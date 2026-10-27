@@ -69,10 +69,17 @@ MARK='<!-- gc:city -->'
 # gc_city_cutover owns the cutover's shape test. A stamp that is not a UTC
 # instant reads as no cutover at all, which makes every post under the city's
 # login its own, so a reader passes the stamp as it found it.
+#
+# gc_city_marked counts the sitting reminder's marker, <!-- gc:sitting:<task> -->,
+# and the marker it carried before conversations were tasks,
+# <!-- gc:visit:<id> -->. Debt, dated 2026-10-20: the old marker stays while an
+# open PR carries a reminder posted under it, so that reminder never reads as an
+# unanswered human comment. Trigger: no open PR carries one.
 OWN_DEF='def gc_city_marked:
   ((.body // "") | tostring) as $b
   | ($b | contains("<!-- gc:city -->"))
     or ($b | contains("<!-- gc-writeback -->"))
+    or ($b | contains("<!-- gc:sitting:"))
     or ($b | contains("<!-- gc:visit:"));
 def gc_city_cutover($since):
   ($since | tostring) as $s

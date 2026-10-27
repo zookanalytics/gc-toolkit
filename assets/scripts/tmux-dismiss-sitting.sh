@@ -1,8 +1,7 @@
 #!/bin/sh
 # tmux-dismiss-sitting.sh — prefix+X: end the converse sitting in view. It is
 # the keystroke for `gc-helm dismiss`, which, with no bead named, infers the
-# sitting's subject from the caller's session identity and closes the open
-# visit that holds the sitting up.
+# conversation the caller's session holds from its identity and closes it.
 #
 # Usage: tmux-dismiss-sitting.sh <config-dir> [--city-path <path>]
 #
@@ -135,12 +134,12 @@ if [ "$RC" -ne 0 ]; then
 fi
 
 SUBJECT=$(printf '%s' "$OUT" | jq -r '.subject // ""' 2>/dev/null || true)
-VISITS=$(printf '%s' "$OUT" | jq -r '[.matched[]?.id] | join(" ")' 2>/dev/null || true)
+CONVS=$(printf '%s' "$OUT" | jq -r '[.matched[]?.id] | join(" ")' 2>/dev/null || true)
 CLOSED=$(printf '%s' "$OUT" | jq -r '.closed // 0' 2>/dev/null || echo 0)
 case "$CLOSED" in ''|*[!0-9]*) CLOSED=0 ;; esac
 if [ "$CLOSED" -gt 0 ]; then
-    say 6000 "dismiss: the sitting on ${SUBJECT:-?} is over (visit ${VISITS:-?} closed); its session closes after you leave it"
+    say 6000 "dismiss: the sitting on ${SUBJECT:-?} is over (conversation ${CONVS:-?} closed); its session closes after you leave it"
 else
-    say 6000 "dismiss: no open visit on ${SUBJECT:-?} — nothing was holding a sitting"
+    say 6000 "dismiss: no live sitting on ${SUBJECT:-?} — nothing to end"
 fi
 exit 0

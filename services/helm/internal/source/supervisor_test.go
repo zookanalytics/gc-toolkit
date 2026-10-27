@@ -382,15 +382,17 @@ func TestGatherRefusesNonWorkBeads(t *testing.T) {
 	}
 }
 
-// TestGatherAdmitsGateBackedHumanDemand: a human demand is now a native gate
-// (issue_type=gate, gc.routed_to=human, from gc-helm.sh `demand`). The live
-// API returns gates on the bare status=open scan AND on the type=gate page the
-// source adds as a guard, so the mock serves the gate rows on both: the union
-// must admit the demand as exactly ONE `human` anchor — matching the
-// in-process backend, whose metadata-keyed query has no default type
-// exclusion. A gate WITHOUT the marker is not an anchor: the type is not the
-// key, the marker is.
-func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
+// TestGatherAdmitsHumanGatesAndQueuedConversations: the operator's side, read
+// off the scan. The live API returns gates on the bare status=open scan AND on
+// the type=gate page the source adds as a guard, so the mock serves them on
+// both, and the union must admit each gate once. A gate is a human gate when
+// the payload names its await type as human, and its beads are the scanned
+// beads whose own `blocks` edges name it. A gate the payload names no await
+// type for, as the API does today, asks nobody here, and a gate is never
+// admitted by the route or the takeaway it carries. A queued conversation is a
+// task assigned to the operator's queue that tracks one bead; work a person
+// owes tracks nothing and is not one.
+func TestGatherAdmitsHumanGatesAndQueuedConversations(t *testing.T) {
 	const base = "/v0/city/testcity"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -399,16 +401,21 @@ func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
 		case r.URL.Path == base+"/rigs":
 			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
 		case r.URL.Path == base+"/beads" && (q.Get("type") == "gate" || q.Get("type") == ""):
-			// Served on the bare open scan and the gate page alike, as the
-			// live API does; the union must not double the anchor.
 			writeJSON(w, `{"items":[
-				{"id":"tk-gate-demand","title":"operator: pick the backend","status":"open","issue_type":"gate","priority":1,
-				 "metadata":{"gc.routed_to":"human","gc.demand_for":"tk-work"}},
-				{"id":"tk-gate-bare","title":"a gate carrying no demand marker","status":"open","issue_type":"gate"}
-			],"total":2}`)
+				{"id":"tk-hg","title":"operator: pick the backend","status":"open","issue_type":"gate","await_type":"human"},
+				{"id":"tk-gate-legacy","title":"which base?","status":"open","issue_type":"gate",
+				 "metadata":{"gc.routed_to":"human","gc.takeaway":"which base?"}},
+				{"id":"tk-gate-bare","title":"a gate naming no await type","status":"open","issue_type":"gate"},
+				{"id":"tk-work","title":"work that waits","status":"open","issue_type":"task",
+				 "dependencies":[{"issue_id":"tk-work","depends_on_id":"tk-hg","type":"blocks"}]},
+				{"id":"tk-conv","title":"talk it through","status":"open","issue_type":"task","assignee":"human",
+				 "dependencies":[{"issue_id":"tk-conv","depends_on_id":"tk-work","type":"tracks"},
+				                 {"issue_id":"tk-conv","depends_on_id":"tk-hg","type":"replies-to"}]},
+				{"id":"tk-owed","title":"work a person owes","status":"open","issue_type":"task","assignee":"human"}
+			],"total":6}`)
 		default:
 			// Every other Gather leg — the typed scans, the convoy feed — reads
-			// empty, isolating the gate path.
+			// empty, isolating the scan path.
 			writeJSON(w, `{"items":[]}`)
 		}
 	}))
@@ -421,20 +428,27 @@ func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
 	if res.Partial {
 		t.Errorf("unexpected partial: %v", res.PartialErrors)
 	}
-	// The gate-backed demand reaches the human filter exactly once, although
-	// both pages returned it — the dedupe is what keeps the union one row.
-	if got := kindsOf(res, "tk-gate-demand"); !reflect.DeepEqual(got, []string{"human"}) {
-		t.Errorf("tk-gate-demand kinds = %v, want [human] — a gate-backed human demand must gather", got)
+	if got := kindsOf(res, "tk-hg"); !reflect.DeepEqual(got, []string{board.KindGate}) {
+		t.Errorf("tk-hg kinds = %v, want [gate] once, although both pages returned it", got)
 	}
-	human := anchorOf(res, "tk-gate-demand", "human")
-	if human == nil {
-		t.Fatal("tk-gate-demand missing")
+	gate := anchorOf(res, "tk-hg", board.KindGate)
+	if gate == nil {
+		t.Fatal("tk-hg missing")
 	}
-	if human.Rig != "gc-toolkit" || human.Prefix != "tk" {
-		t.Errorf("rig/prefix = %s/%s, want gc-toolkit/tk", human.Rig, human.Prefix)
+	if !reflect.DeepEqual(gate.Subjects, []string{"tk-work"}) || gate.Rig != "gc-toolkit" {
+		t.Errorf("a gate's beads are the beads whose blocks edges name it: subjects=%v rig=%s", gate.Subjects, gate.Rig)
 	}
-	if got := kindsOf(res, "tk-gate-bare"); len(got) != 0 {
-		t.Errorf("a gate without gc.routed_to=human is not an anchor, got %v", got)
+	for _, id := range []string{"tk-gate-legacy", "tk-gate-bare", "tk-owed"} {
+		if got := kindsOf(res, id); len(got) != 0 {
+			t.Errorf("%s is no anchor here, got %v", id, got)
+		}
+	}
+	conv := anchorOf(res, "tk-conv", board.KindConversation)
+	if conv == nil {
+		t.Fatal("the queued conversation is missing")
+	}
+	if !reflect.DeepEqual(conv.Subjects, []string{"tk-work"}) || !reflect.DeepEqual(conv.RepliesTo, []string{"tk-hg"}) || conv.Assignee != "human" {
+		t.Errorf("a conversation carries its subject, replies and holder: %+v", *conv)
 	}
 }
 

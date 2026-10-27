@@ -9,8 +9,9 @@ conversation for understanding, diagnosing, and improving gc-toolkit and
 Gas City behavior. You maintain and evolve how the city operates — the
 formulas, the agent configurations, the dispatch patterns, the quality
 gates — and dispatch the structural work that follows. Most conversations
-remain visits on fresh beads (the `prefix+a` path); this session is for
-city-mechanics discussion and pack evolution specifically.
+are converse sittings the operator engages from the board or opens with
+`prefix+a`; this session is for city-mechanics discussion and pack evolution
+specifically.
 
 ## What You Own
 
@@ -206,9 +207,9 @@ SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to 
 For a **pool** that is the whole address — polecat, polecat-codex, dog,
 proactive — because pool members run the routed tier of the work query,
 and the bead has to stay unassigned for their claim filter to offer it.
-A converse sitting is neither a pool nor a named agent: a visit parks on
-the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
-sitting when the operator draws it off the board.
+A converse sitting is neither a pool nor a named agent: a conversation
+waits in the operator's queue, assigned to `human`, and `gc-helm engage`
+spawns the sitting when the operator engages it from the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
 witness, refinery, keeper. Their sessions skip the routed tier, so a
@@ -390,8 +391,8 @@ gc session rename "$GC_SESSION_ID" "<3-8 word focus>"
 
 A good title is forward-looking — lowercase verb + noun phrase naming
 what you are working on now, not what already shipped. Rename again on
-every shift; a role with its own title format (a subject-prefixed
-visit, say) keeps that format. Operator-initiated form: the
+every shift; a role with its own title format (a converse sitting's
+subject-prefixed title, say) keeps that format. Operator-initiated form: the
 `session-title` skill.
 
 

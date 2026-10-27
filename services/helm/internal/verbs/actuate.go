@@ -1,15 +1,15 @@
-// Package visit runs the city's helm WRITE verbs on behalf of the board.
+// Package verbs runs the city's helm WRITE verbs on behalf of the board.
 //
 // It is a thin exec wrapper and nothing else. `gc-helm.sh` owns what each verb
-// DOES — open files a visit, accept slings the subject's recommended formula and
-// dismisses the visit, engage spawns a Discuss sitting on the visit, dismiss
-// closes the visit — together with subject resolution, the one-open-visit-per-
-// subject gate, rig resolution and the board cache bust. This package exists so
-// the HTTP layer can reach that one copy rather than grow a second. The same
-// reuse discipline assets/scripts/gc-visit-open.sh follows, for the same reason:
-// assets/scripts/gate-visit.test.sh guards a single canonical copy, and a Go
-// reimplementation would be an unguarded one.
-package visit
+// DOES — open files a conversation in the operator's queue, accept clears a
+// recommendation's human gate and slings the bead's recommended formula,
+// engage starts a Discuss sitting on a conversation, dismiss ends the sitting —
+// together with subject resolution, rig resolution and the board cache bust.
+// This package exists so the HTTP layer can reach that one copy rather than
+// grow a second, the same reuse discipline assets/scripts/operator-intake.sh
+// follows, for the same reason: a Go reimplementation would be a copy nothing
+// keeps in step with the script.
+package verbs
 
 import (
 	"bytes"
@@ -31,9 +31,9 @@ import (
 //
 // Generous on purpose. No verb is one command: open enumerates rigs (itself
 // bounded at 30s by default, GC_HELM_RIG_TIMEOUT), reads the subject, scans the
-// city's open beads for an existing visit, then creates and stamps a bead and
-// files a dependency edge; accept adds a sling and a dismiss; engage spawns a
-// converse session. Each of those is a `gc`/`bd` call against Dolt, and under
+// bead's conversations for one waiting in the queue, then creates a task and
+// files its edge; accept reads the bead's gates, resolves one, reads it back
+// and slings; engage spawns a converse session. Each of those is a `gc`/`bd` call against Dolt, and under
 // city load the CLI startup cost alone is seconds. Cutting a slow-but-working
 // run short would report failure for a side effect that then appears anyway —
 // the worst outcome available, because the operator's retry is what splits the
@@ -133,7 +133,7 @@ func (o *Actuator) Script() string { return o.script }
 // TTY to prompt at and no tmux pane to attach, so --no-input drives engage's
 // flag-driven one-shot path (no prompts) and --no-attach spawns the Discuss
 // sitting WITHOUT attaching. The operator then attaches from the terminal tile
-// or the sessions picker — exactly how `open`'s filed visit is reached, and the
+// or the sessions picker — exactly how `open`'s queued conversation is reached, and the
 // documented use of engage's --no-attach (the tmux board picker uses it too).
 // Every other semantic is the CLI's, unchanged (tk-hsm4d9).
 func argvFor(verb, bead string) ([]string, bool) {

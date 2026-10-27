@@ -76,8 +76,8 @@ stateDiagram-v2
   abandoned --> [*]: human
   retargeted --> [*]: human
 
-  UN --> held: converse-hold.sh — a sitting holds for an operator decision
-  held --> UN: the ruling landed
+  UN --> held: the converse hold — a sitting holds for an operator decision
+  held --> UN: the ruling landed, or nothing holds it any more
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
@@ -115,8 +115,8 @@ the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
 entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
 still at `status=open`.
 
-The route exception is `park_route` (`human`), the sentinel a visit or an
-operator hold leaves for a person. No pool claims that value, so a transition
+The route exception is `park_route` (`human`), the sentinel a hold leaves for
+a person. No pool claims that value, so a transition
 that finds it leaves it in place. Any other route on a detached anchor is pool demand
 for work that is already in the merge queue. A worker claims it, the claim moves
 the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
@@ -182,8 +182,8 @@ transition into a closed state writes none.
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch, and no `direct_landing_sha` stamp the target carries |
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
-| unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
+| unanchored → held | `skills/converse-hold`, a converse sitting's hold, via `lifecycle.sh`, only beside a human gate that blocks the bead | a sitting is waiting on an operator decision; state + route in one write |
+| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off; `gc-helm.sh accept`, before it dispatches the recommendation; `skills/converse-recheck-premise`, a moot or benign close; each via `lifecycle.sh`; or human | the ruling landed; Accept's answer read back; or the premise re-check found the conversation moot or benign, and no open human gate still holds the bead |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
 routed rework child that blocks the anchor, with the reviewer's findings and the
@@ -300,7 +300,7 @@ review, inline comment, and conversation comment that is not the city's own
 post is feedback, whoever wrote it. The city's own post is one that
 `assets/scripts/pr-post.sh` marked, which is every post the pack makes —
 `signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
-replies and its ruled-finding comments, the visit reminder, a demo delivery,
+replies and its ruled-finding comments, the sitting reminder, a demo delivery,
 `pr-dispose.sh`'s closing comment. An unmarked post under the city's login
 after its PR's provenance cutover, described next, is feedback like a person's,
 whoever posted it. Rework hand-backs post nothing.
@@ -757,11 +757,23 @@ review's result set.
   (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
   child every round and nothing in the cadence bounds them. One writer, one
   verdict: no second component writes a verdict.
-- **Ruling** (operator, via converse): a ruled sign-off on an open-PR subject
-  must answer whether the ruling changes what the branch must contain
-  (`converse-signoff.sh --rework` or `--no-rework`), and one that answers
-  neither is refused. On `--rework`, `converse-rework.sh` files the same fix
-  unit through `rework-child.sh`, sourced by `source_ruling_bead=<visit>` in
+- **Ruling** (operator, via converse): a ruling that reaches an open PR,
+  whether given at the sign-off or on a turn that answers a gate without
+  signing off (`--answer`), must say what it does to the PR
+  (`converse-signoff.sh --rework`, `--no-rework` or `--retire <kind>`), and one
+  that says none of them is refused. It reaches the subject when the subject
+  is an open PR, and each open PR that a gate it answers releases, such as a
+  member of an epic subject. The rework or the retirement acts on one PR,
+  which `--pr-anchor` names when the ruling reaches more than one, and each
+  other one stands. Each runs before any gate the ruling answers is resolved,
+  because a gate can be what holds the merge, and in that PR's own rig, after
+  the conversation records which PR it acts on (`gc.ruling_consequence`), so a
+  re-run of the same ruling acts on the same PR even once it has closed.
+  `--retire` records the
+  disposition and closes the PR through `pr-dispose.sh`, and `pr-facts.sh`
+  then takes the anchor through the `pull_request → closed (disposed)`
+  transition. On `--rework`, `converse-rework.sh` files the same fix
+  unit through `rework-child.sh`, sourced by `source_ruling_bead=<conversation>` in
   place of a verdict's `source_review_bead`: `task_kind=rework`, the anchor's
   branch resumed, a `blocks` edge holding the merge. A ruling on a published PR
   so becomes demand the refinery lands rather than prose nobody reads. A ruling
@@ -834,7 +846,7 @@ review's result set.
   way out. It checks the same evidence before it calls the writer. It also
   closes an unmarked rework twin: an open rework child that was never
   dispatched (no dispatch metadata, no convoy tracking it) whose source is
-  closed (the review it answers, or the visit a ruling's child answers) and
+  closed (the review it answers, or the conversation a ruling's child answers) and
   whose same-source, same-anchor sibling landed. That twin would otherwise hold
   its anchor forever; the sweep records `gc.work_outcome=no-op` on it before the
   close. A first reaction never closes a bead: it hands a confident no-op to the
@@ -972,7 +984,7 @@ distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
 `duplicate` — say the work relocated, and the pointer names the bead that
 carries it now. The fifth, `not-needed`, says nothing carries it: the bead
 was not needed, and the pointer names the evidence that concluded so,
-typically the visit bead from the sitting that ruled. The pointer is required
+typically the conversation of the sitting that ruled. The pointer is required
 under every kind, because it is the whole of that distinction. The kind is
 read from the close reason, which opens with the kind's phrase and the
 successor, as in `not needed, per <successor> in <store>`. When the pointer is
@@ -1106,7 +1118,7 @@ discovered work, and the finding closes through `bead-rehome.sh` pointed at it.
 When a finding's comment line does not read, the consummation leaves the close
 to the next pass rather than closing the anchor before the finding is judged.
 The sweep never touches `task_kind=review` (`review-sweep.sh`'s) or the human
-side, a visit, a human gate or a conversation: a disposed PR does not moot the
+side, a human gate or a conversation: a disposed PR does not moot the
 human conversation about why it closed, and `finalize-gate.sh` holds the
 anchor's own close while a human gate on it is open. Clearing the machine side
 is what lets that close land once the human side is done.

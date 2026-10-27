@@ -68,20 +68,29 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	//                            closed, which is the board flooded rather than
 	//                            the board stable. A fake that accepted it would
 	//                            leave that untested.
-	//   Statuses=[open,inprog]   the JOIN queries (visits, workflow roots and
-	//                            steps) — a CLAIMED visit is a held conversation,
-	//                            not a finished one, and a claimed step is the
-	//                            normal state of a live molecule.
+	//   Statuses=[open,inprog]   the JOIN queries (conversations, workflow roots
+	//                            and steps) — a CLAIMED conversation is a held
+	//                            one, not a finished one, and a claimed step is
+	//                            the normal state of a live molecule.
 	//   Statuses=bd-lib.sh's live set, keyed on task_kind=review
 	//                            the live REVIEW read (readReviews), which reads
 	//                            an anchor's live children the way bd-lib.sh
 	//                            does. The set is spelled out here, not read from
 	//                            the source, so the fake pins it to bd-lib.sh's.
+	//   ExcludeStatus=[closed], keyed on issue_type=gate
+	//                            the live HUMAN GATE read, which reads every gate
+	//                            that still holds the way bd-lib.sh's
+	//                            HUMAN_GATE_JQ does: in every status but closed.
 	//
 	// Anything else — no scope at all, or a widened one — is refused, so the
 	// filter stays load-bearing rather than decorative.
 	reviewRead := len(filter.MetadataFields) == 1 && filter.MetadataFields["task_kind"] == "review"
+	gateRead := filter.IssueType != nil && *filter.IssueType == beads.IssueType("gate")
 	switch {
+	case len(filter.ExcludeStatus) > 0:
+		if !gateRead || filter.Status != nil || len(filter.Statuses) > 0 || !slices.Equal(filter.ExcludeStatus, []beads.Status{beads.StatusClosed}) {
+			return nil, errors.New("a status exclusion is the live gate read alone: issue_type=gate excluding closed, with no other status scope")
+		}
 	case filter.Status != nil && *filter.Status == beads.StatusOpen && len(filter.Statuses) == 0:
 	case filter.Status != nil && *filter.Status == beads.StatusClosed && len(filter.Statuses) == 0:
 		if filter.ClosedAfter == nil {
@@ -90,7 +99,7 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
 	case filter.Status == nil && reviewRead && slices.Equal(filter.Statuses, []beads.Status{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}):
 	default:
-		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows) or the live review read")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows), the live review read or the live gate read")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -175,8 +184,8 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 }
 
 // matching applies the status and closed-window predicates the library applies
-// in SQL. Without it the fake would hand an open-visit query the closed visits
-// too: the two sitting passes could not be told apart, and the done pass would
+// in SQL. Without it the fake would hand an open-conversation query the closed
+// ones too: the two sitting passes could not be told apart, and the done pass would
 // re-return every OPEN anchor as a closed one.
 func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*beads.Issue {
 	var out []*beads.Issue
@@ -185,6 +194,9 @@ func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*bea
 			continue
 		}
 		if len(filter.Statuses) > 0 && !slices.Contains(filter.Statuses, iss.Status) {
+			continue
+		}
+		if slices.Contains(filter.ExcludeStatus, iss.Status) {
 			continue
 		}
 		if filter.ClosedAfter != nil && (iss.ClosedAt == nil || !iss.ClosedAt.After(*filter.ClosedAfter)) {
@@ -223,7 +235,7 @@ func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, 
 	//
 	// The rule is scoped to the anchor gathers, which are the status=open ones.
 	// A JOIN query (statuses=[open,in_progress]) and the closed-sitting pass are
-	// not gathering anchors at all — they read visit beads and molecule steps,
+	// not gathering anchors at all — they read conversations and molecule steps,
 	// which are ordinary tasks — so demanding the exclusion there would be
 	// asserting a rule that does not apply.
 	if filter.Status != nil && *filter.Status == beads.StatusOpen {
@@ -448,12 +460,12 @@ func populatedStore() *fakeStore {
 			// files the work a sitting routes as a child of the subject, so
 			// this is where that work lives — and the only relation that can
 			// see it, since beads refuses a parent→descendant `blocks` edge
-			// (tk-a9k0l, tk-2cyxo). The `tracks` edge is the visit convoy
+			// (tk-a9k0l, tk-2cyxo). The `tracks` edge is a conversation
 			// pointing at the same bead: not a child.
 			"tk-parked": {
 				withDepType(child("tk-p1", "open", testNow, ""), "parent-child"),
 				withDepType(child("tk-p2", "closed", testNow.Add(-24*time.Hour), ""), "parent-child"),
-				withDepType(child("tk-visit", "open", testNow, ""), "tracks"),
+				withDepType(child("tk-conv", "open", testNow, ""), "tracks"),
 			},
 		},
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
@@ -858,6 +870,81 @@ func TestReviewReworkChildrenAreAdmittedAsTiles(t *testing.T) {
 	}
 }
 
+// TestReworkChildBehindASharedGateGathersTheGate is the shared-gate case read
+// from the store, where board.TestGateFoldsOntoEachBeadItBlocks hands the
+// derivation its waits by hand: an anchor and its rework child both wait on
+// the anchor's bring-current gate. The gather reads the child's own `blocks`
+// waits as it reads the anchor's, so the board lists the gate among what each
+// row waits on, and the child's row asks the gate's question.
+func TestReworkChildBehindASharedGateGathersTheGate(t *testing.T) {
+	const ask = "Bring the branch current over the conflict?"
+	waitsOnGate := func() *beads.IssueWithDependencyMetadata {
+		return withDepType(child("tk-gate", "open", testNow, ""), "blocks")
+	}
+	st := &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"task": {
+				issue("tk-anc", "the PR", "task", 2, testNow, `{"merge_result":"pull_request","pr_number":"7"}`),
+				issue("tk-rwk", "Rework branch polecat/tk-anc", "task", 2, testNow, `{"task_kind":"rework","anchor_bead":"tk-anc"}`),
+			},
+			"gate": {gateBead("tk-gate", ask, "human", "bring-current", time.Time{}, "")},
+		},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-anc": {waitsOnGate(), withDepType(child("tk-rwk", "open", testNow, ""), "blocks")},
+			"tk-rwk": {waitsOnGate()},
+		},
+		depsUp: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-gate": {
+				withDepType(child("tk-anc", "open", testNow, ""), "blocks"),
+				withDepType(child("tk-rwk", "open", testNow, ""), "blocks"),
+			},
+		},
+	}
+	src := newBeadsTestSource(t, cityWithRigs(t, map[string]string{"gc-toolkit": "tk"}),
+		map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Partial {
+		t.Fatalf("unexpected partial: %v", res.PartialErrors)
+	}
+	rwk, ok := anchorsOfKind(res, "rework")["tk-rwk"]
+	if !ok {
+		t.Fatal("the rework child is not gathered as a rework row")
+	}
+	if !slices.Equal(rwk.WaitingOn, []string{"tk-gate"}) || len(rwk.Blockers) != 1 ||
+		rwk.Blockers[0].ID != "tk-gate" || rwk.Blockers[0].AwaitType != "human" || rwk.WaitingUnknown {
+		t.Errorf("the gather reads the rework child's own blocks waits: waiting_on=%v blockers=%+v unknown=%v",
+			rwk.WaitingOn, rwk.Blockers, rwk.WaitingUnknown)
+	}
+
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	row := func(id string) (board.Tile, bool) {
+		i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == id })
+		if i < 0 {
+			return board.Tile{}, false
+		}
+		return b.Tiles[i], true
+	}
+	for _, id := range []string{"tk-anc", "tk-rwk"} {
+		tl, ok := row(id)
+		if !ok {
+			t.Errorf("%s has no row", id)
+			continue
+		}
+		if !slices.Contains(tl.WaitingOnOpen, "tk-gate") {
+			t.Errorf("%s: the row lists the gate among what its bead waits on: waiting_on_open=%v", id, tl.WaitingOnOpen)
+		}
+	}
+	if tl, ok := row("tk-rwk"); ok && (tl.Needs != ask || !tl.Held || !tl.Owed) {
+		t.Errorf("the child's row is held and owed, asking the gate's question: needs=%q held=%v owed=%v", tl.Needs, tl.Held, tl.Owed)
+	}
+	if _, ok := row("tk-gate"); ok {
+		t.Error("a gate whose beads have rows takes no row of its own")
+	}
+}
+
 // withDesc stamps a description on an issue fixture — the one heavy TEXT column
 // this source reads (crossRigRefs scans an open anchor's prose).
 func withDesc(iss *beads.Issue, desc string) *beads.Issue {
@@ -1094,7 +1181,7 @@ func TestBeadsGatherMetadataKindsDegradeIndependently(t *testing.T) {
 	}
 	var named bool
 	for _, e := range res.PartialErrors {
-		if strings.HasPrefix(e, "parked-visits@gc-toolkit") {
+		if strings.HasPrefix(e, "parked-takeaways@gc-toolkit") {
 			named = true
 		}
 	}
@@ -1325,6 +1412,61 @@ func writeGCStub(t *testing.T, stdout string, code int) string {
 	return path
 }
 
+// TestSessionsGiveASharedKeyToItsLiveHolder: two listed sessions can carry one
+// key, as when a new sitting takes the alias of one whose launch failed, and
+// `gc session list` puts the newest session first. An ended state never
+// replaces a live one, whichever session is listed first, and each session's
+// own name and id keep its own state. A key only ended sessions hold, or only
+// live ones, takes the later entry.
+func TestSessionsGiveASharedKeyToItsLiveHolder(t *testing.T) {
+	const alias = "gc-toolkit.converse-tk-conv"
+	row := func(id, state string) string {
+		return fmt.Sprintf(`{"id":%q,"alias":%q,"session_name":%q,"state":%q}`, id, alias, "s-"+id, state)
+	}
+	sessions := func(t *testing.T, rows ...string) map[string]string {
+		t.Helper()
+		t.Setenv("GC_HELM_GC_BIN", writeGCStub(t, `{"sessions":[`+strings.Join(rows, ",")+`]}`, 0))
+		got, err := newGCExec("").Sessions(context.Background())
+		if err != nil {
+			t.Fatalf("Sessions: %v", err)
+		}
+		return got
+	}
+	for _, ended := range []string{"failed-create", "closed", "archived", ""} {
+		name := ended
+		if name == "" {
+			name = "no state"
+		}
+		for _, order := range []string{"listed after", "listed first"} {
+			t.Run(name+" predecessor "+order, func(t *testing.T) {
+				rows := []string{row("hq-new", "active"), row("hq-old", ended)}
+				if order == "listed first" {
+					slices.Reverse(rows)
+				}
+				got := sessions(t, rows...)
+				if got[alias] != "active" {
+					t.Errorf("the shared alias reads %q, want its live holder's %q", got[alias], "active")
+				}
+				for k, want := range map[string]string{"hq-new": "active", "s-hq-new": "active", "hq-old": ended, "s-hq-old": ended} {
+					if st, ok := got[k]; !ok || st != want {
+						t.Errorf("%s reads %q (listed %v), want its own session's %q", k, st, ok, want)
+					}
+				}
+			})
+		}
+	}
+	t.Run("every holder ended", func(t *testing.T) {
+		if got := sessions(t, row("hq-a", "archived"), row("hq-b", "failed-create")); got[alias] != "failed-create" {
+			t.Errorf("a key only ended sessions hold reads %q, want the later entry's %q", got[alias], "failed-create")
+		}
+	})
+	t.Run("every holder live", func(t *testing.T) {
+		if got := sessions(t, row("hq-a", "active"), row("hq-b", "asleep")); got[alias] != "asleep" {
+			t.Errorf("a key only live sessions hold reads %q, want the later entry's %q", got[alias], "asleep")
+		}
+	})
+}
+
 // TestBeadsSourceCloses verifies shutdown releases the cached handles.
 func TestBeadsSourceCloses(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
@@ -1442,8 +1584,6 @@ func TestReadIssuePrefix(t *testing.T) {
 func joinStore() *fakeStore {
 	st := populatedStore()
 	st.issues["task"] = append(st.issues["task"],
-		issue("tk-visit1", "visit: tk-epic — operator pick", "task", 2, testNow,
-			`{"task_kind":"visit","gc.continuation_group":"tk-epic"}`),
 		issue("tk-root1", "mol-polecat-work", "task", 2, testNow,
 			`{"gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
 		// A root with NO session of its own: the name has to come off its steps.
@@ -1475,10 +1615,10 @@ func liveGC() *fakeGC {
 	}
 }
 
-// TestGatherJoinsVisitsAndInflight is the whole point of the join gather: an
-// open visit marks its subject held, and a LIVE workflow root resolves through
-// its input convoy to the work bead it stands over.
-func TestGatherJoinsVisitsAndInflight(t *testing.T) {
+// TestGatherJoinsInflight is the whole point of the join gather: a LIVE
+// workflow root resolves through its input convoy to the work bead it stands
+// over.
+func TestGatherJoinsInflight(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	gc := liveGC()
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": joinStore()}, withGCClient(gc))
@@ -1488,9 +1628,6 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 		t.Fatalf("Gather: %v", err)
 	}
 
-	if !res.Facts.Visits["tk-epic"] {
-		t.Errorf("an open visit marks its subject held: visits=%v", res.Facts.Visits)
-	}
 	if got := res.Facts.Inflight["tk-work1"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
 		t.Errorf("root with its own session_name resolves: got %v", got)
 	}
@@ -1663,10 +1800,6 @@ func TestGatherDegradesWhenGCUnavailable(t *testing.T) {
 	}
 	if len(res.Facts.Inflight) != 0 {
 		t.Errorf("no session map means no in-flight claims: %v", res.Facts.Inflight)
-	}
-	// Visits do NOT come from gc, so they survive.
-	if !res.Facts.Visits["tk-epic"] {
-		t.Error("the visit join reads beads, not gc, so it must survive")
 	}
 }
 
@@ -1849,62 +1982,90 @@ func TestBeadsProbeHandleIsReusedByGather(t *testing.T) {
 	}
 }
 
-// --- sittings --------------------------------------------------------------
+// --- conversations and sittings ---------------------------------------------
 
-// visitBead builds an OPEN visit bead: a sitting a converse session is holding.
-func visitBead(id, title, meta string, created time.Time) *beads.Issue {
+// conversationBead builds an OPEN conversation task: assigned to `human` while
+// it waits in the operator's queue, or to the alias of the sitting holding it.
+// Its subject and replies are its own edges, in the store's depsDown.
+func conversationBead(id, title, assignee, meta string, created time.Time) *beads.Issue {
 	i := issue(id, title, "task", 2, created, meta)
 	i.CreatedAt = created
+	i.Assignee = assignee
 	return i
 }
 
-// closedVisitBead builds a FINISHED sitting. The close stamp is what the
-// window filters on, so it is set explicitly rather than derived.
-func closedVisitBead(id, title, meta string, created, closed time.Time) *beads.Issue {
-	i := visitBead(id, title, meta, created)
+// closedConversationBead builds a FINISHED sitting's conversation, closed with
+// the reason its ending wrote. bd's close leaves the assignee as it was. The
+// close stamp is what the window filters on, so it is set explicitly.
+func closedConversationBead(id, title, assignee, meta, reason string, created, closed time.Time) *beads.Issue {
+	i := conversationBead(id, title, assignee, meta, created)
 	i.Status = beads.StatusClosed
 	i.UpdatedAt = closed
 	i.ClosedAt = &closed
+	i.CloseReason = reason
 	return i
 }
 
-// sittingStore is one subject visited three times, plus a fourth sitting whose
-// close fell outside the window.
+// tracks is a conversation's edge onto the bead it is about; repliesTo its edge
+// onto a gate it answers.
+func tracks(bead string) *beads.IssueWithDependencyMetadata {
+	return withDepType(child(bead, "open", testNow, ""), "tracks")
+}
+func repliesTo(gate string) *beads.IssueWithDependencyMetadata {
+	return withDepType(child(gate, "open", testNow, ""), "replies-to")
+}
+
+// sittingStore is one subject discussed three times, a fourth conversation
+// whose close fell outside the window, one waiting in the operator's queue, and
+// three tasks that are not conversations.
 //
 // The subject carries ONE takeaway, stamped at 09:55 — inside the middle
 // sitting's span and outside the other two. That is the whole attribution
 // question in fixture form: the takeaway on a bead belongs to the sitting that
-// wrote it, and a subject visited more than once has sittings that did not.
+// wrote it, and a subject discussed more than once has sittings that did not.
 func sittingStore() *fakeStore {
 	at := func(h, m int) time.Time { return time.Date(2026, 8, 1, h, m, 0, 0, time.UTC) }
+	open := conversationBead("tk-sit-open", "still talking", "gc-toolkit/gc-toolkit.tk-sit-open",
+		`{"gc.claimed_at":"2026-08-01T11:00:00Z","gc.session_name":"gc-toolkit__converse-1"}`, at(10, 45))
+	open.Status = beads.StatusInProgress
 	return &fakeStore{failMeta: map[string]error{}, issues: map[string][]*beads.Issue{
 		"task": {
 			issue("tk-parked", "the subject three sittings talked about", "task", 2, at(9, 55),
 				`{"gc.takeaway":"routed to the polecat pool","gc.takeaway_at":"2026-08-01T09:55:00Z","gc.takeaway_by":"converse"}`),
 			issue("tk-quiet", "a subject nobody reached a takeaway on", "task", 2, at(7, 0), `{}`),
 			issue("tk-settled", "a subject whose only sitting ended inside the window", "task", 2, at(9, 30), `{}`),
+			issue("tk-asked", "a subject the operator queued a concern on", "task", 2, at(8, 0), `{}`),
 
-			visitBead("tk-sit-open", "visit: tk-parked — still talking",
-				`{"task_kind":"visit","gc.continuation_group":"tk-parked","gc.claimed_at":"2026-08-01T11:00:00Z","gc.session_name":"gc-toolkit__converse-1"}`,
-				at(10, 45)),
-			closedVisitBead("tk-sit-recent", "visit: tk-parked — routed the work",
-				`{"task_kind":"visit","gc.continuation_group":"tk-parked","gc.outcome":"diagnosed","gc.claimed_at":"2026-08-01T09:00:00Z","gc.session_name":"gc-toolkit__converse-2"}`,
-				at(8, 55), at(10, 0)),
-			closedVisitBead("tk-sit-earlier", "visit: tk-parked — nothing to do yet",
-				`{"task_kind":"visit","gc.continuation_group":"tk-parked","gc.outcome":"folded","gc.claimed_at":"2026-08-01T06:00:00Z"}`,
-				at(5, 55), at(7, 0)),
-			// The Held control: one sitting, closed, inside the window. Nothing
-			// holds tk-settled, and only a closed-sitting leak into the visit
-			// join could say otherwise.
-			closedVisitBead("tk-sit-settled", "visit: tk-settled — done and closed",
-				`{"task_kind":"visit","gc.continuation_group":"tk-settled","gc.outcome":"benign","gc.claimed_at":"2026-08-01T09:30:00Z"}`,
-				at(9, 25), at(9, 45)),
+			open,
+			closedConversationBead("tk-sit-recent", "routed the work", "gc-toolkit/gc-toolkit.tk-sit-recent",
+				`{"gc.claimed_at":"2026-08-01T09:00:00Z","gc.session_name":"gc-toolkit__converse-2"}`,
+				"routed the work to the polecat pool", at(8, 55), at(10, 0)),
+			closedConversationBead("tk-sit-earlier", "nothing to do yet", "human",
+				`{"gc.claimed_at":"2026-08-01T06:00:00Z"}`, "dismissed by the operator", at(5, 55), at(7, 0)),
+			closedConversationBead("tk-sit-settled", "done and closed", "c-tk-sit-settled",
+				`{"gc.claimed_at":"2026-08-01T09:30:00Z"}`, "settled", at(9, 25), at(9, 45)),
 			// Closed 4 days before the pinned clock: inside the store, outside
 			// any default window.
-			closedVisitBead("tk-sit-old", "visit: tk-quiet — long since done",
-				`{"task_kind":"visit","gc.continuation_group":"tk-quiet","gc.outcome":"moot"}`,
+			closedConversationBead("tk-sit-old", "long since done", "human", `{}`, "settled",
 				time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC), time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC)),
+			conversationBead("tk-queued", "operator pick from the board", "human", `{}`, at(8, 30)),
+
+			// Not conversations. Work a person owes tracks nothing; a task held by
+			// another task's alias is that task's; and a task tracking two beads
+			// is about neither.
+			conversationBead("tk-owed", "work a person owes", "human", `{}`, at(8, 0)),
+			conversationBead("tk-other", "held by another alias", "gc-toolkit/gc-toolkit.tk-sit-open", `{}`, at(8, 0)),
+			conversationBead("tk-two", "tracks two beads", "human", `{}`, at(8, 0)),
 		},
+	}, depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+		"tk-sit-open":    {tracks("tk-parked"), repliesTo("tk-gate")},
+		"tk-sit-recent":  {tracks("tk-parked")},
+		"tk-sit-earlier": {tracks("tk-parked")},
+		"tk-sit-settled": {tracks("tk-settled")},
+		"tk-sit-old":     {tracks("tk-quiet")},
+		"tk-queued":      {tracks("tk-asked")},
+		"tk-other":       {tracks("tk-quiet")},
+		"tk-two":         {tracks("tk-quiet"), tracks("tk-asked")},
 	}}
 }
 
@@ -1912,6 +2073,17 @@ func sittingsByID(res *Result) map[string]board.Sitting {
 	out := map[string]board.Sitting{}
 	for _, s := range res.Facts.Sittings {
 		out[s.ID] = s
+	}
+	return out
+}
+
+// anchorsOfKind returns the gathered anchors of one kind, by id.
+func anchorsOfKind(res *Result, kind string) map[string]board.Anchor {
+	out := map[string]board.Anchor{}
+	for _, a := range res.Anchors {
+		if a.Kind == kind {
+			out[a.ID] = a
+		}
 	}
 	return out
 }
@@ -1927,23 +2099,21 @@ func gatherSittings(t *testing.T, opts ...BeadsOption) *Result {
 	return res
 }
 
-// TestGatherRecordsSittings: the record carries running sittings and those
-// closed inside the window, and nothing older.
+// TestGatherRecordsSittings: the record carries every open conversation and
+// those closed inside the window, and nothing older and nothing of another
+// shape. A closed conversation carries its close reason, the sentence the card
+// reads when the sitting left no takeaway.
 func TestGatherRecordsSittings(t *testing.T) {
 	got := sittingsByID(gatherSittings(t))
 
-	for _, want := range []string{"tk-sit-open", "tk-sit-recent", "tk-sit-earlier"} {
-		if _, ok := got[want]; !ok {
-			t.Errorf("%s missing from the sitting record: got %v", want, slices.Sorted(maps.Keys(got)))
-		}
-	}
-	if _, ok := got["tk-sit-old"]; ok {
-		t.Error("a sitting closed outside the window must not be gathered — the window is what bounds an unbounded read")
+	want := []string{"tk-queued", "tk-sit-earlier", "tk-sit-open", "tk-sit-recent", "tk-sit-settled"}
+	if ids := slices.Sorted(maps.Keys(got)); !slices.Equal(ids, want) {
+		t.Errorf("sitting record = %v, want %v", ids, want)
 	}
 
 	open := got["tk-sit-open"]
-	if open.Status != "open" || !open.ClosedAt.IsZero() {
-		t.Errorf("a running sitting has no close stamp: status=%q closed=%v", open.Status, open.ClosedAt)
+	if open.Status != "in_progress" || !open.ClosedAt.IsZero() || open.OutcomeReason != "" {
+		t.Errorf("a running sitting has no close: status=%q closed=%v reason=%q", open.Status, open.ClosedAt, open.OutcomeReason)
 	}
 	if want := time.Date(2026, 8, 1, 11, 0, 0, 0, time.UTC); !open.OpenedAt.Equal(want) {
 		t.Errorf("OpenedAt = %v, want the gc.claimed_at stamp %v", open.OpenedAt, want)
@@ -1953,16 +2123,60 @@ func TestGatherRecordsSittings(t *testing.T) {
 	}
 
 	done := got["tk-sit-recent"]
-	if done.Status != "closed" || done.Outcome != "diagnosed" {
-		t.Errorf("a closed sitting carries the justification it closed on: status=%q outcome=%q", done.Status, done.Outcome)
+	if done.Status != "closed" || done.OutcomeReason != "routed the work to the polecat pool" {
+		t.Errorf("a closed sitting carries its close reason: status=%q reason=%q", done.Status, done.OutcomeReason)
 	}
 	if want := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC); !done.ClosedAt.Equal(want) {
 		t.Errorf("ClosedAt = %v, want %v", done.ClosedAt, want)
 	}
+	// A conversation no sitting has claimed starts when it was filed.
+	if q := got["tk-queued"]; !q.OpenedAt.Equal(time.Date(2026, 8, 1, 8, 30, 0, 0, time.UTC)) {
+		t.Errorf("an unclaimed conversation starts at its creation: %v", q.OpenedAt)
+	}
+}
 
-	// A visit that never got a claim stamp still has to say when it started.
-	if fallback := got["tk-sit-old"]; fallback.ID != "" {
-		t.Fatal("guarded above")
+// TestGatherAdmitsOpenConversationsAsAnchors: each open conversation is also an
+// anchor the fold moves onto its bead, carrying its subject, its replies and
+// its holder. A closed one is a sitting alone, so it holds nothing.
+func TestGatherAdmitsOpenConversationsAsAnchors(t *testing.T) {
+	convs := anchorsOfKind(gatherSittings(t), board.KindConversation)
+
+	if ids := slices.Sorted(maps.Keys(convs)); !slices.Equal(ids, []string{"tk-queued", "tk-sit-open"}) {
+		t.Fatalf("conversation anchors = %v, want the two open ones", ids)
+	}
+	held := convs["tk-sit-open"]
+	if !slices.Equal(held.Subjects, []string{"tk-parked"}) || !slices.Equal(held.RepliesTo, []string{"tk-gate"}) ||
+		held.Assignee != "gc-toolkit/gc-toolkit.tk-sit-open" || held.Source != board.KindConversation {
+		t.Errorf("a held conversation carries its subject, replies and holder: %+v", held)
+	}
+	if q := convs["tk-queued"]; !slices.Equal(q.Subjects, []string{"tk-asked"}) || q.Assignee != "human" {
+		t.Errorf("a queued conversation carries its subject and the operator's queue: %+v", q)
+	}
+}
+
+// TestConversationShapeIsTheAssigneeAndOneTracksEdge pins the assignee half of
+// the shape conversation.sh defines: `human`, or the alias that names the
+// task's own id, bare, as its `c-` fallback, or qualified by a session's rig and
+// binding.
+func TestConversationShapeIsTheAssigneeAndOneTracksEdge(t *testing.T) {
+	for _, tc := range []struct {
+		assignee string
+		want     bool
+	}{
+		{"human", true},
+		{"tk-c1", true},
+		{"c-tk-c1", true},
+		{"gc-toolkit/gc-toolkit.tk-c1", true},
+		{"gc-toolkit/gc-toolkit.c-tk-c1", true},
+		{"converse.tk-c1", true},
+		{"", false},
+		{"alice", false},
+		{"gc-toolkit/gc-toolkit.tk-c2", false},
+		{"tk-c11", false},
+	} {
+		if got := conversationAssignee(tc.assignee, "tk-c1"); got != tc.want {
+			t.Errorf("conversationAssignee(%q) = %v, want %v", tc.assignee, got, tc.want)
+		}
 	}
 }
 
@@ -1995,8 +2209,6 @@ func TestSittingCarriesSubjectTitle(t *testing.T) {
 			t.Errorf("%s: SubjectTitle = %q, want the subject's title %q", id, s.SubjectTitle, topic)
 		}
 	}
-	// The two that carry the topic but NO takeaway are the rows the change
-	// exists for: without the title their headline would be a bare id.
 	for _, id := range []string{"tk-sit-open", "tk-sit-earlier"} {
 		if s := got[id]; s.Takeaway != "" {
 			t.Errorf("guard: %s should carry no takeaway, got %q", id, s.Takeaway)
@@ -2013,12 +2225,16 @@ func TestSittingWindowIsConfigurable(t *testing.T) {
 	}
 
 	t.Setenv("GC_HELM_SITTINGS_WINDOW", "0s")
-	got := sittingsByID(gatherSittings(t))
+	res := gatherSittings(t)
+	got := sittingsByID(res)
 	if _, ok := got["tk-sit-recent"]; ok {
 		t.Error("a zero window gathers no closed sittings")
 	}
 	if _, ok := got["tk-sit-open"]; !ok {
 		t.Error("a zero window must not cost the board its RUNNING sittings")
+	}
+	if _, ok := anchorsOfKind(res, board.KindConversation)["tk-sit-open"]; !ok {
+		t.Error("a zero window must not cost the board the conversations that hold their beads")
 	}
 
 	t.Setenv("GC_HELM_SITTINGS_WINDOW", "not-a-duration")
@@ -2027,23 +2243,9 @@ func TestSittingWindowIsConfigurable(t *testing.T) {
 	}
 }
 
-// TestOnlyRunningSittingsHoldTheirAnchor: Tile.Held is a claim about a LIVE
-// conversation, so the closed half of the record must not feed it.
-func TestOnlyRunningSittingsHoldTheirAnchor(t *testing.T) {
-	res := gatherSittings(t)
-	if !res.Facts.Visits["tk-parked"] {
-		t.Error("a subject with a running sitting is held")
-	}
-	if res.Facts.Visits["tk-settled"] {
-		t.Error("a subject whose only sitting has CLOSED is not held — the conversation ended")
-	}
-	if res.Facts.Visits["tk-quiet"] {
-		t.Error("a subject whose sitting fell outside the window is not held either")
-	}
-}
-
-// TestSittingPassesDegradeIndependently: neither half of the record may take
-// the other down, and Tile.Held must survive losing the closed pass.
+// TestSittingPassesDegradeIndependently: an unreadable subject narrows the
+// rows rather than dropping them, and costs the board no conversation that
+// holds a bead.
 func TestSittingPassesDegradeIndependently(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	st := sittingStore()
@@ -2055,69 +2257,25 @@ func TestSittingPassesDegradeIndependently(t *testing.T) {
 		t.Fatalf("Gather: %v", err)
 	}
 	got := sittingsByID(res)
-	if len(got) != 4 {
+	if len(got) != 5 {
 		t.Errorf("an unreadable subject narrows the rows, it does not drop them: got %d", len(got))
 	}
-	if s := got["tk-sit-recent"]; s.Takeaway != "" || s.Outcome != "diagnosed" {
-		t.Errorf("the sitting keeps what it owns and loses only the joined headline: %+v", s)
+	if s := got["tk-sit-recent"]; s.Takeaway != "" || s.SubjectTitle != "" || s.OutcomeReason == "" {
+		t.Errorf("the sitting keeps what it owns and loses only the joined headline and topic: %+v", s)
 	}
-	if s := got["tk-sit-recent"]; s.SubjectTitle != "" {
-		t.Errorf("an unreadable subject leaves the topic empty, not guessed: %q", s.SubjectTitle)
+	if len(anchorsOfKind(res, board.KindConversation)) != 2 {
+		t.Error("an unreadable subject costs the board no conversation that holds a bead")
 	}
 	if !res.Partial {
 		t.Error("a failed subject read is reported as partial")
 	}
 }
 
-// TestGatherResolvesEdgeOnlyVisitSubject: a visit records its subject twice — the
-// gc.continuation_group stamp and a tracks edge — and gate-visit can leave the stamp
-// empty. The board reads the subject off the edge in that case, so an edge-only visit
-// holds its anchor and carries its subject's headline exactly as a stamped one does.
-func TestGatherResolvesEdgeOnlyVisitSubject(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
-	st := &fakeStore{
-		issues: map[string][]*beads.Issue{
-			"task": {
-				issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
-				// task_kind=visit with NO gc.continuation_group: the subject is
-				// reachable only through the tracks edge below.
-				visitBead("tk-sit-edge", "visit: tk-rec — named through the tracks edge",
-					`{"task_kind":"visit","gc.claimed_at":"2026-08-01T11:00:00Z","gc.session_name":"gc-toolkit__converse-1"}`,
-					testNow),
-			},
-		},
-		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
-			"tk-sit-edge": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
-		},
-	}
-	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
-	res, err := src.Gather(context.Background())
-	if err != nil {
-		t.Fatalf("Gather: %v", err)
-	}
-	got := sittingsByID(res)
-	s, ok := got["tk-sit-edge"]
-	if !ok {
-		t.Fatalf("the edge-only visit was dropped from the sitting record: %v", slices.Sorted(maps.Keys(got)))
-	}
-	if s.Subject != "tk-rec" {
-		t.Errorf("Subject = %q, want the tracks-edge target %q with the stamp empty", s.Subject, "tk-rec")
-	}
-	if !res.Facts.Visits["tk-rec"] {
-		t.Error("a running edge-only visit holds its subject, so the board must mark it visited")
-	}
-	// The subject's title rides the row, which only happens if the edge subject is
-	// resolved BEFORE attributeTakeaways reads it.
-	if want := "a recommendation subject"; s.SubjectTitle != want {
-		t.Errorf("SubjectTitle = %q, want the subject's title %q carried onto the row", s.SubjectTitle, want)
-	}
-}
-
-// TestVisitSubjectsResolveInOneBatchedRead: the tracks edges of every gathered
-// visit come from one batched dependency read, whether a visit carries the stamp
-// or not, so the read does not grow with the number of visits. A store with no
-// visit spends nothing on it.
-func TestVisitSubjectsResolveInOneBatchedRead(t *testing.T) {
+// TestConversationEdgesComeFromOneBatchedRead: the edges of every candidate
+// conversation come from one batched dependency read, so the read does not
+// grow with the number of conversations, and a store with none spends nothing
+// on it.
+func TestConversationEdgesComeFromOneBatchedRead(t *testing.T) {
 	gather := func(st *fakeStore) *fakeStore {
 		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
@@ -2126,31 +2284,43 @@ func TestVisitSubjectsResolveInOneBatchedRead(t *testing.T) {
 		}
 		return st
 	}
-	rec := issue("tk-rec", "a recommendation subject", "task", 2, testNow, "")
-	none := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {rec}}})
-	one := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {
-		rec,
-		visitBead("tk-sit-stamped", "visit: tk-rec — stamped",
-			`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
-	}}})
+	subject := issue("tk-rec", "a subject", "task", 2, testNow, "")
+	none := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {subject}}})
+	one := gather(&fakeStore{
+		issues:   map[string][]*beads.Issue{"task": {subject, conversationBead("tk-c1", "one", "human", `{}`, testNow)}},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{"tk-c1": {tracks("tk-rec")}},
+	})
 	three := gather(&fakeStore{
-		issues: map[string][]*beads.Issue{"task": {
-			rec,
-			visitBead("tk-sit-stamped", "visit: tk-rec — stamped",
-				`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
-			visitBead("tk-sit-edge", "visit: tk-rec — edge only",
-				`{"task_kind":"visit"}`, testNow),
-			visitBead("tk-sit-both", "visit: tk-rec — stamped and edged",
-				`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
+		issues: map[string][]*beads.Issue{"task": {subject,
+			conversationBead("tk-c1", "one", "human", `{}`, testNow),
+			conversationBead("tk-c2", "two", "c-tk-c2", `{}`, testNow),
+			conversationBead("tk-c3", "three", "human", `{}`, testNow),
 		}},
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
-			"tk-sit-edge": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
-			"tk-sit-both": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
+			"tk-c1": {tracks("tk-rec")}, "tk-c2": {tracks("tk-rec")}, "tk-c3": {tracks("tk-rec")},
 		},
 	})
 	if one.depyN != none.depyN+1 || three.depyN != one.depyN {
-		t.Errorf("the visits' tracks edges must come from one batched read: no visit=%d, one=%d, three=%d (want one = no visit + 1, three = one)",
+		t.Errorf("the conversations' edges must come from one batched read: none=%d, one=%d, three=%d (want one = none + 1, three = one)",
 			none.depyN, one.depyN, three.depyN)
+	}
+}
+
+// TestFailedConversationEdgeReadNamesNoConversation: without its edges no task
+// can be told for a conversation, so a failed edge read admits none, and the
+// gather reports itself partial.
+func TestFailedConversationEdgeReadNamesNoConversation(t *testing.T) {
+	st := sittingStore()
+	st.failDeps = map[string]error{"tk-sit-open": errors.New("edge read failed")}
+	res := gatherOneStore(t, st)
+	if n := len(anchorsOfKind(res, board.KindConversation)); n != 0 {
+		t.Errorf("a failed edge read admits no conversation: got %d", n)
+	}
+	if n := len(res.Facts.Sittings); n != 0 {
+		t.Errorf("a failed edge read records no sitting: got %d", n)
+	}
+	if !res.Partial {
+		t.Error("a failed conversation edge read is reported as partial")
 	}
 }
 
@@ -2166,84 +2336,119 @@ func gatherOneStore(t *testing.T, st *fakeStore) *Result {
 	return res
 }
 
-// TestVisitSubjectIsTheTracksEdgeOverAStaleStamp: the shared visit identity reads
-// the tracks edge first, so a visit stamped with one bead and tracking another
-// holds the tracked bead, and its stamp holds nothing. The tracked bead is the one
-// the status label and the merge pass's finalize gate hold on.
-func TestVisitSubjectIsTheTracksEdgeOverAStaleStamp(t *testing.T) {
-	res := gatherOneStore(t, &fakeStore{
-		issues: map[string][]*beads.Issue{"task": {
-			issue("tk-stamped", "the bead the stale stamp names", "task", 2, testNow, ""),
-			issue("tk-tracked", "the bead the tracks edge names", "task", 2, testNow, ""),
-			visitBead("tk-sit", "visit: tk-tracked — the edge wins",
-				`{"task_kind":"visit","gc.continuation_group":"tk-stamped"}`, testNow),
-		}},
-		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
-			"tk-sit": {withDepType(child("tk-tracked", "open", testNow, ""), "tracks")},
-		},
-	})
-	s := sittingsByID(res)["tk-sit"]
-	if s.Subject != "tk-tracked" {
-		t.Errorf("Subject = %q, want the tracks-edge target %q over the stamp", s.Subject, "tk-tracked")
+// --- human gates ------------------------------------------------------------
+
+// gateBead builds a gate awaiting awaitType, open unless closed is non-zero.
+func gateBead(id, title, awaitType, awaitID string, closed time.Time, meta string) *beads.Issue {
+	i := issue(id, title, "gate", 2, testNow, meta)
+	i.AwaitType, i.AwaitID = awaitType, awaitID
+	if !closed.IsZero() {
+		i.Status = beads.StatusClosed
+		i.ClosedAt = &closed
 	}
-	if !res.Facts.Visits["tk-tracked"] || res.Facts.Visits["tk-stamped"] {
-		t.Errorf("the visit holds the bead it tracks and not the one its stale stamp names: visits=%v", res.Facts.Visits)
+	return i
+}
+
+// gateStore holds human gates and a gate of another kind. tk-hg blocks two
+// beads; tk-legacy carries the route and takeaway a gate filed before gates
+// were native was stamped with; tk-timer awaits a timer and asks nobody;
+// tk-hg-recent closed inside the sittings window and tk-hg-old before it.
+func gateStore(now time.Time) *fakeStore {
+	st := populatedStore()
+	st.issues["gate"] = []*beads.Issue{
+		gateBead("tk-hg", "Bring the branch current?", "human", "bring-current", time.Time{}, ""),
+		gateBead("tk-legacy", "Which base?", "human", "rebase", time.Time{},
+			`{"gc.routed_to":"human","gc.takeaway":"Which base?","gc.demand_for":"tk-a"}`),
+		gateBead("tk-timer", "wait an hour", "timer", "", time.Time{}, ""),
+		gateBead("tk-hg-recent", "an answered question", "human", "q", now.Add(-2*time.Hour), ""),
+		gateBead("tk-hg-old", "a long-answered question", "human", "q", now.Add(-72*time.Hour), ""),
 	}
-	if want := "the bead the tracks edge names"; s.SubjectTitle != want {
-		t.Errorf("SubjectTitle = %q, want the tracked bead's title %q", s.SubjectTitle, want)
+	st.depsUp["tk-hg"] = []*beads.IssueWithDependencyMetadata{
+		withDepType(child("tk-b", "open", testNow, ""), "blocks"),
+		withDepType(child("tk-a", "open", testNow, ""), "blocks"),
+	}
+	st.depsUp["tk-legacy"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-a", "open", testNow, ""), "blocks")}
+	st.depsUp["tk-hg-recent"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-a", "open", testNow, ""), "blocks")}
+	return st
+}
+
+// TestGatherAdmitsHumanGatesWithTheBeadsTheyBlock: a gate that awaits a person
+// is a human gate, and its beads are its `blocks` dependents. A gate awaiting
+// anything else asks nobody, and a gate is never admitted by the route or the
+// takeaway it carries. The closed pass reads back as far as the sittings
+// window.
+func TestGatherAdmitsHumanGatesWithTheBeadsTheyBlock(t *testing.T) {
+	src := newBeadsTestSource(t, cityWithRigs(t, map[string]string{"gc-toolkit": "tk"}),
+		map[string]*fakeStore{"gc-toolkit": gateStore(testNow)})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	gates := anchorsOfKind(res, board.KindGate)
+	if ids := slices.Sorted(maps.Keys(gates)); !slices.Equal(ids, []string{"tk-hg", "tk-hg-recent", "tk-legacy"}) {
+		t.Fatalf("human gates = %v, want the open two and the one closed inside the window", ids)
+	}
+	if got := gates["tk-hg"].Subjects; !slices.Equal(got, []string{"tk-a", "tk-b"}) {
+		t.Errorf("a gate's beads are its blocks dependents: got %v", got)
+	}
+	if gates["tk-hg-recent"].ClosedAt.IsZero() {
+		t.Error("a gate closed inside the window is a closed row")
+	}
+	for _, a := range res.Anchors {
+		if a.ID == "tk-legacy" && a.Kind != board.KindGate {
+			t.Errorf("a gate is admitted only as a gate, not by its route or takeaway: got kind %q", a.Kind)
+		}
 	}
 }
 
-// TestVisitWithTwoTracksEdgesHoldsBoth: a visit covers every bead its tracks edges
-// name (visit_identity_subjects), so both beads are held, and the row names the
-// first in id order (visit_subject's choice), whatever order the edges come in.
-func TestVisitWithTwoTracksEdgesHoldsBoth(t *testing.T) {
-	res := gatherOneStore(t, &fakeStore{
-		issues: map[string][]*beads.Issue{"task": {
-			issue("tk-a", "the first tracked bead", "task", 2, testNow, ""),
-			issue("tk-b", "the second tracked bead", "task", 2, testNow, ""),
-			visitBead("tk-sit", "visit: tk-a — two tracks edges", `{"task_kind":"visit"}`, testNow),
-		}},
-		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
-			"tk-sit": {
-				withDepType(child("tk-b", "open", testNow, ""), "tracks"),
-				withDepType(child("tk-a", "open", testNow, ""), "tracks"),
-			},
-		},
-	})
-	s := sittingsByID(res)["tk-sit"]
-	if s.Subject != "tk-a" || !slices.Equal(s.Subjects, []string{"tk-a", "tk-b"}) {
-		t.Errorf("Subject = %q, Subjects = %v; want tk-a and [tk-a tk-b]", s.Subject, s.Subjects)
+// TestGatherKeepsAHumanGateInEveryStatusThatHolds: a human gate holds the bead
+// it blocks in every status but closed, pinned included (bd-lib.sh's
+// HUMAN_GATE_JQ), so the live pass reads it in each of them. Each gate here
+// blocks a plain task that has no row of its own, so the gate's own row is the
+// only place the board asks its question: a gate the read missed would be a
+// question off the board with nothing reported partial.
+func TestGatherKeepsAHumanGateInEveryStatusThatHolds(t *testing.T) {
+	st := populatedStore()
+	holding := []beads.Status{
+		beads.StatusOpen, beads.StatusInProgress, beads.StatusBlocked,
+		beads.StatusDeferred, beads.Status("hooked"), beads.Status("pinned"),
 	}
-	if !res.Facts.Visits["tk-a"] || !res.Facts.Visits["tk-b"] {
-		t.Errorf("a visit with two tracks edges holds both beads: visits=%v", res.Facts.Visits)
+	want := map[string]string{} // gate id -> the question it asks
+	for _, status := range holding {
+		id, plain := "tk-g-"+string(status), "tk-plain-"+string(status)
+		g := gateBead(id, "Question held while "+string(status)+"?", "human", "q-"+string(status), time.Time{}, "")
+		g.Status = status
+		st.issues["gate"] = append(st.issues["gate"], g)
+		st.depsUp[id] = []*beads.IssueWithDependencyMetadata{withDepType(child(plain, "open", testNow, ""), "blocks")}
+		want[id] = g.Title
 	}
-}
 
-// TestFailedVisitEdgeReadFallsBackToTheStamp: when the tracks-edge read fails,
-// each visit falls back to its stamp, the identity's fallback, and the gather
-// reports itself partial.
-func TestFailedVisitEdgeReadFallsBackToTheStamp(t *testing.T) {
-	res := gatherOneStore(t, &fakeStore{
-		issues: map[string][]*beads.Issue{"task": {
-			issue("tk-stamped", "the bead the stamp names", "task", 2, testNow, ""),
-			issue("tk-tracked", "the bead the tracks edge names", "task", 2, testNow, ""),
-			visitBead("tk-sit", "visit: tk-tracked — the edge read fails",
-				`{"task_kind":"visit","gc.continuation_group":"tk-stamped"}`, testNow),
-		}},
-		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
-			"tk-sit": {withDepType(child("tk-tracked", "open", testNow, ""), "tracks")},
-		},
-		failDeps: map[string]error{"tk-sit": errors.New("edge read failed")},
-	})
-	if s := sittingsByID(res)["tk-sit"]; s.Subject != "tk-stamped" {
-		t.Errorf("Subject = %q, want the stamp %q when the edge read fails", s.Subject, "tk-stamped")
+	src := newBeadsTestSource(t, cityWithRigs(t, map[string]string{"gc-toolkit": "tk"}),
+		map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
 	}
-	if !res.Facts.Visits["tk-stamped"] {
-		t.Errorf("the stamped bead is held when the edge read fails: visits=%v", res.Facts.Visits)
+	if res.Partial {
+		t.Fatalf("unexpected partial: %v", res.PartialErrors)
 	}
-	if !res.Partial {
-		t.Error("a failed tracks-edge read is reported as partial")
+	gates := anchorsOfKind(res, board.KindGate)
+	if ids := slices.Sorted(maps.Keys(gates)); !slices.Equal(ids, slices.Sorted(maps.Keys(want))) {
+		t.Fatalf("human gates = %v, want one in each status that holds: %v", ids, slices.Sorted(maps.Keys(want)))
+	}
+
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	for _, status := range holding {
+		id := "tk-g-" + string(status)
+		i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == id })
+		if i < 0 {
+			t.Errorf("the %s gate has no row, so its question is off the board", status)
+			continue
+		}
+		if tl := b.Tiles[i]; tl.Needs != want[id] || !tl.Owed || tl.Section != board.SectionGate {
+			t.Errorf("the %s gate's row asks its question and is owed as a gate: needs=%q owed=%v section=%q",
+				status, tl.Needs, tl.Owed, tl.Section)
+		}
 	}
 }
 
@@ -2554,7 +2759,7 @@ func TestPreOpenReviewsInAJoinedStore(t *testing.T) {
 	unjoined := reviewFixture("rv-unjoined", beads.StatusClosed, `{"task_kind":"review","anchor_bead":"tk-gate","check_name":"triage","reviewed_oid":"abc","signoff_verdict":"approve"}`)
 	moved := reviewFixture("rv-moved", beads.StatusClosed, `{"task_kind":"review","anchor_bead":"tk-other","check_name":"triage"}`)
 	rework := reviewFixture("rw-1", beads.StatusClosed, `{"task_kind":"rework","anchor_bead":"tk-gate"}`)
-	visit := reviewFixture("vi-1", beads.StatusOpen, `{"task_kind":"visit"}`)
+	conv := reviewFixture("cv-1", beads.StatusOpen, `{}`)
 	prReview := reviewFixture("rv-pr", beads.StatusClosed, `{"task_kind":"review","anchor_bead":"tk-pr","check_name":"correctness"}`)
 	store := func() *fakeStore {
 		return &fakeStore{
@@ -2562,13 +2767,13 @@ func TestPreOpenReviewsInAJoinedStore(t *testing.T) {
 				"task": {
 					issue("tk-gate", "pre-open, reviewed", "task", 2, testNow, `{"merge_result":"pre_open_gate","check_set":"correctness,triage,arch"}`),
 					issue("tk-pr", "an open PR", "task", 2, testNow, `{"merge_result":"pull_request","pr_number":"9"}`),
-					approve, open, claimed, unjoined, moved, rework, visit, prReview,
+					approve, open, claimed, unjoined, moved, rework, conv, prReview,
 				},
 			},
 			depsUp: map[string][]*beads.IssueWithDependencyMetadata{
 				"tk-gate": {
 					joinedTo(approve, "related"), joinedTo(claimed, "related"), joinedTo(moved, "related"),
-					joinedTo(rework, "related"), joinedTo(visit, "tracks"), filedLate,
+					joinedTo(rework, "related"), joinedTo(conv, "tracks"), filedLate,
 				},
 				"tk-pr": {joinedTo(prReview, "related")},
 			},

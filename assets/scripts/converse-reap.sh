@@ -1,81 +1,93 @@
 #!/usr/bin/env bash
-# converse-reap.sh — end a converse sitting once its VISIT has closed.
+# converse-reap.sh — end a converse sitting once its conversation is over.
 #
-# Converse is spawn-on-engagement: `gc-helm engage` spawns a manual
-# converse-<model> session (origin=manual) bound to a visit, and the session's
-# --alias IS that visit id. A manual session is exempt from every pool backstop,
-# so nothing in the runtime cycles it. Both endings the config names — the
-# agent's sign-off and the operator's `gc-helm dismiss` — close the VISIT on the
-# belief that closing the visit ends the sitting. It does not: the manual session
-# outlives its closed visit as a live provider process and, when the operator has
-# walked away, a closed visit beside a live pane. This pass is the reap those two
-# endings assume.
+# A sitting is a manual converse-<model> session that `gc-helm engage` starts
+# under the alias of the conversation it holds: the conversation task's id, or
+# its `c-` fallback when the runtime refuses the bare id as an alias. Gas City
+# does not end a manual session when its work closes, and the sitting cannot
+# drain itself at its sign-off without destroying an attached operator's pane.
+# So the session outlives a conversation its sign-off or a dismiss closed, and
+# one a sitting cut short handed back to the operator's queue. This pass is the
+# close those endings assume (docs/warrants.md, Converse reap).
 #
-# A converse session whose visit is CLOSED (or gone) is settled: the hold it
-# protected is over, so there is nothing left to protect. Close the session.
+# A converse session is settled, and closed here, when the conversation its
+# alias names has closed, is gone, or is back in the operator's queue (assigned
+# to `human` and open). A conversation its sitting still holds is a live
+# sitting, and is kept.
 #
-# The one visit this pass will NOT reap under is one still OPEN — that is a live
-# hold — and the one session it will not reap is one an operator is ATTACHED to.
-# The pack cannot see a half-typed reply in the composer (that needs the
-# runtime's typed-input state, which the pack cannot yet read), and the operator's
-# standing ruling is that draining a pane with typed text is a hard no. Attachment
-# is the only signal the pack has for "someone is at this pane", so an attached
-# sitting is left for its own sign-off or a dismiss even when its visit already
-# reads closed. The unattached settled sittings, the leaked sessions, are what
-# this reaps. A sitting whose visit is still OPEN (the operator walked away
-# before any sign-off) is the harder, separate case; this pass leaves it alone.
+# Two sessions are never closed. One an operator is ATTACHED to: the pack cannot
+# see a half-typed reply in the composer, and draining a pane with typed text is
+# the operator's hard no, so an attached sitting is left for its own sign-off or
+# a dismiss. And one younger than --min-age, the reap's own interval: engage
+# starts a session before it binds the conversation to it, so a session that
+# young holding the alias of a conversation still in the queue may be a sitting
+# about to take it.
 #
-# Fully mechanical: `gc session list` + one `gc bd show` per converse session +
+# Fully mechanical: `gc session list` + one `gc bd show` per candidate session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
 #
-# Bias: an unreadable probe reaps NOTHING. A session whose visit cannot be read,
-# whose alias is not a bead id, or whose bound bead is not a visit is left alone —
-# the pass only ever ends a sitting it can prove is settled.
+# Bias: an unreadable probe reaps NOTHING. A session whose conversation cannot
+# be read, whose alias names no bead id, or whose bead is no conversation is
+# left alone: the pass only ever ends a sitting it can prove is settled.
 #
 # Usage:
-#   converse-reap.sh            reap settled sittings, print one summary line
-#   converse-reap.sh --dry-run  report the plan, close nothing
+#   converse-reap.sh [--min-age <seconds>]            reap, print one summary line
+#   converse-reap.sh [--min-age <seconds>] --dry-run  report the plan, close nothing
+#   --min-age defaults to 300, the converse-reap order's interval.
 # Exit: 0 reaped or nothing to do · 1 the session list could not be read or the
 #       candidate set could not be enumerated · 2 usage
-# Caller: the converse-reap cooldown order. See specs/tk-2i4bde/converse-reap.md.
+# Caller: the converse-reap cooldown order.
 set -uo pipefail
 
 PROG="${0##*/}"
 DRY_RUN=0
-for arg in "$@"; do
-    case "$arg" in
+MIN_AGE=300
+while [ $# -gt 0 ]; do
+    case "$1" in
         --dry-run) DRY_RUN=1 ;;
-        -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "$PROG: unknown argument: $arg" >&2; exit 2 ;;
+        --min-age) shift; case "${1:-}" in ''|*[!0-9]*) echo "$PROG: --min-age needs a whole number of seconds" >&2; exit 2 ;; esac
+                   MIN_AGE="$1" ;;
+        -h|--help) sed -n '2,/^set -uo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "$PROG: unknown argument: $1" >&2; exit 2 ;;
     esac
+    shift
 done
 
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 1; }
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# The one definition of a conversation's shape. Exposes $CONVERSATION_JQ.
+# shellcheck source=conversation.sh
+. "$HERE/conversation.sh" || { echo "$PROG: cannot source conversation.sh from $HERE" >&2; exit 1; }
+
 GC="${CONVERSE_REAP_GC:-gc}"
 
 # Every session, every state. `gc bd show` resolves a bead across ledgers on its
-# own, so the visit lookup is store-agnostic and this pass reads the whole city.
-# A non-object answer, or one without a .sessions array, is a listing we cannot
-# trust — reap nothing and say so with exit 1.
+# own, so the conversation lookup is store-agnostic and this pass reads the
+# whole city. A non-object answer, or one without a .sessions array, is a
+# listing we cannot trust — reap nothing and say so with exit 1.
 sessions_json="$("$GC" session list --state all --json 2>/dev/null)" || sessions_json=""
 if ! printf '%s' "$sessions_json" | jq -e 'type=="object" and (.sessions|type=="array")' >/dev/null 2>&1; then
     echo "$PROG: could not read the session list — reaping nothing" >&2
     exit 1
 fi
 
-# Candidate rows, one per line as <session-id>\t<visit-id>: a converse template,
-# not already closed, NOT attached, and carrying an alias. engage sets the alias
-# to the visit id, qualified as <rig>/<pack>.<visit-id>, so the id is the final
-# dot-segment. A session with no alias was not engage-bound to a visit and is
-# none of our business.
-candidates="$(printf '%s' "$sessions_json" | jq -r '
+# Candidate rows, one per line as <session-id>\t<conversation-id>: a converse
+# template, not already closed, NOT attached, older than --min-age, and carrying
+# an alias. engage qualifies the alias as <rig>/<binding>.<alias>, so the alias
+# is the final dot-segment, and a `c-` fallback names the id after its prefix. A
+# session with no alias was not engage-bound to a conversation and is none of
+# our business, and one whose creation time does not read cannot prove its age.
+candidates="$(printf '%s' "$sessions_json" | jq -r --argjson age "$MIN_AGE" '
     .sessions[]?
     | select(((.template // "") | test("converse")))
     | select((.closed // false) == false)
     | select((.attached // false) == false)
     | select((.alias // "") != "")
-    | [ .id, ((.alias) | sub("^.*\\."; "")) ]
+    | select(((.created_at // "") | tostring | sub("\\.[0-9]+"; "") | fromdateiso8601?) as $t
+             | $t != null and $t <= (now - $age))
+    | ((.alias) | sub("^.*\\."; "")) as $tail
+    | [ .id, (if ($tail | test("^c-[a-z]+-[a-z0-9]+$")) then ($tail | ltrimstr("c-")) else $tail end) ]
     | @tsv')"
 
 reaped=0; kept=0; skipped=0
@@ -101,55 +113,65 @@ printf '%s\n' "$candidates" > "$ROWS" || {
 expected="$(grep -c . "$ROWS" 2>/dev/null || true)"; case "$expected" in ''|*[!0-9]*) expected=0 ;; esac
 processed=0
 
-while IFS=$'\t' read -r sid vid; do
+while IFS=$'\t' read -r sid cid; do
     [ -n "$sid" ] || continue
     processed=$((processed + 1))
 
     # The alias' final segment must look like a bead id, or the alias is not a
-    # visit reference this pass can resolve.
-    if ! [[ "$vid" =~ ^[a-z]+-[a-z0-9]+$ ]]; then
+    # conversation reference this pass can resolve.
+    if ! [[ "$cid" =~ ^[a-z]+-[a-z0-9]+$ ]]; then
         skipped=$((skipped + 1)); continue
     fi
 
-    # Read the visit, capturing stdout and exit status SEPARATELY: `gc bd show`
-    # exits non-zero for an id that resolves to nothing yet still prints the
-    # not-found object that proves the visit is GONE, so stdout must survive a
-    # non-zero exit for that signature to be classified. An answer that is not
-    # JSON at all — empty, or a garbled/failed read — carries nothing to classify
-    # and is an unreadable probe: never reap.
-    show="$("$GC" bd show "$vid" --json 2>/dev/null)"; show_rc=$?
+    # Read the conversation, capturing stdout and exit status SEPARATELY:
+    # `gc bd show` exits non-zero for an id that resolves to nothing yet still
+    # prints the not-found object that proves the conversation is GONE, so
+    # stdout must survive a non-zero exit for that signature to be classified.
+    # An answer that is not JSON at all — empty, or a garbled/failed read —
+    # carries nothing to classify and is an unreadable probe: never reap.
+    show="$("$GC" bd show "$cid" --json 2>/dev/null)"; show_rc=$?
     if ! printf '%s' "$show" | jq -e . >/dev/null 2>&1; then
         skipped=$((skipped + 1)); continue
     fi
 
-    # The bead whose id is exactly this visit, whether bd answered with an array
-    # (one or more matches) or the single object it returns for one id.
-    row="$(printf '%s' "$show" | jq -c --arg v "$vid" '
-        if type=="array" then ([ .[] | select((.id // "") == $v) ] | first)
-        elif (.id // "") == $v then .
-        else null end')"
+    # The bead whose id is exactly this conversation, whether bd answered with
+    # an array or the single object it returns for one id. A `gc bd show` row
+    # spells an edge {dependency_type, id}; the shape rule reads the `gc bd list`
+    # spelling {type, depends_on_id}, so the row is respelled before it is read.
+    row="$(printf '%s' "$show" | jq -c --arg c "$cid" '
+        (if type=="array" then ([ .[] | select((.id // "") == $c) ] | first)
+         elif (.id // "") == $c then .
+         else null end)
+        | if . == null then null
+          else .dependencies = [ (.dependencies // [])[]? | objects
+                 | {type: ((.type // .dependency_type) // ""), depends_on_id: ((.depends_on_id // .id) // "")} ]
+          end')"
 
     verdict=keep
     if [ "$row" = "null" ] || [ -z "$row" ]; then
         # No bead resolved. GONE only when bd said so with its not-found
         # signature: a non-zero exit carrying an object whose .error names no
-        # matching issue (a deleted or purged visit). Any other unmatched payload
-        # — a store blip, an unexpected error shape — we cannot classify, so it
-        # is left alone, not reaped.
+        # matching issue (a deleted or purged conversation). Any other unmatched
+        # payload — a store blip, an unexpected error shape — we cannot
+        # classify, so it is left alone, not reaped.
         if [ "$show_rc" -ne 0 ] && printf '%s' "$show" | jq -e 'type=="object" and ((.error // "") | test("no issues found"))' >/dev/null 2>&1; then
             verdict=gone
         else
             skipped=$((skipped + 1)); continue
         fi
     else
-        kind="$(printf '%s' "$row" | jq -r '(.metadata.task_kind) // ""')"
-        status="$(printf '%s' "$row" | jq -r '.status // ""')"
-        if [ "$kind" != "visit" ]; then
-            # The alias resolves to something that is not a visit — cannot prove
-            # this session's sitting is settled.
+        if ! printf '%s' "$row" | jq -e "$CONVERSATION_JQ"'conversation' >/dev/null 2>&1; then
+            # The alias resolves to something that is not a conversation, so
+            # nothing proves this session's sitting is settled.
             skipped=$((skipped + 1)); continue
         fi
-        [ "$status" = "closed" ] && verdict=closed
+        status="$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')"
+        assignee="$(printf '%s' "$row" | jq -r '(.assignee // "") | tostring')"
+        if [ "$status" = "closed" ]; then
+            verdict=closed
+        elif [ "$assignee" = "human" ] && [ "$status" = "open" ]; then
+            verdict=queued
+        fi
     fi
 
     if [ "$verdict" = "keep" ]; then
@@ -167,10 +189,10 @@ while IFS=$'\t' read -r sid vid; do
         reaped=$((reaped + 1))
     else
         skipped=$((skipped + 1))
-        echo "$PROG: could not close settled sitting $sid (visit $vid $verdict) — left for the next pass" >&2
+        echo "$PROG: could not close settled sitting $sid (conversation $cid $verdict) — left for the next pass" >&2
         continue
     fi
-    reaped_lines="${reaped_lines}  ${sid} (visit ${vid} ${verdict})
+    reaped_lines="${reaped_lines}  ${sid} (conversation ${cid} ${verdict})
 "
 done < "$ROWS"
 rm -f "$ROWS"
@@ -184,6 +206,6 @@ rm -f "$ROWS"
 }
 
 verb="closed"; [ "$DRY_RUN" -eq 1 ] && verb="would close"
-echo "$PROG: $verb $reaped settled converse sittings (visit closed or gone), kept $kept held, skipped $skipped"
+echo "$PROG: $verb $reaped settled converse sittings (conversation closed, gone or back in the queue), kept $kept held, skipped $skipped"
 [ -n "$reaped_lines" ] && printf '%s' "$reaped_lines"
 exit 0

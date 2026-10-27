@@ -5,17 +5,17 @@
 #
 # Renders `helm-svc board --json` (the Go board, services/helm) as a tmux
 # display-menu; picking a row runs `gc-helm.sh engage <bead> --no-attach`, which
-# spawns a converse sitting on demand for that visit (the converse routed-pool
-# is retired; a sitting holds only while an operator engages one). Bound as the
+# spawns a converse sitting on the bead's conversation (no pool serves converse;
+# a sitting holds only while an operator engages one). Bound as the
 # sibling of the live-session picker (prefix+S = "what's running"; this = "what
 # needs me").
 #
 # TWO MENUS, ONE SCRIPT. Bare, this renders the operator's QUEUE — what is owed
-# by a person, oldest first, each row headlined by the demand itself. --all
+# by a person, oldest first, each row headlined by what it asks. --all
 # renders the city overview, headlined by the object, and is bound one keystroke
 # away (prefix+B). They are the same rows, ranked and labelled to answer
 # different questions, and the queue is the one a keystroke should reach first:
-# the overview sorts by severity then subtree size, where a demand owed by a
+# the overview sorts by severity then subtree size, where an ask owed by a
 # person has a subtree of one.
 #
 # The helm-svc binary is resolved at the path the launcher/builder deploy
@@ -130,9 +130,9 @@ set --
 i=1
 while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
     [ -n "$id" ] || continue
-    # The queue's headline is the DEMAND — helm-svc puts the authored
-    # gc.takeaway in `needs`, and what the operator owes is the whole reason the
-    # row is on this menu. The bead's own title names the object and follows it.
+    # The queue's headline is the ASK — helm-svc puts what the row needs in
+    # `needs`, the authored gc.takeaway or the title of the human gate that holds
+    # it, and what the operator owes is the whole reason the row is on this menu. The bead's own title names the object and follows it.
     # The overview asks the other question, so it leads with the object.
     if [ -n "$ALL" ]; then
         label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$title" "$frontier")
@@ -142,10 +142,10 @@ while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
 
     # Background the engage: spawning a converse sitting takes seconds and
     # must never freeze the tmux server. --no-attach spawns and binds the
-    # visit; the operator attaches from the session picker (prefix+S), the way
-    # a pool sitting was reached before. --no-input keeps engage non-interactive:
-    # the picker already names the visit, and a backgrounded run-shell job has no
-    # terminal to prompt on. run-shell drops the job's stderr and shows only
+    # conversation; the operator attaches from the session picker (prefix+S).
+    # --no-input keeps engage non-interactive: the picker already names the
+    # bead, and a backgrounded run-shell job has no terminal to prompt on.
+    # run-shell drops the job's stderr and shows only
     # stdout plus "returned N" in its view window, and every engage refusal
     # (already engaged, blocked, lost race, no template in this rig) is a stderr
     # line — fold it into stdout so the reason reaches the operator.

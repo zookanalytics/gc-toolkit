@@ -54,8 +54,7 @@ scrub() { tr -d '\000-\037'; }
 PROG="gate-visit-sweep"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
-# The one definition of what subject a visit covers, shared with gc-helm.sh,
-# converse-fold.sh and liveness-sweep.sh. Exposes $VISIT_IDENTITY_JQ.
+# The one definition of what subject a visit covers. Exposes $VISIT_IDENTITY_JQ.
 # shellcheck source=visit-identity.sh
 . "$SCRIPT_DIR/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $SCRIPT_DIR" >&2; exit 1; }
 
@@ -140,9 +139,7 @@ while IFS=$'\t' read -r gate_id gated title; do
     # files its conversation demand on the VISIT, and that visit IS the sitting
     # that resolves the gate. visit_covers never matches a visit against itself, so
     # without this the sweep would `helm open` a visit on a visit. Record the gated
-    # visit as its own cover; the stamp below keys the gate on it. converse-hold.sh
-    # already stamps gc.gate_visit at filing time, so this is the backstop for when
-    # that best-effort write did not land.
+    # visit as its own cover; the stamp below keys the gate on it.
     if [ -z "$visit" ]; then
         gated_kind=$(printf '%s' "$LIVE_RAW" | jq -r --arg b "$gated" \
             '[ .[] | select((.id // "") == $b) | (.metadata.task_kind // "") ] | first // ""' 2>/dev/null || echo "")

@@ -1,33 +1,31 @@
 #!/usr/bin/env bash
-# pr-visit-comment.sh — leave a reminder on a subject's PR that a visit
-# happened. `engage` posts (or refreshes) a marked comment saying the visit is
-# open; `close` edits that same comment in place to say it closed, with the
-# sitting's summary. One comment per visit, found by a hidden marker keyed to
-# the visit id.
+# pr-sitting-comment.sh — leave a reminder on a subject's PR that a sitting
+# happened. `engage` posts (or refreshes) a marked comment saying a sitting is
+# open; `close` edits that same comment in place to say the sitting ended, with
+# its outcome, summary and actions. One comment per conversation, found by a
+# hidden marker keyed to the conversation task's id, <!-- gc:sitting:<task> -->.
 #
-# It is a reminder, so it never blocks the visit lifecycle: a missing gh, an
-# unresolvable origin, a subject with no PR, or a gh call that errors all exit 0
-# having done nothing. The subject carries the PR (pr_number / pr_url, written
-# by pr-open.sh); a visit tracks the subject, and the subject's PR is where the
-# comment lands.
+# It is a reminder, so it never blocks a sitting: a missing gh, an unresolvable
+# origin, a subject with no PR, or a gh call that errors all exit 0 having done
+# nothing. The subject carries the PR (pr_number / pr_url, written by
+# pr-open.sh); a conversation tracks the subject, and the subject's PR is where
+# the comment lands.
 #
 # Usage:
-#   pr-visit-comment.sh engage --visit <id> --subject <id> [--reason <text>]
-#   pr-visit-comment.sh close  --visit <id> --subject <id> \
+#   pr-sitting-comment.sh engage --sitting <task> --subject <id> [--reason <text>]
+#   pr-sitting-comment.sh close  --sitting <task> --subject <id> \
 #       [--outcome <word>] [--summary <text>] [--actions <text>]
 #
 #   engage: upsert the marked comment into its "open" shape.
-#   close:  edit the marked comment into its "closed" shape. UPDATE-ONLY — a
-#           visit that never engaged has no comment, and close leaves the PR
-#           alone. The reason is preserved from the comment engage wrote, so
-#           close takes no --reason. --outcome/--summary/--actions default to the
-#           visit's gc.outcome, gc.pr_visit_summary and gc.pr_visit_actions when
-#           omitted, so a post-close caller need only name the visit and subject.
-#           close refuses while the visit is still open, so it never says
-#           "closed" ahead of the close.
+#   close:  edit the marked comment into its "ended" shape. UPDATE-ONLY — a
+#           conversation no sitting engaged has no comment, and close leaves the
+#           PR alone. The reason is preserved from the comment engage wrote, so
+#           close takes no --reason. Its callers run it once their own write
+#           reads back: the sign-off once the conversation is closed or handed
+#           back to the operator's queue, and dismiss once it is closed.
 set -u
 
-PROG=pr-visit-comment
+PROG=pr-sitting-comment
 # The single writer of the city's PR posts: the reminder is posted and edited
 # through it so every shape of it carries the city's mark.
 PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
@@ -48,26 +46,26 @@ oneline() { printf '%s' "${1:-}" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/^ *//; 
 MODE="${1:-}"
 case "$MODE" in engage|close) shift ;; *) echo "$PROG: first argument must be 'engage' or 'close'" >&2; exit 2 ;; esac
 
-VISIT=""; SUBJECT=""; REASON=""; OUTCOME=""; SUMMARY=""; ACTIONS=""
+SITTING=""; SUBJECT=""; REASON=""; OUTCOME=""; SUMMARY=""; ACTIONS=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --visit)    shift; [ $# -gt 0 ] || { echo "$PROG: --visit needs a value" >&2; exit 2; }; VISIT="$1" ;;
+    --sitting)  shift; [ $# -gt 0 ] || { echo "$PROG: --sitting needs a value" >&2; exit 2; }; SITTING="$1" ;;
     --subject)  shift; [ $# -gt 0 ] || { echo "$PROG: --subject needs a value" >&2; exit 2; }; SUBJECT="$1" ;;
     --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: --reason needs a value" >&2; exit 2; }; REASON="$1" ;;
     --outcome)  shift; [ $# -gt 0 ] || { echo "$PROG: --outcome needs a value" >&2; exit 2; }; OUTCOME="$1" ;;
     --summary)  shift; [ $# -gt 0 ] || { echo "$PROG: --summary needs a value" >&2; exit 2; }; SUMMARY="$1" ;;
     --actions)  shift; [ $# -gt 0 ] || { echo "$PROG: --actions needs a value" >&2; exit 2; }; ACTIONS="$1" ;;
-    -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "$PROG: unknown flag '$1'" >&2; exit 2 ;;
     *)  echo "$PROG: unexpected argument '$1'" >&2; exit 2 ;;
   esac
   shift
 done
 
-[ -n "$VISIT" ]   || { echo "$PROG: --visit is required" >&2; exit 2; }
+[ -n "$SITTING" ] || { echo "$PROG: --sitting is required" >&2; exit 2; }
 [ -n "$SUBJECT" ] || { echo "$PROG: --subject is required" >&2; exit 2; }
 
-# From here on every exit is 0: a reminder must not break an engage or a close.
+# From here on every exit is 0: a reminder must not break an engage or a sign-off.
 command -v gh >/dev/null 2>&1 || exit 0
 command -v gc >/dev/null 2>&1 || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
@@ -77,7 +75,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 # and dismiss are launched from the board, outside any rig checkout, where a cwd
 # origin lookup resolves nothing and the reminder would silently never post. gc
 # rig list maps the subject's id prefix to its repo path; cwd is the fallback for
-# a caller that already runs inside the subject's rig (the converse close paths).
+# a caller that already runs inside the subject's rig (the converse sign-off).
 ORIGIN_HOST=""; ORIGIN_REPO=""; ORIGIN_REPO_Q=""
 REPO_DIR=$(gc rig list --json 2>/dev/null | scrub \
   | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .path' 2>/dev/null | head -n1)
@@ -122,29 +120,7 @@ if [ -n "$PR_URL" ]; then
   fi
 fi
 
-# For a close, the summary, the actions, and the outcome word can be left to
-# durable state: converse-signoff.sh stamps gc.pr_visit_summary and
-# gc.pr_visit_actions on the visit before the close, and the visit's gc.outcome
-# is the closing word. Reading them here lets the post-close writers
-# (converse-settle's close step and converse-claim.sh's stranded-finish
-# recovery) close the reminder without re-deriving the sitting. The same read
-# refuses to mark the reminder closed while the visit is still open — a known
-# non-closed status leaves the comment alone — because saying "closed" ahead of
-# the close is the defect this waits on the close to avoid. An unreadable status
-# is not proof of anything, so it proceeds: this is a best-effort reminder.
-if [ "$MODE" = close ]; then
-  VISIT_JSON=$(gc bd show "$VISIT" --json 2>/dev/null | scrub)
-  VSTATUS=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].status // ""' 2>/dev/null || true)
-  case "$VSTATUS" in
-    ""|closed) : ;;
-    *) echo "$PROG: visit $VISIT reads '$VSTATUS', not closed; leaving its PR reminder open" >&2; exit 0 ;;
-  esac
-  [ -n "$OUTCOME" ] || OUTCOME=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].metadata["gc.outcome"] // ""' 2>/dev/null || true)
-  [ -n "$SUMMARY" ] || SUMMARY=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].metadata["gc.pr_visit_summary"] // ""' 2>/dev/null || true)
-  [ -n "$ACTIONS" ] || ACTIONS=$(printf '%s' "$VISIT_JSON" | jq -r '.[0].metadata["gc.pr_visit_actions"] // ""' 2>/dev/null || true)
-fi
-
-MARKER="<!-- gc:visit:$VISIT -->"
+MARKER="<!-- gc:sitting:$SITTING -->"
 
 # The one comment carrying our marker, on the PR's issue-comment thread (what
 # `gh pr comment` posts to). Unreadable is fail-safe: for close there is nothing
@@ -167,8 +143,8 @@ SUMMARY=$(oneline "$SUMMARY")
 ACTIONS=$(oneline "$ACTIONS")
 
 if [ "$MODE" = close ]; then
-  # UPDATE-ONLY: a visit that never engaged has no comment, and its close leaves
-  # the PR alone.
+  # UPDATE-ONLY: a conversation no sitting engaged has no comment, and its close
+  # leaves the PR alone.
   [ -n "$COMMENT_ID" ] || exit 0
   # Preserve the reason the engage wrote — one line, so this read-back is exact.
   REASON=$(printf '%s' "$COMMENT_BODY" | sed -n 's/^- Reason: //p' | head -1)
@@ -177,12 +153,12 @@ fi
 # Compose the body. Both shapes carry the marker so the next call finds it.
 BODY="$MARKER"$'\n'
 if [ "$MODE" = engage ]; then
-  BODY="$BODY### Visit $VISIT — open"$'\n'
+  BODY="$BODY### Sitting on $SITTING — open"$'\n'
 else
   if [ -n "$OUTCOME" ]; then
-    BODY="$BODY### Visit $VISIT — closed ($OUTCOME)"$'\n'
+    BODY="$BODY### Sitting on $SITTING — ended ($OUTCOME)"$'\n'
   else
-    BODY="$BODY### Visit $VISIT — closed"$'\n'
+    BODY="$BODY### Sitting on $SITTING — ended"$'\n'
   fi
 fi
 BODY="$BODY- Subject: $SUBJECT"$'\n'
@@ -194,16 +170,16 @@ fi
 
 if [ -n "$COMMENT_ID" ]; then
   if "$PR_POST" edit --repo "$ORIGIN_REPO_Q" --comment "$COMMENT_ID" --body "$BODY" >/dev/null 2>&1; then
-    echo "$PROG: updated visit comment on PR#$PR ($MODE)"
+    echo "$PROG: updated sitting comment on PR#$PR ($MODE)"
   else
-    echo "$PROG: could not update visit comment $COMMENT_ID on PR#$PR" >&2
+    echo "$PROG: could not update sitting comment $COMMENT_ID on PR#$PR" >&2
   fi
 else
   # No comment yet. engage creates one; close already returned above.
   if "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR" --body "$BODY" >/dev/null 2>&1; then
-    echo "$PROG: posted visit comment on PR#$PR"
+    echo "$PROG: posted sitting comment on PR#$PR"
   else
-    echo "$PROG: could not post visit comment on PR#$PR" >&2
+    echo "$PROG: could not post sitting comment on PR#$PR" >&2
   fi
 fi
 exit 0

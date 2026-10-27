@@ -1,22 +1,22 @@
 #!/bin/sh
-# gc-visit-open.sh — operator-origin visit intake: turn "I need an agent on
-# topic X" into a routed, durable conversation in one command.
+# operator-intake.sh — the operator's intake: turn "I need an agent on topic X"
+# into a durable conversation in one command.
 # The argument (grammar and flags in usage()) is either a topic string, which
 # becomes a NEW subject bead, or a reference to an EXISTING one (a bead id, a
 # PR number or URL, or a superseded id) resolved through gc-helm to the live
 # bead that owns the work.
-# Owns everything upstream of the visit (rig, subject bead, path choice);
-# visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
-# this calls (gate-visit.test.sh guards that single copy). Two paths:
-# PREFERRED files a first reaction (framing card; a reaction that puts the
-# topic to the operator files a human gate, and gate-visit-sweep files that
-# gate's visit); FALLBACK files the visit directly — taken on --no-react, whenever
-# `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
-# a reaction routed into a downed pool waits invisibly; today's tool always says
-# yes), and when the subject already has an open first reaction or a live owner
-# owns it (gc-helm react exit 5), a live workflow already drives it (exit 6), or
-# it is already routed or armed (exit 7), so react is a no-op that files
-# nothing: nothing would file the visit, so this does.
+# Owns everything upstream of the conversation (rig, subject bead, path
+# choice); filing the conversation lives ONCE in gc-helm.sh open, which this
+# calls. Two paths: PREFERRED files a first reaction (a framing card; a reaction
+# that puts the topic to the operator files a human gate, which reaches the
+# operator on the board); FALLBACK files a conversation in the operator's queue
+# directly — taken on --no-react, whenever `gc-proactive.sh deliverable`
+# answers no (divert-on-no is the contract — a reaction routed into a downed
+# pool waits invisibly; today's tool always says yes), and when the subject
+# already has an open first reaction or a live owner owns it (gc-helm react
+# exit 5), a live workflow already drives it (exit 6), or it is already routed
+# or armed (exit 7), so react is a no-op that files nothing: nothing would put
+# the topic to the operator, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
 set -u
@@ -29,7 +29,7 @@ set -u
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-PROG="gc-visit-open"
+PROG="operator-intake"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
@@ -53,21 +53,21 @@ DEFAULT_RIG="${GC_VISIT_DEFAULT_RIG:-gc-toolkit}"
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-visit-open "<topic>" [--rig <rig>] [--no-react] [--type <t>] [--topic]
-  gc-visit-open <bead-id|pr-number|pr-url>  [--no-react]
+  operator-intake "<topic>" [--rig <rig>] [--no-react] [--type <t>] [--topic]
+  operator-intake <bead-id|pr-number|pr-url>  [--no-react]
 
 Opens a durable conversation in one step. A topic string becomes a subject
 bead; a bead id, a PR number or URL, or a superseded id resolves through
 gc-helm to the LIVE bead that owns the work and is used as the subject as-is.
-Either way the visit parks on the helm board (`gc.routed_to=human`); the
-operator draws it off the board and `gc-helm engage` spawns a converse sitting
-on demand.
+Either way the conversation waits in the operator's queue on the helm board;
+the operator draws it off the board and `gc-helm engage` spawns a converse
+sitting on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
                  override with GC_VISIT_DEFAULT_RIG). Refused with exit 2 for
                  a bead id, a PR number, or a PR URL, because an existing
                  bead's own rig is authoritative.
-  --no-react     Skip the proactive first reaction and file the visit now.
+  --no-react     Skip the proactive first reaction and file the conversation now.
                  Faster and unconditional; you lose the framing card.
   --type <t>     Subject bead type (default: task, or decision when the topic
                  reads as a question). Refused with exit 2 for a bead id, a PR
@@ -78,9 +78,9 @@ on demand.
 
 Without --no-react the topic is handed to a proactive first reaction, which
 writes a framing card and, when it puts the topic back to you, files a human
-gate whose visit gate-visit-sweep files — but ONLY when that pool can actually
-run. When it cannot (auto-spawn disabled, or the city is at the session cap)
-this falls back to filing the visit directly and says so.
+gate that reaches you on the board — but ONLY when that pool can actually run.
+When it cannot (auto-spawn disabled, or the city is at the session cap) this
+falls back to filing the conversation directly and says so.
 EOF
 }
 
@@ -145,7 +145,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$ARG" ] || { echo "$PROG: needs a topic string or a bead id" >&2; usage; exit 2; }
 
-[ -f "$HELM" ] || die "cannot find gc-helm.sh (looked at $HELM) — visit filing lives there" 3
+[ -f "$HELM" ] || die "cannot find gc-helm.sh (looked at $HELM) — filing the conversation lives there" 3
 
 # ── Bead id or topic? Disambiguated by RIG PREFIX, not shape alone ────
 # prefix matches no rig → topic; matches and resolves → subject; matches but
@@ -257,7 +257,7 @@ require_reaction_agent() {
 # cannot tell an idle rig from one whose pool is dead (city-liveness.sh). A
 # reaction pool that cannot run at all, because it is unregistered, suspended
 # or capped at zero slots, is `gc-proactive.sh deliverable`'s no: the path
-# choice below diverts on it to a direct visit and prints the reason.
+# choice below diverts on it to a direct conversation and prints the reason.
 note_if_report_waits() {
     if [ "$(rig_suspended "$1")" = "true" ]; then
         note "$PROG: rig '$1' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $1)."
@@ -382,7 +382,7 @@ fi
 
 # The topic path guarded before it minted the subject; the existing-bead and
 # PR-reference paths resolve a subject in another rig, so guard here before a
-# visit is filed against a target that could never engage it.
+# conversation is filed against a target that could never engage it.
 if [ -n "$looks_like_bead_id" ] || [ -n "$looks_like_pr_ref" ]; then
     require_reaction_agent "$RIG_NAME"
 fi
@@ -409,7 +409,7 @@ fi
 # the clamps (the tool + agents/proactive/agent.toml).
 REACT=""; REACT_WHY=""
 if [ -n "$NO_REACT" ]; then
-    REACT_WHY="--no-react: filing the visit directly"
+    REACT_WHY="--no-react: filing the conversation directly"
 elif [ ! -x "$PROACTIVE_TOOL" ]; then
     REACT_WHY="no: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)"
 else
@@ -422,36 +422,37 @@ fi
 
 # ── Open the conversation ────────────────────────────────────────────
 if [ -n "$REACT" ]; then
-    # The reaction owns visit creation from here; a second visit would split
-    # the conversation.
+    # The reaction owns putting the topic to the operator from here; a
+    # conversation filed now would put it twice.
     if "$HELM" react "$SUBJECT" --reason "operator-origin intake: $ARG"; then
         printf '%s: subject %s — first reaction filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
-        printf '       The reaction writes a framing card, and when it puts the topic to you the visit is filed for it; it is not filed yet.\n'
+        printf '       The reaction writes a framing card, and when it puts the topic to you it files a human gate for you; nothing waits on you yet.\n'
         printf '       Want the conversation now instead? Re-run with --no-react.\n'
         exit 0
     else
         REACT_RC=$?
     fi
-    # No reaction was dispatched, so nothing downstream will file the visit —
-    # fall through and file it directly; a conversation beats a bead nobody is
-    # coming to. gc-helm react exit 5 is the already-reacting no-op (the guard
+    # No reaction was dispatched, so nothing downstream will put the topic to
+    # the operator — fall through and file the conversation directly; a
+    # conversation beats a bead nobody is coming to. gc-helm react exit 5 is
+    # the already-reacting no-op (the guard
     # filed nothing because a first reaction happens once at a time, or a live
     # owner owns it), exit 6 the live-workflow no-op (the guard filed nothing
     # because a reaction never races work in flight), and exit 7 the
     # dispatch-path no-op (the guard filed nothing because the subject is already
     # routed or armed), each distinct from a real failure to file: name the
-    # actual cause so the visit body the converse session reads is accurate.
+    # actual cause so the ask the converse session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
-        note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the visit directly"
+        note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the conversation directly"
         REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
     elif [ "$REACT_RC" -eq 6 ]; then
-        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the visit directly"
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the conversation directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     elif [ "$REACT_RC" -eq 7 ]; then
-        note "$PROG: subject $SUBJECT is already routed or armed — no reaction was filed; filing the visit directly"
+        note "$PROG: subject $SUBJECT is already routed or armed — no reaction was filed; filing the conversation directly"
         REACT_WHY="no: the subject is already routed or armed (a first reaction never second-guesses a dispatch already decided)"
     else
-        note "$PROG: filing the first reaction FAILED — falling back to filing the visit directly"
+        note "$PROG: filing the first reaction FAILED — falling back to filing the conversation directly"
         REACT_WHY="no: filing the first reaction failed"
     fi
 fi
@@ -461,5 +462,5 @@ fi
 "$HELM" open "$SUBJECT" \
     --reason "operator-origin topic intake" \
     --body "The operator opened this topic directly and no framing card was written ($REACT_WHY). Rebuild whatever context exists on the subject, prep, and hold for the operator. The subject's body is the seed of the conversation, not a specification — ask before assuming scope." \
-    || die "could not file the visit on $SUBJECT (the subject bead exists; retry with: $HELM open $SUBJECT)" 4
-printf '%s: subject %s — visit filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+    || die "could not file the conversation on $SUBJECT (the subject bead exists; retry with: $HELM open $SUBJECT)" 4
+printf '%s: subject %s — conversation filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"

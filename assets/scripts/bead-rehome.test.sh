@@ -725,8 +725,8 @@ eq "$rc" 0 "a non-visit re-home succeeds"
 eq "$(field alpha m.gc.outcome al-task1)" "" "a non-visit origin gets no gc.outcome"
 
 # --- (t) an outcome the visit already records is left as it was -----------
-# A visit closed through visit-close.sh and later re-homed already carries the
-# word the sitting signed off with; the re-home writes no outcome over it.
+# A visit a sitting closed and that is later re-homed already carries the word
+# the sitting signed off with; the re-home writes no outcome over it.
 mkbead alpha open al-visit2
 printf 'm.task_kind=visit\nm.gc.outcome=dismissed\n' >> "$TMP/rigs/alpha/.beads/al-visit2"
 mkbead beta open bt-vsucc2

@@ -4,11 +4,11 @@
 // It carries the same two disciplines OpenConversation does, for the same
 // reasons:
 //
-//  1. It never claims more than happened. accept dispatches a formula and
-//     dismisses the visit; engage spawns a Discuss sitting but does NOT attach the
-//     operator to it (there is no pane in a browser until the embedded ttyd can be
-//     retargeted — tk-rbf9r / tk-xlup8); dismiss closes the visit. The success
-//     copy says exactly that and no more.
+//  1. It never claims more than happened. accept clears the recommendation's
+//     gate and dispatches a formula; engage spawns a Discuss sitting but does NOT
+//     attach the operator to it (there is no pane in a browser until the embedded
+//     ttyd can be retargeted — tk-rbf9r / tk-xlup8); dismiss ends the sitting and
+//     closes its conversation. The success copy says exactly that and no more.
 //  2. A failure says WHICH failure. The service returns a stable `reason` slug
 //     beside the tool's own sentence; the sentence is shown verbatim and the slug
 //     picks a next move. A button whose only failure mode is a shrug is worse than
@@ -24,7 +24,7 @@ import { actuate, ActuateError, type ActuateResult, type ActuateVerb } from './c
 // What the operator should do next, per failure reason. Empty where the service's
 // own sentence already names the move — doubling up would just add noise.
 // `verb_failed` is deliberately absent: it is the verb's own refusal (discuss-only,
-// an engaged visit, a failed sling, a rig that is down), and the script's sentence
+// another gate blocking the bead, a failed sling, a rig that is down), and the script's sentence
 // is the whole story and names the move itself.
 const NEXT_MOVE: Record<string, string> = {
   invalid_bead: 'This row does not carry an id the board can act on. It is a board bug, not a bad click.',
@@ -58,7 +58,7 @@ const COPY: Record<ActuateVerb, VerbCopy> = {
   accept: {
     idle: (formula) => (formula ? `accept ▸ ${formula}` : 'accept ▸'),
     busy: 'accepting…',
-    fallback: 'Accepted: the recommendation was dispatched and its visit dismissed.',
+    fallback: "Accepted: the recommendation's gate was cleared and its formula dispatched.",
   },
   engage: {
     idle: () => 'Discuss',
@@ -68,7 +68,7 @@ const COPY: Record<ActuateVerb, VerbCopy> = {
   dismiss: {
     idle: () => 'Dismiss',
     busy: 'dismissing…',
-    fallback: 'The visit was closed.',
+    fallback: 'The sitting was ended.',
   },
 };
 
@@ -148,7 +148,7 @@ export function ActuateButton({ beadId, verb, formula, compact, onDone }: Actuat
         disabled={state.phase === 'running'}
         title={
           verb === 'accept' && formula
-            ? `dispatch ${formula} at ${beadId} and dismiss the visit`
+            ? `clear the recommendation's gate and dispatch ${formula} at ${beadId}`
             : undefined
         }
       >

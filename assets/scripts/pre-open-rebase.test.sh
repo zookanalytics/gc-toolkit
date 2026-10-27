@@ -295,7 +295,7 @@ eq "$(meta K1 task_kind)" "<absent>" "a claimed covering child is NOT re-stamped
 hasnt "$OUT" "re-stamped role marker on covering rework K1" "and no restamp is attempted on it"
 
 echo "# a covering rework child parked for a person still covers the branch"
-# converse-hold transitions an unanchored child to the `held` lifecycle state,
+# A sitting's hold moves an unanchored child to the `held` lifecycle state,
 # which stamps merge_result=held; the child still owns the branch, so the
 # merge_result test must not drop it and mint a merge-current twin every pass.
 reset "$(pre AK polecat/tk-c1)" '{"id":"H1","status":"blocked","assignee":"","title":"held rework","metadata":{"branch":"polecat/tk-c1","task_kind":"rework","anchor_bead":"AK","merge_result":"held"}}'

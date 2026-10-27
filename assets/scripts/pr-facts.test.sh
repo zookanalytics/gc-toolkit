@@ -1161,7 +1161,7 @@ out=$(run)
 has "$out" "rework CW1 already covers branch 'polecat/x97' at this head, no new child" "the anchor's own rework child is excluded from the guard, so the dedup runs"
 
 echo "# …and that own rework child, parked for a person in the held lifecycle state, still covers — the merge_result stamp does not drop it"
-# converse-hold transitions an unanchored child to `held`, stamping
+# A sitting's hold moves an unanchored child to `held`, stamping
 # merge_result=held; the child still owns the branch, so dropping it on the
 # merge_result test alone would re-mint a merge-current twin every pass.
 store "[$(anchor FBK3 98),$(child HW1 polecat/x98 ',"task_kind":"rework","anchor_bead":"FBK3","merge_result":"held"' blocked)]"

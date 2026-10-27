@@ -2,12 +2,9 @@
 # visit-identity.sh — the single definition of what subject a visit covers.
 #
 # Sourced (never executed) by every script that must agree on visit coverage:
-# gc-helm.sh (open, dismiss, engage), converse-fold.sh and converse-claim.sh
-# (sitting membership), converse-hold.sh and converse-signoff.sh (the subject a
-# hold or sign-off writes to when none is passed), the sweeps
-# (gate-visit-sweep.sh, liveness-sweep.sh, liveness-sweep-precheck.sh), and the
-# formula copies of the gate-visit block, which locate it at run time to reuse a
-# visit already open on their subject. One definition, no copies.
+# gate-visit-sweep.sh, and a step poured before the cutover with a copy of the
+# gate-visit block, which locates it at run time to reuse a visit already open
+# on its subject. One definition, no copies.
 #
 # Coverage is a visit's DIRECT graph-native identity to its subject: the outgoing
 # `tracks` edge, with the `gc.continuation_group` stamp as the recovery fallback
@@ -23,6 +20,7 @@
 # Usage follows the in-variable jq convention (bead-context.sh $ADV): prepend the
 # defs to a jq program that runs against one visit bead object, e.g.
 #   jq -r "$VISIT_IDENTITY_JQ"' select(visit_covers($s)) | .id '
+# shellcheck disable=SC2034  # read by the scripts that source this file
 VISIT_IDENTITY_JQ='
   # The subject ids this visit tracks via its outgoing tracks edge(s).
   def visit_tracked_subjects:

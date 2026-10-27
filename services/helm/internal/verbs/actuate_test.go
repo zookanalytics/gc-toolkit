@@ -1,4 +1,4 @@
-package visit
+package verbs
 
 // These tests drive a REAL subprocess — a tiny shell script standing in for
 // gc-helm.sh — because what is being checked is exactly the exec boundary: that

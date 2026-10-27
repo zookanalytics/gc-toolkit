@@ -1,70 +1,160 @@
 #!/usr/bin/env bash
-# converse-signoff.sh — step 7 of the converse loop: write the durable trace a
-# finished sitting owes to the subject, and discharge the hold, BEFORE the
-# sign-off is posted and the visit is closed.
+# converse-signoff.sh — a sitting's sign-off: the durable trace it owes, written
+# in one order every time.
 #
-# It stamps the closing takeaway on the subject, reads it back, and discharges
-# the demands the hold filed. A conversation wait gates the VISIT, an explicit
-# merge hold gates the anchor; a sitting may have filed either or both, and each
-# is discharged. One question decides each discharge: did the decision this hold
-# waited on land here (--ruled yes) or not (--ruled no)?
-#   --ruled yes: the operator ruled in this thread. Each gate is RESOLVED (a
-#     pre-gate demand is closed on the same terms), where the subject still
-#     reads `held` it is released back to the pool that owns it, and the ruling
-#     is recorded on the visit as gc.ruling, which a review finding deferred to
-#     the visit waits for.
-#   --ruled no:  cut short, or the question outlived the sitting. The wait is
-#     consolidated onto the SUBJECT — a demand gating the VISIT is closed and
-#     re-stated there — so it outlives the visit's close, the liveness sweep
-#     (keyed on gc.demand_for=<subject>) re-offers the next sitting, and on a PR
-#     anchor the merge waits; a pre-PR subject stays `held`. The visit carries no
-#     gc.ruling.
-# `held` follows this sitting's outcome, not the state read off the subject,
-# because the cut-short exit runs this discharge on a subject still waiting.
+# A sitting holds one conversation, a task that tracks the subject and replies
+# to each human gate it answers. When the operator ruled (--ruled yes), the
+# sign-off:
+#   1. carries out what the ruling does to an open PR it reaches, the subject
+#      or a bead a gate it answers releases: its rework, through
+#      converse-rework.sh with the conversation as the rework's
+#      source_ruling_bead (--rework), or its retirement, through pr-dispose.sh,
+#      which records the disposition and closes the PR (--retire). Either one
+#      runs in that PR's own rig, its store, pool and checkout, whichever rig
+#      the conversation lives in, and the PR it acts on is recorded on the
+#      conversation before it acts, so a re-run of the same ruling acts on the
+#      same PR even once that PR has closed;
+#   2. writes the subject's headline (gc-helm.sh takeaway) and reads it back;
+#   3. resolves each open gate the conversation replies to with
+#      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
+#      resolves a closed gate without changing it and reports success either
+#      way, so a close reason other than this one means another answer reached
+#      the gate first: a filer's withdrawal, an Accept, another sitting, or a
+#      person at the command line. The first answer wins, and the sign-off
+#      reports it;
+#   4. releases a subject that reads `held`, and stops, the conversation left
+#      open, when that release fails;
+#   5. takes the subject's recommendation when the ruling takes it (--accept),
+#      through gc-helm.sh accept, the writer the board's Accept runs: under the
+#      subject's acceptance lock it answers the recommendation's gate, which
+#      step 3 leaves to it, dispatches the recommended formula at the subject
+#      and records the dispatch, or finishes an acceptance an earlier Accept
+#      left unfinished without dispatching it again;
+#   6. closes the conversation;
+#   7. updates the subject's PR reminder.
+# A gate can hold a merge, and resolving it releases the merge, so everything
+# the ruling puts in the merge's way is written before step 3: the rework
+# child's blocks edge, the closed PR, and each wait the headline wires. The
+# beads each gate releases are read before the first write, so a gate that
+# releases an open PR other than the subject, such as an epic member's gate the
+# epic's sitting answers, or a gate about the subject and another PR, puts the
+# question of that PR to the ruling just as an open-PR subject does. The
+# acceptance follows the release: mol-polecat-work's load-context reads any
+# merge_result, `held` included, as a PR or merge that already exists, and
+# cancels a run poured at a bead that still carries one.
 #
-# Every store read the discharge depends on runs before the first write and
-# fails closed: the visit, the open demands, the demand the visit's
-# gc.hold_demand names, and on a ruling the subject's lifecycle state. A read
-# that fails is not an empty answer. Taken as one, a failed demand listing finds
-# no demand, the discharge skips a gate that still blocks, and the sitting signs
-# off while the hold stands. For the same reason a demand counts as discharged
-# only once it reads back closed.
+# A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
+# for the gates --answer names, and step 5 when it takes the recommendation,
+# and stops there: the conversation stays open under its sitting, and the
+# sign-off later reads each of those gates as already cleared.
 #
-# What is waiting on the subject is the caller's to state: one --waiting-on per
-# bead it ROUTED work into, --no-wait when it settled the subject and nothing is
+# Cut short (--ruled no), it writes the headline, leaves every gate the
+# conversation replies to open and owed, with its reply in place for the next
+# sitting, and hands the conversation back to the operator's queue with one
+# write guarded on the sitting that holds it and the status it read, then
+# updates the reminder. A conversation that reads closed, before that write or
+# because a dismiss closed it first, stays closed.
+#
+# It resolves no gate its conversation does not reply to: a gate the sitting
+# never took up stays for whoever owes it. The gates are read from the
+# conversation's own row (`gc bd list --id <task>`), whose edges keep a reply
+# onto a gate in another store. Every read the sign-off depends on runs before
+# its first write and fails closed, because a read that fails is no proof that
+# nothing stands.
+#
+# What waits on the subject is the caller's to state: one --waiting-on per bead
+# it ROUTED work into, --no-wait when it settled the subject and nothing is
 # waiting, and NEITHER where the subject is parked for a person. The scripts it
-# runs (converse-rework.sh, gc-helm.sh, lifecycle.sh) are SEARCHED for on the
-# candidate roots, in the one order pack_script holds.
+# runs (converse-rework.sh, gc-helm.sh, lifecycle.sh, pr-sitting-comment.sh) are
+# SEARCHED for on the candidate roots, in the one order pack_script holds.
 #
 # Usage:
-#   converse-signoff.sh --visit <id> --outcome "<takeaway, ≤140 chars>" \
-#     [--subject <id>] [--ruled yes|no] \
+#   converse-signoff.sh --conversation <task> --outcome "<headline, ≤140 chars>" \
+#     [--subject <id>] [--ruled yes|no] [--ruling "<one line>"] \
+#     [--route <rig>/<agent>|human] [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ...] \
-#     [--ruling "<one line>"] [--still-owed "<≤140 chars>"] [--route <rig>/<agent>|human] \
-#     [--rework | --no-rework]
-#   --outcome is required. --ruled defaults to `no`. --ruled yes requires
-#   --ruling and --route; --ruled no requires --still-owed. --subject defaults
-#   to the subject the visit records (its tracks edge, else its
-#   gc.continuation_group stamp); with neither, the sign-off refuses and writes
-#   nothing.
-#   --rework | --no-rework (with --ruled yes): whether the ruling changes what an
-#     already-published PR's branch must contain. --rework files the rework
-#     demand against the subject anchor, the fix unit a review verdict files,
-#     sourced by this visit, and --no-rework records in the visit's PR close
-#     text (gc.pr_visit_actions) that the ruling leaves the branch as it stands. A
-#     ruled sign-off on a subject at merge_result=pull_request must give one; it
-#     is refused, with nothing written, when it gives neither. The filing runs
-#     before every other write, and when it does not land nothing else is
-#     written.
-# Exit: 0 the trace is written and the hold discharged — the sign-off may
-#   proceed, once any write it reports as failed is repaired; 1 it stopped
-#   short because a read failed, --rework did not file, a demand did not close,
-#   a cut-short wait did not re-state, or the visit's gc.ruling did not read
-#   back as this sign-off left it —
-#   do NOT post the sign-off or close the visit; repair what it names and re-run,
-#   which repeats every write it made safely; 2 refused before any write: usage,
-#   no subject resolves, or a ruled sign-off on an open PR that answered neither
-#   --rework nor --no-rework.
+#     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
+#     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]]
+#   --outcome is the subject's headline, and the close reason the sittings card
+#   falls back to. --ruled defaults to `no`. --ruled yes requires --ruling, the
+#   answer each gate resolves with, and --route, where a `held` subject is
+#   released to. --subject, when given, must be the bead the conversation tracks.
+#   --leave (with --ruled yes) names a gate the conversation replies to that the
+#   ruling leaves owed: it stays open, and its reply stays as the record that
+#   this conversation took it up.
+#   --answer names a gate the conversation replies to that the ruling answers
+#     on a turn that does not sign off. It carries a ruling, so it takes
+#     --ruling and the open-PR answer below; it releases no subject and leaves
+#     every other gate as it is, so --ruled no, --route and --leave are refused
+#     beside it.
+#   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
+#     does to an already-published PR it reaches: the subject at
+#     merge_result=pull_request, and each bead at merge_result=pull_request
+#     that a human gate the ruling answers releases, while the gate is open or
+#     once this ruling's own answer has closed it, so a re-run reaches the PRs
+#     an earlier attempt did. A ruling that reaches one must give one of them;
+#     given none, it is refused with nothing written. --rework says the PR's branch must change: the rework is filed
+#     against that PR's anchor, sourced by this conversation, and refused while
+#     a rework the conversation filed for another ruling is open. --no-rework
+#     says the branch of each such PR stands, and the PR reminder records that.
+#     --retire says the PR will not land: pr-dispose.sh records the disposition
+#     under <kind> (re-homed, folded, fixed-upstream, duplicate or not-needed)
+#     and closes the PR. Its successor is --successor, the bead that carries
+#     the work now, which every kind but not-needed requires; under not-needed
+#     it defaults to this conversation, the evidence that ruled the work out.
+#     --rework and --retire act on one PR, the one the ruling reaches, else
+#     the subject. The rework or the retirement runs in that PR's rig, after
+#     one write that records the PR on the conversation (gc.ruling_consequence)
+#     and before every other write, and when it does not complete nothing else
+#     is written. A re-run of the same ruling with the same answer acts on the
+#     PR the record names, the one --pr-anchor named or the ruling reached
+#     then, even once it has closed, as a retired PR closes when pr-facts
+#     consummates its disposition; a PR that reads closed has nothing left for
+#     the rework or the retirement to do, so the re-run goes on without it.
+#   --pr-anchor <bead> names the PR --rework or --retire acts on when the
+#     ruling reaches more than one, which it requires; every other one the
+#     ruling reaches stands. A conversation owns one live rework child, so a
+#     sign-off files one rework, and a second PR whose branch must change takes
+#     a ruling of its own: the gate that releases it stays owed until then. A
+#     re-run may name the PR an earlier attempt of the same ruling recorded,
+#     even once it has closed.
+#   --accept (with a ruling) says the ruling takes the subject's
+#     recommendation, gc.recommended_formula, which a first reaction put to the
+#     operator through a human gate under the key first-reaction that blocks
+#     the subject. That gate must be one the ruling answers: the conversation
+#     replies to it, and on a turn that does not sign off --answer names it. A
+#     gate under the key that blocks another bead, such as an epic's member,
+#     asks that bead's recommendation, which --accept does not take. Step 3
+#     leaves the subject's gate to step 5, which runs gc-helm.sh accept, the
+#     one writer that dispatches a recommendation, so the sitting never slings
+#     it itself. Accept answers each open gate under the key on the subject, or
+#     with none open the newest one, and the ruling must answer each of those.
+#     Under Accept's lock and its token, a dispatch the board's Accept already
+#     poured is recorded and not sent again, even when that Accept stopped
+#     before recording it. Refused while another open human gate that the
+#     ruling does not answer holds the subject, since the dispatch waits for
+#     every gate that holds it.
+#     A subject that still reads `held` when Accept's writer runs, as on a turn
+#     that does not sign off, is released by that writer before it dispatches.
+#   --var <key>=<value> (with --accept, repeatable) is a var the ruling settled
+#     for the recommendation's dispatch, such as mol-design-convoy's
+#     design_gated=false. Accept passes each one to its sling. A dispatch an
+#     earlier Accept already made keeps the vars it was made with.
+# Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
+#   short — a read failed, the rework did not file, the PR did not retire, the
+#   headline did not land, a gate did not close, a held subject did not
+#   release, the recommendation was not taken, or the conversation did not
+#   close or hand back — so do NOT post the sign-off, or report the ruling as
+#   carried out; repair what it names and re-run, which repeats every write it
+#   made safely; 2 refused before any write: usage, a conversation that is not
+#   one, a gate it does not reply to, a ruling that reaches an open PR and gave
+#   none of --rework, --no-rework and --retire, a --rework or --retire on a
+#   ruling that reaches more than one open PR without a --pr-anchor naming one
+#   of them, or an --accept with none of the subject's own recommendation gates
+#   among the gates the ruling answers, a gate Accept would answer that the
+#   ruling does not, no recommendation on the subject, or another open human
+#   gate the ruling does not answer, or a --var without --accept or not of the
+#   form <key>=<value>.
 set -u
 
 # >>> control-char-scrub
@@ -75,55 +165,48 @@ set -u
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-VISIT=""
-SUBJECT="${SUBJECT:-}"
+CONVERSATION=""
+SUBJECT=""
 OUTCOME=""
-RULED=no
+RULED=""
 RULING=""
-STILL_OWED=""
 ROUTE=""
-REWORK=""
+PR_ANSWER=""
+RETIRE_KIND=""
+SUCCESSOR=""
+PR_PICK=""
+ACCEPT=""
+ACCEPT_VARS=()
 WAIT=()
+LEAVE=()
+ANSWER_GATES=()
+UNDONE="NOT SIGNED OFF — do NOT post the sign-off."
 
 die() { echo "converse-signoff: $1" >&2; exit 2; }
 # stopped <why> — refuse the sign-off (exit 1). Whatever ran before it is a write
-# a re-run repeats safely, and a demand it did not discharge still stands for the
-# re-run to find.
+# a re-run repeats safely.
 stopped() {
   echo "converse-signoff: $1" >&2
-  echo "NOT SIGNED OFF — do NOT post the sign-off or close the visit. Repair what is named above, then re-run this sign-off."
+  echo "$UNDONE Repair what is named above, then re-run this call."
   exit 1
 }
-# show_one <id> — print `gc bd show <id> --json`, scrubbed, when it reads as an
-# array whose first row is <id>. Returns 3 when the store answers that <id> does
-# not exist, and 1 on any other failure. The exit status is read on its own: a
-# pipeline answers with its last command's, and scrub succeeds whatever gc did.
-# gc exits non-zero on a missing id but still prints its not-found object, so
-# the output is classified before the status is trusted.
-show_one() {
-  local raw rc
-  raw=$(gc bd show "$1" --json); rc=$?
-  raw=$(printf '%s' "$raw" | scrub)
-  if [ "$rc" -eq 0 ] && printf '%s' "$raw" | jq -e --arg id "$1" 'type == "array" and ((.[0].id // "") == $id)' >/dev/null 2>&1; then
-    printf '%s' "$raw"
-    return 0
-  fi
-  printf '%s' "$raw" | jq -e 'type == "object" and ((.error // "") | test("no issues found"))' >/dev/null 2>&1 && return 3
-  return 1
+# pr_answer <rework|no-rework|retire> — the one answer to what a ruling does to
+# an open PR.
+pr_answer() {
+  [ -z "$PR_ANSWER" ] || [ "$PR_ANSWER" = "$1" ] || die "--rework, --no-rework and --retire answer one question; give one"
+  PR_ANSWER="$1"
 }
-# demand_closed <id> — the demand reads back closed. A read that fails is no
-# proof of a close, so it answers as still open.
-demand_closed() {
-  local got
-  got=$(show_one "$1") || return 1
-  printf '%s' "$got" | jq -e '((.[0].status // "") | ascii_downcase) == "closed"' >/dev/null 2>&1
+# show_row <id> — the bead's row from `gc bd show <id> --json`, one line of
+# JSON, or nothing (status 1) when it does not read as that bead.
+show_row() {
+  gc bd show "$1" --json 2>/dev/null | scrub \
+    | jq -ce --arg id "$1" 'if type == "array" then (.[0] | select((.id // "") == $id)) else error("unread") end' 2>/dev/null
 }
 
 # pack_script <name> — the first candidate root's assets/scripts/<name>: the rig
 # root, then the git checkout of the working directory, then the city's
-# gc-toolkit rig. Every script this sign-off runs is found through it, so the
-# three share one search order. Non-zero, printing nothing, when no root
-# carries it.
+# gc-toolkit rig. Every script this sign-off runs is found through it, so they
+# share one search order. Non-zero, printing nothing, when no root carries it.
 pack_script() {
   local cand
   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -132,24 +215,42 @@ pack_script() {
   return 1
 }
 
-# The one definition of what subject a visit covers (its tracks edge, the
-# gc.continuation_group stamp as fallback), shared with converse-fold.sh and the
-# sweeps. Exposes $VISIT_IDENTITY_JQ.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=visit-identity.sh
-. "$HERE/visit-identity.sh" || die "cannot source visit-identity.sh from $HERE"
+# The one definition of a conversation's shape. Exposes $CONVERSATION_JQ.
+# shellcheck source=conversation.sh
+. "$HERE/conversation.sh" || die "cannot source conversation.sh from $HERE"
+# The one gc.work_outcome stamp a conversation gets before it closes, shared
+# with gc-helm.sh dismiss. Exposes work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || die "cannot source work-outcome.sh from $HERE"
+# The one read of a bead's human gates, the read gc-helm.sh accept makes, and
+# the rule of which of them still hold it. Exposes bd_human_gates and
+# $HUMAN_GATE_JQ.
+# shellcheck source=bd-lib.sh
+. "$HERE/bd-lib.sh" || die "cannot source bd-lib.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --visit)      shift; [ $# -gt 0 ] || die "--visit needs a value"; VISIT="$1" ;;
+    --conversation) shift; [ $# -gt 0 ] || die "--conversation needs a value"; CONVERSATION="$1" ;;
     --subject)    shift; [ $# -gt 0 ] || die "--subject needs a value"; SUBJECT="$1" ;;
     --outcome)    shift; [ $# -gt 0 ] || die "--outcome needs a value"; OUTCOME="$1" ;;
     --ruled)      shift; [ $# -gt 0 ] || die "--ruled needs yes|no"; RULED="$1" ;;
     --ruling)     shift; [ $# -gt 0 ] || die "--ruling needs a value"; RULING="$1" ;;
-    --still-owed) shift; [ $# -gt 0 ] || die "--still-owed needs a value"; STILL_OWED="$1" ;;
     --route)      shift; [ $# -gt 0 ] || die "--route needs a value"; ROUTE="$1" ;;
-    --rework)     [ "${REWORK:-yes}" = yes ] || die "--rework and --no-rework answer one question; give one"; REWORK=yes ;;
-    --no-rework)  [ "${REWORK:-no}" = no ]   || die "--rework and --no-rework answer one question; give one"; REWORK=no ;;
+    --leave)      shift; [ $# -gt 0 ] || die "--leave needs a gate id"; LEAVE+=("$1") ;;
+    --answer)     shift; [ $# -gt 0 ] || die "--answer needs a gate id"; ANSWER_GATES+=("$1") ;;
+    --rework)     pr_answer rework ;;
+    --no-rework)  pr_answer no-rework ;;
+    --retire)     shift; [ $# -gt 0 ] || die "--retire needs a kind"; pr_answer retire; RETIRE_KIND="$1" ;;
+    --successor)  shift; [ $# -gt 0 ] || die "--successor needs a bead id"; SUCCESSOR="$1" ;;
+    --pr-anchor)  shift; [ $# -gt 0 ] || die "--pr-anchor needs a bead id"; PR_PICK="$1" ;;
+    --accept)     ACCEPT=yes ;;
+    --var)        shift; [ $# -gt 0 ] || die "--var needs <key>=<value>"
+                  case "$1" in
+                    *$'\n'*) die "--var takes <key>=<value> on one line" ;;
+                    [!=]*=*) ACCEPT_VARS+=(--var "$1") ;;
+                    *)       die "--var takes <key>=<value>, not '$1'" ;;
+                  esac ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
     -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -158,332 +259,520 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-[ -n "$VISIT" ]   || die "--visit is required"
+[ -n "$CONVERSATION" ] || die "--conversation is required"
 [ -n "$OUTCOME" ] || die "--outcome is required"
-case "$RULED" in yes|no) ;; *) die "--ruled must be yes or no" ;; esac
+[ "${#ACCEPT_VARS[@]}" -eq 0 ] || [ -n "$ACCEPT" ] \
+  || die "--var requires --accept: it is a var of the recommendation's dispatch"
+case "${RULED:-no}" in yes|no) ;; *) die "--ruled must be yes or no" ;; esac
+ANSWERING=""
+if [ "${#ANSWER_GATES[@]}" -gt 0 ]; then
+  ANSWERING=yes
+  [ "${RULED:-yes}" = yes ] || die "--answer carries a ruling, so it cannot be --ruled no"
+  [ -n "$RULING" ] || die "--answer requires --ruling (the answer each gate it names resolves with)"
+  [ -z "$ROUTE" ] || die "--route is where a sign-off releases a held subject to, and --answer releases nothing"
+  [ "${#LEAVE[@]}" -eq 0 ] || die "--answer resolves only the gates it names, so --leave has nothing to leave"
+  RULED=yes
+  UNDONE="NOT ANSWERED — do NOT tell the operator the ruling is carried out."
+fi
+RULED="${RULED:-no}"
 if [ "$RULED" = yes ]; then
-  [ -n "$RULING" ] || die "--ruled yes requires --ruling (the reason the gate resolves with)"
-  [ -n "$ROUTE" ]  || die "--ruled yes requires --route (where the subject is released to)"
+  [ -n "$RULING" ] || die "--ruled yes requires --ruling (the answer each gate resolves with)"
+  [ -n "$ANSWERING" ] || [ -n "$ROUTE" ] || die "--ruled yes requires --route (where a held subject is released to)"
 else
-  [ -n "$STILL_OWED" ] || die "--ruled no requires --still-owed (what the subject still waits on)"
+  [ -z "$PR_ANSWER" ] || die "--rework, --no-rework and --retire require a ruling (they answer what it does to an open PR)"
+  [ "${#LEAVE[@]}" -eq 0 ] || die "--leave requires --ruled yes: a cut-short sign-off leaves every gate open"
+  [ -z "$ACCEPT" ] || die "--accept requires a ruling (--ruled yes, or --answer): it takes the recommendation the operator ruled to take"
 fi
-if [ -n "$REWORK" ] && [ "$RULED" != yes ]; then
-  die "--rework and --no-rework require --ruled yes (they answer what a ruling changes)"
+if [ "$PR_ANSWER" = retire ]; then
+  case "$RETIRE_KIND" in
+    re-homed|folded|fixed-upstream|duplicate|not-needed) ;;
+    *) die "--retire takes a kind: re-homed, folded, fixed-upstream, duplicate or not-needed (got '$RETIRE_KIND')" ;;
+  esac
+  [ "$RETIRE_KIND" = not-needed ] || [ -n "$SUCCESSOR" ] \
+    || die "--retire $RETIRE_KIND requires --successor, the bead that carries the work now"
+else
+  [ -z "$SUCCESSOR" ] || die "--successor names a retired PR's successor, so it requires --retire"
 fi
+case "$PR_ANSWER" in
+  rework|retire) ;;
+  *) [ -z "$PR_PICK" ] || die "--pr-anchor names the open PR --rework or --retire acts on, so it requires one of them" ;;
+esac
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
-# The visit names the subject, this sitting's topic and the demand its hold
-# filed. Read as empty, the topic would widen the discharge to a sibling
-# sitting's demand on a shared bucket, so a visit that does not read stops here.
-V=$(show_one "$VISIT"); VRC=$?
-case "$VRC" in
-  0) ;;
-  3) stopped "visit $VISIT does not exist in the store gc bd answers from; nothing was written" ;;
-  *) stopped "visit $VISIT could not be read, and its subject, topic and gc.hold_demand decide what this sign-off discharges; nothing was written" ;;
-esac
-# Every write below lands on the subject or the visit. The caller passes the
-# subject step 1 resolved, and the visit records it twice, as its tracks edge
-# and as its gc.continuation_group stamp, so an absent --subject is recovered
-# here the way converse-fold.sh recovers it. With neither, every write would
-# land on an empty bead id, so it refuses before any write.
-if [ -z "$SUBJECT" ]; then
-  SUBJECT=$(printf '%s' "$V" | jq -r "$VISIT_IDENTITY_JQ"'(.[0] // {}) | visit_subject' 2>/dev/null || true)
+# The conversation's own row names its subject, its holder and the gates it
+# answers, and its edges keep a reply onto a gate in another store.
+CONV_ROW=$(gc bd list --id "$CONVERSATION" --all --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+  | jq -ce --arg c "$CONVERSATION" 'if type == "array" then (map(objects | select((.id // "") == $c)) | first // empty) else error("unread") end' 2>/dev/null)
+[ -n "$CONV_ROW" ] || stopped "conversation $CONVERSATION could not be read, and its row names the subject and the gates this sign-off answers; nothing was written"
+printf '%s' "$CONV_ROW" | jq -e "$CONVERSATION_JQ"'conversation' >/dev/null 2>&1 \
+  || die "$CONVERSATION is not a conversation (a task that tracks one bead, assigned to human or to the alias that names its id); nothing was written"
+TRACKED=$(printf '%s' "$CONV_ROW" | jq -r "$CONVERSATION_JQ"'conversation_subjects[0]')
+if [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$TRACKED" ]; then
+  die "--subject $SUBJECT is not the bead conversation $CONVERSATION tracks ($TRACKED), and its record goes on that bead alone; nothing was written"
 fi
-[ -n "$SUBJECT" ] || die "no subject: --subject was not given and visit $VISIT names none (no tracks edge, no gc.continuation_group stamp); nothing was written — re-run with --subject <id>"
+SUBJECT="$TRACKED"
+CONV_STATUS=$(printf '%s' "$CONV_ROW" | jq -r '(.status // "") | ascii_downcase')
+HOLDER=$(printf '%s' "$CONV_ROW" | jq -r '(.assignee // "") | tostring')
+REPLIES=$(printf '%s' "$CONV_ROW" | jq -r '[ .dependencies[]? | objects
+    | select(((.type // .dependency_type) // "") == "replies-to")
+    | ((.depends_on_id // .id) // "") | select(. != "") ] | unique | .[]')
+for g in "${LEAVE[@]+"${LEAVE[@]}"}"; do
+  printf '%s\n' "$REPLIES" | grep -qxF -- "$g" \
+    || die "--leave $g names a gate conversation $CONVERSATION does not reply to; nothing was written"
+done
+for g in "${ANSWER_GATES[@]+"${ANSWER_GATES[@]}"}"; do
+  printf '%s\n' "$REPLIES" | grep -qxF -- "$g" \
+    || die "--answer $g names a gate conversation $CONVERSATION does not reply to; add the reply first, then re-run. Nothing was written"
+done
+[ "$PR_ANSWER" != retire ] || [ -n "$SUCCESSOR" ] || SUCCESSOR="$CONVERSATION"
+# Each gate the conversation replies to, read now: a gate that does not read
+# could be one still open, so the sign-off stops before it writes anything.
+GATES_JSON='[]'
+for g in $REPLIES; do
+  GROW=$(show_row "$g") || stopped "gate $g, which conversation $CONVERSATION replies to, could not be read; nothing was written"
+  GATES_JSON=$(printf '%s' "$GATES_JSON" | jq -c --argjson r "$GROW" '. + [$r]')
+done
+# The gates the ruling answers: those --answer names, or else each one the
+# conversation replies to. Step 3 skips the ones --leave names, and resolves the
+# rest with ANSWER.
+TO_ANSWER=""
+ANSWER=""
+if [ "$RULED" = yes ]; then
+  if [ -n "$ANSWERING" ]; then TO_ANSWER="${ANSWER_GATES[*]}"; else TO_ANSWER="$REPLIES"; fi
+  case "$RULING" in ruled:*) ANSWER="$RULING" ;; *) ANSWER="ruled: $RULING" ;; esac
+fi
 # A ruling that changes what an open PR's branch must contain is demand on that
 # PR, and nothing but --rework turns it into demand: unfiled, the ruling lands
 # only in notes nothing reads, and the PR keeps reading ready against a head the
-# ruling has outdated. Only the sitting knows a ruling's consequence, so a ruled
-# sign-off on an open PR must answer the question either way, and one that gives
-# no answer is refused before any write. A subject that will not read cannot be
-# told from an open PR, so it is refused the same way.
-if [ "$RULED" = yes ] && [ -z "$REWORK" ]; then
-  SUBJECT_ROW=$(gc bd show "$SUBJECT" --json 2>/dev/null | scrub)
-  printf '%s' "$SUBJECT_ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
-    || die "could not read $SUBJECT to tell whether it is an open PR; nothing was written. Re-run with --rework or --no-rework"
-  if [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.[0].metadata.merge_result // ""')" = pull_request ]; then
-    die "$SUBJECT is an open PR (merge_result=pull_request), so a --ruled yes sign-off must say whether the ruling changes what its branch must contain; nothing was written. Re-run with --rework to file the rework, or --no-rework if the branch stands"
+# ruling has outdated. A ruling that the PR will not land must close it before
+# any gate it answers releases the merge, or an approved PR lands first. Only
+# the sitting knows a ruling's consequence, so a ruling must answer the question
+# for each open PR it reaches: the subject when it is one, and each bead at
+# merge_result=pull_request that a human gate the ruling answers releases, such
+# as an epic member whose gate the epic's sitting answers, or the other PR behind
+# a gate about two. Such a gate is one still open, or one this ruling's own
+# answer has closed: an attempt that stopped after resolving it had already
+# acted on what it released, and the re-run it asks for must act on the same PR
+# rather than fall back to the subject. What each such gate releases is read
+# here, with the other reads. A listing of a gate's beads, or the row of a bead
+# it releases, that does not read could hide an open PR, so the sign-off stops
+# before it writes anything, and a subject that will not read cannot be told
+# from an open PR either.
+PR_ANCHORS=()
+GATE_WAITERS='{}'
+reaches_pr() { # <bead> — 0 when the ruling already reaches it as an open PR
+  local p
+  for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$1" ] && return 0; done
+  return 1
+}
+if [ "$RULED" = yes ]; then
+  if ! SUBJECT_ROW=$(show_row "$SUBJECT"); then
+    [ -n "$PR_ANSWER" ] || die "could not read $SUBJECT to tell whether it is an open PR; nothing was written. Re-run with --rework, --no-rework or --retire <kind>"
+    stopped "could not read $SUBJECT to tell whether it is an open PR, which decides the PR the ruling's answer acts on; nothing was written"
   fi
+  [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
+  for g in $TO_ANSWER; do
+    printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
+    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg a "$ANSWER" 'any(.[]; .id == $g and (.issue_type // "") == "gate"
+        and (.await_type // "") == "human"
+        and (((.status // "") | ascii_downcase) != "closed" or (.close_reason // "") == $a))' >/dev/null 2>&1 || continue
+    WAITERS=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+      | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
+      || stopped "the beads that wait on gate $g could not be read, and answering it releases them, so an open PR among them could not be told; nothing was written"
+    GATE_WAITERS=$(printf '%s' "$GATE_WAITERS" | jq -c --arg g "$g" --argjson w "$WAITERS" '. + {($g): [ $w[] | (.id // "") | select(. != "") ]}')
+    for b in $(printf '%s' "$WAITERS" | jq -r --arg s "$SUBJECT" '.[]
+        | select(((.status // "") | tostring | ascii_downcase) != "closed")
+        | (.id // "") | select(. != "" and . != $s)'); do
+      reaches_pr "$b" && continue
+      BROW=$(show_row "$b") \
+        || stopped "$b, which gate $g releases, could not be read to tell whether it is an open PR; nothing was written"
+      [ "$(printf '%s' "$BROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$b")
+    done
+  done
 fi
-# The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
-# on a shared standing-scope bucket (same subject, distinct escalation_key)
-# keeps its own demand: this sign-off neither resolves it nor overwrites its
-# operator question with a re-state. escalation_key is that per-sitting
-# discriminator, empty on an ordinary visit — which keeps the pre-topic
-# behaviour. An array so an empty topic expands to no argument under zsh.
-TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
-DEMAND_TOPIC=()
-[ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
-# The hold to discharge. A conversation wait gates the VISIT (the default — a
-# conversation does not freeze its subject) and an explicit merge hold gates the
-# SUBJECT; a sitting may have filed either or both. --include-gates: a demand is
-# a human gate, hidden from `bd list` by default, so the discharge would
-# otherwise never find it. The listing's exit status is read on its own line and
-# its output must parse as an array, because an unread listing is no proof that
-# no demand stands.
-HELD_DEMAND=$(printf '%s' "$V" | jq -r '.[0].metadata["gc.hold_demand"] // ""')
-DEMANDS_JSON=$(gc bd list --status=open,in_progress --include-gates --json --limit=0)
-DEMANDS_RC=$?
-DEMANDS_JSON=$(printf '%s' "$DEMANDS_JSON" | scrub)
-if [ "$DEMANDS_RC" -ne 0 ] || ! printf '%s' "$DEMANDS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  stopped "the open-demand listing could not be read (gc bd list exited $DEMANDS_RC), so nothing shows whether this sitting's demands still stand; nothing was written"
+PR_LIST="${PR_ANCHORS[*]+"${PR_ANCHORS[*]}"}"
+if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ] && [ -n "$PR_LIST" ]; then
+  [ "$PR_LIST" != "$SUBJECT" ] \
+    || die "$SUBJECT is an open PR (merge_result=pull_request), so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
+  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
 fi
-# The demand the hold filed is read directly, by the id converse-hold stamped on
-# the visit as gc.hold_demand, so it is found in whatever live status it stands
-# in; the listing holds open and in_progress rows only. The listing still serves
-# what carries no stamp: an opt-in merge hold, a hold that predates the stamp,
-# and an orphan the await_id recovers. A stamped demand that no longer exists
-# blocks nothing, and one that does not read stops the sign-off as the listing
-# does.
-if [ -n "$HELD_DEMAND" ]; then
-  HELD_JSON=$(show_one "$HELD_DEMAND"); HELD_RC=$?
-  case "$HELD_RC" in
-    0) MERGED=$(printf '%s' "$DEMANDS_JSON" | jq -c --argjson h "$HELD_JSON" '
-           ($h[0]) as $d
-           | if ((($d.status // "") | ascii_downcase) == "closed") or any(.[]; .id == $d.id)
-             then . else . + [$d] end' 2>/dev/null)
-       [ -n "$MERGED" ] || stopped "the stamped demand $HELD_DEMAND read, but could not be joined to the open demands; nothing was written"
-       DEMANDS_JSON="$MERGED" ;;
-    3) : ;;
-    *) stopped "the demand $HELD_DEMAND, which gc.hold_demand on $VISIT names, could not be read; nothing was written" ;;
-  esac
+# --rework and --retire act on one open PR: the one the ruling reaches, the one
+# --pr-anchor names when it reaches more than one, or else the subject, which
+# converse-rework.sh and pr-dispose.sh refuse unless it is an open PR. A
+# conversation owns one live rework child (rework-child.sh), so one sign-off
+# files one rework, and each other open PR the ruling reaches stands under it,
+# as --no-rework says of every one.
+#
+# The PR a ruling's rework or retirement acts on is recorded on the conversation
+# (gc.ruling_consequence, keyed by the ruling's answer) before it acts, because
+# what it acts on can close in between: pr-facts consummates a retirement by
+# closing the retired PR's anchor, and a closed bead is no open PR the ruling
+# reaches. A re-run of the same ruling with the same answer recovers that PR
+# from the record, so it never falls back to the subject or acts on another PR,
+# and a recorded PR that reads closed has nothing left for the answer to do. A
+# re-run that answers differently is a new answer, and the record does not
+# bind it.
+CONSEQUENCE_JQ='def consequences: ((.metadata // {})["gc.ruling_consequence"] // {})
+  | (if type == "string" then (fromjson? // {}) else . end) | if type == "object" then . else {} end;'
+RECORDED_ON=""
+case "$PR_ANSWER" in
+  rework|retire)
+    RECORDED_ON=$(printf '%s' "$CONV_ROW" | jq -r --arg a "$ANSWER" --arg act "$PR_ANSWER" "$CONSEQUENCE_JQ"'
+      consequences | .[$a] // {} | select(((.act // "") | tostring) == $act) | (.anchor // "") | tostring' 2>/dev/null) ;;
+esac
+PR_TARGET=""
+TARGET_CLOSED=""
+STANDS=()
+case "$PR_ANSWER" in
+  rework|retire)
+    if [ -n "$PR_PICK" ]; then
+      reaches_pr "$PR_PICK" || [ "$PR_PICK" = "$RECORDED_ON" ] \
+        || die "--pr-anchor $PR_PICK is no open PR this ruling reaches (${PR_LIST:-none}); nothing was written"
+      PR_TARGET="$PR_PICK"
+    elif [ -n "$RECORDED_ON" ]; then
+      PR_TARGET="$RECORDED_ON"
+      echo "an earlier attempt of this ruling recorded $PR_TARGET as the PR its --$PR_ANSWER acts on; acting on it again"
+    elif [ "${#PR_ANCHORS[@]}" -gt 1 ]; then
+      die "this ruling reaches more than one open PR ($PR_LIST), and --$PR_ANSWER acts on one; nothing was written. Name it with --pr-anchor <bead>, and each other one stands under this ruling. A conversation files one live rework, so a PR whose own branch must change or which must retire as well takes a ruling of its own: leave the gate that releases it owed, with --leave or out of --answer, until that ruling is carried out"
+    else
+      PR_TARGET="${PR_ANCHORS[0]:-$SUBJECT}"
+    fi
+    for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$PR_TARGET" ] || STANDS+=("$p"); done
+    if [ -n "$RECORDED_ON" ] && [ "$PR_TARGET" = "$RECORDED_ON" ]; then
+      TROW=$(show_row "$PR_TARGET") \
+        || stopped "$PR_TARGET, the PR an earlier attempt of this ruling recorded for its --$PR_ANSWER, could not be read to tell whether it is still open; nothing was written"
+      [ "$(printf '%s' "$TROW" | jq -r '(.status // "") | ascii_downcase')" = closed ] && TARGET_CLOSED=yes
+    fi ;;
+  no-rework)
+    STANDS=("${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}")
+    [ "${#STANDS[@]}" -gt 0 ] || STANDS=("$SUBJECT") ;;
+esac
+# The rework or the retirement acts in the rig of the PR it acts on, which can
+# be another rig than the conversation's when a gate in another store releases
+# it. converse-rework.sh and rework-child.sh find the rework pool, file and
+# deduplicate the child, prove its blocks edge onto the anchor and sling it in
+# the store and rig GC_RIG names; pr-dispose.sh reads the anchor there; and the
+# review lanes read their check index from the checkout. So the consequence
+# runs with GC_RIG, GC_RIG_ROOT and the working directory all pinned to that
+# rig, resolved from the PR's id prefix by bead-store.sh, the one resolver of
+# a bead's store. The conversation stays the rework's provenance.
+TARGET_RIG=""
+TARGET_PATH=""
+if [ -n "$PR_TARGET" ] && [ -z "$TARGET_CLOSED" ]; then
+  BS=$(pack_script bead-store.sh) \
+    || stopped "no bead-store.sh on any candidate root, so the rig that holds $PR_TARGET, where its --$PR_ANSWER acts, could not be resolved; nothing was written"
+  TARGET_RIG=$("$BS" "$PR_TARGET" 2>/dev/null) && TARGET_PATH=$("$BS" --path "$PR_TARGET" 2>/dev/null) && [ -d "$TARGET_PATH" ] \
+    || stopped "the rig that holds $PR_TARGET could not be resolved from its id ('bead-store.sh $PR_TARGET' says why), and its --$PR_ANSWER acts in that rig's store, pool and checkout; nothing was written"
+fi
+# in_target_rig <cmd> [args...] — run <cmd> in the rig of the PR the
+# consequence acts on.
+in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARGET_PATH" "$@" ); }
+# --accept takes the subject's recommendation through the gate that put it to
+# the operator: a human gate under the key first-reaction that blocks the
+# subject. A gate under the key that blocks another bead, such as a member of
+# the epic a sitting is about, asks that bead's recommendation, and Accept on
+# the subject never answers it. The gate must be one the ruling answers, so the
+# conversation's reply on it records which conversation took it up. Step 3
+# leaves it, and step 5 hands it to Accept's writer, which answers the gates it
+# chooses on the subject: each open one under the key, or with none open the
+# newest, whose acceptance an earlier Accept left unfinished. The sign-off
+# answers no gate its conversation does not reply to, so each gate Accept
+# answers must be one this ruling answers. Accept dispatches only once no other
+# open human gate holds the subject, because a formula's sling reads no blocks
+# edge, so a gate this ruling does not answer refuses the take here, before any
+# write, rather than after step 3 has answered the others. One listing of the
+# subject's human gates answers each of these checks.
+REC_GATES=""
+REC_FORMULA=""
+if [ -n "$ACCEPT" ]; then
+  SUBJECT_GATES=$(bd_human_gates "$SUBJECT") \
+    || stopped "the human gates that hold $SUBJECT could not be read, and its recommendation is taken only through its own gate, once no gate but its own holds it; nothing was written"
+  ANSWERED_GATES=""
+  for g in $TO_ANSWER; do
+    printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
+    ANSWERED_GATES="${ANSWERED_GATES:+$ANSWERED_GATES }$g"
+    printf '%s' "$SUBJECT_GATES" | jq -e --arg g "$g" 'any(.[]; .id == $g and ((.await_id // "") | tostring) == "first-reaction")' >/dev/null 2>&1 \
+      && REC_GATES="${REC_GATES:+$REC_GATES }$g"
+  done
+  [ -n "$REC_GATES" ] \
+    || die "--accept takes $SUBJECT's recommendation through the gate that puts it to the operator, a human gate under the key first-reaction that blocks $SUBJECT, and no gate this ruling answers is that gate; nothing was written. A gate under the key that blocks another bead asks that bead's recommendation, which Accept on $SUBJECT does not take. Reply to $SUBJECT's own gate first${ANSWERING:+ and name it with --answer}, then re-run"
+  ACCEPT_ANSWERS=$(printf '%s' "$SUBJECT_GATES" | jq -r "$HUMAN_GATE_JQ"'
+      [ .[] | select(((.await_id // "") | tostring) == "first-reaction") ] as $rec
+      | [ $rec[] | select(open_human_gate("first-reaction")) | .id ] as $open
+      | (if ($open | length) > 0 then $open else [ $rec | sort_by(.created_at // "") | last // empty | .id ] end)
+      | join(" ")')
+  UNANSWERED=""
+  for g in $ACCEPT_ANSWERS; do
+    case " $ANSWERED_GATES " in *" $g "*) ;; *) UNANSWERED="${UNANSWERED:+$UNANSWERED }$g" ;; esac
+  done
+  [ -z "$UNANSWERED" ] \
+    || die "Accept takes $SUBJECT's recommendation by answering $UNANSWERED, which this ruling does not answer, and the sign-off answers no gate its conversation does not reply to; nothing was written. Reply to it${ANSWERING:+ and name it with --answer}, then re-run"
+  REC_FORMULA=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {})["gc.recommended_formula"] // "" | tostring')
+  REC_SENT=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {})["gc.recommended_formula_dispatched"] // "" | tostring')
+  [ -n "$REC_FORMULA$REC_SENT" ] \
+    || die "--accept takes $SUBJECT's recommendation, and $SUBJECT carries none (no gc.recommended_formula); nothing was written. Answer its gate without --accept"
+  REC_FORMULA="${REC_FORMULA:-$REC_SENT}"
+  OTHERS=$(printf '%s' "$SUBJECT_GATES" | jq -r --arg answered "$ANSWERED_GATES" "$HUMAN_GATE_JQ"'
+      ($answered | split(" ")) as $a
+      | [ .[] | select(open_human_gate("")) | select(((.await_id // "") | tostring) != "first-reaction")
+              | select(((.id // "") | tostring) as $i | ($a | index($i)) == null)
+              | "\(.id) (\(.title // "untitled"))" ] | join("; ")')
+  [ -z "$OTHERS" ] \
+    || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
 fi
 # A ruling releases a subject that still reads `held`, so the state is read
 # here, with the other reads. lifecycle.sh exits 2 when the subject does not
 # read, an answer that cannot say whether it is held. Any other refusal (an
 # undeclared state, no gctk binary) answers as not held, the side that leaves
-# the bead visibly waiting on a person.
+# the bead visibly waiting on a person. An answer releases nothing, so it reads
+# no state. One that takes the recommendation leaves a held subject to Accept's
+# writer, which releases it once its answer reads back and before it sends the
+# formula, because mol-polecat-work cancels a run poured at a held bead.
 LC=$(pack_script lifecycle.sh)
 SUBJECT_STATE=""
-if [ "$RULED" = yes ] && [ -n "$LC" ]; then
+if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
   SUBJECT_STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
-  [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether to release it from held; nothing was written"
+  [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether it reads held; nothing was written"
 fi
-# A ruling can make an already-published PR stale: it changes what the branch
-# must contain, while the PR still reads review-ready against a head that
-# predates it. --rework turns that ruling into the rework demand a review verdict
-# files — a fix unit that blocks the anchor and resumes its branch — sourced by
-# this visit instead of a verdict, and returns every review lane to unreviewed so
-# the branch is re-reviewed once the rework lands. The filing is independent of
-# the demand discharge below: a ruling with no prior hold still needs its rework.
-# The filing runs before every other write and fails the sign-off closed. Filed
-# first, the child's blocks edge already holds the merge when the discharge
-# resolves a merge hold this sitting took, so the hold passes to the edge with no
-# gap in which the stale PR can land. A filing does not complete when no script
-# resolves, or when converse-rework.sh exits non-zero, as it does for any filing
-# it refuses or cannot prove and for lanes it cannot return to unreviewed. Then
-# the takeaway, the discharge and the release stay unwritten, every demand this
-# sitting filed still stands, and exit 1 tells the sitting not to sign off or
-# close the visit. A re-run starts clean, and converse-rework.sh adopts a child
-# an earlier attempt filed rather than minting a second.
-REWORK_FILED=""
-if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
-  CR=$(pack_script converse-rework.sh)
-  if [ -z "$CR" ]; then
-    REWORK_OUT="no converse-rework.sh on any candidate root"
-  elif REWORK_OUT=$("$CR" --anchor "$SUBJECT" --ruling-bead "$VISIT" --ruling "$RULING" 2>&1); then
-    echo "$REWORK_OUT"
-    REWORK_FILED=yes
-  fi
-  if [ -z "$REWORK_FILED" ]; then
-    echo "REWORK NOT COMPLETE on $SUBJECT: $REWORK_OUT"
-    echo "Nothing is signed off: no takeaway, discharge or release was written, and every demand this sitting filed still stands. Do NOT post the sign-off or close the visit."
-    echo "Repair the cause and re-run this sign-off. If $SUBJECT is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
-    exit 1
-  fi
-fi
-HELM=$(pack_script gc-helm.sh)
-[ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the subject carries no trace of this sitting"
-# What is waiting on $SUBJECT now that this sitting is over. Three shapes,
-# exactly one true, and this sitting is the last reader that can tell them
-# apart: one --waiting-on per bead it ROUTED work into; --no-wait when it
-# settled the subject and nothing is waiting; EMPTY only where the subject
-# is parked for a person, which doctor/check-wait-is-an-edge reports as a
-# wait nothing re-asks, because that is what it is.
-# An ARRAY, not a string: this city runs zsh, which does not word-split an
-# unquoted parameter, so a populated string arrives as ONE argument and the
-# call dies with `unknown flag` on exactly the sittings the flag exists for.
-# "${WAIT[@]}" expands to nothing when empty and to one argument per element
-# otherwise, in both bash and zsh.
-"$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]}" \
-  || echo "TAKEAWAY FAILED on $SUBJECT — re-run it before closing; nothing below records this sitting"
-# Read the takeaway back on the SUBJECT. The gc.outcome check below proves the
-# VISIT stamp and says nothing about the subject, so a takeaway that died still
-# closes clean — the unstamped close this block exists to prevent, one bead
-# over.
-gc bd show "$SUBJECT" --json | scrub \
-  | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
-  || echo "NO TAKEAWAY ON $SUBJECT — do not close until it lands"
-# The live, unassigned demand THIS sitting filed on a given bead, or empty. Under
-# a standing scope sibling sittings share the subject and each holds its own
-# topic-keyed demand on it, so a first match on gc.demand_for alone would resolve
-# or re-state a sibling's operator question. converse-hold stamps the
-# conversation demand's id as gc.hold_demand on the visit, so that exact demand
-# wins wherever it gates this bead. Any other demand (the merge hold, which
-# carries no stamp, or a hold predating the stamp) is matched under this
-# sitting's topic, and the topic-encoding await_id recovers an orphan whose
-# gc.demand_for stamp never landed. An empty topic keeps the pre-topic match on
-# the bead alone. An empty target would match every bead that carries no
-# gc.demand_for at all, so it returns nothing.
-demand_on() {
-  [ -n "$1" ] || { printf ''; return; }
-  local aid
-  if [ -n "$TOPIC" ]; then aid="gc-demand:$1:$TOPIC"; else aid="gc-demand:$1"; fi
-  printf '%s' "$DEMANDS_JSON" \
-    | jq -r --arg i "$1" --arg d "$HELD_DEMAND" --arg t "$TOPIC" --arg aid "$aid" '
-        [ .[]? | select((.assignee // "") == "") ] as $open
-        | ([ $open[] | select($d != "" and .id == $d
-                              and (.metadata["gc.demand_for"] // "") == $i) | .id ] | first)
-          // ([ $open[] | select(
-                  ((.metadata["gc.demand_for"] // "") == $i
-                     and ($t == "" or (.metadata["gc.demand_topic"] // "") == $t))
-                  or (.issue_type == "gate" and .await_type == "human"
-                     and (.await_id // "") == $aid)) | .id ] | first)
-          // empty'
-}
-if [ "$RULED" = yes ]; then
-  # SETTLED — the operator ruled in this thread. Resolve each gate where it
-  # sits: the visit demand lets the conversation conclude, the anchor demand
-  # releases the merge. A demand filed before demands were gates
-  # (issue_type=decision) is refused by `gate resolve` ("is not a gate issue"),
-  # so it is closed on the same terms instead. Whether the demand closed is
-  # decided by reading it back, not by either call's exit status. One that still
-  # reads open still blocks, so it gets no ruling and the sign-off stops once
-  # every demand has been tried.
-  UNCLOSED=""
-  for GATED in "$VISIT" "$SUBJECT"; do
-    DEMAND=$(demand_on "$GATED")
-    [ -n "$DEMAND" ] || continue
-    gc bd gate resolve "$DEMAND" --reason "$RULING" \
-      || gc bd close "$DEMAND" --reason "$RULING"
-    if ! demand_closed "$DEMAND"; then
-      echo "DEMAND $DEMAND DID NOT CLOSE — it still blocks $GATED, so the ruling is not stamped on it"
-      UNCLOSED="${UNCLOSED:+$UNCLOSED }$DEMAND"
-      continue
-    fi
-    # A demand's board sentence (gc.takeaway) is the QUESTION it was filed with,
-    # and the ruling is the answer. Left only in the gate's close reason, which no
-    # board reads, the closed demand lingers on the DONE band still asking and a
-    # glance re-engages a settled decision. The takeaway verb overwrites it with the
-    # ruling; --no-wait is what stamps gc.takeaway_settled, the settled mark only
-    # that verb writes, so every board surface reads the answer as a discharged
-    # wait. Run only once the close reads back, so the demand never sits
-    # open-but-settled — the shape doctor/check-wait-is-an-edge reads as a wait
-    # already discharged while it still blocks. The verb's stamp is a plain
-    # metadata write, so it lands on the closed demand; if it does not, the
-    # renderer still suppresses the stale question.
-    "$HELM" takeaway "$DEMAND" "$RULING" --by converse --no-wait \
-      || echo "COULD NOT STAMP THE RULING on $DEMAND — the board may still show its question; run: $HELM takeaway $DEMAND \"$RULING\" --by converse --no-wait"
-  done
-  [ -z "$UNCLOSED" ] || stopped "the ruling did not close $UNCLOSED; the discharge stopped there, so the subject is not released"
-else
-  # STILL OWED — cut short, or the question outlived the sitting. The wait must
-  # persist on the SUBJECT, not on the VISIT: the liveness return trip keys on
-  # gc.demand_for=<subject>, so a demand there re-offers the next sitting, and
-  # on a PR anchor it also freezes the merge — a sitting that abandoned an
-  # unresolved question is the one case the merge should wait. A demand gating
-  # the VISIT cannot carry that wait: the visit is this sitting's record and
-  # converse-settle closes it next, stranding any demand left on it as a gate on
-  # closed work that gate-visit-sweep names on stderr forever and `gate resolve`
-  # readies nothing. So move it — re-state the wait on the SUBJECT under this
-  # sitting's topic (idempotent: one open demand per gated bead and topic, so an
-  # anchor already holding this sitting's opt-in merge demand is simply
-  # refreshed, and a sibling sitting's demand on a shared bucket is left alone),
-  # then close the visit demand. A sitting that filed NO demand re-states none:
-  # the discharge records only the waits the hold actually took.
-  # The re-state comes first and must land before the visit demand closes. Closed
-  # first, a visit demand whose re-state then failed would leave a re-run finding
-  # neither demand, and the operator's open question would be gone. gc-helm.sh
-  # demand reads the blocks edge back off the subject before it exits 0 and
-  # prints `demand <id>`, so its status is read on its own line, as
-  # converse-hold.sh reads it.
-  VD=""
-  [ "$VISIT" != "$SUBJECT" ] && VD=$(demand_on "$VISIT")
-  ID=$(demand_on "$SUBJECT")
-  if [ -n "$VD" ] || [ -n "$ID" ]; then
-    RESTATE_OUT=$("$HELM" demand "$SUBJECT" "$STILL_OWED" --by converse "${DEMAND_TOPIC[@]}")
-    RESTATE_RC=$?
-    [ -n "$RESTATE_OUT" ] && printf '%s\n' "$RESTATE_OUT"
-    RESTATED=$(printf '%s\n' "$RESTATE_OUT" | awk '/^demand /{print $2; exit}')
-    if [ "$RESTATE_RC" -ne 0 ] || [ -z "$RESTATED" ]; then
-      KEPT=""
-      [ -n "$VD" ] && KEPT="; the visit demand $VD was left open, so a re-run finds it again"
-      stopped "the wait did not re-state on $SUBJECT (gc-helm.sh demand exited $RESTATE_RC)$KEPT"
-    fi
-  fi
-  if [ -n "$VD" ]; then
-    gc bd gate resolve "$VD" --reason "cut short; wait re-stated on $SUBJECT" \
-      || gc bd close "$VD" --reason "cut short; wait re-stated on $SUBJECT"
-    demand_closed "$VD" \
-      || stopped "the visit's demand $VD did not close, and closing the visit now would strand it as a gate on closed work; the wait already stands on $SUBJECT as $RESTATED, and a re-run refreshes it"
-    # Settle its board question so the closed demand does not linger asking;
-    # the live wait now rides the SUBJECT demand above.
-    "$HELM" takeaway "$VD" "cut short; wait moved to $SUBJECT" --by converse --no-wait \
-      || echo "COULD NOT STAMP the moved-wait note on $VD — the board may still show its question"
-  fi
-fi
-# The ruling is recorded on the VISIT as gc.ruling, because what waits on the
-# visit's question reads it there: a review finding deferred to this visit
-# (finding.sh needs-you) is released only by a visit that closed carrying one. A
-# visit also closes without a ruling (moot, benign, folded, dismissed, or cut
-# short here), and none of those answers the question it carried. A cut-short
-# sign-off clears a ruling an earlier run recorded on the same visit, so the visit
-# carries only this sitting's final word. Each write is read back, and one that
-# did not land stops the sign-off: a visit closed without its ruling never
-# releases the finding, and one closed with a stale ruling releases it on a
-# question nobody ruled.
-ruling_now() {
-  local row
-  row=$(show_one "$VISIT") || return 1
-  printf '%s' "$row" | jq -r '(.[0].metadata["gc.ruling"] // "") | tostring' 2>/dev/null
-}
-if [ "$RULED" = yes ]; then
-  gc bd update "$VISIT" --set-metadata "gc.ruling=$RULING" >/dev/null 2>&1 || true
-  GOT_RULING=$(ruling_now) && [ "$GOT_RULING" = "$RULING" ] \
-    || stopped "the ruling did not read back on $VISIT as gc.ruling, and a review finding deferred to this visit is released only by it; the hold is discharged, and a re-run records the ruling"
-elif [ -n "$(printf '%s' "$V" | jq -r '(.[0].metadata["gc.ruling"] // "") | tostring' 2>/dev/null)" ]; then
-  gc bd update "$VISIT" --unset-metadata gc.ruling >/dev/null 2>&1 || true
-  GOT_RULING=$(ruling_now) && [ -z "$GOT_RULING" ] \
-    || stopped "an earlier ruling on $VISIT (gc.ruling) did not clear, and this cut-short visit would close carrying it, releasing a review finding on a question nobody ruled"
-fi
-# `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
-# runs this same block on a subject still waiting, so the release is keyed to
-# this sitting's outcome rather than to the state read off the subject. Erring
-# toward the hold leaves a bead visibly routed to a person; erring the other
-# way restores the untraceable wait this state exists to end. The state was read
-# before the first write; nothing this sign-off writes changes it.
-if [ "$RULED" = yes ] && [ "$SUBJECT_STATE" = "held" ]; then
-  "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
-    || echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"
-fi
+HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh on any candidate root, so the subject's headline cannot be written; nothing was written"
 
-# Stash what the visit's PR-reminder close will say, for the writer that runs
-# AFTER the visit is actually closed: converse-settle's close step on a normal
-# sign-off, or converse-claim.sh's stranded-finish recovery. This script is the
-# PRE-close durable trace, so posting "closed" here would run before the close
-# lands — a death, a failed outcome stamp, or a failed close between here and
-# there would leave the PR saying the visit closed while it is still open and
-# holding the merge. The takeaway is the Summary; Actions Taken is what the
-# sitting did: the work it routed, the ruling it reached, or what is still owed.
-# The stamp lands even though this session still holds the visit, because a
-# metadata write bypasses the claim guard.
+# take_recommendation — step 5: hand the recommendation's gate to gc-helm.sh
+# accept, the writer the board's Accept runs, and read back what it left. Accept
+# exits 0 once it has dispatched the formula, or recorded a dispatch that an
+# earlier Accept poured under its token. Any other exit is read off the gates
+# and the subject. A recommendation already dispatched and withdrawn was taken,
+# and an answer that reached the gate first stands, as in step 3. Anything
+# else stops the sign-off here, before the conversation closes, so a re-run
+# takes the recommendation once Accept can.
+take_recommendation() {
+  local out rc g row st why other="" open=""
+  out=$("$HELM" accept "$SUBJECT" --conversation "$CONVERSATION" --reason "$RULING" \
+    "${ACCEPT_VARS[@]+"${ACCEPT_VARS[@]}"}" 2>&1); rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out"
+  if [ "$rc" -eq 0 ]; then
+    echo "took the recommendation: $REC_FORMULA at $SUBJECT, through Accept"
+    ACTIONS+=("took the recommendation: $REC_FORMULA, through Accept")
+    return 0
+  fi
+  for g in $REC_GATES; do
+    row=$(show_row "$g") \
+      || stopped "gc-helm.sh accept exited $rc, and gate $g could not be read back to tell whether the recommendation was taken; the conversation is not closed"
+    st=$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')
+    why=$(printf '%s' "$row" | jq -r '.close_reason // ""')
+    if [ "$st" != closed ]; then
+      open="${open:+$open }$g"
+    elif ! printf '%s' "$why" | grep -qE '^ruled: accepted [^ ]+ accept:[0-9a-f]+$'; then
+      other="${other:+$other; }$g: \"$why\""
+    fi
+  done
+  if [ -z "$open" ] && [ -n "$other" ]; then
+    echo "another answer reached the recommendation's gate first — $other. The first answer stands, so the recommendation is not taken."
+    ACTIONS+=("left the recommendation untaken: another answer reached its gate first")
+    return 0
+  fi
+  if [ -z "$open" ] && show_row "$SUBJECT" | jq -e '((.metadata // {})["gc.recommended_formula"] // "") == ""
+      and ((.metadata // {})["gc.recommended_formula_dispatched"] // "") != ""' >/dev/null 2>&1; then
+    echo "the recommendation was already taken: an Accept dispatched $REC_FORMULA at $SUBJECT and recorded it${ACCEPT_VARS[*]:+. That dispatch keeps the vars it was made with, so the --var given here does not reach it}"
+    ACTIONS+=("the recommendation was already taken through Accept")
+    return 0
+  fi
+  stopped "the recommendation was not taken: gc-helm.sh accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
+}
+
+# 1. What the ruling does to an open PR. --rework files the fix unit a review
+# verdict files, sourced by this conversation, and returns every review lane to
+# unreviewed; the child's blocks edge holds the merge. --retire records the
+# disposition and closes the PR, so there is nothing left to merge. Either one
+# runs in the PR's own rig, after the record of the PR it acts on and before
+# any gate this sitting answers is resolved. One that does not complete stops
+# here with nothing else written, and a re-run adopts a child an earlier
+# attempt filed, or finds the PR it closed.
+CONSEQUENCE=""
+# The PR the answer acts on is recorded first, so an attempt that stops at any
+# later write leaves its re-run that PR to act on. A record that does not read
+# back stops the sign-off with nothing else written.
+if [ -n "$PR_TARGET" ] && [ "$RECORDED_ON" != "$PR_TARGET" ]; then
+  RECORD=$(printf '%s' "$CONV_ROW" | jq -c --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
+    consequences + {($a): {act: $act, anchor: $t}}' 2>/dev/null)
+  [ -n "$RECORD" ] && gc bd update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" >/dev/null 2>&1
+  show_row "$CONVERSATION" | jq -e --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
+      consequences | .[$a] == {act: $act, anchor: $t}' >/dev/null 2>&1 \
+    || stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) did not read back recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written"
+fi
+ACTING="$PR_ANSWER"
+if [ -n "$TARGET_CLOSED" ]; then
+  echo "$PR_TARGET, the PR an earlier attempt of this ruling recorded for its --$PR_ANSWER, reads closed, so the $PR_ANSWER has nothing left to act on"
+  CONSEQUENCE="found $PR_TARGET closed, so the $PR_ANSWER had nothing left to act on"
+  ACTING=""
+fi
+case "$ACTING" in
+  rework)
+    CR=$(pack_script converse-rework.sh)
+    if [ -z "$CR" ]; then
+      PR_OUT="no converse-rework.sh on any candidate root"
+    elif PR_OUT=$(in_target_rig "$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" 2>&1); then
+      echo "$PR_OUT"
+      CONSEQUENCE="filed ruling-driven rework on $PR_TARGET"
+    fi
+    if [ -z "$CONSEQUENCE" ]; then
+      echo "REWORK NOT COMPLETE on $PR_TARGET: $PR_OUT"
+      echo "Nothing else was written: no headline, gate answer or close. $UNDONE"
+      echo "Repair the cause and re-run. If $PR_TARGET is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
+      exit 1
+    fi ;;
+  retire)
+    PD=$(pack_script pr-dispose.sh)
+    if [ -z "$PD" ]; then
+      PR_OUT="no pr-dispose.sh on any candidate root"
+    elif PR_OUT=$(in_target_rig "$PD" --anchor "$PR_TARGET" --successor "$SUCCESSOR" --kind "$RETIRE_KIND" --note "$RULING" 2>&1); then
+      echo "$PR_OUT"
+      CONSEQUENCE="retired the PR of $PR_TARGET ($RETIRE_KIND, successor $SUCCESSOR)"
+    fi
+    if [ -z "$CONSEQUENCE" ]; then
+      echo "RETIREMENT NOT COMPLETE on $PR_TARGET: $PR_OUT"
+      echo "Nothing else was written: no headline, gate answer or close, so each gate the conversation replies to still holds the merge. $UNDONE"
+      echo "Repair the cause and re-run; pr-dispose.sh keeps a disposition an earlier attempt recorded and closes the PR it left open. If it cannot be repaired, raise it in the thread."
+      exit 1
+    fi ;;
+esac
+for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of $p as it stands"; done
+
+# 2. The headline. An ARRAY, not a string: this city runs zsh, which does not
+# word-split an unquoted parameter, so "${WAIT[@]}" is what passes each flag as
+# its own argument, and nothing when it is empty.
+"$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
+  || stopped "the headline did not land on $SUBJECT (gc-helm.sh takeaway refused it); no gate was resolved and the conversation is not closed"
+show_row "$SUBJECT" | jq -e '(.metadata["gc.takeaway"] // "") != ""' >/dev/null 2>&1 \
+  || stopped "no headline reads back on $SUBJECT; no gate was resolved and the conversation is not closed"
+
+ACTIONS=()
 routed=""
 i=0
 while [ "$i" -lt "${#WAIT[@]}" ]; do
   [ "${WAIT[$i]}" = "--waiting-on" ] && { i=$((i + 1)); routed="${routed:+$routed, }${WAIT[$i]}"; }
   i=$((i + 1))
 done
-SIGNOFF_ACTIONS=""
-[ -n "$routed" ] && SIGNOFF_ACTIONS="routed work to $routed"
+[ -n "$routed" ] && ACTIONS+=("routed work to $routed")
+
 if [ "$RULED" = yes ]; then
-  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }ruling: $RULING (released to $ROUTE)"
-  [ -n "$REWORK_FILED" ] && SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS}; filed ruling-driven rework on $SUBJECT"
-  [ "$REWORK" = no ] && SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS}; ruling leaves the branch of $SUBJECT as it stands"
-elif [ -n "$STILL_OWED" ]; then
-  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }still owed: $STILL_OWED"
+  # 3. The gates the ruling answers: those --answer names, or else each one the
+  # conversation replies to. A reply onto a bead that is no human gate holds
+  # nothing to resolve. The recommendation's gate, when the ruling takes the
+  # recommendation, is step 5's to answer through Accept.
+  UNCLOSED=""
+  for g in $TO_ANSWER; do
+    case " $REC_GATES " in *" $g "*) continue ;; esac
+    if printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g"; then
+      echo "gate $g stays open and owed: the ruling leaves it, and this conversation's reply stays on it"
+      ACTIONS+=("left gate $g owed")
+      continue
+    fi
+    GROW=$(printf '%s' "$GATES_JSON" | jq -c --arg g "$g" '.[] | select(.id == $g)')
+    if ! printf '%s' "$GROW" | jq -e '(.issue_type // "") == "gate" and (.await_type // "") == "human"' >/dev/null 2>&1; then
+      echo "$g, which conversation $CONVERSATION replies to, is no human gate; nothing to resolve there"
+      continue
+    fi
+    if [ "$(printf '%s' "$GROW" | jq -r '(.status // "") | ascii_downcase')" = closed ]; then
+      echo "gate $g was already cleared before this sign-off: \"$(printf '%s' "$GROW" | jq -r '.close_reason // ""')\". That answer stands."
+      continue
+    fi
+    gc bd gate resolve "$g" --reason "$ANSWER" >/dev/null 2>&1 || true
+    BACK=$(show_row "$g") || BACK=""
+    BACK_STATUS=$(printf '%s' "$BACK" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)
+    BACK_REASON=$(printf '%s' "$BACK" | jq -r '.close_reason // ""' 2>/dev/null)
+    if [ "$BACK_STATUS" != closed ]; then
+      echo "GATE $g DID NOT CLOSE — it still holds what waits on it"
+      UNCLOSED="${UNCLOSED:+$UNCLOSED }$g"
+    elif [ "$BACK_REASON" != "$ANSWER" ]; then
+      echo "another answer reached gate $g first: \"$BACK_REASON\". The first answer stands, and this ruling is not its answer."
+    else
+      RELEASED=$(printf '%s' "$GATE_WAITERS" | jq -r --arg g "$g" '(.[$g] // []) | join(" ")')
+      echo "resolved gate $g: $ANSWER${RELEASED:+ (it held $RELEASED)}"
+      ACTIONS+=("resolved gate $g")
+    fi
+  done
+  [ -z "$UNCLOSED" ] || stopped "the ruling did not close $UNCLOSED; the conversation is not closed, so a re-run resolves it"
+  if [ -n "$ANSWERING" ]; then
+    [ -z "$ACCEPT" ] || take_recommendation
+    echo "ANSWERED $TO_ANSWER for conversation $CONVERSATION on $SUBJECT; the conversation stays open, and its sign-off reads each of those gates as already cleared"
+    exit 0
+  fi
+
+  # 4. `held` is cleared by a ruling, not by a sitting ending. The state was
+  # read before the first write; nothing this sign-off writes changes it. A
+  # release that fails stops every ruled sign-off here, before the
+  # recommendation and the close: mol-polecat-work cancels a run poured at a
+  # bead that still reads `held`, so the conversation stays open for the
+  # re-run that releases it.
+  if [ "$SUBJECT_STATE" = "held" ]; then
+    "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
+      || stopped "RELEASE FROM held FAILED on $SUBJECT: it still reads as waiting on a person, and mol-polecat-work cancels a run poured at it. The conversation is not closed, so a re-run releases it${ACCEPT:+ and then takes the recommendation}"
+  fi
+  ACTIONS+=("ruling: $RULING (released to $ROUTE)")
+  [ -n "$CONSEQUENCE" ] && ACTIONS+=("$CONSEQUENCE")
+  for p in "${STANDS[@]+"${STANDS[@]}"}"; do ACTIONS+=("ruling leaves the branch of $p as it stands"); done
+
+  # 5. The recommendation, once nothing holds the subject back.
+  [ -z "$ACCEPT" ] || take_recommendation
+
+  # 6. Close the conversation. The work-record gate the close runs wants
+  # gc.work_outcome, stamped in a write of its own so it never decides whether
+  # the conversation closes. The sitting holds the conversation, so a plain
+  # close is the holder's own; --force covers an actor bd does not read as its
+  # holder. A close counts once it reads back.
+  if [ "$CONV_STATUS" != closed ]; then
+    work_outcome_noop "$CONVERSATION" gc bd
+    gc bd close "$CONVERSATION" --reason "$OUTCOME" >/dev/null 2>&1 \
+      || gc bd close "$CONVERSATION" --reason "$OUTCOME" --force >/dev/null 2>&1 \
+      || true
+    [ "$(show_row "$CONVERSATION" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)" = closed ] \
+      || stopped "conversation $CONVERSATION did not close; every gate above is answered, and a re-run closes it"
+  fi
+  REMINDER_OUTCOME=settled
+else
+  # Cut short: the gates stay open and owed, with their replies in place, and
+  # the conversation goes back to the operator's queue with one write guarded
+  # on the sitting that holds it and on the status read above, which drops the
+  # claim's lease. A conversation already in the queue has no sitting to hand
+  # it back from. One that reads closed has ended, by a dismiss or an earlier
+  # sign-off, and bd's close keeps its assignee, so a write guarded on the
+  # holder alone would reopen it: it stays closed. A dismiss that lands between
+  # the read and the write fails the status guard, and the read-back finds the
+  # conversation closed.
+  [ -n "$REPLIES" ] && ACTIONS+=("left $(printf '%s' "$REPLIES" | tr '\n' ' ' | sed 's/ *$//') open and owed")
+  BACK_AT=""
+  if [ "$CONV_STATUS" = closed ]; then
+    echo "conversation $CONVERSATION already reads closed, so it stays closed and is not handed back"
+  elif [ "$HOLDER" = human ]; then
+    BACK_AT="human/open"
+  else
+    gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --assignee human --status open >/dev/null 2>&1 || true
+    BACK=$(show_row "$CONVERSATION") || BACK=""
+    BACK_AT=$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)
+    case "$BACK_AT" in
+      human/open) ;;
+      */closed) echo "conversation $CONVERSATION was closed while this sign-off ran, so it stays closed and is not handed back" ;;
+      *) stopped "conversation $CONVERSATION did not read back in the operator's queue (assignee human, status open) after its hand-back from $HOLDER; re-run once the store answers" ;;
+    esac
+  fi
+  if [ "$BACK_AT" = human/open ]; then
+    ACTIONS+=("conversation back in the operator's queue")
+    REMINDER_OUTCOME="handed back"
+  else
+    REMINDER_OUTCOME=""
+  fi
 fi
-gc bd update "$VISIT" \
-  --set-metadata "gc.pr_visit_summary=$OUTCOME" \
-  --set-metadata "gc.pr_visit_actions=$SIGNOFF_ACTIONS" \
-  || echo "COULD NOT STASH the PR-reminder close text on $VISIT; its PR comment may stay 'open' after the visit closes"
+
+# 7. The PR reminder, once the conversation reads closed or back in the queue.
+# Best effort and update-only: a conversation no sitting engaged left no comment,
+# and a cut-short sign-off on one already closed leaves the reminder its closer
+# wrote.
+REMINDER=$(pack_script pr-sitting-comment.sh)
+if [ -n "$REMINDER" ] && [ -n "$REMINDER_OUTCOME" ]; then
+  ACTIONS_TEXT=""
+  for a in "${ACTIONS[@]+"${ACTIONS[@]}"}"; do ACTIONS_TEXT="${ACTIONS_TEXT:+$ACTIONS_TEXT; }$a"; done
+  "$REMINDER" close --sitting "$CONVERSATION" --subject "$SUBJECT" \
+    --outcome "$REMINDER_OUTCOME" --summary "$OUTCOME" --actions "$ACTIONS_TEXT" || true
+fi
+echo "SIGNED OFF conversation $CONVERSATION on $SUBJECT (${REMINDER_OUTCOME:-already closed})"

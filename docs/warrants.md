@@ -78,11 +78,18 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** Gas City offers ready work in canonical ready order: priority,
   then `created_at`, then id (`gc ready` in `docs/reference/cli.md`, and the
   routed-queue policy in `engdocs/architecture/dispatch.md`). The priority is
-  the bead's own field (`readySortPriority` in `internal/beads/query.go`). bd's
-  `ready` sorts by the bead's own priority by default. Neither one's
-  documentation derives a priority from another bead.
-- **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624 and bd 1.3.1
-  (c1c4b642a).
+  the bead's own field (`readySortPriority` in `internal/beads/query.go`).
+  Gas City copies a priority only when it creates beads: a sling pours its
+  workflow at the priority of the bead it is slung on (`BeadPriorityOverride`
+  in `internal/sling/sling.go`), and nothing updates the poured beads when
+  that bead's priority changes. bd's `ready` sorts by the bead's own priority
+  by default (`--sort` in bd's `docs/cli-reference/ready.md`). No `--sort`
+  choice of `gc ready`, or of bd's `ready`, `list`, `query` or `search`, orders
+  by a parent's priority. Neither one's documentation derives a priority from
+  another bead.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main f78779e41,
+  `gastownhall/gascity-packs` main dac12a4a8, bd 1.3.2 (9b65b9e19), and
+  `gastownhall/beads` main 4acde6b4e.
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
@@ -101,3 +108,46 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City ships per-agent write scoping. A fine-grained token
   limited to the owned repositories may cover the origin half on GitHub's side,
   and the next re-verification checks that first.
+
+## Converse reap
+
+- **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
+- **Stands in for.** Ending a manual session once the work it claimed has
+  closed and nobody is attached.
+- **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
+  work closes. It stays until it is closed or drained, and attaching wakes one
+  that sleeps (`cmd/gc/compute_awake_set.go` 432-440, 583-594 and 668-693).
+  No closer the controller runs on its own ends one because its work closed:
+  the stale-session closers exempt a session that has started its
+  conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
+  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3057, 3237 and
+  3500), and the core reaper prunes a session only once it has drained
+  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69 and 1402-1404).
+  A sitting cannot drain itself at its sign-off, because a drain destroys an
+  attached operator's pane.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` 1e05ae624, beside a live
+  `gc session list --state closed`.
+- **Retires when.** Gas City ends a manual session once its claimed work has
+  closed and nobody is attached.
+
+## Accept's lock
+
+- **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one
+  `flock` file per bead, `accept-<rig>-<bead>.lock`, under the city's
+  `.gc/runtime/packs/gc-toolkit`, held from Accept's live read to its last
+  write.
+- **Stands in for.** A launch that pours once per acceptance across a finished
+  run: a `gc sling` that refuses a second root under a caller's key whatever
+  the first root's status.
+- **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
+  <formula>` launches under a per-bead lock and refuses a second launch of the
+  formula at the bead, exiting 3, only while a root an earlier launch poured is
+  live (`internal/sling/sling_core.go` 544-724, the lock at 563 and the check at
+  589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
+  `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
+  `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
+  launch pours again. No `gc sling` flag checks an earlier root by its title or
+  by a key (`cmd/gc/cmd_sling.go` 145-160).
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main e2671dc4d.
+- **Retires when.** A Gas City launch can refuse a second root under a caller's
+  key whatever the first root's status.

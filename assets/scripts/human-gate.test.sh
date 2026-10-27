@@ -30,7 +30,12 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #   update <id> --description <d> — sets the bead's description; STUB_UPDATE_FAIL
 #     refuses it and writes nothing.
 #   show <id> --json.
-# The store is a JSON array of beads; EDGES holds `<waiter>|blocks|<gate>` lines.
+#   dep add <issue> <depends-on> --type <t> — records the edge, for the hold
+#     skill's reply from a conversation onto its gate.
+#   list --id <id> --all --json — the bead's row with its outgoing edges as
+#     dependencies, the read-back the hold skill makes of that reply.
+# The store is a JSON array of beads; EDGES holds `<issue>|<type>|<depends-on>`
+# lines, a waiter's `<waiter>|blocks|<gate>` among them.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
@@ -94,8 +99,20 @@ Reason: $reason" \
       then .status = "closed" | .close_reason = $r | .closed_at = $at else . end)' "$STORE" | save
     printf '✓ Gate resolved: %s\n  Reason: %s\n' "$id" "$reason"
     exit 0 ;;
+  "dep add")
+    from="${3:-}"; to="${4:-}"; typ=blocks; shift 4 || true
+    while [ $# -gt 0 ]; do case "$1" in --type) shift; typ="${1:-}" ;; --type=*) typ="${1#--type=}" ;; esac; shift || true; done
+    { exists "$from" && exists "$to"; } || { echo "Error: issue not found: $from or $to" >&2; exit 1; }
+    printf '%s|%s|%s\n' "$from" "$typ" "$to" >> "$EDGES"
+    echo "✓ Added dependency: $from depends on $to ($typ)"
+    exit 0 ;;
 esac
 case "${1:-}" in
+  list)
+    id=""; prev=""; for a in "$@"; do [ "$prev" = "--id" ] && id="$a"; prev="$a"; done
+    deps=$(awk -F'|' -v b="$id" '$1 == b { printf "%s{\"issue_id\":\"%s\",\"depends_on_id\":\"%s\",\"type\":\"%s\"}", (n++ ? "," : ""), $1, $3, $2 }' "$EDGES")
+    jq -c --arg id "$id" --argjson d "[$deps]" '[ .[] | select(.id == $id) | . + {dependencies: $d} ]' "$STORE"
+    exit 0 ;;
   update)
     id="${2:-}"; shift 2
     desc=""
@@ -370,6 +387,37 @@ eq "$rc" 0 "a retract through the old name works too"
 eq "$(field gate-1 close_reason)" "moot: gone" "and resolves the gate"
 "$OLD_NAME" --subject lx-wisp-x --key k --message m >/dev/null 2>&1
 eq "$?" 2 "the helper's own refusals come back through the old name"
+
+echo "# two conversations on one bead each hold with a gate of their own"
+# A converse sitting's hold files the gate its conversation owes through this
+# helper (skills/converse-hold/SKILL.md). The key names the conversation, so a
+# second conversation on the same bead files a gate of its own rather than
+# adopting the first one's, whose ruling would release the bead with the second
+# question still owed, and a resumed hold finds the gate it filed. The skill's
+# own block runs here against the real helper, its placeholders filled.
+HOLD_SKILL="$HERE/../../skills/converse-hold/SKILL.md"
+awk '/^```/ { if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 } else if ($0 ~ /^```bash/) inb = 1; next }
+     inb { buf = buf $0 "\n"; if (index($0, "human-gate.sh\" --subject")) hit = 1 }' "$HOLD_SKILL" \
+  | sed -e 's#<the bead that must wait>#tk-pr#' -e 's#<[^>]*>#x#g' > "$TMP/hold-block"
+if [ -s "$TMP/hold-block" ]; then ok "the hold skill's gate block is found"; else bad "the hold skill's gate block is found in $HOLD_SKILL"; fi
+hold() { (CONV="$HERE" CONVERSATION="$1" NEED="$2" bash "$TMP/hold-block" 2>"$TMP/err"); }
+reset "$(task tk-pr),$(task tk-ca),$(task tk-cb)"
+out=$(hold tk-ca "Keep the retry?"); rc=$?
+eq "$rc" 0 "the first conversation's hold exits 0"
+has "$out" "gate gate-1 holds what waits" "…filing a gate on the bead"
+out=$(hold tk-cb "Ship the docs first?"); rc=$?
+eq "$rc" 0 "the second conversation's hold exits 0"
+has "$out" "gate gate-2 holds what waits" "…filing a gate of its own rather than adopting the first one's"
+eq "$(creates)" 2 "two conversations hold with two gates"
+eq "$(field gate-1 await_id) $(field gate-2 await_id)" "conversation.tk-ca conversation.tk-cb" "each under a key that names its conversation"
+eq "$(field gate-2 title)" "Ship the docs first?" "the second gate asks the second question"
+has "$(cat "$STUB_EDGES")" "tk-pr|blocks|gate-2" "both gates block the bead, so its merge waits for both rulings"
+has "$(cat "$STUB_EDGES")" "tk-cb|replies-to|gate-2" "each conversation replies to its own gate"
+hasnt "$(cat "$STUB_EDGES")" "tk-cb|replies-to|gate-1" "…and not to the other conversation's"
+out=$(hold tk-ca "Keep the retry?"); rc=$?
+eq "$rc" 0 "a resumed hold exits 0"
+eq "$(creates)" 2 "…filing no second gate"
+has "$out" "gate gate-1 holds what waits" "…and finding the gate it filed"
 
 echo "# the deacon's filed gates reach its incident ledger"
 # The helper calls the ledger by sibling path, so it runs from a private copy
