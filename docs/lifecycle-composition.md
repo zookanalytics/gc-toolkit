@@ -36,8 +36,8 @@ when the rule is broken.
 **Boundaries.** It does not restate the three lifecycles — each has one owner
 above, and this doc defers to them rather than summarizing them. It is not a
 fourth lifecycle narrative: it describes no state a bead, PR, gate or
-conversation passes through. It does not carry the board's rendering rules or the converse
-sitting's procedure, which belong to
+conversation passes through. It does not carry the board's rendering rules or
+the converse sitting's procedure, which belong to
 [human-engagement.md](human-engagement.md), nor the routing
 mechanics, which belong to
 [gascity/routing-model.md](gascity/routing-model.md). The general model of how
@@ -159,9 +159,9 @@ The intended shape is `tk-2cyxo` (in flight):
   subject.
 - **Additive.** The takeaway is never cleared; the conversation is filed beside
   it.
-- **Self-describing.** The conversation states its own premise — the subject, which
-  blockers closed, and when — so the next sitting can cheaply kill it if the
-  situation has changed.
+- **Self-describing.** The conversation states its own premise — the subject,
+  which blockers closed, and when — so the next sitting can cheaply kill it if
+  the situation has changed.
 
 ## Two propagation paths, chosen by how the work was filed
 

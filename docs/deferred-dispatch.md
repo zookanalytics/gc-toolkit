@@ -344,10 +344,10 @@ the pass carries its own lock:
   `refinery-reconcile.sh` takes its pass lock through the same
   `take_pass_lock` and runs its arms through `pass_child`, under a state key
   of its own.
-- Every `gc`, `human-gate.sh`, `gc-helm.sh` and `bead-rehome.sh` call the pass makes runs
-  through `pass_child`, with the lock's descriptor closed. A process that a
-  `gc` call starts can outlive the pass: a store read can bring up a Dolt
-  server, and `gc` hands the descriptors it was given to what it starts. A
+- Every `gc`, `human-gate.sh`, `gc-helm.sh` and `bead-rehome.sh` call the pass
+  makes runs through `pass_child`, with the lock's descriptor closed. A process
+  that a `gc` call starts can outlive the pass: a store read can bring up a
+  Dolt server, and `gc` hands the descriptors it was given to what it starts. A
   process that kept the descriptor would hold the lock against every later
   pass. The subshell `pass_child` runs a call from holds the descriptor until
   the call exits, so a pass killed by itself leaves the lock held while the
