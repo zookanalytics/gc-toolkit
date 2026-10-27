@@ -260,9 +260,11 @@ J
 # in statuses a default or --status listing can leave out: a hooked child
 # advances, a pinned one is a hold whatever its route, and one in a status its
 # store adds is unknown to the classifier, so it fails closed. One done child is
-# counted, never listed. The epic's own blocks are none, so its frontier verdict
-# is ready. The plain unrouted-stuck case is covered by tk-stuck in the frontier
-# section above, off the same shared classifier.
+# counted, never listed. tk-kid-event is the closed event `bd set-state` files
+# under a bead whose state changed, and it is neither counted nor listed. The
+# epic's own blocks are none, so its frontier verdict is ready. The plain
+# unrouted-stuck case is covered by tk-stuck in the frontier section above, off
+# the same shared classifier.
 bead "$R_TK" tk-epic <<'J'
 {"id":"tk-epic","title":"the epic","status":"open","issue_type":"epic","priority":2,
  "metadata":{},
@@ -281,6 +283,9 @@ bead "$R_TK" tk-kid-human <<'J'
 J
 bead "$R_TK" tk-kid-done <<'J'
 {"id":"tk-kid-done","title":"done child","status":"closed","issue_type":"task","parent":"tk-epic","metadata":{}}
+J
+bead "$R_TK" tk-kid-event <<'J'
+{"id":"tk-kid-event","title":"State change: situation → cleared","status":"closed","issue_type":"event","priority":4,"parent":"tk-epic","metadata":{}}
 J
 bead "$R_TK" tk-kid-rework <<'J'
 {"id":"tk-kid-rework","title":"rework child","status":"open","issue_type":"task","parent":"tk-epic",
@@ -656,9 +661,9 @@ has "$OUT" "(open, stuck: unrouted)" "  ... and a blocker that stops itself as j
 
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
-JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 10 "every direct child is counted, in any status"
+JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 10 "every direct child is counted, in any status, and a bd set-state event is not a child"
 JQF='.horizon.children.open'         runj tk-epic --horizon;  eq "$JQ" 9 "  ... nine are open"
-JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the listing asks for every status)"
+JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the listing asks for every status), and the closed event is not"
 JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 5 "  ... pool-routed, in-progress, hooked, a progressing anchor and a pour-cleared rework child advance"
 JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 4 "  ... the human-gated, armed-behind-the-gate, pinned and custom-status children are stuck"
 JQF='.horizon.open | length'         runj tk-epic --horizon;  eq "$JQ" 9 "open children are listed; the done one is not"
