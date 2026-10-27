@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App, resolveDrillTarget } from './App';
@@ -1324,7 +1326,10 @@ it('shows the PR phase beside the row', async () => {
 });
 
 // An approved PR the city is landing reads merging, in its own color, so it no
-// longer shares the working chip with a PR the city is still changing.
+// longer shares the working chip with a PR the city is still changing. The chip
+// builds its class from any phase it is given, so the color is pinned on the
+// stylesheet, read from disk because the suite loads no CSS: without a rule of
+// its own, a merging chip renders in the chip's plain text color.
 it('shows merging on the chip of a PR the city is landing', async () => {
   servePRUnder('tk-root', prTile({
     id: 'tk-mg',
@@ -1337,6 +1342,8 @@ it('shows merging on the chip of a PR the city is landing', async () => {
   const row = rowFor(/an approved row being landed/);
   const chip = within(row as HTMLElement).getByText('merging');
   expect(chip.className).toBe('pr-phase pr-phase--merging');
+  const styles = readFileSync(join(import.meta.dirname, 'styles.css'), 'utf8');
+  expect(styles).toMatch(/\.pr-phase--merging\s*\{[^}]*\bcolor:\s*#[0-9a-fA-F]{3,8}\s*;/);
 });
 
 // A resolved PR names its terminal state on the same chip, so a done row says how
