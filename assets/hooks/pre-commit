@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Keep generated/seed-audit/ in step with the fragments it renders: a commit
-# touching a seed input regenerates the audit and stages it. A commit touching
-# no input pays one `git diff --cached --name-only`; one that does pays the
-# render (~15-25s).
+# touching a seed input regenerates the files its branch moves and stages them.
+# A commit touching no input pays one `git diff --cached --name-only`; one that
+# does pays a render, and a render of the branch's fork point as well when the
+# first one writes a file differently from how the fork point commits it.
 # This is branch-local upkeep, not a guarantee. The artifact is a function of
 # the whole source tree, so a branch stays current only against its own base:
 # a commit that bypasses hooks, a host with no `gc` (which exits 0 below), and
@@ -58,8 +59,22 @@ if [ -n "$dirty" ]; then
     while IFS= read -r f; do printf 'pre-commit:   %s\n' "$f" >&2; done <<< "$dirty"
 fi
 
-printf 'pre-commit: seed inputs changed — regenerating generated/seed-audit ...\n' >&2
-if ! bash "$script" >&2; then
+# The commit carries what its branch moves and nothing else. The render runs
+# --since the branch's fork point from the default branch, or HEAD where there
+# is none. A file that renders differently now but the same at the fork point is
+# no change of the branch's, so it is kept as the fork point commits it. Its
+# text moved with the gc binary, and that text lands through the default
+# branch's re-audit in a change of its own (render-seed-audit.sh, WHOSE TEXT IT
+# IS). A file the branch moves is written as rendered, which also renews one an
+# earlier commit left stale. A repository with no commit yet renders the whole
+# tree.
+since=()
+if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    fork="$(git merge-base HEAD refs/remotes/origin/HEAD 2>/dev/null)"
+    since=(--since "${fork:-HEAD}")
+fi
+printf 'pre-commit: seed inputs changed — regenerating what this branch moves in generated/seed-audit ...\n' >&2
+if ! bash "$script" ${since[@]+"${since[@]}"} >&2; then
     printf 'pre-commit: render FAILED. Commit aborted so a broken audit is not committed.\n' >&2
     printf 'pre-commit: re-run it directly to see why: assets/scripts/render-seed-audit.sh\n' >&2
     exit 1

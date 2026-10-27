@@ -31,9 +31,17 @@
 # carrying no audit, and the stub tree before a first render; a head that
 # deletes INDEX.md and leaves renders committed, one of them stale, and the
 # stub's README beside a render the head left; the cannot-tell
-# exits (unresolvable rev, conflicting merge, missing revs, no scratch dir); and
-# the merge shape, against a control carrying the per-agent size rows the index
-# no longer commits. For the renderer and sizes: what INDEX.md carries and
+# exits (unresolvable rev, conflicting merge, missing revs, no scratch dir); the
+# remedy a held merge names, run, clearing the hold; --base-stale-out naming the
+# file the base is stale in alone, emptying what an earlier check left, and
+# refused outside --check-merge; and the merge shape, against a control carrying
+# the per-agent size rows the index no longer commits. For what a commit
+# renders: --since writing the file the change moves and keeping, as HEAD
+# commits them, the text that moved with gc, a file only gc added and the index
+# row that would list it, against a plain render as the control; one render when
+# no file differs; the whole render since a revision with no audit; its
+# refusals; and the pre-commit hook committing what the commit moves and not
+# gc's text. For the renderer and sizes: what INDEX.md carries and
 # SOURCES.txt's absence; --sizes with and without a base; the gcq wrapper's cwd
 # pin; the hook install's refusal, for a hand-installed hook and for a listing
 # that fails, against a control holding only a sample hook; the builtin-fallback
@@ -85,9 +93,11 @@ case "\$1 \${2:-}" in
     "agent list")   { agents | sed "s|.*|{\"name\":\"&\",\"qualified_name\":\"\$binding.&\"}|"
                       echo '{"name":"claude","qualified_name":"claude"}'; } | paste -s -d, - \
                         | sed 's/.*/{"agents":[&]}/' ;;
-    "formula list") for f in "\$root"/formulas/*.toml; do [ -f "\$f" ] && basename "\$f" .toml; done ;;
-    "formula show") cat "\$root/formulas/\$3.toml" ;;
-    "prime claude") printf '%s\n' "$BUILTIN_WORKER" ;;
+    "formula list") for f in "\$root"/formulas/*.toml; do [ -f "\$f" ] && basename "\$f" .toml; done
+                    if [ -f "$STUB/mol-gc.toml" ]; then echo mol-gc; fi ;;
+    "formula show") if [ "\$3" = mol-gc ]; then cat "$STUB/mol-gc.toml"; else cat "\$root/formulas/\$3.toml"; fi ;;
+    "prime claude") printf '%s\n' "$BUILTIN_WORKER"
+                    if [ -f "$STUB/claude.gc" ]; then cat "$STUB/claude.gc"; fi ;;
     "prime "*)      "$STUB/spell-city" < "\$root/agents/\$2/prompt.template.md" ;;
     *)              exit 1 ;;
 esac
@@ -146,7 +156,20 @@ branch() { on "$1" && git -C "$R" checkout -q -b "$2"; } # <from> <new>
 commit() { git -C "$R" add -A && git -C "$R" commit -q --allow-empty -m "$1"; }
 # The render a commit would carry, made by the renderer in the tree itself.
 render() { PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --jobs 1 >/dev/null 2>&1; }
-check_merge() { : > "$STUB/roots.log"; PATH="$STUB:$PATH" bash "$SUT" --root "$R" --check-merge "$1" "$2" 2>&1; }
+# The render of what the change since <rev> moves, and what it said.
+render_since() { : > "$STUB/roots.log"; PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --jobs 1 --since "$1" 2>&1; }
+check_merge() { # <base> <head> [extra args...]
+    local b="$1" h="$2"; shift 2
+    : > "$STUB/roots.log"; PATH="$STUB:$PATH" bash "$SUT" --root "$R" --check-merge "$b" "$h" "$@" 2>&1
+}
+# A newer gc moves the text of the agents and formulas gc itself defines, with
+# no commit in the pack. While the stub's drift files exist, every tree renders
+# the builtin claude with a line a newer gc adds, and lists one formula only gc
+# defines.
+gc_moves() { printf 'a line a newer gc renders\n' > "$STUB/claude.gc"; printf 'formula = "mol-gc"\n' > "$STUB/mol-gc.toml"; }
+gc_restores() { rm -f "$STUB/claude.gc" "$STUB/mol-gc.toml"; }
+# The working tree holds <file> under the audit as <rev> commits it, absence included.
+as_committed() { git -C "$R" diff --quiet "$1" -- "generated/seed-audit/$2"; } # <rev> <file>
 renders() { LC_ALL=C sort -u "$STUB/roots.log" | grep -c .; } # trees the last check rendered
 edit_prompt() { printf '%s\n' "$2" >> "$R/agents/$1/prompt.template.md"; } # <agent> <line>
 
@@ -165,14 +188,19 @@ has "$out" "would be STALE at the merge of moved into base" "the verdict names b
 has "$out" "agents/alpha.md (the merge changes its render but keeps the copy base commits)" \
     "the file whose render moved is named, with why"
 hasnt "$out" "agents/beta.md" "…and a file whose render did not move is not"
-has "$out" "assets/scripts/render-seed-audit.sh && git add generated/seed-audit" "the remedy is spelled out"
+has "$out" "assets/scripts/render-seed-audit.sh --since base && git add generated/seed-audit" "the remedy is spelled out"
+render_since base >/dev/null; commit "render what the branch moves"
+out=$(check_merge base moved); rc=$?
+eq "$rc" 0 "…and the remedy it names clears the hold"
 
 echo "# a head that commits the fresh render is current, on one render"
 branch base fresh
 edit_prompt alpha "moved and rendered"
 render; commit "move alpha's prompt and render it"
-out=$(check_merge base fresh); rc=$?
+printf 'left by an earlier check\n' > "$TMP/base-stale.txt"
+out=$(check_merge base fresh --base-stale-out "$TMP/base-stale.txt"); rc=$?
 eq "$rc" 0 "a fresh render exits 0"
+eq "$(wc -c < "$TMP/base-stale.txt" | tr -d ' ')" "0" "…and --base-stale-out names no file, emptying what was there"
 has "$out" "seed audit is current at the merge of fresh into base" "…and says so"
 eq "$(renders)" 1 "…having rendered the merge result alone, since every file matched it"
 
@@ -183,8 +211,9 @@ commit "the base moves beta's prompt without rendering"
 branch stale-base bystander
 mkdir -p "$R/docs"; printf 'a doc\n' > "$R/docs/d.md"
 commit "touch nothing the audit renders"
-out=$(check_merge stale-base bystander); rc=$?
+out=$(check_merge stale-base bystander --base-stale-out "$TMP/base-stale.txt"); rc=$?
 eq "$rc" 0 "the base's own staleness does not hold the merge"
+eq "$(cat "$TMP/base-stale.txt")" "agents/beta.md" "…and --base-stale-out names the file the base is stale in, alone"
 has "$out" "the merge of bystander into stale-base makes no render stale" "…which is what the verdict says"
 hasnt "$out" "seed audit is current" "…without calling a tree current that is not"
 has "$out" "stale-base is already stale in these files" "…and the staleness is reported as the base's"
@@ -305,6 +334,106 @@ eq "$rc" 2 "--check-merge without its two revs exits 2"
 out=$(TMPDIR=/nonexistent-under-test bash "$SUT" --root "$R" --check-merge base fresh 2>&1); rc=$?
 eq "$rc" 2 "a scratch dir that cannot be made exits 2"
 has "$out" "mktemp failed" "…naming the cause, not the tar failure downstream of it"
+
+out=$(bash "$SUT" --root "$R" --check --base-stale-out "$TMP/base-stale.txt" 2>&1); rc=$?
+eq "$rc" 2 "--base-stale-out outside --check-merge exits 2"
+has "$out" "--base-stale-out applies to --check-merge" "…and says why"
+
+# --------------------------------------------------- what a commit renders
+#
+# A commit carries the renders its own change moves. Text that moved with the
+# gc binary renders the same at HEAD as in the working tree, so it is no change
+# of this commit's, and it stays as HEAD commits it until a change of its own
+# lands it.
+echo "# --since writes what the change moves and keeps what moved with gc"
+branch base own-render
+gc_moves
+edit_prompt alpha "moved by the change"
+out=$(render_since HEAD); rc=$?
+eq "$rc" 0 "a render since HEAD exits 0"
+has "$(cat "$R/generated/seed-audit/agents/alpha.md")" "moved by the change" "the file the change moves is written as rendered"
+if as_committed HEAD agents/claude.md; then ok "…the file whose text moved with gc is kept as HEAD commits it"
+else bad "…the text that moved with gc was written into claude.md"; fi
+if as_committed HEAD formulas/mol-gc.md; then ok "…a file only gc added is left out, as HEAD has it"
+else bad "…the formula only gc added was written"; fi
+if as_committed HEAD INDEX.md; then ok "…and so is the index row that would list it"
+else bad "…the index was rewritten for a formula only gc added"; fi
+has "$out" "kept 3 file(s) as HEAD commits them" "…saying what it kept"
+has "$out" "  agents/claude.md" "…by path"
+eq "$(renders)" 2 "…having rendered HEAD as well, since some file differed from it"
+render
+if as_committed HEAD agents/claude.md; then bad "control: a plain render keeps claude.md too, so the case above proves nothing"
+else ok "control: a plain render writes the text that moved with gc"; fi
+gc_restores
+git -C "$R" reset -q --hard && git -C "$R" clean -qfd
+
+echo "# --since over a tree that renders as HEAD commits it renders once"
+branch base own-quiet
+out=$(render_since HEAD); rc=$?
+eq "$rc" 0 "a render since HEAD of an unchanged tree exits 0"
+eq "$(renders)" 1 "…rendering the tree alone, since no file differed"
+hasnt "$out" "kept" "…and keeping nothing"
+if git -C "$R" diff --quiet HEAD -- generated/seed-audit; then ok "…leaving the audit as HEAD commits it"
+else bad "…but the audit changed"; fi
+
+echo "# --since a revision that carries no audit writes the whole render"
+branch base own-first
+gc_moves
+out=$(render_since c0); rc=$?
+eq "$rc" 0 "a render since a revision with no audit exits 0"
+has "$(cat "$R/generated/seed-audit/agents/claude.md")" "a line a newer gc renders" "…writing the whole render, gc's text included"
+eq "$(renders)" 1 "…with no render of a revision that has nothing to keep"
+gc_restores
+git -C "$R" reset -q --hard && git -C "$R" clean -qfd
+
+out=$(bash "$SUT" --root "$R" --check --since base 2>&1); rc=$?
+eq "$rc" 2 "--since outside a render exits 2"
+has "$out" "--since applies to a render" "…and says why"
+out=$(PATH="$STUB:$PATH" bash "$SUT" --root "$R" --jobs 1 --since no-such-rev 2>&1); rc=$?
+eq "$rc" 2 "--since an unresolvable revision exits 2"
+has "$out" "names no commit" "…and says which"
+
+echo "# the pre-commit hook commits what the commit moves, and not gc's text"
+branch base hooked
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+git -C "$R" config core.hooksPath assets/hooks
+gc_moves
+edit_prompt alpha "moved by a commit the hook renders"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit lands"
+changed=$(git -C "$R" diff --name-only HEAD~1 HEAD)
+has "$changed" "generated/seed-audit/agents/alpha.md" "…carrying the render its own change moved"
+hasnt "$changed" "generated/seed-audit/agents/claude.md" "…and not the text that moved with gc"
+hasnt "$changed" "generated/seed-audit/formulas/mol-gc.md" "…nor a file only gc added"
+has "$out" "kept 3 file(s) as HEAD commits them" "…saying what it left for the re-audit"
+git -C "$R" config --unset core.hooksPath
+gc_restores
+
+echo "# the hook renders since the branch's fork point, renewing what an earlier commit left stale"
+branch base hooked-fork
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+edit_prompt alpha "moved by a commit that rendered nothing"
+commit "move alpha's prompt, render nothing"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+git -C "$R" config core.hooksPath assets/hooks
+gc_moves
+edit_prompt beta "moved by a hooked commit"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move beta's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit lands"
+changed=$(git -C "$R" diff --name-only HEAD~1 HEAD)
+has "$changed" "generated/seed-audit/agents/beta.md" "…carrying the render its own change moved"
+has "$changed" "generated/seed-audit/agents/alpha.md" "…and renewing the render an earlier commit of its branch left stale"
+hasnt "$changed" "generated/seed-audit/agents/claude.md" "…and still not the text that moved with gc"
+has "$out" "as $(git -C "$R" rev-parse base) commits them" "…keeping what it keeps as the fork point commits it"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
 
 # ------------------------------------------------ the shape that has to merge
 #

@@ -263,6 +263,13 @@ gained lands over that input. `merge.sh` refuses such a merge, using
 writes. So the host that runs the refinery's merges needs `gc` on its PATH and
 git 2.38 or newer.
 
+A commit carries the renders its branch moves. The hook renders `--since` the
+branch's fork point from the default branch, so a file whose text moved with
+the `gc` binary, and not with the branch, stays as the fork point has it. That
+text lands in a pull request of its own: the merge gate hands the files the
+default branch is stale in to `seed-audit-reaudit.sh`, which slings one bead to
+re-render them.
+
 ### Smoke test
 
 ```bash
