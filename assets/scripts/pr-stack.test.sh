@@ -523,6 +523,61 @@ out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" "$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a second pass over the measured region writes nothing"
 eq "$(cat "$MEASURE_LOG")" "" "…and measures nothing, since only a refresh measures"
 
+# The stub the cases below measure with: it logs what it was asked, fails when
+# MEASURE_FAIL is set, and otherwise prints MEASURE_OUT as the section body.
+MEASURE_ANY="$TMP/measure-any-stub.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$MEASURE_LOG"' \
+  '[ -z "${MEASURE_FAIL:-}" ] || exit 2' 'printf "%s\n" "$MEASURE_OUT"' > "$MEASURE_ANY"
+chmod +x "$MEASURE_ANY"
+# A region as the composer writes it at <head> in <mode>, closing with <size>.
+composed_region() { # id summary head mode size [sup_num sup_head]
+  ( . "$SD/pr-summary-region.sh" && phased=$(prs_resolve_phased 'correctness' "$3") && {
+    printf '%s\n' "$PRS_MARK_OPEN"
+    compose_managed "$2" '' "$1" "polecat/$1" main 'correctness' "$3" "${6:-}" "${7:-}" "$4" "$phased" "$5"
+    printf '%s\n' "$PRS_MARK_CLOSE"
+  } )
+}
+
+echo "# a head reset to the merge base its Size section names is still a moved head"
+# measure.sh names the merge base by git's abbreviated hash, which can be the
+# eight characters the handoff bullet gives the head. Once the PR's head is
+# reset to that merge base, the Size section carries the new head's prefix, but
+# the handoff bullet still names the head the region was composed at, so the
+# region is behind and is recomposed at the reset head.
+store "[$(anchor_sum RS polecat/RS 300 'correctness' 'RESET: the summary a reset to the merge base leaves alone.')]"
+pr 300 OPEN polecat/RS "$(composed_region RS 'RESET: the summary a reset to the merge base leaves alone.' dddd444400000000 open \
+  'Net lines from the merge base `eeee5555`: runtime +9 and tests +2.')" eeee555500000000
+: > "$STUB_GH_LOG"; : > "$MEASURE_LOG"
+out=$(GC_MEASURE_TOOL="$MEASURE_ANY" MEASURE_LOG="$MEASURE_LOG" \
+  MEASURE_OUT='No runtime or test lines change from the merge base `eeee5555`.' "$SUT" 2>&1)
+has "$out" "PR#300 summary region refreshed" "the reset head refreshes the region"
+b=$(body 300)
+has "$b" '- Head `eeee5555`; gates `correctness`; see the PR checks for current status.' \
+  "the handoff bullet names the reset head"
+hasnt "$b" 'dddd4444' "…and no longer the head the region was composed at"
+has "$b" '## Size'$'\n\n''No runtime or test lines change from the merge base `eeee5555`.'$'\n''<!-- /gc:pr-summary -->' \
+  "the Size section is measured again at the reset head"
+hasnt "$b" 'runtime +9' "…and the old head's size is gone"
+
+echo "# the head check reads the head field of the composed handoff bullets and nothing else"
+# Each mode names the head it was composed at where the check reads it, so a
+# region a pass has just written is never behind on its head. The other commits
+# a region can name are not that head: one a summary cites, the Size section's
+# merge base, and the closed PR's head in a Supersedes bullet.
+head_of() { ( . "$SD/pr-summary-region.sh" && prs_region_names_head "$1" "$2" ) && echo names || echo none; }
+HB="$TMP/head-body"
+for mode in open refresh; do
+  composed_region HD 'Restores what broke at `7777bbbb`.' 1234abcd99999999 "$mode" \
+    'Net lines from the merge base `5678ef00`: runtime +1 and tests 0.' > "$HB"
+  eq "$(head_of "$HB" 1234abcd99999999)" names "a $mode-mode region names the head it was composed at"
+  eq "$(head_of "$HB" 5678ef0011111111)" none "…and not the merge base its Size section names"
+  eq "$(head_of "$HB" 7777bbbb22222222)" none "…nor a commit its summary cites"
+done
+composed_region HD 'S.' 1234abcd99999999 open '' 41 9999aaaa00000000 > "$HB"
+has "$(cat "$HB")" '(closed unmerged at `9999aaaa`)' "a superseding region names the closed PR's head"
+eq "$(head_of "$HB" 1234abcd99999999)" names "…and names its own head"
+eq "$(head_of "$HB" 9999aaaa33333333)" none "…but the closed PR's head is not it"
+
 echo "# a reworked summary and a newly stacked bead land in one edit"
 store "[$(anchor_sum Y polecat/Y 220 'correctness' 'NEW: the reworked Y summary.'),
         $(printf '{"id":"Y2","status":"closed","title":"Stacked impl","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Y2","merged_target":"polecat/Y","merge_result":"merged"}}')]"

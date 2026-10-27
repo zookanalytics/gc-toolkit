@@ -174,26 +174,37 @@ prs_current_section() { # <body-file>
   ' "$1"
 }
 
-# 0 = the managed region already names <head_oid> in its handoff bullet, which
-# compose renders as the head's 8-char prefix in backticks in either mode; 1 = it
-# names a different head or none. A post-open refresh pairs this with the summary
-# comparison: a rework that moves the head without changing the summary leaves the
-# handoff bullet pinned to the pre-rework head, and only the head comparison catches
-# it — the summary text alone still reads current. A head is a commit hash, so its
-# backticked 8-char prefix does not collide with the other backticked tokens (issue,
-# branch, target, gates, the size section's paths) the region carries. The one other
-# hash, the size section's merge base, is the commit the branch left its target at,
-# so it matches only a head reset to that commit.
+# 0 = the managed region's handoff bullets name <head_oid> as the head the region
+# was composed at; 1 = they name a different head or none. Compose writes that head
+# as its 8-char prefix in backticks, after `Head ` in refresh mode and after `at `
+# in open mode, and closes the clause with `.` or `;`. Only that field of the
+# bullets under the region's last `## Refinery handoff` heading is read, up to the
+# next heading. Other commits the region names are not the head it was composed
+# at: one a summary cites, the Size section's merge base, which is the head
+# itself once the head is reset to it, and the closed PR's head in a Supersedes
+# bullet. A post-open refresh pairs this with the summary comparison: a rework
+# that moves the head without changing the summary leaves the handoff bullet
+# pinned to the pre-rework head, and only the head comparison catches it — the
+# summary text alone still reads current.
 # Substring-match a captured string rather than piping into `grep -q`: this
 # library is sourced by callers that may run under `set -o pipefail`, where a
 # writer SIGPIPEd by grep's early exit turns a match into a pipeline failure.
 prs_region_names_head() { # <body-file> <head_oid>
-  local head8 needle
+  local head8 h bullets
   head8=$(printf '%.8s' "${2:-}")
   [ -n "$head8" ] || return 1
-  needle='`'"$head8"'`'
-  case "$(prs_current_section "$1")" in
-    *"$needle"*) return 0 ;;
+  h='`'"$head8"'`'
+  bullets=$(awk -v o="$PRS_MARK_OPEN" -v c="$PRS_MARK_CLOSE" '
+    $0 == o { inreg = 1; next }
+    $0 == c { inreg = 0; handoff = 0; next }
+    !inreg { next }
+    /^##[ \t]+Refinery handoff[ \t]*$/ { handoff = 1; n = 0; next }
+    /^##[ \t]/ { handoff = 0; next }
+    handoff { line[++n] = $0 }
+    END { for (i = 1; i <= n; i++) print line[i] }
+  ' "$1")
+  case "$bullets" in
+    *"Head $h;"*|*" at $h."*|*" at $h;"*) return 0 ;;
     *) return 1 ;;
   esac
 }
