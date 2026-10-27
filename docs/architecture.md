@@ -185,7 +185,7 @@ moves it afterwards.
 | The review's values: its check, anchor, branch, base, reviewed commit and PR, and why it went out | The record `assets/scripts/gate-ensure.sh` writes on the review bead and passes to the pour as formula vars | Fixed at dispatch |
 | The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
 | The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
-| The pack's scripts, and the pack's check index | The installed pack's script directory. A skill reaches it through `gc <binding> scripts-dir`, and a formula step through a loop over candidate directories. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
+| The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
 | The rig's check index rows | The rig's `review-checks.toml`, laid over the pack's rows | The reviewed commit |
 | The rig's guidance for the check | The rig's `docs/review-<check>.md`, which the formula prints | The reviewed commit |
 | The diff, and the docs a check stewards, such as `docs/architecture.md` for arch and `docs/product-goals.md` for pm | The review's worktree ([review-workspace.md](review-workspace.md)) | The reviewed commit |
@@ -226,14 +226,11 @@ none.
   branch under review. None of them is the installed pack. So pack text names
   a skill it tells an agent to load as `gc-toolkit.<name>`, and a path in its
   place is a defect.
-- **Known limit: a formula step finds the pack's scripts only because
-  gc-toolkit is a rig of this city.** Its loop takes the first directory it
-  tries that holds the script. In gc-toolkit's own rig that is `$GC_RIG_ROOT`,
-  and in every other rig it is `$GC_CITY_PATH/rigs/gc-toolkit`. A city that
-  imports the pack from a URL rather than as a rig checkout has neither, so its
-  formula steps find no script. A skill has no such limit, because
-  `gc <binding> scripts-dir` prints the script directory of whichever pack gc
-  loaded
+- **The pack's scripts are the installed pack's wherever the pack comes
+  from.** `gc <binding> scripts-dir` prints the script directory of the pack gc
+  loaded, so a city that imports the pack from a URL runs the same scripts as
+  one that clones it as a rig, and no step reads a script from the tree it
+  stands in
   ([pack-authoring.md](pack-authoring.md#step-text-and-skills-reach-pack-scripts-at-runtime)).
 
 ## How humans engage
