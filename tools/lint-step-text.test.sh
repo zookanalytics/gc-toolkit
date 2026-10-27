@@ -4,12 +4,14 @@
 #
 # The defects it guards against: a single script call read as a procedure (a
 # substitution in an argument, a here-document's body, a quoted separator, a
-# redirection, a TOML-escaped continuation), a procedure read as a single call
-# (a pipeline, a sequence, a substitution holding a pipeline, && or ||), step
+# redirection, a TOML-escaped continuation or quote), a procedure read as a
+# single call (a pipeline, a sequence, a substitution holding a pipeline, && or
+# ||), step text left unread (a TOML string of any kind wherever it sits), step
 # text that predates the rule failing because a change touched its file, a
 # moved or trimmed block read as new, a branch listed as in flight stalled by
 # its own lines, a branch built on it let through with lines of its own, and a
-# change it cannot read passing as clean.
+# change it cannot read passing as clean (an unreadable file, a file that is
+# not TOML, no Python to decode it).
 #
 # Hermetic: each case runs in a throwaway git repo whose main is the base the
 # change is measured from (refs/remotes/origin/main), with a copy of the lint
@@ -257,6 +259,83 @@ with_step new "$(block 'gc bd update "$X" \
   --append-notes "y"')" > "$REPO/$F"
 run_lint "$F"
 expect 0 "a TOML line-ending backslash keeps one command: exit 0"
+
+# Each string in the file is decoded as TOML decodes it, whatever its kind and
+# wherever it sits, so step text that renders a procedure fails however the
+# string is written.
+procedure_step() {  # <the step's description line, as written in the file>
+  base_formula
+  printf '\n[[steps]]\nid = "new"\ntitle = "New"\n%s\n' "$1"
+}
+procedure_step 'description = "Run:\n```bash\necho first; echo second\n```\n"' > "$REPO/$F"
+run_lint "$F"
+expect 1 "a basic string whose escaped newlines render a procedure: exit 1" "the new step new has shell blocks that do more than call a script, with 2 commands"
+
+procedure_step 'description = """Run:\n```bash\necho first; echo second\n```\n"""' > "$REPO/$F"
+run_lint "$F"
+expect 1 "a triple-quoted string closed on its opening line: exit 1" "with 2 commands"
+
+procedure_step 'description = """
+Run:\n```bash\necho first; echo second\n```
+"""' > "$REPO/$F"
+run_lint "$F"
+expect 1 "a line of a multi-line string whose escaped newlines render a procedure: exit 1" "with 2 commands"
+
+procedure_step '"description" = """
+```bash
+echo first; echo second
+```
+"""' > "$REPO/$F"
+run_lint "$F"
+expect 1 "a step whose key is quoted: exit 1" "with 2 commands"
+
+procedure_step "description = '''
+\`\`\`bash
+echo first; echo second
+\`\`\`
+'''" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a multi-line literal string: exit 1" "with 2 commands"
+
+procedure_step 'description = "# not a comment\n```bash\necho first; echo second\n```\n"   # a comment with """ in it' > "$REPO/$F"
+run_lint "$F"
+expect 1 "a # inside a string is text, and quotes inside a comment open no string: exit 1" "with 2 commands"
+
+DQ=$(printf '%su%04x' "$(printf '\134')" 34)   # TOML's unicode escape for "
+with_step new "$(block "echo ${DQ}first; second${DQ}")" > "$REPO/$F"
+grep -qF "echo ${DQ}first" "$REPO/$F" && ok "the escape fixture holds the escape" || bad "the escape fixture holds the escape"
+run_lint "$F"
+expect 0 "an escaped quote decodes to a quote, so the separator it quotes stays in one argument: exit 0"
+
+printf 'steps = [{ id = "a", description = "```bash\\necho first; echo second\\n```" }]\n' > "$REPO/formulas/mol-inline.toml"
+run_lint formulas/mol-inline.toml
+expect 1 "steps written as an inline array still have their strings read: exit 1" "the formula's own text gains shell blocks"
+rm -f "$REPO/formulas/mol-inline.toml"
+
+base_formula | awk '
+  /^description = """$/ && ++n == 3 { printf "description = \"The old procedure:\\n```bash\\nA=$(gc bd show \\\"$B\\\" --json)\\nif [ -n \\\"$A\\\" ]; then\\n  echo \\\"$A\\\"\\nfi\\n```\\n\"\n"; skip = 1; next }
+  skip && /^"""$/ { skip = 0; next }
+  skip { next }
+  { print }' > "$REPO/$F"
+grep -q '^description = "The old procedure:' "$REPO/$F" && ! grep -q '^The old procedure:$' "$REPO/$F" \
+  && ok "the re-written fixture holds step two as one basic string" || bad "the re-written fixture holds step two as one basic string"
+run_lint "$F"
+expect 0 "a step re-written as a basic string that decodes to the same text weighs nothing: exit 0"
+
+printf 'a = """\nunclosed\n' > "$REPO/formulas/bad.toml"
+run_lint formulas/bad.toml
+expect 2 "a formula that is not valid TOML: exit 2" "cannot parse formulas/bad.toml"
+rm -f "$REPO/formulas/bad.toml"
+
+# The lint decodes TOML with a Python that has tomllib, and with none on PATH
+# it cannot operate.
+mkdir -p "$TMP/nopy"
+for t in git awk mktemp rm cat tr head grep sort dirname sed; do
+  p=$(command -v "$t") && ln -sf "$p" "$TMP/nopy/$t"
+done
+if OUT=$(cd "$REPO" && PATH="$TMP/nopy" "$BASH" tools/lint-step-text.sh "$F" 2>&1); then rc=0; else rc=$?; fi
+expect 2 "no Python with tomllib on PATH: exit 2" "needs a Python with tomllib"
+g checkout -q -- "$F"
 
 # --- An existing step is weighed against its old self. -----------------------
 step_two_with 'A=$(gc bd show "$B" --json)

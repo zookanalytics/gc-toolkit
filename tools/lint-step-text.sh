@@ -26,11 +26,14 @@
 # formula is compared with its old path. A FILE is a path from the top of the
 # repository, as git prints it.
 #
-# The agent reads step text as TOML decodes it, and so does the lint: a step's
-# description is a TOML string, so `\\` in the file is one backslash, and a
-# backslash that ends a line joins the next line to it. Only a block fenced as
-# bash, sh, shell, zsh, ksh or dash holds commands, and a here-document's body
-# is data, not commands.
+# The agent reads step text as TOML decodes it, and so does the lint. Python's
+# tomllib decodes each string in the file, whatever its kind and wherever it
+# sits, so an escape such as `\n` or `\\` reads as what it stands for, and a
+# backslash that ends a line of a multi-line basic string joins the next line
+# to it. The lint finds each string in the file to tie its text to the file's
+# lines. When the strings it finds are not all the strings tomllib reads in the
+# file, it cannot operate. Only a block fenced as bash, sh, shell, zsh, ksh or
+# dash holds commands, and a here-document's body is data, not commands.
 #
 # lint-step-text.in-flight, beside this script, lists the branches whose
 # formula changes were in flight when the rule landed, each read from its origin
@@ -47,7 +50,8 @@
 # Output: each finding as `<file>:<line>: <message>`, each in-flight warning as
 # `<file>:<line>: warning: <message>`, then one summary line.
 # Exit: 0 no finding, warnings or not; 1 a finding; 2 it could not operate (not
-#       a repository, a BASE git cannot read, a file it cannot read or parse).
+#       a repository, a BASE git cannot read, a file it cannot read or parse,
+#       or no Python 3.11 or newer on PATH to decode a formula's TOML).
 
 set -uo pipefail
 
@@ -103,39 +107,174 @@ if ! MERGE_BASE=$(git merge-base "$BASE_OID" HEAD); then
   exit 2
 fi
 
+# A Python whose standard library has tomllib (3.11 and newer) decodes the
+# TOML: python3, or else the newest python3.N on PATH.
+PY=""
+for name in python3 $(compgen -c python3. 2>/dev/null | grep -xE 'python3\.[0-9]+' | sort -t. -k2,2nr -u); do
+  cand=$(command -v "$name") || continue
+  "$cand" -I -c 'import tomllib' >/dev/null 2>&1 && { PY=$cand; break; }
+done
+if [ -z "$PY" ]; then
+  echo "$PROG: decoding a formula's TOML needs a Python with tomllib (3.11 or newer), and PATH has none" >&2
+  exit 2
+fi
+
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-lint-step-text.XXXXXX") || exit 2
 trap 'rm -rf "$WORK"' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 
-# PARSE_AWK reads a formula file and prints, for each shell block in its TOML
-# strings, `F<FS>open<FS>commands<FS>control<FS>words<FS>text<FS>step`; for
-# each line that holds code, `L<FS>line<FS>open`; and for each step,
-# `S<FS>step<FS>id<FS>line`. <FS> is \034, open is the line of the block's
-# opening fence, words names its control flow, text is its code with every
-# newline written as \035, and step is the step's place in the file.
+# DECODE_PY reads a formula file and prints its strings as the agent reads
+# them. It finds each string in the file, of any of TOML's four kinds, outside
+# the comments, and decodes it with the place each character came from. That
+# decoding must equal tomllib's, and the strings it finds must hold every
+# string tomllib reads in the file. It prints, for each step,
+# `S<FS>step<FS>id<FS>line`, and then, for each string, `T<FS>step` for the
+# step it sits in, `R<FS>lines<FS>text` for each line of its decoded text with
+# the file lines that line came from, and `E`. A step is each [[steps]] table,
+# named by its id. Text before the first one is the formula's own, step 0 with
+# an empty name.
+DECODE_PY=$(cat <<'PYEOF'
+import bisect, collections, re, sys, tomllib
+
+def fail(msg):
+    sys.stderr.write(msg + "\n")
+    sys.exit(1)
+
+try:
+    with open(sys.argv[1], "rb") as fh:
+        src = fh.read().decode("utf-8")
+    doc = tomllib.loads(src)
+except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as err:
+    fail(str(err))
+src = src.replace("\r\n", "\n")
+n = len(src)
+eols = [m.start() for m in re.finditer("\n", src)]
+
+def line(pos):
+    return bisect.bisect_left(eols, pos) + 1
+
+# Each string as (start, end, delimiter), and where each [[steps]] line starts.
+# A closing delimiter of three quotes can follow up to two quotes the string
+# holds.
+HEADER = re.compile(r"[ \t]*\[\[[ \t]*(?:steps|\"steps\"|'steps')[ \t]*\]\][ \t]*(?:#.*)?$")
+tokens, headers, i = [], [], 0
+while i < n:
+    if i == 0 or src[i - 1] == "\n":
+        end = src.find("\n", i)
+        if HEADER.match(src, i, n if end < 0 else end):
+            headers.append(i)
+    c = src[i]
+    if c == "#":
+        end = src.find("\n", i)
+        i = n if end < 0 else end
+    elif c in "\"'":
+        q = c * 3 if src.startswith(c * 3, i) else c
+        j = i + len(q)
+        while not src.startswith(q, j):
+            if j >= n or (len(q) == 1 and src[j] == "\n"):
+                fail(f"line {line(i)}: a string the lint finds no end of")
+            j += 2 if c == '"' and src[j] == "\\" else 1
+        if len(q) == 3:
+            for _ in range(2):
+                if src.startswith(c, j + 3):
+                    j += 1
+        tokens.append((i, j + len(q), q))
+        i = j + len(q)
+    else:
+        i += 1
+
+ESCAPES = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", "e": "\x1b", '"': '"', "\\": "\\"}
+HEX = {"x": 2, "u": 4, "U": 8}
+
+# A string's decoded characters, each with the place it came from, or None on
+# an escape this does not know. A multi-line string drops the newline that
+# follows its opening delimiter.
+def decode(start, end, q):
+    pos, stop, out = start + len(q), end - len(q), []
+    if len(q) == 3 and src.startswith("\n", pos):
+        pos += 1
+    while pos < stop:
+        ch = src[pos]
+        if ch == "\\" and q[0] == '"':
+            nx = src[pos + 1]
+            if nx in " \t\n":
+                pos += 1
+                while pos < stop and src[pos] in " \t\n":
+                    pos += 1
+            elif nx in ESCAPES:
+                out.append((ESCAPES[nx], pos))
+                pos += 2
+            elif nx in HEX:
+                try:
+                    out.append((chr(int(src[pos + 2:pos + 2 + HEX[nx]], 16)), pos))
+                except ValueError:
+                    return None
+                pos += 2 + HEX[nx]
+            else:
+                return None
+            continue
+        out.append((ch, pos))
+        pos += 1
+    return out
+
+# A control character other than a tab reads as a blank, so no text carries
+# the record separators.
+PLAIN = {c: " " for c in list(range(32)) + [127] if c != 9}
+
+def rendered(text, lines):
+    span = " ".join(str(x) for x in range(lines[0], lines[-1] + 1))
+    return "R\x1c" + span + "\x1c" + "".join(text).translate(PLAIN)
+
+steps = doc.get("steps")
+named = isinstance(steps, list) and len(steps) == len(headers)
+out = ["S\x1c0\x1c\x1c0"]
+for k, at in enumerate(headers, 1):
+    sid = steps[k - 1].get("id") if named and isinstance(steps[k - 1], dict) else None
+    sid = sid if isinstance(sid, str) else f"#{k}"
+    out.append(f"S\x1c{k}\x1c{sid.translate(PLAIN)}\x1c{line(at)}")
+found = collections.Counter()
+for start, end, q in tokens:
+    want = tomllib.loads("v = " + src[start:end])["v"]
+    chars = decode(start, end, q)
+    if chars is None or "".join(ch for ch, _ in chars) != want:
+        fail(f"line {line(start)}: a string the lint cannot decode the way TOML does")
+    found[want] += 1
+    out.append(f"T\x1c{bisect.bisect_right(headers, start)}")
+    text, lines = [], []
+    for ch, pos in chars:
+        lines.append(line(pos))
+        if ch == "\n":
+            out.append(rendered(text, lines))
+            text, lines = [], []
+        else:
+            text.append(ch)
+    out.append(rendered(text, lines or [line(end - 1)]))
+    out.append("E")
+
+def strings(v):
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, (dict, list)):
+        for x in (v.values() if isinstance(v, dict) else v):
+            yield from strings(x)
+
+missing = collections.Counter(strings(doc)) - found
+if missing:
+    fail(f"a string tomllib reads in the file is not one the lint found there: {next(iter(missing))[:60]!r}")
+sys.stdout.buffer.write(("\n".join(out) + "\n").encode("utf-8", "replace"))
+PYEOF
+) || { echo "$PROG: could not load its decoder" >&2; exit 2; }
+
+# PARSE_AWK reads what DECODE_PY prints for a formula file and prints, for each
+# shell block in its strings,
+# `F<FS>open<FS>commands<FS>control<FS>words<FS>text<FS>step`; for each line of
+# a block's code, `L<FS>line<FS>open`; and each step's S record as it came.
+# <FS> is \034, open is the line of the block's opening fence, words names its
+# control flow, text is its code with every newline written as \035, and step
+# is the step's place in the file.
 PARSE_AWK=$(cat <<'AWKEOF'
 function fill(w,   o) { o = ""; while (w-- > 0) o = o "."; return o }
 function blanks(w,   o) { o = ""; while (w-- > 0) o = o " "; return o }
-# One line of a TOML basic string, decoded. TJOIN is set when the line ends in
-# the line-ending backslash, which joins the next line to this one.
-function toml_decode(s,   out, i, n, c, nx) {
-    out = ""; n = length(s); TJOIN = 0; i = 1
-    while (i <= n) {
-        c = substr(s, i, 1)
-        if (c != "\\") { out = out c; i++; continue }
-        if (substr(s, i + 1) ~ /^[ \t]*$/) { TJOIN = 1; break }
-        nx = substr(s, i + 1, 1)
-        if (nx == "\\" || nx == "\"") out = out nx
-        else if (nx == "n") out = out "\n"
-        else if (nx == "t") out = out "\t"
-        else if (nx == "b" || nx == "f" || nx == "r" || nx == "e") out = out " "
-        else if (nx == "u") { out = out "?"; i += 4 }
-        else if (nx == "U") { out = out "?"; i += 8 }
-        else out = out c nx
-        i += 2
-    }
-    return out
-}
 function word_start(s, i,   p) {
     if (i == 1) return 1
     p = substr(s, i - 1, 1)
@@ -314,13 +453,18 @@ function analyze(s, depth,   m, n, i, subs, cmd, cf, w, lbl) {
     SC_LBL = lbl
     AC_CMD = cmd; AC_CF = cf; AC_W = w
 }
-function finish(   n, i, bl) {
+function finish() {
     analyze(buf, 0)
     fcmd += AC_CMD; fcf += AC_CF; fwords = fwords AC_W
     ftext = ftext buf "\n"
-    n = split(blines, bl, " ")
-    for (i = 1; i <= n; i++) if (bl[i] != "") print "L\034" bl[i] "\034" fopen
+    code_lines(blines)
     buf = ""; blines = ""; bsep = ""; bhd = 0
+}
+# An L record for each of the block's lines not yet recorded.
+function code_lines(lines,   n, i, bl) {
+    n = split(lines, bl, " ")
+    for (i = 1; i <= n; i++)
+        if (bl[i] != "" && !((fopen, bl[i]) in lseen)) { lseen[fopen, bl[i]] = 1; print "L\034" bl[i] "\034" fopen }
 }
 function fence_close(   t) {
     if (!infence) return
@@ -358,9 +502,9 @@ function shell_line(s, lines,   t, i) {
     if (SO > 0) { bsep = "\n"; return }
     finish()
 }
-# A line of a TOML string as the agent reads it, with the physical lines it
-# came from. A fence opens or closes a block; a line inside a shell block is
-# read as shell.
+# A line of a TOML string as the agent reads it, with the file lines it came
+# from. A fence opens or closes a block; a line inside a shell block is read as
+# shell.
 function rendered(s, lines,   first, tag) {
     first = lines; sub(/ .*$/, "", first)
     if (s ~ /^[ \t]*```/) {
@@ -374,73 +518,19 @@ function rendered(s, lines,   first, tag) {
     }
     if (infence && fshell) shell_line(s, lines)
 }
-function string_line(text, nr,   d) {
-    if (strq == "'''") { rendered(text, nr); return }
-    if (tpend) {
-        sub(/^[ \t]+/, "", text)
-        if (text == "") { tlines = tlines " " nr; return }
-    }
-    d = toml_decode(text)
-    if (tpend) { tbuf = tbuf d; tlines = tlines " " nr } else { tbuf = d; tlines = nr }
-    if (TJOIN) { tpend = 1; return }
-    tpend = 0
-    rendered(tbuf, tlines)
-}
-function string_end() {
-    if (tpend) { tpend = 0; rendered(tbuf, tlines) }
-    fence_close()
-}
-# The position of the delimiter that closes the open string on line s, or 0.
-function close_at(s,   p, off) {
-    off = 0
-    while ((p = index(substr(s, off + 1), strq)) > 0) {
-        p += off
-        if (strq == "'''" || p == 1 || substr(s, p - 1, 1) != "\\") return p
-        off = p
-    }
-    return 0
-}
-# A step is each [[steps]] table, named by its id. Text before the first one is
-# the formula's own, step 0 with an empty name.
+# Each record DECODE_PY printed: a step, the step the next string sits in, a
+# line of that string, or its end, which closes a block still open in it.
 # CASE_IN is a case's own `in` on a line of its own, and CASE_LABEL a pattern
 # label: an optional (, one or more patterns joined by |, and the closing ).
 BEGIN {
-    stepn = 0; sid[0] = ""; sline[0] = 0
+    FS = "\034"
     CASE_IN = "^in([ \t\n]|$)"
     CASE_LABEL = "^[(]?[^ \t\n;&|()<>]+([|][^ \t\n;&|()<>]+)*[)]"
 }
-{
-    raw = $0
-    if (!instr) {
-        if (raw ~ /^[ \t]*\[\[[ \t]*steps[ \t]*\]\][ \t]*$/) { stepn++; sid[stepn] = "#" stepn; sline[stepn] = NR; intop = 1; next }
-        if (raw ~ /^[ \t]*\[/) { intop = 0; next }
-        if (intop && !named[stepn] && match(raw, /^[ \t]*id[ \t]*=[ \t]*"[^"]*"/)) {
-            v = substr(raw, RSTART, RLENGTH); sub(/^[ \t]*id[ \t]*=[ \t]*"/, "", v); sub(/"$/, "", v)
-            sid[stepn] = v; named[stepn] = 1
-        }
-        if (match(raw, /^[ \t]*[A-Za-z0-9_.-]+[ \t]*=[ \t]*("""|''')/)) {
-            strq = substr(raw, RSTART + RLENGTH - 3, 3)
-            rest = substr(raw, RSTART + RLENGTH)
-            if (index(rest, strq) == 0) {
-                instr = 1; tpend = 0
-                if (rest != "") string_line(rest, NR)
-            }
-        }
-        next
-    }
-    p = close_at(raw)
-    if (p) {
-        string_line(substr(raw, 1, p - 1), NR)
-        string_end()
-        instr = 0
-        next
-    }
-    string_line(raw, NR)
-}
-END {
-    if (instr) string_end()
-    for (k = 0; k <= stepn; k++) print "S\034" k "\034" sid[k] "\034" sline[k]
-}
+$1 == "S" { print; next }
+$1 == "T" { stepn = $2 + 0; next }
+$1 == "R" { rendered($3, $2); next }
+$1 == "E" { fence_close() }
 AWKEOF
 ) || { echo "$PROG: could not load its parser" >&2; exit 2; }
 
@@ -591,8 +681,14 @@ for f in "${formulas[@]}"; do
   else
     : > "$old"
   fi
-  awk "$PARSE_AWK" "$old" > "$old_rec" || { echo "$PROG: cannot parse $src at $MERGE_BASE" >&2; exit 2; }
-  awk "$PARSE_AWK" "$f" > "$new_rec" || { echo "$PROG: cannot parse $f" >&2; exit 2; }
+  if ! "$PY" -I -c "$DECODE_PY" "$old" > "$WORK/old.$i.str" 2> "$WORK/err"; then
+    echo "$PROG: cannot parse $src at $MERGE_BASE: $(head -c 300 "$WORK/err" | tr '\n' ' ')" >&2; exit 2
+  fi
+  if ! "$PY" -I -c "$DECODE_PY" "$f" > "$WORK/new.$i.str" 2> "$WORK/err"; then
+    echo "$PROG: cannot parse $f: $(head -c 300 "$WORK/err" | tr '\n' ' ')" >&2; exit 2
+  fi
+  awk "$PARSE_AWK" "$WORK/old.$i.str" > "$old_rec" || { echo "$PROG: cannot parse $src at $MERGE_BASE" >&2; exit 2; }
+  awk "$PARSE_AWK" "$WORK/new.$i.str" > "$new_rec" || { echo "$PROG: cannot parse $f" >&2; exit 2; }
   git diff --no-index --no-color --no-ext-diff --histogram -U0 -- "$old" "$f" > "$WORK/diff.$i"
   rc=$?
   [ "$rc" -le 1 ] || { echo "$PROG: cannot diff $f against $src at $MERGE_BASE" >&2; exit 2; }

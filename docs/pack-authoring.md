@@ -140,7 +140,9 @@ substitution that holds a single command is an argument of the command around
 it. A here-document's body is data, not commands.
 
 `tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
-files a change names. It judges only what a change adds. It weighs each step by
+files a change names. It reads every TOML string in a formula as Python's
+`tomllib` decodes it, so it needs a Python 3.11 or newer on PATH. It judges
+only what a change adds. It weighs each step by
 the commands and the control flow of the procedures its blocks hold, and fails
 a step the change makes heavier in either count. A new step fails when it holds
 a procedure at all. A block the change leaves alone, or moves without editing

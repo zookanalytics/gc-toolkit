@@ -220,7 +220,9 @@ it reads, and names its exceptions by file or step.
 ## What the change does with it
 
 Nothing Gas City ships covers the four needs, so the lint is pack code. It
-decodes the TOML strings in a formula, finds the fenced blocks in them and
+decodes the TOML strings in a formula with Python's `tomllib`, the decoder the
+packs' tests use, and ties each decoded line to its file line itself, since
+`tomllib` keeps no positions. It finds the fenced blocks in that text and
 counts their commands itself, with awk, and it reads the merge base, the
 working tree and in-flight heads with git. Its unit is the one Gas City's core
 drain-ack test uses, a fenced shell block of decoded step text, which is what
