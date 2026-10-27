@@ -8,7 +8,7 @@
 # rule + veto and the lift line a bring-current ruling draws on it, which the
 # visit order and the terminal re-read read too, CLEAN/UNSTABLE handling,
 # BLOCKED naming its cause from
-# reviewThreads + reviewDecision, an UNKNOWN merge state read again within one
+# reviewThreads, reviewDecision and the required checks, an UNKNOWN merge state read again within one
 # budget per pass so one pass lands every approved clean PR); the check
 # resolver, whose crash holds the merge and whose absence holds the pass; a
 # broken lane or finalize helper, which holds only its own anchor; the recorded

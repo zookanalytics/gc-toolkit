@@ -132,7 +132,7 @@ func TestAggregatePhaseNeedsAttentionPropagates(t *testing.T) {
 	}
 }
 
-// TestAggregatePhaseClosedChildren proves a closed child (no live tri-state)
+// TestAggregatePhaseClosedChildren proves a closed child (no live state)
 // contributes nothing, and a parent whose children have all closed reads off its
 // own phase again.
 func TestAggregatePhaseClosedChildren(t *testing.T) {
