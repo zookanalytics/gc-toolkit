@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
@@ -705,6 +706,16 @@ func (m *merger) handle(row *gcbd.Bead) {
 				return
 			}
 			if notgreen != "" {
+				// The hold reads every run on the head, a superseded one
+				// included, and the verdict judges each required check by its
+				// newest run, as handleBlocked does. A hold that stands only on a
+				// superseded run lasts until a push moves the head, so it is
+				// blocked.
+				if failed, pending, ok := requiredCheckStates(rollupRaw, reqContexts); ok {
+					if !m.recordCheckVerdict(id, headOid, aroute, failed, pending) {
+						m.recordBlocked(id, headOid, aroute, prstatus.CauseCheckFailed, "a superseded run of a required check holds the merge at "+shortSha(headOid)+" until a push moves the head: "+notgreen)
+					}
+				}
 				fmt.Fprintf(m.stdout, "%s: PR#%s is UNSTABLE and a REQUIRED check is not green at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, notgreen, id)
 				m.held++
 				return
@@ -905,17 +916,33 @@ func (m *merger) handleBlocked(id, num, base, headOid, aroute, reviewDecision st
 			return
 		}
 	}
+	if m.recordCheckVerdict(id, headOid, aroute, failed, pending) {
+		if len(failed) > 0 {
+			fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: required check(s) failed at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(failed, " "), id)
+		} else {
+			fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection while required check(s) run at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(pending, " "), id)
+		}
+		return
+	}
+	m.recordBlocked(id, headOid, aroute, prstatus.CauseRule, "branch protection holds it by a rule other than an unresolved required thread, a missing approval or a required check")
+	fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection by a rule other than an unresolved required thread, a missing approval or a required check (thread-resolution required=%s, approvals required=%d, reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, strconv.FormatBool(threadReq), approvals, rdShown, id)
+}
+
+// recordCheckVerdict records the verdict a PR's required checks give it while
+// one of them is not green, the rule the BLOCKED and UNSTABLE arms share. One
+// that failed at the head is blocked with cause check-failed. One still queued
+// or running, or not yet reported, is progressing. It records nothing and
+// returns false when no required check is failed or pending.
+func (m *merger) recordCheckVerdict(id, headOid, aroute string, failed, pending []string) bool {
 	switch {
 	case len(failed) > 0:
 		m.recordBlocked(id, headOid, aroute, prstatus.CauseCheckFailed, "required check(s) "+strings.Join(failed, ", ")+" failed at "+shortSha(headOid))
-		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: required check(s) failed at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(failed, " "), id)
 	case len(pending) > 0:
 		m.recordMachine(id, "progressing", headOid, aroute)
-		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection while required check(s) run at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(pending, " "), id)
 	default:
-		m.recordBlocked(id, headOid, aroute, prstatus.CauseRule, "branch protection holds it by a rule other than an unresolved required thread, a missing approval or a required check")
-		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection by a rule other than an unresolved required thread, a missing approval or a required check (thread-resolution required=%s, approvals required=%d, reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, strconv.FormatBool(threadReq), approvals, rdShown, id)
+		return false
 	}
+	return true
 }
 
 // mergeInDeferred names what keeps pr-facts.sh's conflict arm from filing a
@@ -1982,35 +2009,98 @@ func rollupFailed(item map[string]any) (isFailed, ok bool) {
 	return set && (s == "FAILURE" || s == "ERROR"), ok
 }
 
-// requiredCheckStates sorts the required contexts that are not green. A context
-// with a row that failed is failed. Any other context not green is pending: a
-// row still queued or running, or no row at all, which GitHub shows as a check
-// expected but not yet reported. ok=false means the rollup is unreadable, as
-// notGreenRequired reads it.
+// rollupStart is when a rollup row's run started: gh prints a check run's
+// startedAt, and a status context's createdAt under the same key. started is
+// false for a run not yet started, whose startedAt is absent, null, empty or the
+// zero instant gh prints for an unset time. ok is false for any other value
+// that is not an RFC 3339 instant.
+func rollupStart(item map[string]any) (at time.Time, started, ok bool) {
+	switch x := item["startedAt"].(type) {
+	case nil:
+		return time.Time{}, false, true
+	case string:
+		if x == "" {
+			return time.Time{}, false, true
+		}
+		t, err := time.Parse(time.RFC3339, x)
+		if err != nil {
+			return time.Time{}, false, false
+		}
+		return t, !t.IsZero(), true
+	}
+	return time.Time{}, false, false
+}
+
+// newestRuns is the rows of a context's newest run: the rows that started last,
+// a run not yet started counting as newer than every run that has. Rows that
+// started at the same instant are all newest. ok=false when a row's start is
+// unreadable.
+func newestRuns(rows []map[string]any, context string) (newest []map[string]any, ok bool) {
+	var last time.Time
+	waiting := false // newest holds runs not yet started
+	for _, item := range rows {
+		if rollupName(item) != context {
+			continue
+		}
+		at, started, sok := rollupStart(item)
+		switch {
+		case !sok:
+			return nil, false
+		case !started:
+			if !waiting {
+				newest, waiting = nil, true
+			}
+			newest = append(newest, item)
+		case waiting:
+			// It started before a run that has not started yet.
+		case newest == nil || at.After(last):
+			newest, last = []map[string]any{item}, at
+		case at.Equal(last):
+			newest = append(newest, item)
+		}
+	}
+	return newest, true
+}
+
+// requiredCheckStates sorts the required contexts that are not green, judging
+// each by its newest run, so a run a re-run on the same head superseded decides
+// nothing. A context whose newest run failed is failed. Any other context not
+// green is pending: its newest run still queued or running, or no row at all,
+// which GitHub shows as a check expected but not yet reported. Rows of one run
+// that started at the same instant are read together, so a failed one is not
+// masked by a green one. ok=false means the rollup is unreadable: every row of a
+// required context is read, as notGreenRequired reads it, and its start too.
 func requiredCheckStates(rollupRaw []byte, required []string) (failed, pending []string, ok bool) {
 	rows, ok := rollupRows(rollupRaw)
 	if !ok {
 		return nil, nil, false
 	}
 	for _, c := range required {
-		isFailed, isGreen, seen := false, true, false
 		for _, item := range rows {
 			if rollupName(item) != c {
 				continue
 			}
-			seen = true
-			g, gok := rollupGreen(item)
-			f, fok := rollupFailed(item)
+			_, gok := rollupGreen(item)
+			_, fok := rollupFailed(item)
 			if !gok || !fok {
 				return nil, nil, false
 			}
+		}
+		newest, nok := newestRuns(rows, c)
+		if !nok {
+			return nil, nil, false
+		}
+		isFailed, isGreen := false, len(newest) > 0
+		for _, item := range newest {
+			g, _ := rollupGreen(item)
+			f, _ := rollupFailed(item)
 			isFailed = isFailed || f
 			isGreen = isGreen && g
 		}
 		switch {
 		case isFailed:
 			failed = append(failed, c)
-		case !seen || !isGreen:
+		case !isGreen:
 			pending = append(pending, c)
 		}
 	}

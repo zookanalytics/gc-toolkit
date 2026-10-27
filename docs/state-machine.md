@@ -687,19 +687,27 @@ records `blocked` only for a cause no automated actor will clear:
 | `pr.machine_cause` | Recorded when |
 |---|---|
 | `review-threads` | branch protection requires resolved review threads and one is unresolved |
-| `check-failed` | a required check failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR` |
+| `check-failed` | a required check's newest run failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR`; or the `UNSTABLE` arm holds the head on a failed run a re-run superseded |
 | `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
 | `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
 | `blocker` | a live blocker holds the anchor, and no automated actor holds any of its live blockers |
-| `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check failed or running |
+| `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check whose newest run failed or is still running |
 
 GitHub reports `BLOCKED` for every unmet rule, so the pass reads the branch's
 rules before it names a cause. An unresolved required thread is
 `review-threads`, an approval still owed is `settled`, and otherwise it reads the
-required checks the way its `UNSTABLE` arm does. One that failed is
-`check-failed`. One still queued or running, or one that has not reported yet
-(GitHub shows it as Expected), is `progressing`, and every required check green
-leaves `rule`. A conflict with nothing in flight is `progressing`, because
+required checks. The check rollup lists every run on the head, so a required
+check re-run on the same head keeps its failed run beside the re-run. The pass
+judges each required check by its newest run, the one started last, and a run
+not yet started is newer than every run that has. A check whose newest run
+failed is `check-failed`. One whose newest run is still queued or running, or
+one that has not reported yet (GitHub shows it as Expected), is `progressing`,
+and every required check's newest run green leaves `rule`. The `UNSTABLE` arm
+holds the merge while any run of a required check on the head is not green, a
+superseded run included, and records the verdict the `BLOCKED` arm records for
+the same required checks. Where only a superseded run holds it, the hold lasts
+until a push moves the head, and the arm records `check-failed`. A conflict with
+nothing in flight is `progressing`, because
 `pr-facts.sh`'s conflict arm files the merge-in rework for an approved PR on its
 next pass. It is `blocked` only when something defers that merge-in: a
 `rebase_hold` on the anchor, an armed re-dispatch, or a `rebase_hold` on any bead
