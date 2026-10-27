@@ -45,10 +45,11 @@ bead carries it, and the operator funds each one.
   scripts under `assets/scripts/`, and the measuring script's rules place the
   other 41 (9.1k lines).
 
-`specs/tk-11l1ejh/measure.sh [REF]` prints a commit's table, and
-`measure.sh BASE HEAD` prints what a change adds net of what it removes. The
-baseline is main at b09345315 (2026-10-25). Every number on this page is
-derived in [the measurement record](../specs/tk-11l1ejh/measurement.md).
+`tools/measure.sh [REF]` prints a commit's table, `measure.sh BASE HEAD`
+prints what a change adds net of what it removes, and `measure.sh --pr BASE
+HEAD` prints a PR's size section ([rule 3](#the-rules)). The baseline is main
+at b09345315 (2026-10-25). Every number on this page is derived in
+[the measurement record](../specs/tk-11l1ejh/measurement.md).
 
 ## The built-once shape, subsystem by subsystem
 
@@ -355,7 +356,6 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P1 | [Rule 3](#the-rules)'s size line: `measure.sh` moves into `tools/`, and each PR's managed summary carries its size change | the tool and the summary line | tk-i17pn6e | this page landing |
 | P3 | One decline call replaces the 20 copies of the decline sequence in step text, under rule 2 | 20 copies, 29 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
 | P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.9k lines of shell in step text, 52 tests of 16.4k lines | tk-udqthpx states the rule and adds its lint, and tk-1tfzr71.12, .19 and .20 apply it to the formulas they rewrite | this page landing, for tk-udqthpx |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
@@ -365,12 +365,11 @@ Each item is carried by the bead it names.
 Every change follows these rules.
 
 1. **Code the deletion plan retires gets no new work.** The plan is the
-   schedule above, with the whole files
-   [the measurement record](../specs/tk-11l1ejh/measurement.md#3-the-scheduled-removals-whole-files)
-   lists for each bead. A problem found in that code goes to the bead that
-   retires it, as a note there, and the problem's own bead waits on that
-   retirement. A problem that hurts the operator now gets the smallest stopgap
-   and no new test suite.
+   schedule above, and [`tools/deletion-plan.tsv`](../tools/deletion-plan.tsv)
+   lists the whole files it retires, each with the bead that retires it. A
+   problem found in that code goes to the bead that retires it, as a note
+   there, and the problem's own bead waits on that retirement. A problem that
+   hurts the operator now gets the smallest stopgap and no new test suite.
 2. **Step text holds no procedures.** A formula step calls a tested script, and
    anything two steps need is one script. Existing step text changes at its own
    rewrite.
@@ -379,16 +378,17 @@ Every change follows these rules.
    names separately the lines the change adds to code the plan retires, and the
    bead that retires each. It carries no budget, no prediction and no stored
    history. The PR's CI test run time can sit beside it as information.
+   `tools/measure.sh --pr` computes it, and each PR's managed summary ends
+   with it as its Size section.
 
 tk-udqthpx states rules 1 and 2 where agents file and route work and where they
 write formula steps, and adds a lint that flags a procedure in the lines a
-formula change adds. tk-i17pn6e puts rule 3's line in each PR's managed
-summary. Both are armed to start when this page lands. Until they land, an
-agent meets the rules only on this page, and `measure.sh BASE HEAD` computes a
-change's net by hand, without the split for code the plan retires.
+formula change adds. Until it lands, an agent meets those two rules only on
+this page.
 
 ## Keeping it true
 
-- A change that lands a schedule row removes the row.
+- A change that lands a schedule row removes the row, and a change that
+  retires a file removes its row from `tools/deletion-plan.tsv`.
 - A change that completes a stage of the schedule re-measures the baseline
   table, so the baseline is never more than one stage old.
