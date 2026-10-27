@@ -114,8 +114,7 @@ type Facts struct {
 	PRPosture string
 	// PRMachine is metadata.pr.machine, stored value@oid@instant: what the merge
 	// cadence can do with the anchor on its next pass (progressing, settled or
-	// blocked). Only blocked moves the state, and only at the posture's head,
-	// since a verdict at another head was reached about a different commit.
+	// blocked). Only blocked moves the state, by the rule [Blocked] states.
 	PRMachine string
 	// PRMachineCause is metadata.pr.machine_cause, one of the Cause values,
 	// recorded beside a blocked verdict and read only while the verdict is
@@ -150,9 +149,10 @@ func Derive(f Facts) State {
 	if isSet(f.MergeHold) || isSet(f.RebaseHold) || f.OpenVisit {
 		return NeedsAttention
 	}
-	// A recorded value outside the vocabulary its writer declares is a state
-	// the derivation cannot name.
-	if !knownPosture(posture) || !knownMachine(machine) || (machine == "blocked" && !knownCause(f.PRMachineCause)) {
+	// A recorded posture or verdict outside the vocabulary its writer declares
+	// is a state the derivation cannot name. [Blocked] reads a blocked verdict's
+	// cause the same way.
+	if !knownPosture(posture) || !knownMachine(machine) {
 		return NeedsAttention
 	}
 	// The merge pass's blocked verdict, while it holds the PR.
@@ -179,7 +179,9 @@ func Derive(f Facts) State {
 // reads a blocked verdict by it too, for a row's owed bit and needs phrase, so
 // its queue and its chip read the verdict the same way.
 //
-// The verdict counts at the head the posture was read at, since a verdict at
+// A verdict whose cause is outside the vocabulary is one the derivation cannot
+// name, so it holds the PR wherever it was recorded, whatever is in flight. Any
+// other verdict counts at the head the posture was read at, since a verdict at
 // another head was reached about a different commit. The pass records most
 // causes only with nothing in flight, so live work that arrives afterwards is
 // the city acting on the cause, and the next pass replaces the verdict. The
@@ -190,7 +192,13 @@ func Derive(f Facts) State {
 func Blocked(f Facts) bool {
 	_, postureHead := splitDated(f.PRPosture)
 	machine, machineHead := splitDated(f.PRMachine)
-	return machine == "blocked" && (postureHead == "" || machineHead == postureHead) &&
+	if machine != "blocked" {
+		return false
+	}
+	if !knownCause(f.PRMachineCause) {
+		return true
+	}
+	return (postureHead == "" || machineHead == postureHead) &&
 		(f.InFlightCount == 0 || f.PRMachineCause == CauseBlocker)
 }
 

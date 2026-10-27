@@ -85,6 +85,9 @@ func TestBlocked(t *testing.T) {
 		{"the blocker cause, whatever is in flight", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 2}, true},
 		{"the blocker cause on an unapproved PR", Facts{PRPosture: "review_required@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 1}, true},
 		{"the blocker cause at a head the posture has left", Facts{PRPosture: "approved@new@t", PRMachine: "blocked@old@t", PRMachineCause: CauseBlocker}, false},
+		{"a cause outside the vocabulary at a head the posture has left", Facts{PRPosture: "approved@new@t", PRMachine: "blocked@old@t", PRMachineCause: "mystery"}, true},
+		{"a cause outside the vocabulary with city work in flight", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: "mystery", InFlightCount: 1}, true},
+		{"a cause beside a verdict that is not blocked", Facts{PRPosture: "approved@oid@t", PRMachine: "settled@oid@t", PRMachineCause: "mystery"}, false},
 		{"a verdict that is not blocked", Facts{PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, false},
 		{"no verdict recorded", Facts{PRPosture: "approved@oid@t"}, false},
 	} {

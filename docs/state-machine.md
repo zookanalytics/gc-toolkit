@@ -578,7 +578,9 @@ work on an unapproved PR comes before the verdict it leads to, and the verdict
 is what remains when neither stands. A hold that only a human can release reads
 `needs-attention` with no rule of its own.
 
-A blocked machine verdict holds the PR only at the head the posture was read at,
+A blocked machine verdict whose cause is outside its writer's vocabulary holds
+the PR wherever it was recorded, as any state the derivation cannot name does.
+Any other blocked verdict holds the PR only at the head the posture was read at,
 because a verdict at another head was reached about another commit. It holds
 only while nothing is in flight on the anchor: the merge pass records most
 causes only when no live bead holds the merge, so work that arrives afterwards

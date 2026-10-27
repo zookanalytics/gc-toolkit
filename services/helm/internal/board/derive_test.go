@@ -2813,6 +2813,50 @@ func TestBlockerCauseWithAPoolRoutedBlockerIsOwed(t *testing.T) {
 	}
 }
 
+// TestBlockedWithAnUnnamedCauseIsOwed: a blocked verdict whose cause is outside
+// the vocabulary is a state the derivation cannot name, so the chip reads
+// needs-attention wherever the verdict was recorded and whatever is in flight.
+// The owed queue reads it by the same rule, at a head the posture has left and
+// with a rework child in flight alike: the row stays owed from the verdict's
+// own stamp, and its needs phrase names the block.
+func TestBlockedWithAnUnnamedCauseIsOwed(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	reason := "a cause this build has no word for"
+	moved := mergeAnchor("tk-skew-moved", map[string]string{
+		mdPRMachine:       dated(MachineBlocked, "oldhead", at),
+		mdPRMachineCause:  "mystery",
+		mdPRMachineReason: reason,
+		mdPRPosture:       dated(postureApproved, headLive, at),
+		mdPRNumber:        "881",
+	})
+	fixing := mergeAnchor("tk-skew-fixing", map[string]string{
+		mdPRMachine:       dated(MachineBlocked, headLive, at),
+		mdPRMachineCause:  "mystery",
+		mdPRMachineReason: reason,
+		mdPRPosture:       dated(postureApproved, headLive, at),
+		mdPRNumber:        "882",
+	}, Blocker{ID: "tk-skew-fixing.rw", Title: "Rework branch polecat/tk-skew-fixing", Status: "open", IssueType: "task"})
+	kid := Anchor{ID: "tk-skew-fixing.rw", Title: "Rework branch polecat/tk-skew-fixing", Kind: "rework", Source: kindRework,
+		Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{mdAnchorBead: "tk-skew-fixing"}}
+
+	b := BuildBoard([]Anchor{moved, fixing, kid}, fixtureNow, false, nil, Facts{})
+	for _, id := range []string{"tk-skew-moved", "tk-skew-fixing"} {
+		tile := mustTile(t, b, id)
+		if tile.PRPhase != PhaseNeedsAttention || tile.Phase != PhaseNeedsAttention {
+			t.Fatalf("%s: test premise: a cause the derivation cannot name holds the chip: pr_phase=%q phase=%q", id, tile.PRPhase, tile.Phase)
+		}
+		if !tile.Owed || !tile.PROwedSince.Equal(at) {
+			t.Errorf("%s: a verdict the chip counts is owed from its own stamp: owed=%v since=%v, want since %v", id, tile.Owed, tile.PROwedSince, at)
+		}
+		if tile.Needs != "blocked: "+reason {
+			t.Errorf("%s: needs names the block the chip reads, got %q", id, tile.Needs)
+		}
+		if tile.PRMachine != MachineBlocked {
+			t.Errorf("%s: pr_machine = %q, want %q", id, tile.PRMachine, MachineBlocked)
+		}
+	}
+}
+
 // TestBlockedReasonlessStillNeedsAttention. A blocked verdict whose reason write
 // dropped still owes the row and phases it needs-attention, falling back to a
 // generic sentence rather than reading as settled.
