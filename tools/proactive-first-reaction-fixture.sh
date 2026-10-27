@@ -606,11 +606,10 @@ has "…or files the missing one, deduped by cause"        "--blocker-key" "$D"
 # as ruling, but names the execution mol the operator Accepts — the flag ruling
 # rejects and recommend requires, so its presence discriminates the two exits.
 has "the recommend exit names the execution mol to Accept" "--recommended-formula" "$D"
-# The reaction produces the human gate and the sweep files its visit, so the
-# operator's escalation has one producer and one visit rule.
-has "the ruling and recommend exits file the gate through demand" '"$HELM" demand' "$D"
+# The reaction files the human gate itself, through the helper, and the board
+# is how that gate reaches the operator.
+has "the ruling and recommend exits file the gate through the helper" 'human-gate.sh' "$D"
 absent "…and file no visit inline"                       "# >>> gate-visit" "$D"
-has "…naming the sweep that files the gate's visit"      "gate-visit-sweep" "$D"
 # The close exit routes to the pool that validates and closes, never a close here.
 has "the close exit hands the bead to the validating closer" "mol-validate-close" "$D"
 has "the completion marker names the reaction bead"      "gc.reacted_by" "$D"

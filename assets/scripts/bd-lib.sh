@@ -8,8 +8,7 @@
 # per-rig key an order's state lives under, and the pass lock that lets an order
 # run one pass at a time. Sourced, never executed.
 #
-# A caller resolves this file beside itself and sources it, the way
-# visit-identity.sh is sourced:
+# A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
 #   . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh" >&2; exit 1; }
 #
