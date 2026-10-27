@@ -101,7 +101,7 @@ it:
   `rigs/gc-toolkit/assets/scripts/gc-helm.sh` (its header documents every
   `--json` field). Re-capture a fresh snapshot with:
   `bash rigs/gc-toolkit/assets/scripts/gc-helm.sh board --json`
-  (run from the city root, `/home/zook/loomington`).
+  (run from the city root, `/home/zook/mycity`).
 
 ---
 

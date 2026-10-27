@@ -228,7 +228,9 @@ hold_read() {
 # The rig and order registries are read at once, in the background. The store
 # scans wait only on the rig list; the order registry is needed only once their
 # reports are judged.
-read_to "$WORK/rigs.json" gc rig list --json </dev/null >/dev/null 2>&1 & rigs_pid=$!
+# rig-map.sh reads the rig map, and names on stderr why it did not.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+read_to "$WORK/rigs.json" "$RIG_MAP" </dev/null >/dev/null 2>&1 & rigs_pid=$!
 read_to "$WORK/orders.json" gc order list --json </dev/null >/dev/null 2>&1 & orders_pid=$!
 
 wait "$rigs_pid"; rigs_rc=$?
@@ -238,7 +240,7 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether owed deferred dispatches are firing"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
     rigs_err=$(err_of "$WORK/rigs.json")
-    [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
+    [ -n "$rigs_err" ] && detail "$rigs_err"
     exit 1
 fi
 

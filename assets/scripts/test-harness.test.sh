@@ -14,8 +14,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-test-harness-test.XXXXXX")"; trap 'rm -rf
 # writer, an inherited gctk binary path and forced fallback, and the build a
 # suite makes before harness_init (harness_build_gctk sets GCTK_BUILT pre-init
 # because the stub git must not answer the Go build).
-export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=loomington
-export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=lx-live
+export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=mycity
+export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=hq-live
 export GC_TRIGGER_BEAD_ID=tk-live GC_RIG_ROOT=/live/rigs/gc-toolkit
 export BEADS_DIR=/live/beads BEADS_ACTOR=live-actor
 export GC_QUEUE_PRIORITY_TOOL=/live/rigs/gc-toolkit/assets/scripts/queue-priority.sh
@@ -240,11 +240,11 @@ eq "$(bstatus new-9)|$(gc bd dep list tk-anc --direction=down -t blocks --json |
 store '[{"id":"tk-u","status":"open","assignee":"","title":"u","notes":"first","description":"","metadata":{"keep":"k","gone":"g","typed":"old"}},{"id":"tk-v","status":"open","assignee":"","title":"v","notes":"","metadata":{}}]'
 gc bd update tk-u --set-metadata typed=1 --set-metadata "eq=a=b" --set-metadata flag=true \
   --set-metadata typed=2.5 --set-metadata nul=null --set-metadata txt=" 007 " --unset-metadata gone \
-  --assignee lx-one --status=in_progress --append-notes "second" --description "d1" --json >/dev/null
+  --assignee hq-one --status=in_progress --append-notes "second" --description "d1" --json >/dev/null
 eq "$(jq -c '.[] | select(.id == "tk-u") | .metadata' "$STUB_STORE")" \
   '{"keep":"k","typed":2.5,"eq":"a=b","flag":true,"nul":null,"txt":" 007 "}' \
   "update: every set lands typed as bd types it, the later value of a repeated key wins, a value keeps its own = and the unset is gone"
-eq "$(bassignee tk-u)" "lx-one" "update: the assignee rides the same call"
+eq "$(bassignee tk-u)" "hq-one" "update: the assignee rides the same call"
 eq "$(bstatus tk-u)" "in_progress" "update: …and so does the status"
 eq "$(notes tk-u)" $'first\nsecond' "update: a note is appended on its own line"
 eq "$(jq -r '.[] | select(.id == "tk-u") | .description' "$STUB_STORE")" "d1" "update: …and the description lands"
@@ -252,10 +252,10 @@ eq "$(jq -c '.[] | select(.id == "tk-v")' "$STUB_STORE")" '{"id":"tk-v","status"
   "update: the other beads are untouched"
 gc bd update tk-v --append-notes "only" >/dev/null
 eq "$(notes tk-v)" "only" "update: the first note takes no leading newline"
-STUB_DROP_KEYS="tk-u:status,typed,assignee" gc bd update tk-u --status=closed --set-metadata typed=9 --set-metadata other=o --assignee lx-two --unset-metadata keep >/dev/null
+STUB_DROP_KEYS="tk-u:status,typed,assignee" gc bd update tk-u --status=closed --set-metadata typed=9 --set-metadata other=o --assignee hq-two --unset-metadata keep >/dev/null
 eq "$(bstatus tk-u)" "in_progress" "update: a dropped status leaves the bead as it was"
 eq "$(meta tk-u typed)" "2.5" "update: …and a dropped metadata key keeps its old value"
-eq "$(bassignee tk-u)" "lx-one" "update: …and a dropped assignee is not written"
+eq "$(bassignee tk-u)" "hq-one" "update: …and a dropped assignee is not written"
 eq "$(meta tk-u other)" "o" "update: …while the keys the knob does not name still land"
 eq "$(meta tk-u keep)" "<absent>" "update: …including an unset"
 eq "$(jq 'length' "$STUB_STORE")" "2" "update: no bead is lost to a dropped field"
@@ -291,7 +291,7 @@ eq "$(meta tk-s gc.execution_routed_to)" "<absent>" "sling: …and leaves the st
 # --status=closed` never runs the check. A caller that drops its --force passes
 # against a stub that refuses nothing, so the refusal is pinned here, and so is
 # the default: with the knob unset any actor closes, as every other suite expects.
-store '[{"id":"tk-held","status":"in_progress","assignee":"lx-sitting","title":"h","notes":"","metadata":{}},{"id":"tk-free","status":"open","assignee":"","title":"f","notes":"","metadata":{}},{"id":"tk-mine","status":"open","assignee":"rig/refinery","title":"m","notes":"","metadata":{}},{"id":"tk-upd","status":"in_progress","assignee":"lx-sitting","title":"u","notes":"","metadata":{}},{"id":"tk-off","status":"in_progress","assignee":"lx-sitting","title":"o","notes":"","metadata":{}}]'
+store '[{"id":"tk-held","status":"in_progress","assignee":"hq-sitting","title":"h","notes":"","metadata":{}},{"id":"tk-free","status":"open","assignee":"","title":"f","notes":"","metadata":{}},{"id":"tk-mine","status":"open","assignee":"rig/refinery","title":"m","notes":"","metadata":{}},{"id":"tk-upd","status":"in_progress","assignee":"hq-sitting","title":"u","notes":"","metadata":{}},{"id":"tk-off","status":"in_progress","assignee":"hq-sitting","title":"o","notes":"","metadata":{}}]'
 as_refinery() { STUB_ENFORCE_CLOSE_OWNER=1 BEADS_ACTOR=rig/refinery gc bd "$@" >/dev/null 2>&1; }
 as_refinery close tk-held --reason r; rc=$?
 eq "$rc" "1" "close: a bead assigned to another actor is refused without --force"

@@ -25,7 +25,7 @@
 #     session (an operator's shell running gc-helm.sh) reaches the same city;
 #   * refusals with no request and no write: no identity, an ambiguous step, a
 #     step naming no root, a bead that is not a workflow root, usage errors;
-#   * the SUBSTRING trap: session lx-zzk must not own lx-zzk9's bead.
+#   * the SUBSTRING trap: session hq-zzk must not own hq-zzk9's bead.
 #
 # No live city, Dolt, network, or beads: a tmpdir, a `gc` stub over a JSON
 # store, a `curl` stub that answers from a queue, and the script itself.
@@ -168,15 +168,15 @@ cat > "$GC_HOME/cities.toml" <<'TOML'
 
 [[cities]]
   path = "/srv/town"
-  name = "loomington"
+  name = "mycity"
 TOML
 export GC_CITY_PATH="/srv/town"
 
-MINE="gc-toolkit__polecat-lx-98h2m"
-export GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-98h2m"
+MINE="gc-toolkit__polecat-hq-98h2m"
+export GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-98h2m"
 
 STEP="mol-polecat-work.load-context"
-URL="http://127.0.0.1:8372/v0/city/loomington/runs/tk-root/cancel"
+URL="http://127.0.0.1:8372/v0/city/mycity/runs/tk-root/cancel"
 
 # The live molecule shape: a routed root, this session's in_progress load-context,
 # pre-assigned open siblings, the dispatcher's finalize step; and an unrelated
@@ -262,11 +262,11 @@ has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "blocked tier: the step's root"
 
 # ── 5. the substring trap ────────────────────────────────────────────────────
 reset
-export GC_SESSION_NAME="gc-toolkit__polecat-lx-98h2" GC_SESSION_ID="lx-98h2"
+export GC_SESSION_NAME="gc-toolkit__polecat-hq-98h2" GC_SESSION_ID="hq-98h2"
 run --step "$STEP" --reason r
-eq "$RC" 2 "substring: session lx-98h2 owns none of lx-98h2m's beads"
+eq "$RC" 2 "substring: session hq-98h2 owns none of hq-98h2m's beads"
 eq "$(calls)" 0 "substring: no request"
-export GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-98h2m"
+export GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-98h2m"
 
 # ── 6. refusals: no identity, no root, not a root ────────────────────────────
 reset
@@ -398,7 +398,7 @@ eq "$(calls)" 1 "4xx: one request"
 reset
 printf '[supervisor]\nbind = "0.0.0.0"\nport = 9911\n\n[other]\nport = 1\n' > "$GC_HOME/supervisor.toml"
 run --root tk-root --reason r
-has "$(cat "$CURL_LOG")" "POST http://127.0.0.1:9911/v0/city/loomington/runs/tk-root/cancel" "supervisor.toml: a wildcard bind is loopback, the port is [supervisor]'s"
+has "$(cat "$CURL_LOG")" "POST http://127.0.0.1:9911/v0/city/mycity/runs/tk-root/cancel" "supervisor.toml: a wildcard bind is loopback, the port is [supervisor]'s"
 reset
 printf '[supervisor]\nbind = "::1"\n' > "$GC_HOME/supervisor.toml"
 run --root tk-root --reason r

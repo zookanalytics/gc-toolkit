@@ -169,7 +169,7 @@ if [ -n "$STEP" ]; then
   fi
 
   # `index` is exact element equality; `inside` and `contains` match
-  # substrings, which would let session lx-zzk own lx-zzk9's bead.
+  # substrings, which would let session hq-zzk own hq-zzk9's bead.
   verify() { # <id> -> its status when it is this session's bead for $STEP
     local json
     [ -n "$1" ] || return 1

@@ -178,7 +178,7 @@ a directory this order does not own: `QUOTA_PARK_STATE_DIR` defaults inside the
 shared city runtime dir and is an override besides, and a session id is not a
 rare shape for a filename. A bare `rm -f "$STATE_DIR/<id>"` is therefore not
 "end the episode" but "delete whatever is at that name" — reproduced during
-review with an unrelated regular file at `$STATE_DIR/lx-clean`, destroyed by one
+review with an unrelated regular file at `$STATE_DIR/hq-clean`, destroyed by one
 clean sweep. The week-old prune below already had a narrow ownership test;
 what it did not have was the every-five-minutes paths using it. Now all three
 share one: directly in `STATE_DIR`, a regular file and not a symlink, named like
@@ -290,11 +290,11 @@ So the classification stays in this script — no LLM, no pane text out — and 
 patrols read it through a closed-field surface:
 
 ```
-$ quota-park-nudge.sh --status lx-gsnfk
+$ quota-park-nudge.sh --status hq-gsnfk
 heartbeat_age=48
 heartbeat_fresh=1
 stale_after=1800
-session=lx-gsnfk quota_park=yes detector_class=possessive-limit age_s=8400 parked_for=2h20m attempts=5 unconfirmed=0 escalated=1 last_seen_age=48 reason=-
+session=hq-gsnfk quota_park=yes detector_class=possessive-limit age_s=8400 parked_for=2h20m attempts=5 unconfirmed=0 escalated=1 last_seen_age=48 reason=-
 ```
 
 Every value is an integer this script computed, a label from `detector_class`'s

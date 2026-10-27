@@ -10,7 +10,7 @@ description: The draft PRD that restates decision bead tk-yrio as problem, goals
 > authoritative brief and the PRD substance — this document re-structures its converged
 > framing into PRD form for the review/design legs; it does **not** re-derive the framing
 > or introduce new scope. Where this PRD and tk-yrio disagree, **tk-yrio wins.** Read
-> tk-yrio in full: `gc bd show tk-yrio --db /home/zook/loomington/rigs/gc-toolkit/.beads`.
+> tk-yrio in full: `gc bd show tk-yrio --db /home/zook/mycity/rigs/gc-toolkit/.beads`.
 >
 > This is a draft. Breadth over polish; uncertainty is exposed, not hidden.
 

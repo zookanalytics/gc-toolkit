@@ -217,7 +217,7 @@ IT_STARTED="${IT_STARTED-2026-07-22T19:03:00Z}"
 IT_CLAIMED="${IT_CLAIMED-}"
 IT_CLOSED="${IT_CLOSED-2026-07-22T19:11:00Z}"
 IT_SESSION="${IT_SESSION-gascity--gascity__polecat-1-pool}"
-IT_SESSION_ID="${IT_SESSION_ID-lx-iter1}"
+IT_SESSION_ID="${IT_SESSION_ID-hq-iter1}"
 UPDATE_FAILS="${UPDATE_FAILS-0}"
 EOF
 }
@@ -470,7 +470,7 @@ assert_call "the entry carries when work began"      '"started_at":"2026-07-22T1
 assert_call "the entry carries when work ended"      '"closed_at":"2026-07-22T19:11:00Z"'
 assert_call "the entry carries when the check ran"   '"checked_at":"20'
 assert_call "the entry names the session"            '"session":"gascity--gascity__polecat-1-pool"'
-assert_call "the entry names the session id"         '"session_id":"lx-iter1"'
+assert_call "the entry names the session id"         '"session_id":"hq-iter1"'
 assert_call "a green gate records verdict=pass"      '"verdict":"pass"'
 
 # Repeated "error" is a wedged loop; repeated "incomplete" is a loop making

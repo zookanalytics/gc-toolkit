@@ -75,11 +75,11 @@ command -v jq >/dev/null 2>&1 || exit 0
 # The repository every gh call is pinned to — resolved from the SUBJECT's rig
 # origin, never gh's movable current repo, and never the caller's cwd: engage
 # and dismiss are launched from the board, outside any rig checkout, where a cwd
-# origin lookup resolves nothing and the reminder would silently never post. gc
-# rig list maps the subject's id prefix to its repo path; cwd is the fallback for
+# origin lookup resolves nothing and the reminder would silently never post. The
+# rig map maps the subject's id prefix to its repo path; cwd is the fallback for
 # a caller that already runs inside the subject's rig (the converse close paths).
 ORIGIN_HOST=""; ORIGIN_REPO=""; ORIGIN_REPO_Q=""
-REPO_DIR=$(gc rig list --json 2>/dev/null | scrub \
+REPO_DIR=$("$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/rig-map.sh" \
   | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .path' 2>/dev/null | head -n1)
 if [ -n "$REPO_DIR" ] && [ -d "$REPO_DIR" ]; then
   u=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null | tr -d '[:space:]')

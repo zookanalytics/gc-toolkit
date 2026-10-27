@@ -11,7 +11,7 @@ metadata:
 As of 2026-07-23 the refinery reconcile block's `reconcile-merged-prs.sh` has a
 LIVE stale-gate self-heal arm (WS4 GAP1). For an OPEN gating anchor whose
 `check.codex=green@<oid>` and whose PR head advanced PAST `<oid>` with NO rework
-bead filed (a direct push / operator fixup — the su-PR#31 stall), it files a
+bead filed (a direct push / operator fixup), it files a
 codex RE-REVIEW child at the live head, routed to `--review-pool`, anchored to
 the gating anchor (`anchor_bead` + BLOCKS edge), bounded one-per-head via
 `stale_gate_head`. This is the case [[refinery-merge-gate-human-approval]] calls

@@ -70,35 +70,35 @@ done
 # tk-gated       a work bead on a human gate, still naming its dead polecat
 fixture() {
   store '[
-    {"id":"gc-bound","status":"open","assignee":"s-lx-wisp-tjt3y","title":"visit: gc-ycww6 — a question",
+    {"id":"gc-bound","status":"open","assignee":"s-hq-wisp-tjt3y","title":"visit: gc-ycww6 — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
-    {"id":"gc-del","status":"open","assignee":"s-lx-wisp-de\u007fl","title":"visit: gc-7del — a question",
+    {"id":"gc-del","status":"open","assignee":"s-hq-wisp-de\u007fl","title":"visit: gc-7del — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-7del"}},
-    {"id":"gc-bound-open","status":"open","assignee":"s-lx-wisp-12neh","title":"visit: gc-2ddu7 — a question",
+    {"id":"gc-bound-open","status":"open","assignee":"s-hq-wisp-12neh","title":"visit: gc-2ddu7 — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7"}},
     {"id":"gc-claimed","status":"in_progress","assignee":"gascity/gc-toolkit.gc-claimed","title":"visit: gc-3abc — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-3abc",
-                 "gc.session_id":"lx-wisp-gone","gc.session_name":"s-lx-wisp-gone"}},
-    {"id":"gc-starting","status":"open","assignee":"s-lx-wisp-new","title":"visit: gc-4abc — a question",
+                 "gc.session_id":"hq-wisp-gone","gc.session_name":"s-hq-wisp-gone"}},
+    {"id":"gc-starting","status":"open","assignee":"s-hq-wisp-new","title":"visit: gc-4abc — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-4abc"}},
     {"id":"gc-live","status":"in_progress","assignee":"gascity/gc-toolkit.gc-live","title":"visit: gc-5abc — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-5abc",
-                 "gc.session_id":"lx-wisp-live","gc.session_name":"s-lx-wisp-live"}},
+                 "gc.session_id":"hq-wisp-live","gc.session_name":"s-hq-wisp-live"}},
     {"id":"gc-parked","status":"open","assignee":"","title":"visit: gc-6abc — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-6abc"}},
     {"id":"tk-gated","status":"open","assignee":"","title":"a work bead on a merge gate",
-     "metadata":{"gc.routed_to":"human","gc.session_id":"lx-dead","branch":"polecat/tk-gated"}}
+     "metadata":{"gc.routed_to":"human","gc.session_id":"hq-dead","branch":"polecat/tk-gated"}}
   ]'
   : > "$STUB_GC_LOG"
 }
-# gc session list omits a closed session, so lx-wisp-tjt3y, lx-wisp-gone and
-# lx-dead are absent. An open failed-create row is listed under that state.
+# gc session list omits a closed session, so hq-wisp-tjt3y, hq-wisp-gone and
+# hq-dead are absent. An open failed-create row is listed under that state.
 cat > "$TMP/sessions.json" <<'JSON'
 {"ok":true,"sessions":[
-  {"id":"lx-wisp-live","alias":"gascity/gc-toolkit.gc-live","session_name":"s-lx-wisp-live","state":"active"},
-  {"id":"lx-wisp-new","alias":"gascity/gc-toolkit.gc-starting","session_name":"s-lx-wisp-new","state":"start-pending"},
-  {"id":"lx-wisp-12neh","session_name":"s-lx-wisp-12neh","state":"failed-create"},
-  {"id":"lx-witness","alias":"gascity/gc-toolkit.witness","session_name":"gascity--witness","state":"active"}
+  {"id":"hq-wisp-live","alias":"gascity/gc-toolkit.gc-live","session_name":"s-hq-wisp-live","state":"active"},
+  {"id":"hq-wisp-new","alias":"gascity/gc-toolkit.gc-starting","session_name":"s-hq-wisp-new","state":"start-pending"},
+  {"id":"hq-wisp-12neh","session_name":"s-hq-wisp-12neh","state":"failed-create"},
+  {"id":"hq-witness","alias":"gascity/gc-toolkit.witness","session_name":"gascity--witness","state":"active"}
 ]}
 JSON
 export STUB_SESSIONS="$TMP/sessions.json"
@@ -175,7 +175,7 @@ for id in gc-bound gc-bound-open gc-claimed gc-del; do
   eq "$(board_reads "$id")" "engaged" "(premise) before the patrol the board reads $id as engaged"
 done
 eq "$(bash "$TMP/candidate-pipeline.sh" 2>/dev/null | awk '$1 == "gc-del" {print $2 " " $3}')" \
-   "s-lx-wisp-del s-lx-wisp-del:open:s-lx-wisp-del" \
+   "s-hq-wisp-del s-hq-wisp-del:open:s-hq-wisp-del" \
    "(premise) the listing reads gc-del's binding without the DEL the store holds"
 
 echo "--- one patrol cycle ---"
@@ -213,10 +213,10 @@ echo "--- a visit engage re-binds after the listing ---"
 # disposal is handed the claim the row listed, so it leaves the fresh binding
 # alone and reports a skip, which the patrol records as no recovery.
 fixture
-eq "$(patrol_pass 'map(if .id == "gc-bound" then .assignee = "s-lx-wisp-fresh" else . end)' | sort | paste -sd ',' -)" \
+eq "$(patrol_pass 'map(if .id == "gc-bound" then .assignee = "s-hq-wisp-fresh" else . end)' | sort | paste -sd ',' -)" \
    "gc-bound absent skipped,gc-bound-open failed-create disposed,gc-claimed absent disposed,gc-del absent disposed,gc-live active owned,gc-starting start-pending owned" \
    "the visit re-bound after the listing is skipped, and the cycle releases the others"
-eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives the cycle"
+eq "$(bassignee gc-bound)" "s-hq-wisp-fresh" "the fresh binding survives the cycle"
 eq "$(grep -c -E '^bd update gc-bound ' "$STUB_GC_LOG")" "0" "the re-bound visit takes no write"
 eq "$(meta gc-bound gc.takeaway)" "<absent>" "and no headline is written over it"
 

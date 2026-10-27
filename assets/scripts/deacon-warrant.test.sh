@@ -32,7 +32,7 @@ extract() { awk -v n="$1" '
 # which is the deacon's documented, correct input.
 render() { printf '%s\n' "$1" \
   | sed 's|{{binding_prefix}}|gc-toolkit.|g' \
-  | sed 's|<session>|lx-wisp-dq|g' \
+  | sed 's|<session>|hq-wisp-dq|g' \
   | sed 's|<rig>/<role>|gc-toolkit/gc-toolkit.deacon|g' \
   | sed 's|<what is stale and for how long>|wisp stale 30m|g'; }
 
@@ -97,7 +97,7 @@ STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export GC_RIG_ROOT="$RIGROOT" GC_RIG=gc-toolkit
-export STUB_SESSIONS='{"sessions":[{"id":"lx-wisp-dq","alias":"gc-toolkit/gc-toolkit.deacon","session_name":"gc-toolkit--gc-toolkit__deacon","state":"active"}]}'
+export STUB_SESSIONS='{"sessions":[{"id":"hq-wisp-dq","alias":"gc-toolkit/gc-toolkit.deacon","session_name":"gc-toolkit--gc-toolkit__deacon","state":"active"}]}'
 
 render "$WARRANT" > "$TMP/warrant.sh"
 bash -n "$TMP/warrant.sh" && ok "rendered deacon warrant block is valid bash" || bad "deacon warrant block failed bash -n"
@@ -119,7 +119,7 @@ echo "# a fresh filing: the warrant the deacon files is unchanged, and it is led
 reset
 run
 has "$LOG" 'bd create' "a warrant is filed"
-eq "$(mget 'warrant.target')" "lx-wisp-dq" "warrant.target is the session id, as the deacon's correct pattern always had it"
+eq "$(mget 'warrant.target')" "hq-wisp-dq" "warrant.target is the session id, as the deacon's correct pattern always had it"
 has "$LOG" 'Stuck: gc-toolkit/gc-toolkit.deacon' "the role is what the title names"
 eq "$(mget 'warrant.requester')" "deacon" "requester is deacon"
 eq "$(mget 'gc.routed_to')" "gc-toolkit.dog" "routed at the dog, binding_prefix rendered"
@@ -127,7 +127,7 @@ has "$LEDGER" 'append warrant' "the fresh filing is ledgered"
 has "$LEDGER" 'bead:tk-w1' "with the filed warrant id"
 
 echo "# a repeat for the same session is not re-ledgered (ledger the filing, not the skip)"
-# the store still holds tk-w1 for lx-wisp-dq from the previous run
+# the store still holds tk-w1 for hq-wisp-dq from the previous run
 run
 hasnt "$LOG" 'bd create' "no second warrant is filed"
 eq "$LEDGER" "" "and the skip writes no ledger line"

@@ -439,10 +439,10 @@ sitting_is_gone() {
 
 # ── Rig enumeration ──────────────────────────────────────────────────
 # Sets RIGS (JSON array of {name,path,prefix,hq,suspended}, plus running on the
-# HQ row; city-liveness.sh's RIG_PROJECTION_JQ); exits 3 with a per-cause
-# sentence otherwise. Each failure names its own operator move because for a
+# HQ row; city-liveness.sh's RIG_PROJECTION_JQ); exits 3 otherwise. For a
 # non-CLI caller (the web board's open button) the code plus the sentence is
-# the whole signal.
+# the whole signal, so a listing that does not read leaves rig-map.sh's reason,
+# which names the operator's move for its cause, on stderr above this script's.
 RIGS=""
 rigs_count() {
     # jq emits nothing on empty input; normalize so arithmetic never throws.
@@ -456,53 +456,10 @@ enumerate_rigs() {
         RIGS=$(jq -c '.' < "$FIXTURE/rigs.json" 2>/dev/null || printf '[]')
         [ "$(rigs_count)" -gt 0 ] && return 0
     fi
-    # 30s, not a board-render budget: a one-shot verb that exits 3 having
-    # filed nothing is the wrong trade for a slow answer (measured 2.6-8.4s).
-    _er_secs="${GC_HELM_RIG_TIMEOUT:-30}"
-    # Capture status AND stderr — they are the only things separating a
-    # timeout kill, a wedged data plane, malformed output, and a rigless city.
-    # The stderr capture outlives nothing: it is read and removed a few lines
-    # down, and the traps that cover the signal landing while `gc rig list`
-    # runs come off with it. A trap is process-global, so a helper that leaves
-    # one installed rewrites how every later line of every caller handles a
-    # signal — this one lives exactly as long as the file it removes.
-    _er_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-rig-enum.XXXXXX" 2>/dev/null || printf '')
-    _er_rc=0
-    if [ -n "$_er_errf" ]; then
-        trap 'rm -f "$_er_errf" 2>/dev/null' EXIT
-        trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-        rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>"$_er_errf") || _er_rc=$?
-        _er_why=$(tr '\n' ' ' < "$_er_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
-        rm -f "$_er_errf" 2>/dev/null || true
-        trap - EXIT INT TERM HUP
-    else
-        rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>/dev/null) || _er_rc=$?
-        _er_why=""
-    fi
-
-    if [ "$_er_rc" -ne 0 ]; then
-        # 124 is the timeout kill, only meaningful when a timeout binary ran.
-        if [ -n "$TIMEOUT_BIN" ] && [ "$_er_rc" -eq 124 ]; then
-            echo "$PROG: could not enumerate rigs: 'gc rig list' did not answer within ${_er_secs}s and was killed. Raise the bound with GC_HELM_RIG_TIMEOUT=<seconds>, or check whether gc/Dolt is wedged. This command wrote nothing." >&2
-        else
-            echo "$PROG: could not enumerate rigs: 'gc rig list' exited ${_er_rc}${_er_why:+ — $_er_why}. That is the data plane, not this script — try 'gc doctor' and check Dolt. This command wrote nothing." >&2
-        fi
+    rigs_raw=$("$SCRIPT_DIR/rig-map.sh") || {
+        echo "$PROG: could not enumerate rigs. This command wrote nothing." >&2
         exit 3
-    fi
-
-    # gc exited 0, so the problem is what it printed. jq -e separates the
-    # readings: 4 = no output at all, 5 = not JSON, 1 = wrong shape.
-    _er_shape=0
-    printf '%s' "$rigs_raw" | jq -e 'type=="object" and (.rigs|type)=="array"' >/dev/null 2>&1 || _er_shape=$?
-    case "$_er_shape" in
-        0) : ;;
-        4) echo "$PROG: could not enumerate rigs: 'gc rig list --json' exited 0 but printed nothing. A silent empty answer usually means gc was killed or the city path is wrong — check GC_CITY and 'gc doctor'. This command wrote nothing." >&2
-           exit 3 ;;
-        5) echo "$PROG: could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." >&2
-           exit 3 ;;
-        *) echo "$PROG: could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem — this script reads {\"rigs\":[{name,path,prefix}]}. This command wrote nothing." >&2
-           exit 3 ;;
-    esac
+    }
 
     # The projection carries the flags engage's liveness guard reads from this
     # same enumeration (city-liveness.sh says which, and why a rig row's running
@@ -553,7 +510,7 @@ rig_db_for_session() {
                 | map(select(. != "")) | first // ""' 2>/dev/null || true)
     fi
     [ -n "$_srig" ] || return 0
-    _spath=$(gc rig list --json 2>/dev/null | scrub \
+    _spath=$("$SCRIPT_DIR/rig-map.sh" \
         | jq -r --arg n "$_srig" '.rigs[]? | objects | select(.name == $n) | .path' 2>/dev/null | head -n1)
     [ -n "$_spath" ] && [ -d "$_spath/.beads" ] && printf '%s' "$_spath/.beads"
 }
@@ -2263,8 +2220,8 @@ cmd_open() {
     # <<< open-subject-closed
 
     # Already held? A visit records its subject as a tracks edge to it, with the
-    # gc.continuation_group stamp as the recovery fallback (su-ab9je: the stamp
-    # can land empty). visit-identity.sh is the one matcher, shared with dismiss,
+    # gc.continuation_group stamp as the recovery fallback (the stamp can land
+    # empty). visit-identity.sh is the one matcher, shared with dismiss,
     # converse-fold and the sweeps; it also names WHICH identity matched, so a
     # fold is reported (--json and stderr), never a silent no-op.
     # --allow-duplicate skips the dedup: engage --reason files a fresh visit for
@@ -2454,8 +2411,8 @@ cmd_react() {
 # "the sitting I am in", so when no bead is named it resolves it here instead
 # of making the operator paste an id the session already knows. A converse
 # session is the ASSIGNEE of the visit it holds; the subject is that visit's
-# gc.continuation_group stamp, or its tracks edge when the stamp landed empty
-# (su-ab9je) — the same recovery converse's own visit-fold-check makes, and
+# gc.continuation_group stamp, or its tracks edge when the stamp landed empty,
+# the same recovery converse's own visit-fold-check makes, and
 # one cmd_dismiss's stamp-or-edge lookup then finds under the same id.
 # Read from this session's own rig ledger: a visit is filed in its subject's
 # rig and adopted by the converse sitting engaged on it, so the store to read

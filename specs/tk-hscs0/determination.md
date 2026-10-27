@@ -58,7 +58,7 @@ Measured against that environment, reconstructed faithfully with `env -i`:
 | origin/main | none | `no: … disabled` | 1 |
 | config-aware | none | `no: … disabled` | 1 |
 | config-aware | `GC_RIG=gc-toolkit` | `yes: … under the cap` | 0 |
-| config-aware | `GC_RIG=signal-loom` | `no: … disabled` | 1 |
+| config-aware | `GC_RIG=rig-a` | `no: … disabled` | 1 |
 
 The last row is why this is resolved per-pool rather than city-wide: only
 gc-toolkit's pool is enabled, and the gate must keep answering "no" for the

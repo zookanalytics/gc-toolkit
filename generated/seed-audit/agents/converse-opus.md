@@ -535,7 +535,7 @@ visit, say) keeps that format. Operator-initiated form: the
      the authoring standards for the human class only; universal standards
      live in work-quality-base. -->
 
-<!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, pr:zookanalytics/signal-loom#533 adopted:2026-10-03 -->
+<!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, another rig's pull request adopted:2026-10-03 -->
 - When the ask is to simplify, or is about architecture or the big picture,
   the deliverable is a target the system can be measured against — what the
   thing would be if built once, correctly — not an enumeration of what to

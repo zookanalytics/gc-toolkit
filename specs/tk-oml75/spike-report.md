@@ -8,7 +8,7 @@ description: The Phase 0 spike for bead-universe v1, which asks whether a resume
 **Bead:** `tk-oml75` — *Spike: prove per-bead resume fidelity across a drain*
 (child of epic `tk-q4xaj`, *Bead-Universe Operating Model v1 — implementation*)
 **Branch:** `polecat/tk-oml75`
-**Polecat:** `gc-toolkit/gc-toolkit.furiosa` (session `lx-wisp-k7wzdv`)
+**Polecat:** `gc-toolkit/gc-toolkit.furiosa` (session `hq-wisp-k7wzdv`)
 **Design source (durable):** the A2/A3 criteria, the Open Question, and the
 cold-by-default constraint are durably captured in the bd ledger — spike bead
 `tk-oml75`, epic `tk-q4xaj`, decision `tk-yrio` — and restated below under
@@ -80,7 +80,7 @@ is a *stronger* fidelity signal than the minimal probe the spike prescribed
 | Design doc — mechanism claims, A2/A3, Open Qs (*working artifact, **untracked**, not committed to the repo*) | `coord-bead-universe` worktree: `.designs/bead-universe/design-doc.md` | 2026-06-06 |
 | `consult-host` shape (the shape to clone) | `agents/consult-host/agent.toml` + `prompt.template.md` | 2026-06-06 |
 | `mayor-thread` shape (`wake_mode=resume` reference) | `agents/mayor-thread/agent.toml` | 2026-06-06 |
-| **Production resume evidence** | session `lx-wisp-twghx` transcript `c30cacb0-…jsonl` | 2026-06-06 |
+| **Production resume evidence** | session `hq-wisp-twghx` transcript `c30cacb0-…jsonl` | 2026-06-06 |
 | Token cost | `gc bd show` over real epic `tk-q4xaj` + 5 children | 2026-06-06 |
 | Precedent for operator-deferral | `specs/tk-k9s0k/spike-report.md` §B–§C | 2026-06-06 |
 | Consult prior art (resume direction history) | `specs/2026-04-consult-design/consult-session-feasibility.md` | 2026-06-06 |
@@ -151,7 +151,7 @@ answerable from the resume-mode sessions already running.
 
 **Method (read-only).** Inspected the live `wake_mode=resume` sessions
 (`gc session list --json`, template `gc-toolkit.mayor-thread`) and the provider
-transcript of the longest-lived one, `lx-wisp-twghx`
+transcript of the longest-lived one, `hq-wisp-twghx`
 (alias `mayor-thread-adhoc-3025832b60` — the thread that *filed this very
 spike bead* and titled itself "bead-universe operating model — exhaustive
 design").
@@ -168,7 +168,7 @@ design").
   - 57 min gap ending `23:25:13Z`; 11 min gap ending `22:18:47Z`.
 - After each gap the conversation **continues coherently in the same
   session** — at `23:29` it is reasoning about *this* spike
-  (`"P0 is running (polecat lx-wisp-k7wzdv claimed it, actively working the
+  (`"P0 is running (polecat hq-wisp-k7wzdv claimed it, actively working the
   spike)"`), referencing context established 17 h earlier.
 
 **Finding.** `wake_mode=resume` **carries the conversation across a full cold
@@ -334,7 +334,7 @@ conversation survives suspend/wake — when asked to recall something, recall it
 by this same rig) established the governing rule and was accepted on it:
 
 > *"The … verifications … require side-effecting operations on the running
-> loomington city. As a polecat I should not spawn / reset agents in the live
+> mycity city. As a polecat I should not spawn / reset agents in the live
 > city. The following commands are what the operator (or mechanik in review)
 > should run after PR merge."*
 
@@ -355,7 +355,7 @@ The probe is therefore a *confirmation*, run at the operator's convenience.
 ## §C — Operator confirmatory probe (copy-paste)
 
 ```bash
-cd /home/zook/loomington
+cd /home/zook/mycity
 
 # 0. Register the throwaway probe template (city-scoped), then let the
 #    controller pick it up. Remove it in step 5.

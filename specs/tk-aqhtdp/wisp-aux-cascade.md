@@ -1,14 +1,14 @@
 ---
-name: Why lx accumulates orphaned wisp auxiliary rows, and what the repair is
-description: Work record for tk-aqhtdp. The wisp delete paths were fixed upstream and are not the generator; lx is the one city store missing the four ON DELETE CASCADE foreign keys, its migration ledger records them as applied, and the repair has to follow the orphan purge.
+name: Why hq accumulates orphaned wisp auxiliary rows, and what the repair is
+description: Work record for tk-aqhtdp. The wisp delete paths were fixed upstream and are not the generator; hq is the one city store missing the four ON DELETE CASCADE foreign keys, its migration ledger records them as applied, and the repair has to follow the orphan purge.
 ---
 
-# Orphaned wisp auxiliary rows on lx
+# Orphaned wisp auxiliary rows on hq
 
 Work record for bead tk-aqhtdp. The bead asked whether the fix belongs in a
 cascade in the beads store or a sweep in `wisp-compact`. Measured against the
 live city and against the running `bd` binary, it is neither: every delete
-path already removes the auxiliary rows, and lx is the only store in the city
+path already removes the auxiliary rows, and hq is the only store in the city
 whose schema cannot enforce the constraint those paths were written around.
 
 ## What was measured
@@ -16,7 +16,7 @@ whose schema cannot enforce the constraint those paths were written around.
 Every fact below was taken on 2026-09-03 from the running city, or from the
 `bd` binary the city actually runs (`bd version 1.2.2`, commit `62d211937`).
 
-### lx is the only store missing the cascade constraints
+### hq is the only store missing the cascade constraints
 
 The wisp plane has four auxiliary tables. Three key on `issue_id`
 (`wisp_labels`, `wisp_events`, `wisp_comments`) and one on `parent_id`
@@ -25,33 +25,33 @@ The wisp plane has four auxiliary tables. Three key on `issue_id`
 
 | database | rig | aux cascade FKs present | ignored-migration 4 recorded applied |
 |---|---|---|---|
-| lx | loomington (city) | **0 of 4** | 2026-05-24 02:27:41 |
+| hq | mycity (city) | **0 of 4** | 2026-05-24 02:27:41 |
 | tk | gc-toolkit | 4 of 4 | 2026-05-19 00:13:27 |
 | gc | gascity | 4 of 4 | 2026-05-19 00:12:52 |
-| sl | signal-loom | 4 of 4 | 2026-05-19 00:12:06 |
-| su | shutupandlisten | 4 of 4 | 2026-05-24 03:16:47 |
+| ra | rig-a | 4 of 4 | 2026-05-19 00:12:06 |
+| rb | rig-b | 4 of 4 | 2026-05-24 03:16:47 |
 
-lx is also the only store with the orphan problem. The correlation is exact.
+hq is also the only store with the orphan problem. The correlation is exact.
 
 Two further facts make this a durable divergence rather than a version skew.
-lx's `ignored_schema_migrations` ledger records version 4 — the migration that
+hq's `ignored_schema_migrations` ledger records version 4 — the migration that
 adds all four constraints — as applied, so the migration will never be
 retried. And a store initialised from scratch by the same `bd` binary comes up
 with all four constraints present, so the migration works and something about
-lx's own run of it did not.
+hq's own run of it did not.
 
-### The one auxiliary table lx does not leak is the one whose FK survives
+### The one auxiliary table hq does not leak is the one whose FK survives
 
 `wisp_dependencies` was measured at 0% orphaned while the other three ran
 99–100%. It is the only auxiliary table whose foreign keys are declared in the
 `CREATE TABLE` itself rather than added by the later migration, so it is the
-only one lx still has. That is the discriminating evidence: the split follows
+only one hq still has. That is the discriminating evidence: the split follows
 constraint presence exactly, not delete-path coverage.
 
 ### The constraint guards writes, not only deletes
 
 Probed on a scratch store built by the same binary, with the four constraints
-dropped to reproduce lx's shape:
+dropped to reproduce hq's shape:
 
 - Inserting a `wisp_events` row naming a wisp with no row in `wisps` **succeeds**
   and is an orphan the moment it lands.
@@ -87,7 +87,7 @@ One delete path in beads does still depend entirely on the constraint:
 auxiliary table. Its sibling `DeleteCascadeTables` says so outright — "for
 issues the delete only issues `DELETE FROM issues WHERE id = ?` and everything
 else goes through `ON DELETE CASCADE` foreign keys declared in the
-migrations". Any caller reaching that path on lx leaks.
+migrations". Any caller reaching that path on hq leaks.
 
 ### The leak is live
 
@@ -110,13 +110,13 @@ in the city already has.
 `ADD CONSTRAINT` validates existing rows and fails on the first violation.
 Measured on the scratch store: adding `fk_wisp_events_issue` with a single
 orphan present returns `Error 1452`, and the same statement succeeds once the
-orphan is deleted. lx holds roughly 3.4M violating rows, so the constraints
+orphan is deleted. hq holds roughly 3.4M violating rows, so the constraints
 cannot go back until the purge has run.
 
-The order is therefore: purge lx's orphaned auxiliary rows, then add the four
+The order is therefore: purge hq's orphaned auxiliary rows, then add the four
 constraints, then confirm `doctor/check-wisp-cascade-intact` reports OK.
 
-Statement per table, on lx:
+Statement per table, on hq:
 
 ```sql
 ALTER TABLE wisp_labels         ADD CONSTRAINT fk_wisp_labels_issue         FOREIGN KEY (issue_id)  REFERENCES wisps(id) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -139,8 +139,8 @@ checks each constraint's whole tuple — source table and column, referenced
 canonical name is present. A same-named foreign key that does not cascade, or
 names the wrong column, would leave the delete gap open while reading as intact
 — the exact regression the check has to hold against once it becomes a gate. It
-reports lx and passes the four rigs, so it starts as a live finding and becomes
-a regression gate once lx is repaired.
+reports hq and passes the four rigs, so it starts as a live finding and becomes
+a regression gate once hq is repaired.
 
 The check reports at warning while a store carries a standing backlog it
 cannot take the constraint back over. `GC_DOCTOR_WISP_CASCADE_SEVERITY=error`
@@ -148,7 +148,7 @@ raises it, and the default should move to error once no store carries such a
 backlog — at that point every finding is a fresh divergence repairable on
 sight.
 
-Two pieces are outside a gc-toolkit branch. Repairing lx's schema is a live
+Two pieces are outside a gc-toolkit branch. Repairing hq's schema is a live
 operation on the city store, sequenced behind the purge. And the migration
 recording success while adding nothing is a beads defect: a migration that
 cannot verify its own effect leaves exactly this divergence undetectable from

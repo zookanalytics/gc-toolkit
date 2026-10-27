@@ -56,8 +56,8 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$RIG_PATH" ]; then
-    if ! RIG_PATH=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.name=="gascity") | .path'); then
-        echo "ERROR: 'gc rig list --json | jq ...' failed; pass --rig-path explicitly." >&2
+    if ! RIG_PATH=$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/rig-map.sh" | jq -r '.rigs[] | select(.name=="gascity") | .path'); then
+        echo "ERROR: the rig map did not read (rig-map.sh says why above); pass --rig-path explicitly." >&2
         exit 2
     fi
     if [ -z "$RIG_PATH" ]; then

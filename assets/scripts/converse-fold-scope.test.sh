@@ -119,7 +119,7 @@ chmod +x "$BIN/gc"
 # in_progress listing.
 # A 4th argument writes the `tracks` edge a visit is filed with alongside its
 # stamp — the visit's SECOND recording of its own subject, and the one that
-# has held where the stamp did not (su-ab9je); it is what the empty-group
+# has held where the stamp did not (rb-ab9je); it is what the empty-group
 # cases below recover from.
 # A 5th writes escalation_key, the stamp escalate.sh gives every visit it
 # files: under one bucket the key is the only thing that tells two situations

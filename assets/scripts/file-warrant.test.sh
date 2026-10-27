@@ -80,9 +80,9 @@ export PATH="$BIN:$PATH"
 # exactly the shape that produced the bug — plus a dead session that must never
 # be targeted.
 ROSTER='{"sessions":[
-  {"id":"lx-wisp-p3","alias":"gc-toolkit/gc-toolkit.polecat-3","session_name":"gc-toolkit--gc-toolkit__polecat-3-pool","state":"active"},
-  {"id":"lx-wisp-idle","alias":"gc-toolkit/gc-toolkit.witness","session_name":"gc-toolkit--gc-toolkit__witness","state":"asleep"},
-  {"id":"lx-wisp-dead","alias":"gc-toolkit/gc-toolkit.polecat-9","session_name":"gc-toolkit--gc-toolkit__polecat-9-pool","state":"closed"}
+  {"id":"hq-wisp-p3","alias":"gc-toolkit/gc-toolkit.polecat-3","session_name":"gc-toolkit--gc-toolkit__polecat-3-pool","state":"active"},
+  {"id":"hq-wisp-idle","alias":"gc-toolkit/gc-toolkit.witness","session_name":"gc-toolkit--gc-toolkit__witness","state":"asleep"},
+  {"id":"hq-wisp-dead","alias":"gc-toolkit/gc-toolkit.polecat-9","session_name":"gc-toolkit--gc-toolkit__polecat-9-pool","state":"closed"}
 ]}'
 
 # reset clears the store; run clears only the log, so LOG/META reflect that one
@@ -104,7 +104,7 @@ reset; export STUB_SESSIONS="$ROSTER"
 run --owner "gc-toolkit/gc-toolkit.polecat-3" --reason "no wisp progress for 90m" --requester witness --dog "gc-toolkit.dog"
 eq "$RC" 0 "the warrant is filed"
 has "$LOG" 'bd create' "one create call is made"
-eq "$(mget 'warrant.target')" "lx-wisp-p3" "warrant.target is the resolved session id"
+eq "$(mget 'warrant.target')" "hq-wisp-p3" "warrant.target is the resolved session id"
 hasnt "$(mget 'warrant.target')" "/" "and carries no slash — dance-probe.sh would accept it"
 case "$(mget 'warrant.target')" in *[!A-Za-z0-9._-]*) bad "target is charset-safe" ;; *) ok "target is charset-safe" ;; esac
 eq "$(mget 'warrant.reason')" "no wisp progress for 90m" "the reason is carried through"
@@ -114,21 +114,21 @@ eq "$OUT" "tk-w1" "the filed warrant id is printed for the caller's ledger"
 
 echo "# the role (not the session id) is what the human-readable title carries"
 reset; export STUB_SESSIONS="$ROSTER"
-run --owner "lx-wisp-p3" --role "gc-toolkit/gc-toolkit.polecat-3" --reason "stale 2h" --requester deacon --dog "gc-toolkit.dog"
+run --owner "hq-wisp-p3" --role "gc-toolkit/gc-toolkit.polecat-3" --reason "stale 2h" --requester deacon --dog "gc-toolkit.dog"
 has "$LOG" 'Stuck: gc-toolkit/gc-toolkit.polecat-3' "the title names the role a human reads"
-eq "$(mget 'warrant.target')" "lx-wisp-p3" "while the target stays the session id"
+eq "$(mget 'warrant.target')" "hq-wisp-p3" "while the target stays the session id"
 eq "$(mget 'warrant.requester')" "deacon" "requester passes through for the deacon too"
 
 echo "# an owner already given as a live session id resolves to itself"
 reset; export STUB_SESSIONS="$ROSTER"
-run --owner "lx-wisp-p3" --reason r --requester witness --dog d
-eq "$(mget 'warrant.target')" "lx-wisp-p3" "an id owner is filed unchanged"
+run --owner "hq-wisp-p3" --reason r --requester witness --dog d
+eq "$(mget 'warrant.target')" "hq-wisp-p3" "an id owner is filed unchanged"
 eq "$(mget 'gc.routed_to')" "d" "and the dog route is stamped verbatim"
 
 echo "# a session name resolves to its id"
 reset; export STUB_SESSIONS="$ROSTER"
 run --owner "gc-toolkit--gc-toolkit__polecat-3-pool" --reason r --requester witness --dog d
-eq "$(mget 'warrant.target')" "lx-wisp-p3" "a session_name owner resolves to the id"
+eq "$(mget 'warrant.target')" "hq-wisp-p3" "a session_name owner resolves to the id"
 
 echo "# an owner that matches no live session files nothing and refuses"
 reset; export STUB_SESSIONS="$ROSTER"
@@ -147,7 +147,7 @@ echo "# an asleep session is live enough to warrant"
 reset; export STUB_SESSIONS="$ROSTER"
 run --owner "gc-toolkit/gc-toolkit.witness" --reason r --requester deacon --dog d
 eq "$RC" 0 "an asleep owner still files"
-eq "$(mget 'warrant.target')" "lx-wisp-idle" "targeting its session id"
+eq "$(mget 'warrant.target')" "hq-wisp-idle" "targeting its session id"
 
 echo "# a second warrant for the same session collapses onto the first"
 reset; export STUB_SESSIONS="$ROSTER"
@@ -161,21 +161,21 @@ has "$ERR" "already open" "and it says so on stderr, keeping stdout the bare id"
 
 echo "# an unreadable session list is not proof of a live target — refuse"
 reset; export STUB_SESSIONS="$ROSTER"; export STUB_SESSIONS_FAIL=1
-run --owner "lx-wisp-p3" --reason r --requester witness --dog d
+run --owner "hq-wisp-p3" --reason r --requester witness --dog d
 eq "$RC" 1 "a broken roster refuses rather than filing blind"
 hasnt "$LOG" 'bd create' "nothing is written"
 unset STUB_SESSIONS_FAIL
 
 echo "# a reason carrying a double quote cannot break the metadata payload"
 reset; export STUB_SESSIONS="$ROSTER"
-run --owner "lx-wisp-p3" --reason 'bead "tk-a" stale 6h' --requester witness --dog "gc-toolkit.dog"
+run --owner "hq-wisp-p3" --reason 'bead "tk-a" stale 6h' --requester witness --dog "gc-toolkit.dog"
 has "$LOG" 'bd create' "the warrant is still filed"
 printf '%s' "$META" | jq -e . >/dev/null 2>&1 && ok "and its metadata is parseable JSON" || bad "the metadata payload did not survive the quote"
 eq "$(mget 'warrant.reason')" 'bead "tk-a" stale 6h' "with the reason intact"
 
 echo "# missing required arguments are usage errors, and file nothing"
 reset; export STUB_SESSIONS="$ROSTER"
-run --owner "lx-wisp-p3" --requester witness --dog d
+run --owner "hq-wisp-p3" --requester witness --dog d
 eq "$RC" 2 "a missing --reason is a usage error"
 hasnt "$LOG" 'bd create' "and nothing is filed"
 run --reason r --requester witness --dog d

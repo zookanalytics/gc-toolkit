@@ -13,7 +13,7 @@ description: The full set of bead-creation sites reachable from city-scoped role
 unresolved rig — it warns and writes to the ambient store.
 
 A **city-scoped** role runs with `GC_RIG` unset from the city path, so an
-unqualified create resolves to the city (HQ / `lx-`) store. A **rig-workable**
+unqualified create resolves to the city (HQ / `hq-`) store. A **rig-workable**
 bead placed there — a task/bug meant for a rig's polecat pool — is unclaimable:
 the pool reads only its rig store, so the bead maroons. The two safe forms for a
 rig-less caller are to name the rig (`gc bd --rig <rig>`, `gc convoy create
@@ -75,12 +75,12 @@ create; e.g. `gc-helm.sh:1615-1621`).
 - `assets/scripts/dance-probe.sh`, `assets/scripts/boot-health.sh` — the
   dog-invoked scripts. Neither contains any `bd create`; `boot-health.sh` is
   report-only (`gc mail send`), `dance-probe.sh` only interrogates sessions.
-- **`mol-dog-stale-db` — the `lx-ja517n` exemplar. Cross-repo; no in-pack fix.**
+- **`mol-dog-stale-db` — the `hq-ja517n` exemplar. Cross-repo; no in-pack fix.**
   This formula lives in the gascity repo
   (`rigs/gascity/examples/bd/dolt/formulas/mol-dog-stale-db.toml`), not in this
   pack, and it contains **no `bd create`**: it reports through `gc event emit`,
   `append_report_note` (a `bd update` on its own work bead), and
-  `send_escalation` (escalate.sh or `gc mail send`). `lx-ja517n` was filed by
+  `send_escalation` (escalate.sh or `gc mail send`). `hq-ja517n` was filed by
   the dog pool session as an ad-hoc bug report — a diagnosis of the formula's
   claim-guard close loop — and landed in the city store because the dog runs
   city-scoped. So there is no scripted rig-defect create to rescope here; the
@@ -113,7 +113,7 @@ correct entry point for a rig-less caller. No change: no city-scoped role reache
 
 ## Related beads (converse tk-evszjm)
 
-- tk-k0zue3 — the `mol-dog-stale-db` claim-guard close loop (the `lx-ja517n`
+- tk-k0zue3 — the `mol-dog-stale-db` claim-guard close loop (the `hq-ja517n`
   content bug), re-homed from HQ to gc-toolkit.
 - tk-ungwb4 — the doctor backstop that flags any rig-workable bead marooned in
   the city store (the catch-all detector for paths not enumerated here).
