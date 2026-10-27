@@ -139,6 +139,16 @@ performer; the full transition table with writers is
 9. **Close propagates.** `closed` means *landed and verified* — the one signal
    waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
 
+An integration effort's beads take this pipeline through the handoff, and then
+the refinery lands each one directly on the effort's integration branch, which
+the bead carries as its own `target`, with no PR of its own. A bead the operator
+asks to review on its own is a stage, with a PR into the branch. One landing
+bead carries the branch to main through the effort's one PR. It is assigned to
+the refinery when the effort is stood up, and waits there by `blocks` edges on
+the effort's beads and on its summary task, which writes the PR's summary from
+the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
+bound for main.
+
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park — are handled by these reactive paths:
 `pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the

@@ -19,13 +19,16 @@
 #      that is a session's own directory is held by that session.
 #   3. FAIL CLOSED — a failed git worktree list, an unreadable session list or
 #      bead listing, a tree no session directory accounts for, and a claim
-#      whose molecule cannot be traced to its work. Held outranks undecided.
+#      whose molecule cannot be read or whose run names no work. Held outranks
+#      undecided.
 #   4. The finding names the tree by its resolved path and counts its
 #      uncommitted paths, so the holder's work can be salvaged.
 #
 # Runs the real script against real git repositories laid out like pool slots
-# ($ROOT/slots/<slot>/worktrees/<bead>) and a fake gc that serves the session
-# list and the bead listing. No live city, Dolt, or network.
+# ($ROOT/slots/<slot>/worktrees/<bead>), a fake gc that serves the session list
+# and the bead listing, and the run-lib.sh stub, which serves the runs of each
+# case's rows as run-lib.sh's own run_rows names them. No live city, Dolt, or
+# network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -104,6 +107,10 @@ convoy() { # <id> <member> [status]
   jq -nc --arg id "$1" --arg m "$2" --arg st "${3:-open}" '{id: $id, issue_type: "convoy", status: $st, assignee: null, metadata: {}, dependencies: [{issue_id: $id, depends_on_id: $m, type: "tracks"}]}'
 }
 beads() { printf '%s\n' "$@" | jq -sc '.'; }
+# The runs the stub serves: those of the case's rows, by run-lib.sh's own rule.
+# shellcheck source=run-lib.sh
+. "$HERE/run-lib.sh" || { echo "cannot source run-lib.sh" >&2; exit 1; }
+export GC_RUN_LIB="$HERE/run-lib.stub.sh"
 # A molecule run by <session> over <work>: its claimed step, root and convoy.
 molecule() { # <tag> <session-id> <work-id> [step-status]
   step "st-$1" "root-$1" "$2" "${4:-in_progress}"
@@ -121,18 +128,21 @@ fresh() {
   git -C "$REPO" -c commit.gpgsign=false commit -q --allow-empty -m init
   git -C "$REPO" worktree add -q --detach "$ME"
   git -C "$REPO" worktree add -q --detach "$PEER"
-  unset FAKE_SESSIONS FAKE_LIST_FAIL FAKE_ID_FAIL FAKE_LIST_HIDE
+  unset FAKE_SESSIONS FAKE_LIST_FAIL FAKE_ID_FAIL FAKE_LIST_HIDE FAKE_RUN_FAIL
   FAKE_BEADS='[]'
-  : > "$R/gc.log"
+  : > "$R/gc.log"; : > "$R/run-lib.log"
 }
 tree_at() { git -C "$REPO" worktree add -q --detach "$1"; }        # <path>
 branch_at() { git -C "$REPO" worktree add -q -b "$2" "$1"; }       # <path> <branch>
 
 # run [args...] — the script as the gate calls it, from this session's slot.
-# Prints "<rc>|<stdout>"; $R/gc.log holds the gc calls.
+# Prints "<rc>|<stdout>"; $R/gc.log holds the gc calls and $R/run-lib.log the
+# run-lib.sh calls. FAKE_RUN_FAIL fails the run-lib.sh calls it names.
 run() {
   local rc=0 out
+  printf '%s' "$FAKE_BEADS" | jq -c "$RUN_JQ"'run_rows' > "$R/runs.json"
   out=$(cd "$ME" && GC_DIR="$ME" GC_RIG_ROOT="${RIG:-$REPO}" FAKE_GC_LOG="$R/gc.log" \
+        RUN_LIB_STUB_RUNS="$R/runs.json" RUN_LIB_STUB_LOG="$R/run-lib.log" RUN_LIB_STUB_FAIL="${FAKE_RUN_FAIL:-}" \
         FAKE_SESSIONS="${FAKE_SESSIONS:-}" FAKE_BEADS="$FAKE_BEADS" \
         FAKE_LIST_FAIL="${FAKE_LIST_FAIL:-}" FAKE_ID_FAIL="${FAKE_ID_FAIL:-}" FAKE_LIST_HIDE="${FAKE_LIST_HIDE:-}" \
         "$SCRIPT" "$@") || rc=$?
@@ -283,14 +293,15 @@ eq "${out%%|*}" "1" "a recorded work_dir that is a live session's own directory:
 has "$out" "whose directory it is" "session directory: the finding says why"
 no "$(cat "$R/gc.log")" "bd list" "session directory: no claim lookup is needed"
 
-# The convoy is not in the open listing (closed early); the script fetches it.
+# The convoy is not in the open listing (closed early); its run still names
+# the work, so the claim is traced.
 fresh
 tree_at "$PEER/worktrees/tk-w"
 FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
 FAKE_BEADS=$(beads "$(step st-p root-p lx-peer)" "$(root root-p cv-p)" "$(convoy cv-p tk-w closed)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w | cut -d'|' -f1)" "1" \
-   "a convoy outside the open listing is fetched by id and traced: held"
-has "$(cat "$R/gc.log")" "--id cv-p" "the missing convoy is fetched by id"
+   "a run whose convoy is outside the open listing is traced: held"
+has "$(cat "$R/run-lib.log")" "subject tree_bd root-p" "the claim's molecule is traced through run-lib.sh"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
@@ -298,7 +309,7 @@ FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
 FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 FAKE_LIST_HIDE=root-p
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w | cut -d'|' -f1)" "1" \
-   "a molecule root missing from the listing is fetched by id and traced: held"
+   "a molecule root missing from the open listing is traced through its run: held"
 
 # --- 3. Fail closed. ----------------------------------------------------------
 
@@ -333,17 +344,18 @@ fresh
 tree_at "$PEER/worktrees/tk-w"
 FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
 FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)")
-FAKE_LIST_HIDE=root-p; FAKE_ID_FAIL=1
+FAKE_RUN_FAIL="subject:root-p"
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
-eq "${out%%|*}" "2" "the holder's molecule root cannot be fetched: undecided"
+eq "${out%%|*}" "2" "the holder's molecule cannot be read: undecided"
+has "$out" "the molecule root-p live pool__polecat-lx-peer is running could not be read" "unreadable molecule: the finding names it"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
 FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
 FAKE_BEADS=$(beads "$(step st-p root-p lx-peer)" "$(jq -nc '{id: "root-p", status: "in_progress", metadata: {"gc.kind": "workflow"}, dependencies: []}')")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
-eq "${out%%|*}" "2" "the holder's molecule names no input convoy: undecided"
-has "$out" "molecule root-p names no input convoy" "untraced claim: the finding says which and why"
+eq "${out%%|*}" "2" "the holder's molecule names no input convoy, so its run names no work: undecided"
+has "$out" "the run of molecule root-p names no work" "untraced claim: the finding says which and why"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"

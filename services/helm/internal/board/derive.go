@@ -1043,7 +1043,7 @@ func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, dispDue, isRu
 		return "no children — decompose or assign"
 	case r.open == 0:
 		if a.Source == "convoy" {
-			return fmt.Sprintf("all %d closed — graduate", r.mTotal)
+			return fmt.Sprintf("all %d tracked closed", r.mTotal)
 		}
 		return fmt.Sprintf("all %d closed — close or extend", r.mTotal)
 	// Ahead of the dead-owner and idle phrases: this row has no ask of its own

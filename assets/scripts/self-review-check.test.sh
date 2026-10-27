@@ -2,8 +2,9 @@
 # Test for self-review-check.sh — the exit condition of the self-review check
 # loop in mol-polecat-work.
 #
-# It EXECUTES the real shipped script against stub `bd` / `gc` binaries, a real
-# fixture git worktree, and the real `gctk` built from this checkout, whose
+# It EXECUTES the real shipped script against stub `bd` / `gc` binaries, the
+# run-lib.sh stub (the run of the root each case names), a real fixture git
+# worktree, and the real `gctk` built from this checkout, whose
 # records the cases write by running `gctk rig` in the fixture the way an
 # iteration does. So the exit-code contract (0 verified-green, 1 everything
 # else, fail-closed on any unreadable state), the record reads and the
@@ -33,28 +34,13 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 mkdir -p "$TMP/bin"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
-# bd show <id> --json | bd dep tree <id> --json | bd list … --json | bd update <id> …
+# bd show <id> --json | bd list … --json | bd update <id> …
 . "$STATE"
 case "$1" in
-dep)
-  if [ "$2" = "tree" ]; then
-    [ "$DEP_TREE_FAILS" = "1" ] && { echo "stub: dep tree unavailable" >&2; exit 1; }
-    printf '[{"id":"%s","depth":0,"parent_id":"","issue_type":"convoy"}' "$CONVOY_ID"
-    i=1
-    while [ "$i" -le "$CONVOY_MEMBERS" ]; do
-      if [ "$i" = "1" ]; then member="$ISSUE_ID"; else member="$ISSUE_ID-extra$i"; fi
-      printf ',{"id":"%s","depth":1,"parent_id":"%s","issue_type":"task"}' "$member" "$CONVOY_ID"
-      i=$((i + 1))
-    done
-    printf ']'
-    exit 0
-  fi
-  exit 1
-  ;;
 show)
   case "$2" in
   "$ROOT_ID")
-    printf '[{"id":"%s","metadata":{"gc.input_convoy_id":"%s"' "$ROOT_ID" "$CONVOY_ID"
+    printf '[{"id":"%s","metadata":{"gc.kind":"workflow"' "$ROOT_ID"
     [ -n "$MD_ROOT_ISSUE" ] && printf ',"gc.var.issue":"%s"' "$MD_ROOT_ISSUE"
     [ -n "$MD_ROOT_VARS" ] && printf ',%s' "$MD_ROOT_VARS"
     printf '}}]'
@@ -195,11 +181,8 @@ write_state() {
   local issue_id="${ISSUE_ID-gc-issue}"
   cat > "$STATE" <<EOF
 ROOT_ID="${ROOT_ID-wisp-1}"
-CONVOY_ID="${CONVOY_ID-convoy-1}"
-CONVOY_MEMBERS="${CONVOY_MEMBERS-1}"
 ISSUE_ID="$issue_id"
 MD_ROOT_ISSUE="${MD_ROOT_ISSUE-$issue_id}"
-DEP_TREE_FAILS="${DEP_TREE_FAILS-0}"
 GC_COLD="${GC_COLD-0}"
 MD_WORK_DIR="${MD_WORK_DIR-$WT}"
 MD_BRANCH="${MD_BRANCH-polecat/gc-issue}"
@@ -215,6 +198,10 @@ EOF
   printf 'MD_PRE_TEST=%q\n' "${MD_PRE_TEST-}" >> "$STATE"
   printf 'MD_SETUP_BUILD=%q\n' "${MD_SETUP_BUILD-$SB_GREEN}" >> "$STATE"
   printf 'MD_PRE_BUILD=%q\n' "${MD_PRE_BUILD-}" >> "$STATE"
+  # The run of the root, as run-lib.sh would name it: by default it works the
+  # case's issue, and RUN_BEAD="" is a run that names no bead.
+  jq -nc --arg root "${ROOT_ID-wisp-1}" --arg bead "${RUN_BEAD-$issue_id}" \
+    '[{root: $root, convoy: "convoy-1", bead: $bead, formula: "mol-polecat-work", live: true}]' > "$TMP/runs.json"
   # The root carries gc.var.<name> for each var the pour rendered non-empty, as
   # gascity stamps it, and the stub splices these pairs into its metadata.
   local stamps
@@ -231,6 +218,8 @@ run_case() {
   local desc="$1" want="$2"
   : > "$CALLS"
   ( cd "$TMP" && GC_WISP_ID="${ROOT_ID-wisp-1}" GC_BEAD_ID=iter-1 \
+      GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" \
+      RUN_LIB_STUB_FAIL="${RUN_FAILS:+subject}" \
       GC_ITERATION="${ITERATION-1}" GCTK_BIN="${GCTK-$GCTK_BUILT}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
   local got=$?
   if [ "$got" = "$want" ]; then ok "$desc (exit $got)"
@@ -254,7 +243,7 @@ assert_out() {
 }
 
 reset_env() {
-  unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
+  unset ROOT_ID ISSUE_ID MD_ROOT_ISSUE RUN_BEAD RUN_FAILS GC_COLD
   unset MD_WORK_DIR MD_BRANCH MD_GATE MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
   unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK
   unset VAR_BASE VAR_SETUP VAR_TYPECHECK VAR_LINT VAR_BUILD VAR_AFFECTED VAR_TEST
@@ -532,22 +521,25 @@ run_case "FAIL (fail-closed) when recorded work_dir does not exist" 1
 reset_env; MD_WORK_DIR="$TMP"; write_state
 run_case "FAIL (fail-closed) when work_dir is not a git worktree" 1
 
-# --- 7. fail-closed when membership is unreadable and no gc.var.issue --------
-reset_env; DEP_TREE_FAILS=1; MD_ROOT_ISSUE=""; write_state
-run_case "FAIL (fail-closed) when convoy membership is unreadable and no gc.var.issue" 1
+# --- 7. fail-closed when the run is unreadable and no gc.var.issue -----------
+reset_env; RUN_FAILS=1; MD_ROOT_ISSUE=""; write_state
+run_case "FAIL (fail-closed) when the run of the root is unreadable and no gc.var.issue" 1
 
-# --- 8. resilient fallback: membership unreadable but gc.var.issue set --------
-reset_env; DEP_TREE_FAILS=1; write_state; green
-run_case "PASS via gc.var.issue fallback when membership is unreadable but the records are green" 0
+# --- 8. resilient fallback: the run unreadable but gc.var.issue set -----------
+reset_env; RUN_FAILS=1; write_state; green
+run_case "PASS via gc.var.issue fallback when the run is unreadable but the records are green" 0
 assert_out "warns that the one-member invariant went unverified" "membership unverified"
 
 # --- 9. fail-closed on a malformed convoy (two members) ----------------------
-reset_env; CONVOY_MEMBERS=2; write_state
-run_case "FAIL (fail-closed) when the convoy has more than one tracked member" 1
+# run-lib.sh names no bead for a run whose convoy tracks two.
+reset_env; RUN_BEAD=""; write_state
+run_case "FAIL (fail-closed) when the run names no bead, as for a convoy with two tracked members" 1
+assert_out "names the run it could not use" "works no single bead"
 
 # --- 10. fail-closed when gc.var.issue disagrees with the member -------------
-reset_env; MD_ROOT_ISSUE="gc-other"; write_state
-run_case "FAIL (fail-closed) when gc.var.issue disagrees with the convoy member" 1
+# run-lib.sh names no bead for a root whose gc.var.issue disagrees with its convoy.
+reset_env; MD_ROOT_ISSUE="gc-other"; RUN_BEAD=""; write_state
+run_case "FAIL (fail-closed) when the run names no bead, as when gc.var.issue disagrees with the convoy member" 1
 
 # --- 11. bd-only under a cold gc -------------------------------------------
 # A cold import cache kills every gc call; the verdict must still be correct

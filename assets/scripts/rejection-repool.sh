@@ -8,10 +8,7 @@
 # branch-caused arm. Both run `gc workflow reopen-source` first, which leaves
 # the bead open with no assignee, out of the refinery's queue.
 # Stdout is one line: the bead's row as read before any write (the scrubbed
-# `gc bd show --json` array), which the handle-failures arm's branch decision
-# reads instead of a read of its own. Of the fields that decision reads, the
-# release writes only existing_pr, and only from a pr_url the decision already
-# counts. Stdout is empty when the bead could not be read.
+# `gc bd show --json` array). Stdout is empty when the bead could not be read.
 #
 # A pour, because the work bead is a member of its epic and bd's blocked flag
 # cascades down parent-child edges: a bead routed back to the pool is withheld
@@ -23,7 +20,7 @@
 # A convoy is never the bead poured. gc sling takes a convoy target as the
 # run's own input convoy, so that run works on the beads the convoy tracks, and
 # mol-polecat-work takes the one bead its input convoy tracks as its work bead.
-# A graduation's anchor is such a convoy (convoy-graduate.sh). So a convoy's
+# A graduation's anchor is such a convoy. So a convoy's
 # rebuild is poured onto its rebuild child, an ordinary task that resumes the
 # convoy's branch, lands on its target and blocks it. gc sling gives the child
 # what it gives any bead it pours onto: a one-bead input convoy, a launch lock

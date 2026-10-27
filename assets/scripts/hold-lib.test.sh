@@ -13,12 +13,18 @@
 #   (SHAPE)   a bead read by `bd show` gives the same edges as one read by a list
 #   (FAIL)    a read that fails or does not parse fails the walk, and a chain
 #             deeper than the cap holds the bead as unread
-#   (READERS) every reader of a hold sources this file, applies $HOLD_JQ and
-#             builds its graph with hold_graph
+#   (ANNOTATE) hold_annotate gives every bead of one listing the state, label
+#             and release time the predicate finds for it alone, fails whole on
+#             a read that fails or input that is not an array, and leaves no
+#             scratch behind
+#   (READERS) every reader of a hold sources this file, and either applies
+#             $HOLD_JQ and builds its graph with hold_graph, or reads its
+#             listing's holds with hold_annotate
 #   (NO-COPY) no other file in the pack defines the predicate's jq defs
 # A reader with a private copy of the predicate drifts silently from this one.
 # The behavioral half lives beside each reader (deferred-dispatch.test.sh,
-# doctor/check-armed-dispatch-owed/run.test.sh).
+# doctor/check-armed-dispatch-owed/run.test.sh, find-work-gating-guard.test.sh,
+# refinery-stuck-escalate.test.sh, doctor/check-refinery-patrol-live/run.test.sh).
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -42,6 +48,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 . "$LIB" || { echo "FAIL - cannot source $LIB" >&2; exit 1; }
 [ -n "${HOLD_JQ:-}" ] && ok "(DEF) sourcing the file exposes \$HOLD_JQ" || bad "(DEF) sourcing the file exposes \$HOLD_JQ"
 [ "$(type -t hold_graph)" = "function" ] && ok "(DEF) sourcing the file defines hold_graph" || bad "(DEF) sourcing the file defines hold_graph"
+[ "$(type -t hold_annotate)" = "function" ] && ok "(DEF) sourcing the file defines hold_annotate" || bad "(DEF) sourcing the file defines hold_annotate"
 case "${HOLD_MAX_DEPTH:-}" in ''|*[!0-9]*) bad "(DEF) HOLD_MAX_DEPTH is a whole number (got '${HOLD_MAX_DEPTH:-}')" ;; *) ok "(DEF) HOLD_MAX_DEPTH is a whole number" ;; esac
 jq -e '(.beads | type) == "array" and (.cases | type) == "array" and (.cases | length) > 0' "$FX" >/dev/null 2>&1 \
     && ok "(DEF) the fixture carries a store and its cases" || bad "(DEF) the fixture carries a store and its cases"
@@ -153,17 +160,56 @@ eq "$(ask 'hold_summary($g[0])')" "ancestor deep-$deep (unreadable)" "(LABEL) an
 [ "$(reads)" -le $((HOLD_MAX_DEPTH + 1)) ] && ok "(FAIL) the walk stops reading at the cap ($(reads) reads)" \
     || bad "(FAIL) the walk stops reading at the cap ($(reads) reads)"
 
+echo "# a listing annotated in one walk"
+# Every case's bead in one listing, walked together. Each must come back with
+# the state, label and release time the predicate finds for it walked alone.
+ANN="$TMP/annotate"; mkdir -p "$ANN"
+jq -c '[ .cases[].bead ] as $b | [ .beads[] | select(.id as $i | $b | index($i)) ]' "$FX" > "$TMP/listing.json"
+if ANNOTATED="$(TMPDIR="$ANN" hold_annotate fx_read < "$TMP/listing.json")"; then
+    ok "(ANNOTATE) a listing of every case's bead is annotated"
+else
+    bad "(ANNOTATE) a listing of every case's bead is annotated"; ANNOTATED='[]'
+fi
+eq "$(printf '%s' "$ANNOTATED" | jq 'length')" "$(jq '.cases | length' "$FX")" "(ANNOTATE) every bead of the listing comes back"
+while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    name="$(printf '%s' "$c" | jq -r '.name')"
+    bead="$(printf '%s' "$c" | jq -r '.bead')"
+    want="$(printf '%s' "$c" | jq -c '{state: (if any(.holds[]; .unread | not) then "held" elif (.holds | length) > 0 then "unread" else "free" end), released_at}')"
+    walk "$bead" || { bad "(ANNOTATE) $name: the walk for $bead fails"; continue; }
+    want_why="$(ask 'hold_summary($g[0])')"
+    eq "$(printf '%s' "$ANNOTATED" | jq -c --arg b "$bead" '.[] | select(.id == $b) | .hold | {state, released_at}')" "$want" "(ANNOTATE) $name: state and released_at"
+    eq "$(printf '%s' "$ANNOTATED" | jq -r --arg b "$bead" '.[] | select(.id == $b) | .hold.why')" "$want_why" "(ANNOTATE) $name: why is the bead's own summary"
+done <<< "$(jq -c '.cases[]' "$FX")"
+eq "$(printf '%s' "$ANNOTATED" | jq -c '[.[] | select(.id == "e-1")] | .[0] | del(.hold) | keys')" "$(jq -c '[.beads[] | select(.id == "e-1")] | .[0] | keys' "$FX")" \
+   "(ANNOTATE) each bead keeps every field it came with"
+out_fail="$(TMPDIR="$ANN" hold_annotate fail_read < "$TMP/listing.json")"; rc=$?
+[ "$rc" -ne 0 ] && ok "(ANNOTATE) a read that fails fails the whole listing" || bad "(ANNOTATE) a read that fails fails the whole listing"
+eq "$out_fail" "" "(ANNOTATE) and prints nothing a caller could take for a verdict"
+out_junk="$(printf 'not json' | TMPDIR="$ANN" hold_annotate fx_read)"; rc=$?
+[ "$rc" -ne 0 ] && ok "(ANNOTATE) input that is not a JSON array fails" || bad "(ANNOTATE) input that is not a JSON array fails"
+eq "$out_junk" "" "(ANNOTATE) and prints nothing"
+eq "$(printf '[]' | TMPDIR="$ANN" hold_annotate fx_read)" "[]" "(ANNOTATE) an empty listing is an empty array"
+eq "$(find "$ANN" -mindepth 1 | wc -l | tr -d ' ')" "0" "(ANNOTATE) no scratch is left behind, on success or failure"
+
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the library in prose but
 # no longer calls it still fails.
 READERS="assets/scripts/deferred-dispatch.sh
-doctor/check-armed-dispatch-owed/run.sh"
+doctor/check-armed-dispatch-owed/run.sh
+doctor/check-refinery-patrol-live/run.sh
+formulas/mol-refinery-patrol.toml
+formulas/mol-witness-patrol.toml"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi
     code="$(grep -vE '^[[:space:]]*#' "$f")"
-    grep -qE '^[[:space:]]*\.[[:space:]].*hold-lib\.sh' <<< "$code" \
+    grep -qE '(^|[;&|[:space:]])\.[[:space:]].*hold-lib\.sh' <<< "$code" \
         && ok "(READERS) $r sources hold-lib.sh" || bad "(READERS) $r sources hold-lib.sh"
+    if grep -qE '(^|[^[:alnum:]_])hold_annotate[[:space:]]' <<< "$code"; then
+        ok "(READERS) $r reads its listing's holds with hold_annotate"
+        continue
+    fi
     grep -q 'HOLD_JQ' <<< "$code" && ok "(READERS) $r applies \$HOLD_JQ" || bad "(READERS) $r applies \$HOLD_JQ"
     grep -qE '(^|[^[:alnum:]_])hold_graph[[:space:]]' <<< "$code" \
         && ok "(READERS) $r builds its graph with hold_graph" || bad "(READERS) $r builds its graph with hold_graph"

@@ -57,8 +57,8 @@
 #   one with nothing owed.
 #
 # until_fresh <reader> <id> <successor> [closed]
-#   The bead, every edge it has, and the beads that depend on it, as the store
-#   holds them now. A caller reads them just before it acts, because a scan
+#   The bead, every edge it has, the beads that depend on it, and the runs that
+#   work it (run-lib.sh), as the store holds them now. A caller reads them just before it acts, because a scan
 #   ages while a pass runs. With `closed`, it reads them just after the pass
 #   has closed the bead: a bead closed under UNTIL_FENCE, or closed and
 #   unassigned, reads as the open, unassigned bead the pass claimed, without
@@ -117,22 +117,23 @@ until_scan() { # reader -> one row per candidate on stdout; exit 1 listing unrea
 }
 
 until_fresh() { # reader id successor [closed] -> "<verdict>\t<detail>" on stdout; exit 1 when a read fails or does not parse
-    local reader="$1" id="$2" succ="$3" closed=false row listed up
+    local reader="$1" id="$2" succ="$3" closed=false row listed up runs
     [ "${4:-}" = closed ] && closed=true
     [ -n "${UNTIL_RESOLVED_JQ:-}" ] || return 1
     # `bd show` gives the bead's own edges with each target's status, and
     # `bd list --id` gives the bead's row with every edge it has, including one
     # whose target this store has no row for. The flags are the scan's status
     # read's, so the row comes back whatever the bead's status or class.
-    # `bd dep list --direction=up` gives the beads that depend on it, because
-    # `bd show` leaves a convoy's tracks edge out of its dependents.
+    # `bd dep list --direction=up` gives the beads that depend on it, its
+    # children among them, and run-lib.sh the runs that work it.
     row="$("$reader" show "$id" --json </dev/null 2>/dev/null)" || return 1
     listed="$("$reader" list --id "$id" --all --include-gates --include-infra --include-templates --brief --json --limit 0 </dev/null 2>/dev/null)" || return 1
     up="$("$reader" dep list "$id" --direction=up --json </dev/null 2>/dev/null)" || return 1
-    [ -n "$row" ] && [ -n "$listed" ] && [ -n "$up" ] || return 1
-    { printf '%s' "$row" | scrub; printf '\n'; printf '%s' "$listed" | scrub; printf '\n'; printf '%s' "$up" | scrub; printf '\n'; } \
+    runs="$(run_lib runs "$reader" "$id")" || return 1
+    [ -n "$row" ] && [ -n "$listed" ] && [ -n "$up" ] && [ -n "$runs" ] || return 1
+    { printf '%s' "$row" | scrub; printf '\n'; printf '%s' "$listed" | scrub; printf '\n'; printf '%s' "$up" | scrub; printf '\n'; printf '%s\n' "$runs"; } \
         | jq -rn --arg id "$id" --arg succ "$succ" --argjson closed "$closed" "$UNTIL_RESOLVED_JQ"'
-            input as $row | input as $listed | input as $up
+            input as $row | input as $listed | input as $up | input as $runs
             # `bd show` answers an array on a hit and an {"error": ...} object
             # on a miss, both at exit 0. `bd list --id` answers an array, with
             # no row for a bead the store does not hold.
@@ -144,7 +145,7 @@ until_fresh() { # reader id successor [closed] -> "<verdict>\t<detail>" on stdou
                               | if length == 1 then .[0] else null end
                          else null end) as $l
             | if ($b | type) == "object" and ($l | type) == "object" and ($up | type) == "array"
-              then $b | until_unfenced($closed) | until_fresh_verdict($l; $up; $succ)
+              then $b | until_unfenced($closed) | until_fresh_verdict($l; $up; $runs; $succ)
               else error("unreadable") end' 2>/dev/null
 }
 
@@ -158,6 +159,10 @@ UNTIL_MARK="gc.until_disposal"
 UNTIL_RESOLVED_JQ=""
 # shellcheck source=live-work.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/live-work.sh" 2>/dev/null || LIVE_WORK_JQ=""
+# The one reader of a run's link to its bead, through a variable its callers'
+# suites point at a stub of its verbs.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-lib.sh}" 2>/dev/null || LIVE_WORK_JQ=""
 if [ -n "${LIVE_WORK_JQ:-}" ]; then
     # Usage follows the in-variable jq convention (live-work.sh): prepend the
     # defs to a jq program. The live-work defs come first, because the decision
@@ -245,10 +250,10 @@ if [ -n "${LIVE_WORK_JQ:-}" ]; then
   # an edge whose target has no row in this store. $listed: the row of the same
   # bead from `bd list --json`, whose .dependencies carry every edge it has as
   # {depends_on_id, type}. $up: what `bd dep list <id> --direction=up --json`
-  # returns. $succ: the successor the scan named. Once the edge to the
-  # successor is found, the verdict is decided in the order until_judge decides
-  # a candidate.
-  def until_fresh_verdict($listed; $up; $succ):
+  # returns. $runs: what the runs verb of run-lib.sh answers for the bead.
+  # $succ: the successor the scan named. Once the edge to the successor is
+  # found, the verdict is decided in the order until_judge decides a candidate.
+  def until_fresh_verdict($listed; $up; $runs; $succ):
     def etype: ((.dependency_type // .type // "") | tostring);
     def eid: ((.id // "") | tostring);
     def unclosed: (((.status // "") | tostring | ascii_downcase) != "closed");
@@ -266,7 +271,7 @@ if [ -n "${LIVE_WORK_JQ:-}" ]; then
     | ([ $all[] | select(.type == "until" or .type == "blocks" or .type == "parent-child")
          | .id | select(length > 0) | select($shown[.] | not) ] | unique) as $unseen
     | [ $d[] | select(etype == "blocks") | select(unclosed) | eid ] as $open_b
-    | (live_work_reasons + live_work_edge_reasons($up)) as $marks
+    | (live_work_reasons + live_work_edge_reasons($up) + live_work_run_reasons($runs)) as $marks
     | if ([ $u[] | select(. == $succ) ] | length) == 0 then "gone\t-"
       elif ($open_u | length) > 0 then "waiting\t\($open_u | join(","))"
       elif ($unseen | length) > 0 then "unresolved\t\($unseen | join(","))"

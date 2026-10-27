@@ -287,8 +287,7 @@ write code. IF a reaction genuinely needs code, that output takes the
 correctness-gated **`mr`** merge path, **never `direct`**: commit on a
 `polecat/<id>` branch and hand it to the refinery exactly like an impl polecat
 (the `mol-polecat-work` done sequence), with `merge_strategy=mr`. Never push to
-main. Never `--merge direct`. The pool already defaults
-`GC_DEFAULT_MERGE_STRATEGY=mr`; do not override it.
+main. Never `--merge direct`.
 
 ## What You Do NOT Do
 

@@ -22,10 +22,10 @@
 # in that directory now is often on other work. Such a session holds the tree
 # only while one of its claims is this work. A claim is an open or in_progress
 # bead assigned to the session under any of its names. The claim is this work
-# when it is the bead itself, or when it is a step of a molecule whose input
-# convoy tracks a bead that is this bead, stands on this branch, or records
-# this tree as its work_dir. The branch match covers the anchor and a sibling
-# rework child. Directories are compared with `-ef`, because git lists a
+# when it is the bead itself, or when it is a step of a molecule whose run
+# works a bead (run-lib.sh) that is this bead, stands on this branch, or
+# records this tree as its work_dir. The branch match covers the anchor and a
+# sibling rework child. Directories are compared with `-ef`, because git lists a
 # worktree by its resolved path and a session records the path it was given.
 #
 # A session absent from `gc session list --state all` is gone, and a tree with
@@ -33,7 +33,7 @@
 # recovers a crashed run. Every input the answer depends on fails closed: a
 # failed `git worktree list`, an unreadable session list or bead listing, a
 # tree no session directory accounts for, and a claim whose molecule cannot be
-# traced to its work.
+# read or whose run names no bead.
 #
 # stdout: one line naming each tree outside $GC_DIR, its count of uncommitted
 #         paths, and what was found; nothing when there is no such tree.
@@ -50,6 +50,11 @@ PROG="work-tree-holder"
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-lib.sh}" \
+  || { echo "$PROG: cannot source run-lib.sh beside this script, so no claim can be traced to its work" >&2; exit 2; }
+tree_bd() { gc bd "$@"; }
 
 usage() {
   cat >&2 <<'USAGE'
@@ -183,7 +188,7 @@ need_rows() {
 
 # judge TREE — set FINDING; return 0 adoptable, 1 held, 2 undecided.
 judge() {
-  local tree="$1" desc home="" d in_tree="" in_home="" names ids claims roots convoys traced untraced work_ids matches="" others="" w found branch wd
+  local tree="$1" desc home="" d in_tree="" in_home="" names ids claims roots runs run r traced untraced work_ids matches="" others="" w found branch wd
   desc="worktree $tree (uncommitted paths: $(uncommitted "$tree"))"
   if [ "$SESSIONS_READ" != 1 ]; then
     FINDING="$desc could not be cleared: the session list could not be read"
@@ -225,33 +230,26 @@ EOF
     return 0
   fi
 
-  # A claim with no molecule root is the work itself. A step's work is what
-  # its molecule's input convoy tracks.
-  roots=$(printf '%s' "$claims" | jq -r '.[] | .metadata["gc.root_bead_id"] // empty | strings')
-  if ! need_rows "$roots"; then
-    FINDING="$desc could not be cleared: the molecules live $names is running could not be read"
-    return 2
-  fi
-  convoys=$(jq -r --arg roots "$roots" '($roots | split("\n")) as $r | .[] | select(.id as $i | any($r[]; . == $i)) | .metadata["gc.input_convoy_id"] // .metadata["gc.var.convoy_id"] // empty | strings' "$SCRATCH/rows.json")
-  if ! need_rows "$convoys"; then
-    FINDING="$desc could not be cleared: the input convoys of the molecules live $names is running could not be read"
-    return 2
-  fi
-  traced=$(jq -c --argjson claims "$claims" '
-    (map({key: .id, value: .}) | from_entries) as $by
+  # A claim with no molecule root is the work itself. A step's work is the
+  # bead its molecule's run works.
+  roots=$(printf '%s' "$claims" | jq -r '[.[] | .metadata["gc.root_bead_id"] // empty | strings | select(length > 0)] | unique | .[]')
+  runs='[]'
+  for r in $roots; do
+    if ! run=$(run_lib subject tree_bd "$r"); then
+      FINDING="$desc could not be cleared: the molecule $r live $names is running could not be read"
+      return 2
+    fi
+    runs=$(jq -cn --argjson a "$runs" --argjson b "$run" '$a + $b')
+  done
+  traced=$(jq -cn --argjson claims "$claims" --argjson runs "$runs" '
+    ($runs | map({key: .root, value: .}) | from_entries) as $by
     | [$claims[] as $c
        | ($c.metadata["gc.root_bead_id"] // "" | tostring) as $r
        | if $r == "" then {claim: $c.id, work: [$c.id]}
-         elif $by[$r] == null then {claim: $c.id, untraced: "molecule \($r) could not be read"}
-         else ($by[$r].metadata["gc.input_convoy_id"] // $by[$r].metadata["gc.var.convoy_id"] // "" | tostring) as $cv
-           | if $cv == "" then {claim: $c.id, untraced: "molecule \($r) names no input convoy"}
-             elif $by[$cv] == null then {claim: $c.id, untraced: "convoy \($cv) could not be read"}
-             else [$by[$cv].dependencies[]? | select((.type // .dependency_type) == "tracks") | (.depends_on_id // .id)] as $m
-               | if ($m | length) == 0 then {claim: $c.id, untraced: "convoy \($cv) tracks no work"}
-                 else {claim: $c.id, work: $m}
-                 end
-             end
-         end]' "$SCRATCH/rows.json")
+         elif $by[$r] == null then {claim: $c.id, untraced: "molecule \($r) is no run this store holds"}
+         elif $by[$r].bead == "" then {claim: $c.id, untraced: "the run of molecule \($r) names no work"}
+         else {claim: $c.id, work: [$by[$r].bead]}
+         end]')
   untraced=$(printf '%s' "$traced" | jq -r '[.[] | select(.untraced) | "\(.claim): \(.untraced)"] | join("; ")')
   work_ids=$(printf '%s' "$traced" | jq -r '[.[] | .work[]?] | unique | .[]')
   if ! need_rows "$work_ids"; then
