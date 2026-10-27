@@ -390,6 +390,11 @@ func withDepType(c *beads.IssueWithDependencyMetadata, t string) *beads.IssueWit
 	return c
 }
 
+func withIssueType(c *beads.IssueWithDependencyMetadata, t string) *beads.IssueWithDependencyMetadata {
+	c.IssueType = beads.IssueType(t)
+	return c
+}
+
 // withLabels stamps labels on an issue fixture. A convoy's ownership is read
 // from its own "owned" label — the same label gascity keys the `gc convoy
 // list` owned flag on.
@@ -478,6 +483,10 @@ func populatedStore() *fakeStore {
 				withDepType(child("tk-p1", "open", testNow, ""), "parent-child"),
 				withDepType(child("tk-p2", "closed", testNow.Add(-24*time.Hour), ""), "parent-child"),
 				withDepType(child("tk-visit", "open", testNow, ""), "tracks"),
+				// The closed event `bd set-state` files under the bead whose
+				// state it changed, on a parent-child edge: an audit record,
+				// not a child.
+				withDepType(withIssueType(child("tk-p-state", "closed", testNow, ""), "event"), "parent-child"),
 			},
 		},
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
@@ -738,7 +747,7 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 	}
 	gotKids := []string{parked.Children[0].ID, parked.Children[1].ID}
 	if gotKids[0] != "tk-p1" || gotKids[1] != "tk-p2" {
-		t.Errorf("children: got %v, want [tk-p1 tk-p2] — the tracks edge is membership, not a child", gotKids)
+		t.Errorf("children: got %v, want [tk-p1 tk-p2] — the tracks edge is membership, and a bd audit event is a record, not a child", gotKids)
 	}
 	if parked.Children[0].Status != "open" || parked.Children[1].Status != "closed" {
 		t.Errorf("children are read at ALL statuses so n_closed is real: %+v", parked.Children)

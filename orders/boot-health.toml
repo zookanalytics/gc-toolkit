@@ -1,25 +1,32 @@
 # boot-health — "is the deacon stuck?" answered mechanically (the patrol-wisp
 # ledger, the deacon's pane only when the wisp is not fresh, and a threshold),
-# replacing the always-on `boot` watchdog session. REPORT-ONLY:
-# it observes and reports to a human; it does not nudge the deacon (a nudge
-# forces a full context reload and delivery to a fresh-wake singleton is
-# unreliable) and it files no warrants. The dog pool exists again, but
-# boot-health deliberately does not file warrants: a false nudge-death
-# diagnosis must not kill a healthy deacon. Interval 5m against a deacon that
-# waits 600s between patrol cycles. The report thresholds in boot-health.sh are
-# wall-clock (WISP_FRESH, REPORT_AFTER), so the interval sets how often the
-# deacon is read, not how long it must stay cold before a report.
+# replacing the always-on `boot` watchdog session. REPORT-ONLY: it observes and
+# files a finding through assets/scripts/patrol-finding.sh, one bead per deacon
+# that the finding's first reaction carries to the operator's board. The report
+# is not mail, because the operator does not read the "human" mailbox. It does
+# not nudge the deacon (a nudge forces a full context reload and delivery to a
+# fresh-wake singleton is unreliable) and it files no warrants. The dog pool
+# exists again, but boot-health deliberately does not file warrants: a false
+# nudge-death diagnosis must not kill a healthy deacon. Interval 5m against a
+# deacon that waits 600s between patrol cycles. The report thresholds in
+# boot-health.sh are wall-clock (WISP_FRESH, REPORT_AFTER), so the interval sets
+# how often the deacon is read, not how long it must stay cold before a report.
+# `timeout` covers the wisp read, the pane read and the finding call, each
+# bounded in boot-health.sh. The cooldown clock starts when a pass is
+# dispatched, so a timeout under the interval ends a pass before the next one
+# starts.
 [order]
-description = "Detect a wedged deacon mechanically and report it; no nudge, no warrant"
+description = "Detect a wedged deacon mechanically and file it as a finding; no nudge, no warrant"
 trigger = "cooldown"
 interval = "5m"
 exec = "$PACK_DIR/assets/scripts/boot-health.sh"
 scope = "city"
-timeout = "90s"
+timeout = "240s"
 idempotent = true
 
 [order.env]
-# Session name to peek (not a mail address).
+# The deacon's session name: the pane to peek and the assignee of its patrol
+# wisps.
 BOOT_HEALTH_DEACON = "gc-toolkit.deacon"
-# Where a cold-deacon report goes — a human decision point by design.
-BOOT_HEALTH_REPORT_TO = "human"
+# The rig whose store holds the cold-deacon finding.
+BOOT_HEALTH_RIG = "gc-toolkit"

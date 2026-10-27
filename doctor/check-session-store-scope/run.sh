@@ -11,10 +11,17 @@
 #   session neither sets nor marks removed. A value the session sets wrong is as
 #   reachable by that respawn as one it lets inherit, so both are checked.
 #
-# Scope comes from the session's own identity — GC_ALIAS's rig prefix, else the
-# `<rig>--` session-name prefix — and never from config: the proposition is
-# that a session agrees with itself, which stays checkable when the config it
-# was spawned from has since changed.
+# Scope comes from the session's own environment and never from config: the
+# proposition is that a session agrees with itself, which stays checkable when
+# the config it was spawned from has since changed. A qualified GC_ALIAS,
+# `<rig>/<binding>.<agent>`, names the session's rig, and an unqualified one
+# names a city-scoped agent. A session with no alias, such as a member of an
+# unaliased pool, takes its scope from GC_TEMPLATE: `<rig>/<binding>.<agent>`
+# on a rig-scoped session and `<binding>.<agent>` on a city-scoped one. The
+# session name is not read for scope. A pool member is named
+# `<binding>__<agent>-<id>` whichever rig imported its pack, so the name opens
+# with the pack binding, not the rig. A session carrying neither key has no
+# scope to agree with, so it warns as unverified.
 #
 # GC_BEADS_PREFIX is not judged on its own, because its correct value is a
 # property of the store rather than of the session. It never travels alone:
@@ -169,66 +176,72 @@ else
         [ -n "$agent" ] || continue
         sess_city=$(env_val GC_CITY_PATH "$senv")
         [ -z "$sess_city" ] || [ "$sess_city" = "$city" ] || continue
-        sessions_checked=$((sessions_checked + 1))
 
-        # Rig prefix of the qualified alias when the session carries one. An
-        # aliasless session (a pool member) names its store rig as the leading
-        # segment of its own name: <rig>__<template>-<id> when it shares the
-        # store's rig, <rig>--<template> when it is bound to a rig from
-        # elsewhere. GC_RIG is that first segment either way, so split on
-        # whichever of `--` or `__` opens the name.
+        # Gas City sets GC_TEMPLATE on each session it spawns from that
+        # session's own template, over whatever the spawning process passed
+        # through, so a scope a caller leaks cannot also move the scope the
+        # session is judged against.
         alias_name=$(env_val GC_ALIAS "$senv")
-        want_rig=""
+        template=$(env_val GC_TEMPLATE "$senv")
+        want_rig=""; scope_known=1
         case "$alias_name" in
             */*) want_rig="${alias_name%%/*}" ;;
-            "")  case "$sess" in
-                     *--*) want_rig="${sess%%--*}" ;;
-                     *__*) want_rig="${sess%%__*}" ;;
+            "")  case "$template" in
+                     */*) want_rig="${template%%/*}" ;;
+                     "")  scope_known=0 ;;
                  esac ;;
         esac
         want_scope="city"; [ -n "$want_rig" ] && want_scope="rig"
         scope_desc="city-scoped"; [ -n "$want_rig" ] && scope_desc="scoped to rig $want_rig"
 
-        # --- Arm 1: the running process agrees with the session's own scope ---
-        penv=""
-        if [ -n "$pane_pid" ] && [ -r "$PROC/$pane_pid/environ" ]; then
-            penv=$(tr '\0' '\n' < "$PROC/$pane_pid/environ" 2>/dev/null)
-        fi
-        if [ -z "$penv" ]; then
-            notes+=("$sess: pane process environment unreadable (pane_pid=${pane_pid:-none}, $PROC) — what this agent actually holds was not read")
+        if [ "$scope_known" -eq 0 ]; then
+            scope_desc="of undetermined scope"
+            warnings+=("$sess carries GC_AGENT but neither GC_ALIAS nor GC_TEMPLATE, so its store scope cannot be derived and the store keys it holds are UNVERIFIED. Not a benign skip: an agent reading the wrong store writes beads no queue that wants them can see. Read its store keys by hand (\`tmux show-environment -t $sess\`). If every pool session reads this way, Gas City has stopped writing GC_TEMPLATE, and this check needs another source of scope.")
         else
-            panes_read=$((panes_read + 1))
+            sessions_checked=$((sessions_checked + 1))
+
+            # --- Arm 1: the running process agrees with the session's own scope
+            penv=""
+            if [ -n "$pane_pid" ] && [ -r "$PROC/$pane_pid/environ" ]; then
+                penv=$(tr '\0' '\n' < "$PROC/$pane_pid/environ" 2>/dev/null)
+            fi
+            if [ -z "$penv" ]; then
+                notes+=("$sess: pane process environment unreadable (pane_pid=${pane_pid:-none}, $PROC) — what this agent actually holds was not read")
+            else
+                panes_read=$((panes_read + 1))
+                while IFS="$TAB" read -r kind key val named; do
+                    [ -n "$kind" ] || continue
+                    case "$kind" in
+                        rig-wrong)   errors+=("$sess is $scope_desc but its running process holds $key=$val — every bd call it makes reads and writes rig $val's store. Restart the session (\`gc session reset $agent\`); if it recurs, the spawn is handing out a caller's scope.") ;;
+                        rig-missing) errors+=("$sess is $scope_desc but its running process holds no GC_RIG — it resolves the city store instead of rig $want_rig's, so its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
+                        path-rig)    errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc session reset $agent\`) and re-read this check.") ;;
+                        path-city)   errors+=("$sess is $scope_desc but its running process holds $key=$val, the city store, not rig $want_rig's — its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
+                        scope-wrong) errors+=("$sess is $scope_desc but its running process holds $key=$val, not $want_scope — restart the session (\`gc session reset $agent\`).") ;;
+                    esac
+                done <<< "$(scope_disagreements "$penv")"
+            fi
+
+            # --- Arm 1b: the session environment names the session's own scope
+            # respawn-pane takes no env argument, so a store-scope value the
+            # session environment SETS is what the next process in this pane
+            # comes up with. Arm 2 cannot see it: that arm flags only keys the
+            # session leaves open for the server to fill, never a wrong value
+            # the session sets itself. The running process can still hold the
+            # right scope (Arm 1 clean) while the session env already names
+            # another store, so this is an error the same as the pane's —
+            # `gc session reset` recreates the session from its derived scope.
+            # Absence is not judged here: an unset key is Arm 2's to weigh, and
+            # one the session sets is validated at the pane above.
             while IFS="$TAB" read -r kind key val named; do
                 [ -n "$kind" ] || continue
                 case "$kind" in
-                    rig-wrong)   errors+=("$sess is $scope_desc but its running process holds $key=$val — every bd call it makes reads and writes rig $val's store. Restart the session (\`gc session reset $agent\`); if it recurs, the spawn is handing out a caller's scope.") ;;
-                    rig-missing) errors+=("$sess is $scope_desc but its running process holds no GC_RIG — it resolves the city store instead of rig $want_rig's, so its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
-                    path-rig)    errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc session reset $agent\`) and re-read this check.") ;;
-                    path-city)   errors+=("$sess is $scope_desc but its running process holds $key=$val, the city store, not rig $want_rig's — its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
-                    scope-wrong) errors+=("$sess is $scope_desc but its running process holds $key=$val, not $want_scope — restart the session (\`gc session reset $agent\`).") ;;
+                    rig-wrong)   errors+=("$sess is $scope_desc but its session environment sets $key=$val — \`respawn-pane\` takes no env argument, so the next process in this pane comes up reading rig $val's store. Reset the session (\`gc session reset $agent\`).") ;;
+                    path-rig)    errors+=("$sess is $scope_desc but its session environment sets $key=$val, which names rig $named — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
+                    path-city)   errors+=("$sess is $scope_desc but its session environment sets $key=$val, the city store, not rig $want_rig's — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
+                    scope-wrong) errors+=("$sess is $scope_desc but its session environment sets $key=$val, not $want_scope — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
                 esac
-            done <<< "$(scope_disagreements "$penv")"
+            done <<< "$(scope_disagreements "$senv")"
         fi
-
-        # --- Arm 1b: the session environment names the session's own scope ----
-        # respawn-pane takes no env argument, so a store-scope value the session
-        # environment SETS is what the next process in this pane comes up with.
-        # Arm 2 cannot see it: that arm flags only keys the session leaves open
-        # for the server to fill, never a wrong value the session sets itself. The
-        # running process can still hold the right scope (Arm 1 clean) while the
-        # session env already names another store, so this is an error the same as
-        # the pane's — `gc session reset` recreates the session from its derived
-        # scope. Absence is not judged here: an unset key is Arm 2's to weigh, and
-        # one the session sets is validated at the pane above.
-        while IFS="$TAB" read -r kind key val named; do
-            [ -n "$kind" ] || continue
-            case "$kind" in
-                rig-wrong)   errors+=("$sess is $scope_desc but its session environment sets $key=$val — \`respawn-pane\` takes no env argument, so the next process in this pane comes up reading rig $val's store. Reset the session (\`gc session reset $agent\`).") ;;
-                path-rig)    errors+=("$sess is $scope_desc but its session environment sets $key=$val, which names rig $named — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
-                path-city)   errors+=("$sess is $scope_desc but its session environment sets $key=$val, the city store, not rig $want_rig's — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
-                scope-wrong) errors+=("$sess is $scope_desc but its session environment sets $key=$val, not $want_scope — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
-            esac
-        done <<< "$(scope_disagreements "$senv")"
 
         # --- Arm 2: a respawn of this pane would not inherit a store key ------
         # The per-key test governs both scopes: a session shadows only the keys
