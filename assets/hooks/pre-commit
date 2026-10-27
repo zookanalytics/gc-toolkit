@@ -46,11 +46,13 @@ fi
 # The commit carries what its branch moves and nothing else. The render runs
 # --since the branch's fork point from the default branch. A file that renders
 # differently now but the same at the fork point is no change of the branch's,
-# so it is kept as the fork point commits it, unless HEAD already commits it as
-# rendered. Its text moved with the gc binary, and that text lands through the
-# default branch's re-audit in a change of its own (render-seed-audit.sh, WHOSE
-# TEXT IT IS). A file the branch moves is written as rendered, which also renews
-# one an earlier commit left stale.
+# so it is kept as the fork point commits it. Its text moved with the gc binary,
+# and that text lands through the default branch's re-audit in a change of its
+# own (render-seed-audit.sh, WHOSE TEXT IT IS). A file the branch moves is
+# written as rendered, which also renews one an earlier commit left stale. So is
+# a file the branch adopted gc's text for, by committing it as rendered or by a
+# re-render of its own such as the re-audit's, so a newer gc renews the
+# adoption and never undoes it.
 #
 # A commit that concludes a merge has the merged heads for parents as well, so
 # its fork point is taken with them. Taken from HEAD alone, a merge of the

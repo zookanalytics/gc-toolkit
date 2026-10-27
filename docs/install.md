@@ -265,11 +265,12 @@ git 2.38 or newer.
 
 A commit carries the renders its branch moves. The hook renders `--since` the
 branch's fork point from the default branch, so a file whose text moved with
-the `gc` binary, and not with the branch, stays as the fork point has it,
-unless the branch already commits the new text. That text lands in a pull
-request of its own: the merge gate hands the files the
+the `gc` binary, and not with the branch, stays as the fork point has it. That
+text lands in a pull request of its own: the merge gate hands the files the
 default branch is stale in to `seed-audit-reaudit.sh`, which slings one bead to
-re-render them.
+re-render them. A branch that adopted gc's text for a file, by committing it as
+rendered or by a re-render of its own such as that bead's, has the file
+rendered fresh, so a newer `gc` renews the adoption rather than undoing it.
 
 ### Smoke test
 

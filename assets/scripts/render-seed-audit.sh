@@ -1108,15 +1108,25 @@ fi
 # --since <rev> writes what the change since <rev> moves, and nothing else. A
 # file the fresh render writes the way <rev> commits it needs no judgement. Any
 # other file is judged against a render of <rev> itself, which runs only when
-# some file needs it. A file that renders the same at <rev> did not move with
-# the change, so it is kept as <rev> commits it, or left out when <rev> commits
-# none: its text moved with the `gc` binary (see WHOSE TEXT IT IS), or <rev> had
-# it stale already. That holds unless HEAD already commits the file as rendered.
-# The change then adds nothing to it, and <rev>'s copy would undo text a commit
-# of the branch adopted, such as the re-audit's own. A file that renders
-# differently at <rev> moved with the change and is written as rendered. A
-# revision that carries no audit, or only the stub a pack ships before its first
-# render, keeps nothing.
+# some file needs it. A file that renders differently at <rev> moved with the
+# change and is written as rendered. A file that renders the same at <rev> did
+# not move with the change, so it is kept as <rev> commits it, or left out when
+# <rev> commits none: its text moved with the `gc` binary (see WHOSE TEXT IT
+# IS), or <rev> had it stale already.
+#
+# That holds unless the branch adopted gc's text for the file. HEAD committing
+# the file as rendered is one sign of an adoption, and the file then stays,
+# since the change adds nothing to it. A re-render is the other sign. HEAD's
+# copy is the branch's own when it differs from <rev>'s, and the branch's
+# commits are the ones HEAD has and <rev> does not. When the first of them to
+# change the file changed nothing outside the audit, a re-render started that
+# copy, and its text came from gc, as the re-audit's does. Such a file is the
+# branch's own change, so it is written as rendered, like a file the change
+# moves. Once gc moves again, the copy HEAD commits is neither <rev>'s nor the
+# render, and putting back <rev>'s copy would undo the adoption. A copy that a
+# change to anything else started is no adoption, and reverting that change
+# puts back <rev>'s copy. A revision that carries no audit, or only the stub a
+# pack ships before its first render, keeps nothing.
 #
 # Whether HEAD commits <file> under the audit with <path>'s bytes, or commits no
 # such file where <path> holds none.
@@ -1128,7 +1138,20 @@ head_commits() { # <file> <path>
         [ ! -f "$2" ]
     fi
 }
+# The blob <rev> commits for <file> under the audit, and nothing where it
+# commits none.
+audit_blob() { git -C "$ROOT" rev-parse -q --verify "$1:$AUDIT/$2" 2>/dev/null; } # <rev> <file>
+# Whether a re-render of the branch started HEAD's own copy of <file>. The
+# branch's commits are read along first parents, so a merge that brought the
+# file in from another line counts as one commit, with everything it brought.
+head_adopted() { # <file>
+    local first
+    [ "$(audit_blob HEAD "$1")" != "$(audit_blob "$SINCE" "$1")" ] || return 1
+    first="$(git -C "$ROOT" log --first-parent --reverse --format=%H "$SINCE..HEAD" -- "$AUDIT/$1" 2>/dev/null | head -n 1)"
+    [ -n "$first" ] && git -C "$ROOT" diff --quiet "$first^1" "$first" -- . ":(exclude)$AUDIT" 2>/dev/null
+}
 KEPT=()
+RENEWED=()
 if [ -n "$SINCE" ]; then
     SINCE_TREE="$TMPROOT/since"
     SINCE_RENDER="$TMPROOT/since.render"
@@ -1150,6 +1173,7 @@ if [ -n "$SINCE" ]; then
         for p in "${differs[@]}"; do
             same "$SINCE_RENDER/$p" "$STAGE/$p" || continue
             head_commits "$p" "$STAGE/$p" && continue
+            if head_adopted "$p"; then RENEWED+=("$p"); continue; fi
             KEPT+=("$p")
             if [ -f "$since_audit/$p" ]; then
                 mkdir -p "$(dirname "$STAGE/$p")" && cp "$since_audit/$p" "$STAGE/$p" \
@@ -1170,4 +1194,9 @@ if [ "${#KEPT[@]}" -gt 0 ]; then
     printf 'kept %s file(s) as %s commits them: each renders differently now but the same at %s, so the change does not move it. Text that moves with the gc binary lands through the default branch'"'"'s re-audit (seed-audit-reaudit.sh):\n' \
         "${#KEPT[@]}" "$SINCE" "$SINCE"
     printf '  %s\n' "${KEPT[@]}"
+fi
+if [ "${#RENEWED[@]}" -gt 0 ]; then
+    printf 'renewed %s file(s) a re-render of this branch adopted: each renders differently now but the same at %s, and is written as rendered rather than put back as %s commits it:\n' \
+        "${#RENEWED[@]}" "$SINCE" "$SINCE"
+    printf '  %s\n' "${RENEWED[@]}"
 fi
