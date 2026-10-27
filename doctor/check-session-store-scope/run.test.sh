@@ -242,67 +242,178 @@ eq "$RC" "2" "a rig-scoped agent holding no GC_RIG is an ERROR"
 has "$OUT" "holds no GC_RIG" "the finding says the scope is missing, not wrong"
 has "$OUT" "rig alpha" "the scope it should have had is named"
 
-# --- 6. pool members carry no GC_ALIAS; the session name carries the rig -----
+# --- 6. a pool member's rig comes from GC_TEMPLATE, not its session name ------
+# A member of an unaliased pool carries no GC_ALIAS, and it is named
+# <binding>__<agent>-<id> whichever rig imported its pack, so the name opens
+# with the pack binding.
+# Here a pack bound as "alpha", the name rig alpha also has, runs a polecat for
+# rig beta. Only its GC_TEMPLATE, beta/alpha.polecat, names its rig, and the
+# beta store keys it holds are its own.
 healthy
-session alpha--city__polecat-1-pool 300 <<EOF
-GC_AGENT=alpha--city__polecat-1-pool
-GC_CITY_PATH=$CITY
-GC_RIG=alpha
-EOF
-pane 300 <<EOF
-GC_AGENT=alpha--city__polecat-1-pool
+session alpha__polecat-hq-wisp-1 300 <<EOF
+GC_AGENT=hq-wisp-1
+GC_TEMPLATE=beta/alpha.polecat
 GC_CITY_PATH=$CITY
 GC_RIG=beta
+GC_RIG_ROOT=$CITY/rigs/beta
+BEADS_DIR=$CITY/rigs/beta/.beads
+EOF
+pane 300 <<EOF
+GC_AGENT=hq-wisp-1
+GC_TEMPLATE=beta/alpha.polecat
+GC_CITY_PATH=$CITY
+GC_RIG=beta
+GC_RIG_ROOT=$CITY/rigs/beta
+BEADS_DIR=$CITY/rigs/beta/.beads
 EOF
 OUT=$(run); RC=$?
-eq "$RC" "2" "an aliasless pool member takes its rig from the session name"
-has "$OUT" "alpha--city__polecat-1-pool" "the pool session is named"
-has "$OUT" "scoped to rig alpha" "the rig came from the session-name prefix"
+eq "$RC" "0" "a pool member of another rig, named for its pack, that holds its own rig's store keys passes"
+has "$OUT" "3 agent session(s)" "the pool member is judged, not skipped"
+has "$OUT" "3 read at the running process" "the pool member's running process is read"
+hasnt "$OUT" "scoped to rig alpha" "the session name's pack binding is not read as its rig"
 
-# --- 6b. an aliasless same-store pool member: <rig>__<template>, no `--` ------
-# The real shape a same-store pool session actually carries: named
-# <rig>__<template>-<id> with a double underscore and no `--`, GC_RIG=<rig>, and
-# no GC_ALIAS. The `--`-only split judged it city-scoped and reported its own
-# correct GC_RIG as a leak; the rig is the first name segment either separator.
+# --- 6b. a pool member whose pack shares its rig's name -----------------------
 healthy
-session alpha__polecat-1 310 <<EOF
-GC_AGENT=alpha__polecat-1
+session alpha__polecat-hq-wisp-2 310 <<EOF
+GC_AGENT=hq-wisp-2
+GC_TEMPLATE=alpha/alpha.polecat
 GC_CITY_PATH=$CITY
 GC_RIG=alpha
 GC_RIG_ROOT=$CITY/rigs/alpha
 BEADS_DIR=$CITY/rigs/alpha/.beads
 EOF
 pane 310 <<EOF
-GC_AGENT=alpha__polecat-1
+GC_AGENT=hq-wisp-2
+GC_TEMPLATE=alpha/alpha.polecat
 GC_CITY_PATH=$CITY
 GC_RIG=alpha
 GC_RIG_ROOT=$CITY/rigs/alpha
 BEADS_DIR=$CITY/rigs/alpha/.beads
 EOF
 OUT=$(run); RC=$?
-eq "$RC" "0" "an aliasless <rig>__<template> pool member that agrees with its rig passes"
+eq "$RC" "0" "a pool member that agrees with its template's rig passes"
 has "$OUT" "3 agent session(s)" "the pool member is judged, not skipped"
-hasnt "$OUT" "alpha__polecat-1 is scoped to rig" "a pool member that agrees with its own rig is not a finding"
 
-# --- 6c. the same <rig>__ shape still catches a genuine leak -----------------
-# Deriving the rig from the <rig>__ prefix must not pass the session wholesale:
-# a pane whose GC_RIG names another rig is still an ERROR, and the finding names
-# the scope the name gave it, not "city-scoped".
+# --- 6c. GC_TEMPLATE still catches the leak the check exists for --------------
+# A rig alpha template whose environment holds rig beta's GC_RIG is an ERROR,
+# both in the running process and in the session environment a respawn gets.
 healthy
-session alpha__polecat-2 320 <<EOF
-GC_AGENT=alpha__polecat-2
+session alpha__polecat-hq-wisp-3 320 <<EOF
+GC_AGENT=hq-wisp-3
+GC_TEMPLATE=alpha/alpha.polecat
 GC_CITY_PATH=$CITY
-GC_RIG=alpha
+GC_RIG=beta
 EOF
 pane 320 <<EOF
-GC_AGENT=alpha__polecat-2
+GC_AGENT=hq-wisp-3
+GC_TEMPLATE=alpha/alpha.polecat
 GC_CITY_PATH=$CITY
 GC_RIG=beta
 EOF
 OUT=$(run); RC=$?
-eq "$RC" "2" "an aliasless <rig>__<template> pool member whose pane names another rig is an ERROR"
-has "$OUT" "alpha__polecat-2 is scoped to rig alpha" "the rig came from the <rig>__ name prefix"
-has "$OUT" "running process holds GC_RIG=beta" "the leak is named"
+eq "$RC" "2" "a pool member whose environment holds another rig's GC_RIG than its template names is an ERROR"
+has "$OUT" "alpha__polecat-hq-wisp-3 is scoped to rig alpha" "the rig came from GC_TEMPLATE"
+has "$OUT" "running process holds GC_RIG=beta" "the running process's leak is named"
+has "$OUT" "session environment sets GC_RIG=beta" "the session environment's leak is named"
+has "$OUT" "gc session reset hq-wisp-3" "the finding carries the remedy"
+
+# --- 6d. a leak the session name would hide -----------------------------------
+# A polecat of rig beta whose environment holds rig alpha's store keys, where
+# alpha is also its pack binding. Reading the rig off the name would call this
+# session clean; its GC_TEMPLATE names rig beta, so it is an ERROR.
+healthy
+session alpha__polecat-hq-wisp-4 330 <<EOF
+GC_AGENT=hq-wisp-4
+GC_TEMPLATE=beta/alpha.polecat
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=$CITY/rigs/alpha/.beads
+EOF
+pane 330 <<EOF
+GC_AGENT=hq-wisp-4
+GC_TEMPLATE=beta/alpha.polecat
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=$CITY/rigs/alpha/.beads
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "2" "a pool member holding the store keys of the rig its name opens with, not its template's, is an ERROR"
+has "$OUT" "alpha__polecat-hq-wisp-4 is scoped to rig beta" "the rig came from GC_TEMPLATE, not the name"
+has "$OUT" "running process holds GC_RIG=alpha" "the wrong rig is named"
+has "$OUT" "names rig alpha" "the path-valued keys resolve to the wrong rig"
+
+# --- 6e. a city pool member: a bare template and no GC_RIG --------------------
+# A city-scoped pool's template names no rig, <binding>.<agent>, so the session
+# is city-scoped whatever its name opens with, and holding no GC_RIG is right.
+healthy
+session city__dog-hq-wisp-5 340 <<EOF
+GC_AGENT=hq-wisp-5
+GC_TEMPLATE=city.dog
+GC_CITY_PATH=$CITY
+-BEADS_DIR
+EOF
+pane 340 <<EOF
+GC_AGENT=hq-wisp-5
+GC_TEMPLATE=city.dog
+GC_CITY_PATH=$CITY
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "0" "a city pool member with a bare template and no GC_RIG passes"
+has "$OUT" "3 agent session(s)" "the city pool member is judged, not skipped"
+hasnt "$OUT" "scoped to rig city" "the session name's pack binding is not read as a rig"
+
+# --- 6f. a bare template is still judged as city-scoped -----------------------
+healthy
+session city__dog-hq-wisp-6 350 <<EOF
+GC_AGENT=hq-wisp-6
+GC_TEMPLATE=city.dog
+GC_CITY_PATH=$CITY
+-BEADS_DIR
+EOF
+pane 350 <<EOF
+GC_AGENT=hq-wisp-6
+GC_TEMPLATE=city.dog
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+BEADS_DIR=$CITY/rigs/alpha/.beads
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "2" "a city pool member whose running process holds a rig's store env is an ERROR"
+has "$OUT" "city__dog-hq-wisp-6 is city-scoped" "the bare template made it city-scoped"
+has "$OUT" "running process holds GC_RIG=alpha" "the leaked rig is named"
+
+# --- 6g. no alias and no template: unverified, never guessed ------------------
+# With neither key the session has no scope of its own to agree with. Its name
+# is not read in their place, whatever form it takes, so the session is a
+# WARNING that names it and never an error against a guessed rig.
+healthy
+session alpha--city__polecat-hq-wisp-7 360 <<EOF
+GC_AGENT=hq-wisp-7
+GC_CITY_PATH=$CITY
+GC_RIG=beta
+EOF
+pane 360 <<EOF
+GC_AGENT=hq-wisp-7
+GC_CITY_PATH=$CITY
+GC_RIG=beta
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "1" "a session carrying neither GC_ALIAS nor GC_TEMPLATE is a WARNING"
+has "$OUT" "alpha--city__polecat-hq-wisp-7 carries GC_AGENT but neither GC_ALIAS nor GC_TEMPLATE" "the warning names the session and what it lacks"
+has "$OUT" "UNVERIFIED" "the warning says the answer is unknown"
+hasnt "$OUT" "alpha--city__polecat-hq-wisp-7 is scoped to rig" "no rig is read off the session name"
+hasnt "$OUT" "OK:" "an unjudged session cannot reach the OK line"
+healthy
+printf 'GC_STORE_SCOPE=city\n' > "$TMP/global.env"
+session city__polecat-hq-wisp-8 370 <<EOF
+GC_AGENT=hq-wisp-8
+GC_CITY_PATH=$CITY
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "1" "an unjudged session is still read for warm-respawn exposure"
+has "$OUT" "city__polecat-hq-wisp-8 is of undetermined scope and its session environment neither sets nor removes GC_STORE_SCOPE" "the respawn arm runs on a session whose scope is unknown"
 
 # --- 7. warm-respawn exposure: the server holds a key the session leaves open -
 healthy
