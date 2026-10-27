@@ -399,9 +399,9 @@ esac
 # hold a cross-store edge, which reports success and holds nothing. Resolve
 # the subject's own rig by its id prefix, the way the board's write verbs do.
 if [ -z "$DB" ]; then
-    _rigs="$(gc rig list --json 2>/dev/null || printf '')"
+    _rigs="$("$HERE/rig-map.sh" || printf '')"
     if [ -n "$_rigs" ]; then
-        _path="$(printf '%s' "$_rigs" | scrub \
+        _path="$(printf '%s' "$_rigs" \
             | jq -r --arg p "${BEAD%%-*}" '((.rigs // []) | map(select((.prefix // "") == $p)) | .[0].path // "")' 2>/dev/null || printf '')"
         [ -n "$_path" ] && [ -d "$_path/.beads" ] && DB="$_path/.beads"
     fi

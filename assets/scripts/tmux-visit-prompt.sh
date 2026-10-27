@@ -139,14 +139,15 @@ fi
 # empty `gc rig list` skips the chooser and lets the intake apply its own
 # default; an Esc cancels the whole press, and nothing is typed yet to keep.
 #
-# The rig set comes from `gc rig list --json`, whose cost is the per-rig
+# The rig set comes from rig-map.sh, whose cost is `gc rig list`'s per-rig
 # liveness probe. It runs in the foreground before the message popup and outside
-# the intake timeout below, so it is BOUNDED — a `gc rig list` wedged against a
+# the intake timeout below. rig-map.sh BOUNDS it, so a listing wedged against a
 # dead data plane falls to an empty list (chooser skipped) rather than stranding
-# the operator at a rig-less prompt — and CACHED, so a burst of presses opens the
-# picker without re-paying the probe. Only a valid, non-empty rig set is cached;
-# a wedged or empty answer is never stored as the answer. The temp write uses
-# $$ (not mktemp) so a concurrent press never reads a half-written cache.
+# the operator at a rig-less prompt. The read is also CACHED, so a burst of
+# presses opens the picker without re-paying the probe. Only a valid, non-empty
+# rig set is cached; a wedged or empty answer is never stored as the answer. The
+# temp write uses $$ (not mktemp) so a concurrent press never reads a
+# half-written cache.
 RIG_LIST_JSON=""
 RIG_CACHE_FILE="$DRAFT_DIR/rig-list.cache"
 mkdir -p "$DRAFT_DIR" 2>/dev/null || true
@@ -155,11 +156,7 @@ if [ "$RIG_CACHE_TTL" -gt 0 ] && [ -f "$RIG_CACHE_FILE" ] \
     RIG_LIST_JSON=$(cat "$RIG_CACHE_FILE" 2>/dev/null || true)
 fi
 if [ -z "$RIG_LIST_JSON" ]; then
-    if command -v timeout >/dev/null 2>&1; then
-        RIG_LIST_JSON=$(timeout "$INTAKE_TIMEOUT" gc rig list --json 2>/dev/null || true)
-    else
-        RIG_LIST_JSON=$(gc rig list --json 2>/dev/null || true)
-    fi
+    RIG_LIST_JSON=$("$CONFIGDIR/assets/scripts/rig-map.sh" 2>/dev/null || true)
     if [ "$RIG_CACHE_TTL" -gt 0 ] \
        && printf '%s' "$RIG_LIST_JSON" | jq -e '(.rigs | length) > 0' >/dev/null 2>&1; then
         if printf '%s' "$RIG_LIST_JSON" > "$RIG_CACHE_FILE.$$" 2>/dev/null; then
@@ -338,7 +335,7 @@ case "$TOPIC" in
         fi ;;
 esac
 
-# 7. Background the slow half (seconds, up to GC_HELM_RIG_TIMEOUT). stdout/
+# 7. Background the slow half (seconds, up to GC_RIG_LIST_TIMEOUT). stdout/
 #    stderr closed so run-shell sees EOF at once (it waits on pipes, not the
 #    process tree). Only this half may remove the draft — the parent exits
 #    immediately.

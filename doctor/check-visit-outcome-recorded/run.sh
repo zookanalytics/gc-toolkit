@@ -157,6 +157,9 @@ if ! reads_init check-visit-outcome-recorded; then
     exit 1
 fi
 
+# rig-map.sh reads the rig map, and names on stderr why it did not.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+
 # `gc rig list` names the stores this check scans, and it can fail transiently:
 # a momentary Dolt or lock blip returns a non-zero rc that a later call clears.
 # Since a check that cannot enumerate files an all-rigs finding, a single blip
@@ -167,7 +170,7 @@ RIGS_MAX_ATTEMPTS=3
 rigs_attempt=0
 while : ; do
     rigs_attempt=$((rigs_attempt + 1))
-    read_to "$WORK/rigs.json" gc rig list --json; rigs_rc=$?
+    read_to "$WORK/rigs.json" "$RIG_MAP"; rigs_rc=$?
     [ "$rigs_rc" -eq 0 ] && break
     [ "$rigs_attempt" -ge "$RIGS_MAX_ATTEMPTS" ] && break
     budget_spent && break
@@ -180,7 +183,7 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether every closed visit records an outcome"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths after $rigs_attempt attempt(s); there is no set of bead stores to scan."
     rigs_err=$(err_of "$WORK/rigs.json")
-    [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
+    [ -n "$rigs_err" ] && detail "$rigs_err"
     exit 1
 fi
 

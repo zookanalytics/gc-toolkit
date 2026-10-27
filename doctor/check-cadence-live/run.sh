@@ -127,7 +127,9 @@ exec 9>"$probe_dir/held"
 # every window short by however long they took.
 now=$(budget_now)
 run_bounded gc order history --limit 0 --json >"$probe_dir/runs.json" 2>/dev/null & runs_pid=$!
-run_bounded gc rig list --json >"$probe_dir/rigs.json" 2>/dev/null & rigs_pid=$!
+# rig-map.sh reads the rig map, and names on stderr why it did not.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+run_bounded "$RIG_MAP" >"$probe_dir/rigs.json" 2>"$probe_dir/rigs.err" & rigs_pid=$!
 
 orders_json=$(run_bounded gc order list --json 2>/dev/null)
 if ! printf '%s' "$orders_json" | jq -e '(.orders | type) == "array"' >/dev/null 2>&1; then
@@ -150,7 +152,8 @@ if printf '%s' "$rigs_json" | jq -e '(.rigs | type) == "array"' >/dev/null 2>&1;
     suspended_rigs=$(printf '%s' "$rigs_json" \
         | jq -r '.rigs[]? | select((.suspended // false) == true) | .name // empty' 2>/dev/null)
 else
-    warnings+=("could not read the rig roster (\`gc rig list --json\`) — a suspended rig cannot be told apart from a stalled one below")
+    rigs_why=$(sed -n '/[^[:space:]]/{p;q;}' "$probe_dir/rigs.err" 2>/dev/null | cut -c1-200)
+    warnings+=("could not read the rig roster (\`gc rig list --json\`) — a suspended rig cannot be told apart from a stalled one below${rigs_why:+ ($rigs_why)}")
 fi
 is_suspended() { [ -n "$suspended_rigs" ] && printf '%s\n' "$suspended_rigs" | grep -qxF "$1"; }
 

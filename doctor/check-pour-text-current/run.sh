@@ -100,13 +100,17 @@ if [ "$NOW" -eq 0 ]; then
 fi
 STALE_AFTER=$(( INTERVAL * SLACK ))
 
+# rig-map.sh prints the map when the listing reads and only its reason when it
+# does not, so one capture holds whichever came back.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
 # `gc rig list` is the roster the reconciler itself reads
 # (assets/scripts/reconcile-rig-checkouts.sh), so this asserts that order's
 # own contract over exactly the set it promises to keep current.
-rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+rigs_raw=$(run_bounded "$RIG_MAP" 2>&1); rigs_rc=$?
 if [ "$rigs_rc" -ne 0 ] || [ -z "$rigs_raw" ]; then
     echo "cannot determine whether the executed pack is current (I9)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or returned nothing; there is no set of checkouts to scan."
+    [ "$rigs_rc" -eq 0 ] || [ -z "$rigs_raw" ] || detail "$rigs_raw"
     exit 1
 fi
 # US-joined so a rig with an empty name still yields its other fields intact.

@@ -242,8 +242,10 @@ mkcfg() {           # mkcfg <dir> <stub-body>
     printf '%s\n' "$2" > "$1/assets/scripts/gc-visit-open.sh"
     chmod +x "$1/assets/scripts/gc-visit-open.sh"
     # tmux-bindings.sh derives the handler path from the config dir too, so
-    # the live half reaches the REAL handler only if it is linked in here.
+    # the live half reaches the REAL handler only if it is linked in here. The
+    # rig chooser reads through the config dir's rig-map.sh, linked the same way.
     ln -sf "$SCRIPT" "$1/assets/scripts/tmux-visit-prompt.sh"
+    ln -sf "$HERE/rig-map.sh" "$1/assets/scripts/rig-map.sh"
 }
 
 STUB_OK='#!/bin/sh
@@ -527,7 +529,7 @@ has "$ccalls" "argv=[a report with no chooser]" "CHOOSER: the report is still fi
 # and the press falls through to the message popup and the intake default.
 if command -v timeout >/dev/null 2>&1; then
     export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1" FAKE_RIG_LIST_SLEEP=60
-    GC_VISIT_INTAKE_TIMEOUT=1 run_handler "$CFG_OK" "a report while rig list is wedged"
+    GC_RIG_LIST_TIMEOUT=1 run_handler "$CFG_OK" "a report while rig list is wedged"
     ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
     hasnt "$cgum" "gum choose" "CHOOSERHANG: a wedged rig list bounds out, so no picker is shown"
     hasnt "$ccalls" "argv=[--rig]" "CHOOSERHANG: ...and no --rig is forwarded, leaving the intake default"
