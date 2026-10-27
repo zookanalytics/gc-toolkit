@@ -143,8 +143,8 @@ type Facts struct {
 // Live city work on an unapproved PR comes before the review verdict it leads
 // to, and the verdict is what remains when neither stands.
 func Derive(f Facts) State {
-	posture, postureHead := splitDated(f.PRPosture)
-	machine, machineHead := splitDated(f.PRMachine)
+	posture, _ := splitDated(f.PRPosture)
+	machine, _ := splitDated(f.PRMachine)
 
 	// needs-attention: a blocker the city will not clear on its own.
 	if isSet(f.MergeHold) || isSet(f.RebaseHold) || f.OpenVisit {
@@ -155,15 +155,8 @@ func Derive(f Facts) State {
 	if !knownPosture(posture) || !knownMachine(machine) || (machine == "blocked" && !knownCause(f.PRMachineCause)) {
 		return NeedsAttention
 	}
-	// The merge pass's blocked verdict, at the head the posture was read at.
-	// The pass records most causes only with nothing in flight, so live work
-	// that arrives afterwards is the city acting on the cause, and the next pass
-	// replaces the verdict. The blocker cause is the exception: the pass records
-	// it only once no automated actor holds any live blocker
-	// (assets/scripts/blocker-holder.sh), and the blocker itself is often in
-	// the in-flight set, such as a must-fix finding nothing answers.
-	if machine == "blocked" && (postureHead == "" || machineHead == postureHead) &&
-		(f.InFlightCount == 0 || f.PRMachineCause == CauseBlocker) {
+	// The merge pass's blocked verdict, while it holds the PR.
+	if Blocked(f) {
 		return NeedsAttention
 	}
 
@@ -179,6 +172,24 @@ func Derive(f Facts) State {
 
 	// needs-review: only a human's verdict on the settled head is left.
 	return NeedsReview
+}
+
+// Blocked reports whether the merge pass's blocked verdict holds the PR, the
+// rule by which [Derive] reads that verdict as needs-attention.
+//
+// The verdict counts at the head the posture was read at, since a verdict at
+// another head was reached about a different commit. The pass records most
+// causes only with nothing in flight, so live work that arrives afterwards is
+// the city acting on the cause, and the next pass replaces the verdict. The
+// blocker cause is the exception: the pass records it only once no automated
+// actor holds any live blocker (assets/scripts/blocker-holder.sh), and the
+// blocker itself is often in the in-flight set, such as a must-fix finding
+// nothing answers.
+func Blocked(f Facts) bool {
+	_, postureHead := splitDated(f.PRPosture)
+	machine, machineHead := splitDated(f.PRMachine)
+	return machine == "blocked" && (postureHead == "" || machineHead == postureHead) &&
+		(f.InFlightCount == 0 || f.PRMachineCause == CauseBlocker)
 }
 
 // knownPosture is the posture vocabulary pr-facts.sh records ([posture]

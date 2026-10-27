@@ -68,6 +68,37 @@ func TestDerive(t *testing.T) {
 	}
 }
 
+// Blocked is the rule Derive reads a blocked verdict by, so each case also holds
+// Derive to it: a verdict Blocked counts derives needs-attention, and one it
+// does not count, with nothing else holding the PR, does not.
+func TestBlocked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		f    Facts
+		want bool
+	}{
+		{"at the posture's head, nothing in flight", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseCheckFailed}, true},
+		{"no posture recorded", Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseRule}, true},
+		{"no cause recorded", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t"}, true},
+		{"at a head the posture has left", Facts{PRPosture: "approved@new@t", PRMachine: "blocked@old@t", PRMachineCause: CauseCheckFailed}, false},
+		{"city work in flight on the cause", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseCheckFailed, InFlightCount: 1}, false},
+		{"the blocker cause, whatever is in flight", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 2}, true},
+		{"the blocker cause on an unapproved PR", Facts{PRPosture: "review_required@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 1}, true},
+		{"the blocker cause at a head the posture has left", Facts{PRPosture: "approved@new@t", PRMachine: "blocked@old@t", PRMachineCause: CauseBlocker}, false},
+		{"a verdict that is not blocked", Facts{PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, false},
+		{"no verdict recorded", Facts{PRPosture: "approved@oid@t"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Blocked(tc.f); got != tc.want {
+				t.Errorf("Blocked(%+v) = %v, want %v", tc.f, got, tc.want)
+			}
+			if got := Derive(tc.f) == NeedsAttention; got != tc.want {
+				t.Errorf("Derive(%+v) reads needs-attention %v, want %v as Blocked reads it", tc.f, got, tc.want)
+			}
+		})
+	}
+}
+
 // isSet mirrors the shell is_set: null and false arrive empty through
 // `(v // "") | tostring`, and the string spellings of an unset flag read as
 // unset too. A merge_hold carrying one of those must NOT read as a hold.
