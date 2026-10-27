@@ -111,7 +111,7 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
 # on a minority of visits while the `tracks` edge filed alongside it still
-# carries the subject (su-ab9je is the edge holding where the stamp did not).
+# carries the subject.
 # The group is the SUBJECT the caller works the sitting on, so it is recovered
 # from the edge first. Scoped to task_kind=visit on purpose: `tracks` is not a
 # visit-only edge (a convoy tracks its members), and inventing a group for a

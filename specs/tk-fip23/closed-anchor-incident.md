@@ -65,17 +65,17 @@ That is not what happened. `reconcile-merged-prs.sh` mailed all eight
 escalations, and they exist:
 
 ```
-lx-wisp-qbsa  ESCALATION: anchorless open PR#432 (bead tk-jj2ad is closed)   05:03:08
-lx-wisp-65nk  ESCALATION: anchorless open PR#431 (bead tk-yhwfv.1 is closed) 05:03:11
-lx-wisp-dsi6  ESCALATION: anchorless open PR#430 (bead tk-03wjb is closed)   05:03:14
-lx-wisp-g63l  ESCALATION: anchorless open PR#429 (bead tk-yhwfv.2 is closed) 05:03:17
-lx-wisp-xtxc  ESCALATION: anchorless open PR#428 (bead tk-wvrga is closed)   05:03:20
-lx-wisp-p69s  ESCALATION: anchorless open PR#427 (bead tk-vie5k is closed)   05:03:23
-lx-wisp-f6ke  ESCALATION: anchorless open PR#426 (bead tk-2cy79 is closed)   05:03:26
-lx-wisp-g2oh  ESCALATION: anchorless open PR#425 (bead tk-mcyd1 is closed)   05:03:29
+hq-wisp-qbsa  ESCALATION: anchorless open PR#432 (bead tk-jj2ad is closed)   05:03:08
+hq-wisp-65nk  ESCALATION: anchorless open PR#431 (bead tk-yhwfv.1 is closed) 05:03:11
+hq-wisp-dsi6  ESCALATION: anchorless open PR#430 (bead tk-03wjb is closed)   05:03:14
+hq-wisp-g63l  ESCALATION: anchorless open PR#429 (bead tk-yhwfv.2 is closed) 05:03:17
+hq-wisp-xtxc  ESCALATION: anchorless open PR#428 (bead tk-wvrga is closed)   05:03:20
+hq-wisp-p69s  ESCALATION: anchorless open PR#427 (bead tk-vie5k is closed)   05:03:23
+hq-wisp-f6ke  ESCALATION: anchorless open PR#426 (bead tk-2cy79 is closed)   05:03:26
+hq-wisp-g2oh  ESCALATION: anchorless open PR#425 (bead tk-mcyd1 is closed)   05:03:29
 ```
 
-They are **wisps**, in the `lx` store, addressed to the mayor. `bd list`
+They are **wisps**, in the `hq` store, addressed to the mayor. `bd list`
 cannot see wisps at all, in any store, at any status — so a search of "the
 whole store, all statuses" finds nothing and correctly concludes nothing was
 filed. The escalation was durable, carried the PR, named the anchor, and

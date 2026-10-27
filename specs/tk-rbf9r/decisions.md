@@ -144,7 +144,7 @@ refuses. It is inert while `-O` is off.
 The bead's file list spans two repositories. `services/helm/**` and the guard
 are in this rig and are in this PR. `setup/steps/96-gc-terminal.sh` and
 `setup/files/systemd/gc-terminal.service` are in the **city repo**
-(`zookanalytics/loomington`), which has no refinery pipeline here, so a polecat
+(`zookanalytics/mycity`), which has no refinery pipeline here, so a polecat
 branch cannot carry them. **Until the patch below is applied, nothing in this
 PR changes what the live terminal attaches** — the frontend sends `?arg=`, and
 a ttyd without `-a` ignores it.

@@ -36,7 +36,7 @@ func (f *fakeSource) Gather(context.Context) (*source.Result, error) {
 func newFake() *fakeSource {
 	return &fakeSource{result: &source.Result{
 		Anchors: []board.Anchor{
-			{ID: "sl-dec", Kind: "decision", Source: "decision", Rig: "signal-loom"},
+			{ID: "ra-dec", Kind: "decision", Source: "decision", Rig: "rig-a"},
 			{ID: "tk-epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Children: []board.Child{{ID: "c", Status: "open"}}},
 		},
 	}}
@@ -70,8 +70,8 @@ func TestBoardEndpointRanks(t *testing.T) {
 		if b.Total != 2 || len(b.Tiles) != 2 {
 			t.Fatalf("%s: want 2 tiles, got total=%d tiles=%d", path, b.Total, len(b.Tiles))
 		}
-		if b.Tiles[0].ID != "sl-dec" || !b.Tiles[0].Owed {
-			t.Errorf("%s: top tile = %s (owed=%v), want the owed sl-dec", path, b.Tiles[0].ID, b.Tiles[0].Owed)
+		if b.Tiles[0].ID != "ra-dec" || !b.Tiles[0].Owed {
+			t.Errorf("%s: top tile = %s (owed=%v), want the owed ra-dec", path, b.Tiles[0].ID, b.Tiles[0].Owed)
 		}
 		// The band derivation is unchanged underneath: the epic still ranks
 		// HIGH, it is just no longer what the board answers with.

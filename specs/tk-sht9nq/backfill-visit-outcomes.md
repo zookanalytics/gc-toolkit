@@ -42,8 +42,8 @@ audit cannot promise it has found every close site, so it does not have to:
 a close site that reaches the store outcome-less surfaces as this finding — a
 bounded ledger repair plus the missing stamp — rather than as silent board rot.
 
-The count is 326: loomington 203, gc-toolkit 111, signal-loom 6, gascity 5,
-shutupandlisten 1. loomington holds most of it and is nearly all automated
+The count is 326: mycity 203, gc-toolkit 111, rig-a 6, gascity 5,
+rig-b 1. mycity holds most of it and is nearly all automated
 dedup and patrol closes (duplicate patrol escalations from before the
 `escalate.sh` dedup fix, and a 2026-09-02 operator-ruling cleanup batch), which
 historically did not stamp; those mechanisms are one-time, not a live stream.

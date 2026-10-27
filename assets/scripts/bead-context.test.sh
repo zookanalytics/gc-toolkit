@@ -34,7 +34,7 @@ cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
   {"name":"gc-toolkit","path":"$R_TK","prefix":"tk","hq":false},
   {"name":"otherrig","path":"$R_OR","prefix":"or","hq":false},
-  {"name":"loomington","path":"$HQ","prefix":"lx","hq":true}
+  {"name":"mycity","path":"$HQ","prefix":"hq","hq":true}
 ]}
 JSON
 export FAKE_RIGS="$TMP/rigs.json"
@@ -303,9 +303,9 @@ bead "$R_TK" tk-kid-custom <<'J'
  "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 J
 
-# lx-city lives in the HQ store, which no --rig value names — only --db reaches.
-bead "$HQ" lx-city <<'J'
-{"id":"lx-city","title":"city bead","status":"open","issue_type":"task","metadata":{}}
+# hq-city lives in the HQ store, which no --rig value names — only --db reaches.
+bead "$HQ" hq-city <<'J'
+{"id":"hq-city","title":"city bead","status":"open","issue_type":"task","metadata":{}}
 J
 
 # tk-ctrl carries a raw C0 byte (SOH \001) in its notes, the payload real bd
@@ -692,9 +692,9 @@ run tk-missing
 eq "$RC" 4 "a not-found id (\`{\"error\":…}\` object) is reported, not parsed as a bead"
 has "$ERR" "did not resolve to a bead" "  ... with a diagnostic"
 
-run lx-city --db "$HQ/.beads"
+run hq-city --db "$HQ/.beads"
 eq "$RC" 0 "--db reaches the HQ store, which no --rig value names"
-has "$OUT" "Store       loomington" "  ... and the rig is recovered from the db path"
+has "$OUT" "Store       mycity" "  ... and the rig is recovered from the db path"
 
 JQF='.subject.status'  runj or-far --store rig:otherrig
 eq "$JQ" closed "--store rig:<name> pins the read to that rig's store"

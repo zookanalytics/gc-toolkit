@@ -2,9 +2,15 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // The dev server proxies the board fetch to a running helm service mount, so
-// `npm run dev` renders live data. Point it at another city (or another
-// supervisor port) with HELM_DEV_MOUNT.
-const DEFAULT_DEV_MOUNT = 'http://127.0.0.1:8372/v0/city/loomington/svc/helm';
+// `npm run dev` renders live data. The mount defaults to the supervisor's
+// loopback port and the city a Gas City session runs in, which GC_CITY names
+// by its path or by its name. Point it at another city (or another supervisor
+// port) with HELM_DEV_MOUNT. A build proxies nothing and folds the dev city out
+// of the bundle, so only the dev server needs a city: the helm-dev-city plugin
+// below refuses to start one without it.
+const DEFAULT_DEV_CITY = (process.env.GC_CITY ?? '').replace(/\/+$/, '').split('/').pop() ?? '';
+const NO_DEV_CITY = process.env.HELM_DEV_MOUNT === undefined && DEFAULT_DEV_CITY === '';
+const DEFAULT_DEV_MOUNT = `http://127.0.0.1:8372/v0/city/${encodeURIComponent(DEFAULT_DEV_CITY || '_')}/svc/helm`;
 // ttyd's own loopback port. In deployment the board reaches ttyd because a
 // tailscale-serve mapping publishes both under one origin; the dev server has
 // no such mapping, so it proxies /terminal itself to reproduce that same-origin
@@ -53,7 +59,17 @@ const devMount = resolveLoopbackTarget('HELM_DEV_MOUNT', DEFAULT_DEV_MOUNT);
 const devTtyd = resolveLoopbackTarget('HELM_DEV_TTYD', DEFAULT_DEV_TTYD);
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'helm-dev-city',
+      configureServer() {
+        if (NO_DEV_CITY) {
+          throw new Error('HELM_DEV_MOUNT is unset, and no GC_CITY names a city to default it to');
+        }
+      },
+    },
+  ],
 
   define: {
     // Only ever read behind `import.meta.env.DEV`, so this is constant-folded

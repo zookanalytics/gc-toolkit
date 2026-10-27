@@ -186,7 +186,7 @@ needed.
    every importing rig. Acceptable for now (single-operator fleet), or do
    rules need per-rig scoping from day one?
 5. **Where does the miner run** — the gc-toolkit rig only, or against every
-   rig's repos (signal-loom etc.)? Cross-rig capture multiplies signal but
+   rig's repos (rig-a etc.)? Cross-rig capture multiplies signal but
    needs the orders/pool story checked per rig.
 6. **Thresholds** — the proposed defaults (promote at 3 occurrences across ≥2
    PRs/beads spanning ≥7 days; review-by 90d; fragment cap ~15 bullets) are

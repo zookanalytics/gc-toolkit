@@ -125,7 +125,7 @@ overtaken by those rebases and are recorded below as they resolved.
    to the live head as settled. Only a head move changes that, and it re-gates
    the new head rather than the one the exception names.
 
-Fact 4 is live, not theoretical. signal-loom `sl-bgmuy` (PR#552) carried
+Fact 4 is live, not theoretical. rig-a `ra-bgmuy` (PR#552) carried
 `check.codex=exception@3ecc2def` and now carries `green@3ecc2def` at the same
 head, released by a hand-dispatched review bead titled "first review of head
 3ecc2def (post-cap re-gate)". The anchor's `blocked_reason` cleared with the
@@ -136,14 +136,14 @@ cap reached is still the one who decides to land it.
 
 The cap's terminal action *is* the handoff to a human. Lowering it for prose
 work moves that handoff earlier and attaches fewer findings to it; it does not
-remove it. It does not reliably end the loop either: tk-10521 recorded signal-loom
-`sl-kg9z6.1.1` running to seven review rounds on a zero-code branch under a
+remove it. It does not reliably end the loop either: tk-10521 recorded rig-a
+`ra-kg9z6.1.1` running to seven review rounds on a zero-code branch under a
 cap of 3, the rounds past the cap proceeding on hand-authorized re-gates.
 
-One live docs-only case grounds this: `sl-bgmuy` (PR#552, changing
-`docs/material-layers.md` and `specs/sl-bgmuy/coach-flow.md`), capped at 3,
+One live docs-only case grounds this: `ra-bgmuy` (PR#552, changing
+`docs/material-layers.md` and `specs/ra-bgmuy/coach-flow.md`), capped at 3,
 still open and routed to human, and since released as described above. The
-bead cites a second case that is not a docs branch. `sl-kg9z6.1.2` (PR#559,
+bead cites a second case that is not a docs branch. `ra-kg9z6.1.2` (PR#559,
 `check.codex=exception@9af8238a`) changes `convex/materialNode.ts` and two
 test files, so its cap says nothing about prose. tk-at7fur read its exception
 as a stranding defect rather than a calibration one, and #486 fixed it as one.
@@ -159,7 +159,7 @@ findings that stopped it are on the review beads under the anchor.
 
 Another round is a second opinion on a head that has already been judged. It
 is the right move when the findings turn on a fact the reviewer could have
-checked and did not, which is what `sl-bgmuy` turned out to be.
+checked and did not, which is what `ra-bgmuy` turned out to be.
 
 When the findings turn on judgment about work that has not happened yet, no
 further reviewer settles them, because the document's correctness is not

@@ -813,7 +813,7 @@ eq "${CUPD:-<none>}" "<none>"             "(NOGROUP) …and nothing is written"
 # `gc hook --claim` reports the gc.continuation_group STAMP, and the stamp
 # lands empty on a minority of visits. The group is the SUBJECT the caller
 # works the sitting on, and the `tracks` edge has held where the stamp did not
-# (su-ab9je), so the subject is recovered from it.
+# (rb-ab9je), so the subject is recovered from it.
 VISIT_TRACKS='[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{"task_kind":"visit"},"dependencies":[{"id":"tk-other","dependency_type":"tracks"}]}]'
 run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "$VISIT_TRACKS"
 eq "$COUT" "action=work bead=tk-foreign group=tk-other" \

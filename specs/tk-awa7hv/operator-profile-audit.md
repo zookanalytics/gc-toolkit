@@ -20,10 +20,10 @@ Every observation bead in the city, read 2026-08-26 across all five stores
 | store | observations |
 |---|---|
 | gc-toolkit | 73 |
-| signal-loom | 53 |
+| rig-a | 53 |
 | gascity | 16 |
-| shutupandlisten | 13 |
-| loomington (HQ) | 2 |
+| rig-b | 13 |
+| mycity (HQ) | 2 |
 | **total** | **157** |
 
 Of those, 65 carry `obs.source=operator` and 29 carry
@@ -69,13 +69,13 @@ recurrence report attributes against.
 
 | # | anchor | entry | evidence |
 |---|---|---|---|
-| 1 | `tk-vglpm` (existing) | Lead with the decision | tk-589ps, tk-638qo, tk-xrvfa, tk-ag4eb, tk-87zfxj, tk-p2dr0k, sl-t6if4, sl-vhw9n |
-| 2 | `tk-3znt49` (new) | The operator's queues are state | tk-rlhkd, lx-6jjw, tk-1r0sv, tk-f0s4q2, tk-nv0z5m, tk-4l0ai, su-fr08x |
-| 3 | `tk-uzkg2c` (new) | Derive a load-bearing claim | sl-xd9ta, tk-ztjtx, tk-awau8, sl-11vqf, sl-lcyh3, gc-gj2ri, sl-tgsdl |
-| 4 | `tk-b80kkz` (new) | A rename is not a fix | tk-5d7q4, tk-zejs0, tk-exqf5, tk-6emwu, sl-vq0y2, sl-pzm2x |
+| 1 | `tk-vglpm` (existing) | Lead with the decision | tk-589ps, tk-638qo, tk-xrvfa, tk-ag4eb, tk-87zfxj, tk-p2dr0k, ra-t6if4, ra-vhw9n |
+| 2 | `tk-3znt49` (new) | The operator's queues are state | tk-rlhkd, hq-6jjw, tk-1r0sv, tk-f0s4q2, tk-nv0z5m, tk-4l0ai, rb-fr08x |
+| 3 | `tk-uzkg2c` (new) | Derive a load-bearing claim | ra-xd9ta, tk-ztjtx, tk-awau8, ra-11vqf, ra-lcyh3, gc-gj2ri, ra-tgsdl |
+| 4 | `tk-b80kkz` (new) | A rename is not a fix | tk-5d7q4, tk-zejs0, tk-exqf5, tk-6emwu, ra-vq0y2, ra-pzm2x |
 | 5 | `tk-lz8mpv` (new) | Read a ruling for its intent | tk-5kezf, tk-0lapo, gc-xi5hg, tk-ladzj |
-| 6 | `tk-tketyk` (new) | File work in the pass that names it | tk-yg0ndg, tk-odvidd, su-sw64, gc-y8vad |
-| 7 | `tk-xgaeo` (existing) | Documentation is present-tense | sl-399cu, sl-kbn84, sl-24xpi, tk-9b68m, su-6yf70, sl-u1voc |
+| 6 | `tk-tketyk` (new) | File work in the pass that names it | tk-yg0ndg, tk-odvidd, rb-sw64, gc-y8vad |
+| 7 | `tk-xgaeo` (existing) | Documentation is present-tense | ra-399cu, ra-kbn84, ra-24xpi, tk-9b68m, rb-6yf70, ra-u1voc |
 
 Entries 1 and 2 are adjacent and were nearly written as one. They stay
 separate because their triggers differ: entry 1 fires while composing
@@ -102,7 +102,7 @@ to displace before the operator has seen it once.
 
 Recorded so a later run does not re-derive them from scratch.
 
-- **Prefer the standard path over a bespoke one** (tk-p3e1e, sl-8y4hr,
+- **Prefer the standard path over a bespoke one** (tk-p3e1e, ra-8y4hr,
   tk-mjjqo). Four occurrences, genuinely recurring, but the three
   instances resolve differently — reuse an existing PR, reach for the
   standard remedy, own a full copy rather than an override. They rhyme;

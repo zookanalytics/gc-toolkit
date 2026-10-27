@@ -6,7 +6,7 @@ description: Every hold mechanism found in the gc-toolkit pack and the running r
 # Inventory of every mechanism that represents work not moving
 
 Grounded in code and config read on 2026-08-26, and in a census of all five
-bead stores in the `loomington` city taken the same day: 899 open or
+bead stores in the `mycity` city taken the same day: 899 open or
 in-progress beads, 637 of them non-step work beads.
 
 "Not moving" means the bead is open and no worker will take it until something

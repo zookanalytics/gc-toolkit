@@ -5,7 +5,7 @@ description: Disposition record for tk-qs1j6. The repair half the bead asked for
 
 # Pre-open gate reads check_set
 
-tk-qs1j6 was filed by the shutupandlisten refinery against
+tk-qs1j6 was filed by the rig-b refinery against
 `check-set-heal.sh`, `pre-open-resolve.sh` and `merge-skill.sh`. All three
 were deleted by the #465 rewrite (`9a6b86ae`), which replaced them with
 `gate-ensure.sh`, `pr-open.sh`, `merge.sh` and `pr-facts.sh`. The rewrite

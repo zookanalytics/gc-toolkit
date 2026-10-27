@@ -33,11 +33,11 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case path == base+"/rigs":
-			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"},{"name":"signal-loom","prefix":"sl"}]}`)
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"},{"name":"rig-a","prefix":"ra"}]}`)
 		case path == base+"/beads" && r.URL.Query().Get("type") == "epic":
 			writeJSON(w, `{"items":[{"id":"tk-epic","title":"Big epic","status":"open","issue_type":"epic","priority":2}],"total":1}`)
 		case path == base+"/beads" && r.URL.Query().Get("type") == "decision":
-			writeJSON(w, `{"items":[{"id":"sl-dec","title":"Pick a path","status":"open","issue_type":"decision","priority":1}],"total":1}`)
+			writeJSON(w, `{"items":[{"id":"ra-dec","title":"Pick a path","status":"open","issue_type":"decision","priority":1}],"total":1}`)
 		// The source pages gates separately (type=gate) as a guard against an
 		// API default that hides them. Empty in the shared fixture; the
 		// gate-demand case has its own test.
@@ -68,7 +68,7 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 					 "metadata":{"gc.routed_to":"human","gc.takeaway":"ruling owed"}},
 					{"id":"tk-epic","title":"Big epic","status":"open","issue_type":"epic",
 					 "metadata":{"gc.routed_to":"human"}},
-					{"id":"lx-sess","title":"a session record","status":"open","issue_type":"session",
+					{"id":"hq-sess","title":"a session record","status":"open","issue_type":"session",
 					 "metadata":{"gc.takeaway":"not work"}},
 					{"id":"tk-mail","title":"agent mail","status":"open","issue_type":"message","ephemeral":true,
 					 "metadata":{"gc.takeaway":"not work either"}}
@@ -76,9 +76,9 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 				return
 			}
 			writeJSON(w, `{"items":[
-				{"id":"sl-kid","title":"open child of tk-human","status":"open","issue_type":"task",
+				{"id":"ra-kid","title":"open child of tk-human","status":"open","issue_type":"task",
 				 "assignee":"polecat-live",
-				 "dependencies":[{"issue_id":"sl-kid","depends_on_id":"tk-human","type":"parent-child"}]},
+				 "dependencies":[{"issue_id":"ra-kid","depends_on_id":"tk-human","type":"parent-child"}]},
 				{"id":"tk-plain","title":"ordinary work","status":"open","issue_type":"task"},
 				{"id":"tk-cv","title":"real convoy","status":"open","issue_type":"convoy",
 				 "metadata":{"gc.takeaway":"typed kinds are gathered by type"}},
@@ -154,8 +154,8 @@ func TestGatherMapsAllKinds(t *testing.T) {
 	if ok, kind, rig, m, closed := anchorByID(res, "tk-epic"); !ok || kind != "epic" || rig != "gc-toolkit" || m != 2 || closed != 1 {
 		t.Errorf("epic anchor wrong: ok=%v kind=%s rig=%s m=%d closed=%d", ok, kind, rig, m, closed)
 	}
-	// Decision: rig from the sl prefix.
-	if ok, kind, rig, _, _ := anchorByID(res, "sl-dec"); !ok || kind != "decision" || rig != "signal-loom" {
+	// Decision: rig from the ra prefix.
+	if ok, kind, rig, _, _ := anchorByID(res, "ra-dec"); !ok || kind != "decision" || rig != "rig-a" {
 		t.Errorf("decision anchor wrong: ok=%v kind=%s rig=%s", ok, kind, rig)
 	}
 	// Convoy: only the owned, floating, non-sling convoy; 2 children.
@@ -214,9 +214,9 @@ func TestGatherErrorsOnTotalOutage(t *testing.T) {
 
 func TestDiscoverCityFromURLPrefix(t *testing.T) {
 	t.Setenv("GC_HELM_CITY", "")
-	t.Setenv("GC_SERVICE_URL_PREFIX", "/v0/city/loomington/svc/helm")
-	if got := discoverCity(); got != "loomington" {
-		t.Errorf("discoverCity from URL prefix = %q, want loomington", got)
+	t.Setenv("GC_SERVICE_URL_PREFIX", "/v0/city/mycity/svc/helm")
+	if got := discoverCity(); got != "mycity" {
+		t.Errorf("discoverCity from URL prefix = %q, want mycity", got)
 	}
 }
 
@@ -333,8 +333,8 @@ func TestGatherAdmitsMetadataKeyedKinds(t *testing.T) {
 	if human == nil {
 		t.Fatal("tk-human missing")
 	}
-	if len(human.Children) != 1 || human.Children[0].ID != "sl-kid" {
-		t.Errorf("tk-human children = %+v, want [sl-kid]", human.Children)
+	if len(human.Children) != 1 || human.Children[0].ID != "ra-kid" {
+		t.Errorf("tk-human children = %+v, want [ra-kid]", human.Children)
 	}
 	if human.Children[0].Assignee != "polecat-live" {
 		t.Errorf("a child's assignee is half the dead-owner join: %+v", human.Children[0])
@@ -369,7 +369,7 @@ func TestGatherRefusesNonWorkBeads(t *testing.T) {
 	}
 	// Infrastructure, not work: the beads backend drops these with SkipWisps.
 	// The supervisor list flags only part of the wisp side `ephemeral`.
-	if got := kindsOf(res, "lx-sess"); len(got) != 0 {
+	if got := kindsOf(res, "hq-sess"); len(got) != 0 {
 		t.Errorf("a session record is not an anchor, got %v", got)
 	}
 	// Flagged ephemeral by the API itself.
@@ -614,7 +614,7 @@ func TestOpenBeadsCarriesTheSupervisorsOwnPartial(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == base+"/beads" && r.URL.Query().Get("status") == "open" {
-			writeJSON(w, `{"items":[],"partial":true,"partial_errors":["rig signal-loom: context deadline exceeded"]}`)
+			writeJSON(w, `{"items":[],"partial":true,"partial_errors":["rig rig-a: context deadline exceeded"]}`)
 			return
 		}
 		writeJSON(w, `{"items":[]}`)
@@ -630,7 +630,7 @@ func TestOpenBeadsCarriesTheSupervisorsOwnPartial(t *testing.T) {
 	}
 	var named bool
 	for _, e := range res.PartialErrors {
-		if strings.Contains(e, "rig signal-loom") {
+		if strings.Contains(e, "rig rig-a") {
 			named = true
 		}
 	}

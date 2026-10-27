@@ -213,7 +213,7 @@ the suite.
 
 ## Live population when this was written
 
-Measured against the loomington store on 2026-09-03, before the change: 38 open
+Measured against the mycity store on 2026-09-03, before the change: 38 open
 anchors at `pre_open_gate` against 12 at `pull_request`. Probing each pre-open
 anchor's branch against its target with the same `merge-tree` call this arm
 makes, **12 of the 38 conflicted with `main`** and were receiving no rebase

@@ -50,7 +50,7 @@ func TestFourAnchorBoard(t *testing.T) {
 		{ID: "tk-epic", Title: "Big epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "tk-a", Status: "open"}, {ID: "tk-b", Status: "closed"},
 		}},
-		{ID: "sl-dec", Title: "Pick a path", Kind: "decision", Source: "decision", Rig: "signal-loom", Prefix: "sl", Priority: ptr(1)},
+		{ID: "ra-dec", Title: "Pick a path", Kind: "decision", Source: "decision", Rig: "rig-a", Prefix: "ra", Priority: ptr(1)},
 		{ID: "tk-two", Title: "Stale spec", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(4), Children: []Child{
 			{ID: "tk-hw1", Status: "open"},
 		}},
@@ -63,7 +63,7 @@ func TestFourAnchorBoard(t *testing.T) {
 	}
 	// The board leads with the operator's queue, and the decision is the only
 	// row here whose next move is a person's. The overview begins under it.
-	if got := b.Tiles[0].ID; got != "sl-dec" {
+	if got := b.Tiles[0].ID; got != "ra-dec" {
 		t.Errorf("the owed decision leads the board: got %s", got)
 	}
 	if got := b.Tiles[1].Severity; got != SevHigh {
@@ -71,7 +71,7 @@ func TestFourAnchorBoard(t *testing.T) {
 	}
 	// the stranded epic still outranks the decision on rank_score.
 	epic, _ := tileByID(b, "tk-epic")
-	dec, _ := tileByID(b, "sl-dec")
+	dec, _ := tileByID(b, "ra-dec")
 	if !(epic.RankScore > dec.RankScore) {
 		t.Errorf("stranded epic must outrank the decision: epic=%d decision=%d", epic.RankScore, dec.RankScore)
 	}
@@ -282,10 +282,10 @@ func TestParkedWithLiveMoleculeIsActive(t *testing.T) {
 		// tk-live: a molecule whose session is still up. tk-drained: the same
 		// wiring, but the session has gone — wfLive must stop counting it at once.
 		Inflight: map[string][]string{
-			"tk-live":    {"gc-toolkit__polecat-lx-live"},
-			"tk-drained": {"gc-toolkit__polecat-lx-gone"},
+			"tk-live":    {"gc-toolkit__polecat-hq-live"},
+			"tk-drained": {"gc-toolkit__polecat-hq-gone"},
 		},
-		OwnerState: map[string]string{"gc-toolkit__polecat-lx-live": "active"},
+		OwnerState: map[string]string{"gc-toolkit__polecat-hq-live": "active"},
 	}
 	b := BuildBoard([]Anchor{parked("tk-live"), parked("tk-drained"), parked("tk-none")}, fixtureNow, false, nil, f)
 
@@ -447,7 +447,7 @@ func TestUnresolvedBlockerStaysQuiet(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-unk", Title: "waiting on something unreadable", Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
-			WaitingOn: []string{"sl-9999"}},
+			WaitingOn: []string{"ra-9999"}},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 	tile, _ := tileByID(b, "tk-unk")
@@ -727,8 +727,8 @@ func TestSlungWorkIsInFlight(t *testing.T) {
 			{ID: "w1", Status: "open"}, // never claimed; the workflow carries it
 		}},
 	}
-	f := liveOwners("gc-toolkit__polecat-lx-1")
-	f.Inflight = map[string][]string{"w1": {"gc-toolkit__polecat-lx-1"}}
+	f := liveOwners("gc-toolkit__polecat-hq-1")
+	f.Inflight = map[string][]string{"w1": {"gc-toolkit__polecat-hq-1"}}
 
 	b := BuildBoard(anchors, fixtureNow, false, nil, f)
 	tl := b.Tiles[0]
@@ -748,7 +748,7 @@ func TestSlungWorkIsInFlight(t *testing.T) {
 
 	// The same workflow, but its session has drained: back to stranded. Liveness
 	// is re-derived at derive time precisely so this flips without a re-gather.
-	dead := Facts{Inflight: f.Inflight, OwnerState: map[string]string{"gc-toolkit__polecat-lx-1": "archived"}}
+	dead := Facts{Inflight: f.Inflight, OwnerState: map[string]string{"gc-toolkit__polecat-hq-1": "archived"}}
 	if tl := BuildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]; !tl.Stranded {
 		t.Errorf("a drained workflow stops counting: got severity=%s stranded=%v", tl.Severity, tl.Stranded)
 	}
@@ -806,14 +806,14 @@ func TestTakeawayWinsNeeds(t *testing.T) {
 // body adds weight (blast radius), capped, and never matches this rig's own
 // prefix, a rig NAME, or the anchor itself.
 func TestCrossRigRefsWeighAnchor(t *testing.T) {
-	f := Facts{Prefixes: []string{"tk", "sl", "su"}, RigNames: []string{"gc-toolkit", "signal-loom"}}
+	f := Facts{Prefixes: []string{"tk", "ra", "rb"}, RigNames: []string{"gc-toolkit", "rig-a"}}
 	a := Anchor{ID: "tk-xref", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
-		Description: "blocks sl-abc12 and su-9zz, follows tk-local1 and tk-xref itself",
+		Description: "blocks ra-abc12 and rb-9zz, follows tk-local1 and tk-xref itself",
 		Children:    []Child{{ID: "c1", Status: "open"}}}
 
 	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, f).Tiles[0]
-	if !equalIDs(tl.CrossRigRefs, []string{"sl-abc12", "su-9zz"}) {
-		t.Errorf("cross_rig_refs = %v, want [sl-abc12 su-9zz] (own prefix and self excluded)", tl.CrossRigRefs)
+	if !equalIDs(tl.CrossRigRefs, []string{"ra-abc12", "rb-9zz"}) {
+		t.Errorf("cross_rig_refs = %v, want [ra-abc12 rb-9zz] (own prefix and self excluded)", tl.CrossRigRefs)
 	}
 	// weight = m_total(1) + prio_w(3)=1 + min(2 refs, cap)
 	if tl.Weight != 1+1+2 {
@@ -821,7 +821,7 @@ func TestCrossRigRefsWeighAnchor(t *testing.T) {
 	}
 
 	// A decision is banded by what it IS, so the scan is skipped entirely.
-	dec := Anchor{ID: "sl-dec", Kind: "decision", Source: "decision", Rig: "signal-loom", Prefix: "sl",
+	dec := Anchor{ID: "ra-dec", Kind: "decision", Source: "decision", Rig: "rig-a", Prefix: "ra",
 		Description: "mentions tk-abc12"}
 	if refs := BuildBoard([]Anchor{dec}, fixtureNow, false, nil, f).Tiles[0].CrossRigRefs; len(refs) != 0 {
 		t.Errorf("a decision is not scanned: got %v", refs)
@@ -962,16 +962,16 @@ func TestRuledInFlightIsInProgress(t *testing.T) {
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
 			Takeaway:  "answered NO — real bug is stranded holds, routed tk-jsyci7",
 			WaitingOn: []string{"tk-jsyci7"}},
-		{ID: "sl-fm1xp", Title: "bring Pino back", Kind: "human", Source: "human",
-			Rig: "signal-loom", Prefix: "sl", Priority: ptr(1), UpdatedAt: daysAgo(1),
-			Takeaway:  "ruled: bring Pino back — work slung sl-9kd2, awaiting implementation",
-			WaitingOn: []string{"sl-9kd2"}},
+		{ID: "ra-fm1xp", Title: "bring Pino back", Kind: "human", Source: "human",
+			Rig: "rig-a", Prefix: "ra", Priority: ptr(1), UpdatedAt: daysAgo(1),
+			Takeaway:  "ruled: bring Pino back — work slung ra-9kd2, awaiting implementation",
+			WaitingOn: []string{"ra-9kd2"}},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	for _, c := range []struct{ id, needs string }{
 		{"tk-hs2e8", "answered NO — real bug is stranded holds, routed tk-jsyci7"},
-		{"sl-fm1xp", "ruled: bring Pino back — work slung sl-9kd2, awaiting implementation"},
+		{"ra-fm1xp", "ruled: bring Pino back — work slung ra-9kd2, awaiting implementation"},
 	} {
 		tile, ok := tileByID(b, c.id)
 		if !ok {
@@ -1152,7 +1152,7 @@ func TestRuledTwinDoesNotReElevate(t *testing.T) {
 	// shape that actually needs the exclusion inside dispositionDue: the
 	// childless pair above is already caught by the `isRuled && mTotal == 0`
 	// branch, which sits above dispDue, so it would pass with the exclusion
-	// gone. sl-kg9z6.1.2 — one of the seven rows this rule was measured on —
+	// gone. ra-kg9z6.1.2 — one of the seven rows this rule was measured on —
 	// is exactly this shape (5 children, all closed, 7 discharged waits).
 	kidsMD := map[string]string{"gc.routed_to": "human", "gc.takeaway": "routed — all of it landed"}
 	kids := []Child{{ID: "tk-k1", Status: "closed"}, {ID: "tk-k2", Status: "closed"}}
@@ -1476,21 +1476,21 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 // wrong bead — the child is already assigned, to the operator.
 func TestParkedChildIsNotIdleWork(t *testing.T) {
 	kids := []Child{
-		{ID: "sl-kg9z6.1.9", Status: "open", Metadata: map[string]string{
+		{ID: "ra-kg9z6.1.9", Status: "open", Metadata: map[string]string{
 			"gc.routed_to": "human",
 			"gc.takeaway":  "holding for your ruling",
 		}},
-		{ID: "sl-kg9z6.1.2", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "ra-kg9z6.1.2", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}},
 	}
 	for i := 1; i <= 5; i++ {
-		kids = append(kids, Child{ID: "sl-idle" + string(rune('0'+i)), Status: "open"})
+		kids = append(kids, Child{ID: "ra-idle" + string(rune('0'+i)), Status: "open"})
 	}
 	anchors := []Anchor{{
-		ID: "sl-kg9z6.1", Title: "the parent epic", Kind: "epic", Source: "epic",
-		Rig: "signal-loom", Prefix: "sl", Priority: ptr(1), Children: kids,
+		ID: "ra-kg9z6.1", Title: "the parent epic", Kind: "epic", Source: "epic",
+		Rig: "rig-a", Prefix: "ra", Priority: ptr(1), Children: kids,
 	}}
 
-	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "sl-kg9z6.1")
+	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-kg9z6.1")
 	if !ok {
 		t.Fatal("epic tile missing")
 	}
@@ -1503,7 +1503,7 @@ func TestParkedChildIsNotIdleWork(t *testing.T) {
 		t.Errorf("parked_heads = %v, want the two human-routed children", tile.ParkedHeads)
 	}
 	for _, id := range tile.OpenHeads {
-		if id == "sl-kg9z6.1.9" || id == "sl-kg9z6.1.2" {
+		if id == "ra-kg9z6.1.9" || id == "ra-kg9z6.1.2" {
 			t.Errorf("open_heads still carries a parked child: %v", tile.OpenHeads)
 		}
 	}
@@ -3319,10 +3319,10 @@ func TestHumanGatedWithLiveMoleculeIsActive(t *testing.T) {
 		// tk-live: a molecule whose session is up. tk-drained: the same wiring, but
 		// the session has gone — wfLive must stop counting it at once.
 		Inflight: map[string][]string{
-			"tk-live":    {"gc-toolkit__polecat-lx-live"},
-			"tk-drained": {"gc-toolkit__polecat-lx-gone"},
+			"tk-live":    {"gc-toolkit__polecat-hq-live"},
+			"tk-drained": {"gc-toolkit__polecat-hq-gone"},
 		},
-		OwnerState: map[string]string{"gc-toolkit__polecat-lx-live": "active"},
+		OwnerState: map[string]string{"gc-toolkit__polecat-hq-live": "active"},
 	}
 	b := BuildBoard([]Anchor{human("tk-live"), human("tk-drained"), human("tk-none"),
 		{ID: "tk-dec", Title: "a call to make", Kind: "decision", Source: "decision",
@@ -3391,8 +3391,8 @@ func TestDemandFoldYieldsToLiveWork(t *testing.T) {
 			Takeaway: "decide the layout"},
 	}
 	f := Facts{
-		Inflight:   map[string][]string{"tk-klive": {"gc-toolkit__polecat-lx-live"}},
-		OwnerState: map[string]string{"gc-toolkit__polecat-lx-live": "active"},
+		Inflight:   map[string][]string{"tk-klive": {"gc-toolkit__polecat-hq-live"}},
+		OwnerState: map[string]string{"gc-toolkit__polecat-hq-live": "active"},
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, f)
 

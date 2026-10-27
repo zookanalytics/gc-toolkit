@@ -24,8 +24,8 @@ binary.
 targets by walking every argv element that does not begin with `-` and
 retargeting the whole command to the store owning that element's bead-id
 prefix. A flag's value is its own argv element, so a *space-separated*
-`--if-assignee lx-yevik` exposes `lx-yevik` to the scan while the attached
-`--if-assignee=lx-yevik` hides it behind the leading `-`.
+`--if-assignee hq-yevik` exposes `hq-yevik` to the scan while the attached
+`--if-assignee=hq-yevik` hides it behind the leading `-`.
 
 The loop guards itself with `bdBeadExists` (a bare `store.Get`), intending to
 reject non-id flag values. It cannot, because a live session identity *is* a
@@ -44,21 +44,21 @@ For `unclaim` there is a second contributor. `unclaim` is absent from the
 `internal/bdflags` subcommand manifest, so `bdArgsNameClassOwnedBead`
 (`cmd/gc/cmd_bd_by_id.go`) falls into its "undecidable — judge every token"
 branch and also inspects the `--if-assignee` value; this path matters for a
-class-reserved (`gcs-`) session id, while the `lx-`-shaped ids seen in practice
+class-reserved (`gcs-`) session id, while the `hq-`-shaped ids seen in practice
 misroute through `resolveBdScopeTarget` above.
 
-### Reproduction (loomington, gascity HEAD cf63b7da1, 2026-09-15)
+### Reproduction (mycity, gascity HEAD cf63b7da1, 2026-09-15)
 
 Non-mutating: the CAS guard writes nothing on a mismatch, so tk-hjxuck
 (assignee empty) is untouched by either probe.
 
-    $ gc bd unclaim tk-hjxuck --if-assignee lx-4e3nan     # spaced, live session
+    $ gc bd unclaim tk-hjxuck --if-assignee hq-4e3nan     # spaced, live session
     Error resolving tk-hjxuck: no issue found matching "tk-hjxuck"
 
-    $ gc bd unclaim tk-hjxuck --if-assignee=lx-4e3nan     # attached, same value
-    Error unclaiming tk-hjxuck: assignee mismatch: tk-hjxuck is held by "", expected "lx-4e3nan"
+    $ gc bd unclaim tk-hjxuck --if-assignee=hq-4e3nan     # attached, same value
+    Error unclaiming tk-hjxuck: assignee mismatch: tk-hjxuck is held by "", expected "hq-4e3nan"
 
-`lx-4e3nan` resolves as `type=session` in the city store, which is what lets it
+`hq-4e3nan` resolves as `type=session` in the city store, which is what lets it
 pass `bdBeadExists`.
 
 ## Where the fix lives: gascity gc-rwa68

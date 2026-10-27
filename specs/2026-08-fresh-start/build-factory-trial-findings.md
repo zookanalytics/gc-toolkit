@@ -87,7 +87,7 @@ Banked here so the spine work inherits them:
   be expressed against upstream's current `gc gc claim` /
   `gc runtime drain-ack` contract, not the older `gc hook --claim`
   citations (confirmed as a real bug by the run's review).
-- **`gc-role-worker` has no provider on signal-loom** as imported —
+- **`gc-role-worker` has no provider on rig-a** as imported —
   provider wiring is part of W6's pool/routing preflight, not an
   afterthought.
 - **B1 stands as a warning**: `nx-cycle-recycle` ships a working Stop

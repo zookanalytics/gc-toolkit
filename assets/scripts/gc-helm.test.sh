@@ -46,20 +46,20 @@ mkdir -p "$TMP/bin"
 #                            which the FOLDED section releases
 cat > "$TMP/steps.json" <<'JSON'
 [
-  {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-load","assignee":"gc-toolkit__polecat-hq-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"s-impl","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
-  {"id":"s-held","status":"blocked","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-PARKED","blocked_reason":"declined: premise falsified"}},
+  {"id":"s-held","status":"blocked","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-PARKED","blocked_reason":"declined: premise falsified"}},
   {"id":"s-final","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/core.control-dispatcher"}},
   {"id":"s-quiet","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.self-review","gc.root_bead_id":"root-PARKED"}},
   {"id":"s-nonmol","assignee":"someone","metadata":{"gc.step_ref":"mol-other-formula.step","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-noref","assignee":"someone-else","metadata":{"gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
-  {"id":"s-other","assignee":"gc-toolkit__polecat-lx-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
-  {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
-  {"id":"s-NOPIN","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-other","assignee":"gc-toolkit__polecat-hq-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-orphan","assignee":"gc-toolkit__polecat-hq-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-NOPIN","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"root-PARKED","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-OTHER","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-ORPHAN","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
-  {"id":"s-fold","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"s-fold","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-FOLD","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 ]
 JSON
@@ -92,25 +92,25 @@ S
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
-    # un-scoped bd calls for `tk-` ids; signal-loom's does, so an `sl-` id
+    # un-scoped bd calls for `tk-` ids; rig-a's does, so an `ra-` id
     # exercises the rig pin.
-    jq -n --arg sl "$FAKE_SL_PATH" \
+    jq -n --arg ra "$FAKE_RA_PATH" \
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
-               {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
+               {name:"rig-a", path:$ra, prefix:"ra"}]}' ;;
   "session list")
     # FAKE_SESSIONS_JSON replaces the listing, for the dismiss cases that stop
     # the session holding a visit.
     [ -n "${FAKE_SESSIONS_JSON:-}" ] && { printf '%s\n' "$FAKE_SESSIONS_JSON"; exit 0; }
     # The no-id dismiss resolves the session's own rig from its record, because
-    # a converse sitting defaults its store to the CITY ledger. converse-lx-1's
-    # record names rig signal-loom (the rig whose path HAS a .beads dir), so the
+    # a converse sitting defaults its store to the CITY ledger. converse-hq-1's
+    # record names rig rig-a (the rig whose path HAS a .beads dir), so the
     # pin it drives is visible in FAKE_LISTS; other identities match no record
     # and the lookup falls back to the caller store.
     jq -n '{sessions:[
-      {id:"gc-toolkit__converse-lx-1",
-       session_name:"gc-toolkit__converse-lx-1",
-       alias:"gc-toolkit/gc-toolkit.converse-lx-1",
-       rig:"signal-loom"}
+      {id:"gc-toolkit__converse-hq-1",
+       session_name:"gc-toolkit__converse-hq-1",
+       alias:"gc-toolkit/gc-toolkit.converse-hq-1",
+       rig:"rig-a"}
     ]}' ;;
   "bd list")
     # Record the store this list actually read, so a lookup that searched the
@@ -409,7 +409,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes" \
        FAKE_EVENTS="$TMP/events"
-mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
+mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists" "$TMP/outcomes"
 : > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -441,7 +441,7 @@ J
 cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
 [{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
-export FAKE_SL_PATH="$TMP/signal-loom"
+export FAKE_RA_PATH="$TMP/rig-a"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 : > "$TMP/settled"; : > "$TMP/takeaway"
 # metadata.branch per bead, for the --waiting-on landed-rider skip. w-same,
@@ -1296,8 +1296,8 @@ grep -q 'takeaway set on' "$TMP/xout" \
 #   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
 #   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried
 #   (SNAMEDEAD/SIDDEAD)  a clear that will not land is a verb failure, writes kept
-SNAME="gc-toolkit__polecat-lx-gone"
-SID="lx-gone"
+SNAME="gc-toolkit__polecat-hq-gone"
+SID="hq-gone"
 
 # (SNAMEOK/SIDOK) both pins clear: the release's own unset is the only write for
 # each, and a read-back that finds them gone says nothing.
@@ -1781,13 +1781,13 @@ grep -q 'helm-svc board' <<< "$BERRTXT" \
 
 cat > "$TMP/visits.json" <<'JSON'
 [
-  {"id":"v-HELD","assignee":"gc-toolkit__converse-lx-1",
+  {"id":"v-HELD","assignee":"gc-toolkit__converse-hq-1",
    "metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},
   {"id":"v-EDGE","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":""},
    "dependencies":[{"type":"tracks","depends_on_id":"A-EDGE"}]},
   {"id":"v-OTHER","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"A-OTHER"}},
   {"id":"n-NOTAVISIT","assignee":"","metadata":{"gc.continuation_group":"A-PARKED"}},
-  {"id":"v-STUCK","assignee":"gc-toolkit__converse-lx-2",
+  {"id":"v-STUCK","assignee":"gc-toolkit__converse-hq-2",
    "metadata":{"task_kind":"visit","gc.continuation_group":"A-STUCK"}},
   {"id":"v-NOSTAMP","assignee":"",
    "metadata":{"task_kind":"visit","gc.continuation_group":"A-STAMPLESS"}},
@@ -2180,8 +2180,8 @@ fi
 # ledger. Unpinned it reads the caller's, finds nothing, and reports a sitting
 # ended while its pane is still up.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/lists"
-sh "$SCRIPT" dismiss sl-9001 >/dev/null 2>&1 || true
-if grep -qF "$TMP/signal-loom/.beads" "$TMP/lists"; then
+sh "$SCRIPT" dismiss ra-9001 >/dev/null 2>&1 || true
+if grep -qF "$TMP/rig-a/.beads" "$TMP/lists"; then
     ok "(DISMISS-RIG) the visit lookup is pinned at the subject's rig"
 else
     bad "(DISMISS-RIG) the visit lookup ran against the wrong store" \
@@ -2191,10 +2191,10 @@ fi
 # (DISMISS-INFER) with no bead named, dismiss resolves "the sitting I am in":
 # the one open visit assigned to this session, and its continuation_group
 # subject. This is what lets a bare `gc-helm dismiss` map to a keystroke. The
-# visits fixture models v-HELD (converse-lx-1) -> A-PARKED, so a session under
+# visits fixture models v-HELD (converse-hq-1) -> A-PARKED, so a session under
 # that identity dismisses A-PARKED without ever naming it.
 : > "$TMP/updates"; : > "$TMP/closes"
-IRC=0; IOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1)" || IRC=$?
+IRC=0; IOUT="$(GC_SESSION_ID=gc-toolkit__converse-hq-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1)" || IRC=$?
 eq "$IRC" "0" "(DISMISS-INFER) a bare dismiss on a held sitting succeeds"
 if grep -q 'inferred the current sitting' <<< "$IOUT"; then
     ok "(DISMISS-INFER) a bare dismiss resolves the subject from session state"
@@ -2217,14 +2217,14 @@ grep -q 'from the pane' <<< "$(grep -E '^bd close v-HELD' "$TMP/closes" || true)
 
 # A listing that did not answer is a runtime fault (exit 4, the header's
 # contract), not a usage error, and never a reason to report "no sitting".
-LFRC=0; LFOUT="$(FAKE_LIST_RC=1 GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss 2>&1)" || LFRC=$?
+LFRC=0; LFOUT="$(FAKE_LIST_RC=1 GC_SESSION_ID=gc-toolkit__converse-hq-1 sh "$SCRIPT" dismiss 2>&1)" || LFRC=$?
 eq "$LFRC" "4" "(DISMISS-INFER) a failed listing is a runtime failure, not a usage error"
 grep -q "'gc bd list' failed" <<< "$LFOUT" \
   && ok "(DISMISS-INFER) …and it names the read that failed" \
   || bad "(DISMISS-INFER) wrong failed-listing diagnostic (got: $LFOUT)"
 # An array this verb cannot parse (a non-object element beside a real held
 # visit) is the same fault, and must not be misreported as an empty sitting.
-MFRC=0; MFOUT="$(FAKE_LIST_OUT='[{"id":"v-HELD","assignee":"gc-toolkit__converse-lx-1","metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},"junk"]' GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss 2>&1)" || MFRC=$?
+MFRC=0; MFOUT="$(FAKE_LIST_OUT='[{"id":"v-HELD","assignee":"gc-toolkit__converse-hq-1","metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},"junk"]' GC_SESSION_ID=gc-toolkit__converse-hq-1 sh "$SCRIPT" dismiss 2>&1)" || MFRC=$?
 if grep -q 'no open visit is assigned' <<< "$MFOUT"; then
     bad "(DISMISS-INFER) a malformed element was misreported as no sitting (got: $MFOUT)"
 else
@@ -2260,13 +2260,13 @@ grep -q 'dismiss <bead-id>' <<< "$NVOUT" \
 
 # (DISMISS-INFER-RIG) a converse sitting defaults its store to the CITY ledger,
 # but its visit is filed in its SUBJECT's rig. So the no-id lookup must resolve
-# the session's own rig (converse-lx-1's record names signal-loom) and read
+# the session's own rig (converse-hq-1's record names rig-a) and read
 # THERE; unpinned it reads the caller store, finds nothing, and reports no open
 # sitting while its pane is still up. The read store is recorded in FAKE_LISTS,
 # so a lookup that ran against the caller store is visible rather than silent.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/lists"
-RGOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1 || true)"
-if grep -qF "$TMP/signal-loom/.beads" "$TMP/lists"; then
+RGOUT="$(GC_SESSION_ID=gc-toolkit__converse-hq-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1 || true)"
+if grep -qF "$TMP/rig-a/.beads" "$TMP/lists"; then
     ok "(DISMISS-INFER-RIG) the current-sitting lookup is pinned at the session's rig, not the caller store"
 else
     bad "(DISMISS-INFER-RIG) the inference read the caller store, not the session's rig" \
@@ -2304,36 +2304,36 @@ eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 # live converse session counts as a holder, and a stop that fails leaves the
 # dismiss standing and names converse-reap.
 STOP_SESSIONS='{"sessions":[
-  {"id":"gc-toolkit__converse-lx-1","session_name":"gc-toolkit__converse-lx-1",
-   "alias":"gc-toolkit/gc-toolkit.v-HELD","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"signal-loom","closed":false},
-  {"id":"gc-toolkit__converse-lx-2","session_name":"gc-toolkit__converse-lx-2",
+  {"id":"gc-toolkit__converse-hq-1","session_name":"gc-toolkit__converse-hq-1",
+   "alias":"gc-toolkit/gc-toolkit.v-HELD","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"rig-a","closed":false},
+  {"id":"gc-toolkit__converse-hq-2","session_name":"gc-toolkit__converse-hq-2",
    "alias":"gc-toolkit/gc-toolkit.v-STUCK","template":"gc-toolkit/gc-toolkit.polecat","closed":false},
-  {"id":"gc-old","session_name":"gc-toolkit__converse-lx-1",
+  {"id":"gc-old","session_name":"gc-toolkit__converse-hq-1",
    "template":"gc-toolkit/gc-toolkit.converse-opus","closed":true}]}'
 export FAKE_DRAINS="$TMP/drains"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
 SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-OTHER) a dismiss from outside the sitting exits 0"
-eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
    "(DISMISS-STOP-OTHER) …and acks the holding session as an operator, once, after the visit's close"
-grep -q 'stopped session gc-toolkit__converse-lx-1' <<< "$SOUT" \
+grep -q 'stopped session gc-toolkit__converse-hq-1' <<< "$SOUT" \
   && ok "(DISMISS-STOP-OTHER) …and says which session it stopped" \
   || bad "(DISMISS-STOP-OTHER) the stop is not reported (got: $SOUT)"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID=gc-toolkit__converse-hq-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-OWN) a dismiss typed into the sitting exits 0"
-eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=2" \
+eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-hq-1 | closes=2" \
    "(DISMISS-STOP-OWN) …and the sitting acks its own session, after the visit's close"
-grep -q 'ending this session (gc-toolkit__converse-lx-1)' <<< "$SOUT" \
+grep -q 'ending this session (gc-toolkit__converse-hq-1)' <<< "$SOUT" \
   && ok "(DISMISS-STOP-OWN) …saying so before it does" \
   || bad "(DISMISS-STOP-OWN) the self-stop is not announced (got: $SOUT)"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
 SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_RC=1 GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-FAIL) a stop that fails leaves the dismiss standing"
-grep -q 'could not stop session gc-toolkit__converse-lx-1.*converse-reap' <<< "$SOUT" \
+grep -q 'could not stop session gc-toolkit__converse-hq-1.*converse-reap' <<< "$SOUT" \
   && ok "(DISMISS-STOP-FAIL) …and names converse-reap as what closes the session" \
   || bad "(DISMISS-STOP-FAIL) the failed stop is not reported (got: $SOUT)"
 
@@ -2362,13 +2362,13 @@ grep -q '^drain-ack --operator gc-81 ' "$TMP/drains" \
 # every incarnation rule. A sitting's tmux environment carries its session id
 # and token, and a run-shell job inherits that environment, so a caller outside
 # the sitting can carry both.
-export FAKE_SESSION_TOKENS="gc-toolkit__converse-lx-1=tok-lx-1 gc-toolkit__converse-lx-9=tok-lx-9"
+export FAKE_SESSION_TOKENS="gc-toolkit__converse-hq-1=tok-hq-1 gc-toolkit__converse-hq-9=tok-hq-9"
 
 # A dismiss typed into the sitting proves its incarnation with its own token,
 # so its self-ack stands under v2.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN=tok-lx-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
-eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=2" \
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-hq-1 GC_INSTANCE_TOKEN=tok-hq-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-hq-1 | closes=2" \
    "(DISMISS-STOP-OWN-V2) a dismiss in the sitting acks its own session with its own token, which v2 takes"
 
 # --operator: the caller runs under the sitting's identity and token, as the
@@ -2378,11 +2378,11 @@ eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=
 for _mode in legacy v2; do
     _v2=""; [ "$_mode" = v2 ] && _v2=1
     : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-    SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_SESSION_NAME=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN=tok-lx-1 sh "$SCRIPT" dismiss --operator A-PARKED 2>&1)" || SRC=$?
+    SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" GC_SESSION_ID=gc-toolkit__converse-hq-1 GC_SESSION_NAME=gc-toolkit__converse-hq-1 GC_INSTANCE_TOKEN=tok-hq-1 sh "$SCRIPT" dismiss --operator A-PARKED 2>&1)" || SRC=$?
     eq "$SRC" "0" "(DISMISS-STOP-OPERATOR) [$_mode] dismiss --operator under the sitting's identity exits 0"
-    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
        "(DISMISS-STOP-OPERATOR) [$_mode] …and acks the sitting as an operator, with no session identity or token, which Gas City takes"
-    grep -q 'stopped session gc-toolkit__converse-lx-1' <<< "$SOUT" \
+    grep -q 'stopped session gc-toolkit__converse-hq-1' <<< "$SOUT" \
       && ok "(DISMISS-STOP-OPERATOR) [$_mode] …and says which session it stopped" \
       || bad "(DISMISS-STOP-OPERATOR) [$_mode] the operator stop is not reported (got: $SOUT)"
     grep -q 'ending this session' <<< "$SOUT" \
@@ -2393,8 +2393,8 @@ done
 # Another sitting dismissing this one's subject acks it as an operator too, and
 # its own identity never reaches that ack.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-lx-9 GC_INSTANCE_TOKEN=tok-lx-9 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
-eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-hq-9 GC_INSTANCE_TOKEN=tok-hq-9 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
    "(DISMISS-STOP-OTHER-V2) a dismiss from another sitting acks the holder as an operator, without its own identity"
 
 # ── prefix+X through the real dismiss ─────────────────────────────────────────
@@ -2413,7 +2413,7 @@ if [ "$1" = display-message ]; then
         if [ "$a" = "-p" ]; then
             case "${!#}" in
                 '#{client_tty}')     printf '/dev/pts/7\n' ;;
-                '#{client_session}') printf 'gc-toolkit__converse-lx-1\n' ;;
+                '#{client_session}') printf 'gc-toolkit__converse-hq-1\n' ;;
             esac
             exit 0
         fi
@@ -2427,13 +2427,13 @@ KEY_CFG="$(cd "$HERE/../.." && pwd)"
 export FAKE_KEY_SAID="$TMP/key-said"
 for _mode in v2-inherited v2-bare legacy-inherited; do
     _v2=""; case "$_mode" in v2-*) _v2=1 ;; esac
-    _tok=tok-lx-1; [ "$_mode" = v2-bare ] && _tok=""
+    _tok=tok-hq-1; [ "$_mode" = v2-bare ] && _tok=""
     : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; : > "$FAKE_KEY_SAID"; rm -f "$TMP/outcomes"/*
     KRC=0; KOUT="$(PATH="$TMP/keybin:$PATH" FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" \
-        GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_SESSION_NAME=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN="$_tok" \
+        GC_SESSION_ID=gc-toolkit__converse-hq-1 GC_SESSION_NAME=gc-toolkit__converse-hq-1 GC_INSTANCE_TOKEN="$_tok" \
         sh "$HERE/tmux-dismiss-sitting.sh" "$KEY_CFG" 2>/dev/null)" || KRC=$?
     eq "$KRC/$KOUT" "0/" "(DISMISS-KEY) [$_mode] prefix+X exits 0 with nothing on stdout"
-    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
        "(DISMISS-KEY) [$_mode] …and the real dismiss stops the sitting with one operator ack that Gas City takes"
     grep -q 'the sitting on A-PARKED is over (visit v-HELD closed), and its session is ending' "$FAKE_KEY_SAID" \
       && ok "(DISMISS-KEY) [$_mode] …and tells the operator the sitting is over" \
@@ -2482,12 +2482,12 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
  {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-sample","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
  {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-sample.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-hq-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-hq-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
- {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
- {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
+ {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-hq-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
+ {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
 ]
 JSON
 printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
@@ -2591,7 +2591,7 @@ live_store_intact() {
 SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
 SAVED_CANCEL_TOOL="$GC_RUN_CANCEL_TOOL"; unset GC_RUN_CANCEL_TOOL
 export GC_CITY_PATH="$LIVE/town" GC_HOME="$LIVE/gchome"; mkdir -p "$GC_HOME"
-RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
   sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
 live_store_intact   # the release writes landed, or this is disk pressure not a verdict
 
@@ -2613,7 +2613,7 @@ grep -q '/runs/root-LIVE/' "$LIVE_CURL_LOG" \
   && bad "(OWNRUN) the session's own run was cancelled" || ok "(OWNRUN) …and it is not cancelled"
 eq "$(field L-peer gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
    "(OWNRUN) a sibling step keeps its route; gascity, not the pack, owns its lifecycle"
-eq "$(field L-held assignee)" "gc-toolkit__polecat-lx-other" \
+eq "$(field L-held assignee)" "gc-toolkit__polecat-hq-other" \
    "(OWNRUN) …and a step another live session holds keeps its holder"
 eq "$(field root-LIVE gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
    "(OWNRUN) …and the root is not rewritten"
@@ -2626,7 +2626,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 # The proof the guard exists for: the terminal step is still CLOSABLE after the
 # release, by the same resolution the formula's terminal block uses.
 SCRC=0
-SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
   bash "$HERE/step-close.sh" --step mol-sample.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
 live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
@@ -2639,7 +2639,7 @@ eq "$(field L-live status)" "closed" \
 # This one proves what the store holds afterwards, which is the thing the bug
 # is about: a bead whose disposition landed must not come back as open work.
 FOLDRC=0
-FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
   sh "$SCRIPT" takeaway A-FOLD "superseded by A-CARRIER; the pour raced the fold" \
      --by proactive --release 2>"$LIVE/folderr")" || FOLDRC=$?
 FOLDERR="$(cat "$LIVE/folderr")"
@@ -2647,7 +2647,7 @@ live_store_intact   # the fold release's writes landed, or this is disk pressure
 eq "$FOLDRC" "0" "(FOLDSTORE) the release on a folded anchor succeeds"
 eq "$(field A-FOLD status)" "closed" \
    "(FOLDSTORE) the anchor is still CLOSED — its disposition was not resurrected"
-eq "$(field A-FOLD assignee)" "gc-toolkit__polecat-lx-old" \
+eq "$(field A-FOLD assignee)" "gc-toolkit__polecat-hq-old" \
    "(FOLDSTORE) …still assigned as it was closed"
 eq "$(field A-FOLD gc.routed_to)" "human" \
    "(FOLDSTORE) …and its route survives the release"
@@ -2665,7 +2665,7 @@ grep -q 'ended run root-FOLD of A-FOLD through gascity' <<< "$FOLDOUT" \
 FOLDW="$(grep -E '^update bd update (F-|root-FOLD)' "$LIVE_LOG" || true)"
 [ -z "$FOLDW" ] && ok "(FOLDSTORE) gc-helm.sh writes none of that run's beads; gascity's cancel closes them" \
   || bad "(FOLDSTORE) the release wrote the folded run's beads: $FOLDW"
-eq "$(field F-held assignee)" "gc-toolkit__polecat-lx-other" \
+eq "$(field F-held assignee)" "gc-toolkit__polecat-hq-other" \
    "(FOLDSTORE) …so a step another live session holds is not reassigned under it"
 grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
   && ok "(FOLDSTORE) …and the run names the disposition it kept" \
@@ -2960,7 +2960,7 @@ grep -q 'gc bd dep add tk-kid tk-NOEDGE9 -t blocks' <<< "$DERR" \
 
 # (PREFIX) a create routed to another rig's ledger returns an id, not an error,
 # and that id can never carry an edge to the gated bead.
-printf 'sl-wrong1\n' > "$D_NEXTID"
+printf 'ra-wrong1\n' > "$D_NEXTID"
 demand_run tk-kid "operator: decide"
 eq "$DRC" "4" "(PREFIX) a demand filed in the wrong ledger is a runtime failure"
 grep -q "not 'tk'" <<< "$DERR" \

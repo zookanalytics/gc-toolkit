@@ -36,8 +36,8 @@ retention:
 |---|---|---|---|
 | gascity | 20 | 06:44:20Z | 08:26:53Z |
 | **gc-toolkit** | **19** | **06:44:20Z** | **08:19:23Z** |
-| shutupandlisten | 18 | 06:45:18Z | 08:21:00Z |
-| signal-loom | 18 | 06:45:18Z | 08:21:00Z |
+| rig-b | 18 | 06:45:18Z | 08:21:00Z |
+| rig-a | 18 | 06:45:18Z | 08:21:00Z |
 
 Tracking beads agree. They are **wisps**, not issues, so they are absent from
 `bd list`; read through the control plane they are all there:
@@ -46,8 +46,8 @@ Tracking beads agree. They are **wisps**, not issues, so they are absent from
 $ gc order history refinery-reconcile --limit 0 | awk 'NR>1{print $2}' | sort | uniq -c
      11 gascity
      11 gc-toolkit
-     10 shutupandlisten
-     10 signal-loom
+     10 rig-b
+     10 rig-a
 ```
 
 The bead was filed at 08:07:38Z. gc-toolkit's tracking bead `tk-wisp-7jy` was

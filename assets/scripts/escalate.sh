@@ -155,7 +155,7 @@ esac
 #               real bead, so it is NOT bucketed as ephemeral; the store-pin
 #               block below refuses it when GC_RIG is unset.
 # The *-wisp-* glob overrides escalation-rig's answer because a wisp's own prefix
-# (lx-, tk-) does resolve to a rig, so resolvability alone would miscall it
+# (hq-, tk-) does resolve to a rig, so resolvability alone would miscall it
 # durable. The rig a wisp resolves to is kept, so its visit is filed in the store
 # its prefix names, as a durable subject's is.
 ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"

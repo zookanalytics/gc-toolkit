@@ -26,12 +26,12 @@ in the gascity store, not this one." The city-wide sweep run at
 |---|---|---|
 | gascity | 4 | 2 |
 | gc-toolkit | 25 | 13 |
-| signal-loom | 0 (repaired earlier, visit sl-pdyk5) | 1 |
-| loomington | 0 | 0 |
-| shutupandlisten | 0 | 0 |
+| rig-a | 0 (repaired earlier, visit ra-pdyk5) | 1 |
+| mycity | 0 | 0 |
+| rig-b | 0 | 0 |
 
 This is the third successive undercount of the same defect. PR#479's evidence
-section named 3 signal-loom beads and called PR#568 "the first casualty
+section named 3 rig-a beads and called PR#568 "the first casualty
 city-wide". Its notes then added a gascity correction of 7, and an addendum
 added 10 in gc-toolkit. The true gc-toolkit figure is 25.
 

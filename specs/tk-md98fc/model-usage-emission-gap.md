@@ -12,7 +12,7 @@ for over an hour. The gap is upstream, in the emission path that writes
 `.gc/usage.jsonl`.
 
 The finding this bead was filed on — two persistent sessions (mechanik
-`lx-0kl2y`, gascity refinery `lx-ekpvw`) silent for 135m and 121m while
+`hq-0kl2y`, gascity refinery `hq-ekpvw`) silent for 135m and 121m while
 working, sink healthy for every other session — is one instance of a single
 defect: **a claude session's `session_key` selects the transcript that every
 usage recorder reads, no writer points a non-empty `session_key` at the
@@ -133,7 +133,7 @@ intermittent and why every currently-awake session shows a correct key.
 
 ## The discriminator: deacon works because it wakes fresh often
 
-The report named deacon (`lx-54vlh`) as the control: same provider
+The report named deacon (`hq-54vlh`) as the control: same provider
 (`claude-watch`), same named-session shape, also rotates transcripts, records
 fine. The difference is interval length, not shape.
 
@@ -152,7 +152,7 @@ lane the report pointed at.
 ## Forensic corroboration (mechanik, 2026-09-02 → 09-03)
 
 From the surviving transcripts in
-`~/.claude/projects/-home-zook-loomington--gc-agents-mechanik/`:
+`~/.claude/projects/-home-zook-mycity--gc-agents-mechanik/`:
 
 - Pre-wake transcript `fd110900-…`: usage-bearing turns 2026-09-02T19:40 →
   **23:11:48**. The report's newest recorded fact for mechanik was
