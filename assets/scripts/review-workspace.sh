@@ -225,7 +225,7 @@ cmd_reap() {
     local rigs prefix path d e name hit id st mt age kb seen=" " now dirs=()
     local took_closed=0 took_idle=0 took_kb=0 failed=0
     local kept_live=0 kept_unread=0 kept_active=0 kept_held=0
-    rigs="$(gc rig list --json 2>/dev/null \
+    rigs="$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rig-map.sh" \
         | jq -r '.rigs[]? | select((.prefix // "") != "" and (.path // "") != "") | [.prefix, .path] | @tsv' 2>/dev/null)" || rigs=""
     [ -n "$rigs" ] || { echo "$PROG: could not read the city's rigs; reaping nothing" >&2; exit 1; }
     while IFS=$'\t' read -r prefix path; do RIG_DB["$prefix"]="$path/.beads"; done <<< "$rigs"

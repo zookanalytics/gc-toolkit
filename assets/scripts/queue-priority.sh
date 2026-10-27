@@ -168,7 +168,7 @@ EOF
 resolve_db() {
     [ -n "$BD_DB" ] && return 0
     local prefix="${1%%-*}" path=""
-    path="$(gc rig list --json 2>/dev/null 9>&- | scrub | jq -r --arg p "$prefix" '.rigs[]? | objects | select((.prefix // "") == $p) | .path // empty' 2>/dev/null | head -n1)"
+    path="$("$SCRIPTS_DIR/rig-map.sh" 9>&- | jq -r --arg p "$prefix" '.rigs[]? | objects | select((.prefix // "") == $p) | .path // empty' 2>/dev/null | head -n1)"
     if [ -n "$path" ] && [ -d "$path/.beads" ]; then BD_DB="$path/.beads"; return 0; fi
     if [ -n "${GC_RIG_ROOT:-}" ] && [ -d "$GC_RIG_ROOT/.beads" ]; then BD_DB="$GC_RIG_ROOT/.beads"; return 0; fi
     return 1

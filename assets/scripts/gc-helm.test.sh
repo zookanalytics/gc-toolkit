@@ -3252,9 +3252,9 @@ printf '[]\n' > "$D_LIST"
 
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
 # A trap is process-global: one installed inside a helper and left there
-# rewrites how every later line of the caller answers a signal, and outlives
-# the file it was installed to remove. The helper is lifted and run directly
-# — every real call site is a command substitution, whose subshell would hide
+# rewrites how every later line of the caller answers a signal. The helper is
+# lifted and run directly, with the real rig-map.sh it reads the map through —
+# every real call site is a command substitution, whose subshell would hide
 # the residue. Assert the table is unchanged across the call, not that it is
 # empty: a caller can inherit a disposition the helper never touches — a parent
 # that ignores SIGPIPE shows up as `trap -- '' SIGPIPE`, which bash reports and
@@ -3269,11 +3269,11 @@ exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
 # The probe sources city-liveness.sh ($2) first, for the projection the helper
-# runs, as the script does.
+# runs, as the script does, and finds rig-map.sh in $3, as the script finds it
+# beside itself.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
-PROG=probe; FIXTURE=""; RIGS=""; TIMEOUT_BIN=""
-with_timeout() { shift; "$@"; }
+PROG=probe; FIXTURE=""; RIGS=""; SCRIPT_DIR="$3"
 . "$2"
 . "$1"
 before="$(trap)"
@@ -3284,15 +3284,15 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" "$HERE" 2>&1 || true)"
 grep -q 'RIGS\[\[' <<< "$EOUT" \
-  && ok "(ENUM) the helper enumerated, so the temp-file path really ran" \
+  && ok "(ENUM) the helper enumerated, through rig-map.sh" \
   || bad "(ENUM) the helper did not enumerate (out: $EOUT)"
 grep -q 'TRAPDELTA\[\]' <<< "$EOUT" \
   && ok "(ENUM) …and left the caller's trap table as it found it" \
   || bad "(ENUM) the helper changed the caller's traps (out: $EOUT)"
-eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
-   "(ENUM) …and removed its stderr capture"
+eq "$(find "$ENUMTMP" -name 'gctk-rig-map.*' | wc -l | tr -d ' ')" "0" \
+   "(ENUM) …and rig-map.sh removed its stderr capture"
 
 echo ""
 echo "── react: an already-reacted skip is a distinct exit, not a silent dispatch ──"

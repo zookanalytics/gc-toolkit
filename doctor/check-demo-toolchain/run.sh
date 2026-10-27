@@ -46,7 +46,7 @@ if command -v ffmpeg >/dev/null 2>&1; then
 elif [ -n "${FFMPEG_BIN:-}" ] && [ -x "${FFMPEG_BIN:-}" ]; then
     ffmpeg_ok="FFMPEG_BIN"
 elif command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    ss_dir=$(gc rig list --json 2>/dev/null | jq -r '.rigs[]? | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -1)
+    ss_dir=$("$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh" 2>/dev/null | jq -r '.rigs[]? | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -1)
     if [ -n "$ss_dir" ] && [ -x "$ss_dir/node_modules/ffmpeg-static/ffmpeg" ]; then
         ffmpeg_ok="ffmpeg-static (sprintshow engine)"
     fi

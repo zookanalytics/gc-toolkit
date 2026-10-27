@@ -452,12 +452,12 @@ grep -qi 'cannot index object' <<< "$ERR" \
   && bad "(CREATEFAIL) a raw jq error leaked to the operator (err: $ERR)" \
   || ok "(CREATEFAIL) no raw jq error leaked"
 
-# --- (RIGTIMEOUT) the rig-enumeration bound is generous, and tunable ----------
-# `gc rig list` can take several seconds to answer in a loaded city, and a bound
-# it overruns makes open exit 3 having filed nothing. That is harmless for the
+# --- (RIGTIMEOUT) the rig-enumeration bound is the pack's one, and tunable -----
+# `gc rig list` can take seconds to answer in a loaded city, and a bound it
+# overruns makes open exit 3 having filed nothing. That is harmless for the
 # board picker, but gc-visit-open.sh's topic path creates the subject bead
 # before open runs, so a timeout there leaves that bead with no visit.
-# enumerate_rigs bounds the call by GC_HELM_RIG_TIMEOUT, default 30s.
+# enumerate_rigs reads through rig-map.sh, bounded by GC_RIG_LIST_TIMEOUT.
 mkdir -p "$TMP/slowbin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/slowbin/gc" <<'SLOW'
 case "$1 ${2:-}" in
@@ -473,21 +473,17 @@ SLOW
 chmod +x "$TMP/slowbin/gc"
 : > "$FAKE_CALLS"
 set +e
-PATH="$TMP/slowbin:$PATH" GC_HELM_RIG_TIMEOUT=1 sh "$SCRIPT" open tk-slow1 >/dev/null 2>&1; RC=$?
+PATH="$TMP/slowbin:$PATH" GC_RIG_LIST_TIMEOUT=1 sh "$SCRIPT" open tk-slow1 >/dev/null 2>&1; RC=$?
 set -e
 eq "$RC" "3" "(RIGTIMEOUT) a bound shorter than the answer still fails closed"
 eq "$(cat "$FAKE_CALLS")" "" "(RIGTIMEOUT) and files nothing when it does"
 : > "$FAKE_CALLS"
 set +e
-PATH="$TMP/slowbin:$PATH" GC_HELM_RIG_TIMEOUT=10 sh "$SCRIPT" open tk-slow1 >/dev/null 2>&1; RC=$?
+PATH="$TMP/slowbin:$PATH" GC_RIG_LIST_TIMEOUT=10 sh "$SCRIPT" open tk-slow1 >/dev/null 2>&1; RC=$?
 set -e
 eq "$RC" "0" "(RIGTIMEOUT) a generous bound rides out a slow gc rig list"
 grep -q 'bd create' <<< "$(cat "$FAKE_CALLS")" \
   && ok "(RIGTIMEOUT) and the visit is filed" || bad "(RIGTIMEOUT) visit filed"
-# The shipped default must be generous, not the board's render budget.
-grep -q 'GC_HELM_RIG_TIMEOUT:-30' "$SCRIPT" \
-  && ok "(RIGTIMEOUT) the shipped default is 30s, not the board's 10" \
-  || bad "(RIGTIMEOUT) shipped default changed — a one-shot verb must not inherit the board budget"
 
 # --- (RIGWHY) enumerate_rigs names WHICH failure it hit ----------------------
 # Every unhappy reading of `gc rig list` exits 3 having filed nothing, with a
@@ -528,7 +524,7 @@ chmod +x "$TMP/rigbin/gc"
 rigwhy() {
   : > "$FAKE_CALLS"
   set +e
-  RIGWHY_ERR=$(PATH="$TMP/rigbin:$PATH" RIGMODE="$1" GC_HELM_RIG_TIMEOUT="${2:-30}" \
+  RIGWHY_ERR=$(PATH="$TMP/rigbin:$PATH" RIGMODE="$1" GC_RIG_LIST_TIMEOUT="${2:-30}" \
     sh "$SCRIPT" open tk-any1 2>&1 >/dev/null)
   RIGWHY_RC=$?
   set -e
@@ -553,12 +549,13 @@ says notjson  30 "is not JSON"                             "unparseable output s
 says shape    30 "no '.rigs' array"                        "valid JSON of the wrong shape is a gc contract change"
 says rigless  30 "no rigs in this city"                    "a genuinely rigless city is reported as a CITY state"
 
-# (DISTINCT) no two causes share a message: collect every cause's message and
-# require as many unique messages as there are causes.
+# (DISTINCT) no two causes share a message: collect every cause's message, its
+# lines joined into one, and require as many unique messages as there are
+# causes.
 : > "$TMP/rigmsgs"
 for m in slow exitfail empty notjson shape rigless; do
   if [ "$m" = slow ]; then rigwhy "$m" 1; else rigwhy "$m" 30; fi
-  printf '%s\n' "$RIGWHY_ERR" >> "$TMP/rigmsgs"
+  printf '%s\n' "$(printf '%s' "$RIGWHY_ERR" | tr '\n' ' ')" >> "$TMP/rigmsgs"
 done
 NUNIQ=$(sort -u "$TMP/rigmsgs" | wc -l | tr -d ' ')
 eq "$NUNIQ" "6" "(RIGWHY-DISTINCT) six causes produce six different sentences"
@@ -575,16 +572,9 @@ esac
 rigwhy ok 30
 eq "$RIGWHY_RC" "0" "(RIGWHY) a well-formed rig list still enumerates and files"
 
-# MUTATION CHECK (static): the causes are told apart by gc's exit status and
-# stderr, so enumerate_rigs must capture both. No stubbed run above takes its
-# mktemp-failure fallback, so only the source shows that the fallback keeps the
-# exit status too.
-grep -q 'gc rig list --json 2>"\$_er_errf"' "$SCRIPT" \
-  && ok "(RIGWHY-EVIDENCE) gc's stderr is captured, not sent to /dev/null" \
-  || bad "(RIGWHY-EVIDENCE) stderr capture removed — messages will lose their 'why'"
-# Match the ASSIGNMENT lines only, bounded to the function body. The first line
-# in enumerate_rigs naming "gc rig list" is a COMMENT, so a check anchored there
-# passes whatever the code does. Anchor guards to code, never to prose.
+# MUTATION CHECK (static): enumerate_rigs keeps the read's exit status. Match
+# the ASSIGNMENT lines only, bounded to the function body: a check anchored on a
+# comment passes whatever the code does. Anchor guards to code, never to prose.
 grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw=\$\(/' "$SCRIPT") \
   && bad "(RIGWHY-EVIDENCE) '|| true' is back — the exit status is discarded again" \
   || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
