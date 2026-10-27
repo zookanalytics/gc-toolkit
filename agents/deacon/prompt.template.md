@@ -61,10 +61,13 @@ same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
 # session and the deacon's assignee carries no rig segment, so the rig filter
 # the per-rig witness and refinery apply would never match the deacon's own
 # wisp. The query stays assignee-blind so an orphan left by an interrupted
-# pour is still collected.
+# pour is still collected. Each query and the pour below name the city store
+# with --city: the shell keeps the directory it last changed to, and from a rig
+# checkout a bare `gc bd list` answers from that rig's store, finds no wisp,
+# and the pour then lands one there, where no later reconcile looks.
 WISP_ROWS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
+  gc bd list --city="$GC_CITY_PATH" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
+  gc bd list --city="$GC_CITY_PATH" --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
 )
 # Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
 # awaiting burn beside the fresh successor it poured, the successor is always
@@ -76,7 +79,7 @@ WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
 for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
-  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-deacon-patrol --city="$GC_CITY_PATH" --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
   POURED=1
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
@@ -103,7 +106,9 @@ exit a wisp from an intermediate step: continue, or jump to next-iteration,
 which pours and ASSIGNS the next wisp before burning this one — a failed
 assign rolls the pour back and keeps the current wisp. Do NOT enter a
 "standing by" idle state between cycles; after next-iteration, run
-`gc hook`.
+`gc hook`. A turn you end anyway comes back as Stop hook feedback from the
+patrol-continue hook, which hands you the next cycle; run it
+(docs/patrol-continue.md).
 
 ## Findings
 

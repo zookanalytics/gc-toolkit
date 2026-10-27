@@ -80,7 +80,9 @@ tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
 (origin=manual, backstop-exempt), assigns the visit to the session's runtime
 name so the session's own claim adopts it with no pool routing, and attaches
-once the reconciler has started it;
+once the reconciler has started it, however long the start takes, reporting
+the sitting's state while it waits (an interrupted wait leaves the sitting to
+start on its own, to attach later);
 --model picks the converse variant (opus, the work tier, is the default),
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
@@ -358,6 +360,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=placement.sh
 . "${GC_PLACEMENT_LIB:-$SCRIPT_DIR/placement.sh}" \
     || { echo "$PROG: cannot source placement.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one reader of a run's link to the bead it works: the release finds the
+# runs beneath an anchor, and the park survey the workflows poured for a bead.
+# Exposes run_lib and $RUN_JQ.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" \
+    || { echo "$PROG: cannot source run-lib.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # The priority move's writer, which owns the priority function and the store's
 # priority lock.
@@ -376,11 +384,15 @@ VISIT_COMMENT_TOOL="${GC_VISIT_COMMENT_TOOL:-$SCRIPT_DIR/pr-visit-comment.sh}"
 # overridable so a hermetic test can point it at a fixture.
 RUN_CANCEL_TOOL="${GC_RUN_CANCEL_TOOL:-$SCRIPT_DIR/run-cancel.sh}"
 # The longest engage waits, in seconds, for the reconciler to start the sitting
-# it spawned before attaching to it. 120 is the default `gc session new` puts on
-# the same wait. Overridable, so a slow controller can be given longer and a
-# hermetic test can reach the bound.
-ENGAGE_WAIT_TIMEOUT="${GC_HELM_ENGAGE_WAIT_TIMEOUT:-120}"
-case "$ENGAGE_WAIT_TIMEOUT" in ''|*[!0-9]*) ENGAGE_WAIT_TIMEOUT=120 ;; esac
+# it spawned before attaching to it. The wait stops once the sitting reads
+# active or has ended, so this bound is a backstop for a controller that has
+# stopped working the sitting, and it sits above the controller's own limits.
+# Gas City rolls back a sitting it has not started 10 minutes after creating it
+# (pendingCreateNeverStartedTimeout), and one start runs for at most the city's
+# [session] startup_timeout (60s unless the city raises it). 900 clears the two
+# together. Overridable, so a hermetic test can reach the bound.
+ENGAGE_WAIT_TIMEOUT="${GC_HELM_ENGAGE_WAIT_TIMEOUT:-900}"
+case "$ENGAGE_WAIT_TIMEOUT" in ''|*[!0-9]*) ENGAGE_WAIT_TIMEOUT=900 ;; esac
 TAB=$(printf '\t')
 
 # Bust the retired bash board's gather cache so a straggler reader never
@@ -686,22 +698,23 @@ _resolve_superseded_reference() {
 # closes the root and every step that is not closed. This script writes no step
 # and no root. That is why the walk is reachable on a closed anchor too.
 #
-# The anchor's input convoy TRACKS it, so a reverse `tracks` lookup on the
-# anchor names the convoy(s) whose molecule resolves HERE; a root belongs to
-# this molecule when its gc.input_convoy_id is one of them and that convoy's
-# single tracked member is the anchor. Keying on the anchor keeps the
-# resolution bounded — the work does not grow with the number of molecules open
-# in the store.
+# The runs beneath the anchor are the live runs run-lib.sh names for it: a
+# run whose input convoy's one tracked bead IS the anchor. Keying on the anchor
+# keeps the resolution bounded — the work does not grow with the number of
+# molecules open in the store.
 #
 # A molecule the RELEASING session holds a step of is its own run, such as a
 # sitting disposing the anchor it runs on, and it closes its own chain the
-# normal way, so it is left alone.
+# normal way, so it is left alone. A read that fails, of the runs or of the
+# steps that say whose a run is, ends nothing and is reported as a miss, since
+# a run it could not read may still run.
 #
 # Guards: fail closed on an unresolved or foreign anchor; an absent root is the
 # witness patrol's, not ours.
 #
 # Subshell. $1 = released anchor id, $2 = rig .beads path or "". Returns
-# non-zero when a run it set out to end did not end, each named on stderr.
+# non-zero when a run it set out to end did not end, or when it could not read
+# which runs to end, each named on stderr.
 # >>> cancel-release-molecules
 cancel_release_molecules() (
     set +e
@@ -709,54 +722,36 @@ cancel_release_molecules() (
 
     _me=$(session_identities)
 
-    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
-    _live=$(gc bd list --status=open,in_progress,blocked ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
-    [ -n "$_live" ] && [ "$_live" != "[]" ] || exit 0
-
-    # One row per molecule member: a root carries gc.kind=workflow and names
-    # its convoy, a step names its root.
-    _rows=$(printf '%s' "$_live" | jq -c '
-        .[]
-        | . as $b
-        | (($b.metadata["gc.kind"] // "") == "workflow") as $isroot
-        | select($isroot
-                 or ((($b.metadata["gc.step_ref"]     // "") != "")
-                     and (($b.metadata["gc.root_bead_id"] // "") != "")))
-        | { id:       $b.id,
-            kind:     (if $isroot then "root" else "step" end),
-            root:     (if $isroot then $b.id
-                                  else ($b.metadata["gc.root_bead_id"] // "") end),
-            convoy:   (if $isroot then ($b.metadata["gc.input_convoy_id"] // "") else "" end),
-            assignee: ($b.assignee // "") }' 2>/dev/null || true)
-    [ -n "$_rows" ] || exit 0
-
-    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
-    _convoys=$(gc bd dep list "$_anchor" --direction=up -t tracks ${_db:+--db "$_db"} --json 2>/dev/null \
-        | jq -r 'if type == "array" then (.[] | .id // empty) else empty end' 2>/dev/null | grep . || true)
-    [ -n "$_convoys" ] || exit 0
-
-    _match_roots=$(printf '%s\n' "$_rows" | jq -r -s --arg c "$_convoys" '
-        ($c | split("\n") | map(select(length > 0))) as $cs
-        | [ .[]
-            | select(.kind == "root")
-            | . as $r | ($r.convoy // "") as $cv
-            | select($cv != "" and ($cs | any(. == $cv)))
-            | $r.root ]
-        | unique | .[]' 2>/dev/null || true)
+    # shellcheck disable=SC2329,SC2086  # run_lib calls it; ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+    release_bd() { gc bd ${_db:+--db "$_db"} "$@"; }
+    if ! _runs=$(run_lib runs release_bd "$_anchor"); then
+        echo "$PROG: takeaway: could not read the runs beneath $_anchor, so none was ended and any of them may still run" >&2
+        echo "$PROG:   end each by hand: $RUN_CANCEL_TOOL --root <root>${_db:+ --db $_db} --reason \"<why>\"" >&2
+        exit 1
+    fi
+    _match_roots=$(printf '%s' "$_runs" | jq -r '.[] | select(.live) | .root' 2>/dev/null)
     [ -n "$_match_roots" ] || exit 0
+
+    # One row per live member of a molecule: a root, or a step naming its root.
+    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+    if ! _live=$(gc bd list --status=open,in_progress,blocked ${_db:+--db "$_db"} --json --limit=0 2>/dev/null) \
+       || ! _rows=$(printf '%s' "$_live" | jq -c '
+            .[]
+            | . as $b
+            | (($b.metadata["gc.kind"] // "") == "workflow") as $isroot
+            | select($isroot
+                     or ((($b.metadata["gc.step_ref"]     // "") != "")
+                         and (($b.metadata["gc.root_bead_id"] // "") != "")))
+            | { root:     (if $isroot then $b.id
+                                      else ($b.metadata["gc.root_bead_id"] // "") end),
+                assignee: ($b.assignee // "") }' 2>/dev/null); then
+        echo "$PROG: takeaway: could not read whose runs are beneath $_anchor, so none was ended and any of them may still run" >&2
+        echo "$PROG:   end each by hand: $RUN_CANCEL_TOOL --root <root>${_db:+ --db $_db} --reason \"<why>\"" >&2
+        exit 1
+    fi
 
     while IFS= read -r _root; do
         [ -n "$_root" ] || continue
-        _convoy=$(printf '%s\n' "$_rows" | jq -r --arg r "$_root" \
-            'select(.kind == "root" and .root == $r) | .convoy' 2>/dev/null | head -n1)
-        [ -n "$_convoy" ] || continue
-
-        # FAIL CLOSED: the reverse lookup proved the convoy tracks the anchor;
-        # confirm it is a clean 1:1 input convoy whose single tracked member IS
-        # the released bead before acting.
-        _ranchor=$(gc convoy status "$_convoy" --json 2>/dev/null \
-            | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null || true)
-        [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
 
         _own=""
         if [ -n "$_me" ]; then
@@ -1691,8 +1686,8 @@ cmd_demand() {
 # workflow poured for it has passed load-context. The status alone does not
 # cover a workflow, because a pour promotes its own root to in_progress and
 # never claims the bead it was poured for. A workflow is found from its bead:
-# its input convoy tracks the bead, and its root names that convoy in
-# gc.input_convoy_id. The workflow has passed load-context once no step of the
+# it is a run among the listed rows whose bead is that bead, as run-lib.sh's
+# run_rows names it. The workflow has passed load-context once no step of the
 # root whose gc.step_ref ends in .load-context is still open, so a formula with
 # no such step counts as started.
 #   flight  in flight, with why; the park leaves it running.
@@ -1704,13 +1699,14 @@ cmd_demand() {
 # Rows come in either bd shape: a listing's edges are {depends_on_id, type},
 # and a `bd show` row's are {id, dependency_type}.
 # shellcheck disable=SC2016  # jq program, single-quoted on purpose
-PARK_SURVEY_JQ='
+PARK_SURVEY_JQ="$RUN_JQ"'
   def meta: if (.metadata | type) == "object" then .metadata else {} end;
   def edges: [ (.dependencies // [])[]? | select(type == "object")
                | {t: ((.type // .dependency_type // "") | tostring),
                   on: ((.depends_on_id // .id // "") | tostring)} ];
   def has_($x): any(.[]; . == $x);
-  [ .[] | select(type == "object")
+  run_rows as $runs
+  | [ .[] | select(type == "object")
     | {id: ((.id // "") | tostring), it: ((.issue_type // "") | tostring),
        st: ((.status // "") | tostring), a: ((.assignee // "") | tostring), m: meta, e: edges} ] as $all
   | def under($front; $acc):
@@ -1719,9 +1715,6 @@ PARK_SURVEY_JQ='
             | unique | map(select(. as $x | ($acc | has_($x) | not) and $x != $b))) as $next
            | under($next; $acc + $next) end;
     under([$b]; []) as $sub
-  | [ $all[] | select(.it == "convoy") | {c: .id, tracked: [ .e[] | select(.t == "tracks") | .on ]} ] as $convoys
-  | [ $all[] | select(((.m["gc.kind"] // "") | tostring) == "workflow")
-      | {r: .id, c: ((.m["gc.input_convoy_id"] // "") | tostring)} ] as $roots
   | [ $all[] | select(((.m["gc.step_ref"] // "") | tostring) | endswith(".load-context"))
       | ((.m["gc.root_bead_id"] // "") | tostring) ] as $at_lc
   | ($all | map({key: .id, value: .}) | from_entries) as $by
@@ -1732,9 +1725,7 @@ PARK_SURVEY_JQ='
         elif (($m.branch // "") | tostring) != "" then "branch " + ($m.branch | tostring)
         elif $r.st == "in_progress" or $r.st == "hooked" then $r.st + (if $r.a != "" then " under " + $r.a else "" end)
         else "" end;
-    def workflows($id):
-      [ $convoys[] | select(.tracked | has_($id)) | .c ] as $cs
-      | [ $roots[] | select(.c as $c | $cs | has_($c)) | .r ];
+    def workflows($id): [ $runs[] | select(.bead == $id) | .root ];
     [ ([$b] + $sub)[] as $id
       | ($by[$id] // {st: "", a: "", m: {}}) as $r
       | $r.m as $m
@@ -4544,9 +4535,12 @@ cmd_engage() {
     # `gc session attach` on a sitting the reconciler has not launched yet
     # launches it itself, from the stored command with no prompt, and that
     # sitting idles at its input until someone types into it. So the attach path
-    # waits for the launch first (engage_await_start), the same wait
-    # `gc session new` runs before its own attach, and attaches only a started
-    # sitting. --no-attach attaches nothing, so it does not wait.
+    # waits for the launch first (engage_await_start), the wait `gc session new`
+    # runs before its own attach, and attaches only a started sitting. It waits
+    # as long as the start takes, because a start on a busy controller can take
+    # minutes, and an engage that stops waiting first leaves the operator with
+    # no sitting on screen while it starts anyway. --no-attach attaches nothing,
+    # so it does not wait.
     #
     # codex is the exception to self-starting. gascity delivers its prompt the
     # same way, but the codex CLI is not trusted to consume an argv prompt at
@@ -4574,10 +4568,17 @@ cmd_engage() {
     # that leaves the list and an empty state mean it ended, as does
     # failed-create. A sitting not listed yet may only lag the supervisor's read
     # cache, so it is waited on, and so is a listing that did not read.
-    # start_state keeps the last state read, for the messages below.
+    # start_state keeps the last state read, and start_waited the seconds waited
+    # as of that read, for the messages below.
+    #
+    # The wait reports itself on stdout, so a slow start reads as progress and
+    # not as a hang: a line when it begins, a line each time the sitting's state
+    # changes (start-pending to creating, say), and a line every 30 seconds with
+    # the time waited. A listing that did not read is no change of state.
     engage_await_start() {
-        _start_deadline=$(( $(date +%s) + ENGAGE_WAIT_TIMEOUT ))
-        _start_seen=0; _start_told=0; start_state=""
+        _start_t0=$(date +%s)
+        _start_seen=0; _start_told=0; _start_shown=""; _start_tick=30
+        start_state=""; start_waited=0
         while :; do
             start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
                 if type == "object" and ((.sessions // null) | type) == "array"
@@ -4585,40 +4586,88 @@ cmd_engage() {
                             | if (.state // "") == "" then "closed" else .state end)
                       // "unlisted")
                 else "unreadable" end' 2>/dev/null || true)
+            start_waited=$(( $(date +%s) - _start_t0 ))
+            _start_now=""
             case "$start_state" in
                 active) return 0 ;;
                 closed|failed-create) return 2 ;;
                 unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
                 ''|unreadable) ;;
-                *) _start_seen=1 ;;
+                *) _start_seen=1; _start_now="$start_state" ;;
             esac
-            [ "$(date +%s)" -lt "$_start_deadline" ] || return 1
+            [ "$start_waited" -lt "$ENGAGE_WAIT_TIMEOUT" ] || return 1
             if [ "$_start_told" = 0 ]; then
-                printf '  waiting up to %ss for the reconciler to start %s...\n' "$ENGAGE_WAIT_TIMEOUT" "$sname"
+                printf '  waiting for the reconciler to start %s (it %s), then attaching; Ctrl-C stops the wait and leaves it starting\n' \
+                    "$sname" "$(engage_state_text "$start_state")"
                 _start_told=1
+            elif [ -n "$_start_now" ] && [ "$_start_now" != "$_start_shown" ]; then
+                printf '  %s is now %s, after %s\n' "$sname" "$_start_now" "$(engage_dur "$start_waited")"
+            elif [ "$start_waited" -ge "$_start_tick" ]; then
+                printf '  still waiting after %s: %s %s\n' \
+                    "$(engage_dur "$start_waited")" "$sname" "$(engage_state_text "$start_state")"
             fi
+            [ -z "$_start_now" ] || _start_shown="$_start_now"
+            while [ "$_start_tick" -le "$start_waited" ]; do _start_tick=$((_start_tick + 30)); done
             sleep 1
         done
     }
+    # engage_dur <seconds> — a wait as the operator reads it: 45s, 2m05s.
+    engage_dur() {
+        if [ "$1" -lt 60 ]; then
+            printf '%ss' "$1"
+        else
+            printf '%sm%02ds' "$(($1 / 60))" "$(($1 % 60))"
+        fi
+    }
+    # engage_state_text <state> — a start_state read, as the verb phrase that
+    # follows the sitting in a progress line.
+    engage_state_text() {
+        case "$1" in
+            unlisted) printf 'is not listed yet' ;;
+            ''|unreadable) printf "could not be read from 'gc session list'" ;;
+            *) printf 'is %s' "$1" ;;
+        esac
+    }
+    # engage_kick — a codex sitting's opening turn; a claude one gets none.
+    engage_kick() {
+        case "$engage_model" in
+            opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
+            *)
+                kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
+                _kick_opener="${engage_body:-$engage_reason}"
+                [ -n "$_kick_opener" ] && kick="$kick The operator's reason: $_kick_opener"
+                gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
+                    || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
+                ;;
+        esac
+    }
+    # engage_wait_interrupted <exit-code> — the wait's INT, TERM and HUP trap,
+    # HUP being the terminal going away under the wait. The handler writes and
+    # closes nothing, so the binding and the start carry on without engage. A
+    # codex sitting is kicked first, as on every path past the wait, so it
+    # begins once it starts. The handler disarms itself, so a second Ctrl-C ends
+    # engage at once.
+    engage_wait_interrupted() {
+        trap - INT TERM HUP
+        engage_kick
+        echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Visit $VISIT stays bound to $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach $sid" >&2
+        exit "$1"
+    }
     start_rc=0
     if [ "$engage_attach" = "1" ]; then
+        start_waited=0
+        trap 'engage_wait_interrupted 130' INT
+        trap 'engage_wait_interrupted 143' TERM
+        trap 'engage_wait_interrupted 129' HUP
         engage_await_start || start_rc=$?
+        trap - INT TERM HUP
         if [ "$start_rc" -eq 2 ]; then
             echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Visit $VISIT is still bound to it; unbind it to put it back on the board: gc bd update $VISIT --assignee \"\"" >&2
             exit 4
         fi
     fi
 
-    case "$engage_model" in
-        opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
-        *)
-            kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
-            _kick_opener="${engage_body:-$engage_reason}"
-            [ -n "$_kick_opener" ] && kick="$kick The operator's reason: $_kick_opener"
-            gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
-                || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
-            ;;
-    esac
+    engage_kick
 
     # Once the attach returns, the tab is back at this shell, and what it prints
     # next is the operator's only account of the sitting it left: nothing of the
@@ -4661,14 +4710,16 @@ cmd_engage() {
 
     # The summary already printed the attach line; on the default path we attach
     # a started sitting. One still unstarted at the bound is left unattached,
-    # because the attach would launch it without its prompt.
+    # and the engage fails with exit 4; ENGAGE_WAIT_TIMEOUT says what reaching
+    # the bound means.
     if [ "$engage_attach" = "1" ]; then
         if [ "$start_rc" -eq 0 ]; then
             attach_rc=0
             gc session attach "$sid" || attach_rc=$?
             engage_after_attach "$attach_rc"
         else
-            echo "$PROG: engage: the reconciler has not started $sname after ${ENGAGE_WAIT_TIMEOUT}s (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
+            echo "$PROG: engage: the reconciler has not started $sname after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
+            exit 4
         fi
     fi
     return 0

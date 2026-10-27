@@ -7,8 +7,10 @@
 # kept within P0 to P4 at each level. What a bead follows:
 #   * A workflow's input convoy, root and steps follow the bead the workflow was
 #     poured for, at shift 0. A step follows its root (gc.root_bead_id), a root
-#     its input convoy (gc.input_convoy_id), and an input convoy (gc.synthetic,
-#     tracking exactly one bead) the bead it tracks.
+#     the input convoy it names, and an input convoy (gc.synthetic, tracking
+#     exactly one bead) the bead it tracks. Which convoy a root names and which
+#     beads a convoy tracks are run-lib.sh's defs, the one reading of a run's
+#     link to its bead.
 #   * PR-finishing work, a bead carrying anchor_bead, follows its anchor. Once
 #     the anchor's PR is approved, it runs at P0 whatever its shift. A PR is
 #     approved when its anchor rests in pull_request (merge_result) and the
@@ -64,12 +66,15 @@
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
+# shellcheck source=run-lib.sh
+. "$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/run-lib.sh" || return 1
+
 # How many levels a priority is followed up, and how many generations of
 # followed beads the walk reads. A bead whose chain runs past it is unreadable.
 PRIORITY_MAX_DEPTH=16
 
 # shellcheck disable=SC2016,SC2034  # jq source, its $names are jq's; read by the scripts that source this file
-PRIORITY_JQ='
+PRIORITY_JQ="$RUN_JQ"'
   def prio_meta: (.metadata // {}) | if type == "object" then . else {} end;
   def prio_str($k): ((prio_meta[$k] // "") | tostring | gsub("^[[:space:]]+|[[:space:]]+$"; ""));
   # The edges a bead carries, as {to, type}, from either shape bd prints them
@@ -115,15 +120,15 @@ PRIORITY_JQ='
   def prio_follows:
     ((.id // "") | tostring) as $self
     | prio_str("gc.root_bead_id") as $root
-    | prio_str("gc.input_convoy_id") as $convoy
+    | run_convoy as $convoy
     | prio_str("anchor_bead") as $anchor
-    | [ prio_edges[] | select(.type == "tracks") | .to ] as $tracked
+    | run_tracked as $tracked
     | ([ prio_edges[] | select(.type == "parent-child") | .to ]
        + (if ((.parent // "") | tostring) != "" then [(.parent | tostring)] else [] end)) as $parents
     | if $root != "" and $root != $self then {kind: "workflow", on: [$root]}
       elif prio_str("gc.kind") == "workflow" and $convoy != "" and $convoy != $self then {kind: "workflow", on: [$convoy]}
       elif ((.issue_type // "") | tostring) == "convoy" and (prio_str("gc.synthetic") | ascii_downcase) == "true"
-           and ($tracked | unique | length) == 1 and $tracked[0] != $self then {kind: "workflow", on: [$tracked[0]]}
+           and ($tracked | length) == 1 and $tracked[0] != $self then {kind: "workflow", on: [$tracked[0]]}
       elif $anchor != "" and $anchor != $self then {kind: "anchor", on: [$anchor]}
       else ($parents | unique | map(select(. != $self))) as $p
         | if ($p | length) > 0 then {kind: "parent", on: $p} else {kind: "none", on: []} end

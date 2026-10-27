@@ -479,7 +479,7 @@ have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
 have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
 have "…reads the hold back from the anchor in the same rig" '&& gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json' "$PRS_SKILL"
 have "…and slings only after that read" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
-have "…whose target is the PR's base, an integration branch under an owned convoy" 'integration/<convoy-id>' "$PRS_SKILL"
+have "…whose target is the PR's base, the integration branch for a stage's PR" "the integration branch for a stage's PR" "$PRS_SKILL"
 have "…one at a time on a branch" 'Send one supplement at a time' "$PRS_SKILL"
 # fenced_block <file> <marker> — the fenced bash block that holds <marker>, with
 # the fence's own indent taken off each of its lines.

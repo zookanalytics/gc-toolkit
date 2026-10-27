@@ -4,7 +4,7 @@
 # cannot yet be asked about. Covers: a conflicting branch dispatching ONE child
 # stamped prepare_mode=merge and routed, carrying no PR facts; a branch that still
 # merges dispatching nothing; every branch shape brought current by merge (no
-# shape rebases or force-pushes, polecat/* and a graduation included) and this
+# shape rebases or force-pushes, polecat/* and a landing bead's included) and this
 # site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
 # rebase_hold on a bead naming the branch, a live demand, no fix pool); a branch
 # whose edited code main deleted getting the operator's supersession decision
@@ -67,7 +67,7 @@ git init -q -b main "$SRC"
   } > pin.sh
   git add f.txt pin.sh; git commit -qm base
   BASE=$(git rev-parse HEAD)
-  for spec in "polecat/tk-c1:C1" "integration/conv:CONV" "polecat/tk-grad:GRAD" "polecat/tk-hold:HOLD"; do
+  for spec in "polecat/tk-c1:C1" "integration/conv:CONV" "integration/A4:LAND" "polecat/tk-hold:HOLD"; do
     git checkout -q -b "${spec%%:*}" "$BASE"
     printf 'l1\n%s\nl3\n' "${spec#*:}" > f.txt
     git commit -qam "${spec%%:*}"
@@ -250,9 +250,9 @@ has "$(jq -r --arg k "$K" '.[]|select(.id==$k)|.title' "$STUB_STORE")" "Merge ma
 has "$(meta "$K" rejection_reason)" "Do NOT rebase it and do NOT force-push it" "the work order forbids the rewrite"
 hasnt "$(meta "$K" rejection_reason)" "force-with-lease" "and never names a force-push"
 
-reset "$(pre A4 polecat/tk-grad ',"graduation":"true"')"
+reset "$(pre A4 integration/A4 ',"target":"main"')"
 run --fix-pool "$POOL" >/dev/null
-eq "$(meta "$(newborn)" prepare_mode)" "merge" "a graduation merges whatever its branch is named"
+eq "$(meta "$(newborn)" prepare_mode)" "merge" "a landing bead, whose branch is named for itself, merges"
 
 echo "# operator and human holds"
 reset "$(pre A5 polecat/tk-hold ',"merge_hold":"true"')"
