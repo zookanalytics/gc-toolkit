@@ -885,10 +885,10 @@ run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-a --until 
 eq "$RC" "4" "(UNTEDGE) one of two edges reading back is still a failed exit"
 has "no until edge onto tk-b reads back" "$ERR" "(UNTEDGE) …naming only the one that missed"
 
-run tk-sub --disposition until --reason "r" --takeaway "t" --until sl-foreign --reaction-bead "$R"
+run tk-sub --disposition until --reason "r" --takeaway "t" --until ra-foreign --reaction-bead "$R"
 eq "$RC" "2" "(UNTCROSS) a target in another store is refused"
 eq "$LOG" "" "(UNTCROSS) …and nothing was written"
-has "never sees sl-foreign close" "$ERR" "(UNTCROSS) …because the pass cannot see it close"
+has "never sees ra-foreign close" "$ERR" "(UNTCROSS) …because the pass cannot see it close"
 has "--disposition ruling" "$ERR" "(UNTCROSS) …and the refusal names a person's close as the remedy"
 
 run tk-sub --disposition until --reason "r" --takeaway "t" --reaction-bead "$R"
