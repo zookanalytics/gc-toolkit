@@ -211,7 +211,7 @@ eq "$RC" "0" "a closed work bead (landed work) is exempt"
 echo "== 5b. exempt: a run that works no bead has no landing to wait for =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             '{"id":"CV1","status":"open","issue_type":"convoy","metadata":{}}'
 ready alpha "$(step front1 R1 open "$OLD")"

@@ -347,7 +347,7 @@ FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)")
 FAKE_RUN_FAIL="subject:root-p"
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "2" "the holder's molecule cannot be read: undecided"
-has "$out" "the molecule root-p live pool__polecat-lx-peer is running could not be read" "unreadable molecule: the finding names it"
+has "$out" "the molecule root-p live pool__polecat-hq-peer is running could not be read" "unreadable molecule: the finding names it"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"

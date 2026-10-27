@@ -603,7 +603,7 @@ eq "$(cut -d' ' -f1,3 "$RUN_LIB_STUB_LOG" | tail -n 1)" "subject conv-mine" "(CO
 # back to the derivation, which here meets the queued rivals and refuses.
 convoy_store
 : > "$RUN_LIB_STUB_LOG"
-invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" RUN_LIB_STUB_FAIL="subject" -- --step "$FR" --convoy conv-mine
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" RUN_LIB_STUB_FAIL="subject" -- --step "$FR" --convoy conv-mine
 eq "$RC" "2" "(CONVOY-UNREAD) a failed read of the convoy's runs takes no root"
 has "$OUT" "names no single live workflow root" "(CONVOY-UNREAD) …and says the derivation decides"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-UNREAD) …which writes nothing over the rivals"
