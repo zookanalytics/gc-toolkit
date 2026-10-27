@@ -174,7 +174,7 @@ pour_vars() {
     --arg lint "${VAR_LINT-true}" --arg build "${VAR_BUILD-make}" --arg affected "${VAR_AFFECTED-true}" \
     --arg test "${VAR_TEST-}" '{base_branch: $base, setup_command: $setup,
       typecheck_command: $typecheck, lint_command: $lint, build_command: $build,
-      affected_tests_command: $affected, test_command: $test}'
+      affected_tests_command: $affected, test_command: $test, binding_prefix: "gc-toolkit."}'
 }
 
 write_state() {

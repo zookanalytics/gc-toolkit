@@ -27,9 +27,7 @@ every escalation goes through assets/scripts/escalate.sh (one open visit
 per situation key). Resolve both at shell runtime — formula bodies get no
 {{.ConfigDir}}:
 
-    LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
-    done
+    LC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/lifecycle.sh" && [ -x "$LC" ] || LC=""
 
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
@@ -106,9 +104,7 @@ healthy):
 ```bash
 if [ -z "${GC_AGENT:-}" ]; then
     echo "GC_AGENT is empty — refusing to self-poll with an empty filter."
-    SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-    done
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
     [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "${GC_SESSION_ID:-refinery}" --key refinery-empty-identity --message "Refinery session started with empty GC_AGENT; investigate the session harness."
     gc runtime drain-ack
     exit 1
@@ -164,10 +160,7 @@ fi
 # flight, so only a blocker on the bead itself holds it, never a park on an
 # ancestor. A blocker the store does not return holds the bead too, and a walk
 # that cannot read ends the turn, since a hold nobody read is no release.
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -f "$c/assets/scripts/hold-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
 fw_hold_read() { gc bd list ${GC_RIG:+--rig="$GC_RIG"} --id "$1" --all --include-gates --include-infra --include-templates --limit=0 --json; }
 WORK_JUDGED=""
 if [ -n "$SCRIPTS" ] && . "$SCRIPTS/hold-lib.sh"; then
@@ -275,14 +268,11 @@ git -C "$RIG_ROOT" fetch --prune origin
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 # A gate an interrupted iteration left running still runs in the prep worktree,
 # so it is stopped before the worktree is rebuilt under it. A gate that will not
-# stop leaves the work with the refinery. The launcher is found by path, as the
-# rig root is, never from cwd. Its TERM-to-KILL grace outlasts the ten seconds
+# stop leaves the work with the refinery. The launcher is the pack's own copy,
+# which gc names, never one found from cwd. Its TERM-to-KILL grace outlasts the ten seconds
 # `gctk rig` takes to stop a check's command, so no command outlives the stop.
 GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
-JOB=""
-for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
-done
+JOB="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/detached-job.sh" && [ -x "$JOB" ] || JOB=""
 [ -n "$JOB" ] || { echo "detached-job.sh not found, so a gate left running in $GATE cannot be stopped. NOT rebuilding the prep worktree; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   printf '%s' "$STOP_OUT"; echo
@@ -294,10 +284,7 @@ fi
 # removes nothing itself. It is found the way the launcher is. The stage records
 # that the prep worktree holds $BRANCH for $WORK, and merge-push takes the bead
 # and branch it acts for from that record.
-WS=""
-for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
-done
+WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 [ -n "$WS" ] || { echo "refinery-workspace.sh not found, so the prep worktree cannot be staged. NOT preparing the branch; leaving it with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # Check the staging result before any conflict path can run: a failed staging is
 # prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
@@ -332,10 +319,7 @@ or files a visit:
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
 # >>> mr-aware-rejection
-REPOOL=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/rejection-repool.sh" ] && { REPOOL="$c/assets/scripts/rejection-repool.sh"; break; }
-done
+REPOOL="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rejection-repool.sh" && [ -x "$REPOOL" ] || REPOOL=""
 if [ -z "$REPOOL" ]; then
   echo "rejection-repool.sh not found — NOT repooling $WORK; ending the turn"
   gc runtime drain-ack
@@ -357,10 +341,7 @@ that does not complete is no reason to stop, because the next iteration's
 rebase step clears the leftover before it stages:
 ```bash
 # >>> prep-teardown
-WS=""
-for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
-done
+WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 if [ -z "$WS" ] || ! "$WS" teardown; then
   echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
 fi
@@ -419,10 +400,7 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 COMMON="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)"
 PREP_WT="$COMMON/gc-refinery-prep"
 GATE="$COMMON/gc-refinery-gate"
-JOB=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
-done
+JOB="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/detached-job.sh" && [ -x "$JOB" ] || JOB=""
 [ -n "$JOB" ] || { echo "detached-job.sh not found; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
@@ -440,10 +418,7 @@ if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
 fi
 # refinery-workspace.sh empties the checks directory, so this block removes
 # nothing itself. It is found the way the launcher is.
-WS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
-done
+WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 [ -n "$WS" ] || { echo "refinery-workspace.sh not found, so the previous gate's checks cannot be cleared; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 "$WS" checks --rig-root "$RIG_ROOT" || { echo "could not empty $GATE/checks; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # >>> rig-check-commands
@@ -563,10 +538,7 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
-JOB=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
-done
+JOB="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/detached-job.sh" && [ -x "$JOB" ] || JOB=""
 [ -n "$JOB" ] || { echo "detached-job.sh not found from here, so this call cannot wait on the gate, which keeps running in $GATE; run this block again from the pack checkout, or with GC_RIG_ROOT or GC_CITY_PATH naming it, and do not end the turn"; exit 1; }
 WAIT_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
 printf '%s' "$WAIT_OUT"; echo
@@ -636,10 +608,7 @@ the same repool as the rebase step:
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="<failure summary>"
 # >>> mr-aware-rejection
-REPOOL=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/rejection-repool.sh" ] && { REPOOL="$c/assets/scripts/rejection-repool.sh"; break; }
-done
+REPOOL="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rejection-repool.sh" && [ -x "$REPOOL" ] || REPOOL=""
 if [ -z "$REPOOL" ]; then
   echo "rejection-repool.sh not found — NOT repooling $WORK; ending the turn"
   gc runtime drain-ack
@@ -659,10 +628,7 @@ else has to be deleted, and a teardown that does not complete is cleared by the
 next rebase step:
 ```bash
 # >>> prep-teardown
-WS=""
-for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
-done
+WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 if [ -z "$WS" ] || ! "$WS" teardown; then
   echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
 fi
@@ -680,7 +646,7 @@ linter flagged is its own key and its own tracker:
 # preexisting-failure.sh owns the key, the lookup and the filing. A polecat's
 # pre-flight files these trackers through it too, so both gates derive one key
 # per failure and find each other's trackers.
-PF=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/preexisting-failure.sh" ] && { PF="$c/assets/scripts/preexisting-failure.sh"; break; }; done
+PF="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/preexisting-failure.sh" && [ -x "$PF" ] || PF=""
 if [ -z "$PF" ]; then
   echo "preexisting-failure.sh not found — filing nothing and NOT merging $WORK; the next patrol retries"
   gc runtime drain-ack
@@ -768,7 +734,7 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 HEAD_OID=$(git -C "$PREP_WT" rev-parse HEAD)
 ANCHOR=$(gc bd show "$WORK" --json 2>/dev/null | jq -r '.[0].metadata.anchor_bead // empty' 2>/dev/null)
-PRE=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-check-pre-existing.sh" ] && { PRE="$c/assets/scripts/rig-check-pre-existing.sh"; break; }; done
+PRE="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-check-pre-existing.sh" && [ -x "$PRE" ] || PRE=""
 "${PRE:?rig-check-pre-existing.sh not found in the pack}" --bead "${ANCHOR:-$WORK}" --check "$CHECK" --commit "$HEAD_OID" --worktree "$PREP_WT" --trackers "$TRACKERS" || echo "the mark did not land; the merge goes on, and a review at this head runs the suite itself"
 # <<< refinery-pre-existing-mark
 ```
@@ -802,10 +768,7 @@ draining: jump to next-iteration, and the next patrol prepares the work again.
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-WS=""
-for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
-done
+WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 [ -n "$WS" ] || { echo "refinery-workspace.sh not found, so nothing shows which bead the prep worktree holds; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 if ! HELD=$("$WS" held --rig-root "$RIG_ROOT"); then
   "$WS" teardown --rig-root "$RIG_ROOT" || echo "the prep worktree was not torn down; the next rebase step clears it before staging"
@@ -837,9 +800,7 @@ if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
   echo "metadata.existing_pr requires the PR pipeline; using merge_strategy=mr."
   MERGE_STRATEGY="mr"
 fi
-LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
-done
+LC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/lifecycle.sh" && [ -x "$LC" ] || LC=""
 if [ -z "$LC" ]; then
   echo "lifecycle.sh not found — cannot transition $WORK; leaving it with the refinery to retry"
   gc runtime drain-ack
@@ -882,9 +843,7 @@ if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
     MERGE_STRATEGY=direct
   else
     "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-    SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-    done
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
     [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
     gc runtime drain-ack
     exit 1
@@ -915,10 +874,7 @@ other non-zero exit stops the wisp, and the block leaves the work with the
 refinery; the script's output says what landed, if anything.
 ```bash
 # >>> direct-merge-push
-DMP=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/direct-merge-push.sh" ] && { DMP="$c/assets/scripts/direct-merge-push.sh"; break; }
-done
+DMP="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/direct-merge-push.sh" && [ -x "$DMP" ] || DMP=""
 [ -n "$DMP" ] || { echo "direct-merge-push.sh not found; NOT landing $WORK, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 DIRECT_RC=0
 DIRECT_ARGS=(--work "$WORK" --branch "$BRANCH" --target "$TARGET")
@@ -938,10 +894,7 @@ branch, and the rig root's HEAD was never moved, so nothing is restored; a
 teardown that does not complete is cleared by the next rebase step:
 ```bash
 # >>> prep-teardown
-WS=""
-for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
-done
+WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 if [ -z "$WS" ] || ! "$WS" teardown; then
   echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
 fi
@@ -993,9 +946,7 @@ not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
 needs, capped at 140 characters.
 ```bash
 "$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>" --takeaway "existing_pr failed validation: <what is wrong> — supply a valid PR or clear existing_pr"
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
 [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
 ```
 Then jump to next-iteration (pour before burn).
@@ -1270,10 +1221,7 @@ cleared by the next iteration's rebase step. The prep worktree is detached and
 holds no branch, so nothing else has to be deleted:
 ```bash
 # >>> prep-teardown
-WS=""
-for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
-done
+WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 if [ -z "$WS" ] || ! "$WS" teardown; then
   echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
 fi

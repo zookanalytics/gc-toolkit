@@ -105,7 +105,13 @@ mkdir -p "$TMP/bin"
 #               $FAKE_UPDFAIL so the write-failure arm is reachable.
 # FAKE_CTRL=1 injects a raw control character into every title, reproducing the
 # bd payloads that make an unfiltered `| jq` exit "invalid".
+# `gc-toolkit scripts-dir` names the pack, $STUB_PACK, as gc does for the
+# binding the city imports the pack under.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
+  [ -n "${STUB_PACK:-}" ] || exit 1
+  printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+fi
 [ "$1" = "bd" ] || exit 0
 shift
 
@@ -1464,10 +1470,12 @@ B
 run_loop() { # <loop file>; sets OUT and RC
   RC=0
   stub_runs
-  OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_CITY_PATH="" \
+  OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" STUB_PACK="$ROOT" GC_RIG_ROOT="" GC_CITY_PATH="" \
     bash "$1" 2>&1) || RC=$?
 }
 
+# The pour renders {{binding_prefix}} as the binding plus a dot, gc-toolkit. here.
+LOOP_SRC=$(printf '%s\n' "$LOOP_SRC" | sed 's/{{binding_prefix}}/gc-toolkit./g')
 printf '%s\n' "$LOOP_SRC" | sed 's/{{convoy_id}}/conv-loop/g' > "$TMP/loop-convoy.sh"
 loop_store
 run_loop "$TMP/loop-convoy.sh"

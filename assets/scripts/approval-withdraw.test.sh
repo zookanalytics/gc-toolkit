@@ -378,8 +378,8 @@ eq "$(reviewed_oid='' runblock correctness)" \
    "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-lane --anchor AN1 --lane correctness --reason the reason;" \
    "…while a reviewer's batch, whose supersede names no commit, still runs both"
 STEP=$(awk '/^id = "rule-convergence"$/ {f=1} f && /^\[\[steps\]\]$/ {exit} f' "$TOML")
-has "$STEP" '[ -x "$c/assets/scripts/approval-withdraw.sh" ]' "the step resolves its scripts only where the withdrawal is present"
-has "$STEP" '[ -r "$c/assets/scripts/git-lib.sh" ]' "…and git-lib.sh, which reads the head a pass with no reviewed_oid is superseded at"
+has "$STEP" '[ -x "$SCRIPTS/approval-withdraw.sh" ]' "the step resolves its scripts only where the withdrawal is present"
+has "$STEP" '[ -r "$SCRIPTS/git-lib.sh" ]' "…and git-lib.sh, which reads the head a pass with no reviewed_oid is superseded at"
 eq "$(grep -c 'approval-withdraw.sh" --pass' "$TOML")" "1" "the formula runs the withdrawal in one place"
 eq "$(grep -c 'approval-withdraw.sh" --pass' "$BLOCK")" "1" "…the not-converged block, so a converged batch keeps its approval"
 

@@ -50,6 +50,7 @@ itself, the validator's own working bead that no other writer disposes of.
 
 
 Variables:
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{defer_policy}}: The fix-now-versus-defer threshold, rendered into the triage step at pour. It is
 a policy SENTENCE the validator reasons with, not a number a script compares
 against, and it is a formula variable so a rig can set it without editing a

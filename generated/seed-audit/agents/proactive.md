@@ -37,11 +37,9 @@ gc bd show <R> --json | jq '.[0].metadata'
 SUBJECT=$(gc bd show <R> --json | jq -r '.[0].metadata["gc.reaction_subject"] // ""')
 [ -n "$SUBJECT" ] || SUBJECT=$(gc bd dep list <R> --json | jq -r '[.[]? | select(((.dependency_type // .type) // "")=="tracks") | (.id // .depends_on_id)] | .[0] // ""')
 
-# 3. The disposition script lives in the pack, which is not always the checkout
-#    you are running in.
-DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
-done
+# 3. The disposition script is the pack's own copy, which gc names, never the
+#    checkout you are running in.
+DISPOSE="$(gc gc-toolkit scripts-dir)/first-reaction-dispose.sh" && [ -x "$DISPOSE" ] || DISPOSE=""
 [ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 ```
 
@@ -92,7 +90,7 @@ esac
 1. **Read the subject's body and its universe slice.** The body is the durable
    seed. Pull the one-hop slice for neighborhood context:
    ```bash
-   TOOLS="$(git rev-parse --show-toplevel)/tools"
+   TOOLS="$(gc gc-toolkit scripts-dir)/../../tools"
    "$TOOLS/gc-bd-universe.sh" slice "$SUBJECT"
    ```
    If the body is empty or unintelligible, say so in the card and make your
@@ -316,9 +314,7 @@ another visit already carries its need, or when its premise is gone. That
 close goes through one of two writers:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/visit-close.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
 # An open escalation you raised on a bead:
 "$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 # Any other visit you raised:

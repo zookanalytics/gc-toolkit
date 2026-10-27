@@ -37,11 +37,9 @@ gc bd show <R> --json | jq '.[0].metadata'
 SUBJECT=$(gc bd show <R> --json | jq -r '.[0].metadata["gc.reaction_subject"] // ""')
 [ -n "$SUBJECT" ] || SUBJECT=$(gc bd dep list <R> --json | jq -r '[.[]? | select(((.dependency_type // .type) // "")=="tracks") | (.id // .depends_on_id)] | .[0] // ""')
 
-# 3. The disposition script lives in the pack, which is not always the checkout
-#    you are running in.
-DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
-done
+# 3. The disposition script is the pack's own copy, which gc names, never the
+#    checkout you are running in.
+DISPOSE="$(gc {{ .BindingName }} scripts-dir)/first-reaction-dispose.sh" && [ -x "$DISPOSE" ] || DISPOSE=""
 [ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 ```
 
@@ -92,7 +90,7 @@ esac
 1. **Read the subject's body and its universe slice.** The body is the durable
    seed. Pull the one-hop slice for neighborhood context:
    ```bash
-   TOOLS="$(git rev-parse --show-toplevel)/tools"
+   TOOLS="$(gc {{ .BindingName }} scripts-dir)/../../tools"
    "$TOOLS/gc-bd-universe.sh" slice "$SUBJECT"
    ```
    If the body is empty or unintelligible, say so in the card and make your
