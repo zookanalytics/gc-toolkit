@@ -360,14 +360,20 @@ own_key() {
 # id is its key. A demand's await id, gc-demand:<gated>[:<topic>], names the
 # bead it blocks instead, so its key is its gc.demand_topic, else the key of the
 # visit whose gc.hold_demand names it (converse-hold gave its demands the
-# visit's own key), else conversation.<demand id>. Returns 1 when that visit
-# lookup did not answer.
+# visit's own key), else conversation.<demand id>. converse-hold gave the
+# demands of a visit filed for a concern of its own (visit_topic=own) the topic
+# visit:<visit id>. Such a visit carries no escalation_key, so that topic
+# stands for the visit's key, conversation.<visit id>. Returns 1 when the
+# visit lookup did not answer.
 gate_key() {
   local row="$1" id await topic db hold v
   id=$(rf "$row" '.id'); await=$(rf "$row" '.await_id')
   if [ -n "$await" ] && [ "${await#gc-demand:}" = "$await" ]; then printf '%s' "$await"; return 0; fi
   topic=$(rf "$row" '.metadata["gc.demand_topic"]')
-  [ -n "$topic" ] && { printf '%s' "$topic"; return 0; }
+  case "$topic" in
+    visit:?*) printf 'conversation.%s' "${topic#visit:}"; return 0 ;;
+    ?*) printf '%s' "$topic"; return 0 ;;
+  esac
   db=$(db_of "$id") || { printf 'conversation.%s' "$id"; return 0; }
   hold=$(bd_list --db "$db" --metadata-field "gc.hold_demand=$id" --all) || return 1
   v=$(printf '%s' "$hold" | jq -c '[ .[] | select(((.metadata.task_kind // "") | tostring) == "visit") ]

@@ -518,6 +518,10 @@ if part holds; then
   b '{"id":"ra-vhold6","title":"visit: ra-anc6 — hold the merge","description":"Hold the merge for the operator.","created_by":"hq-wisp-op","metadata":{"task_kind":"visit","gc.continuation_group":"ra-anc6","gc.routed_to":"human","gc.hold_demand":"ra-dh6a"},"deps":[["tracks","ra-anc6"],["blocks","ra-dh6a"]]}'
   b '{"id":"ra-dh6a","issue_type":"gate","await_type":"human","await_id":"gc-demand:ra-vhold6","title":"Decide the merge","metadata":{"gc.demand_for":"ra-vhold6","gc.takeaway":"Decide the merge","gc.routed_to":"human"}}'
   b '{"id":"ra-dh6b","issue_type":"gate","await_type":"human","await_id":"gc-demand:ra-anc6","title":"Decide the merge","metadata":{"gc.demand_for":"ra-anc6","gc.takeaway":"Decide the merge","gc.routed_to":"human"}}'
+  b '{"id":"ra-anc7","title":"PR anchor seven","metadata":{"merge_result":"pull_request"},"deps":[["blocks","ra-dh7b"]]}'
+  b '{"id":"ra-vhold7","title":"visit: ra-anc7 — a concern of its own","description":"Pick the preview login before the merge.","created_by":"hq-wisp-op","metadata":{"task_kind":"visit","visit_topic":"own","gc.continuation_group":"ra-anc7","gc.routed_to":"human","gc.hold_demand":"ra-dh7a"},"deps":[["tracks","ra-anc7"],["blocks","ra-dh7a"]]}'
+  b '{"id":"ra-dh7a","issue_type":"gate","await_type":"human","await_id":"gc-demand:ra-vhold7:visit:ra-vhold7","title":"Pick the preview login","metadata":{"gc.demand_for":"ra-vhold7","gc.demand_topic":"visit:ra-vhold7","gc.takeaway":"Pick the preview login","gc.routed_to":"human","gc.gate_visit":"ra-vhold7"}}'
+  b '{"id":"ra-dh7b","issue_type":"gate","await_type":"human","await_id":"gc-demand:ra-anc7:visit:ra-vhold7","title":"Pick the preview login","metadata":{"gc.demand_for":"ra-anc7","gc.demand_topic":"visit:ra-vhold7","gc.takeaway":"Pick the preview login","gc.routed_to":"human","gc.gate_visit":"ra-vhold7"}}'
   b '{"id":"ra-tri","title":"triage: stalled beads (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"liveness"}}'
   b '{"id":"ra-vlive","title":"visit: ra-tri — 3 beads look stalled","description":"Census cut 2026-10-20T00:00:00Z — a snapshot, not the board. Run the visit.recheck stamp on this visit before acting.","created_by":"order:liveness-sweep","metadata":{"task_kind":"visit","escalation_key":"liveness-stalled","gc.continuation_group":"ra-tri","gc.routed_to":"human","visit.recheck":"/old/pack/assets/scripts/liveness-recheck.sh","sweep.new_ids":"ra-x1,ra-x2","sweep.carried_ids":"ra-x3","sweep.pass_at":"2026-10-20T00:00:00Z"},"deps":[["tracks","ra-tri"]]}'
   fx_end
@@ -533,7 +537,10 @@ if part holds; then
   eq "$(waiters ra-dh5a blocks)" "ra-anc5" "the demand filed on the visit moved its edge to the anchor"
   eq "$(gates_on ra-anc6)" "conversation.ra-dh6b,conversation.ra-vhold6" "a keyless hold-merge demand stays a second gate under a key of its own"
   eq "$(g ra-vhold6 '.close_reason')" "migrated: gate ra-dh6a" "the keyless held visit closes into the demand its hold filed"
-  for d in ra-dh4 ra-dh5a ra-dh5b ra-dh6a ra-dh6b; do eq "$(pack_keys "$d")" "" "demand $d sheds its pack keys"; done
+  eq "$(g ra-vhold7 '.close_reason')" "migrated: gate ra-dh7a" "a held visit of a concern of its own closes into its oldest demand"
+  eq "$(gates_on ra-anc7)" "conversation.ra-vhold7,conversation.ra-vhold7" "its demands' visit:<id> topic is the visit's key, so the anchor waits on the pair and on no third gate"
+  eq "$(waiters ra-dh7a blocks)" "ra-anc7" "the demand filed on that visit moved its edge to the anchor"
+  for d in ra-dh4 ra-dh5a ra-dh5b ra-dh6a ra-dh6b ra-dh7a ra-dh7b; do eq "$(pack_keys "$d")" "" "demand $d sheds its pack keys"; done
   GL=$(gate_on ra-tri liveness-stalled)
   has "$(g "$GL" '.notes')" "Re-check the census before acting: liveness-recheck.sh --ids ra-x1,ra-x2 --carried ra-x3 --pass-at 2026-10-20T00:00:00Z" "the liveness gate carries the re-check command built from the visit's census"
   hasnt "$(g "$GL" '.notes' | grep 'liveness-recheck.sh')" "ra-vlive" "the re-check command names no visit"

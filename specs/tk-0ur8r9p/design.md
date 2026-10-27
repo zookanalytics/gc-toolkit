@@ -2257,7 +2257,12 @@ that stops part way leaves the visit open for the rerun to finish:
 
    converse-hold's demands take the visit's `escalation_key` as their topic
    (converse-hold.sh 187-189), so a held visit and its demands cover one
-   situation. A held visit the sweep filed is the exception, because step 1
+   situation. A visit filed for a concern of its own carries
+   `visit_topic=own` and no `escalation_key`, and converse-hold gave its
+   demands the topic `visit:<visit id>` (visit-topic.sh 60-64), which names
+   that visit, so that topic is read as the visit's key,
+   `conversation.<visit id>`, and such a visit and its demands cover one
+   situation too. A held visit the sweep filed is the exception, because step 1
    gives it the topic of the demand it was filed for, so the hold stays a
    gate of its own beside that demand. converse-hold files its first demand
    on the visit itself when the subject is a PR anchor (converse-hold.sh
@@ -2468,6 +2473,10 @@ states this section names:
 - **A held visit with a substantial description and no notes**, whose demand's
   description is empty. The gate the visit closes into carries that description
   in its notes.
+- **A held visit filed for a concern of its own,** whose demand on the visit
+  and `--hold-merge` demand on its anchor carry the topic `visit:<visit id>`.
+  The visit closes into the older demand, both block the anchor under
+  `conversation.<visit id>`, and no third gate is filed.
 - **A liveness sweep's visit with its `visit.recheck` stamp and census.** The
   gate it becomes carries the re-check command with the visit's census in its
   notes, naming no visit, and that command prints the census after the visit
