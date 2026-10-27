@@ -770,6 +770,12 @@ if part legacy; then
   b '{"id":"ra-timer","issue_type":"gate","await_type":"timer","await_id":"1h","title":"a timer gate","metadata":{"gc.demand_for":"ra-p33"}}'
   fx_end
 
+  run_mig --rig rig-a --dry-run
+  eq "$RC:$(writes)" "0:0" "a dry run over legacy demands writes nothing"
+  has "$OUT" "would file legacy demand ra-L1 again as a human gate on ra-p30 [t30]" "the dry run plans the legacy demand's gate"
+  has "$OUT" "would close visit ra-vsw30 into the gate legacy demand ra-L1 becomes [t30]" "and plans its sweep visit's close into that gate, which a dry run cannot file"
+  has "$OUT" "LEFT OPEN for a person: visit ra-vsw33: it is the sweep's visit for legacy demand ra-L4, which no bead waits on" "a sweep visit whose legacy demand nothing waits on is planned to stay open"
+
   run_mig --rig rig-a
   eq "$RC" 0 "the run completes"
   G30=$(gate_on ra-p30 t30)

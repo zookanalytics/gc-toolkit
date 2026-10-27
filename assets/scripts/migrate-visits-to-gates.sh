@@ -573,11 +573,13 @@ EOF
 # visit_situation <visit row> — step 1's read, which writes nothing. Sets
 # SIT_SUBJECT (the bead the visit is about), SIT_KEY, SIT_REPLY (the gate its
 # subject named, which a conversation replies to), SIT_FIRST (the subject as
-# the visit names it) and SIT_PROBLEM (why it cannot move, empty when it can).
-SIT_SUBJECT=""; SIT_KEY=""; SIT_REPLY=""; SIT_FIRST=""; SIT_PROBLEM=""
+# the visit names it), SIT_PROBLEM (why it cannot move, empty when it can) and,
+# in a dry run only, SIT_LEGACY (the legacy demand whose gate the visit would
+# close into, since a dry run files no demand again).
+SIT_SUBJECT=""; SIT_KEY=""; SIT_REPLY=""; SIT_FIRST=""; SIT_PROBLEM=""; SIT_LEGACY=""
 visit_situation() {
   local row="$1" v dm g waiters n ids
-  SIT_SUBJECT=""; SIT_KEY=""; SIT_REPLY=""; SIT_FIRST=""; SIT_PROBLEM=""
+  SIT_SUBJECT=""; SIT_KEY=""; SIT_REPLY=""; SIT_FIRST=""; SIT_PROBLEM=""; SIT_LEGACY=""
   v=$(rf "$row" '.id')
   SIT_FIRST=$(printf '%s' "$row" | jq -r "$SUBJECT_JQ"'visit_subject' 2>/dev/null)
   if [ -z "$SIT_FIRST" ]; then SIT_PROBLEM="it names no subject (no tracks edge, no gc.continuation_group)"; return; fi
@@ -594,7 +596,18 @@ visit_situation() {
              if is_human_gate "$ROW"; then
                SIT_KEY=$(gate_key "$ROW") || { SIT_PROBLEM="the key of its demand $dm did not read"; return; }
              else
-               SIT_PROBLEM="it is the sweep's visit for legacy demand $dm, which no bead waits on through a blocks edge, so it stays open beside that demand"; return
+               # A legacy demand still open after the legacy pass: either no
+               # bead waits on it, or that pass could not file it again (it
+               # names why), or this is a dry run, which files nothing.
+               waiters=$(deps_of "$dm" blocks up) || { SIT_PROBLEM="what waits on its legacy demand $dm did not read"; return; }
+               if [ -z "$(open_ids "$waiters")" ]; then
+                 SIT_PROBLEM="it is the sweep's visit for legacy demand $dm, which no bead waits on through a blocks edge, so it stays open beside that demand"; return
+               elif [ "$DRY" = 1 ]; then
+                 SIT_KEY=$(demand_key "$ROW") || { SIT_PROBLEM="the key of its legacy demand $dm did not read"; return; }
+                 SIT_LEGACY="$dm"; return
+               else
+                 SIT_PROBLEM="it is the sweep's visit for legacy demand $dm, which is still open because the legacy pass did not file it again (the line above names why); a rerun closes the visit into that gate once it has"; return
+               fi
              fi
            elif g=$(migrated_gate "$ROW"); then
              show_row "$g" && [ "$(rf "$ROW" '.status')" != closed ] && { SIT_KEY=$(gate_key "$ROW") || { SIT_PROBLEM="the key of gate $g did not read"; return; }; }
@@ -792,6 +805,9 @@ migrate_visit() {
   # 1. The subject and the key.
   visit_situation "$row"
   [ -z "$SIT_PROBLEM" ] || { left_open "visit $v: $SIT_PROBLEM"; return; }
+  if [ -n "$SIT_LEGACY" ]; then
+    note_line "would close visit $v into the gate legacy demand $SIT_LEGACY becomes [$SIT_KEY]"; return
+  fi
   # 2. The subject's state.
   if show_row "$SIT_SUBJECT"; then
     subj_row="$ROW"
@@ -948,7 +964,7 @@ shape_pass() {
     case "$(rf "$row" '.await_id')" in
       gc-demand:*)
         key=$(gate_key "$row") || { left_open "gate $g: the visit that may name it as its hold did not read"; continue; }
-        if [ "$DRY" = 1 ]; then note_line "would shape gate $g [$key]"; continue; fi
+        if [ "$DRY" = 1 ]; then note_line "would shape gate $g [$key] and remove its demand keys"; continue; fi
         tk=$(rf "$row" '.metadata["gc.takeaway"]'); title=$(rf "$row" '.title')
         if [ -n "$tk" ] && [ "$tk" != "$title" ]; then
           gc bd update "$g" --title "$tk" </dev/null >/dev/null 2>&1 || true
