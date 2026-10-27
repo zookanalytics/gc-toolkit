@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic tests for first-reaction-dispose.sh — the five exits a first reaction
+# Hermetic tests for first-reaction-dispose.sh — the exits a first reaction
 # ends in, in the reaction-bead model, the stand-down it asks before it reacts,
 # and the frozen no-reaction-bead call an in-flight mol-first-reaction molecule
 # still makes. Runs the REAL script with a
@@ -779,6 +779,142 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
 eq "$RC" "2" "(BLKASSIGN) a --then-assign agent that cannot be handed the bead is refused"
 hasnt "HELM" "$LOG" "(BLKASSIGN) …and the bead is not released"
 unset FAKE_AGENT_GONE FAKE_DEPS_JSON
+
+# ── until: the bead's job ends when another bead lands ───────────────────────
+# A problem in code the deletion plan retires closes with the bead that retires
+# the code. The deferred-dispatch pass closes a bead once its until targets have
+# closed, and only a pure wait, so the exit writes the until edge and nothing
+# that routes, arms, places or blocks the subject. The subject here is a plain
+# bug with no parent, the one intake holds for placement on a pool exit.
+#   (UNT)       the until edge is written, read back by its type, and the
+#               release says nothing holds the subject; the reaction completes
+#   (UNTORDER)  the edge reads back before the release, the landed proof after
+#   (UNTPURE)   the pass's own read of the subject the exit left: waiting while
+#               the target is open, owed with no live-work mark once it closes;
+#               the blocked exit's subject is never selected at all
+#   (UNTEDGE)   an edge that does not read back as until fails the exit before
+#               the release; a re-run over a landed edge succeeds
+#   (UNTCROSS)  a target in another store is refused, naming a person's close
+#   (UNTARGS)   until takes --until only and needs one; no other exit takes it
+#   (UNTDRY)    a dry run names the wait and writes nothing
+UNTIL_SUBJECT='[{"id":"tk-sub","status":"open","issue_type":"bug","assignee":"","metadata":{}}]'
+export FAKE_SHOW_JSON="$UNTIL_SUBJECT" FAKE_DEPS_JSON='[{"id":"tk-retire","dependency_type":"until"}]'
+run tk-sub --disposition until --reason "the file it reports on is retired whole by tk-retire" \
+    --takeaway "closes once tk-retire retires its code" --until tk-retire --reaction-bead "$R"
+eq "$RC" "0" "(UNT) an until disposition succeeds"
+has "DEP bd dep add tk-sub tk-retire --type=until" "$LOG" "(UNT) the until edge is written onto the bead whose landing ends the job"
+has "DEP bd dep list tk-sub --direction=down -t until --json" "$LOG" "(UNT) …and read back by its type"
+has "HELM takeaway tk-sub closes once tk-retire retires its code --by proactive --release --no-wait" "$LOG" \
+    "(UNT) the release says nothing holds the subject"
+has "gc.reacted_by=$R" "$LOG" "(UNT) the landed proof is stamped"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
+    "(UNT) …and the reaction bead is closed"
+has "disposed as until (tk-retire)" "$OUT" "(UNT) …and the run reports the bead it waits for"
+before '^DEP bd dep list' '^HELM takeaway' "(UNTORDER) the edge reads back before the release"
+before '^HELM takeaway' 'gc.reacted_by' "(UNTORDER) …and the landed proof follows the release"
+hasnt "--waiting-on" "$LOG" "(UNTPURE) no blocks edge rides the release"
+hasnt "-t blocks" "$LOG" "(UNTPURE) …and none is added directly"
+hasnt "--route" "$LOG" "(UNTPURE) no route"
+hasnt "--assign" "$LOG" "(UNTPURE) no assignee"
+hasnt "DEFERRED" "$LOG" "(UNTPURE) no arm and no notice"
+hasnt "placement" "$LOG" "(UNTPURE) no placement, though the subject has no parent"
+hasnt "HELM demand" "$LOG" "(UNTPURE) no human gate"
+
+# until_row — the subject as the exit left it, as `bd list --json` lists it: the
+# fixture with each metadata value the exit set on it, and each edge the exit
+# wrote, an until add or a --waiting-on blocks edge. until_reader answers
+# until-resolved.sh's two reads with that row and UNTIL_STATUSES, so
+# scan_subject is the pass's own selection and decision over it.
+until_row() {
+  local meta edges
+  meta=$(grep '^UPDATE bd update tk-sub ' "$FAKE_LOG" | grep -o -- '--set-metadata [^ ]*' | sed 's/^--set-metadata //' \
+    | jq -Rn '[inputs | capture("^(?<k>[^=]+)=(?<v>.*)$") | {(.k): .v}] | add // {}')
+  edges=$({ grep -o 'DEP bd dep add tk-sub [^ ]* --type=until' "$FAKE_LOG" | awk '{print $6 "\tuntil"}'
+            grep '^HELM takeaway tk-sub ' "$FAKE_LOG" | grep -o -- '--waiting-on [^ ]*' | awk '{print $2 "\tblocks"}'; } \
+    | jq -Rn '[inputs | split("\t") | {depends_on_id: .[0], type: .[1]}]')
+  printf '%s' "$FAKE_SHOW_JSON" | jq -c --argjson m "$meta" --argjson e "$edges" \
+    '.[0] | .metadata = ((.metadata // {}) + $m) | .dependencies = $e'
+}
+until_reader() {
+  case " $* " in
+    *" --id "*) printf '%s\n' "$UNTIL_STATUSES" ;;
+    *) printf '[%s]\n' "$UNTIL_ROW" ;;
+  esac
+}
+scan_subject() { ( export GC_RUN_LIB="$HERE/run-lib.stub.sh"; . "$HERE/until-resolved.sh"; until_scan until_reader ) || echo "until_scan exited $?"; }
+UNTIL_ROW=$(until_row) || UNTIL_ROW=""
+UNTIL_STATUSES='[{"id":"tk-retire","status":"open","closed_at":null}]'
+eq "$(scan_subject | cut -f2)" "waiting" "(UNTPURE) while tk-retire is open, the pass reads the subject as waiting on it"
+UNTIL_STATUSES='[{"id":"tk-retire","status":"closed","closed_at":"2026-10-27T00:00:00Z"}]'
+UNTIL_SCAN=$(scan_subject)
+eq "$(printf '%s' "$UNTIL_SCAN" | cut -f2)" "owed" "(UNTPURE) once tk-retire closes, the pass reads the subject as owed its close"
+eq "$(printf '%s' "$UNTIL_SCAN" | cut -f3)" "tk-retire" "(UNTPURE) …pointing it at tk-retire"
+eq "$(printf '%s' "$UNTIL_SCAN" | cut -f8)" "-" "(UNTPURE) …and it carries no live-work mark that keeps the pass from closing it (live-work.sh)"
+
+# Control: the blocked exit onto the same bead leaves a blocks edge, and holds
+# the parentless subject for placement. The pass selects only a bead with an
+# until edge, so that subject stays open after the retirement lands.
+export FAKE_DEPS_JSON='[{"id":"tk-retire"}]'
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-retire \
+    --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(UNTPURE) control: the blocked exit on the same subject succeeds"
+has "placement=pending" "$LOG" "(UNTPURE) control: …holds it for placement"
+UNTIL_ROW=$(until_row) || UNTIL_ROW=""
+eq "$(scan_subject)" "" "(UNTPURE) control: …and with tk-retire closed, the pass selects nothing to close"
+
+# The read-back is by type: a blocks edge onto the target, which refuses the
+# until one, is not taken for it.
+export FAKE_DEPS_JSON='[{"id":"tk-retire","dependency_type":"blocks"}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire --reaction-bead "$R"
+eq "$RC" "4" "(UNTEDGE) a target that reads back only as a blocks edge fails the exit"
+has "no until edge onto tk-retire reads back" "$ERR" "(UNTEDGE) …naming the edge that is missing"
+has "gc bd dep remove tk-sub" "$ERR" "(UNTEDGE) …and the blocks edge to remove first"
+hasnt "HELM" "$LOG" "(UNTEDGE) …before the release and the headline"
+hasnt "gc.reacted_by" "$LOG" "(UNTEDGE) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(UNTEDGE) …and the reaction bead left open"
+export FAKE_DEPS_JSON='[]' FAKE_DEP_FAILS=1
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire --reaction-bead "$R"
+eq "$RC" "4" "(UNTEDGE) a refused add with nothing to read back fails the exit"
+has "bd answered" "$ERR" "(UNTEDGE) …carrying what bd answered"
+export FAKE_DEPS_JSON='[{"id":"tk-retire","dependency_type":"until"}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire --reaction-bead "$R"
+eq "$RC" "0" "(UNTEDGE) a re-run whose add is refused over an edge that landed succeeds"
+unset FAKE_DEP_FAILS
+export FAKE_DEPS_JSON='[{"id":"tk-a","dependency_type":"until"}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-a --until tk-b --reaction-bead "$R"
+eq "$RC" "4" "(UNTEDGE) one of two edges reading back is still a failed exit"
+has "no until edge onto tk-b reads back" "$ERR" "(UNTEDGE) …naming only the one that missed"
+
+run tk-sub --disposition until --reason "r" --takeaway "t" --until sl-foreign --reaction-bead "$R"
+eq "$RC" "2" "(UNTCROSS) a target in another store is refused"
+eq "$LOG" "" "(UNTCROSS) …and nothing was written"
+has "never sees sl-foreign close" "$ERR" "(UNTCROSS) …because the pass cannot see it close"
+has "--disposition ruling" "$ERR" "(UNTCROSS) …and the refusal names a person's close as the remedy"
+
+run tk-sub --disposition until --reason "r" --takeaway "t" --reaction-bead "$R"
+eq "$RC" "2" "(UNTARGS) until with no --until is refused"
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-sub --reaction-bead "$R"
+eq "$RC" "2" "(UNTARGS) a bead cannot wait until itself lands"
+for extra in "--then-route gc-toolkit/gc-toolkit.polecat" "--waiting-on tk-other" "--route gc-toolkit/gc-toolkit.polecat" "--assign gc-toolkit.mechanik"; do
+  # shellcheck disable=SC2086  # $extra is a flag and its value
+  run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire $extra --reaction-bead "$R"
+  eq "$RC" "2" "(UNTARGS) until refuses ${extra%% *}"
+  eq "$LOG" "" "(UNTARGS) …and writes nothing"
+done
+for d in actionable "blocked --waiting-on tk-blk1" close ruling "recommend --recommended-formula mol-polecat-work"; do
+  # shellcheck disable=SC2086  # $d is a disposition and the flags it needs
+  run tk-sub --disposition $d --reason "r" --takeaway "t" --until tk-retire --reaction-bead "$R"
+  eq "$RC" "2" "(UNTARGS) ${d%% *} refuses --until"
+  has "--until" "$ERR" "(UNTARGS) …naming it"
+done
+
+export FAKE_DEPS_JSON='[{"id":"tk-retire","dependency_type":"until"}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire --dry-run
+eq "$RC" "0" "(UNTDRY) a dry run of the until exit succeeds"
+has "would close tk-sub once each of these lands" "$OUT" "(UNTDRY) …and names the wait"
+hasnt "DEP" "$LOG" "(UNTDRY) …writing no edge"
+hasnt "HELM" "$LOG" "(UNTDRY) …and releasing nothing"
+unset FAKE_SHOW_JSON FAKE_DEPS_JSON
 
 # ── ruling: the human gate is the wait, filed by the exit itself ─────────────
 #   (RUL)      the exit files the gate through gc-helm.sh demand, the takeaway
@@ -1843,5 +1979,5 @@ has "NUDGE session nudge gc-toolkit.mechanik Ready for you: tk-sub" "$LOG" "(E2E
 unset DEFERRED_DISPATCH_STATE_DIR DEFERRED_DISPATCH_PASS_BUDGET_SECS
 
 echo ""
-echo "first-reaction-dispose (five exits, reaction-bead): $PASS passed, $FAIL failed"
+echo "first-reaction-dispose (exits, reaction-bead): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

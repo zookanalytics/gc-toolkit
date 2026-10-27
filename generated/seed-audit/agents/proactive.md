@@ -9,8 +9,9 @@ leased work item, filed by the scan and routed to you — and you give its
 **subject** `S` a cheap **first reaction**: read S's body, work out what it means
 and what the first move is, write that as a card on S, and then **dispose** of S
 — route it to the pool that does that work or assign it to the named agent whose
-work it is, hold it on the bead it is waiting for, route a confident no-op to a
-validating closer, or put it to the operator as a human gate, for their judgment
+work it is, hold it on the bead it is waiting for, leave it to close when the
+bead that ends its job lands, route a confident no-op to a validating closer, or
+put it to the operator as a human gate, for their judgment
 (a `ruling`) or their trigger on an action you can name (a `recommend`). New work
 that no epic holds waits for the operator's placement sitting, and your card is
 that sitting's triage. Then you
@@ -113,16 +114,16 @@ esac
      operator's placement sitting, which places it under an epic or routes it
      on its own.
    - **Disposition** — the exit step 4 takes (`actionable`, `recommend`,
-     `blocked`, `close`, or `ruling`), and one line on why. Decide it here,
-     while the bead is in front of you.
+     `blocked`, `until`, `close`, or `ruling`), and one line on why. Decide it
+     here, while the bead is in front of you.
    ```bash
    gc bd update "$SUBJECT" --append-notes "# First reaction · <one-line what-this-is>
 ## Understanding
 ...
 ## Disposition
-<actionable|recommend|blocked|close|ruling> — <why>"
+<actionable|recommend|blocked|until|close|ruling> — <why>"
    ```
-4. **Perform the disposition — ONE of five exits, each triaged on its merits**
+4. **Perform the disposition — ONE of these exits, each triaged on its merits**
    and biased toward moving work forward:
    - **actionable** — the bead names work someone can pick up: a done condition
      you can state, and no unanswered question in front of it. Route it to the
@@ -131,10 +132,9 @@ esac
      so it goes to mechanik, and a blocked one waits assigned to mechanik. A
      city-config question that is genuinely a policy call, such as resuming an
      order the operator paused, is still a `ruling`. A problem in code the
-     pack's deletion plan retires is not actionable: do what the `work`
-     skill's filing section says for one, except that the subject waits on
-     the bead that retires the code through the `blocked` exit, in place of
-     the `until` edge the skill gives a problem's own bead.
+     pack's deletion plan retires is not actionable: it waits on the bead that
+     retires the code, as the `work` skill's filing section says, and that is
+     the `until` exit.
    - **recommend** — you can name the action, but it warrants the operator's
      trigger before it runs: an authority-gated action (retire an in-flight PR,
      supersede an anchor) or a consequential, partly-uncertain call you have a
@@ -145,6 +145,13 @@ esac
      but you want the operator to trigger it.
    - **blocked** — the bead cannot move until something else does: hold it on
      the blocker as an edge.
+   - **until** — the bead's whole job ends once another bead lands, such as the
+     bead that retires its code. The exit records that as an `until` edge, and
+     the deferred-dispatch pass closes the subject once that bead closes, so the
+     exit routes, arms and places nothing. The bead must be in the subject's
+     store, since the pass cannot see a bead in another store close. When it is
+     not, a person closes the subject once that bead lands, so put that to the
+     operator as a `ruling`.
    - **close** — a confident no-op, nothing left to do and nothing the operator
      needs to see: you verified the thing is already fixed with nothing left to
      merge, or the bead should not exist (a duplicate, or fixed upstream). Route
@@ -199,7 +206,7 @@ esac
    <action>; execute via <mol> — discuss if <caveat>`. The card is what the
    execution worker reads if the operator Accepts: broad direction, not a spec.
 
-   `first-reaction-dispose.sh` performs all five against the subject, stamps
+   `first-reaction-dispose.sh` performs each of them against the subject, stamps
    `gc.reacted_by=<R>` on it as the completion marker, and closes `R`. Pass
    `--reaction-bead <R>` so it closes your reaction bead when the write-back
    lands. The `--takeaway` is your card's one-line headline (from **Decision
@@ -241,6 +248,11 @@ esac
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
 
+   # until — the subject's job ends once another bead lands. The exit writes an
+   # until edge onto that bead and releases the subject with no route, arm or
+   # placement, the pure wait the deferred-dispatch pass closes once it lands.
+   "$DISPOSE" "$SUBJECT" --disposition until --reaction-bead <R> --by proactive --reason "<why its job ends when that bead lands>" --takeaway "<headline>" --until <bead-id>
+
    # close — hand a confident no-op to the validating closer (mol-validate-close
    # on this rig's polecat pool; --route names another). --reason is the
    # closer's brief: why there is no work, the successor that carries it when
@@ -260,10 +272,11 @@ esac
 
    The script exits non-zero when the route never stamped, the placement marker
    or an emergency's P0 never landed, the human gate never filed, the wait never
-   became a `blocks` edge, the `--then-route` dispatch never armed, or the closer
-   never slung. It leaves `R` open then. A subject in that state is not routed,
-   not held, or held with nothing to route it once the wait lifts, so fix what
-   its message names and re-run the same call before you drain.
+   became a `blocks` edge, the `until` edge never read back, the `--then-route`
+   dispatch never armed, or the closer never slung. It leaves `R` open then. A
+   subject in that state is not routed, not held, or held with nothing to route
+   it once the wait lifts, so fix what its message names and re-run the same
+   call before you drain.
 5. **Drain.** `first-reaction-dispose.sh` closed `R` when the write-back landed;
    the reaction is done.
    ```bash
@@ -293,8 +306,9 @@ main. Never `--merge direct`.
 
 - **Close the subject.** A first reaction *advances* the subject; it does not
   finish it. Every exit leaves it open — routed to a pool or assigned to a named
-  agent, held on an edge, handed to the validating closer, or waiting on the
-  operator behind its human gate. You DO close `R`, your own reaction bead — that
+  agent, held on an edge, left on an `until` edge for the deferred-dispatch pass
+  to close, handed to the validating closer, or waiting on the operator behind
+  its human gate. You DO close `R`, your own reaction bead — that
   is how the reaction records done, and `first-reaction-dispose.sh` does it for
   you.
 - **Make every subject a visit.** Both `ruling` and `recommend` put the subject
