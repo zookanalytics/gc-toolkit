@@ -345,8 +345,9 @@ machines = ["progressing", "settled", "blocked"]
 # pr.machine_cause beside it:
 #   review-threads    a required review thread is unresolved
 #   check-failed      a required check failed at the head
-#   conflict          the branch conflicts with its base, and a rebase_hold or an
-#                     armed re-dispatch defers the merge-in rework
+#   conflict          the branch conflicts with its base, and something defers
+#                     the merge-in rework: a rebase_hold on the anchor or on any
+#                     bead naming its branch, or an armed re-dispatch
 #   behind            the base moved ahead (BEHIND), and nothing brings the
 #                     branch current
 #   blocker           an unrouted blocker no automated actor will clear holds it
@@ -1248,7 +1249,9 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # pre-open-rebase.sh, pr-open.sh and pr-facts.sh from rebasing or dispatching
 # it, save the one dispatch pr-facts.sh files whatever
 # holds the anchor: a review-feedback batch's rework child, which brings the
-# branch current by merge as it answers. tracking_only opts a PR out of
+# branch current by merge as it answers. merge.sh reads the same freeze, so a
+# conflicting PR on a frozen branch records a blocked verdict (cause conflict)
+# rather than waiting on a merge-in. tracking_only opts a PR out of
 # merge.sh's in-flight-holder count. The pack never writes or clears either.
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it

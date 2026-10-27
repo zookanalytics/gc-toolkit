@@ -56,6 +56,10 @@ const prFields = "state,isDraft,baseRefName,headRefName,headRefOid,headRepositor
 // not-closed state a live worker or a wait can hold it at.
 const mergeLiveStatuses = "open,in_progress,blocked,deferred,hooked,pinned"
 
+// mergeAllStatuses is every status, closed included: the set the conflict arm
+// reads the beads naming a branch over.
+const mergeAllStatuses = mergeLiveStatuses + ",closed"
+
 // reviewThreads is GraphQL-only; paginated to exhaustion because a count read
 // from a truncated connection decides wrongly.
 const threadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
@@ -709,7 +713,12 @@ func (m *merger) handle(row *gcbd.Bead) {
 			// No live holder stands here, so no merge-in rework is in flight.
 			// pr-facts.sh's conflict arm files one for an approved PR on its next
 			// pass unless something defers it, and only a deferred one is a block.
-			if why := mergeInDeferred(fresh); why != "" {
+			// The arm reads the beads naming the branch in every status, so this
+			// does too, and a read that does not answer records nothing.
+			onBranch, branchOK := m.client.List("--metadata-field", "branch="+headRef, "--status="+mergeAllStatuses, "--limit=0", "--json")
+			if !branchOK {
+				fmt.Fprintf(m.stdout, "%s: PR#%s conflicts, and the beads on '%s' could not be read to tell whether its merge-in is deferred (anchor %s)\n", mergeProg, num, headRef, id)
+			} else if why := mergeInDeferred(fresh, onBranch); why != "" {
 				m.recordBlocked(id, headOid, aroute, prstatus.CauseConflict, "the branch conflicts with '"+base+"' and "+why+", so no merge-in rework is filed; bring '"+headRef+"' current with '"+base+"' before it can merge")
 			} else {
 				m.recordMachine(id, "progressing", headOid, aroute)
@@ -898,16 +907,37 @@ func (m *merger) handleBlocked(id, num, base, headOid, aroute, reviewDecision st
 
 // mergeInDeferred names what keeps pr-facts.sh's conflict arm from filing a
 // merge-in rework for a conflicting, approved anchor that has nothing in flight,
-// or "" when nothing does. The arm stands down on a merge_hold, a rebase_hold, a
-// live demand, an armed re-dispatch and a foreign blocker. The merge pass has
-// already held a merge_hold and every live blocker, a demand included, before
-// its merge-state switch, so the two left to read here are on the anchor itself.
-func mergeInDeferred(anchor *gcbd.Bead) string {
+// or "" when nothing does. The arm stands down on a merge_hold, a rebase_hold on
+// the anchor, a live demand, an armed re-dispatch, a foreign blocker, and a
+// freeze on the branch. The merge pass has already held a merge_hold and every
+// live blocker, a demand included, before its merge-state switch, and a branch
+// a landed change supersedes reaches no merge state here, because that arm
+// files a visit the finalize gate holds the merge on. So three are left to
+// read: the anchor's own rebase_hold and arm, and the freeze a bead naming the
+// branch puts on it. onBranch is every bead naming the branch, in any status.
+func mergeInDeferred(anchor *gcbd.Bead, onBranch []gcbd.Bead) string {
 	if isHeld(anchor.Meta("rebase_hold")) {
 		return "a rebase hold defers the merge-in"
 	}
 	if anchor.Meta("gc.dispatch_when_ready") != "" {
 		return "an armed re-dispatch defers the merge-in"
+	}
+	if frozen := branchFreeze(onBranch); frozen != "" {
+		return "the rebase hold on " + frozen + " freezes the branch"
+	}
+	return ""
+}
+
+// branchFreeze is pr-facts.sh's branch_freeze, its marked branch-freeze block:
+// the first bead naming the branch whose rebase_hold, lowercased, is anything
+// but empty, false, 0 or null. merge.test.sh holds the two to one answer.
+func branchFreeze(onBranch []gcbd.Bead) string {
+	for i := range onBranch {
+		switch strings.ToLower(onBranch[i].Meta("rebase_hold")) {
+		case "", "false", "0", "null":
+			continue
+		}
+		return onBranch[i].ID
 	}
 	return ""
 }

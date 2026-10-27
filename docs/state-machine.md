@@ -676,7 +676,7 @@ records `blocked` only for a cause no automated actor will clear:
 |---|---|
 | `review-threads` | branch protection requires resolved review threads and one is unresolved |
 | `check-failed` | a required check failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR` |
-| `conflict` | the branch conflicts with its base (`DIRTY`), and a `rebase_hold` or an armed re-dispatch defers the merge-in rework `pr-facts.sh` would file |
+| `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
 | `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
 | `blocker` | an unrouted live blocker that no pool will claim holds the anchor |
 | `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check failed or running |
@@ -689,10 +689,14 @@ required checks the way its `UNSTABLE` arm does. One that failed is
 (GitHub shows it as Expected), is `progressing`, and every required check green
 leaves `rule`. A conflict with nothing in flight is `progressing`, because
 `pr-facts.sh`'s conflict arm files the merge-in rework for an approved PR on its
-next pass. It is `blocked` only when a hold or an armed re-dispatch defers that
-merge-in. A read that does not answer (the branch rules, the review threads, the
-required-check set, the check rollup) records nothing, and the verdict the last
-pass recorded stands.
+next pass. It is `blocked` only when something defers that merge-in: a
+`rebase_hold` on the anchor, an armed re-dispatch, or a `rebase_hold` on any bead
+naming the branch, in any status. The pass reads that last freeze by the rule the
+conflict arm applies, `pr-facts.sh`'s marked `branch-freeze` block, and
+`merge.test.sh` holds the two to one answer. A read that does not answer (the
+branch rules, the review threads, the required-check set, the check rollup, the
+beads naming the branch) records nothing, and the verdict the last pass recorded
+stands.
 
 `gate-ensure.sh` records its own `progressing` or `settled` after the merge pass
 in the same reconcile pass. It replaces a `blocked` verdict at the same head

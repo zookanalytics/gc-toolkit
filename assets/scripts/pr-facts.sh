@@ -455,6 +455,22 @@ anchor_decision_held() { # <anchor-id>
 }
 # <<< anchor-decision-guard
 
+# >>> branch-freeze
+# An operator's freeze on a branch ([holds] in lifecycle/lifecycle.toml): a
+# truthy rebase_hold on any bead that names the branch, in any status. The
+# conflict arm files no merge-in under one. gctk merge reads the same freeze
+# (mergeInDeferred in services/gctk/internal/cli/merge.go) before it records a
+# conflicting, approved PR with nothing in flight as progressing, because a
+# frozen branch gets no merge-in. merge.test.sh runs this block and gctk merge
+# over the same fixtures and fails when the two disagree. Takes the beads that
+# name the branch and prints the first one that freezes it.
+branch_freeze() { # <beads-json>
+  printf '%s' "${1:-}" | jq -r '
+    [ .[] | ((.metadata.rebase_hold // "") | tostring | ascii_downcase) as $h
+      | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null
+}
+# <<< branch-freeze
+
 # Whether a conflict is a landed change superseding this branch rather than drift,
 # in which case bringing it current is the operator's decision and no merge-in
 # child goes. branch-supersession.sh owns the classification and the decision
@@ -2798,9 +2814,7 @@ REAP_EOF
         skipped=$((skipped + 1)); continue
       fi
       # Any rebase_hold on a bead naming this branch is an operator freeze.
-      frozen=$(printf '%s' "$kids" | jq -r '
-        [ .[] | ((.metadata.rebase_hold // "") | tostring | ascii_downcase) as $h
-          | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null)
+      frozen=$(branch_freeze "$kids")
       if [ -n "$frozen" ]; then
         echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
         skipped=$((skipped + 1)); continue

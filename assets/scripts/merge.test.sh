@@ -1522,6 +1522,27 @@ out=$("$SUT" 2>&1)
 eq "$(cause BK5a)" "conflict" "a merge-in an armed re-dispatch defers is a blocked hold"
 has "$(reason BK5a)" "armed re-dispatch" "…and the reason names what defers the merge-in"
 
+# pr-facts.sh's conflict arm reads a rebase_hold on any bead naming the branch,
+# in any status, as the operator's freeze, so an anchor that carries none of its
+# own is not enough for a merge-in to be filed.
+echo "# a conflicting branch a closed bead freezes records blocked: nothing files its merge-in"
+store "[$(anchor BK5f 170), $(rev BK5f),
+        {\"id\":\"rw-bk5f\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"BK5f\",\"branch\":\"polecat/x170\",\"rebase_hold\":\"true\"}}]"
+printf '%s' "$(prview 170 OPEN DIRTY)" > "$GH_DIR/pr_view_170.json"
+approved 170
+out=$("$SUT" 2>&1)
+eq "$(pinned BK5f)" "blocked@sha-170" "a merge-in the freeze on a closed bead defers is a blocked hold"
+eq "$(cause BK5f)" "conflict" "…its cause is the conflict"
+has "$(reason BK5f)" "rw-bk5f" "…and the reason names the bead whose hold freezes the branch"
+
+echo "# a conflicting branch whose beads cannot be read records no verdict"
+store "[$(anchor BK5u 171 ',"pr.machine":"progressing@sha-171@2026-10-27T00:11:44Z"'), $(rev BK5u)]"
+printf '%s' "$(prview 171 OPEN DIRTY)" > "$GH_DIR/pr_view_171.json"
+approved 171
+out=$(STUB_LIST_FAIL_ON="branch=polecat/x171" "$SUT" 2>&1)
+has "$out" "PR#171 conflicts, and the beads on 'polecat/x171' could not be read" "an unreadable branch read is named"
+eq "$(machine BK5u)" "progressing@sha-171@2026-10-27T00:11:44Z" "…and the recorded verdict stands untouched"
+
 # Once pr-facts.sh's merge-in rework is in flight, the in-flight arm records
 # progressing BEFORE the DIRTY switch is reached, so the verdict stays the city's
 # move exactly while a rework is moving the branch.
@@ -2213,6 +2234,40 @@ verdict_case 330 "a dismissed approval with a line" "none" \
   "[$(rvw 1 human1 DISMISSED $T0)]" "$LIFT"
 verdict_case 331 "a lift line that is not YYYY-MM-DDTHH:MM:SSZ" "lifted:human1" \
   "[$(rvw 1 human1 APPROVED $T2)]" "2026-08-21"
+
+echo "# the branch freeze: pr-facts.sh's branch_freeze and gctk merge read one freeze"
+# gctk merge shows its answer on an approved PR that conflicts with nothing in
+# flight: blocked on the conflict when a bead naming the branch freezes it, and
+# progressing, waiting on the merge-in, when none does. The freezing bead is not
+# the anchor and does not block it, so only the freeze tells the two apart.
+BF_BLOCK=$(awk '/^[[:space:]]*# >>> branch-freeze[[:space:]]*$/{inb=1;next} /^[[:space:]]*# <<< branch-freeze[[:space:]]*$/{inb=0} inb' "$HERE/pr-facts.sh")
+if [ -n "$BF_BLOCK" ]; then ok "pr-facts.sh carries the marked branch-freeze block"
+else bad "pr-facts.sh carries the marked branch-freeze block"; fi
+bf_case() { # <num> <label> <want: frozen:<id> | free> <rebase_hold as JSON> [<status of the bead>]
+  local num="$1" label="$2" want="$3" hold="$4" st="${5:-closed}" id="BF$1" kid="rw-bf$1" row got
+  row="{\"id\":\"$kid\",\"status\":\"$st\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"$id\",\"branch\":\"polecat/x$num\",\"rebase_hold\":$hold}}"
+  got=$( ( eval "$BF_BLOCK"; branch_freeze "[$row]" ) )
+  if [ -n "$got" ]; then got="frozen:$got"; else got="free"; fi
+  eq "$got" "$want" "pr-facts.sh reads $label as $want"
+  store "[$(anchor "$id" "$num"), $(rev "$id"), $row]"
+  : > "$STUB_DEPS"
+  printf '%s' "$(prview "$num" OPEN DIRTY)" > "$GH_DIR/pr_view_$num.json"
+  approved "$num"
+  "$SUT" >/dev/null 2>&1
+  case "$want" in
+    frozen:*) eq "$(pinned "$id") $(cause "$id")" "blocked@sha-$num conflict" "…and gctk merge holds the conflict as blocked" ;;
+    *)        eq "$(pinned "$id") $(cause "$id")" "progressing@sha-$num <absent>" "…and gctk merge waits on the merge-in" ;;
+  esac
+  rm -f "$GH_DIR/pr_view_$num.json" "$GH_DIR/reviews_$num.json"
+}
+bf_case 341 "a closed bead's rebase_hold of true" "frozen:rw-bf341" '"true"'
+bf_case 342 "an open bead's boolean rebase_hold" "frozen:rw-bf342" 'true' open
+bf_case 343 "a rebase_hold of 1" "frozen:rw-bf343" '"1"'
+bf_case 344 "a rebase_hold of false" "free" '"false"'
+bf_case 345 "a rebase_hold of NULL, in any case" "free" '"NULL"'
+bf_case 346 "a numeric rebase_hold of 0" "free" '0'
+bf_case 347 "a boolean false rebase_hold" "free" 'false'
+bf_case 348 "an empty rebase_hold" "free" '""'
 
 fi # part gates
 

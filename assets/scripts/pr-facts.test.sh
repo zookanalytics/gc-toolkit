@@ -1218,6 +1218,19 @@ out=$(run)
 has "$out" "rework HW1 already covers branch 'polecat/x98' at this head, no new child" "a rework child parked in the held lifecycle state (merge_result=held) still covers the branch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
+echo "# …and a rebase_hold on a CLOSED bead naming the branch freezes the dispatch: the freeze is the operator's, whichever bead carries it"
+# A closed child holds no merge and covers nothing, so only the freeze stops the
+# dispatch here. gctk merge reads the same freeze through branch_freeze's marked
+# block, which merge.test.sh holds it to.
+store "[$(anchor FRZ1 116),$(child FZC1 polecat/x116 ',"task_kind":"rework","anchor_bead":"FRZ1","rebase_hold":"true"' closed)]"
+printf '%s' "$(prview 116 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_116.json"
+approve 116
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "PR#116 conflicts but FZC1 holds branch 'polecat/x116' with rebase_hold (operator gate); no rework dispatched" "a closed bead's rebase_hold on the branch vetoes the dispatch"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
 echo "# …but that own rework child, ITSELF held by a live decision demand, DOES veto: the demand gates the branch both share"
 # A base-supersession or reconcile decision is filed on the in-flight rework
 # (gc.demand_for=<child>), not the anchor. The child is on the anchor's own
