@@ -182,13 +182,16 @@ three paths, and none of them needs a migration script.
    before the change runs the submit text frozen into its steps at pour time.
    That text still clears the route (`mol-polecat-work.toml:1738`), assigns the
    refinery by name, and runs its own wake and nudge. A pre-cutover keeper
-   handoff assigns the refinery the same way and leaves whatever route the bead
-   carried. The new refinery serves such a bead through the claim's second tier,
-   which returns open work assigned to the session's own identities. Those
-   include `<rig>/gc-toolkit.refinery` (section 2), the same string the old text
-   writes. While the bead waits, the demand count and the alarm count it as they
-   count an offer (sections 4 and 5), and the witness leaves it to the claim
-   (section 2). The claim gives it the refinery's route before anything else is
+   handoff assigns the refinery the same way. Cutover step 1 confirms that
+   every such run carries tk-e1dbjsf's text, so both leave the bead with no
+   route and no `gc.run_target` (below). The new refinery serves such a
+   bead through the claim's second tier, which returns open work assigned to
+   the session's own identities. Those include `<rig>/gc-toolkit.refinery`
+   (section 2), the same string the old text writes. While the bead waits, the
+   demand count and the alarm count it as they count an offer (sections 4 and
+   5), and the witness leaves it to the claim (section 2). A release can reach
+   it before the claim does, and gives it back as an offer to the refinery
+   (below). The claim gives it the refinery's route before anything else is
    done to it ("The claim routes what it takes", section 2). From then on it is
    released, parked and offered again exactly as an offer's claim is. This
    window closes when the last molecule poured before cutover submits. A query
@@ -208,6 +211,36 @@ three paths, and none of them needs a migration script.
    session's first tier cannot find a wisp still assigned to the alias and
    resume it as its claim. Nothing reads the wisps after cutover, and the
    cutover burns them by hand (section 12).
+
+Paths 1 and 2 each meet a gascity release that can give an old-style handoff
+back before a refinery claim routes it. The retirement in path 1 releases every
+bead assigned to the named session at the moment it runs, so it also takes a
+handoff submitted after cutover step 1 listed the waiting ones. In path 2 a
+waiting handoff is assigned to the alias, so it is in the release scope of the
+refinery session that holds the alias (section 2, "Release paths"). That
+session's stranded repair and close cascade give back open beads, not only
+claims (`releasePolicies`, `work_release.go:92-99`).
+
+Each of these releases routes the bead the way path 1 describes for the
+retirement. It keeps a route the bead carries. When the bead carries no route,
+the release gives it back on the `gc.run_target` the bead carries. When the bead
+carries none either, the release stamps the session's template there, and every
+release takes that template as its fallback (`releaseSeatOfBead` and
+`releaseSeatOfInfo`, `work_release.go:122-145`). The refinery's template is its
+qualified name, and on 2026-10-27 `gc session list` reports it as
+`<rig>/gc-toolkit.refinery`. Route recovery then copies the target into
+`gc.routed_to` (`carriedPoolRoute`, `route_recovery.go:32-69`).
+
+So an old-style handoff with no route and no `gc.run_target` is given back as an
+offer to the refinery, whichever of these releases reaches it. One that carries
+an archived target is given to the pool the target names. Step 1's write
+protects only the handoffs it lists. One change therefore lands on main ahead of
+cutover, as tk-e1dbjsf (section 11). With it, every writer that assigns a
+handoff to the refinery by name leaves the bead with no route and no
+`gc.run_target`. A molecule runs the text frozen into its steps at pour time, so
+cutover waits until no run without that change can still hand off (section 12,
+step 1). From then on every old-style handoff has that shape, whether it is
+written before the retirement or after it.
 
 ## 2. Claiming and releasing a handoff
 
@@ -1160,6 +1193,19 @@ below is the build order. Nothing reaches production until graduation, which is
 why the writers and the refinery can change in separate units without a window
 where one speaks the old shape to the other.
 
+One change cannot wait for graduation, because cutover needs it live first
+(section 1, "Cutover"). It lands on main ahead of the units, as tk-e1dbjsf, and
+the landing bead tk-zvu0bd6 waits on it. The change makes every writer that
+assigns a handoff to the refinery by name leave the bead with no route and no
+`gc.run_target`. On main at `3688e4a3b` those writers are the submit handoff's
+first write (`submit-target-consume`, which already clears the route), the
+keeper's `notify-and-handoff`, and the landing bead's hand-over, in
+`mol-design-convoy.toml`'s `dispatch` step and in step 6 of the mechanik's
+integration recipe (`agents/mechanik/prompt.template.md`). The old refinery
+selects its queue by assignee, so the change does not alter what it takes.
+`submit-branch-gate.test.sh` pins the unset in the handoff's shape. Unit 3 keeps
+the unset in each writer it rewrites.
+
 1. **The exit writer.** Write `assets/scripts/refinery-exit.sh` and its test. It
    covers release, demand and finding, the attempt count, the edge read-back, the
    self-block refusal, pin clearing, and the unfinished repool's finding, which
@@ -1287,23 +1333,40 @@ Graduation deploys every unit at once, and the hand steps below go with it. They
 are recorded in tk-fhkllrb's notes when run, and no script for them lands in the
 repo.
 
-1. As the last act before graduation, list the old-style handoffs on each rig:
-   open beads assigned to `<rig>/gc-toolkit.refinery` whose route is not
-   `<rig>/gc-toolkit.refinery`. On each, set
-   `gc.routed_to=<rig>/gc-toolkit.refinery` and unset `gc.run_target`, the same
-   write the claim makes (section 2). The old refinery reads its queue by
-   assignee, so nothing changes for it, and the retirement then releases each
-   one on that route (section 1). After graduation, confirm that every listed
-   handoff was released onto the refinery's route. A handoff submitted between
-   the write and graduation is routed by the release itself, so check those too.
-   Any left assigned are still served by the claim's second tier, which routes
-   each one as it claims it.
+1. As the last act before graduation, confirm on each rig that no run can still
+   hand off without tk-e1dbjsf's change. No open or in-progress step bead whose
+   `gc.step_ref` is `mol-polecat-work.submit-and-exit`,
+   `mol-upstream-gc-rebase.notify-and-handoff` or `mol-design-convoy.dispatch`
+   may have a description without `gc.run_target`. A step bead's description is
+   the text its run executes, frozen at the pour, and the change adds the unset
+   to each of these steps. Graduate only once none is left.
+
+   Then run the old-style query on each rig: open beads assigned to
+   `<rig>/gc-toolkit.refinery` whose route is not `<rig>/gc-toolkit.refinery`.
+   On each, set `gc.routed_to=<rig>/gc-toolkit.refinery` and unset
+   `gc.run_target`, the same write the claim makes (section 2). The old
+   refinery reads its queue by assignee, so nothing changes for it, and the
+   retirement then releases each one on that route (section 1). A handoff
+   submitted after the query and before the retirement carries no route and no
+   `gc.run_target`. So the retirement stamps the refinery's template on it, and
+   route recovery copies that into its route (section 1).
+
+   After graduation, run the release query on each rig: open, unassigned beads
+   whose route or `gc.run_target` is `<rig>/gc-toolkit.refinery`. Everything
+   the retirement released is among them. Confirm that every handoff the
+   old-style query listed is there or already claimed by the refinery, and that
+   each bead the release query lists carries the refinery's route once route
+   recovery has run. A handoff submitted after the retirement stays assigned to
+   the alias until the claim's second tier routes it, or until a release gives
+   it back as an offer (section 1).
 2. Burn each rig's `mol-refinery-patrol` wisps.
 3. Close the open `witness-refinery-queue` visits as moot, naming this design.
 4. Confirm one refinery session per rig: `gc session list` shows at most one
    session per rig with an active or creating state.
 5. Each pre-cutover molecule writes its old-style handoff when it submits. Check
-   that the query from step 1 drains to zero as those molecules finish.
+   that the old-style query from step 1 drains to zero as those molecules
+   finish, and that each handoff it drops is claimed by the refinery or offered
+   on its route.
 
 ## Alternatives considered
 
@@ -1330,6 +1393,15 @@ repo.
   offer to the work bead, and the offer's readiness would be `bd ready`'s rule
   rather than the pack's hold. The custom query costs one script and, until
   gascity gc-9h08f6, the backstop for offers under a parked epic.
+- **Fence the late submits, or repair the releases after graduation.** `gc agent
+  suspend` stops the reconciler from starting a pool's sessions, but it leaves
+  running ones running. So a run already at its submit still hands off, and a
+  run held until after the retirement meets the releases of path 2 instead
+  (section 1). A repair after the retirement races route recovery, whose delta
+  pass restores a released bead's carried target as its route on the next
+  controller tick (`route_recovery_lane.go:28-31`). From then on the pool the
+  target names can claim the bead. Leaving no target on a handoff where it is
+  written closes both windows, and needs no hand step to beat the controller.
 - **Let a park hold handoffs.** This keeps gascity's default queries and needs
   nothing custom. It is not chosen, because it reverses steer-by-epic's approved
   rule that a park leaves in-flight work running: a branch already built would
