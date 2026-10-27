@@ -119,12 +119,12 @@ idle.
 
 ## With cycle-recycle
 
-Both hooks run on the same `Stop` event. Past the context threshold
-cycle-recycle writes its handoff and resets the session, which ends the
-conversation even though the hand-back continued the turn, and the next
-session's startup reconcile adopts the wisp. Under the threshold, and
-whenever cycle-recycle defers, the hand-back keeps the patrol going, so a
-deferred recycle reaches its next turn boundary.
+Both hooks run on the same `Stop` event. When cycle-recycle recycles, past
+the context threshold or on a pack change, it writes its handoff and resets
+the session, which ends the conversation even though the hand-back continued
+the turn, and the next session's startup reconcile adopts the wisp. When it
+has nothing to recycle, and whenever it defers, the hand-back keeps the patrol
+going, so a deferred recycle reaches its next turn boundary.
 
 ## The city store
 

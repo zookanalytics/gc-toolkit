@@ -204,10 +204,11 @@ Further checks guard structure that is not an anchor invariant:
 resolves in the composed config), `doctor/check-seed-audit-current`
 (the generated seed audit is present and its pre-commit hook is wired;
 warn-only),
-`doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
-reaches the hook with its stdin intact, the hook's own measurement reads the
-context size a transcript carries, and no refinery's git-op defer guard has
-been latched past a bound), `doctor/check-cycle-recycle-hook` (the cycle-recycle
+`doctor/check-recycle-capable` (cycle-recycle can fire at all: the Stop and
+UserPromptSubmit events reach the hook with its stdin intact, the hook's own
+measurement reads the context size a transcript carries, its drift check sees
+a changed pack file, and no refinery's git-op defer guard has been latched past
+a bound), `doctor/check-cycle-recycle-hook` (the cycle-recycle
 Stop hook and its no-consent doctrine name the same roles: every agent carrying
 `overlay_dir = "overlays/cycle-recycle"` injects the `heartbeat-no-consent-ui`
 fragment and every agent injecting it carries the overlay, so no role recycles
@@ -484,7 +485,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/review-workspace-reap.toml` | patrol | Fires the review-workspace reaper hourly, city-wide. |
 | `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
 | `orders/dolt-reclaim.toml` | patrol | Fires the Dolt reclaim pass daily, city-wide: runs `gc dolt compact --gc-only` on each store whose noms size is over the per-database line. |
-| `assets/scripts/boot-health.sh` | patrol | Mechanical reads: the patrol-wisp ledger, and the deacon's pane only when the wisp is not fresh. Report-only by design ([authority-map.md](authority-map.md)). |
+| `assets/scripts/boot-health.sh` | patrol | Mechanical reads: the patrol-wisp ledger, and the deacon's pane only when the wisp is not fresh. Report-only by design ([authority-map.md](authority-map.md)): it files a cold deacon as a finding through `patrol-finding.sh`, one per deacon, refreshes it while the episode lasts, and records on it the fresh wisp that ends the episode. |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
 | `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in, and reports a sweep that finished more than an interval before it was collected as stale, never as current findings. |
 | `assets/scripts/gc-deacon-ledger.sh` | patrol | The deacon's rolling incident ledger: one open `deacon-ledger` bead, one comment per non-routine action, rotated so it stays skimmable. Reconstructs a shift for an operator or a recycled deacon without a transcript. |
@@ -502,7 +503,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/order-cadence.sh` | patrol | The one definition of an order's cadence window: max(3×interval, one trip of the order dispatch rotation), the trip derived from the live registry and the city's dispatch budget. Patrol's doctor sweep runs `check-cadence-live` (I10), `check-armed-dispatch-owed` and `check-until-resolved-owed`, which all source it, so an owed check never calls owed a gap I10 reads as healthy. |
 | `assets/scripts/dolt-reclaim.sh` | patrol | Measures each managed Dolt store's noms size and runs `gc dolt compact --gc-only --only-db <db>` on the ones over the per-database line, so a store size-bloated below the flatten commit-threshold is reclaimed on a cadence. Never runs a bare flatten; defers while the data plane is degraded. |
 | `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key — the door to a human, for what only a human can answer. The window is one OPEN visit, so a recurring observation belongs in `patrol-finding.sh` instead. |
-| `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key` and its subject. A new bead that shares either with a live finding in its scope is refused unless the caller passes `--distinct`. A proactive first reaction disposes it: routed to a pool, held for the placement sitting, held on an edge, or put to the operator as a human gate. |
+| `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key` and its subject. A new bead that shares either with a live finding in its scope is refused unless the caller passes `--distinct`. A caller that sees the situation end records it with `--cleared`, which sets the live bead's `situation` state with `bd set-state` and files no finding. A proactive first reaction disposes it: routed to a pool, held for the placement sitting, held on an edge, or put to the operator as a human gate. |
 | `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |
 | `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |
 | `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. Its `--check` mode re-renders a checkout, and its `--check-merge` mode, which renders the merge result, is what `merge.sh` gates a landing on. `doctor/check-seed-audit-current` reports whether the artifact is present and its hook wired. |

@@ -861,9 +861,16 @@ const (
 	outboundFarEnd
 )
 
+// auditEventType is bd's TypeEvent: the type of the closed bead `bd set-state`
+// files under the bead whose state it changed. That bead records the change, not
+// work, so no roll-up counts it as a child. bd's root package exports no
+// constant for it.
+const auditEventType = beads.IssueType("event")
+
 // childrenFromEdges projects the edges of one dependency type onto board
 // children, dropping any whose far-end issue did not hydrate — the same drop the
-// library's WithMetadata join made for a dangling or cross-store edge.
+// library's WithMetadata join made for a dangling or cross-store edge — and any
+// that is a bd audit event.
 func childrenFromEdges(recs []*beads.Dependency, want string, side farEndSide, issueByID map[string]*beads.Issue) []board.Child {
 	var out []board.Child
 	for _, d := range recs {
@@ -875,7 +882,7 @@ func childrenFromEdges(recs []*beads.Dependency, want string, side farEndSide, i
 			farID = d.IssueID
 		}
 		iss, ok := issueByID[farID]
-		if !ok {
+		if !ok || iss.IssueType == auditEventType {
 			continue
 		}
 		out = append(out, board.Child{

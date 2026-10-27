@@ -294,6 +294,9 @@ carries no edge per story; `--horizon` lists the direct children by the
 `--parent` query, asked for with `--all`. bd's default scope leaves out closed
 and pinned children, and a `--status` list leaves out any status it does not
 name, so with `--all` a child in any status is counted, a done one included.
+The listing also returns the closed event bead `bd set-state` files under a
+bead each time its state changes. An event records the change, not work, so it
+is not counted as a child.
 
 The subject read passes `--brief-deps`, so a listed bead's body is never fetched
 to read its status, and a same-store closed blocker's status rides the edge at no
