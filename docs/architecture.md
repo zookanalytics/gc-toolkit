@@ -150,14 +150,16 @@ the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
 bound for main.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a provider quota park — are handled by these reactive paths:
-`pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the
-witness patrol recovers work orphaned by dead sessions, the `dog` pool is
-warrant executor for due-process recovery of wedged sessions (demand-scaled
-0-2), `quota-park-nudge.sh` nudges a session parked behind a provider limit,
-`boot-health.sh` detects a wedged deacon (report-only by design), and
+session dying, a provider quota park, a `gc` build that moves the text the seed
+audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
+the cadence) records PR events and files a visit, the witness patrol recovers
+work orphaned by dead sessions, the `dog` pool is warrant executor for
+due-process recovery of wedged sessions (demand-scaled 0-2),
+`quota-park-nudge.sh` nudges a session parked behind a provider limit,
+`boot-health.sh` detects a wedged deacon (report-only by design),
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
-edit no writer saw. See
+edit no writer saw, and `seed-audit-reaudit.sh`, which the merge arm calls,
+slings the one re-render of the default branch's `generated/seed-audit`. See
 [authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.

@@ -1164,14 +1164,28 @@ echo "# generated-artifact freshness at the merge result"
 # overwrites inputs it never saw, and every other gate here is head-keyed, so
 # nothing else notices the base moving underneath.
 RENDER_LOG="$TMP/render.log"; : > "$RENDER_LOG"
+# The renderer names the files the base is already stale in through
+# --base-stale-out; STUB_BASE_STALE is that list, one file per line.
 cat > "$SD/render-seed-audit.sh" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$RENDER_LOG"
+while [ \$# -gt 0 ]; do
+  if [ "\$1" = --base-stale-out ]; then shift; printf '%s' "\${STUB_BASE_STALE:-}" > "\$1"; fi
+  shift
+done
 printf '%s\n' "\${STUB_RENDER_OUT:-seed audit is current}"
 exit "\${STUB_RENDER_RC:-0}"
 STUB
 chmod +x "$SD/render-seed-audit.sh"
-export STUB_RENDER_RC=0 STUB_RENDER_OUT=""
+REAUDIT_LOG="$TMP/reaudit.log"; : > "$REAUDIT_LOG"
+cat > "$SD/seed-audit-reaudit.sh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$REAUDIT_LOG"
+printf 're-1 rig/gc-toolkit.polecat filed\n'
+exit "\${STUB_REAUDIT_RC:-0}"
+STUB
+chmod +x "$SD/seed-audit-reaudit.sh"
+export STUB_RENDER_RC=0 STUB_RENDER_OUT="" STUB_BASE_STALE="" STUB_REAUDIT_RC=0
 mkdir -p "$TMP/repo/generated/seed-audit"; printf 'name = "t"\n' > "$TMP/repo/pack.toml"
 # The body runs once per arm; S0 is the no-rendered-audit case, so drop any
 # INDEX.md a prior arm's S1 rendered before asserting the probe stays idle.
@@ -1194,11 +1208,14 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded S1" "a current merge result merges"
 has "$(cat "$RENDER_LOG")" "--check-merge refs/gc-toolkit/merge-gate/base refs/gc-toolkit/merge-gate/head" \
   "…and the question was asked of the merge, in the probe's own ref namespace"
+has "$(cat "$RENDER_LOG")" "--base-stale-out " "…asking for the files the base is already stale in"
+eq "$(wc -c < "$REAUDIT_LOG" | tr -d ' ')" "0" "…and a base stale in none asks for no re-audit"
 
 store "[$(anchor S2 82), $(rev S2)]"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
 approved 82
-export STUB_FETCHED_HEAD="sha-82" STUB_RENDER_RC=1 STUB_RENDER_OUT="seed audit would be STALE at the merge"
+export STUB_FETCHED_HEAD="sha-82" STUB_RENDER_RC=1 STUB_RENDER_OUT="seed audit would be STALE at the merge" \
+  STUB_BASE_STALE=$'agents/claude.md\nformulas/mol-x.md'
 : > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "would land a stale generated/seed-audit; merge held" "a stale merge result holds"
@@ -1208,7 +1225,10 @@ has "$(cat "$STUB_ESC_LOG")" "--key seed-audit-merge-gate.82" "…and one visit 
 has "$(cat "$STUB_ESC_LOG")" "PR#82 would land a stale generated/seed-audit; the merge is held." \
   "…whose first line is a headline, since escalate.sh titles the visit from it"
 has "$(cat "$STUB_ESC_LOG")" "seed audit would be STALE at the merge" "…carrying the renderer's own diagnosis"
+has "$(cat "$STUB_ESC_LOG")" "render-seed-audit.sh --since origin/main" \
+  "…and the remedy renders only what the branch moves, so the base's own staleness is not folded in"
 eq "$(bstatus S2)" "open" "the anchor stays open"
+eq "$(wc -c < "$REAUDIT_LOG" | tr -d ' ')" "0" "…and a held merge asks for no re-audit, whatever the base is stale in"
 
 store "[$(anchor S3 83), $(rev S3)]"
 printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
@@ -1237,7 +1257,32 @@ out=$("$SUT" 2>&1)
 has "$out" "head moved during the freshness probe (fetched 'sha-moved', validated 'sha-85')" \
   "a head that moved under the probe holds rather than answering about the wrong tree"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
-export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
+
+# A base already stale in files the merge leaves alone holds nothing. Its text
+# moved with the gc binary, and the gate hands those files to the one writer of
+# the base's re-audit, whose pull request lands the new text on its own.
+store "[$(anchor S6 86), $(rev S6)]"
+printf '%s' "$(prview 86 OPEN CLEAN)" > "$GH_DIR/pr_view_86.json"
+approved 86
+export STUB_FETCHED_HEAD="sha-86" STUB_RENDER_RC=0 STUB_RENDER_OUT="the merge makes no render stale"
+: > "$STUB_GH_LOG"; : > "$REAUDIT_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded S6" "a base already stale in files the merge leaves alone holds nothing"
+has "$out" "'main' is already stale in 2 generated/seed-audit file(s) the merge leaves as it has them" "…and the pass says so"
+has "$(cat "$REAUDIT_LOG")" "--base main --seen-by The merge gate, checking PR#86, --page agents/claude.md --page formulas/mol-x.md" \
+  "…handing each file to the re-audit of the branch the PR lands on"
+has "$out" "re-1 rig/gc-toolkit.polecat filed" "…and quoting what the re-audit answered"
+
+store "[$(anchor S7 87), $(rev S7)]"
+printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
+approved 87
+export STUB_FETCHED_HEAD="sha-87" STUB_REAUDIT_RC=2
+: > "$STUB_GH_LOG"; : > "$REAUDIT_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded S7" "a re-audit that is not dispatched holds no merge"
+has "$out" "the re-audit was not dispatched (seed-audit-reaudit.sh exit 2); the next merge that finds 'main' stale asks again" \
+  "…and the pass says the next merge asks again"
+export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_BASE_STALE="" STUB_REAUDIT_RC=0
 
 fi # part record
 
