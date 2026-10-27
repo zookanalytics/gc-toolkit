@@ -262,8 +262,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    itself, so a `pr_summary` opening with one of its own is de-duplicated. The
    region ends with a `## Size` section, which `tools/measure.sh --pr` writes
    for the change from its merge base with the target to its head. A
-   repository that does not carry the tool gets none, and neither does a pass
-   whose fetch of the target fails. The composed body lives between
+   repository that does not carry the tool gets none. When a fetch or the tool
+   fails, the section says the size could not be measured, and `pr-stack.sh`
+   measures it again. The composed body lives between
    `gc:pr-summary` markers, so adopting an OPEN PR
    re-splices it from the anchor's current `pr_summary` — a rework's restamp
    reaches the published merge surface — while text an operator or `pr-stack.sh`
@@ -692,13 +693,15 @@ the cadence — the arms run whether or not any refinery session is awake.
    squash commit message — would otherwise keep describing superseded work. When
    the region is a well-formed marker pair whose handoff bullet names a head other
    than the PR's or says the PR opened green (a CI result the static body cannot
-   know), or whose summary is behind the anchor's current `pr_summary`, this arm
-   recomposes and re-splices it; a region already current, a legacy markerless
-   body (arm 3's adoption path establishes that), or a malformed shape is left
-   alone. The recompose uses `refresh` mode: the reworked head has not
-   re-signed-off, so the handoff bullet names the head and defers to the PR's
-   checks rather than repeating arm 3's pre-open sign-off line. The recompose
-   measures the Size section again at the PR's head.
+   know), or whose summary is behind the anchor's current `pr_summary`, or whose
+   Size section says the size could not be measured, this arm recomposes and
+   re-splices it; a region already current, a legacy markerless body (arm 3's
+   adoption path establishes that), or a malformed shape is left alone. The
+   recompose uses `refresh` mode: the reworked head has not re-signed-off, so
+   the handoff bullet names the head and defers to the PR's checks rather than
+   repeating arm 3's pre-open sign-off line. The recompose measures the Size
+   section again at the PR's head. A region behind only on a size that still
+   cannot be read is left as it stands.
 
    The title: arm 3 writes it once, at create, composed from the anchor's title
    (a conventional-commit type, the title, then the bead id), and the squash

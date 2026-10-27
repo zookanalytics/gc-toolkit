@@ -50,24 +50,33 @@ prs_band() { # <phased> <phase>
 # another one.
 PRS_MEASURE="${GC_MEASURE_TOOL:-$_prs_lib_dir/../../tools/measure.sh}"
 
+# The Size section's body when the size could not be read, because a fetch or the
+# measuring tool failed. The region keeps it as the record that the size is still
+# to be measured, and pr-stack.sh reads it (prs_region_size_unread) to measure
+# the size again.
+PRS_SIZE_UNREAD="The size could not be measured at this head. The refinery measures it again on a later pass."
+
 # The body of the region's `## Size` section: what `measure.sh --pr` prints for
 # the change from its merge base with <target>, as origin has the target now, to
 # <head_oid>. The target is fetched, as review-checks.sh fetches the base it
-# takes a fork point from, and a head this checkout lacks is fetched by id.
-# Prints nothing when no size can be read: the tool is missing, a fetch fails,
-# or the repository does not measure itself, which the tool decides. The section
-# is information that gates nothing, so a size that cannot be read is left out.
+# takes a fork point from, and a head this checkout lacks is fetched by id. A
+# fetch or a run of the tool that fails prints PRS_SIZE_UNREAD. Prints nothing
+# when no size applies: the tool is missing, the target is not a branch name, or
+# the repository does not measure itself, which the tool decides. The section is
+# information that gates nothing.
 prs_size_section() { # <target> <head_oid>
   local target="${1:-}" head="${2:-}" out
   [ -x "$PRS_MEASURE" ] && [ -n "$target" ] && [ -n "$head" ] || return 0
   git check-ref-format "refs/heads/$target" >/dev/null 2>&1 || return 0
-  git cat-file -e "$head^{commit}" 2>/dev/null \
-    || git fetch --quiet --no-tags --no-write-fetch-head origin "$head" >/dev/null 2>&1 \
-    || return 0
-  git fetch --quiet --no-tags --no-write-fetch-head origin \
-    "+refs/heads/$target:refs/remotes/origin/$target" >/dev/null 2>&1 || return 0
-  out=$("$PRS_MEASURE" --pr "refs/remotes/origin/$target" "$head" 2>/dev/null) || return 0
-  [ -z "$out" ] || printf '%s\n' "$out"
+  if { git cat-file -e "$head^{commit}" 2>/dev/null \
+       || git fetch --quiet --no-tags --no-write-fetch-head origin "$head" >/dev/null 2>&1; } \
+     && git fetch --quiet --no-tags --no-write-fetch-head origin \
+          "+refs/heads/$target:refs/remotes/origin/$target" >/dev/null 2>&1 \
+     && out=$("$PRS_MEASURE" --pr "refs/remotes/origin/$target" "$head" 2>/dev/null); then
+    [ -z "$out" ] || printf '%s\n' "$out"
+  else
+    printf '%s\n' "$PRS_SIZE_UNREAD"
+  fi
 }
 
 # The region always writes its own `## Summary`, so a stored pr_summary that opens
@@ -207,6 +216,23 @@ prs_region_names_head() { # <body-file> <head_oid>
     *"Head $h;"*|*" at $h."*|*" at $h;"*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# 0 = the region's Size section is PRS_SIZE_UNREAD, so its size could not be read
+# when it was composed; 1 = it carries a size, or no Size section. Only the
+# section below the region's last `## Refinery handoff` heading is read, where
+# compose writes it, so a summary that quotes the line is not that record.
+prs_region_size_unread() { # <body-file>
+  awk -v o="$PRS_MARK_OPEN" -v c="$PRS_MARK_CLOSE" -v u="$PRS_SIZE_UNREAD" '
+    $0 == o { inreg = 1; next }
+    $0 == c { inreg = 0; size = 0; next }
+    !inreg { next }
+    /^##[ \t]+Refinery handoff[ \t]*$/ { handoff = 1; size = 0; hit = 0; next }
+    handoff && /^##[ \t]+Size[ \t]*$/ { size = 1; next }
+    /^##[ \t]/ { size = 0; next }
+    size && $0 == u { hit = 1 }
+    END { exit hit ? 0 : 1 }
+  ' "$1"
 }
 
 # 0 = the managed region's handoff bullet says the PR "opened green"; 1 = it does

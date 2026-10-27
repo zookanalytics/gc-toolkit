@@ -486,7 +486,7 @@ has "$body" 'see the PR checks.'$'\n\n''## Size'$'\n\n''Net lines from the merge
 eq "$(cat "$MEASURE_LOG")" "--pr refs/remotes/origin/main sha-s1" \
   "the tool measures from the target as origin has it to the head the PR opens at"
 
-echo "# a size the tool does not print, or a fetch that fails, leaves the section out"
+echo "# a size the tool does not print leaves the section out"
 store "[$(pre S2 polecat/s2), $(rev S2)]"
 echo "sha-s2" > "$GH_DIR/head_polecat_s2"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/86"
@@ -494,6 +494,10 @@ printf '%s' "$(prrow 86 OPEN polecat/s2 sha-s2 main)" > "$GH_DIR/pr_view_86.json
 out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" MEASURE_QUIET=1 "$SUT" 2>&1)
 has "$out" "opened PR#86" "a repository the tool does not measure still gets its PR"
 hasnt "$(cat "$GH_DIR/pr_create_body.txt")" "## Size" "…with no Size section"
+
+echo "# a fetch that fails leaves a Size section recording that the size could not be measured"
+# The record is what pr-stack.sh reads to measure the size again once the fetch
+# works, so a transient failure does not cost the PR its size for good.
 store "[$(pre S3 polecat/s3), $(rev S3)]"
 echo "sha-s3" > "$GH_DIR/head_polecat_s3"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/87"
@@ -501,7 +505,8 @@ printf '%s' "$(prrow 87 OPEN polecat/s3 sha-s3 main)" > "$GH_DIR/pr_view_87.json
 : > "$MEASURE_LOG"
 out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" STUB_FETCH_RC=1 "$SUT" 2>&1)
 has "$out" "opened PR#87" "a target that will not fetch still gets its PR"
-hasnt "$(cat "$GH_DIR/pr_create_body.txt")" "## Size" "…with no Size section"
+has "$(cat "$GH_DIR/pr_create_body.txt")" 'see the PR checks.'$'\n\n''## Size'$'\n\n''The size could not be measured at this head. The refinery measures it again on a later pass.'$'\n''<!-- /gc:pr-summary -->' \
+  "…whose Size section records that the size could not be measured"
 eq "$(cat "$MEASURE_LOG")" "" "…and the tool never runs over a target it could not fetch"
 
 echo "# a head that moved between gate and create refuses the stamp"

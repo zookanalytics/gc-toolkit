@@ -521,7 +521,7 @@ eq "$(cat "$MEASURE_LOG")" "--pr refs/remotes/origin/main aaaabbbb00000000" \
 : > "$STUB_GH_LOG"; : > "$MEASURE_LOG"
 out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" "$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a second pass over the measured region writes nothing"
-eq "$(cat "$MEASURE_LOG")" "" "…and measures nothing, since only a refresh measures"
+eq "$(cat "$MEASURE_LOG")" "" "…and measures nothing, since the region carries its head's size"
 
 # The stub the cases below measure with: it logs what it was asked, fails when
 # MEASURE_FAIL is set, and otherwise prints MEASURE_OUT as the section body.
@@ -558,6 +558,63 @@ hasnt "$b" 'dddd4444' "…and no longer the head the region was composed at"
 has "$b" '## Size'$'\n\n''No runtime or test lines change from the merge base `eeee5555`.'$'\n''<!-- /gc:pr-summary -->' \
   "the Size section is measured again at the reset head"
 hasnt "$b" 'runtime +9' "…and the old head's size is gone"
+
+echo "# a size the create could not measure is measured again at the same head until it reads"
+# pr-open composed this region while the target would not fetch, so its Size
+# section records that the size could not be measured. Its summary and head are
+# current, so only that record makes it behind: a pass that still cannot read the
+# size leaves the region as it stands, and a healthy pass at the same head writes
+# the size in.
+OWED_SUM='OWED: the summary whose size the create could not measure.'
+OWED=$(export GC_MEASURE_TOOL="$MEASURE_ANY" MEASURE_LOG="$MEASURE_LOG" STUB_FETCH_RC=1
+  composed_region OW "$OWED_SUM" ffff666600000000 open \
+    "$(. "$SD/pr-summary-region.sh" && prs_size_section main ffff666600000000)")
+has "$OWED" '## Size'$'\n\n''The size could not be measured at this head. The refinery measures it again on a later pass.'$'\n''<!-- /gc:pr-summary -->' \
+  "the create's region records the size it could not measure"
+store "[$(anchor_sum OW polecat/OW 310 'correctness' "$OWED_SUM")]"
+pr 310 OPEN polecat/OW "$OWED" ffff666600000000
+: > "$STUB_GH_LOG"; : > "$MEASURE_LOG"
+out=$(GC_MEASURE_TOOL="$MEASURE_ANY" MEASURE_LOG="$MEASURE_LOG" STUB_FETCH_RC=1 "$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a pass that still cannot fetch the target writes nothing"
+eq "$(body 310)" "$OWED" "…and the body is byte-identical"
+: > "$STUB_GH_LOG"; : > "$MEASURE_LOG"
+out=$(GC_MEASURE_TOOL="$MEASURE_ANY" MEASURE_LOG="$MEASURE_LOG" MEASURE_FAIL=1 "$SUT" 2>&1)
+eq "$(cat "$MEASURE_LOG")" "--pr refs/remotes/origin/main ffff666600000000" \
+  "the size is measured again at the same head"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…and a run of the tool that fails writes nothing"
+eq "$(body 310)" "$OWED" "…so the body is byte-identical"
+: > "$STUB_GH_LOG"; : > "$MEASURE_LOG"
+out=$(GC_MEASURE_TOOL="$MEASURE_ANY" MEASURE_LOG="$MEASURE_LOG" \
+  MEASURE_OUT='Net lines from the merge base `abab1212`: runtime +4 and tests +1.' "$SUT" 2>&1)
+has "$out" "PR#310 summary region refreshed" "a healthy pass at the same head refreshes the region"
+b=$(body 310)
+has "$b" '- Head `ffff6666`; gates `correctness`; see the PR checks for current status.' \
+  "the handoff bullet still names that head"
+has "$b" '## Size'$'\n\n''Net lines from the merge base `abab1212`: runtime +4 and tests +1.'$'\n''<!-- /gc:pr-summary -->' \
+  "the measured size replaces the record"
+hasnt "$b" 'could not be measured' "…and the record is gone"
+eq "$(grep -c 'pr edit 310' "$STUB_GH_LOG")" "1" "exactly one body edit"
+: > "$STUB_GH_LOG"; : > "$MEASURE_LOG"
+out=$(GC_MEASURE_TOOL="$MEASURE_ANY" MEASURE_LOG="$MEASURE_LOG" MEASURE_FAIL=1 "$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a later pass over the measured region writes nothing"
+eq "$(cat "$MEASURE_LOG")" "" "…and measures nothing, even when the tool would now fail"
+
+echo "# only the Size section the composer wrote records a size that could not be read"
+# A summary can quote the record, even under a Size heading of its own. Reading
+# that quote as the record would measure a measured region again, and rewrite
+# it, on every pass.
+unread_of() { ( . "$SD/pr-summary-region.sh" && prs_region_size_unread "$1" ) && echo unread || echo read; }
+UB="$TMP/unread-body"
+UNREAD_LINE='The size could not be measured at this head. The refinery measures it again on a later pass.'
+composed_region UQ "$(printf '%s\n\n%s\n\n%s' 'Records a failed measurement as:' '## Size' "$UNREAD_LINE")" 1234abcd99999999 refresh \
+  'Net lines from the merge base `5678ef00`: runtime +1 and tests 0.' > "$UB"
+eq "$(unread_of "$UB")" read "a summary quoting the record above a measured size is not the record"
+composed_region UQ 'S.' 1234abcd99999999 refresh "$UNREAD_LINE" > "$UB"
+eq "$(unread_of "$UB")" unread "the Size section the composer wrote is the record"
+composed_region UQ 'S.' 1234abcd99999999 refresh '' > "$UB"
+eq "$(unread_of "$UB")" read "a region with no Size section records nothing"
+printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Size' '' "$UNREAD_LINE" '<!-- /gc:pr-summary -->' > "$UB"
+eq "$(unread_of "$UB")" read "a region with no handoff block records nothing, whatever its summary quotes"
 
 echo "# the head check reads the head field of the composed handoff bullets and nothing else"
 # Each mode names the head it was composed at where the check reads it, so a

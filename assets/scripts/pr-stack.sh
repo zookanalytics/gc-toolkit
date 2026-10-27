@@ -226,43 +226,51 @@ append_section() { # <body-file> <section-file> <out-file>
 
 # Bring the gc:pr-summary region current with the anchor. 0 = the region was behind
 # and <out-file> now carries it refreshed; 1 = no change (no summary to publish, no
-# well-formed region, or the region already carries this summary at this head and
-# states no CI result). The region is behind when its summary text lags the anchor,
-# when its handoff bullet names a head other than the current one (a rework that
-# moves the head without touching the summary still restamps the "at <head>"
-# claim), or when that bullet says the PR opened green, a CI result the static body
-# cannot know. Only a well-formed marker pair (prs_marker_state 0) is rewritten in
-# place: a legacy markerless or malformed body is pr-open's adoption path to
-# establish, not this arm's to reshape. The region is recomposed in `refresh` mode,
-# whose handoff bullet names the head and defers the check state to the PR rather
-# than repeating the pre-open sign-off claim. A reworked head has not
-# re-signed-off, and this arm reads no lane state that would show an unmoved one
-# did.
+# well-formed region, the region already carries this summary at this head and
+# states no CI result, or it is behind only on a size that still cannot be read).
+# The region is behind when its summary text lags the anchor, when its handoff
+# bullet names a head other than the current one (a rework that moves the head
+# without touching the summary still restamps the "at <head>" claim), when that
+# bullet says the PR opened green, a CI result the static body cannot know, or
+# when its Size section records that the size could not be read. One compose
+# writes the head and the size measured at it, so a region whose bullet names
+# the current head carries that head's size, and only a size that could not be
+# read is measured again. Only a well-formed marker pair (prs_marker_state 0) is
+# rewritten in place: a legacy markerless or malformed body is pr-open's adoption
+# path to establish, not this arm's to reshape. The region is recomposed in
+# `refresh` mode, whose handoff bullet names the head and defers the check state
+# to the PR rather than repeating the pre-open sign-off claim. A reworked head
+# has not re-signed-off, and this arm reads no lane state that would show an
+# unmoved one did.
 refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
-  local summary want cur desc checkset branch target phased size SECTION
+  local summary want cur desc checkset branch target phased size measured="" SECTION
   summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty' 2>/dev/null)
   [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || return 1
   prs_marker_state "$bin" || return 1
   want=$(strip_summary_heading "$summary")
   cur=$(prs_region_summary "$bin")
-  # Current only when the summary matches, the region already names this head, and
-  # its handoff bullet does not say the PR opened green: a head-only rework leaves
-  # the summary current but the handoff bullet stale, and a bullet stating a CI
-  # result is stale at any head.
+  target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // "main"' 2>/dev/null)
+  # Current only when the summary matches, the handoff bullet already names this
+  # head and does not say the PR opened green, and the size was read: a head-only
+  # rework leaves the summary current but the handoff bullet stale, and a bullet
+  # stating a CI result is stale at any head. A size that still cannot be read
+  # leaves the region as it stands, since the region already says so.
   if [ "$cur" = "$want" ] && prs_region_names_head "$bin" "$head_oid" \
      && ! prs_region_says_opened_green "$bin"; then
-    return 1
+    prs_region_size_unread "$bin" || return 1
+    size=$(prs_size_section "$target" "$head_oid")
+    [ "$size" != "$PRS_SIZE_UNREAD" ] || return 1
+    measured=1
   fi
   desc=$(printf '%s' "$row" | jq -r '.description // empty' 2>/dev/null)
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""' 2>/dev/null)
   branch=$(printf '%s' "$row" | jq -r '.metadata.branch // empty' 2>/dev/null)
-  target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // .metadata.target // "main"' 2>/dev/null)
   # The gates the handoff bullet names, resolved at this head. An unreadable set
   # leaves the region as it stands this pass rather than publish a bullet that
   # names no gate.
   phased=$(prs_resolve_phased "$checkset" "$head_oid") || return 1
-  size=$(prs_size_section "$target" "$head_oid")
+  [ -n "$measured" ] || size=$(prs_size_section "$target" "$head_oid")
   SECTION=$(mktemp "$STACK_TMP/summary.XXXXXX") || return 1
   if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh "$phased" "$size" > "$SECTION" \
      || [ ! -s "$SECTION" ]; then
