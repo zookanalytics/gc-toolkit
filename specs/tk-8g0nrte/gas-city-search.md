@@ -132,9 +132,21 @@ For a Claude session, Gas City installs its own `UserPromptSubmit` hooks
 (`gc nudge drain --inject` and `gc mail check --inject`) and a `PreCompact`
 hook that runs `gc handoff --auto`. Before a turn starts is the platform's own
 place to act on a session. `gc handoff` sends the session's HANDOFF mail to
-itself and, for a controller-restartable session, requests the restart.
+itself and, for a controller-restartable session, then requests the restart and
+signals the controller (package main, `doHandoffWithOutcome`). It exits 1 when
+that signal fails, with the request already set, and its report on stdout says
+which happened: `Handoff: sent mail <id>, requesting restart...` once the
+request is set, and `Handoff: sent mail <id> (named session; restart skipped).`
+for an on-demand named session, whose stale restart request it clears.
 `gc session reset` requests a fresh restart that keeps the session's identity,
-alias, mail and queued work. The hook composes these and nothing else.
+alias, mail and queued work. It signals the controller before any write, and
+its restart request, one batch write of `restart_requested` and
+`continuation_reset_pending` (package session, `RequestFreshRestart`), is its
+last write, so a reset that fails requested nothing. The reconciler stops a
+session on the first pass that reads either request, without waiting for its
+turn to end, which is why the HANDOFF is written before any restart is
+requested. `gc mail archive` removes a message from the inbox. The hook
+composes these and nothing else.
 
 ## Claude Code behavior the change relies on
 

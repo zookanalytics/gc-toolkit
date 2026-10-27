@@ -68,11 +68,12 @@ At the end of every turn, and before every prompt, the hook, in order:
    a pack file its prompt or patrol formula comes from changed on disk after
    its first prompt ([Pack drift](#pack-drift)). With neither, the common
    path, the hook exits cheaply.
-5. **Recycles**: it writes a durable HANDOFF mail (`gc handoff`), reaps the
-   retiring session's scratch (`scratch-reap.sh --session`, since the recycle
-   abandons that tree whole — docs/scratch-reclaim.md), and triggers a restart
-   (`gc session reset`). Before a prompt it then blocks the prompt
-   ([Before a prompt](#before-a-prompt)).
+5. **Recycles**: it writes a durable HANDOFF mail (`gc handoff`, which also
+   requests the restart for the witness and the deacon), reaps the retiring
+   session's scratch (`scratch-reap.sh --session`, since the recycle abandons
+   that tree whole — docs/scratch-reclaim.md), and requests a restart
+   (`gc session reset`). Before a prompt it then blocks the prompt once a
+   restart is requested ([Before a prompt](#before-a-prompt)).
 
 ### Why 200K, absolutely rather than proportionally
 
@@ -145,15 +146,37 @@ Under `--prompt`, a drifted session recycles before the prompt reaches the
 model. The hook sends the HANDOFF mail, which carries the prompt's text,
 requests the restart, and then blocks the prompt, so the old text never acts
 on it. The restarted session starts from the current prompt, adopts its wisp,
-reads its inbox and works its queue. The hook blocks only once
-`gc session reset` succeeds: a blocked prompt with no restart behind it would
-leave the session idle on the old text, dropping every prompt it is sent. A
-HANDOFF that fails to send does not hold the block, because the requested
-restart would end a turn let through mid-command; the prompt's text then stays
-in the old session's transcript, where Claude Code writes a blocked prompt. The
-HANDOFF does not carry what Gas City's own `UserPromptSubmit` hooks inject
-into that prompt, such as drained nudges; the restarted session's startup
-reconcile and inbox stand in for them.
+reads its inbox and works its queue.
+
+The hook blocks the prompt exactly when a restart is requested, and its
+handoff and its reset can each request one:
+
+- `gc session reset` requests a restart for any session, and it is the only
+  request for the on-demand refinery. It signals the controller before it
+  writes anything, so a reset that fails has requested nothing.
+- `gc handoff` requests the restart itself for an always-mode session, the
+  witness or the deacon, once it has written the mail. It exits 1 when it then
+  cannot signal the controller, and the request still stands, so its exit
+  status does not tell the hook whether it requested a restart. Its report on
+  stdout does: the line naming the sent mail says `requesting restart` once
+  the request is set, and `restart skipped` when it requests none. A report
+  the hook does not recognize counts as neither.
+
+A restart that either one requested would end a turn let through
+mid-command, so the prompt is blocked even when the other failed. With no
+restart requested, the prompt goes through: a blocked prompt with no restart
+behind it would leave the session idle on the old text, dropping every prompt
+it is sent. The prompt then runs in the old session, and the hook tries the
+recycle again at that turn's end. So that the next session does not act on
+the prompt a second time, the hook archives the HANDOFF that carries it when
+the handoff's report names that mail with the restart skipped.
+
+When the handoff fails before its report, the hook cannot tell whether the
+mail was sent. It archives nothing then, and a prompt it blocks may survive
+only in the old session's transcript, where Claude Code writes a blocked
+prompt. The HANDOFF does not carry what Gas City's own `UserPromptSubmit`
+hooks inject into that prompt, such as drained nudges; the restarted session's
+startup reconcile and inbox stand in for them.
 
 ### Which named sessions it covers
 
