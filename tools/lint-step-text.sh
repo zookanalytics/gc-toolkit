@@ -33,7 +33,9 @@
 # to it. The lint finds each string in the file to tie its text to the file's
 # lines. When the strings it finds are not all the strings tomllib reads in the
 # file, it cannot operate. Only a block fenced as bash, sh, shell, zsh, ksh or
-# dash holds commands, and a here-document's body is data, not commands.
+# dash holds commands. A here-document's body is data, except where no part of
+# its delimiter is quoted. The shell then expands the body, so a command
+# substitution in it weighs as one in an argument does.
 #
 # lint-step-text.in-flight, beside this script, lists the branches whose
 # formula changes were in flight when the rule landed, each read from its origin
@@ -268,10 +270,10 @@ PYEOF
 # PARSE_AWK reads what DECODE_PY prints for a formula file and prints, for each
 # shell block in its strings,
 # `F<FS>open<FS>commands<FS>control<FS>words<FS>text<FS>step`; for each line of
-# a block's code, `L<FS>line<FS>open`; and each step's S record as it came.
-# <FS> is \034, open is the line of the block's opening fence, words names its
-# control flow, text is its code with every newline written as \035, and step
-# is the step's place in the file.
+# a block's code, here-document bodies included, `L<FS>line<FS>open`; and each
+# step's S record as it came. <FS> is \034, open is the line of the block's
+# opening fence, words names its control flow, text is its code with every
+# newline written as \035, and step is the step's place in the file.
 PARSE_AWK=$(cat <<'AWKEOF'
 function fill(w,   o) { o = ""; while (w-- > 0) o = o "."; return o }
 function blanks(w,   o) { o = ""; while (w-- > 0) o = o " "; return o }
@@ -280,25 +282,28 @@ function word_start(s, i,   p) {
     p = substr(s, i - 1, 1)
     return (p == " " || p == "\t" || p == "\n" || p == ";" || p == "&" || p == "|" || p == "(" || p == ")" || p == "{" || p == "!")
 }
-# A here-document operator at i: record its delimiter, and whether it strips
-# leading tabs, and return the width of the operator and its word.
-function heredoc_op(s, i,   j, n, tabs, d, c, q) {
-    n = length(s); j = i + 2; tabs = 0
+# A here-document operator at i: record its delimiter, whether it strips
+# leading tabs, and whether any part of its word is quoted, which keeps the
+# shell from expanding the body, and return the width of the operator and its
+# word.
+function heredoc_op(s, i,   j, n, tabs, d, c, q, lit) {
+    n = length(s); j = i + 2; tabs = 0; lit = 0
     if (substr(s, j, 1) == "-") { tabs = 1; j++ }
     while (j <= n && substr(s, j, 1) ~ /[ \t]/) j++
     d = ""
     while (j <= n) {
         c = substr(s, j, 1)
         if (c == "'" || c == "\"") {
+            lit = 1
             q = index(substr(s, j + 1), c)
             if (!q) { d = d substr(s, j + 1); j = n + 1; break }
             d = d substr(s, j + 1, q - 1); j += q + 1; continue
         }
-        if (c == "\\") { d = d substr(s, j + 1, 1); j += 2; continue }
+        if (c == "\\") { lit = 1; d = d substr(s, j + 1, 1); j += 2; continue }
         if (c ~ /[ \t\n;&|<>()]/) break
         d = d c; j++
     }
-    if (d != "") { SHD[++SHN] = d; SHT[SHN] = tabs }
+    if (d != "") { SHD[++SHN] = d; SHT[SHN] = tabs; SHQ[SHN] = lit }
     return j - i
 }
 # Walk shell text s once. SM is s with every character that is not at the top
@@ -307,9 +312,12 @@ function heredoc_op(s, i,   j, n, tabs, d, c, q) {
 # counts. SS[1..SN] are the outermost command substitutions, SO the depth still
 # open at the end (0 when s is whole), and SHD/SHT[1..SHN] the here-documents
 # it opens. The context stack holds S '', E $'', D "", K ``, C $() <() >(),
-# P a ( inside C, A $(( )) or (( )), Q a ( inside A, Z ${ } and T [[ ]].
+# P a ( inside C, A $(( )) or (( )), Q a ( inside A, Z ${ } and T [[ ]]. With
+# SCAN_BODY set, s is an expanding here-document's body, which the stack opens
+# as H: a D in which " is a plain character.
 function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
     n = length(s); top = 0; out = ""; SN = 0; SHN = 0; subd = 0; at = 0
+    if (SCAN_BODY) { st[1] = "H"; top = 1 }
     i = 1
     while (i <= n) {
         c = substr(s, i, 1); nx = substr(s, i + 1, 1)
@@ -322,8 +330,8 @@ function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
             else if (c == "'") top--
         } else if (c == "\\") {
             w = 2
-        } else if (k == "D") {
-            if (c == "\"") top--
+        } else if (k == "D" || k == "H") {
+            if (c == "\"") { if (k == "D") top-- }
             else if (c == "`") { st[++top] = "K"; if (subd++ == 0) at = i + 1 }
             else if (c == "$" && nx == "(" && substr(s, i + 2, 1) == "(") { st[++top] = "A"; w = 3 }
             else if (c == "$" && nx == "(") { st[++top] = "C"; w = 2; if (subd++ == 0) at = i + 2 }
@@ -466,24 +474,51 @@ function code_lines(lines,   n, i, bl) {
     for (i = 1; i <= n; i++)
         if (bl[i] != "" && !((fopen, bl[i]) in lseen)) { lseen[fopen, bl[i]] = 1; print "L\034" bl[i] "\034" fopen }
 }
+# The command substitutions an expanding here-document body runs weigh as a
+# command line's do: their control flow, and the commands of each that holds
+# more than one. A case label due on the command line around the body still
+# waits once the body is weighed.
+function body_weigh(b,   n, i, subs, lbl) {
+    lbl = SC_LBL
+    SCAN_BODY = 1; scan(b); SCAN_BODY = 0
+    n = SN
+    for (i = 1; i <= n; i++) subs[i] = SS[i]
+    for (i = 1; i <= n; i++) {
+        SC_LBL = 0
+        analyze(subs[i], 1)
+        fcf += AC_CF; fwords = fwords AC_W
+        if (AC_CMD > 1) fcmd += AC_CMD
+    }
+    SC_LBL = lbl
+}
 function fence_close(   t) {
     if (!infence) return
     if (fshell) {
+        if (hdn > hdi && !hdq[hdi + 1]) body_weigh(hbody)
         if (buf != "") finish()
         t = ftext; gsub(/\n/, "\035", t)
         print "F\034" fopen "\034" fcmd "\034" fcf "\034" fwords "\034" t "\034" stepn
     }
-    infence = 0; fshell = 0; hdn = 0; hdi = 0; buf = ""; blines = ""; bsep = ""; bhd = 0
+    infence = 0; fshell = 0; hdn = 0; hdi = 0; hbody = ""; buf = ""; blines = ""; bsep = ""; bhd = 0
 }
-# One line of a shell block, as the agent reads it. A line inside a
-# here-document is data. A command whose quote, substitution or continuation
-# is still open runs on into the next line.
+# One line of a shell block, as the agent reads it. A command whose quote,
+# substitution or continuation is still open runs on into the next line. A line
+# inside a here-document is the body's, and joins the block's text and lines.
+# Once a body whose delimiter is unquoted ends, the shell expands it, so its
+# substitutions are weighed then; a block that closes first ends the body.
 function shell_line(s, lines,   t, i) {
     if (hdn > hdi) {
         t = s
         if (hdt[hdi + 1]) sub(/^\t+/, "", t)
-        if (t == hdd[hdi + 1]) hdi++
-        if (hdi >= hdn) { hdn = 0; hdi = 0 }
+        if (t == hdd[hdi + 1]) {
+            hdi++
+            if (!hdq[hdi]) body_weigh(hbody)
+            hbody = ""
+            if (hdi >= hdn) { hdn = 0; hdi = 0 }
+            return
+        }
+        hbody = hbody s "\n"; ftext = ftext s "\n"
+        code_lines(lines)
         return
     }
     if (buf == "") {
@@ -493,7 +528,7 @@ function shell_line(s, lines,   t, i) {
         buf = buf bsep s; blines = blines " " lines
     }
     scan(buf)
-    for (i = bhd + 1; i <= SHN; i++) { hdn++; hdd[hdn] = SHD[i]; hdt[hdn] = SHT[i] }
+    for (i = bhd + 1; i <= SHN; i++) { hdn++; hdd[hdn] = SHD[i]; hdt[hdn] = SHT[i]; hdq[hdn] = SHQ[i] }
     if (SHN > bhd) bhd = SHN
     if (SO == 0 && buf ~ /\\$/) {
         t = buf; sub(/\\+$/, "", t)
@@ -513,7 +548,7 @@ function rendered(s, lines,   first, tag) {
         infence = 1
         fshell = (tag == "bash" || tag == "sh" || tag == "shell" || tag == "zsh" || tag == "ksh" || tag == "dash")
         fopen = first; fcmd = 0; fcf = 0; fwords = ""; ftext = ""
-        buf = ""; blines = ""; bsep = ""; bhd = 0; hdn = 0; hdi = 0; SC_LBL = 0
+        buf = ""; blines = ""; bsep = ""; bhd = 0; hdn = 0; hdi = 0; hbody = ""; SC_LBL = 0
         return
     }
     if (infence && fshell) shell_line(s, lines)

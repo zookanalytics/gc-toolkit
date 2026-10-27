@@ -3,15 +3,17 @@
 # adding a procedure to step text.
 #
 # The defects it guards against: a single script call read as a procedure (a
-# substitution in an argument, a here-document's body, a quoted separator, a
-# redirection, a TOML-escaped continuation or quote), a procedure read as a
-# single call (a pipeline, a sequence, a substitution holding a pipeline, && or
-# ||), step text left unread (a TOML string of any kind wherever it sits), step
-# text that predates the rule failing because a change touched its file, a
-# moved or trimmed block read as new, a branch listed as in flight stalled by
-# its own lines, a branch built on it let through with lines of its own, and a
-# change it cannot read passing as clean (an unreadable file, a file that is
-# not TOML, no Python to decode it).
+# substitution in an argument, the body of a here-document whose delimiter is
+# quoted, a quoted separator, a redirection, a TOML-escaped continuation or
+# quote), a procedure read as a single call (a pipeline, a sequence, a
+# substitution holding a pipeline, && or ||, a substitution an expanding
+# here-document's body runs), step text left unread (a TOML string of any kind
+# wherever it sits, an edit inside a here-document's body), step text that
+# predates the rule failing because a change touched its file, a moved or
+# trimmed block read as new, a branch listed as in flight stalled by its own
+# lines, a branch built on it let through with lines of its own, and a change
+# it cannot read passing as clean (an unreadable file, a file that is not
+# TOML, no Python to decode it).
 #
 # Hermetic: each case runs in a throwaway git repo whose main is the base the
 # change is measured from (refs/remotes/origin/main), with a copy of the lint
@@ -260,6 +262,57 @@ with_step new "$(block 'gc bd update "$X" \
 run_lint "$F"
 expect 0 "a TOML line-ending backslash keeps one command: exit 0"
 
+# The shell expands a here-document's body when no part of its delimiter is
+# quoted, and runs each command substitution in it. A substitution there weighs
+# as one in an argument does: its control flow, and its commands when it holds
+# more than one.
+with_step new "$(block 'cat <<EOF
+$(echo first; echo second)
+EOF')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "an expanding body's substitution that holds a sequence is a procedure: exit 1" "with 3 commands\. "
+
+for op in "<<'EOF'" '<<"EOF"' '<<\\EOF' '<<E"O"F'; do
+  with_step new "$(block "cat $op
+\$(echo first; echo second)
+EOF")" > "$REPO/$F"
+  run_lint "$F"
+  expect 0 "a body whose delimiter is quoted ($op) is not expanded, so it is data: exit 0"
+done
+
+with_step new "$(block 'cat <<EOF
+on $(date -u +%F), "$X" says: it is done
+EOF')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "an expanding body's single-command substitution is an argument: exit 0"
+
+with_step new "$(block 'cat <<EOF
+\\$(echo first; echo second)
+EOF')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "an escaped \$ in an expanding body starts no substitution: exit 0"
+
+with_step new "$(block 'cat <<EOF
+"$(echo first; echo second)"
+EOF')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a \" in an expanding body is a plain character and hides no substitution: exit 1" "with 3 commands\. "
+
+with_step new "$(block 'cat <<EOF
+$(if [ -n "$X" ]; then echo y; fi)
+EOF')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "control flow in an expanding body's substitution counts: exit 1" "control flow (if)"
+
+with_step new "$(block "$(printf 'cat <<-EOF\n\t$(echo first; echo second)\n\tEOF')")" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a <<- body whose delimiter is indented by tabs is weighed too: exit 1" "with 3 commands\. "
+
+with_step new "$(block 'cat <<EOF
+$(echo first; echo second)')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "an expanding body the block closes before its delimiter is still weighed: exit 1" "with 3 commands\. "
+
 # Each string in the file is decoded as TOML decodes it, whatever its kind and
 # wherever it sits, so step text that renders a procedure fails however the
 # string is written.
@@ -395,6 +448,36 @@ grep -q '^The old procedure, copied:$' "$REPO/$F" && grep -q '^The old procedure
 run_lint "$F"
 expect 1 "a procedure copied into another step weighs on the step it was copied into: exit 1" \
   "^$F:11: step text gains a procedure: step one gains shell blocks that do more than call a script, with 3 commands and control flow (if)"
+
+# A here-document's body is part of its block's text, so an edit to the body is
+# an edit to the block, and a substitution it adds to an expanding body weighs
+# on the step. Here step two's procedure, already on main, writes a body.
+for quoting in expanding quoted; do
+  fresh_repo
+  op='<<EOF'; [ "$quoting" = quoted ] && op="<<'EOF'"
+  step_two_with "A=\$(gc bd show \"\$B\" --json)
+cat $op
+note: \$A
+EOF" > "$REPO/$F"
+  g commit -qam "a body on main"
+  g update-ref refs/remotes/origin/main HEAD
+  step_two_with "A=\$(gc bd show \"\$B\" --json)
+cat $op
+note: \$A, id \$(gc bd show \"\$B\" --json | jq -r .id)
+EOF" > "$REPO/$F"
+  run_lint "$F"
+  if [ "$quoting" = expanding ]; then
+    expect 1 "a substitution added to an existing expanding body weighs on its step: exit 1" \
+      "^$F:[0-9]*: .*grow from 2 commands and no control flow to 4 commands and no control flow"
+    line=$(printf '%s\n' "$OUT" | sed -n "s#^$F:\([0-9]*\): .*#\1#p" | head -1)
+    case "$(sed -n "${line}p" "$REPO/$F")" in
+      "note: \$A, id "*) ok "the finding's line is the body line the change edits" ;;
+      *) bad "the finding's line is the body line the change edits (line $line)" ;;
+    esac
+  else
+    expect 0 "the same edit to a quoted body is an edit to data: exit 0"
+  fi
+done
 
 # --- Other formula paths. ------------------------------------------------------
 fresh_repo

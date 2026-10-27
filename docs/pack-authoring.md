@@ -137,7 +137,9 @@ A block does more than make one call when it holds control flow (`if`, `elif`,
 or `||`) or more than one command. A sequence and a pipeline are more than one
 command, and so is a command substitution that holds more than one. A
 substitution that holds a single command is an argument of the command around
-it. A here-document's body is data, not commands.
+it. A here-document's body is data when any part of its delimiter is quoted.
+Otherwise the shell expands the body, and a substitution in it counts as one
+in an argument does.
 
 `tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
 files a change names. It reads every TOML string in a formula as Python's
