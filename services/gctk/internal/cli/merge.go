@@ -35,12 +35,13 @@ import (
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
 // writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git
 // and the sibling shell helpers (escalate.sh, record-failure-cap.sh,
-// lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh),
-// resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's
-// directory before it execs this binary. Subprocess seams let merge.test.sh's
-// stubs on PATH drive the binary, and keep the observability and permissions
-// surfaces those tools have for every other caller. Run any other way, with
-// GCTK_SCRIPTS_DIR unset, the pass refuses (exit 1) before it reads a PR.
+// lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
+// pr-status-label.sh), resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh
+// exports as merge.sh's directory before it execs this binary. Subprocess seams
+// let merge.test.sh's stubs on PATH drive the binary, and keep the
+// observability and permissions surfaces those tools have for every other
+// caller. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass refuses
+// (exit 1) before it reads a PR.
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
@@ -480,6 +481,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 			"--append-notes", "Merged to "+base+" at "+short+" (record recovered by merge)") {
 			m.recovered++
 			fmt.Fprintf(m.stdout, "%s: recovered %s — PR#%s was already merged to %s at %s; the record had not landed\n", mergeProg, id, num, base, short)
+			m.clearStatusLabel(id, num)
 		} else {
 			fmt.Fprintf(m.stderr, "%s: PR#%s is MERGED but the record failed for %s; retry next pass\n", mergeProg, num, id)
 			m.recordFailed++
@@ -820,6 +822,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 			echoShort = "?"
 		}
 		fmt.Fprintf(m.stdout, "%s: merged + recorded %s — PR#%s squashed to %s at %s\n", mergeProg, id, num, landTarget, echoShort)
+		m.clearStatusLabel(id, num)
 	} else {
 		fmt.Fprintf(m.stderr, "%s: PR#%s MERGED but the lifecycle record FAILED for %s; pr-facts records it next pass\n", mergeProg, num, id)
 		m.recordFailed++
@@ -1183,12 +1186,12 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // directory missing a helper is not refused here: the pass is refused only for
 // a missing check resolver, which Merge checks next. Every other helper is
 // handled where it is called. A missing lane-state.sh or finalize-gate.sh holds
-// that anchor. A missing escalate.sh, record-failure-cap.sh or
-// render-seed-audit.sh is skipped. The pass still records a PR that has
-// already merged.
+// that anchor. A missing escalate.sh, record-failure-cap.sh,
+// render-seed-audit.sh or pr-status-label.sh is skipped. The pass still records
+// a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
@@ -1204,6 +1207,25 @@ func (m *merger) escalate(args ...string) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	_ = cmd.Run()
+}
+
+// clearStatusLabel takes the status: label off a PR that merged, through the
+// label's one writer. The pass closes the anchor in the write that records the
+// merge, and pr-facts.sh visits only open anchors, so no later pass reaches this
+// PR. The clear is best effort: one that does not land leaves the label and
+// warns.
+func (m *merger) clearStatusLabel(id, num string) {
+	p := m.scriptPath("pr-status-label.sh")
+	if !isExecutable(p) {
+		return
+	}
+	cmd := exec.Command(p, "clear", "--pr", num, "--repo", m.originRepoQ)
+	var errBuf bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &errBuf
+	if rc := gcbd.ExitCode(cmd.Run()); rc != 0 {
+		fmt.Fprintf(m.stderr, "%s: WARN PR#%s merged but its status: label did not come off (rc=%d; %s) (anchor %s)\n", mergeProg, num, rc, strings.TrimSpace(errBuf.String()), id)
+	}
 }
 
 func (m *merger) recordCap(id, num, mergeOid, base string) {

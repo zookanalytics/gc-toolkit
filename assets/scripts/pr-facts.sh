@@ -756,6 +756,19 @@ reconcile_status_label() { # <anchor> <pr-number>
     >/dev/null 2>&1 || true
   cur_labels=""
 }
+# Take the status: label off a PR that merged or closed, where GitHub's own state
+# takes over. The labels come from this pass's pinned PR read, and a PR that
+# carries none has nothing to take off. Best-effort: a clear that does not land
+# leaves the label, and a pass that visits the PR again because its record did
+# not land clears it again.
+clear_status_label() { # <pr-number>
+  local labels
+  labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
+  [ -n "$labels" ] || return 0
+  "$PR_STATUS_LABEL" clear --pr "$1" \
+    --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "$labels" \
+    >/dev/null 2>&1 || true
+}
 # The escalation keys this script files on an anchor to hold its PR's merge
 # until a person answers, for PR number $n: rework or close (pr-abandoned), a
 # moved base (pr-retargeted), feedback nothing routed (pr-comments), review
@@ -1751,6 +1764,7 @@ while IFS= read -r tagged; do
   # --route-comments-only) reconcile no terminal state, so a MERGED or CLOSED
   # anchor falls through to the OPEN filter.
   if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+    clear_status_label "$num"
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
     if [ -z "$merge_oid" ]; then
@@ -1778,6 +1792,7 @@ while IFS= read -r tagged; do
 
   # --- PR closed unmerged: out-of-band close ------------------------------------
   if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+    clear_status_label "$num"
     # A deliberate supersede/not-planned close records its disposition on the
     # still-open anchor before the PR closes (assets/scripts/pr-dispose.sh):
     # the bead-rehome kind, the successor, and an optional store. When it is

@@ -7,9 +7,11 @@
 # blocker stands that the city will not clear on its own (needs-attention). An
 # open PR carries exactly one value, and pr-facts.sh's full pass recomputes it for
 # each open PR its paced walk reaches, from the anchor's posture, holds, open
-# visits, the merge cadence's verdict, draft stage and live work. It is workflow
-# state, never an approval, and never asserts a PR may merge: machine-readiness
-# rides pr.machine and the draft flag.
+# visits, the merge cadence's verdict, draft stage and live work. The label comes
+# off once the PR merges or closes, where GitHub's own Merged or Closed state
+# takes over: pr-facts.sh clears it when it records a merge or a close, and gctk
+# merge when it merges. It is workflow state, never an approval, and never
+# asserts a PR may merge: machine-readiness rides pr.machine and the draft flag.
 # The values themselves — what each projects from, and their precedence — are
 # decided by one Go package, services/gctk/prstatus, reached through `gctk
 # pr-status derive` and exported so the helm board derives the same per-bead
@@ -24,9 +26,11 @@
 #   derive    --anchor ID                                 print working | merging | needs-review | needs-attention
 #   set       --pr N --value V --repo Q [--host H] [--current-labels CSV]
 #   reconcile --anchor ID --pr N --repo Q [--host H] [--current-labels CSV]
+#   clear     --pr N --repo Q [--host H] [--current-labels CSV]   take every status: label off
 #
-# Exit: 0 done (set may be a no-op) · 1 usage/refused · 2 a read did not resolve
-# (the caller leaves the label as-is rather than flipping it blind). Not set -e.
+# Exit: 0 done (set and clear may be no-ops) · 1 usage/refused · 2 a read did not
+# resolve (the caller leaves the label as-is rather than flipping it blind). Not
+# set -e.
 set -u
 
 PROG="pr-status-label"
@@ -211,6 +215,31 @@ set_label() { # <pr-number> <value> [<current-labels-csv or newline>]
   return 0
 }
 
+# Take every status: label off a PR, the terminal step once it has merged or
+# closed. A no-op when none is present. A read of the PR's labels that does not
+# resolve leaves them as they are.
+clear_labels() { # <pr-number> [<current-labels-csv or newline>]
+  local num="$1" provided="${2:-}" cur rc present rm
+  [ -n "$num" ] || { warn "clear needs --pr"; return 1; }
+  if [ -n "$provided" ]; then
+    cur=$(printf '%s' "$provided" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^$/d')
+  else
+    cur=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json labels -q '.labels[].name' 2>/dev/null); rc=$?
+    if [ "$rc" -ne 0 ]; then
+      warn "could not read PR#$num labels on $ORIGIN_REPO_Q (rc=$rc); label left unchanged"
+      return 2
+    fi
+  fi
+  present=$(printf '%s\n' "$cur" | grep "^${LABEL_PREFIX}" || true)
+  [ -n "$present" ] || return 0
+  rm=$(printf '%s' "$present" | paste -sd, -)
+  if ! gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --remove-label "$rm" >/dev/null 2>&1; then
+    warn "could not take '${rm}' off PR#$num"
+    return 2
+  fi
+  return 0
+}
+
 # --- argv -----------------------------------------------------------------
 
 VERB="${1:-}"; [ -n "$VERB" ] && shift
@@ -244,6 +273,9 @@ case "$VERB" in
       exit "$dr"
     fi
     set_label "$PR" "$V" "$CURRENT"; exit $? ;;
+  clear)
+    resolve_origin "$REPO" "$HOST" || exit 2
+    clear_labels "$PR" "$CURRENT"; exit $? ;;
   ''|-h|--help|help)
     cat >&2 <<'USAGE'
 usage: pr-status-label.sh <verb> [options]
@@ -251,6 +283,7 @@ usage: pr-status-label.sh <verb> [options]
   derive    --anchor ID
   set       --pr N --value working|merging|needs-review|needs-attention --repo Q [--host H] [--current-labels CSV]
   reconcile --anchor ID --pr N --repo Q [--host H] [--current-labels CSV]
+  clear     --pr N --repo Q [--host H] [--current-labels CSV]
 USAGE
     [ -n "$VERB" ] && exit 0 || exit 1 ;;
   *) warn "unknown verb '$VERB'"; exit 1 ;;

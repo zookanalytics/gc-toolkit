@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # pr-status-label.test.sh — hermetic tests for the workflow-owned status: PR
 # label: its derivation (anchor state -> working, merging, needs-review or
-# needs-attention), its mutually-exclusive set, ensure, and reconcile. No live
-# city, gh, or network.
+# needs-attention), its mutually-exclusive set, ensure, reconcile, and the clear
+# that takes it off a PR that merged or closed. No live city, gh, or network.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-prlabel-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -321,6 +321,31 @@ resetlog
 "$SUT" reconcile --anchor tk-missing --pr 51 --repo "$REPO" --current-labels "status: needs-review"
 eq "$(pv_labels 51)" "status: needs-review" "reconcile leaves the label as-is when the anchor does not resolve"
 hasnt "$(ghlog)" "pr edit" "reconcile writes nothing when it cannot derive a status"
+
+# ---------------------------------------------------------------------------
+# clear: a PR that merged or closed carries no status: label; GitHub's own
+# Merged or Closed state takes over.
+# ---------------------------------------------------------------------------
+pv 60 '[{"name":"status: merging"},{"name":"bug"}]'
+resetlog
+"$SUT" clear --pr 60 --repo "$REPO" --current-labels "status: merging,bug"
+eq "$?" "0" "clear exits 0"
+eq "$(pv_labels 60)" "bug" "clear takes the status: label off and leaves the rest"
+
+pv 61 '[{"name":"status: working"},{"name":"status: needs-review"},{"name":"bug"}]'
+resetlog
+"$SUT" clear --pr 61 --repo "$REPO"
+eq "$(pv_labels 61)" "bug" "clear reads the PR's labels itself and takes every status: label off"
+
+pv 62 '[{"name":"bug"}]'
+resetlog
+"$SUT" clear --pr 62 --repo "$REPO" --current-labels "bug"
+hasnt "$(ghlog)" "pr edit" "clear writes nothing on a PR with no status: label"
+
+resetlog
+"$SUT" clear --pr 63 --repo "$REPO" >/dev/null 2>&1
+eq "$?" "2" "clear exits 2 when the PR's labels cannot be read"
+hasnt "$(ghlog)" "pr edit" "…and writes nothing"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

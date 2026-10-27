@@ -153,6 +153,22 @@ eq "$(meta M1 merged_sha)" "merged-sha-10" "merged_sha recorded from mergeCommit
 has "$(notes M1)" "Merged to main at merged-s" "the close reason names the landing"
 eq "$(grep -c '^bd update M1' "$STUB_GC_LOG" || true)" "1" "ONE lifecycle update carried close+record"
 
+echo "# a merge, or a merge recovered, takes the status: label off the PR through its writer"
+# The pass closes the anchor in the write that records the merge, so no later
+# pass visits the PR; the label writer's clear is the pass's to call. Its
+# absence (every other case in this file) skips the clear.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/status-label.log" > "$SD/pr-status-label.sh"
+chmod +x "$SD/pr-status-label.sh"; : > "$TMP/status-label.log"
+store "[$(anchor ML1 12), $(rev ML1), $(anchor ML2 13)]"
+printf '%s' "$(prview 12 OPEN CLEAN)" > "$GH_DIR/pr_view_12.json"
+printf '%s' "$(prview 13 MERGED CLEAN)" > "$GH_DIR/pr_view_13.json"
+approved 12
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded ML1" "test premise: the PR merges"
+has "$(cat "$TMP/status-label.log")" "clear --pr 12 --repo github.com/zook/gc-toolkit" "…and its status: label is cleared"
+has "$(cat "$TMP/status-label.log")" "clear --pr 13 --repo github.com/zook/gc-toolkit" "…and so is a merge the pass recovered the record of"
+rm -f "$SD/pr-status-label.sh"
+
 echo "# the lanes are resolved at the head the merge is pinned to"
 # The resolver logs the arguments it is asked with, then runs as itself.
 store "[$(anchor MA1 9063), $(rev MA1)]"

@@ -6669,6 +6669,22 @@ has "$(cat "$STUB_GH_LOG")" "pr edit 173 --repo github.com/zook/gc-toolkit --add
 eq "$(meta_pinned LB4 pr_posture)" "approved@sha-173" "the same pass then records the approval"
 eq "$(pv_labels 173)" "status: merging" "…and the label follows the approval, not the value the sweep wrote"
 
+echo "# …a PR that merged or closed has its status: label taken off as the pass records it"
+# GitHub's own Merged or Closed state takes over; a status: label left on a
+# finished PR reads as work the city still has.
+store "[$(anchor LB5 174), $(anchor LB6 175)]"
+prview 174 MERGED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: merging"}, {name: "bug"}]' > "$GH_DIR/pr_view_174.json"
+prview 175 CLOSED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: needs-review"}]' > "$GH_DIR/pr_view_175.json"
+out=$(run)
+eq "$(bstatus LB5)" "closed" "test premise: the merge is recorded"
+eq "$(pv_labels 174)" "bug" "the merged PR's status: label comes off, and its other labels stay"
+eq "$(pv_labels 175)" "" "the closed PR's status: label comes off"
+: > "$STUB_GH_LOG"
+store "[$(anchor LB7 176)]"
+prview 176 MERGED CLEAN MERGEABLE > "$GH_DIR/pr_view_176.json"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 176" "a merged PR carrying no label is left alone"
+
 rm -f "$SD/pr-status-label.sh"
 
 echo "# with GC_RECONCILE_BD_CACHE set, a rework mint invalidates the dedup so a re-probe files no twin"
