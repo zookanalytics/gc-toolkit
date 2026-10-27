@@ -71,19 +71,20 @@ They are the three things the check matches, so the check reads them from
 `gc rig list --json` each time it runs.
 
 Nothing in a rig's entry says what another rig's content may name. A `Rig`
-carries no visibility, no repository owner and no remote. Cross-rig work in Gas
-City is routing: `gc rig add` generates the cross-rig routes for a new rig, and
-the bundled `core` pack's `cross-rig-deps` order converts a satisfied
-cross-rig `blocks` dependency to `related`.
+carries no visibility, no repository owner and no remote. Gas City's cross-rig
+features route work and resolve its dependencies: `gc rig add` generates the
+cross-rig routes for a new rig, and the bundled `core` pack's `cross-rig-deps`
+order converts a satisfied cross-rig `blocks` dependency to `related`.
 
 ### Redaction in Gas City
 
 The trust model
 ([Command Execution Trust Boundaries](https://docs.gascity.com/reference/trust-boundaries))
 treats pull request text as untrusted data that must not be concatenated into a
-shell command. It strips inherited secret-looking environment keys from the
-commands Gas City runs. Its failure logs "redact known secret values before
-writing order exec errors or events". In source, package execenv's
+shell command. Before its orchestrator runs a `work_query`, a `scale_check`, a
+pool hook, an order or a sling helper, it strips inherited secret-looking
+environment keys. Its failure logs "redact known secret values before writing
+order exec errors or events". In source, package execenv's
 `RedactText` replaces known secret values and secret assignment patterns in
 text meant for logs or events, and package gitcred's `ScrubSecrets` masks a
 credential that git echoes in an error. `gc metrics status` shows "redacted
@@ -109,35 +110,47 @@ adds.
 
 ### The packs Gas City bundles and publishes
 
-- The gstack pack's `spec` skill reviews a spec's text each time the text goes
-  somewhere: before it sends the draft to Codex, before it files the spec as an
-  issue, and before it archives it. A semantic pass by the model looks for
-  named people, customers and vendors tied to negative judgments, unannounced
+- The gstack pack's `spec` skill reviews a spec's text before the text leaves.
+  A semantic pass by the model reads the final draft once, looking for named
+  people, customers and vendors tied to negative judgments, unannounced
   strategy, NDA material and "Confidential context bleed — a codename only in
   this spec, not in the repo README / `package.json`". Then upstream gstack's
-  `gstack-redact` scans the exact bytes. Its taxonomy is gstack's
-  `lib/redact-patterns.ts`: credentials at the HIGH tier; PII, legal markers,
-  hostnames under `.internal`, `.corp`, `.local` and similar, and localhost
-  URLs at MEDIUM; absolute paths under a home directory and TODO markers at
-  LOW. Its options set the input, the repository's visibility, the spans and
-  emails to suppress, the findings to auto-redact and a size cap. None of them
-  adds a term to look for. gstack's `gstack-redact-prepush` hook scans the lines
-  a push adds with the same taxonomy, blocks the push on a HIGH finding and
-  warns on a MEDIUM one. So the scanner cannot list a rig's name or a bead id
-  by the rig's prefix. Its home-path pattern lists every path under a home
-  directory, the change's own rig's included, at the tier it only surfaces.
+  `gstack-redact` scans the exact bytes before each place they go: before the
+  skill sends the draft to Codex, before it files the spec as an issue, and
+  before it archives it. Its taxonomy is gstack's `lib/redact-patterns.ts`:
+  credentials at the HIGH tier; lower-confidence credential shapes such as JWTs
+  and Google API keys, PII, legal markers, hostnames under `.internal`,
+  `.corp`, `.local` and similar, and localhost URLs at MEDIUM; absolute paths
+  under a home directory and TODO markers at LOW. Its options set the input,
+  the repository's visibility, the spans and emails to suppress, the findings
+  to auto-redact and a size cap. None of them adds a term to look for.
+  gstack's `gstack-redact-prepush` hook scans the lines a push adds with the
+  same taxonomy, blocks the push on a HIGH finding and warns on a MEDIUM one.
+  So the scanner cannot list a rig's name or a bead id by the rig's prefix.
+  Its home-path pattern lists every path under a home directory, the change's
+  own rig's included, at the tier it only surfaces.
   The semantic pass is a model's judgment over one spec, with nothing to tell
   it which names are the city's.
 - The `gascity` pack, bundled and at packs main, renders a GitHub issue triage
   comment with `render_triage_comment` in `assets/scripts/github_reports.py`.
   It withholds the analysis of a security-sensitive or P0 report until a person
   approves it. The rule reads the report's verdict and priority, not its names.
+  The same pack's `publish` formula creates a pull request only after the push
+  succeeds and a "sanitized title/body" from the final report passes policy
+  (`assets/workflows/publish/open-pr.md`), and its preflight step validates
+  "sanitized metadata". Neither step says what sanitizing removes, and the
+  pack's GitHub helper, `assets/scripts/github_api.py`, posts a pull request's
+  body as it reads it from the file.
 - The `github` pack's `redact_config` hides its GitHub App's secret material in
   the configuration it prints.
 - The `oversight-rig` pack tells its project lead to keep to "THIS rig only —
   never another rig, never the whole city", and asks for status updates in
   "plain language: omit internal IDs, session names, branches". These are
-  instructions to a model, and no check reads what comes back.
+  instructions to a model, and no check reads what comes back. Two of the
+  pack's unit tests read the files of its packaged `city-executive-status`
+  skill. One fails on a path under `/home/`, an email address or an
+  eleven-character id that starts with `C`, and the other on any `/home/`
+  path. Their patterns are fixed, and they read only that skill's files.
 
 ## What the change does with it
 
@@ -153,9 +166,10 @@ The check composes the roster and adds the matching that no primitive offers.
   ([review-arch.md](../../docs/review-arch.md#the-checks), check 2).
 - The sweep that came with it touches paths that one warrant covers. Its
   rewording of `assets/scripts/gh-origin-guard.sh` and
-  [gh-origin-guard.md](../../docs/gh-origin-guard.md) falls under *gh write
-  containment*, which is re-verified in the same change
-  ([warrants.md](../../docs/warrants.md#gh-write-containment), check 4). Its
+  [gh-origin-guard.md](../../docs/gh-origin-guard.md) falls under
+  [*gh write containment*](../../docs/warrants.md#gh-write-containment), which
+  is re-verified in the same change
+  ([review-arch.md](../../docs/review-arch.md#the-checks), check 4). Its
   edits to `assets/scripts/gc-helm.sh` leave the `priority` verb, which
   *Priority following* covers, as it was. No other Covers line names a path the
   branch changes.
