@@ -227,10 +227,12 @@ none.
   a skill it tells an agent to load as `gc-toolkit.<name>`, and a path in its
   place is a defect.
 - **The pack's scripts are the installed pack's wherever the pack comes
-  from.** `gc <binding> scripts-dir` prints the script directory of the pack gc
-  loaded, so a city that imports the pack from a URL runs the same scripts as
-  one that clones it as a rig, and no step reads a script from the tree it
-  stands in
+  from.** `gc <binding> scripts-dir` prints the script directory of the pack
+  the city imports in its root `pack.toml`, so a city that imports the pack
+  from a URL runs the same scripts as one that imports a rig checkout, and no
+  step reads a script from the tree it stands in. gc registers the command for
+  that city-level import only, so a city imports the pack there as well as in
+  its rigs
   ([pack-authoring.md](pack-authoring.md#step-text-and-skills-reach-pack-scripts-at-runtime)).
 
 ## How humans engage

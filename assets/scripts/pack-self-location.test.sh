@@ -25,8 +25,11 @@
 #      fails, even with the script sitting in every directory the old lookup
 #      tried.
 #   4. With GC_BIN naming a real gc: a scratch city that imports this tree
-#      from git, under another binding, pours a formula, and the poured step
-#      reaches a pack script in the copy gc fetched into its cache.
+#      from git, under another binding, in its pack.toml and in a rig as
+#      docs/install.md lays out, pours a formula, and the poured step reaches
+#      a pack script in the copy gc fetched into its cache. A city that
+#      imports the tree only in a rig gets no gc <binding> scripts-dir, which
+#      is why docs/install.md has a city import the pack at city level too.
 #
 # Hermetic: reads the pack's own files and runs extracted lines under a stub gc.
 # Part 4 runs the real gc against a scratch city and a git repository it builds,
@@ -170,12 +173,13 @@ PATH_LINE=$(grep -h -m1 -E "^SC=\"\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b
 [ -n "$PATH_LINE" ] && ok "mol-polecat-work carries a step-close.sh path resolver" \
   || bad "mol-polecat-work carries a step-close.sh path resolver" "no such line"
 
-# gc answers `kit scripts-dir` with the pack, and refuses every other binding
-# the way the real gc refuses an unknown command.
+# gc answers `kit scripts-dir` with STUB_PACK, which is empty for a gc that
+# succeeds and prints nothing, and refuses every other binding the way the
+# real gc refuses an unknown command.
 mkdir -p "$TMP/bin" "$TMP/pack/assets/scripts" "$TMP/away"
 cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-[ "${1:-} ${2:-}" = "kit scripts-dir" ] && [ -n "${STUB_PACK:-}" ] && { printf '%s\n' "$STUB_PACK"; exit 0; }
+[ "${1:-} ${2:-}" = "kit scripts-dir" ] && { [ -z "${STUB_PACK:-}" ] || printf '%s\n' "$STUB_PACK"; exit 0; }
 echo "gc: unknown command \"${1:-}\"" >&2
 exit 1
 STUB
@@ -221,22 +225,28 @@ if [ -z "${GC_BIN:-}" ] || [ ! -x "${GC_BIN:-}" ]; then
 else
   # This tree, committed into a repository of its own, is the pack the city
   # imports from git; the scratch city clones nothing as a rig. The city
-  # imports it as kit, so the binding a step names is the one its pour carries.
-  SRC="$TMP/src"; CITY="$TMP/city"; GCH="$TMP/gc-home"
-  mkdir -p "$SRC" "$CITY" "$GCH" "$TMP/real-gc" "$TMP/away"
+  # imports it as kit, so the binding a step names is the one its pour carries,
+  # in its pack.toml and in its one rig, the layout docs/install.md gives.
+  SRC="$TMP/src"; CITY="$TMP/city"; GCH="$TMP/gc-home"; RIG_ONLY="$TMP/city-rig-only"
+  mkdir -p "$SRC" "$CITY/rigs/probe" "$RIG_ONLY/rigs/probe" "$GCH" "$TMP/real-gc" "$TMP/away"
   ln -s "$GC_BIN" "$TMP/real-gc/gc"
   ( cd "$ROOT" && git ls-files -co --exclude-standard -z | xargs -0 tar -cf - 2>/dev/null ) | tar -xf - -C "$SRC"
   ( cd "$SRC" && git init -q -b main && git add -A \
       && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m "pack" )
   SHA=$(git -C "$SRC" rev-parse HEAD 2>/dev/null)
-  printf '[workspace]\nprovider = "claude"\n\n[providers.claude]\nbase = "builtin:claude"\n\n[providers.codex]\nbase = "builtin:codex"\n\n[providers.gemini]\nbase = "builtin:gemini"\n' > "$CITY/city.toml"
+  for c in "$CITY" "$RIG_ONLY"; do
+    printf '[workspace]\nprovider = "claude"\n\n[providers.claude]\nbase = "builtin:claude"\n\n[providers.codex]\nbase = "builtin:codex"\n\n[providers.gemini]\nbase = "builtin:gemini"\n\n[[rigs]]\nname = "probe"\nprefix = "pr"\n\n[rigs.imports.kit]\nsource = "file://%s"\nversion = "sha:%s"\n' "$SRC" "$SHA" > "$c/city.toml"
+  done
   printf '[pack]\nname = "remote-probe"\nschema = 2\n\n[imports.kit]\nsource = "file://%s"\nversion = "sha:%s"\n' "$SRC" "$SHA" > "$CITY/pack.toml"
-  # in_city <command...> — the real gc in the scratch city, with a file store,
-  # and nothing in the environment naming a live city, rig or store.
+  printf '[pack]\nname = "rig-only-probe"\nschema = 2\n' > "$RIG_ONLY/pack.toml"
+  # in_city <command...> — the real gc in the scratch city ($IN_CITY, else
+  # $CITY), with a file store, and nothing in the environment naming a live
+  # city, rig or store.
   in_city() {
-    (cd "${IN_DIR:-$CITY}" && env -u GC_CITY_PATH -u GC_RIG -u GC_RIG_ROOT -u GC_DIR -u GC_PACK_DIR \
+    local city="${IN_CITY:-$CITY}"
+    (cd "${IN_DIR:-$city}" && env -u GC_CITY_PATH -u GC_RIG -u GC_RIG_ROOT -u GC_DIR -u GC_PACK_DIR \
         -u BEADS_DIR -u GC_BEADS_SCOPE_ROOT -u GC_DOLT_PORT -u BEADS_DOLT_SERVER_PORT -u BASH_ENV -u ENV \
-        GC_CITY="$CITY" GC_HOME="$GCH" GC_BEADS=file PATH="$TMP/real-gc:$PATH" "$@")
+        GC_CITY="$city" GC_HOME="$GCH" GC_BEADS=file PATH="$TMP/real-gc:$PATH" "$@")
   }
   in_city gc import install >"$TMP/install.out" 2>&1 \
     && ok "the city installs the pack from git" \
@@ -246,6 +256,9 @@ else
     "$ROOT"*|"$SRC"*|"") bad "gc kit scripts-dir names the copy gc fetched, not this checkout or its source" "named '$KIT'" ;;
     *) ok "gc kit scripts-dir names the copy gc fetched, not this checkout or its source" ;;
   esac
+  RIG_KIT=$(IN_DIR="$CITY/rigs/probe" in_city gc kit scripts-dir 2>/dev/null)
+  [ -n "$KIT" ] && [ "$RIG_KIT" = "$KIT" ] && ok "a shell in the rig gets the same answer" \
+    || bad "a shell in the rig gets the same answer" "named '$RIG_KIT'"
   COOK=$(in_city gc formula cook mol-visit --var subject=rp-subj --var visit=probe --var binding_prefix=kit. --json 2>/dev/null)
   STEP=$(printf '%s' "$COOK" | jq -r '.id_mapping["mol-visit.file-visit"] // empty' 2>/dev/null)
   [ -n "$STEP" ] && ok "the city pours mol-visit from the fetched pack" \
@@ -259,6 +272,18 @@ else
     ok "the poured step sources the pack's visit-identity.sh from the fetched copy"
   else
     bad "the poured step sources the pack's visit-identity.sh from the fetched copy" "got '$GOT'"
+  fi
+  # gc registers a pack's commands only for a city-level import, so a city
+  # that imports the pack only in a rig has no gc kit scripts-dir.
+  if IN_CITY="$RIG_ONLY" in_city gc import install >"$TMP/install-rig-only.out" 2>&1; then
+    ONLY=$(IN_CITY="$RIG_ONLY" in_city gc kit scripts-dir 2>&1)
+    case "$ONLY" in
+      *'unknown command'*) ok "a city that imports the pack only in a rig has no gc kit scripts-dir, so docs/install.md has it import the pack at city level too" ;;
+      *) bad "a city that imports the pack only in a rig has no gc kit scripts-dir" \
+           "gc answered '$ONLY'; if gc now registers a rig import's commands, docs/install.md's city-level import is no longer required" ;;
+    esac
+  else
+    bad "the rig-only city installs the pack from git" "$(tail -3 "$TMP/install-rig-only.out")"
   fi
 fi
 

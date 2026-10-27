@@ -101,8 +101,11 @@ its import binding and under no other name
 and runs it with `GC_PACK_DIR` set to that pack. So a city that imports the
 pack as `[imports.gc-toolkit]` runs `gc gc-toolkit scripts-dir`, one that
 imports it as `[imports.kit]` runs `gc kit scripts-dir`, and the answer is the
-pack's own copy whether the city imports it from a directory or from a URL
-cached under `.gc/cache/`. It is never a checkout the caller stands in.
+pack's own copy whether the city imports it from a directory or from a URL.
+It is never a checkout the caller stands in. gc registers the command only for
+an import in the city root `pack.toml`, not for a rig's import, so a city
+imports the pack there as well as in its rigs
+([install.md](install.md#the-city-level-import)).
 
 Each kind of pack text names the binding the way its rendering allows:
 

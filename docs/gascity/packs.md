@@ -312,6 +312,10 @@ empty path. `GC_RIG_ROOT` (the agent's own rig checkout) and `GC_CITY_PATH`
 (the city root) are in the session environment. Neither names the pack: a
 step reaches it by running a pack command, which does get `GC_PACK_DIR`
 ([pack-authoring.md](../pack-authoring.md#step-text-and-skills-reach-pack-scripts-at-runtime)).
+gc registers a pack's commands only for an import in the city root
+`pack.toml`. A rig's `[rigs.imports.<binding>]` and `[defaults.rig.imports]`
+register none, so in a city that imports a pack only per rig,
+`gc <binding> <command>` answers `unknown command`.
 
 A formula body can name the pack's binding through a var. `gc sling` adds
 `rig_name`, `binding_name` and `binding_prefix` (the binding plus a dot) to
@@ -327,7 +331,13 @@ spec §1.2.12) but not the session environment. The routing vars were read on
 2026-10-27 at the fork's `e03752646`, the installed gc's build:
 `buildSlingFormulaVars` in `internal/sling/sling.go` adds them through
 `addRoutingVar`, and `prepareOrderWispRecipe` in `cmd/gc/order_dispatch.go`
-passes the order's vars alone.
+passes the order's vars alone. The command registration was read the same
+day at the same build. In `internal/config/pack.go`, `expandCityPacks` adds a
+city import's commands to `PackCommands`, while the `[rigs.imports]` loop in
+`expandPacks` adds none. `engdocs/design/packv2/doc-commands.md` leans toward
+keeping commands city-scoped. In a scratch city that imports gc-toolkit only
+per rig, `gc <binding> scripts-dir` answered `unknown command`, and with the
+city-level import added it named the pack.
 
 ## Refresh procedure
 
