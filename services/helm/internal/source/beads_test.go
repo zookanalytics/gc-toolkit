@@ -1439,7 +1439,7 @@ func TestSessionsGiveASharedKeyToItsLiveHolder(t *testing.T) {
 		}
 		for _, order := range []string{"listed after", "listed first"} {
 			t.Run(name+" predecessor "+order, func(t *testing.T) {
-				rows := []string{row("lx-new", "active"), row("lx-old", ended)}
+				rows := []string{row("hq-new", "active"), row("hq-old", ended)}
 				if order == "listed first" {
 					slices.Reverse(rows)
 				}
@@ -1447,7 +1447,7 @@ func TestSessionsGiveASharedKeyToItsLiveHolder(t *testing.T) {
 				if got[alias] != "active" {
 					t.Errorf("the shared alias reads %q, want its live holder's %q", got[alias], "active")
 				}
-				for k, want := range map[string]string{"lx-new": "active", "s-lx-new": "active", "lx-old": ended, "s-lx-old": ended} {
+				for k, want := range map[string]string{"hq-new": "active", "s-hq-new": "active", "hq-old": ended, "s-hq-old": ended} {
 					if st, ok := got[k]; !ok || st != want {
 						t.Errorf("%s reads %q (listed %v), want its own session's %q", k, st, ok, want)
 					}
@@ -1456,12 +1456,12 @@ func TestSessionsGiveASharedKeyToItsLiveHolder(t *testing.T) {
 		}
 	}
 	t.Run("every holder ended", func(t *testing.T) {
-		if got := sessions(t, row("lx-a", "archived"), row("lx-b", "failed-create")); got[alias] != "failed-create" {
+		if got := sessions(t, row("hq-a", "archived"), row("hq-b", "failed-create")); got[alias] != "failed-create" {
 			t.Errorf("a key only ended sessions hold reads %q, want the later entry's %q", got[alias], "failed-create")
 		}
 	})
 	t.Run("every holder live", func(t *testing.T) {
-		if got := sessions(t, row("lx-a", "active"), row("lx-b", "asleep")); got[alias] != "asleep" {
+		if got := sessions(t, row("hq-a", "active"), row("hq-b", "asleep")); got[alias] != "asleep" {
 			t.Errorf("a key only live sessions hold reads %q, want the later entry's %q", got[alias], "asleep")
 		}
 	})
