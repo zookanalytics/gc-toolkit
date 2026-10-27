@@ -209,18 +209,21 @@ shares only the word ([authority-map.md](authority-map.md)).
     whose PR it is. Only `gc github pr backfill` runs it (`gc github pr
     backfill` in `docs/reference/cli.md`, and `GitHubPRMonitor` in
     `docs/reference/config.md`).
-  - Gas City reads bead labels as state only for its dispatch holds,
-    `hold:mayor` and `hold:external`
+  - The one state dimension Gas City reads as a bead label is `hold`, for
+    its dispatch holds `hold:mayor` and `hold:external`
     (`engdocs/contributors/hold-label-conventions.md`, and
-    `DispatchHoldLabels` in `internal/beadmeta/hold_labels.go`).
+    `DispatchHoldLabels` in `internal/beadmeta/hold_labels.go`). Its other
+    label reads are flags and markers, such as a convoy's `owned`
+    (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`), and none of them is
+    a verdict tied to a head.
   - In `gastownhall/beads`, labels as state keep one value per dimension,
     read on its own, with an event bead as its history (*Labels as State
     Cache* in `docs/core-concepts/labels.md`). `bd set-state` refuses an
-    empty value, and no state command removes a dimension (`runSetState` in
-    `cmd/bd/state.go`), so a cause could not be cleared when the verdict it
-    qualifies moves on. A custom status (*Custom Statuses and Types* in
-    `docs/reference/configuration.md`) would take the place of the bead's own
-    status.
+    empty value, and no state command removes a dimension (`setStateCmd`
+    and `runSetState` in `cmd/bd/state.go`), so a cause could not be
+    cleared when the verdict it qualifies moves on. A custom status (*Custom
+    Statuses and Types* in `docs/reference/configuration.md`) would take the
+    place of the bead's own status.
   - In `gastownhall/gascity-packs`, no pack reads a branch's rules or a
     check's required flag, and none records why a PR cannot merge as a value
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
@@ -248,13 +251,17 @@ shares only the word ([authority-map.md](authority-map.md)).
   - In `gastownhall/gascity`, a failed order is not retried ("No retry on
     dispatch failure" in `engdocs/architecture/orders.md`), and
     `[steps.retry]` retries a formula step's attempt within its run (section
-    3.2 of `docs/reference/specs/formula-spec-v2.md`). Nothing in Gas City
-    keeps an outbox or a retry queue for a write to an outside service.
+    3.2 of `docs/reference/specs/formula-spec-v2.md`). Gas City keeps no
+    outbox or retry queue that a pack can hand a write to an outside
+    service. Its usage facts retry a failed write with a marker of their
+    own: a fact whose sink fails leaves the session bead's
+    `usage_compute_emitted_at` marker unset for the next reconcile tick
+    (`emitComputeFactForBead` in `cmd/gc/usage_compute.go`).
   - In `gastownhall/gascity-packs`, a pack that retries such a write keeps a
     marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
     the `oversight-rig` pack's `delivered` label.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
 - **Verified.** 2026-10-27, at `gastownhall/gascity` main e73ebbfb48fd and
   `gastownhall/gascity-packs` main dac12a4a802c.
-- **Retires when.** Gas City ships a retry for a failed write to an outside
-  service, such as an outbox that a later pass drains.
+- **Retires when.** Gas City ships a retry that a pack can hand a failed write
+  to an outside service, such as an outbox that a later pass drains.

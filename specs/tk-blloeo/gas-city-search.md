@@ -21,14 +21,15 @@ rollup, so it calls every `BLOCKED` PR blocked, a required check still running
 included, and it records its class on a repair bead it files, not on the bead
 whose PR it is. bd keeps operational state as a label through `bd set-state`,
 which cannot clear a value or tie it to the verdict and the head it qualifies,
-and Gas City reads bead labels as state only for its dispatch holds. bd's
-custom statuses would take the place of the bead's own status. No pack that Gas
-City bundles or publishes reads a branch's rules to tell a block from a wait,
-keeps a label on a pull request that says whose move it is, or judges whether
-an automated actor holds a blocker. Gas City ships no retry for a failed write
-to an outside service. So the pack keeps its machine axis and its owed-clear
-record, and the warrants *Machine axis* and *Owed status label clear* in
-[warrants.md](../../docs/warrants.md) say why.
+and the one such dimension Gas City reads is `hold`, for its dispatch holds.
+bd's custom statuses would take the place of the bead's own status. No pack
+that Gas City bundles or publishes reads a branch's rules to tell a block from
+a wait, keeps a label on a pull request that says whose move it is, or judges
+whether an automated actor holds a blocker. Gas City keeps no retry that a pack
+can hand a failed write to an outside service, and its usage facts, which
+retry a write of their own, keep a marker on the bead for it. So the pack keeps
+its machine axis and its owed-clear record, and the warrants *Machine axis* and
+*Owed status label clear* in [warrants.md](../../docs/warrants.md) say why.
 
 ## The surface and the need
 
@@ -178,8 +179,12 @@ record the merge or the close, so they already know the moment.
 
 ### GitHub labels
 
-No Go code in Gas City writes or reads a GitHub label, and neither does the
-`core` pack. Its query for the PR monitor fetches no labels.
+No Go code in Gas City writes a GitHub label, and neither does the `core`
+pack. Gas City reads one only from a webhook delivery that a rule matches. A
+`[[webhook.rule]]` can match a delivery's `label.name`, the label a `labeled`
+event names, and start an order (`WebhookRule` in `docs/reference/config.md`,
+and package `webhookmatch`). Such a rule reacts to a label once someone adds
+it, and keeps none. The PR monitor's query fetches no labels.
 
 The nearest vocabulary is a convention of Gas City's own repository. Its
 contributor guide, `CONTRIBUTING.md`, lists "Pull Request Pipeline Labels" for
@@ -233,16 +238,22 @@ block nobody will clear from a check still running.
 
 ### Labels as state in Gas City
 
-Gas City reads bead labels as state for one purpose, its dispatch holds. The
-engineering doc *Hold and Blocked Label Conventions* sets them for the
-project's own bd tracker: a `hold:<value>` label, set with
-`bd set-state <id> hold=<value>`, means "I am paused pending a specific actor
-or condition", and "Only two values are canonical", `hold:mayor` and
-`hold:external`. Package `beadmeta` declares both in `DispatchHoldLabels`, and
-the dispatcher reads them so a held bead is not handed out as work. The doc
-retires a plain `blocked` label in favor of bd's `blocked` status. It also
-names a `maintainer-pr-review` pack, with its own labels and metadata, that
-Gas City neither bundles nor publishes, so the search could not read it.
+Gas City reads one state dimension in bd's `<dimension>:<value>` form, `hold`,
+for its dispatch holds. The engineering doc *Hold and Blocked Label
+Conventions* sets them for the project's own bd tracker: a `hold:<value>`
+label, set with `bd set-state <id> hold=<value>`, means "I am paused pending a
+specific actor or condition", and "Only two values are canonical",
+`hold:mayor` and `hold:external`. Package `beadmeta` declares both in
+`DispatchHoldLabels`, and the dispatcher reads them so a held bead is not
+handed out as work. The doc retires a plain `blocked` label in favor of bd's
+`blocked` status. It also names a `maintainer-pr-review` pack, with its own
+labels and metadata, that Gas City neither bundles nor publishes, so the search
+could not read it.
+
+Its other label reads are flags and markers. A mail bead labeled `read` has
+been read (package `beadmail`), a convoy labeled `owned` stays out of
+auto-close (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`), and labels such
+as `gc:session` say what a bead is. None of them is a verdict tied to a head.
 
 A hold says what an agent should not do with a bead. The machine axis says
 what the merge cadence can do with a pull request, and its `blocked` verdict
@@ -344,12 +355,20 @@ ready only when its dependencies are closed and no human decision gates it.
 
 ### A write retried on a later pass
 
-Gas City ships no outbox and no retry queue for a write to an outside service.
-Its engineering doc on orders lists "No retry on dispatch failure" among their
-known limitations. `[steps.retry]` retries a formula step's attempt within its
-run (section 3.2 of the formula spec), and a label clear runs inside a
-script's pass, not as a step. Webhook intake leaves the retry to the sender,
-which redelivers on a non-2xx answer.
+Gas City keeps no outbox or retry queue that a pack can hand a write to an
+outside service. Its engineering doc on orders lists "No retry on dispatch
+failure" among their known limitations. `[steps.retry]` retries a formula
+step's attempt within its run (section 3.2 of the formula spec), and a label
+clear runs inside a script's pass, not as a step. Webhook intake leaves the
+retry to the sender, which redelivers on a non-2xx answer.
+
+Gas City does retry a failed write of its own. When the sink that records a
+usage fact fails, such as an `exec:` sink, whose script is the integration
+point for an outside aggregator, the controller leaves the session bead's
+`usage_compute_emitted_at` marker unset, and its next reconcile tick records
+the fact again (`emitComputeFactForBead` in `cmd/gc/usage_compute.go`). That
+retry serves the usage facts alone, and it keeps a marker of its own on the
+bead, as `status_label_clear_owed` does.
 
 Packs that retry such a write keep a marker of their own. The `gastown` pack's
 `pr-merge-reconcile` keeps `pr_reconcile_pending` on a work bead until its
@@ -394,14 +413,16 @@ on each write from the anchor's records and does no I/O, and nothing keeps the
 value in the store. The label itself is GitHub's, written through `gh`.
 
 **`status_label_clear_owed` is the pack's retry marker.** Gas City ships no
-retry for a failed write to GitHub, and the packs that retry one keep a marker
-of their own, as this key does. The key records a state the pack defines, so
-it carries the warrant *Owed status label clear* in
+retry that a pack can hand a failed write to GitHub. Each writer this search
+found retrying such a write keeps a marker of its own, Gas City's usage facts
+and the packs above alike, and this key is the pack's. The key records a state
+the pack defines, so it carries the warrant *Owed status label clear* in
 [warrants.md](../../docs/warrants.md#owed-status-label-clear).
 
 This answer changes if Gas City's PR monitor reads a base branch's rules and
 its required checks, so that a required check still running is not a block,
 and records its class where a reader of the PR's own bead finds it. It changes
 too if bd can clear a state dimension, or write one in the same write as the
-metadata it qualifies, or if Gas City ships a retry for a failed write to an
-outside service. At `e73ebbfb48fd` and `43f41374a34d` none of these ships.
+metadata it qualifies, or if Gas City ships a retry that a pack can hand a
+failed write to an outside service. At `e73ebbfb48fd` and `43f41374a34d` none
+of these ships.
