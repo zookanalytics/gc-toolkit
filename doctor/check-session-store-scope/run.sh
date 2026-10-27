@@ -15,12 +15,13 @@
 # proposition is that a session agrees with itself, which stays checkable when
 # the config it was spawned from has since changed. A qualified GC_ALIAS,
 # `<rig>/<binding>.<agent>`, names the session's rig, and an unqualified one
-# names a city-scoped agent. A pool member carries no alias, so its GC_TEMPLATE
-# decides: `<rig>/<binding>.<agent>` on a rig-scoped session and
-# `<binding>.<agent>` on a city-scoped one. The session name is not read for
-# scope. A pool member is named `<binding>__<agent>-<id>` whichever rig imported
-# its pack, so the name opens with the pack binding, not the rig. A session
-# carrying neither key has no scope to agree with, so it warns as unverified.
+# names a city-scoped agent. A session with no alias, such as a member of an
+# unaliased pool, takes its scope from GC_TEMPLATE: `<rig>/<binding>.<agent>`
+# on a rig-scoped session and `<binding>.<agent>` on a city-scoped one. The
+# session name is not read for scope. A pool member is named
+# `<binding>__<agent>-<id>` whichever rig imported its pack, so the name opens
+# with the pack binding, not the rig. A session carrying neither key has no
+# scope to agree with, so it warns as unverified.
 #
 # GC_BEADS_PREFIX is not judged on its own, because its correct value is a
 # property of the store rather than of the session. It never travels alone:

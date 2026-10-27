@@ -243,8 +243,9 @@ has "$OUT" "holds no GC_RIG" "the finding says the scope is missing, not wrong"
 has "$OUT" "rig alpha" "the scope it should have had is named"
 
 # --- 6. a pool member's rig comes from GC_TEMPLATE, not its session name ------
-# A pool member carries no GC_ALIAS, and it is named <binding>__<agent>-<id>
-# whichever rig imported its pack, so the name opens with the pack binding.
+# A member of an unaliased pool carries no GC_ALIAS, and it is named
+# <binding>__<agent>-<id> whichever rig imported its pack, so the name opens
+# with the pack binding.
 # Here a pack bound as "alpha", the name rig alpha also has, runs a polecat for
 # rig beta. Only its GC_TEMPLATE, beta/alpha.polecat, names its rig, and the
 # beta store keys it holds are its own.
