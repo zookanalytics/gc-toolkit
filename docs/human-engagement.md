@@ -712,11 +712,11 @@ output, only the reading appended to its subject. That is step 2's moot or
 benign close. The sign-off exists because an unanswered framing left in a
 vanishing thread reads as a crash; where no framing was ever posted there is
 no question to abandon. An earlier sitting on the same conversation may have
-held and been cut short, leaving its subject `held`, which nothing but a
-ruling, an Accept or this close releases. So the close reads the subject's
-state first. A held subject that no open human gate still holds goes back to
-`unanchored`, routed to `human`, and the reading replaces the hold's headline.
-The conversation closes only once those writes read back.
+held and been cut short, leaving its subject `held`, which only a ruling's
+sign-off, an Accept, this close or a person moves back. So the close reads
+the subject's state first. A held subject that no open human gate still holds
+goes back to `unanchored`, routed to `human`, and the reading replaces the
+hold's headline. The conversation closes only once those writes read back.
 
 *A restart is not an ending.* A wake that reaches a session mid-hold gets its
 conversation back from `gc hook --claim` as an existing assignment. Draining

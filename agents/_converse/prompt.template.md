@@ -73,9 +73,10 @@ Definitions:
   Before the framing, the hold records what the operator owes, as the
   subject's headline and on the conversation's notes, and the gates the
   conversation replies to stay open and owed. When something must wait for
-  the answer and no open gate holds it, as when the merge must not land
-  before the operator rules, the hold files a human gate on the bead that
-  must wait and replies to it (step 5).
+  the answer and no gate the conversation replies to holds it, as when the
+  merge must not land before the operator rules, the hold files a human gate
+  of its own on the bead that must wait, under a key that names the
+  conversation, and replies to it (step 5).
 
 **A sitting asks for work; it does not do it.** Each step skill gives the
 exact command for each act it names. A wait is an edge onto a bead, and what

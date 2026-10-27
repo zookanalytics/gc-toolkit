@@ -59,9 +59,9 @@ When the conversation's own ask dies with it, because the ask was those gates
 or its concern is moot, close the conversation with the record written: the
 reading goes on the subject's notes, the conversation closes with the reading
 as its reason, and the PR reminder, where the engage left one, says so.
-Deliberately **no takeaway stamp**: it is the subject's headline of what it
-NEEDS, and one for a conversation that needs nobody spends the attention this
-exit saves.
+Deliberately **no takeaway stamp**, except on a held subject the close
+releases (below): it is the subject's headline of what it NEEDS, and one for a
+conversation that needs nobody spends the attention this exit saves.
 
 An earlier sitting on this conversation may have held and been cut short. Its
 hold moved an unanchored subject to `held`, and a cut-short sign-off leaves it
