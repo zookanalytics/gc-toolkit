@@ -607,7 +607,10 @@ A clear that does not land is recorded on the anchor as
 record, and `pr-facts.sh` writes it before its record, leaving the anchor open
 for the next pass when that write does not land either. Every full pass of
 `pr-facts.sh` lists the anchors carrying the key, in any status, retries each
-clear, and unsets the key once it lands.
+clear, and unsets the key once it lands. The retry clears only the PR the
+anchor's `pr_url` names, so a write that records the key on an anchor with no
+`pr_url` records the live PR's url beside it, the one its writer validated
+against origin.
 
 An open visit covers the anchor by the shared visit identity
 (`assets/scripts/visit-identity.sh`): the bead its tracks edge names, or its

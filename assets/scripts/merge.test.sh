@@ -187,8 +187,24 @@ out=$(STUB_LABEL_RC=2 "$SUT" 2>&1)
 eq "$(meta ML3 merge_result) $(bstatus ML3)" "merged closed" "a merge whose clear fails is still recorded"
 eq "$(meta ML3 status_label_clear_owed)" "175" "…and its record carries the clear it owes"
 eq "$(grep -c '^bd update ML3' "$STUB_GC_LOG" || true)" "1" "…in the one update that records the merge"
+hasnt "$(grep '^bd update ML3' "$STUB_GC_LOG")" "pr_url" "…which leaves the pr_url the anchor records alone"
 eq "$(meta ML4 merge_result) $(meta ML4 status_label_clear_owed)" "merged 176" "a recovered record carries it too"
 has "$out" "the record carries status_label_clear_owed=175, which pr-facts.sh retries" "…and the pass says so"
+
+echo "# an owed clear on an anchor that records no pr_url names the PR in the same record"
+# pr-facts.sh's retry clears only the PR an anchor's pr_url names, and the pass
+# merges an anchor that records none once the live PR's identity holds. So the
+# record that owes the clear carries the url the pass validated.
+store "[$(anchor ML5 181 | jq -c 'del(.metadata.pr_url)'), $(rev ML5), $(anchor ML6 182 | jq -c 'del(.metadata.pr_url)')]"
+printf '%s' "$(prview 181 OPEN CLEAN)" > "$GH_DIR/pr_view_181.json"
+printf '%s' "$(prview 182 MERGED CLEAN)" > "$GH_DIR/pr_view_182.json"
+approved 181
+: > "$STUB_GC_LOG"
+out=$(STUB_LABEL_RC=2 "$SUT" 2>&1)
+eq "$(bstatus ML5) $(meta ML5 merge_result) $(meta ML5 status_label_clear_owed)" "closed merged 181" "the merge record lands, closing the anchor and owing the clear"
+eq "$(meta ML5 pr_url)" "https://github.com/zook/gc-toolkit/pull/181" "…and names the PR the clear is owed on"
+eq "$(grep -c '^bd update ML5' "$STUB_GC_LOG" || true)" "1" "…in the one transition that records the merge"
+eq "$(bstatus ML6) $(meta ML6 merge_result) $(meta ML6 status_label_clear_owed) $(meta ML6 pr_url)" "closed merged 182 https://github.com/zook/gc-toolkit/pull/182" "a recovered record lands naming it too"
 rm -f "$SD/pr-status-label.sh"
 
 echo "# the lanes are resolved at the head the merge is pinned to"

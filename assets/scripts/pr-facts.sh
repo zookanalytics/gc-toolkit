@@ -778,17 +778,22 @@ reconcile_status_label() { # <anchor> <pr-number>
 # take off. That write takes the anchor out of every enumeration of open PRs, so
 # a clear that does not land is recorded on the anchor first, as
 # status_label_clear_owed=<pr>, and the full pass retries it from there (the
-# owed-clear retry below). Returns non-zero only when neither the clear nor that
-# record landed, and the caller then leaves the anchor open for the next pass.
-clear_status_label() { # <anchor> <pr-number>
-  local labels
+# owed-clear retry below). That retry clears only the PR the anchor's pr_url
+# names, so an anchor that records no pr_url gets the live PR's url, which this
+# pass certified, in the same write. Returns non-zero only when neither the
+# clear nor that record landed, and the caller then leaves the anchor open for
+# the next pass.
+clear_status_label() { # <anchor> <pr-number> <the anchor's pr_url> <the live PR's url>
+  local labels owed
   [ -x "$PR_STATUS_LABEL" ] || return 0
   labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
   [ -n "$labels" ] || return 0
   "$PR_STATUS_LABEL" clear --pr "$2" \
     --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "$labels" \
     >/dev/null 2>&1 && return 0
-  if gc bd update "$1" --set-metadata status_label_clear_owed="$2" >/dev/null 2>&1; then
+  owed=(--set-metadata status_label_clear_owed="$2")
+  [ -n "$3" ] || owed+=(--set-metadata pr_url="$4")
+  if gc bd update "$1" "${owed[@]}" >/dev/null 2>&1; then
     echo "$PROG: $1 — the status: label did not come off PR#$2; recorded status_label_clear_owed, which the full pass retries" >&2
     return 0
   fi
@@ -1825,7 +1830,7 @@ while IFS= read -r tagged; do
   # --route-comments-only) reconcile no terminal state, so a MERGED or CLOSED
   # anchor falls through to the OPEN filter.
   if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-    clear_status_label "$id" "$num" || { skipped=$((skipped + 1)); continue; }
+    clear_status_label "$id" "$num" "$prurl" "$live_url" || { skipped=$((skipped + 1)); continue; }
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
     if [ -z "$merge_oid" ]; then
@@ -1853,7 +1858,7 @@ while IFS= read -r tagged; do
 
   # --- PR closed unmerged: out-of-band close ------------------------------------
   if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-    clear_status_label "$id" "$num" || { skipped=$((skipped + 1)); continue; }
+    clear_status_label "$id" "$num" "$prurl" "$live_url" || { skipped=$((skipped + 1)); continue; }
     # A deliberate supersede/not-planned close records its disposition on the
     # still-open anchor before the PR closes (assets/scripts/pr-dispose.sh):
     # the bead-rehome kind, the successor, and an optional store. When it is

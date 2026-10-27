@@ -510,7 +510,9 @@ keys = [
 #   record that cannot read the oid writes the sentinel `unverified:PR#<n>`
 #   rather than nothing. Not read back; never cleared.
 # pr_url / pr_number — the open PR, written when it opens (pr-open.sh) and copied
-#   onto rework children and visits by pr-facts.sh. merge.sh and pr-facts.sh read
+#   onto rework children and visits by pr-facts.sh. An anchor with no pr_url gets
+#   one from the write that records status_label_clear_owed on it
+#   ([metadata.pr_status_label]). merge.sh and pr-facts.sh read
 #   them to bind a bead to its live PR; a non-numeric pr_number is skipped, and an
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
@@ -1235,7 +1237,9 @@ keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation"
 # status_label_clear_owed records a clear that did not land, valued with the PR
 # number: gctk merge carries it in its record, and pr-facts.sh writes it ahead
 # of its own. pr-facts.sh's full pass lists the anchors carrying it, in any
-# status, retries each clear, and unsets the key once the clear lands.
+# status, retries each clear, and unsets the key once the clear lands. The
+# retry clears only the PR the anchor's pr_url names, so the write that records
+# the key on an anchor with no pr_url records the validated live PR url too.
 keys = ["status_label_clear_owed"]
 
 [metadata.pr_close_disposition]

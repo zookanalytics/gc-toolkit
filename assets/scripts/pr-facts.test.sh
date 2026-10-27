@@ -6711,6 +6711,7 @@ prview 118 CLOSED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: needs-revi
 out=$(run)
 eq "$(bstatus LB8) $(meta LB8 merge_result)" "closed merged" "a merge whose clear fails is still recorded"
 eq "$(meta LB8 status_label_clear_owed)" "117" "…and the anchor records the clear it owes"
+hasnt "$(grep '^bd update LB8' "$STUB_GC_LOG")" "pr_url" "…leaving the pr_url the anchor records alone"
 eq "$(meta LB9 merge_result) $(meta LB9 status_label_clear_owed)" "abandoned 118" "an out-of-band close records it the same way"
 eq "$(pv_labels 117)" "status: merging" "test premise: the label is still on the merged PR"
 out=$(run)
@@ -6738,6 +6739,22 @@ out=$(run)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit 139" "a key whose anchor names another repository edits nothing"
 eq "$(meta LB11 status_label_clear_owed)" "139" "…and keeps the key"
 has "$out" "left for the operator" "…and says the anchor is left for the operator"
+
+echo "# …an owed clear on an anchor that records no pr_url names the PR, so the retry clears it"
+# The identity check ahead of the record accepts an anchor with no pr_url, and
+# the retry clears only the PR an anchor's pr_url names, so the write that
+# records the owed clear names the PR this pass certified.
+printf '#!/usr/bin/env bash\nexit 2\n' > "$SD/pr-status-label.sh"
+store "[$(anchor LB12 180 | jq -c 'del(.metadata.pr_url)'), $(anchor LB13 181 | jq -c 'del(.metadata.pr_url)')]"
+prview 180 MERGED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: merging"}]' > "$GH_DIR/pr_view_180.json"
+prview 181 CLOSED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: needs-review"}]' > "$GH_DIR/pr_view_181.json"
+out=$(run)
+eq "$(meta LB12 status_label_clear_owed) $(meta LB12 pr_url)" "180 https://github.com/zook/gc-toolkit/pull/180" "a merge whose clear fails names the PR it owes the clear on"
+eq "$(meta LB13 status_label_clear_owed) $(meta LB13 pr_url)" "181 https://github.com/zook/gc-toolkit/pull/181" "…and so does an out-of-band close"
+printf '%s\n' "$LABEL_WRAPPER" > "$SD/pr-status-label.sh"
+out=$(run)
+eq "$(pv_labels 180)|$(pv_labels 181)" "|" "the full pass's retry takes both labels off"
+eq "$(meta LB12 status_label_clear_owed)|$(meta LB13 status_label_clear_owed)" "<absent>|<absent>" "…and unsets the keys it retried"
 
 rm -f "$SD/pr-status-label.sh"
 

@@ -484,9 +484,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		record := []string{"--to", "merged", "--expect", "pull_request", "--close",
 			"--set", "merged_sha=" + mergeOid, "--unset", "merge_record_failures",
 			"--append-notes", "Merged to " + base + " at " + short + " (record recovered by merge)"}
-		if m.clearStatusLabel(id, num) {
-			record = append(record, "--set", statusLabelClearOwed+"="+num)
-		}
+		record = append(record, m.clearStatusLabel(id, num, prurl, liveURL)...)
 		if m.transition(m.stdout, m.stderr, id, record...) {
 			m.recovered++
 			fmt.Fprintf(m.stdout, "%s: recovered %s — PR#%s was already merged to %s at %s; the record had not landed\n", mergeProg, id, num, base, short)
@@ -846,9 +844,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	record := []string{"--to", "merged", "--expect", "pull_request", "--close",
 		"--set", "merged_sha=" + mergeOid, "--unset", "merge_record_failures",
 		"--append-notes", "Merged to " + landTarget + " at " + noteShort}
-	if m.clearStatusLabel(id, num) {
-		record = append(record, "--set", statusLabelClearOwed+"="+num)
-	}
+	record = append(record, m.clearStatusLabel(id, num, prurl, liveURL)...)
 	if m.transition(m.stdout, m.stderr, id, record...) {
 		m.merged++
 		echoShort := short
@@ -1288,14 +1284,16 @@ func (m *merger) escalate(args ...string) {
 const statusLabelClearOwed = "status_label_clear_owed"
 
 // clearStatusLabel takes the status: label off a PR that merged, through the
-// label's one writer, ahead of the write that records the merge. It reports
-// whether the clear is owed: true when the writer ran and did not land it, so
-// the record carries statusLabelClearOwed. A missing writer clears nothing and
-// owes nothing.
-func (m *merger) clearStatusLabel(id, num string) (owed bool) {
+// label's one writer, ahead of the write that records the merge. When the
+// writer ran and did not land the clear, it returns the fields that record
+// carries: statusLabelClearOwed, and the PR's url when the anchor records no
+// pr_url, because pr-facts.sh's retry clears only the PR an anchor's pr_url
+// names. url is the live PR's, which the pass has validated against origin. A
+// missing writer clears nothing and owes nothing.
+func (m *merger) clearStatusLabel(id, num, prurl, url string) (owed []string) {
 	p := m.scriptPath("pr-status-label.sh")
 	if !isExecutable(p) {
-		return false
+		return nil
 	}
 	cmd := exec.Command(p, "clear", "--pr", num, "--repo", m.originRepoQ)
 	var errBuf bytes.Buffer
@@ -1303,9 +1301,13 @@ func (m *merger) clearStatusLabel(id, num string) (owed bool) {
 	cmd.Stderr = &errBuf
 	if rc := gcbd.ExitCode(cmd.Run()); rc != 0 {
 		fmt.Fprintf(m.stderr, "%s: WARN PR#%s merged but its status: label did not come off (rc=%d; %s); the record carries %s=%s, which pr-facts.sh retries (anchor %s)\n", mergeProg, num, rc, strings.TrimSpace(errBuf.String()), statusLabelClearOwed, num, id)
-		return true
+		owed = []string{"--set", statusLabelClearOwed + "=" + num}
+		if prurl == "" {
+			owed = append(owed, "--set", "pr_url="+url)
+		}
+		return owed
 	}
-	return false
+	return nil
 }
 
 func (m *merger) recordCap(id, num, mergeOid, base string) {
