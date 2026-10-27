@@ -262,12 +262,13 @@ reaction on a subject whose whole job is over once another bead lands, such as
 the bead that retires the code the subject is about. The edge it writes,
 `until`, is bd's own type, a reference that keeps a bead "active until target
 closes", and nothing that Gas City, the packs it bundles and publishes, or bd
-ships acts on it. Gas City and bd close a bead when other beads close only if
-it contains them, as a convoy, an epic or a workflow root does, or if it is a
-gate, which closes itself and unblocks the work that waits on it. None of them
-closes a bead whose job another bead's landing ends. So the exit composes what
-bd ships, the `until` type and an edge write made in one transaction, with the
-release the script's other exits use, and the pack's existing reader of
+ships acts on it. When Gas City or bd closes a bead because other beads closed,
+the bead it closes contains them, belongs to one of them or to their workflow,
+is the source bead of a workflow that passed, or is a gate that awaits them, as
+a session's wait is. The packs close a bead once its own work lands. A subject
+whose job another bead's landing ends is none of these. So the exit composes
+what bd ships, the `until` type and an edge write made in one transaction, with
+the release the script's other exits use, and the pack's existing reader of
 `until` edges closes the subject.
 
 ### The surface and the need
@@ -305,22 +306,24 @@ Each was read on 2026-10-27 (UTC):
 
 - Gas City at main `a86d05bd73e0`: the CLI reference, the orders tutorial, the
   `core` pack's orders and the scripts they run, and its source. The source was
-  searched for each dependency type Gas City names and what reads it, the
-  controller's close-event auto-close, `gc convoy check`, `gc session wait`,
-  the gate sweep, and `until` written as a dependency type anywhere in its Go,
-  docs, TOML and shell. Each hit outside the tests was read.
+  searched for each dependency type Gas City names and what reads it, every
+  call that closes a bead in its Go and in the `core` pack's scripts,
+  `gc convoy check`, `gc session wait`, the gate sweep, and `until` written as
+  a dependency type anywhere in its Go, docs, TOML and shell. Each hit outside
+  the tests was read.
 - The packs the first part lists, in Gas City's packs repository at
   `dac12a4a802c`, and `gastown` and `gascity` at `66c672b5ed00`, the packs
   commit Gas City bundles. Each was searched for an `until` edge in each way of
   writing the type, a gate that awaits a bead, a gate check, an order an event
   triggers, `bd supersede`, `bd duplicate`, `bd epic`, `gc convoy check` and
-  `gc convoy land`, `gc session wait`, and prose about closing one bead when
-  another closes or lands. Each hit was read.
+  `gc convoy land`, `gc session wait`, every command that closes a bead, and
+  prose about closing one bead when another closes or lands. Each hit was read.
 - bd at main `5011528b3ad5`: its dependency types and every reader of
   `until`, `bd dep add --file`, `bd dep list`, `bd gate` and its bead gate,
-  `bd epic close-eligible`, `bd close`, `bd supersede`, `bd duplicate` and
-  `bd defer`. The bd the city runs, at `9b65b9e198ac`, was read for the same
-  `until` type, readiness rule, bead gate and edge write.
+  `bd epic close-eligible`, `bd close` and every other call that closes a
+  bead, `bd supersede`, `bd duplicate` and `bd defer`. The bd the city runs, at
+  `9b65b9e198ac`, was read for the same `until` type, readiness rule, bead gate
+  and edge write.
 
 Each passage cited below from Gas City's and bd's documentation was also found
 on the live sites, docs.gascity.com and beads.gascity.com.
@@ -343,11 +346,13 @@ page leaves it out of both its tables, of blocking and of non-blocking types.
 Gas City names no `until` edge. Its readiness reads `blocks`, `waits-for` and
 `conditional-blocks` (package beads, `IsReadyBlockingDependencyType`), and its
 convoy membership reads `tracks` (package convoy, `TrackingDepType`). No pack,
-published or bundled, writes or reads an `until` edge. bd's `delegated-from`
-type says "completion cascades up", and like `until` it is read only to show
-it.
+published or bundled, writes an `until` edge or reads one by its type. bd's
+`delegated-from` type says "completion cascades up", and like `until` it is
+read only to show it.
 
-**What closes a bead when others close contains them, or is a gate.**
+**What Gas City and bd close when other beads close.** The bead they close
+contains the beads that closed, belongs to one of them or to their workflow,
+is the source bead of a workflow that passed, or is a gate that awaits them.
 
 - The controller closes a convoy once every member is terminal. On a member's
   `bead.closed` it checks each convoy that parents or tracks the bead, and
@@ -358,10 +363,20 @@ it.
   `convoy-autoclose-backstop` order run the same check for a close whose event
   was missed. The same close event closes a molecule root once all its steps
   are terminal, and the workflow roots attached to a closed work bead
-  (`doMoleculeAutocloseWith`, `doWispAutocloseWith`).
+  (`doMoleculeAutocloseWith`, `doWispAutocloseWith`). `bd close` also closes a
+  molecule's root with its last open step when the root is a poured molecule,
+  a wisp or an epic labeled `template`.
 - [`bd epic close-eligible`](https://beads.gascity.com/cli-reference/epic)
   closes "epics where all children are complete". Nothing in Gas City or its
   packs runs it.
+- Inside a workflow, a step still open when its root finishes closes as
+  skipped or canceled, the open members of a scope close as skipped once one
+  of its members fails, and a drain control closes failed once a step before
+  it fails (package dispatch). The `core` pack's `reaper` order closes a stale
+  wisp whose owning parent or root has closed.
+- When a workflow passes, its finalizer closes the bead the workflow was
+  launched from and each source bead above that one (package dispatch,
+  `closeSourceBeadChain`).
 - A gate is a bead that blocks "dependent work until an external condition is
   met"
   ([Dependencies and Gates](https://beads.gascity.com/core-concepts/dependencies#gates)).
@@ -370,12 +385,24 @@ it.
   gate once that bead closes, and the work that waits on the gate through a
   `blocks` edge becomes ready. The `core` pack's `gate-sweep` order runs
   `bd gate check` for timer and GitHub gates and skips bead gates, to be
-  restored "when beads adds it back". `gastown`'s deacon checks the same kinds.
-  So nothing in Gas City as shipped checks a bead gate.
-- The `core` pack's other orders that close beads close them by their own age
-  or state, not on another bead's close: stale delivered nudges and read mail
-  (`nudge-mail-sweep`), stale order-tracking beads (`order-tracking-sweep`),
-  and stale or expired wisps (`reaper`, `wisp-compact`).
+  restored "when beads adds it back". `gastown`'s deacon prompt lists
+  `bd gate check` for the same two kinds. Its role line counts bead gates among
+  the gates it closes when their conditions are met, but no command it is given
+  checks one, and its patrol formula leaves gate evaluation to exec orders. So
+  no order, script or command in Gas City as shipped checks a bd bead gate.
+- Gas City's session waits are gates of its own.
+  [`gc session wait --on-beads`](https://docs.gascity.com/reference/cli#gc-session-wait)
+  registers "a dependency wait for a session" as a bead of type `gate`
+  (package session, `WaitBeadType`). Once the beads it names close, the
+  controller wakes the session with the wait's note, and once the note is
+  delivered it closes the wait bead (`CloseWaitFromNudge`). The `gascity` and
+  `superpowers` packs park a session on its own step that way while a person
+  decides.
+- The `core` pack's orders also close beads by their own age or state: stale
+  delivered nudges and read mail (`nudge-mail-sweep`), stale order-tracking
+  beads (`order-tracking-sweep`), and stale workflow roots, expired nudges and
+  stale issues (`reaper`). `wisp-compact` closes nothing. It deletes closed
+  wisps past their time to live and makes open ones permanent.
 
 **What acts on a close closes nothing itself.**
 
@@ -384,17 +411,26 @@ it.
   ([Tutorial 07 - Orders](https://docs.gascity.com/tutorials/07-orders)), and
   the order supplies what it runs. The `core` pack's
   `cascade-nudge-on-blocker-close` is one. It reads the closed bead's `blocks`
-  dependents and nudges each one's assignee or routed target.
-- [`gc session wait --on-beads`](https://docs.gascity.com/reference/cli#gc-session-wait)
-  registers "a dependency wait for a session", which wakes the session with a
-  note once the beads it names close. The `gascity` and `superpowers` packs
-  park a session on its own step that way while a person decides.
+  dependents and nudges each one's assignee or routed target. No pack ships an
+  order that an event triggers.
 - The `core` pack's `cross-rig-deps` order turns a satisfied cross-rig
   `blocks` edge into `related`.
 - [`bd supersede --with`](https://beads.gascity.com/cli-reference/supersede)
   and [`bd duplicate --of`](https://beads.gascity.com/cli-reference/duplicate)
   close a bead at once, "with a reference to" another bead, whether or not
   that bead has closed. `bd defer --until` takes a time, not a bead.
+
+**Packs close a bead once its own work lands.** The `gascity` pack's `do-work`
+and `implementation-base` formulas and `superpowers`' development formulas end
+in a `close-source-anchor` step, which closes the work bead the run
+implemented once the steps before it have closed. The `bmad`,
+`compound-engineering` and `gstack` formulas that extend `do-work` inherit it.
+`gastown`'s refinery closes a work bead when it merges the bead's branch, and
+its witness closes an orphaned bead whose branch is already on main. At
+`dac12a4a802c`, `gastown`'s `pr-merge-reconcile` command also closes a work
+bead once GitHub reports its pull request merged. The `gascity` pack's
+`wait-for-drain` step closes itself once its run's drain control has closed.
+Each closes a step of a run, or a bead whose own work has landed.
 
 **bd writes a set of edges in one transaction.** `bd dep add --file -` reads
 edges as JSONL, each with its own type
@@ -407,8 +443,9 @@ bead gate the same way, and writes a `--file` set in the same one transaction.
 
 ### What the change does with it
 
-Nothing Gas City or bd ships closes a bead that neither contains the beads it
-waits on nor is a gate, so the close stays with the pack's existing reader of
+Nothing Gas City, bd or the packs ship closes a subject like this one, which
+contains none of the beads it names, belongs to none of them, has no run of
+its own and is no gate. So the close stays with the pack's existing reader of
 `until` edges. The deferred-dispatch pass closes an open, unassigned bead that
 carries no live work once every one of its `until` targets has closed and no
 `blocks` blocker of its own is open
@@ -440,6 +477,14 @@ Each nearer primitive fails a need above:
   to 4. A `blocks` edge would hold the subject, nothing in Gas City checks the
   gate, and a gate that closed would make the subject ready work, which is what
   the blocked exit does, not a close.
+- A session wait on the named bead fails need 1, because the wait is a bead of
+  its own that names a session, not a record on the subject. It closes only
+  itself. Once the named bead closes, the controller hands the session a note,
+  and the subject closes only if that session's agent closes it. A wait whose
+  session has closed is canceled.
+- A run launched from the subject would have its finalizer close the subject,
+  as the run's source, once the run passes. The run is work the subject
+  carries, so it fails need 2.
 - Making the subject a gate, a convoy or an epic over the bead it names would
   change what the subject is to every reader of the store. A report of a
   problem would read as a wait that work blocks on, a group of work, or the
@@ -452,6 +497,7 @@ Each nearer primitive fails a need above:
 
 This answer changes if bd or Gas City acts on an `until` edge, if Gas City's
 gate sweep checks bead gates and a gate can close the bead that waits on it,
-or if Gas City closes a bead once the beads it names close. At Gas City's
-`a86d05bd73e0` and bd's `5011528b3ad5` none does. The exit should then write
-what that reader reads, and the pack's reader should retire.
+or if a Gas City wait can close a bead other than itself once the beads it
+names close. At Gas City's `a86d05bd73e0` and bd's `5011528b3ad5` none does.
+The exit should then write what that reader reads, and the pack's reader should
+retire.
