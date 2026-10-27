@@ -11,9 +11,10 @@
 # exact-match dedup cannot see it. A NEW bead that shares its key or its subject
 # with a live finding in its scope is therefore refused, and those findings are
 # listed for the caller to compare. --distinct files it anyway.
-# A caller that sees the situation end passes --cleared. That stamps the live
-# bead with when it cleared and files nothing, and a later report that lands on
-# that bead unsets the stamp and notes that it came back.
+# A caller that sees the situation end passes --cleared. That sets the live
+# bead's situation state to cleared with `bd set-state`, which records the
+# change as a closed event bead under it and files no finding. A later report
+# that lands on that bead sets the state back to active the same way.
 #   patrol-finding.sh --key <situation-key> --title <one line> --message <text>
 #                     [--about <bead-id>] [--scope <slug>] [--type <t>]
 #                     [--priority <n>] [--rig <rig>] [--distinct]
@@ -100,12 +101,12 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               gc-toolkit). It also rig-qualifies the proactive pool
   --no-react  file the bead and stop. It keeps gc.proactive=1, so the next
               `gc-proactive.sh scan --sling` sweep reacts to it
-  --cleared   the situation has ended. Stamp finding.cleared_at on the bead a
-              recurrence would land on, or else on one held at blocked with
-              nothing left to wait on, add a one-line note of --message, and
-              file nothing. With no live bead there is nothing to record, and
-              the exit is 0. --title is not needed. A later report that lands
-              on that bead unsets the stamp and notes that the finding recurred
+  --cleared   the situation has ended. Set situation=cleared, with --message
+              as the reason, on the bead a recurrence would land on, or else
+              on one held at blocked with nothing left to wait on, and file no
+              finding. With no live bead there is nothing to record, and the
+              exit is 0. --title is not needed. A later report that lands on
+              that bead sets situation=active
   --dry-run   print what would be filed and exit
 U
 }
@@ -395,40 +396,22 @@ fi
 # ── The situation has ended ──────────────────────────────────────────
 # --cleared lands on the bead a recurrence would land on. When there is none,
 # it lands on a held bead with nothing left to wait on: a recurrence files a new
-# bead beside that one, but it is still the newest record of the situation. It
-# files nothing, because a situation that no live bead holds has no record to
-# end. finding.cleared_at is what a reader checks, so a finding that cleared is
-# told from one still recurring without parsing notes. The note is one bounded
-# line, held back whenever a later recurrence's cap marker would not fit after
-# it, the way a recurrence's own line is.
+# bead beside that one, but it is still the newest record of the situation. A
+# situation that no live bead holds has no record to end, so nothing is written.
+# The end is bd's operational state, set with `bd set-state`: the
+# situation:<value> label is what a reader checks (`bd state <bead> situation`),
+# and each change files bd's closed audit event under the bead, with --message
+# as its reason. The bead's status stays as it is, because the work a finding
+# asks for is not done when its situation ends. A clear of a bead already at
+# cleared writes nothing.
 if [ -n "$CLEARED" ]; then
   TARGET="${EXISTING:-$HELD}"
   if [ -z "$TARGET" ]; then
     echo "$PROG: no live bead holds $DEDUP_SCOPE, so there is no clear to record"
     exit 0
   fi
-  ROW=$(bd_json show "$TARGET")
-  SEEN=$(printf '%s' "$ROW" | jq -r '.[0].metadata["finding.occurrences"] // "1"' 2>/dev/null)
-  case "$SEEN" in ''|*[!0-9]*) SEEN=1 ;; esac
-  HAVE=$(printf '%s' "$ROW" | jq -r '(.[0].notes // "") | utf8bytelength' 2>/dev/null)
-  LINE="[$(now_utc)] $SCOPE_LABEL: finding cleared: $(note_head "$MESSAGE")"
-  MARK="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $(( SEEN + 1 ))). The notes are at their $NOTES_CAP-byte cap, so this and later recurrences $CAP_MARK."
-  set -- --set-metadata "finding.cleared_at=$(now_utc)"
-  case "$HAVE" in
-    ''|*[!0-9]*) NOTED=unread ;;
-    *)
-      if [ $(( HAVE + 1 + $(byte_len "$LINE") + 1 + $(byte_len "$MARK") )) -le "$NOTES_CAP" ]; then
-        set -- "$@" --append-notes "$LINE"; NOTED=line
-      else
-        NOTED=cap
-      fi ;;
-  esac
-  if gc bd update "$TARGET" "$@" >/dev/null 2>&1; then
-    case "$NOTED" in
-      line) echo "$PROG: $TARGET holds $DEDUP_SCOPE — recorded that it cleared, with a one-line note" ;;
-      cap)  echo "$PROG: $TARGET holds $DEDUP_SCOPE — recorded that it cleared; nothing is noted, because the notes are at their $NOTES_CAP-byte cap" ;;
-      *)    echo "$PROG: $TARGET holds $DEDUP_SCOPE — recorded that it cleared; nothing is noted, because the bead's notes could not be read" ;;
-    esac
+  if gc bd set-state "$TARGET" situation=cleared --reason "$MESSAGE" >/dev/null 2>&1; then
+    echo "$PROG: $TARGET holds $DEDUP_SCOPE — recorded that it cleared (situation=cleared)"
     exit 0
   fi
   warn "could not record on $TARGET that $DEDUP_SCOPE cleared"
@@ -441,30 +424,32 @@ if [ -n "$EXISTING" ]; then
   case "$SEEN" in ''|*[!0-9]*) SEEN=1 ;; esac
   SEEN=$(( SEEN + 1 ))
   WAS=$(printf '%s' "$ROW" | jq -r '.[0].metadata["finding.digest"] // ""' 2>/dev/null)
-  CLEARED_AT=$(printf '%s' "$ROW" | jq -r '.[0].metadata["finding.cleared_at"] // ""' 2>/dev/null)
+  # A report on a bead whose situation cleared is its return. The state is read
+  # from the bead's row in the keyed listing, which the lookup above proved
+  # readable, so a show that fails cannot hide a clear. It goes back to active
+  # before the occurrence is counted, so a return that does not land counts
+  # nothing, and the caller's retry still reads it cleared.
+  SITUATION=$(printf '%s' "$LIVE" | jq -r --arg id "$EXISTING" '[.[] | select(.id == $id) | (.labels // [])[]? | strings | select(startswith("situation:"))][0] // "" | ltrimstr("situation:")' 2>/dev/null)
+  RETURNED=""
+  if [ "$SITUATION" = cleared ]; then
+    if ! gc bd set-state "$EXISTING" situation=active --reason "reported again (occurrence $SEEN)" >/dev/null 2>&1; then
+      warn "could not record on $EXISTING that $DEDUP_SCOPE is active again after it cleared, so the recurrence is not counted either; the finding is still tracked there"
+      exit 1
+    fi
+    RETURNED="; its situation had cleared and is active again"
+  fi
 
   set -- --set-metadata "finding.occurrences=$SEEN" \
          --set-metadata "finding.last_seen=$(now_utc)"
-  # A finding reported again after it cleared is live again. The stamp goes,
-  # and a note says the finding came back even when its text is unchanged.
-  NOTE_OF="the changed text"
-  if [ -n "$CLEARED_AT" ]; then
-    set -- "$@" --unset-metadata finding.cleared_at
-    NOTE_OF="its return after it cleared at $CLEARED_AT"
-  fi
   NOTED=""
-  if [ "$WAS" != "$DIGEST" ] || [ -n "$CLEARED_AT" ]; then
-    if [ "$WAS" != "$DIGEST" ]; then set -- "$@" --set-metadata "finding.digest=$DIGEST"; fi
+  if [ "$WAS" != "$DIGEST" ]; then
+    set -- "$@" --set-metadata "finding.digest=$DIGEST"
     # The notes as they stand: their size in bytes, and whether the cap marker
     # is already among them. Notes that cannot be read get nothing appended.
     NOTES_NOW=$(printf '%s' "$ROW" | jq -r --arg m "$CAP_MARK" \
         '(.[0].notes // "") | "\(utf8bytelength) \(contains($m))"' 2>/dev/null)
     HAVE="${NOTES_NOW%% *}"; MARKED="${NOTES_NOW#* }"
-    if [ -n "$CLEARED_AT" ]; then
-      LINE="[$(now_utc)] $SCOPE_LABEL: finding recurred after it cleared at $CLEARED_AT (occurrence $SEEN, digest $DIGEST): $(note_head "$MESSAGE")"
-    else
-      LINE="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN, digest $DIGEST): $(note_head "$MESSAGE")"
-    fi
+    LINE="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN, digest $DIGEST): $(note_head "$MESSAGE")"
     MARK="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN). The notes are at their $NOTES_CAP-byte cap, so this and later recurrences $CAP_MARK."
     # A line goes in only while the marker would still fit after it, so the
     # lines stop at least a marker's length short of the cap. Another writer's
@@ -487,10 +472,10 @@ if [ -n "$EXISTING" ]; then
   fi
   if gc bd update "$EXISTING" "$@" >/dev/null 2>&1; then
     case "$NOTED" in
-      line)   echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN and a one-line note of $NOTE_OF" ;;
-      cap)    echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; $NOTE_OF is not noted, because the notes are at their $NOTES_CAP-byte cap" ;;
-      unread) echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; $NOTE_OF is not noted, because the bead's notes could not be read" ;;
-      *)      echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN, text unchanged" ;;
+      line)   echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN and a one-line note of the changed text$RETURNED" ;;
+      cap)    echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the notes are at their $NOTES_CAP-byte cap$RETURNED" ;;
+      unread) echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the bead's notes could not be read$RETURNED" ;;
+      *)      echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN, text unchanged$RETURNED" ;;
     esac
     exit 0
   fi
