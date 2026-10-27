@@ -9,12 +9,14 @@ description: The search the arch check asks for before tools/lint-step-text.sh j
 text, meaning a shell block that holds control flow or more than one command.
 It judges only the lines the change adds. The arch check asks what Gas City
 already ships for that ([review-arch.md](../../docs/review-arch.md#the-checks),
-check 1). Gas City validates a formula's structure and never reads what its
-step text holds. Its own formulas, and the packs it publishes, keep procedures
-in step text, and the checks they run over that text are tests that judge
-whole files. No formula command in `gc` or `bd` returns a file's step text with
-each line tied to its place in the file. So the pack checks rule 2 with a lint
-of its own, run by the rig's existing lint command.
+check 1). Gas City validates a formula's structure and handles step text only
+as a template: it fills in variables when it pours a formula, and its compiler
+rejects a reserved variable used wrongly. No command it ships judges the shell
+a step holds. Its own formulas, and the packs it publishes, keep procedures in
+step text, and the checks they run over that text are tests that judge whole
+files. No formula command in `gc` or `bd` returns a file's step text with each
+line tied to its place in the file. So the pack checks rule 2 with a lint of
+its own, run by the rig's existing lint command.
 
 ## The surface and the need
 
@@ -55,7 +57,7 @@ Each was read on 2026-10-27 (UTC):
   compile pipeline, `GC_FORMULA_REF`, the doctor's formula and pack checks, and
   every test or tool that reads a fenced shell block or runs shellcheck. Each
   hit outside the tests was read, and so was each test that reads step text.
-- Every pack Gas City publishes, at `dac12a4a802c`: `bmad`, `cass`,
+- Every pack in Gas City's packs repository, at `dac12a4a802c`: `bmad`, `cass`,
   `compound-engineering`, `contributing-to-gascity`, `discord`, `gascity`,
   `gastown`, `github`, `gstack`, `oversight-rig`, `pr-pipeline`, `pr-review`,
   `profiler`, `runtime-cloudflare`, `slack-channel`, `slack-full`,
@@ -77,13 +79,22 @@ on the live sites, docs.gascity.com and beads.gascity.com.
 says "A formula must satisfy these structural rules". They cover the formula's
 name, contract and type, its variables, step ids and titles, priorities,
 dependencies, and the shape of `check`, `retry`, `drain`, timeouts and loops.
-None reads what a step's description holds. Its
+None reads what a step's description holds. One rule outside that list reads
+step text, for template variables only. The compiler's reserved-symbol
+validation
+([Compilation](https://docs.gascity.com/reference/specs/formula-spec-v2#2-compilation))
+finds each reference to a variable a v2 formula reserves, `{{convoy_id}}`,
+`{{bead_id}}` or `{{issue}}`, in a step's title, description and notes with a
+regular expression. It fails the references the
+[variables section](https://docs.gascity.com/reference/specs/formula-spec-v2#1-4-variables)
+forbids (package formula, `ValidateGraphV2ReservedSymbols`). The
+specification's
 [Doctor and lint](https://docs.gascity.com/reference/specs/formula-spec-v2#doctor-and-lint)
-section names the two checks Gas City runs over formulas. The `gc doctor` check
-`formula-requirements` reports parse failures, the deprecated `contract`
-opt-in, missing v2 requirements and host mismatches (package doctor,
-`FormulaRequirementsCheck`). `gc lint` warns on the deprecated
-`gc.output_json` fan-out, and "Warnings do not fail lint."
+section names what `gc doctor` and `gc lint` check in formulas. The
+`gc doctor` check `formula-requirements` reports parse and inheritance
+failures, the deprecated `contract` opt-in, missing v2 requirements and host
+mismatches (package doctor, `FormulaRequirementsCheck`). `gc lint` warns on
+the deprecated `gc.output_json` fan-out, and "Warnings do not fail lint."
 
 **`gc lint` runs a fixed set of checks, and none reads step text.** The
 [CLI Reference](https://docs.gascity.com/reference/cli#gc-lint) says it
@@ -111,12 +122,20 @@ does name a script, but "after each iteration closes, the orchestrator runs
 the configured script" to judge the agent's work, not to do it. The `core`
 pack's `mol-do-work` keeps shell blocks with control flow in its `do-work` and
 `drain` steps, such as the block in `do-work` that opens
-`if [ -z "$WORK_BEAD_ID" ]; then`. Gas City checks one property of that text
-in its own test suite. `coreDrainAckBlocks` collects each block fenced as
+`if [ -z "$WORK_BEAD_ID" ]; then`. Gas City's own tests check that text, each
+over files Gas City ships. `coreDrainAckBlocks` collects each block fenced as
 `bash` in a rendered core step, and `coreDrainAckViolations` reports a
 `gc runtime drain-ack` that no fail-closed close of the step precedes in its
-own block (package main, `core_formula_drain_ack_test.go`). It tests core's
-formulas, and no command runs it on a pack.
+own block (package main, `core_formula_drain_ack_test.go`).
+`TestQualityGateFallbackInFormulas` pins phrases in the steps of core's
+`mol-polecat-base`. The acceptance test `TestDrainAckBeforeExit` wants
+`gc runtime drain-ack` on the line before each `exit` in a code block of the
+formulas and prompt templates under `examples/`. The dolt pack's tests lift the
+shell out of its `mol-dog-stale-db` step, check it with `bash -n` and run it
+against stubbed commands (`examples/bd/dolt`). The gastown example's tests run
+helper functions they cut out of the `merge-push` step of the bundled
+`gastown` pack's `mol-refinery-patrol` (`examples/gastown`). No command runs
+any of them on a pack.
 
 **No formula command returns step text with its lines.**
 
@@ -132,24 +151,36 @@ formulas, and no command runs it on a pack.
   `Step.SourceLocation`, a place such as `steps[0]`, and does not serialize it.
   So the command returns the compiled steps of whichever formula wins a name
   in the city, not the text of a given file at a given commit.
-- `GC_FORMULA_REF` reads formula files at a git ref (package formula,
-  `SourceFromEnv` and `GitRefSource`). Inside a repository it reads committed
-  content only, and "an uncommitted or untracked file is treated as absent"
-  (`gitRepoAwareFallback`). The lint's new side is the working tree, before any
-  commit.
+- `GC_FORMULA_REF` chooses what the formula reader reads (package formula,
+  `SourceFromEnv`). Unset, or set to `working-tree` or `HEAD`, it reads the
+  files on disk. Set to another git ref, it reads that ref's committed content
+  for a path inside a repository (`GitRefSource`), and "an uncommitted or
+  untracked file is treated as absent" (`gitRepoAwareFallback`). So
+  `gc formula show` could read a formula at the merge base or on disk, but
+  either way it answers with the compiled steps of the name that wins in the
+  city's layers, with no line.
 - [`bd cook`](https://beads.gascity.com/cli-reference/cook) and
   [`bd formula`](https://beads.gascity.com/cli-reference/formula) read bd's
   own formula files. bd's parser decodes a path as TOML only when it ends in
-  `.formula.toml`, and as JSON otherwise (package formula, `Parser.ParseFile`),
-  so a Gas City formula named `<name>.toml` does not parse.
-  [`bd lint`](https://beads.gascity.com/cli-reference/lint) checks issues for
-  "missing recommended sections", not formulas.
+  `.formula.toml`, and as JSON otherwise (package formula, `Parser.ParseFile`).
+  So it reads a Gas City formula `<name>.toml` only through the
+  `<name>.formula.toml` alias that Gas City links into a scope's
+  `.beads/formulas/` to the file that wins the name
+  ([formula specification](https://docs.gascity.com/reference/specs/formula-spec-v2#1-1-file-naming-and-layers)),
+  and like Gas City's parser it keeps a step's `SourceLocation` out of its
+  JSON. [`bd lint`](https://beads.gascity.com/cli-reference/lint) checks
+  issues for "missing recommended sections", not formulas.
 
 **Nothing Gas City ships counts the commands in a shell block.** Its module
-requires TOML decoders and no shell or Markdown parser. Its drain-ack test
-finds a block by the fence's prefix and a close by a regular expression, and
+requires TOML decoders and no Markdown parser. It requires `google/shlex`,
+which splits a string into words by the shell's quoting rules and has no
+notion of an operator, and uses it to read an agent's shell command as a file
+read or a search (packages worker and sessionlog). The core drain-ack test
+finds a block by the fence's prefix and a close by a regular expression, the
+reserved-symbol validation finds a variable by a regular expression, and
 `ScanUnknownFlags` splits lines as described above, each for a purpose of its
-own.
+own. The dolt pack's test hands a block to `bash -n`, which checks its syntax
+and counts nothing.
 
 **The published checks judge whole files.**
 
@@ -162,15 +193,21 @@ own.
   decodes with Python's `tomllib`. Its exceptions are fixed lists of deferred
   steps and exempt formulas. Its `tests/test_no_bare_bd_commands.py` checks
   that the packs' shipped files route `bd` commands through `gc`.
-- Two packs test a procedure where it lives. `gastown`'s
-  `tests/test_polecat_push_gate.sh` lifts the push gate's bash out of the
-  `submit-and-exit` step of its `mol-polecat-work` and runs it against stubbed
-  `gc` and `git`, so "what is tested is the text an agent reads at pour time".
-  That test is at the packs' head and not at the bundled pin. `pr-pipeline`'s
+- Tests run procedures where they live. `gastown`'s tests lift bash out of
+  its formulas' steps through `tomllib` and run it against stubbed commands.
+  At the bundled pin, `tests/test_deacon_dolt_health_guard.sh` does it for the
+  `dolt-health` step of `mol-deacon-patrol`. At the head,
+  `tests/test_polecat_push_gate.sh` does it for the push gate in the
+  `submit-and-exit` step of `mol-polecat-work`, so "what is tested is the text
+  an agent reads at pour time". `pr-pipeline`'s
   `tests/test_pr_review_size_guard.py` does the same for the budget refusal in
-  `mol-pr-review`. The `gascity` pack's `tests/test_formula_assets.py` pins
-  phrases in its own step descriptions and checks that each
-  `description_file` resolves.
+  `mol-pr-review`. The repository's own
+  `tests/test_default_branch_resolution.py` pulls the default-branch
+  resolution out of the `gascity` pack's `prepare-worktree` step and out of
+  guards in `contributing-to-gascity` and `pr-pipeline` formulas, and runs it
+  against git repositories it builds. The `gascity` pack's
+  `tests/test_formula_assets.py` pins phrases in its own step descriptions and
+  checks that each `description_file` resolves.
 - A pack doctor check, `doctor/<name>/run.sh`
   ([pack specification](https://docs.gascity.com/reference/specs/pack-spec#1-2-11-doctor-directory)),
   is how Gas City lets a pack add a check of its own. Its contract hands the
@@ -185,7 +222,7 @@ it reads, and names its exceptions by file or step.
 Nothing Gas City ships covers the four needs, so the lint is pack code. It
 decodes the TOML strings in a formula, finds the fenced blocks in them and
 counts their commands itself, with awk, and it reads the merge base, the
-working tree and in-flight heads with git. Its unit is the one Gas City's
+working tree and in-flight heads with git. Its unit is the one Gas City's core
 drain-ack test uses, a fenced shell block of decoded step text, which is what
 an agent runs as one command. It parts from the published checks in judging
 only what a change adds, because the rule exempts existing step text until its
@@ -204,7 +241,7 @@ formula sets `description_file`. tk-o55szzi extends the lint to that file, and
 it waits on this change.
 
 This answer changes if `gc lint` takes a rule that a pack declares, if the
-formula specification's validation reads what step text holds, or if a Gas
+formula specification's validation judges the shell in step text, or if a Gas
 City command returns a formula file's step text with each line tied to its
 place in the file, at a commit or in the working tree. At `45563e2abf21` none
 does. The lint should then become that rule, or read its step text through
