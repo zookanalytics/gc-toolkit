@@ -236,7 +236,9 @@ function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
 }
 # Count one command segment of a masked line: its control flow into SC_CF and
 # SC_W, and the command it runs, if any, into SC_CMD. Only a word in command
-# position is a keyword.
+# position is a keyword. segs drops a case clause's pattern label before this
+# reads the segment, so a word that ends in ) closes a subshell and is the
+# subshell's last command.
 function seg_end(g,   nw, ww, j, t) {
     nw = split(g, ww, /[ \t]+/)
     j = 1
@@ -246,19 +248,27 @@ function seg_end(g,   nw, ww, j, t) {
         if (t == "" || t ~ /^[{}!]+$/ || t == "then" || t == "do") { j++; continue }
         if (t == "if" || t == "elif" || t == "else" || t == "while" || t == "until") { SC_CF++; SC_W = SC_W " " t; j++; continue }
         if (t == "fi" || t == "done" || t == "esac" || t ~ /^[)}]/) return
-        if (t == "for" || t == "select" || t == "case" || t == "function") { SC_CF++; SC_W = SC_W " " t; return }
+        if (t == "case") { SC_CF++; SC_W = SC_W " case"; SC_LBL = 1; return }
+        if (t == "for" || t == "select" || t == "function") { SC_CF++; SC_W = SC_W " " t; return }
         if (t ~ /^[A-Za-z_][A-Za-z0-9_:.-]*\(\)/ || ww[j + 1] ~ /^\(\)/) { SC_CF++; SC_W = SC_W " function"; return }
-        if (t ~ /\)$/ && t !~ /\(/) { j++; continue }
         break
     }
     if (j <= nw) SC_CMD++
 }
 # Split a masked line into commands at ; ;; & | |& && || and newlines. A
-# redirection's & or | (>& <& &> >|) is part of a word.
+# redirection's & or | (>& <& &> >|) is part of a word. A case clause opens
+# with its pattern label, which is no command: the first word after case ...
+# in, or after ;; ;& or ;;&. SC_LBL says one is due, across lines, and the
+# label is skipped whole, alternatives and all, so its | is not a pipe.
 function segs(m,   n, i, c, nx, pv, g) {
     n = length(m); g = ""; SC_CMD = 0; SC_CF = 0; SC_W = ""
     for (i = 1; i <= n; i++) {
         c = substr(m, i, 1); nx = substr(m, i + 1, 1); pv = (i > 1) ? substr(m, i - 1, 1) : ""
+        if (SC_LBL && c != " " && c != "\t" && c != "\n") {
+            if (substr(m, i) ~ CASE_IN) { i++; continue }
+            SC_LBL = 0
+            if (match(substr(m, i), CASE_LABEL)) { i += RLENGTH - 1; continue }
+        }
         if (c == "&") {
             if (nx == "&") { seg_end(g); g = ""; SC_CF++; SC_W = SC_W " &&"; i++; continue }
             if (pv == ">" || pv == "<" || nx == ">") { g = g c; continue }
@@ -271,7 +281,10 @@ function segs(m,   n, i, c, nx, pv, g) {
             seg_end(g); g = ""; continue
         }
         if (c == ";") {
-            if (nx == ";" || nx == "&") { i++; if (substr(m, i + 1, 1) == "&") i++ }
+            if (nx == ";" || nx == "&") {
+                i++; if (substr(m, i + 1, 1) == "&") i++
+                seg_end(g); g = ""; SC_LBL = 1; continue
+            }
             seg_end(g); g = ""; continue
         }
         if (c == "\n") { seg_end(g); g = ""; continue }
@@ -281,20 +294,24 @@ function segs(m,   n, i, c, nx, pv, g) {
 }
 # AC_CMD, AC_CF and AC_W for a whole command line: its own commands and
 # control flow, plus each command substitution's control flow, and the
-# substitution's commands when it holds more than one.
-function analyze(s, depth,   m, n, i, subs, cmd, cf, w) {
+# substitution's commands when it holds more than one. A substitution is a
+# command line of its own, so it starts with no case label due, and the line's
+# own wait for one outlasts it.
+function analyze(s, depth,   m, n, i, subs, cmd, cf, w, lbl) {
     scan(s)
     m = SM; n = SN
     for (i = 1; i <= n; i++) subs[i] = SS[i]
     segs(m)
-    cmd = SC_CMD; cf = SC_CF; w = SC_W
+    cmd = SC_CMD; cf = SC_CF; w = SC_W; lbl = SC_LBL
     if (depth < 16) {
         for (i = 1; i <= n; i++) {
+            SC_LBL = 0
             analyze(subs[i], depth + 1)
             cf += AC_CF; w = w AC_W
             if (AC_CMD > 1) cmd += AC_CMD
         }
     }
+    SC_LBL = lbl
     AC_CMD = cmd; AC_CF = cf; AC_W = w
 }
 function finish(   n, i, bl) {
@@ -352,7 +369,7 @@ function rendered(s, lines,   first, tag) {
         infence = 1
         fshell = (tag == "bash" || tag == "sh" || tag == "shell" || tag == "zsh" || tag == "ksh" || tag == "dash")
         fopen = first; fcmd = 0; fcf = 0; fwords = ""; ftext = ""
-        buf = ""; blines = ""; bsep = ""; bhd = 0; hdn = 0; hdi = 0
+        buf = ""; blines = ""; bsep = ""; bhd = 0; hdn = 0; hdi = 0; SC_LBL = 0
         return
     }
     if (infence && fshell) shell_line(s, lines)
@@ -385,7 +402,13 @@ function close_at(s,   p, off) {
 }
 # A step is each [[steps]] table, named by its id. Text before the first one is
 # the formula's own, step 0 with an empty name.
-BEGIN { stepn = 0; sid[0] = ""; sline[0] = 0 }
+# CASE_IN is a case's own `in` on a line of its own, and CASE_LABEL a pattern
+# label: an optional (, one or more patterns joined by |, and the closing ).
+BEGIN {
+    stepn = 0; sid[0] = ""; sline[0] = 0
+    CASE_IN = "^in([ \t\n]|$)"
+    CASE_LABEL = "^[(]?[^ \t\n;&|()<>]+([|][^ \t\n;&|()<>]+)*[)]"
+}
 {
     raw = $0
     if (!instr) {

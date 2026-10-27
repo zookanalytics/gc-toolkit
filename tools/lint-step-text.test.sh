@@ -171,6 +171,57 @@ line=$(printf '%s\n' "$OUT" | sed -n "s#^$F:\([0-9]*\): .*#\1#p" | head -1)
   && ok "the finding's line is the first line the change adds to the procedure" \
   || bad "the finding's line is the first line the change adds to the procedure (line $line)"
 
+# A subshell's last command ends in its closing parenthesis and is still a
+# command. Only a case clause's pattern label is a word ending in ) that is no
+# command: it opens a clause, after case ... in or after ;; ;& ;;&, and it is
+# skipped whole, alternatives and all.
+for body in '(gc status; true)' '("$S/foo.sh"; exit)' '(cd "$D"; make)'; do
+  with_step new "$(block "$body")" > "$REPO/$F"
+  run_lint "$F"
+  expect 1 "a sequence in a subshell counts its last command: $body" "with 2 commands\. "
+done
+
+with_step new "$(block '("$S/x.sh" --bead "$X")')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a single call in a subshell stays one call: exit 0"
+
+with_step new "$(block 'case "$X" in
+  a) "$S/a.sh" ;;
+  (b) "$S/b.sh" ;;
+esac')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "pat) and (pat) labels are not commands" "with 2 commands and control flow (case)\. "
+
+with_step new "$(block 'case "$X" in
+  a)
+    "$S/a.sh"
+    ;;
+  (b|c)
+    "$S/b.sh"
+    ;;&
+  d|e) "$S/d.sh" ;&
+  *) ;;
+esac')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a label is skipped whole, alternatives and all, after each kind of ;;" "with 3 commands and control flow (case)\. "
+
+with_step new "$(block 'case "$X"
+in
+  a) "$S/a.sh" ;;
+esac')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a case's in on a line of its own is no command, and a label follows it" "with 1 command and control flow (case)\. "
+
+with_step new "$(block 'case "$X" in
+  a) (cd "$D"; make) ;;
+esac')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a subshell in a clause's body counts its last command" "with 2 commands and control flow (case)\. "
+
+with_step new "$(block 'x=$( (gc status; true) )')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a subshell inside a substitution counts its last command" "with 3 commands\. "
+
 with_step new "$(block 'cat > "$F" <<'"'"'EOF'"'"'
 if x; then y; fi | z && w; v
 EOF')" > "$REPO/$F"
