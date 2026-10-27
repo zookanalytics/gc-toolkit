@@ -98,6 +98,22 @@ GO_CAUSES=$(sed -n 's/^[[:space:]]*Cause[A-Z][A-Za-z]*[[:space:]]*=[[:space:]]*"
   "$ROOT/services/gctk/prstatus/prstatus.go" | tr '\n' ' ' | sed 's/ *$//')
 eq "$GO_CAUSES" "$TOML_CAUSES" "blocked cause values match lifecycle.toml"
 
+# prstatus.Derive reads a recorded posture, machine verdict or cause outside the
+# vocabulary as a state it cannot name, needs-attention, so the values each of
+# its known* switches accepts must be the ones declared here. A value declared
+# here and missing there would put every PR that carries it at needs-attention.
+go_known() { # <func>: the values its switch accepts, sorted, "" dropped
+  sed -n "/^func $1(/,/^}/p" "$ROOT/services/gctk/prstatus/prstatus.go" \
+    | sed -n 's/^[[:space:]]*case \(.*\):$/\1/p' | tr ',' '\n' | tr -d '" \t' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'
+}
+sorted_words() { tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'; }
+TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sorted_words)
+[ -n "$TOML_POSTURES" ] && ok "postures declared in lifecycle.toml" || bad "postures = [...] missing from lifecycle.toml"
+eq "$(go_known knownPosture)" "$TOML_POSTURES" "prstatus knows exactly the postures lifecycle.toml declares"
+eq "$(go_known knownMachine)" "$(printf '%s' "$TOML_MACHINES" | sorted_words)" "prstatus knows exactly the machine values lifecycle.toml declares"
+eq "$(go_known knownCause)" "$(sed -n 's/^[[:space:]]*\(Cause[A-Z][A-Za-z]*\)[[:space:]]*=.*/\1/p' \
+  "$ROOT/services/gctk/prstatus/prstatus.go" | sorted_words)" "prstatus knows every blocked cause it declares"
+
 # --- state verb ----------------------------------------------------------------
 echo "# state"
 store '[{"id":"b-1","status":"open","assignee":"","notes":"","metadata":{}},
