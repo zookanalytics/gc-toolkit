@@ -183,3 +183,78 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Verified.** 2026-10-24, at `gastownhall/gascity` main 7cff3a265.
 - **Retires when.** Gas City can set a merge strategy for a target branch, so the
   rule becomes a line of the rig's config.
+
+## Machine axis
+
+- **Covers.** The `pr.machine`, `pr.machine_cause` and `pr.machine_reason`
+  keys: `[machine_axis]` in `lifecycle/lifecycle.toml`, with its `machines`
+  and `causes` lists, and the keys' entry in its `[metadata.pr_round_trip]`
+  table. Their writers: `recordMachine`, `recordBlocked` and `handleBlocked`
+  in `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh`
+  runs, and the "record the pass's own verdict on the anchor" section of
+  `assets/scripts/gate-ensure.sh`. The readers of the causes: package
+  `services/gctk/prstatus`, and the helm board's machine reads in
+  `services/helm/internal/board/derive.go`.
+- **Stands in for.** A merge-readiness verdict kept on the bead whose pull
+  request it is, which tells a block no automated actor will clear from a wait
+  the city is acting on, with the block's cause as a value a reader keys on.
+- **Evidence.**
+  - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor
+    classifies an open PR from its draft flag, its merge state and its check
+    rollup alone, so every `BLOCKED` PR is `blocked` and actionable, a
+    required check still running included (`classifyPullRequest` in
+    `internal/githubmonitor/monitor.go`). It reads no branch rule, review
+    thread or approval, and it records its class on a repair bead it files
+    (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`), not on the bead
+    whose PR it is. Only `gc github pr backfill` runs it (`gc github pr
+    backfill` in `docs/reference/cli.md`, and `GitHubPRMonitor` in
+    `docs/reference/config.md`).
+  - Gas City reads bead labels as state only for its dispatch holds,
+    `hold:mayor` and `hold:external`
+    (`engdocs/contributors/hold-label-conventions.md`, and
+    `DispatchHoldLabels` in `internal/beadmeta/hold_labels.go`).
+  - In `gastownhall/beads`, labels as state keep one value per dimension,
+    read on its own, with an event bead as its history (*Labels as State
+    Cache* in `docs/core-concepts/labels.md`). `bd set-state` refuses an
+    empty value, and no state command removes a dimension (`runSetState` in
+    `cmd/bd/state.go`), so a cause could not be cleared when the verdict it
+    qualifies moves on. A custom status (*Custom Statuses and Types* in
+    `docs/reference/configuration.md`) would take the place of the bead's own
+    status.
+  - In `gastownhall/gascity-packs`, no pack reads a branch's rules or a
+    check's required flag, and none records why a PR cannot merge as a value
+    a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
+    lifecycle in `pr_state`, a key of its own.
+  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
+- **Verified.** 2026-10-27, at `gastownhall/gascity` main e73ebbfb48fd,
+  `gastownhall/gascity-packs` main dac12a4a802c with the packs Gas City
+  bundles at 66c672b5ed00, and `gastownhall/beads` main 43f41374a34d.
+- **Retires when.** Gas City records a pull request's merge readiness where a
+  reader of the PR's own bead finds it, and tells a required check still
+  running from a block, for example once its PR monitor reads the base
+  branch's rules. The axis then moves onto that record.
+
+## Owed status label clear
+
+- **Covers.** The `status_label_clear_owed` key, in the
+  `[metadata.pr_status_label]` table of `lifecycle/lifecycle.toml`. Its
+  writers: `clearStatusLabel` in `services/gctk/internal/cli/merge.go`, and
+  `clear_status_label` in `assets/scripts/pr-facts.sh`. Its reader: the
+  "retry the status: label clears that terminal records still owe" section of
+  `assets/scripts/pr-facts.sh`.
+- **Stands in for.** A retry of a failed write to an outside service, kept
+  until a later pass lands it.
+- **Evidence.**
+  - In `gastownhall/gascity`, a failed order is not retried ("No retry on
+    dispatch failure" in `engdocs/architecture/orders.md`), and
+    `[steps.retry]` retries a formula step's attempt within its run (section
+    3.2 of `docs/reference/specs/formula-spec-v2.md`). Nothing in Gas City
+    keeps an outbox or a retry queue for a write to an outside service.
+  - In `gastownhall/gascity-packs`, a pack that retries such a write keeps a
+    marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
+    the `oversight-rig` pack's `delivered` label.
+  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
+- **Verified.** 2026-10-27, at `gastownhall/gascity` main e73ebbfb48fd and
+  `gastownhall/gascity-packs` main dac12a4a802c.
+- **Retires when.** Gas City ships a retry for a failed write to an outside
+  service, such as an outbox that a later pass drains.
