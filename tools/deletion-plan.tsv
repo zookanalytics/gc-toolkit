@@ -4,11 +4,6 @@
 # test. tools/measure.sh reads them at a PR's merge base, so the PR's size
 # section names the lines a change adds to each. A change that retires a file
 # removes its row.
-assets/scripts/convoy-graduate.sh	tk-tggczbp
-assets/scripts/convoy-graduate.test.sh	tk-tggczbp
-assets/scripts/convoy-seed.sh	tk-tggczbp
-assets/scripts/convoy-seed.test.sh	tk-tggczbp
-orders/convoy-check.toml	tk-tggczbp
 assets/scripts/converse-claim.sh	tk-iirrmiw
 assets/scripts/converse-claim.test.sh	tk-iirrmiw
 assets/scripts/converse-close-out.sh	tk-iirrmiw
