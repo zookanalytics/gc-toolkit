@@ -18,10 +18,15 @@
 #   (CONVERSE)  a converse sitting is dismissed under its OWN identity:
 #               gc-helm.sh dismiss runs with the session name, id, alias and rig
 #               from the session record, and the operator is told which subject
-#               ended. That identity is what dismiss's inference reads.
+#               ended. That identity is what dismiss's inference reads. It runs
+#               with --operator, so the session is stopped as the operator
+#               stops it, from outside the sitting.
 #   (AMBIENT)   an identity or store pin already in the job's environment is
 #               replaced by the record's, never inherited. A record with no alias
-#               leaves GC_ALIAS empty rather than passing an ambient one through.
+#               leaves GC_ALIAS empty rather than passing an ambient one through,
+#               and an inherited incarnation token is dropped: the record
+#               carries none. gc-helm.test.sh (DISMISS-KEY) runs this script
+#               through the real dismiss.
 #   (NOTCONV)   a Gas City session that is not a converse sitting is refused and
 #               gc-helm.sh never runs. Its own identity may hold a visit that
 #               dismiss would close all the same. A template that merely starts
@@ -121,6 +126,7 @@ mkcfg() {               # mkcfg <dir>
   printf 'GC_SESSION_ID=%s\n' "${GC_SESSION_ID-<unset>}"
   printf 'GC_ALIAS=%s\n' "${GC_ALIAS-<unset>}"
   printf 'GC_RIG=%s\n' "${GC_RIG-<unset>}"
+  printf 'GC_INSTANCE_TOKEN=%s\n' "${GC_INSTANCE_TOKEN-<unset>}"
   printf 'BEADS_DIR=%s\n' "${BEADS_DIR-<unset>}"
   printf 'GC_CITY_PATH=%s\n' "${GC_CITY_PATH-<unset>}"; } >> "$HELM_CALLS"
 [ -n "${FAKE_HELM_ERR:-}" ] && printf '%s\n' "$FAKE_HELM_ERR" >&2
@@ -190,7 +196,7 @@ quiet() {               # quiet <label> — the view-mode guard, on every path
 
 echo "# a converse sitting is dismissed under its own identity"
 run s-lx-conv1
-has "$HELM" "ARGS=dismiss --json" "(CONVERSE) gc-helm.sh dismiss runs, with no bead named"
+has "$HELM" "ARGS=dismiss --operator --json" "(CONVERSE) gc-helm.sh dismiss runs as the operator, with no bead named"
 has "$HELM" "GC_SESSION_NAME=s-lx-conv1" "(CONVERSE) …under the record's session name"
 has "$HELM" "GC_SESSION_ID=lx-conv1" "(CONVERSE) …its id"
 has "$HELM" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-vis1" "(CONVERSE) …its alias"
@@ -206,11 +212,12 @@ has "$HELM" "GC_SESSION_ID=lx-base1" "(CONVERSE) the base converse agent is acce
 has "$HELM" "GC_RIG=other" "(CONVERSE) …with the rig its record names"
 
 echo "# the job's ambient identity never reaches dismiss"
-GC_SESSION_NAME=intruder GC_SESSION_ID=intruder GC_ALIAS=intruder GC_RIG=wrong BEADS_DIR=/wrong/.beads run s-lx-noal1
+GC_SESSION_NAME=intruder GC_SESSION_ID=intruder GC_ALIAS=intruder GC_RIG=wrong BEADS_DIR=/wrong/.beads GC_INSTANCE_TOKEN=intruder-token run s-lx-noal1
 has "$HELM" "GC_SESSION_NAME=s-lx-noal1" "(AMBIENT) the record's session name replaces an ambient one"
 has "$HELM" "GC_SESSION_ID=lx-noal1" "(AMBIENT) …and its id"
 has "$HELM" "GC_RIG=gc-toolkit" "(AMBIENT) …and its rig"
 has "$HELM" "BEADS_DIR=<unset>" "(AMBIENT) an ambient store pin is dropped"
+has "$HELM" "GC_INSTANCE_TOKEN=<unset>" "(AMBIENT) …and so is an inherited incarnation token"
 hasnt "$HELM" "intruder" "(AMBIENT) a record with no alias leaves no ambient identity behind"
 quiet "ambient"
 
@@ -367,7 +374,7 @@ if [ -n "$LIVE_TERM" ]; then
     echo "# LIVE: prefix+X, y in a converse pane"
     press s-lx-conv1 y msg_has "the sitting on tk-sub1 is over"
     live=$(cat "$LIVE_CALLS" 2>/dev/null)
-    has "$live" "ARGS=dismiss --json" "(LIVE-YES) a real press, confirmed, runs dismiss"
+    has "$live" "ARGS=dismiss --operator --json" "(LIVE-YES) a real press, confirmed, runs dismiss as the operator"
     eq "$(grep -c '^ARGS=' "$LIVE_CALLS")" "1" "(LIVE-YES) …exactly once"
     has "$live" "GC_SESSION_NAME=s-lx-conv1" "(LIVE-YES) …under the pressed pane's session"
     has "$live" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-vis1" "(LIVE-YES) …and its alias"

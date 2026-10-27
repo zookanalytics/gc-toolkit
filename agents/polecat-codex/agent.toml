@@ -16,12 +16,20 @@ work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
 # an in_progress claim, spelled out as one command because a session's
 # environment names no pack directory to run that script from. The script's
 # header gives the reasons for the write's shape.
+#
+# The nudge points at the prompt's claim contract for the one read a session
+# orients from, assets/scripts/claim-context.sh, rather than naming the script:
+# gc expands no template in a nudge, so only the prompt can render the pack's
+# path.
 nudge = """
 Claim and complete one work item: gc hook --claim --json returns assigned work \
 first and routed pool work second, and the bead it names is yours to carry \
 through its formula to the terminal step. Claiming is not completing. A reason \
 of existing_assignment means you already hold the work, so execute it instead \
-of reporting it. If you cannot proceed, record why on the bead, then hand it \
+of reporting it. Orient from the result and the one read your prompt's claim \
+contract names, not by re-reading the beads: a step_reminder in the result is \
+the step's instructions, and that read gives you the rest. If you cannot \
+proceed, record why on the bead, then hand it \
 back with one write that reopens it and releases your claim, so a pool can \
 offer the work again: `gc bd update <bead> \
 --if-assignee="${GC_ALIAS:-$GC_SESSION_ID}" --if-status=in_progress \
