@@ -18,16 +18,38 @@ func TestDerive(t *testing.T) {
 		{"changes_requested with live work", Facts{PRPosture: "changes_requested@oid@t", InFlightCount: 1}, Working},
 		{"operator freeze merge_hold=true", Facts{MergeHold: "true"}, NeedsAttention},
 		{"rebase hold", Facts{RebaseHold: "true"}, NeedsAttention},
-		{"approved and merging (CLEAN)", Facts{PRPosture: "approved@oid@t", PRMergeState: "CLEAN@oid"}, Working},
-		{"approved but wedged (BLOCKED), empty in-flight set", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid"}, NeedsAttention},
-		{"approved + BLOCKED + live work is working", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid", InFlightCount: 1}, Working},
 		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
 		{"needs-attention outranks working (hold + live work)", Facts{MergeHold: "true", InFlightCount: 2}, NeedsAttention},
 		{"open visit on the anchor", Facts{OpenVisit: true}, NeedsAttention},
-		{"open visit on an approved PR that conflicts (DIRTY)", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMergeState: "DIRTY@oid"}, NeedsAttention},
-		{"open visit on an approved, merging PR (CLEAN)", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMergeState: "CLEAN@oid"}, NeedsAttention},
+		{"open visit on an approved PR", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, NeedsAttention},
 		{"open visit outranks live work", Facts{OpenVisit: true, InFlightCount: 2}, NeedsAttention},
-		{"approved and conflicting (DIRTY), no visit", Facts{PRPosture: "approved@oid@t", PRMergeState: "DIRTY@oid"}, Working},
+		{"a hold outranks an approval", Facts{MergeHold: "true", PRPosture: "approved@oid@t"}, NeedsAttention},
+
+		// An approved PR with nothing known blocking it is the city's to land,
+		// whatever it waits on: the merge pass, a required check still running
+		// (progressing), or city work in flight on the way.
+		{"approved, no machine verdict yet", Facts{PRPosture: "approved@oid@t"}, Merging},
+		{"approved, the merge pass settled", Facts{PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, Merging},
+		{"approved, a required check still running", Facts{PRPosture: "approved@oid@t", PRMachine: "progressing@oid@t"}, Merging},
+		{"approved with city work in flight", Facts{PRPosture: "approved@oid@t", InFlightCount: 1}, Merging},
+		{"an approved draft the city opened", Facts{PRPosture: "approved@oid@t", OpenedAsDraft: "oid"}, Merging},
+
+		// The merge pass's blocked verdict holds the PR at the head the posture
+		// was read at. A verdict at another head was reached about another commit.
+		{"blocked at the current head", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseReviewThreads}, NeedsAttention},
+		{"blocked at a head the posture has left", Facts{PRPosture: "approved@new@t", PRMachine: "blocked@old@t", PRMachineCause: CauseCheckFailed}, Merging},
+		{"blocked with no posture recorded", Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseRule}, NeedsAttention},
+		{"blocked with no cause recorded", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t"}, NeedsAttention},
+		{"blocked, with city work in flight on the cause", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseCheckFailed, InFlightCount: 1}, Merging},
+		{"an unrouted blocker holds whatever is in flight", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 2}, NeedsAttention},
+		{"an unrouted blocker holds an unapproved PR", Facts{PRPosture: "review_required@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 1}, NeedsAttention},
+
+		// A recorded value outside its writer's vocabulary is a state the
+		// derivation cannot name.
+		{"an unknown posture value", Facts{PRPosture: "dismissed@oid@t"}, NeedsAttention},
+		{"an unknown machine value", Facts{PRPosture: "approved@oid@t", PRMachine: "stalled@oid@t"}, NeedsAttention},
+		{"an unknown blocked cause", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: "mystery"}, NeedsAttention},
+		{"a cause beside a verdict that is not blocked is not read", Facts{PRPosture: "approved@oid@t", PRMachine: "settled@oid@t", PRMachineCause: "mystery"}, Merging},
 
 		// The open-as-draft stage: the city opened the PR as a draft and owes the
 		// checks that flip it ready, so nothing asks a human to review it yet.
@@ -87,21 +109,22 @@ func TestInDraftStageIsMarkerPresence(t *testing.T) {
 	}
 }
 
-// A posture stored as value@oid@instant and a merge state as value@oid are read
-// by the value before the first '@'; a bare value with no '@' reads whole.
-func TestBeforeSplitsTheDatedValue(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"", ""},
-		{"approved", "approved"},
-		{"approved@oid", "approved"},
-		{"approved@oid@2026-09-27T00:00:00Z", "approved"},
+// A posture or machine verdict stored as value@oid@instant is read as its value
+// and the oid after it; a bare value with no '@' reads whole, with no oid.
+func TestSplitDated(t *testing.T) {
+	for _, tc := range []struct{ in, value, oid string }{
+		{"", "", ""},
+		{"approved", "approved", ""},
+		{"approved@oid", "approved", "oid"},
+		{"approved@oid@2026-09-27T00:00:00Z", "approved", "oid"},
+		{"blocked@@2026-09-27T00:00:00Z", "blocked", ""},
 	} {
-		if got := before(tc.in, "@"); got != tc.want {
-			t.Errorf("before(%q) = %q, want %q", tc.in, got, tc.want)
+		if value, oid := splitDated(tc.in); value != tc.value || oid != tc.oid {
+			t.Errorf("splitDated(%q) = (%q, %q), want (%q, %q)", tc.in, value, oid, tc.value, tc.oid)
 		}
 	}
-	// The split reaches Derive: a dated approved posture still lands working.
-	if got := Derive(Facts{PRPosture: "approved@abc123@2026-09-27T00:00:00Z"}); got != Working {
-		t.Errorf("dated approved posture derived %q, want working", got)
+	// The split reaches Derive: a dated approved posture lands merging.
+	if got := Derive(Facts{PRPosture: "approved@abc123@2026-09-27T00:00:00Z"}); got != Merging {
+		t.Errorf("dated approved posture derived %q, want merging", got)
 	}
 }

@@ -6627,7 +6627,7 @@ printf '[{"id":17001,"user":{"login":"human1"},"state":"APPROVED","body":"ship i
 out=$(run_posture); rc=$?
 eq "$rc" 0 "the posture-only pass exits 0"
 eq "$(meta_pinned LB1 pr_posture)" "approved@sha-170" "the approval is recorded as the posture"
-eq "$(pv_labels 170)" "status: working" "…and the label leaves needs-review in the same arm: an approved PR is the city's to merge"
+eq "$(pv_labels 170)" "status: merging" "…and the label leaves needs-review in the same arm: an approved PR is the city's to merge"
 
 echo "# …a merge state moving under an unchanged posture leaves the label to the full pass"
 # The label is deliberately wrong for the anchor's state, so any derivation would
@@ -6667,7 +6667,7 @@ prview 173 OPEN CLEAN MERGEABLE | jq -c '.reviewDecision = "APPROVED" | .labels 
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "pr edit 173 --repo github.com/zook/gc-toolkit --add-label status: needs-review" "the sweep writes needs-review off the recorded posture first"
 eq "$(meta_pinned LB4 pr_posture)" "approved@sha-173" "the same pass then records the approval"
-eq "$(pv_labels 173)" "status: working" "…and the label follows the approval, not the value the sweep wrote"
+eq "$(pv_labels 173)" "status: merging" "…and the label follows the approval, not the value the sweep wrote"
 
 rm -f "$SD/pr-status-label.sh"
 

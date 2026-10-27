@@ -9,13 +9,12 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
-// `gctk pr-status` is the tri-state derivation lifted out of
-// assets/scripts/pr-status-label.sh's derive_value. The CLI is
-// contract-preserving — `derive --anchor ID` prints one of
-// working|needs-review|needs-attention and exits 0; 1 on a usage error; 2 when
-// a read did not resolve, so a caller leaves the label as-is rather than
-// flipping it blind — because pr-status-label.sh calls this in place of its own
-// shell and pr-status-label.test.sh is the acceptance bar. The anchor read goes
+// `gctk pr-status` is the status derivation assets/scripts/pr-status-label.sh's
+// derive_value reaches. `derive --anchor ID` prints one of
+// working|merging|needs-review|needs-attention and exits 0; 1 on a usage error;
+// 2 when a read did not resolve, so a caller leaves the label as-is rather than
+// flipping it blind. pr-status-label.sh calls this and has no derivation of its
+// own, and pr-status-label.test.sh is the acceptance bar. The anchor read goes
 // through gcbd.Show (daemon-first against the supervisor API, falling back to
 // `gc bd`); the in-flight set and the anchor's open visits read through `gc bd`.
 // The cli tests pin GC_NO_API, so every read answers from the same `gc bd` stub
@@ -50,9 +49,10 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 }
 
 // prStatusDerive gathers the facts the city records about the anchor and prints
-// the state prstatus.Derive returns: the holds, the dated posture/merge-state
-// and the draft-stage markers off the anchor, the size of the anchor's
-// in-flight set, and whether an open visit covers the anchor.
+// the state prstatus.Derive returns: the holds, the dated posture, the machine
+// verdict and its blocked cause, and the draft-stage markers off the anchor, the
+// size of the anchor's in-flight set, and whether an open visit covers the
+// anchor.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	var missing string
@@ -111,14 +111,15 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	}
 
 	state := prstatus.Derive(prstatus.Facts{
-		MergeHold:     bead.Meta("merge_hold"),
-		RebaseHold:    bead.Meta("rebase_hold"),
-		OpenVisit:     openVisit,
-		PRPosture:     bead.Meta("pr_posture"),
-		PRMergeState:  bead.Meta("pr_merge_state"),
-		OpenedAsDraft: bead.Meta("opened_as_draft"),
-		DraftReadied:  bead.Meta("draft_readied"),
-		InFlightCount: len(rows),
+		MergeHold:      bead.Meta("merge_hold"),
+		RebaseHold:     bead.Meta("rebase_hold"),
+		OpenVisit:      openVisit,
+		PRPosture:      bead.Meta("pr_posture"),
+		PRMachine:      bead.Meta("pr.machine"),
+		PRMachineCause: bead.Meta("pr.machine_cause"),
+		OpenedAsDraft:  bead.Meta("opened_as_draft"),
+		DraftReadied:   bead.Meta("draft_readied"),
+		InFlightCount:  len(rows),
 	})
 	fmt.Fprintf(stdout, "%s\n", state)
 	return 0

@@ -106,16 +106,34 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 	})
 
-	// An approved PR the merge pass would land reads working until an open visit
+	// An approved PR the merge pass would land reads merging until an open visit
 	// covers its anchor; the visit is a hold, so the same PR then reads
 	// needs-attention.
-	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}}]`
+	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
 	stamped := `[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"}}]`
 
-	t.Run("approved and merging, no open visit => working", func(t *testing.T) {
+	t.Run("approved and merging, no open visit => merging", func(t *testing.T) {
 		stubGC(t, approved, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
+		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
+		}
+	})
+
+	// The machine verdict and its cause are read off the anchor: a blocked
+	// verdict at the posture's head holds the PR, and an unrouted blocker holds
+	// it whatever is in flight.
+	t.Run("approved, blocked by the merge pass at the posture's head => needs-attention", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]`, `[]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
+		}
+	})
+
+	t.Run("an unrouted blocker beside live work => needs-attention", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]`,
+			`[{"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a"}}]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
 		}
 	})
 
@@ -157,24 +175,24 @@ func TestPRStatusDerive(t *testing.T) {
 		{"an in_progress visit tracking the anchor => needs-attention",
 			`[{"id":"tk-v","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other"},"dependency_type":"tracks"}]`, ``,
 			"needs-attention\n"},
-		{"a closed visit tracking the anchor => working",
+		{"a closed visit tracking the anchor => merging",
 			`[{"id":"tk-v","status":"closed","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]`, ``,
-			"working\n"},
-		{"a non-visit bead tracking the anchor => working",
+			"merging\n"},
+		{"a non-visit bead tracking the anchor => merging",
 			`[{"id":"tk-r","status":"open","metadata":{"task_kind":"reaction"},"dependency_type":"tracks"}]`, ``,
-			"working\n"},
+			"merging\n"},
 		{"an in_progress visit stamped with the anchor, no tracks edge => needs-attention",
 			``, `[{"id":"tk-v","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"}}]`,
 			"needs-attention\n"},
-		{"an anchor stamp beside a tracks edge to another bead => working",
+		{"an anchor stamp beside a tracks edge to another bead => merging",
 			``, `[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]`,
-			"working\n"},
+			"merging\n"},
 		{"an edge of another type leaves the stamp to cover => needs-attention",
 			``, `[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"blocks"}]}]`,
 			"needs-attention\n"},
-		{"a non-visit bead stamped with the anchor => working",
+		{"a non-visit bead stamped with the anchor => merging",
 			``, `[{"id":"tk-s","status":"open","metadata":{"gc.continuation_group":"tk-a"}}]`,
-			"working\n"},
+			"merging\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubGC(t, approved, `[]`)
@@ -192,8 +210,8 @@ func TestPRStatusDerive(t *testing.T) {
 		stubGC(t, approved, `[]`)
 		log := filepath.Join(t.TempDir(), "gc.log")
 		t.Setenv("STUB_LOG", log)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
+		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
 		}
 		raw, err := os.ReadFile(log)
 		if err != nil {

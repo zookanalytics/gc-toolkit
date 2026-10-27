@@ -1340,7 +1340,9 @@ case "$sub" in
     if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi ;;
   label)
     # The repo's label set, so `pr edit --add-label` can refuse one that was
-    # never created. `list` serves it (honouring -q); `create` appends if absent.
+    # never created. `list` serves it (honouring -q); `create` appends if absent;
+    # `edit` rewrites a label's description, refusing one that does not exist,
+    # as real gh does. Each keeps the description it was given.
     v="${1:-}"; shift || true
     LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
     case "$v" in
@@ -1348,12 +1350,21 @@ case "$sub" in
         lq=""
         while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; lq="${1:-}" ;; esac; shift || true; done
         if [ -n "$lq" ]; then jq -r "$lq" "$LBLS"; else cat "$LBLS"; fi ;;
-      create)
+      create|edit)
         name="${1:-}"; shift || true
-        [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
-        if ! jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
+        desc=""
+        while [ $# -gt 0 ]; do case "$1" in --description) shift; desc="${1:-}" ;; esac; shift || true; done
+        if [ "$v" = create ]; then
+          [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 && exit 0
           t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
-          jq --arg n "$name" '. + [{name: $n}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+          jq --arg n "$name" --arg d "$desc" '. + [{name: $n, description: $d}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+        else
+          [ "${STUB_LABEL_EDIT_RC:-0}" = "0" ] || exit "${STUB_LABEL_EDIT_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 \
+            || { echo "gh: label '$name' not found" >&2; exit 1; }
+          t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
+          jq --arg n "$name" --arg d "$desc" 'map(if .name == $n then .description = $d else . end)' "$LBLS" > "$t" && mv "$t" "$LBLS"
         fi
         exit 0 ;;
       *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;

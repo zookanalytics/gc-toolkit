@@ -2026,8 +2026,8 @@ MP_EOF
   # Above the draft-skip on purpose: the label projects the city's workflow state,
   # which a draft-early PR (specs/tk-6bji7k.1's future half) needs as much as an
   # open one, so this seam stays independent of the draft gate below. Best-effort
-  # and idempotent — pr-status-label.sh derives working/needs-review/needs-attention
-  # from the anchor's own state and writes only on a change. This sweep is the full
+  # and idempotent — pr-status-label.sh derives working, merging, needs-review or
+  # needs-attention from the anchor's own state and writes only on a change. This sweep is the full
   # pass's alone: it costs a derivation per anchor, which the early arms spend
   # only where they change one of the label's inputs (the posture record and the
   # feedback routing below).

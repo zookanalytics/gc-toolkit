@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 // `gctk merge` is arm 2 of the merge cadence, THE single writer of merged
@@ -568,7 +569,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		if ph := poolHolder(blockers); ph != "" {
 			m.recordMachine(id, "progressing", headOid, aroute)
 		} else if sh := stuckHolder(blockers); sh != "" {
-			m.recordBlocked(id, headOid, aroute, causeBlocker, "held by "+inflight+" — an unrouted blocker no automated actor will clear")
+			m.recordBlocked(id, headOid, aroute, prstatus.CauseBlocker, "held by "+inflight+" — an unrouted blocker no automated actor will clear")
 		}
 		fmt.Fprintf(m.stdout, "%s: PR#%s held by %s; merge held (anchor %s)\n", mergeProg, num, inflight, id)
 		m.held++
@@ -701,13 +702,13 @@ func (m *merger) handle(row *gcbd.Bead) {
 	default:
 		switch mergeState {
 		case "BEHIND":
-			m.recordBlocked(id, headOid, aroute, causeBehind, "the base branch '"+base+"' moved ahead; bring '"+headRef+"' current with '"+base+"' before it can merge")
+			m.recordBlocked(id, headOid, aroute, prstatus.CauseBehind, "the base branch '"+base+"' moved ahead; bring '"+headRef+"' current with '"+base+"' before it can merge")
 		case "DIRTY":
 			// No live holder stands here, so no merge-in rework is in flight.
 			// pr-facts.sh's conflict arm files one for an approved PR on its next
 			// pass unless something defers it, and only a deferred one is a block.
 			if why := mergeInDeferred(fresh); why != "" {
-				m.recordBlocked(id, headOid, aroute, causeConflict, "the branch conflicts with '"+base+"' and "+why+", so no merge-in rework is filed; bring '"+headRef+"' current with '"+base+"' before it can merge")
+				m.recordBlocked(id, headOid, aroute, prstatus.CauseConflict, "the branch conflicts with '"+base+"' and "+why+", so no merge-in rework is filed; bring '"+headRef+"' current with '"+base+"' before it can merge")
 			} else {
 				m.recordMachine(id, "progressing", headOid, aroute)
 			}
@@ -826,18 +827,6 @@ func (m *merger) handle(row *gcbd.Bead) {
 	}
 }
 
-// The blocked causes, the structured value pr.machine_cause carries beside the
-// pr.machine_reason sentence ([machine_axis] causes in lifecycle/lifecycle.toml).
-// A reader keys on these and never parses the sentence.
-const (
-	causeReviewThreads = "review-threads" // a required review thread is unresolved
-	causeCheckFailed   = "check-failed"   // a required check failed at the head
-	causeConflict      = "conflict"       // the branch conflicts and its merge-in is deferred
-	causeBehind        = "behind"         // the base moved ahead and nothing brings the branch current
-	causeBlocker       = "blocker"        // an unrouted blocker no automated actor will clear
-	causeRule          = "rule"           // a branch rule the merge pass cannot name
-)
-
 // handleBlocked records the machine verdict for a BLOCKED PR and names the cause
 // off the branch's own rules. GitHub reports BLOCKED for every unmet rule, a
 // required check still running included, so the verdict is blocked only for a
@@ -863,7 +852,7 @@ func (m *merger) handleBlocked(id, num, base, headOid, aroute, reviewDecision st
 			return
 		}
 		if bu > 0 {
-			m.recordBlocked(id, headOid, aroute, causeReviewThreads, strconv.Itoa(bu)+" unresolved review thread(s) must be resolved before this PR can merge")
+			m.recordBlocked(id, headOid, aroute, prstatus.CauseReviewThreads, strconv.Itoa(bu)+" unresolved review thread(s) must be resolved before this PR can merge")
 			fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: %d unresolved review thread(s) hold required_review_thread_resolution (reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, bu, rdShown, id)
 			return
 		}
@@ -893,13 +882,13 @@ func (m *merger) handleBlocked(id, num, base, headOid, aroute, reviewDecision st
 	}
 	switch {
 	case len(failed) > 0:
-		m.recordBlocked(id, headOid, aroute, causeCheckFailed, "required check(s) "+strings.Join(failed, ", ")+" failed at "+shortSha(headOid))
+		m.recordBlocked(id, headOid, aroute, prstatus.CauseCheckFailed, "required check(s) "+strings.Join(failed, ", ")+" failed at "+shortSha(headOid))
 		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: required check(s) failed at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(failed, " "), id)
 	case len(pending) > 0:
 		m.recordMachine(id, "progressing", headOid, aroute)
 		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection while required check(s) run at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(pending, " "), id)
 	default:
-		m.recordBlocked(id, headOid, aroute, causeRule, "branch protection holds it by a rule other than an unresolved required thread, a missing approval or a required check")
+		m.recordBlocked(id, headOid, aroute, prstatus.CauseRule, "branch protection holds it by a rule other than an unresolved required thread, a missing approval or a required check")
 		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection by a rule other than an unresolved required thread, a missing approval or a required check (thread-resolution required=%s, approvals required=%d, reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, strconv.FormatBool(threadReq), approvals, rdShown, id)
 	}
 }
@@ -938,7 +927,8 @@ func (m *merger) recordMachine(id, value, headOid, route string) {
 }
 
 // recordBlocked records a blocked verdict with its cause twice: the structured
-// cause a reader keys on, and the sentence a person reads.
+// cause (a prstatus Cause value) a reader keys on, and the sentence a person
+// reads.
 func (m *merger) recordBlocked(id, headOid, route, cause, reason string) {
 	if headOid == "" {
 		return
