@@ -279,8 +279,9 @@ The rest follows from the store:
 - A `blocks` or `conditional-blocks` wait is resolved once its target is closed
   or pinned. A target at any other status holds, `in_progress` and `hooked`
   included. A `waits-for` wait is resolved by its gate, not by its spawner's
-  status. A closed spawner with a child still open holds, and an open spawner
-  whose gate has opened does not, unless the edge is marked `also_blocks`.
+  status. An `all-children` gate on a closed spawner with a child still open
+  holds, and an open spawner whose gate has opened does not, unless the edge is
+  marked `also_blocks`.
 - An edge onto a bead in another store holds nothing, because the store
   resolves an edge only within itself. `waits` lists each such edge for a doctor
   check to report, and the ledger refuses to write one.
