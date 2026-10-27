@@ -1250,6 +1250,7 @@ fi # part record
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 reason()  { printf '%s' "$(meta "$1" pr.machine_reason)"; }
+cause()   { printf '%s' "$(meta "$1" pr.machine_cause)"; }
 
 # ==== part machine: the machine axis, and the reads that fail closed when they
 # stop partway ====
@@ -1346,7 +1347,9 @@ eq "$(machine V7)" "<absent>" "a demand bead blocking the anchor is not the mach
 
 # A hold no automated actor will clear, and no review verdict is owed on, records
 # `blocked` with its cause — distinct from settled, so the board shows it as
-# needs-attention rather than folding it into the awaiting-review tail.
+# needs-attention rather than folding it into the awaiting-review tail. The cause
+# is recorded twice: pr.machine_cause, the value a reader keys on, and
+# pr.machine_reason, the sentence a person reads.
 echo "# an UNROUTED blocker no pool will claim records blocked, naming the holder"
 # An unrouted rework husk vetoes the merge, but no pool will claim it (unlike V6)
 # and no human route makes it an `asking` demand (unlike V7). It is neither
@@ -1359,6 +1362,7 @@ printf '%s' "$(prview 92 OPEN CLEAN)" > "$GH_DIR/pr_view_92.json"
 approved 92
 out=$("$SUT" 2>&1)
 eq "$(pinned BK1)" "blocked@sha-92" "an unrouted blocker no automated actor will clear records blocked, not silence"
+eq "$(cause BK1)" "blocker" "…its cause is the blocker"
 has "$(reason BK1)" "rw-bk1" "…and the reason names the blocking bead"
 
 echo "# a BLOCKED PR held by an unresolved review thread records blocked with the cause"
@@ -1370,6 +1374,7 @@ echo '{"threads":[{"id":"t1","isResolved":false}]}' > "$GH_DIR/threads_93.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned BK2)" "blocked@sha-93" "an unresolved required review thread is a blocked hold, not settled"
+eq "$(cause BK2)" "review-threads" "…its cause is the review threads"
 has "$(reason BK2)" "unresolved review thread" "…and the reason names the thread"
 
 echo "# a BLOCKED PR merely awaiting an approving review stays settled (awaiting-review)"
@@ -1380,6 +1385,86 @@ printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution
 out=$("$SUT" 2>&1)
 eq "$(pinned BK3)" "settled@sha-94" "awaiting an approving review is the review wait, not a block"
 eq "$(reason BK3)" "<absent>" "…and no blocked reason lingers on a settled row"
+eq "$(cause BK3)" "<absent>" "…nor a blocked cause"
+
+# GitHub reports BLOCKED for any unmet rule, a required check that has not
+# finished included. The pass reads the required checks the way its UNSTABLE arm
+# does: one still running is the city's wait (progressing), one that failed is a
+# block, and a BLOCKED PR whose required checks are all green is held by a rule
+# the pass cannot name.
+REQ_RULES='[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"},{"context":"test-macos"}]}}]'
+blocked_with() { # num rollup-json — an approved PR GitHub reports BLOCKED, with that check rollup
+  printf '%s' "$(prview "$1" OPEN BLOCKED ",\"statusCheckRollup\":$2")" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_$1.json"
+  approved "$1"
+}
+
+echo "# a BLOCKED PR whose required check is still running is progressing, not blocked"
+store "[$(anchor RC1 140 ',"pr.machine":"blocked@sha-140@2026-10-27T00:11:44Z","pr.machine_cause":"rule","pr.machine_reason":"stale"'), $(rev RC1)]"
+blocked_with 140 '[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"},{"name":"test-macos","status":"IN_PROGRESS","conclusion":""}]'
+printf '%s' "$REQ_RULES" > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned RC1)" "progressing@sha-140" "a required check still running is the city's wait, not a wedge"
+eq "$(cause RC1)" "<absent>" "…and the blocked cause an earlier pass recorded is cleared"
+eq "$(reason RC1)" "<absent>" "…with its sentence"
+has "$out" "PR#140 is BLOCKED by branch protection while required check(s) run at sha-140: test-macos" "…and the log names the check it waits on"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 140" "…and nothing merged"
+
+echo "# a required check that has not reported yet is pending too"
+store "[$(anchor RC2 141), $(rev RC2)]"
+blocked_with 141 '[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]'
+out=$("$SUT" 2>&1)
+eq "$(pinned RC2)" "progressing@sha-141" "a required check with no row yet is expected, not failed"
+
+echo "# a BLOCKED PR whose required check failed records blocked, naming the check"
+store "[$(anchor RC3 142), $(rev RC3)]"
+blocked_with 142 '[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"},{"name":"test-macos","status":"QUEUED","conclusion":""}]'
+out=$("$SUT" 2>&1)
+eq "$(pinned RC3)" "blocked@sha-142" "a failed required check is a block, even beside one still running"
+eq "$(cause RC3)" "check-failed" "…its cause is the failed check"
+has "$(reason RC3)" "required check(s) test failed" "…and the reason names the check"
+
+echo "# a failed status context counts as a failed required check"
+store "[$(anchor RC4 143), $(rev RC4)]"
+blocked_with 143 '[{"context":"test","state":"ERROR"},{"name":"test-macos","status":"COMPLETED","conclusion":"SUCCESS"}]'
+out=$("$SUT" 2>&1)
+eq "$(cause RC4)" "check-failed" "a status context in state ERROR is a failed check"
+
+echo "# a BLOCKED PR whose required checks are all green is held by a rule the pass cannot name"
+store "[$(anchor RC5 144), $(rev RC5)]"
+blocked_with 144 '[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"},{"name":"test-macos","status":"COMPLETED","conclusion":"SKIPPED"}]'
+out=$("$SUT" 2>&1)
+eq "$(pinned RC5)" "blocked@sha-144" "every required check green and still BLOCKED is a block"
+eq "$(cause RC5)" "rule" "…its cause is a rule the pass cannot name"
+
+echo "# a BLOCKED PR on a branch with no required check is held by a rule the pass cannot name"
+store "[$(anchor RC6 145), $(rev RC6)]"
+blocked_with 145 '[]'
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+eq "$(cause RC6)" "rule" "no required check to wait on leaves the unnamed rule"
+
+# A read that does not answer leaves the verdict an earlier pass recorded: a
+# failed read is not a state, so it neither raises a block nor clears one.
+echo "# a BLOCKED PR whose check rollup cannot be read records no verdict"
+store "[$(anchor RC7 146 ',"pr.machine":"progressing@sha-146@2026-10-27T00:11:44Z"'), $(rev RC7)]"
+printf '%s' "$(prview 146 OPEN BLOCKED)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_146.json"
+approved 146
+mkdir -p "$GH_DIR/pr_view_146.queue/statusCheckRollup"
+: > "$GH_DIR/pr_view_146.queue/statusCheckRollup/01.json"
+printf '%s' "$REQ_RULES" > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+has "$out" "PR#146 is BLOCKED by branch protection and the check rollup is unreadable" "an unreadable rollup is named"
+eq "$(machine RC7)" "progressing@sha-146@2026-10-27T00:11:44Z" "…and the recorded verdict stands untouched"
+
+echo "# a BLOCKED PR whose required-check set cannot be read records no verdict"
+store "[$(anchor RC8 147 ',"pr.machine":"progressing@sha-147@2026-10-27T00:11:44Z"'), $(rev RC8)]"
+blocked_with 147 '[]'
+printf '%s' "$REQ_RULES" > "$GH_DIR/rules_main.json"
+printf '{"message":"Not Found"}' > "$GH_DIR/branch_main.json"
+out=$("$SUT" 2>&1)
+has "$out" "PR#147 is BLOCKED by branch protection and the required-check set for 'main' is unreadable" "an unreadable required-check set is named"
+eq "$(machine RC8)" "progressing@sha-147@2026-10-27T00:11:44Z" "…and the recorded verdict stands untouched"
+rm -f "$GH_DIR/branch_main.json"
 
 echo "# a base gone BEHIND records blocked; the branch must be brought current"
 store "[$(anchor BK4 95), $(rev BK4)]"
@@ -1388,26 +1473,43 @@ printf '%s' "$(prview 95 OPEN BEHIND)" > "$GH_DIR/pr_view_95.json"
 approved 95
 out=$("$SUT" 2>&1)
 eq "$(pinned BK4)" "blocked@sha-95" "a base gone BEHIND is a blocked hold, not settled"
+eq "$(cause BK4)" "behind" "…its cause is the base gone ahead"
 has "$(reason BK4)" "moved ahead" "…and the reason says to bring the branch current"
 
-# The conflicting-after-approval wedge: checks green, nothing in flight, but the
-# branch conflicts with the base. No review verdict brings it current, so it is
-# the operator's (or the merge-in cadence's), not the awaiting-review tail —
-# record blocked, not settled, so the board stops reading it as a merge in
-# progress. This is the state defect #911 masked for ~12h as "working".
-echo "# a branch gone CONFLICTING (DIRTY) with nothing in flight records blocked, not settled"
-store "[$(anchor BK5 97), $(rev BK5)]"
+# A branch gone CONFLICTING after approval, with nothing in flight, is the merge-in
+# rework's to bring current: pr-facts.sh's conflict arm files one for an approved
+# PR on its next pass, so the pass records progressing. Only a merge-in something
+# defers, a rebase hold or an armed re-dispatch, leaves the conflict to a person.
+echo "# a branch gone CONFLICTING (DIRTY) with nothing in flight waits on its merge-in, progressing"
+store "[$(anchor BK5 97 ',"pr.machine":"blocked@sha-97@2026-10-27T00:11:44Z","pr.machine_cause":"conflict","pr.machine_reason":"stale"'), $(rev BK5)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 97 OPEN DIRTY)" > "$GH_DIR/pr_view_97.json"
 approved 97
 out=$("$SUT" 2>&1)
-eq "$(pinned BK5)" "blocked@sha-97" "a conflicting branch with nothing in flight is a blocked hold, not settled"
-has "$(reason BK5)" "conflicts" "…and the reason names the conflict and says to bring the branch current"
+eq "$(pinned BK5)" "progressing@sha-97" "a conflict the merge-in rework will bring current is the city's move, not a wedge"
+eq "$(cause BK5)" "<absent>" "…and an earlier blocked cause is cleared"
 
-# pr-facts.sh files the merge-in rework; once it is in flight the in-flight arm
-# records progressing BEFORE the DIRTY switch is reached, so "working" stays
-# correct exactly while a rework is moving the branch.
-echo "# …but a conflicting branch WITH a pool-routed merge-in in flight stays progressing, not blocked"
+echo "# a conflicting branch under a rebase hold records blocked: nothing files its merge-in"
+store "[$(anchor BK5h 98 ',"rebase_hold":"true"'), $(rev BK5h)]"
+printf '%s' "$(prview 98 OPEN DIRTY)" > "$GH_DIR/pr_view_98.json"
+approved 98
+out=$("$SUT" 2>&1)
+eq "$(pinned BK5h)" "blocked@sha-98" "a merge-in a rebase hold defers is a blocked hold"
+eq "$(cause BK5h)" "conflict" "…its cause is the conflict"
+has "$(reason BK5h)" "rebase hold" "…and the reason names what defers the merge-in"
+
+echo "# a conflicting branch armed to re-dispatch records blocked: nothing files its merge-in"
+store "[$(anchor BK5a 96 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"'), $(rev BK5a)]"
+printf '%s' "$(prview 96 OPEN DIRTY)" > "$GH_DIR/pr_view_96.json"
+approved 96
+out=$("$SUT" 2>&1)
+eq "$(cause BK5a)" "conflict" "a merge-in an armed re-dispatch defers is a blocked hold"
+has "$(reason BK5a)" "armed re-dispatch" "…and the reason names what defers the merge-in"
+
+# Once pr-facts.sh's merge-in rework is in flight, the in-flight arm records
+# progressing BEFORE the DIRTY switch is reached, so the verdict stays the city's
+# move exactly while a rework is moving the branch.
+echo "# …and a conflicting branch WITH a pool-routed merge-in in flight stays progressing"
 store "[$(anchor BK6 99), $(rev BK6),
         {\"id\":\"rw-bk6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\",\"task_kind\":\"rework\",\"anchor_bead\":\"BK6\",\"branch\":\"polecat/x99\"}}]"
 printf 'rw-bk6|blocks|BK6\n' > "$STUB_DEPS"
@@ -1510,8 +1612,8 @@ approved 123
 echo '{"threads":[]}' > "$GH_DIR/threads_123.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$(STUB_GQL_THREADS_TAIL='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNext' "$SUT" 2>&1)
-eq "$(pinned TH1)" "blocked@sha-123" "a thread read cut short is a blocked hold, not the approval wait"
-has "$(reason TH1)" "could not be read" "…and the reason says the threads could not be read"
+eq "$(pinned TH1)" "<absent>" "a thread read cut short records no verdict, never the approval wait"
+has "$out" "reviewThreads could not be read to count them" "…and the log says the threads could not be read"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# with the reconcile cache on, the pass reads the anchor enumeration once, not once per anchor"
@@ -1689,12 +1791,12 @@ has "$out" "PR#155 changed between the pinned read and re-read 1 of its UNKNOWN 
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged on a head the gates never validated"
 
 echo "# a re-read that computes DIRTY keeps DIRTY's handling"
-store "[$(anchor RR7 156), $(rev RR7)]"
+store "[$(anchor RR7 156 ',"rebase_hold":"true"'), $(rev RR7)]"
 printf '%s' "$(prview 156 OPEN DIRTY)" > "$GH_DIR/pr_view_156.json"
 unknown_first 156
 approved 156
 out=$("$SUT" 2>&1)
-eq "$(pinned RR7)" "blocked@sha-156" "the computed DIRTY records blocked, as a pinned DIRTY does"
+eq "$(pinned RR7)" "blocked@sha-156" "the computed DIRTY under a rebase hold records blocked, as a pinned DIRTY does"
 has "$(reason RR7)" "conflicts" "…and the reason names the conflict"
 
 echo "# a re-read that computes BLOCKED names its cause from the re-read, not the pinned read"

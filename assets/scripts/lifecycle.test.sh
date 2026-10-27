@@ -88,6 +88,15 @@ GO_MACHINES=$(sed -n 's/^[[:space:]]*Machine[A-Za-z]*[[:space:]]*=[[:space:]]*"\
   "$ROOT/services/helm/internal/board/derive.go" | tr '\n' ' ' | sed 's/ *$//')
 eq "$GO_MACHINES" "$TOML_MACHINES" "machine axis values match lifecycle.toml"
 
+# The blocked causes are declared here and written by gctk merge as Go constants,
+# for the status: label, the board and the held: label to key on. A cause added
+# on one side only is a value its readers were never told about.
+TOML_CAUSES=$(sed -n 's/^causes = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
+[ -n "$TOML_CAUSES" ] && ok "blocked causes declared in lifecycle.toml" || bad "causes = [...] missing from lifecycle.toml"
+GO_CAUSES=$(sed -n 's/^[[:space:]]*cause[A-Z][A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "$ROOT/services/gctk/internal/cli/merge.go" | tr '\n' ' ' | sed 's/ *$//')
+eq "$GO_CAUSES" "$TOML_CAUSES" "blocked cause values match lifecycle.toml"
+
 # --- state verb ----------------------------------------------------------------
 echo "# state"
 store '[{"id":"b-1","status":"open","assignee":"","notes":"","metadata":{}},

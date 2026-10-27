@@ -568,7 +568,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		if ph := poolHolder(blockers); ph != "" {
 			m.recordMachine(id, "progressing", headOid, aroute)
 		} else if sh := stuckHolder(blockers); sh != "" {
-			m.recordBlocked(id, headOid, aroute, "held by "+inflight+" — an unrouted blocker no automated actor will clear")
+			m.recordBlocked(id, headOid, aroute, causeBlocker, "held by "+inflight+" — an unrouted blocker no automated actor will clear")
 		}
 		fmt.Fprintf(m.stdout, "%s: PR#%s held by %s; merge held (anchor %s)\n", mergeProg, num, inflight, id)
 		m.held++
@@ -699,11 +699,19 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	default:
-		if mergeState == "BEHIND" {
-			m.recordBlocked(id, headOid, aroute, "the base branch '"+base+"' moved ahead; bring '"+headRef+"' current with '"+base+"' before it can merge")
-		} else if mergeState == "DIRTY" {
-			m.recordBlocked(id, headOid, aroute, "the branch conflicts with '"+base+"' and no merge-in rework is in flight; bring '"+headRef+"' current with '"+base+"' before it can merge")
-		} else {
+		switch mergeState {
+		case "BEHIND":
+			m.recordBlocked(id, headOid, aroute, causeBehind, "the base branch '"+base+"' moved ahead; bring '"+headRef+"' current with '"+base+"' before it can merge")
+		case "DIRTY":
+			// No live holder stands here, so no merge-in rework is in flight.
+			// pr-facts.sh's conflict arm files one for an approved PR on its next
+			// pass unless something defers it, and only a deferred one is a block.
+			if why := mergeInDeferred(fresh); why != "" {
+				m.recordBlocked(id, headOid, aroute, causeConflict, "the branch conflicts with '"+base+"' and "+why+", so no merge-in rework is filed; bring '"+headRef+"' current with '"+base+"' before it can merge")
+			} else {
+				m.recordMachine(id, "progressing", headOid, aroute)
+			}
+		default:
 			m.recordMachine(id, "settled", headOid, aroute)
 		}
 		msState := mergeState
@@ -818,8 +826,26 @@ func (m *merger) handle(row *gcbd.Bead) {
 	}
 }
 
+// The blocked causes, the structured value pr.machine_cause carries beside the
+// pr.machine_reason sentence ([machine_axis] causes in lifecycle/lifecycle.toml).
+// A reader keys on these and never parses the sentence.
+const (
+	causeReviewThreads = "review-threads" // a required review thread is unresolved
+	causeCheckFailed   = "check-failed"   // a required check failed at the head
+	causeConflict      = "conflict"       // the branch conflicts and its merge-in is deferred
+	causeBehind        = "behind"         // the base moved ahead and nothing brings the branch current
+	causeBlocker       = "blocker"        // an unrouted blocker no automated actor will clear
+	causeRule          = "rule"           // a branch rule the merge pass cannot name
+)
+
 // handleBlocked records the machine verdict for a BLOCKED PR and names the cause
-// off the branch's own rules.
+// off the branch's own rules. GitHub reports BLOCKED for every unmet rule, a
+// required check still running included, so the verdict is blocked only for a
+// cause no automated actor will clear: an unresolved required thread, a failed
+// required check, or a rule the pass cannot name. A required check still running
+// is progressing, and an approval still owed is settled. A read that does not
+// answer records nothing, so the verdict the last pass recorded stands rather
+// than one this pass could not derive.
 func (m *merger) handleBlocked(id, num, base, headOid, aroute, reviewDecision string) {
 	st, threadReq, approvals := m.reviewGatesFor(base)
 	rdShown := reviewDecision
@@ -827,44 +853,71 @@ func (m *merger) handleBlocked(id, num, base, headOid, aroute, reviewDecision st
 		rdShown = "empty"
 	}
 	if st != "known" {
-		m.recordBlocked(id, headOid, aroute, "BLOCKED by branch protection; the rules for '"+base+"' could not be read to name the cause")
 		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection but the rules for '%s' could not be read to name the cause (reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, base, rdShown, id)
 		return
 	}
-	bcause := ""
-	bu := 0
 	if threadReq {
-		if n, ok := m.unresolvedThreads(num); ok {
-			bu = n
-			if bu > 0 {
-				bcause = "threads"
-			}
-		} else {
-			bu = 0
-			bcause = "threads-unreadable"
+		bu, ok := m.unresolvedThreads(num)
+		if !ok {
+			fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: review-thread resolution is required but its reviewThreads could not be read to count them (reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, rdShown, id)
+			return
+		}
+		if bu > 0 {
+			m.recordBlocked(id, headOid, aroute, causeReviewThreads, strconv.Itoa(bu)+" unresolved review thread(s) must be resolved before this PR can merge")
+			fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: %d unresolved review thread(s) hold required_review_thread_resolution (reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, bu, rdShown, id)
+			return
 		}
 	}
-	if bcause == "" {
-		if approvals >= 1 && reviewDecision != "APPROVED" {
-			bcause = "approval"
-		} else {
-			bcause = "other"
-		}
-	}
-	switch bcause {
-	case "threads":
-		m.recordBlocked(id, headOid, aroute, strconv.Itoa(bu)+" unresolved review thread(s) must be resolved before this PR can merge")
-		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: %d unresolved review thread(s) hold required_review_thread_resolution (reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, bu, rdShown, id)
-	case "threads-unreadable":
-		m.recordBlocked(id, headOid, aroute, "a required review thread's resolution state could not be read")
-		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: review-thread resolution is required but its reviewThreads could not be read to count them (reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, rdShown, id)
-	case "approval":
+	if approvals >= 1 && reviewDecision != "APPROVED" {
 		m.recordMachine(id, "settled", headOid, aroute)
 		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: waiting on an approving review (%d required, reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, approvals, rdShown, id)
-	case "other":
-		m.recordBlocked(id, headOid, aroute, "branch protection holds it by a rule other than an unresolved required thread or a missing approval")
-		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection by a rule other than an unresolved required thread or a missing approval (thread-resolution required=%s, approvals required=%d, reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, strconv.FormatBool(threadReq), approvals, rdShown, id)
+		return
 	}
+	// The required checks, read the way the UNSTABLE arm reads them.
+	cst, contexts := m.requiredContextsFor(base)
+	if cst != "known" {
+		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection and the required-check set for '%s' is unreadable; merge held (anchor %s)\n", mergeProg, num, base, id)
+		return
+	}
+	var failed, pending []string
+	if len(contexts) > 0 {
+		rollupRaw := firstOut(m.gh("pr", "view", num, "--repo", m.originRepoQ, "--json", "statusCheckRollup"))
+		ok := len(bytes.TrimSpace(rollupRaw)) > 0
+		if ok {
+			failed, pending, ok = requiredCheckStates(rollupRaw, contexts)
+		}
+		if !ok {
+			fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection and the check rollup is unreadable; merge held (anchor %s)\n", mergeProg, num, id)
+			return
+		}
+	}
+	switch {
+	case len(failed) > 0:
+		m.recordBlocked(id, headOid, aroute, causeCheckFailed, "required check(s) "+strings.Join(failed, ", ")+" failed at "+shortSha(headOid))
+		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection: required check(s) failed at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(failed, " "), id)
+	case len(pending) > 0:
+		m.recordMachine(id, "progressing", headOid, aroute)
+		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection while required check(s) run at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, strings.Join(pending, " "), id)
+	default:
+		m.recordBlocked(id, headOid, aroute, causeRule, "branch protection holds it by a rule other than an unresolved required thread, a missing approval or a required check")
+		fmt.Fprintf(m.stdout, "%s: PR#%s is BLOCKED by branch protection by a rule other than an unresolved required thread, a missing approval or a required check (thread-resolution required=%s, approvals required=%d, reviewDecision='%s'); merge held (anchor %s)\n", mergeProg, num, strconv.FormatBool(threadReq), approvals, rdShown, id)
+	}
+}
+
+// mergeInDeferred names what keeps pr-facts.sh's conflict arm from filing a
+// merge-in rework for a conflicting, approved anchor that has nothing in flight,
+// or "" when nothing does. The arm stands down on a merge_hold, a rebase_hold, a
+// live demand, an armed re-dispatch and a foreign blocker. The merge pass has
+// already held a merge_hold and every live blocker, a demand included, before
+// its merge-state switch, so the two left to read here are on the anchor itself.
+func mergeInDeferred(anchor *gcbd.Bead) string {
+	if isHeld(anchor.Meta("rebase_hold")) {
+		return "a rebase hold defers the merge-in"
+	}
+	if anchor.Meta("gc.dispatch_when_ready") != "" {
+		return "an armed re-dispatch defers the merge-in"
+	}
+	return ""
 }
 
 // --- lifecycle transitions (in-process) -----------------------------------------
@@ -879,17 +932,19 @@ func (m *merger) recordMachine(id, value, headOid, route string) {
 		return
 	}
 	if !m.transition(io.Discard, io.Discard, id, "--to", "pull_request", "--expect", "pull_request",
-		"--route", route, "--set-dated", "pr.machine="+value+"@"+headOid, "--unset", "pr.machine_reason") {
+		"--route", route, "--set-dated", "pr.machine="+value+"@"+headOid, "--unset", "pr.machine_reason", "--unset", "pr.machine_cause") {
 		fmt.Fprintf(m.stderr, "%s: WARN %s machine axis '%s@%s' did not record; the board reads it as unknown until the next pass\n", mergeProg, id, value, headOid)
 	}
 }
 
-func (m *merger) recordBlocked(id, headOid, route, reason string) {
+// recordBlocked records a blocked verdict with its cause twice: the structured
+// cause a reader keys on, and the sentence a person reads.
+func (m *merger) recordBlocked(id, headOid, route, cause, reason string) {
 	if headOid == "" {
 		return
 	}
 	if !m.transition(io.Discard, io.Discard, id, "--to", "pull_request", "--expect", "pull_request",
-		"--route", route, "--set-dated", "pr.machine=blocked@"+headOid, "--set", "pr.machine_reason="+reason) {
+		"--route", route, "--set-dated", "pr.machine=blocked@"+headOid, "--set", "pr.machine_cause="+cause, "--set", "pr.machine_reason="+reason) {
 		fmt.Fprintf(m.stderr, "%s: WARN %s machine axis 'blocked@%s' did not record; the board reads it as unknown until the next pass\n", mergeProg, id, headOid)
 	}
 }
@@ -1769,55 +1824,123 @@ func numberToInt64(n json.Number) int64 {
 	return 0
 }
 
+// rollupRows decodes a statusCheckRollup read, ok=false when it does not decode.
+func rollupRows(rollupRaw []byte) ([]map[string]any, bool) {
+	var v struct {
+		StatusCheckRollup []map[string]any `json:"statusCheckRollup"`
+	}
+	if json.Unmarshal(gcbd.Scrub(rollupRaw), &v) != nil {
+		return nil, false
+	}
+	return v.StatusCheckRollup, true
+}
+
+// rollupName is the context a rollup row reports: a check run's name, else a
+// status context's context.
+func rollupName(item map[string]any) string {
+	if n, ok := item["name"].(string); ok && n != "" {
+		return n
+	}
+	if c, ok := item["context"].(string); ok {
+		return c
+	}
+	return ""
+}
+
+// rollupUpper is `((.<k> // "") | tostring | length) > 0` and then
+// `.<k> | ascii_upcase`. set is false for an absent, null, false or empty value.
+// ok is false for any other non-string, where ascii_upcase errors.
+func rollupUpper(item map[string]any, k string) (u string, set, ok bool) {
+	switch x := item[k].(type) {
+	case nil:
+		return "", false, true
+	case string:
+		return strings.ToUpper(x), x != "", true
+	case bool:
+		if !x {
+			return "", false, true
+		}
+	}
+	return "", true, false
+}
+
+// rollupGreen reports a row that passed: a set conclusion of SUCCESS, NEUTRAL or
+// SKIPPED, or else a status context in state SUCCESS.
+func rollupGreen(item map[string]any) (isGreen, ok bool) {
+	c, set, ok := rollupUpper(item, "conclusion")
+	if set {
+		return c == "SUCCESS" || c == "NEUTRAL" || c == "SKIPPED", ok
+	}
+	s, set, ok := rollupUpper(item, "state")
+	return set && s == "SUCCESS", ok
+}
+
+// rollupFailed reports a row that ended in a failure, the set pr-facts.sh's
+// red-check arm routes on: a conclusion of FAILURE, TIMED_OUT, CANCELLED,
+// ACTION_REQUIRED or STARTUP_FAILURE, or else a status context in state FAILURE
+// or ERROR.
+func rollupFailed(item map[string]any) (isFailed, ok bool) {
+	c, set, ok := rollupUpper(item, "conclusion")
+	if set {
+		switch c {
+		case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE":
+			return true, ok
+		}
+		return false, ok
+	}
+	s, set, ok := rollupUpper(item, "state")
+	return set && (s == "FAILURE" || s == "ERROR"), ok
+}
+
+// requiredCheckStates sorts the required contexts that are not green. A context
+// with a row that failed is failed. Any other context not green is pending: a
+// row still queued or running, or no row at all, which GitHub shows as a check
+// expected but not yet reported. ok=false means the rollup is unreadable, as
+// notGreenRequired reads it.
+func requiredCheckStates(rollupRaw []byte, required []string) (failed, pending []string, ok bool) {
+	rows, ok := rollupRows(rollupRaw)
+	if !ok {
+		return nil, nil, false
+	}
+	for _, c := range required {
+		isFailed, isGreen, seen := false, true, false
+		for _, item := range rows {
+			if rollupName(item) != c {
+				continue
+			}
+			seen = true
+			g, gok := rollupGreen(item)
+			f, fok := rollupFailed(item)
+			if !gok || !fok {
+				return nil, nil, false
+			}
+			isFailed = isFailed || f
+			isGreen = isGreen && g
+		}
+		switch {
+		case isFailed:
+			failed = append(failed, c)
+		case !seen || !isGreen:
+			pending = append(pending, c)
+		}
+	}
+	return failed, pending, true
+}
+
 // notGreenRequired names each required context that is MISSING or RED in the
 // rollup, joined by spaces. ok=false means the rollup is unreadable: it did not
 // decode, or a row of a required context carries a set conclusion or state that
 // is not a string.
 func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
-	var v struct {
-		StatusCheckRollup []map[string]any `json:"statusCheckRollup"`
-	}
-	if json.Unmarshal(gcbd.Scrub(rollupRaw), &v) != nil {
+	rows, ok := rollupRows(rollupRaw)
+	if !ok {
 		return "", false
-	}
-	nameOf := func(item map[string]any) string {
-		if n, ok := item["name"].(string); ok && n != "" {
-			return n
-		}
-		if c, ok := item["context"].(string); ok {
-			return c
-		}
-		return ""
-	}
-	// upper is `((.<k> // "") | tostring | length) > 0` and then
-	// `.<k> | ascii_upcase`. set is false for an absent, null, false or empty
-	// value. ok is false for any other non-string, where ascii_upcase errors.
-	upper := func(item map[string]any, k string) (u string, set, ok bool) {
-		switch x := item[k].(type) {
-		case nil:
-			return "", false, true
-		case string:
-			return strings.ToUpper(x), x != "", true
-		case bool:
-			if !x {
-				return "", false, true
-			}
-		}
-		return "", true, false
-	}
-	green := func(item map[string]any) (isGreen, ok bool) {
-		c, set, ok := upper(item, "conclusion")
-		if set {
-			return c == "SUCCESS" || c == "NEUTRAL" || c == "SKIPPED", ok
-		}
-		s, set, ok := upper(item, "state")
-		return set && s == "SUCCESS", ok
 	}
 	var out []string
 	for _, c := range required {
 		var hits []map[string]any
-		for _, item := range v.StatusCheckRollup {
-			if nameOf(item) == c {
+		for _, item := range rows {
+			if rollupName(item) == c {
 				hits = append(hits, item)
 			}
 		}
@@ -1829,7 +1952,7 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 		// rollup unreadable.
 		red := false
 		for _, h := range hits {
-			g, ok := green(h)
+			g, ok := rollupGreen(h)
 			if !ok {
 				return "", false
 			}

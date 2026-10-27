@@ -328,18 +328,31 @@ disposition_key = "pr_comment_disposition"
 # never re-implements two scripts' predicates to learn it.
 machine_key = "pr.machine"
 #   progressing       some automated actor will act — a pool-routed blocker is
-#                     open, or a declared lane is short of green
+#                     open, a declared lane is short of green, a required check
+#                     is still running, or a conflicting branch waits on the
+#                     merge-in rework pr-facts.sh files
 #   settled           every declared check reads green; the cadence
 #                     is done and the PR waits on approval, on the merge pass,
 #                     or on nothing
 #   blocked           the merge cannot proceed without a person, and no review
-#                     verdict is what it waits on: a required review thread is
-#                     unresolved, the base has gone BEHIND, or an unrouted
-#                     blocker no automated actor will clear holds it. Distinct
-#                     from settled — which waits on a review or the merge pass —
-#                     so the board can show it as needs-attention rather than
-#                     awaiting-review. The specific cause rides pr.machine_reason.
+#                     verdict is what it waits on. Distinct from settled — which
+#                     waits on a review or the merge pass — so the board and the
+#                     status: label show it as needs-attention rather than
+#                     awaiting-review. The cause rides pr.machine_cause, one of
+#                     causes below, and pr.machine_reason says it in a sentence.
 machines = ["progressing", "settled", "blocked"]
+# Why a blocked verdict cannot merge, the value merge.sh records in
+# pr.machine_cause beside it:
+#   review-threads    a required review thread is unresolved
+#   check-failed      a required check failed at the head
+#   conflict          the branch conflicts with its base, and a rebase_hold or an
+#                     armed re-dispatch defers the merge-in rework
+#   behind            the base moved ahead (BEHIND), and nothing brings the
+#                     branch current
+#   blocker           an unrouted blocker no automated actor will clear holds it
+#   rule              branch protection holds it by a rule the merge pass
+#                     cannot name
+causes = ["review-threads", "check-failed", "conflict", "behind", "blocker", "rule"]
 # Written from pre_open_gate onward, before a PR number exists: gate-ensure.sh
 # reaches a pre-open anchor's verdict on the same pass as an open one's.
 writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh), assets/scripts/merge.sh (gctk merge, through the lifecycle writer it runs in-process)"
@@ -1203,11 +1216,13 @@ keys = [
 # pr.machine and pr.conversation are the two round-trip axes, both dated keys
 # (see [machine_axis], [conversation], [dated_keys]). pr-facts.sh writes
 # pr.conversation; gate-ensure.sh and merge.sh write pr.machine.
-# pr.machine_reason is the human sentence naming why a `blocked` machine verdict
-# cannot merge (which thread, which base, which blocker). It is plain, not dated:
-# it is read only while pr.machine is `blocked`, and merge.sh writes the two
-# together and clears the reason whenever it records any other verdict.
-keys = ["pr.machine", "pr.machine_reason", "pr.conversation"]
+# pr.machine_cause and pr.machine_reason name why a `blocked` machine verdict
+# cannot merge: the cause is one value of [machine_axis] causes, which a reader
+# keys on, and the reason is the human sentence (which thread, which base, which
+# blocker). Both are plain, not dated, and read only while pr.machine is
+# `blocked`: merge.sh writes the three together and clears both whenever it
+# records any other verdict, and gate-ensure.sh's own verdicts leave them alone.
+keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the
