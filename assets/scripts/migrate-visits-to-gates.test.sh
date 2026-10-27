@@ -367,10 +367,12 @@ fx_restore() {
 }
 
 # run_mig <args...> — one run in a process group of its own, so the stub can
-# stop it after a write without touching the test. Sets OUT and RC.
+# stop it after a write without touching the test. The stop is a SIGKILL,
+# which leaves a temp file the run made behind, so the run's TMPDIR is the
+# test's own and goes with it. Sets OUT and RC.
 OUT=""; RC=0
 run_mig() {
-  OUT=$(perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' "$SUT" "$@" 2>&1); RC=$?
+  OUT=$(TMPDIR="$TMP" perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' "$SUT" "$@" 2>&1); RC=$?
 }
 
 # ── Reads of the stub store ───────────────────────────────────────────
