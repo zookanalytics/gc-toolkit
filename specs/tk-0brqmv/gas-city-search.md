@@ -85,10 +85,10 @@ Each source was read on 2026-10-27:
 
 ### Orders
 
-An order pairs a trigger with an action. The controller evaluates every order's
-trigger on each pass of its orders lane, "about once per patrol interval"
-(`engdocs/architecture/orders.md`), and the patrol interval defaults to 30
-seconds (`patrol_interval` in
+An order pairs a trigger with an action. The controller evaluates every trigger
+that is not manual on each pass of its orders lane, "about once per patrol
+interval" (`engdocs/architecture/orders.md`), and the patrol interval defaults
+to 30 seconds (`patrol_interval` in
 [DaemonConfig](https://docs.gascity.com/reference/config#daemonconfig)). Three
 parts of an order overlap the writer.
 
@@ -235,19 +235,19 @@ pins do not do that.
   nothing about which pack a line came from. It reads prompt templates and
   their fragments from disk (`renderPromptWithMeta` and `loadSharedTemplates`
   in package main), so it cannot render an agent as of an earlier commit.
-- Formulas can be read as of a commit. With `GC_FORMULA_REF` set to a ref, a
-  formula file inside a git repository is read at that ref, and one outside any
-  repository, such as a built-in pack's in gc's cache, is read from disk
-  (`SourceFromEnv` in package `formula`, which `gc formula show` uses). That
-  reproduces the fork point's formula pages with the current binary's built-in
-  text, which is half of what `--since` renders at the fork point. The change
-  does not compose it, for three reasons. No page in Gas City's docs or
-  engineering docs describes the variable. The agent pages still need the fork
-  point's tree written out and rendered, and once it is, its formula pages
-  render from it in the same pass, so the variable would add a second path for
-  half the pages and remove no step. And each tree renders through its own copy
-  of the renderer, whose scenario city is part of what every page renders to,
-  which a formula ref does not reach.
+- Formulas can be read as of a commit. With `GC_FORMULA_REF` set to a ref other
+  than `HEAD`, a formula file inside a git repository is read at that ref, and
+  one outside any repository, such as a built-in pack's in gc's cache, is read
+  from disk (`SourceFromEnv` in package `formula`, which `gc formula show`
+  uses). That reproduces the fork point's formula pages with the current
+  binary's built-in text, which is half of what `--since` renders at the fork
+  point. The change does not compose it, for three reasons. No page in
+  Gas City's docs or engineering docs describes the variable. The agent pages
+  still need the fork point's tree written out and rendered, and once it is,
+  its formula pages render from it in the same pass, so the variable would add
+  a second path for half the pages and remove no step. And each tree renders
+  through its own copy of the renderer, whose scenario city is part of what
+  every page renders to, which a formula ref does not reach.
 - Nothing in Gas City tells the binary's text from a pack's. So `--since`
   renders the fork point's tree itself to learn which pages a change moved.
 - Gas City installs no git hook for a pack and has no setting for one. When
