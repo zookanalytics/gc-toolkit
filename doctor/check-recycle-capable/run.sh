@@ -189,12 +189,14 @@ fi
 
 rig_paths=""
 if [ -n "$refinery_rigs" ]; then
-    rigs_json=$(run_bounded gc --city "$city" rig list --json 2>/dev/null)
+    # rig-map.sh prints the map when the listing reads and only its reason when
+    # it does not, so one capture holds whichever came back.
+    rigs_json=$(run_bounded "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh" --city "$city" 2>&1)
     if printf '%s' "$rigs_json" | jq -e '(.rigs | type) == "array"' >/dev/null 2>&1; then
         rig_paths=$(printf '%s' "$rigs_json" | jq -r \
             '.rigs[]? | select((.suspended // false) | not) | [(.name // "-"), (.path // "-")] | @tsv' 2>/dev/null)
     else
-        warnings+=("could not read the rig roster (\`gc --city $city rig list --json\`) — the defer-guard arm did not run, so a latched guard would not be visible")
+        warnings+=("could not read the rig roster (\`gc --city $city rig list --json\`) — the defer-guard arm did not run, so a latched guard would not be visible${rigs_json:+ ($rigs_json)}")
         refinery_rigs=""
     fi
 fi

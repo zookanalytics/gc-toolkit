@@ -722,7 +722,7 @@ OUT=$(BD_FAIL_BLOCKERS=alpha BD_ERR="dolt: query timed out" run_check); RC=$?
 has "$OUT" "alpha: could not read what holds 1 armed bead(s) in $TMP/alpha/.beads — they were NOT checked; \`gc bd list\` stderr: dolt: query timed out" "the hold walk's warning carries the stderr of its failed read"
 OUT=$(RIGS_RC=2 RIGS_ERR="rig registry: permission denied" run_check); RC=$?
 eq "$RC" "1" "a failed rig list warns (exit 1)"
-has "$OUT" "\`gc rig list\` stderr: rig registry: permission denied" "the rig-list detail carries its stderr"
+has "$OUT" "rig-map: \`gc rig list --json\` exited 2: rig registry: permission denied" "the rig-list detail carries rig-map.sh's reason, with gc's stderr"
 OUT=$(ORDERS_ERR="order registry: socket unavailable" run_check); RC=$?
 has "$OUT" "minimum floor, not one trip of the dispatch rotation; \`gc order list\` stderr: order registry: socket unavailable" "an unread order registry's note carries its stderr"
 OUT=$(BD_FAIL_LIST=alpha run_check); RC=$?

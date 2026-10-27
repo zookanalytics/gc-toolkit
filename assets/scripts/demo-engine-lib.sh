@@ -56,13 +56,9 @@
 
 DEMO_ENGINE_PACKAGE=@zookanalytics/sprintshow
 
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
+# The directory this library is sourced from, where rig-map.sh sits beside it.
+# bash names the file being sourced in BASH_SOURCE, and zsh in $0.
+DEMO_ENGINE_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 
 _demo_engine_say() { echo "${PROG:-demo-engine-lib}: $1" >&2; }
 
@@ -86,7 +82,7 @@ demo_engine_find() {
   local dir=""
   DEMO_ENGINE_DIR=""
   if command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    dir=$(gc rig list --json 2>/dev/null | scrub | jq -r '.rigs[]? | objects | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -n1)
+    dir=$("$DEMO_ENGINE_LIB_DIR/rig-map.sh" | jq -r '.rigs[]? | objects | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -n1)
   fi
   if [ -n "$dir" ] && [ "$(jq -r '.name // empty' "$dir/package.json" 2>/dev/null)" = "$DEMO_ENGINE_PACKAGE" ]; then
     DEMO_ENGINE_DIR=$dir
