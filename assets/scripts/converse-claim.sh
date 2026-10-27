@@ -211,9 +211,7 @@ if [ "$REASON" = "existing_assignment" ]; then
             # caller parses. GROUP is the subject: its gc.continuation_group stamp,
             # else the tracks edge recovered above.
             PVC=""
-            for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-                [ -x "$cand/assets/scripts/pr-visit-comment.sh" ] && { PVC="$cand/assets/scripts/pr-visit-comment.sh"; break; }
-            done
+            [ -x "$HERE/pr-visit-comment.sh" ] && PVC="$HERE/pr-visit-comment.sh"
             [ -n "$PVC" ] && [ -n "$GROUP" ] && "$PVC" close --visit "$BEAD" --subject "$GROUP" >/dev/null 2>&1 || true
         else
             # Still a finish: sending the caller back to waiting on a

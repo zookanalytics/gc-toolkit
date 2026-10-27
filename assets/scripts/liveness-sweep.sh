@@ -488,13 +488,9 @@ advance_baseline() {
         || echo "$PROG: WARN: cannot write baseline at $BASELINE_FILE" >&2
 }
 
-# resolve the claim-time re-check script — searched, never assumed (importer
-# rigs have no assets/ of their own).
+# The claim-time re-check script is this script's sibling in the pack.
 RECHECK_SH=""
-for cand in "$HERE/.." "${GC_RIG_ROOT:+$GC_RIG_ROOT/assets}" "${GC_CITY_PATH:+$GC_CITY_PATH/rigs/gc-toolkit/assets}"; do
-    [ -n "$cand" ] && [ -x "$cand/scripts/liveness-recheck.sh" ] \
-        && { RECHECK_SH="$(cd "$cand/scripts" && pwd)/liveness-recheck.sh"; break; }
-done
+[ -x "$HERE/liveness-recheck.sh" ] && RECHECK_SH="$HERE/liveness-recheck.sh"
 
 sweep_visit() {
     # Live-visit guard: a sitting already live on the subject self-limits the
