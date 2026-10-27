@@ -2193,9 +2193,9 @@ func dated(value, oid string, at time.Time) string {
 	return value + "@" + oid + "@" + at.Format(time.RFC3339)
 }
 
-// prPhase names what stands between a PR and landing in the same values and
-// precedence as pr-status-label.sh's derive_value; these cases mirror that
-// script's, since it stamps nothing on the bead for the board to read instead.
+// prPhase names whose move a PR is in the same values and precedence as
+// pr-status-label.sh's derive_value; these cases mirror that script's, since it
+// stamps nothing on the bead for the board to read instead.
 func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 	merge := func(md map[string]string) Anchor {
 		full := map[string]string{mdMergeResult: "pull_request"}
@@ -2213,10 +2213,12 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"non-merge row has no phase", Anchor{Metadata: map[string]string{}}, 0, ""},
 		{"operator freeze needs attention", merge(map[string]string{mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 		{"rebase hold needs attention", merge(map[string]string{mdRebaseHold: "true"}), 0, PhaseNeedsAttention},
-		{"approved but blocked with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMergeState: "BLOCKED@abc"}), 0, PhaseNeedsAttention},
-		{"approved and blocked but reworking is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "BLOCKED@abc"}), 1, PhaseWorking},
+		{"approved and blocked by the merge pass with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "check-failed"}), 0, PhaseNeedsAttention},
+		{"approved and blocked but reworking is merging", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "check-failed"}), 1, PhaseMerging},
+		{"approved and held by an unrouted blocker needs attention whatever is in flight", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "blocker"}), 1, PhaseNeedsAttention},
+		{"approved while GitHub reports BLOCKED for a check still running is merging", merge(map[string]string{mdPRPosture: "approved@abc", "pr_merge_state": "BLOCKED@abc", mdPRMachine: "progressing@abc@2026-01-01T00:00:00Z"}), 0, PhaseMerging},
 		{"open rework child is working", merge(map[string]string{mdPRPosture: "review_required@abc"}), 2, PhaseWorking},
-		{"approved and mergeable is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "CLEAN@abc"}), 0, PhaseWorking},
+		{"approved and mergeable is merging", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "settled@abc@2026-01-01T00:00:00Z"}), 0, PhaseMerging},
 		{"settled awaiting review needs review", merge(map[string]string{mdPRPosture: "review_required@abc"}), 0, PhaseNeedsReview},
 		{"falsy holds do not count", merge(map[string]string{mdMergeHold: "false", mdRebaseHold: "0", mdPRPosture: "commented@abc"}), 0, PhaseNeedsReview},
 		{"a draft the city opened is working until readied", merge(map[string]string{mdOpenedAsDraft: "abc"}), 0, PhaseWorking},
@@ -2264,7 +2266,7 @@ func TestDraftStageReadsWorkingOnBothAxes(t *testing.T) {
 }
 
 // An open visit on a merge anchor is a hold: the merge pass's finalize gate holds
-// the PR until the visit closes. So an approved, settled PR, which reads working
+// the PR until the visit closes. So an approved, settled PR, which reads merging
 // with the merge pass next, reads needs-attention on both axes while a visit
 // names it, and its needs line stops naming the merge pass. The visit fact is the
 // one the held marker reads, so a visit a sitting is holding, which no wrapper
@@ -2272,10 +2274,9 @@ func TestDraftStageReadsWorkingOnBothAxes(t *testing.T) {
 // what moves the row.
 func TestOpenVisitHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
 	md := map[string]string{
-		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
-		mdPRMergeState: "DIRTY@" + headLive,
-		mdPRMachine:    dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
-		mdPRNumber:     "1162",
+		mdPRPosture: dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRMachine: dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRNumber:  "1162",
 	}
 	held := mergeAnchor("tk-held", md)
 	free := mergeAnchor("tk-free", md)
@@ -2283,8 +2284,8 @@ func TestOpenVisitHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
 	b := BuildBoard([]Anchor{held, free}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-held": true}})
 
 	fr := mustTile(t, b, "tk-free")
-	if fr.PRPhase != PhaseWorking || fr.Phase != PhaseWorking || fr.Needs != "green — waiting on the merge pass" {
-		t.Fatalf("test premise: the unheld twin is working with the merge pass next; got pr_phase=%q phase=%q needs=%q", fr.PRPhase, fr.Phase, fr.Needs)
+	if fr.PRPhase != PhaseMerging || fr.Phase != PhaseMerging || fr.Needs != "green — waiting on the merge pass" {
+		t.Fatalf("test premise: the unheld twin is merging with the merge pass next; got pr_phase=%q phase=%q needs=%q", fr.PRPhase, fr.Phase, fr.Needs)
 	}
 
 	h := mustTile(t, b, "tk-held")
@@ -2482,17 +2483,15 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 // supersede or disposal — closed without merging and reads "closed". The per-bead
 // Phase stays empty on a closed row, so the frontier keeps its age phrase. The
 // live twin, with the merged anchor's identical frozen facts but still open,
-// proves closedness is the only thing moving the PR axis off working.
+// proves closedness is the only thing moving the PR axis off merging.
 func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
 	frozen := map[string]string{
-		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
-		mdPRMergeState: "CLEAN@" + headLive,
+		mdPRPosture: dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
 	}
 	merged := mergeAnchor("tk-merged", map[string]string{
-		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
-		mdPRMergeState: "CLEAN@" + headLive,
-		mdMergeResult:  mergeResultMerged,
-		"merged_sha":   "abc123def456",
+		mdPRPosture:   dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
+		mdMergeResult: mergeResultMerged,
+		"merged_sha":  "abc123def456",
 	})
 	merged.ClosedAt = fixtureNow.Add(-24 * time.Hour)
 	// Closed without merging: merge_result stays the default pull_request — a bare
@@ -2503,8 +2502,8 @@ func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
 
 	b := BuildBoard([]Anchor{merged, superseded, live}, fixtureNow, false, nil, Facts{})
 
-	if got := mustTile(t, b, "tk-live").PRPhase; got != PhaseWorking {
-		t.Fatalf("test premise: the identical live anchor derives working; got %q", got)
+	if got := mustTile(t, b, "tk-live").PRPhase; got != PhaseMerging {
+		t.Fatalf("test premise: the identical live anchor derives merging; got %q", got)
 	}
 	if got := mustTile(t, b, "tk-merged").PRPhase; got != PhaseMerged {
 		t.Errorf("a merged (closed) anchor reads merged on the PR axis; got %q (the DONE-bead-shows-WORKING report)", got)
@@ -2717,6 +2716,26 @@ func TestBlockedAnchorIsOwedAndNamed(t *testing.T) {
 	}
 	if !blk.PROwedSince.Equal(at) {
 		t.Errorf("pr_owed_since = %v, want the blocked stamp %v", blk.PROwedSince, at)
+	}
+}
+
+// TestBlockedAtAnEarlierHeadIsMerging: a blocked verdict the merge pass
+// recorded at a head the PR has since left was reached about another commit, so
+// an approved PR at the new head reads merging on both axes, as its status:
+// label does, and the roll-up treats it as a row like any other.
+func TestBlockedAtAnEarlierHeadIsMerging(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-moved", map[string]string{
+			mdPRMachine:      dated(MachineBlocked, "oldhead", at),
+			mdPRMachineCause: "check-failed",
+			mdPRPosture:      dated(postureApproved, headLive, at),
+			mdPRNumber:       "877",
+		}),
+	}, fixtureNow, false, nil, Facts{})
+	tile := mustTile(t, b, "tk-moved")
+	if tile.PRPhase != PhaseMerging || tile.Phase != PhaseMerging {
+		t.Errorf("a blocked verdict at an earlier head does not hold the PR: pr_phase=%q phase=%q, want merging", tile.PRPhase, tile.Phase)
 	}
 }
 

@@ -400,9 +400,11 @@ type Tile struct {
 	// pass: progressing, settled, blocked, or unknown.
 	//
 	// `blocked` is a hold no automated actor will clear and no review verdict is
-	// owed on — an unresolved required review thread, a base gone BEHIND, or an
-	// unrouted blocker. The operator is owed it, distinct from `settled`, and its
-	// cause rides `pr.machine_reason`, surfaced in the row's `needs`.
+	// owed on — an unresolved required review thread, a failed required check, a
+	// base gone BEHIND, a conflict whose merge-in a hold defers, an unrouted
+	// blocker, or a branch rule the merge pass cannot name. The operator is owed
+	// it, distinct from `settled`. Its cause rides `pr.machine_cause` as a value
+	// and `pr.machine_reason` as the sentence surfaced in the row's `needs`.
 	//
 	// `unknown` is a rendered value, not a fallback to the quiet end — the same
 	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An
@@ -511,24 +513,24 @@ type Tile struct {
 	// too. A rig the board holds no pull request URL for keeps the bare branch.
 	PRBranchURL string `json:"pr_branch_url"`
 
-	// PRPhase is this merge anchor's PR status. On a live anchor it is what stands
-	// between the PR and landing — `working`, `needs-review`, or
-	// `needs-attention` — the same status: taxonomy pr-status-label.sh projects
-	// to the GitHub PR list, so the board and the label read one vocabulary
-	// rather than two. On a closed anchor it is the PR's resolved state,
-	// `merged` or `closed`, so a done row names how its PR ended rather than
-	// freezing on its last live value. Empty on a non-merge row.
+	// PRPhase is this merge anchor's PR status. On a live anchor it is whose move
+	// the PR is — `working`, `merging`, `needs-review`, or `needs-attention` — the
+	// same status: taxonomy pr-status-label.sh projects to the GitHub PR list, so
+	// the board and the label read one vocabulary rather than two. On a closed
+	// anchor it is the PR's resolved state, `merged` or `closed`, so a done row
+	// names how its PR ended rather than freezing on its last live value. Empty on
+	// a non-merge row.
 	PRPhase string `json:"pr_phase"`
 
-	// Phase is this bead's liveness in the shared tri-state vocabulary —
-	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
+	// Phase is this bead's liveness in the shared status vocabulary — `working`,
+	// `merging`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
 	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
-	// visit, posture, the draft stage, and for a merge anchor its open
-	// rework/review children, or for any other bead the live-workflow signal
-	// standing over it. A bead's board liveness and its GitHub `status:` label
-	// come from that one core. A row WITH child tiles then takes their rolled-up
-	// state in place of that per-bead value
+	// visit, posture, the merge pass's verdict, the draft stage, and for a merge
+	// anchor its open rework/review children, or for any other bead the
+	// live-workflow signal standing over it. A bead's board liveness and its
+	// GitHub `status:` label come from that one core. A row WITH child tiles then
+	// takes their rolled-up state in place of that per-bead value
 	// ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
 	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
@@ -537,7 +539,7 @@ type Tile struct {
 	// review children hang off it by a blocked/anchor_bead edge the roll-up does
 	// not climb — and diverges from it on a merge anchor that ALSO has
 	// parent-child child tiles, whose Phase becomes their roll-up. The one place
-	// the two cannot disagree is a blocked machine verdict, which lifts both to
+	// the two cannot disagree is a blocked machine verdict, which holds both at
 	// needs-attention together.
 	//
 	// Empty on a terminal (closed) row, where the live vocabulary has no answer,

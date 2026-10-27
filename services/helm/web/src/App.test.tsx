@@ -1323,6 +1323,22 @@ it('shows the PR phase beside the row', async () => {
   expect(within(row as HTMLElement).getByText('needs-review')).toBeTruthy();
 });
 
+// An approved PR the city is landing reads merging, in its own color, so it no
+// longer shares the working chip with a PR the city is still changing.
+it('shows merging on the chip of a PR the city is landing', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-mg',
+    title: 'an approved row being landed',
+    pr_phase: 'merging',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/an approved row being landed/)).toBeTruthy());
+
+  const row = rowFor(/an approved row being landed/);
+  const chip = within(row as HTMLElement).getByText('merging');
+  expect(chip.className).toBe('pr-phase pr-phase--merging');
+});
+
 // A resolved PR names its terminal state on the same chip, so a done row says how
 // its PR ended — merged or closed — rather than freezing on its last live phase.
 it('shows a resolved PR state on the chip', async () => {

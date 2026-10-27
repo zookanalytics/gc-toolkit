@@ -7,8 +7,9 @@ import (
 )
 
 // phaseLeaf is a childless tile whose per-bead phase the test drives directly:
-// needs-review by default, needs-attention with a merge hold, and working when a
-// live workflow stands over it (wired through workingFacts).
+// needs-review by default, needs-attention with a merge hold, merging with an
+// approved posture, and working when a live workflow stands over it (wired
+// through workingFacts).
 func phaseLeaf(id string, md map[string]string) Anchor {
 	return Anchor{
 		ID: id, Title: "t " + id, Kind: "human", Source: "human",
@@ -27,12 +28,14 @@ func workingFacts(ids ...string) Facts {
 }
 
 // TestAggregatePhaseUpParentChain is the precedence golden case: a parent's
-// rolled-up tri-state is working while ANY live child is, needs-attention only
-// when EVERY live child is, and needs-review otherwise. The leaves keep their
-// own per-bead phase; only the parent rolls up.
+// rolled-up state is working while ANY live child is, merging while no child is
+// working and ANY is being landed, needs-attention only when EVERY live child
+// is, and needs-review otherwise. The leaves keep their own per-bead phase; only
+// the parent rolls up.
 func TestAggregatePhaseUpParentChain(t *testing.T) {
 	const (
 		W = PhaseWorking
+		M = PhaseMerging
 		R = PhaseNeedsReview
 		A = PhaseNeedsAttention
 	)
@@ -49,6 +52,10 @@ func TestAggregatePhaseUpParentChain(t *testing.T) {
 		{"a review among attention is not all-stuck", []string{R, A}, R},
 		{"lone working child", []string{W}, W},
 		{"lone attention child", []string{A}, A},
+		{"working outranks merging", []string{W, M}, W},
+		{"merging when no child is working", []string{M, R}, M},
+		{"merging dominates attention too", []string{M, A}, M},
+		{"lone merging child", []string{M}, M},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -64,6 +71,8 @@ func TestAggregatePhaseUpParentChain(t *testing.T) {
 					working = append(working, id)
 				case A:
 					anchors = append(anchors, phaseLeaf(id, map[string]string{mdMergeHold: "true"}))
+				case M:
+					anchors = append(anchors, phaseLeaf(id, map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z"}))
 				default:
 					anchors = append(anchors, phaseLeaf(id, nil))
 				}
