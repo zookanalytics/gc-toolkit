@@ -602,17 +602,20 @@ counts the review threads that wait on the city's answer and records the count
 as `pr.unanswered_threads`, pinned to the head it read. A thread waits when it is
 unresolved and the newest of its posts that asks or answers is feedback
 (`gc_thread_awaits_answer` in `pr-post.sh`). A post not for review neither asks
-nor answers, whoever posted it, and neither does a post a dismissal retired
-(`live_comments` in `review-dismissal.sh`). The count holds the PR at the head
-the posture was read at, while nothing is in flight on the anchor, because work
-in flight is the city answering, and while no feedback waits for `pr-facts.sh`
-to route it (posture `commented`). A thread the city answered and left open for
-the reviewer, such as a point it declined or deferred, waits on the reviewer and
-not on the city, so the PR reads as the reviewer's queue: `needs-review` before
-approval. Where the base requires thread resolution, the merge pass's
-`review-threads` verdict holds an approved PR for any unresolved thread,
-answered or not. The merge does not read the count, so on a base that requires
-no thread resolution an approved PR still lands while `held: review` stands.
+nor answers, whoever posted it. Neither does a post the city marked handled with
+the THUMBS_UP that `pr-facts.sh`'s write-back puts on a post it owes nothing
+more, which is the only answer a point declined with no reply owed gets. Nor
+does a post a dismissal retired (`live_comments` in `review-dismissal.sh`). The
+count holds the PR at the head the posture was read at, while nothing is in
+flight on the anchor, because work in flight is the city answering, and while
+no feedback waits for `pr-facts.sh` to route it (posture `commented`). A thread
+the city answered and left open for the reviewer, such as a point it declined
+or deferred, waits on the reviewer and not on the city, so the PR reads as the
+reviewer's queue: `needs-review` before approval. Where the base requires
+thread resolution, the merge pass's `review-threads` verdict holds an approved
+PR for any unresolved thread, answered or not. The merge does not read the
+count, so on a base that requires no thread resolution an approved PR still
+lands while `held: review` stands.
 
 `prstatus.Held` is the rule, and the helm board shows the same values as a row's
 `pr_held`, from the same derivation over the same facts: the anchor's

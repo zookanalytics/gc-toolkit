@@ -177,7 +177,8 @@ type Facts struct {
 	// and the newest of its posts that asks or answers is feedback
 	// (gc_thread_awaits_answer in assets/scripts/pr-post.sh), so a thread the
 	// city answered and left open for the reviewer does not. A post not for
-	// review, or one a dismissal retired, neither asks nor answers.
+	// review, one the city marked handled with its THUMBS_UP, or one a
+	// dismissal retired, neither asks nor answers.
 	PRUnansweredThreads string
 	// OpenedAsDraft is metadata.opened_as_draft: the head oid pr-open.sh opened
 	// or adopted the PR as a draft at, recorded only on a draft whose ready flip

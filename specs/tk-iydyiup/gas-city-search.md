@@ -41,9 +41,12 @@ The change adds these pieces of surface:
   newest of its posts that asks or answers is feedback. A post of the city's
   answers every post before it, so a thread the city answered and left open for
   the reviewer does not wait on the city. A post not for review neither asks nor
-  answers, and neither does a post a dismissal retired, which the definition
-  reads through `live_comments` in `review-dismissal.sh`, so
-  `pr-post.sh feedback-def` prints that file's definitions ahead of it.
+  answers. Neither does a post the city marked handled with the THUMBS_UP that
+  `pr-facts.sh`'s write-back puts on a post it owes nothing more, the only
+  answer a point declined with no reply owed gets. Nor does a post a dismissal
+  retired, which the definition reads through `live_comments` in
+  `review-dismissal.sh`, so `pr-post.sh feedback-def` prints that file's
+  definitions ahead of it.
 - **`held: review` reads the count.** `prstatus.Held` holds the PR on a count
   above zero at the head the posture was read at, while nothing is in flight on
   the anchor and no feedback waits for `pr-facts.sh` to route it. The labels

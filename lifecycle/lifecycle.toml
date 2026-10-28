@@ -1229,8 +1229,9 @@ keys = [
 # records any other verdict, and gate-ensure.sh's own verdicts leave them alone.
 # pr.unanswered_threads is how many of the PR's review threads wait on the
 # city's answer, `<count>@<head oid>`: unresolved, with no answer of the city's
-# after their newest feedback, where a post not for review or one a dismissal
-# retired is neither (gc_thread_awaits_answer in pr-post.sh). merge.sh
+# after their newest feedback, where a post not for review, one the city marked
+# handled with its THUMBS_UP, or one a dismissal retired is neither
+# (gc_thread_awaits_answer in pr-post.sh). merge.sh
 # writes it, through gctk merge, for every open, non-draft PR the pass visits,
 # whenever the count or the head moves. prstatus reads it for held: review,
 # through gctk pr-status for the labels and in the helm board, and only at the
