@@ -516,8 +516,8 @@ func (m *merger) handle(row *gcbd.Bead) {
 	}
 
 	// --- review feedback nothing has answered: the labels' fact, not the merge's ---
-	// Recorded for every open PR the pass visits, before a hold below ends the
-	// visit. The merge does not read it.
+	// Recorded for every open, non-draft PR the pass visits, before a hold below
+	// ends the visit. The merge does not read it.
 	m.recordUnansweredThreads(fresh, num, headOid)
 
 	// --- the rest of the anchor-local authorization set, off the same row -------

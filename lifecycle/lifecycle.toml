@@ -1230,12 +1230,12 @@ keys = [
 # pr.unanswered_threads is how many of the PR's review threads wait on the
 # city's answer, `<count>@<head oid>`: unresolved, with no post of the city's
 # after their newest feedback (gc_thread_awaits_answer in pr-post.sh). merge.sh
-# writes it, through gctk merge, for every open PR the pass visits, whenever the
-# count or the head moves. prstatus reads it for held: review, through gctk
-# pr-status for the labels and in the helm board, and only at the head the
-# posture was read at. Absent means no visit has counted the threads yet, and
-# nothing reads as waiting. It is plain, not dated, and never cleared: the next
-# count replaces it.
+# writes it, through gctk merge, for every open, non-draft PR the pass visits,
+# whenever the count or the head moves. prstatus reads it for held: review,
+# through gctk pr-status for the labels and in the helm board, and only at the
+# head the posture was read at. Absent means no visit has counted the threads
+# yet, and nothing reads as waiting. It is plain, not dated, and never cleared:
+# the next count replaces it.
 keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation", "pr.unanswered_threads"]
 
 [metadata.pr_status_label]

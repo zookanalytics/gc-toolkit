@@ -597,9 +597,9 @@ its own. A blocker the city is landing, one an automated actor holds and no
 person owes, is no hold, and the PR keeps its status.
 
 `held: review` stands on any base, approved or not, for review feedback the city
-has not answered. On every open PR it visits, the merge pass counts the review
-threads that wait on the city's answer and records the count as
-`pr.unanswered_threads`, pinned to the head it read. A thread waits when it is
+has not answered. On every open PR it visits that is not a draft, the merge pass
+counts the review threads that wait on the city's answer and records the count
+as `pr.unanswered_threads`, pinned to the head it read. A thread waits when it is
 unresolved and its newest post that is feedback or the city's own is feedback
 (`gc_thread_awaits_answer` in `pr-post.sh`). The count holds the PR at the head
 the posture was read at, while nothing is in flight on the anchor, because work

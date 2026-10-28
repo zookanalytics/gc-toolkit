@@ -2014,7 +2014,7 @@ has "$out" "PR#127 held by unclosed rework/review bead blk-es2 (open); merge hel
 
 echo "# the pass counts each open PR's review threads whose feedback the city has not answered"
 # pr.unanswered_threads is the fact held: review reads on any base, approved or
-# not. The pass records it for every open PR it visits, before a hold ends the
+# not. The pass records it for every open, non-draft PR it visits, before a hold ends the
 # visit, pinned to the head it read. pr-post.sh's gc_thread_awaits_answer
 # decides which threads count: unresolved, ending on feedback no post of the
 # city's follows.
