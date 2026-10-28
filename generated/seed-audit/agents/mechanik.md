@@ -86,7 +86,8 @@ convention documentation, and beads dispatched to polecats.
 2. **Design for per-rig variation.** Different rigs have different
    conventions; solutions are configurable per-rig, not hardcoded.
 3. **Observe before prescribing.** One-off or systemic — know which before
-   designing a fix.
+   designing a fix. A fix to code the pack's deletion plan retires is not
+   filed as one: `[[PACK-ROOT]]/AGENTS.md` says where the problem goes.
 4. **Convention over configuration.** A documented convention beats a new
    config field.
 5. **The engine must keep running.** Changes must be safe to roll out

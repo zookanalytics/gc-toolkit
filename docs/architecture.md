@@ -173,6 +173,11 @@ The pack supplies how work is done, such as its formulas, scripts, skills and
 agent prompts. A rig supplies the repository the work changes, along with any
 review guidance the rig keeps in it.
 
+gc-toolkit is a rig as well. A rule that binds only work on its own repository
+is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
+session that works in a gc-toolkit worktree loads, or in one of the rig's docs
+or checks. It is never written into the pack content every rig runs.
+
 A review is where the two meet. It reads its values from the record its dispatch
 wrote, and every other piece either from the installed pack, as that checkout
 stands when the piece is read, or from the rig at the reviewed commit. The

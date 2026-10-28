@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Hermetic test for lint.sh — the rig's shell, go vet and gofmt lint entry point.
+# Hermetic test for lint.sh — the rig's shell, step text, go vet and gofmt lint
+# entry point.
 #
 # The defects it guards against: a linter that could not run reads as a clean
-# pass (fail-closed violated), shell findings get swallowed into 0, a go
-# module is silently skipped, a Go file gofmt would rewrite passes, or go vet
-# on macOS is not pointed at the icu4c headers services/helm's cgo needs.
+# pass (fail-closed violated), shell or step-text findings get swallowed into 0,
+# a go module is silently skipped, a Go file gofmt would rewrite passes, or go
+# vet on macOS is not pointed at the icu4c headers services/helm's cgo needs.
 #
-# Hermetic: a throwaway git repo holds a stub shellcheck-run.sh whose exit code
-# the test sets and a tracked go.mod, and lint.sh runs with PATH pointing at a
+# Hermetic: a throwaway git repo holds a stub shellcheck-run.sh and a stub
+# lint-step-text.sh whose exit codes the test sets, and a tracked go.mod, and
+# lint.sh runs with PATH pointing at a
 # stub bin — so whether shellcheck, go and gofmt "ran" and what they returned
 # is the test's to decide. No real shellcheck or go toolchain is required. The
 # host is stubbed the same way: a stub uname names it and a stub brew answers
@@ -52,6 +54,21 @@ exit $1
 EOF
   chmod +x "$WRAP"
 }
+
+# Stub step-text lint (tools/lint-step-text.sh): records the files it was handed
+# and exits the code the test asks for. lint.sh resolves it from the repo root,
+# so it stands in for the real lint, which a lint.sh case has no base to run.
+STEP="$REPO/tools/lint-step-text.sh"
+make_step_text() {  # $1 = exit code
+  mkdir -p "$REPO/tools"
+  cat > "$STEP" <<EOF
+#!/bin/sh
+echo "stub-step-text ran: \$*" >> "$TMP/step.log"
+exit $1
+EOF
+  chmod +x "$STEP"
+}
+make_step_text 0
 
 # --- Stub bin: only the externals lint.sh reaches for. -----------------------
 # lint.sh needs git, basename and dirname; go and gofmt are stubbed so their
@@ -324,6 +341,40 @@ grep -q 'cannot source assets/scripts/icu4c-cgo.sh' "$TMP/err" \
   && ok "helper missing: error names the helper" \
   || bad "helper missing: error is silent about icu4c-cgo.sh"
 
+# --- W: the step-text lint gets every file, and its verdict is the gate's. ---
+# It picks the formulas out itself, so lint.sh hands it the whole list.
+HOST_OS=""; ICU_PREFIX=""
+make_wrapper 0; make_go 0; make_gofmt 0; make_step_text 0; : > "$TMP/step.log"
+run_sut subject.sh formulas/mol-x.toml
+[ "$rc" -eq 0 ] && ok "step text clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "step text clean: expected 0, got $rc"; }
+grep -qx 'stub-step-text ran: subject.sh formulas/mol-x.toml' "$TMP/step.log" \
+  && ok "step text: lint-step-text.sh received every file lint.sh was handed" \
+  || bad "step text: lint-step-text.sh did not receive the files: $(cat "$TMP/step.log")"
+grep -q 'step text: clean' "$TMP/out" && ok "step text clean: reported clean" \
+  || bad "step text clean: no clean line in the report"
+
+make_step_text 1
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "step text finding: exit 1" || bad "step text finding: expected 1, got $rc"
+grep -q 'step text: FAIL — a formula change adds a procedure' "$TMP/out" \
+  && ok "step text finding: report names the finding" \
+  || bad "step text finding: report is silent about it"
+
+make_step_text 2
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "step text could not run: exit 1 (fail-closed)" || bad "step text could not run: expected 1, got $rc"
+grep -q 'lint-step-text.sh could not run (exit 2)' "$TMP/out" \
+  && ok "step text could not run: report names the fail-closed" \
+  || bad "step text could not run: report is silent about the fail-closed"
+
+rm -f "$STEP"
+run_sut subject.sh
+[ "$rc" -eq 2 ] && ok "step-text lint missing: structural error (exit 2)" || bad "step-text lint missing: expected 2, got $rc"
+grep -q 'step-text lint missing' "$TMP/err" \
+  && ok "step-text lint missing: error names it" \
+  || bad "step-text lint missing: error is silent about it"
+make_step_text 0
+
 # --- V: invoked by a relative path from a subdirectory, it still finds it. ---
 # lint.sh cds to the repo root, after which a relative invocation path names a
 # different directory; the helper is located before that cd.
@@ -331,7 +382,7 @@ mkdir -p "$REPO/tools"; cp "$SUT" "$REPO/tools/lint.sh"
 cp "$HERE/../assets/scripts/icu4c-cgo.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
 if ( cd "$REPO/services/foo" && PATH="$STUB" "$BASH_BIN" ../../tools/lint.sh ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 0 ] && ok "relative invocation: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "relative invocation: expected 0, got $rc"; }
-rm -rf "$REPO/tools" "$REPO/assets/scripts/icu4c-cgo.sh"
+rm -f "$REPO/tools/lint.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
 
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"

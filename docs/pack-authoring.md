@@ -1,6 +1,6 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, how a landed pack change is confirmed live, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a landed pack change is confirmed live, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
@@ -15,10 +15,10 @@ convention rests on one of them, it links there.
 
 **Mandate.** The conventions gc-toolkit's own formulas, scripts, skills and
 agents follow where Gas City leaves the choice to the pack: how a step closes
-and how a run declines, how step text and skills reach a pack script, how a
-landed pack change is confirmed live, the names the pack's artifacts carry,
-where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves
-an owner or an address.
+and how a run declines, how step text and skills reach a pack script, why each
+shell block in step text makes one call, how a landed pack change is confirmed
+live, the names the pack's artifacts carry, where a rig-scoped agent runs, the
+patrol-wisp cycle, and how a scan resolves an owner or an address.
 
 **Boundaries.** What Gas City itself does when a formula runs or a pack loads
 is [gascity/packs.md](gascity/packs.md); agent variants, identity and session
@@ -121,6 +121,37 @@ agent fills in the binding gc puts in front of the skill's own name
 call then runs the pack's own copy wherever the city imports the pack from,
 and never a checkout the agent is standing in. The ask-for-work skills
 (`work`, `waits`, `records`, `prs`) call every writer this way.
+
+## Step text calls a tested script
+
+Step text holds no procedure. Each shell block in a formula step makes one
+call, to a tested pack script reached as the section above shows or to one
+command such as `gc`, and anything two steps need is one script. No shell block
+in step text is shellchecked, and a block runs in a test only where a suite
+extracts it, while a script carries a test of its own. So the procedure lives
+in the script, and the step passes the call its own facts as arguments.
+Existing step text changes at its own rewrite.
+
+A block does more than make one call when it holds control flow (`if`, `elif`,
+`else`, `case`, `for`, `select`, `while`, `until`, a function definition, `&&`
+or `||`) or more than one command. A sequence and a pipeline are more than one
+command, and so is a command substitution that holds more than one. A
+substitution that holds a single command is an argument of the command around
+it. A here-document's body is data when any part of its delimiter is quoted.
+Otherwise the shell expands the body, and a substitution in it counts as one
+in an argument does.
+
+`tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
+files a change names. It reads every TOML string in a formula as Python's
+`tomllib` decodes it, so it needs a Python 3.11 or newer on PATH. It judges
+only what a change adds. It weighs each step by
+the commands and the control flow of the procedures its blocks hold, and fails
+a step the change makes heavier in either count. A new step fails when it holds
+a procedure at all. A block the change leaves alone, or moves without editing
+it, weighs nothing, so a step that only gains single calls passes, and so does
+one that trades a procedure for a call. `tools/lint-step-text.in-flight` names
+the branches whose formula changes were built before the rule, and a step made
+heavier only by lines one of them adds draws a warning instead of a failure.
 
 ## A landed pack change is confirmed on the deployed checkout
 
