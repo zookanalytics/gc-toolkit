@@ -2012,6 +2012,75 @@ out=$("$SUT" 2>&1)
 has "$out" "PR#127 held by unclosed rework/review bead blk-es2 (open); merge held" "the control: a null-status blocker reads as open and holds"
 : > "$STUB_DEPS"
 
+echo "# the pass counts each open PR's review threads whose feedback the city has not answered"
+# pr.unanswered_threads is the fact held: review reads on any base, approved or
+# not. The pass records it for every open PR it visits, before a hold ends the
+# visit, pinned to the head it read. pr-post.sh's gc_thread_awaits_answer
+# decides which threads count: unresolved, ending on feedback no post of the
+# city's follows.
+op_post()   { jq -nc --arg b "$1" '{author: {login: "johnzook"}, body: $b, createdAt: "2026-10-20T01:00:00Z"}'; }
+city_post() { jq -nc --arg b "$1" --arg l "$STUB_SELF_LOGIN" '{author: {login: $l}, body: ($b + "\n\n<!-- gc:city -->"), createdAt: "2026-10-20T02:00:00Z"}'; }
+fthread()   { jq -nc --arg id "$1" --argjson r "$2" --argjson c "$3" '{id: $id, isResolved: $r, comments: {nodes: $c}}'; } # <id> <isResolved> <comments-array>
+store "[$(anchor FT1 401), $(rev FT1)]"
+printf '%s' "$(prview 401 OPEN BLOCKED)" > "$GH_DIR/pr_view_401.json"
+printf '{"threads":[%s,%s,%s,%s]}\n' \
+  "$(fthread t1 false "[$(op_post 'Rename this.')]")" \
+  "$(fthread t2 false "[$(op_post 'Why here?'), $(city_post 'Declined: the name matches the API.')]")" \
+  "$(fthread t3 true "[$(op_post 'Typo.')]")" \
+  "$(fthread t4 false "[$(op_post 'Use a constant.'), $(city_post 'Addressed in abc1234.'), $(op_post 'Still a literal at line 9.')]")" \
+  > "$GH_DIR/threads_401.json"
+out=$("$SUT" 2>&1)
+eq "$(meta FT1 pr.unanswered_threads)" "2@sha-401" \
+  "an unapproved PR: the thread never answered and the one whose feedback followed the city's reply count; the declined and the resolved do not"
+has "$out" "no external APPROVED review stands" "…recorded on a PR the approval gate holds"
+
+echo "# the count follows the threads at the same head, and a pass that finds it unchanged writes nothing"
+printf '{"threads":[%s]}\n' "$(fthread t1 false "[$(op_post 'Rename this.'), $(city_post 'Addressed in abc1234.')]")" > "$GH_DIR/threads_401.json"
+out=$("$SUT" 2>&1)
+eq "$(meta FT1 pr.unanswered_threads)" "0@sha-401" "the city's reply answers the last thread, so the count drops to zero"
+: > "$STUB_GC_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$(cat "$STUB_GC_LOG")" "pr.unanswered_threads" "…and the next pass over the same threads writes no count"
+
+echo "# a head the PR moved to is counted again"
+printf '%s' "$(prview 401 OPEN BLOCKED)" | jq -c '.headRefOid = "sha-401b"' > "$GH_DIR/pr_view_401.json"
+out=$("$SUT" 2>&1)
+eq "$(meta FT1 pr.unanswered_threads)" "0@sha-401b" "the count is pinned to the head the pass read"
+
+echo "# a held PR is counted too, and an approved one on a base that does not require thread resolution"
+store "[$(anchor FT2 402 ',"merge_hold":"true"'), $(rev FT2), $(anchor FT3 403), $(rev FT3)]"
+printf '%s' "$(prview 402 OPEN CLEAN)" > "$GH_DIR/pr_view_402.json"
+printf '%s' "$(prview 403 OPEN CLEAN)" > "$GH_DIR/pr_view_403.json"
+approved 403
+for n in 402 403; do printf '{"threads":[%s]}\n' "$(fthread t1 false "[$(op_post 'Rename this.')]")" > "$GH_DIR/threads_$n.json"; done
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta FT2 pr.unanswered_threads)" "1@sha-402" "an operator freeze ends the visit after the count is recorded"
+eq "$(meta FT3 pr.unanswered_threads)" "1@sha-403" "an approved PR records its count"
+has "$out" "merged + recorded FT3" "…and the merge does not wait on it"
+
+echo "# a thread read that does not answer records nothing, and the last count stands"
+store "[$(anchor FT4 404 ',"pr.unanswered_threads":"1@sha-404"'), $(rev FT4)]"
+printf '%s' "$(prview 404 OPEN BLOCKED)" > "$GH_DIR/pr_view_404.json"
+printf '{"threads":[]}\n' > "$GH_DIR/threads_404.json"
+out=$(STUB_GQL_READ_FAIL=1 "$SUT" 2>&1)
+eq "$(meta FT4 pr.unanswered_threads)" "1@sha-404" "a failed read keeps the last count"
+has "$out" "PR#404 review threads could not be read for the feedback nothing has answered; anchor FT4 keeps its last count" "…and says so"
+out=$(STUB_GQL_THREADS_TAIL='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNext' "$SUT" 2>&1)
+eq "$(meta FT4 pr.unanswered_threads)" "1@sha-404" "a read whose later page will not decode is no count, never zero"
+
+echo "# without pr-post.sh's definitions, or the acting login, nothing is counted"
+store "[$(anchor FT4 404 ',"pr.unanswered_threads":"1@sha-404"'), $(rev FT4), $(anchor FT5 405), $(rev FT5)]"
+printf '%s' "$(prview 405 OPEN BLOCKED)" > "$GH_DIR/pr_view_405.json"
+printf '{"threads":[%s]}\n' "$(fthread t1 false "[$(op_post 'Rename this.')]")" > "$GH_DIR/threads_405.json"
+mv "$SD/pr-post.sh" "$TMP/pr-post.sh.aside"
+out=$("$SUT" 2>&1)
+mv "$TMP/pr-post.sh.aside" "$SD/pr-post.sh"
+eq "$(meta FT4 pr.unanswered_threads)|$(meta FT5 pr.unanswered_threads)" "1@sha-404|<absent>" "with no definitions the pass writes no count"
+eq "$(printf '%s\n' "$out" | grep -c 'pr-post.sh feedback-def printed no definitions')" "1" "…and says so once for the pass, not once per PR"
+out=$(STUB_SELF_LOGIN="" "$SUT" 2>&1)
+eq "$(meta FT4 pr.unanswered_threads)" "1@sha-404" "with no acting login nothing reads as the city's own post, so nothing is counted"
+
 fi # part machine
 
 # ==== part reread: an UNKNOWN merge state read again within one budget per

@@ -131,6 +131,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
+   record how many of its review threads wait on the city's answer
+   (`pr.unanswered_threads`, which the labels and the board read for
+   `held: review` and the merge does not), then
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
    that the merge makes no `generated/seed-audit` render stale, re-read the full
    authorization set immediately before merging, `gh pr merge --squash

@@ -34,11 +34,12 @@ import (
 // (pace.go).
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
-// writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git
+// writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git/jq
 // and the sibling shell helpers (escalate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
-// pr-status-label.sh, blocker-holder.sh), resolved from GCTK_SCRIPTS_DIR, which
-// gctk-resolve.sh exports as merge.sh's directory before it execs this binary.
+// pr-status-label.sh, blocker-holder.sh, pr-post.sh), resolved from
+// GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's directory
+// before it execs this binary.
 // Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
 // the observability and permissions surfaces those tools have for every other
 // caller. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass refuses
@@ -67,6 +68,17 @@ const threadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:St
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}`
+
+// feedbackThreadsQuery reads each review thread with the posts
+// gc_thread_awaits_answer weighs: each comment's author and body, and the
+// instants gc_city_own dates a post by. The threads are paginated to
+// exhaustion, as threadsQuery's are. A thread's newest hundred comments carry
+// the newest post, which is the one the definition decides on.
+const feedbackThreadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{isResolved comments(last:100){nodes{author{login} body createdAt pullRequestReview{submittedAt}}}}}}}}`
 
 // The visit order's one read: every open PR's draft flag, head and each
 // account's latest review, paginated. It asks for no merge state, because
@@ -174,6 +186,13 @@ type merger struct {
 	rereads      int
 	rereadSecs   int
 	rereadsSpent int
+
+	// feedbackDef is the jq definitions `pr-post.sh feedback-def` prints, read
+	// once per pass on the first visit that counts a PR's unanswered threads.
+	// feedbackDefRead says that read was made, and an empty feedbackDef after it
+	// is one that failed.
+	feedbackDef     string
+	feedbackDefRead bool
 
 	merged       int
 	recovered    int
@@ -495,6 +514,11 @@ func (m *merger) handle(row *gcbd.Bead) {
 		}
 		return
 	}
+
+	// --- review feedback nothing has answered: the labels' fact, not the merge's ---
+	// Recorded for every open PR the pass visits, before a hold below ends the
+	// visit. The merge does not read it.
+	m.recordUnansweredThreads(fresh, num, headOid)
 
 	// --- the rest of the anchor-local authorization set, off the same row -------
 	target := fresh.Meta("merged_target")
@@ -1190,6 +1214,107 @@ func (m *merger) unresolvedThreads(num string) (int, bool) {
 	return count, true
 }
 
+// mdUnansweredThreads is the anchor key recordUnansweredThreads writes and
+// prstatus.Facts.PRUnansweredThreads carries: <count>@<head oid>.
+const mdUnansweredThreads = "pr.unanswered_threads"
+
+// recordUnansweredThreads records on the anchor how many of its PR's review
+// threads wait on the city's answer, pinned to the head the pass read. The
+// count is prstatus.Held's input for held: review on any base, approved or
+// not, and both the labels and the helm board read it off the anchor. A read
+// that does not answer records nothing, so the last count stands, and it counts
+// only at the head it was read at. With no acting login nothing reads as the
+// city's own post, so nothing is recorded.
+func (m *merger) recordUnansweredThreads(anchor *gcbd.Bead, num, headOid string) {
+	if headOid == "" || m.selfLogin == "" {
+		return
+	}
+	def, ok := m.feedbackDefinitions()
+	if !ok {
+		return
+	}
+	n, ok := m.unansweredThreads(num, def, anchor.Meta("pr_provenance_since"))
+	if !ok {
+		fmt.Fprintf(m.stderr, "%s: WARN PR#%s review threads could not be read for the feedback nothing has answered; anchor %s keeps its last count\n", mergeProg, num, anchor.ID)
+		return
+	}
+	want := strconv.Itoa(n) + "@" + headOid
+	if anchor.Meta(mdUnansweredThreads) == want {
+		return
+	}
+	if !m.transition(io.Discard, io.Discard, anchor.ID, "--to", "pull_request", "--expect", "pull_request",
+		"--route", anchor.Meta("gc.routed_to"), "--set", mdUnansweredThreads+"="+want) {
+		fmt.Fprintf(m.stderr, "%s: WARN %s unanswered review threads '%s' did not record; it keeps its last count until the next visit\n", mergeProg, anchor.ID, want)
+	}
+}
+
+// unansweredThreads counts num's review threads that wait on the city's answer
+// by gc_thread_awaits_answer, defined in def (`pr-post.sh feedback-def`) with
+// the rule that tells feedback from the city's own post. since is the anchor's
+// provenance cutover (pr_provenance_since). ok=false is a count that cannot be
+// made: a read that fails, a thread page that will not decode, or a jq run that
+// fails.
+func (m *merger) unansweredThreads(num, def, since string) (int, bool) {
+	raw, rc := m.ghOrigin("graphql", "--paginate",
+		"-f", "query="+feedbackThreadsQuery,
+		"-f", "owner="+originOwner(m.originRepo),
+		"-f", "repo="+originName(m.originRepo),
+		"-F", "num="+num)
+	if rc != 0 || len(bytes.TrimSpace(raw)) == 0 {
+		return 0, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
+	threads := []json.RawMessage{}
+	saw := false
+	for {
+		var page gqlFeedbackThreadsPage
+		if err := dec.Decode(&page); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, false
+		}
+		rt := page.Data.Repository.PullRequest.ReviewThreads
+		if rt == nil {
+			continue
+		}
+		saw = true
+		threads = append(threads, rt.Nodes...)
+	}
+	if !saw {
+		return 0, false
+	}
+	in, err := json.Marshal(threads)
+	if err != nil {
+		return 0, false
+	}
+	out, rc := captureStdin(in, "jq", "--arg", "self", m.selfLogin, "--arg", "since", since,
+		def+"\n[ .[] | select(gc_thread_awaits_answer($self; $since)) ] | length")
+	if rc != 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// feedbackDefinitions reads `pr-post.sh feedback-def` once per pass. ok=false
+// when pr-post.sh is missing or prints nothing, which the pass reports once.
+func (m *merger) feedbackDefinitions() (string, bool) {
+	if !m.feedbackDefRead {
+		m.feedbackDefRead = true
+		if out, rc := m.scriptCapture("pr-post.sh", "feedback-def"); rc == 0 {
+			m.feedbackDef = strings.TrimSpace(out)
+		}
+		if m.feedbackDef == "" {
+			fmt.Fprintf(m.stderr, "%s: WARN pr-post.sh feedback-def printed no definitions (%s); no PR's unanswered review threads are counted this pass\n", mergeProg, m.scriptPath("pr-post.sh"))
+		}
+	}
+	return m.feedbackDef, m.feedbackDef != ""
+}
+
 // reviewGatesFor reads branch protection: whether an unresolved thread blocks
 // a merge and how many approvals are required. st is "known" or "unknown".
 func (m *merger) reviewGatesFor(branch string) (st string, threadReq bool, approvals int) {
@@ -1269,12 +1394,13 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // a missing check resolver, which Merge checks next. Every other helper is
 // handled where it is called. A missing lane-state.sh or finalize-gate.sh holds
 // that anchor. A missing blocker-holder.sh records no verdict for an anchor a
-// live blocker holds, whose merge is held anyway. A missing escalate.sh,
+// live blocker holds, whose merge is held anyway. A missing pr-post.sh counts
+// no PR's unanswered review threads. A missing escalate.sh,
 // record-failure-cap.sh, render-seed-audit.sh or pr-status-label.sh is skipped.
 // The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
@@ -1532,6 +1658,14 @@ func capture(bin string, args ...string) ([]byte, int) {
 	return out, gcbd.ExitCode(err)
 }
 
+// captureStdin is capture with in on the command's standard input.
+func captureStdin(in []byte, bin string, args ...string) ([]byte, int) {
+	cmd := exec.Command(bin, args...)
+	cmd.Stdin = bytes.NewReader(in)
+	out, err := cmd.Output()
+	return out, gcbd.ExitCode(err)
+}
+
 func firstOut(out []byte, _ int) []byte { return out }
 
 func runOut(bin string, args ...string) string {
@@ -1666,6 +1800,20 @@ type gqlThreadsPage struct {
 					Nodes []struct {
 						IsResolved *bool `json:"isResolved"`
 					} `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
+// gqlFeedbackThreadsPage is one page of feedbackThreadsQuery. The thread nodes
+// stay raw, because jq reads them as the API wrote them.
+type gqlFeedbackThreadsPage struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads *struct {
+					Nodes []json.RawMessage `json:"nodes"`
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
