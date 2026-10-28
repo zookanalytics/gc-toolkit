@@ -1113,12 +1113,14 @@ func TestEdgeReadsAreBatchedNotPerAnchor(t *testing.T) {
 
 // TestOpenChildrenCarryTheirWaits: an open child of a live anchor carries its
 // own `blocks` waits, hydrated with the fields the board classifies it by, so
-// the roll-up can tell a child waiting its turn from one nothing will start. A
+// the roll-up can tell a child waiting its turn from one nothing will start,
+// and a gate the city resolves by itself from one a person must release. A
 // closed child reads none, and a failed read degrades to no waits with a
 // partial note rather than costing the anchor its row.
 func TestOpenChildrenCarryTheirWaits(t *testing.T) {
 	build := func() *fakeStore {
 		gate := issue("tk-gate", "parked until the design is signed", "gate", 2, testNow, "")
+		gate.AwaitType = "human"
 		sibling := child("tk-ep.1", "open", testNow, `{"merge_result":"pull_request"}`)
 		armed := child("tk-ep.2", "open", testNow, `{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"}`)
 		held := child("tk-ep.3", "open", testNow, "")
@@ -1152,8 +1154,9 @@ func TestOpenChildrenCarryTheirWaits(t *testing.T) {
 	if got := waits["tk-ep.2"]; len(got) != 1 || got[0].ID != "tk-ep.1" || got[0].Status != "open" {
 		t.Errorf("the armed child waits on its open sibling: %+v", got)
 	}
-	if got := waits["tk-ep.3"]; len(got) != 1 || got[0].IssueType != "gate" || got[0].Title != "parked until the design is signed" {
-		t.Errorf("the held child's gate is hydrated with its type and title: %+v", got)
+	if got := waits["tk-ep.3"]; len(got) != 1 || got[0].IssueType != "gate" || got[0].AwaitType != "human" ||
+		got[0].Title != "parked until the design is signed" {
+		t.Errorf("the held child's gate is hydrated with its type, what it awaits, and its title: %+v", got)
 	}
 	if len(waits["tk-ep.1"]) != 0 || len(waits["tk-ep.4"]) != 0 {
 		t.Errorf("a child with no wait, and a closed child, carry none: %+v / %+v", waits["tk-ep.1"], waits["tk-ep.4"])

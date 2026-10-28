@@ -1127,6 +1127,7 @@ func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issu
 			Status:    strings.ToLower(string(iss.Status)),
 			RoutedTo:  md["gc.routed_to"],
 			IssueType: strings.ToLower(string(iss.IssueType)),
+			AwaitType: iss.AwaitType,
 			Assignee:  iss.Assignee,
 			CreatedAt: iss.CreatedAt,
 		})

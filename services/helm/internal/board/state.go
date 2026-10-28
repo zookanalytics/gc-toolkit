@@ -26,12 +26,13 @@ const (
 	stateInReview = "in review"
 	// stateInConversation: a live sitting holds a visit on the bead.
 	stateInConversation = "in conversation"
-	// stateParked: a person holds the bead. It waits on an open park or demand
-	// gate, it is routed to the operator, or a visit on it waits for someone
-	// to engage it.
+	// stateParked: a person holds the bead. It waits on an open gate a person
+	// releases or on a demand, it is routed to the operator, or a visit on it
+	// waits for someone to engage it.
 	stateParked = "parked"
-	// stateQueued: the bead waits its turn. It waits on open work, or it
-	// carries a pool route, an arm or an assignee that will start it.
+	// stateQueued: the bead waits its turn. It waits on open work or on a gate
+	// the city resolves by itself, or it carries a pool route, an arm or an
+	// assignee that will start it.
 	stateQueued = "queued"
 	// stateStranded: nothing holds the bead and nothing will start it. It has
 	// no open wait, no route, no arm, and nothing in progress.
@@ -308,10 +309,20 @@ func inReview(md map[string]string) bool {
 }
 
 // heldByPerson reports whether an open blocker is one a person releases: a gate
-// (a park gate, or a native human gate) or a demand ([demand]). No agent closes
-// either, so a bead waiting on one is parked rather than queued.
+// the city does not resolve by itself ([sweptGate]), or a demand ([demand]). No
+// agent closes either, so a bead waiting on one is parked rather than queued.
 func heldByPerson(b Blocker) bool {
-	return b.IssueType == "gate" || demand(b)
+	return (b.IssueType == "gate" && !sweptGate(b)) || demand(b)
+}
+
+// sweptGate reports whether a gate is one the city resolves by itself: a timer
+// gate, or a gate on a GitHub workflow run or pull request. The core pack's
+// gate sweep runs `gc bd gate check` for timer and gh gates, and bd closes
+// those from the clock and from GitHub. Every other gate stays open until
+// someone closes it: a human gate, a park gate, which names no await type, and
+// a gate of any type the sweep does not check.
+func sweptGate(b Blocker) bool {
+	return b.AwaitType == "timer" || strings.HasPrefix(b.AwaitType, "gh:run") || strings.HasPrefix(b.AwaitType, "gh:pr")
 }
 
 // poolRoute reports whether a bead is routed to a pool, which claims it once

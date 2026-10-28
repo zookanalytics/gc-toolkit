@@ -235,6 +235,9 @@ type Blocker struct {
 	// IssueType is what the bead IS. A `decision` is a demand by construction,
 	// the way the board's own `decision` kind is.
 	IssueType string `json:"issue_type,omitempty"`
+	// AwaitType is a gate's await_type, what the gate waits on. It says whether
+	// the city resolves the gate by itself or a person must ([sweptGate]).
+	AwaitType string `json:"await_type,omitempty"`
 	// Assignee is who holds the child. It lets the derivation ask whether a
 	// pool-routed review or rework is actually being WORKED — claimed by a live
 	// session — rather than merely routed to a pool nothing is draining. Routed

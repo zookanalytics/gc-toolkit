@@ -1768,6 +1768,16 @@ func TestAncestorWaitHoldsTheFamily(t *testing.T) {
 		}
 	})
 
+	t.Run("an epic waiting on a swept gate holds its children queued", func(t *testing.T) {
+		timer := Blocker{ID: "ra-tg", Title: "Gate: timer", Status: "open", IssueType: "gate", AwaitType: "timer"}
+		b := BuildBoard([]Anchor{waitsOn(epic("ra-e", Child{ID: "ra-e.1", Status: "open"}), timer)},
+			fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if len(tile.ParkedHeads) != 0 || tile.Frontier != "needs-review · 1 queued · nothing idle" || tile.Needs != "queued behind Gate: timer" {
+			t.Errorf("parked=%v frontier=%q needs=%q", tile.ParkedHeads, tile.Frontier, tile.Needs)
+		}
+	})
+
 	t.Run("an epic waiting on work holds its children queued", func(t *testing.T) {
 		b := BuildBoard([]Anchor{waitsOn(epic("ra-e",
 			Child{ID: "ra-e.1", Status: "open"}, Child{ID: "ra-e.2", Status: "open"},
@@ -1786,6 +1796,46 @@ func TestAncestorWaitHoldsTheFamily(t *testing.T) {
 			t.Errorf("a tracked member nothing holds is stranded: stranded=%v open=%v", tile.Stranded, tile.OpenHeads)
 		}
 	})
+}
+
+// TestSweptGateQueuesItsBead: the city's gate sweep closes a timer gate, and a
+// gate on a GitHub workflow run or pull request, by itself. A child waiting on
+// one waits its turn, so its epic counts it queued and does not ask the
+// operator to release it. A gate that awaits a person, a park gate, which names
+// no await, and a gate the sweep does not check all wait for someone to close
+// them, so a child waiting on one is parked for the operator.
+func TestSweptGateQueuesItsBead(t *testing.T) {
+	cases := []struct {
+		name, await string
+		parked      bool
+	}{
+		{"a timer gate", "timer", false},
+		{"a GitHub run gate", "gh:run", false},
+		{"a GitHub pull request gate", "gh:pr", false},
+		{"a human gate", "human", true},
+		{"a park gate", "", true},
+		{"a gate the sweep does not check", "mail", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gate := Blocker{ID: "ra-g", Title: "the gate", Status: "open", IssueType: "gate", AwaitType: tc.await}
+			epic := Anchor{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{{ID: "ra-e.1", Status: "open", Blockers: []Blocker{gate}}}}
+			tile := mustTile(t, BuildBoard([]Anchor{epic}, fixtureNow, false, nil, Facts{}), "ra-e")
+			if tc.parked {
+				if !equalIDs(tile.ParkedHeads, []string{"ra-e.1"}) || tile.Section != SectionGate ||
+					tile.Needs != "1 parked for the operator — release or rule on them" {
+					t.Errorf("a person releases it: parked=%v section=%s needs=%q", tile.ParkedHeads, tile.Section, tile.Needs)
+				}
+				return
+			}
+			if len(tile.ParkedHeads) != 0 || tile.Section != SectionActive || tile.Stranded ||
+				tile.Frontier != "needs-review · 1 queued · nothing idle" || tile.Needs != "nothing idle — 1 queued" {
+				t.Errorf("the sweep releases it: parked=%v section=%s stranded=%v frontier=%q needs=%q",
+					tile.ParkedHeads, tile.Section, tile.Stranded, tile.Frontier, tile.Needs)
+			}
+		})
+	}
 }
 
 // TestInReviewBeadIsNotADisposition: a bead carrying a takeaway, every
@@ -2007,6 +2057,11 @@ func TestParkedSplitIgnoresAMovingChild(t *testing.T) {
 func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 	work := Blocker{ID: "ra-work", Title: "the sibling it waits behind", Status: "open", IssueType: "task"}
 	gate := Blocker{ID: "ra-gate", Title: "parked until the design is signed", Status: "open", IssueType: "gate"}
+	humanGate := Blocker{ID: "ra-hg", Title: "sign off the design", Status: "open", IssueType: "gate", AwaitType: "human"}
+	timerGate := Blocker{ID: "ra-tg", Title: "Gate: timer", Status: "open", IssueType: "gate", AwaitType: "timer"}
+	runGate := Blocker{ID: "ra-rg", Title: "Gate: gh:run release.yml", Status: "open", IssueType: "gate", AwaitType: "gh:run"}
+	prGate := Blocker{ID: "ra-pg", Title: "Gate: gh:pr 42", Status: "open", IssueType: "gate", AwaitType: "gh:pr"}
+	mailGate := Blocker{ID: "ra-mg", Title: "Gate: mail", Status: "open", IssueType: "gate", AwaitType: "mail"}
 	decision := Blocker{ID: "ra-dec", Title: "pick a vendor", Status: "open", IssueType: "decision"}
 	visitWait := Blocker{ID: "ra-visit", Title: "visit: rule on it", Status: "open", IssueType: "task", RoutedTo: routedHuman}
 	landed := Blocker{ID: "ra-done", Title: "landed work", Status: "closed", IssueType: "task"}
@@ -2042,6 +2097,12 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 		{name: "assigned and not started", in: stateInput{id: "ra-a", status: "open", assignee: "rig-a/gc-toolkit.refinery"},
 			want: stateQueued, selfStart: true},
 		{name: "waits on a park gate", in: stateInput{id: "ra-a", blockers: []Blocker{gate}}, want: stateParked},
+		{name: "waits on a human gate", in: stateInput{id: "ra-a", blockers: []Blocker{humanGate}}, want: stateParked},
+		{name: "waits on a timer gate", in: stateInput{id: "ra-a", blockers: []Blocker{timerGate}}, want: stateQueued},
+		{name: "waits on a GitHub run gate", in: stateInput{id: "ra-a", blockers: []Blocker{runGate}}, want: stateQueued},
+		{name: "waits on a GitHub pull request gate", in: stateInput{id: "ra-a", blockers: []Blocker{prGate}}, want: stateQueued},
+		{name: "waits on a gate the sweep does not check", in: stateInput{id: "ra-a", blockers: []Blocker{mailGate}}, want: stateParked},
+		{name: "a person's gate outranks a swept one", in: stateInput{id: "ra-a", blockers: []Blocker{timerGate, gate}}, want: stateParked},
 		{name: "waits on a decision", in: stateInput{id: "ra-a", blockers: []Blocker{decision}}, want: stateParked},
 		{name: "waits on a visit", in: stateInput{id: "ra-a", blockers: []Blocker{visitWait}}, want: stateParked},
 		{name: "a gate outranks open work", in: stateInput{id: "ra-a", blockers: []Blocker{work, gate},
