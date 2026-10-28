@@ -71,10 +71,13 @@ Add `--parent <epic>` when an epic applies, and
 `--metadata '{"placement":"pending"}'` when intake holds the bead. The
 description is the contract the worker reads. A product area's sub-epic is
 filed the same way, with `-t epic`, the area's name as its title, and the epic
-the area serves as its `--parent`. `gc bd list --parent <epic> -t epic` lists
-an epic's open sub-epics, so check it for the area's sub-epic before filing
-one. `docs/epics.md` says what an epic carries. The sub-epic itself goes to no
-pool, because its members are the work.
+the area serves as its `--parent`. Before filing one, look for the area's
+sub-epic in `gc bd list --parent <epic> -t epic --limit 0`, which lists all of
+the epic's open sub-epics. Without `--limit 0`, a JSON or flat read of that list
+stops at 50 rows and can leave the area's sub-epic out. An error from the list
+is not an empty answer, so file the sub-epic only once the list succeeds and the
+area is not in it. `docs/epics.md` says what an epic carries. The sub-epic
+itself goes to no pool, because its members are the work.
 
 ## Send a bead to a pool on a formula
 
