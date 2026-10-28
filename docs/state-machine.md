@@ -568,7 +568,7 @@ carries exactly one value, and setting one removes any other `status:` value.
 | `status: working` | the city's, changing the PR | an unapproved PR with live work on the anchor (a rework or fix child, a validation pass, a review, a finding), or a draft the city opened that still waits on the checks that flip it ready |
 | `status: merging` | the city's, landing the PR | an approved PR with no known blocker: its required checks may still be running, a merge-in rework or other city work may be in flight, or it waits for the merge pass |
 | `status: needs-review` | a human's review | an unapproved PR with nothing in flight and nothing holding it: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, an open visit on the anchor, a blocked verdict the merge pass recorded at the current head ([The machine axis](#the-machine-axis)), or a recorded posture, verdict or cause outside its writer's vocabulary, a state the derivation cannot name |
+| `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, anything a `held:` label names, a blocked verdict the merge pass recorded at the current head ([The machine axis](#the-machine-axis)), or a recorded posture, verdict or cause outside its writer's vocabulary, a state the derivation cannot name |
 
 Precedence when inputs overlap: `needs-attention` > `merging` > `working` >
 `needs-review`. It follows from the middle column. A blocker the city will not
@@ -577,6 +577,29 @@ blocking it is the city's to land, whatever work is in flight on the way. City
 work on an unapproved PR comes before the verdict it leads to, and the verdict
 is what remains when neither stands. A hold that only a human can release reads
 `needs-attention` with no rule of its own.
+
+Beside the one `status:` value, a workflow-owned `held:` label names each thing
+that holds an open PR which the city will not clear on its own. Each value is a
+label of its own, so more than one can stand at once, and a PR nothing holds
+carries none.
+
+| Label | What holds the PR | Read from |
+|---|---|---|
+| `held: visit` | an open visit covers the anchor, or the PR's own work in flight: one of its live review or rework children | the shared visit identity, over the anchor and each bead carrying its `anchor_bead` whose `task_kind` is `review` or `rework`, open or `in_progress` |
+| `held: review` | an unresolved review thread holds the merge, and nothing in flight acts on it | the merge pass's `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision |
+
+Any `held:` label reads `status: needs-attention`, because each names something
+a person has to act on. The merge freeze and the rebase hold carry no `held:`
+value, and neither do a failed required check, a deferred merge-in, a base gone
+`BEHIND` or a rule the merge pass cannot name: each reads `needs-attention` on
+its own. A blocker the city is landing, one an automated actor holds and no
+person owes, is no hold, and the PR keeps its status. The merge pass reads
+review threads only where the base branch requires their resolution, so
+`held: review` stands only on such a base. A thread left open where resolution
+is not required holds no merge. `prstatus.Held` is the rule, and the helm board
+shows the same values as a row's `pr_held`, from the same derivation over the
+review and rework children it gathers.
 
 A blocked machine verdict whose cause is outside its writer's vocabulary holds
 the PR wherever it was recorded, as any state the derivation cannot name does.
@@ -593,13 +616,17 @@ flight, and by it decides a blocked row's phase, whether the operator's queue
 lists the row, and the row's needs phrase.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
-anchor, its in-flight set or its visits do not read, `pr-status-label.sh` exits 2
-and leaves the label as it is.
+anchor, its in-flight set, its visits, the visits on its work or its blockers do
+not read, `pr-status-label.sh` exits 2 and leaves both families as they are.
+Otherwise it writes both from one derivation in one edit: the `status:` value and
+a `held:` label for each held value, with every other label under either prefix
+taken off. A `held:` label comes off on the first derivation after its condition
+clears.
 
-The label comes off when the PR merges or closes, where GitHub's own Merged or
-Closed state takes over. `pr-facts.sh` takes it off in the full pass that
-records an out-of-band merge or a close. `gctk merge` takes it off for a merge
-it made, or one whose record it recovered. Each takes it off before the write
+The labels come off when the PR merges or closes, where GitHub's own Merged or
+Closed state takes over. `pr-facts.sh` takes them off in the full pass that
+records an out-of-band merge or a close. `gctk merge` takes them off for a merge
+it made, or one whose record it recovered. Each takes them off before the write
 that records the merge or the close, because that write closes the anchor or
 moves it out of `pull_request`, and no pass enumerates it as an open PR again.
 A clear that does not land is recorded on the anchor as
@@ -616,14 +643,17 @@ An open visit covers the anchor by the shared visit identity
 (`assets/scripts/visit-identity.sh`): the bead its tracks edge names, or its
 `gc.continuation_group` stamp when it has no tracks edge. The merge pass's
 finalize gate (`finalize-gate.sh`) reads visits by the same identity and refuses
-the merge while one covers the anchor. The label counts each open or
+the merge while one covers the anchor. The labels count each open or
 `in_progress` visit that covers the anchor, a visit a sitting is in included,
-and the helm board's phase and held marker count the same ones.
+and the helm board's phase and held marker count the same ones. A visit that
+covers one of the anchor's live review or rework children holds the PR too,
+because the work the city has left waits on the person it asks.
 
-The label reads the city's own state — the refinery-computed posture on the
+The labels read the city's own state — the refinery-computed posture on the
 anchor, the merge cadence's machine verdict and its cause, its holds, any open
-visit on it, its draft-stage markers, and its live work — not GitHub's review
-posture, merge state or draft flag directly. GitHub reports `BLOCKED` for a
+visit on it or its work, the blockers its `blocks` edges name, its draft-stage
+markers, and its live work — not GitHub's review posture, merge state or draft
+flag directly. GitHub reports `BLOCKED` for a
 required check still running as it does for a wedge, and the merge pass, which
 reads the branch's rules, is what tells the two apart. The
 `working`->`needs-review` flip rests on the live work, which closes as the fix
@@ -640,31 +670,32 @@ and, unless it is approved, reads `working` until `pr-open.sh` records
 `draft_readied`, because until then the city still owes the checks that flip it
 and the flip itself. A draft anyone else made, or one re-drafted after the city
 readied it, reads like any other PR.
-`assets/scripts/pr-status-label.sh` is the single writer. `pr-open.sh` sets the
-label when it opens a PR and when it records a draft ready, whether it flipped
-the draft or found it already ready, and `signoff.sh` re-derives it on each of
-the city's own verdicts. A human's review moves it in the
-merge cadence's posture and feedback arms, in the pass that records the review.
-The posture arm re-derives the label for an anchor whose posture value it
-changes: an approval, a comment, a change request, or a dismissal. The feedback
-arm re-derives it for an anchor whose feedback batch it routes into live work. A
-head or merge state that moves under an unchanged posture value does not
-re-derive the label there. GitHub reports `UNKNOWN` while it computes a PR's
-mergeability, so those moves are most posture writes, and re-deriving on them
-would cost a derivation for dozens of open PRs at once. The full `pr-facts.sh`
-pass re-derives the label for each open PR its walk reaches, so those moves, the
-other inputs, and a missed event self-heal there. The walk is paced: it visits
+`assets/scripts/pr-status-label.sh` is the single writer of both families, and
+every call that derives one writes the other. `pr-open.sh` sets the labels when
+it opens a PR and when it records a draft ready, whether it flipped the draft or
+found it already ready, and `signoff.sh` re-derives them on each of the city's
+own verdicts. A human's review moves them in the merge cadence's posture and
+feedback arms, in the pass that records the review. The posture arm re-derives
+the labels for an anchor whose posture value it changes: an approval, a comment,
+a change request, or a dismissal. The feedback arm re-derives them for an anchor
+whose feedback batch it routes into live work. A head or merge state that moves
+under an unchanged posture value does not re-derive the labels there. GitHub
+reports `UNKNOWN` while it computes a PR's mergeability, so those moves are most
+posture writes, and re-deriving on them would cost a derivation for dozens of
+open PRs at once. The full `pr-facts.sh` pass re-derives the labels for each open
+PR its walk reaches, so those moves, the other inputs, and a missed event
+self-heal there. The walk is paced: it visits
 first the PRs that left the open list, owe a merge-in, or changed on GitHub
 since its last visit, then rotates through the rest until its deadline, and a
 PR it does not reach waits for a later pass.
 
-Nothing re-derives the label when a visit opens or closes, and a visit change
-does not put its anchor first in that walk. The label follows a visit on the
+Nothing re-derives the labels when a visit or a blocker opens or closes, and such
+a change does not put its anchor first in that walk. The labels follow it on the
 next full pass that reaches the anchor: within one reconcile pass while the walk
 reaches every open PR, and after more passes when the deadline stops it short.
-The label likewise reads the machine verdict the last merge pass recorded, so it
-follows a new verdict on the next pass that derives it. Every write is pinned to
-the origin, and a label is not an approval.
+The labels likewise read the machine verdict the last merge pass recorded, so
+they follow a new verdict on the next pass that derives it. Every write is pinned
+to the origin, and a label is not an approval.
 
 ## The machine axis
 

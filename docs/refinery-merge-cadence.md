@@ -59,8 +59,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
    other anchor's too. Where this arm changes an anchor's posture value, it also
-   re-derives that PR's `status:` label, so an approval moves the label in the
-   pass that records it
+   re-derives that PR's `status:` and `held:` labels, so an approval moves them
+   in the pass that records it
    ([state-machine.md](state-machine.md#the-status-label-github-projection)).
 
    Its cost follows the PRs that moved, not the PR set. One paginated GraphQL
@@ -284,7 +284,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    rework child or visit and opens the same validation pass arm 7 would, then
    stops — no write-back sweep, no external-fact reconciliation, none of the
    arms that belong at the tail. A batch it routes is live work on the anchor,
-   which the `status:` label reads, so it re-derives that PR's label as it
+   which the `status:` label reads, so it re-derives that PR's labels as it
    routes. Arm 7 still runs the routing idempotently (a
    landed batch's watermark and `pr_comment_disposition` make the re-run a
    no-op) and still owns the write-back and the terminal-state records. Its rc

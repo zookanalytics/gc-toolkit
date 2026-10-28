@@ -16,10 +16,10 @@
 // not a goal, and neither are tests that pin usage text.
 // assets/scripts/lifecycle.sh and assets/scripts/merge.sh are bridges: they
 // only exec this binary, and refuse the call when there is none to run.
-// pr-status-label.sh writes the status: label in shell and takes its value from
-// `gctk pr-status`, the one derivation the label and the helm board share, so
-// when the binary is absent or stale it leaves the label unchanged rather than
-// deriving one in shell.
+// pr-status-label.sh writes the status: and held: labels in shell and takes
+// their values from `gctk pr-status`, the one derivation the labels and the helm
+// board share, so when the binary is absent or stale it leaves the labels
+// unchanged rather than deriving them in shell.
 package main
 
 import (

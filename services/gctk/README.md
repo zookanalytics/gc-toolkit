@@ -40,10 +40,10 @@ one and a refused merge pass as `merge rc=1`, and retries both on its next
 pass. A fresh city has no binary until that order's first build, and a city
 whose build failed keeps serving the last good binary.
 
-`assets/scripts/pr-status-label.sh` writes the `status:` label in shell and
-takes the value from `gctk pr-status derive`. It resolves the binary the same
-way, and when there is none, or the binary is too old to carry `pr-status`, it
-leaves the label unchanged.
+`assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
+shell and takes their values from `gctk pr-status derive`. It resolves the
+binary the same way, and when there is none, or the binary is too old to carry
+`pr-status` or its `--json`, it leaves the labels unchanged.
 
 ## rig
 
