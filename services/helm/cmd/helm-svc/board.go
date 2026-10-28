@@ -529,18 +529,32 @@ func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 }
 
 // needsCell is a row's NEEDS cell: its needs behind the accept marker
-// ([acceptCell]), then where a pull request row's conversation stands
-// ([conversationNote]). NEEDS is the unpadded last column, so the note never
-// pushes another column out of line.
+// ([acceptCell]), then what holds a pull request row's PR ([heldNote]), then
+// where its conversation stands ([conversationNote]). NEEDS is the unpadded last
+// column, so the notes never push another column out of line.
 func needsCell(t board.Tile) string {
-	n, c := acceptCell(t), conversationNote(t)
-	switch {
-	case c == "":
-		return n
-	case n == "":
-		return c
+	return joinNotes(acceptCell(t), heldNote(t), conversationNote(t))
+}
+
+// joinNotes joins the non-empty parts of a cell with the board's separator.
+func joinNotes(parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
 	}
-	return n + " · " + c
+	return strings.Join(kept, " · ")
+}
+
+// heldNote names what holds a live pull request row's PR, in the words of its
+// held: labels ([board.Tile.PRHeld]). A row nothing holds, a closed row and a
+// row that is not a pull request each read "".
+func heldNote(t board.Tile) string {
+	if len(t.PRHeld) == 0 {
+		return ""
+	}
+	return "held: " + strings.Join(t.PRHeld, ", ")
 }
 
 // conversationNote names where a live pull request row's conversation with the
@@ -669,9 +683,11 @@ func renderFamilyLegend(w io.Writer) {
 	fmt.Fprint(w, conversationLegend)
 }
 
-// conversationLegend says what the conversation note on a pull request row
-// ([conversationNote]) means. renderLegend and renderFamilyLegend print it.
-const conversationLegend = "A live pull request row ends with its conversation: outstanding=a comment waits on the city · answered=the reply is there to look at · quiet=nothing said · unknown=not recorded\n"
+// conversationLegend says what the held and conversation notes on a pull
+// request row ([heldNote], [conversationNote]) mean. renderLegend and
+// renderFamilyLegend print it.
+const conversationLegend = "A live pull request row a person must clear names what holds it, its held: labels: visit=an open visit on the PR or its work · review=an unresolved review thread the merge waits on · blocked=a blocker no automated actor will clear\n" +
+	"A live pull request row ends with its conversation: outstanding=a comment waits on the city · answered=the reply is there to look at · quiet=nothing said · unknown=not recorded\n"
 
 // clusterMemberCap bounds how many members a folded cluster spells out before it
 // says how many more it held. Enough that an ordinary cluster is listed in full,
@@ -693,12 +709,9 @@ func renderClusterLine(w io.Writer, cr board.ClusterRow, idW, rigW int) {
 			fmt.Fprintf(w, "%s… (+%d more, all in --json)\n", indent, len(cr.Members)-clusterMemberCap)
 			break
 		}
-		// The fold shares the needs sentence, not the conversation, so a pull
-		// request member keeps its own conversation beside its title.
-		title := m.Title
-		if c := conversationNote(m); c != "" {
-			title += " · " + c
-		}
+		// The fold shares the needs sentence, not what holds a PR or its
+		// conversation, so a pull request member keeps its own beside its title.
+		title := joinNotes(m.Title, heldNote(m), conversationNote(m))
 		fmt.Fprintf(w, "%s%s%s%s\n", indent, rpad(m.ID, idW), rpad(m.Rig, rigW), clip(title, colNeedsMax))
 	}
 }

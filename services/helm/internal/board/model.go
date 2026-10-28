@@ -562,6 +562,18 @@ type Tile struct {
 	// non-empty exactly when VisitState is VisitStartFailed, so a consumer reads
 	// the state and its reason off one row.
 	VisitStartFailure string `json:"visit_start_failure"`
+
+	// PRHeld is what holds this live merge anchor's PR that the city will not
+	// clear on its own, the values prstatus.Held names in its order: `visit`
+	// (an open visit covers the anchor or one of its live review or rework
+	// children), `review` (an unresolved review thread holds the merge), and
+	// `blocked` (a blocker no automated actor will clear, or one a person
+	// owes). Each is the value of one GitHub held: label pr-status-label.sh
+	// writes from the same derivation, and any of them reads PRPhase
+	// needs-attention. Null on a PR nothing holds, on a closed row, and on a
+	// non-merge row. It is the PR's own: Held is the visit on this row's bead,
+	// so a PR whose rework a visit holds carries `visit` here with Held false.
+	PRHeld []string `json:"pr_held"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

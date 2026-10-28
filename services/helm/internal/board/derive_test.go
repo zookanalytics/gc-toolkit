@@ -2063,7 +2063,7 @@ func closedAnchor(id string, d int, children ...Child) Anchor {
 
 func TestClosedAnchorBandsDoneNotByItsChildren(t *testing.T) {
 	a := closedAnchor("tk-done", 1, Child{ID: "tk-c1", Status: "open"}, Child{ID: "tk-c2", Status: "open"})
-	tile := computeTile(a, fixtureNow, Facts{}, 0)
+	tile := computeTile(a, fixtureNow, Facts{}, anchorWork{})
 
 	if tile.Severity != SevDone {
 		t.Errorf("a closed anchor bands DONE: got %s", tile.Severity)
@@ -2086,7 +2086,7 @@ func TestClosedAnchorNeedsOutranksItsTakeaway(t *testing.T) {
 	a.Kind, a.Source = "parked", "parked"
 	a.Takeaway = "waiting on the operator to pick a storage backend"
 
-	tile := computeTile(a, fixtureNow, Facts{}, 0)
+	tile := computeTile(a, fixtureNow, Facts{}, anchorWork{})
 	if tile.Needs != "closed — ages out" {
 		t.Errorf("a closed row ages out on its own, it is not re-read: got %q", tile.Needs)
 	}
@@ -2226,7 +2226,7 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"a held draft needs attention", merge(map[string]string{mdOpenedAsDraft: "abc", mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 	}
 	for _, tc := range cases {
-		if got := prPhase(tc.a, Facts{}, tc.kids); got != tc.want {
+		if got := prPhase(tc.a, Facts{}, anchorWork{reworkKids: tc.kids}); got != tc.want {
 			t.Errorf("%s: prPhase = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -2242,6 +2242,20 @@ func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
 	b := BuildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseWorking {
 		t.Errorf("an anchor with an open rework child is working: got %q", got)
+	}
+}
+
+// The in-flight count is the open rework children alone. A live review child is
+// read for a visit on the PR's work, but it is not counted as the city changing
+// the PR, so an unapproved anchor with only a review child in flight reads as it
+// did with none.
+func TestPRPhaseCountsNoReviewChildInFlight(t *testing.T) {
+	anchor := mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"})
+	review := Anchor{ID: "tk-anc.rv", Source: kindReview, Rig: "gc-toolkit", Metadata: map[string]string{mdAnchorBead: "tk-anc"}}
+
+	b := BuildBoard([]Anchor{anchor, review}, fixtureNow, false, nil, Facts{})
+	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseNeedsReview {
+		t.Errorf("an anchor whose only child in flight is a review: got %q, want %q", got, PhaseNeedsReview)
 	}
 }
 
@@ -2424,6 +2438,111 @@ func TestRepoBaseFromPRURL(t *testing.T) {
 	}
 }
 
+// A live merge anchor carries what holds its PR in PRHeld, the values
+// prstatus.Held names over the facts its phase reads, the same derivation the
+// held: labels come from, and any value reads PRPhase needs-attention. A visit
+// on the PR's own review or rework child holds it as one on the anchor does,
+// though Held, the visit on the row's own bead, stays false. A blocker a person
+// owes holds it, one a pool is landing does not, and a value comes off once its
+// condition clears. A closed row and a non-merge row carry none.
+func TestPRHeldNamesWhatHoldsThePR(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	approved := map[string]string{
+		mdPRPosture: dated(postureApproved, headLive, at),
+		mdPRMachine: dated(MachineSettled, headLive, at),
+	}
+	with := func(md map[string]string, kv ...string) map[string]string {
+		out := map[string]string{}
+		for k, v := range md {
+			out[k] = v
+		}
+		for i := 0; i+1 < len(kv); i += 2 {
+			out[kv[i]] = kv[i+1]
+		}
+		return out
+	}
+	child := func(id, kind string) Anchor {
+		return Anchor{ID: id, Title: "t " + id, Kind: kind, Source: kind, Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdAnchorBead: "tk-a"}, UpdatedAt: fixtureNow}
+	}
+	closedChild := child("tk-a.rw", kindRework)
+	closedChild.ClosedAt = fixtureNow.Add(-time.Hour)
+	threads := with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "review-threads")
+	person := Blocker{ID: "tk-d", Title: "decide the flag name", Status: "open", RoutedTo: routedHuman}
+	for _, tc := range []struct {
+		name     string
+		anchors  []Anchor
+		visits   map[string]bool
+		want     []string
+		wantHeld bool
+		phase    string
+	}{
+		{"nothing holds an approved PR", []Anchor{mergeAnchor("tk-a", approved)}, nil, nil, false, PhaseMerging},
+		{"an open visit on the anchor", []Anchor{mergeAnchor("tk-a", approved)},
+			map[string]bool{"tk-a": true}, []string{"visit"}, true, PhaseNeedsAttention},
+		{"an open visit on the PR's rework child", []Anchor{mergeAnchor("tk-a", approved), child("tk-a.rw", kindRework)},
+			map[string]bool{"tk-a.rw": true}, []string{"visit"}, false, PhaseNeedsAttention},
+		{"an open visit on the PR's review child", []Anchor{mergeAnchor("tk-a", approved), child("tk-a.rv", kindReview)},
+			map[string]bool{"tk-a.rv": true}, []string{"visit"}, false, PhaseNeedsAttention},
+		{"a visit on a closed rework child no longer holds", []Anchor{mergeAnchor("tk-a", approved), closedChild},
+			map[string]bool{"tk-a.rw": true}, nil, false, PhaseMerging},
+		{"a visit on another PR's rework does not hold this one", []Anchor{mergeAnchor("tk-a", approved), func() Anchor {
+			k := child("tk-b.rw", kindRework)
+			k.Metadata[mdAnchorBead] = "tk-b"
+			return k
+		}()}, map[string]bool{"tk-b.rw": true}, nil, false, PhaseMerging},
+		{"a blocker routed to a person", []Anchor{mergeAnchor("tk-a", approved, person)}, nil, []string{"blocked"}, false, PhaseNeedsAttention},
+		{"a decision blocker", []Anchor{mergeAnchor("tk-a", approved, Blocker{ID: "tk-d", Status: "open", IssueType: "decision"})},
+			nil, []string{"blocked"}, false, PhaseNeedsAttention},
+		{"a closed blocker routed to a person no longer holds", []Anchor{mergeAnchor("tk-a", approved,
+			Blocker{ID: "tk-d", Status: "closed", RoutedTo: routedHuman})}, nil, nil, false, PhaseMerging},
+		{"a blocker a pool is landing is the city's", []Anchor{mergeAnchor("tk-a", approved,
+			Blocker{ID: "tk-d", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"})}, nil, nil, false, PhaseMerging},
+		{"the merge pass's thread verdict", []Anchor{mergeAnchor("tk-a", threads)}, nil, []string{"review"}, false, PhaseNeedsAttention},
+		{"the merge pass's stuck-blocker verdict", []Anchor{mergeAnchor("tk-a",
+			with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "blocker"))},
+			nil, []string{"blocked"}, false, PhaseNeedsAttention},
+		{"a failed check reads needs-attention and holds nothing", []Anchor{mergeAnchor("tk-a",
+			with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "check-failed"))},
+			nil, nil, false, PhaseNeedsAttention},
+		{"the merge freeze reads needs-attention and holds nothing", []Anchor{mergeAnchor("tk-a", with(approved, mdMergeHold, "true"))},
+			nil, nil, false, PhaseNeedsAttention},
+		{"every value at once, in order", []Anchor{mergeAnchor("tk-a", threads, person)},
+			map[string]bool{"tk-a": true}, []string{"visit", "review", "blocked"}, true, PhaseNeedsAttention},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := BuildBoard(tc.anchors, fixtureNow, false, nil, Facts{Visits: tc.visits})
+			tile := mustTile(t, b, "tk-a")
+			if !slices.Equal(tile.PRHeld, tc.want) {
+				t.Errorf("pr_held = %v, want %v", tile.PRHeld, tc.want)
+			}
+			if tile.Held != tc.wantHeld {
+				t.Errorf("held = %v, want %v: Held is the visit on the row's own bead", tile.Held, tc.wantHeld)
+			}
+			if tile.PRPhase != tc.phase || tile.Phase != tc.phase {
+				t.Errorf("pr_phase=%q phase=%q, want both %q", tile.PRPhase, tile.Phase, tc.phase)
+			}
+		})
+	}
+
+	// A resolved PR carries no held value, whatever its frozen facts say, as a
+	// merged or closed PR carries no held: label.
+	closed := mergeAnchor("tk-a", map[string]string{mdMergeResult: mergeResultMerged}, person)
+	closed.ClosedAt = fixtureNow.Add(-time.Hour)
+	if got := mustTile(t, BuildBoard([]Anchor{closed}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-a": true}}), "tk-a").PRHeld; got != nil {
+		t.Errorf("a closed merge anchor carries pr_held %v, want none", got)
+	}
+
+	// A row that is no merge anchor has no PR to hold, and a blocker a person
+	// owes does not move its own liveness, which reads as it did before.
+	plain := Anchor{ID: "tk-p", Title: "t tk-p", Kind: "task", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+		Metadata: map[string]string{}, Blockers: []Blocker{person}, UpdatedAt: fixtureNow}
+	pt := mustTile(t, BuildBoard([]Anchor{plain}, fixtureNow, false, nil, Facts{}), "tk-p")
+	if pt.PRHeld != nil || pt.Phase != PhaseNeedsReview {
+		t.Errorf("a non-merge row: pr_held=%v phase=%q, want none and needs-review", pt.PRHeld, pt.Phase)
+	}
+}
+
 // mergeAnchor is an open merge anchor as the gather produces one: the `merge`
 // kind, whatever metadata the case is about, and its `blocks` blockers.
 func mergeAnchor(id string, md map[string]string, blockers ...Blocker) Anchor {
@@ -2458,7 +2577,7 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	})
 	a.ClosedAt = fixtureNow.Add(-24 * time.Hour)
 
-	tile := computeTile(a, fixtureNow, Facts{}, 0)
+	tile := computeTile(a, fixtureNow, Facts{}, anchorWork{})
 	if tile.Owed {
 		t.Error("a closed merge anchor is not owed, whatever markers it still carries")
 	}
@@ -3581,7 +3700,7 @@ func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
 	}
 
 	// Acceptable row: the card reaches the wire, trimmed, structure intact.
-	tile := computeTile(subject("tk-rec"), fixtureNow, openVisit("tk-rec"), 0)
+	tile := computeTile(subject("tk-rec"), fixtureNow, openVisit("tk-rec"), anchorWork{})
 	if !tile.Acceptable {
 		t.Fatal("precondition: a recommended formula + open un-engaged visit is acceptable")
 	}
@@ -3593,14 +3712,14 @@ func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
 	}
 
 	// Same notes, but no open visit → not acceptable → no card on the wire.
-	if got := computeTile(subject("tk-rec"), fixtureNow, Facts{}, 0).Recommendation; got != nil {
+	if got := computeTile(subject("tk-rec"), fixtureNow, Facts{}, anchorWork{}).Recommendation; got != nil {
 		t.Errorf("off an acceptable row the wire carries no card: got %q", *got)
 	}
 
 	// Acceptable, but whitespace-only notes → null, never an empty string.
 	empty := subject("tk-rec")
 	empty.Notes = "   \n"
-	if got := computeTile(empty, fixtureNow, openVisit("tk-rec"), 0).Recommendation; got != nil {
+	if got := computeTile(empty, fixtureNow, openVisit("tk-rec"), anchorWork{}).Recommendation; got != nil {
 		t.Errorf("whitespace-only notes is null, not an empty recommendation: got %q", *got)
 	}
 }

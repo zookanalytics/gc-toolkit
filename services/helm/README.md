@@ -73,7 +73,7 @@ takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 section cluster_key group_root group_parent
 acceptable accept_formula pr_branch_url pr_phase phase recommendation
-visit_start_failure
+visit_start_failure pr_held
 ```
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
@@ -506,6 +506,7 @@ field would be lying on a normal day.
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
+| `pr_held` | any of `visit`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open visit on the anchor or on one of its live review or rework children, the blocked verdict's cause, and the anchor's demand blockers |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
