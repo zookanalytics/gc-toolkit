@@ -106,6 +106,23 @@ eq "$out" "actor B11-400-$pad routed to rig/gc-toolkit.polecat" "the long list a
 out=$( (ulimit -f 0; trap '' XFSZ; TMPDIR="$TMP/bh-tmp" "$SUT" --anchor A11) 2>/dev/null); rc=$?
 eq "$rc" 2 "lines that cannot be written to the temp file exit 2"
 eq "$out" "" "…printing no answer, never none"
+# The first loop answers from routes and claims, and the second reads runs
+# only. A read that ends the first loop at its first line stands in for lines
+# lost under it: B14 is routed and no run works it, so answering from the
+# second loop alone would call it stuck.
+store "[$(anchor A14), $(blk B14 open '' ',"gc.routed_to":"rig/gc-toolkit.polecat"')]"
+printf 'B14|blocks|A14\n' > "$STUB_DEPS"
+out=$(
+  read() { # the script's first read gets nothing; every other read, a stub's too, is bash's
+    case "$0" in */blocker-holder.sh) [ -n "${_bh_lost:-}" ] || { _bh_lost=1; return 1; } ;; esac
+    builtin read "$@"
+  }
+  export -f read
+  TMPDIR="$TMP/bh-tmp" "$SUT" --anchor A14 2>/dev/null
+); rc=$?
+eq "$rc" 2 "lines lost under the first loop exit 2"
+eq "$out" "" "…printing no answer, never stuck"
+eq "$(TMPDIR="$TMP/bh-tmp" "$SUT" --anchor A14)" "actor B14 routed to rig/gc-toolkit.polecat" "…where the whole list answers actor"
 # The second loop reads the file again, one run read per line. A run read that
 # empties the file stands in for lines lost under that loop: B13b's live run is
 # then never read, and answering from B13a alone would say stuck.
