@@ -1658,6 +1658,18 @@ keys = ["failure_key"]
 #   check. `find` reads no title, so a bug without it is no tracker. Never
 #   cleared, so a retitle or a fold leaves it in place. A string.
 
+[metadata.seed_audit_reaudit]
+# The seed audit's re-audit: the one bead that re-renders generated/seed-audit on
+# the default branch, once the merge gate finds that branch stale in files no
+# change in the repository moved, and lands the new text in a pull request of
+# its own. Filed and slung by assets/scripts/seed-audit-reaudit.sh, which the
+# merge gate (gctk merge) calls with the files it found.
+keys = ["seed_audit_reaudit"]
+# seed_audit_reaudit — the branch the re-audit re-renders, written in the create
+#   with target set to the same branch. The writer's dedup reads it over the live
+#   statuses, so a branch owns at most one live re-audit. Never cleared. A branch
+#   name.
+
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session
 # (docs/authority-map.md; formulas/mol-dog-shutdown-dance.toml). Renamed from
