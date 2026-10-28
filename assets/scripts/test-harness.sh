@@ -697,11 +697,14 @@ case "$verb" in
               else                  { if (b == id) print a "|" ty "|" issue "|" dep }   # legacy: who names me
             }' "$D"
         done)
+        # The rows reach jq through a pipe. A long dependency list passes the
+        # 128 KiB Linux allows any one argument, and bash writes a large
+        # here-string to a temp file, which a suite's file-size limit refuses.
         if [ "${#qids[@]}" -gt 1 ] && [ "$dir" = "down" ]; then
-          jq -c --arg rows "$rows" '[ $rows | split("\n")[] | select(. != "") | split("|")
+          printf '%s' "$rows" | jq -c --rawfile rows /dev/stdin '[ $rows | split("\n")[] | select(. != "") | split("|")
             | {issue_id: .[2], depends_on_id: .[3], type: .[1]} ]' -n || exit $?
         else
-          jq -c --arg rows "$rows" '
+          printf '%s' "$rows" | jq -c --rawfile rows /dev/stdin '
             [ $rows | split("\n")[] | select(. != "") | split("|") | {id: .[0], t: .[1]} ] as $want
             | [ .[] | . as $b | $want[] | select(.id == $b.id) | ($b + {dependency_type: .t}) ]' "$S" || exit $?
         fi
