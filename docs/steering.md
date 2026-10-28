@@ -45,7 +45,11 @@ A bead may be routed or armed to a work pool only when one of these holds:
 - it is a member of an epic, which means it has a parent-child parent;
 - it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
 - it is an emergency, a red main or a broken gate, checked rather than asserted;
-- the operator routed it, through a sitting, a hand sling or an Accept.
+- the operator routed it, through a sitting, a hand sling or an Accept;
+- it is the seed audit's re-audit, the one bead `seed-audit-reaudit.sh` slings
+  to re-render the default branch's `generated/seed-audit` once the merge gate
+  finds files there that the `gc` binary moved, a route the operator made
+  standing ([refinery-merge-cadence.md](refinery-merge-cadence.md)).
 
 Every other bead waits for placement. A bead held this way carries
 `placement=pending` and no route and no arm, so no pool is offered it.

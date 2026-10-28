@@ -778,7 +778,15 @@ func (m *merger) handle(row *gcbd.Bead) {
 			m.held++
 			return
 		}
-		saOut, saRC := runCombined("bash", renderer, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
+		saArgs := []string{renderer, "--root", m.repoRoot, "--check-merge", mergeGateRef + "/base", mergeGateRef + "/head"}
+		staleList := ""
+		if f, err := os.CreateTemp("", "gctk-merge-base-stale.*"); err == nil {
+			staleList = f.Name()
+			f.Close()
+			defer os.Remove(staleList)
+			saArgs = append(saArgs, "--base-stale-out", staleList)
+		}
+		saOut, saRC := runCombined("bash", saArgs...)
 		if saRC != 0 {
 			saWhy := "generated-artifact freshness could not be determined"
 			if saRC == 1 {
@@ -787,9 +795,12 @@ func (m *merger) handle(row *gcbd.Bead) {
 			fmt.Fprintf(m.stdout, "%s: PR#%s %s; merge held (anchor %s)\n", mergeProg, num, saWhy, id)
 			m.printIndented(saOut, 6)
 			m.escalate("--subject", id, "--key", "seed-audit-merge-gate."+num,
-				"--message", "PR#"+num+" "+saWhy+"; the merge is held.\n\ngenerated/seed-audit is rendered from the whole source tree and committed per\nbranch, so a branch carrying a render made at an older base lands over prompt\ninputs it never saw. Bring the head branch current with '"+base+"', run\nassets/scripts/render-seed-audit.sh, commit generated/seed-audit, and push.\n\n"+saOut)
+				"--message", "PR#"+num+" "+saWhy+"; the merge is held.\n\ngenerated/seed-audit is rendered from the whole source tree and committed per\nbranch, so a branch carrying a render made at an older base lands over prompt\ninputs it never saw. Bring the head branch current with '"+base+"', run\nassets/scripts/render-seed-audit.sh --since origin/"+base+", commit generated/seed-audit,\nand push.\n\n"+saOut)
 			m.held++
 			return
+		}
+		if staleList != "" {
+			m.reaudit(base, num, readLines(staleList))
 		}
 	}
 
@@ -1312,6 +1323,47 @@ func (m *merger) clearStatusLabel(id, num, prurl, url string) (owed []string) {
 		return owed
 	}
 	return nil
+}
+
+// reaudit hands the files the base is already stale in to seed-audit-reaudit.sh,
+// which slings the one bead that re-renders the default branch and lands the new
+// text in a pull request of its own. The check that found them holds nothing, so
+// neither does this: the merge goes on whatever the helper answers, and a base
+// still stale at the next merge hands them over again.
+func (m *merger) reaudit(base, num string, files []string) {
+	if len(files) == 0 {
+		return
+	}
+	fmt.Fprintf(m.stdout, "%s: PR#%s: '%s' is already stale in %d generated/seed-audit file(s) the merge leaves as it has them; asking for its re-audit\n", mergeProg, num, base, len(files))
+	p := m.scriptPath("seed-audit-reaudit.sh")
+	if !isExecutable(p) {
+		fmt.Fprintf(m.stdout, "%s: PR#%s: seed-audit-reaudit.sh is not in %s; no re-audit asked for\n", mergeProg, num, m.scriptsDir)
+		return
+	}
+	args := []string{"--base", base, "--seen-by", "The merge gate, checking PR#" + num + ","}
+	for _, f := range files {
+		args = append(args, "--page", f)
+	}
+	out, rc := runCombined(p, args...)
+	m.printIndented(out, 6)
+	if rc != 0 {
+		fmt.Fprintf(m.stdout, "%s: PR#%s: the re-audit was not dispatched (seed-audit-reaudit.sh exit %d); the next merge that finds '%s' stale asks again\n", mergeProg, num, rc, base)
+	}
+}
+
+// readLines returns a file's non-empty lines, and none for a file it cannot read.
+func readLines(p string) []string {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(string(b), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 func (m *merger) recordCap(id, num, mergeOid, base string) {
