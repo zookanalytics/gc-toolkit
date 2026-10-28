@@ -42,7 +42,7 @@ the checkpoint below reads the measured and graded criteria it brought.
 
 ## Facts this design rests on
 
-Each was read on 2026-10-28, at gc-toolkit main 90d0a84e, in bd 1.3.2, or in
+Each was read on 2026-10-28, at gc-toolkit main ec0a1401, in bd 1.3.2, or in
 Gas City upstream main 221b1476d.
 
 1. **bd's types.** `bd types` describes `epic` as a "Large body of work spanning
@@ -55,12 +55,20 @@ Gas City upstream main 221b1476d.
    its own only to epic, decision and convoy (`typedAnchorKinds`,
    `services/helm/internal/source/beads.go:486`, also read at
    `supervisor.go:692`). `assignGroupRoots`
-   (`services/helm/internal/board/derive.go:2875`) nests a row under the row
+   (`services/helm/internal/board/derive.go:2939`) nests a row under the row
    its parent-child edge climbs to. So a child epic's row sits under its
    parent's, and a member's row, such as a PR's, sits under the child epic's.
    A child epic whose members have all closed reads
-   `all N closed — close or extend` (`derive.go:1048`) and bands LOW
-   (`derive.go:773`).
+   `all N closed — close or extend` (`derive.go:1093`) and bands LOW
+   (`derive.go:800`). The sources differ in what an epic's row carries. The
+   default source, the direct store reader, carries each row's metadata
+   (`newAnchor`, `beads.go:1255`). The supervisor source, the fallback
+   (`selectSource`, `services/helm/cmd/helm-svc/main.go:225`), builds an
+   epic's row with no metadata (`gatherEpics`, `supervisor.go:350`), though
+   the `/beads` list it reads carries it. The native-gates branch builds the
+   row the same way. The built-once board reads through the supervisor API, and
+   the direct reader goes
+   ([built-once-target.md](../../docs/built-once-target.md#board)).
 3. **What counts as work.** `doctor/check-blocked-work-armed` counts bug,
    feature, task, chore and spike as work (`run.sh:75`), and its header names
    epic, milestone and story as containers whose children are the routed work.
@@ -233,8 +241,13 @@ the Feature waits for. Unit 4 rewords the row of a landed Feature (an
 epic-typed child of an epic, with no hypothesis, whose members have all closed)
 to name the checkpoint it waits for, and bands it with the rows the operator
 owes. The change sits in the board's derivation, which the built-once shape
-keeps. It touches neither board source and adds no field to the board's wire
-contract.
+keeps, and adds no field to the board's wire contract. The derivation tells a
+Feature from a child epic with a hypothesis of its own by the
+`epic_hypothesis` key in the row's metadata. The supervisor source, the one the
+built-once shape keeps, builds an epic's row with no metadata (fact 2), so
+there every child epic would read as a Feature. Unit 4 therefore makes that
+source carry an epic's metadata on its row, as the direct store reader already
+does. The direct store reader, which tk-1tfzr71.24 retires, takes no new work.
 
 **Rejected.** *A row of a new kind for Features.* A child epic already has a
 row, and a new kind would be a new read in the board's direct store reader,
@@ -381,7 +394,7 @@ each waits for it and is written against what it leaves.
 | 1 | **The model in the epic docs.** `docs/epics.md` states the Feature and the Epic Checkpoint as built. `docs/epic-stewardship.md` says the close gate and I15 never hold a Feature and the checkpoint closes it, and narrows its direction to unit 6. `docs/steering.md` places work under a Feature as under an epic, and names the Feature level in its priority rule. | 1–5 | tk-iirrmiw | The three docs state the model. None calls the Feature layer unbuilt, and none names a sub-epic. |
 | 2 | **Filing into a Feature.** The work skill's "File new work" states section 2's rule, the list of open Features and the Feature's create. `converse-parent.sh` prints the nearest open parent-child ancestor, with its test. | 2, 4 | 1, tk-iirrmiw | The skill suites pass with the rule stated. `converse-parent.sh` prints the epic for a Story under a closed Feature of an open epic, and an empty line for a Story under a closed epic with no open ancestor. |
 | 3 | **The Epic Checkpoint by hand.** A pack skill that a sitting on an epic follows after a Feature lands: the evidence, the record, and section 5's writes in order. The converse prompt names the checkpoint's two closes. | 5 | 1, tk-iirrmiw | The skill and prompt suites pass, with the prompt's pins moved with its sentence. The first checkpoint after a Feature lands runs from the skill, and its record is on the epic's notes. |
-| 4 | **A landed Feature asks for its checkpoint.** The board's derivation rewords a landed Feature's row to name its checkpoint and bands it with the rows the operator owes. The derivation's comments say Feature where they say sub-epic. | 3 | 1, tk-iirrmiw | A board fixture renders a landed Feature that way and a landed top-level epic as before. Neither board source changes, and the wire contract gains no field. |
+| 4 | **A landed Feature asks for its checkpoint.** The board's derivation rewords a landed Feature's row to name its checkpoint and bands it with the rows the operator owes. The supervisor source carries an epic's metadata on its row, as the direct store reader does. The derivation's comments say Feature where they say sub-epic. | 3 | 1, tk-iirrmiw | A board fixture renders a landed Feature that way, and a landed top-level epic and a landed child epic with a hypothesis as before. A supervisor source test reads an epic's `epic_hypothesis` off its row. The direct store reader is unchanged, and the wire contract gains no field. |
 | 5 | **The child epics on file.** A sitting on each epic that has an open child epic, asked for in that epic's store, reads each child against section 6. It is not a PR. | 6 | 1, 2 | No open child epic of an epic, in any rig store, lacks both an `Aim:` line and a hypothesis. |
 | 6 | **The checkpoint's machinery.** A design, drawn from the hand-run records, for what they show to be mechanical. Plausibly that is a formula that files the checkpoint and gathers its evidence when a Feature lands, and one verb that makes the ruling's writes. | 5 | 3, and two checkpoints run from the skill | The operator approves the design at its PR. |
 
