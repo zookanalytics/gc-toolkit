@@ -270,7 +270,10 @@ text lands in a pull request of its own: the merge gate hands the files the
 default branch is stale in to `seed-audit-reaudit.sh`, which slings one bead to
 re-render them. A file that a branch re-rendered itself, as that bead does, is
 the branch's adoption of gc's text, and later commits render it fresh, so a
-newer `gc` renews the adoption rather than undoing it.
+newer `gc` renews the adoption rather than undoing it. `INDEX.md` lists every
+page, so a commit that moves the index, by adding an agent for example, also
+carries a page that `gc` added or removed, and the index lists no page the
+commit leaves out.
 
 ### Smoke test
 

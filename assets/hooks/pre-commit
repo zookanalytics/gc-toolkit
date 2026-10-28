@@ -51,7 +51,9 @@ fi
 # own (render-seed-audit.sh, WHOSE TEXT IT IS). A file the branch moves is
 # written as rendered, which also renews one an earlier commit left stale. So is
 # a file the branch re-rendered itself, as the re-audit does, which adopts gc's
-# text for it, so a newer gc renews the adoption and never undoes it.
+# text for it, so a newer gc renews the adoption and never undoes it. INDEX.md
+# lists every page, so a page gc added or removed goes with an index the commit
+# writes as rendered, and the index lists no page the commit leaves out.
 #
 # A commit that concludes a merge has the merged heads for parents as well, so
 # its fork point is taken with them. Taken from HEAD alone, a merge of the

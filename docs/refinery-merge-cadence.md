@@ -221,10 +221,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    on the hand-off, whatever it answers. A branch's own commits add none of
    that text: the pre-commit hook and the remedy above render `--since` a
    revision, which keeps each file the change does not move as that revision
-   has it. The exception is a file the branch re-rendered itself, as the
-   re-audit does. That file is rendered fresh, so when gc moves again before
-   the re-audit merges, the same remedy renews its text, and the held merge
-   clears.
+   has it. The exceptions are a file the branch re-rendered itself, as the
+   re-audit does, and a page gc added or removed while the branch moves
+   `INDEX.md`, which lists every page. The re-rendered file is rendered fresh,
+   so when gc moves again before the re-audit merges, the same remedy renews
+   its text, and the held merge clears. The page goes with the index, so the
+   index lists no page the merge leaves out.
 
    What the artifact commits is chosen to stay out of the queue's way. A line
    that moves on every edit to one agent's prompt, committed beside the lines

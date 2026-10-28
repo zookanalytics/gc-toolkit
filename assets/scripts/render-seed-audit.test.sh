@@ -40,17 +40,22 @@
 # the per-agent size rows the index no longer commits. For what a commit
 # renders: --since writing the file the change moves and keeping, as HEAD
 # commits them, the text that moved with gc, a file only gc added and the index
-# row that would list it, against a plain render as the control; one render when
+# row that would list it, against a plain render as the control; a page gc
+# added or dropped written as rendered beside an index the change moves, while
+# a page whose text alone moved with gc is kept; one render when
 # no file differs; the whole render since a revision with no audit; its
 # refusals; the pre-commit hook committing what the commit moves and not gc's
 # text, renewing what an earlier commit of its branch left stale, and keeping
 # the text a commit of its branch adopted; renewing a re-render of its branch
-# that gc has moved past, again after a third move; putting back gc's text that
+# that gc has moved past, again after a third move, and an index it adopted
+# with the formula gc added since; putting back gc's text that
 # rode in beside a change to a seed input, and renewing no re-render the branch
-# took back out; a hooked commit that concludes a
+# took back out; putting back a page whose change the branch reverted after gc
+# moved its text; a hooked commit that concludes a
 # merge of the default branch keeping what that branch re-rendered, judged from
-# the fork point the merge leaves, and one on a re-audit branch renewing its
-# re-render; and, with no gc on PATH, the render the hook
+# the fork point the merge leaves, one on a re-audit branch renewing its
+# re-render, and one writing a page both sides changed as rendered, after one
+# gc move; and, with no gc on PATH, the render the hook
 # names instead, since the fork point, or since the head a merge brings in where
 # there is no origin/HEAD. For the renderer and sizes: what INDEX.md
 # carries and SOURCES.txt's absence; --sizes with and without a base; the gcq
@@ -104,12 +109,12 @@ case "\$1 \${2:-}" in
     "agent list")   { agents | sed "s|.*|{\"name\":\"&\",\"qualified_name\":\"\$binding.&\"}|"
                       echo '{"name":"claude","qualified_name":"claude"}'; } | paste -s -d, - \
                         | sed 's/.*/{"agents":[&]}/' ;;
-    "formula list") for f in "\$root"/formulas/*.toml; do [ -f "\$f" ] && basename "\$f" .toml; done
-                    if [ -f "$STUB/mol-gc.toml" ]; then echo mol-gc; fi ;;
-    "formula show") if [ "\$3" = mol-gc ]; then cat "$STUB/mol-gc.toml"; else cat "\$root/formulas/\$3.toml"; fi ;;
+    "formula list") for f in "\$root"/formulas/*.toml "$STUB"/*.toml; do if [ -f "\$f" ]; then basename "\$f" .toml; fi; done ;;
+    "formula show") if [ -f "$STUB/\$3.toml" ]; then cat "$STUB/\$3.toml"; else cat "\$root/formulas/\$3.toml"; fi ;;
     "prime claude") printf '%s\n' "$BUILTIN_WORKER"
                     if [ -f "$STUB/claude.gc" ]; then cat "$STUB/claude.gc"; fi ;;
-    "prime "*)      "$STUB/spell-city" < "\$root/agents/\$2/prompt.template.md" ;;
+    "prime "*)      "$STUB/spell-city" < "\$root/agents/\$2/prompt.template.md"
+                    if [ -f "$STUB/\$2.gc" ]; then cat "$STUB/\$2.gc"; fi ;;
     *)              exit 1 ;;
 esac
 STUB
@@ -180,7 +185,12 @@ check_merge() { # <base> <head> [extra args...]
 gc_moves() { printf 'a line a newer gc renders\n' > "$STUB/claude.gc"; printf 'formula = "mol-gc"\n' > "$STUB/mol-gc.toml"; }
 # A still newer gc moves both again, the formula only gc defines included.
 gc_moves_again() { printf 'a line a still newer gc renders\n' > "$STUB/claude.gc"; printf 'formula = "mol-gc"\n# a still newer gc\n' > "$STUB/mol-gc.toml"; }
-gc_restores() { rm -f "$STUB/claude.gc" "$STUB/mol-gc.toml"; }
+# A newer gc defines one more formula of its own.
+gc_adds_formula() { printf 'formula = "mol-gc-new"\n' > "$STUB/mol-gc-new.toml"; }
+# A newer gc moves the text of one of this pack's agents, as it does a formula
+# of the pack's that extends one of gc's own.
+gc_moves_into() { printf 'a line gc renders into %s\n' "$1" > "$STUB/$1.gc"; } # <agent>
+gc_restores() { rm -f "$STUB"/*.gc "$STUB"/*.toml; }
 # The working tree holds <file> under the audit as <rev> commits it, absence included.
 as_committed() { git -C "$R" diff --quiet "$1" -- "generated/seed-audit/$2"; } # <rev> <file>
 renders() { LC_ALL=C sort -u "$STUB/roots.log" | grep -c .; } # trees the last check rendered
@@ -400,6 +410,57 @@ else ok "control: a plain render writes the text that moved with gc"; fi
 gc_restores
 git -C "$R" reset -q --hard && git -C "$R" clean -qfd
 
+# A change that adds an agent moves the index, which is then written as
+# rendered and lists the formula only gc added. That formula is written as
+# rendered beside it, so the index lists no page the commit leaves out, while a
+# page whose text alone moved with gc is still kept.
+echo "# a page gc added goes with an index the change moves"
+branch base own-index
+gc_moves
+mkdir -p "$R/agents/gamma"
+printf 'name = "gamma"\n' > "$R/agents/gamma/agent.toml"
+printf '# gamma doctrine\n' > "$R/agents/gamma/prompt.template.md"
+out=$(render_since HEAD); rc=$?
+eq "$rc" 0 "a render since HEAD of a change that adds an agent exits 0"
+index=$(cat "$R/generated/seed-audit/INDEX.md")
+has "$index" "agents/gamma.md" "…writing the index as rendered, with the agent the change adds"
+has "$index" "formulas/mol-gc.md" "…and the formula only gc added"
+if [ -f "$R/generated/seed-audit/formulas/mol-gc.md" ]; then ok "…so that formula is written as rendered beside it"
+else bad "…but the index lists a formula the render left out"; fi
+if as_committed HEAD agents/claude.md; then ok "…while the file whose text alone moved with gc is kept as HEAD commits it"
+else bad "…but the text that moved with gc was written into claude.md"; fi
+has "$out" "kept 1 file(s) as HEAD commits them" "…keeping that file alone"
+has "$out" "wrote 1 page(s) as rendered to match the index this commit writes" "…and saying which page follows the index"
+commit "add an agent"
+out=$(check_merge base own-index); rc=$?
+eq "$rc" 0 "…so the merge gate holds nothing"
+hasnt "$out" "formulas/mol-gc.md" "…and finds the formula current, not the base's staleness"
+gc_restores
+
+# The other way round: the default branch re-rendered a formula that gc then
+# stops defining, and a change that moves the index drops it with the index.
+echo "# a page gc dropped goes with an index the change moves"
+branch base own-index-drop-base
+gc_moves
+render; commit "the default branch re-renders what gc moved"
+branch own-index-drop-base own-index-drop
+gc_restores
+mkdir -p "$R/agents/gamma"
+printf 'name = "gamma"\n' > "$R/agents/gamma/agent.toml"
+printf '# gamma doctrine\n' > "$R/agents/gamma/prompt.template.md"
+out=$(render_since HEAD); rc=$?
+eq "$rc" 0 "a render since HEAD of a change that adds an agent exits 0"
+hasnt "$(cat "$R/generated/seed-audit/INDEX.md")" "formulas/mol-gc.md" "…writing the index as rendered, without the formula gc no longer defines"
+if [ -e "$R/generated/seed-audit/formulas/mol-gc.md" ]; then bad "…but the formula the index no longer lists was put back"
+else ok "…so that formula goes with it"; fi
+if as_committed HEAD agents/claude.md; then ok "…while the file whose text alone moved with gc is kept as HEAD commits it"
+else bad "…but the text that moved with gc was written into claude.md"; fi
+has "$out" "wrote 1 page(s) as rendered to match the index this commit writes" "…saying which page follows the index"
+commit "add an agent"
+out=$(check_merge own-index-drop-base own-index-drop); rc=$?
+eq "$rc" 0 "…so the merge gate holds nothing"
+hasnt "$out" "formulas/mol-gc.md" "…and finds the formula's removal current"
+
 echo "# --since over a tree that renders as HEAD commits it renders once"
 branch base own-quiet
 out=$(render_since HEAD); rc=$?
@@ -534,6 +595,34 @@ git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
 gc_restores
 
+# The re-render adopted the index too, and gc then defines one more formula of
+# its own. The renewed index lists it, so it is written as rendered as well.
+echo "# a hooked commit renews an adopted index with the formula gc added since"
+branch base hooked-readopted-index
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+gc_moves
+render; commit "re-audit: adopt the text gc moved"
+git -C "$R" config core.hooksPath assets/hooks
+gc_adds_formula
+edit_prompt alpha "moved by a hooked commit after gc added a formula"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit lands"
+has "$(git -C "$R" show HEAD:generated/seed-audit/INDEX.md)" "formulas/mol-gc-new.md" \
+    "…renewing the index the re-audit adopted, with the formula gc added since"
+if git -C "$R" cat-file -e HEAD:generated/seed-audit/formulas/mol-gc-new.md 2>/dev/null; then ok "…and carrying that formula beside it"
+else bad "…but the index lists a formula the commit does not carry"; fi
+has "$out" "  formulas/mol-gc-new.md" "…naming it"
+out=$(check_merge base hooked-readopted-index); rc=$?
+eq "$rc" 0 "…so the merge gate holds nothing"
+has "$out" "seed audit is current at the merge" "…and finds the merge current"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
 # A commit that changed a seed input and rendered everything plainly carried
 # gc's text in beside its own change. That is no adoption: once gc moves again,
 # a hooked commit puts the fork point's copy back, the index included, though
@@ -589,6 +678,33 @@ else bad "…but the re-render the branch took back out was renewed"; fi
 if as_committed base formulas/mol-gc.md; then ok "…and leaving out the file only gc added"
 else bad "…but the file only gc added came back"; fi
 hasnt "$out" "renewed" "…renewing nothing"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
+# A branch changes alpha's prompt, gc then moves alpha's text, and a later
+# commit reverts the change. HEAD's alpha.md differs from the fork point's, but
+# a change to a seed input started it, so it is no adoption: keeping it would
+# commit the reverted change, and rendering it would commit gc's text.
+echo "# a hooked commit that reverts a change puts the page back as the fork point commits it"
+branch base hooked-revert
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+git -C "$R" config core.hooksPath assets/hooks
+edit_prompt alpha "a change the branch later reverts"
+git -C "$R" add -A
+(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" >/dev/null 2>&1)
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/alpha.md)" "a change the branch later reverts" "the hooked change renders alpha"
+gc_moves_into alpha
+git -C "$R" checkout -q base -- agents/alpha/prompt.template.md
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "revert alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit that reverts the change lands"
+if as_committed base agents/alpha.md; then ok "…putting alpha.md back as the fork point commits it"
+else bad "…but alpha.md kept the reverted change or took gc's text"; fi
+has "$out" "  agents/alpha.md" "…naming it among what it kept"
 git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
 gc_restores
@@ -666,6 +782,40 @@ has "$(git -C "$R" show HEAD:generated/seed-audit/formulas/mol-gc.md 2>&1)" "a s
 has "$(git -C "$R" show HEAD:generated/seed-audit/agents/beta.md)" "moved on the default branch" "…beside the render the merge brings in"
 has "$out" "renewed 2 file(s) a re-render of this branch adopted" "…saying what it renewed"
 out=$(check_merge readopt-merge-main readopt-merge); rc=$?
+eq "$rc" 0 "…so the merge gate holds nothing"
+has "$out" "seed audit is current at the merge" "…and finds the merge current"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
+# The default branch changes alpha's prompt, and a re-audit branch adopted gc's
+# text in alpha's own page. Bringing the re-audit current conflicts in that
+# page after one gc move, and the commit that concludes the merge writes it as
+# rendered, with the default branch's change and gc's text both.
+echo "# a hooked merge on a re-audit branch writes a page both sides changed as rendered"
+branch base readopt-page-fork
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+branch readopt-page-fork readopt-page-main
+edit_prompt alpha "moved on the default branch"
+render; commit "the default branch moves alpha's prompt"
+branch readopt-page-fork readopt-page
+gc_moves; gc_moves_into alpha
+render; commit "re-audit: adopt the text gc moved"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/readopt-page-main
+git -C "$R" config core.hooksPath assets/hooks
+if git -C "$R" merge -q --no-edit readopt-page-main >/dev/null 2>&1; then bad "the merge was meant to conflict"
+else ok "the re-audit branch's merge of the default branch conflicts"; fi
+has "$(git -C "$R" diff --name-only --diff-filter=U)" "generated/seed-audit/agents/alpha.md" "…in the page both sides changed"
+git -C "$R" checkout -q --ours generated/seed-audit/agents/alpha.md
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q --no-edit 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit that concludes the merge lands"
+alpha=$(git -C "$R" show HEAD:generated/seed-audit/agents/alpha.md)
+has "$alpha" "moved on the default branch" "…writing alpha.md with the default branch's change"
+has "$alpha" "a line gc renders into alpha" "…and the text the re-audit adopted"
+out=$(check_merge readopt-page-main readopt-page); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
 has "$out" "seed audit is current at the merge" "…and finds the merge current"
 git -C "$R" config --unset core.hooksPath

@@ -1130,6 +1130,17 @@ fi
 # row are judged alike and go back together. A revision that carries no audit,
 # or only the stub a pack ships before its first render, keeps nothing.
 #
+# INDEX.md lists every page, so the pages a commit carries follow the index it
+# carries. An index written as rendered, because the change moves it or the
+# branch re-rendered it, lists what renders now. So a page that the render
+# writes and <rev> commits none of is written as rendered too, gc's text and
+# all, and a page that <rev> commits and the render writes none of is left out.
+# The index then lists no page the commit leaves out and leaves out none it
+# carries, and the merge gate finds the index and the page as they render. A
+# page that only gc's text moved is still kept as <rev> commits it, because the
+# index lists it either way. An index kept as <rev> commits it lists <rev>'s
+# pages, and every page follows <rev>.
+#
 # Whether HEAD commits <file> under the audit with <path>'s bytes, or commits no
 # such file where <path> holds none.
 head_commits() { # <file> <path>
@@ -1152,8 +1163,13 @@ head_adopted() { # <file>
     first="$(git -C "$ROOT" log --first-parent --reverse --format=%H "$SINCE..HEAD" -- "$AUDIT/$1" 2>/dev/null | head -n 1)"
     [ -n "$first" ] && git -C "$ROOT" diff --quiet "$first^1" "$first" -- . ":(exclude)$AUDIT" 2>/dev/null
 }
+# Whether the render writes <file> where <rev> commits none, or the other way round.
+presence_differs() { # <file>
+    if [ -f "$STAGE/$1" ]; then [ ! -f "$since_audit/$1" ]; else [ -f "$since_audit/$1" ]; fi
+}
 KEPT=()
 RENEWED=()
+LISTED=()
 if [ -n "$SINCE" ]; then
     SINCE_TREE="$TMPROOT/since"
     SINCE_RENDER="$TMPROOT/since.render"
@@ -1172,10 +1188,20 @@ if [ -n "$SINCE" ]; then
     if [ "${#differs[@]}" -gt 0 ]; then
         render_tree "$SINCE_TREE" "$SINCE_RENDER"; rc=$?
         [ "$rc" -eq 0 ] || render_failed "$SINCE" "$SINCE_RENDER" "$rc"
+        unmoved=()
+        index_kept=""
         for p in "${differs[@]}"; do
             same "$SINCE_RENDER/$p" "$STAGE/$p" || continue
             if head_adopted "$p"; then
                 head_commits "$p" "$STAGE/$p" || RENEWED+=("$p")
+                continue
+            fi
+            unmoved+=("$p")
+            [ "$p" != INDEX.md ] || index_kept=1
+        done
+        for p in ${unmoved[@]+"${unmoved[@]}"}; do
+            if [ -z "$index_kept" ] && [ "$p" != INDEX.md ] && presence_differs "$p"; then
+                LISTED+=("$p")
                 continue
             fi
             KEPT+=("$p")
@@ -1203,4 +1229,9 @@ if [ "${#RENEWED[@]}" -gt 0 ]; then
     printf 'renewed %s file(s) a re-render of this branch adopted: each renders differently now but the same at %s, and is written as rendered rather than put back as %s commits it:\n' \
         "${#RENEWED[@]}" "$SINCE" "$SINCE"
     printf '  %s\n' "${RENEWED[@]}"
+fi
+if [ "${#LISTED[@]}" -gt 0 ]; then
+    printf 'wrote %s page(s) as rendered to match the index this commit writes: the render adds or removes each one where %s commits it the other way:\n' \
+        "${#LISTED[@]}" "$SINCE"
+    printf '  %s\n' "${LISTED[@]}"
 fi
