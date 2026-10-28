@@ -1,11 +1,16 @@
 package board
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 func ptr(i int) *int { return &i }
@@ -2226,14 +2231,23 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"a held draft needs attention", merge(map[string]string{mdOpenedAsDraft: "abc", mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 	}
 	for _, tc := range cases {
-		if got := prPhase(tc.a, Facts{}, anchorWork{reworkKids: tc.kids}); got != tc.want {
+		if got := prPhase(tc.a, Facts{}, workOf(tc.kids)); got != tc.want {
 			t.Errorf("%s: prPhase = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
 
-// The open-rework count comes from the children the board gathers — each names
-// its anchor in anchor_bead — so an anchor with one is working even with nothing
+// workOf is an [anchorWork] whose in-flight set holds n children.
+func workOf(n int) anchorWork {
+	w := anchorWork{inFlight: map[string]bool{}}
+	for i := range n {
+		w.inFlight[fmt.Sprintf("tk-x.%d", i)] = true
+	}
+	return w
+}
+
+// A live rework row the board gathers names its anchor in anchor_bead and is in
+// the anchor's in-flight set, so an anchor with one is working even with nothing
 // else recorded.
 func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
 	anchor := mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"})
@@ -2245,18 +2259,90 @@ func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
 	}
 }
 
-// The in-flight count is the open rework children alone. A live review child is
-// read for a visit on the PR's work, but it is not counted as the city changing
-// the PR, so an unapproved anchor with only a review child in flight reads as it
-// did with none.
-func TestPRPhaseCountsNoReviewChildInFlight(t *testing.T) {
-	anchor := mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"})
+// The in-flight count is the anchor's in-flight set, every live bead that names
+// it in anchor_bead, as the PR labels count it. A live review row counts as a
+// rework row does, and so does a member of [Anchor.InFlight] the board shows no
+// row for, such as a validation pass or a blocked finding. An unapproved anchor
+// with any of them in flight is working, and with none it needs review.
+func TestPRPhaseCountsEveryChildInFlight(t *testing.T) {
+	anchor := func() Anchor { return mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"}) }
 	review := Anchor{ID: "tk-anc.rv", Source: kindReview, Rig: "gc-toolkit", Metadata: map[string]string{mdAnchorBead: "tk-anc"}}
-
-	b := BuildBoard([]Anchor{anchor, review}, fixtureNow, false, nil, Facts{})
-	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseNeedsReview {
-		t.Errorf("an anchor whose only child in flight is a review: got %q, want %q", got, PhaseNeedsReview)
+	for _, tc := range []struct {
+		name    string
+		anchors []Anchor
+		want    string
+	}{
+		{"a live review row", []Anchor{anchor(), review}, PhaseWorking},
+		{"a validation pass", []Anchor{withInFlight(anchor(), member("tk-anc.va", "validation", "open"))}, PhaseWorking},
+		{"a blocked finding", []Anchor{withInFlight(anchor(), member("tk-anc.fi", "finding", "blocked"))}, PhaseWorking},
+		{"nothing in flight", []Anchor{anchor()}, PhaseNeedsReview},
+	} {
+		b := BuildBoard(tc.anchors, fixtureNow, false, nil, Facts{})
+		if got := mustTile(t, b, "tk-anc").PRPhase; got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
 	}
+}
+
+// The board's side of the parity table the PR labels are held to
+// (services/gctk/prstatus/testdata/parity.json, whose label side is
+// TestPRStatusDeriveParity): each case's in-flight set is anchor tk-a's
+// InFlight, a member prstatus.IsWork accepts is also the review or rework row the
+// beads source gathers, and each bead an open visit covers is a visit fact.
+func TestPRHeldParity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "gctk", "prstatus", "testdata", "parity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name     string            `json:"name"`
+		Metadata map[string]string `json:"metadata"`
+		InFlight []struct {
+			ID       string `json:"id"`
+			TaskKind string `json:"task_kind"`
+			Status   string `json:"status"`
+		} `json:"in_flight"`
+		Visits []string `json:"visits"`
+		Want   struct {
+			Status string   `json:"status"`
+			Held   []string `json:"held"`
+		} `json:"want"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
+		t.Fatalf("parity.json: %d cases, err %v", len(cases), err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			anchor := mergeAnchor("tk-a", tc.Metadata)
+			anchors := []Anchor{anchor}
+			for _, c := range tc.InFlight {
+				anchors[0].InFlight = append(anchors[0].InFlight, member(c.ID, c.TaskKind, c.Status))
+				if prstatus.IsWork(c.TaskKind, c.Status) {
+					anchors = append(anchors, Anchor{ID: c.ID, Title: "t " + c.ID, Kind: c.TaskKind, Source: c.TaskKind,
+						Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{mdAnchorBead: "tk-a", mdTaskKind: c.TaskKind}})
+				}
+			}
+			visits := map[string]bool{}
+			for _, v := range tc.Visits {
+				visits[v] = true
+			}
+			tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{Visits: visits}), "tk-a")
+			if tile.PRPhase != tc.Want.Status || !slices.Equal(tile.PRHeld, tc.Want.Held) {
+				t.Errorf("pr_phase=%q pr_held=%v, want %q and %v", tile.PRPhase, tile.PRHeld, tc.Want.Status, tc.Want.Held)
+			}
+		})
+	}
+}
+
+// member is a child of an anchor's in-flight set, as the beads source reads it.
+func member(id, taskKind, status string) Child {
+	return Child{ID: id, Status: status, Metadata: map[string]string{mdTaskKind: taskKind}}
+}
+
+// withInFlight gives a merge anchor the in-flight set the beads source reads.
+func withInFlight(a Anchor, children ...Child) Anchor {
+	a.InFlight = children
+	return a
 }
 
 // A draft the city opened is not yet up for review, so the PR chip (PRPhase) and
@@ -2499,6 +2585,16 @@ func TestPRHeldNamesWhatHoldsThePR(t *testing.T) {
 		{"a blocker a pool is landing is the city's", []Anchor{mergeAnchor("tk-a", approved,
 			Blocker{ID: "tk-d", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"})}, nil, nil, false, PhaseMerging},
 		{"the merge pass's thread verdict", []Anchor{mergeAnchor("tk-a", threads)}, nil, []string{"review"}, false, PhaseNeedsAttention},
+		{"the thread verdict beside an open review child", []Anchor{mergeAnchor("tk-a", threads), child("tk-a.rv", kindReview)},
+			nil, nil, false, PhaseMerging},
+		{"the thread verdict beside a validation pass", []Anchor{withInFlight(mergeAnchor("tk-a", threads), member("tk-a.va", "validation", "open"))},
+			nil, nil, false, PhaseMerging},
+		{"an open visit on review work only the in-flight set holds", []Anchor{withInFlight(mergeAnchor("tk-a", approved), member("tk-a.rv", "review", "in_progress"))},
+			map[string]bool{"tk-a.rv": true}, []string{"visit"}, false, PhaseNeedsAttention},
+		{"a visit on a validation pass holds nothing", []Anchor{withInFlight(mergeAnchor("tk-a", approved), member("tk-a.va", "validation", "open"))},
+			map[string]bool{"tk-a.va": true}, nil, false, PhaseMerging},
+		{"a visit on a rework child that is not open or in_progress holds nothing", []Anchor{withInFlight(mergeAnchor("tk-a", approved), member("tk-a.rw", "rework", "deferred"))},
+			map[string]bool{"tk-a.rw": true}, nil, false, PhaseMerging},
 		{"the merge pass's stuck-blocker verdict", []Anchor{mergeAnchor("tk-a",
 			with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "blocker"))},
 			nil, []string{"blocked"}, false, PhaseNeedsAttention},

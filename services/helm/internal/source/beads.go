@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
@@ -692,6 +693,13 @@ func needsReviews(p pendingAnchor) bool {
 	return p.kind == "merge" && p.anchor.ClosedAt.IsZero() && p.anchor.Metadata["merge_result"] == "pre_open_gate"
 }
 
+// needsInFlight reports whether an anchor's in-flight set is gathered: a live
+// anchor carrying merge_result, the merge anchor whose phase and held values
+// count the set (board.Anchor.InFlight), whatever kind it was gathered as.
+func needsInFlight(p pendingAnchor) bool {
+	return p.anchor.ClosedAt.IsZero() && p.anchor.Metadata["merge_result"] != ""
+}
+
 // needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
 // The readers that spend them: board.ruled and the merge row's PR axes
 // (decision, human, parked, merge), and the dependency-family grouping, which
@@ -713,8 +721,10 @@ func needsWaitingEdges(kind string) bool {
 // reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`,
 // everything else's `blocks`), and one SearchIssues that hydrates every far-end
 // issue both name. A pass that gathers any anchor's reviews adds the reads
-// [BeadsSource.readReviews] makes, once for the whole set. The read count is
-// fixed by the rig+status pass, so it does not scale with the number of anchors.
+// [BeadsSource.readReviews] makes, and one that gathers a live merge anchor adds
+// the read [BeadsSource.readInFlight] makes, each once for the whole set. The
+// read count is fixed by the rig+status pass, so it does not scale with the
+// number of anchors.
 //
 // The two batched reads fail INDEPENDENTLY, and each failure degrades only the
 // roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
@@ -727,10 +737,14 @@ func needsWaitingEdges(kind string) bool {
 func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor) {
 	var dependentIDs, dependencyIDs []string
 	reviewed := map[string]bool{}
+	inFlightOf := map[string]bool{}
 	for i := range pending {
 		id := pending[i].anchor.ID
 		if needsReviews(pending[i]) {
 			reviewed[id] = true
+		}
+		if needsInFlight(pending[i]) {
+			inFlightOf[id] = true
 		}
 		if needsParentChildren(pending[i].kind) || reviewed[id] {
 			dependentIDs = append(dependentIDs, id)
@@ -745,6 +759,10 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	var rv reviewReads
 	if len(reviewed) > 0 {
 		rv = s.readReviews(ctx, g, st, r, reviewed)
+	}
+	var inFlight map[string][]board.Child
+	if len(inFlightOf) > 0 {
+		inFlight = s.readInFlight(ctx, g, st, r, inFlightOf)
 	}
 
 	var (
@@ -807,6 +825,9 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 		}
 		if reviewed[p.anchor.ID] {
 			p.anchor.Reviews, p.anchor.ReviewsUnknown = rv.forAnchor(p.anchor.ID, depnRecs[p.anchor.ID], issueByID, dependentsOK)
+		}
+		if inFlightOf[p.anchor.ID] {
+			p.anchor.InFlight = inFlight[p.anchor.ID]
 		}
 		// The `blocks` waits come from the SAME outbound read a convoy already
 		// spends on its `tracks`, so a convoy gathers both from one read; an epic
@@ -904,12 +925,17 @@ func childrenFromEdges(recs []*beads.Dependency, want string, side farEndSide, i
 const anchorJoinedKey = "kv.anchor_edges.joined"
 
 // anchorChildLiveStatuses are the statuses bd-lib.sh reads an anchor's live
-// children over: its _BD_ANCHOR_STATUSES less closed. The library exports no
-// constant for hooked or pinned.
-var anchorChildLiveStatuses = []beads.Status{
-	beads.StatusOpen, beads.StatusInProgress, beads.StatusBlocked,
-	beads.StatusDeferred, beads.Status("hooked"), beads.Status("pinned"),
-}
+// children over: its _BD_ANCHOR_STATUSES less closed, which
+// prstatus.InFlightStatuses names for `gctk pr-status derive` and this source
+// alike. The library exports no constant for hooked or pinned, so each name
+// converts as it is.
+var anchorChildLiveStatuses = func() []beads.Status {
+	out := make([]beads.Status, len(prstatus.InFlightStatuses))
+	for i, s := range prstatus.InFlightStatuses {
+		out[i] = beads.Status(s)
+	}
+	return out
+}()
 
 // reviewReads is what [BeadsSource.readReviews] read for one rig+status pass.
 // known says the pass can gather reviews at all: the store is marked joined, so
@@ -965,10 +991,44 @@ func (s *BeadsSource) readReviews(ctx context.Context, g *gatherState, st beadSt
 		}
 		md := decodeMetadata(iss.Metadata)
 		if a := md["anchor_bead"]; md["task_kind"] == "review" && reviewed[a] {
-			rv.live[a] = append(rv.live[a], reviewChild(iss, md))
+			rv.live[a] = append(rv.live[a], anchorChild(iss, md))
 		}
 	}
 	return rv
+}
+
+// readInFlight reads the in-flight sets of the live merge anchors in merge in
+// one read for the pass: every bead carrying anchor_bead, any task_kind, at one
+// of [anchorChildLiveStatuses], keyed by the anchor it names
+// ([board.Anchor.InFlight]). `gctk pr-status derive` reads one anchor's set
+// for the PR labels by anchor_bead=<anchor> over the same statuses. A metadata
+// filter matches a key against one value, never a set of anchors, so this read
+// selects on the key's presence and the rows are keyed here. It skips the wisps
+// table, whose rows `gc bd list` hides unless asked. A read that fails is noted
+// partial and returns no set.
+func (s *BeadsSource) readInFlight(ctx context.Context, g *gatherState, st beadStore, r rigRef, merge map[string]bool) map[string][]board.Child {
+	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
+		Statuses:       anchorChildLiveStatuses,
+		HasMetadataKey: "anchor_bead",
+		SkipWisps:      true,
+		// Lite: a member becomes a board.Child, which carries no heavy column.
+		Lite: true,
+	})
+	if err != nil {
+		g.note(true, []string{"in-flight@" + r.name + ": " + err.Error()})
+		return nil
+	}
+	sets := map[string][]board.Child{}
+	for _, iss := range issues {
+		if iss == nil {
+			continue
+		}
+		md := decodeMetadata(iss.Metadata)
+		if a := md["anchor_bead"]; merge[a] {
+			sets[a] = append(sets[a], anchorChild(iss, md))
+		}
+	}
+	return sets
 }
 
 // forAnchor is one anchor's review beads: its live ones, then its closed ones
@@ -1015,14 +1075,15 @@ func closedReviewsFromEdges(recs []*beads.Dependency, anchorID string, issueByID
 			continue
 		}
 		seen[d.IssueID] = true
-		out = append(out, reviewChild(iss, md))
+		out = append(out, anchorChild(iss, md))
 	}
 	return out
 }
 
-// reviewChild projects a review bead, its metadata already decoded, onto the
-// shape [board.Anchor.Reviews] carries.
-func reviewChild(iss *beads.Issue, md map[string]string) board.Child {
+// anchorChild projects one of an anchor's children, its metadata already
+// decoded, onto the shape [board.Anchor.Reviews] and [board.Anchor.InFlight]
+// carry.
+func anchorChild(iss *beads.Issue, md map[string]string) board.Child {
 	return board.Child{
 		ID:        iss.ID,
 		Status:    string(iss.Status),

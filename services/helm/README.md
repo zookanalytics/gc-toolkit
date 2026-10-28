@@ -555,8 +555,10 @@ cadence's ordinary wait on a review or the merge pass.
 
 A recorded `blocked` verdict reads `blocked` only while it holds the PR by the
 rule the `status:` label applies, `prstatus.Blocked`: it was recorded at the head
-the posture was read at, and no rework child is open on the anchor unless its
-cause is `blocker`. A cause outside the vocabulary holds wherever it was
+the posture was read at, and nothing is in flight on the anchor unless its cause
+is `blocker`. The work in flight is the anchor's in-flight set, every bead
+carrying its `anchor_bead` at a live status, which the beads source reads as
+`gctk pr-status derive` does. A cause outside the vocabulary holds wherever it was
 recorded, because the derivation cannot name it. Any other recorded `blocked`
 reads `progressing`, because the next merge pass replaces it, so the row is not
 owed and its `needs` does not call it blocked. The row's phase reads the verdict

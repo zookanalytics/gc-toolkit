@@ -2243,38 +2243,47 @@ const (
 // signal that a resolved row merged rather than closed without merging.
 const mergeResultMerged = "merged"
 
-// anchorWork is what the board reads about a merge anchor's own work in flight,
-// its live review and rework children among the anchors the board gathers.
+// anchorWork is what the board reads about a merge anchor's work in flight.
 type anchorWork struct {
-	// reworkKids counts the open rework children, the in-flight count a merge
-	// anchor's phase and machine axis read ([phaseFacts]).
-	reworkKids int
-	// visit is whether an open visit covers one of its live review or rework
-	// children ([Facts.Visits]): the work waits on a person, which holds the PR
+	// inFlight is the anchor's in-flight set by child id, whose size is the
+	// in-flight count a merge anchor's phase and machine axis read
+	// ([phaseFacts]).
+	inFlight map[string]bool
+	// visit is whether an open visit ([Facts.Visits]) covers a member of that set
+	// prstatus.IsWork accepts: the work waits on a person, which holds the PR
 	// (prstatus.Facts.WorkVisit).
 	visit bool
 }
 
 // anchorWorkSet reads each merge anchor's [anchorWork] off the anchors the board
-// gathers: a child names its anchor in [mdAnchorBead]. Counting is deduped by
-// child id, because one gather can list a bead twice.
+// gathers: the members of its [Anchor.InFlight], and each live review or rework
+// row that names it in [mdAnchorBead], a child prstatus.IsWork accepts. A row is
+// a member of the anchor's InFlight too, and counts here even when the read of
+// that set failed. The set is keyed by child id, because a child can arrive both
+// ways and one gather can list a bead twice.
 func anchorWorkSet(anchors []Anchor, f Facts) map[string]anchorWork {
 	work := make(map[string]anchorWork)
-	seen := make(map[string]bool)
-	for _, a := range anchors {
-		parent := a.Metadata[mdAnchorBead]
-		if !isReviewReworkKind(a.Source) || !a.ClosedAt.IsZero() || parent == "" || seen[a.ID] {
-			continue
+	add := func(anchor, child string, isWork bool) {
+		w := work[anchor]
+		if w.inFlight == nil {
+			w.inFlight = make(map[string]bool)
 		}
-		seen[a.ID] = true
-		w := work[parent]
-		if a.Source == kindRework {
-			w.reworkKids++
-		}
-		if f.Visits[a.ID] {
+		w.inFlight[child] = true
+		if isWork && f.Visits[child] {
 			w.visit = true
 		}
-		work[parent] = w
+		work[anchor] = w
+	}
+	for _, a := range anchors {
+		if !a.ClosedAt.IsZero() {
+			continue
+		}
+		for _, c := range a.InFlight {
+			add(a.ID, c.ID, prstatus.IsWork(c.Metadata[mdTaskKind], c.Status))
+		}
+		if parent := a.Metadata[mdAnchorBead]; parent != "" && isReviewReworkKind(a.Source) {
+			add(parent, a.ID, true)
+		}
 	}
 	return work
 }
@@ -2542,16 +2551,15 @@ func beadPhase(a Anchor, f Facts, work anchorWork) string {
 // phase and the marker agree. That fact finds a visit's subjects by the shared
 // visit identity, as `gctk pr-status derive` does for the PR labels, so the
 // phase and the labels count the same visits. The rest differs by row shape. A
-// merge anchor counts its open rework children (each names it in
-// [mdAnchorBead]) as its in-flight count, the set prPhase has always fed, reads
-// a visit on one of its live review or rework children as a visit on its work,
-// and reads its oldest open demand blocker ([askingDemand]) as a blocker a
-// person owes, the facts the PR labels add. Any other bead reads the
-// live-workflow signal standing over its own bead ([Facts.anchorInFlight]) and
-// neither of those.
+// merge anchor counts its in-flight set ([anchorWorkSet]) as its in-flight
+// count, as the PR labels do, reads a visit on a member of that set
+// prstatus.IsWork accepts as a visit on its work, and reads its oldest open
+// demand blocker ([askingDemand]) as a blocker a person owes. Any other bead
+// reads the live-workflow signal standing over its own bead
+// ([Facts.anchorInFlight]) and neither of the others.
 func phaseFacts(a Anchor, f Facts, work anchorWork) prstatus.Facts {
 	merge := isMergeAnchor(a)
-	inFlight := work.reworkKids
+	inFlight := len(work.inFlight)
 	if !merge {
 		inFlight = f.anchorInFlight(a)
 	}

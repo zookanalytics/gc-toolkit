@@ -77,10 +77,15 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	//                            an anchor's live children the way bd-lib.sh
 	//                            does. The set is spelled out here, not read from
 	//                            the source, so the fake pins it to bd-lib.sh's.
+	//   Statuses=the same live set, keyed on anchor_bead's presence
+	//                            the IN-FLIGHT read (readInFlight), a live merge
+	//                            anchor's in-flight set as `gctk pr-status
+	//                            derive` reads it.
 	//
 	// Anything else — no scope at all, or a widened one — is refused, so the
 	// filter stays load-bearing rather than decorative.
 	reviewRead := len(filter.MetadataFields) == 1 && filter.MetadataFields["task_kind"] == "review"
+	inFlightRead := len(filter.MetadataFields) == 0 && filter.HasMetadataKey == "anchor_bead"
 	switch {
 	case filter.Status != nil && *filter.Status == beads.StatusOpen && len(filter.Statuses) == 0:
 	case filter.Status != nil && *filter.Status == beads.StatusClosed && len(filter.Statuses) == 0:
@@ -88,9 +93,9 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 			return nil, errors.New("a closed-bead query must bound its window with ClosedAfter")
 		}
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
-	case filter.Status == nil && reviewRead && slices.Equal(filter.Statuses, []beads.Status{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}):
+	case filter.Status == nil && (reviewRead || inFlightRead) && slices.Equal(filter.Statuses, []beads.Status{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}):
 	default:
-		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows) or the live review read")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows), or the live review or in-flight read")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -2833,6 +2838,100 @@ func TestMergeAnchorUnreadableEdgesStayUnknown(t *testing.T) {
 	}
 	if !res.Partial {
 		t.Error("the gather is degraded and the board has to say so out loud")
+	}
+}
+
+// TestMergeAnchorInFlightSetIsGathered: each live merge anchor carries its
+// in-flight set, the beads `gctk pr-status derive` counts for the PR labels:
+// every bead naming it in anchor_bead, any task_kind, at a live status. One read
+// serves the pass, in the live pass only. So a PR whose merge pass recorded a
+// thread verdict reads merging with nothing held on the board, as it does on its
+// labels, while a validation pass the board shows no row for is in flight. A
+// read that fails is noted partial, and the board then counts the review row it
+// gathered.
+func TestMergeAnchorInFlightSetIsGathered(t *testing.T) {
+	at := testNow.Add(-time.Hour).Format(time.RFC3339)
+	threads := `{"merge_result":"pull_request","pr_number":"9","pr_posture":"approved@abc@` + at +
+		`","pr.machine":"blocked@abc@` + at + `","pr.machine_cause":"review-threads"}`
+	doneAt := testNow.Add(-time.Hour)
+	done := issue("tk-done", "a landed PR", "task", 2, testNow, `{"merge_result":"merged"}`)
+	done.Status, done.ClosedAt = beads.StatusClosed, &doneAt
+	store := func(children ...*beads.Issue) *fakeStore {
+		return &fakeStore{issues: map[string][]*beads.Issue{"task": append([]*beads.Issue{
+			issue("tk-pr", "an open PR", "task", 2, testNow, threads),
+			issue("tk-gate", "a pre-open anchor", "task", 2, testNow, `{"merge_result":"pre_open_gate"}`),
+			done,
+		}, children...)}}
+	}
+	validation := reviewFixture("va-1", beads.StatusOpen, `{"task_kind":"validation","anchor_bead":"tk-pr"}`)
+	children := []*beads.Issue{
+		validation,
+		reviewFixture("fi-1", beads.StatusBlocked, `{"task_kind":"finding","anchor_bead":"tk-pr"}`),
+		reviewFixture("rw-closed", beads.StatusClosed, `{"task_kind":"rework","anchor_bead":"tk-pr"}`),
+		reviewFixture("rv-gate", beads.StatusInProgress, `{"task_kind":"review","anchor_bead":"tk-gate"}`),
+		reviewFixture("fi-gone", beads.StatusOpen, `{"task_kind":"finding","anchor_bead":"tk-done"}`),
+	}
+	inFlight := func(a board.Anchor) []string {
+		var ids []string
+		for _, c := range a.InFlight {
+			ids = append(ids, c.ID+"/"+c.Status+"/"+c.Metadata["task_kind"])
+		}
+		slices.Sort(ids)
+		return ids
+	}
+	pr := func(t *testing.T, b board.Board) board.Tile {
+		t.Helper()
+		i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == "tk-pr" })
+		if i < 0 {
+			t.Fatal("the PR anchor has no tile")
+		}
+		return b.Tiles[i]
+	}
+
+	st := store(children...)
+	res, anchor := gatherPreOpen(t, st, "tk-pr")
+	if got, want := inFlight(anchor), []string{"fi-1/blocked/finding", "va-1/open/validation"}; !slices.Equal(got, want) {
+		t.Errorf("tk-pr in flight = %v, want %v: every live bead naming it, whatever its kind, and no closed one", got, want)
+	}
+	if i, ok := findAnchor(res, "tk-gate"); !ok || !slices.Equal(inFlight(res.Anchors[i]), []string{"rv-gate/in_progress/review"}) {
+		t.Errorf("tk-gate in flight = %v, want its in_progress review", inFlight(res.Anchors[i]))
+	}
+	if i, ok := findAnchor(res, "tk-done"); !ok || res.Anchors[i].InFlight != nil {
+		t.Errorf("a closed merge anchor gathers no in-flight set (found=%v)", ok)
+	}
+	var reads []beads.IssueFilter
+	for _, c := range st.calls {
+		if c.HasMetadataKey == "anchor_bead" {
+			reads = append(reads, c)
+		}
+	}
+	if len(reads) != 1 {
+		t.Fatalf("in-flight reads = %d, want one for the pass whatever the number of anchors", len(reads))
+	}
+	if r := reads[0]; !slices.Equal(r.Statuses, anchorChildLiveStatuses) || !r.SkipWisps || !r.Lite {
+		t.Errorf("the in-flight read must scope to the live statuses, skip wisps and read lite: %+v", r)
+	}
+	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != board.PhaseMerging || tile.PRHeld != nil {
+		t.Errorf("a thread verdict beside a validation pass in flight: pr_phase=%q pr_held=%v, want merging and none", tile.PRPhase, tile.PRHeld)
+	}
+
+	// The twin with nothing in flight: the verdict holds the PR.
+	res, _ = gatherPreOpen(t, store(), "tk-pr")
+	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != board.PhaseNeedsAttention || !slices.Equal(tile.PRHeld, []string{"review"}) {
+		t.Errorf("a thread verdict with nothing in flight: pr_phase=%q pr_held=%v, want needs-attention and [review]", tile.PRPhase, tile.PRHeld)
+	}
+
+	failing := store(reviewFixture("rv-1", beads.StatusOpen, `{"task_kind":"review","anchor_bead":"tk-pr"}`))
+	failing.failMeta = map[string]error{"anchor_bead": errors.New("in-flight unreadable")}
+	res, anchor = gatherPreOpen(t, failing, "tk-pr")
+	if anchor.InFlight != nil {
+		t.Errorf("a failed read gathers nothing: %v", inFlight(anchor))
+	}
+	if want := "in-flight@gc-toolkit: in-flight unreadable"; !res.Partial || !slices.Contains(res.PartialErrors, want) {
+		t.Errorf("partial=%v errors=%v, want %q among them", res.Partial, res.PartialErrors, want)
+	}
+	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != board.PhaseMerging || tile.PRHeld != nil {
+		t.Errorf("with the read failed, the review row still counts: pr_phase=%q pr_held=%v, want merging and none", tile.PRPhase, tile.PRHeld)
 	}
 }
 

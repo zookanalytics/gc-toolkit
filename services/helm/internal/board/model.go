@@ -213,6 +213,17 @@ type Anchor struct {
 	// metadata-keyed row it serves.
 	Reviews        []Child `json:"reviews,omitempty"`
 	ReviewsUnknown bool    `json:"reviews_unknown,omitempty"`
+
+	// InFlight is a live merge anchor's in-flight set: every bead that names it
+	// in anchor_bead, any task_kind, at one of prstatus.InFlightStatuses, the set
+	// `gctk pr-status derive` reads for the PR labels. Its phase and held values
+	// count it ([anchorWorkSet]), so the board and the labels read the same work.
+	// The beads source reads it for each live merge anchor
+	// ([source.BeadsSource.readInFlight]). A read that fails is noted partial
+	// and leaves it empty, and the board then counts the live review and rework
+	// rows it gathered for the anchor, which the set also holds. The supervisor
+	// backend gathers neither.
+	InFlight []Child `json:"in_flight,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.
@@ -530,7 +541,7 @@ type Tile struct {
 	// leads with on every live row. It begins as the per-bead value
 	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
 	// visit, posture, the merge pass's verdict, the draft stage, and for a merge
-	// anchor its open rework/review children, or for any other bead the
+	// anchor its in-flight set ([Anchor.InFlight]), or for any other bead the
 	// live-workflow signal standing over it. A bead's board liveness and its
 	// GitHub `status:` label come from that one core. A row WITH child tiles then
 	// takes their rolled-up state in place of that per-bead value
