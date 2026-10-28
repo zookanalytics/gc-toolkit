@@ -2102,6 +2102,40 @@ out=$("$SUT" 2>&1)
 eq "$(meta FT8 pr.unanswered_threads)" "1@sha-408" \
   "a thread whose only feedback the city marked handled is not counted; one with later feedback it has not marked is"
 
+echo "# a thread longer than the read's window is read to its end before it is counted"
+# The thread read takes each thread's newest hundred comments, and the rule
+# decides on the newest post that asks or answers. A run of posts the rule sets
+# aside can push that post out of the window, so a thread that comes back with a
+# whole window is read again whole, asking each post for what the window read
+# asks. The stub cuts each thread to the window the query names, and answers the
+# read of one thread with all of it, trimmed to the fields that read names.
+notices() { jq -nc --argjson n "$1" --arg l "$STUB_SELF_LOGIN" '[range($n) | {author: {login: $l}, body: "<!-- gc:no-review -->\nPreview deployed.\n\n<!-- gc:city -->", createdAt: "2026-10-20T03:00:00Z"}]'; } # <count>
+behind() { jq -nc --argjson a "[$1]" --argjson b "$(notices 100)" '$a + $b'; } # <comma-joined comments>: those comments, then a hundred notices
+store "[$(anchor FT9 409), $(rev FT9)]"
+printf '%s' "$(prview 409 OPEN BLOCKED)" > "$GH_DIR/pr_view_409.json"
+printf '{"threads":[%s,%s,%s,%s,%s]}\n' \
+  "$(fthread tl-409a false "$(behind "$(op_post 'Rename this.')")")" \
+  "$(fthread tl-409b false "$(behind "$(op_post 'Why here?'), $(city_post 'Declined: the name matches the API.')")")" \
+  "$(fthread tl-409c false "$(behind "$(in_review "$(op_post 'Use a constant.')" DISMISSED)")")" \
+  "$(fthread tl-409d false "$(behind "$(handled "$(op_post 'Nice cleanup.')")")")" \
+  "$(fthread tl-409e false "[$(op_post 'Typo.')]")" \
+  > "$GH_DIR/threads_409.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta FT9 pr.unanswered_threads)" "2@sha-409" \
+  "feedback behind a hundred notices waits; the city's answer, a dismissal or the handled mark behind them still answers it"
+eq "$(grep -c ' -f id=tl-409[a-d]$' "$STUB_GH_LOG")|$(grep -c ' -f id=tl-409e$' "$STUB_GH_LOG")" "4|0" \
+  "…and only the threads that came back with a whole window are read again"
+
+echo "# a long thread that cannot be read to its end is no count, and the last count stands"
+store "[$(anchor FT9 409 ',"pr.unanswered_threads":"5@sha-409"'), $(rev FT9), $(anchor FT10 410), $(rev FT10)]"
+printf '%s' "$(prview 410 OPEN BLOCKED)" > "$GH_DIR/pr_view_410.json"
+printf '{"threads":[%s]}\n' "$(fthread tl-410 false "[$(op_post 'Rename this.')]")" > "$GH_DIR/threads_410.json"
+out=$(STUB_GQL_THREAD_FAIL=1 "$SUT" 2>&1)
+eq "$(meta FT9 pr.unanswered_threads)" "5@sha-409" "a thread read again that fails keeps the last count"
+has "$out" "PR#409 review threads could not be read for the feedback nothing has answered; anchor FT9 keeps its last count" "…and says so"
+eq "$(meta FT10 pr.unanswered_threads)" "1@sha-410" "…while a PR whose threads all fit the window is counted"
+
 echo "# a thread read that does not answer records nothing, and the last count stands"
 store "[$(anchor FT4 404 ',"pr.unanswered_threads":"1@sha-404"'), $(rev FT4)]"
 printf '%s' "$(prview 404 OPEN BLOCKED)" > "$GH_DIR/pr_view_404.json"

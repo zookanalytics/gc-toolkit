@@ -69,20 +69,38 @@ const threadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:St
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}`
 
-// feedbackThreadsQuery reads each review thread with the posts
-// gc_thread_awaits_answer weighs: each comment's author and body, the instants
-// gc_city_own dates a post by, the state of the review that carried it, which
-// tells a post a dismissal retired, and the reactions the acting login left on
-// it, which tell a post the city marked handled. The threads are paginated to
-// exhaustion, as threadsQuery's are. A thread's newest hundred comments carry
-// its newest posts, and the definition decides on the newest that asks or
-// answers.
-const feedbackThreadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+// feedbackCommentFields is what both thread reads ask of each comment, the
+// facts gc_thread_awaits_answer weighs a post by: its author and body, the
+// instants gc_city_own dates a post by, the state of the review that carried
+// it, which tells a post a dismissal retired, and the reactions the acting
+// login left on it, which tell a post the city marked handled.
+const feedbackCommentFields = `author{login} body createdAt pullRequestReview{submittedAt state}
+        reactionGroups{content viewerHasReacted}`
+
+// feedbackCommentWindow is how many of a thread's comments, its newest,
+// feedbackThreadsQuery reads. A thread longer than that comes back holding
+// exactly that many.
+const feedbackCommentWindow = 100
+
+// feedbackThreadsQuery reads each review thread with its newest comments. The
+// threads are paginated to exhaustion, as threadsQuery's are. The definition
+// decides on a thread's newest post that asks or answers, which can be older
+// than the window when every post in it is one the definition sets aside, so a
+// thread that comes back with a whole window is read again to its end
+// (feedbackThreadCommentsQuery).
+var feedbackThreadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
-      nodes{isResolved comments(last:100){nodes{author{login} body createdAt pullRequestReview{submittedAt state}
-        reactionGroups{content viewerHasReacted}}}}}}}}`
+      nodes{id isResolved comments(last:` + strconv.Itoa(feedbackCommentWindow) + `){nodes{` + feedbackCommentFields + `}}}}}}}`
+
+// feedbackThreadCommentsQuery reads one review thread's comments from its
+// first, paginated to exhaustion.
+const feedbackThreadCommentsQuery = `query($id:ID!,$endCursor:String){
+  node(id:$id){... on PullRequestReviewThread{
+    comments(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{` + feedbackCommentFields + `}}}}}`
 
 // The visit order's one read: every open PR's draft flag, head and each
 // account's latest review, paginated. It asks for no merge state, because
@@ -1259,7 +1277,8 @@ func (m *merger) recordUnansweredThreads(anchor *gcbd.Bead, num, headOid string)
 // selfLogin, so a comment's viewerHasReacted is the acting login's reaction.
 // since is the anchor's provenance cutover (pr_provenance_since). ok=false is a
 // count that cannot be made: a read that fails, a thread page that will not
-// decode, or a jq run that fails.
+// decode, a thread longer than its window that cannot be read to its end, or a
+// jq run that fails.
 func (m *merger) unansweredThreads(num, def, since string) (int, bool) {
 	raw, rc := m.ghOrigin("graphql", "--paginate",
 		"-f", "query="+feedbackThreadsQuery,
@@ -1290,6 +1309,36 @@ func (m *merger) unansweredThreads(num, def, since string) (int, bool) {
 	if !saw {
 		return 0, false
 	}
+	for i, t := range threads {
+		var th struct {
+			ID       string `json:"id"`
+			Comments struct {
+				Nodes []json.RawMessage `json:"nodes"`
+			} `json:"comments"`
+		}
+		if err := json.Unmarshal(t, &th); err != nil {
+			return 0, false
+		}
+		if len(th.Comments.Nodes) < feedbackCommentWindow {
+			continue
+		}
+		whole, ok := m.threadComments(th.ID)
+		if !ok {
+			return 0, false
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(t, &fields); err != nil {
+			return 0, false
+		}
+		c, err := json.Marshal(map[string][]json.RawMessage{"nodes": whole})
+		if err != nil {
+			return 0, false
+		}
+		fields["comments"] = c
+		if threads[i], err = json.Marshal(fields); err != nil {
+			return 0, false
+		}
+	}
 	in, err := json.Marshal(threads)
 	if err != nil {
 		return 0, false
@@ -1304,6 +1353,38 @@ func (m *merger) unansweredThreads(num, def, since string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// threadComments reads review thread id's comments to its end, oldest first
+// as the API lists them. ok=false is a thread that cannot be read whole: no
+// id, a read that fails, a page that will not decode or carries no comments,
+// or a thread that comes back with none.
+func (m *merger) threadComments(id string) ([]json.RawMessage, bool) {
+	if id == "" {
+		return nil, false
+	}
+	raw, rc := m.ghOrigin("graphql", "--paginate",
+		"-f", "query="+feedbackThreadCommentsQuery,
+		"-f", "id="+id)
+	if rc != 0 || len(bytes.TrimSpace(raw)) == 0 {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
+	var nodes []json.RawMessage
+	for {
+		var page gqlThreadCommentsPage
+		if err := dec.Decode(&page); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, false
+		}
+		if page.Data.Node == nil || page.Data.Node.Comments == nil {
+			return nil, false
+		}
+		nodes = append(nodes, page.Data.Node.Comments.Nodes...)
+	}
+	return nodes, len(nodes) > 0
 }
 
 // feedbackDefinitions reads `pr-post.sh feedback-def` once per pass. ok=false
@@ -1823,6 +1904,18 @@ type gqlFeedbackThreadsPage struct {
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
+	} `json:"data"`
+}
+
+// gqlThreadCommentsPage is one page of feedbackThreadCommentsQuery, its comment
+// nodes raw as gqlFeedbackThreadsPage's threads are.
+type gqlThreadCommentsPage struct {
+	Data struct {
+		Node *struct {
+			Comments *struct {
+				Nodes []json.RawMessage `json:"nodes"`
+			} `json:"comments"`
+		} `json:"node"`
 	} `json:"data"`
 }
 
