@@ -1229,8 +1229,11 @@ read -r FIX_BEAD FIX_POOL FIX_STATE <<< "$FILED"
 # fix unit's edge onto the anchor is what holds the merge in the meantime.
 ensure_validation_pass
 close_review
-# A rework child now stands on the anchor; the city holds the ball until it lands.
-[ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
+# A rework child now stands on the anchor, so the city holds the ball until it
+# lands. Reconcile rather than assert a value: the child reads working on an
+# unapproved PR and merging on an approved one, and an open visit still reads
+# needs-attention.
+[ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
   --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
 if [ "$FIX_STATE" = in-flight ]; then
   echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $FIX_POOL"

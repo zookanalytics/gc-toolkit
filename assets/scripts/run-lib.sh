@@ -68,6 +68,9 @@
 # and refuses a first reaction to a bead a live run works.
 # until-resolved.sh takes the runs that work a bead it is about to dispose,
 # which live-work.sh judges.
+# blocker-holder.sh takes the runs that work each live blocker of an anchor
+# that no route or claim marks, to tell one a live run works from one nothing
+# does.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

@@ -327,19 +327,35 @@ disposition_key = "pr_comment_disposition"
 # pass and prints it to a log; this key is where the answer is kept, so a reader
 # never re-implements two scripts' predicates to learn it.
 machine_key = "pr.machine"
-#   progressing       some automated actor will act — a pool-routed blocker is
-#                     open, or a declared lane is short of green
+#   progressing       some automated actor will act — one holds a live blocker
+#                     (assets/scripts/blocker-holder.sh), a declared lane is
+#                     short of green, a required check is still running, or a
+#                     conflicting branch waits on the merge-in rework
+#                     pr-facts.sh files
 #   settled           every declared check reads green; the cadence
 #                     is done and the PR waits on approval, on the merge pass,
 #                     or on nothing
 #   blocked           the merge cannot proceed without a person, and no review
-#                     verdict is what it waits on: a required review thread is
-#                     unresolved, the base has gone BEHIND, or an unrouted
-#                     blocker no automated actor will clear holds it. Distinct
-#                     from settled — which waits on a review or the merge pass —
-#                     so the board can show it as needs-attention rather than
-#                     awaiting-review. The specific cause rides pr.machine_reason.
+#                     verdict is what it waits on. Distinct from settled — which
+#                     waits on a review or the merge pass — so the board and the
+#                     status: label show it as needs-attention rather than
+#                     awaiting-review. The cause rides pr.machine_cause, one of
+#                     causes below, and pr.machine_reason says it in a sentence.
 machines = ["progressing", "settled", "blocked"]
+# Why a blocked verdict cannot merge, the value merge.sh records in
+# pr.machine_cause beside it:
+#   review-threads    a required review thread is unresolved
+#   check-failed      a required check failed at the head
+#   conflict          the branch conflicts with its base, and something defers
+#                     the merge-in rework: a rebase_hold on the anchor or on any
+#                     bead naming its branch, or an armed re-dispatch
+#   behind            the base moved ahead (BEHIND), and nothing brings the
+#                     branch current
+#   blocker           a live blocker holds it, and no automated actor holds any
+#                     of its live blockers (assets/scripts/blocker-holder.sh)
+#   rule              branch protection holds it by a rule the merge pass
+#                     cannot name
+causes = ["review-threads", "check-failed", "conflict", "behind", "blocker", "rule"]
 # Written from pre_open_gate onward, before a PR number exists: gate-ensure.sh
 # reaches a pre-open anchor's verdict on the same pass as an open one's.
 writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh), assets/scripts/merge.sh (gctk merge, through the lifecycle writer it runs in-process)"
@@ -494,7 +510,9 @@ keys = [
 #   record that cannot read the oid writes the sentinel `unverified:PR#<n>`
 #   rather than nothing. Not read back; never cleared.
 # pr_url / pr_number — the open PR, written when it opens (pr-open.sh) and copied
-#   onto rework children and visits by pr-facts.sh. merge.sh and pr-facts.sh read
+#   onto rework children and visits by pr-facts.sh. An anchor with no pr_url gets
+#   one from the write that records status_label_clear_owed on it
+#   ([metadata.pr_status_label]). merge.sh and pr-facts.sh read
 #   them to bind a bead to its live PR; a non-numeric pr_number is skipped, and an
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
@@ -1203,11 +1221,26 @@ keys = [
 # pr.machine and pr.conversation are the two round-trip axes, both dated keys
 # (see [machine_axis], [conversation], [dated_keys]). pr-facts.sh writes
 # pr.conversation; gate-ensure.sh and merge.sh write pr.machine.
-# pr.machine_reason is the human sentence naming why a `blocked` machine verdict
-# cannot merge (which thread, which base, which blocker). It is plain, not dated:
-# it is read only while pr.machine is `blocked`, and merge.sh writes the two
-# together and clears the reason whenever it records any other verdict.
-keys = ["pr.machine", "pr.machine_reason", "pr.conversation"]
+# pr.machine_cause and pr.machine_reason name why a `blocked` machine verdict
+# cannot merge: the cause is one value of [machine_axis] causes, which a reader
+# keys on, and the reason is the human sentence (which thread, which base, which
+# blocker). Both are plain, not dated, and read only while pr.machine is
+# `blocked`: merge.sh writes the three together and clears both whenever it
+# records any other verdict, and gate-ensure.sh's own verdicts leave them alone.
+keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation"]
+
+[metadata.pr_status_label]
+# The status: label comes off a PR once it merges or closes. The writer that
+# records the merge or the close (merge.sh, through gctk merge, or pr-facts.sh)
+# takes it off before its record, which closes the anchor or moves it out of
+# pull_request, and so out of every enumeration of open PRs.
+# status_label_clear_owed records a clear that did not land, valued with the PR
+# number: gctk merge carries it in its record, and pr-facts.sh writes it ahead
+# of its own. pr-facts.sh's full pass lists the anchors carrying it, in any
+# status, retries each clear, and unsets the key once the clear lands. The
+# retry clears only the PR the anchor's pr_url names, so the write that records
+# the key on an anchor with no pr_url records the validated live PR url too.
+keys = ["status_label_clear_owed"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the
@@ -1233,7 +1266,9 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # pre-open-rebase.sh, pr-open.sh and pr-facts.sh from rebasing or dispatching
 # it, save the one dispatch pr-facts.sh files whatever
 # holds the anchor: a review-feedback batch's rework child, which brings the
-# branch current by merge as it answers. tracking_only opts a PR out of
+# branch current by merge as it answers. merge.sh reads the same freeze, so a
+# conflicting PR on a frozen branch records a blocked verdict (cause conflict)
+# rather than waiting on a merge-in. tracking_only opts a PR out of
 # merge.sh's in-flight-holder count. The pack never writes or clears either.
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it

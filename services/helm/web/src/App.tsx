@@ -155,7 +155,7 @@ function PRLink({ tile }: { tile: Tile }) {
 
 /**
  * The PR phase indicator for a merge anchor. On a live row it names who must act
- * next, in the three values the GitHub status: label carries (working,
+ * next, in the four values the GitHub status: label carries (working, merging,
  * needs-review, needs-attention); on a closed row it names how the PR resolved,
  * in the board-only terminal states (merged, closed). A colored chip so the
  * answer reads at a glance; nothing rendered on a row with no phase.
