@@ -378,10 +378,10 @@ printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes"
   > "$R_TK/.beads/tk-nul.json"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-# Only the surface bead-context.sh touches: rig list; bd show; bd list --parent
-# (children); bd dep list --direction=up --type tracks|blocks|until (reverse
-# trackers, and the beads that wait on a bead). Every call is logged so the test
-# can prove which store was asked, not just what came back.
+# Only the surface bead-context.sh touches: rig list; bd show, with the bead's
+# dependents on --include-dependents; bd list --parent (children); bd dep list
+# --direction=up --type tracks (reverse trackers). Every call is logged so the
+# test can prove which store was asked, not just what came back.
 set -u
 printf '%s\n' "$*" >> "$FAKE_GC_LOG"
 preface() { [ -n "${STUB_PREFACE:-}" ] && echo 'gc bd: answering from the rig "fake" store'; }
@@ -394,16 +394,38 @@ miss() { printf '{"error":"no issues found matching the provided IDs","schema_ve
 # the tool must survive. Brackets keep the array shape the tool discriminates on.
 serve() {
   preface; printf '['
-  local first=1 f out
+  local first=1 f out deps
   for f in "$@"; do
     [ "$first" = 1 ] || printf ','; first=0
     if out=$(jq -c '.dependencies = [(.dependencies // [])[] | select(.status != null)]' "$f" 2>/dev/null); then
+      if [ -n "$WITH_DEPENDENTS" ]; then
+        deps=$(dependents_of "$(printf '%s' "$out" | jq -r '.id')")
+        [ "$deps" = "[]" ] || out=$(printf '%s' "$out" | jq -c --argjson d "$deps" '.dependents = $d')
+      fi
       printf '%s' "$out"
     else
       cat "$f"
     fi
   done
   printf ']\n'; exit 0
+}
+# Real `bd show --include-dependents` adds every bead in the store with an edge to
+# the shown one, of any type, cut to its identity fields and the edge's type, and
+# leaves the key out when there are none. It streams them oldest first, so here
+# they come in descending id order, an order the tool must not lean on.
+dependents_of() {
+  local d f row first=1
+  printf '['
+  for d in $(stores); do
+    for f in $(grep -laF "\"$1\"" "$d"/*.json 2>/dev/null | sort -r); do
+      row=$(jq -c --arg s "$1" '. as $b | (.dependencies // [])[] | select(.id == $s)
+        | {id: $b.id, title: $b.title, status: $b.status, issue_type: $b.issue_type, dependency_type}' "$f" 2>/dev/null) || continue
+      [ -n "$row" ] || continue
+      [ "$first" = 1 ] || printf ','; first=0
+      printf '%s' "$row"
+    done
+  done
+  printf ']'
 }
 # A list row renders every edge, another store's included, in the shape real
 # `gc bd list` emits: {issue_id, depends_on_id, type}, no embedded status.
@@ -419,7 +441,7 @@ case "${1:-} ${2:-}" in
 esac
 [ "${1:-}" = bd ] || { echo "gc: unsupported ($*)" >&2; exit 1; }
 shift
-DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""
+DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""; WITH_DEPENDENTS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --db)          DB="$2"; shift 2 ;;
@@ -427,6 +449,7 @@ while [ $# -gt 0 ]; do
     --all)         ALL=1; shift ;;
     --id)          LIST_IDS="$2"; shift 2 ;;
     --include-gates) GATES=1; shift ;;
+    --include-dependents) WITH_DEPENDENTS=1; shift ;;
     --direction|--direction=*) case "$1" in *=*) DIRECTION="${1#*=}"; shift ;; *) DIRECTION="$2"; shift 2 ;; esac ;;
     -t|--type)     TYPE="$2"; shift 2 ;;
     -s|--status)   STATUS="$2"; shift 2 ;;
@@ -588,12 +611,14 @@ eq "$(jr '.edges.awaited_by[0].title')" "the build it released" "  ... and its t
 eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "4 2" "  ... counted in all and open"
 eq "$(jr '[.edges.tracked_by[].id] | join(",")')" tk-aw-track \
   "  ... while a visit's tracks edge stays tracked-by, and a related review and a child are in neither"
+eq "$(jr '[.edges.awaited_by[] | keys | join(",")] | unique | join(" ")')" "edge,id,status,title" \
+  "  ... each cut to its id, title, status and edge"
 eq "$(jr '[paths | join(".")] | map(select(test("description|notes|comment"; "i"))) | length')" 0 \
   "  ... and no waiter's body rides along"
-eq "$(grep -c -- 'dep list tk-design --direction=up --type blocks ' "$FAKE_GC_LOG")" 1 "  ... read by one reverse read of blocks edges"
-eq "$(grep -c -- 'dep list tk-design --direction=up --type until ' "$FAKE_GC_LOG")" 1 "  ... and one of until edges"
-eq "$(grep -- 'dep list tk-design' "$FAKE_GC_LOG" | grep -vc -- '--type')" 0 \
-  "  ... and no untyped reverse read, which would bring every child and related bead"
+eq "$(grep -c -- 'show tk-design --brief-deps --include-dependents' "$FAKE_GC_LOG")" 1 \
+  "  ... taken from the dependents the subject's own read carries"
+eq "$(grep -- 'dep list tk-design' "$FAKE_GC_LOG" | grep -vc -- '--type tracks')" 0 \
+  "  ... with no reverse read of its own beside tracked-by's"
 run tk-design
 has "$OUT" "awaited-by  4 (2 open): tk-aw-next (open, blocks), tk-aw-polish (in_progress, blocks), tk-aw-dup (closed, until), tk-aw-earlier (closed, blocks)" \
   "  ... and the text view names them on one line after the counts"

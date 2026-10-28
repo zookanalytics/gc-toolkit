@@ -183,8 +183,10 @@ bd_json() {
 }
 # The subject is read with --brief-deps: only its own fields and its edges'
 # {id, title, status, type} are read here, never a listed bead's body, and a hub
-# bead's dependency bodies would otherwise dwarf the read.
-bd_show() { bd_json "$1" show "$2" --brief-deps; }
+# bead's dependency bodies would otherwise dwarf the read. --include-dependents
+# adds the beads with an edge to it, each cut by bd to its identity fields and
+# the edge's type, again with no body.
+bd_show() { bd_json "$1" show "$2" --brief-deps --include-dependents; }
 # The walk reads list rows instead: `gc bd show` leaves out an edge whose far end
 # lives in another rig's store, and a list row keeps every edge. --brief drops the
 # free text. `gc bd list` hides gates, infrastructure beads, template molecules
@@ -426,25 +428,20 @@ STORE_JSON=$(jq -nc --arg rig "$SUBJ_RIG" --arg db "$DB" \
 # subject's own read. Both edge spellings live in the store — `relates-to` and
 # the older `related` — so the class matches either. The tracked-by visits are
 # an INBOUND `tracks` edge (a visit tracks its subject; the subject carries no
-# reverse edge), so they are read with a reverse dep-list. So are the beads that
-# wait on the subject, each carrying a `blocks` or an `until` edge to it. bd
-# matches --type as one literal type, so each is its own read, and an untyped
-# read would also bring every child and every inbound `related` edge, the review
-# and rework machinery this list leaves out. A reverse read sees only the
-# subject's store, so a bead in another store that waits on it is not listed.
+# reverse edge), so they are read with a reverse dep-list. The beads that wait on
+# the subject carry a `blocks` or an `until` edge to it, inbound too, and they
+# come from the dependents the subject's own read carries. The dependents also
+# hold every child and every inbound `related` edge, the review and rework
+# machinery this list leaves out, so it keeps the two edge types. bd neither
+# bounds the dependents nor puts the open ones first, so the list does both and
+# counts all of them. bd reads only the subject's store, so a bead in another
+# store that waits on it is not listed.
 TRACKED_BY=$(bd_json "$DB" dep list "$BEAD" --direction=up --type tracks \
   | jq -c 'if type == "array" then [.[] | {id, status}] else [] end' 2>/dev/null || echo '[]')
-# awaited_read <type>: the beads with a <type> edge to the subject, tagged with
-# it. Each row carries its bead's description and metadata, so the pipe keeps
-# only {id, title, status, edge}.
-awaited_read() {
-  bd_json "$DB" dep list "$BEAD" --direction=up --type "$1" \
-    | jq -c --arg e "$1" 'if type == "array"
-        then [.[] | select(type == "object" and (.id // "") != "") | {id, title: (.title // null), status, edge: $e}]
-        else [] end' 2>/dev/null || echo '[]'
-}
-AWAITED=$( { awaited_read blocks; awaited_read until; } | jq -sc --argjson cap "$AWAITED_CAP" '
-  (add // []) | unique_by(.id) | sort_by(.status == "closed")
+AWAITED=$(printf '%s' "$SUBJ" | jq -c --argjson cap "$AWAITED_CAP" '
+  [.dependents[]? | select(type == "object" and (.id // "") != "" and (.dependency_type == "blocks" or .dependency_type == "until"))
+    | {id, title: (.title // null), status, edge: .dependency_type}]
+  | unique_by(.id) | sort_by(.status == "closed")
   | {total: length, open: ([.[] | select(.status != "closed")] | length), named: .[:$cap]}' 2>/dev/null)
 [ -n "$AWAITED" ] || AWAITED='{"total":0,"open":0,"named":[]}'
 EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" --argjson awaited "$AWAITED" '

@@ -292,14 +292,15 @@ is read with one reverse query the subject's own row cannot answer.
 
 Each bead that waits on the subject carries a `blocks` or an `until` edge to
 it, another inbound edge. That is how a closed design's read names the build it
-released. bd matches `--type` as one literal type, so each edge type is its own
-reverse query. An untyped query would also return every child and every inbound
-`related` edge, the review, validation and rework beads that gather on a design,
-and the list leaves those out. It names the open ones first, each with its edge,
-and at most ten of them. Its counts give how many wait in all and how many of
-those are open, since a gate can hold a hundred parked beads. A reverse query
-reads only the subject's store, so a bead in another store that waits on the
-subject is not listed.
+released. The subject's read asks bd for its dependents too
+(`--include-dependents`), and bd returns each one cut to its identity fields and
+the edge's type, never its body. The dependents also hold every child and every
+inbound `related` edge, the review, validation and rework beads that gather on a
+design, so the list keeps only the `blocks` and `until` ones. It names the open
+ones first, each with its edge, and at most ten of them. Its counts give how
+many wait in all and how many of those are open, since a gate can hold a hundred
+parked beads. bd reads only the subject's store, so a bead in another store that
+waits on the subject is not listed.
 
 The counts are over a bead's own edges and its direct children, never its whole
 subtree. A `parent-child` edge is stored on the child pointing up, so an epic
