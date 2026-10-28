@@ -2059,6 +2059,18 @@ eq "$(meta FT2 pr.unanswered_threads)" "1@sha-402" "an operator freeze ends the 
 eq "$(meta FT3 pr.unanswered_threads)" "1@sha-403" "an approved PR records its count"
 has "$out" "merged + recorded FT3" "…and the merge does not wait on it"
 
+echo "# a notice of the city's own, not for review, answers nothing"
+# It opens with the no-review mark and carries the provenance mark every post of
+# the city's does, so it neither asks nor answers.
+store "[$(anchor FT7 407), $(rev FT7)]"
+printf '%s' "$(prview 407 OPEN BLOCKED)" > "$GH_DIR/pr_view_407.json"
+printf '{"threads":[%s]}\n' \
+  "$(fthread t1 false "[$(op_post 'Use a constant.'), $(city_post "$(printf '<!-- gc:no-review -->\nPreview deployed.')")]")" \
+  > "$GH_DIR/threads_407.json"
+out=$("$SUT" 2>&1)
+eq "$(meta FT7 pr.unanswered_threads)" "1@sha-407" \
+  "a notice of the city's own after the feedback leaves the thread waiting"
+
 echo "# a thread read that does not answer records nothing, and the last count stands"
 store "[$(anchor FT4 404 ',"pr.unanswered_threads":"1@sha-404"'), $(rev FT4)]"
 printf '%s' "$(prview 404 OPEN BLOCKED)" > "$GH_DIR/pr_view_404.json"

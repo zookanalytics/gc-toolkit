@@ -223,13 +223,13 @@ nfr_load() {
 #
 # gc_thread_awaits_answer asks of a review thread, a GraphQL reviewThread node
 # with its comments, whether its feedback waits on the city: the thread is
-# unresolved, and the newest of its posts that is feedback or the city's own is
-# feedback. GitHub lists a thread's comments oldest first. A post of the city's
-# answers every post before it, whether it says the point was fixed, declined or
+# unresolved, and the newest of its posts that asks or answers is feedback.
+# GitHub lists a thread's comments oldest first. A post of the city's answers
+# every post before it, whether it says the point was fixed, declined or
 # deferred, so a thread the city answered and left open for the reviewer does
-# not wait on the city. A post not for review neither asks nor answers. With no
-# $self nothing is the city's own, so a reader without the acting login does not
-# ask.
+# not wait on the city. A post not for review neither asks nor answers, whoever
+# posted it, the city included. With no $self nothing is the city's own, so a
+# reader without the acting login does not ask.
 NFR_DEF='def gc_opens_with_mark:
   def comments($l):
     (if .open then
@@ -262,7 +262,7 @@ def gc_feedback($self; $since):
   (gc_city_own($self; $since) | not) and (gc_not_for_review | not);
 def gc_thread_awaits_answer($self; $since):
   ((.isResolved // false) == false)
-  and ([ (.comments.nodes // [])[] | select(gc_city_own($self; $since) or gc_feedback($self; $since)) ]
+  and ([ (.comments.nodes // [])[] | select(gc_not_for_review | not) ]
        | length > 0 and (last | gc_feedback($self; $since)));
 '
 # The mark holds no character a JSON string escapes, so it is quoted as it is.

@@ -335,6 +335,12 @@ eq "$(awaits "$NDEF" "$(thread false "$NOTICE")")" false "a thread holding only 
 eq "$(awaits "$NDEF" "$(thread false "$OP" "$NOTICE")")" true \
   "a post not for review after the feedback answers nothing"
 eq "$(awaits "$NDEF" "$(thread false "$REPLY" "$NOTICE")")" false "…and asks nothing after the city's reply"
+# A notice of the city's own opens with the mark and carries the provenance mark
+# every post of the city's does.
+CITY_NOTICE='{"author":{"login":"bot"},"body":"<!-- gc:no-review -->\nPreview deployed.\n\n<!-- gc:city -->","createdAt":"2026-10-08T04:00:00Z"}'
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$CITY_NOTICE")")" true \
+  "a notice of the city's own, not for review, answers nothing either"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$REPLY" "$CITY_NOTICE")")" false "…and the city's reply before it still does"
 eq "$(awaits "$NDEF" '{"isResolved":false,"comments":{"nodes":[]}}')" false "a thread with no comments awaits nothing"
 eq "$(awaits "$NDEF" '{"isResolved":false}')" false "…nor one the read carries no comments for"
 eq "$(printf '%s' "$(thread false "$OP" "$REPLY")" | jq -r --arg self "" --arg since "$CUT" "$NDEF"'gc_thread_awaits_answer($self; $since)')" true \
