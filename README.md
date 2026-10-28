@@ -73,7 +73,9 @@ wires `assets/hooks/pre-commit`, which regenerates `generated/seed-audit/` —
 the rendered standing prompt of every agent and compiled recipe of every
 formula, against a synthetic city — whenever a commit touches a renderer
 input (`agents/`, `template-fragments/`, `formulas/`, `packs/`, `pack.toml`,
-or the renderer itself). Nothing under `generated/` is hand-edited.
+or the renderer itself). The commit carries only the renders its change moves:
+text the `gc` binary moved lands through the default branch's re-audit, a pull
+request of its own. Nothing under `generated/` is hand-edited.
 `render-seed-audit.sh --check` verifies the artifact by re-rendering it, the
 merge gate re-renders every merge before it lands, and
 `doctor/check-seed-audit-current` warns when the artifact is absent or the
