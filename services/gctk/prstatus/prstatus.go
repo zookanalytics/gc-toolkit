@@ -9,8 +9,9 @@
 // so the facts [Derive] reads carry no merged-or-closed signal.
 //
 // Beside the one status value, [Held] names what holds an open PR that the city
-// will not clear on its own: an open visit on the PR or its work, an unresolved
-// review thread the merge waits on, or a blocker no automated actor will clear.
+// will not clear on its own: an open visit on the PR or its work, review
+// feedback the city has not answered or a review thread the merge waits on, or
+// a blocker no automated actor will clear.
 // Each is a value of the `held:` label family, and more than one can stand.
 // Each names something a person has to act on, so [Derive] reads needs-attention
 // while any stands.
@@ -35,7 +36,8 @@
 // Derive reads only state the city records: the anchor's holds
 // (merge_hold/rebase_hold), whether an open visit covers it or its review and
 // rework children, whether a blocker it waits on is a person's, the pr-facts.sh
-// posture, the merge cadence's machine verdict and its blocked cause, the
+// posture, the merge cadence's machine verdict and its blocked cause, the merge
+// cadence's count of review threads waiting on the city's answer, the
 // draft-stage markers pr-open.sh records (opened_as_draft, draft_readied), and
 // the anchor's in-flight set — any live bead carrying anchor_bead, the same
 // membership test pr-facts.sh applies in its own arms. It does not read GitHub's
@@ -49,7 +51,10 @@
 // other PR.
 package prstatus
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // State is a PR anchor's status value: the live, mutually-exclusive `status:`
 // label group (working, merging, needs-review, needs-attention) plus the
@@ -108,11 +113,14 @@ const (
 	// HeldVisit: an open visit covers the anchor, or one of its live review or
 	// rework children, the PR's own work in flight. A person answers the visit.
 	HeldVisit Hold = "visit"
-	// HeldReview: an unresolved review thread holds the merge and nothing in
-	// flight acts on it, so resolving it falls to a person. It is the merge
-	// pass's blocked verdict with cause review-threads, as [Blocked] counts it.
-	// The merge pass reads the threads where the base branch requires their
-	// resolution, so a base that does not require it records no such hold.
+	// HeldReview: review feedback holds the PR and nothing in flight acts on it,
+	// so answering or resolving it falls to a person. It stands for either of two
+	// facts. One is feedback the city has not answered, on any base, approved or
+	// not: the merge pass counted a review thread whose newest feedback no post
+	// of the city's follows ([Facts.PRUnansweredThreads]), by the rule
+	// [unansweredFeedback] states. The other is the merge pass's blocked verdict
+	// with cause review-threads, as [Blocked] counts it: an unresolved thread on
+	// a base that requires resolution, answered or not.
 	HeldReview Hold = "review"
 	// HeldBlocked: a live blocker holds the PR that no automated actor will
 	// clear. It is the merge pass's blocked verdict with cause blocker, as
@@ -163,6 +171,13 @@ type Facts struct {
 	// recorded beside a blocked verdict and read only while the verdict is
 	// blocked.
 	PRMachineCause string
+	// PRUnansweredThreads is metadata.pr.unanswered_threads, stored count@oid:
+	// how many of the PR's review threads the merge pass found waiting on the
+	// city's answer at the head oid names. A thread waits when it is unresolved
+	// and its newest post that is feedback or the city's own is feedback
+	// (gc_thread_awaits_answer in assets/scripts/pr-post.sh), so a thread the
+	// city answered and left open for the reviewer does not.
+	PRUnansweredThreads string
 	// OpenedAsDraft is metadata.opened_as_draft: the head oid pr-open.sh opened
 	// or adopted the PR as a draft at, recorded only on a draft whose ready flip
 	// the refinery owns.
@@ -208,16 +223,17 @@ func IsWork(taskKind, status string) bool {
 func Derive(f Facts) State {
 	posture, _ := splitDated(f.PRPosture)
 	machine, _ := splitDated(f.PRMachine)
+	threads, _ := splitDated(f.PRUnansweredThreads)
 
 	// needs-attention: a blocker the city will not clear on its own. A hold
 	// stands, or something [Held] names, each a thing a person has to act on.
 	if isSet(f.MergeHold) || isSet(f.RebaseHold) || len(Held(f)) > 0 {
 		return NeedsAttention
 	}
-	// A recorded posture or verdict outside the vocabulary its writer declares
-	// is a state the derivation cannot name. [Blocked] reads a blocked verdict's
-	// cause the same way.
-	if !knownPosture(posture) || !knownMachine(machine) {
+	// A recorded posture, verdict or thread count outside the vocabulary its
+	// writer declares is a state the derivation cannot name. [Blocked] reads a
+	// blocked verdict's cause the same way.
+	if !knownPosture(posture) || !knownMachine(machine) || !knownCount(threads) {
 		return NeedsAttention
 	}
 	// The merge pass's blocked verdict, while it holds the PR.
@@ -278,13 +294,30 @@ func Held(f Facts) []Hold {
 		held = append(held, HeldVisit)
 	}
 	blocked := Blocked(f)
-	if blocked && f.PRMachineCause == CauseReviewThreads {
+	if (blocked && f.PRMachineCause == CauseReviewThreads) || unansweredFeedback(f) {
 		held = append(held, HeldReview)
 	}
 	if (blocked && f.PRMachineCause == CauseBlocker) || f.PersonBlocker {
 		held = append(held, HeldBlocked)
 	}
 	return held
+}
+
+// unansweredFeedback reports whether review feedback the city has not answered
+// holds the PR ([HeldReview]): the merge pass counted a thread waiting on the
+// city's answer at the head the posture was read at, nothing is in flight on
+// the anchor, and no feedback waits for pr-facts.sh to route it, which a
+// commented posture says. Work in flight is the city answering, and a
+// commented posture is feedback it has not routed yet, so neither is a
+// person's to clear. A count read at another head was read about another
+// commit, and the merge pass counts again on its next visit.
+func unansweredFeedback(f Facts) bool {
+	posture, postureHead := splitDated(f.PRPosture)
+	count, head := splitDated(f.PRUnansweredThreads)
+	if n, err := strconv.Atoi(count); err != nil || n < 1 {
+		return false
+	}
+	return (postureHead == "" || head == postureHead) && f.InFlightCount == 0 && posture != "commented"
 }
 
 // knownPosture is the posture vocabulary pr-facts.sh records ([posture]
@@ -315,6 +348,17 @@ func knownCause(v string) bool {
 		return true
 	}
 	return false
+}
+
+// knownCount is a thread count as gctk merge records it, digits alone, plus no
+// count recorded yet.
+func knownCount(v string) bool {
+	for _, c := range v {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // isSet is the truthiness rule pr-facts.sh, pr-open.sh and pr-status-label.sh

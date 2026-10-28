@@ -1138,6 +1138,11 @@ const (
 	mdOpenedAsDraft   = "opened_as_draft"
 	mdDraftReadied    = "draft_readied"
 
+	// mdPRUnansweredThreads is the merge pass's count of the PR's review
+	// threads waiting on the city's answer, count@oid, which prstatus.Held
+	// reads for held: review.
+	mdPRUnansweredThreads = "pr.unanswered_threads"
+
 	// The posture vocabulary pr-facts.sh records, mirroring
 	// lifecycle/lifecycle.toml [posture].postures.
 	postureChangesRequested = "changes_requested"
@@ -2544,8 +2549,9 @@ func beadPhase(a Anchor, f Facts, work anchorWork) string {
 }
 
 // phaseFacts gathers the prstatus.Facts a row projects. The holds, the dated
-// posture, the machine verdict and its cause, and the draft-stage markers are
-// read straight off the anchor — prstatus splits the '@' and applies the hold
+// posture, the machine verdict and its cause, the count of review threads
+// waiting on the city's answer, and the draft-stage markers are read straight
+// off the anchor — prstatus splits the '@' and applies the hold
 // truthiness itself, so the stored values pass through as they are. An open
 // visit is the visit fact the row's held marker reads ([Facts.Visits]), so the
 // phase and the marker agree. That fact finds a visit's subjects by the shared
@@ -2564,17 +2570,18 @@ func phaseFacts(a Anchor, f Facts, work anchorWork) prstatus.Facts {
 		inFlight = f.anchorInFlight(a)
 	}
 	return prstatus.Facts{
-		MergeHold:      a.Metadata[mdMergeHold],
-		RebaseHold:     a.Metadata[mdRebaseHold],
-		OpenVisit:      f.Visits[a.ID],
-		WorkVisit:      merge && work.visit,
-		PersonBlocker:  merge && askingDemand(a.Blockers) != nil,
-		PRPosture:      a.Metadata[mdPRPosture],
-		PRMachine:      a.Metadata[mdPRMachine],
-		PRMachineCause: a.Metadata[mdPRMachineCause],
-		OpenedAsDraft:  a.Metadata[mdOpenedAsDraft],
-		DraftReadied:   a.Metadata[mdDraftReadied],
-		InFlightCount:  inFlight,
+		MergeHold:           a.Metadata[mdMergeHold],
+		RebaseHold:          a.Metadata[mdRebaseHold],
+		OpenVisit:           f.Visits[a.ID],
+		WorkVisit:           merge && work.visit,
+		PersonBlocker:       merge && askingDemand(a.Blockers) != nil,
+		PRPosture:           a.Metadata[mdPRPosture],
+		PRMachine:           a.Metadata[mdPRMachine],
+		PRMachineCause:      a.Metadata[mdPRMachineCause],
+		PRUnansweredThreads: a.Metadata[mdPRUnansweredThreads],
+		OpenedAsDraft:       a.Metadata[mdOpenedAsDraft],
+		DraftReadied:        a.Metadata[mdDraftReadied],
+		InFlightCount:       inFlight,
 	}
 }
 

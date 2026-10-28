@@ -168,7 +168,7 @@ function PRPhaseChip({ tile }: { tile: Tile }) {
 // What each held: value asks of the operator, for the chip's hover text.
 const HELD_MEANING: Record<string, string> = {
   visit: 'an open visit holds the PR or its work in flight; answer it',
-  review: 'an unresolved review thread holds the merge; resolve it',
+  review: 'review feedback the city has not answered, or a thread the merge waits on; answer or resolve it',
   blocked: 'a blocker no automated actor will clear holds the PR; clear it',
 };
 
@@ -772,8 +772,8 @@ function Legend() {
         <span className="pr-held" aria-hidden="true">
           held:
         </span>{' '}
-        what holds a PR: visit = an open visit on the PR or its work · review = an unresolved review thread
-        the merge waits on · blocked = a blocker no automated actor will clear
+        what holds a PR: visit = an open visit on the PR or its work · review = review feedback the city
+        has not answered, or a thread the merge waits on · blocked = a blocker no automated actor will clear
       </span>
       <span className="legend__item">
         <span aria-hidden="true">💬</span> PR conversation: outstanding = a comment waits on the city ·

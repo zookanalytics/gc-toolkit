@@ -686,7 +686,7 @@ func renderFamilyLegend(w io.Writer) {
 // conversationLegend says what the held and conversation notes on a pull
 // request row ([heldNote], [conversationNote]) mean. renderLegend and
 // renderFamilyLegend print it.
-const conversationLegend = "A live pull request row a person must clear names what holds it, its held: labels: visit=an open visit on the PR or its work · review=an unresolved review thread the merge waits on · blocked=a blocker no automated actor will clear\n" +
+const conversationLegend = "A live pull request row a person must clear names what holds it, its held: labels: visit=an open visit on the PR or its work · review=review feedback the city has not answered, or a thread the merge waits on · blocked=a blocker no automated actor will clear\n" +
 	"A live pull request row ends with its conversation: outstanding=a comment waits on the city · answered=the reply is there to look at · quiet=nothing said · unknown=not recorded\n"
 
 // clusterMemberCap bounds how many members a folded cluster spells out before it

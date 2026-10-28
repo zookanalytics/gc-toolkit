@@ -407,6 +407,30 @@ resetlog
 "$SUT" reconcile --anchor tk-a --pr 73 --repo "$REPO"
 eq "$(pv_labels 73)" "status: needs-attention" "a failed required check => needs-attention with no held: label"
 
+# held: review off review feedback the city has not answered, which holds an
+# unapproved PR on a base that requires no thread resolution: the merge pass
+# counted a thread no post of the city's answers, and nothing is in flight.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"review_required@abc@t","pr.machine":"settled@abc@t","pr.unanswered_threads":"1@abc"}}]'
+pv 79 '[{"name":"status: needs-review"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 79 --repo "$REPO" --current-labels "status: needs-review"
+eq "$(pv_labels 79)" "held: review,status: needs-attention" "feedback the city has not answered => held: review, and needs-attention over needs-review"
+
+# a rework in flight is the city answering it, so the count holds nothing while it runs.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"review_required@abc@t","pr.machine":"progressing@abc@t","pr.unanswered_threads":"1@abc"}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 79 --repo "$REPO" --current-labels "held: review,status: needs-attention"
+eq "$(pv_labels 79)" "status: working" "a rework in flight to answer it => held: review comes off, and the PR reads working"
+
+# the thread answered or resolved: the merge pass counts none, and the PR is
+# the operator's to review again.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"review_required@abc@t","pr.machine":"settled@abc@t","pr.unanswered_threads":"0@abc"}}]'
+pv 80 '[{"name":"held: review"},{"name":"status: needs-attention"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 80 --repo "$REPO" --current-labels "held: review,status: needs-attention"
+eq "$(pv_labels 80)" "status: needs-review" "the feedback answered or resolved => held: review comes off, and the PR reads needs-review"
+
 # more than one value stands at once, each its own label.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"review-threads"}},
         {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}},

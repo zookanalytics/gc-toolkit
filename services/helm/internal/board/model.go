@@ -577,7 +577,8 @@ type Tile struct {
 	// PRHeld is what holds this live merge anchor's PR that the city will not
 	// clear on its own, the values prstatus.Held names in its order: `visit`
 	// (an open visit covers the anchor or one of its live review or rework
-	// children), `review` (an unresolved review thread holds the merge), and
+	// children), `review` (review feedback the city has not answered, or a
+	// review thread the merge waits on), and
 	// `blocked` (a blocker no automated actor will clear, or one a person
 	// owes). Each is the value of one GitHub held: label pr-status-label.sh
 	// writes from the same derivation, and any of them reads PRPhase

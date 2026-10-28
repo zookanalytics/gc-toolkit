@@ -586,7 +586,7 @@ carries none.
 | Label | What holds the PR | Read from |
 |---|---|---|
 | `held: visit` | an open visit covers the anchor, or the PR's own work in flight: one of its live review or rework children | the shared visit identity, over the anchor and each bead carrying its `anchor_bead` whose `task_kind` is `review` or `rework`, open or `in_progress` |
-| `held: review` | an unresolved review thread holds the merge, and nothing in flight acts on it | the merge pass's `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
+| `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
 | `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision |
 
 Any `held:` label reads `status: needs-attention`, because each names something
@@ -594,14 +594,30 @@ a person has to act on. The merge freeze and the rebase hold carry no `held:`
 value, and neither do a failed required check, a deferred merge-in, a base gone
 `BEHIND` or a rule the merge pass cannot name: each reads `needs-attention` on
 its own. A blocker the city is landing, one an automated actor holds and no
-person owes, is no hold, and the PR keeps its status. The merge pass reads
-review threads only where the base branch requires their resolution, so
-`held: review` stands only on such a base. A thread left open where resolution
-is not required holds no merge. `prstatus.Held` is the rule, and the helm board
-shows the same values as a row's `pr_held`, from the same derivation over the
-same in-flight set: every bead carrying the anchor's `anchor_bead`, any
-`task_kind`, at a live status (`prstatus.InFlightStatuses`), which the board's
-beads source reads as `gctk pr-status derive` does.
+person owes, is no hold, and the PR keeps its status.
+
+`held: review` stands on any base, approved or not, for review feedback the city
+has not answered. On every open PR it visits, the merge pass counts the review
+threads that wait on the city's answer and records the count as
+`pr.unanswered_threads`, pinned to the head it read. A thread waits when it is
+unresolved and its newest post that is feedback or the city's own is feedback
+(`gc_thread_awaits_answer` in `pr-post.sh`). The count holds the PR at the head
+the posture was read at, while nothing is in flight on the anchor, because work
+in flight is the city answering, and while no feedback waits for `pr-facts.sh`
+to route it (posture `commented`). A thread the city answered and left open for
+the reviewer, such as a point it declined or deferred, waits on the reviewer and
+not on the city, so the PR reads as the reviewer's queue: `needs-review` before
+approval. Where the base requires thread resolution, the merge pass's
+`review-threads` verdict holds an approved PR for any unresolved thread,
+answered or not. The merge does not read the count, so on a base that requires
+no thread resolution an approved PR still lands while `held: review` stands.
+
+`prstatus.Held` is the rule, and the helm board shows the same values as a row's
+`pr_held`, from the same derivation over the same facts: the anchor's
+`pr.unanswered_threads` among them, and the same in-flight set, every bead
+carrying the anchor's `anchor_bead`, any `task_kind`, at a live status
+(`prstatus.InFlightStatuses`), which the board's beads source reads as
+`gctk pr-status derive` does.
 
 A blocked machine verdict whose cause is outside its writer's vocabulary holds
 the PR wherever it was recorded, as any state the derivation cannot name does.
@@ -695,9 +711,10 @@ Nothing re-derives the labels when a visit or a blocker opens or closes, and suc
 a change does not put its anchor first in that walk. The labels follow it on the
 next full pass that reaches the anchor: within one reconcile pass while the walk
 reaches every open PR, and after more passes when the deadline stops it short.
-The labels likewise read the machine verdict the last merge pass recorded, so
-they follow a new verdict on the next pass that derives it. Every write is pinned
-to the origin, and a label is not an approval.
+The labels likewise read the machine verdict and the thread count the last merge
+pass recorded, so they follow a new verdict, or a thread answered or resolved, on
+the next pass that derives them after the merge pass's visit. Every write is
+pinned to the origin, and a label is not an approval.
 
 ## The machine axis
 

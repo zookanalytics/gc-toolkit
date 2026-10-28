@@ -55,9 +55,10 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 // prStatusDerive gathers the facts the city records about the anchor and prints
 // the state prstatus.Derive returns, and with --json the values prstatus.Held
 // returns beside it: the holds, the dated posture, the machine verdict and its
-// blocked cause, and the draft-stage markers off the anchor, the size of the
-// anchor's in-flight set, whether an open visit covers the anchor or its work,
-// and whether a blocker it waits on is a person's.
+// blocked cause, the count of review threads waiting on the city's answer, and
+// the draft-stage markers off the anchor, the size of the anchor's in-flight
+// set, whether an open visit covers the anchor or its work, and whether a
+// blocker it waits on is a person's.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	asJSON := false
@@ -136,17 +137,18 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	}
 
 	facts := prstatus.Facts{
-		MergeHold:      bead.Meta("merge_hold"),
-		RebaseHold:     bead.Meta("rebase_hold"),
-		OpenVisit:      openVisit,
-		WorkVisit:      workVisit,
-		PersonBlocker:  personBlocker(blockers),
-		PRPosture:      bead.Meta("pr_posture"),
-		PRMachine:      bead.Meta("pr.machine"),
-		PRMachineCause: bead.Meta("pr.machine_cause"),
-		OpenedAsDraft:  bead.Meta("opened_as_draft"),
-		DraftReadied:   bead.Meta("draft_readied"),
-		InFlightCount:  len(rows),
+		MergeHold:           bead.Meta("merge_hold"),
+		RebaseHold:          bead.Meta("rebase_hold"),
+		OpenVisit:           openVisit,
+		WorkVisit:           workVisit,
+		PersonBlocker:       personBlocker(blockers),
+		PRPosture:           bead.Meta("pr_posture"),
+		PRMachine:           bead.Meta("pr.machine"),
+		PRMachineCause:      bead.Meta("pr.machine_cause"),
+		PRUnansweredThreads: bead.Meta("pr.unanswered_threads"),
+		OpenedAsDraft:       bead.Meta("opened_as_draft"),
+		DraftReadied:        bead.Meta("draft_readied"),
+		InFlightCount:       len(rows),
 	}
 	state := prstatus.Derive(facts)
 	if !asJSON {

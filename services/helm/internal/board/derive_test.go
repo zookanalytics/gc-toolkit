@@ -2554,6 +2554,14 @@ func TestPRHeldNamesWhatHoldsThePR(t *testing.T) {
 	closedChild := child("tk-a.rw", kindRework)
 	closedChild.ClosedAt = fixtureNow.Add(-time.Hour)
 	threads := with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "review-threads")
+	// An unapproved PR whose operator thread the city never answered, on a base
+	// that requires no thread resolution: the merge pass counted the thread
+	// and recorded no thread verdict.
+	unanswered := map[string]string{
+		mdPRPosture:           dated(postureReviewRequired, headLive, at),
+		mdPRMachine:           dated(MachineSettled, headLive, at),
+		mdPRUnansweredThreads: "1@" + headLive,
+	}
 	person := Blocker{ID: "tk-d", Title: "decide the flag name", Status: "open", RoutedTo: routedHuman}
 	for _, tc := range []struct {
 		name     string
@@ -2589,6 +2597,12 @@ func TestPRHeldNamesWhatHoldsThePR(t *testing.T) {
 			nil, nil, false, PhaseMerging},
 		{"the thread verdict beside a validation pass", []Anchor{withInFlight(mergeAnchor("tk-a", threads), member("tk-a.va", "validation", "open"))},
 			nil, nil, false, PhaseMerging},
+		{"review feedback the city has not answered on an unapproved PR", []Anchor{mergeAnchor("tk-a", unanswered)},
+			nil, []string{"review"}, false, PhaseNeedsAttention},
+		{"…released once every thread is answered or resolved", []Anchor{mergeAnchor("tk-a", with(unanswered, mdPRUnansweredThreads, "0@"+headLive))},
+			nil, nil, false, PhaseNeedsReview},
+		{"…and while a rework in flight answers it", []Anchor{withInFlight(mergeAnchor("tk-a", unanswered), member("tk-a.rw", "rework", "open")), child("tk-a.rw", kindRework)},
+			nil, nil, false, PhaseWorking},
 		{"an open visit on review work only the in-flight set holds", []Anchor{withInFlight(mergeAnchor("tk-a", approved), member("tk-a.rv", "review", "in_progress"))},
 			map[string]bool{"tk-a.rv": true}, []string{"visit"}, false, PhaseNeedsAttention},
 		{"a visit on a validation pass holds nothing", []Anchor{withInFlight(mergeAnchor("tk-a", approved), member("tk-a.va", "validation", "open"))},
