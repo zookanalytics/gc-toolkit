@@ -414,6 +414,55 @@ func TestOpenPRsReadsTheWholeStreamOrNothing(t *testing.T) {
 	}
 }
 
+// A thread read again to its end is one paginated GraphQL call, read whole or
+// not at all: a failed call, an empty answer, a page that does not decode or
+// carries no comments, or a thread that comes back with none leaves the count
+// unreadable, never counted over part of the thread.
+func TestThreadCommentsReadsTheWholeThreadOrNothing(t *testing.T) {
+	page := func(more bool, nodes string) string {
+		return `{"data":{"node":{"comments":{"pageInfo":{"hasNextPage":` + strconv.FormatBool(more) +
+			`,"endCursor":"c"},"nodes":[` + nodes + `]}}}}`
+	}
+	p1 := page(true, `{"body":"one"},{"body":"two"}`)
+	p2 := page(false, `{"body":"three"}`)
+	m := &merger{originHost: "github.com", originRepo: "zook/gc-toolkit"}
+
+	args := stubGH(t, p1+"\n"+p2+"\n", 0)
+	nodes, ok := m.threadComments("PRRT_1")
+	if !ok || len(nodes) != 3 || string(nodes[0]) != `{"body":"one"}` || string(nodes[2]) != `{"body":"three"}` {
+		t.Fatalf("two good pages: (%s, ok=%v); want the three comments, oldest first", nodes, ok)
+	}
+	want := "api --hostname github.com graphql --paginate -f query=" + feedbackThreadCommentsQuery + " -f id=PRRT_1"
+	if got := readFile(t, args); got != want {
+		t.Errorf("gh args =\n%s\nwant\n%s", got, want)
+	}
+
+	for _, tc := range []struct {
+		name, payload string
+		rc            int
+	}{
+		{"a failed call", p2, 1},
+		{"no answer", "", 0},
+		{"a page cut short", p1 + "\n" + p2[:40], 0},
+		{"a page whose thread does not resolve", p1 + "\n" + `{"data":{"node":null}}`, 0},
+		{"a page whose node is not a review thread", p1 + "\n" + `{"data":{"node":{}}}`, 0},
+		{"a page that is a GraphQL error", p1 + "\n" + `{"data":null,"errors":[{"message":"timeout"}]}`, 0},
+		{"a thread with no comments", page(false, ""), 0},
+	} {
+		stubGH(t, tc.payload, tc.rc)
+		if nodes, ok := m.threadComments("PRRT_1"); ok {
+			t.Errorf("%s: (%s, ok=true); want unreadable", tc.name, nodes)
+		}
+	}
+	args = stubGH(t, p2, 0)
+	if nodes, ok := m.threadComments(""); ok {
+		t.Errorf("no thread id: (%s, ok=true); want unreadable", nodes)
+	}
+	if _, err := os.Stat(args); err == nil {
+		t.Errorf("no thread id: gh was called with %q; want no call", readFile(t, args))
+	}
+}
+
 // The rollup keeps every run on the head, so a re-run lists beside the run it
 // superseded, and each case is read in both row orders: the verdict must not
 // depend on which row gh prints first. A start gh prints as the zero instant is

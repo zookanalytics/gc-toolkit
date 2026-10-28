@@ -68,6 +68,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     accept_formula: '',
     recommendation: null,
     visit_start_failure: '',
+    pr_held: null,
     ...over,
   };
 }
@@ -1360,6 +1361,39 @@ it('shows a resolved PR state on the chip', async () => {
   const row = rowFor(/a row whose PR has merged/);
   const chip = within(row as HTMLElement).getByText('merged');
   expect(chip.className).toContain('pr-phase--merged');
+});
+
+// What holds a PR rides its row as one chip per held: label, read off the wire
+// in its order, each with hover text saying what it asks of the operator, in a
+// colour of its own pinned on the stylesheet. A PR nothing holds carries none.
+it('shows what holds a PR beside its phase, one chip per held value', async () => {
+  serve([
+    tile({ id: 'tk-root', kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
+    {
+      ...prTile({ id: 'tk-held', title: 'a pull request a visit and a blocker hold', pr_phase: 'needs-attention', pr_held: ['visit', 'blocked'] }),
+      group_root: 'tk-root',
+    },
+    {
+      ...prTile({ id: 'tk-free', title: 'a pull request nothing holds', pr_phase: 'merging', pr_held: null }),
+      group_root: 'tk-root',
+    },
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('a pull request a visit and a blocker hold')).toBeTruthy());
+
+  const held = rowFor('a pull request a visit and a blocker hold') as HTMLElement;
+  const chips = Array.from(held.querySelectorAll('.pr-held')).map((c) => c.textContent);
+  expect(chips).toEqual(['held: visit', 'held: blocked']);
+  expect(within(held).getByText('held: visit').getAttribute('title')).toMatch(/^held: visit: \S/);
+  expect(within(held).getByText('held: blocked').className).toBe('pr-held pr-held--blocked');
+
+  const free = rowFor('a pull request nothing holds') as HTMLElement;
+  expect(free.querySelectorAll('.pr-held')).toHaveLength(0);
+
+  const styles = readFileSync(join(import.meta.dirname, 'styles.css'), 'utf8');
+  expect(styles).toMatch(/\.pr-held\s*\{[^}]*\bcolor:\s*#[0-9a-fA-F]{3,8}\s*;/);
+  const key = anchors().querySelector('.legend') as HTMLElement;
+  expect(key.textContent).toContain('what holds a PR: visit = an open visit on the PR or its work');
 });
 
 // The conversation axis is how the board shows which pull requests carry the

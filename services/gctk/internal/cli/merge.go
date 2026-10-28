@@ -34,11 +34,12 @@ import (
 // (pace.go).
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
-// writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git
+// writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git/jq
 // and the sibling shell helpers (escalate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
-// pr-status-label.sh, blocker-holder.sh), resolved from GCTK_SCRIPTS_DIR, which
-// gctk-resolve.sh exports as merge.sh's directory before it execs this binary.
+// pr-status-label.sh, blocker-holder.sh, pr-post.sh), resolved from
+// GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's directory
+// before it execs this binary.
 // Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
 // the observability and permissions surfaces those tools have for every other
 // caller. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass refuses
@@ -67,6 +68,39 @@ const threadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:St
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}`
+
+// feedbackCommentFields is what both thread reads ask of each comment, the
+// facts gc_thread_awaits_answer weighs a post by: its author and body, the
+// instants gc_city_own dates a post by, the state of the review that carried
+// it, which tells a post a dismissal retired, and the reactions the acting
+// login left on it, which tell a post the city marked handled.
+const feedbackCommentFields = `author{login} body createdAt pullRequestReview{submittedAt state}
+        reactionGroups{content viewerHasReacted}`
+
+// feedbackCommentWindow is how many of a thread's comments, its newest,
+// feedbackThreadsQuery reads. A thread longer than that comes back holding
+// exactly that many.
+const feedbackCommentWindow = 100
+
+// feedbackThreadsQuery reads each review thread with its newest comments. The
+// threads are paginated to exhaustion, as threadsQuery's are. The definition
+// decides on a thread's newest post that asks or answers, which can be older
+// than the window when every post in it is one the definition sets aside, so a
+// thread that comes back with a whole window is read again to its end
+// (feedbackThreadCommentsQuery).
+var feedbackThreadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{id isResolved comments(last:` + strconv.Itoa(feedbackCommentWindow) + `){nodes{` + feedbackCommentFields + `}}}}}}}`
+
+// feedbackThreadCommentsQuery reads one review thread's comments from its
+// first, paginated to exhaustion.
+const feedbackThreadCommentsQuery = `query($id:ID!,$endCursor:String){
+  node(id:$id){... on PullRequestReviewThread{
+    comments(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{` + feedbackCommentFields + `}}}}}`
 
 // The visit order's one read: every open PR's draft flag, head and each
 // account's latest review, paginated. It asks for no merge state, because
@@ -174,6 +208,13 @@ type merger struct {
 	rereads      int
 	rereadSecs   int
 	rereadsSpent int
+
+	// feedbackDef is the jq definitions `pr-post.sh feedback-def` prints, read
+	// once per pass on the first visit that counts a PR's unanswered threads.
+	// feedbackDefRead says that read was made, and an empty feedbackDef after it
+	// is one that failed.
+	feedbackDef     string
+	feedbackDefRead bool
 
 	merged       int
 	recovered    int
@@ -495,6 +536,11 @@ func (m *merger) handle(row *gcbd.Bead) {
 		}
 		return
 	}
+
+	// --- review feedback nothing has answered: the labels' fact, not the merge's ---
+	// Recorded for every open, non-draft PR the pass visits, before a hold below
+	// ends the visit. The merge does not read it.
+	m.recordUnansweredThreads(fresh, num, headOid)
 
 	// --- the rest of the anchor-local authorization set, off the same row -------
 	target := fresh.Meta("merged_target")
@@ -1190,6 +1236,172 @@ func (m *merger) unresolvedThreads(num string) (int, bool) {
 	return count, true
 }
 
+// mdUnansweredThreads is the anchor key recordUnansweredThreads writes and
+// prstatus.Facts.PRUnansweredThreads carries: <count>@<head oid>.
+const mdUnansweredThreads = "pr.unanswered_threads"
+
+// recordUnansweredThreads records on the anchor how many of its PR's review
+// threads wait on the city's answer, pinned to the head the pass read. The
+// count is prstatus.Held's input for held: review on any base, approved or
+// not, and both the labels and the helm board read it off the anchor. A read
+// that does not answer records nothing, so the last count stands, and it counts
+// only at the head it was read at. With no acting login nothing reads as the
+// city's own post, so nothing is recorded.
+func (m *merger) recordUnansweredThreads(anchor *gcbd.Bead, num, headOid string) {
+	if headOid == "" || m.selfLogin == "" {
+		return
+	}
+	def, ok := m.feedbackDefinitions()
+	if !ok {
+		return
+	}
+	n, ok := m.unansweredThreads(num, def, anchor.Meta("pr_provenance_since"))
+	if !ok {
+		fmt.Fprintf(m.stderr, "%s: WARN PR#%s review threads could not be read for the feedback nothing has answered; anchor %s keeps its last count\n", mergeProg, num, anchor.ID)
+		return
+	}
+	want := strconv.Itoa(n) + "@" + headOid
+	if anchor.Meta(mdUnansweredThreads) == want {
+		return
+	}
+	if !m.transition(io.Discard, io.Discard, anchor.ID, "--to", "pull_request", "--expect", "pull_request",
+		"--route", anchor.Meta("gc.routed_to"), "--set", mdUnansweredThreads+"="+want) {
+		fmt.Fprintf(m.stderr, "%s: WARN %s unanswered review threads '%s' did not record; it keeps its last count until the next visit\n", mergeProg, anchor.ID, want)
+	}
+}
+
+// unansweredThreads counts num's review threads that wait on the city's answer
+// by gc_thread_awaits_answer, defined in def (`pr-post.sh feedback-def`) with
+// the rules that tell feedback from the city's own post, a post the city marked
+// handled and a post a dismissal retired. It reads through the gh that answered
+// selfLogin, so a comment's viewerHasReacted is the acting login's reaction.
+// since is the anchor's provenance cutover (pr_provenance_since). ok=false is a
+// count that cannot be made: a read that fails, a thread page that will not
+// decode, a thread longer than its window that cannot be read to its end, or a
+// jq run that fails.
+func (m *merger) unansweredThreads(num, def, since string) (int, bool) {
+	raw, rc := m.ghOrigin("graphql", "--paginate",
+		"-f", "query="+feedbackThreadsQuery,
+		"-f", "owner="+originOwner(m.originRepo),
+		"-f", "repo="+originName(m.originRepo),
+		"-F", "num="+num)
+	if rc != 0 || len(bytes.TrimSpace(raw)) == 0 {
+		return 0, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
+	threads := []json.RawMessage{}
+	saw := false
+	for {
+		var page gqlFeedbackThreadsPage
+		if err := dec.Decode(&page); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, false
+		}
+		rt := page.Data.Repository.PullRequest.ReviewThreads
+		if rt == nil {
+			continue
+		}
+		saw = true
+		threads = append(threads, rt.Nodes...)
+	}
+	if !saw {
+		return 0, false
+	}
+	for i, t := range threads {
+		var th struct {
+			ID       string `json:"id"`
+			Comments struct {
+				Nodes []json.RawMessage `json:"nodes"`
+			} `json:"comments"`
+		}
+		if err := json.Unmarshal(t, &th); err != nil {
+			return 0, false
+		}
+		if len(th.Comments.Nodes) < feedbackCommentWindow {
+			continue
+		}
+		whole, ok := m.threadComments(th.ID)
+		if !ok {
+			return 0, false
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(t, &fields); err != nil {
+			return 0, false
+		}
+		c, err := json.Marshal(map[string][]json.RawMessage{"nodes": whole})
+		if err != nil {
+			return 0, false
+		}
+		fields["comments"] = c
+		if threads[i], err = json.Marshal(fields); err != nil {
+			return 0, false
+		}
+	}
+	in, err := json.Marshal(threads)
+	if err != nil {
+		return 0, false
+	}
+	out, rc := captureStdin(in, "jq", "--arg", "self", m.selfLogin, "--arg", "since", since,
+		def+"\n[ .[] | select(gc_thread_awaits_answer($self; $since)) ] | length")
+	if rc != 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// threadComments reads review thread id's comments to its end, oldest first
+// as the API lists them. ok=false is a thread that cannot be read whole: no
+// id, a read that fails, a page that will not decode or carries no comments,
+// or a thread that comes back with none.
+func (m *merger) threadComments(id string) ([]json.RawMessage, bool) {
+	if id == "" {
+		return nil, false
+	}
+	raw, rc := m.ghOrigin("graphql", "--paginate",
+		"-f", "query="+feedbackThreadCommentsQuery,
+		"-f", "id="+id)
+	if rc != 0 || len(bytes.TrimSpace(raw)) == 0 {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
+	var nodes []json.RawMessage
+	for {
+		var page gqlThreadCommentsPage
+		if err := dec.Decode(&page); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, false
+		}
+		if page.Data.Node == nil || page.Data.Node.Comments == nil {
+			return nil, false
+		}
+		nodes = append(nodes, page.Data.Node.Comments.Nodes...)
+	}
+	return nodes, len(nodes) > 0
+}
+
+// feedbackDefinitions reads `pr-post.sh feedback-def` once per pass. ok=false
+// when pr-post.sh is missing or prints nothing, which the pass reports once.
+func (m *merger) feedbackDefinitions() (string, bool) {
+	if !m.feedbackDefRead {
+		m.feedbackDefRead = true
+		if out, rc := m.scriptCapture("pr-post.sh", "feedback-def"); rc == 0 {
+			m.feedbackDef = strings.TrimSpace(out)
+		}
+		if m.feedbackDef == "" {
+			fmt.Fprintf(m.stderr, "%s: WARN pr-post.sh feedback-def printed no definitions (%s); no PR's unanswered review threads are counted this pass\n", mergeProg, m.scriptPath("pr-post.sh"))
+		}
+	}
+	return m.feedbackDef, m.feedbackDef != ""
+}
+
 // reviewGatesFor reads branch protection: whether an unresolved thread blocks
 // a merge and how many approvals are required. st is "known" or "unknown".
 func (m *merger) reviewGatesFor(branch string) (st string, threadReq bool, approvals int) {
@@ -1269,12 +1481,13 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // a missing check resolver, which Merge checks next. Every other helper is
 // handled where it is called. A missing lane-state.sh or finalize-gate.sh holds
 // that anchor. A missing blocker-holder.sh records no verdict for an anchor a
-// live blocker holds, whose merge is held anyway. A missing escalate.sh,
+// live blocker holds, whose merge is held anyway. A missing pr-post.sh counts
+// no PR's unanswered review threads. A missing escalate.sh,
 // record-failure-cap.sh, render-seed-audit.sh or pr-status-label.sh is skipped.
 // The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
@@ -1532,6 +1745,14 @@ func capture(bin string, args ...string) ([]byte, int) {
 	return out, gcbd.ExitCode(err)
 }
 
+// captureStdin is capture with in on the command's standard input.
+func captureStdin(in []byte, bin string, args ...string) ([]byte, int) {
+	cmd := exec.Command(bin, args...)
+	cmd.Stdin = bytes.NewReader(in)
+	out, err := cmd.Output()
+	return out, gcbd.ExitCode(err)
+}
+
 func firstOut(out []byte, _ int) []byte { return out }
 
 func runOut(bin string, args ...string) string {
@@ -1669,6 +1890,32 @@ type gqlThreadsPage struct {
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
+	} `json:"data"`
+}
+
+// gqlFeedbackThreadsPage is one page of feedbackThreadsQuery. The thread nodes
+// stay raw, because jq reads them as the API wrote them.
+type gqlFeedbackThreadsPage struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads *struct {
+					Nodes []json.RawMessage `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
+// gqlThreadCommentsPage is one page of feedbackThreadCommentsQuery, its comment
+// nodes raw as gqlFeedbackThreadsPage's threads are.
+type gqlThreadCommentsPage struct {
+	Data struct {
+		Node *struct {
+			Comments *struct {
+				Nodes []json.RawMessage `json:"nodes"`
+			} `json:"comments"`
+		} `json:"node"`
 	} `json:"data"`
 }
 

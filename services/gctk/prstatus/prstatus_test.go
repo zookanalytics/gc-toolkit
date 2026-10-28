@@ -1,6 +1,9 @@
 package prstatus
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // The precedence table, one row per case pr-status-label.test.sh asserts.
 // Keeping them here too proves the rule in isolation from the `gc bd` gathering,
@@ -24,6 +27,16 @@ func TestDerive(t *testing.T) {
 		{"open visit on an approved PR", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, NeedsAttention},
 		{"open visit outranks live work", Facts{OpenVisit: true, InFlightCount: 2}, NeedsAttention},
 		{"a hold outranks an approval", Facts{MergeHold: "true", PRPosture: "approved@oid@t"}, NeedsAttention},
+
+		// Whatever Held names is a thing a person has to act on, so it holds the PR
+		// as a visit on the anchor does, whatever is in flight beside it.
+		{"an open visit on the PR's rework, the rework in flight", Facts{WorkVisit: true, InFlightCount: 1}, NeedsAttention},
+		{"an open visit on the work of an approved PR", Facts{WorkVisit: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t", InFlightCount: 1}, NeedsAttention},
+		{"a blocker a person owes", Facts{PersonBlocker: true}, NeedsAttention},
+		{"a blocker a person owes on an approved PR with work in flight", Facts{PersonBlocker: true, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
+		{"review feedback the city has not answered, nothing in flight", Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "1@oid"}, NeedsAttention},
+		{"…which a fix unit in flight answers", Facts{PRPosture: "review_required@oid@t", PRUnansweredThreads: "1@oid", InFlightCount: 1}, Working},
+		{"…and an answer or a resolve releases", Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "0@oid"}, NeedsReview},
 
 		// An approved PR with nothing known blocking it is the city's to land,
 		// whatever it waits on: the merge pass, a required check still running
@@ -50,6 +63,8 @@ func TestDerive(t *testing.T) {
 		{"an unknown machine value", Facts{PRPosture: "approved@oid@t", PRMachine: "stalled@oid@t"}, NeedsAttention},
 		{"an unknown blocked cause", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: "mystery"}, NeedsAttention},
 		{"a cause beside a verdict that is not blocked is not read", Facts{PRPosture: "approved@oid@t", PRMachine: "settled@oid@t", PRMachineCause: "mystery"}, Merging},
+		{"a thread count that is not a count", Facts{PRPosture: "review_required@oid@t", PRUnansweredThreads: "some@oid"}, NeedsAttention},
+		{"…read whatever head it was counted at", Facts{PRPosture: "approved@new@t", PRUnansweredThreads: "-1@old"}, NeedsAttention},
 
 		// The open-as-draft stage: the city opened the PR as a draft and owes the
 		// checks that flip it ready, so nothing asks a human to review it yet.
@@ -97,6 +112,76 @@ func TestBlocked(t *testing.T) {
 			}
 			if got := Derive(tc.f) == NeedsAttention; got != tc.want {
 				t.Errorf("Derive(%+v) reads needs-attention %v, want %v as Blocked reads it", tc.f, got, tc.want)
+			}
+		})
+	}
+}
+
+// Held names each thing that holds the PR, in the order visit, review, blocked,
+// and leaves out a value whose condition no longer stands. Any value means
+// Derive reads needs-attention; the holds that carry no value (merge_hold and
+// rebase_hold) read needs-attention with Held empty.
+func TestHeld(t *testing.T) {
+	approved := func(f Facts) Facts {
+		f.PRPosture = "approved@oid@t"
+		return f
+	}
+	threads := approved(Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseReviewThreads})
+	stuck := approved(Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker})
+	// The exemplar: an unapproved PR whose findings are closed, nothing in
+	// flight, and an operator thread unresolved with no answer of the city's,
+	// on a base that requires no thread resolution, so the merge pass records
+	// no thread verdict.
+	unanswered := Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "1@oid"}
+	with := func(f Facts, edit func(*Facts)) Facts { edit(&f); return f }
+	for _, tc := range []struct {
+		name string
+		f    Facts
+		want []Hold
+	}{
+		{"nothing holds the PR", Facts{}, nil},
+		{"an approved PR the city is landing", approved(Facts{PRMachine: "settled@oid@t", InFlightCount: 1}), nil},
+		{"the merge freeze carries no held value", Facts{MergeHold: "true"}, nil},
+		{"the rebase hold carries no held value", Facts{RebaseHold: "true"}, nil},
+
+		{"an open visit on the anchor", Facts{OpenVisit: true}, []Hold{HeldVisit}},
+		{"an open visit on the PR's rework", Facts{WorkVisit: true, InFlightCount: 1}, []Hold{HeldVisit}},
+		{"a visit on the anchor and one on its work are one value", Facts{OpenVisit: true, WorkVisit: true}, []Hold{HeldVisit}},
+
+		{"an unresolved required thread, nothing in flight", threads, []Hold{HeldReview}},
+		{"the thread verdict with a fix in flight", func() Facts { f := threads; f.InFlightCount = 1; return f }(), nil},
+		{"the thread verdict at a head the posture has left", func() Facts { f := threads; f.PRPosture = "approved@new@t"; return f }(), nil},
+		{"a failed check is not a review hold", approved(Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseCheckFailed}), nil},
+		{"a verdict that is not blocked keeps no thread cause", approved(Facts{PRMachine: "settled@oid@t", PRMachineCause: CauseReviewThreads}), nil},
+
+		{"review feedback the city has not answered, nothing in flight", unanswered, []Hold{HeldReview}},
+		{"…on an approved PR", approved(unanswered), []Hold{HeldReview}},
+		{"…with no posture recorded yet", Facts{PRUnansweredThreads: "2@oid"}, []Hold{HeldReview}},
+		{"…beside the thread verdict is one value", with(threads, func(f *Facts) { f.PRUnansweredThreads = "1@oid" }), []Hold{HeldReview}},
+		{"every thread answered or resolved", with(unanswered, func(f *Facts) { f.PRUnansweredThreads = "0@oid" }), nil},
+		{"a fix unit in flight answers the feedback", with(unanswered, func(f *Facts) { f.InFlightCount = 1 }), nil},
+		{"feedback still waiting to be routed", with(unanswered, func(f *Facts) { f.PRPosture = "commented@oid@t" }), nil},
+		{"a count read at a head the posture has left", with(unanswered, func(f *Facts) { f.PRPosture = "review_required@new@t" }), nil},
+		{"a count recorded with no head", with(unanswered, func(f *Facts) { f.PRUnansweredThreads = "1" }), nil},
+		{"a visit on the work the feedback waits on", with(unanswered, func(f *Facts) { f.WorkVisit = true; f.InFlightCount = 1 }), []Hold{HeldVisit}},
+
+		{"a blocker no automated actor holds", stuck, []Hold{HeldBlocked}},
+		{"the stuck blocker holds whatever is in flight", func() Facts { f := stuck; f.InFlightCount = 2; return f }(), []Hold{HeldBlocked}},
+		{"the stuck blocker at a head the posture has left", func() Facts { f := stuck; f.PRPosture = "approved@new@t"; return f }(), nil},
+		{"a blocker a person owes", Facts{PersonBlocker: true}, []Hold{HeldBlocked}},
+		{"a stuck blocker beside one a person owes is one value", func() Facts { f := stuck; f.PersonBlocker = true; return f }(), []Hold{HeldBlocked}},
+
+		{"a visit and a person's blocker stand together", Facts{OpenVisit: true, PersonBlocker: true}, []Hold{HeldVisit, HeldBlocked}},
+		{"a visit on the work beside the thread verdict", func() Facts { f := threads; f.WorkVisit = true; return f }(), []Hold{HeldVisit, HeldReview}},
+		{"every value at once", func() Facts { f := threads; f.OpenVisit = true; f.PersonBlocker = true; return f }(), []Hold{HeldVisit, HeldReview, HeldBlocked}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Held(tc.f)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("Held(%+v) = %v, want %v", tc.f, got, tc.want)
+			}
+			if len(got) > 0 && Derive(tc.f) != NeedsAttention {
+				t.Errorf("Held(%+v) = %v but Derive = %q, want needs-attention while any value stands", tc.f, got, Derive(tc.f))
 			}
 		})
 	}
@@ -160,5 +245,31 @@ func TestSplitDated(t *testing.T) {
 	// The split reaches Derive: a dated approved posture lands merging.
 	if got := Derive(Facts{PRPosture: "approved@abc123@2026-09-27T00:00:00Z"}); got != Merging {
 		t.Errorf("dated approved posture derived %q, want merging", got)
+	}
+}
+
+// The PR's own work in flight, whose visit holds the PR, is a review or rework
+// child that is open or in_progress. Any other kind in the in-flight set, or a
+// review or rework child at another live status, counts in flight and holds
+// nothing.
+func TestIsWork(t *testing.T) {
+	for _, tc := range []struct {
+		kind, status string
+		want         bool
+	}{
+		{"review", "open", true},
+		{"review", "in_progress", true},
+		{"rework", "open", true},
+		{"rework", "in_progress", true},
+		{"review", "blocked", false},
+		{"rework", "deferred", false},
+		{"rework", "", false},
+		{"validation", "open", false},
+		{"finding", "in_progress", false},
+		{"", "open", false},
+	} {
+		if got := IsWork(tc.kind, tc.status); got != tc.want {
+			t.Errorf("IsWork(%q, %q) = %v, want %v", tc.kind, tc.status, got, tc.want)
+		}
 	}
 }

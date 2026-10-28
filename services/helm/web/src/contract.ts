@@ -337,6 +337,18 @@ export interface Tile {
    * is `'start-failed'`, `''` on every other row. Always present.
    */
   visit_start_failure: string;
+  /**
+   * What holds this live merge anchor's PR that the city will not clear on its
+   * own, in order — `'visit'` (an open visit covers the anchor or one of its
+   * live review or rework children), `'review'` (an unresolved review thread
+   * holds the merge), `'blocked'` (a blocker no automated actor will clear, or
+   * one a person owes). Each is the value of one GitHub `held:` label, derived
+   * by the same code, and any of them reads `pr_phase` `'needs-attention'`.
+   * `null` on a PR nothing holds, on a closed row, and on a non-merge row. It is
+   * the PR's own: `held` is the visit on this row's bead, so a PR whose rework a
+   * visit holds carries `'visit'` here with `held` false.
+   */
+  pr_held: string[] | null;
 }
 
 /**

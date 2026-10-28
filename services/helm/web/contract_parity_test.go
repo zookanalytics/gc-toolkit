@@ -654,6 +654,10 @@ func fixtureBoard() board.Board {
 				// fixture carries both fields non-zero into the TypeScript check.
 				Acceptable:    true,
 				AcceptFormula: "mol-dispose-pr",
+				// The unrouted blocker holds the PR, the one held: label it
+				// carries, so the fixture takes pr_held into the TypeScript check
+				// as a list.
+				PRHeld: []string{"blocked"},
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into

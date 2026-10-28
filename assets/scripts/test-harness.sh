@@ -1028,6 +1028,15 @@ case "$sub" in
         done < <(grep -lF -- "\"$1\"" "$G"/threads_*.json 2>/dev/null)
         return 1
       }
+      # GraphQL answers only the fields a query names, so a review thread's
+      # comment keeps its review's state, which a dismissal is read from, and its
+      # reactionGroups only for a query that asks for each. asked($q) trims a
+      # list of comments to what the query $q names.
+      ASKED_JQ='def asked($q):
+        ($q | test("pullRequestReview\\s*\\{[^}]*\\bstate\\b")) as $st
+        | ($q | test("\\breactionGroups\\b")) as $rx
+        | map(if $st or (.pullRequestReview | type) != "object" then . else .pullRequestReview |= del(.state) end
+              | if $rx then . else del(.reactionGroups) end);'
       case "$gqquery" in
         *pullRequests\(states:OPEN*)
           # merge.sh's visit-order read: every open PR, served as one page from
@@ -1100,13 +1109,19 @@ case "$sub" in
         *reviewThreads*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
-          # `first: 100` is a real cap, so a thread longer than a page comes back
-          # cut to one — which is the whole reason the caller tops such a thread
-          # up. A stub handing back the full list would make that read look
-          # unnecessary and hide the resolve it gets wrong.
-          jq -c '{data: {repository: {pullRequest: {
+          # A thread's comments come back cut to the window the query names, its
+          # oldest for `first: N` and its newest for `last: N`, as the API cuts
+          # them. So a thread longer than a window comes back holding exactly one,
+          # which is the whole reason a caller reads such a thread again to its
+          # end. A stub handing back the full list would make that read look
+          # unnecessary and hide the answer it gets wrong.
+          jq -c --arg q "$gqquery" "$ASKED_JQ"'
+            (($q | capture("comments\\((?<end>first|last):(?<n>[0-9]+)")) // {end: "first", n: "100"}) as $w
+            | ($w.n | tonumber) as $n
+            | {data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
-                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])
+                  | if $w.end == "last" then .[-$n:] else .[0:$n] end | asked($q)) ]}}}}}' "$f"
           # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
           # hands back when a later page came back garbled.
           [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"
@@ -1118,9 +1133,9 @@ case "$sub" in
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           # The caller pages this one to exhaustion, so it answers with the whole
           # thread — the state the real API reaches after following its cursor.
-          jq -c --arg t "$tid" '{data: {node: {comments: {
+          jq -c --arg t "$tid" --arg q "$gqquery" "$ASKED_JQ"'{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
-              nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+              nodes: ([ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ] | asked($q))}}}}' "$f"
           exit 0 ;;
         *commits\(first:100,after:*)
           # The PR's commits, which a fix's answer cites. Served from the PR
