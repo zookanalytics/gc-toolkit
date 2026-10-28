@@ -109,10 +109,13 @@ Gas City upstream main 221b1476d.
     other rigs hold open child epics, and none carries `epic_hypothesis`. One
     holds the first phase of a product area's delivery, the case the operator
     approved. The others are numbered tracks of one epic.
-12. **Work in flight on the same files.** The native-gates convoy (tk-iirrmiw)
-    rewrites `docs/steering.md`, `docs/epic-stewardship.md`, the work skill, the
-    converse prompt and skills, and `derive.go`. On its branch a ruling's
-    `epic_ruling_evidence` is "the human gate the ruling cleared".
+12. **Work in flight on the same files.** The native-gates branch
+    (`integration/tk-iirrmiw`) rewrites `docs/steering.md`,
+    `docs/epic-stewardship.md`, the work skill, the converse prompt and skills,
+    and `derive.go`. On it a ruling's `epic_ruling_evidence` is "the human gate
+    the ruling cleared". Landing bead tk-1tfzr71.4 carries the branch to main,
+    and it closes when the branch lands. The convoy the branch is named for,
+    tk-iirrmiw, is closed, and what waited on it waits on tk-1tfzr71.4.
     Steer-by-epic's unit 11 (tk-rl8gz4b.14), which states a checkpoint's
     priority and park moves, is parked.
 
@@ -386,15 +389,15 @@ keeps taking its area's work and never closes, which the operator retired PR
 Each unit is filed under tk-wmwcdlc. Units 1 to 4 and 6 are each one
 reviewable change, pack-side, and none needs a Gas City change. Each updates
 the central documents its change makes stale. Unit 5 is sittings, not a
-change. Units 1 to 4 edit files the native-gates convoy rewrites (fact 12), so
-each waits for it and is written against what it leaves.
+change. Units 1 to 4 edit files the native-gates branch rewrites (fact 12), so
+each waits for the branch to land and is written against what it leaves.
 
 | # | Unit | Section | Needs | Done when |
 |---|---|---|---|---|
-| 1 | **The model in the epic docs.** `docs/epics.md` states the Feature and the Epic Checkpoint as built. `docs/epic-stewardship.md` says the close gate and I15 never hold a Feature and the checkpoint closes it, and narrows its direction to unit 6. `docs/steering.md` places work under a Feature as under an epic, and names the Feature level in its priority rule. | 1–5 | tk-iirrmiw | The three docs state the model. None calls the Feature layer unbuilt, and none names a sub-epic. |
-| 2 | **Filing into a Feature.** The work skill's "File new work" states section 2's rule, the list of open Features and the Feature's create. `converse-parent.sh` prints the nearest open parent-child ancestor, with its test. | 2, 4 | 1, tk-iirrmiw | The skill suites pass with the rule stated. `converse-parent.sh` prints the epic for a Story under a closed Feature of an open epic, and an empty line for a Story under a closed epic with no open ancestor. |
-| 3 | **The Epic Checkpoint by hand.** A pack skill that a sitting on an epic follows after a Feature lands: the evidence, the record, and section 5's writes in order. The converse prompt names the checkpoint's two closes. | 5 | 1, tk-iirrmiw | The skill and prompt suites pass, with the prompt's pins moved with its sentence. The first checkpoint after a Feature lands runs from the skill, and its record is on the epic's notes. |
-| 4 | **A landed Feature asks for its checkpoint.** The board's derivation rewords a landed Feature's row to name its checkpoint and bands it with the rows the operator owes. The supervisor source carries an epic's metadata on its row, as the direct store reader does. The derivation's comments say Feature where they say sub-epic. | 3 | 1, tk-iirrmiw | A board fixture renders a landed Feature that way, and a landed top-level epic and a landed child epic with a hypothesis as before. A supervisor source test reads an epic's `epic_hypothesis` off its row. The direct store reader is unchanged, and the wire contract gains no field. |
+| 1 | **The model in the epic docs.** `docs/epics.md` states the Feature and the Epic Checkpoint as built. `docs/epic-stewardship.md` says the close gate and I15 never hold a Feature and the checkpoint closes it, and narrows its direction to unit 6. `docs/steering.md` places work under a Feature as under an epic, and names the Feature level in its priority rule. | 1–5 | tk-1tfzr71.4 | The three docs state the model. None calls the Feature layer unbuilt, and none names a sub-epic. |
+| 2 | **Filing into a Feature.** The work skill's "File new work" states section 2's rule, the list of open Features and the Feature's create. `converse-parent.sh` prints the nearest open parent-child ancestor, with its test. | 2, 4 | 1, tk-1tfzr71.4 | The skill suites pass with the rule stated. `converse-parent.sh` prints the epic for a Story under a closed Feature of an open epic, and an empty line for a Story under a closed epic with no open ancestor. |
+| 3 | **The Epic Checkpoint by hand.** A pack skill that a sitting on an epic follows after a Feature lands: the evidence, the record, and section 5's writes in order. The converse prompt names the checkpoint's two closes. | 5 | 1, tk-1tfzr71.4 | The skill and prompt suites pass, with the prompt's pins moved with its sentence. The first checkpoint after a Feature lands runs from the skill, and its record is on the epic's notes. |
+| 4 | **A landed Feature asks for its checkpoint.** The board's derivation rewords a landed Feature's row to name its checkpoint and bands it with the rows the operator owes. The supervisor source carries an epic's metadata on its row, as the direct store reader does. The derivation's comments say Feature where they say sub-epic. | 3 | 1, tk-1tfzr71.4 | A board fixture renders a landed Feature that way, and a landed top-level epic and a landed child epic with a hypothesis as before. A supervisor source test reads an epic's `epic_hypothesis` off its row. The direct store reader is unchanged, and the wire contract gains no field. |
 | 5 | **The child epics on file.** A sitting on each epic that has an open child epic, asked for in that epic's store, reads each child against section 6. It is not a PR. | 6 | 1, 2 | No open child epic of an epic, in any rig store, lacks both an `Aim:` line and a hypothesis. |
 | 6 | **The checkpoint's machinery.** A design, drawn from the hand-run records, for what they show to be mechanical. Plausibly that is a formula that files the checkpoint and gathers its evidence when a Feature lands, and one verb that makes the ruling's writes. | 5 | 3, and two checkpoints run from the skill | The operator approves the design at its PR. |
 
