@@ -1101,12 +1101,81 @@ func TestEdgeReadsAreBatchedNotPerAnchor(t *testing.T) {
 			"dependents %d vs %d, dependencies %d vs %d (3 vs 60 anchors per kind)",
 			small.depnN, large.depnN, small.depyN, large.depyN)
 	}
-	// The fixed count is one batch per direction per gather pass. The open pass
-	// gathers every anchor; the closed pass finds none here, so it reads no edges
-	// at all — hence exactly one of each.
-	if large.depnN != 1 || large.depyN != 1 {
-		t.Errorf("expected one batched read per direction, got dependents=%d dependencies=%d",
+	// The fixed count is one batch per direction per gather pass, plus one more
+	// outbound batch for the waits of the open children those anchors roll up.
+	// The open pass gathers every anchor; the closed pass finds none here, so it
+	// reads no edges at all — hence one inbound read and two outbound ones.
+	if large.depnN != 1 || large.depyN != 2 {
+		t.Errorf("expected one inbound read and two outbound ones, got dependents=%d dependencies=%d",
 			large.depnN, large.depyN)
+	}
+}
+
+// TestOpenChildrenCarryTheirWaits: an open child of a live anchor carries its
+// own `blocks` waits, hydrated with the fields the board classifies it by, so
+// the roll-up can tell a child waiting its turn from one nothing will start. A
+// closed child reads none, and a failed read degrades to no waits with a
+// partial note rather than costing the anchor its row.
+func TestOpenChildrenCarryTheirWaits(t *testing.T) {
+	build := func() *fakeStore {
+		gate := issue("tk-gate", "parked until the design is signed", "gate", 2, testNow, "")
+		sibling := child("tk-ep.1", "open", testNow, `{"merge_result":"pull_request"}`)
+		armed := child("tk-ep.2", "open", testNow, `{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"}`)
+		held := child("tk-ep.3", "open", testNow, "")
+		done := child("tk-ep.4", "closed", testNow, "")
+		return &fakeStore{
+			issues: map[string][]*beads.Issue{
+				"epic": {issue("tk-ep", "an epic", "epic", 2, testNow, "")},
+				"gate": {gate},
+			},
+			depsUp: map[string][]*beads.IssueWithDependencyMetadata{"tk-ep": {
+				withDepType(sibling, "parent-child"), withDepType(armed, "parent-child"),
+				withDepType(held, "parent-child"), withDepType(done, "parent-child"),
+			}},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+				"tk-ep.2": {withDepType(child("tk-ep.1", "open", testNow, `{"merge_result":"pull_request"}`), "blocks")},
+				"tk-ep.3": {withDepType(&beads.IssueWithDependencyMetadata{Issue: *gate}, "blocks")},
+				"tk-ep.4": {withDepType(child("tk-ep.1", "open", testNow, ""), "blocks")},
+			},
+		}
+	}
+
+	res := gatherOneStore(t, build())
+	j, ok := findAnchor(res, "tk-ep")
+	if !ok {
+		t.Fatal("the epic is missing")
+	}
+	waits := map[string][]board.Blocker{}
+	for _, c := range res.Anchors[j].Children {
+		waits[c.ID] = c.Blockers
+	}
+	if got := waits["tk-ep.2"]; len(got) != 1 || got[0].ID != "tk-ep.1" || got[0].Status != "open" {
+		t.Errorf("the armed child waits on its open sibling: %+v", got)
+	}
+	if got := waits["tk-ep.3"]; len(got) != 1 || got[0].IssueType != "gate" || got[0].Title != "parked until the design is signed" {
+		t.Errorf("the held child's gate is hydrated with its type and title: %+v", got)
+	}
+	if len(waits["tk-ep.1"]) != 0 || len(waits["tk-ep.4"]) != 0 {
+		t.Errorf("a child with no wait, and a closed child, carry none: %+v / %+v", waits["tk-ep.1"], waits["tk-ep.4"])
+	}
+
+	failing := build()
+	failing.failDeps = map[string]error{"tk-ep.2": errors.New("dolt timeout")}
+	res = gatherOneStore(t, failing)
+	j, ok = findAnchor(res, "tk-ep")
+	if !ok {
+		t.Fatal("a failed child-waits read must not cost the epic its row")
+	}
+	if len(res.Anchors[j].Children) != 4 {
+		t.Errorf("the children survive a failed waits read: %+v", res.Anchors[j].Children)
+	}
+	for _, c := range res.Anchors[j].Children {
+		if len(c.Blockers) != 0 {
+			t.Errorf("%s: a failed read invents no waits: %+v", c.ID, c.Blockers)
+		}
+	}
+	if !res.Partial {
+		t.Error("a failed child-waits read is noted partial")
 	}
 }
 
@@ -2484,6 +2553,8 @@ func mergeStore() *fakeStore {
 					`{"merge_result":"pre_open_gate","branch":"polecat/tk-pre","gc.routed_to":"human","pr.machine":"progressing@aaaa@2026-08-28T04:05:06Z"}`),
 				issue("tk-open", "an ordinary open PR", "task", 2, testNow,
 					`{"merge_result":"pull_request","pr_number":"512","branch":"polecat/tk-open"}`),
+				issue("tk-talked", "an open PR a sitting talked about", "task", 2, testNow,
+					`{"merge_result":"pull_request","pr_number":"513","branch":"polecat/tk-talked","gc.takeaway":"ruled; in rework"}`),
 				issue("tk-quiet", "no merge_result at all", "task", 2, testNow, `{"branch":"polecat/tk-quiet"}`),
 			},
 		},
@@ -2766,6 +2837,12 @@ func TestMergeAnchorsAreGathered(t *testing.T) {
 	}
 	if got := kinds["tk-open"]; len(got) != 1 || got[0] != "merge" {
 		t.Errorf("tk-open kinds = %v, want [merge] — a detached anchor has no route to gather it", got)
+	}
+	// A pull request a sitting talked about carries a takeaway too and gathers
+	// twice. `merge` comes FIRST, so the dedup leaves the pull request's row: the
+	// takeaway does not make it a parked bead.
+	if got := kinds["tk-talked"]; len(got) != 2 || got[0] != "merge" || got[1] != "parked" {
+		t.Errorf("tk-talked kinds = %v, want [merge parked] in that order", got)
 	}
 	if got := kinds["tk-quiet"]; got != nil {
 		t.Errorf("a bead with no merge_result is not a merge anchor: %v", got)

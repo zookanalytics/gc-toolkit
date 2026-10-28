@@ -296,7 +296,9 @@ func TestParkedWithLiveMoleculeIsActive(t *testing.T) {
 	if live.Section != SectionActive {
 		t.Errorf("…so it bands active, not cleanup: got %s", live.Section)
 	}
-	if live.Frontier != "working · parked — work in flight" {
+	// The frontier speaks the row's state: a takeaway does not park a bead the
+	// city is working.
+	if live.Frontier != "working · in flight" {
 		t.Errorf("frontier: %q", live.Frontier)
 	}
 	// The takeaway still answers NEEDS, exactly as it does for ruledInFlight: the
@@ -1522,14 +1524,15 @@ func TestParkedChildIsNotIdleWork(t *testing.T) {
 }
 
 // TestAllChildrenParkedIsNotStranded: when the ONLY open children are waiting
-// on the operator, the parent has no ask of its own — the asks are on the
-// children's own rows.
+// on the operator, the parent has no ask of its own — the asks are the
+// operator's, on the children or the gates that hold them.
 func TestAllChildrenParkedIsNotStranded(t *testing.T) {
 	anchors := []Anchor{{
 		ID: "tk-epic", Title: "everything is with the operator", Kind: "epic", Source: "epic",
 		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "tk-a", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}},
-			{ID: "tk-b", Status: "open", Metadata: map[string]string{"gc.takeaway": "ruling owed"}},
+			{ID: "tk-b", Status: "open", Metadata: map[string]string{"gc.takeaway": "ruling owed"},
+				Blockers: []Blocker{{ID: "tk-gate", Title: "parked until the ruling", Status: "open", IssueType: "gate"}}},
 			{ID: "tk-c", Status: "closed"},
 		},
 	}}
@@ -1552,6 +1555,363 @@ func TestAllChildrenParkedIsNotStranded(t *testing.T) {
 	}
 	if len(tile.OpenHeads) != 0 {
 		t.Errorf("open_heads = %v, want empty", tile.OpenHeads)
+	}
+}
+
+// TestTakeawayAloneDoesNotParkAChild: a child is parked when a person holds it,
+// not because a sitting left a takeaway on it. With no wait, no route, no arm
+// and nothing in progress, nothing will start it, so it strands its parent.
+func TestTakeawayAloneDoesNotParkAChild(t *testing.T) {
+	anchors := []Anchor{{
+		ID: "ra-epic", Title: "a sitting concluded and routed nothing", Kind: "epic", Source: "epic",
+		Rig: "rig-a", Prefix: "ra", Priority: ptr(2), Children: []Child{
+			{ID: "ra-epic.1", Status: "open", Metadata: map[string]string{"gc.takeaway": "ruled — do it after sign-up"}},
+		},
+	}}
+	tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-epic")
+	if len(tile.ParkedHeads) != 0 || !equalIDs(tile.OpenHeads, []string{"ra-epic.1"}) {
+		t.Errorf("the takeaway child is stranded, not parked: parked=%v open=%v", tile.ParkedHeads, tile.OpenHeads)
+	}
+	if !tile.Stranded || tile.Severity != SevHigh {
+		t.Errorf("nothing will start it, so the epic strands: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+	}
+	if tile.Frontier != "needs-review · 1 open · 0 in flight (stranded)" {
+		t.Errorf("frontier = %q", tile.Frontier)
+	}
+}
+
+// TestQueuedChildrenAreNotStranded covers an epic whose open children wait
+// their turn behind a sibling in review. Each queued child is armed, so it
+// starts by itself once the sibling lands: none of them is work nobody has
+// picked up. The sibling carries a takeaway, an open pull request whose review
+// rounds have all closed, and a sitting in progress, and it reads in review.
+// Children that nothing holds and nothing will start still strand the epic.
+func TestQueuedChildrenAreNotStranded(t *testing.T) {
+	arm := "rig-a/gc-toolkit.polecat"
+	inReview := Blocker{ID: "ra-epic.1", Title: "Platform admin", Status: "open", IssueType: "task"}
+	round := Blocker{ID: "ra-rework", Title: "Rework PR #62", Status: "closed", IssueType: "task",
+		RoutedTo: "rig-a/gc-toolkit.polecat"}
+	waiting := []Child{
+		{ID: "ra-epic.1", Status: "open", Blockers: []Blocker{round},
+			Metadata: map[string]string{"gc.takeaway": "ruled; PR #62 is in rework", "merge_result": "pull_request", "pr_number": "62"}},
+		{ID: "ra-epic.2", Status: "open", Blockers: []Blocker{inReview},
+			Metadata: map[string]string{"gc.dispatch_when_ready": arm}},
+		{ID: "ra-epic.3", Status: "open", Blockers: []Blocker{inReview},
+			Metadata: map[string]string{"gc.dispatch_when_ready": arm, "gc.takeaway": "after sign-up"}},
+		{ID: "ra-epic.4", Status: "open", Blockers: []Blocker{round, inReview},
+			Metadata: map[string]string{"gc.dispatch_when_ready": arm}},
+		{ID: "ra-epic.5", Status: "closed"},
+	}
+	facts := Facts{
+		Sittings: []Sitting{{ID: "ra-visit", Subject: "ra-epic.1", Subjects: []string{"ra-epic.1"},
+			Title: "visit: ra-epic.1 — settle the rework", Status: sittingInProgress, Session: "converse-1"}},
+		Visits: map[string]bool{"ra-epic.1": true},
+	}
+	epic := func(kids []Child) []Anchor {
+		return []Anchor{{ID: "ra-epic", Title: "Platform foundation", Kind: "epic", Source: "epic",
+			Rig: "rig-a", Prefix: "ra", Priority: ptr(2), Children: kids}}
+	}
+
+	t.Run("every open child waits on something", func(t *testing.T) {
+		tile := mustTile(t, BuildBoard(epic(waiting), fixtureNow, false, nil, facts), "ra-epic")
+		if tile.Stranded || tile.Severity == SevHigh {
+			t.Errorf("children waiting their turn do not strand the epic: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+		}
+		if tile.Frontier != "needs-review · 1 in review · 3 queued · nothing idle" {
+			t.Errorf("frontier = %q", tile.Frontier)
+		}
+		if tile.Needs != "nothing idle — 1 in review, 3 queued" {
+			t.Errorf("needs = %q", tile.Needs)
+		}
+		if len(tile.OpenHeads) != 0 || len(tile.ParkedHeads) != 0 {
+			t.Errorf("nothing is idle or parked: open=%v parked=%v", tile.OpenHeads, tile.ParkedHeads)
+		}
+		if tile.Open != 4 {
+			t.Errorf("open = %d, want the honest total 4", tile.Open)
+		}
+	})
+
+	t.Run("children nothing will start still strand it", func(t *testing.T) {
+		kids := append(append([]Child{}, waiting...),
+			Child{ID: "ra-epic.6", Status: "open"},
+			Child{ID: "ra-epic.7", Status: "open", Metadata: map[string]string{"placement": "pending"}})
+		tile := mustTile(t, BuildBoard(epic(kids), fixtureNow, false, nil, facts), "ra-epic")
+		if !tile.Stranded || tile.Severity != SevHigh {
+			t.Errorf("two children nothing will start strand the epic: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+		}
+		if tile.Frontier != "needs-review · 2 open · 0 in flight (stranded) · 1 in review · 3 queued" {
+			t.Errorf("the frontier counts the stranded ones and names the rest: %q", tile.Frontier)
+		}
+		if !equalIDs(tile.OpenHeads, []string{"ra-epic.6", "ra-epic.7"}) {
+			t.Errorf("open_heads names only the stranded children: %v", tile.OpenHeads)
+		}
+	})
+}
+
+// TestNestedParentReadsItsChildren: a sub-epic carries no route and no arm of
+// its own, so read by its own bead alone it would always be stranded. Nothing
+// holds its bead, so its parent counts it by what its own children are doing:
+// queued while they wait their turn, in flight while one moves, and stranded
+// only while one is idle. The reading carries through every level.
+func TestNestedParentReadsItsChildren(t *testing.T) {
+	arm := map[string]string{"gc.dispatch_when_ready": "rig-a/gc-toolkit.polecat"}
+	sibling := Blocker{ID: "ra-x", Title: "Platform admin", Status: "open", IssueType: "task"}
+	live := liveOwners("polecat-live")
+	family := func(leaf Child) []Anchor {
+		return []Anchor{
+			{ID: "ra-top", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{{ID: "ra-mid", Status: "open"}, {ID: "ra-done", Status: "closed"}}},
+			{ID: "ra-mid", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{{ID: "ra-sub", Status: "open"}}},
+			{ID: "ra-sub", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{leaf}},
+		}
+	}
+	cases := []struct {
+		name          string
+		leaf          Child
+		wantStranded  bool
+		wantFrontier  string
+		wantInFlight  int
+		wantOpenHeads []string
+	}{
+		{"its children wait their turn", Child{ID: "ra-leaf", Status: "open", Metadata: arm, Blockers: []Blocker{sibling}},
+			false, "needs-review · 1 queued · nothing idle", 0, []string{}},
+		{"one of its children moves", Child{ID: "ra-leaf", Status: "in_progress", Assignee: "polecat-live"},
+			false, "needs-review · 1 open · 1 in flight", 1, []string{}},
+		{"one of its children is idle", Child{ID: "ra-leaf", Status: "open"},
+			true, "needs-review · 1 open · 0 in flight (stranded)", 0, []string{"ra-mid"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			top := mustTile(t, BuildBoard(family(tc.leaf), fixtureNow, false, nil, live), "ra-top")
+			if top.Stranded != tc.wantStranded || top.Frontier != tc.wantFrontier ||
+				top.InProgressLive != tc.wantInFlight || !equalIDs(top.OpenHeads, tc.wantOpenHeads) {
+				t.Errorf("stranded=%v frontier=%q in_progress_live=%d open_heads=%v, want %v / %q / %d / %v",
+					top.Stranded, top.Frontier, top.InProgressLive, top.OpenHeads,
+					tc.wantStranded, tc.wantFrontier, tc.wantInFlight, tc.wantOpenHeads)
+			}
+		})
+	}
+
+	// A sub-epic its own bead holds keeps that state: a person parked it.
+	anchors := family(Child{ID: "ra-leaf", Status: "open"})
+	anchors[0].Children[0].Blockers = []Blocker{{ID: "ra-gate", Title: "parked for the quarter", Status: "open", IssueType: "gate"}}
+	top := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, live), "ra-top")
+	if top.Stranded || !equalIDs(top.ParkedHeads, []string{"ra-mid"}) {
+		t.Errorf("a parked sub-epic is parked, whatever its children do: stranded=%v parked=%v", top.Stranded, top.ParkedHeads)
+	}
+}
+
+// TestAncestorWaitHoldsTheFamily: bd keeps a bead out of `bd ready` while it or
+// a parent-child ancestor has an open blocker, so the children of a parked epic
+// are held by the park, not stranded, and the epic names the gate that holds
+// them. Work already in flight under the park keeps running and reads so. An
+// epic waiting on open work holds its children the same way, queued behind it.
+// A convoy's members hang off it by `tracks`, which bd does not cascade, so a
+// convoy's own wait holds none of them.
+func TestAncestorWaitHoldsTheFamily(t *testing.T) {
+	gate := Blocker{ID: "ra-gate", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate"}
+	work := Blocker{ID: "ra-w", Title: "the platform build", Status: "open", IssueType: "task"}
+	sibling := Blocker{ID: "ra-x", Title: "Platform admin", Status: "open", IssueType: "task"}
+	arm := map[string]string{"gc.dispatch_when_ready": "rig-a/gc-toolkit.polecat"}
+	live := liveOwners("polecat-live")
+	waitsOn := func(a Anchor, b Blocker) Anchor {
+		a.Blockers = []Blocker{b}
+		a.WaitingOn = []string{b.ID}
+		return a
+	}
+	epic := func(id string, kids ...Child) Anchor {
+		return Anchor{ID: id, Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra", Children: kids}
+	}
+
+	t.Run("a parked epic holds its children", func(t *testing.T) {
+		b := BuildBoard([]Anchor{waitsOn(epic("ra-e",
+			Child{ID: "ra-e.1", Status: "open"},
+			Child{ID: "ra-e.2", Status: "open", Metadata: arm, Blockers: []Blocker{sibling}},
+		), gate)}, fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if tile.Stranded || tile.Severity == SevHigh || !equalIDs(tile.ParkedHeads, []string{"ra-e.1", "ra-e.2"}) {
+			t.Errorf("held children are parked, not stranded: sev=%s stranded=%v parked=%v", tile.Severity, tile.Stranded, tile.ParkedHeads)
+		}
+		if tile.Frontier != "needs-review · 2 parked for the operator · nothing idle" {
+			t.Errorf("frontier = %q", tile.Frontier)
+		}
+		if tile.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("the epic names the gate that holds it: %q", tile.Needs)
+		}
+	})
+
+	t.Run("work in flight under the park keeps running", func(t *testing.T) {
+		b := BuildBoard([]Anchor{waitsOn(epic("ra-e",
+			Child{ID: "ra-e.1", Status: "open"},
+			Child{ID: "ra-e.3", Status: "in_progress", Assignee: "polecat-live"},
+			Child{ID: "ra-e.4", Status: "open", Metadata: map[string]string{"merge_result": "pull_request"}},
+		), gate)}, fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if tile.Frontier != "needs-review · 1 open · 1 in flight · 1 in review · 1 parked for the operator" {
+			t.Errorf("frontier = %q", tile.Frontier)
+		}
+	})
+
+	t.Run("the hold reaches through a nested parent", func(t *testing.T) {
+		b := BuildBoard([]Anchor{
+			waitsOn(epic("ra-e", Child{ID: "ra-s", Status: "open"}), gate),
+			epic("ra-s", Child{ID: "ra-s.1", Status: "open"}),
+		}, fixtureNow, false, nil, live)
+		top, sub := mustTile(t, b, "ra-e"), mustTile(t, b, "ra-s")
+		if !equalIDs(top.ParkedHeads, []string{"ra-s"}) || top.Stranded {
+			t.Errorf("the nested parent is held: parked=%v stranded=%v", top.ParkedHeads, top.Stranded)
+		}
+		if sub.Stranded || !equalIDs(sub.ParkedHeads, []string{"ra-s.1"}) {
+			t.Errorf("its own children are held by the park above it: parked=%v stranded=%v", sub.ParkedHeads, sub.Stranded)
+		}
+	})
+
+	t.Run("an epic waiting on work holds its children queued", func(t *testing.T) {
+		b := BuildBoard([]Anchor{waitsOn(epic("ra-e",
+			Child{ID: "ra-e.1", Status: "open"}, Child{ID: "ra-e.2", Status: "open"},
+		), work)}, fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if tile.Stranded || tile.Frontier != "needs-review · 2 queued · nothing idle" || tile.Needs != "queued behind the platform build" {
+			t.Errorf("stranded=%v frontier=%q needs=%q", tile.Stranded, tile.Frontier, tile.Needs)
+		}
+	})
+
+	t.Run("a convoy's wait does not hold its members", func(t *testing.T) {
+		cv := waitsOn(Anchor{ID: "ra-cv", Kind: "convoy", Source: "convoy", Rig: "rig-a", Prefix: "ra",
+			Children: []Child{{ID: "ra-m1", Status: "open"}}}, gate)
+		tile := mustTile(t, BuildBoard([]Anchor{cv}, fixtureNow, false, nil, live), "ra-cv")
+		if !tile.Stranded || !equalIDs(tile.OpenHeads, []string{"ra-m1"}) {
+			t.Errorf("a tracked member nothing holds is stranded: stranded=%v open=%v", tile.Stranded, tile.OpenHeads)
+		}
+	})
+}
+
+// TestInReviewBeadIsNotADisposition: a bead carrying a takeaway, every
+// recorded wait closed, an open pull request and a sitting in progress is a
+// pull request in review. Its closed waits are its finished review rounds, not
+// a park that ended, so it owes no disposition. The gather admits it twice, as
+// a merge anchor and by its takeaway, and the two rows read alike.
+func TestInReviewBeadIsNotADisposition(t *testing.T) {
+	md := map[string]string{
+		"merge_result": "pull_request", "pr_number": "62", "branch": "polecat/ra-pr",
+		"gc.takeaway": "Ruled: previews get an admin login. PR #62 is in rework so the demo can capture",
+	}
+	twin := func(kind string) Anchor {
+		return Anchor{ID: "ra-pr", Title: "Platform admin", Kind: kind, Source: kind, Rig: "rig-a", Prefix: "ra",
+			Priority: ptr(1), UpdatedAt: daysAgo(1), Metadata: md, Takeaway: md["gc.takeaway"],
+			WaitingOn: []string{"ra-r1", "ra-r2"}, WaitingOnClosed: []string{"ra-r1", "ra-r2"},
+			Blockers: []Blocker{
+				{ID: "ra-r1", Title: "Review PR #62", Status: "closed", IssueType: "task", RoutedTo: "rig-a/gc-toolkit.polecat"},
+				{ID: "ra-r2", Title: "Rework PR #62", Status: "closed", IssueType: "task", RoutedTo: "rig-a/gc-toolkit.polecat"},
+			}}
+	}
+	facts := Facts{
+		Sittings: []Sitting{{ID: "ra-visit", Subject: "ra-pr", Subjects: []string{"ra-pr"},
+			Title: "visit: ra-pr — settle the rework", Status: sittingInProgress, Session: "converse-1"}},
+		Visits: map[string]bool{"ra-pr": true},
+	}
+
+	for _, order := range [][]string{{"merge", "parked"}, {"parked", "merge"}} {
+		t.Run(strings.Join(order, " then "), func(t *testing.T) {
+			b := BuildBoard([]Anchor{twin(order[0]), twin(order[1])}, fixtureNow, false, nil, facts)
+			if len(b.Tiles) != 1 {
+				t.Fatalf("the twins are one bead: %d tiles", len(b.Tiles))
+			}
+			tile := b.Tiles[0]
+			if tile.Kind != order[0] {
+				t.Errorf("the twins tie, so the row the gather admits first stands: kind=%s", tile.Kind)
+			}
+			if tile.DispositionDue || tile.Needs == "blocker landed — dispose or resume" {
+				t.Errorf("a pull request in review owes no disposition: disposition_due=%v needs=%q", tile.DispositionDue, tile.Needs)
+			}
+			if tile.Section != SectionReview {
+				t.Errorf("it reads in review: section=%s", tile.Section)
+			}
+			if tile.Frontier != "needs-attention · PR #62" {
+				t.Errorf("the frontier names the pull request, not a park: %q", tile.Frontier)
+			}
+			if tile.Needs != md["gc.takeaway"] {
+				t.Errorf("a merge anchor spends its takeaway as NEEDS: %q", tile.Needs)
+			}
+			if tile.Owed {
+				t.Error("nothing on the pull request is owed, and no disposition is")
+			}
+			if tile.VisitState != VisitEngaged {
+				t.Errorf("the sitting in progress still shows: visit_state=%q", tile.VisitState)
+			}
+		})
+	}
+}
+
+// TestTakeawayRowSpeaksItsState: a childless takeaway row says what its graph
+// says it waits on, ahead of the takeaway, which stays on the wire. It names
+// the wait it is queued or parked behind, and says when it starts by itself.
+// Once every recorded wait has landed, it reads its live state, and a
+// disposition only when nothing holds or moves it.
+func TestTakeawayRowSpeaksItsState(t *testing.T) {
+	work := Blocker{ID: "ra-1", Title: "Platform admin", Status: "open", IssueType: "task"}
+	gate := Blocker{ID: "ra-gate", Title: "parked until the design is signed", Status: "open", IssueType: "gate"}
+	landed := Blocker{ID: "ra-done", Title: "the routed fix", Status: "closed", IssueType: "task"}
+	row := func(id string, md map[string]string, blockers ...Blocker) Anchor {
+		full := map[string]string{"gc.takeaway": "the sitting's conclusion"}
+		for k, v := range md {
+			full[k] = v
+		}
+		a := Anchor{ID: id, Title: "t " + id, Kind: "parked", Source: "parked", Rig: "rig-a", Prefix: "ra",
+			Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: full, Takeaway: full["gc.takeaway"], Blockers: blockers}
+		for _, b := range blockers {
+			a.WaitingOn = append(a.WaitingOn, b.ID)
+			if b.Status == "closed" {
+				a.WaitingOnClosed = append(a.WaitingOnClosed, b.ID)
+			}
+		}
+		return a
+	}
+	arm := map[string]string{"gc.dispatch_when_ready": "rig-a/gc-toolkit.polecat"}
+	anchors := []Anchor{
+		row("ra-queued", arm, landed, work),
+		row("ra-queued-bare", nil, work),
+		row("ra-parked", arm, gate, work),
+		row("ra-talk", nil, landed),
+		row("ra-asked", nil, landed),
+		row("ra-armed", arm, landed),
+		row("ra-done", nil, landed),
+	}
+	facts := Facts{
+		Sittings: []Sitting{
+			{ID: "ra-visit", Subject: "ra-talk", Subjects: []string{"ra-talk"},
+				Title: "visit: ra-talk — what next", Status: sittingInProgress, Session: "converse-1"},
+			{ID: "ra-visit2", Subject: "ra-asked", Subjects: []string{"ra-asked"},
+				Title: "visit: ra-asked — close it or say why not", Status: sittingOpen},
+		},
+		Visits: map[string]bool{"ra-talk": true, "ra-asked": true},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
+
+	cases := []struct {
+		id, frontier, needs string
+		dispositionDue      bool
+	}{
+		{"ra-queued", "needs-review · queued · waiting on 1 · starts by itself",
+			"queued behind Platform admin — starts by itself when it lands", false},
+		{"ra-queued-bare", "needs-review · queued · waiting on 1", "queued behind Platform admin", false},
+		{"ra-parked", "needs-review · parked · waiting on 2", "parked: parked until the design is signed", false},
+		{"ra-talk", "needs-attention · in conversation", "held by an open visit: what next", false},
+		{"ra-asked", "needs-attention · held by an open visit", "held by an open visit: close it or say why not", false},
+		{"ra-armed", "needs-review · queued · starts by itself", "queued — starts by itself", false},
+		{"ra-done", "needs-review · blocker landed", "blocker landed — dispose or resume", true},
+	}
+	for _, tc := range cases {
+		tile := mustTile(t, b, tc.id)
+		if tile.Frontier != tc.frontier || tile.Needs != tc.needs || tile.DispositionDue != tc.dispositionDue {
+			t.Errorf("%s: frontier=%q needs=%q disposition_due=%v, want %q / %q / %v",
+				tc.id, tile.Frontier, tile.Needs, tile.DispositionDue, tc.frontier, tc.needs, tc.dispositionDue)
+		}
+		if tile.Takeaway == nil || *tile.Takeaway != "the sitting's conclusion" {
+			t.Errorf("%s: the takeaway stays on the wire: %v", tc.id, tile.Takeaway)
+		}
 	}
 }
 
@@ -1641,28 +2001,70 @@ func TestParkedSplitIgnoresAMovingChild(t *testing.T) {
 	}
 }
 
-// TestHasOwnRowReadsPresenceNotTruthiness: bd round-trips an empty metadata
-// value and the decode keeps the key, so a blanked takeaway still gives the bead
-// a row. This reading must match the gather's selector, or a child is an anchor
-// on the board and idle work under its parent at the same time.
-func TestHasOwnRowReadsPresenceNotTruthiness(t *testing.T) {
+// TestDeriveStateReadsTheGraphNotTheMarkers covers each state a bead can be in,
+// read off its own waits, route, arm and live work. A takeaway, blank or not,
+// decides nothing: the state is what holds the bead, not what was said about it.
+func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
+	work := Blocker{ID: "ra-work", Title: "the sibling it waits behind", Status: "open", IssueType: "task"}
+	gate := Blocker{ID: "ra-gate", Title: "parked until the design is signed", Status: "open", IssueType: "gate"}
+	decision := Blocker{ID: "ra-dec", Title: "pick a vendor", Status: "open", IssueType: "decision"}
+	visitWait := Blocker{ID: "ra-visit", Title: "visit: rule on it", Status: "open", IssueType: "task", RoutedTo: routedHuman}
+	landed := Blocker{ID: "ra-done", Title: "landed work", Status: "closed", IssueType: "task"}
+	live := liveOwners("polecat-live")
+	live.Inflight = map[string][]string{"ra-slung": {"polecat-live"}}
+	sittings := Facts{
+		Sittings: []Sitting{
+			{ID: "ra-v1", Subject: "ra-talk", Subjects: []string{"ra-talk"}, Status: sittingInProgress, Session: "converse-1"},
+			{ID: "ra-v2", Subject: "ra-asked", Subjects: []string{"ra-asked"}, Status: sittingOpen},
+			{ID: "ra-v3", Subject: "ra-pr-talk", Subjects: []string{"ra-pr-talk"}, Status: sittingInProgress, Session: "converse-2"},
+		},
+		Visits: map[string]bool{"ra-talk": true, "ra-asked": true, "ra-pr-talk": true},
+	}
 	cases := []struct {
-		name string
-		md   map[string]string
-		want bool
+		name      string
+		in        stateInput
+		facts     Facts
+		want      string
+		selfStart bool
 	}{
-		{"nil", nil, false},
-		{"empty", map[string]string{}, false},
-		{"routed to the operator", map[string]string{"gc.routed_to": "human"}, true},
-		{"routed to an agent", map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}, false},
-		{"takeaway present", map[string]string{"gc.takeaway": "held"}, true},
-		{"takeaway blanked", map[string]string{"gc.takeaway": ""}, true},
-		{"only a neighbouring key", map[string]string{"gc.takeaway_at": "2026-08-26T00:00:00Z"}, false},
+		{name: "nothing holds it", in: stateInput{id: "ra-a"}, want: stateStranded},
+		{name: "a takeaway alone", in: stateInput{id: "ra-a", metadata: map[string]string{mdTakeaway: "ruling owed"}}, want: stateStranded},
+		{name: "a blanked takeaway", in: stateInput{id: "ra-a", metadata: map[string]string{mdTakeaway: ""}}, want: stateStranded},
+		{name: "only landed waits", in: stateInput{id: "ra-a", blockers: []Blocker{landed}}, want: stateStranded},
+		{name: "waits on open work", in: stateInput{id: "ra-a", blockers: []Blocker{landed, work}}, want: stateQueued},
+		{name: "waits on open work, armed", in: stateInput{id: "ra-a", blockers: []Blocker{work},
+			metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}}, want: stateQueued, selfStart: true},
+		{name: "an unread wait", in: stateInput{id: "ra-a", unread: 1}, want: stateQueued},
+		{name: "routed to a pool", in: stateInput{id: "ra-a", metadata: map[string]string{mdRoutedTo: "rig-a/gc-toolkit.polecat"}},
+			want: stateQueued, selfStart: true},
+		{name: "armed with nothing open", in: stateInput{id: "ra-a", metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}},
+			want: stateQueued, selfStart: true},
+		{name: "assigned and not started", in: stateInput{id: "ra-a", status: "open", assignee: "rig-a/gc-toolkit.refinery"},
+			want: stateQueued, selfStart: true},
+		{name: "waits on a park gate", in: stateInput{id: "ra-a", blockers: []Blocker{gate}}, want: stateParked},
+		{name: "waits on a decision", in: stateInput{id: "ra-a", blockers: []Blocker{decision}}, want: stateParked},
+		{name: "waits on a visit", in: stateInput{id: "ra-a", blockers: []Blocker{visitWait}}, want: stateParked},
+		{name: "a gate outranks open work", in: stateInput{id: "ra-a", blockers: []Blocker{work, gate},
+			metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}}, want: stateParked},
+		{name: "routed to the operator", in: stateInput{id: "ra-a", metadata: map[string]string{mdRoutedTo: routedHuman}}, want: stateParked},
+		{name: "a visit no one has engaged", in: stateInput{id: "ra-asked"}, facts: sittings, want: stateParked},
+		{name: "a live sitting", in: stateInput{id: "ra-talk", blockers: []Blocker{work}}, facts: sittings, want: stateInConversation},
+		{name: "an open pull request", in: stateInput{id: "ra-pr", metadata: map[string]string{mdMergeResult: "pull_request"},
+			blockers: []Blocker{landed}}, want: stateInReview},
+		{name: "a pre-open gate", in: stateInput{id: "ra-pr", metadata: map[string]string{mdMergeResult: "pre_open_gate"}}, want: stateInReview},
+		{name: "a pull request outranks its conversation", in: stateInput{id: "ra-pr-talk",
+			metadata: map[string]string{mdMergeResult: "pull_request", mdTakeaway: "in rework"}, blockers: []Blocker{landed}},
+			facts: sittings, want: stateInReview},
+		{name: "a merge held for the operator is not in review", in: stateInput{id: "ra-held",
+			metadata: map[string]string{mdMergeResult: "held", mdRoutedTo: routedHuman}}, want: stateParked},
+		{name: "a live workflow", in: stateInput{id: "ra-slung", blockers: []Blocker{gate}}, facts: live, want: stateInFlight},
+		{name: "a live claim", in: stateInput{id: "ra-a", status: "in_progress", assignee: "polecat-live"}, facts: live, want: stateInFlight},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := hasOwnRow(tc.md); got != tc.want {
-				t.Errorf("hasOwnRow(%v) = %v, want %v", tc.md, got, tc.want)
+			got := deriveState(tc.in, tc.facts)
+			if got.kind != tc.want || got.selfStart != tc.selfStart {
+				t.Errorf("state = %q (starts by itself %v), want %q (%v)", got.kind, got.selfStart, tc.want, tc.selfStart)
 			}
 		})
 	}
@@ -2793,12 +3195,13 @@ func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
 		mergeAnchor("tk-run", map[string]string{
 			"pr.machine": dated(MachineProgressing, headLive, fixtureNow),
 		}),
-		// A parked merge anchor whose every blocker has closed.
+		// The takeaway twin of a merge anchor whose every blocker has closed.
 		func() Anchor {
 			a := mergeAnchor("tk-disp", map[string]string{
 				"gc.takeaway": "waiting on the upstream fix",
 			})
 			a.Kind, a.Source = "parked", "parked"
+			a.Takeaway = a.Metadata["gc.takeaway"]
 			a.WaitingOn = []string{"tk-gone"}
 			a.WaitingOnClosed = []string{"tk-gone"}
 			return a
@@ -2827,13 +3230,17 @@ func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
 		t.Errorf("needs = %q", bare.Needs)
 	}
 
-	// The disposition phrase is news the identity does not carry, so it keeps
-	// its row: a branch name in place of "a blocker landed" is a downgrade.
+	// A pull request the city is landing is in review, not a park that ended:
+	// the blockers that closed are its review rounds. The row names the pull
+	// request, and the takeaway stays its NEEDS as on every other merge anchor.
 	disp := mustTile(t, b, "tk-disp")
-	if disp.Frontier != "needs-review · parked · blocker landed" {
-		t.Errorf("frontier = %q, want the disposition phrase", disp.Frontier)
+	if disp.DispositionDue || disp.Owed {
+		t.Errorf("a pull request in review owes no disposition: disposition_due=%v owed=%v", disp.DispositionDue, disp.Owed)
 	}
-	if disp.Needs != "blocker landed — dispose or resume" {
+	if disp.Frontier != "needs-review · polecat/tk-disp" {
+		t.Errorf("frontier = %q, want the pull request's identity", disp.Frontier)
+	}
+	if disp.Needs != "waiting on the upstream fix" {
 		t.Errorf("needs = %q", disp.Needs)
 	}
 

@@ -121,21 +121,24 @@ export interface Tile {
   priority: number | null;
   /** Bead ids belonging to OTHER rigs, scanned out of the anchor's prose. */
   cross_rig_refs: string[] | null;
-  /** Idle open children — unclaimed, not carried by a live workflow, and not parked. */
+  /**
+   * Stranded open children — unclaimed, not carried by a live workflow, and
+   * waiting on nothing: no open wait, no route, no arm.
+   */
   open_heads: string[] | null;
   dead_owner_heads: string[] | null;
   /**
-   * Open children that carry a board row of their own — routed to the operator,
-   * or holding a takeaway. Split out of `open_heads` so a parent cannot report
-   * a child that is waiting on a ruling as work nobody has picked up. `open`
-   * still counts them.
+   * Open children a person holds — each waits on an open park or demand gate,
+   * is routed to the operator, or carries a visit no one has engaged. A
+   * takeaway alone parks nothing. `open` still counts them.
    */
   parked_heads: string[] | null;
   /**
    * Beads this row depends on by a `blocks` edge, and the subset still open.
    * On a parked conversation these are the work a sitting routed out of it:
-   * `disposition_due` is true once every one of them has closed, which is the
-   * board's only way to tell a finished topic from a live hold (tk-2plde).
+   * `disposition_due` is true once every one of them has closed and nothing
+   * else holds or moves the bead, which is the board's only way to tell a
+   * finished topic from a live hold (tk-2plde).
    */
   waiting_on: string[] | null;
   waiting_on_open: string[] | null;
