@@ -239,9 +239,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10,
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main 822dd74ec3b9,
   `gastownhall/gascity-packs` main dac12a4a802c with the packs Gas City
-  bundles at 66c672b5ed00, and `gastownhall/beads` main 5011528b3ad5.
+  bundles at 66c672b5ed00, and `gastownhall/beads` main 2f7699c49a19.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -271,7 +271,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
     the `oversight-rig` pack's `delivered` label.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10 and
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main 822dd74ec3b9 and
   `gastownhall/gascity-packs` main dac12a4a802c.
 - **Retires when.** Gas City ships a retry that a pack can hand a failed write
   to an outside service, such as an outbox that a later pass drains.
@@ -283,10 +283,11 @@ shares only the word ([authority-map.md](authority-map.md)).
   `recordUnansweredThreads` and `unansweredThreads` in
   `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh` runs.
   The definition it counts by: `gc_thread_awaits_answer` in
-  `assets/scripts/pr-post.sh`. Its readers: `unansweredFeedback` in package
-  `services/gctk/prstatus`, `gctk pr-status derive` in
-  `services/gctk/internal/cli/prstatus.go`, and `phaseFacts` in the helm
-  board's `services/helm/internal/board/derive.go`.
+  `assets/scripts/pr-post.sh`, which reads a thread's posts through
+  `live_comments` in `assets/scripts/review-dismissal.sh`. Its readers:
+  `unansweredFeedback` in package `services/gctk/prstatus`,
+  `gctk pr-status derive` in `services/gctk/internal/cli/prstatus.go`, and
+  `phaseFacts` in the helm board's `services/helm/internal/board/derive.go`.
 - **Stands in for.** A record of a pull request's review threads kept on the
   bead whose pull request it is, which says whether review feedback still
   waits on an answer.
@@ -310,9 +311,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
     keeps no record of it.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10 with
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main 822dd74ec3b9 with
   the `gastown` pack it bundles at 66c672b5ed00, `gastownhall/gascity-packs`
-  main dac12a4a802c, and `gastownhall/beads` main 5011528b3ad5.
+  main dac12a4a802c, and `gastownhall/beads` main 2f7699c49a19.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from

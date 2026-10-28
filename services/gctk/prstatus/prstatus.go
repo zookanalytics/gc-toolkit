@@ -116,8 +116,8 @@ const (
 	// HeldReview: review feedback holds the PR and nothing in flight acts on it,
 	// so answering or resolving it falls to a person. It stands for either of two
 	// facts. One is feedback the city has not answered, on any base, approved or
-	// not: the merge pass counted a review thread whose newest feedback no post
-	// of the city's follows ([Facts.PRUnansweredThreads]), by the rule
+	// not: the merge pass counted a review thread whose newest feedback no
+	// answer of the city's follows ([Facts.PRUnansweredThreads]), by the rule
 	// [unansweredFeedback] states. The other is the merge pass's blocked verdict
 	// with cause review-threads, as [Blocked] counts it: an unresolved thread on
 	// a base that requires resolution, answered or not.
@@ -174,9 +174,10 @@ type Facts struct {
 	// PRUnansweredThreads is metadata.pr.unanswered_threads, stored count@oid:
 	// how many of the PR's review threads the merge pass found waiting on the
 	// city's answer at the head oid names. A thread waits when it is unresolved
-	// and its newest post that is feedback or the city's own is feedback
+	// and the newest of its posts that asks or answers is feedback
 	// (gc_thread_awaits_answer in assets/scripts/pr-post.sh), so a thread the
-	// city answered and left open for the reviewer does not.
+	// city answered and left open for the reviewer does not. A post not for
+	// review, or one a dismissal retired, neither asks nor answers.
 	PRUnansweredThreads string
 	// OpenedAsDraft is metadata.opened_as_draft: the head oid pr-open.sh opened
 	// or adopted the PR as a draft at, recorded only on a draft whose ready flip

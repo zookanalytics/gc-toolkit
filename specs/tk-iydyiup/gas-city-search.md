@@ -37,10 +37,13 @@ The change adds these pieces of surface:
   (`recordUnansweredThreads` in `services/gctk/internal/cli/merge.go`) for every
   open PR the pass visits, whenever the count or the head moves.
 - **`gc_thread_awaits_answer`, a definition `pr-post.sh feedback-def` prints.**
-  A review thread waits on the city's answer when it is unresolved and its newest
-  post that is feedback or the city's own is feedback. A post of the city's
+  A review thread waits on the city's answer when it is unresolved and the
+  newest of its posts that asks or answers is feedback. A post of the city's
   answers every post before it, so a thread the city answered and left open for
-  the reviewer does not wait on the city.
+  the reviewer does not wait on the city. A post not for review neither asks nor
+  answers, and neither does a post a dismissal retired, which the definition
+  reads through `live_comments` in `review-dismissal.sh`, so
+  `pr-post.sh feedback-def` prints that file's definitions ahead of it.
 - **`held: review` reads the count.** `prstatus.Held` holds the PR on a count
   above zero at the head the posture was read at, while nothing is in flight on
   the anchor and no feedback waits for `pr-facts.sh` to route it. The labels
@@ -48,7 +51,7 @@ The change adds these pieces of surface:
   read it off the same anchor.
 
 The need is a fact kept on the bead whose pull request it is, pinned to a head,
-that says whether the PR carries review feedback no post of the city's answers,
+that says whether the PR carries review feedback no answer of the city's follows,
 on any base and whatever its approval. A derivation that does no I/O has to be
 able to name it, and the label and the board have to read the one fact.
 

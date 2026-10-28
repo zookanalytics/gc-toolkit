@@ -600,8 +600,10 @@ person owes, is no hold, and the PR keeps its status.
 has not answered. On every open PR it visits that is not a draft, the merge pass
 counts the review threads that wait on the city's answer and records the count
 as `pr.unanswered_threads`, pinned to the head it read. A thread waits when it is
-unresolved and its newest post that is feedback or the city's own is feedback
-(`gc_thread_awaits_answer` in `pr-post.sh`). The count holds the PR at the head
+unresolved and the newest of its posts that asks or answers is feedback
+(`gc_thread_awaits_answer` in `pr-post.sh`). A post not for review neither asks
+nor answers, whoever posted it, and neither does a post a dismissal retired
+(`live_comments` in `review-dismissal.sh`). The count holds the PR at the head
 the posture was read at, while nothing is in flight on the anchor, because work
 in flight is the city answering, and while no feedback waits for `pr-facts.sh`
 to route it (posture `commented`). A thread the city answered and left open for
