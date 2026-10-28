@@ -190,10 +190,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   `assets/scripts/until-resolved.sh`, `orders/deferred-dispatch.toml`, the
   `gc.dispatch_when_ready` keys, and
   [deferred-dispatch.md](deferred-dispatch.md).
-- **Stands in for.** Two primitives. A dispatch that waits for its bead's
-  blockers, pouring the bead's formula once nothing holds it. A close that
-  follows from a named cause, closing a bead once every bead it names as
-  resolving it has closed.
+- **Stands in for.** A dispatch that waits for its bead's blockers, pouring the
+  bead's formula once nothing holds it. A close that follows from a named cause,
+  closing a bead once every bead it names as resolving it has closed.
 - **Evidence.**
   - In `gastownhall/gascity`, nothing slings or pours a bead when its blockers
     close. The bundled `core` pack's `cascade-nudge-on-blocker-close` order
@@ -213,10 +212,10 @@ shares only the word ([authority-map.md](authority-map.md)).
     Nothing in bd closes a bead when its `until` target closes.
 - **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10 and
   `gastownhall/beads` main 5011528b3ad5.
-- **Retires when.** Each half retires on its own. The dispatch goes when Gas
-  City or bd pours a formula on a bead once its blockers close. The close goes
-  when either one closes a bead once the beads it names as resolving it have
-  closed.
+- **Retires when.** The dispatch and the close retire separately. The dispatch
+  goes when Gas City or bd pours a formula on a bead once its blockers close. The
+  close goes when either one closes a bead once the beads it names as resolving
+  it have closed.
 
 ## Quota-park nudging
 

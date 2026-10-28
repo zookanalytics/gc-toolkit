@@ -363,7 +363,7 @@ mark on the supervisor's bead rows cannot stand in for that read, because it is
 Gas City's readiness answer, which also holds a bead whose blocker closed with
 `gc.work_outcome=blocked`.
 
-Both compensations retire with one repair of bd. Once the bd the city runs
+The compensations retire with one repair of bd. Once the bd the city runs
 judges a `waits-for` edge by its gate and returns an error when its read of
 parents fails (tk-ssm8qns.5), the adapter drops the error and the marks read
 (tk-ssm8qns.6).
@@ -412,10 +412,11 @@ What `waits` adds over the store's answer:
   ancestor it is held through.
 - **One status.** A bead is `blocked` when a wait of its own holds it, and
   `held` when only an ancestor's wait holds it and its work has not started.
-  It is `unjudged` when it has a `waits-for` edge of its own, which bd's
-  listing cannot answer, and every caller that acts treats that edge as a wait
-  that holds. Otherwise it is `clear`. A read that fails returns an error, never
-  a status.
+  It is `unjudged` when it has a `waits-for` edge of its own. bd's listing
+  cannot answer such a bead, so the adapter answers it with an error, and
+  `waits` reads that error as this status, not as a failed read. Every caller
+  that acts treats the edge as a wait that holds. Otherwise the bead is `clear`.
+  A read that fails returns an error, never a status.
 
 The status rests on these answers.
 
