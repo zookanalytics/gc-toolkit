@@ -11,15 +11,15 @@ import (
 // gcStub answers `bd show` with $STUB_SHOW, the anchor's blockers (`bd dep list
 // -t blocks`) with $STUB_BLOCKERS, the anchor tk-a's incoming tracks edges (`bd
 // dep list`) with $STUB_TRACKERS, the beads stamped with tk-a (the `bd list`
-// selecting gc.continuation_group) with $STUB_STAMPED, the same two reads for
-// any other bead, the anchor's work, with $STUB_WORK_TRACKERS and
+// selecting gc.continuation_group) with $STUB_STAMPED, the same reads for any
+// other bead, the anchor's work, with $STUB_WORK_TRACKERS and
 // $STUB_WORK_STAMPED, `[]` when any is unset, and every other `bd list` with
 // $STUB_LIST, so a derive test drives the whole gathering path with no live
 // store — the same `gc bd` seam pr-status-label.test.sh exercises through the
 // shell, proven here in-process. $STUB_TRACKERS_FAIL and $STUB_STAMPED_FAIL fail
-// one of the anchor's visit reads each, $STUB_WORK_FAIL both of the work's, and
-// $STUB_BLOCKERS_FAIL the blockers read. $STUB_LOG, when set, records the
-// arguments of every call.
+// one of the anchor's visit reads each, $STUB_WORK_FAIL every one of the
+// work's, and $STUB_BLOCKERS_FAIL the blockers read. $STUB_LOG, when set,
+// records the arguments of every call.
 const gcStub = `#!/bin/sh
 [ -z "$STUB_LOG" ] || printf '%s\n' "$*" >> "$STUB_LOG"
 case "$2" in

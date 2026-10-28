@@ -2280,10 +2280,10 @@ func anchorWorkSet(anchors []Anchor, f Facts) map[string]anchorWork {
 }
 
 // classifyPhases stamps a row's live state, whose move it is, from the shared
-// prstatus core. It fills three fields: PRPhase on a merge anchor (the PR
-// round-trip axis, empty elsewhere), PRHeld on a live merge anchor (what holds
-// its PR, [prHeld]), and Phase on every live row (the per-bead liveness, empty
-// only on a closed row). They read the holds, the posture and the machine
+// prstatus core. It fills PRPhase on a merge anchor (the PR round-trip axis,
+// empty elsewhere), PRHeld on a live merge anchor (what holds its PR,
+// [prHeld]), and Phase on every live row (the per-bead liveness, empty only on
+// a closed row). They read the holds, the posture and the machine
 // verdict off the anchor, its open visit off facts, and the anchor's work in
 // flight from work ([anchorWorkSet]); a non-merge bead's Phase reads its own
 // live-workflow signal from facts instead.
@@ -2546,7 +2546,7 @@ func beadPhase(a Anchor, f Facts, work anchorWork) string {
 // [mdAnchorBead]) as its in-flight count, the set prPhase has always fed, reads
 // a visit on one of its live review or rework children as a visit on its work,
 // and reads its oldest open demand blocker ([askingDemand]) as a blocker a
-// person owes, the two facts the PR labels add. Any other bead reads the
+// person owes, the facts the PR labels add. Any other bead reads the
 // live-workflow signal standing over its own bead ([Facts.anchorInFlight]) and
 // neither of those.
 func phaseFacts(a Anchor, f Facts, work anchorWork) prstatus.Facts {
