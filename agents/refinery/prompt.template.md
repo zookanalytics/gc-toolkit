@@ -104,11 +104,7 @@ while one runs: a gate that finishes while you sit idle wakes nothing.
 Every escalation is a visit, filed through one writer that dedups repeats:
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$(gc {{ .BindingName }} scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
 ```
 
 Escalate what a human must act on; a PR awaiting the operator's approval is

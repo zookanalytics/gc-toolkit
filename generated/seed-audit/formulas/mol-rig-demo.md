@@ -47,6 +47,7 @@ Required vars:
 
 Optional vars:
   {{base_url}}: URL of a server already running, driven as-is. One of serve_dir / serve_cmd / base_url. (default=)
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{capture_mode}}: walkthrough (default, one continuous recorded take) or proof (one checked screenshot per step). (default=walkthrough)
   {{deliver_pr}}: PR number or URL to deliver the clip to, when no deliver_subject names one. Optional. (default=)
   {{deliver_subject}}: A bead whose pr_number/pr_url names the PR to deliver the clip to. Optional; with deliver_pr unset too, the mol reports the artifact path instead of delivering. (default=)

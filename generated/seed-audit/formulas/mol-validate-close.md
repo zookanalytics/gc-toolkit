@@ -27,6 +27,9 @@ the bead when it holds or escalates to the operator when it does not.
    which does not track the current step after a claim.
 
 
+Variables:
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
+
 Steps (3):
   ├── mol-validate-close.load-context: Read the subject and the reaction's close brief
   ├── mol-validate-close.validate-and-resolve: Validate the no-work conclusion, then close or escalate [needs: mol-validate-close.load-context]

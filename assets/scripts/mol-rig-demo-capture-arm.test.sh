@@ -42,7 +42,8 @@ awk -v m="$MARKER" '
   $0 ~ ("# <<< " m "$") {f=0}
   f' "$TOML" \
   | sed -e 's/{{rig_name}}/demo-rig/g' -e 's/{{capture_mode}}/walkthrough/g' \
-        -e 's/{{serve_port}}/5173/g' -e 's/{{narrate}}/true/g' > "$TMP/block.sh"
+        -e 's/{{serve_port}}/5173/g' -e 's/{{narrate}}/true/g' \
+        -e 's/{{binding_prefix}}/gc-toolkit./g' > "$TMP/block.sh"
 
 echo "# the region extracts as runnable bash"
 if [ ! -s "$TMP/block.sh" ]; then
@@ -67,12 +68,13 @@ cp "$TMP/block.sh" "$TMP/plain.sh"
 # --- Fakes. --------------------------------------------------------------------
 # gc: the block reaches `bd update` (the failure note, or the clip path on
 # success) and `runtime drain-ack`. The capture, escalate and cancel stubs sit in
-# a stub pack that GC_PACK_DIR names, which the block's script loop tries first.
+# a stub pack, $STUB_PACK, which gc names for `gc gc-toolkit scripts-dir`.
 # Each fake records its verb into one ordered log and its argv into its own file.
 mkdir -p "$TMP/bin" "$TMP/pack/assets/scripts" "$TMP/cwd"
 SHEBANG="#!${BASH:-/usr/bin/env bash}"
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "bd update")         printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "$FAKE_DIR/gc.argv" ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG" ;;
 esac
@@ -95,7 +97,7 @@ exit "${FAKE_CANCEL_RC:-0}"
 CANCEL
 chmod +x "$TMP/bin/gc" "$TMP/pack/assets/scripts/"*.sh
 export PATH="$TMP/bin:$PATH"
-export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GIT_CEILING_DIRECTORIES="$TMP"
+export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GIT_CEILING_DIRECTORIES="$TMP"
 
 # The variables the capture step sets before this block: the request bead, the
 # resolved script, the clip path, the app target, and the scripts dir.

@@ -1412,8 +1412,8 @@ fi
 # fenced block; here the whole discharge is RUN). These assertions drive the
 # script against stubs: the takeaway lands on the subject with the WAIT disposition,
 # the demand discharges one of two ways keyed to --ruled, and a held subject is
-# released only when the sitting ruled. The writers are searched for on the
-# candidate roots, never assumed.
+# released only when the sitting ruled. The writers are the script's siblings in
+# the copy of the pack that runs, never a rig root's or the city's.
 echo "── step 7 discharge ships and runs as converse-signoff.sh ──"
 SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
 [ -x "$SIGNOFF_SUT" ] && ok "converse-signoff.sh is present and executable" \
@@ -1544,11 +1544,18 @@ case "${1:-}" in
 esac
 LC
 chmod +x "$SOPACK/assets/scripts/lifecycle.sh"
+# so_pack <dir> — a copy of the sign-off under <dir>, beside the libraries it
+# sources, so it runs the writers <dir> carries.
+so_pack() {
+    mkdir -p "$1/assets/scripts"
+    cp "$SIGNOFF_SUT" "$REPO/assets/scripts/visit-identity.sh" "$REPO/assets/scripts/visit-topic.sh" "$1/assets/scripts/"
+}
+so_pack "$SOPACK"; so_pack "$SOFOR"; so_pack "$SOCITY/rigs/gc-toolkit"
 
-# run_so [VAR=val ...] — run converse-signoff.sh with the flags in SOARGS from a
-# non-git cwd; trailing VAR=val pairs override the base env (env: last wins), so
-# a case dials SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
-# GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs, and the
+# run_so [VAR=val ...] — run the copy of converse-signoff.sh in SO_PACK (SOPACK by
+# default) with the flags in SOARGS from a non-git cwd; trailing VAR=val pairs
+# override the base env (env: last wins), so a case dials SO_DEMAND /
+# SO_TAKEAWAY / SO_GATE_RC / STUB_STATE inline. Captures SO_OUT and SO_RC; resets the two logs, and the
 # store's closes and the visit's gc.ruling too unless SO_KEEP=1 (a re-run against
 # the store a first run left behind). SO_SEED_RULING, set on the call, seeds the
 # visit with a ruling an earlier run left.
@@ -1560,7 +1567,7 @@ run_so() {
     [ -z "${SO_SEED_RULING:-}" ] || printf '%s' "$SO_SEED_RULING" >"$SOST/v-x.ruling"
     SO_OUT="$(cd "$SOBARE" && env PATH="$SOBIN:$PATH" \
         GC_RIG_ROOT="$SOPACK" GC_CITY_PATH="$SOCITY" GIT_CEILING_DIRECTORIES="$TMPD" \
-        SOLOG="$SOLOG" SOGC="$SOGC" SOST="$SOST" "$@" bash "$SIGNOFF_SUT" "${SOARGS[@]}" 2>&1)"
+        SOLOG="$SOLOG" SOGC="$SOGC" SOST="$SOST" "$@" bash "${SO_PACK:-$SOPACK}/assets/scripts/converse-signoff.sh" "${SOARGS[@]}" 2>&1)"
     SO_RC=$?
 }
 # no_writes <label> — the run reached no writer: no gc-helm.sh or lifecycle.sh
@@ -1815,11 +1822,13 @@ if grep -qE 'demand|gate resolve' "$SOLOG" "$SOGC" 2>/dev/null; then
     bad "no demand present means no discharge" "found a discharge with no demand present"
 else ok "no demand present means no discharge"; fi
 
-echo "── the writer is searched for; none on any root is LOUD ──"
+echo "── no writer beside the sign-off is LOUD, though the rig root and the city hold one ──"
 SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
-run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$TMPD/no-such-city"
-case "$SO_OUT" in *"NO TAKEAWAY WRITER"*) ok "no writer on any candidate root is LOUD" ;;
-                  *) bad "no writer on any candidate root is LOUD" "got: $SO_OUT" ;; esac
+SO_PACK="$SOFOR" run_so GC_RIG_ROOT="$SOPACK"
+case "$SO_OUT" in *"NO TAKEAWAY WRITER"*) ok "no writer beside the script is LOUD" ;;
+                  *) bad "no writer beside the script is LOUD" "got: $SO_OUT" ;; esac
+case "$(cat "$SOLOG")" in *"helm["*) bad "…and neither the rig root's nor the city's writer is used" "found: $(cat "$SOLOG")" ;;
+                          *) ok "…and neither the rig root's nor the city's writer is used" ;; esac
 
 echo "── the flag contract fails closed on a missing judgment ──"
 SOARGS=(--visit v-x --outcome "o — p" --ruled yes --route human); run_so; eq "$SO_RC" "2" "--ruled yes without --ruling is refused"
@@ -1875,10 +1884,10 @@ else bad "…no demand resolved and no close text stashed, so a merge hold still
 if [ -s "$SOLOG" ]; then bad "…and no takeaway or release written" "found: $(cat "$SOLOG")"
 else ok "…and no takeaway or release written"; fi
 
-echo "── a rework script that resolves nowhere stops the sign-off too ──"
-# The city root carries a takeaway writer but no converse-rework.sh, so a sign-off
-# that ran on past the missing script would reach that writer.
-run_so GC_RIG_ROOT="$SOFOR"
+echo "── a rework script the pack lacks stops the sign-off too ──"
+# The city's copy carries a takeaway writer but no converse-rework.sh, so a
+# sign-off that ran on past the missing script would reach that writer.
+SO_PACK="$SOCITY/rigs/gc-toolkit" run_so GC_RIG_ROOT="$SOPACK"
 eq "$SO_RC" "1" "a missing converse-rework.sh exits 1"
 case "$SO_OUT" in *"REWORK NOT COMPLETE on item-x: no converse-rework.sh"*) ok "…and says the script resolved nowhere" ;;
                   *) bad "…and says the script resolved nowhere" "got: $SO_OUT" ;; esac
@@ -1932,11 +1941,12 @@ SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r 
 run_so; eq "$SO_RC" "2" "--rework with --no-rework is refused"
 have "the settle skill teaches the forced answer" '--no-rework' "$SK_SETTLE"
 
-# Every script the sign-off runs is found by one search order: the rig root, then
-# the working directory's checkout, then the city's gc-toolkit rig. A rig root
-# carrying none of them sends all three to the city root, each logging its root.
-echo "── one search order finds every script the sign-off runs ──"
+# Every script the sign-off runs is its sibling in the copy of the pack that
+# runs. A copy carrying all three uses them, each logging its copy, whatever the
+# rig root and the city hold.
+echo "── every script the sign-off runs is the one beside it ──"
 SOCITY2="$SO/city2"; mkdir -p "$SOCITY2/rigs/gc-toolkit/assets/scripts"
+so_pack "$SOCITY2/rigs/gc-toolkit"
 so_helm "$SOCITY2/rigs/gc-toolkit" CITY2
 cat >"$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
@@ -1953,8 +1963,8 @@ echo "converse-rework: filed rework rw-1 on anchor item-x"
 CR
 chmod +x "$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" "$SOCITY2/rigs/gc-toolkit/assets/scripts/converse-rework.sh"
 SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
-run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$SOCITY2" SO_MERGE_RESULT=pull_request
-eq "$SO_RC" "0" "a sign-off whose scripts sit only on the city root runs"
+SO_PACK="$SOCITY2/rigs/gc-toolkit" run_so GC_RIG_ROOT="$SOPACK" GC_CITY_PATH="$SOCITY" SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "a sign-off runs from the copy of the pack that carries its scripts"
 have "…finding the rework script there" 'REWORK[CITY2]: --anchor item-x' "$SOGC"
 have "…the takeaway writer" 'helm[CITY2] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
 have "…and the lifecycle writer" 'lc[CITY2] transition item-x --to unanchored --route human' "$SOLOG"

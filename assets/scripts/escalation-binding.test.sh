@@ -45,11 +45,15 @@ scope_of() { # agent name -> declared scope, empty when the agent is not shipped
   sed -n 's/^scope[[:space:]]*=[[:space:]]*"\([a-z]*\)".*/\1/p' "$toml" | head -n 1
 }
 
-# Only runnable invocations: a call through $SCRIPTS, or the bare name with
-# its flags. A path test (`[ -x .../escalate.sh ]`) and a prose mention that
-# names no flags are neither.
+# Only runnable invocations: a call through $SCRIPTS or straight through the
+# directory `gc <binding> scripts-dir` prints, or the bare name with its flags.
+# A path test (`[ -x "$SCRIPTS/escalate.sh" ]`) is dropped before the match,
+# and a prose mention that names no flags is neither.
 WRITERS='escalate|patrol-finding'
-invocations() { grep -n -E "\\\$SCRIPTS/($WRITERS)\\.sh|(^|[^-/[:alnum:]])($WRITERS)\\.sh[[:space:]]+--" "$1"; }
+invocations() {
+  sed -E 's/\[ -[xfr] "[^"]*" \]//g' "$1" \
+    | grep -n -E "(\\\$SCRIPTS|scripts-dir\\))/($WRITERS)\\.sh|(^|[^-/[:alnum:]])($WRITERS)\\.sh[[:space:]]+--"
+}
 # GC_RIG= binds either writer, and --rig binds patrol-finding.sh.
 bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--rig[[:space:]]+[A-Za-z0-9._-]'; }
 

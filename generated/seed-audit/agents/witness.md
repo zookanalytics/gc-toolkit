@@ -115,11 +115,7 @@ situation key. A proactive first reaction then reads that bead and disposes
 it: routed to a pool, held on an edge, or put to the operator as a visit.
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
+"$(gc gc-toolkit scripts-dir)/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
 `--about` names the bead the finding is about, and the dedup matches on it
@@ -142,9 +138,9 @@ take yourself.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — goes straight to a visit
-through `"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key>
---message "<what is wrong + recommendation>"`. Context recycling is the
-cycle-recycle Stop hook's job — never something you ask about.
+through `"$(gc gc-toolkit scripts-dir)/escalate.sh" --subject <bead>
+--key <situation-key> --message "<what is wrong + recommendation>"`. Context
+recycling is the cycle-recycle Stop hook's job — never something you ask about.
 
 
 ### Closing a visit: never by hand
@@ -160,9 +156,7 @@ another visit already carries its need, or when its premise is gone. That
 close goes through one of two writers:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/visit-close.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
 # An open escalation you raised on a bead:
 "$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 # Any other visit you raised:

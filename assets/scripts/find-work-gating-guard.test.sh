@@ -54,11 +54,13 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3" "got '$1' want '$2'"; }
 
 [ -s "$TOML" ] || { echo "missing $TOML"; exit 1; }
 
+# A block comes out with {{binding_prefix}} rendered as the pour renders it:
+# the binding the city imports the pack under plus a dot, gc-toolkit. here.
 extract() {
   awk -v m="$1" '
     $0 ~ ("# >>> " m "$") {f=1; next}
     $0 ~ ("# <<< " m "$") {f=0}
-    f' "$2"
+    f' "$2" | sed 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 
 extract find-work-select     "$TOML" > "$TMP/select.sh"
@@ -106,6 +108,10 @@ esac
 # leading parked anchor is the only row the filter ever sees.
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
+  [ -n "${STUB_PACK:-}" ] || exit 1
+  printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+fi
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
 [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 0   # bd fails open: empty stdout
 # FAKE_STORE is a JSON array of beads with their edges, answered as bd answers:
@@ -165,9 +171,9 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_ROWS="$TMP/rows"
 export GC_RIG="testrig" GC_AGENT="testrig/gc-toolkit.refinery"
-# The block finds hold-lib.sh through the rig root first, and this suite's rig
-# root is the repo it tests.
-export GC_RIG_ROOT="$ROOT"
+# The block finds hold-lib.sh in the pack gc names, and this suite's pack is the
+# repo it tests.
+export STUB_PACK="$ROOT" GC_RIG_ROOT=""
 
 { cat "$TMP/select.sh"; printf 'printf "%%s\\n" "$WORK"\n'; } > "$TMP/run-select.sh"
 

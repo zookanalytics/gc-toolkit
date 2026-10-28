@@ -58,7 +58,9 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML"; }
+# A block comes out with {{binding_prefix}} rendered as the patrol fills it in:
+# the binding it was poured with, gc-toolkit. here.
+fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
 
 echo "── the blocks ──"
 for m in shared-branch-merge-mode branch-has-real-change zero-diff-guard direct-merge-push; do
@@ -69,7 +71,7 @@ fence shared-branch-merge-mode > "$TMP/prep.sh"
 {
   echo 'BEAD_JSON=$(gc bd show $WORK --json)'
   echo 'MERGE_STRATEGY="$STRATEGY"'
-  echo 'LC="$GC_CITY_PATH/rigs/gc-toolkit/assets/scripts/lifecycle.sh"'
+  echo 'LC="$(gc gc-toolkit scripts-dir)/lifecycle.sh"'
   fence branch-has-real-change
   fence zero-diff-guard
   echo 'if [ "$MERGE_STRATEGY" = direct ]; then'
@@ -85,7 +87,7 @@ for f in prep merge-push; do
   if bash -n "$TMP/$f.sh" 2>/dev/null; then ok "$f: valid bash"; else bad "$f: valid bash"; fi
 done
 
-# The pack the blocks find their scripts in, through GC_CITY_PATH.
+# The pack the blocks find their scripts in, which gc names.
 CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
@@ -101,12 +103,14 @@ cat > "$PACK/escalate.sh" <<'ESC'
 echo "escalate $*" >> "$FAKE_LOG"
 ESC
 chmod +x "$PACK"/*.sh
-# gc answers the roster for `rig list` and the bead file for `bd show`, applies
+# gc names the pack for `gc gc-toolkit scripts-dir`, answers the roster for
+# `rig list` and the bead file for `bd show`, applies
 # each --set-metadata and --unset-metadata of a `bd update` to that file, and
 # logs every other call.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
   *)
@@ -170,7 +174,7 @@ fixture() {
 # Sets PREP_RC, RC and OUT.
 attempt() {
   : > "$D/gc.log"; : > "$D/lc.log"
-  local run=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
+  local run=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig STUB_PACK="$CITY/rigs/gc-toolkit" WORK=wb BRANCH=polecat/wb TARGET=main
     TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
     FAKE_LC_LOG="$D/lc.log" DIRECT_MERGE_PUSH_BACKOFF=0 STRATEGY=direct "$@")
   ( cd "$D/rig" && "${run[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?

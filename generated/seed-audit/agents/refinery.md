@@ -104,11 +104,7 @@ while one runs: a gate that finishes while you sit idle wakes nothing.
 Every escalation is a visit, filed through one writer that dedups repeats:
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$(gc gc-toolkit scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
 ```
 
 Escalate what a human must act on; a PR awaiting the operator's approval is
@@ -129,9 +125,7 @@ another visit already carries its need, or when its premise is gone. That
 close goes through one of two writers:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/visit-close.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
 # An open escalation you raised on a bead:
 "$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 # Any other visit you raised:

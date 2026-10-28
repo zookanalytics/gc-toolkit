@@ -27,6 +27,10 @@ required = true
 description = "The visit prompt: what this visit needs from the operator (decision, review, catch-up). Substituted into a shell command — avoid quote characters, or put the detail in the -d body by hand."
 required = true
 
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default."
+default = "gc-toolkit."
+
 [[steps]]
 id = "file-visit"
 title = "File the visit bead in the subject's continuation group"
@@ -58,9 +62,7 @@ VISIT_TAIL=$(printf '%s' "$VISIT_TEXT" | jq -Rsr 'gsub("[[:space:]]+"; " ") | lt
 # this one. A listing that does not read files anyway: a second visit is a
 # bounded nuisance, and a visit never filed asks nobody.
 VISIT=""
-VI=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -f "$c/assets/scripts/visit-identity.sh" ] && { VI="$c/assets/scripts/visit-identity.sh"; break; }
-done
+VI="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/visit-identity.sh" && [ -f "$VI" ] || VI=""
 if [ -n "$VI" ] && . "$VI"; then
   VISIT=$(gc bd list --status=open,in_progress --metadata-field task_kind=visit --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' \
     | jq -r --arg s "{{subject}}" "$VISIT_IDENTITY_JQ"'if type == "array" then ([ .[]
