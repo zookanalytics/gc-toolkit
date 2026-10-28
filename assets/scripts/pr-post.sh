@@ -61,10 +61,11 @@
 #                        only whether a post is the city's own pays for no read.
 #   pr-post.sh feedback-def
 #                        print the own-def definitions, gc_not_for_review,
-#                        gc_feedback($self; $since) and
-#                        gc_thread_awaits_answer($self; $since), for a reader of
-#                        feedback to prepend to its program. It reads the rig's
-#                        declaration and embeds its prefixes.
+#                        gc_feedback($self; $since), the definitions of what a
+#                        dismissal retires (review-dismissal.sh, beside this
+#                        script) and gc_thread_awaits_answer($self; $since), for
+#                        a reader of feedback to prepend to its program. It
+#                        reads the rig's declaration and embeds its prefixes.
 #   pr-post.sh not-for-review
 #                        print the no-review mark and each prefix the rig
 #                        declares, one per line
@@ -75,9 +76,10 @@
 # the rig's declaration they refuse, and a default branch they cannot read. A
 # refused part declares nothing, and so does a branch that cannot be read.
 #
-# Exit: 0 posted (or printed); 1 the post failed, with gh's error on stderr, or
+# Exit: 0 posted (or printed); 1 the post failed, with gh's error on stderr,
 #       not-for-review refused part of the declaration or could not read the
-#       default branch; 2 usage.
+#       default branch, or feedback-def could not read review-dismissal.sh, and
+#       printed nothing; 2 usage.
 set -u
 
 PROG=pr-post
@@ -220,16 +222,6 @@ nfr_load() {
 # A byte-order mark that opens a body is not text: GitHub's renderer drops it,
 # so both tests read the body without it. A declared prefix is compared with the
 # body's text after any leading whitespace, as the parser drops the prefix's own.
-#
-# gc_thread_awaits_answer asks of a review thread, a GraphQL reviewThread node
-# with its comments, whether its feedback waits on the city: the thread is
-# unresolved, and the newest of its posts that asks or answers is feedback.
-# GitHub lists a thread's comments oldest first. A post of the city's answers
-# every post before it, whether it says the point was fixed, declined or
-# deferred, so a thread the city answered and left open for the reviewer does
-# not wait on the city. A post not for review neither asks nor answers, whoever
-# posted it, the city included. With no $self nothing is the city's own, so a
-# reader without the acting login does not ask.
 NFR_DEF='def gc_opens_with_mark:
   def comments($l):
     (if .open then
@@ -260,10 +252,6 @@ def gc_not_for_review:
     or any(gc_not_for_review_prefixes[]; . as $p | $t | startswith($p));
 def gc_feedback($self; $since):
   (gc_city_own($self; $since) | not) and (gc_not_for_review | not);
-def gc_thread_awaits_answer($self; $since):
-  ((.isResolved // false) == false)
-  and ([ (.comments.nodes // [])[] | select(gc_not_for_review | not) ]
-       | length > 0 and (last | gc_feedback($self; $since)));
 '
 # The mark holds no character a JSON string escapes, so it is quoted as it is.
 nfr_defs() {
@@ -271,6 +259,32 @@ nfr_defs() {
   printf 'def gc_not_for_review_prefixes: %s;\n' "$NFR_PREFIXES"
   printf '%s' "$NFR_DEF"
 }
+
+# gc_thread_awaits_answer asks of a review thread, a GraphQL reviewThread node
+# with its comments, whether its feedback waits on the city: the thread is
+# unresolved, and the newest of its posts that asks or answers is feedback.
+# GitHub lists a thread's comments oldest first. A post of the city's answers
+# every post before it, whether it says the point was fixed, declined or
+# deferred, so a thread the city answered and left open for the reviewer does
+# not wait on the city. A post not for review neither asks nor answers, whoever
+# posted it, the city included. Neither does a post a dismissal retired, which
+# live_comments in review-dismissal.sh sets aside: a comment node names its own
+# review, so each post is paired with that review under a key of the post's
+# own, the shape live_comments reads. A reader therefore asks for each comment's
+# pullRequestReview with its state and submittedAt. With no $self nothing is the
+# city's own, so a reader without the acting login does not ask. feedback-def
+# prints it after review-dismissal.sh's definitions, since jq resolves a call
+# only to a definition before it.
+THREAD_DEF='def gc_thread_awaits_answer($self; $since):
+  [ (.comments.nodes // []) | to_entries[]
+    | .value + { pull_request_review_id: ("p" + (.key | tostring)) } ] as $posts
+  | [ $posts[] | select((.pullRequestReview | type) == "object")
+      | { id: .pull_request_review_id, state: .pullRequestReview.state,
+          submitted_at: .pullRequestReview.submittedAt } ] as $revs
+  | ((.isResolved // false) == false)
+    and ([ $posts | live_comments($revs)[] | select(gc_not_for_review | not) ]
+         | length > 0 and (last | gc_feedback($self; $since)));
+'
 
 usage() { sed -n '/^# Usage:/,/^# gh.s own output/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 die_usage() { echo "$PROG: $1" >&2; usage >&2; exit 2; }
@@ -286,9 +300,12 @@ case "$VERB" in
     printf '%s' "$NFR_PREFIXES" | jq -r '.[]'
     [ -z "$NFR_REFUSED" ]; exit $? ;;
   feedback-def)
+    # shellcheck source=review-dismissal.sh
+    . "$(dirname -- "${BASH_SOURCE[0]}")/review-dismissal.sh" \
+      || { echo "$PROG: cannot source review-dismissal.sh beside this script, so no definition is printed" >&2; exit 1; }
     nfr_load
     [ -z "$NFR_REFUSED" ] || printf '%s\n' "$NFR_REFUSED" | sed "s/^/$PROG: /" >&2
-    printf '%s\n' "$OWN_DEF"; nfr_defs; exit 0 ;;
+    printf '%s\n' "$OWN_DEF"; nfr_defs; printf '%s\n' "$REVIEW_DISMISSAL_DEF"; printf '%s' "$THREAD_DEF"; exit 0 ;;
   comment|review|reply|edit|file-comment) shift ;;
   -h|--help) usage; exit 0 ;;
   *) die_usage "first argument must be comment, review, reply, edit, file-comment, mark, own-def, feedback-def or not-for-review" ;;

@@ -70,15 +70,17 @@ const threadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:St
       pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}`
 
 // feedbackThreadsQuery reads each review thread with the posts
-// gc_thread_awaits_answer weighs: each comment's author and body, and the
-// instants gc_city_own dates a post by. The threads are paginated to
+// gc_thread_awaits_answer weighs: each comment's author and body, the instants
+// gc_city_own dates a post by, and the state of the review that carried it,
+// which tells a post a dismissal retired. The threads are paginated to
 // exhaustion, as threadsQuery's are. A thread's newest hundred comments carry
-// the newest post, which is the one the definition decides on.
+// its newest posts, and the definition decides on the newest that asks or
+// answers.
 const feedbackThreadsQuery = `query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$num){
     reviewThreads(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
-      nodes{isResolved comments(last:100){nodes{author{login} body createdAt pullRequestReview{submittedAt}}}}}}}}`
+      nodes{isResolved comments(last:100){nodes{author{login} body createdAt pullRequestReview{submittedAt state}}}}}}}}`
 
 // The visit order's one read: every open PR's draft flag, head and each
 // account's latest review, paginated. It asks for no merge state, because
@@ -1250,10 +1252,10 @@ func (m *merger) recordUnansweredThreads(anchor *gcbd.Bead, num, headOid string)
 
 // unansweredThreads counts num's review threads that wait on the city's answer
 // by gc_thread_awaits_answer, defined in def (`pr-post.sh feedback-def`) with
-// the rule that tells feedback from the city's own post. since is the anchor's
-// provenance cutover (pr_provenance_since). ok=false is a count that cannot be
-// made: a read that fails, a thread page that will not decode, or a jq run that
-// fails.
+// the rules that tell feedback from the city's own post and a post a dismissal
+// retired. since is the anchor's provenance cutover (pr_provenance_since).
+// ok=false is a count that cannot be made: a read that fails, a thread page
+// that will not decode, or a jq run that fails.
 func (m *merger) unansweredThreads(num, def, since string) (int, bool) {
 	raw, rc := m.ghOrigin("graphql", "--paginate",
 		"-f", "query="+feedbackThreadsQuery,

@@ -1103,10 +1103,16 @@ case "$sub" in
           # `first: 100` is a real cap, so a thread longer than a page comes back
           # cut to one — which is the whole reason the caller tops such a thread
           # up. A stub handing back the full list would make that read look
-          # unnecessary and hide the resolve it gets wrong.
-          jq -c '{data: {repository: {pullRequest: {
+          # unnecessary and hide the resolve it gets wrong. GraphQL answers only
+          # the fields a query names, so a comment's review keeps the state a
+          # dismissal is read from only for a query that asks for it.
+          jq -c --arg q "$gqquery" '
+            ($q | test("pullRequestReview\\s*\\{[^}]*\\bstate\\b")) as $st
+            | {data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
-                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]
+                  | if $st then . else map(if (.pullRequestReview | type) == "object"
+                      then .pullRequestReview |= del(.state) else . end) end) ]}}}}}' "$f"
           # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
           # hands back when a later page came back garbled.
           [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"

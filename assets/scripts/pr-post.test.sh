@@ -346,6 +346,23 @@ eq "$(awaits "$NDEF" '{"isResolved":false}')" false "…nor one the read carries
 eq "$(printf '%s' "$(thread false "$OP" "$REPLY")" | jq -r --arg self "" --arg since "$CUT" "$NDEF"'gc_thread_awaits_answer($self; $since)')" true \
   "with no login, nothing is the city's own, so even its reply reads as feedback"
 
+echo "# feedback-def: a post a dismissal retired neither asks nor answers"
+# in_review <comment-json> <state> — the comment, carried by a review in <state>
+# that was submitted when the comment was made.
+in_review() { printf '%s' "$1" | jq -c --arg s "$2" '. + {pullRequestReview: {state: $s, submittedAt: .createdAt}}'; }
+eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" DISMISSED)")")" false \
+  "feedback whose review was dismissed awaits nothing"
+eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" DISMISSED)" "$(in_review "$OP2" COMMENTED)")")" true \
+  "…while a later post its dismissal does not cover still asks"
+eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" DISMISSED)" "$OP2")")" true \
+  "…and so does a standalone post, which names no review"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$REPLY" "$(in_review "$OP2" DISMISSED)")")" false \
+  "a dismissal of feedback after the city's reply leaves the reply the last word"
+eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" APPROVED)")")" true \
+  "only a dismissal retires a post: the comment of a standing approval still asks"
+eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" CHANGES_REQUESTED)" "$(in_review "$REPLY" DISMISSED)")")" true \
+  "a dismissed review of the city's answers nothing"
+
 echo "# feedback-def: the mark counts only among the HTML comments a body opens with"
 row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
 NR='<!-- gc:no-review -->'

@@ -2071,6 +2071,21 @@ out=$("$SUT" 2>&1)
 eq "$(meta FT7 pr.unanswered_threads)" "1@sha-407" \
   "a notice of the city's own after the feedback leaves the thread waiting"
 
+echo "# feedback a dismissal retired waits on nothing"
+# A dismissal retires the inline comments its review carried, so the pass asks
+# each comment's review for its state; the stub answers a state only to a query
+# that names it.
+in_review() { printf '%s' "$1" | jq -c --arg s "$2" '. + {pullRequestReview: {state: $s, submittedAt: .createdAt}}'; } # <comment-json> <state>
+store "[$(anchor FT6 406), $(rev FT6)]"
+printf '%s' "$(prview 406 OPEN BLOCKED)" > "$GH_DIR/pr_view_406.json"
+printf '{"threads":[%s,%s]}\n' \
+  "$(fthread t1 false "[$(in_review "$(op_post 'Rename this.')" DISMISSED)]")" \
+  "$(fthread t2 false "[$(in_review "$(op_post 'Why here?')" DISMISSED), $(in_review "$(op_post 'Still asking.')" COMMENTED)]")" \
+  > "$GH_DIR/threads_406.json"
+out=$("$SUT" 2>&1)
+eq "$(meta FT6 pr.unanswered_threads)" "1@sha-406" \
+  "a thread whose only feedback a dismissal retired is not counted; one whose later post no dismissal covers is"
+
 echo "# a thread read that does not answer records nothing, and the last count stands"
 store "[$(anchor FT4 404 ',"pr.unanswered_threads":"1@sha-404"'), $(rev FT4)]"
 printf '%s' "$(prview 404 OPEN BLOCKED)" > "$GH_DIR/pr_view_404.json"
