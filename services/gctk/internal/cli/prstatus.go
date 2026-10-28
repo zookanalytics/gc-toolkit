@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
@@ -96,14 +97,15 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// The anchor's in-flight set: every live bead carrying anchor_bead, any
-	// task_kind, the membership test pr-facts.sh applies in its own arms.
-	// metadata-field selection lists non-closed by default; the explicit --status
-	// keeps it robust, one comma list because a repeated flag drops earlier
-	// values, and --limit 0 so the client-side field filter sees every candidate.
+	// The anchor's in-flight set: every bead carrying anchor_bead, any
+	// task_kind, at one of prstatus.InFlightStatuses, the statuses the helm board
+	// reads the same set over. metadata-field selection lists non-closed by
+	// default; the explicit --status keeps it robust, one comma list because a
+	// repeated flag drops earlier values, and --limit 0 so the client-side field
+	// filter sees every candidate.
 	rows, ok := client.List(
 		"--metadata-field", "anchor_bead="+anchor,
-		"--status", "open,in_progress,blocked,deferred,hooked,pinned",
+		"--status", strings.Join(prstatus.InFlightStatuses, ","),
 		"--limit", "0",
 		"--json",
 	)
@@ -167,21 +169,13 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// workOpenVisit reports whether an open visit covers one of the PR's live review
-// or rework children among rows, the anchor's in-flight set: a row whose
-// task_kind is review or rework, open or in_progress, the children the helm
-// board gathers as rows of their own, so the board and the label read the same
-// work. ok is false when a visit read does not answer.
+// workOpenVisit reports whether an open visit covers the PR's own work among
+// rows, the anchor's in-flight set: a row prstatus.IsWork accepts, by the rule
+// the helm board applies to the same set. A row with no status reads open. ok is
+// false when a visit read does not answer.
 func workOpenVisit(client *gcbd.Client, rows []gcbd.Bead) (covered, ok bool) {
 	for i := range rows {
-		switch rows[i].Meta("task_kind") {
-		case "review", "rework":
-		default:
-			continue
-		}
-		switch rows[i].StatusLowerOr("open") {
-		case "open", "in_progress":
-		default:
+		if !prstatus.IsWork(rows[i].Meta("task_kind"), rows[i].StatusLowerOr("open")) {
 			continue
 		}
 		if covered, ok := openVisitCovers(client, rows[i].ID); !ok || covered {

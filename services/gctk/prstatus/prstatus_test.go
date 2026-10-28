@@ -225,3 +225,29 @@ func TestSplitDated(t *testing.T) {
 		t.Errorf("dated approved posture derived %q, want merging", got)
 	}
 }
+
+// The PR's own work in flight, whose visit holds the PR, is a review or rework
+// child that is open or in_progress. Any other kind in the in-flight set, or a
+// review or rework child at another live status, counts in flight and holds
+// nothing.
+func TestIsWork(t *testing.T) {
+	for _, tc := range []struct {
+		kind, status string
+		want         bool
+	}{
+		{"review", "open", true},
+		{"review", "in_progress", true},
+		{"rework", "open", true},
+		{"rework", "in_progress", true},
+		{"review", "blocked", false},
+		{"rework", "deferred", false},
+		{"rework", "", false},
+		{"validation", "open", false},
+		{"finding", "in_progress", false},
+		{"", "open", false},
+	} {
+		if got := IsWork(tc.kind, tc.status); got != tc.want {
+			t.Errorf("IsWork(%q, %q) = %v, want %v", tc.kind, tc.status, got, tc.want)
+		}
+	}
+}

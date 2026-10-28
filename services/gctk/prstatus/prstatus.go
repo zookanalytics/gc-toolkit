@@ -27,7 +27,10 @@
 // The rule is Derive's; gathering the facts is the caller's. The label path
 // reads them by shelling out to `gc bd`; a caller that already holds the bead,
 // such as the board through the beads library, hands Derive the same raw
-// metadata instead. Derive itself does no I/O.
+// metadata instead. Derive itself does no I/O. What the two gatherers read
+// about the anchor's work is fixed here, so they read the same beads: the
+// in-flight set over [InFlightStatuses], and the visits on the members
+// [IsWork] accepts.
 //
 // Derive reads only state the city records: the anchor's holds
 // (merge_hold/rebase_hold), whether an open visit covers it or its review and
@@ -139,11 +142,9 @@ type Facts struct {
 	// flight.
 	OpenVisit bool
 	// WorkVisit is whether an open visit covers the PR's own work in flight: a
-	// live review or rework child of the anchor, a bead carrying anchor_bead
-	// whose task_kind is review or rework, open or in_progress. Those are the
-	// children the helm board gathers as rows of their own. The work waits on
-	// the person the visit asks, so the visit holds the PR as one on the anchor
-	// does.
+	// member of the anchor's in-flight set that [IsWork] accepts. The work waits
+	// on the person the visit asks, so the visit holds the PR as one on the
+	// anchor does.
 	WorkVisit bool
 	// PersonBlocker is whether a live blocker the anchor waits on, a bead its
 	// blocks edge names that has not closed, is a person's to clear: one routed
@@ -170,11 +171,32 @@ type Facts struct {
 	// draft ready at, either the head it flipped it at or the head it found it
 	// already ready at.
 	DraftReadied string
-	// InFlightCount is the size of the anchor's in-flight set: every live bead
-	// carrying anchor_bead, any task_kind, over the live statuses pr-facts.sh
-	// counts (a rework or fix child, a validation pass, a review, a finding).
-	// Non-zero means the city is acting on the PR.
+	// InFlightCount is the size of the anchor's in-flight set: every bead
+	// carrying anchor_bead, any task_kind, at one of [InFlightStatuses] (a
+	// rework or fix child, a validation pass, a review, a finding). Non-zero
+	// means the city is acting on the PR.
 	InFlightCount int
+}
+
+// InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
+// its anchor's in-flight set, whatever its task_kind: bd-lib.sh's anchor
+// statuses (_BD_ANCHOR_STATUSES) less closed. `gctk pr-status derive` reads the
+// set over them for the PR labels, and the helm board's beads source reads it
+// over them for the board.
+var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}
+
+// IsWork reports whether a member of the anchor's in-flight set, read by its
+// task_kind and its lowercase status, is the PR's own work in flight, whose
+// visit holds the PR ([Facts.WorkVisit]): a review or rework child, open or
+// in_progress. Those are the children the helm board gathers as rows of their
+// own.
+func IsWork(taskKind, status string) bool {
+	switch taskKind {
+	case "review", "rework":
+	default:
+		return false
+	}
+	return status == "open" || status == "in_progress"
 }
 
 // Derive returns the state the anchor projects. Precedence:

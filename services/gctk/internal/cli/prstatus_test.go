@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -16,10 +18,11 @@ import (
 // $STUB_WORK_STAMPED, `[]` when any is unset, and every other `bd list` with
 // $STUB_LIST, so a derive test drives the whole gathering path with no live
 // store — the same `gc bd` seam pr-status-label.test.sh exercises through the
-// shell, proven here in-process. $STUB_TRACKERS_FAIL and $STUB_STAMPED_FAIL fail
-// one of the anchor's visit reads each, $STUB_WORK_FAIL every one of the
-// work's, and $STUB_BLOCKERS_FAIL the blockers read. $STUB_LOG, when set,
-// records the arguments of every call.
+// shell, proven here in-process. A work bead named in $STUB_VISITED, a
+// space-separated list, answers its tracks read with an open visit instead.
+// $STUB_TRACKERS_FAIL and $STUB_STAMPED_FAIL fail one of the anchor's visit
+// reads each, $STUB_WORK_FAIL every one of the work's, and $STUB_BLOCKERS_FAIL
+// the blockers read. $STUB_LOG, when set, records the arguments of every call.
 const gcStub = `#!/bin/sh
 [ -z "$STUB_LOG" ] || printf '%s\n' "$*" >> "$STUB_LOG"
 case "$2" in
@@ -35,7 +38,10 @@ case "$2" in
           printf '%s\n' "${STUB_TRACKERS:-[]}"
         else
           [ -z "$STUB_WORK_FAIL" ] || { echo "simulated work dep list failure" >&2; exit 1; }
-          printf '%s\n' "${STUB_WORK_TRACKERS:-[]}"
+          case " $STUB_VISITED " in
+            *" $4 "*) printf '%s\n' '[{"id":"tk-w","status":"open","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]' ;;
+            *) printf '%s\n' "${STUB_WORK_TRACKERS:-[]}" ;;
+          esac
         fi ;;
     esac ;;
   list)
@@ -224,6 +230,9 @@ func TestPRStatusDerive(t *testing.T) {
 
 	// Both visit reads name the anchor, so the cost follows the anchor rather than
 	// the number of open visits in the store, and neither lists every open visit.
+	// The in-flight read names the anchor too, over bd-lib.sh's live statuses,
+	// spelled out here as the helm board's source test spells them, so both pin
+	// the one list.
 	t.Run("the visit reads are scoped to the anchor", func(t *testing.T) {
 		stubGC(t, approved, `[]`)
 		log := filepath.Join(t.TempDir(), "gc.log")
@@ -237,6 +246,7 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 		calls := string(raw)
 		for _, want := range []string{
+			"bd list --metadata-field anchor_bead=tk-a --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json\n",
 			"bd dep list tk-a --direction=up -t tracks --json\n",
 			"bd list --metadata-field gc.continuation_group=tk-a --status open,in_progress --limit 0 --json\n",
 			"bd dep list tk-a --direction=down -t blocks --json\n",
@@ -279,7 +289,7 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 		{"a closed visit on the rework releases the PR", approved, rework,
 			map[string]string{"STUB_WORK_TRACKERS": `[{"id":"tk-w","status":"closed","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]`},
 			`{"status":"merging","held":[]}`},
-		{"a visit on work the board does not gather, a validation pass", approved,
+		{"a visit on a validation pass, which is not the PR's review or rework work", approved,
 			`[{"id":"tk-v","status":"open","metadata":{"task_kind":"validation","anchor_bead":"tk-a"}}]`,
 			map[string]string{"STUB_WORK_TRACKERS": workVisit},
 			`{"status":"merging","held":[]}`},
@@ -365,6 +375,79 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 			t.Errorf("the derive read the work's visits with a visit on the anchor; calls:\n%s", raw)
 		}
 	})
+}
+
+// parityCase is one row of prstatus/testdata/parity.json, the table the PR
+// labels and the helm board are both held to: anchor tk-a's metadata, its
+// in-flight set, the beads an open visit covers, and the status and held values
+// both derive from them.
+type parityCase struct {
+	Name     string            `json:"name"`
+	Metadata map[string]string `json:"metadata"`
+	InFlight []struct {
+		ID       string `json:"id"`
+		TaskKind string `json:"task_kind"`
+		Status   string `json:"status"`
+	} `json:"in_flight"`
+	Visits []string `json:"visits"`
+	Want   struct {
+		Status string   `json:"status"`
+		Held   []string `json:"held"`
+	} `json:"want"`
+}
+
+// The label's side of the parity table: each case reaches the derive as the
+// `gc bd` reads return it. The helm board's TestPRHeldParity builds the same
+// cases as the rows its beads source gathers, so neither side can drift from the
+// other unseen.
+func TestPRStatusDeriveParity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "prstatus", "testdata", "parity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []parityCase
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
+		t.Fatalf("parity.json: %d cases, err %v", len(cases), err)
+	}
+	visit := `[{"id":"tk-w","status":"open","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]`
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			show, err := json.Marshal([]any{map[string]any{"id": "tk-a", "status": "open", "metadata": tc.Metadata}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := []any{}
+			for _, c := range tc.InFlight {
+				rows = append(rows, map[string]any{"id": c.ID, "status": c.Status,
+					"metadata": map[string]string{"task_kind": c.TaskKind, "anchor_bead": "tk-a"}})
+			}
+			list, err := json.Marshal(rows)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stubGC(t, string(show), string(list))
+			var work []string
+			for _, v := range tc.Visits {
+				if v == "tk-a" {
+					t.Setenv("STUB_TRACKERS", visit)
+				} else {
+					work = append(work, v)
+				}
+			}
+			t.Setenv("STUB_VISITED", strings.Join(work, " "))
+			out, code := derive(t, "tk-a", "--json")
+			var got struct {
+				Status string   `json:"status"`
+				Held   []string `json:"held"`
+			}
+			if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
+				t.Fatalf("derive --json = (%q, %d)", out, code)
+			}
+			if got.Status != tc.Want.Status || !slices.Equal(got.Held, tc.Want.Held) {
+				t.Errorf("status=%q held=%v, want %q and %v", got.Status, got.Held, tc.Want.Status, tc.Want.Held)
+			}
+		})
+	}
 }
 
 func TestPRStatusUsageErrors(t *testing.T) {
