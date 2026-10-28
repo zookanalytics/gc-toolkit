@@ -60,10 +60,11 @@
 #                        its program. They read nothing, so a caller that asks
 #                        only whether a post is the city's own pays for no read.
 #   pr-post.sh feedback-def
-#                        print the own-def definitions, gc_not_for_review and
-#                        gc_feedback($self; $since), for a reader of feedback to
-#                        prepend to its program. It reads the rig's declaration
-#                        and embeds its prefixes.
+#                        print the own-def definitions, gc_not_for_review,
+#                        gc_feedback($self; $since) and
+#                        gc_thread_awaits_answer($self; $since), for a reader of
+#                        feedback to prepend to its program. It reads the rig's
+#                        declaration and embeds its prefixes.
 #   pr-post.sh not-for-review
 #                        print the no-review mark and each prefix the rig
 #                        declares, one per line
@@ -219,6 +220,16 @@ nfr_load() {
 # A byte-order mark that opens a body is not text: GitHub's renderer drops it,
 # so both tests read the body without it. A declared prefix is compared with the
 # body's text after any leading whitespace, as the parser drops the prefix's own.
+#
+# gc_thread_awaits_answer asks of a review thread, a GraphQL reviewThread node
+# with its comments, whether its feedback waits on the city: the thread is
+# unresolved, and the newest of its posts that is feedback or the city's own is
+# feedback. GitHub lists a thread's comments oldest first. A post of the city's
+# answers every post before it, whether it says the point was fixed, declined or
+# deferred, so a thread the city answered and left open for the reviewer does
+# not wait on the city. A post not for review neither asks nor answers. With no
+# $self nothing is the city's own, so a reader without the acting login does not
+# ask.
 NFR_DEF='def gc_opens_with_mark:
   def comments($l):
     (if .open then
@@ -249,6 +260,10 @@ def gc_not_for_review:
     or any(gc_not_for_review_prefixes[]; . as $p | $t | startswith($p));
 def gc_feedback($self; $since):
   (gc_city_own($self; $since) | not) and (gc_not_for_review | not);
+def gc_thread_awaits_answer($self; $since):
+  ((.isResolved // false) == false)
+  and ([ (.comments.nodes // [])[] | select(gc_city_own($self; $since) or gc_feedback($self; $since)) ]
+       | length > 0 and (last | gc_feedback($self; $since)));
 '
 # The mark holds no character a JSON string escapes, so it is quoted as it is.
 nfr_defs() {

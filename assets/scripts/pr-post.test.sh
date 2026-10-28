@@ -301,6 +301,45 @@ eq "$(nfr "$NDEF" '{"body":null}')" false "a null body carries no mark"
 eq "$(printf '%s' "$VERCEL" | jq -r --arg self bot --arg since "$CUT" "$VDEF"'gc_city_own($self; $since)')" false \
   "the city's own rule is unchanged by a declaration"
 
+echo "# feedback-def: a review thread awaits the city's answer while its newest feedback follows the city's last post"
+# awaits <def> <thread-json> — prints gc_thread_awaits_answer for our login
+# "bot" at $CUT.
+awaits() { printf '%s' "$2" | jq -r --arg self bot --arg since "$CUT" "$1"'gc_thread_awaits_answer($self; $since)'; }
+# thread <isResolved> <comment-json>... — a reviewThread node, its comments
+# oldest first, as the thread read returns them.
+thread() {
+  local r="$1"; shift
+  printf '%s\n' "$@" | jq -sc --argjson r "$r" '{isResolved: $r, comments: {nodes: .}}'
+}
+OP='{"author":{"login":"johnzook"},"body":"Rename this.","createdAt":"2026-10-08T01:00:00Z"}'
+OP2='{"author":{"login":"johnzook"},"body":"Still wrong here.","createdAt":"2026-10-08T03:00:00Z"}'
+REPLY='{"author":{"login":"bot"},"body":"Addressed in abc1234.\n\n<!-- gc:city -->","createdAt":"2026-10-08T02:00:00Z"}'
+DECLINE='{"author":{"login":"bot"},"body":"Declined: the name matches the API.\n\n<!-- gc:city -->","createdAt":"2026-10-08T02:00:00Z"}'
+OLD_REPLY='{"author":{"login":"bot"},"body":"Done.","createdAt":"2026-10-06T02:00:00Z"}'
+OLD_OP='{"author":{"login":"johnzook"},"body":"Rename this.","createdAt":"2026-10-06T01:00:00Z"}'
+NOTICE='{"author":{"login":"preview[bot]"},"body":"<!-- gc:no-review -->\nDeployed.","createdAt":"2026-10-08T04:00:00Z"}'
+eq "$(awaits "$NDEF" "$(thread false "$OP")")" true \
+  "an unresolved thread whose feedback the city never answered awaits it"
+eq "$(awaits "$NDEF" "$(thread null "$OP")")" true "…and so does one whose resolution reads null"
+eq "$(awaits "$NDEF" "$(thread true "$OP")")" false "a resolved thread awaits nothing"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$REPLY")")" false \
+  "a reply of the city's answers the feedback before it, though the thread stays open"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$DECLINE")")" false \
+  "…and so does a point it declined, left open for the reviewer"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$REPLY" "$OP2")")" true \
+  "feedback after the city's reply awaits a new answer"
+eq "$(awaits "$NDEF" "$(thread false "$OLD_OP" "$OLD_REPLY")")" false \
+  "an unmarked post under our login from before the cutover is the city's own, so it answers"
+eq "$(awaits "$NDEF" "$(thread false "$REPLY")")" false "a thread of the city's own posts awaits nothing"
+eq "$(awaits "$NDEF" "$(thread false "$NOTICE")")" false "a thread holding only a post not for review awaits nothing"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$NOTICE")")" true \
+  "a post not for review after the feedback answers nothing"
+eq "$(awaits "$NDEF" "$(thread false "$REPLY" "$NOTICE")")" false "…and asks nothing after the city's reply"
+eq "$(awaits "$NDEF" '{"isResolved":false,"comments":{"nodes":[]}}')" false "a thread with no comments awaits nothing"
+eq "$(awaits "$NDEF" '{"isResolved":false}')" false "…nor one the read carries no comments for"
+eq "$(printf '%s' "$(thread false "$OP" "$REPLY")" | jq -r --arg self "" --arg since "$CUT" "$NDEF"'gc_thread_awaits_answer($self; $since)')" true \
+  "with no login, nothing is the city's own, so even its reply reads as feedback"
+
 echo "# feedback-def: the mark counts only among the HTML comments a body opens with"
 row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
 NR='<!-- gc:no-review -->'
@@ -521,7 +560,7 @@ echo "# one definition: no reader carries the no-review rule of its own"
 if git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
   eq "$(git -C "$REPO" grep -l -F -e 'gc:no-review' -- 'assets/' 'formulas/' 'services/' 'tools/' ':!assets/scripts/pr-post.sh' ':!*.test.sh' ':!*_test.go' 2>/dev/null)" "" \
     "no file but pr-post.sh tests for the no-review mark"
-  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark|gc_opens_with_mark)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
+  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark|gc_opens_with_mark|gc_thread_awaits_answer)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
     "no file but pr-post.sh defines the rule"
   # The miner's fallback for a rig that declares nothing is the one exception:
   # it skips Vercel's deployment notice there until the rig declares a prefix.
