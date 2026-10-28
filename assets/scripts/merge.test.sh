@@ -2086,6 +2086,22 @@ out=$("$SUT" 2>&1)
 eq "$(meta FT6 pr.unanswered_threads)" "1@sha-406" \
   "a thread whose only feedback a dismissal retired is not counted; one whose later post no dismissal covers is"
 
+echo "# feedback the city marked handled waits on nothing"
+# The write-back puts THUMBS_UP in place of its EYES on a post it owes nothing
+# more, the only answer a point declined with no reply owed gets, so the pass
+# asks each comment for the reactions the acting login left; the stub answers
+# them only to a query that names them.
+handled() { printf '%s' "$1" | jq -c '. + {reactionGroups: [{content: "THUMBS_UP", viewerHasReacted: true}]}'; } # <comment-json>
+store "[$(anchor FT8 408), $(rev FT8)]"
+printf '%s' "$(prview 408 OPEN BLOCKED)" > "$GH_DIR/pr_view_408.json"
+printf '{"threads":[%s,%s]}\n' \
+  "$(fthread t1 false "[$(handled "$(op_post 'Nice cleanup.')")]")" \
+  "$(fthread t2 false "[$(handled "$(op_post 'Looks good.')"), $(op_post 'One more thing here.')]")" \
+  > "$GH_DIR/threads_408.json"
+out=$("$SUT" 2>&1)
+eq "$(meta FT8 pr.unanswered_threads)" "1@sha-408" \
+  "a thread whose only feedback the city marked handled is not counted; one with later feedback it has not marked is"
+
 echo "# a thread read that does not answer records nothing, and the last count stands"
 store "[$(anchor FT4 404 ',"pr.unanswered_threads":"1@sha-404"'), $(rev FT4)]"
 printf '%s' "$(prview 404 OPEN BLOCKED)" > "$GH_DIR/pr_view_404.json"

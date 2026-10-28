@@ -363,6 +363,30 @@ eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" APPROVED)")")" true \
 eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" CHANGES_REQUESTED)" "$(in_review "$REPLY" DISMISSED)")")" true \
   "a dismissed review of the city's answers nothing"
 
+echo "# feedback-def: a post the city marked handled neither asks nor answers"
+# The write-back in pr-facts.sh puts WB_RESOLVED_REACTION in place of its
+# WB_REACTION on a post it owes nothing more. The cases read both from it, so a
+# write-back that marks with another reaction fails them.
+WB_ROUTED=$(sed -n 's/^WB_REACTION="\([A-Z_]*\)"$/\1/p' "$HERE/pr-facts.sh")
+WB_HANDLED=$(sed -n 's/^WB_RESOLVED_REACTION="\([A-Z_]*\)"$/\1/p' "$HERE/pr-facts.sh")
+if [ -n "$WB_ROUTED" ] && [ -n "$WB_HANDLED" ]; then ok "pr-facts.sh names the reactions its write-back marks a post with"
+else bad "pr-facts.sh names the reactions its write-back marks a post with" "WB_REACTION='$WB_ROUTED' WB_RESOLVED_REACTION='$WB_HANDLED'"; fi
+# reacted <comment-json> <content> <viewer-has-reacted> — the comment carrying
+# one reaction group.
+reacted() { printf '%s' "$1" | jq -c --arg c "$2" --argjson v "$3" '. + {reactionGroups: [{content: $c, viewerHasReacted: $v}]}'; }
+eq "$(awaits "$NDEF" "$(thread false "$(reacted "$OP" "$WB_HANDLED" true)")")" false \
+  "feedback the city marked handled, as a point declined with no reply owed, awaits nothing"
+eq "$(awaits "$NDEF" "$(thread false "$(reacted "$OP" "$WB_HANDLED" true)" "$OP2")")" true \
+  "…while later feedback it has not marked still asks"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$(reacted "$OP2" "$WB_HANDLED" true)")")" true \
+  "…and so does earlier feedback it has not marked, since the mark answers only its own post"
+eq "$(awaits "$NDEF" "$(thread false "$OP" "$REPLY" "$(reacted "$OP2" "$WB_HANDLED" true)")")" false \
+  "a handled post after the city's reply leaves the reply the last word"
+eq "$(awaits "$NDEF" "$(thread false "$(reacted "$OP" "$WB_HANDLED" false)")")" true \
+  "the same reaction from another login marks nothing handled"
+eq "$(awaits "$NDEF" "$(thread false "$(reacted "$OP" "$WB_ROUTED" true)")")" true \
+  "the city's reaction that it routed a post is no answer"
+
 echo "# feedback-def: the mark counts only among the HTML comments a body opens with"
 row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
 NR='<!-- gc:no-review -->'

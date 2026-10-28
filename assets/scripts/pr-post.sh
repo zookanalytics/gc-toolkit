@@ -63,9 +63,10 @@
 #                        print the own-def definitions, gc_not_for_review,
 #                        gc_feedback($self; $since), the definitions of what a
 #                        dismissal retires (review-dismissal.sh, beside this
-#                        script) and gc_thread_awaits_answer($self; $since), for
-#                        a reader of feedback to prepend to its program. It
-#                        reads the rig's declaration and embeds its prefixes.
+#                        script), gc_city_handled and
+#                        gc_thread_awaits_answer($self; $since), for a reader of
+#                        feedback to prepend to its program. It reads the rig's
+#                        declaration and embeds its prefixes.
 #   pr-post.sh not-for-review
 #                        print the no-review mark and each prefix the rig
 #                        declares, one per line
@@ -267,22 +268,34 @@ nfr_defs() {
 # every post before it, whether it says the point was fixed, declined or
 # deferred, so a thread the city answered and left open for the reviewer does
 # not wait on the city. A post not for review neither asks nor answers, whoever
-# posted it, the city included. Neither does a post a dismissal retired, which
-# live_comments in review-dismissal.sh sets aside: a comment node names its own
-# review, so each post is paired with that review under a key of the post's
-# own, the shape live_comments reads. A reader therefore asks for each comment's
-# pullRequestReview with its state and submittedAt. With no $self nothing is the
-# city's own, so a reader without the acting login does not ask. feedback-def
-# prints it after review-dismissal.sh's definitions, since jq resolves a call
-# only to a definition before it.
-THREAD_DEF='def gc_thread_awaits_answer($self; $since):
+# posted it, the city included. Neither does a post the city marked handled, or
+# a post a dismissal retired.
+#
+# A post the city marked handled carries its THUMBS_UP (gc_city_handled), the
+# reaction the write-back in pr-facts.sh puts in place of its EYES once it owes
+# the post nothing more (WB_RESOLVED_REACTION). For a point declined with no
+# reply owed, that reaction is the only answer the post gets. viewerHasReacted
+# names the reader's own reaction, so a reader reads the threads as the acting
+# login and asks for each comment's reactionGroups.
+#
+# A post a dismissal retired is one live_comments in review-dismissal.sh sets
+# aside: a comment node names its own review, so each post is paired with that
+# review under a key of the post's own, the shape live_comments reads. A reader
+# therefore asks for each comment's pullRequestReview with its state and
+# submittedAt. With no $self nothing is the city's own, so a reader without the
+# acting login does not ask. feedback-def prints the rule after
+# review-dismissal.sh's definitions, since jq resolves a call only to a
+# definition before it.
+THREAD_DEF='def gc_city_handled:
+  any((.reactionGroups // [])[]; .content == "THUMBS_UP" and .viewerHasReacted == true);
+def gc_thread_awaits_answer($self; $since):
   [ (.comments.nodes // []) | to_entries[]
     | .value + { pull_request_review_id: ("p" + (.key | tostring)) } ] as $posts
   | [ $posts[] | select((.pullRequestReview | type) == "object")
       | { id: .pull_request_review_id, state: .pullRequestReview.state,
           submitted_at: .pullRequestReview.submittedAt } ] as $revs
   | ((.isResolved // false) == false)
-    and ([ $posts | live_comments($revs)[] | select(gc_not_for_review | not) ]
+    and ([ $posts | live_comments($revs)[] | select((gc_not_for_review or gc_city_handled) | not) ]
          | length > 0 and (last | gc_feedback($self; $since)));
 '
 
