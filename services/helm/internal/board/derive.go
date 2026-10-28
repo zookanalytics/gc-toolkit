@@ -746,10 +746,11 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string, own beadState) bool
 // things make that different from the naive "0 in progress": inProgressLive
 // counts a slung bead whose movement lives on its workflow, `held` means a
 // conversation is holding the anchor — attention is already on it, so silence
-// in the child beads is not abandonment — and a child parked for the operator
-// is a question already asked on its own row, so [rollup.idle] excludes it. An
-// anchor whose every open child is parked that way falls through to NORMAL:
-// the asks are all live, none of them are its own.
+// in the child beads is not abandonment — and a child whose state names what it
+// waits on (a person, its turn, a review or a conversation, [deriveState]) is
+// not work nobody has picked up, so [rollup.idle] excludes it. An anchor whose
+// every open child waits that way falls through to NORMAL: nothing under it is
+// idle.
 func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledCheck bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
@@ -1960,8 +1961,8 @@ func classifySection(t Tile) string {
 		return SectionCleanup
 	case len(t.ParkedHeads) > 0 && t.Open == len(t.ParkedHeads) && t.InProgressLive == 0:
 		// Every open child is parked for the operator and nothing else is moving.
-		// The parent is not active work — it is waiting on the operator to rule
-		// those child rows — so it bands gate rather than masquerading as
+		// The parent is not active work: it waits on the operator to release or
+		// rule on those children, so it bands gate rather than masquerading as
 		// in-flight.
 		return SectionGate
 	default:
