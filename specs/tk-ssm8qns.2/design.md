@@ -1,6 +1,6 @@
 ---
 name: Design record — gctk's domains from its CLI, proved on "is this blocked?"
-description: The record behind docs/gctk-architecture.md, taken at b25a5c06. It covers what approving the design decides and what each part costs, where the design departs from its Feature's contract and why, the rulings on the queued pr-open, signoff and cobra beads, the domain set the surviving intents yield against the epic's starting proposal, which change carries each domain move, the breakdown the implementation child follows, and what the Epic Checkpoint reads. The census of "blocked" is in blocked-census.md beside it.
+description: The record behind docs/gctk-architecture.md, taken at b25a5c06. It covers what approving the design decides and what each part costs, where the design departs from its Feature's contract and why, what the design-gate sitting settled, the rulings on the queued pr-open, signoff and cobra beads, the nouns the surviving intents yield against the epic's starting proposal, which change carries each domain move, the breakdown the implementation child follows, and what the Epic Checkpoint reads. The census of "blocked" is in blocked-census.md beside it.
 ---
 
 # Design record: gctk's domains from its CLI
@@ -13,17 +13,23 @@ was cut from.
 ## What the operator approves
 
 Approving the design starts the proof, tk-ssm8qns.3. It builds gctk's command
-tree, the ledger, the store adapter with its fake, and `waits`, the domain that
-answers "is this blocked?". Every place in surviving code that decides it then
-asks `waits`, and `hold-lib.sh`, its suite and its fixture (686 lines) are
-deleted. Approving decides six things.
+tree, the ledger, the store adapter with its fake, and `waits`, the package
+behind `gctk bead blocked`, which answers "is this blocked?". Every place in
+surviving code that decides it then asks `waits`, and `hold-lib.sh`, its suite
+and its fixture (686 lines) are deleted. Approving decides six things.
 
-- **The CLI and its domains.** Every intent that survives the migration map is
-  one `gctk <domain> <verb>` call. The domains are waits, dispatch, priority,
-  pr, review, sessions, rig, sends, dolt and seed. Anchor, findings,
-  engagement, disposition, run, convoy, epics and learning are not domains,
-  because what they hold retires onto Gas City or stays prose. This costs
-  nothing until a domain moves.
+- **The surface and its callers.** Every intent that survives the migration
+  map is one `gctk <noun> <verb>` call. Each verb carries a caller class, agent,
+  hook or order, and a defense: the feature it adds over the native call it
+  wraps, or the debt it contains and what retires it. The nouns are bead,
+  priority, pr, rig, review, quota-park, seed and dolt, and lifecycle and merge
+  join as named debt. Writes stay on the native surface, and pack logic that
+  follows a write reacts through an order, which one admission rule governs.
+  Anchor, findings, engagement, disposition, run, convoy, epics and learning
+  are not nouns, because what they hold retires onto Gas City or stays prose.
+  Dispatch, sessions and sends dissolve: arm and disarm are bead verbs and the
+  start is an order, quota-park nudging is an order of its own, and the
+  containment acts live under pr. This costs nothing until a domain moves.
 - **One rule for "is this blocked?", and it is the store's.** Work that has not
   started is held by whatever keeps it out of `bd ready`, a wait of its own or
   an ancestor's. Work in flight is held only by its own waits, the ones bd
@@ -40,9 +46,9 @@ deleted. Approving decides six things.
   close rule. So its listing can leave out a bead that its own gate holds,
   blame a parent that holds nothing, or name a spawner whose gate has opened
   ([blocked-census.md](blocked-census.md#the-stores-rules)). Until the bd the
-  city runs judges the gate, `waits` answers a bead with a `waits-for` edge of
-  its own with an error. Unlike a failed read, that error stands until the
-  repair, so every caller holds such a bead, even once its gate opens. No
+  city runs judges the gate, a bead with a `waits-for` edge of its own reads
+  `unjudged`. Unlike a failed read, that answer stands until the repair, so
+  every caller that acts holds such a bead, even once its gate opens. No
   store held such an edge at 20:12Z, so this costs nothing today. The same
   repair makes `bd blocked` return an error when its read of parents fails.
   Today it drops every bead held through a parent and exits 0, so until then
@@ -128,6 +134,52 @@ the migration map came after it, and the design follows them where they differ.
    steering.md expects a park to hold routed members, and the doctor check on
    blocked work flags a member that has neither a route nor an arm.
 
+## What the design-gate sitting settled
+
+The operator ruled the design at 9db113b9 unapprovable as written in the
+design-gate sitting (visit tk-ppb4639, 2026-10-28), and settled its rework
+there. The rulings, with their provenance, are on tk-ssm8qns.2's notes. The
+design follows them.
+
+1. **The bar.** An architecture doc defines, defends and describes. Every
+   element states the feature it adds over the native call it wraps, or the
+   debt it contains and what retires it, and an element that defends neither is
+   cut. A pack-local definition is classed aloud as a feature or as debt.
+2. **One surface, classed by caller.** The CLI is a product that defends its
+   structure and its value. The CLI table and the domain table become one
+   surface table, and each verb carries a caller class. The classes are agent,
+   hook and order and no others, because each of them has a registry that
+   enumerates its consumers. No verb is internal, since an internal consumer
+   cannot be enumerated, and Go packages are implementation beneath the verbs.
+3. **Writes stay native, and pack logic reacts, as a floor.** No gctk verb
+   parallels an act the native surface already expresses. Pack logic that
+   follows a native write reacts through an order. An adversarial stress test
+   amended the principle before it was adopted: where the pack owns the writer,
+   the writer settles synchronously as a hook and the order stays as the
+   backstop. The naive form would have deleted the synchronous half of
+   queue-priority's shipped shape.
+4. **The order class has an admission rule and a guarantee model.** An order is
+   admitted only when it converges from durable state, is idempotent, tolerates
+   lag, finds every intent it must keep already stored, reads a bounded set and
+   guards its writes with the field's one lock. Its guarantee is per cadence,
+   never per change, because the event bus is lossy by design.
+5. **Priority shift stays** as the one agent-class priority verb: it writes the
+   stored shift and settles the queue in one act. `priority set` dies, because
+   an absolute write parallels the native act. Settle is hook-class, and
+   reconcile is the order backstop.
+6. **The nouns change.** `waits` is a package behind one bead read, which
+   answers blocked, pending and one status with own-or-inherited attribution.
+   Dispatch decomposes into the bead verbs arm and disarm plus the orders that
+   start and dispose. Sessions dissolves, and quota-park nudging is an order.
+   Sends dissolves: its acts live under pr, and its containment rule in the
+   GitHub adapter. pr derives from Gas City's own PR concept first, and "any
+   merge rule GitHub cannot express" is cut as hypothetical.
+7. **The record of debts.** The in-flight test is adopted debt. `lifecycle` and
+   `merge` and the store adapter's compensations each state why they
+   re-implement Gas City's logic, the goal of staying in step, and the risk.
+   Quota-park nudging is kept, its warrant is written, and its revisit is
+   tk-vtnyw8d.
+
 ## Rulings on the queued beads
 
 Each of these waits on the Feature by a `blocks` edge. The implementation child
@@ -147,30 +199,31 @@ fallback, so unit 1 deletes them with their cases in `gctk-resolve.test.sh`,
 and the `GCTK_FALLBACK` clear in `test-harness.sh` with its cases in
 `test-harness.test.sh`.
 
-## The derived domain set against the starting proposal
+## The derived nouns against the starting proposal
 
 The epic's notes proposed anchor, waits, dispatch, review, findings, pr,
 engagement, disposition, run, convoy, sessions and rig, plus epics and learning.
-The CLI drawn from the surviving intents keeps some, narrows some, drops the
-rest, and adds four the proposal did not name.
+The surface drawn from the surviving intents keeps some, narrows some, dissolves
+or drops the rest, and adds the nouns the proposal did not name.
 
 | Proposed | Derived | Why |
 |---|---|---|
 | anchor | dropped | The anchor state machine retires toward the states Gas Town's refinery records (tk-1tfzr71.20). The one question that survives about an anchor, which bead owns a PR, is `pr`'s. |
-| waits | kept | It owns "is this blocked?", the proof. |
-| dispatch | narrowed | Only the residual survives: pour on ready, and close on an `until` target's close (tk-1tfzr71.16). |
+| waits | a package | It answers "is this blocked?", the proof, behind the one bead read `gctk bead blocked`. A wait is a projection of bead state, not a new thing, and no surviving intent maps to it. |
+| dispatch | dissolved | Only the residual survives: pour on ready, and close on an `until` target's close (tk-1tfzr71.16). Arm and disarm are bead verbs, and `start-unblocked` and `dispose-resolved` are the orders that act. |
 | review | narrowed | Only the lanes' synthesis and the check loop's check script survive (tk-1tfzr71.22). |
 | findings | dropped | Finding beads for machine findings retire with the review lanes. |
-| pr | kept | Title and summary composition, any merge rule GitHub cannot express, the hop from a GitHub event to its owning bead, and the PR status the board shares. |
+| pr | narrowed | Title and summary composition, the hop from a GitHub event to its owning bead, the PR status the board shares, and the containment acts that were sends'. It starts from Gas City's own PR concept, and the hypothetical merge rule GitHub cannot express is cut. |
 | engagement | dropped | Visits, demands and takeaways move onto Gas City's human gates (the native-gates effort, tk-1tfzr71.4). |
 | disposition | dropped | `bd duplicate` and `bd supersede` (tk-1tfzr71.13). |
 | run | dropped | `run-cancel.sh` is retained glue, one call over an endpoint with no CLI verb. The map keeps it as shell. |
 | convoy | dropped | `gc convoy land`, tracks and Gas Town's auto-land (tk-1tfzr71.23). |
-| sessions | narrowed | Only quota-park nudging survives, under the warrant the session-liveness member re-derives (tk-1tfzr71.18). |
+| sessions | dissolved | Only quota-park nudging survives, and nothing in it is a session question an agent asks. It is the `quota-park` noun's order, under its warrant, which the session-liveness member re-checks (tk-1tfzr71.18). |
 | rig | kept | Already in gctk. |
 | epics, learning | dropped | Retained product the map holds in prose, formulas, skills and doctor checks. Neither is a surviving intent. |
-| (new) priority | added | Priority following, under its warrant. |
-| (new) sends | added | gh write containment, under its warrant. |
+| (new) bead | added | The one bead read, and arm and disarm with the orders that act on an arm. |
+| (new) priority | added | Priority following, under its warrant. The field is bd's, and the noun owns the derivation. |
+| (new) quota-park | added | Quota-park nudging, under its warrant. |
 | (new) dolt | added | Dolt reclaim, under its warrant. |
 | (new) seed | added | The seed audit, retained glue the map names as a surviving intent. |
 
@@ -188,14 +241,14 @@ it after this Feature's checkpoint.
 
 | Domain | Carried by | Notes |
 |---|---|---|
-| waits | this Feature (tk-ssm8qns.3) | The proof. |
+| bead's read, `bead blocked` over `waits` | this Feature (tk-ssm8qns.3) | The proof. |
 | rig | in gctk already | Joins the cobra tree in this Feature, and its `rig_check.<check>` key becomes the ledger's first owned declaration. |
-| dispatch | the deferred-dispatch member (tk-1tfzr71.16) | Its contract re-expresses the residual as one event order on `bead.closed`. Under this design that order runs `gctk dispatch closed`, which asks `waits`. Until then deferred-dispatch.sh asks `gctk waits`. |
-| sessions | the session-liveness member (tk-1tfzr71.18) | Only if its re-check keeps the quota-park warrant. |
-| pr | the merge member (tk-1tfzr71.20) for composition and any merge residual; the GitHub-intake member (tk-1tfzr71.21) for the owner hop | `prstatus` moves under `pr` with whichever of them rewrites its facts. |
+| bead's arm and disarm, and the orders that start and dispose | the deferred-dispatch member (tk-1tfzr71.16) | Its contract re-expresses the residual as one event order on `bead.closed`. Under this design that event only cuts latency, so `gctk bead start-unblocked` and `gctk bead dispose-resolved` also converge on a cadence, as the admission rule requires, and both ask `waits`. Until then deferred-dispatch.sh asks `gctk bead blocked`. |
+| quota-park | the session-liveness member (tk-1tfzr71.18) | Only if its re-check keeps the quota-park warrant. |
+| pr | the merge member (tk-1tfzr71.20) for composition; the GitHub-intake member (tk-1tfzr71.21) for the owner hop | `prstatus` moves under `pr` with whichever of them rewrites its facts. |
 | review | the review-lane member (tk-1tfzr71.22) | |
 | the board's shared questions | the board member (tk-1tfzr71.24) | This Feature moves the board's ruled rows onto `waits`. The board imports each other domain's questions as that domain moves. Its ranking and attention model stay in helm. |
-| priority, sends, dolt, seed | later Features of this epic | The implementation child files each under the epic, waiting on this Feature by a `blocks` edge and not armed, so the epic's checkpoint decides when the next one starts. |
+| priority, pr's post and guard, dolt, seed | later Features of this epic | The implementation child files each under the epic, waiting on this Feature by a `blocks` edge and not armed, so the epic's checkpoint decides when the next one starts. |
 | the ledger's read-back | this Feature builds it | The read-back member (tk-1tfzr71.11) records the warrant and reduces the shell sites. |
 
 ## The implementation breakdown
@@ -260,30 +313,33 @@ next section lists.
 - `gctk-resolve.sh` loses `gctk_resolve`, its skew guard and `GCTK_FALLBACK`,
   as the rulings above say.
 
-**Unit 2: `waits`.**
+**Unit 2: `waits` and the bead read.**
 
 - The package answers whether a bead is blocked and on what, which of its own
   waits are pending, which wait edges point into another store, and whether a
   bead is in flight. It reads one snapshot and computes no wait itself.
-- `gctk waits blocked`, `pending` and `foreign` print one JSON record per bead,
-  so a shell caller reads the answer with one call. The record of a bead with
-  a `waits-for` edge of its own says that `waits` could not judge that edge,
-  apart from a read that failed.
+- `gctk bead blocked` prints one JSON record per bead, so a shell caller reads
+  the answer with one call. The record carries the bead's status, `blocked`,
+  `held`, `unjudged` or `clear`, with the waits behind it and whether each is
+  the bead's own or an ancestor's, its own pending waits and when the last one
+  landed, its arm, and its wait edges into another store. A bead with a
+  `waits-for` edge of its own reads `unjudged`, which is not a failed read.
 - Go tests on the fake cover every row of the census's disagreement table, a
   failed read, a bead with a `waits-for` edge of its own, which gets the
-  adapter's error, and each condition that puts a bead in flight.
+  adapter's error, each condition that puts a bead in flight, and each status.
 
 **Unit 3: the callers.**
 
-- The 22 places the census marks "moves" ask `waits`. `hold-lib.sh`'s five
-  callers swap in the same change that deletes `hold-lib.sh`,
-  `hold-lib.test.sh` and `hold-lib.fixture.json`, and the test harness stops
-  copying it. `until-resolved.sh` keeps the `until` predicate and asks
-  `pending` for its `blocks` clause.
+- The 22 places the census marks "moves" ask `gctk bead blocked`, or `waits`
+  through the package from Go. `hold-lib.sh`'s five callers swap in the same
+  change that deletes `hold-lib.sh`, `hold-lib.test.sh` and
+  `hold-lib.fixture.json`, and the test harness stops copying it.
+  `until-resolved.sh` keeps the `until` predicate and reads the bead's pending
+  waits for its `blocks` clause.
 - The board asks `pending` through the package for its ruled rows, from one
   snapshot per render.
-- check-wait-is-an-edge lists every wait edge into another store, from `waits
-  foreign`, for every bead, not only one with a hold marker.
+- check-wait-is-an-edge lists every wait edge into another store, from the
+  bead read, for every bead, not only one with a hold marker.
 - Each suite whose caller moved drives it through the built binary over the
   harness's stub store, as the suites that reach `gctk merge` do. Nothing keeps
   two copies equal.
@@ -309,8 +365,8 @@ next section lists.
   is closed, and what waited on the convoy waits on that bead.
   tk-1tfzr71.12's note names the change for a bead slung by hand under a parked
   epic (blocked-census.md).
-- The priority, sends, dolt and seed Features, filed under the epic as the
-  carriers table says.
+- The priority, pr post and guard, dolt and seed Features, filed under the epic
+  as the carriers table says.
 
 ## What the checkpoint reads
 
@@ -337,5 +393,5 @@ Once unit 3 lands:
   marks read it checks the listing against took 0.3 s at a host load of 12 to
   16, beside 0.5 to 0.6 s for the listing.
 - **No refinery pass gets slower than today's 552 s median.** find-work's hold
-  read becomes one `gctk waits blocked` call in place of `hold-lib.sh`'s reads,
+  read becomes one `gctk bead blocked` call in place of `hold-lib.sh`'s reads,
   and unit 3 measures the pass time.
