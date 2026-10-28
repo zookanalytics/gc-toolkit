@@ -13,7 +13,9 @@
 #      gc.takeaway headline (with gc.takeaway_settled). The free-text body is
 #      never parsed.
 #   D. Context edges, shown but never gating — the parent, the relates-to edges,
-#      the tracked-by visits, and a count per class.
+#      the tracked-by visits, the beads that wait on this one by a blocks or an
+#      until edge (open ones first, at most AWAITED_CAP named), and a count per
+#      class.
 #   E. Store — the store that answered, and the db it read.
 # and, each behind its own opt-in flag:
 #   B. --frontier — the blockers. A verdict over {ready, advancing, stuck}: ready
@@ -68,6 +70,10 @@ PROG="bead-context"
 # walk that stopped early cannot vouch that the branch drains.
 WALK_BUDGET=50
 WALK_DEPTH=6
+# The awaited-by edges name at most this many of the beads that wait on the
+# subject, the open ones first, and count the rest. A gate can hold a hundred
+# parked beads, and the edges print on every read.
+AWAITED_CAP=10
 # deferred-dispatch.sh stops re-slinging an armed bead at this many failed slings
 # and hands it to a person; the same knob and default set the cap read here.
 ARM_CAP="${GC_MAX_DISPATCH_SLING_FAILURES:-3}"
@@ -91,9 +97,10 @@ usage: bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads]
 Rebuilds one bead's working context in a single call: its core (title, status,
 priority, type, task_kind, assignee, routing, anchor state, first_reaction,
 origin, takeaway), its context edges (parent, relates-to, tracked-by visits,
-with a count per class), and the store that answered. --frontier adds the
-blocker verdict (ready/advancing/stuck) with open blockers named and closed
-counted; --horizon adds the direct-children epic-health snapshot. Each named
+the beads that wait on it by a blocks or until edge, with a count per class),
+and the store that answered. --frontier adds the blocker verdict
+(ready/advancing/stuck) with open blockers named and closed counted; --horizon
+adds the direct-children epic-health snapshot. Each named
 blocker or child carries a transitive advance: stuck names the bead that stops
 it and why. --walk-budget caps the open beads that walk reads beyond the
 subject's direct blockers (default 50). --store / --db pin the owning store
@@ -419,21 +426,42 @@ STORE_JSON=$(jq -nc --arg rig "$SUBJ_RIG" --arg db "$DB" \
 # subject's own read. Both edge spellings live in the store — `relates-to` and
 # the older `related` — so the class matches either. The tracked-by visits are
 # an INBOUND `tracks` edge (a visit tracks its subject; the subject carries no
-# reverse edge), so they are read with a reverse dep-list.
+# reverse edge), so they are read with a reverse dep-list. So are the beads that
+# wait on the subject, each carrying a `blocks` or an `until` edge to it. bd
+# matches --type as one literal type, so each is its own read, and an untyped
+# read would also bring every child and every inbound `related` edge, the review
+# and rework machinery this list leaves out. A reverse read sees only the
+# subject's store, so a bead in another store that waits on it is not listed.
 TRACKED_BY=$(bd_json "$DB" dep list "$BEAD" --direction=up --type tracks \
   | jq -c 'if type == "array" then [.[] | {id, status}] else [] end' 2>/dev/null || echo '[]')
-EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" '
+# awaited_read <type>: the beads with a <type> edge to the subject, tagged with
+# it. Each row carries its bead's description and metadata, so the pipe keeps
+# only {id, title, status, edge}.
+awaited_read() {
+  bd_json "$DB" dep list "$BEAD" --direction=up --type "$1" \
+    | jq -c --arg e "$1" 'if type == "array"
+        then [.[] | select(type == "object" and (.id // "") != "") | {id, title: (.title // null), status, edge: $e}]
+        else [] end' 2>/dev/null || echo '[]'
+}
+AWAITED=$( { awaited_read blocks; awaited_read until; } | jq -sc --argjson cap "$AWAITED_CAP" '
+  (add // []) | unique_by(.id) | sort_by(.status == "closed")
+  | {total: length, open: ([.[] | select(.status != "closed")] | length), named: .[:$cap]}' 2>/dev/null)
+[ -n "$AWAITED" ] || AWAITED='{"total":0,"open":0,"named":[]}'
+EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" --argjson awaited "$AWAITED" '
   (.parent // null) as $pid |
   ([.dependencies[]? | select(.dependency_type == "parent-child" and .id == $pid) | {id, title, status}] | .[0]) as $pedge |
   {
     parent: (if ($pid == null or $pid == "") then null else ($pedge // {id: $pid, title: null, status: null}) end),
     relates_to: [.dependencies[]? | select(.dependency_type == "relates-to" or .dependency_type == "related") | {id, title, status}],
-    tracked_by: $tracked
+    tracked_by: $tracked,
+    awaited_by: $awaited.named
   }
   | . + {counts: {
       parent: (if .parent == null then 0 else 1 end),
       relates_to: (.relates_to | length),
-      tracked_by: (.tracked_by | length)
+      tracked_by: (.tracked_by | length),
+      awaited_by: $awaited.total,
+      awaited_by_open: $awaited.open
     }}')
 
 # ── B/C. Frontier and horizon — the advance walk (opt-in) ───────────────────
@@ -654,7 +682,13 @@ TB_N=$(g '.edges.counts.tracked_by')
 if [ "$TB_N" != "0" ]; then
   printf '    tracked-by  %s: %s\n' "$TB_N" "$(g '.edges.tracked_by | map("\(.id) (\(.status))") | join(", ")')"
 fi
-[ "$(g '.edges.parent')" = "null" ] && [ "$REL_N" = "0" ] && [ "$TB_N" = "0" ] && printf '    (none)\n'
+AW_N=$(g '.edges.counts.awaited_by')
+if [ "$AW_N" != "0" ]; then
+  printf '    awaited-by  %s\n' "$(g '.edges | "\(.counts.awaited_by) (\(.counts.awaited_by_open) open): "
+    + (.awaited_by | map("\(.id) (\(.status), \(.edge))") | join(", "))
+    + ((.counts.awaited_by - (.awaited_by | length)) as $more | if $more > 0 then ", and \($more) more" else "" end)')"
+fi
+[ "$(g '.edges.parent')" = "null" ] && [ "$REL_N" = "0" ] && [ "$TB_N" = "0" ] && [ "$AW_N" = "0" ] && printf '    (none)\n'
 
 if [ -n "$WANT_FRONTIER" ]; then
   printf '\n  Frontier\n'

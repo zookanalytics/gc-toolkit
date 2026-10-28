@@ -219,7 +219,8 @@ dance by hand. It returns, and nothing outside this:
   merged_target) when the bead carries a merge_result; the first_reaction fields;
   gc.origin; and the distilled gc.takeaway headline with its settled flag.
 - **Context edges**, shown but never gating — the parent, the relates-to edges,
-  the tracked-by visits, and a count per class.
+  the tracked-by visits, the beads that wait on it by a `blocks` or an `until`
+  edge, and a count per class.
 - **Store** — the store that answered, and the db it read.
 
 and, each behind an opt-in flag so a caller pays only for what it needs:
@@ -273,9 +274,10 @@ context as one object; the default is a human-readable block. It reads only.
 ### What it returns, and what it leaves out
 
 The free-text body — descriptions, notes and comments, of the subject or of any
-listed bead — is never returned, and no blocker or child is carried beyond
+listed bead — is never returned. No blocker or child is carried beyond
 `{id, title, status, advance}` and, when it is stuck, the `stuck_on {id, why}`
-that names its cause. That text is unbounded, and returning it
+that names its cause, and no bead that waits on the subject beyond
+`{id, title, status, edge}`. That text is unbounded, and returning it
 proactively is the context bloat this tool exists to cut. So it complements `gc
 bd show <id>`, which the reader still runs for the one bead whose full body a
 decision turns on, and does not replace it.
@@ -287,6 +289,17 @@ edges (either the `relates-to` or the older `related` spelling), and the
 `blocks`-deps. The tracked-by visits are an inbound `tracks` edge and the direct
 children an inbound `parent-child` edge, each stored on the other bead, so each
 is read with one reverse query the subject's own row cannot answer.
+
+Each bead that waits on the subject carries a `blocks` or an `until` edge to
+it, another inbound edge. That is how a closed design's read names the build it
+released. bd matches `--type` as one literal type, so each edge type is its own
+reverse query. An untyped query would also return every child and every inbound
+`related` edge, the review, validation and rework beads that gather on a design,
+and the list leaves those out. It names the open ones first, each with its edge,
+and at most ten of them. Its counts give how many wait in all and how many of
+those are open, since a gate can hold a hundred parked beads. A reverse query
+reads only the subject's store, so a bead in another store that waits on the
+subject is not listed.
 
 The counts are over a bead's own edges and its direct children, never its whole
 subtree. A `parent-child` edge is stored on the child pointing up, so an epic

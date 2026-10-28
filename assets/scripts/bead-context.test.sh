@@ -4,8 +4,10 @@
 # The tool rebuilds a subject's opening context in one call, so the assertions
 # target the contract that opening reads: subject core (A) with the anchor,
 # first_reaction, origin and takeaway fields; context edges (D) — parent,
-# relates-to (both the `relates-to` and older `related` spellings), and the
-# reverse `tracks` visits — each with a count; the store that answered (E); and,
+# relates-to (both the `relates-to` and older `related` spellings), the reverse
+# `tracks` visits, and the beads that wait on it by a reverse `blocks` or
+# `until` edge, open ones first and capped — each with a count; the store that
+# answered (E); and,
 # each behind its opt-in flag, the frontier verdict over {ready, advancing,
 # stuck} (B) and the direct-children epic-health snapshot (C). The advance enum,
 # the cross-store fold, the fail-closed unknown, the status scope of the child
@@ -81,6 +83,59 @@ bead "$R_TK" tk-visit <<'J'
 {"id":"tk-visit","title":"visit: tk-anchor","status":"closed","issue_type":"task","metadata":{},
  "dependencies":[{"id":"tk-anchor","dependency_type":"tracks","status":"open"}]}
 J
+
+# tk-design: a closed design and the beads that wait on it, each by its own
+# reverse edge. The build it released (open) and its docs (in progress) wait by
+# blocks edges; an earlier build (closed) by a blocks edge and a duplicate it
+# answered (closed) by an until edge. The closed ones' ids sort before the open
+# ones', so only an open-first order lists the build first. A review's inbound
+# `related` edge, a visit's `tracks` edge and a child's `parent-child` edge also
+# point at it, and none of those waits on it. The build carries a body the read
+# must never surface.
+bead "$R_TK" tk-design <<'J'
+{"id":"tk-design","title":"the design","status":"closed","issue_type":"task","metadata":{}}
+J
+bead "$R_TK" tk-aw-next <<'J'
+{"id":"tk-aw-next","title":"the build it released","status":"open","issue_type":"task",
+ "description":"build body prose the read must never surface","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"blocks","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-polish <<'J'
+{"id":"tk-aw-polish","title":"its docs","status":"in_progress","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"blocks","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-earlier <<'J'
+{"id":"tk-aw-earlier","title":"an earlier build","status":"closed","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"blocks","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-dup <<'J'
+{"id":"tk-aw-dup","title":"a duplicate it answered","status":"closed","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"until","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-review <<'J'
+{"id":"tk-aw-review","title":"review the design","status":"open","issue_type":"task",
+ "metadata":{"task_kind":"review"},
+ "dependencies":[{"id":"tk-design","dependency_type":"related","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-track <<'J'
+{"id":"tk-aw-track","title":"visit: tk-design","status":"closed","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"tracks","status":"closed"}]}
+J
+bead "$R_TK" tk-aw-kid <<'J'
+{"id":"tk-aw-kid","title":"a child of the design","status":"open","issue_type":"task","parent":"tk-design","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"parent-child","status":"closed","title":"the design"}]}
+J
+
+# tk-hub: a gate twelve beads wait on, more than the list names. tk-hw-00 is
+# closed and sorts first by id; tk-hw-01 to tk-hw-11 are open.
+bead "$R_TK" tk-hub <<'J'
+{"id":"tk-hub","title":"a gate","status":"open","issue_type":"gate","metadata":{}}
+J
+for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
+  st=open; [ "$i" = 00 ] && st=closed
+  printf '{"id":"tk-hw-%s","title":"parked %s","status":"%s","issue_type":"task","metadata":{},"dependencies":[{"id":"tk-hub","dependency_type":"blocks","status":"open","title":"a gate"}]}\n' \
+    "$i" "$i" "$st" > "$R_TK/.beads/tk-hw-$i.json"
+done
 
 # Frontier verdict fixtures: one open unrouted blocker (stuck), one open
 # pool-routed blocker (advancing), one open human-gated blocker (stuck).
@@ -324,9 +379,9 @@ printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-context.sh touches: rig list; bd show; bd list --parent
-# (children); bd dep list --direction=up --type tracks (reverse trackers). Every
-# call is logged so the test can prove which store was asked, not just what came
-# back.
+# (children); bd dep list --direction=up --type tracks|blocks|until (reverse
+# trackers, and the beads that wait on a bead). Every call is logged so the test
+# can prove which store was asked, not just what came back.
 set -u
 printf '%s\n' "$*" >> "$FAKE_GC_LOG"
 preface() { [ -n "${STUB_PREFACE:-}" ] && echo 'gc bd: answering from the rig "fake" store'; }
@@ -469,6 +524,8 @@ runj() { run "$@" --json; JQ=$(printf '%s' "$OUT" | jq -r "$JQF" 2>/dev/null); }
 # Bounded variant for a call that could spin before a fix: a wedged SUT surfaces
 # as timeout's rc 124 (a test failure) instead of hanging the whole suite.
 runb() { OUT=$(timeout 10 "$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
+# One run per subject; each assertion queries that run's output.
+jr()  { printf '%s' "$OUT" | jq -r "$1" 2>/dev/null; }
 
 # --- A. Subject core --------------------------------------------------------
 run tk-anchor
@@ -521,6 +578,46 @@ JQF='.edges.tracked_by[0].id'         runj tk-anchor; eq "$JQ" tk-visit    "  ..
 has "$(cat "$FAKE_GC_LOG")" "dep list tk-anchor --direction=up --type tracks" \
   "  ... via a reverse dep-list, since the subject carries no tracked-by edge itself"
 
+# The beads that wait on a bead: a closed design names the build it released.
+: > "$FAKE_GC_LOG"
+run tk-design --json
+eq "$(jr '[.edges.awaited_by[] | "\(.id):\(.status):\(.edge)"] | join(" ")')" \
+  "tk-aw-next:open:blocks tk-aw-polish:in_progress:blocks tk-aw-dup:closed:until tk-aw-earlier:closed:blocks" \
+  "awaited-by names the beads with a blocks or until edge to the subject, open ones first, each with its status and edge"
+eq "$(jr '.edges.awaited_by[0].title')" "the build it released" "  ... and its title"
+eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "4 2" "  ... counted in all and open"
+eq "$(jr '[.edges.tracked_by[].id] | join(",")')" tk-aw-track \
+  "  ... while a visit's tracks edge stays tracked-by, and a related review and a child are in neither"
+eq "$(jr '[paths | join(".")] | map(select(test("description|notes|comment"; "i"))) | length')" 0 \
+  "  ... and no waiter's body rides along"
+eq "$(grep -c -- 'dep list tk-design --direction=up --type blocks ' "$FAKE_GC_LOG")" 1 "  ... read by one reverse read of blocks edges"
+eq "$(grep -c -- 'dep list tk-design --direction=up --type until ' "$FAKE_GC_LOG")" 1 "  ... and one of until edges"
+eq "$(grep -- 'dep list tk-design' "$FAKE_GC_LOG" | grep -vc -- '--type')" 0 \
+  "  ... and no untyped reverse read, which would bring every child and related bead"
+run tk-design
+has "$OUT" "awaited-by  4 (2 open): tk-aw-next (open, blocks), tk-aw-polish (in_progress, blocks), tk-aw-dup (closed, until), tk-aw-earlier (closed, blocks)" \
+  "  ... and the text view names them on one line after the counts"
+
+run tk-hub --json
+eq "$(jr '[.edges.awaited_by[].id] | join(",")')" \
+  "tk-hw-01,tk-hw-02,tk-hw-03,tk-hw-04,tk-hw-05,tk-hw-06,tk-hw-07,tk-hw-08,tk-hw-09,tk-hw-10" \
+  "a bead with more waiters than the cap names ten, open ones first, so a closed one that sorts first is cut"
+eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "12 11" "  ... and counts all twelve, eleven open"
+run tk-hub
+has "$OUT" "awaited-by  12 (11 open): tk-hw-01 (open, blocks), " "  ... the text view leads with the counts"
+has "$OUT" "tk-hw-10 (open, blocks), and 2 more" "  ... and says how many it left out"
+# The Edges section's line for a bead with no edge of any class.
+NO_EDGES=$'\n    (none)'
+hasnt "$OUT" "$NO_EDGES" "  ... and a bead whose only edges are its waiters does not read as having none"
+
+run tk-anchor --json
+eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "0 0" "a bead nothing waits on counts no waiters"
+eq "$(jr '.edges.awaited_by | length')" 0 "  ... and names none"
+run tk-anchor
+hasnt "$OUT" "awaited-by" "  ... and prints no awaited-by line"
+run hq-city --db "$HQ/.beads"
+has "$OUT" "$NO_EDGES" "a bead with no edge of any class reads (none)"
+
 # --- B. Frontier (opt-in) ---------------------------------------------------
 # Default output carries no frontier; it is added only on --frontier.
 JQF='has("frontier")'  runj tk-anchor;             eq "$JQ" false "frontier is absent by default (opt-in)"
@@ -552,8 +649,6 @@ JQF='.frontier.open[0].stuck_on | "\(.id) \(.why)"' runj tk-failclosed --frontie
 eq "$JQ" "zz-ghost unknown" "  ... and names itself unknown"
 
 # --- B2. The transitive walk --------------------------------------------------
-# One run per subject; each assertion queries that run's output.
-jr()  { printf '%s' "$OUT" | jq -r "$1" 2>/dev/null; }
 blkr() { jr "[.frontier.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
 logcount() { grep -c -- "$1" "$FAKE_GC_LOG" | tr -d ' '; }
 
