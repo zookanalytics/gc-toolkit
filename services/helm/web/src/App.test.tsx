@@ -200,7 +200,7 @@ const BOARD: Board = {
       waiting_on: ['tk-hgmob'],
       waiting_on_open: [],
       disposition_due: true,
-      frontier: 'parked · blocker landed',
+      frontier: 'blocker landed',
       needs: 'blocker landed — dispose or resume',
       rank_score: 2_002_001,
     }),

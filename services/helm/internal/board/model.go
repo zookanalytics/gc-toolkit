@@ -70,16 +70,20 @@ func (s Severity) rank() int {
 }
 
 // Child is a rolled-up member of an anchor (epic child or convoy dependent).
-// Only the status feeds the counts today; Assignee, UpdatedAt and Metadata are
-// carried for parity with the model and are what the consumer beads spend (a
-// dead-owner check, per-child staleness, the visit glyph). A source that cannot
-// read a field leaves it zero rather than approximating it.
+// The roll-up reads its status, assignee, metadata and waits to tell which
+// state an open child is in ([Facts.stateOf]). A source that cannot read a
+// field leaves it zero rather than approximating it.
 type Child struct {
 	ID        string            `json:"id"`
 	Status    string            `json:"status"`
 	Assignee  string            `json:"assignee,omitempty"`
 	UpdatedAt time.Time         `json:"updated_at,omitzero"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	// Blockers is the child's own `blocks` waits, read for an open child of a
+	// live anchor. It is what separates a child waiting its turn behind open
+	// work, or held at a gate, from one nothing will start. A source that did
+	// not read them leaves it empty, and the child is classified without them.
+	Blockers []Blocker `json:"blockers,omitempty"`
 }
 
 // Anchor is one raw gather result before derivation — the Go analogue of a line
@@ -242,6 +246,9 @@ type Blocker struct {
 	// IssueType is what the bead IS. A `decision` is a demand by construction,
 	// the way the board's own `decision` kind is.
 	IssueType string `json:"issue_type,omitempty"`
+	// AwaitType is a gate's await_type, what the gate waits on. It says whether
+	// the city resolves the gate by itself or a person must ([sweptGate]).
+	AwaitType string `json:"await_type,omitempty"`
 	// Assignee is who holds the child. It lets the derivation ask whether a
 	// pool-routed review or rework is actually being WORKED — claimed by a live
 	// session — rather than merely routed to a pool nothing is draining. Routed
@@ -332,24 +339,27 @@ type Tile struct {
 	// updated_at — indistinguishable, on the wire, from an anchor touched today.
 	// That ambiguity is why UpdatedAt is carried alongside: absent means unknown,
 	// present means genuinely fresh.
-	StaleDays      int      `json:"stale_days"`
-	Priority       *int     `json:"priority"`
-	CrossRigRefs   []string `json:"cross_rig_refs"`
+	StaleDays    int      `json:"stale_days"`
+	Priority     *int     `json:"priority"`
+	CrossRigRefs []string `json:"cross_rig_refs"`
+	// OpenHeads is the open children nothing holds and nothing will start: no
+	// open wait, no route, no arm, and nothing in progress. They are what
+	// strands an anchor when nothing else under it is in flight.
 	OpenHeads      []string `json:"open_heads"`
 	DeadOwnerHeads []string `json:"dead_owner_heads"`
 
-	// ParkedHeads is the open children that carry a board row of their OWN —
-	// routed to the operator, or holding a takeaway. They are split out of
-	// OpenHeads so a parent cannot report a child that is waiting on a ruling
-	// as work nobody has picked up. Open still counts them; this names which
-	// ones they are.
+	// ParkedHeads is the open children a person holds: each waits on an open
+	// park or demand gate, is routed to the operator, or carries a visit no
+	// one has engaged. A takeaway alone does not park a child. Open still
+	// counts them; this names which ones they are.
 	ParkedHeads []string `json:"parked_heads"`
 
 	// WaitingOn is every bead this row depends on by a `blocks` edge;
 	// WaitingOnOpen is the subset that has NOT closed. DispositionDue is the
-	// state the pair exists to express: a parked conversation that was waiting
-	// on something, all of which has now landed. It is no longer "wants
-	// nothing" — it wants a disposition, so it leaves the LOW floor.
+	// state the pair exists to express: a conversation that was waiting on
+	// something, all of which has now landed, and that nothing else holds or
+	// moves. It is no longer "wants nothing" — it wants a disposition, so it
+	// leaves the LOW floor.
 	//
 	// A blocker whose status could not be resolved counts as OPEN, so an
 	// unreadable graph keeps the pre-fix quiet row rather than inviting the
@@ -764,6 +774,15 @@ type Facts struct {
 	// a "web-" bead id).
 	Prefixes []string
 	RigNames []string
+
+	// held and subtree are set by [BuildBoard], never by a source. held is, for
+	// every bead under a live anchor, the hold the open waits of its
+	// parent-child ancestors put on it ([holds]), keyed by that bead. subtree
+	// is, for each live anchor with open children, the state those children put
+	// it in ([subtreeStates]). A parent counts a child that is itself a parent
+	// by it when nothing holds the child's own bead.
+	held    map[string]hold
+	subtree map[string]string
 }
 
 // Board is the envelope returned by the service. Tiles are deduplicated by id

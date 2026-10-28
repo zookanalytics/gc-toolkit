@@ -234,7 +234,7 @@ Six kinds are gathered. The first three are selected by the bead's issue
 | `decision` | `issue_type=decision` | ELEVATED; NORMAL or LOW once *ruled* | human-gated |
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
 | `human` | `gc.routed_to=human` | ELEVATED; NORMAL or LOW once *ruled* | the operator owns it; no agent will take it |
-| `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
+| `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed and nothing else holds or moves it | a conversation that reached a takeaway |
 | `merge` | `merge_result` present | derived from the roll-up, so LOW while childless | a branch the city is trying to land — the PR round-trip's row |
 
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
@@ -242,9 +242,11 @@ at `pre_open_gate` has a branch, a gate set and a machine axis with no number
 yet, so a number-keyed query cannot see a gate that stalls before the PR opens.
 `pr_branch` is what identifies those rows, and it travels as its own field
 because a table without a `frontier` column has nothing else to name them with.
-It is gathered LAST, so a merge anchor routed to a person — which carries
-`gc.routed_to=human` too — keeps its `human` row through the dedup instead of
-flipping kind between passes.
+It is gathered after `human` and before `parked`. A merge anchor routed to a
+person carries `gc.routed_to=human` too, and keeps its `human` row through the
+dedup instead of flipping kind between passes. A merge anchor a sitting talked
+about carries a takeaway too, and keeps its `merge` row: the kind says what
+admitted the bead, and a takeaway does not make a pull request a parked bead.
 
 All six are gathered by **both** backends. The library backend filters the two
 metadata kinds in the store query; the HTTP backend filters them client-side
@@ -356,9 +358,38 @@ prose — and the board re-derives, per render, whether it has been discharged:
 
 | `waiting_on` | `waiting_on_open` | row |
 |---|---|---|
-| empty | — | LOW, "conversation parked — takeaway recorded", or "— no takeaway recorded" when the sitting left none (a childless row; with children the roll-up answers instead) |
-| non-empty | non-empty | LOW, "parked · waiting on N" — a live hold, still quiet |
-| non-empty | empty | `disposition_due`: ELEVATED, "parked · blocker landed", and NEEDS becomes "blocker landed — dispose or resume" |
+| empty | — | LOW, "conversation parked — takeaway recorded", or "— no takeaway recorded" when the sitting left none (a childless row; with children the roll-up answers instead). A row a live sitting, a visit, a route or an arm holds names that instead |
+| non-empty | non-empty | LOW, "queued · waiting on N", or "parked · waiting on N" when a gate a person releases or a demand is among the waits — a live hold, still quiet. NEEDS names the oldest wait by its title, and says "starts by itself" when an arm or a route will start the row |
+| non-empty | empty | `disposition_due` when nothing holds or moves the row: ELEVATED, "blocker landed", and NEEDS becomes "blocker landed — dispose or resume". Otherwise the row reads what holds it: a pull request in review reads as its merge anchor, a live sitting as "in conversation", an arm or a route as "queued · starts by itself", live work as "in flight", and an ancestor's wait as "parked · held by an ancestor's wait" or "queued · held by an ancestor's wait", with NEEDS naming that wait |
+
+What holds a row is its **state**, derived once per render from its own graph
+and live work (`board.deriveState`), in this order:
+
+| state | the bead |
+|---|---|
+| in flight | is claimed by a live session, or a live workflow stands over it |
+| in review | carries a pull request the city is landing: `merge_result` is `pre_open_gate` or `pull_request` |
+| in conversation | has a visit a live sitting holds |
+| parked | waits on an open gate a person releases or on a demand, is routed to the operator, or has a visit no one has engaged |
+| queued | waits on open work or on a gate the city closes by itself, or carries a pool route, an arm or an assignee that will start it |
+| stranded | none of the above: no open wait, no route, no arm, nothing in progress |
+
+The city closes a timer gate and a gate on a GitHub workflow run or pull
+request by itself (`await_type` `timer`, `gh:run` or `gh:pr`): the core pack's
+gate sweep runs `gc bd gate check` for them. Every other gate waits for someone
+to close it, so a person releases it: a human gate, a park gate, which names no
+await type, and a gate of a type the sweep does not check.
+
+An ancestor's wait then holds the bead, as bd holds it (see *A parent counts
+its children by what holds them*). It holds a bead whose own state is
+stranded, and parks one queued behind work while a person holds the ancestor.
+The row and the parent's roll-up read the same state (`board.Facts.stateOf`).
+
+A takeaway decides none of them. It stays on the wire as what the sitting
+concluded, and NEEDS spends it except where the state says more: a named wait,
+or what holds a row whose recorded waits have all landed. A merge anchor keeps
+its takeaway as NEEDS either way, because its waits are its review rounds
+rather than work a sitting routed.
 
 Two properties are load-bearing:
 
@@ -463,34 +494,58 @@ row wants is a close or a re-open, not a re-read. The ruling stays on the wire
 in `takeaway`, where nothing truncates it; in the terminal table it was the
 longest cell in that column and the least actionable.
 
-### A parent stops counting its parked children as idle (`tk-lb3u4m`)
+### A parent counts its children by what holds them (`tk-lb3u4m`)
 
 An anchor's roll-up reports how many children are open and how many are moving.
 The gap between those two numbers is what makes a row HIGH — *stranded*, with
-`decomposed, idle — assign or visit` next to it. That reading is wrong for one
-class of child: a bead routed to the operator, or holding a takeaway, is not
-work nobody has picked up. It has a row of its own, with its own ask on it, and
-nobody is going to assign it because it is already assigned to the operator.
+`decomposed, idle — assign or visit` next to it. That reading is wrong for every
+child something holds: one waiting its turn behind open work, one a person
+holds, one in review, or one in a conversation. None of them is work nobody has
+picked up.
 
-So `open_heads` splits. `parked_heads` names the open children that carry their
-own row — `board.hasOwnRow`, the same two markers the gather selects the `human`
-and `parked` kinds by — and the band, the `stranded` flag and the frontier's
-count phrases all read the IDLE remainder. `open` on the wire is unchanged: it
-is still every non-closed child, because the total was never the thing that was
-wrong.
+So each open child that is not in flight is classified by its state (the table
+above), read off its own `blocks` waits, which the gather reads for every open
+child of a live anchor, and its route, arm and visits. `parked_heads` names the
+parked children, and the queued, in-review and in-conversation ones are counted
+apart the same way. `open_heads` keeps only the stranded ones, and the band,
+the `stranded` flag and the frontier's count phrases all read that IDLE
+remainder with the children in flight and the stuck ones. `open` on the wire is
+unchanged: it is still every non-closed child, because the total was never the
+thing that was wrong.
 
-Three shapes come out of it:
+Four shapes come out of it:
 
 | the anchor's open children | band | frontier |
 |---|---|---|
-| some idle, some parked | unchanged — the idle ones still strand it | `5 open · 0 in flight (stranded) · 2 parked for the operator` |
+| some idle, some waiting | unchanged — the idle ones still strand it | `2 open · 0 in flight (stranded) · 1 in review · 6 queued` |
 | all parked | NORMAL — no ask of its own | `2 parked for the operator · nothing idle` |
-| none parked | unchanged, byte for byte | `2 open · 0 in flight (stranded)` |
+| all waiting, none parked | NORMAL — NEEDS reads `nothing idle — 1 in review, 6 queued` | `1 in review · 6 queued · nothing idle` |
+| none waiting | unchanged, byte for byte | `2 open · 0 in flight (stranded)` |
 
-Measured on the live board the day this landed: a convoy in another rig had been reporting
-`7 open, 0 in flight (stranded)` while three of those seven were waiting on a
-named operator ruling, and `tk-eemvf` and `tk-9tbbk` were reading `decomposed,
-idle — assign or visit` with nothing under them but a parked child.
+A takeaway parks nothing: a child that carries one is classified like any
+other, so an armed child queued behind a sibling reads queued, and a child with
+no wait, no route and no arm reads stranded whatever its sitting concluded.
+
+A child that is itself a parent on the board carries no route or arm of its
+own. When nothing holds its own bead, it is counted by what its own children
+are doing, read bottom-up through every level (`board.subtreeStates`): in
+flight while one of them moves, stranded while one is idle, and otherwise in
+the state its waiting children are in. A sub-epic whose children wait their
+turn does not strand its parent.
+
+A child is also held by its ancestors' waits, as bd holds it: bd keeps a bead
+out of `bd ready` while it or any parent-child ancestor has an open blocker
+(`board.holds`). Under an anchor that waits on a gate a person releases or on
+a demand, itself or through an ancestor, a child nothing else holds counts as
+parked, and one waiting on work does too. Under an anchor that waits on open
+work, or on a gate the city closes by itself, it counts as queued. A parked
+epic therefore reads `N parked for the operator · nothing idle`, and its NEEDS
+names the gate that holds it. A bead under it that has a row of its own reads
+the same state on that row: its frontier says `held by an ancestor's wait`, its
+NEEDS names the wait, and no disposition is due while the wait holds it. Work
+already in flight, in review or in a conversation keeps its own state, because
+a park leaves it running. A convoy holds none of its members this way, because
+they hang off it by `tracks` edges, which bd does not cascade.
 
 ### The PR round-trip
 
@@ -1595,8 +1650,8 @@ gathers `human` (`gc.routed_to=human`) and `parked` (`gc.takeaway` present)
 beads, so an item the operator owns is no longer invisible for the sole reason
 that its issue type is `task`. See *Anchor kinds*. This is the first consumer to
 spend the metadata tk-x89rn widened the seam to carry. `internal/board` reads it
-too: `humanGated` keys the human-gate rules off `gc.routed_to`, and `hasOwnRow`
-keys the parked-child split off both markers.
+too: `humanGated` keys the human-gate rules off `gc.routed_to`, and
+`deriveState` reads a child's route and arm off its metadata.
 
 **Delivered since** (tk-eemvf.4, the U9 terminal embed): an xterm.js terminal
 attached to the city's existing ttyd, peek at rest and live on focus, with the

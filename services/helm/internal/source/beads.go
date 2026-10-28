@@ -531,12 +531,6 @@ var metadataAnchors = []metadataAnchor{
 	// item moves only when a human moves it — the same human gate a `decision`
 	// bead carries, and banded the same way.
 	{kind: "human", key: "gc.routed_to", value: "human", label: "human-routed"},
-	// A conversation that reached a takeaway: `gc-visit-open` mints the subject
-	// bead and the converse agent stamps `gc.takeaway` on it when the sitting
-	// ends. Presence, not value — the takeaway is a paragraph of free text.
-	// These are deliberately NOT attention items (see the LOW band in
-	// derive.go); they are items the operator has to be able to find again.
-	{kind: "parked", key: "gc.takeaway", label: "parked-visits"},
 	// A merge anchor: a branch, a gate set, and a pull request the city is
 	// trying to land. `doctor/check-one-anchor-per-pr` asserts one open gating
 	// anchor per pull request, so the anchor already IS the PR's row and the PR
@@ -548,11 +542,21 @@ var metadataAnchors = []metadataAnchor{
 	// wedges before the PR opens leaves it there, so a query keyed on the
 	// number cannot see the bulk of the condition this row exists to show.
 	//
-	// LAST in this list on purpose. A wedged anchor carries `gc.routed_to=human`
-	// too and is therefore gathered twice; [board.BuildBoard]'s id-dedup keeps
-	// the first at equal rank, so it stays a `human` row and reports the same PR
-	// axes either way, rather than flipping kind between passes.
+	// After `human` and before `parked` on purpose. A wedged anchor carries
+	// `gc.routed_to=human` too, and an anchor a sitting talked about carries a
+	// takeaway, so each is gathered twice; [board.BuildBoard]'s id-dedup keeps
+	// the first at equal rank. A wedged anchor stays a `human` row and reports
+	// the same PR axes either way, rather than flipping kind between passes,
+	// and a pull request with a takeaway stays the `merge` row it is.
 	{kind: "merge", key: "merge_result", label: "merge-anchors"},
+	// A conversation that reached a takeaway: `gc-visit-open` mints the subject
+	// bead and the converse agent stamps `gc.takeaway` on it when the sitting
+	// ends. Presence, not value — the takeaway is a paragraph of free text.
+	// These are deliberately NOT attention items (see the LOW band in
+	// derive.go); they are items the operator has to be able to find again.
+	// The kind admits the bead; it does not say the bead is parked. The board
+	// reads what holds it off its graph and live work (board.deriveState).
+	{kind: "parked", key: "gc.takeaway", label: "parked-visits"},
 }
 
 // gatherRig collects every anchor kind from one rig's store, twice: once at
@@ -721,10 +725,11 @@ func needsWaitingEdges(kind string) bool {
 // reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`,
 // everything else's `blocks`), and one SearchIssues that hydrates every far-end
 // issue both name. A pass that gathers any anchor's reviews adds the reads
-// [BeadsSource.readReviews] makes, and one that gathers a live merge anchor adds
-// the read [BeadsSource.readInFlight] makes, each once for the whole set. The
-// read count is fixed by the rig+status pass, so it does not scale with the
-// number of anchors.
+// [BeadsSource.readReviews] makes, one that gathers a live merge anchor adds the
+// read [BeadsSource.readInFlight] makes, each once for the whole set, and a pass
+// with an open child under a live anchor adds the two
+// [BeadsSource.attachChildWaits] makes. The read count is fixed by the
+// rig+status pass, so it does not scale with the number of anchors.
 //
 // The two batched reads fail INDEPENDENTLY, and each failure degrades only the
 // roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
@@ -839,6 +844,70 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 					waitingFromEdges(depyRecs[p.anchor.ID], issueByID)
 			} else {
 				p.anchor.WaitingUnknown = true
+			}
+		}
+	}
+	s.attachChildWaits(ctx, g, st, r, pending, issueByID)
+}
+
+// attachChildWaits reads the `blocks` waits of every open child of a live
+// anchor in pending, in one batched OUTBOUND read and one hydration of the
+// blockers the anchor reads did not already fetch. The board's roll-up
+// classifies each open child by them (board.deriveState): a child waiting on
+// open work is queued, one waiting on a gate is parked, and only a child
+// nothing holds is stranded.
+//
+// A closed anchor reads none: it renders DONE, where its children's states say
+// nothing. A failed read notes partial and leaves the children's waits empty,
+// so each child is classified without them: a waiting child can read stranded,
+// never the reverse.
+func (s *BeadsSource) attachChildWaits(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor, issueByID map[string]*beads.Issue) {
+	var ids []string
+	seen := map[string]bool{}
+	for i := range pending {
+		if !pending[i].anchor.ClosedAt.IsZero() {
+			continue
+		}
+		for _, c := range pending[i].anchor.Children {
+			if c.Status != string(beads.StatusClosed) && !seen[c.ID] {
+				seen[c.ID] = true
+				ids = append(ids, c.ID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	recs, err := st.GetDependencyRecordsForIssues(ctx, ids)
+	if err != nil {
+		g.note(true, []string{"child-waits@" + r.name + ": " + err.Error()})
+		return
+	}
+	missing := map[string]struct{}{}
+	for _, list := range recs {
+		for _, d := range list {
+			if d != nil && string(d.Type) == "blocks" && issueByID[d.DependsOnID] == nil {
+				missing[d.DependsOnID] = struct{}{}
+			}
+		}
+	}
+	fetched, err := s.hydrate(ctx, st, missing)
+	if err != nil {
+		g.note(true, []string{"child-waits-hydrate@" + r.name + ": " + err.Error()})
+		return
+	}
+	blockerByID := make(map[string]*beads.Issue, len(issueByID)+len(fetched))
+	for id, iss := range issueByID {
+		blockerByID[id] = iss
+	}
+	for id, iss := range fetched {
+		blockerByID[id] = iss
+	}
+	for i := range pending {
+		kids := pending[i].anchor.Children
+		for j := range kids {
+			if seen[kids[j].ID] {
+				kids[j].Blockers, _, _, _ = waitingFromEdges(recs[kids[j].ID], blockerByID)
 			}
 		}
 	}
@@ -1118,6 +1187,7 @@ func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issu
 			Status:    strings.ToLower(string(iss.Status)),
 			RoutedTo:  md["gc.routed_to"],
 			IssueType: strings.ToLower(string(iss.IssueType)),
+			AwaitType: iss.AwaitType,
 			Assignee:  iss.Assignee,
 			CreatedAt: iss.CreatedAt,
 		})

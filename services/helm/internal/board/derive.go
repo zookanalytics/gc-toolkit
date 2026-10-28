@@ -129,10 +129,12 @@ type rollup struct {
 	assigned   int
 
 	// liveHeads is every bead of this anchor that is demonstrably moving: a
-	// child claimed by a live session or covered by a live workflow, and the
-	// anchor's own bead when a live workflow stands over it. Unioned by id, so a
-	// child matched both ways is counted once. Its length is the live-work count
-	// that the band, the frontier, NEEDS and the stranded test all read.
+	// child claimed by a live session or covered by a live workflow, a child
+	// that is itself a parent whose own children are moving ([subtreeStates]),
+	// and the anchor's own bead when a live workflow stands over it. Unioned by
+	// id, so a child matched both ways is counted once. Its length is the
+	// live-work count that the band, the frontier, NEEDS and the stranded test
+	// all read.
 	liveHeads []string
 	// deadOwnerHeads is claimed, owner dead, AND no live workflow behind it.
 	// The workflow clause matters: a re-dispatched bead can carry a stale
@@ -141,14 +143,19 @@ type rollup struct {
 	deadOwnerHeads []string
 	// inFlightHeads is the part of liveHeads attributable to a workflow.
 	inFlightHeads []string
-	// openHeads is unclaimed/unowned open children MINUS anything a live
-	// workflow already carries — those are not idle, they are in flight — and
-	// MINUS parkedHeads, which are not idle either.
+	// openHeads is the unclaimed/unowned open children nothing moves: MINUS
+	// anything a live workflow already carries — those are not idle, they are
+	// in flight — and MINUS every child whose state says what it waits on
+	// ([Facts.stateOf]). What remains is stranded.
 	openHeads []string
-	// parkedHeads is the part of that set that carries its OWN board row under
-	// a human-gated or parked kind. A child waiting on the operator is not work
-	// nobody has picked up, so it must not be counted as idle.
-	parkedHeads []string
+	// The children that wait on something, by state. None of them is work
+	// nobody has picked up, so none counts as idle. parkedHeads waits on a
+	// person, queuedHeads waits its turn, reviewHeads carries a pull request,
+	// and conversationHeads is held by a live sitting.
+	parkedHeads       []string
+	queuedHeads       []string
+	reviewHeads       []string
+	conversationHeads []string
 }
 
 // rollUp derives every child-derived quantity for one anchor, and adds the
@@ -156,15 +163,23 @@ type rollup struct {
 // ([Facts.anchorInFlight]). That is the common sling shape: the anchor is itself
 // the slung work bead and its molecule stands over it rather than under a
 // child, so a scan of the children alone cannot see it.
-func rollUp(a Anchor, f Facts) rollup {
+func rollUp(a Anchor, f Facts) rollup { return rollUpBy(a, f, f.childState) }
+
+// rollUpBy is [rollUp] with the classifier that names the state an open child
+// not already in flight is counted in. [subtreeStates] passes its own, which
+// computes a nested parent's state on demand.
+func rollUpBy(a Anchor, f Facts, state func(Child) string) rollup {
 	children := a.Children
 	r := rollup{
-		mTotal:         len(children),
-		liveHeads:      []string{},
-		deadOwnerHeads: []string{},
-		inFlightHeads:  []string{},
-		openHeads:      []string{},
-		parkedHeads:    []string{},
+		mTotal:            len(children),
+		liveHeads:         []string{},
+		deadOwnerHeads:    []string{},
+		inFlightHeads:     []string{},
+		openHeads:         []string{},
+		parkedHeads:       []string{},
+		queuedHeads:       []string{},
+		reviewHeads:       []string{},
+		conversationHeads: []string{},
 	}
 
 	live := make(map[string]bool, len(children))
@@ -200,19 +215,30 @@ func rollUp(a Anchor, f Facts) rollup {
 	}
 
 	// Second pass: openHeads subtracts liveHeads, which is only complete once
-	// every child has been classified. The parked split is taken from what
+	// every child has been classified. The waiting split is taken from what
 	// remains after that subtraction — a child that is moving is neither idle
-	// nor parked, whatever markers it carries.
+	// nor waiting, whatever its graph says. The classifier applies the hold the
+	// child's ancestors put on it, this anchor's own waits among them
+	// ([Facts.stateOf]).
 	for _, c := range children {
 		if c.Status == "closed" {
 			continue
 		}
 		if (c.Assignee == "" || c.Status != "in_progress") && !live[c.ID] {
-			if hasOwnRow(c.Metadata) {
+			switch state(c) {
+			case stateInFlight:
+				r.liveHeads = append(r.liveHeads, c.ID)
+			case stateParked:
 				r.parkedHeads = append(r.parkedHeads, c.ID)
-				continue
+			case stateQueued:
+				r.queuedHeads = append(r.queuedHeads, c.ID)
+			case stateInReview:
+				r.reviewHeads = append(r.reviewHeads, c.ID)
+			case stateInConversation:
+				r.conversationHeads = append(r.conversationHeads, c.ID)
+			default:
+				r.openHeads = append(r.openHeads, c.ID)
 			}
-			r.openHeads = append(r.openHeads, c.ID)
 		}
 	}
 
@@ -228,14 +254,24 @@ func rollUp(a Anchor, f Facts) rollup {
 	sort.Strings(r.inFlightHeads)
 	sort.Strings(r.openHeads)
 	sort.Strings(r.parkedHeads)
+	sort.Strings(r.queuedHeads)
+	sort.Strings(r.reviewHeads)
+	sort.Strings(r.conversationHeads)
 	return r
 }
 
-// idle is the open-child count with the ones parked for the operator taken out.
-// It is what "stranded" and the frontier's count phrases mean by open; the wire
-// keeps the honest total in [Tile.Open] and names the difference in
-// [Tile.ParkedHeads]. With nothing parked it equals r.open.
-func (r rollup) idle() int { return r.open - len(r.parkedHeads) }
+// waiting is the count of open children whose own state names what they wait
+// on: parked, queued, in review, or in conversation.
+func (r rollup) waiting() int {
+	return len(r.parkedHeads) + len(r.queuedHeads) + len(r.reviewHeads) + len(r.conversationHeads)
+}
+
+// idle is the open-child count with the waiting ones taken out: the children in
+// flight, the stuck ones, and the stranded ones. It is what "stranded" and the
+// frontier's count phrases mean by open; the wire keeps the honest total in
+// [Tile.Open] and names the parked part in [Tile.ParkedHeads]. With nothing
+// waiting it equals r.open.
+func (r rollup) idle() int { return r.open - r.waiting() }
 
 // beadRef matches a bead id with one of the given prefixes: `<prefix>-<suffix>`
 // where the suffix is 3-8 lowercase alphanumerics. Mirrors gc-helm.sh's
@@ -545,23 +581,6 @@ func markStartFailed(t *Tile, reason string) {
 	t.Section = classifySection(*t)
 }
 
-// hasOwnRow reports whether a bead carrying this metadata is an anchor in its
-// own right, and therefore carries its ask on a row of its own rather than as
-// idle work under its parent.
-//
-// Presence, not truthiness, for the takeaway — the same reading
-// source.metadataAnchor.matches uses, so a blanked takeaway still counts.
-func hasOwnRow(md map[string]string) bool {
-	if md == nil {
-		return false
-	}
-	if md[mdRoutedTo] == routedHuman {
-		return true
-	}
-	_, ok := md[mdTakeaway]
-	return ok
-}
-
 // The kinds an in-flight review or rework child surfaces under. They are the
 // task_kind the source selects them by (source.reviewReworkAnchor), restated
 // here because the derivation bands them: a review or rework child is a
@@ -659,6 +678,13 @@ func ruledInFlight(a Anchor, takeaway string, waitingOpen []string) bool {
 // nothing else in the city re-reads it, so this is the only thing that can
 // notice the wait ended (tk-2plde).
 //
+// Only while the bead's state is stranded ([Facts.stateOf]). Landed waits are
+// not a park that ended when something else holds or moves the bead: a pull
+// request in review, whose landed waits are its finished review rounds, a live
+// sitting, a live workflow, a route or an arm that starts it, or an ancestor's
+// wait that still holds it. Each of those already says who has the next move,
+// and it is not a disposition.
+//
 // NOT for a human-gated subject, including the `parked` TWIN of one. The
 // promotion exists to lift a row out of the parked LOW FLOOR, where nobody
 // would ever look at it again; a human-gated bead was never in that floor, and
@@ -671,9 +697,9 @@ func ruledInFlight(a Anchor, takeaway string, waitingOpen []string) bool {
 // a row that HAS recorded waits, so an anchor whose edge read failed — which
 // carries none — can never reach it. [ruled] needs the clause precisely
 // because it fires on the empty set.
-func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
+func dispositionDue(a Anchor, waiting, waitingOpen []string, own beadState) bool {
 	return a.Source == "parked" && len(waiting) > 0 && len(waitingOpen) == 0 &&
-		!humanGated(a)
+		!humanGated(a) && own.kind == stateStranded
 }
 
 // severity mirrors gc-helm.sh's band derivation.
@@ -716,10 +742,11 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // things make that different from the naive "0 in progress": inProgressLive
 // counts a slung bead whose movement lives on its workflow, `held` means a
 // conversation is holding the anchor — attention is already on it, so silence
-// in the child beads is not abandonment — and a child parked for the operator
-// is a question already asked on its own row, so [rollup.idle] excludes it. An
-// anchor whose every open child is parked that way falls through to NORMAL:
-// the asks are all live, none of them are its own.
+// in the child beads is not abandonment — and a child whose state names what it
+// waits on (a person, its turn, a review or a conversation, [Facts.stateOf]) is
+// not work nobody has picked up, so [rollup.idle] excludes it. An anchor whose
+// every open child waits that way falls through to NORMAL: nothing under it is
+// idle.
 func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledCheck bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
@@ -822,22 +849,18 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, own beadState, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
-	parked := len(r.parkedHeads)
 	deadSfx := ""
 	if dead > 0 {
 		deadSfx = fmt.Sprintf(" · %d stuck (dead owner)", dead)
 	}
 	// An undifferentiated "N open" cannot separate unassigned beads from ones
-	// finished and waiting on a ruling, so the phrases below count the IDLE
-	// remainder and name the parked ones apart from it.
-	parkedSfx := ""
-	if parked > 0 {
-		parkedSfx = fmt.Sprintf(" · %d parked for the operator", parked)
-	}
+	// waiting their turn or waiting on a person, so the phrases below count the
+	// IDLE remainder and name the waiting ones apart from it, by state.
+	waitSfx := r.waitingSuffix()
 
 	switch {
 	case !a.ClosedAt.IsZero():
@@ -889,20 +912,29 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 	case !isRuled && !isRuledInFlight && !humanGatedInFlight && humanGated(a):
 		return "routed to the operator — no agent will take it"
 	case dispDue:
-		return "parked · blocker landed"
-	// The parked twin of "ruled — work in flight": the takeaway was recorded and
-	// the subject has since been re-dispatched, so the row is being acted on, not
-	// parked for disposal. Liveness outranks a recorded wait — the live molecule
-	// is what works it — and the roll-up phrases below, which a decomposed subject
+		return "blocker landed"
+	// From here a takeaway row speaks its state ([Facts.stateOf]), never the
+	// word the takeaway's presence would give it: a takeaway does not park a
+	// bead. The twin of "ruled — work in flight" comes first: the takeaway was
+	// recorded and the subject has since been re-dispatched, so the row is being
+	// acted on. Liveness outranks a recorded wait — the live molecule is what
+	// works it — and the roll-up phrases below, which a decomposed subject
 	// reports instead.
 	case parkedInFlight && r.mTotal == 0:
-		return "parked — work in flight"
-	case a.Source == "parked" && len(waitingOpen) > 0:
-		return fmt.Sprintf("parked · waiting on %d", len(waitingOpen))
+		return rowFrontier(own, 0)
 	// A NAMED wait outranks the roll-up below: the sitting stated it, and that
-	// is why the row is quiet. Under it, a parked subject that decomposed
-	// reports its frontier through the same count phrases as every other
-	// roll-up anchor, so the phrase explains the band those counts just gave it.
+	// is why the row is quiet. The state says whether a person holds the row at
+	// a gate (parked) or it waits its turn behind work (queued).
+	case a.Source == "parked" && len(waitingOpen) > 0:
+		return rowFrontier(own, len(waitingOpen))
+	// A childless row with no open wait that something still holds or moves —
+	// a sitting, a visit, a route or an arm — says so rather than reading as a
+	// conversation that stopped.
+	case a.Source == "parked" && r.mTotal == 0 && own.kind != stateStranded:
+		return rowFrontier(own, 0)
+	// Under the arms above, a parked subject that decomposed reports its
+	// frontier through the same count phrases as every other roll-up anchor, so
+	// the phrase explains the band those counts just gave it.
 	case a.Source == "parked" && r.mTotal == 0:
 		// The phrase is a CLAIM about what the sitting left behind, so it may
 		// not be made on a row that left nothing — NEEDS says the same thing
@@ -915,16 +947,16 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return "empty — no children"
 	case r.open == 0:
 		return fmt.Sprintf("all %d closed · 0 open", r.mTotal)
-	case r.idle() == 0 && parked > 0 && inProgressLive == 0 && dead == 0:
-		return fmt.Sprintf("%d parked for the operator · nothing idle", parked)
+	case r.idle() == 0 && r.waiting() > 0 && inProgressLive == 0 && dead == 0:
+		return strings.Join(r.waitingCounts(), " · ") + " · nothing idle"
 	case inProgressLive == 0 && dead > 0 && !held:
-		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.idle(), dead) + parkedSfx
+		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.idle(), dead) + waitSfx
 	case inProgressLive == 0 && held:
-		return fmt.Sprintf("%d open · in conversation", r.idle()) + deadSfx + parkedSfx
+		return fmt.Sprintf("%d open · in conversation", r.idle()) + deadSfx + waitSfx
 	case inProgressLive == 0:
-		return fmt.Sprintf("%d open · 0 in flight (stranded)", r.idle()) + parkedSfx
+		return fmt.Sprintf("%d open · 0 in flight (stranded)", r.idle()) + waitSfx
 	default:
-		return fmt.Sprintf("%d open · %d in flight", r.idle(), inProgressLive) + deadSfx + parkedSfx
+		return fmt.Sprintf("%d open · %d in flight", r.idle(), inProgressLive) + deadSfx + waitSfx
 	}
 }
 
@@ -943,7 +975,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
+func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, waiting, waitingOpen []string, own beadState, dispDue, isRuled, humanGatedInFlight bool,
 	machine, approval string, ask *Blocker, prIsOwed bool, stallNeeds string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
@@ -952,14 +984,25 @@ func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, dispDue, isRu
 	if !a.ClosedAt.IsZero() {
 		return "closed — ages out"
 	}
-	// The disposition phrase OUTRANKS the takeaway, and only here. Every other
-	// row spends its takeaway as NEEDS because the sentence is the best answer
-	// available; on this row the sentence is precisely what has gone stale —
-	// it was written when the work was dispatched and still says so. The
-	// takeaway itself stays on the wire for anyone who wants to read what the
-	// sitting concluded.
+	// The disposition phrase OUTRANKS the takeaway. A row spends its takeaway
+	// as NEEDS when the sentence is the best answer available; on this row the
+	// sentence is precisely what has gone stale — it was written when the work
+	// was dispatched and still says so. The takeaway itself stays on the wire
+	// for anyone who wants to read what the sitting concluded.
 	if dispDue {
 		return "blocker landed — dispose or resume"
+	}
+	// A childless takeaway row whose graph says more than its takeaway answers
+	// with its state ([stateNeeds]): the wait it is queued or parked behind, by
+	// name, or what holds it once every recorded wait has landed. The takeaway
+	// stays on the wire as what the sitting concluded. Not on a human-gated row,
+	// whose ruling arms below answer for it, and not on a merge anchor, whose
+	// waits are its review rounds rather than work a sitting routed, and whose
+	// twin rows must read alike.
+	if a.Source == "parked" && r.mTotal == 0 && !humanGated(a) && !isMergeAnchor(a) {
+		if phrase := stateNeeds(own, waiting, waitingOpen, heldBy); phrase != "" {
+			return phrase
+		}
 	}
 	// A ruled row spends its NEEDS on the DISPOSITION for the same reason, and
 	// with the same trade. The takeaway is not stale here — it is the ruling —
@@ -1030,7 +1073,9 @@ func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, dispDue, isRu
 	// silent row cannot support.
 	case humanGated(a):
 		return "routed to you — no question recorded"
-	case a.Source == "parked" && r.mTotal == 0:
+	// Not on a merge anchor: a takeaway twin of a pull request is not parked,
+	// and the merge arm below says where the cadence has it.
+	case a.Source == "parked" && r.mTotal == 0 && !isMergeAnchor(a):
 		return "parked for you — no question recorded"
 	// Nobody is owed this one, so it reports where the cadence has it. Ahead of
 	// the roll-up phrases below because a merge anchor does not decompose: its
@@ -1046,10 +1091,22 @@ func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, dispDue, isRu
 			return fmt.Sprintf("all %d tracked closed", r.mTotal)
 		}
 		return fmt.Sprintf("all %d closed — close or extend", r.mTotal)
-	// Ahead of the dead-owner and idle phrases: this row has no ask of its own
-	// left, so "assign or visit" would name the wrong bead.
-	case r.idle() == 0 && len(r.parkedHeads) > 0 && inProgressLive == 0 && dead == 0:
-		return fmt.Sprintf("%d parked for the operator — rule on those rows", len(r.parkedHeads))
+	// Ahead of the dead-owner and idle phrases: no child is idle, so "assign or
+	// visit" would name work that is not idle. An anchor its own wait or an
+	// ancestor's holds names that wait, which holds everything under it.
+	// Otherwise a parked child is the operator's to release or rule on. With
+	// none parked, every open child is waiting its turn, in review or in a
+	// conversation, and the row asks nothing of its own.
+	case r.idle() == 0 && r.waiting() > 0 && inProgressLive == 0 && dead == 0:
+		switch {
+		case own.kind == stateParked && len(own.waits) > 0:
+			return "parked: " + waitsPhrase(own)
+		case own.kind == stateQueued && len(own.waits) > 0:
+			return "queued behind " + waitsPhrase(own)
+		case len(r.parkedHeads) > 0:
+			return fmt.Sprintf("%d parked for the operator — release or rule on them", len(r.parkedHeads))
+		}
+		return "nothing idle — " + strings.Join(r.waitingCounts(), ", ")
 	case inProgressLive == 0 && dead > 0 && !held:
 		return "dead owner — recover or reassign"
 	case inProgressLive == 0 && held:
@@ -1905,8 +1962,8 @@ func classifySection(t Tile) string {
 		return SectionCleanup
 	case len(t.ParkedHeads) > 0 && t.Open == len(t.ParkedHeads) && t.InProgressLive == 0:
 		// Every open child is parked for the operator and nothing else is moving.
-		// The parent is not active work — it is waiting on the operator to rule
-		// those child rows — so it bands gate rather than masquerading as
+		// The parent is not active work: it waits on the operator to release or
+		// rule on those children, so it bands gate rather than masquerading as
 		// in-flight.
 		return SectionGate
 	default:
@@ -1930,7 +1987,8 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 	xrefs := crossRigRefs(a, f)
 	waiting, waitingOpen := waitingSplit(a)
 	takeaway := collapseWS(a.Takeaway)
-	dispDue := dispositionDue(a, waiting, waitingOpen)
+	own := f.stateOf(anchorInput(a, waitingOpen), nil)
+	dispDue := dispositionDue(a, waiting, waitingOpen, own)
 	isRuled := ruled(a, takeaway, waitingOpen)
 	isRuledInFlight := ruledInFlight(a, takeaway, waitingOpen)
 	// A parked subject — a takeaway with no human route — whose own work bead is
@@ -2068,8 +2126,8 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, heldBy, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, own, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
+		Needs:     needs(a, r, held, heldBy, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -2117,6 +2175,12 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// verdict over the in-flight count its phase reads, and each tile settles
 	// its owed bit and needs phrase from that axis.
 	work := anchorWorkSet(anchors, facts)
+	// A child is held by its ancestors' waits as bd holds it, and a parent
+	// counts a child that is itself a parent by what that child's own children
+	// are doing, so both are read first: the holds top-down, then the nested
+	// states bottom-up through them.
+	facts.held = holds(anchors)
+	facts.subtree = subtreeStates(anchors, facts)
 	tiles := make([]Tile, 0, len(anchors))
 	for _, a := range anchors {
 		tiles = append(tiles, computeTile(a, now, facts, work[a.ID]))
