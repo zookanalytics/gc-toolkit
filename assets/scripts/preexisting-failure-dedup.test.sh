@@ -58,6 +58,8 @@ mkdir -p "$TMP/bin" "$TMP/cwd" "$TMP/nopack"
 # --- gc stub: a JSON bead store behind the reads and writes both gates make. ---
 #   gc runtime drain-ack   -> recorded as DRAIN
 #   gc mail send ...       -> recorded as MAIL|<args>
+#   gc gc-toolkit scripts-dir -> the pack, $STUB_PACK, as gc names it for the
+#                             binding the city imports the pack under
 #   gc convoy status <id>  -> one tracked member, work-1
 #   gc bd list ...         -> filtered the way bd filters: --status takes one
 #                             comma list, --type and --metadata-field match
@@ -80,6 +82,9 @@ set -u
 STORE="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_LOG:?}"
 case "${1:-}" in
+  gc-toolkit)
+    [ "${2:-}" = scripts-dir ] && [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   runtime) echo "DRAIN" >> "$FAKE_META"; exit 0 ;;
   mail) shift 2; printf 'MAIL|%s\n' "$*" >> "$FAKE_META"; exit 0 ;;
   convoy) printf '{"children":[{"id":"work-1"}]}\n'; exit 0 ;;
@@ -208,14 +213,14 @@ eq "$(extract "$REFINERY" preexisting-failure-dedup "$TMP/refinery.sh")" "1" "re
 # must reach the bead as text rather than running.
 sed -i.bak -e 's/<failing test function>/test_widget_rebase/' \
   -e 's|<the check that failed, the package or target it ran in, and its raw output>|--- FAIL: test_widget_rebase (0.12s) internal/widget: want `ok`, got $STATUS|' \
-  -e 's/{{target_branch}}/main/g' "$TMP/refinery.sh" && rm -f "$TMP/refinery.sh.bak"
+  -e 's/{{target_branch}}/main/g' -e 's/{{binding_prefix}}/gc-toolkit./g' "$TMP/refinery.sh" && rm -f "$TMP/refinery.sh.bak"
 REF_TMPL="$TMP/refinery.sh"
 
 # refinery [show-scenario] [list-scenario] [block] -> the block's exit code.
-# It runs from a cwd outside any checkout, with GC_RIG_ROOT naming this one, so
-# the block resolves the real script the way a refinery does.
+# It runs from a cwd outside any checkout, and gc names this checkout as the
+# pack (or PACK when it is set), so the block runs the real script.
 refinery() {
-  if (cd "$TMP/cwd" && SHOW_SCENARIO="${1:-target}" LIST_SCENARIO="${2:-}" GC_RIG_ROOT="${PACK:-$ROOT}" WORK=work-1 \
+  if (cd "$TMP/cwd" && SHOW_SCENARIO="${1:-target}" LIST_SCENARIO="${2:-}" STUB_PACK="${PACK:-$ROOT}" WORK=work-1 \
         bash "${3:-$REF_TMPL}" >"$TMP/out" 2>&1); then
     echo 0
   else
@@ -295,7 +300,7 @@ hasnt "$(cat "$TMP/out")" "no tracker filed" "(M) it is not reported as a failed
 # ============================================================================
 # The polecat: preflight-tests 3a-3e
 # ============================================================================
-render() { sed -e 's/{{convoy_id}}/cv-1/g' -e 's/{{escalation_target}}/human/g' -e 's/{{base_branch}}/main/g' "$1" > "$1.r" && mv "$1.r" "$1"; }
+render() { sed -e 's/{{convoy_id}}/cv-1/g' -e 's/{{escalation_target}}/human/g' -e 's/{{base_branch}}/main/g' -e 's/{{binding_prefix}}/gc-toolkit./g' "$1" > "$1.r" && mv "$1.r" "$1"; }
 eq "$(extract "$POLECAT" preflight-failure-lookup "$TMP/lookup.sh")" "1" "polecat: one preflight-failure-lookup block"
 eq "$(extract "$POLECAT" preflight-fix-landed-check "$TMP/landed.sh")" "1" "polecat: one preflight-fix-landed-check block"
 eq "$(extract "$POLECAT" preflight-failure-file "$TMP/file.sh")" "1" "polecat: one preflight-failure-file block"
@@ -306,11 +311,11 @@ echo 'echo "CLOSED_MATCH=$CLOSED_MATCH CLOSED_RC=$CLOSED_RC"' >> "$TMP/landed.sh
 sed -i.bak -e 's|<the full failure: the test or check, its subtest or lines, the package, and the raw output>|--- FAIL: TestWidget/rebase_case (0.12s) want `ok`, got $STATUS|' \
   -e 's|<short description>|rebase loses the lock|' "$TMP/file.sh" && rm -f "$TMP/file.sh.bak"
 
-# polecat <block> [list-scenario] -> the block's stdout. GC_PACK_DIR names this
-# checkout, the first place the block's loop looks, or PACK when it is set. The
+# polecat <block> [list-scenario] -> the block's stdout. gc names this checkout
+# as the pack, or PACK when it is set. The
 # key and the work bead the later blocks reuse from 3b are passed in.
 polecat() {
-  (cd "$TMP/cwd" && LIST_SCENARIO="${2:-}" GC_PACK_DIR="${PACK:-$ROOT}" SYMPTOM_KEY=TestWidget WORK_BEAD_ID=work-1 \
+  (cd "$TMP/cwd" && LIST_SCENARIO="${2:-}" STUB_PACK="${PACK:-$ROOT}" SYMPTOM_KEY=TestWidget WORK_BEAD_ID=work-1 \
      bash "$1" 2>/dev/null)
 }
 PKEY="TestWidget"
@@ -384,7 +389,7 @@ polecat "$TMP/file.sh" >/dev/null
 eq "$(created)" "0" "3e: a closed twin folded into a live batch is not filed again"
 has "$(cat "$FAKE_META")" "Tracked as: tk-batch" "3e: the notice names the batch"
 store
-(cd "$TMP/cwd" && STUB_CREATE_FAIL=1 GC_PACK_DIR="$ROOT" SYMPTOM_KEY=TestWidget WORK_BEAD_ID=work-1 bash "$TMP/file.sh" >/dev/null 2>&1)
+(cd "$TMP/cwd" && STUB_CREATE_FAIL=1 STUB_PACK="$ROOT" SYMPTOM_KEY=TestWidget WORK_BEAD_ID=work-1 bash "$TMP/file.sh" >/dev/null 2>&1)
 has "$(cat "$FAKE_META")" "Tracked as: nothing, the filing failed" "3e: a filing that did not land is reported as nothing filed"
 store
 STUB_SHOW_FAIL=1 polecat "$TMP/file.sh" >/dev/null

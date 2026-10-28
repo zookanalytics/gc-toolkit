@@ -102,7 +102,9 @@ case "$GATE" in
   *)    ok  "snippet is backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
 
-printf '%s\n' "$GATE" > "$TMP/gate.sh"
+# The pour renders {{binding_prefix}}, the binding the city imports the pack
+# under plus a dot; this city's is gc-toolkit.
+printf '%s\n' "${GATE//'{{binding_prefix}}'/gc-toolkit.}" > "$TMP/gate.sh"
 bash -n "$TMP/gate.sh" \
   && ok "extracted gate is syntactically valid bash" \
   || bad "extracted gate failed bash -n"
@@ -118,6 +120,7 @@ bash -n "$TMP/gate.sh" \
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}"; exit "${FAKE_UPDATE_RC:-0}" ;;
   "session list")      printf '%s' "${FAKE_SESSIONS:-}"; exit 0 ;;
@@ -128,8 +131,8 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# run-cancel.sh, await-ruling.sh, escalate.sh and work-tree-holder.sh resolved
-# out of $GC_PACK_DIR exactly as the gate resolves them. The first three record
+# run-cancel.sh, await-ruling.sh, escalate.sh and work-tree-holder.sh in the
+# pack the fake gc names for `gc gc-toolkit scripts-dir`, $STUB_PACK. The first three record
 # their verb into the ordered trace and their argv where the reason/message
 # assertions can read it, returning a code the assertions control. The tree
 # check records its argv apart from the trace, so the trace of every other arm
@@ -165,7 +168,7 @@ chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" \
          "$TMP/pack/assets/scripts/await-ruling.sh" \
          "$TMP/pack/assets/scripts/escalate.sh" \
          "$TMP/pack/assets/scripts/work-tree-holder.sh"
-export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GC_DIR=""
+export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GC_DIR=""
 
 # This session's four identity forms. A work bead whose assignee is any of them
 # is "owned by you" and must be a no-op; anything else is a foreign owner.
@@ -190,7 +193,7 @@ run() {
     WORK_BEAD_JSON="$1" \
     CLAIMED_STEP_BEAD_ID=st-load \
     GC_SESSION_NAME="$SELF_NAME" GC_SESSION_ID="$SELF_ID" GC_AGENT="$SELF_AGENT" GC_ALIAS="$SELF_ALIAS" \
-    GC_PACK_DIR="$GC_PACK_DIR" GC_RIG_ROOT="$GC_RIG_ROOT" GC_DIR="$GC_DIR" \
+    STUB_PACK="$STUB_PACK" GC_RIG_ROOT="$GC_RIG_ROOT" GC_DIR="$GC_DIR" \
     FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_ESC="$TMP/esc" FAKE_ESC_WINDOW="$TMP/esc-window" \
     FAKE_SESSIONS="${FAKE_SESSIONS-$SESS_EMPTY}" FAKE_BEADS="${FAKE_BEADS:-[]}" \
     FAKE_TREE_ARGS="$TMP/tree-args" FAKE_TREE_RC="${FAKE_TREE_RC:-0}" FAKE_TREE_OUT="${FAKE_TREE_OUT:-}" \
@@ -562,22 +565,25 @@ eq "$(FAKE_CANCEL_RC=1 FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" run '[{
    "undecided tree, the cancel does not land after the wait: no drain"
 
 # --- 7. Pack resolution. ------------------------------------------------------
-# The pack is the first candidate carrying every script the gate calls. A
-# candidate without run-cancel.sh is a pack this formula does not ship with, so
-# the lookup moves on rather than decline through it.
+# The pack is the one gc names. A pack without run-cancel.sh stops the gate
+# before any note, check, cancel or drain, though a complete pack sits in the
+# rig root and in the checkout the gate runs from: no other directory is tried.
 mkdir -p "$TMP/stale/assets/scripts"
 printf '#!/usr/bin/env bash\nprintf "STALE-ESCALATE\\n" >> "$FAKE_LOG"\n' > "$TMP/stale/assets/scripts/escalate.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/stale/assets/scripts/work-tree-holder.sh"
 chmod +x "$TMP/stale/assets/scripts/escalate.sh" "$TMP/stale/assets/scripts/work-tree-holder.sh"
+mkdir -p "$TMP/checkout"
+cp -R "$TMP/pack/assets" "$TMP/checkout/"
+git -C "$TMP/checkout" init -q
 
-eq "$(GC_PACK_DIR="$TMP/stale" GC_RIG_ROOT="$TMP/pack" run '[{"status":"closed","metadata":{}}]')" \
-   "1|UPDATE;CANCEL;DRAIN;" \
-   "a candidate without run-cancel.sh is skipped for the next complete pack"
-
-eq "$(GC_PACK_DIR="$TMP/stale" run '[{"status":"open","assignee":"","metadata":{}}]')" "1|" \
+eq "$(RUN_DIR="$TMP/checkout" STUB_PACK="$TMP/stale" GC_RIG_ROOT="$TMP/pack" run '[{"status":"closed","metadata":{}}]')" "1|" \
+   "a pack gc names without run-cancel.sh stops the gate, though the rig root and the checkout hold a complete pack"
+eq "$(STUB_PACK="$TMP/stale" run '[{"status":"open","assignee":"","metadata":{}}]')" "1|" \
    "no complete pack: the gate stops before any note, check, cancel or drain"
 eq "$(cat "$TMP/tree-args")" "" "no complete pack: no tree check"
 has "$(cat "$TMP/out")" "run-cancel.sh, await-ruling.sh, escalate.sh and work-tree-holder.sh not found in the pack" "no complete pack: the stop names the scripts"
+eq "$(STUB_PACK="" GC_RIG_ROOT="$TMP/pack" run '[{"status":"closed","metadata":{}}]')" "1|" \
+   "gc names no pack: the gate stops before any note, though the rig root holds a complete pack"
 
 # --- 8. End to end with the real work-tree-holder.sh. -------------------------
 # A real repository laid out like pool slots: this session's slot ($ME) and a
@@ -615,13 +621,13 @@ e2e_beads() {
 }
 E2E_BEAD="[{\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"work_dir\":\"$PEER/worktrees/tk-work\",\"branch\":\"polecat/tk-work\"}}]"
 
-eq "$(RUN_DIR="$ME" GC_DIR="$ME" GC_PACK_DIR="$TMP/e2e-pack" FAKE_SESSIONS="$E2E_SESSIONS" FAKE_BEADS="$(e2e_beads tk-work)" run "$E2E_BEAD")" \
+eq "$(RUN_DIR="$ME" GC_DIR="$ME" STUB_PACK="$TMP/e2e-pack" FAKE_SESSIONS="$E2E_SESSIONS" FAKE_BEADS="$(e2e_beads tk-work)" run "$E2E_BEAD")" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "end to end: a live peer running a molecule over this bead in its recorded tree ends this dispatch"
 has "$(cat "$TMP/update")" "worktree $PEER/worktrees/tk-work (uncommitted paths: 1) is held by live pool__polecat-hq-peer, which is working tk-work" \
     "end to end: the note names the peer's tree, its uncommitted path and the peer"
 
-eq "$(RUN_DIR="$ME" GC_DIR="$ME" GC_PACK_DIR="$TMP/e2e-pack" FAKE_SESSIONS="$E2E_SESSIONS" FAKE_BEADS="$(e2e_beads tk-other)" run "$E2E_BEAD")" \
+eq "$(RUN_DIR="$ME" GC_DIR="$ME" STUB_PACK="$TMP/e2e-pack" FAKE_SESSIONS="$E2E_SESSIONS" FAKE_BEADS="$(e2e_beads tk-other)" run "$E2E_BEAD")" \
    "0|" \
    "end to end: the peer slot's session on other work leaves the tree adoptable, and the gate passes"
 has "$(cat "$TMP/out")" "is adoptable: live pool__polecat-hq-peer in $PEER is working other work (tk-other)" \

@@ -132,9 +132,7 @@ fi
 ```
 When it exits 1, end the run with the route left empty:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-dispatch review verdict-and-drain; do
   "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
@@ -163,9 +161,7 @@ printed into the steps that follow.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -191,9 +187,7 @@ run as the verdict step's failure arm does.
 **3. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `review`:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.load-dispatch --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -351,9 +345,7 @@ of it; they are their own beads already.
 **6. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `verdict-and-drain`:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.review --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -382,9 +374,7 @@ one slung rework child on request-changes, and refusing a commit the branch no
 longer carries. The verdict names `{{reviewed_oid}}`, the commit the review
 read, and signoff.sh refuses any other:
 ```bash
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/signoff.sh" ] || SCRIPTS=""
 "${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
 ```
 Do not post the review yourself, do not write to the anchor, do not file rework
@@ -432,9 +422,7 @@ blocks the next); close only through step-close.sh, which resolves by
 (gc.root_bead_id, gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead
 after a claim. Never close `workflow-finalize` (the control-dispatcher's):
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-dispatch review verdict-and-drain; do
   "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"

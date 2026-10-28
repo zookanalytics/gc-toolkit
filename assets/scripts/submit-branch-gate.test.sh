@@ -61,15 +61,19 @@ extract() {
     f' "$TOML"
 }
 
-GATE="$(extract submit-branch-gate)"
-RESOLVE="$(extract submit-target-resolve)"
-ANCHOR="$(extract submit-anchor-resolve)"
+# render fills {{binding_prefix}} the way the pour does: the binding the city
+# imports the pack under plus a dot, gc-toolkit. here. The handoff block is
+# left raw, because run_consume renders it with the prefix each case names.
+render() { sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
+GATE="$(extract submit-branch-gate | render)"
+RESOLVE="$(extract submit-target-resolve | render)"
+ANCHOR="$(extract submit-anchor-resolve | render)"
 CONSUME="$(extract submit-target-consume)"
-CLOSE="$(extract submit-chain-close)"
-HALT="$(extract submit-auto-push-halt)"
-HALT_CLOSE="$(extract submit-halt-chain-close)"
-STORE="$(extract submit-store-only-exit)"
-STORE_CLOSE="$(extract submit-store-only-chain-close)"
+CLOSE="$(extract submit-chain-close | render)"
+HALT="$(extract submit-auto-push-halt | render)"
+HALT_CLOSE="$(extract submit-halt-chain-close | render)"
+STORE="$(extract submit-store-only-exit | render)"
+STORE_CLOSE="$(extract submit-store-only-chain-close | render)"
 
 [ -n "$CLOSE" ] \
   && ok "chain close extracted between submit-chain-close markers" \
@@ -185,6 +189,7 @@ state() {
   fi
 }
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           state "$3"
                        printf '[{"status":"%s","assignee":"%s","metadata":%s}]\n' "$cur_status" "$cur_assignee" "${FAKE_META:-{\}}"; exit 0 ;;
@@ -237,8 +242,8 @@ chmod +x "$TMP/bin/git" "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export WORK_BEAD_ID=tk-work
 
-# run-cancel.sh, await-ruling.sh and escalate.sh, resolved out of $GC_PACK_DIR
-# exactly as the arms resolve them. Every fail-closed arm ESCALATES (files the
+# run-cancel.sh, await-ruling.sh and escalate.sh, in the pack the fake gc names
+# for `gc gc-toolkit scripts-dir`, $STUB_PACK. Every fail-closed arm ESCALATES (files the
 # visit), then makes the work bead WAIT on it, then CANCELS the run, then drains:
 # a cancelled run with no visit and no wait behind it leaves work nothing
 # re-offers. Each stub records its call so the order can be asserted, and returns
@@ -270,7 +275,7 @@ chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/awai
 # write.
 cp "$HERE/hand-back.sh" "$TMP/pack/assets/scripts/hand-back.sh"
 chmod +x "$TMP/pack/assets/scripts/hand-back.sh"
-export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
+export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 export FAKE_CANCEL="$TMP/cancel" FAKE_CANCEL_RC=0 FAKE_AWAIT="$TMP/await" FAKE_AWAIT_RC=0 FAKE_ESCALATE="$TMP/escalate" FAKE_ESC_RC=0
 : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/escalate"
 
@@ -1019,7 +1024,7 @@ printf 'set -e\n%s\n' "$CLOSE" > "$TMP/close-run.sh"
 run_close() {
   : > "$TMP/closed"; : > "$TMP/attempted"; : > "$TMP/log"
   local rc=0
-  GC_PACK_DIR="${2-$TMP/pack}" GC_RIG_ROOT="" GC_CITY_PATH="" \
+  STUB_PACK="${2-$TMP/pack}" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_REFUSE="${1-}" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
     FAKE_LOG="$TMP/log" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$TMP/close-run.sh" > "$TMP/out" 2>&1 || rc=$?
@@ -1087,7 +1092,7 @@ eq "$(run_close '' "$TMP/nonexistent")" "1|" \
 printf 'set -e\n%s\n' "$CLOSE" \
   | sed 's/^for STEP in .*; do$/for STEP in submit-and-exit implement preflight-tests workspace-setup load-context; do/' \
   > "$TMP/close-rev.sh"
-GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
   FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_LOG="$TMP/log" \
   FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
   bash "$TMP/close-rev.sh" > "$TMP/out" 2>&1 || true
@@ -1118,7 +1123,7 @@ run_halt() {
   local rc=0
   env -u GC_ALIAS -u GC_SESSION_NAME -u GC_AGENT GC_SESSION_ID=hq-holder \
     "$@" FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
-    GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$script" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
@@ -1209,7 +1214,7 @@ run_store() {
   local script="$1"; shift
   local rc=0
   env -u GC_ALIAS -u GC_SESSION_NAME -u GC_AGENT GC_SESSION_ID=hq-holder \
-    "$@" FAKE_BRANCH=main GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    "$@" FAKE_BRANCH=main STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$script" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
@@ -1327,8 +1332,8 @@ eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,DRAIN" \
 # this session's claim or none. Split into a reopen and then a clear, a store
 # that fails the reopen and takes the clear leaves the bead in_progress with no
 # assignee, which no pool's work query serves.
-HB_HALT="$(extract submit-halt-hand-back)"
-HB_STORE="$(extract submit-store-only-hand-back)"
+HB_HALT="$(extract submit-halt-hand-back | render)"
+HB_STORE="$(extract submit-store-only-hand-back | render)"
 [ -n "$HB_HALT" ] && [ -n "$HB_STORE" ] \
   && ok "the hand-back is extracted from the halt and store-only arms" \
   || bad "a hand-back extraction is EMPTY — markers missing from $TOML"
@@ -1390,7 +1395,7 @@ eq "$(bead_state)" "in_progress|" \
 # the block without draining. The block sits after the verified push, which
 # gives it the pushed head, and before the handoff, and it reads the origin head
 # from before the push.
-BCG_BLOCK="$(extract submit-bring-current-guard)"
+BCG_BLOCK="$(extract submit-bring-current-guard | render)"
 [ -n "$BCG_BLOCK" ] \
   && ok "bring-current guard extracted between submit-bring-current-guard markers" \
   || bad "bring-current-guard extraction EMPTY — markers missing from $TOML"
@@ -1468,7 +1473,7 @@ else
   bad "branch release must follow the chain close (close ends ${CLOSE_END:-?}, release starts ${RELEASE_START:-?})"
 fi
 
-RELEASE="$(extract submit-branch-release)"
+RELEASE="$(extract submit-branch-release | render)"
 [ -n "$RELEASE" ] \
   && ok "branch release extracted between submit-branch-release markers" \
   || bad "branch-release extraction EMPTY — markers missing from $TOML"

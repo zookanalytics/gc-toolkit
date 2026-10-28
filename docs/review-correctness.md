@@ -90,6 +90,9 @@ defect only on a line some test executes.
 No shell block in a formula, skill, prompt or doc is shellchecked. The learned
 detectors that read formula and skill text each catch one shape, and a block
 runs in a test only where a suite extracts it, usually by its markers.
+`tools/lint.sh` fails a formula change that adds a procedure to step text, by
+the rule in
+[pack-authoring.md](pack-authoring.md#step-text-calls-a-tested-script).
 
 - **The agent's shell.** An agent pastes a step's blocks into its own tool
   shell. A codex agent's is zsh, and a Claude agent's is the shell its

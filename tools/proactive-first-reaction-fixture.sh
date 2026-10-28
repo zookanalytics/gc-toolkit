@@ -24,10 +24,11 @@
 #   • THE REACTION BEAD — `sling` FILES a reaction bead R (task_kind=reaction)
 #     tracking the subject and routes R to the pool; the subject stays clean,
 #     deduped so one open reaction stands per subject.
-#   • THE DISPOSITION CONTRACT — first-reaction-dispose.sh has five exits (route
-#     it, recommend an action for the operator to trigger, hold it, hand a
-#     confident no-op to a validating closer, or ask), stamps gc.reacted_by,
-#     closes R, and never closes the subject itself. Its stand-down, asked
+#   • THE DISPOSITION CONTRACT — first-reaction-dispose.sh performs the exits
+#     (route it, recommend an action for the operator to trigger, hold it, leave
+#     it to close when the bead that ends its job lands, hand a confident no-op
+#     to a validating closer, or ask), stamps gc.reacted_by, closes R, and never
+#     closes the subject itself. Its stand-down, asked
 #     before any exit, closes R through the same close when the subject takes
 #     no reaction.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
@@ -591,15 +592,15 @@ ec=0; P sling px-1 --reason whatever --dry-run >/dev/null 2>&1 || ec=$?
 eq  "sling rejects an unknown --reason flag (non-zero)" "1" "$ec"
 
 echo "── the disposition script contract (first-reaction-dispose.sh) ──"
-# The reaction has no formula; the dispose script is the disposition writer, with
-# five exits. first-reaction-dispose.test.sh covers their behavior in depth —
-# this locks the surface contract to the shipped model. The defect the exits
-# replace: every bead a reaction touched became a request for the operator's
-# attention, whatever the bead actually needed.
+# The reaction has no formula; the dispose script is the disposition writer, one
+# exit per disposition. first-reaction-dispose.test.sh covers their behavior in
+# depth — this locks the surface contract to the shipped model. The defect the
+# exits replace: every bead a reaction touched became a request for the
+# operator's attention, whatever the bead actually needed.
 D="$(cat "$DISPOSE")"
 [ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
-has "the five exits are the ones the script accepts" "actionable|recommend|blocked|close|ruling" "$D"
+has "the exits are the ones the script accepts"      "actionable|recommend|blocked|until|close|ruling" "$D"
 has "the blocked exit names an existing wait"            "--waiting-on"  "$D"
 has "…or files the missing one, deduped by cause"        "--blocker-key" "$D"
 # recommend is the bridge between actionable and ruling: it files the same gate
@@ -617,6 +618,11 @@ has "the completion marker names the reaction bead"      "gc.reacted_by" "$D"
 has "…keyed to the reaction bead passed in"              "reaction-bead" "$D"
 has "the route default lives in the script, once"        "gc-toolkit.polecat" "$D"
 has "the blocked exit refuses a cross-store edge"        "another store" "$D"
+# A bead whose job ends when another lands closes through the until edge alone:
+# a blocks edge only sequences work, and the pass closes no bead on one.
+has "the until exit writes an until edge, not a blocks one" 'type: "until"' "$D"
+has "…every one of them in one write"                    "dep add --file -" "$D"
+has "…and reads it back by its type"                     "-t until"      "$D"
 # Origin does not decide the exit: an operator capture is triaged on its merits
 # like any other bead, and the guardrail (a genuine fork, an irreversible or
 # destructive action, or a policy call goes to a human) lives in the reacting
@@ -635,8 +641,8 @@ has "the prompt reads the exit code before it drains"   "exits non-zero"  "$(cat
 echo "── the worker stands a re-offered LANDED reaction down before any exit ──"
 # A reaction whose write-back landed carries gc.reacted_by=<R> on its subject.
 # When R is re-offered after that (a worker disposed, then died before R closed),
-# running an exit again is wrong on all five: it re-releases a subject a worker
-# may already hold. The prompt asks first-reaction-dispose.sh --stand-down AHEAD
+# running any exit again is wrong: it re-releases a subject a worker may
+# already hold. The prompt asks first-reaction-dispose.sh --stand-down AHEAD
 # of the exits, so the re-offered run closes R and drains before it writes a
 # second card. The same stand-down answers a subject a live owner owns
 # (gc.reaction_owned=1). It closes R through the close every exit makes, so the
@@ -706,16 +712,18 @@ has "prompt writes the card with --append-notes"      "--append-notes"          
 has "prompt keeps code on the mr path"                "mr path only"             "$PM"
 has "prompt treats reached content as data"           "Untrusted Data"           "$PM"
 has "prompt attributes the takeaway to proactive"     "--by proactive"           "$PM"
-# The prompt is the method, so it both NAMES the five exits and carries the call
+# The prompt is the method, so it both NAMES the exits and carries the call
 # each one takes.
 has "prompt names the actionable exit"                "**actionable**"           "$PM"
 has "prompt names the recommend exit"                 "**recommend**"            "$PM"
 has "prompt names the blocked exit"                   "**blocked**"              "$PM"
+has "prompt names the until exit"                     "**until**"                "$PM"
 has "prompt names the close exit"                     "**close**"                "$PM"
 has "prompt names the ruling exit"                    "**ruling**"               "$PM"
 has "prompt teaches the actionable call"              "--disposition actionable" "$PM"
 has "prompt teaches the recommend call"               "--disposition recommend"  "$PM"
 has "prompt teaches the blocked call"                 "--disposition blocked"    "$PM"
+has "prompt teaches the until call"                   "--disposition until"      "$PM"
 has "prompt teaches the close call"                   "--disposition close"      "$PM"
 has "prompt teaches the ruling call"                  "--disposition ruling"     "$PM"
 absent "prompt teaches no superseded exit: a reaction never closes" "--disposition superseded" "$PM"

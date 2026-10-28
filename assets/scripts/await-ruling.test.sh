@@ -76,12 +76,16 @@ mkdir -p "$TMP/bin"
 # open bead from --title and --metadata and answers its id, so the real
 # escalate.sh can run against the store. `session list` answers $FAKE_SESSIONS,
 # an empty session list when it is unset, and fails when $FAKE_SESSIONS_FAIL is
-# set. `runtime drain-ack` records DRAIN in $FAKE_TRACE.
+# set. `runtime drain-ack` records DRAIN in $FAKE_TRACE. `gc-toolkit scripts-dir`
+# names the pack, $STUB_PACK, as gc does for the binding the city imports it under.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 S="${FAKE_STORE:?}"; D="${FAKE_DEPS:?}"
 printf '%s\n' "$*" >> "${GC_LOG:?}"
 case "${1:-} ${2:-}" in
+  "gc-toolkit scripts-dir")
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "session list")
     [ -n "${FAKE_SESSIONS_FAIL:-}" ] && { echo "gc: supervisor unreachable (stub)" >&2; exit 1; }
     if [ -n "${FAKE_SESSIONS+set}" ]; then printf '%s\n' "$FAKE_SESSIONS"; else printf '%s\n' '{"sessions":[]}'; fi
@@ -515,7 +519,7 @@ eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "with the window off: the re
 # after it are stubs that record their turn, and the visit is already open.
 ARM="$TMP/missing-branch-arm.sh"
 awk '/^# >>> workspace-setup-missing-branch-decline$/ {f=1; next} /^# <<< workspace-setup-missing-branch-decline$/ {f=0} f' \
-  "$HERE/../../formulas/mol-polecat-work.toml" > "$ARM"
+  "$HERE/../../formulas/mol-polecat-work.toml" | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$ARM"
 has "$(cat "$ARM")" 'await-ruling.sh" "$WORK_BEAD_ID" --key polecat-missing-branch' \
   "the missing-branch arm is read from mol-polecat-work.toml"
 mkdir -p "$TMP/pack/assets/scripts"
@@ -527,7 +531,7 @@ chmod +x "$TMP/pack/assets/scripts/"*.sh
 arm() { # <session list> -> "<rc>|<ordered trace>"
   local rc=0
   : > "$TMP/trace"
-  env "${SELF[@]}" FAKE_SESSIONS="$1" FAKE_TRACE="$TMP/trace" GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+  env "${SELF[@]}" FAKE_SESSIONS="$1" FAKE_TRACE="$TMP/trace" STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     WORK_BEAD_ID=tk-work BRANCH=polecat/tk-work CLAIMED_STEP_BEAD_ID=st-setup bash "$ARM" > "$TMP/arm.out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/trace")"
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# lint.sh — the rig's one lint entry point: shell static analysis, go vet and
-# gofmt.
+# lint.sh — the rig's one lint entry point: shell static analysis, step text,
+# go vet and gofmt.
 #
-# Wired as the refinery's lint_command, it runs on every merge. It runs three
+# Wired as the refinery's lint_command, it runs on every merge. It runs these
 # linters, each at the scope a merge gate can enforce given the tree's current
 # finding-debt:
 #
@@ -14,6 +14,13 @@
 #   the gate scope: main carries pre-existing warning-level findings, so a gate
 #   that failed on an untouched file would block every unrelated merge. Scan the
 #   whole tree by hand by passing the files: `lint.sh $(git ls-files '*.sh')`.
+#
+#   STEP TEXT — tools/lint-step-text.sh over the files passed on argv, which
+#   checks the formulas among them for a procedure the change adds to step text
+#   (docs/pack-authoring.md, "Step text calls a tested script"). It judges what
+#   the change adds since the merge base of origin/main and HEAD, the change the
+#   refinery's `git diff --name-only origin/main...HEAD` names, so step text
+#   that predates the rule passes until its own rewrite.
 #
 #   GO — `go vet ./...` in every Go module (each go.mod tree). Whole-module, not
 #   argv-scoped: vet is a per-package analysis, it is clean across the tree
@@ -37,9 +44,10 @@
 #
 # Usage: lint.sh [FILE ...]
 #   FILE ...  files to lint; the shell scripts among them — a .sh suffix or a
-#             shell shebang (sh, bash, dash, ksh) — are shellchecked, and the
-#             rest drop out. With no shell file given none is linted, and go vet
-#             and gofmt still run.
+#             shell shebang (sh, bash, dash, ksh) — are shellchecked, the
+#             formulas among them have their step text checked, and the rest
+#             drop out. With no shell file or formula given neither is linted,
+#             and go vet and gofmt still run.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
@@ -71,6 +79,11 @@ cd "$ROOT" || { echo "$PROG: cannot enter repo root $ROOT" >&2; exit 2; }
 SHELLCHECK_RUN="$ROOT/assets/scripts/shellcheck-run.sh"
 if [ ! -x "$SHELLCHECK_RUN" ]; then
   echo "$PROG: shell-lint runner missing or not executable: $SHELLCHECK_RUN" >&2
+  exit 2
+fi
+STEP_TEXT_LINT="$ROOT/tools/lint-step-text.sh"
+if [ ! -x "$STEP_TEXT_LINT" ]; then
+  echo "$PROG: step-text lint missing or not executable: $STEP_TEXT_LINT" >&2
   exit 2
 fi
 
@@ -126,6 +139,21 @@ else
     else
       summary+=("shell: FAIL — shellcheck findings (shellcheck-run.sh exit $rc)")
     fi
+  fi
+fi
+
+# ── Step text: no procedure added to a formula step ─────────────────────────
+# The lint picks the formulas out of the files itself. Its exit 2 says it could
+# not read the change, which fails closed like a linter that could not run.
+if "$STEP_TEXT_LINT" "$@"; then
+  summary+=("step text: clean")
+else
+  rc=$?
+  fail=1
+  if [ "$rc" -eq 1 ]; then
+    summary+=("step text: FAIL — a formula change adds a procedure to step text")
+  else
+    summary+=("step text: FAIL — lint-step-text.sh could not run (exit $rc); fail-closed, treated as a finding")
   fi
 fi
 

@@ -313,7 +313,13 @@ case "$sub" in
           else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
-  *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
+  *)
+    # `gc <binding> scripts-dir`: gc names the pack it loaded for the binding the
+    # city imports it under. A suite names that pack in STUB_PACK.
+    if [ "$sub" = gc-toolkit ] && [ "${1:-}" = scripts-dir ] && [ -n "${STUB_PACK:-}" ]; then
+      printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+    fi
+    echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 verb="${1:-}"; shift || true
 # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,

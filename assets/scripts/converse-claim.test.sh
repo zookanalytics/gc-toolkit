@@ -39,11 +39,26 @@ TMPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-claim-test.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; BARE="$TMPD/bare"
 mkdir -p "$BIN" "$BARE"
+# The script runs its siblings from beside itself, so it runs here from a copy of
+# the pack whose scripts link to this tree's, with a recorder in place of
+# pr-visit-comment.sh. The recorder logs to REC_PVC_LOG when a case sets one.
+PACK="$TMPD/pack/assets/scripts"; mkdir -p "$PACK"
+for f in "$REPO"/assets/scripts/*.sh; do
+    case "$f" in *.test.sh) continue ;; esac
+    ln -s "$f" "$PACK/${f##*/}"
+done
+rm -f "$PACK/pr-visit-comment.sh"
+cat >"$PACK/pr-visit-comment.sh" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${REC_PVC_LOG:-/dev/null}"
+REC
+chmod +x "$PACK/pr-visit-comment.sh"
 
 echo "── the script is shipped executable and syntactically valid ──"
 [ -x "$SUT" ] && ok "converse-claim.sh is executable" \
     || bad "converse-claim.sh is executable" "chmod +x it"
-bash -n "$SUT" && ok "converse-claim.sh: valid bash" \
+SHIPPED="$SUT"; SUT="$PACK/converse-claim.sh"
+bash -n "$SHIPPED" && ok "converse-claim.sh: valid bash" \
     || bad "converse-claim.sh: valid bash" "bash -n failed"
 
 # A stub gc dialed entirely from the environment:
@@ -195,17 +210,11 @@ has  "an existing_assignment visit carrying gc.outcome FINISHes" "action=finish 
 is   "…exit 4" "$RC" "4"
 
 echo "── the stranded finish also closes the visit's PR reminder ──"
-# A recorder at a candidate root stands in for pr-visit-comment.sh. The finish
+# The recorder beside the script stands in for pr-visit-comment.sh. The finish
 # arm redirects the tool's stdout so it cannot disturb the action=finish line, so
 # the recorder logs to a file, not stdout.
-PVCRIG="$TMPD/pvcrig"; mkdir -p "$PVCRIG/assets/scripts"
-cat >"$PVCRIG/assets/scripts/pr-visit-comment.sh" <<'REC'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "${REC_PVC_LOG:?}"
-REC
-chmod +x "$PVCRIG/assets/scripts/pr-visit-comment.sh"
 REC_PVC_LOG="$TMPD/finish.pvc"; : >"$REC_PVC_LOG"
-run OUTCOME=settled SHOW_STATUS=closed GC_RIG_ROOT="$PVCRIG" REC_PVC_LOG="$REC_PVC_LOG"
+run OUTCOME=settled SHOW_STATUS=closed REC_PVC_LOG="$REC_PVC_LOG"
 has  "the finish verdict is unchanged" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
 if grep -qF -- 'close --visit v-x --subject g' "$REC_PVC_LOG"; then
     ok "the finish closes the visit's PR reminder, on the subject GROUP names"

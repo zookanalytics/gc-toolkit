@@ -54,10 +54,12 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
-# rig list answers the roster file and bd show the bead file; every other call
+# rig list answers the roster file, bd show the bead file, and
+# `gc gc-toolkit scripts-dir` the pack $STUB_PACK names; every other call
 # is logged and succeeds, and a bd update also writes its --set-metadata and
 # --unset-metadata to the bead file.
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
   *)
@@ -113,7 +115,7 @@ block() {
     return 0
   fi
   ok "$2: block extracted between markers"
-  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g; s|{{delete_merged_branches}}|true|g' > "$3"
+  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g; s|{{delete_merged_branches}}|true|g; s|{{binding_prefix}}|gc-toolkit.|g' > "$3"
   case "$(cat "$3")" in
     *'{{'*) bad "$2: no unrendered formula placeholder left" ;;
     *)      ok "$2: no unrendered formula placeholder left" ;;
@@ -217,7 +219,8 @@ eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reache
 echo "── mol-review: review-gather and review-workspace-remove ──"
 review_render() { # <text> <check> <oid>
   printf '%s\n' "$1" | sed -e 's|{{review_bead}}|rb|g' -e "s|{{reviewed_oid}}|$3|g" -e 's|{{review_base}}|main|g' \
-    -e 's|{{review_branch}}|polecat/x|g' -e 's|{{anchor_bead}}|tk-anc|g' -e "s|{{check}}|$2|g" -e 's|{{review_pr_url}}||g'
+    -e 's|{{review_branch}}|polecat/x|g' -e 's|{{anchor_bead}}|tk-anc|g' -e "s|{{check}}|$2|g" -e 's|{{review_pr_url}}||g' \
+    -e 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 GATHER="$(extract "$REVIEW_TOML" review-gather)"
 [ -n "$GATHER" ] && ok "review-gather: block extracted between markers" || bad "review-gather: block extracted between markers" "markers missing from formulas/mol-review.toml"
@@ -227,10 +230,9 @@ case "$(cat "$TMP/review-render.sh")" in
   *)      ok "review-gather: no unrendered formula placeholder left once a review's values fill it" ;;
 esac
 if bash -n "$TMP/review-render.sh" 2>/dev/null; then ok "review-gather: block is valid bash"; else bad "review-gather: block is valid bash"; fi
-# The pack-script locator's show-toplevel candidate is the block's one bare git
-# call. It picks where the pack's scripts are read from, never the repository
-# the worktree is made in.
-eq "$(bare_git "$TMP/review-render.sh")" "rev-parse " "review: the only git call without -C is the pack-script locator's"
+# The block asks gc for the pack's scripts, so every git call it makes names
+# the repository it acts on.
+eq "$(bare_git "$TMP/review-render.sh")" "" "review: every git call in the block names its repo with -C"
 extract "$REVIEW_TOML" review-workspace-remove > "$TMP/review-rm.tmpl"
 [ -s "$TMP/review-rm.tmpl" ] && ok "review-workspace-remove: block extracted between markers" \
   || bad "review-workspace-remove: block extracted between markers" "markers missing from formulas/mol-review.toml"
@@ -241,7 +243,7 @@ git -C "$PROBE_RIG" worktree list --porcelain | sed -n "s/^worktree //p" > "$PRO
 git -C "$PROBE_CWD" worktree list --porcelain | sed -n "s/^worktree //p" > "$PROBE/cwd"'
 printf '[{"id":"tk-anc","title":"the change under review"}]\n' > "$TMP/anchor.json"
 
-# GC_PACK_DIR names this checkout, so the block runs the review-workspace.sh and
+# gc names this checkout as the pack, so the block runs the review-workspace.sh and
 # review-checks.sh under test. The rig's origin carries the reviewed commit as
 # both main and polecat/x, which the block fetches before it makes the worktree.
 review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
@@ -261,7 +263,7 @@ review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
   git clone -q "$d/rig" "$d/cwd"; commit "$d/cwd" "cwd repo moves on ($1)" >/dev/null
   pick "$1" "$d/rig"
   { review_render "$GATHER" "${2:-correctness}" "$OID"; printf '%s\n' "$PROBE_TAIL"; } > "$d/review-probe.sh"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" \
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" STUB_PACK="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" \
       GCTK_BIN="$TMP/gctk" GCTK_LOG="$d/gctk.log" \
       PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$d/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
@@ -423,12 +425,11 @@ printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/m
 # The pack, where the prep block finds detached-job.sh to stop a gate left
 # running in the prep worktree and refinery-workspace.sh to stage it, and the
 # direct-merge block finds direct-merge-push.sh, beside the bd-lib.sh it
-# sources and a lifecycle.sh that logs. It is named by path, so the cwd plays
-# no part.
-PACK_CITY="$TMP/pack-city"
-mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
-cp "$BIN/lifecycle" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/lifecycle.sh"
+# sources and a lifecycle.sh that logs. gc names it, so the cwd plays no part.
+PACK="$TMP/pack"
+mkdir -p "$PACK/assets/scripts"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$PACK/assets/scripts/"
+cp "$BIN/lifecycle" "$PACK/assets/scripts/lifecycle.sh"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
   mkdir -p "$d"
@@ -439,7 +440,7 @@ prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   git -C "$d/seed" push -q "$d/origin.git" polecat/wb
   STALE=$(git -C "$d/rig" rev-parse origin/polecat/wb)
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" GC_CITY_PATH="$PACK_CITY" WORK=wb TARGET_BRANCH_DEFAULT=main \
+  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" STUB_PACK="$PACK" WORK=wb TARGET_BRANCH_DEFAULT=main \
       FAKE_META="$TMP/meta.json" FAKE_LOG="$d/gc.log" bash "$TMP/prep.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
@@ -465,7 +466,7 @@ grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
 echo "── mol-refinery-patrol: direct-merge-push ──"
 block "$PATROL_TOML" direct-merge-push "$TMP/merge.sh"
 # The block runs direct-merge-push.sh, which makes the landing's git calls.
-eq "$(bare_git "$TMP/merge.sh")" "rev-parse " "direct-merge: the only git call without -C is the pack-script locator's"
+eq "$(bare_git "$TMP/merge.sh")" "" "direct-merge: every git call in the block names its repo with -C"
 eq "$(bare_git "$HERE/direct-merge-push.sh")" "" "direct-merge: every git call in direct-merge-push.sh names its repo with -C"
 
 # bead_file <dir>: the work bead direct-merge-push.sh stamps before its push.
@@ -477,10 +478,10 @@ merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   patrol_rig "$d" "merge $1"
   bead_file "$d"
   # The rebase step leaves the prepared head staged here for wb, detached.
-  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
+  "$PACK/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   pick "$1" "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
+      STUB_PACK="$PACK" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -526,13 +527,13 @@ protected_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge protected"
   bead_file "$d"
-  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
+  "$PACK/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' \
     > "$d/origin.git/hooks/pre-receive"
   chmod +x "$d/origin.git/hooks/pre-receive"
   pick env "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+      STUB_PACK="$PACK" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -565,13 +566,13 @@ moved_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge moved"
   bead_file "$d"
-  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
+  "$PACK/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   git -C "$d/seed" checkout -q main
   MOVED=$(commit "$d/seed" "landed while the gate ran")
   git -C "$d/seed" push -q "$d/origin.git" main
   pick env "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+      STUB_PACK="$PACK" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 

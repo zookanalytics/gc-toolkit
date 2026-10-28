@@ -69,18 +69,39 @@ version = "v0.1.0"
 ```
 
 `version` is required for git-backed imports; run `gc import install` to
-materialize the pack under `.gc/cache/`.
+fetch the pack into gc's repository cache, `$GC_HOME/cache/repos`
+(`~/.gc/cache/repos` by default).
 
 ### Default import across every rig
 
 ```toml
-# pack.toml (city root)
+# city.toml
 [defaults.rig]
 [defaults.rig.imports.gc-toolkit]
 source = "rigs/gc-toolkit"
 ```
 
 Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
+
+### The city-level import
+
+The city root `pack.toml` imports the pack as well, under the binding its rigs
+use and from the same `source` (and `version`, for a git import):
+
+```toml
+# pack.toml (city root)
+[imports.gc-toolkit]
+source = "rigs/gc-toolkit"
+```
+
+The pack's formula steps, prompts and skills run its scripts through
+`gc gc-toolkit scripts-dir`, a pack command. gc registers a pack's commands
+only for an import in the city root `pack.toml`, and none for a rig's import or
+for `[defaults.rig.imports]`. Without the city-level import, each of those
+calls answers `gc: unknown command "gc-toolkit"`, and the step stops. Every
+step runs the scripts of the city-level copy, which is why its `source` matches
+the rigs'. The city-level import also gives the pack's rig agents to every rig
+that does not import the pack itself.
 
 ### What the import brings in
 

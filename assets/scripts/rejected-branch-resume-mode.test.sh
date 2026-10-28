@@ -87,13 +87,15 @@ VARS="$(grep -o '{{[^}]*}}' "$TMP/block.sh" | sort -u | tr '\n' ' ')"
 eq "$VARS" "" "every formula var in the block is rendered"
 bash -n "$TMP/block.sh" && ok "the block is valid bash" || bad "the block is valid bash" "bash -n failed"
 # The audit-entry block concludes a conflicted merge, and the stop-and-ask
-# block stops one to ask a person.
+# block stops one to ask a person. Each names the pack's binding through
+# {{binding_prefix}}, rendered as the pour renders it: gc-toolkit. here.
 for b in bring-current-audit-entry bring-current-unresolvable; do
-  awk -v m="$b" '$0 == "# >>> " m {f=1; next} $0 == "# <<< " m {f=0} f' "$TOML" > "$TMP/$b.sh"
+  awk -v m="$b" '$0 == "# >>> " m {f=1; next} $0 == "# <<< " m {f=0} f' "$TOML" \
+    | sed 's#{{binding_prefix}}#gc-toolkit.#g' > "$TMP/$b.sh"
   if [ -s "$TMP/$b.sh" ] && [ -z "$(grep -o '{{[^}]*}}' "$TMP/$b.sh")" ] && bash -n "$TMP/$b.sh"; then
-    ok "the $b block is extracted, needs no formula var, and is valid bash"
+    ok "the $b block is extracted, needs no formula var but the binding, and is valid bash"
   else
-    bad "the $b block is extracted, needs no formula var, and is valid bash"
+    bad "the $b block is extracted, needs no formula var but the binding, and is valid bash"
   fi
 done
 
@@ -116,6 +118,10 @@ SH
 cat > "$BIN/gc" <<'SH'
 #!/usr/bin/env bash
 printf 'gc %s\n' "$*" >> "$CALLS"
+if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
+  [ -n "${STUB_PACK:-}" ] || exit 1
+  printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 verb="${2:-}"; id="${3:-}"
 case "$verb" in
@@ -137,8 +143,8 @@ esac
 exit 0
 SH
 chmod +x "$BIN/git" "$BIN/gc"
-# The pack scripts the audit-entry and stop-and-ask blocks call, found through
-# GC_PACK_DIR. bring-current-audit.sh writes an entry (add) or a question (ask)
+# The pack scripts the audit-entry and stop-and-ask blocks call, in the pack the
+# gc stub names for `gc gc-toolkit scripts-dir`. bring-current-audit.sh writes an entry (add) or a question (ask)
 # to the bead through the gc stub and prints the bead's anchor (anchor), and
 # await-ruling.sh and run-cancel.sh record their calls.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
@@ -214,13 +220,13 @@ run_block() {
 }
 # again <block-file> [<VAR=value>...] — a block run in $C against the store as
 # the last run left it, the way the bead's next step or next run reaches it.
-# The blocks look for the pack under GC_RIG_ROOT and GC_CITY_PATH after
-# GC_PACK_DIR, and in a city those lead to a real checkout, so both are unset and
-# only the stub pack can answer. Sets RC.
+# gc names the stub pack. GC_RIG_ROOT and GC_CITY_PATH are unset, since in a
+# city they lead to a real checkout, so a block that looked there instead would
+# find nothing. Sets RC.
 again() {
   local f="$1"; shift
   rm -f "$AT_MERGE"
-  ( cd "$C" && env -u GC_RIG_ROOT -u GC_CITY_PATH PATH="$BIN:$PATH" GC_PACK_DIR="$PACK" WORK_BEAD_ID=tk-w "$@" bash "$f" ) > "$TMP/out" 2>&1
+  ( cd "$C" && env -u GC_RIG_ROOT -u GC_CITY_PATH PATH="$BIN:$PATH" STUB_PACK="$PACK" WORK_BEAD_ID=tk-w "$@" bash "$f" ) > "$TMP/out" 2>&1
   RC=$?
 }
 # set_meta <key> <value> — what another writer put on the bead between runs.
