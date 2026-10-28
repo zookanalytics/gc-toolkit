@@ -1,6 +1,9 @@
 package prstatus
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // The precedence table, one row per case pr-status-label.test.sh asserts.
 // Keeping them here too proves the rule in isolation from the `gc bd` gathering,
@@ -24,6 +27,13 @@ func TestDerive(t *testing.T) {
 		{"open visit on an approved PR", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, NeedsAttention},
 		{"open visit outranks live work", Facts{OpenVisit: true, InFlightCount: 2}, NeedsAttention},
 		{"a hold outranks an approval", Facts{MergeHold: "true", PRPosture: "approved@oid@t"}, NeedsAttention},
+
+		// Whatever Held names is a thing a person has to act on, so it holds the PR
+		// as a visit on the anchor does, whatever is in flight beside it.
+		{"an open visit on the PR's rework, the rework in flight", Facts{WorkVisit: true, InFlightCount: 1}, NeedsAttention},
+		{"an open visit on the work of an approved PR", Facts{WorkVisit: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t", InFlightCount: 1}, NeedsAttention},
+		{"a blocker a person owes", Facts{PersonBlocker: true}, NeedsAttention},
+		{"a blocker a person owes on an approved PR with work in flight", Facts{PersonBlocker: true, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
 
 		// An approved PR with nothing known blocking it is the city's to land,
 		// whatever it waits on: the merge pass, a required check still running
@@ -97,6 +107,59 @@ func TestBlocked(t *testing.T) {
 			}
 			if got := Derive(tc.f) == NeedsAttention; got != tc.want {
 				t.Errorf("Derive(%+v) reads needs-attention %v, want %v as Blocked reads it", tc.f, got, tc.want)
+			}
+		})
+	}
+}
+
+// Held names each thing that holds the PR, in the order visit, review, blocked,
+// and leaves out a value whose condition no longer stands. Any value means
+// Derive reads needs-attention; the holds that carry no value (merge_hold and
+// rebase_hold) read needs-attention with Held empty.
+func TestHeld(t *testing.T) {
+	approved := func(f Facts) Facts {
+		f.PRPosture = "approved@oid@t"
+		return f
+	}
+	threads := approved(Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseReviewThreads})
+	stuck := approved(Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker})
+	for _, tc := range []struct {
+		name string
+		f    Facts
+		want []Hold
+	}{
+		{"nothing holds the PR", Facts{}, nil},
+		{"an approved PR the city is landing", approved(Facts{PRMachine: "settled@oid@t", InFlightCount: 1}), nil},
+		{"the merge freeze carries no held value", Facts{MergeHold: "true"}, nil},
+		{"the rebase hold carries no held value", Facts{RebaseHold: "true"}, nil},
+
+		{"an open visit on the anchor", Facts{OpenVisit: true}, []Hold{HeldVisit}},
+		{"an open visit on the PR's rework", Facts{WorkVisit: true, InFlightCount: 1}, []Hold{HeldVisit}},
+		{"a visit on the anchor and one on its work are one value", Facts{OpenVisit: true, WorkVisit: true}, []Hold{HeldVisit}},
+
+		{"an unresolved required thread, nothing in flight", threads, []Hold{HeldReview}},
+		{"the thread verdict with a fix in flight", func() Facts { f := threads; f.InFlightCount = 1; return f }(), nil},
+		{"the thread verdict at a head the posture has left", func() Facts { f := threads; f.PRPosture = "approved@new@t"; return f }(), nil},
+		{"a failed check is not a review hold", approved(Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseCheckFailed}), nil},
+		{"a verdict that is not blocked keeps no thread cause", approved(Facts{PRMachine: "settled@oid@t", PRMachineCause: CauseReviewThreads}), nil},
+
+		{"a blocker no automated actor holds", stuck, []Hold{HeldBlocked}},
+		{"the stuck blocker holds whatever is in flight", func() Facts { f := stuck; f.InFlightCount = 2; return f }(), []Hold{HeldBlocked}},
+		{"the stuck blocker at a head the posture has left", func() Facts { f := stuck; f.PRPosture = "approved@new@t"; return f }(), nil},
+		{"a blocker a person owes", Facts{PersonBlocker: true}, []Hold{HeldBlocked}},
+		{"a stuck blocker beside one a person owes is one value", func() Facts { f := stuck; f.PersonBlocker = true; return f }(), []Hold{HeldBlocked}},
+
+		{"a visit and a person's blocker stand together", Facts{OpenVisit: true, PersonBlocker: true}, []Hold{HeldVisit, HeldBlocked}},
+		{"a visit on the work beside the thread verdict", func() Facts { f := threads; f.WorkVisit = true; return f }(), []Hold{HeldVisit, HeldReview}},
+		{"every value at once", func() Facts { f := threads; f.OpenVisit = true; f.PersonBlocker = true; return f }(), []Hold{HeldVisit, HeldReview, HeldBlocked}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Held(tc.f)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("Held(%+v) = %v, want %v", tc.f, got, tc.want)
+			}
+			if len(got) > 0 && Derive(tc.f) != NeedsAttention {
+				t.Errorf("Held(%+v) = %v but Derive = %q, want needs-attention while any value stands", tc.f, got, Derive(tc.f))
 			}
 		})
 	}

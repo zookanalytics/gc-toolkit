@@ -8,14 +8,21 @@
 // pre-merge values (a merged PR keeps posture=approved and is never restamped),
 // so the facts [Derive] reads carry no merged-or-closed signal.
 //
-// The `status:` PR label writer (assets/scripts/pr-status-label.sh) computes the
-// live state through `gctk pr-status`, and the package is exported — not
-// internal — so the helm board (services/helm) derives the same per-bead state
-// from the same code rather than its own. One code path, so a bead's board
-// liveness and its PR label cannot disagree. The label writer takes the label
-// off a PR that merged or closed, where GitHub's own state takes over, so it
-// never reaches for the terminal states; the board, which alone shows a
-// resolved row, is their only consumer.
+// Beside the one status value, [Held] names what holds an open PR that the city
+// will not clear on its own: an open visit on the PR or its work, an unresolved
+// review thread the merge waits on, or a blocker no automated actor will clear.
+// Each is a value of the `held:` label family, and more than one can stand.
+// Each names something a person has to act on, so [Derive] reads needs-attention
+// while any stands.
+//
+// The PR label writer (assets/scripts/pr-status-label.sh) computes the status
+// and the held values through `gctk pr-status`, and the package is exported —
+// not internal — so the helm board (services/helm) derives the same per-bead
+// state from the same code rather than its own. One code path, so a bead's
+// board liveness and its PR labels cannot disagree. The label writer takes both
+// label families off a PR that merged or closed, where GitHub's own state takes
+// over, so it never reaches for the terminal states; the board, which alone
+// shows a resolved row, is their only consumer.
 //
 // The rule is Derive's; gathering the facts is the caller's. The label path
 // reads them by shelling out to `gc bd`; a caller that already holds the bead,
@@ -23,7 +30,8 @@
 // metadata instead. Derive itself does no I/O.
 //
 // Derive reads only state the city records: the anchor's holds
-// (merge_hold/rebase_hold), whether an open visit covers it, the pr-facts.sh
+// (merge_hold/rebase_hold), whether an open visit covers it or its review and
+// rework children, whether a blocker it waits on is a person's, the pr-facts.sh
 // posture, the merge cadence's machine verdict and its blocked cause, the
 // draft-stage markers pr-open.sh records (opened_as_draft, draft_readied), and
 // the anchor's in-flight set — any live bead carrying anchor_bead, the same
@@ -61,9 +69,9 @@ const (
 	// settled head.
 	NeedsReview State = "needs-review"
 	// NeedsAttention: a blocker stands that the city will not clear on its own:
-	// a merge or rebase hold, an open visit on the anchor, a blocked verdict the
-	// merge pass recorded at the current head, or a recorded value the
-	// derivation has no word for.
+	// a merge or rebase hold, anything [Held] names, a blocked verdict the merge
+	// pass recorded at the current head, or a recorded value the derivation has
+	// no word for.
 	NeedsAttention State = "needs-attention"
 
 	// Merged and Closed are terminal: the PR round-trip has ended, so nothing
@@ -88,6 +96,28 @@ const (
 	CauseRule          = "rule"           // a branch rule the merge pass cannot name
 )
 
+// Hold is a held: value, one thing that holds an open PR which the city will
+// not clear on its own. Each value is a `held:` label of its own, beside the one
+// status value, so more than one can stand at once.
+type Hold string
+
+const (
+	// HeldVisit: an open visit covers the anchor, or one of its live review or
+	// rework children, the PR's own work in flight. A person answers the visit.
+	HeldVisit Hold = "visit"
+	// HeldReview: an unresolved review thread holds the merge and nothing in
+	// flight acts on it, so resolving it falls to a person. It is the merge
+	// pass's blocked verdict with cause review-threads, as [Blocked] counts it.
+	// The merge pass reads the threads where the base branch requires their
+	// resolution, so a base that does not require it records no such hold.
+	HeldReview Hold = "review"
+	// HeldBlocked: a live blocker holds the PR that no automated actor will
+	// clear. It is the merge pass's blocked verdict with cause blocker, as
+	// [Blocked] counts it, or a live blocker a person owes: one routed to a
+	// person, or a decision. A blocker the city is landing is neither.
+	HeldBlocked Hold = "blocked"
+)
+
 // Facts is the state the city records about the anchor, as stored. Each string
 // field carries the raw metadata value; Derive splits the dated posture and
 // machine verdict and applies the truthiness rule, so both consumers pass what
@@ -108,6 +138,18 @@ type Facts struct {
 	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
 	// flight.
 	OpenVisit bool
+	// WorkVisit is whether an open visit covers the PR's own work in flight: a
+	// live review or rework child of the anchor, a bead carrying anchor_bead
+	// whose task_kind is review or rework, open or in_progress. Those are the
+	// children the helm board gathers as rows of their own. The work waits on
+	// the person the visit asks, so the visit holds the PR as one on the anchor
+	// does.
+	WorkVisit bool
+	// PersonBlocker is whether a live blocker the anchor waits on, a bead its
+	// blocks edge names that has not closed, is a person's to clear: one routed
+	// to a person (gc.routed_to=human), or a decision. No automated actor will
+	// clear it, so it holds the PR.
+	PersonBlocker bool
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
 	// was read at, the current head as far as the city knows.
@@ -145,8 +187,9 @@ func Derive(f Facts) State {
 	posture, _ := splitDated(f.PRPosture)
 	machine, _ := splitDated(f.PRMachine)
 
-	// needs-attention: a blocker the city will not clear on its own.
-	if isSet(f.MergeHold) || isSet(f.RebaseHold) || f.OpenVisit {
+	// needs-attention: a blocker the city will not clear on its own. A hold
+	// stands, or something [Held] names, each a thing a person has to act on.
+	if isSet(f.MergeHold) || isSet(f.RebaseHold) || len(Held(f)) > 0 {
 		return NeedsAttention
 	}
 	// A recorded posture or verdict outside the vocabulary its writer declares
@@ -200,6 +243,26 @@ func Blocked(f Facts) bool {
 	}
 	return (postureHead == "" || machineHead == postureHead) &&
 		(f.InFlightCount == 0 || f.PRMachineCause == CauseBlocker)
+}
+
+// Held returns what holds the PR, in the order visit, review, blocked, and
+// nothing when the PR is not held. A value stands only while its condition
+// does, so the first derivation after the condition clears leaves it out. The
+// merge freeze and the rebase hold are not among them: they read needs-attention
+// in [Derive] with no held value of their own.
+func Held(f Facts) []Hold {
+	var held []Hold
+	if f.OpenVisit || f.WorkVisit {
+		held = append(held, HeldVisit)
+	}
+	blocked := Blocked(f)
+	if blocked && f.PRMachineCause == CauseReviewThreads {
+		held = append(held, HeldReview)
+	}
+	if (blocked && f.PRMachineCause == CauseBlocker) || f.PersonBlocker {
+		held = append(held, HeldBlocked)
+	}
+	return held
 }
 
 // knownPosture is the posture vocabulary pr-facts.sh records ([posture]
