@@ -281,9 +281,10 @@ blockers.
 The helm board reads a park as a hold, not a fault. It reads the blockers of
 each member and of the parents above it on the board, so a member under a park
 that nothing else holds counts as parked for the operator rather than
-stranded, and the parked epic names the gate that holds it. The board's
-`parked` kind is something else: a bead the board lists because it carries a
-takeaway.
+stranded, and the parked epic names the gate that holds it. A member that has a
+row of its own reads parked there too and names the gate, so the board asks for
+no disposition of it while the park holds it. The board's `parked` kind is
+something else: a bead the board lists because it carries a takeaway.
 
 ### Where a park goes
 

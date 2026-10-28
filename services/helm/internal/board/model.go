@@ -71,8 +71,8 @@ func (s Severity) rank() int {
 
 // Child is a rolled-up member of an anchor (epic child or convoy dependent).
 // The roll-up reads its status, assignee, metadata and waits to tell which
-// state an open child is in ([deriveState]). A source that cannot read a field
-// leaves it zero rather than approximating it.
+// state an open child is in ([Facts.stateOf]). A source that cannot read a
+// field leaves it zero rather than approximating it.
 type Child struct {
 	ID        string            `json:"id"`
 	Status    string            `json:"status"`
@@ -751,13 +751,13 @@ type Facts struct {
 	Prefixes []string
 	RigNames []string
 
-	// held and subtree are set by [BuildBoard], never by a source. held is the
-	// hold an anchor's own open waits and its parent-child ancestors' put on
-	// every bead under it ([holds]). subtree is, for each live anchor with
-	// open children, the state those children put it in ([subtreeStates]). A
-	// parent counts a child that is itself a parent by it when nothing holds
-	// the child's own bead.
-	held    map[string]string
+	// held and subtree are set by [BuildBoard], never by a source. held is, for
+	// every bead under a live anchor, the hold the open waits of its
+	// parent-child ancestors put on it ([holds]), keyed by that bead. subtree
+	// is, for each live anchor with open children, the state those children put
+	// it in ([subtreeStates]). A parent counts a child that is itself a parent
+	// by it when nothing holds the child's own bead.
+	held    map[string]hold
 	subtree map[string]string
 }
 

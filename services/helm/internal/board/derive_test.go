@@ -1766,6 +1766,35 @@ func TestAncestorWaitHoldsTheFamily(t *testing.T) {
 		if sub.Stranded || !equalIDs(sub.ParkedHeads, []string{"ra-s.1"}) {
 			t.Errorf("its own children are held by the park above it: parked=%v stranded=%v", sub.ParkedHeads, sub.Stranded)
 		}
+		if sub.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("the nested parent names the gate that holds it: %q", sub.Needs)
+		}
+	})
+
+	t.Run("one gate that holds two ancestors is named once", func(t *testing.T) {
+		b := BuildBoard([]Anchor{
+			waitsOn(epic("ra-e", Child{ID: "ra-s", Status: "open"}), gate),
+			waitsOn(epic("ra-s", Child{ID: "ra-s.1", Status: "open"}), gate),
+			epic("ra-s.1", Child{ID: "ra-s.1.1", Status: "open"}),
+		}, fixtureNow, false, nil, live)
+		if leaf := mustTile(t, b, "ra-s.1"); leaf.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("needs = %q", leaf.Needs)
+		}
+	})
+
+	t.Run("two gates above a bead are both counted", func(t *testing.T) {
+		older := Blocker{ID: "ra-gate0", Title: "parked for the quarter", Status: "open", IssueType: "gate",
+			CreatedAt: fixtureNow.Add(-2 * time.Hour)}
+		newer := Blocker{ID: "ra-gate1", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate",
+			CreatedAt: fixtureNow.Add(-time.Hour)}
+		b := BuildBoard([]Anchor{
+			waitsOn(epic("ra-e", Child{ID: "ra-s", Status: "open"}), older),
+			waitsOn(epic("ra-s", Child{ID: "ra-s.1", Status: "open"}), newer),
+			epic("ra-s.1", Child{ID: "ra-s.1.1", Status: "open"}),
+		}, fixtureNow, false, nil, live)
+		if leaf := mustTile(t, b, "ra-s.1"); leaf.Needs != "parked: parked for the quarter and 1 more" {
+			t.Errorf("needs = %q", leaf.Needs)
+		}
 	})
 
 	t.Run("an epic waiting on a swept gate holds its children queued", func(t *testing.T) {
@@ -1836,6 +1865,119 @@ func TestSweptGateQueuesItsBead(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUnderHoldKeepsWhatMovesOrAsks: an ancestor's wait holds a bead that
+// nothing else holds or moves, and parks one waiting its turn behind work while
+// a person holds the ancestor. Live work, a pull request, a conversation and a
+// person's own hold on the bead keep their state, and a bead queued behind its
+// own work under a wait on work keeps its own waits.
+func TestUnderHoldKeepsWhatMovesOrAsks(t *testing.T) {
+	gate := Blocker{ID: "ra-gate", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate"}
+	work := Blocker{ID: "ra-w", Title: "the platform build", Status: "open", IssueType: "task"}
+	own := Blocker{ID: "ra-x", Title: "Platform admin", Status: "open", IssueType: "task"}
+	parked := hold{kind: stateParked, waits: []Blocker{gate}}
+	queued := hold{kind: stateQueued, waits: []Blocker{work}}
+	cases := []struct {
+		name      string
+		s         beadState
+		h         hold
+		want      string
+		wait      string
+		inherited bool
+	}{
+		{"nothing holds it", beadState{kind: stateStranded}, hold{}, stateStranded, "", false},
+		{"stranded under a park", beadState{kind: stateStranded}, parked, stateParked, "ra-gate", true},
+		{"stranded under a wait on work", beadState{kind: stateStranded}, queued, stateQueued, "ra-w", true},
+		{"queued under a park", beadState{kind: stateQueued, waits: []Blocker{own}}, parked, stateParked, "ra-gate", true},
+		{"queued under a wait on work", beadState{kind: stateQueued, waits: []Blocker{own}}, queued, stateQueued, "ra-x", false},
+		{"parked by its own gate", beadState{kind: stateParked, waits: []Blocker{own}}, queued, stateParked, "ra-x", false},
+		{"in flight", beadState{kind: stateInFlight}, parked, stateInFlight, "", false},
+		{"in review", beadState{kind: stateInReview}, parked, stateInReview, "", false},
+		{"in conversation", beadState{kind: stateInConversation}, parked, stateInConversation, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := underHold(tc.s, tc.h)
+			wait := ""
+			if len(got.waits) > 0 {
+				wait = got.waits[0].ID
+			}
+			if got.kind != tc.want || wait != tc.wait || got.inherited != tc.inherited {
+				t.Errorf("state=%q wait=%q inherited=%v, want %q / %q / %v", got.kind, wait, got.inherited, tc.want, tc.wait, tc.inherited)
+			}
+		})
+	}
+}
+
+// TestAncestorWaitHoldsARowOfItsOwn: a bead under a held epic that has a row of
+// its own reads the hold on that row too, so the row and its parent's roll-up
+// give one answer. A takeaway subject whose own waits have landed, under an
+// epic parked at a gate, is parked and names that gate. It owes no
+// disposition, because the park still holds it. Under an epic waiting on work
+// it is queued behind that work. A subject in review keeps its own state.
+func TestAncestorWaitHoldsARowOfItsOwn(t *testing.T) {
+	gate := Blocker{ID: "ra-gate", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate"}
+	work := Blocker{ID: "ra-w", Title: "the platform build", Status: "open", IssueType: "task"}
+	landed := Blocker{ID: "ra-done", Title: "the routed fix", Status: "closed", IssueType: "task"}
+	family := func(epicWait Blocker, md map[string]string) []Anchor {
+		full := map[string]string{"gc.takeaway": "routed the fix; nothing further here"}
+		for k, v := range md {
+			full[k] = v
+		}
+		return []Anchor{
+			{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children:  []Child{{ID: "ra-s", Status: "open", Metadata: full, Blockers: []Blocker{landed}}},
+				WaitingOn: []string{epicWait.ID}, Blockers: []Blocker{epicWait}},
+			{ID: "ra-s", Title: "the subject", Kind: "parked", Source: "parked", Rig: "rig-a", Prefix: "ra",
+				Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: full, Takeaway: full["gc.takeaway"],
+				WaitingOn: []string{landed.ID}, WaitingOnClosed: []string{landed.ID}, Blockers: []Blocker{landed}},
+		}
+	}
+
+	t.Run("under a parked epic", func(t *testing.T) {
+		b := BuildBoard(family(gate, nil), fixtureNow, false, nil, Facts{})
+		row, epic := mustTile(t, b, "ra-s"), mustTile(t, b, "ra-e")
+		if !equalIDs(epic.ParkedHeads, []string{"ra-s"}) {
+			t.Errorf("the epic counts its subject parked: %v", epic.ParkedHeads)
+		}
+		if row.DispositionDue || row.Owed || row.Section == SectionGate {
+			t.Errorf("the park still holds it, so no disposition is owed: disposition_due=%v owed=%v section=%s",
+				row.DispositionDue, row.Owed, row.Section)
+		}
+		if row.Frontier != "needs-review · parked · held by an ancestor's wait" || row.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("the row names the hold: frontier=%q needs=%q", row.Frontier, row.Needs)
+		}
+	})
+
+	t.Run("under an epic waiting on work", func(t *testing.T) {
+		row := mustTile(t, BuildBoard(family(work, nil), fixtureNow, false, nil, Facts{}), "ra-s")
+		if row.DispositionDue || row.Owed {
+			t.Errorf("disposition_due=%v owed=%v", row.DispositionDue, row.Owed)
+		}
+		if row.Frontier != "needs-review · queued · held by an ancestor's wait" || row.Needs != "queued behind the platform build" {
+			t.Errorf("frontier=%q needs=%q", row.Frontier, row.Needs)
+		}
+	})
+
+	t.Run("in review under a parked epic", func(t *testing.T) {
+		md := map[string]string{"merge_result": "pull_request", "pr_number": "62", "branch": "polecat/ra-s"}
+		row := mustTile(t, BuildBoard(family(gate, md), fixtureNow, false, nil, Facts{}), "ra-s")
+		if row.DispositionDue || row.Section != SectionReview {
+			t.Errorf("a pull request in review keeps its state: disposition_due=%v section=%s", row.DispositionDue, row.Section)
+		}
+	})
+
+	t.Run("once the epic's wait lands", func(t *testing.T) {
+		closedGate := gate
+		closedGate.Status = "closed"
+		anchors := family(closedGate, nil)
+		anchors[0].WaitingOnClosed = []string{closedGate.ID}
+		row := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-s")
+		if !row.DispositionDue || row.Needs != "blocker landed — dispose or resume" {
+			t.Errorf("nothing holds it any more, so the disposition is due: disposition_due=%v needs=%q", row.DispositionDue, row.Needs)
+		}
+	})
 }
 
 // TestInReviewBeadIsNotADisposition: a bead carrying a takeaway, every

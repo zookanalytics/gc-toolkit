@@ -360,7 +360,7 @@ prose — and the board re-derives, per render, whether it has been discharged:
 |---|---|---|
 | empty | — | LOW, "conversation parked — takeaway recorded", or "— no takeaway recorded" when the sitting left none (a childless row; with children the roll-up answers instead). A row a live sitting, a visit, a route or an arm holds names that instead |
 | non-empty | non-empty | LOW, "queued · waiting on N", or "parked · waiting on N" when a gate a person releases or a demand is among the waits — a live hold, still quiet. NEEDS names the oldest wait by its title, and says "starts by itself" when an arm or a route will start the row |
-| non-empty | empty | `disposition_due` when nothing holds or moves the row: ELEVATED, "blocker landed", and NEEDS becomes "blocker landed — dispose or resume". Otherwise the row reads what holds it: a pull request in review reads as its merge anchor, a live sitting as "in conversation", an arm or a route as "queued · starts by itself", and live work as "in flight" |
+| non-empty | empty | `disposition_due` when nothing holds or moves the row: ELEVATED, "blocker landed", and NEEDS becomes "blocker landed — dispose or resume". Otherwise the row reads what holds it: a pull request in review reads as its merge anchor, a live sitting as "in conversation", an arm or a route as "queued · starts by itself", live work as "in flight", and an ancestor's wait as "parked · held by an ancestor's wait" or "queued · held by an ancestor's wait", with NEEDS naming that wait |
 
 What holds a row is its **state**, derived once per render from its own graph
 and live work (`board.deriveState`), in this order:
@@ -379,6 +379,11 @@ request by itself (`await_type` `timer`, `gh:run` or `gh:pr`): the core pack's
 gate sweep runs `gc bd gate check` for them. Every other gate waits for someone
 to close it, so a person releases it: a human gate, a park gate, which names no
 await type, and a gate of a type the sweep does not check.
+
+An ancestor's wait then holds the bead, as bd holds it (see *A parent counts
+its children by what holds them*). It holds a bead whose own state is
+stranded, and parks one queued behind work while a person holds the ancestor.
+The row and the parent's roll-up read the same state (`board.Facts.stateOf`).
 
 A takeaway decides none of them. It stays on the wire as what the sitting
 concluded, and NEEDS spends it except where the state says more: a named wait,
@@ -535,10 +540,12 @@ a demand, itself or through an ancestor, a child nothing else holds counts as
 parked, and one waiting on work does too. Under an anchor that waits on open
 work, or on a gate the city closes by itself, it counts as queued. A parked
 epic therefore reads `N parked for the operator · nothing idle`, and its NEEDS
-names the gate that holds it. Work already in flight, in review or in a
-conversation keeps its own state, because a park leaves it running. A convoy
-holds none of its members this way, because they hang off it by `tracks`
-edges, which bd does not cascade.
+names the gate that holds it. A bead under it that has a row of its own reads
+the same state on that row: its frontier says `held by an ancestor's wait`, its
+NEEDS names the wait, and no disposition is due while the wait holds it. Work
+already in flight, in review or in a conversation keeps its own state, because
+a park leaves it running. A convoy holds none of its members this way, because
+they hang off it by `tracks` edges, which bd does not cascade.
 
 ### The PR round-trip
 
