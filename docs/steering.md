@@ -272,15 +272,19 @@ ancestors.
 
 ### What reads a park as a fault
 
-These readers report a held bead as a fault:
+`doctor/check-blocked-work-armed` reports a held bead as a fault. It reads
+`bd blocked`, which lists each member a park holds, and flags one that has
+neither a route nor an arm. Its remedy, arming the member, leaves the member
+held until the park is released, since deferred dispatch reads its ancestors'
+blockers.
 
-- `doctor/check-blocked-work-armed` reads `bd blocked`, which lists each member
-  a park holds, and flags one that has neither a route nor an arm. Its remedy,
-  arming the member, leaves the member held until the park is released, since
-  deferred dispatch reads its ancestors' blockers.
-- The helm board files an epic whose open children sit idle, with nothing in
-  flight, under STALLED, so a parked epic reads as stalled. The board's word
-  "parked" means a bead carrying a takeaway, not a park.
+The helm board reads a park as a hold, not a fault. It reads the blockers of
+each member and of the parents above it on the board, so a member under a park
+that nothing else holds counts as parked for the operator rather than
+stranded, and the parked epic names the gate that holds it. A member that has a
+row of its own reads parked there too and names the gate, so the board asks for
+no disposition of it while the park holds it. The board's `parked` kind is
+something else: a bead the board lists because it carries a takeaway.
 
 ### Where a park goes
 
