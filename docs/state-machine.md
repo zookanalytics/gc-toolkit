@@ -599,7 +599,9 @@ review threads only where the base branch requires their resolution, so
 `held: review` stands only on such a base. A thread left open where resolution
 is not required holds no merge. `prstatus.Held` is the rule, and the helm board
 shows the same values as a row's `pr_held`, from the same derivation over the
-review and rework children it gathers.
+same in-flight set: every bead carrying the anchor's `anchor_bead`, any
+`task_kind`, at a live status (`prstatus.InFlightStatuses`), which the board's
+beads source reads as `gctk pr-status derive` does.
 
 A blocked machine verdict whose cause is outside its writer's vocabulary holds
 the PR wherever it was recorded, as any state the derivation cannot name does.
@@ -611,9 +613,9 @@ is the city acting on the cause, and the next pass replaces the verdict. Cause
 `blocker` holds whatever is in flight, because the merge pass records it after
 weighing the live holders, and the stuck holder is often one of them, such as a
 must-fix finding no fix unit answers. `prstatus.Blocked` is that rule. The helm
-board applies it too, counting the anchor's open rework children as the work in
-flight, and by it decides a blocked row's phase, whether the operator's queue
-lists the row, and the row's needs phrase.
+board applies it too, over the in-flight set the labels count, and by it decides
+a blocked row's phase, whether the operator's queue lists the row, and the row's
+needs phrase.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
 anchor, its in-flight set, its visits, the visits on its work or its blockers do
