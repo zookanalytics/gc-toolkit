@@ -566,10 +566,11 @@ having happened. The rows render from the bead, and
 not grow with the number of pull requests.
 
 **One live upgrade.** An anchor with an open blocker carrying a POOL route reads
-`progressing` whatever the last gate pass recorded, because that half of the
-derivation is a bead read the gather already makes. The route is the
-discriminator: an anchor also blocks on ordinary prerequisites and on the demand
-bead that makes it `asking`, and no pool will claim either.
+`progressing`, because that half of the derivation is a bead read the gather
+already makes. It overrides any verdict the last gate pass recorded except
+`blocked`, which reads by the status rule (see *Blocked, not settled*). The route
+is the discriminator: an anchor also blocks on ordinary prerequisites and on the
+demand bead that makes it `asking`, and no pool will claim either.
 
 **Whose move.** A row is owed by the operator when the machine axis is blocked,
 when an open `blocks` edge to a demand bead means the city is asking, or when the
@@ -582,11 +583,24 @@ reads `required`, and `needs` names the re-review). A veto with a fix unit still
 in flight reads `progressing` and stays the city's move.
 
 **Blocked, not settled.** `blocked` is a hold no automated actor will clear and
-no review verdict is owed on — an unresolved required review thread, a base gone
-BEHIND, or an unrouted blocker no pool will reap. The operator is owed the row,
-and its specific cause is spelled out in `needs` as `blocked: <reason>`, read
-from `pr.machine_reason`. It is distinct from `settled`, which is the merge
+no review verdict is owed on: an unresolved required review thread, a failed
+required check, a base gone BEHIND, a conflict whose merge-in a hold defers, a
+live blocker no automated actor holds, or a branch rule the merge pass cannot
+name.
+A required check still running is `progressing`, not `blocked`. The operator is
+owed the row, and its specific cause is spelled out in `needs` as
+`blocked: <reason>`, read from `pr.machine_reason`; `pr.machine_cause` carries
+the same cause as a value. It is distinct from `settled`, which is the merge
 cadence's ordinary wait on a review or the merge pass.
+
+A recorded `blocked` verdict reads `blocked` only while it holds the PR by the
+rule the `status:` label applies, `prstatus.Blocked`: it was recorded at the head
+the posture was read at, and no rework child is open on the anchor unless its
+cause is `blocker`. A cause outside the vocabulary holds wherever it was
+recorded, because the derivation cannot name it. Any other recorded `blocked`
+reads `progressing`, because the next merge pass replaces it, so the row is not
+owed and its `needs` does not call it blocked. The row's phase reads the verdict
+by the same rule, so the owed queue and the phase chip cannot disagree about it.
 
 **Stalled at a pre-open check.** A merge anchor parked at `pre_open_gate` is owed
 once it has held past three days (`preOpenStaleThresholdDays`) with a check not

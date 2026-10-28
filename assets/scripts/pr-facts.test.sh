@@ -1218,6 +1218,19 @@ out=$(run)
 has "$out" "rework HW1 already covers branch 'polecat/x98' at this head, no new child" "a rework child parked in the held lifecycle state (merge_result=held) still covers the branch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
+echo "# …and a rebase_hold on a CLOSED bead naming the branch freezes the dispatch: the freeze is the operator's, whichever bead carries it"
+# A closed child holds no merge and covers nothing, so only the freeze stops the
+# dispatch here. gctk merge reads the same freeze through branch_freeze's marked
+# block, which merge.test.sh holds it to.
+store "[$(anchor FRZ1 116),$(child FZC1 polecat/x116 ',"task_kind":"rework","anchor_bead":"FRZ1","rebase_hold":"true"' closed)]"
+printf '%s' "$(prview 116 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_116.json"
+approve 116
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "PR#116 conflicts but FZC1 holds branch 'polecat/x116' with rebase_hold (operator gate); no rework dispatched" "a closed bead's rebase_hold on the branch vetoes the dispatch"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
 echo "# …but that own rework child, ITSELF held by a live decision demand, DOES veto: the demand gates the branch both share"
 # A base-supersession or reconcile decision is filed on the in-flight rework
 # (gc.demand_for=<child>), not the anchor. The child is on the anchor's own
@@ -6627,7 +6640,7 @@ printf '[{"id":17001,"user":{"login":"human1"},"state":"APPROVED","body":"ship i
 out=$(run_posture); rc=$?
 eq "$rc" 0 "the posture-only pass exits 0"
 eq "$(meta_pinned LB1 pr_posture)" "approved@sha-170" "the approval is recorded as the posture"
-eq "$(pv_labels 170)" "status: working" "…and the label leaves needs-review in the same arm: an approved PR is the city's to merge"
+eq "$(pv_labels 170)" "status: merging" "…and the label leaves needs-review in the same arm: an approved PR is the city's to merge"
 
 echo "# …a merge state moving under an unchanged posture leaves the label to the full pass"
 # The label is deliberately wrong for the anchor's state, so any derivation would
@@ -6667,7 +6680,81 @@ prview 173 OPEN CLEAN MERGEABLE | jq -c '.reviewDecision = "APPROVED" | .labels 
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "pr edit 173 --repo github.com/zook/gc-toolkit --add-label status: needs-review" "the sweep writes needs-review off the recorded posture first"
 eq "$(meta_pinned LB4 pr_posture)" "approved@sha-173" "the same pass then records the approval"
-eq "$(pv_labels 173)" "status: working" "…and the label follows the approval, not the value the sweep wrote"
+eq "$(pv_labels 173)" "status: merging" "…and the label follows the approval, not the value the sweep wrote"
+
+echo "# …a PR that merged or closed has its status: label taken off as the pass records it"
+# GitHub's own Merged or Closed state takes over; a status: label left on a
+# finished PR reads as work the city still has.
+store "[$(anchor LB5 174), $(anchor LB6 175)]"
+prview 174 MERGED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: merging"}, {name: "bug"}]' > "$GH_DIR/pr_view_174.json"
+prview 175 CLOSED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: needs-review"}]' > "$GH_DIR/pr_view_175.json"
+out=$(run)
+eq "$(bstatus LB5)" "closed" "test premise: the merge is recorded"
+eq "$(pv_labels 174)" "bug" "the merged PR's status: label comes off, and its other labels stay"
+eq "$(pv_labels 175)" "" "the closed PR's status: label comes off"
+: > "$STUB_GH_LOG"
+store "[$(anchor LB7 176)]"
+prview 176 MERGED CLEAN MERGEABLE > "$GH_DIR/pr_view_176.json"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 176" "a merged PR carrying no label is left alone"
+
+echo "# …a clear that does not land is recorded as owed, and the full pass retries it until it lands"
+# The record moves the anchor out of the open pull_request set, and no arm that
+# walks open PRs reaches it again, so the clear it still owes is written on the
+# anchor before the record. A writer that fails stands in for GitHub refusing the
+# edit, and the real writer then runs the retry.
+LABEL_WRAPPER=$(cat "$SD/pr-status-label.sh")
+printf '#!/usr/bin/env bash\nexit 2\n' > "$SD/pr-status-label.sh"
+store "[$(anchor LB8 117), $(anchor LB9 118)]"
+prview 117 MERGED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: merging"}]' > "$GH_DIR/pr_view_117.json"
+prview 118 CLOSED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: needs-review"}]' > "$GH_DIR/pr_view_118.json"
+out=$(run)
+eq "$(bstatus LB8) $(meta LB8 merge_result)" "closed merged" "a merge whose clear fails is still recorded"
+eq "$(meta LB8 status_label_clear_owed)" "117" "…and the anchor records the clear it owes"
+hasnt "$(grep '^bd update LB8' "$STUB_GC_LOG")" "pr_url" "…leaving the pr_url the anchor records alone"
+eq "$(meta LB9 merge_result) $(meta LB9 status_label_clear_owed)" "abandoned 118" "an out-of-band close records it the same way"
+eq "$(pv_labels 117)" "status: merging" "test premise: the label is still on the merged PR"
+out=$(run)
+eq "$(meta LB8 status_label_clear_owed)" "117" "a retry that does not land keeps the key"
+printf '%s\n' "$LABEL_WRAPPER" > "$SD/pr-status-label.sh"
+out=$(run)
+eq "$(pv_labels 117)|$(pv_labels 118)" "|" "the full pass's retry takes the labels off once the writer lands"
+eq "$(meta LB8 status_label_clear_owed)|$(meta LB9 status_label_clear_owed)" "<absent>|<absent>" "…and unsets the key it retried"
+has "$out" "took the status: label off PR#117, the clear LB8's record owed" "…and says which record owed it"
+
+echo "# …a clear that does not land, whose owed record does not land either, leaves the anchor open"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$SD/pr-status-label.sh"
+store "[$(anchor LB10 119)]"
+prview 119 MERGED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: merging"}]' > "$GH_DIR/pr_view_119.json"
+out=$(STUB_UPDATE_FAIL="LB10" run)
+eq "$(bstatus LB10) $(meta LB10 merge_result)" "open pull_request" "the merge is not recorded over a clear nothing would retry"
+has "$out" "the anchor is left open for the next pass" "…and the pass says so"
+
+echo "# …an owed clear whose anchor names another repository is not cleared blind"
+printf '%s\n' "$LABEL_WRAPPER" > "$SD/pr-status-label.sh"
+store "[{\"id\":\"LB11\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\",\"pr_number\":\"139\",\"pr_url\":\"https://github.com/other/repo/pull/139\",\"status_label_clear_owed\":\"139\"}}]"
+prview 139 MERGED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: merging"}]' > "$GH_DIR/pr_view_139.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit 139" "a key whose anchor names another repository edits nothing"
+eq "$(meta LB11 status_label_clear_owed)" "139" "…and keeps the key"
+has "$out" "left for the operator" "…and says the anchor is left for the operator"
+
+echo "# …an owed clear on an anchor that records no pr_url names the PR, so the retry clears it"
+# The identity check ahead of the record accepts an anchor with no pr_url, and
+# the retry clears only the PR an anchor's pr_url names, so the write that
+# records the owed clear names the PR this pass certified.
+printf '#!/usr/bin/env bash\nexit 2\n' > "$SD/pr-status-label.sh"
+store "[$(anchor LB12 180 | jq -c 'del(.metadata.pr_url)'), $(anchor LB13 181 | jq -c 'del(.metadata.pr_url)')]"
+prview 180 MERGED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: merging"}]' > "$GH_DIR/pr_view_180.json"
+prview 181 CLOSED CLEAN MERGEABLE | jq -c '.labels = [{name: "status: needs-review"}]' > "$GH_DIR/pr_view_181.json"
+out=$(run)
+eq "$(meta LB12 status_label_clear_owed) $(meta LB12 pr_url)" "180 https://github.com/zook/gc-toolkit/pull/180" "a merge whose clear fails names the PR it owes the clear on"
+eq "$(meta LB13 status_label_clear_owed) $(meta LB13 pr_url)" "181 https://github.com/zook/gc-toolkit/pull/181" "…and so does an out-of-band close"
+printf '%s\n' "$LABEL_WRAPPER" > "$SD/pr-status-label.sh"
+out=$(run)
+eq "$(pv_labels 180)|$(pv_labels 181)" "|" "the full pass's retry takes both labels off"
+eq "$(meta LB12 status_label_clear_owed)|$(meta LB13 status_label_clear_owed)" "<absent>|<absent>" "…and unsets the keys it retried"
 
 rm -f "$SD/pr-status-label.sh"
 

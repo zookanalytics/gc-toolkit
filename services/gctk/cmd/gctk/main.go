@@ -33,7 +33,7 @@ import (
 const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
   gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
-  gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
+  gctk pr-status <verb> [flags]   PR status working|merging|needs-review|needs-attention (services/gctk/prstatus)
   gctk rig <verb> [flags]         actions on the rig: run a check's command and record its result against the commit
   gctk version                    the revision this binary was built from
 
