@@ -239,9 +239,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 9481d0a38ac3,
-  `gastownhall/gascity-packs` main dac12a4a802c with the packs Gas City
-  bundles at 66c672b5ed00, and `gastownhall/beads` main e1ad3a934d9e.
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37,
+  `gastownhall/gascity-packs` main 5bf643ca55bd with the packs Gas City
+  bundles at 66c672b5ed00, and `gastownhall/beads` main e46de42b3c59.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -271,8 +271,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
     the `oversight-rig` pack's `delivered` label.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 9481d0a38ac3 and
-  `gastownhall/gascity-packs` main dac12a4a802c.
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 and
+  `gastownhall/gascity-packs` main 5bf643ca55bd.
 - **Retires when.** Gas City ships a retry that a pack can hand a failed write
   to an outside service, such as an outbox that a later pass drains.
 
@@ -313,9 +313,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
     keeps no record of it.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main 9481d0a38ac3 with
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 with
   the `gastown` pack it bundles at 66c672b5ed00, `gastownhall/gascity-packs`
-  main dac12a4a802c, and `gastownhall/beads` main e1ad3a934d9e.
+  main 5bf643ca55bd, and `gastownhall/beads` main e46de42b3c59.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
