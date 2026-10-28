@@ -34,8 +34,9 @@ the checkpoint below reads the measured and graded criteria it brought.
   into the next Feature once a checkpoint aims one (section 4).
 - **The Epic Checkpoint is a sitting on the epic, run by hand from a recipe.**
   It re-reads the landed work, re-runs the measures, and records the ruling in
-  the fields epic stewardship already registers. It closes the Feature, and on
-  continue or shift it files the next one (section 5).
+  the fields epic stewardship already registers. It closes the Feature. On
+  continue or shift it files the next one, and on close it settles the epic's
+  other open work, item by item, before it closes the epic (section 5).
 - **Each child epic already filed is read against the rule.** One that holds a
   bounded delivery becomes a Feature. One that groups an area with no end is
   dissolved into its epic (section 6).
@@ -82,8 +83,10 @@ Gas City upstream main 221b1476d.
    workflow's synthetic input convoy (`priority-lib.sh:130`).
 5. **Closing.** The finalize-gate clause (`finalize-gate.sh`
    `clause_epic_ruling_recorded`) and I15 hold only an epic that carries
-   `epic_hypothesis`. bd refuses to close a bead with an open child
-   ([steer-by-epic, fact 5](../tk-rl8gz4b.2/steer-by-epic.md#facts-this-design-rests-on)).
+   `epic_hypothesis`. bd refuses to close a bead with an open child unless the
+   close is forced (bd's `enforceClosePolicyForTargetInTx`,
+   `internal/storage/issueops/close.go:150`;
+   [steer-by-epic, fact 5](../tk-rl8gz4b.2/steer-by-epic.md#facts-this-design-rests-on)).
    `bd epic close-eligible` closes every epic in the store whose children are
    all complete, and takes no scope.
 6. **Listing an epic's open child epics.**
@@ -214,8 +217,9 @@ members filed before this layer stay where they are, and its next checkpoint
 follows their landing.
 
 **An epic may have more than one open Feature.** Each lands and is judged on its
-own. The checkpoint after one reads the others in flight, and a shift ruling
-re-aims them in the same pass.
+own. The checkpoint after one reads the others in flight. A shift ruling
+re-aims them in the same pass, and a close ruling settles each of them before
+the epic closes (section 5).
 
 **Rejected.**
 
@@ -322,8 +326,10 @@ these writes in order:
 1. It appends the checkpoint record to the epic's notes, under
    `## Epic Checkpoint after <Feature id>, <date>`. The record holds the
    ruling, each measure with its commit and method, the grades, the
-   indicators, and what comes next. While checkpoints run by hand, it also
-   holds what was mechanical, what took judgment and what the contract lacked.
+   indicators, and what comes next. On a close, what comes next names each
+   piece of the epic's other open work and what becomes of it (write 5). While
+   checkpoints run by hand, it also holds what was mechanical, what took
+   judgment and what the contract lacked.
 2. It records the ruling on the epic, in the fields
    [epic stewardship](../../docs/epic-stewardship.md#recording-a-ruling)
    registers: `epic_ruling`, `epic_ruling_reason` (on a close, the outcome),
@@ -337,9 +343,45 @@ these writes in order:
    `gc-helm.sh park` or the close of the park gate, as
    [steer-by-epic section 6](../tk-rl8gz4b.2/steer-by-epic.md#6-a-checkpoint-records-the-next-priority)
    decides.
-5. On close, it releases the epic's park if it has one, then closes the epic.
-   The finalize gate and I15 accept the close on the close ruling with its
-   outcome.
+5. On close, it settles the epic's other open work before it releases
+   anything. bd refuses to close the epic while a child of it is open
+   (fact 5), and an epic can still hold other Features (section 2), Stories
+   under the epic itself, and PRs in flight under either. The operator decides
+   each item, whatever the outcome, as
+   [epics.md](../../docs/epics.md#how-an-epic-closes) asks of a disproven
+   epic's surviving work, and the sitting carries out the decision. Meanwhile
+   the epic's park, if it has one, keeps each unstarted item still under the
+   epic from starting. Each item goes one of these ways:
+   - Work that still coheres around a hypothesis moves to the epic that owns
+     it, which the sitting files if no epic does yet. In the same store the
+     bead takes a new parent, as
+     [steering.md](../../docs/steering.md#placing-a-bead) places a bead: that
+     epic's open Feature whose aim covers it, else the epic itself
+     (section 2). A run or PR in flight goes on under the new parent. bd
+     resolves an edge only within one store, so work whose epic is in another
+     rig's store is filed again there. This bead then closes as re-homed onto
+     the new one, through the prs skill's retire path when it has a PR in
+     flight and through the disposition writer otherwise. A whole Feature does
+     not move, because its aim answers this epic's hypothesis, so its Stories
+     move one by one.
+   - Work worth doing on its own, which serves no hypothesis, moves out to
+     ordinary flow with no parent. That is a decision about the item, never
+     the default for whatever is left.
+   - Work that served only this hypothesis is retired. A PR in flight is
+     retired through the prs skill, which closes the PR and disposes of its
+     anchor. Any other bead closes as the work skill closes a bead that needs
+     no work: a run in flight is stopped and an arm disarmed first, and the
+     disposition writer closes it with the sitting's visit as the evidence
+     that ruled it out.
+6. It closes each other Feature, then the epic, once nothing under it is
+   open, and never by a forced close. Each is first released from its park,
+   if it has one, as
+   [steering.md](../../docs/steering.md#releasing-a-park) releases a park,
+   and nothing is left under it for the release to start. A Feature's close
+   reason is the ruling, as in write 3. A Story whose PR was retired closes
+   only when the refinery's next pass over that PR completes the retirement,
+   so the closes in this write follow that pass. The finalize gate and I15
+   accept the epic's close on the close ruling with its outcome.
 
 Each ruling overwrites the epic's last one, so each checkpoint's lasting record
 is its block in the epic's notes and the close reason of the Feature it closed.
@@ -348,8 +390,9 @@ is its block in the epic's notes and the close reason of the Feature it closed.
 the writes a sitting makes in order. The machinery that would gather the
 evidence, file the sitting when a Feature lands and make the writes in one call
 is designed from what the hand runs record (unit 6). The converse prompt gains
-the two closes a checkpoint makes: the landed Feature, and the epic on a close
-ruling (fact 9).
+the closes a checkpoint makes (fact 9): the landed Feature, and on a close
+ruling the open work the ruling retires or re-homes, each other Feature and the
+epic.
 
 **Rejected.**
 
@@ -364,6 +407,15 @@ ruling (fact 9).
   hypothesis, and the close gate and I15 read it on the epic.
 - *The checkpoint record in a file or a bead of its own.* A sitting writes no
   files, and the epic's next sitting primes from the epic's notes.
+- *Closing the epic over its open work.* bd closes a bead with an open child
+  only when the close is forced (fact 5), and the work would then sit under a
+  closed epic, where it follows no priority (fact 4) and sits under no open
+  row.
+- *Sending whatever is left to ordinary flow.*
+  [epics.md](../../docs/epics.md#how-an-epic-closes) rules that out as a
+  default. Work begun for a disproven hypothesis is evaluated before it goes
+  on, and work that still coheres around a hypothesis is rehomed onto an epic
+  that owns it.
 
 ## 6. The child epics already filed
 
@@ -396,7 +448,7 @@ each waits for the branch to land and is written against what it leaves.
 |---|---|---|---|---|
 | 1 | **The model in the epic docs.** `docs/epics.md` states the Feature and the Epic Checkpoint as built. `docs/epic-stewardship.md` says the close gate and I15 never hold a Feature and the checkpoint closes it, and narrows its direction to unit 6. `docs/steering.md` places work under a Feature as under an epic, and names the Feature level in its priority rule. | 1–5 | tk-1tfzr71.4 | The three docs state the model. None calls the Feature layer unbuilt, and none names a sub-epic. |
 | 2 | **Filing into a Feature.** The work skill's "File new work" states section 2's rule, the list of open Features and the Feature's create. `converse-parent.sh` prints the nearest open parent-child ancestor, with its test. | 2, 4 | 1, tk-1tfzr71.4 | The skill suites pass with the rule stated. `converse-parent.sh` prints the epic for a Story under a closed Feature of an open epic, and an empty line for a Story under a closed epic with no open ancestor. |
-| 3 | **The Epic Checkpoint by hand.** A pack skill that a sitting on an epic follows after a Feature lands: the evidence, the record, and section 5's writes in order. The converse prompt names the checkpoint's two closes. | 5 | 1, tk-1tfzr71.4 | The skill and prompt suites pass, with the prompt's pins moved with its sentence. The first checkpoint after a Feature lands runs from the skill, and its record is on the epic's notes. |
+| 3 | **The Epic Checkpoint by hand.** A pack skill that a sitting on an epic follows after a Feature lands: the evidence, the record, and section 5's writes in order. The converse prompt names the closes a checkpoint makes. | 5 | 1, tk-1tfzr71.4 | The skill and prompt suites pass, with the prompt's pins moved with its sentence. The first checkpoint after a Feature lands runs from the skill, and its record is on the epic's notes. |
 | 4 | **A landed Feature asks for its checkpoint.** The board's derivation rewords a landed Feature's row to name its checkpoint and bands it with the rows the operator owes. The supervisor source carries an epic's metadata on its row, as the direct store reader does. The derivation's comments say Feature where they say sub-epic. | 3 | 1, tk-1tfzr71.4 | A board fixture renders a landed Feature that way, and a landed top-level epic and a landed child epic with a hypothesis as before. A supervisor source test reads an epic's `epic_hypothesis` off its row. The direct store reader is unchanged, and the wire contract gains no field. |
 | 5 | **The child epics on file.** A sitting on each epic that has an open child epic, asked for in that epic's store, reads each child against section 6. It is not a PR. | 6 | 1, 2 | No open child epic of an epic, in any rig store, lacks both an `Aim:` line and a hypothesis. |
 | 6 | **The checkpoint's machinery.** A design, drawn from the hand-run records, for what they show to be mechanical. Plausibly that is a formula that files the checkpoint and gathers its evidence when a Feature lands, and one verb that makes the ruling's writes. | 5 | 3, and two checkpoints run from the skill | The operator approves the design at its PR. |
@@ -441,5 +493,8 @@ Until the units land:
 - **A landed Feature waits on the operator.** It takes no new work while it
   waits, but it stays open until its checkpoint. Unit 4 bands it with what the
   operator owes, and unit 6 files the checkpoint once the hand runs show how.
-- **A shift can strand another open Feature's aim.** The checkpoint reads every
-  open Feature of the epic and re-aims each one in the same ruling.
+- **A shift can strand another open Feature's aim, and a close can strand the
+  epic's other open work.** The checkpoint reads every open Feature of the
+  epic. A shift re-aims each one in the same ruling. A close settles each open
+  Feature, Story and PR under the epic with the operator, item by item, before
+  the epic closes (section 5).
