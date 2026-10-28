@@ -1,6 +1,6 @@
 ---
 name: Steering — how the operator steers the city's work
-description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, where PR-finishing work ranks and why it never has a parent, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work or PR-finishing work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
+description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced), how the sitting places a bead, and the sub-epic of its own that a product area's work goes under. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, where PR-finishing work ranks and why it never has a parent, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work or PR-finishing work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
 ---
 
 # Steering
@@ -18,12 +18,12 @@ sooner or later by a shift of its own ([Priority](#priority)).
 
 **Mandate.** Which beads may enter a work pool and what holds the rest: the
 intake rule, the `placement=pending` marker and the writers that set it, the
-emergency check, the placement sitting's queue, and how a bead is placed. How
-the operator decides when work runs: the steering moves, the state each move
-writes, what that state holds and what it leaves running, and how each move is
-released. The order work queues in: how a bead's priority is derived, where it
-is written, and the writers that keep it there, the creators of PR-finishing
-work among them.
+emergency check, the placement sitting's queue, how a bead is placed, and the
+sub-epic a product area's work goes under. How the operator decides when work
+runs: the steering moves, the state each move writes, what that state holds and
+what it leaves running, and how each move is released. The order work queues
+in: how a bead's priority is derived, where it is written, and the writers that
+keep it there, the creators of PR-finishing work among them.
 
 **Boundaries.** The design that decides how work is steered by epic, with the
 alternatives it rejected and the units that build it, is
@@ -139,7 +139,8 @@ For each bead in the queue, the sitting does one of three things.
 - **Place it under an epic.** Give it the epic as its parent
   (`gc bd update <bead> --parent <epic>`), then route it to its pool
   (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the epic holds it from
-  then on, through bd's parent-child cascade.
+  then on, through bd's parent-child cascade. The work of a product area goes
+  under the area's own sub-epic ([below](#a-product-areas-sub-epic)).
 - **Route it on its own.** Route it to its pool with the same sling, and give it
   no parent.
 - **Close it**, when the work is not wanted.
@@ -147,6 +148,26 @@ For each bead in the queue, the sitting does one of three things.
 A placed bead leaves the queue as soon as it has a parent or a route. Clearing
 the marker (`gc bd update <bead> --unset-metadata placement`) keeps the bead's
 record honest, and nothing waits on it.
+
+## A product area's sub-epic
+
+The work of a product area goes under the area's own sub-epic, beneath the epic
+the area serves. A product area is a part of the product the operator steers or
+asks about by name, such as a vertical or a feature with a design of its own. A
+one-off task is not a product area, so it gets no sub-epic.
+
+When an area's work is filed or placed and the area has no open sub-epic, an
+epic named for the area is filed first, with the epic the area serves as its
+parent. The area's work is filed as the sub-epic's members, and later work for
+the area goes under it too. The area's work is then found under the area's
+name, not among the parent's other members.
+
+Filing a sub-epic moves no work in the queue. It is a member of its parent, so
+it follows the parent's priority, and its members follow it in turn. It is
+filed with no shift of its own, so its members queue where they would directly
+under the parent ([Priority](#priority)). A park on the parent reaches the
+sub-epic's members through bd's parent-child cascade, as it reaches the
+parent's own members ([What a park holds](#what-a-park-holds)).
 
 ## A park
 

@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent (a sibling of the bead that waits on it, or a member of the epic it is part of), sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
+description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent (a sibling of the bead that waits on it, a member of the epic it is part of, or a member of its product area's sub-epic), sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -38,6 +38,15 @@ it wait, or leave it for placement.
   same epic. This prints that parent, or an empty line:
   `"$(gc <binding> scripts-dir)/converse-parent.sh" <bead>`. When no epic
   applies, give the bead no parent.
+- **The work of a product area is a member of the area's own sub-epic.** A
+  product area is a part of the product the operator steers or asks about by
+  name, such as a vertical or a feature with a design of its own. A one-off
+  task is not one, so it gets no sub-epic. When the area has no open sub-epic,
+  file one first: an epic named for the area, whose parent is the epic the
+  area serves. File the area's work as the sub-epic's members, and later work
+  for the area under it too. The sub-epic follows its parent's priority and is
+  held by its parent's park, so its members rank and are held as they would be
+  directly under the parent.
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig:
   `gc bd --rig <rig> create`.
@@ -60,7 +69,10 @@ gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks l
 
 Add `--parent <epic>` when an epic applies, and
 `--metadata '{"placement":"pending"}'` when intake holds the bead. The
-description is the contract the worker reads.
+description is the contract the worker reads. A product area's sub-epic is
+filed the same way, with `-t epic`, the area's name as its title, and the epic
+the area serves as its `--parent`. `docs/epics.md` says what an epic carries.
+The sub-epic itself goes to no pool, because its members are the work.
 
 ## Send a bead to a pool on a formula
 
