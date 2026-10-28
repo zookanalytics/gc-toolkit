@@ -183,3 +183,60 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Verified.** 2026-10-24, at `gastownhall/gascity` main 7cff3a265.
 - **Retires when.** Gas City can set a merge strategy for a target branch, so the
   rule becomes a line of the rig's config.
+
+## Deferred dispatch residual
+
+- **Covers.** `assets/scripts/deferred-dispatch.sh`,
+  `assets/scripts/until-resolved.sh`, `orders/deferred-dispatch.toml`, the
+  `gc.dispatch_when_ready` keys, and
+  [deferred-dispatch.md](deferred-dispatch.md).
+- **Stands in for.** Two primitives. A dispatch that waits for its bead's
+  blockers, pouring the bead's formula once nothing holds it. A close that
+  follows from a named cause, closing a bead once every bead it names as
+  resolving it has closed.
+- **Evidence.**
+  - In `gastownhall/gascity`, nothing slings or pours a bead when its blockers
+    close. The bundled `core` pack's `cascade-nudge-on-blocker-close` order
+    runs on `bead.closed`, re-reads the closes with `gc events --since`, and
+    nudges each open dependent's assignee or routed pool with
+    `gc session nudge`. It slings nothing, and no core order or script calls
+    `gc sling`
+    (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`).
+  - The closes Gas City performs on a `bead.closed` are its convoy, wisp and
+    molecule autocloses, each for its own feature (`beadCloseAutoclose` in
+    `cmd/gc/api_state.go`). The core `gate-sweep` order resolves only timer
+    and GitHub gates and skips a bead-type gate
+    (`internal/bootstrap/packs/core/assets/scripts/gate-sweep.sh`).
+  - In `gastownhall/beads`, `until` is a reference type that blocks nothing
+    (`DepUntil` in `internal/types/types.go`), and only `bd show` and the
+    relation labels read it (`cmd/bd/show_refs.go`, `cmd/bd/dep_relation.go`).
+    Nothing in bd closes a bead when its `until` target closes.
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10 and
+  `gastownhall/beads` main 5011528b3ad5.
+- **Retires when.** Each half retires on its own. The dispatch goes when Gas
+  City or bd pours a formula on a bead once its blockers close. The close goes
+  when either one closes a bead once the beads it names as resolving it have
+  closed.
+
+## Quota-park nudging
+
+- **Covers.** `assets/scripts/quota-park-nudge.sh`,
+  `orders/quota-park-nudge.toml`, the nudge episode files under the city's
+  `.gc/runtime/quota-park`, and
+  [quota-park-recovery.md](quota-park-recovery.md).
+- **Stands in for.** Waking a live session that sits idle under a provider's
+  usage-limit banner once the limit resets.
+- **Evidence.** In `gastownhall/gascity`:
+  - The session reconciler classifies only a dead session's exit. A live
+    session short-circuits the classification and is never classified
+    (`ExitFacts.Alive` in `internal/session/lifecycle_exits.go`).
+  - Its provider-screen lane runs for a dead crash candidate. A session whose
+    process died on a provider's limit screen sleeps for a fixed 30 minutes,
+    after which the quarantine clears (`checkRateLimitStability` in
+    `cmd/gc/session_reconcile.go`, `defaultRateLimitQuarantineDuration` in
+    `cmd/gc/session_types.go`). Nothing wakes or nudges a live session idle
+    under the banner.
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10.
+- **Retires when.** Gas City wakes a session parked on a provider's limit once
+  the limit resets, or every provider the city runs resumes such a session by
+  itself.
