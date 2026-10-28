@@ -560,21 +560,57 @@ options.
 
 Posture is recorded on the bead. Its projection onto GitHub's pull request list is
 a workflow-owned label from a mutually-exclusive `status:` group, so a person
-scanning the list sees what stands between each PR and landing without opening
-it. The group is extensible: one value is set at a time, and setting one removes
-any other `status:` value.
+scanning the list sees whose move each open PR is without opening it. An open PR
+carries exactly one value, and setting one removes any other `status:` value.
 
-| Label | What stands between the PR and landing | When |
+| Label | Whose move | When |
 |---|---|---|
-| `status: working` | only the city has work left | an open rework child stands on the anchor, a draft the city opened still waits on the checks that flip it ready, or an approved PR is merging |
-| `status: needs-review` | only a human's review verdict is left | settled at the head, no open rework: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | something only a human can clear blocks the merge | a hold stands, whatever rework is in flight — an operator freeze, a rebase hold, or an open visit on the anchor — or an approved PR is wedged with no rework in flight |
+| `status: working` | the city's, changing the PR | an unapproved PR with live work on the anchor (a rework or fix child, a validation pass, a review, a finding), or a draft the city opened that still waits on the checks that flip it ready |
+| `status: merging` | the city's, landing the PR | an approved PR with no known blocker: its required checks may still be running, a merge-in rework or other city work may be in flight, or it waits for the merge pass |
+| `status: needs-review` | a human's review | an unapproved PR with nothing in flight and nothing holding it: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
+| `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, an open visit on the anchor, a blocked verdict the merge pass recorded at the current head ([The machine axis](#the-machine-axis)), or a recorded posture, verdict or cause outside its writer's vocabulary, a state the derivation cannot name |
 
-Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
-It follows from the middle column. A block only a human can clear stops the
-merge whatever else is in flight, city work comes before the verdict it leads
-to, and the verdict is what remains when neither stands. A hold that only a
-human can release reads `needs-attention` with no rule of its own.
+Precedence when inputs overlap: `needs-attention` > `merging` > `working` >
+`needs-review`. It follows from the middle column. A blocker the city will not
+clear holds the PR whatever else is in flight. An approved PR with nothing
+blocking it is the city's to land, whatever work is in flight on the way. City
+work on an unapproved PR comes before the verdict it leads to, and the verdict
+is what remains when neither stands. A hold that only a human can release reads
+`needs-attention` with no rule of its own.
+
+A blocked machine verdict whose cause is outside its writer's vocabulary holds
+the PR wherever it was recorded, as any state the derivation cannot name does.
+Any other blocked verdict holds the PR only at the head the posture was read at,
+because a verdict at another head was reached about another commit. It holds
+only while nothing is in flight on the anchor: the merge pass records most
+causes only when no live bead holds the merge, so work that arrives afterwards
+is the city acting on the cause, and the next pass replaces the verdict. Cause
+`blocker` holds whatever is in flight, because the merge pass records it after
+weighing the live holders, and the stuck holder is often one of them, such as a
+must-fix finding no fix unit answers. `prstatus.Blocked` is that rule. The helm
+board applies it too, counting the anchor's open rework children as the work in
+flight, and by it decides a blocked row's phase, whether the operator's queue
+lists the row, and the row's needs phrase.
+
+A read that does not answer changes no label. When gctk is unavailable, or the
+anchor, its in-flight set or its visits do not read, `pr-status-label.sh` exits 2
+and leaves the label as it is.
+
+The label comes off when the PR merges or closes, where GitHub's own Merged or
+Closed state takes over. `pr-facts.sh` takes it off in the full pass that
+records an out-of-band merge or a close. `gctk merge` takes it off for a merge
+it made, or one whose record it recovered. Each takes it off before the write
+that records the merge or the close, because that write closes the anchor or
+moves it out of `pull_request`, and no pass enumerates it as an open PR again.
+A clear that does not land is recorded on the anchor as
+`status_label_clear_owed=<pr number>`: `gctk merge` carries the key in its
+record, and `pr-facts.sh` writes it before its record, leaving the anchor open
+for the next pass when that write does not land either. Every full pass of
+`pr-facts.sh` lists the anchors carrying the key, in any status, retries each
+clear, and unsets the key once it lands. The retry clears only the PR the
+anchor's `pr_url` names, so a write that records the key on an anchor with no
+`pr_url` records the live PR's url beside it, the one its writer validated
+against origin.
 
 An open visit covers the anchor by the shared visit identity
 (`assets/scripts/visit-identity.sh`): the bead its tracks edge names, or its
@@ -584,13 +620,15 @@ the merge while one covers the anchor. The label counts each open or
 `in_progress` visit that covers the anchor, a visit a sitting is in included,
 and the helm board's phase and held marker count the same ones.
 
-The label reads the city's own state — the refinery-computed posture and merge
-state on the anchor, its holds, any open visit on it, its draft-stage markers,
-and its rework children — not GitHub's review posture or draft flag directly.
-The `working`->`needs-review` flip rests on the rework child, which is scoped to
-the reviewed commit and closes when the fix lands, so a sticky
-`CHANGES_REQUESTED` never traps the label in `working` after a rework hands
-back.
+The label reads the city's own state — the refinery-computed posture on the
+anchor, the merge cadence's machine verdict and its cause, its holds, any open
+visit on it, its draft-stage markers, and its live work — not GitHub's review
+posture, merge state or draft flag directly. GitHub reports `BLOCKED` for a
+required check still running as it does for a wedge, and the merge pass, which
+reads the branch's rules, is what tells the two apart. The
+`working`->`needs-review` flip rests on the live work, which closes as the fix
+lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
+rework hands back.
 
 The label is workflow state and never says a PR may merge: machine readiness
 rides `pr.machine`. The draft flag is a phase signal, not a merge signal — a PR
@@ -598,14 +636,14 @@ opens as a draft when its `check_set` names an `open-as-draft` check, and
 `pr-open.sh` flips it to ready once every `pre-open` and `open-as-draft` check
 derives green ([Checks](#checks)); merge readiness waits on every phase and the
 universal approval besides. A draft the city opened carries `opened_as_draft`
-and reads `working` until `pr-open.sh` records `draft_readied`, because until
-then the city still owes the checks that flip it and the flip itself. A draft
-anyone else made, or one re-drafted after the city readied it, reads like any
-other PR.
+and, unless it is approved, reads `working` until `pr-open.sh` records
+`draft_readied`, because until then the city still owes the checks that flip it
+and the flip itself. A draft anyone else made, or one re-drafted after the city
+readied it, reads like any other PR.
 `assets/scripts/pr-status-label.sh` is the single writer. `pr-open.sh` sets the
 label when it opens a PR and when it records a draft ready, whether it flipped
-the draft or found it already ready, and `signoff.sh`
-flips it on each of the city's own verdicts. A human's review moves it in the
+the draft or found it already ready, and `signoff.sh` re-derives it on each of
+the city's own verdicts. A human's review moves it in the
 merge cadence's posture and feedback arms, in the pass that records the review.
 The posture arm re-derives the label for an anchor whose posture value it
 changes: an approval, a comment, a change request, or a dismissal. The feedback
@@ -624,11 +662,9 @@ Nothing re-derives the label when a visit opens or closes, and a visit change
 does not put its anchor first in that walk. The label follows a visit on the
 next full pass that reaches the anchor: within one reconcile pass while the walk
 reaches every open PR, and after more passes when the deadline stops it short.
-`signoff.sh` also sets `working` on a request-changes verdict without deriving
-it, because the rework child it files is live work. On an anchor an open visit
-covers, the label then reads `working` until the next full pass that reaches the
-anchor re-derives `needs-attention`. In both windows the label trails the
-visit. Every write is pinned to the origin, and a label is not an approval.
+The label likewise reads the machine verdict the last merge pass recorded, so it
+follows a new verdict on the next pass that derives it. Every write is pinned to
+the origin, and a label is not an approval.
 
 ## The machine axis
 
@@ -644,9 +680,76 @@ ones.
 
 | Value | Meaning |
 |---|---|
-| `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
+| `progressing` | some automated actor will act: one holds a live blocker, a declared lane is short of green, a required check is still running, or a conflicting branch waits on its merge-in rework |
 | `settled` | every declared check derives `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
-| `blocked` | a hold no review verdict clears: an unresolved required review thread, a base gone `BEHIND`, or a branch that conflicts with the base with no merge-in rework in flight. The cause rides `pr.machine_reason`, and the board owes it to the operator as needs-attention rather than folding it into the awaiting-review tail |
+| `blocked` | a hold no automated actor will clear and no review verdict is owed on. The cause rides `pr.machine_cause` as one of the values below and `pr.machine_reason` as a sentence, and the board and the `status:` label show it as needs-attention rather than folding it into the awaiting-review tail |
+
+The merge pass classifies an approved PR it cannot merge by what holds it, and
+records `blocked` only for a cause no automated actor will clear:
+
+| `pr.machine_cause` | Recorded when |
+|---|---|
+| `review-threads` | branch protection requires resolved review threads and one is unresolved |
+| `check-failed` | a required check's newest run failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR`; or the `UNSTABLE` arm holds the head on a superseded run that ended without passing |
+| `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
+| `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
+| `blocker` | a live blocker holds the anchor, and no automated actor holds any of its live blockers |
+| `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check whose newest run failed or is still running |
+
+GitHub reports `BLOCKED` for every unmet rule, so the pass reads the branch's
+rules before it names a cause. An unresolved required thread is
+`review-threads`, an approval still owed is `settled`, and otherwise it reads the
+required checks. The check rollup lists every run on the head, so a required
+check re-run on the same head keeps its failed run beside the re-run. The pass
+judges each required check by its newest run, the one started last, and a run
+waiting to start is newer than every run that has started. A run that ended
+without starting, such as one cancelled while queued, has no start to order it
+by, so it is the newest run only when no other run of its check started or
+waits to start. A check whose newest run
+failed is `check-failed`. One whose newest run is still queued or running, or
+one that has not reported yet (GitHub shows it as Expected), is `progressing`,
+and every required check's newest run green leaves `rule`. The `UNSTABLE` arm
+holds the merge while any run of a required check on the head is not green, a
+superseded run included, and records the verdict the `BLOCKED` arm records for
+the same required checks. Where only superseded runs hold it, the hold lasts
+until a push moves the head once one of them has ended without passing, and the
+arm records `check-failed`. While each of them is still queued or running, it
+can end green and release the hold, and the arm records `progressing`. A
+conflict with nothing in flight is `progressing`, because
+`pr-facts.sh`'s conflict arm files the merge-in rework for an approved PR on its
+next pass. It is `blocked` only when something defers that merge-in: a
+`rebase_hold` on the anchor, an armed re-dispatch, or a `rebase_hold` on any bead
+naming the branch, in any status. The pass reads that last freeze by the rule the
+conflict arm applies, `pr-facts.sh`'s marked `branch-freeze` block, and
+`merge.test.sh` holds the pass and the block to one answer. A read that does
+not answer (the branch rules, the review threads, the required-check set, the
+check rollup, the beads naming the branch) records nothing, and the verdict the
+last pass recorded stands.
+
+An anchor a live blocker holds is `progressing` when an automated actor holds
+any of its live blockers, `blocked` with cause `blocker` when none does, and
+gets no verdict when every live blocker is routed to a person.
+`assets/scripts/blocker-holder.sh` answers that question for each writer of
+the axis. An automated actor holds a blocker routed to a pool or an agent, one
+an agent has claimed, and one a live run works. A rework handed back to the
+refinery is claimed by it until it lands, and a graph.v2 pour leaves the bead
+it works unrouted and unassigned, so its run is the only mark. The
+`gc.execution_routed_to` stamp a pour leaves outlives the run, so it is not
+one.
+
+`gate-ensure.sh` records its own `progressing` or `settled` after the merge pass
+in the same reconcile pass. It replaces a `blocked` verdict at the same head
+only when an automated actor is due to act: a lane short of green or, for any
+cause but `blocker`, a fix unit, rework child or validation pass in flight. For
+the `blocker` cause it asks `blocker-holder.sh`, as the merge pass did, because
+quiescence counts a rework child or validation pass by its status alone. Only an
+actor holding a blocker replaces that verdict, and an answer that does not
+resolve leaves it. The merge pass records `blocked` only once every lane derives
+green, after weighing holds `gate-ensure.sh` does not read, such as a live
+blocker no automated actor holds. So its `settled` adds nothing to a `blocked`
+verdict, and neither does a `progressing` it reaches only because a must-fix
+finding has nothing answering it or a quiescence probe did not answer. A verdict
+at a head the branch has left is replaced.
 
 A standing non-city `CHANGES_REQUESTED` is not `blocked`: a review verdict is
 what it waits on. While a fix unit answering it is in flight the anchor reads

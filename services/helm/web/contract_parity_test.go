@@ -628,8 +628,8 @@ func fixtureBoard() board.Board {
 				Needs:     "blocked: held by tk-01n5cc.1 — an unrouted blocker no automated actor will clear",
 				RankScore: 2003003,
 				// A blocked live merge anchor: a human must unstick it. On a merge
-				// anchor the per-bead Phase equals PRPhase — one bead, one tri-state
-				// — because both read the same shared core off the same facts.
+				// anchor the per-bead Phase equals PRPhase — one bead, one state —
+				// because both read the same shared core off the same facts.
 				PRPhase: board.PhaseNeedsAttention,
 				Phase:   board.PhaseNeedsAttention,
 
