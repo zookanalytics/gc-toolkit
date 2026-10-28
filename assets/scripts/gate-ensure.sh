@@ -133,6 +133,9 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # dispatch), never dispatches blind.
 LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 FINDING="$SCRIPTS_DIR/finding.sh"
+# Whether an automated actor holds the anchor's live blockers, the answer the
+# merge pass records its blocker verdict on.
+BLOCKER_HOLDER="$SCRIPTS_DIR/blocker-holder.sh"
 # The one resolver of the check index: the dispatch loop asks it for the lanes
 # that gate the anchor's current stage (pre-open before the PR exists, through
 # open-as-draft once it is open), which drops the non-lanes none/off and the
@@ -1160,6 +1163,7 @@ GATES
   # fully green anchor lets the loop skip the lazy compute, so run it here
   # before settling and fail closed — a hold, an unanswered must-fix finding,
   # or a probe that cannot answer is progressing, not settled.
+  lane_short=$mach_progress
   if [ "$mach_progress" = 0 ]; then
     if [ "$quiesce_computed" = 0 ]; then
       quiesce_computed=1
@@ -1171,6 +1175,34 @@ GATES
   fi
   if [ "$mach_progress" = 1 ]; then mach="progressing"
   else mach="settled"
+  fi
+  # A blocked verdict at this head is the merge pass's. It records one only once
+  # every lane derives green, after weighing holds this arm does not read, such
+  # as a live blocker no automated actor holds, so it stands until the merge
+  # pass records another verdict or the head moves. This arm replaces it only
+  # when an automated actor is due to act: a lane short of green, or, for any
+  # other cause, a fix unit, rework child or validation pass in flight. A
+  # settled verdict adds nothing to it, and neither does a progressing one
+  # reached only because a must-fix finding has nothing answering it or a
+  # quiescence probe did not answer. For the blocker cause, the merge pass
+  # asked blocker-holder.sh whether an automated actor holds any live blocker,
+  # and this arm asks it the same way, because quiescence counts a rework child
+  # or validation pass by its status alone and would read one nothing works as
+  # an actor. So only an actor holding a blocker now replaces that verdict, and
+  # an answer that does not resolve leaves it.
+  rec_mach=$(meta_of "$row" "pr.machine")
+  rec_head="${rec_mach#*@}"; rec_head="${rec_head%%@*}"
+  if [ "${rec_mach%%@*}" = blocked ] && [ "$rec_head" = "$head" ] && [ "$lane_short" = 0 ]; then
+    if [ "$(meta_of "$row" "pr.machine_cause")" = blocker ]; then
+      holder=""
+      [ -x "$BLOCKER_HOLDER" ] && holder=$("$BLOCKER_HOLDER" --anchor "$id" 2>/dev/null)
+      case "$holder" in
+        actor\ *) : ;;
+        *) continue ;;
+      esac
+    elif [ -z "$quiesce_hold" ]; then
+      continue
+    fi
   fi
   #
   # --route carries the anchor's OWN route back. Recording a verdict is an

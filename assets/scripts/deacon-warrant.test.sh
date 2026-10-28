@@ -40,7 +40,8 @@ WARRANT="$(extract warrant-file)"
 [ -n "$WARRANT" ] && ok "warrant-file block extracted" || bad "warrant-file block EMPTY — markers missing from $TOML"
 has "$WARRANT" 'file-warrant.sh' "the block delegates to the shared filer"
 
-# SUT scripts dir: the real filer beside a ledger stub that logs its argv.
+# SUT scripts dir, the pack gc names for `gc gc-toolkit scripts-dir`: the real
+# filer beside a ledger stub that logs its argv.
 RIGROOT="$TMP/rig"; mkdir -p "$RIGROOT/assets/scripts"
 cp "$ROOT/assets/scripts/file-warrant.sh" "$RIGROOT/assets/scripts/"
 chmod +x "$RIGROOT/assets/scripts/file-warrant.sh"
@@ -60,6 +61,9 @@ printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 STORE="${STUB_STORE:?}"; [ -s "$STORE" ] || echo '[]' > "$STORE"
 sub="${1:-}"; verb="${2:-}"
 case "$sub $verb" in
+  "gc-toolkit scripts-dir")
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "session list")
     [ -n "${STUB_SESSIONS_FAIL:-}" ] && { echo "gc: session list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_SESSIONS:-{\"sessions\":[]}}" ;;
@@ -96,7 +100,7 @@ esac
 STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
-export GC_RIG_ROOT="$RIGROOT" GC_RIG=gc-toolkit
+export STUB_PACK="$RIGROOT" GC_RIG_ROOT="" GC_RIG=gc-toolkit
 export STUB_SESSIONS='{"sessions":[{"id":"hq-wisp-dq","alias":"gc-toolkit/gc-toolkit.deacon","session_name":"gc-toolkit--gc-toolkit__deacon","state":"active"}]}'
 
 render "$WARRANT" > "$TMP/warrant.sh"

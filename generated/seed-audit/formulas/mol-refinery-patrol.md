@@ -27,9 +27,7 @@ every escalation goes through assets/scripts/escalate.sh (one open visit
 per situation key). Resolve both at shell runtime — formula bodies get no
 {{.ConfigDir}}:
 
-    LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
-    done
+    LC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/lifecycle.sh" && [ -x "$LC" ] || LC=""
 
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,

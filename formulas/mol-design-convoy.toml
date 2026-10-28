@@ -43,6 +43,10 @@ formula_compiler = ">=2.0.0"
 description = "true (default): the design child is a stage, slung --merge mr, whose PR into the integration branch is the design gate, and the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when that PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch with no PR of their own, so the subject's PR is the one the operator reviews. Every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. An Accept takes the default, because its sling passes no var. For all-in-one, the operator takes the recommendation to a sitting (Discuss) instead, and the sitting follows the work skill's steps for taking a recommendation, adding --var design_gated=false to the sling those steps run."
 default = "true"
 
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default."
+default = "gc-toolkit."
+
 [[steps]]
 id = "load-context"
 title = "Read the initiative and resolve the gate shape"
@@ -91,9 +95,7 @@ echo "design_gated resolves to $DESIGN_GATED"
 
 **Close this step bead so the graph advances.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.load-context --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -169,9 +171,7 @@ esac
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-branch --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -276,9 +276,7 @@ WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null 
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-design --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -391,9 +389,7 @@ fi
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-implementation --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -485,9 +481,7 @@ HELD=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null |
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-summary --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -549,9 +543,7 @@ case "$(printf '%s' "$DESIGN_GATED_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:
 esac
 # <<< design-gated-resolve
 
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/deferred-dispatch.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/deferred-dispatch.sh" ] || SCRIPTS=""
 [ -n "$SCRIPTS" ] || { echo "deferred-dispatch.sh not found in the pack" >&2; exit 1; }
 
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
@@ -617,9 +609,7 @@ themselves in order) and drain. The control-dispatcher's `workflow-finalize`
 closes the `kind=workflow` root once every step is closed; never close the root,
 the subject, the summary task, or any child yourself.
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.dispatch --convoy {{convoy_id}} --outcome pass
 gc runtime drain-ack
 ```

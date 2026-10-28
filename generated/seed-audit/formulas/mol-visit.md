@@ -20,5 +20,8 @@ Required vars:
   {{subject}}: The subject bead the conversation is about — its id IS the conversation's identity
   {{visit}}: The visit prompt: what this visit needs from the operator (decision, review, catch-up). Substituted into a shell command — avoid quote characters, or put the detail in the -d body by hand.
 
+Optional vars:
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
+
 Steps (1):
   └── mol-visit.file-visit: File the visit bead in the subject's continuation group

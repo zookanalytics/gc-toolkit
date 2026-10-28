@@ -222,6 +222,7 @@ mkdir -p "$EXTMP/bin"
 # listing answers with; unset, the listing answers nothing, as a store with no
 # open visit does.
 case "$1 ${2:-}" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "agent list") printf '%s\n' "${AGENTS:-}" ;;
   "bd list")   printf 'LIST %s\n' "$*" >> "$LOG"
                if [ -n "${LIST_JSON:-}" ]; then cat "$LIST_JSON"; fi ;;
@@ -267,13 +268,13 @@ awk '/# >>> gate-visit/{f = 1; next} /# <<< gate-visit/{f = 0} f' "$FDIR/mol-vis
 # pool's replacement) and resolves no pool, so this run exercises the create and
 # the continuation_group repair, not a route. The route-refusal proof lives with
 # the surviving pool-route.sh call sites (escalate.test.sh executes it).
-# The block locates visit-identity.sh through GC_PACK_DIR, GC_RIG_ROOT, the git
-# toplevel and GC_CITY_PATH, in that order. Each run pins all four, so the copy
-# in this repo answers and an ambient city's copy never does.
+# The block takes visit-identity.sh from the pack gc names, which the stub gc
+# answers with this repo, so the copy in this repo answers and an ambient city's
+# copy never does.
 run_block_gv() { # <LOST> -> stdout+stderr of the block; $EXTMP/log side-effects
     rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
     PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST="$1" GC_RIG=rig \
-        GC_PACK_DIR="" GC_RIG_ROOT="$REPO" GC_CITY_PATH="" LIST_JSON="" \
+        STUB_PACK="$REPO" GC_RIG_ROOT="" GC_CITY_PATH="" LIST_JSON="" \
         bash "$EXTMP/block.sh" 2>&1
 }
 # Every write of the group, the create's --metadata and any update alike.
@@ -327,7 +328,7 @@ run_gv() { # <CREATE answer: object|array|refused> -> OUT, RC; title/body in $EX
     rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
     OUT="$(PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST=0 CREATE="$1" \
         REFUSAL='validation failed: validation failed for issue : title must be 500 characters or less (got 544)' \
-        GC_PACK_DIR="" GC_RIG_ROOT="$REPO" GC_CITY_PATH="" LIST_JSON="" \
+        STUB_PACK="$REPO" GC_RIG_ROOT="" GC_CITY_PATH="" LIST_JSON="" \
         bash "$EXTMP/block-v.sh" 2>&1)"; RC=$?
 }
 
@@ -433,7 +434,7 @@ run_reuse() { # <script> <listing-name> [VAR=value...] -> stdout+stderr; $EXTMP/
     rr_script="$1"; rr_list="$2"; shift 2
     rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
     env PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST=0 \
-        GC_PACK_DIR="" GC_RIG_ROOT="$REPO" GC_CITY_PATH="" LIST_JSON="$EXTMP/list-$rr_list.json" \
+        STUB_PACK="$REPO" GC_RIG_ROOT="" GC_CITY_PATH="" LIST_JSON="$EXTMP/list-$rr_list.json" \
         WORK_BEAD_ID=sub-A SUBJECT=sub-A "$@" bash "$rr_script" 2>&1
 }
 creates() { cr_n=$(grep -c '^CREATE ' "$EXTMP/log" 2>/dev/null); echo "${cr_n:-0}"; }
@@ -477,7 +478,7 @@ else
     bad "the listing reads open and in_progress visits" "listing call: $(grep '^LIST ' "$EXTMP/log" || echo none)"
 fi
 OUT_NOVI="$(run_reuse "$EXTMP/block-result.sh" open \
-    GC_RIG_ROOT="$EXTMP/none" GC_CITY_PATH="$EXTMP/none" GIT_DIR="$EXTMP/none")"
+    STUB_PACK="$EXTMP/none" GC_RIG_ROOT="$REPO" GC_CITY_PATH="$EXTMP/none" GIT_DIR="$EXTMP/none")"
 if [ "$(creates)" = "1" ]; then
     case "$OUT_NOVI" in
         *"visit-identity.sh not found"*) ok "with no visit-identity.sh in reach the block says so and files" ;;

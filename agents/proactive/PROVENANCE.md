@@ -80,7 +80,7 @@ The first reaction NEVER closes its subject — every disposition advances it
 and leaves it open, the `close` disposition included: it routes the subject to a
 validating closer (mol-validate-close), which re-checks the no-work call and
 closes the subject on its own confident check or escalates.
-`assets/scripts/first-reaction-dispose.sh` performs the five, stamps
+`assets/scripts/first-reaction-dispose.sh` performs each of them, stamps
 `gc.reacted_by=<R>` on the subject as the completion marker, and closes the
 reaction bead R — exactly-once is the substrate's, keyed on R's identity, not a
 done-marker on the subject. The card in the subject's notes records which
@@ -101,6 +101,6 @@ Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — `sling` files a
 reaction bead tracking the subject and routes it here; the create-R-once dedup
 skips a subject that already has an open reaction; scan/demand drop graph-structural
 beads; one `scan --sling` sweep is capped; the slice tool fences reached content.
-`assets/scripts/first-reaction-dispose.test.sh` covers the five exits themselves.
+`assets/scripts/first-reaction-dispose.test.sh` covers the exits themselves.
 Design refs: specs/tk-5n01ns/reaction-bead-first-reaction.md; design-doc.md Key
 Components 5-6, Phase 4.

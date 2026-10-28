@@ -122,9 +122,7 @@ mail lands on it as an occurrence. If it reports a different situation, re-run
 the block with DISTINCT=1, which passes --distinct:
 ```bash
 # >>> notice-finding
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
 # peek leaves the mail unread. The control-byte strip keeps a raw byte from
 # failing the parse; the body's escaped newlines survive it.
 MAIL_JSON=""
@@ -505,9 +503,7 @@ loop's OWNER to a live session id — the target dance-probe.sh and `gc session
 kill` require — and refuses to file a warrant no dog can execute:
 ```bash
 # >>> warrant-file
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/file-warrant.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/file-warrant.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] || SCRIPTS=""
 DOG=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}dog") || true
 if [ -z "$DOG" ]; then
   echo "no live dog identity resolves from '{{binding_prefix}}dog'; a warrant nothing claims leaves the session wedged and still reports success, so escalate instead of filing." >&2
@@ -537,9 +533,7 @@ BEAD_JSON=$(gc bd show <bead> --json)
 WORKTREE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.work_dir // empty')
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 STORE_REF=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata["gc.root_store_ref"] // empty')
-BC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/branch-context.sh" ] && { BC="$c/assets/scripts/branch-context.sh"; break; }
-done
+BC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/branch-context.sh" && [ -x "$BC" ] || BC=""
 eval "$("$BC" resolve --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH")"
 # sets RIG_ROOT, OWNER_REPO, OWNING_ORIGIN_URL, REPO_CTX, BRANCH_ON_ORIGIN
 ```
@@ -691,9 +685,7 @@ bead:
 
 ```bash
 # >>> owning-store-guard
-BS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/bead-store.sh" ] && { BS="$c/assets/scripts/bead-store.sh"; break; }
-done
+BS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/bead-store.sh" && [ -x "$BS" ] || BS=""
 OWNED=0
 if [ -z "$BS" ]; then
   echo "witness: bead-store.sh not found — the store owning <bead> is unproven; REFUSING to remove $WORKTREE" >&2
@@ -740,9 +732,7 @@ or that another writer takes or settles before the release lands, is skipped as
 that writer left it, and the next cycle judges it again:
 
 ```bash
-OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/orphan-dispose.sh" ] && { OD="$c/assets/scripts/orphan-dispose.sh"; break; }
-done
+OD="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/orphan-dispose.sh" && [ -x "$OD" ] || OD=""
 DISPOSE_RESULT=""; DISPOSE_RC=0
 if [ -z "$OD" ]; then
   echo "orphan-dispose.sh not found — NOT disposing of <bead>; it stays owned and returns next cycle" >&2
@@ -908,10 +898,7 @@ sits in the queue from the moment its integration effort is stood up, and
 find-work leaves it until the effort's beads and its summary task close.
 ```bash
 # >>> refinery-stuck-escalate
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && [ -f "$c/assets/scripts/hold-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?escalate.sh, resolve-route.sh and hold-lib.sh not found in the pack}"
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an

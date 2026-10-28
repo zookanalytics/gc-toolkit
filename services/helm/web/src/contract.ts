@@ -184,10 +184,14 @@ export interface Tile {
    * `'blocked'`, or `'unknown'`.
    *
    * `'blocked'` is a hold no automated actor will clear and no review verdict is
-   * owed on — an unresolved required review thread, a base gone BEHIND, or an
-   * unrouted blocker. It is owed by the operator (needs-attention), distinct from
-   * `'settled'`, which waits on a review or the merge pass. Its specific cause is
-   * spelled out in `needs`.
+   * owed on — an unresolved required review thread, a failed required check, a
+   * base gone BEHIND, a conflict whose merge-in a hold defers, a blocker no
+   * automated actor holds, or a branch rule the merge pass cannot name. It is
+   * owed by the operator (needs-attention), distinct from `'settled'`, which
+   * waits on a review or the merge pass. Its specific cause is spelled out in
+   * `needs`. A recorded blocked verdict reads `'blocked'` only while the rule
+   * `pr_phase` reads it by counts it, and `'progressing'` otherwise, since the
+   * next merge pass replaces it.
    *
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
    * same choice `waiting_unknown` makes on the gather side. A missing key means
@@ -292,17 +296,17 @@ export interface Tile {
   pr_branch_url: string;
   /**
    * This merge anchor's PR status. On a live anchor it is who must act next —
-   * `'working'`, `'needs-review'`, or `'needs-attention'` — the same status:
-   * taxonomy the GitHub PR list carries, so the board and the label read one
-   * vocabulary. On a closed (`DONE`) anchor it is the PR's resolved state,
+   * `'working'`, `'merging'`, `'needs-review'`, or `'needs-attention'` — the
+   * same status: taxonomy the GitHub PR list carries, so the board and the
+   * label read one vocabulary. On a closed (`DONE`) anchor it is the PR's resolved state,
    * `'merged'` or `'closed'`, so a done row names how its PR ended. `''` on a
    * non-merge row.
    */
   pr_phase: string;
   /**
-   * This bead's liveness in the same tri-state vocabulary — `'working'`,
-   * `'needs-review'`, or `'needs-attention'` — on EVERY live row, and the word
-   * the `frontier` string leads with. It begins as the per-bead value derived
+   * This bead's liveness in the same status vocabulary — `'working'`,
+   * `'merging'`, `'needs-review'`, or `'needs-attention'` — on EVERY live row,
+   * and the word the `frontier` string leads with. It begins as the per-bead value derived
    * from the same inputs as `pr_phase`, but a row with child tiles then takes its
    * children's rolled-up state instead: an epic's frontier is its children's.
    *

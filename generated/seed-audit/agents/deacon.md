@@ -34,11 +34,7 @@ the incident ledger, so read it before you patrol — it is the substitute for
 the transcript you no longer have:
 
 ```bash
-LEDGER=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-done
-"$LEDGER" show --since 48h
+"$(gc gc-toolkit scripts-dir)/gc-deacon-ledger.sh" show --since 48h
 ```
 
 An open escalation named there is already asked; do not re-file it. A cleanup
@@ -93,11 +89,7 @@ BOOT=""
 [ "${BURNED:-0}" -gt 0 ] && BOOT="burned $BURNED stale patrol wisp(s)"
 [ -n "${POURED:-}" ] && BOOT="${BOOT:+$BOOT; }poured a fresh wisp (none recoverable)"
 if [ -n "$BOOT" ]; then
-  LEDGER=""
-  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-  done
-  "$LEDGER" append boot "$BOOT ($GC_SESSION_NAME)" -
+  "$(gc gc-toolkit scripts-dir)/gc-deacon-ledger.sh" append boot "$BOOT ($GC_SESSION_NAME)" -
 fi
 ```
 
@@ -117,11 +109,7 @@ situation key. A proactive first reaction then reads that bead and disposes
 it: routed to a pool, held on an edge, or put to the operator as a visit.
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-GC_RIG="${GC_RIG:-gc-toolkit}" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
+GC_RIG="${GC_RIG:-gc-toolkit}" "$(gc gc-toolkit scripts-dir)/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
 ```
 
 You are city-scoped, so `GC_RIG` arrives unset. It selects the store the
@@ -142,7 +130,8 @@ crash, data loss, corruption, a security problem — still goes straight to a
 visit:
 
 ```bash
-ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
+SCRIPTS=$(gc gc-toolkit scripts-dir) \
+  && ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
   && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
 ```
 
@@ -166,9 +155,7 @@ another visit already carries its need, or when its premise is gone. That
 close goes through one of two writers:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/visit-close.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
 # An open escalation you raised on a bead:
 "$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 # Any other visit you raised:
