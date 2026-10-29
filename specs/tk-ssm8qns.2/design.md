@@ -1,6 +1,6 @@
 ---
 name: Design record — gctk's domains from its CLI, proved on "is this blocked?"
-description: The record behind docs/gctk-architecture.md, taken at b25a5c06. It covers what approving the design decides and what each part costs, where the design departs from its Feature's contract and why, what the design-gate sitting settled, the rulings on the queued pr-open, signoff and cobra beads, the nouns the surviving intents yield against the epic's starting proposal, which change carries each domain move, the breakdown the implementation child follows, and what the Epic Checkpoint reads. The census of "blocked" is in blocked-census.md beside it.
+description: The record behind docs/gctk-architecture.md, taken at b25a5c06. It covers what approving the design decides and what each part costs, where the design departs from its Feature's contract and why, what the design-gate sittings settled, the rulings on the queued pr-open, signoff and cobra beads, the nouns the surviving intents yield against the epic's starting proposal, which change carries each domain move, the breakdown the implementation child follows, and what the Epic Checkpoint reads. The census of "blocked" is in blocked-census.md beside it.
 ---
 
 # Design record: gctk's domains from its CLI
@@ -14,9 +14,10 @@ was cut from.
 
 Approving the design starts the proof, tk-ssm8qns.3. It builds gctk's command
 tree, the ledger, the store adapter with its fake, and `waits`, the package
-behind `gctk bead blocked`, which answers "is this blocked?". Every place in
-surviving code that decides it then asks `waits`, and `hold-lib.sh`, its suite
-and its fixture (686 lines) are deleted. Approving decides six things.
+behind `gctk bead holds`, which answers what holds a bead, "is this blocked?"
+among it. Every place in surviving code that decides "is this blocked?" then
+asks `waits`, and `hold-lib.sh`, its suite and its fixture (686 lines) are
+deleted. Approving decides six things.
 
 - **The surface and its callers.** Every intent that survives the migration
   map is one `gctk <noun> <verb>` call. Each verb carries a caller class, agent,
@@ -25,6 +26,10 @@ and its fixture (686 lines) are deleted. Approving decides six things.
   priority, pr, rig, review, quota-park, seed and dolt, and lifecycle and merge
   join as named debt. Writes stay on the native surface, and pack logic that
   follows a write reacts through an order, which one admission rule governs.
+  A verb shares a native word only where it means the same or does the whole
+  act over the native primitive, and takes a fresh word wherever its answer
+  can differ from the native call it would be taken for, so the bead read is
+  `bead holds` and the order that starts an armed bead is `bead start-armed`.
   Anchor, findings, engagement, disposition, run, convoy, epics and learning
   are not nouns, because what they hold retires onto Gas City or stays prose.
   Dispatch, sessions and sends dissolve: arm and disarm are bead verbs and the
@@ -48,19 +53,24 @@ and its fixture (686 lines) are deleted. Approving decides six things.
   ([blocked-census.md](blocked-census.md#the-stores-rules)). Until the bd the
   city runs judges the gate, a bead with a `waits-for` edge of its own reads
   `unjudged`. Unlike a failed read, that answer stands until the repair, so
-  every caller that acts holds such a bead, even once its gate opens. No
-  store held such an edge at 20:12Z, so this costs nothing today. The same
-  repair makes `bd blocked` return an error when its read of parents fails.
-  Today it drops every bead held through a parent and exits 0, so until then
-  the adapter checks the listing against the beads the store marks blocked,
-  and a bead the listing lost gets an error. tk-ssm8qns.5 tracks the repair,
-  the report to upstream beads is parked for you to send (tk-j692b1f), and
-  tk-ssm8qns.6 drops the error and the check once the repair is in the city's
+  every caller that acts holds such a bead, even once its gate opens. The
+  adapter takes it from the bead's own edge, never from the listing. No
+  store held such an edge at 20:12Z, so this costs nothing today, and unit 3
+  reads the stores again before its callers move. The same repair makes
+  `bd blocked` return an error when its read of parents fails. Today it drops
+  every bead held through a parent and exits 0, so until then the adapter
+  checks the listing against the beads the store marks blocked, and a bead the
+  listing lost gets a read error, which no caller takes for `unjudged`.
+  tk-ssm8qns.5 tracks the repair and waits on this design and on your choice
+  of its path, an upstream fix or a beads patch (tk-n9xx029). The report to
+  upstream beads is parked for you to send (tk-j692b1f), and tk-ssm8qns.6
+  drops the `waits-for` error and the check once the repair is in the city's
   bd. The alternative, holding the proof until then, would hold the six
   members that wait on this Feature as well.
 - **An earlier ruling gives way.** A demand gate on a parent holds the parent's
   work that has not started, as every gate does, so deferred dispatch stops
-  exempting it. No live bead sits under one. The cost: a member armed under a
+  exempting it. No live bead sat under one on 2026-10-27, and unit 3 reads the
+  stores again before its callers move. The cost: a member armed under a
   parent that waits on your decision no longer starts until you decide. A
   question about one member goes on that member instead.
 - **Domain moves ride the migration members.** Six members build their
@@ -134,7 +144,7 @@ the migration map came after it, and the design follows them where they differ.
    steering.md expects a park to hold routed members, and the doctor check on
    blocked work flags a member that has neither a route nor an arm.
 
-## What the design-gate sitting settled
+## What the design-gate sittings settled
 
 The operator ruled the design at 9db113b9 unapprovable as written in the
 design-gate sitting (visit tk-ppb4639, 2026-10-28), and settled its rework
@@ -180,6 +190,34 @@ design follows them.
    Quota-park nudging is kept, its warrant is written, and its revisit is
    tk-vtnyw8d.
 
+The check-in sitting (visit tk-weluos5, 2026-10-29) audited that rework against
+these rulings. It found a caller class no ruling sanctioned and soft spots in
+the text, and settled the fixes, which the design follows.
+
+8. **Names follow the native meaning.** A verb shares a native word where the
+   meaning is the same, keeps its word where it does the whole act over a
+   native primitive and agents are documented onto it alone, and takes a fresh
+   word wherever its answer can differ from the native call it would be taken
+   for. The bead read is `bead holds`. Applied across the surface, the test
+   also renames the order that starts an armed bead to `bead start-armed`,
+   because `unblocked` would read as the store's answer, which differs for a
+   bead with a `waits-for` edge of its own.
+9. **A verb gets a section only when no steward doc holds its semantics.** A
+   row's defense cell carries its whole meaning, and `bead holds` keeps the one
+   contract section, since no steward doc defines what holds a bead.
+10. **Classes follow call sites.** `review checks` is read by the review
+    formula's steps and by the merge cadence, so it is hook and order.
+    `review passed` is the script a formula check loop runs, so it is hook.
+    `pr status` is hook and order, and its order's bounded scan is stated.
+11. **The soft spots are stated.** The start says which write lands
+    first and names the window it leaves. `unjudged` comes only from a bead's
+    own `waits-for` edge, so a lost listing reads as a failed read. The
+    guarantee promises nothing shorter than the cadence.
+12. **The breakdown gains duties.** Unit 3's caller census covers the prompts
+    and skills that teach the old reads. A unit that edits a file a live branch
+    also edits waits on that branch from its filing. Each dated live-store
+    figure or timing a unit relies on is read again when that unit builds.
+
 ## Rulings on the queued beads
 
 Each of these waits on the Feature by a `blocks` edge. The implementation child
@@ -209,8 +247,8 @@ or drops the rest, and adds the nouns the proposal did not name.
 | Proposed | Derived | Why |
 |---|---|---|
 | anchor | dropped | The anchor state machine retires toward the states Gas Town's refinery records (tk-1tfzr71.20). The one question that survives about an anchor, which bead owns a PR, is `pr`'s. |
-| waits | a package | It answers "is this blocked?", the proof, behind the one bead read `gctk bead blocked`. A wait is a projection of bead state, not a new thing, and no surviving intent maps to it. |
-| dispatch | dissolved | Only the residual survives: pour on ready, and close on an `until` target's close (tk-1tfzr71.16). Arm and disarm are bead verbs, and `start-unblocked` and `dispose-resolved` are the orders that act. |
+| waits | a package | It answers "is this blocked?", the proof, behind the one bead read `gctk bead holds`. A wait is a projection of bead state, not a new thing, and no surviving intent maps to it. |
+| dispatch | dissolved | Only the residual survives: pour on ready, and close on an `until` target's close (tk-1tfzr71.16). Arm and disarm are bead verbs, and `start-armed` and `dispose-resolved` are the orders that act. |
 | review | narrowed | Only the lanes' synthesis and the check loop's check script survive (tk-1tfzr71.22). |
 | findings | dropped | Finding beads for machine findings retire with the review lanes. |
 | pr | narrowed | Title and summary composition, the hop from a GitHub event to its owning bead, the PR status the board shares, and the containment acts that were sends'. It starts from Gas City's own PR concept, and the hypothetical merge rule GitHub cannot express is cut. |
@@ -241,9 +279,9 @@ it after this Feature's checkpoint.
 
 | Domain | Carried by | Notes |
 |---|---|---|
-| bead's read, `bead blocked` over `waits` | this Feature (tk-ssm8qns.3) | The proof. |
+| bead's read, `bead holds` over `waits` | this Feature (tk-ssm8qns.3) | The proof. |
 | rig | in gctk already | Joins the cobra tree in this Feature, and its `rig_check.<check>` key becomes the ledger's first owned declaration. |
-| bead's arm and disarm, and the orders that start and dispose | the deferred-dispatch member (tk-1tfzr71.16) | Its contract re-expresses the residual as one event order on `bead.closed`. Under this design that event only cuts latency, so `gctk bead start-unblocked` and `gctk bead dispose-resolved` also converge on a cadence, as the admission rule requires, and both ask `waits`. Until then deferred-dispatch.sh asks `gctk bead blocked`. |
+| bead's arm and disarm, and the orders that start and dispose | the deferred-dispatch member (tk-1tfzr71.16) | Its contract re-expresses the residual as one event order on `bead.closed`. Under this design that event only cuts latency, so `gctk bead start-armed` and `gctk bead dispose-resolved` also converge on a cadence, as the admission rule requires, and both ask `waits`. Until then deferred-dispatch.sh asks `gctk bead holds`. |
 | quota-park | the session-liveness member (tk-1tfzr71.18) | Only if its re-check keeps the quota-park warrant. |
 | pr | the merge member (tk-1tfzr71.20) for composition; the GitHub-intake member (tk-1tfzr71.21) for the owner hop | `prstatus` moves under `pr` with whichever of them rewrites its facts. |
 | review | the review-lane member (tk-1tfzr71.22) | |
@@ -258,7 +296,10 @@ description says: under the epic, with `target=integration/tk-ssm8qns.1`, each
 waiting on the one before it, and each blocking the landing bead and the
 summary task. All three land on the integration branch with no PR of their
 own. Its first act applies the rulings above and adds the edges and notes the
-next section lists.
+next section lists. A unit that edits a file a live branch also edits waits on
+the bead that carries that branch, by a `blocks` edge written when the unit is
+filed, or for unit 1 when tk-ssm8qns.3 starts, so the overlap is a wait in the
+graph from the start and never a conflict found at merge.
 
 **Unit 1: the command tree, the ledger and the store adapter.**
 
@@ -269,13 +310,21 @@ next section lists.
 - `internal/gcbd` and `internal/daemon` become the store adapter, with an
   in-memory fake. It uses `gc bd` for writes, for reads that must see a fresh
   write, and for the blocked set, and the supervisor API for other reads. It
-  answers a bead with a `waits-for` edge of its own with an error. It also
-  reads the ids the store marks blocked, through `gc bd sql` with the query
-  `bd blocked` starts from over both of its tables, and answers a marked bead
-  that the listing leaves out with an error. Its tests on a stub `gc` cover
-  that bead. If tk-ssm8qns.5 has closed by the time the adapter is built, the
-  adapter answers every bead from the listing and reads no marks, and
+  answers a bead with a `waits-for` edge of its own with the `waits-for` error,
+  which it takes from the bead's own edges. It also reads the ids the store
+  marks blocked, through `gc bd sql` with the query `bd blocked` starts from
+  over both of its tables, and answers a marked bead that the listing leaves
+  out with a read error, the type a failed read returns. They are distinct
+  error types. Its tests on a stub `gc` cover each, and a bead with no
+  `waits-for` edge that the stub listing loses gets the read error, never the
+  `waits-for` one. If tk-ssm8qns.5 has closed by the time the adapter is built,
+  the adapter answers every bead from the listing and reads no marks, and
   tk-ssm8qns.6 closes as not needed.
+- When the adapter is built, its read of the blocked set and its marks read
+  are timed again on the gc-toolkit store, with the host load beside each
+  figure, and the unit's PR sets them against the figures in
+  [The boundaries kept](#the-boundaries-kept), which were read on 2026-10-27 at
+  host loads of 12 to 24.
 - The adapter's acceptance test runs the bd the city runs against a scratch
   store, on a dolt sql-server of its own, since that bd is built without cgo
   and opens no embedded store. Each case builds its beads, then compares the
@@ -318,19 +367,27 @@ next section lists.
 - The package answers whether a bead is blocked and on what, which of its own
   waits are pending, which wait edges point into another store, and whether a
   bead is in flight. It reads one snapshot and computes no wait itself.
-- `gctk bead blocked` prints one JSON record per bead, so a shell caller reads
+- `gctk bead holds` prints one JSON record per bead, so a shell caller reads
   the answer with one call. The record carries the bead's status, `blocked`,
   `held`, `unjudged` or `clear`, with the waits behind it and whether each is
   the bead's own or an ancestor's, its own pending waits and when the last one
   landed, its arm, and its wait edges into another store. A bead with a
   `waits-for` edge of its own reads `unjudged`, which is not a failed read.
+  Only the adapter's `waits-for` error reads as `unjudged`, and a read error
+  returns an error, never a status.
 - Go tests on the fake cover every row of the census's disagreement table, a
-  failed read, a bead with a `waits-for` edge of its own, which gets the
-  adapter's error, each condition that puts a bead in flight, and each status.
+  failed read, a bead with a `waits-for` edge of its own, which reads
+  `unjudged`, a marked bead the listing lost, which gets an error and never
+  `unjudged`, each condition that puts a bead in flight, and each status.
 
 **Unit 3: the callers.**
 
-- The 22 places the census marks "moves" ask `gctk bead blocked`, or `waits`
+- Before the callers move, every store is read again for the beads whose
+  answers the swap changes and which numbered none when last read: a
+  `waits-for` or `conditional-blocks` edge (none at 2026-10-27 20:12Z) and a
+  bead held only by a demand gate on an ancestor (none at 18:33Z). The unit's
+  PR names any it finds.
+- The 22 places the census marks "moves" ask `gctk bead holds`, or `waits`
   through the package from Go. `hold-lib.sh`'s five callers swap in the same
   change that deletes `hold-lib.sh`, `hold-lib.test.sh` and
   `hold-lib.fixture.json`, and the test harness stops copying it.
@@ -352,13 +409,20 @@ next section lists.
   its I14 and `check-armed-dispatch-owed` entries, authority-map.md's row for
   arming deferred dispatch, the waits skill, and the comments in
   `dispatch-path.sh` and `gc-helm.sh`.
+- The caller census covers the prompts and skills that teach an agent the old
+  reads, bead-context's `--frontier` and an answer composed from raw row reads,
+  and not only script call sites. Each one teaches `gctk bead holds` in the
+  same change.
 - The refinery's median pass time, read from its pass log over a day before
   and after the swap, stays under 552 s.
 
 ## Edges and notes the implementation child adds
 
 - A `blocks` edge onto tk-ssm8qns.1 from tk-1tfzr71.16, .18, .20, .21, .22 and
-  .24, with a note on each naming the domain it builds.
+  .24, with a note on each naming the domain it builds. tk-1tfzr71.16's note
+  also names the start's window, a death after a sling returns and before its
+  proven mark, which docs/gctk-architecture.md leaves to that member's design of
+  the start order.
 - A rule-1 note on each member that retires a copy, naming the one rule its
   replacement follows: tk-1tfzr71.12, .15, .17, .19, .20, .21, .22, and
   tk-1tfzr71.4, the native-gates effort's landing bead. Its convoy, tk-iirrmiw,
@@ -393,5 +457,5 @@ Once unit 3 lands:
   marks read it checks the listing against took 0.3 s at a host load of 12 to
   16, beside 0.5 to 0.6 s for the listing.
 - **No refinery pass gets slower than today's 552 s median.** find-work's hold
-  read becomes one `gctk bead blocked` call in place of `hold-lib.sh`'s reads,
+  read becomes one `gctk bead holds` call in place of `hold-lib.sh`'s reads,
   and unit 3 measures the pass time.
