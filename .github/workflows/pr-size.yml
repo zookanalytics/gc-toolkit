@@ -1,0 +1,59 @@
+name: pr-size
+
+# Shows each pull request its size change, as rule 3 of
+# docs/built-once-target.md asks of every gc-toolkit pull request: the net
+# runtime and test lines from the merge base to the head, by subsystem, and the
+# lines the change adds to files the deletion plan retires. pr-size.sh measures
+# it with tools/measure.sh --pr and keeps one comment on the pull request
+# current, rewriting it in place on each push. This is gc-toolkit's own check,
+# not pack content another rig runs, so no other rig gets a size line.
+#
+# pull_request_target runs this file as the repository's default branch carries
+# it, never as the pull request has it, and pr-size.sh runs the tool and reads
+# the deletion plan as the merge base has them, so a change cannot edit the job,
+# the tool or the plan to hide what it adds. The checkout is the default branch,
+# so the attributes git counts lines with are that branch's too. The head is
+# read only as git objects, and nothing from it runs, which is what makes the
+# write token this event carries safe to hold.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+# A newer push measures the head that matters; cancel the run before it.
+concurrency:
+  group: pr-size-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# GitHub lists the issue-comment endpoints, which a pull request's comments
+# use, under both the issues and the pull-requests permissions.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The default branch at its tip, and every branch with its history, so
+      # the branch the pull request merges into and the merge base are here.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The base is the tip of the branch the pull request merges into, as the
+      # checkout fetched it. Under this event GITHUB_SHA is the default
+      # branch's tip, which is not the base of a pull request into another
+      # branch.
+      - name: Post the pull request's size
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          bash .github/workflows/pr-size.sh
+          --repo "${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY"
+          --pr "$PR_NUMBER" --base "refs/remotes/origin/$BASE_REF" --head "$HEAD_SHA"

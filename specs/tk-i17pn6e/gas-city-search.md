@@ -1,6 +1,6 @@
 ---
 name: Gas City search for a PR's size line
-description: The search the arch check asks for before the pack adds tools/measure.sh --pr, the deletion plan's file list as tools/deletion-plan.tsv, and the Size section of a PR's managed summary. What Gas City and the packs it publishes ship for measuring a change's lines, read at named upstream commits, and why the pack computes the line from its own rules. Read it when checking whether the size line can move onto a Gas City primitive.
+description: The search the arch check asks for before the pack adds tools/measure.sh --pr, the deletion plan's file list as tools/deletion-plan.tsv, and the CI job that posts a PR's size section. What Gas City and the packs it publishes ship for measuring a change's lines, read at named upstream commits, and why the pack computes the line from its own rules. Read it when checking whether the size line can move onto a Gas City primitive.
 ---
 
 # Gas City search for a PR's size line
@@ -28,14 +28,17 @@ only gc-toolkit's tree holds, so the pack computes the line.
   nothing for a merge base that does not carry the tool.
 - `tools/deletion-plan.tsv` is the plan's file list as data: one row per file,
   the path and the bead that retires it. The tool reads it at the merge base.
-- `prs_size_section` in `assets/scripts/pr-summary-region.sh` fetches the
-  target, runs the tool from the target as origin has it to the PR's head, and
-  hands the result to `compose_managed`, which ends the `gc:pr-summary` region
-  with it under a `## Size` heading. `pr-open.sh` and `pr-stack.sh` call it
-  where they compose the region.
+- `.github/workflows/pr-size.yml`, a job in gc-toolkit's own CI, runs
+  `pr-size.sh` beside it on each push to a PR. The script takes the tool from
+  the merge base, runs it to the PR's head, and keeps one comment on the PR
+  current with the section under a `## Size` heading. Both are gc-toolkit's
+  own check, not pack content another rig runs.
 
-The change adds no bead key, metadata field, order, agent or command. The
-managed region it extends is the pack's existing PR summary.
+The change adds no bead key, metadata field, order, agent or command, and
+nothing to the PR summary the pack's refinery writes. The search ran while the
+design put the section in that summary, which is why its terms include a PR
+body's writer. The operator then ruled that the line applies only to
+gc-toolkit, and it moved to gc-toolkit's CI.
 
 ## Where the search looked
 
@@ -82,6 +85,6 @@ subsystem it belongs to (its row in section 4 of `docs/component-model.md`, or
 the measuring rules), and which files the deletion plan retires. GitHub's
 totals mix the kinds together and carry no subsystem, and no primitive reads a
 plan. The tool reads all three from git objects at the commits it measures, so
-the line needs no stored state, and a repository that does not carry the tool,
-such as another rig the pack's refinery serves, gets no line. The rule rules
+the line needs no stored state. Only gc-toolkit's own CI posts it, so another
+rig the pack serves gets no line. The rule rules
 out a budget and a size gate, so pr-pipeline's guard is not a fit either.

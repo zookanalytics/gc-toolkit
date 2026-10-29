@@ -3,8 +3,8 @@
 #
 #   measure.sh [REF]           the lines of the tree at REF (default HEAD)
 #   measure.sh BASE HEAD       the lines HEAD adds over BASE, less the lines it removes
-#   measure.sh --pr BASE HEAD  the size section of a PR's managed summary, from the
-#                              merge base of BASE and HEAD to HEAD
+#   measure.sh --pr BASE HEAD  the size section gc-toolkit's CI posts on a PR,
+#                              from the merge base of BASE and HEAD to HEAD
 #
 # Run it from inside a gc-toolkit checkout. A line is a physical line of a
 # tracked text file, as `git diff --numstat` counts it, so it reads only git

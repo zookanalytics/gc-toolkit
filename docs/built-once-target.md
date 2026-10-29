@@ -377,8 +377,9 @@ Every change follows these rules.
    names separately the lines the change adds to code the plan retires, and the
    bead that retires each. It carries no budget, no prediction and no stored
    history. The PR's CI test run time can sit beside it as information.
-   `tools/measure.sh --pr` computes it, and each PR's managed summary ends
-   with it as its Size section.
+   `tools/measure.sh --pr` computes it, and gc-toolkit's CI
+   ([pr-size.yml](../.github/workflows/pr-size.yml)) posts it on each PR as one
+   comment that it rewrites on each push.
 
 ## Keeping it true
 
