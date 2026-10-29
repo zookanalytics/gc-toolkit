@@ -100,13 +100,19 @@ again on 2026-10-29, at main 3db3f983.
    closed or pinned one, so a member of a closed epic follows nothing.
    `hold-lib.sh` walks every ancestor, and bd's ready cascade runs down
    parent-child edges. Neither follows a `tracks` edge, except from a
-   workflow's synthetic input convoy (`priority-lib.sh:130`).
+   workflow's synthetic input convoy (`priority-lib.sh:130`). `gc-helm.sh park`
+   refuses a bead that is in flight itself, but not one whose children are,
+   and a park holds only work that has not started. So a Story already running
+   under a parked bead still merges and closes
+   ([steering.md](../../docs/steering.md#in-flight)).
 5. **Closing.** The finalize-gate clause (`finalize-gate.sh`
    `clause_epic_ruling_recorded`) and I15 hold only an epic that carries
    `epic_hypothesis`. bd refuses to close a bead with an open child unless the
    close is forced (bd's `enforceClosePolicyForTargetInTx`,
    `internal/storage/issueops/close.go:150`;
    [steer-by-epic, fact 5](../tk-rl8gz4b.2/steer-by-epic.md#facts-this-design-rests-on)).
+   The same policy refuses, unless forced, to close a bead that has an open
+   direct blocker, such as the gate of a park on it (`close.go:153`).
    `bd epic close-eligible` closes every epic in the store whose children are
    all complete, and takes no scope.
 6. **Listing an epic's open child epics.**
@@ -398,8 +404,16 @@ these writes in order:
 3. It closes each landed Delivery, with the ruling as the close reason. Before
    each close it confirms that every Story under the Delivery is still closed.
    A follow-up opened under it since it landed is settled with the operator
-   first, in one of the ways write 5 settles an item, so the close is never
-   forced.
+   first, in one of the ways write 5 settles an item. Every close here and in
+   write 6 is made the same way, and none is forced. The close waits until
+   nothing under the bead is open, and a bead whose PR was retired stays open
+   until the refinery's next pass over that PR completes the retirement. The
+   sitting then releases the bead from each open blocker on it, such as a
+   park, as [steering.md](../../docs/steering.md#releasing-a-park) releases a
+   park, which starts nothing because nothing under the bead is open. Only
+   then does it close the bead. A Delivery can land while it is parked
+   (fact 4), and bd refuses to close a bead that an open park still blocks
+   (fact 5).
 4. On continue or shift, it files the next Delivery with its aim when the
    ruling aims one, after re-aiming the epic's contract fields on a shift. It
    then sets the epic's next priority and park with the verbs on main:
@@ -437,15 +451,9 @@ these writes in order:
      no work: a run in flight is stopped and an arm disarmed first, and the
      disposition writer closes it with the sitting's visit as the evidence
      that ruled it out.
-6. It closes each other Delivery, then the epic, once nothing under it is
-   open, and never by a forced close. Each is first released from its park,
-   if it has one, as
-   [steering.md](../../docs/steering.md#releasing-a-park) releases a park,
-   and nothing is left under it for the release to start. A Delivery's close
-   reason is the ruling, as in write 3. A Story whose PR was retired closes
-   only when the refinery's next pass over that PR completes the retirement,
-   so the closes in this write follow that pass. The finalize gate and I15
-   accept the epic's close on the close ruling with its outcome.
+6. It closes each other Delivery, then the epic, the way write 3 makes every
+   close. A Delivery's close reason is the ruling, as in write 3. The finalize
+   gate and I15 accept the epic's close on the close ruling with its outcome.
 
 Each ruling overwrites the epic's last one, so each checkpoint's lasting record
 is its block in the epic's notes and the close reasons of the Deliveries it
