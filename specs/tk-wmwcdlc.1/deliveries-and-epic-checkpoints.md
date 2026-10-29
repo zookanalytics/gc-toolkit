@@ -7,23 +7,32 @@ description: The design for the level under an epic, which epic tk-wmwcdlc build
 
 ## The decision
 
-An epic is delivered through Deliveries, and an Epic Checkpoint follows each one
-([epics.md](../../docs/epics.md#direction-features-and-epic-checkpoints)).
+The model in
+[epics.md](../../docs/epics.md#direction-features-and-epic-checkpoints)
+delivers an epic through Deliveries, and an Epic Checkpoint follows each one.
 This level is SAFe's Feature, as epics.md also calls it, and it is named
 Delivery here because bd's `feature` type is a work item (fact 1). Unit 1
 carries the name into the docs. This design builds the level from what bd and
-the pack already do with a child epic. It adds no bead type, no metadata key
-and no state. The goals
-consolidation, the epic's other scope item, already stands in
+the pack already do with a child epic, and an epic takes it only when the
+operator aims a Delivery under it. It adds no bead type, no metadata key and no
+state. The goals consolidation, the epic's other scope item, already stands in
 [epics.md](../../docs/epics.md#direction-features-and-epic-checkpoints), and
 the checkpoint below reads the measured and graded criteria it brought.
 
 - **A Delivery is an epic-typed bead whose parent is the epic it delivers.** Its
   Stories are its children. The board, the work checks, priority, parks and
-  bd's close rule already treat a child epic as this level needs (section 1).
-- **A Delivery carries an aim, not a hypothesis.** Its description says what its
-  landing should show about its epic's hypothesis, and what lands. The epic's
-  checkpoint makes the one ruling, so a Delivery never needs a ruling of its own.
+  bd's close rule already treat a child epic as this level needs. Each bd type
+  is used only with its own meaning, so a Story may be bd's `feature` and no
+  container ever is (section 1).
+- **A Delivery carries an aim, not a hypothesis.** Its aim is the portion of
+  its epic's hypothesis that its landing tests, a step toward the hypothesis
+  and never a hypothesis of its own. Its description states the aim and what
+  lands. The epic's checkpoint makes the one ruling, so a Delivery never needs
+  a ruling of its own.
+- **The layer is opt-in per epic.** An epic may reach its hypothesis entirely
+  on Stories under itself, entirely through Deliveries, or through any mix.
+  Only the operator's aim ever adds the layer, and an epic without it works
+  exactly as an epic works today (section 2).
 - **A Delivery is filed by the decision that aims it.** That decision is the
   operator's: the sitting that elaborates an epic, the approval of a design
   whose units deliver it, or a checkpoint's continue or shift ruling. A
@@ -147,7 +156,8 @@ stewardship holds it as one.
 **What it carries.** Its title names what it lands and starts with `Delivery: `,
 because the board shows the title. Its description opens with two lines:
 
-- `Aim:` what its landing should show about its epic's hypothesis;
+- `Aim:` the portion of its epic's hypothesis that its landing tests, a step
+  toward the hypothesis and never a hypothesis of its own;
 - `Done when:` what lands, as Stories or as checks a person can run.
 
 It carries no `epic_hypothesis`, no `epic_handle` and no ruling field. A
@@ -163,11 +173,21 @@ the stranded-work check reads as a container (fact 3). PR-finishing work stays
 outside every epic and Delivery
 ([steering.md](../../docs/steering.md#pr-finishing-work)).
 
+**Each bd type keeps its own meaning.** A bd type is used only with its own
+semantics, or not at all. So bd's `feature`, which bd and Gas City use for a
+single change (fact 1), types a Story and never a container, the Delivery
+included. `milestone` stays reserved for a marker that holds no work,
+which is what bd says it is (fact 1). A filing rule against a type would bind
+only this pack's filers, while the stores go on receiving beads of that type
+from everyone else, so the design keeps each type to bd's meaning rather than
+banning any.
+
 **Rejected.**
 
 - *bd's `feature` type.* bd describes it as a feature or enhancement, Gas City's
   tutorial files a single change with it (fact 1), and the pack's checks count
-  it as work (fact 3). The board gives it no row, and a row
+  it as work (fact 3). A container of that type would give it a meaning it
+  does not have. The board gives it no row, and a row
   would be new work in the board's direct store reader, which tk-1tfzr71.24
   retires ([built-once-target.md](../../docs/built-once-target.md#3-the-lanes)).
 - *A convoy.* A convoy is the engine's dispatch-time grouping, which
@@ -177,9 +197,10 @@ outside every epic and Delivery
   then nest under the epic, beside the Delivery's row rather than under it
   (fact 2). An unowned convoy also closes when its last member does, before
   anyone has judged the landing (fact 7).
-- *bd's `milestone` type.* It marks completion and holds no work (fact 1).
-  Stories would hang off it by `blocks` edges, which priority, parks and the
-  board's nesting do not follow, and it gets no row either.
+- *bd's `milestone` type.* It marks completion and holds no work (fact 1), so
+  it stays reserved for such a marker. Stories would hang off it by `blocks`
+  edges, which priority, parks and the board's nesting do not follow, and it
+  gets no row either.
 - *A label on the Stories.* A label groups beads with no row, no aim and no end.
 - *A hypothesis of its own, the benefit hypothesis SAFe gives this level.* SAFe
   judges at this level too. Here the operator judges only the epic, which keeps
@@ -188,6 +209,13 @@ outside every epic and Delivery
   which reads prose. A key waits for machinery that reads it (unit 6).
 
 ## 2. When work becomes a Delivery, and how it is filed
+
+**The layer is opt-in per epic.** An epic may reach its hypothesis entirely on
+Stories filed under itself, entirely through Deliveries, or through any mix of
+the two. Only the operator's aim ever adds the layer. An epic the operator never
+aims a Delivery under works exactly as an epic works today. Its Stories go
+under it, and its checkpoint comes when the operator calls a sitting on it
+(section 5).
 
 **A Delivery is filed by the decision that aims it.** That decision is the
 operator's, made at one of three points:
@@ -210,7 +238,7 @@ succeeds. A new Delivery goes to no pool, because its Stories are the work:
 ```bash
 gc bd list --parent <epic> -t epic --limit 0 --json
 gc bd create "Delivery: <what it lands>" -t epic --parent <epic> \
-  -d "Aim: <what its landing should show about the epic's hypothesis>
+  -d "Aim: <the portion of the epic's hypothesis its landing tests>
 Done when: <what lands>" --json
 ```
 
@@ -235,8 +263,9 @@ the epic closes (section 5).
 - *One open Delivery per epic.* Independent steps of one epic would share one
   Delivery, which lands only when its slowest Story does, so the faster step's
   checkpoint would come late.
-- *Every Story under a Delivery.* Work filed between a landing and the next
-  checkpoint, and work that predates this layer, would have nowhere to go.
+- *Every Story under a Delivery.* Every epic would have to take the layer, and
+  work filed between a landing and the next checkpoint, or before the layer,
+  would have nowhere to go.
 
 ## 3. How a Delivery is shown
 
@@ -450,7 +479,7 @@ each waits for the branch to land and is written against what it leaves.
 
 | # | Unit | Section | Needs | Done when |
 |---|---|---|---|---|
-| 1 | **The model in the epic docs.** `docs/epics.md` states the Delivery and the Epic Checkpoint as built, naming the level Delivery with one sentence that maps it to SAFe's Feature. `docs/epic-stewardship.md` says the close gate and I15 never hold a Delivery and the checkpoint closes it, names the level the same way, and narrows its direction to unit 6. `docs/steering.md` places work under a Delivery as under an epic, and names the Delivery level in its priority rule. | 1–5 | tk-1tfzr71.4 | The three docs state the model. None calls the Delivery layer unbuilt, none names the level a Feature outside the sentence that maps it, and none names a sub-epic. |
+| 1 | **The model in the epic docs.** `docs/epics.md` states the Delivery and the Epic Checkpoint as built, and the layer as opt-in per epic, naming the level Delivery with one sentence that maps it to SAFe's Feature. `docs/epic-stewardship.md` says the close gate and I15 never hold a Delivery and the checkpoint closes it, names the level the same way, and narrows its direction to unit 6. `docs/steering.md` places work under a Delivery as under an epic, and names the Delivery level in its priority rule. | 1–5 | tk-1tfzr71.4 | The three docs state the model. None calls the Delivery layer unbuilt, none names the level a Feature outside the sentence that maps it, and none names a sub-epic. |
 | 2 | **Filing into a Delivery.** The work skill's "File new work" states section 2's rule, the list of open Deliveries and the Delivery's create. `converse-parent.sh` prints the nearest open parent-child ancestor, with its test. | 2, 4 | 1, tk-1tfzr71.4 | The skill suites pass with the rule stated. `converse-parent.sh` prints the epic for a Story under a closed Delivery of an open epic, and an empty line for a Story under a closed epic with no open ancestor. |
 | 3 | **The Epic Checkpoint by hand.** A pack skill that a sitting on an epic follows after a Delivery lands: the evidence, the record, and section 5's writes in order. The converse prompt names the closes a checkpoint makes. | 5 | 1, tk-1tfzr71.4 | The skill and prompt suites pass, with the prompt's pins moved with its sentence. |
 | 4 | **A landed Delivery asks for its checkpoint.** The board's derivation rewords a landed Delivery's row to name its checkpoint and bands it with the rows the operator owes. The supervisor source carries an epic's metadata on its row, as the direct store reader does. The derivation's comments say Delivery where they say sub-epic. | 3 | 1, tk-1tfzr71.4 | A board fixture renders a landed Delivery that way, and a landed top-level epic and a landed child epic with a hypothesis as before. A supervisor source test reads an epic's `epic_hypothesis` off its row. The direct store reader is unchanged, and the wire contract gains no field. |
