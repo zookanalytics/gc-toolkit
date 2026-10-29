@@ -467,8 +467,8 @@ What `waits` adds over the store's answer:
   error, and `waits` reads that error, and no other, as this status. Every
   caller that acts treats the edge as a wait that holds. Otherwise the bead is
   `clear`. A read that fails returns an error, never a status, and so does a
-  marked bead the listing lost, so a listing that misses a bead for one read
-  cannot stand as `unjudged`, and the next read clears it.
+  marked bead the listing lost. A listing that misses a bead for one read
+  therefore never stands as `unjudged`, and the next read clears it.
 
 The status rests on these answers.
 
