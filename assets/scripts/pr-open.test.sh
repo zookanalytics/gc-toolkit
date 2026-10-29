@@ -464,51 +464,6 @@ body=$(cat "$GH_DIR/pr_create_body.txt")
 has "$body" "## Summary"$'\n'$'\n'"d E3" "blank prose falls back rather than publishing an empty summary"
 hasnt "$body" "<details>" "…and demotes nothing"
 
-echo "# the body closes with the change's size when the measuring tool prints one"
-# The tool is a stub that logs what it was asked and prints a section body, and
-# the stub git answers the fetches. The suite's private script directory has no
-# tools/measure.sh beside it, so every other case composes no Size section.
-MEASURE="$TMP/measure-stub.sh"
-printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$MEASURE_LOG"' '[ -n "${MEASURE_QUIET:-}" ] && exit 0' \
-  "printf 'Net lines from the merge base \`mb0\`: runtime +3 and tests +1.\\n'" > "$MEASURE"
-chmod +x "$MEASURE"
-MEASURE_LOG="$TMP/measure.log"
-store "[$(pre S1 polecat/s1 ',"pr_summary":"Adds a size line."'), $(rev S1)]"
-echo "sha-s1" > "$GH_DIR/head_polecat_s1"
-export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/85"
-printf '%s' "$(prrow 85 OPEN polecat/s1 sha-s1 main)" > "$GH_DIR/pr_view_85.json"
-: > "$MEASURE_LOG"
-out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" "$SUT" 2>&1)
-has "$out" "opened PR#85" "the PR was opened"
-body=$(cat "$GH_DIR/pr_create_body.txt")
-has "$body" 'see the PR checks.'$'\n\n''## Size'$'\n\n''Net lines from the merge base `mb0`: runtime +3 and tests +1.'$'\n''<!-- /gc:pr-summary -->' \
-  "the size section closes the managed region, below the handoff bullets"
-eq "$(cat "$MEASURE_LOG")" "--pr refs/remotes/origin/main sha-s1" \
-  "the tool measures from the target as origin has it to the head the PR opens at"
-
-echo "# a size the tool does not print leaves the section out"
-store "[$(pre S2 polecat/s2), $(rev S2)]"
-echo "sha-s2" > "$GH_DIR/head_polecat_s2"
-export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/86"
-printf '%s' "$(prrow 86 OPEN polecat/s2 sha-s2 main)" > "$GH_DIR/pr_view_86.json"
-out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" MEASURE_QUIET=1 "$SUT" 2>&1)
-has "$out" "opened PR#86" "a repository the tool does not measure still gets its PR"
-hasnt "$(cat "$GH_DIR/pr_create_body.txt")" "## Size" "…with no Size section"
-
-echo "# a fetch that fails leaves a Size section recording that the size could not be measured"
-# The record is what pr-stack.sh reads to measure the size again once the fetch
-# works, so a transient failure does not cost the PR its size for good.
-store "[$(pre S3 polecat/s3), $(rev S3)]"
-echo "sha-s3" > "$GH_DIR/head_polecat_s3"
-export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/87"
-printf '%s' "$(prrow 87 OPEN polecat/s3 sha-s3 main)" > "$GH_DIR/pr_view_87.json"
-: > "$MEASURE_LOG"
-out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" STUB_FETCH_RC=1 "$SUT" 2>&1)
-has "$out" "opened PR#87" "a target that will not fetch still gets its PR"
-has "$(cat "$GH_DIR/pr_create_body.txt")" 'see the PR checks.'$'\n\n''## Size'$'\n\n''The size could not be measured at this head. The refinery measures it again on a later pass.'$'\n''<!-- /gc:pr-summary -->' \
-  "…whose Size section records that the size could not be measured"
-eq "$(cat "$MEASURE_LOG")" "" "…and the tool never runs over a target it could not fetch"
-
 echo "# a head that moved between gate and create refuses the stamp"
 store "[$(pre C2 polecat/c2), $(rev C2)]"
 echo "sha-c2" > "$GH_DIR/head_polecat_c2"

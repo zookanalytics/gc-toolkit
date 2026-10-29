@@ -46,39 +46,6 @@ prs_band() { # <phased> <phase>
   printf '%s\n' "${1:-}" | awk -F'\t' -v p="$2" '$2 == p { print $1 }'
 }
 
-# The measuring tool, tools/measure.sh beside the pack. GC_MEASURE_TOOL names
-# another one.
-PRS_MEASURE="${GC_MEASURE_TOOL:-$_prs_lib_dir/../../tools/measure.sh}"
-
-# The Size section's body when the size could not be read, because a fetch or the
-# measuring tool failed. The region keeps it as the record that the size is still
-# to be measured, and pr-stack.sh reads it (prs_region_size_unread) to measure
-# the size again.
-PRS_SIZE_UNREAD="The size could not be measured at this head. The refinery measures it again on a later pass."
-
-# The body of the region's `## Size` section: what `measure.sh --pr` prints for
-# the change from its merge base with <target>, as origin has the target now, to
-# <head_oid>. The target is fetched, as review-checks.sh fetches the base it
-# takes a fork point from, and a head this checkout lacks is fetched by id. A
-# fetch or a run of the tool that fails prints PRS_SIZE_UNREAD. Prints nothing
-# when no size applies: the tool is missing, the target is not a branch name, or
-# the repository does not measure itself, which the tool decides. The section is
-# information that gates nothing.
-prs_size_section() { # <target> <head_oid>
-  local target="${1:-}" head="${2:-}" out
-  [ -x "$PRS_MEASURE" ] && [ -n "$target" ] && [ -n "$head" ] || return 0
-  git check-ref-format "refs/heads/$target" >/dev/null 2>&1 || return 0
-  if { git cat-file -e "$head^{commit}" 2>/dev/null \
-       || git fetch --quiet --no-tags --no-write-fetch-head origin "$head" >/dev/null 2>&1; } \
-     && git fetch --quiet --no-tags --no-write-fetch-head origin \
-          "+refs/heads/$target:refs/remotes/origin/$target" >/dev/null 2>&1 \
-     && out=$("$PRS_MEASURE" --pr "refs/remotes/origin/$target" "$head" 2>/dev/null); then
-    [ -z "$out" ] || printf '%s\n' "$out"
-  else
-    printf '%s\n' "$PRS_SIZE_UNREAD"
-  fi
-}
-
 # The region always writes its own `## Summary`, so a stored pr_summary that opens
 # with a Summary heading of its own is stripped of it here rather than published
 # under two. Only a bare `Summary` heading line goes; a heading carrying other
@@ -92,8 +59,7 @@ strip_summary_heading() { # <text>
 }
 
 # The region's contents, no markers: the ## Summary a reviewer reads first, the
-# dispatch text demoted below it when both exist, the refinery handoff facts,
-# and the change's ## Size when <size> carries one.
+# dispatch text demoted below it when both exist, and the refinery handoff facts.
 #
 # The last handoff bullet states the gate posture, and its wording is the one
 # thing that turns on the mode. Neither mode states a CI result: the body is
@@ -107,13 +73,10 @@ strip_summary_heading() { # <text>
 # instead.
 #
 # <phased> is the anchor's resolved gate set (prs_resolve_phased at <head_oid>);
-# the two bands the bullets name are partitioned from it here. <size> is
-# prs_size_section's body for the same head. It comes last, below the handoff
-# bullets, where prs_region_summary, which stops at the dispatch details or the
-# handoff heading, never reads it as part of the summary.
-compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> <mode> <phased> <size>
+# the two bands the bullets name are partitioned from it here.
+compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> <mode> <phased>
   local summary="$1" desc="$2" id="$3" branch="$4" target="$5" checkset="$6" head_oid="$7" sup_num="$8" sup_head="$9"
-  local mode="${10:-open}" phased="${11:-}" size="${12:-}"
+  local mode="${10:-open}" phased="${11:-}"
   local greened draftg
   echo "## Summary"; echo
   if [ -n "$summary" ]; then strip_summary_heading "$summary"
@@ -146,7 +109,6 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
   [ -n "$draftg" ] && printf -- '- Draft-stage gates `%s` run against the open PR before it is marked ready for review.\n' "$draftg"
   [ -n "$sup_num" ] && printf -- '- Supersedes #%s (closed unmerged at `%.8s`); re-implemented and re-gated at `%.8s`.\n' \
     "$sup_num" "$sup_head" "$head_oid"
-  [ -n "$size" ] && printf '\n## Size\n\n%s\n' "$size"
   return 0
 }
 
@@ -183,56 +145,26 @@ prs_current_section() { # <body-file>
   ' "$1"
 }
 
-# 0 = the managed region's handoff bullets name <head_oid> as the head the region
-# was composed at; 1 = they name a different head or none. Compose writes that head
-# as its 8-char prefix in backticks, after `Head ` in refresh mode and after `at `
-# in open mode, and closes the clause with `.` or `;`. Only that field of the
-# bullets under the region's last `## Refinery handoff` heading is read, up to the
-# next heading. Other commits the region names are not the head it was composed
-# at: one a summary cites, the Size section's merge base, which is the head
-# itself once the head is reset to it, and the closed PR's head in a Supersedes
-# bullet. A post-open refresh pairs this with the summary comparison: a rework
-# that moves the head without changing the summary leaves the handoff bullet
-# pinned to the pre-rework head, and only the head comparison catches it — the
-# summary text alone still reads current.
+# 0 = the managed region already names <head_oid> in its handoff bullet, which
+# compose renders as the head's 8-char prefix in backticks in either mode; 1 = it
+# names a different head or none. A post-open refresh pairs this with the summary
+# comparison: a rework that moves the head without changing the summary leaves the
+# handoff bullet pinned to the pre-rework head, and only the head comparison catches
+# it — the summary text alone still reads current. A head is a commit hash, so its
+# backticked 8-char prefix does not collide with the other backticked tokens (issue,
+# branch, target, gates) the region carries.
 # Substring-match a captured string rather than piping into `grep -q`: this
 # library is sourced by callers that may run under `set -o pipefail`, where a
 # writer SIGPIPEd by grep's early exit turns a match into a pipeline failure.
 prs_region_names_head() { # <body-file> <head_oid>
-  local head8 h bullets
+  local head8 needle
   head8=$(printf '%.8s' "${2:-}")
   [ -n "$head8" ] || return 1
-  h='`'"$head8"'`'
-  bullets=$(awk -v o="$PRS_MARK_OPEN" -v c="$PRS_MARK_CLOSE" '
-    $0 == o { inreg = 1; next }
-    $0 == c { inreg = 0; handoff = 0; next }
-    !inreg { next }
-    /^##[ \t]+Refinery handoff[ \t]*$/ { handoff = 1; n = 0; next }
-    /^##[ \t]/ { handoff = 0; next }
-    handoff { line[++n] = $0 }
-    END { for (i = 1; i <= n; i++) print line[i] }
-  ' "$1")
-  case "$bullets" in
-    *"Head $h;"*|*" at $h."*|*" at $h;"*) return 0 ;;
+  needle='`'"$head8"'`'
+  case "$(prs_current_section "$1")" in
+    *"$needle"*) return 0 ;;
     *) return 1 ;;
   esac
-}
-
-# 0 = the region's Size section is PRS_SIZE_UNREAD, so its size could not be read
-# when it was composed; 1 = it carries a size, or no Size section. Only the
-# section below the region's last `## Refinery handoff` heading is read, where
-# compose writes it, so a summary that quotes the line is not that record.
-prs_region_size_unread() { # <body-file>
-  awk -v o="$PRS_MARK_OPEN" -v c="$PRS_MARK_CLOSE" -v u="$PRS_SIZE_UNREAD" '
-    $0 == o { inreg = 1; next }
-    $0 == c { inreg = 0; size = 0; next }
-    !inreg { next }
-    /^##[ \t]+Refinery handoff[ \t]*$/ { handoff = 1; size = 0; hit = 0; next }
-    handoff && /^##[ \t]+Size[ \t]*$/ { size = 1; next }
-    /^##[ \t]/ { size = 0; next }
-    size && $0 == u { hit = 1 }
-    END { exit hit ? 0 : 1 }
-  ' "$1"
 }
 
 # 0 = the managed region's handoff bullet says the PR "opened green"; 1 = it does

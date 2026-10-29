@@ -301,7 +301,7 @@ api_head() { # <branch> -> sha from the API, or nothing
 # at <head_oid>, which the composed handoff bullets name.
 refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid> <phased>
   local id="$1" num="$2" row="$3" branch="$4" target="$5" head_oid="$6" phased="${7:-}"
-  local summary desc checkset body_json CUR SECTION NEW ms rc size
+  local summary desc checkset body_json CUR SECTION NEW ms rc
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id PR#$num head oid unknown from the PR row; body refresh cannot be composed, anchor stays pre_open_gate (retry next pass)" >&2
     return 1
@@ -332,8 +332,7 @@ refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid> <phased>
     return 1
   fi
   printf '%s' "$body_json" | jq -r '.body // ""' 2>/dev/null | tr -d '\r' > "$CUR"
-  size=$(prs_size_section "$target" "$head_oid")
-  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" open "$phased" "$size" > "$SECTION" \
+  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" open "$phased" > "$SECTION" \
      || [ ! -s "$SECTION" ]; then
     rm -f "$CUR" "$SECTION" "$NEW"
     echo "$PROG: $id PR#$num refreshed body could not be composed; anchor stays pre_open_gate (retry next pass)" >&2
@@ -611,11 +610,10 @@ GATES
   # the absent case, as it is for check_set above.
   summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty')
   [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || summary=""
-  SIZE=$(prs_size_section "$target" "$head_oid")
   BODY=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open.XXXXXX") || { echo "$PROG: cannot create a temp file for the PR body" >&2; exit 1; }
   {
     printf '%s\n' "$PRS_MARK_OPEN"
-    compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "$SUP_NUM" "$SUP_HEAD" open "$PHASED" "$SIZE"
+    compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "$SUP_NUM" "$SUP_HEAD" open "$PHASED"
     printf '%s\n' "$PRS_MARK_CLOSE"
   } > "$BODY"
   # The bead id stays in the title so a PR is traceable to its anchor; the
