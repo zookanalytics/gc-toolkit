@@ -155,7 +155,7 @@ function PRLink({ tile }: { tile: Tile }) {
 
 /**
  * The PR phase indicator for a merge anchor. On a live row it names who must act
- * next, in the three values the GitHub status: label carries (working,
+ * next, in the four values the GitHub status: label carries (working, merging,
  * needs-review, needs-attention); on a closed row it names how the PR resolved,
  * in the board-only terminal states (merged, closed). A colored chip so the
  * answer reads at a glance; nothing rendered on a row with no phase.
@@ -163,6 +163,36 @@ function PRLink({ tile }: { tile: Tile }) {
 function PRPhaseChip({ tile }: { tile: Tile }) {
   if (!tile.pr_phase) return null;
   return <span className={`pr-phase pr-phase--${tile.pr_phase}`}>{tile.pr_phase}</span>;
+}
+
+// What each held: value asks of the operator, for the chip's hover text.
+const HELD_MEANING: Record<string, string> = {
+  visit: 'an open visit holds the PR or its work in flight; answer it',
+  review: 'review feedback the city has not answered, or a thread the merge waits on; answer or resolve it',
+  blocked: 'a blocker no automated actor will clear holds the PR; clear it',
+};
+
+/**
+ * What holds a live merge anchor's PR that the city will not clear on its own:
+ * one chip per value of its GitHub held: labels, read off `tile.pr_held`, which
+ * the same code derives. Each is something a person has to act on, so the chips
+ * sit beside the needs-attention phase they explain. Nothing rendered on a PR
+ * nothing holds.
+ */
+function PRHeldChips({ tile }: { tile: Tile }) {
+  if (!tile.pr_held || tile.pr_held.length === 0) return null;
+  return (
+    <>
+      {tile.pr_held.map((h) => {
+        const meaning = HELD_MEANING[h];
+        return (
+          <span key={h} className={`pr-held pr-held--${h}`} title={`held: ${h}${meaning ? `: ${meaning}` : ''}`}>
+            held: {h}
+          </span>
+        );
+      })}
+    </>
+  );
 }
 
 // What each conversation value means to the operator, for the chip's hover text.
@@ -634,6 +664,7 @@ function AnchorRow({
       <td>{tile.kind}</td>
       <td>
         <PRPhaseChip tile={tile} />
+        <PRHeldChips tile={tile} />
         <PRLink tile={tile} />
         <PRConversationChip tile={tile} />
       </td>
@@ -736,6 +767,13 @@ function Legend() {
       </span>
       <span className="legend__item">
         <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a visit holds it
+      </span>
+      <span className="legend__item">
+        <span className="pr-held" aria-hidden="true">
+          held:
+        </span>{' '}
+        what holds a PR: visit = an open visit on the PR or its work · review = review feedback the city
+        has not answered, or a thread the merge waits on · blocked = a blocker no automated actor will clear
       </span>
       <span className="legend__item">
         <span aria-hidden="true">💬</span> PR conversation: outstanding = a comment waits on the city ·

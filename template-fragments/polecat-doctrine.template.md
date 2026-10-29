@@ -243,10 +243,7 @@ exactly one open visit per situation key, and its exit 0 is the release path a
 human hears about and can claim:
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(gc {{ .BindingName }} scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] || SCRIPTS=""
 "$SCRIPTS/escalate.sh" --subject <work-bead> --key polecat-blocked \
   --message "Blocked: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```

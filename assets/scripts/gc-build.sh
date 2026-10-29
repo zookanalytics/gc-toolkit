@@ -123,7 +123,7 @@ fi
 
 # Every `replace <module> => <local path>` in the module's go.mod points at a
 # sibling module whose sources are compiled into the binary: helm replaces in
-# services/gctk, the prstatus tri-state core the PR-label writer also derives
+# services/gctk, the prstatus status core the PR-label writer also derives
 # from. Those sources are build inputs, so SOURCE_REV (the staleness identity),
 # newer_than_binary (the mtime scan) and behind_main all span them: a change
 # confined to a replaced sibling must rebuild the binary, or it serves stale

@@ -16,10 +16,10 @@
 // not a goal, and neither are tests that pin usage text.
 // assets/scripts/lifecycle.sh and assets/scripts/merge.sh are bridges: they
 // only exec this binary, and refuse the call when there is none to run.
-// pr-status-label.sh writes the status: label in shell and takes its value from
-// `gctk pr-status`, the one derivation the label and the helm board share, so
-// when the binary is absent or stale it leaves the label unchanged rather than
-// deriving one in shell.
+// pr-status-label.sh writes the status: and held: labels in shell and takes
+// their values from `gctk pr-status`, the one derivation the labels and the helm
+// board share, so when the binary is absent or stale it leaves the labels
+// unchanged rather than deriving them in shell.
 package main
 
 import (
@@ -33,7 +33,7 @@ import (
 const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
   gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
-  gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
+  gctk pr-status <verb> [flags]   PR status working|merging|needs-review|needs-attention (services/gctk/prstatus)
   gctk rig <verb> [flags]         actions on the rig: run a check's command and record its result against the commit
   gctk version                    the revision this binary was built from
 

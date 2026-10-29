@@ -59,8 +59,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
    other anchor's too. Where this arm changes an anchor's posture value, it also
-   re-derives that PR's `status:` label, so an approval moves the label in the
-   pass that records it
+   re-derives that PR's `status:` and `held:` labels, so an approval moves them
+   in the pass that records it
    ([state-machine.md](state-machine.md#the-status-label-github-projection)).
 
    Its cost follows the PRs that moved, not the PR set. One paginated GraphQL
@@ -131,6 +131,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
+   record how many of its review threads wait on the city's answer
+   (`pr.unanswered_threads`, which the labels and the board read for
+   `held: review` and the merge does not), then
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
    that the merge makes no `generated/seed-audit` render stale, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
@@ -205,7 +208,28 @@ the cadence — the arms run whether or not any refinery session is awake.
    refinery's host. Any other file, or a probe that cannot answer, holds the
    merge and files one visit per PR under `seed-audit-merge-gate.<n>`, naming
    each file and why it failed. Nothing is routed from here: the way out is to
-   bring the head branch current with its base, re-render, and push.
+   bring the head branch current with its base, render what the branch moves
+   (`render-seed-audit.sh --since origin/<base>`), and push.
+
+   A file the base is already stale in went stale with no merge behind it,
+   since this check holds every merge that would make one stale. What moves
+   such a file is the `gc` binary: the agents and recipes gc's own packs
+   define, and this pack's formulas that extend one of them, render whatever
+   the installed build emits, so a newer build makes them stale on every branch
+   at once. The check names those files
+   (`--base-stale-out`), and the arm hands them to `seed-audit-reaudit.sh`,
+   which slings the one bead that re-renders the default branch and lands the
+   new text in a pull request of its own. While that bead is live, a later
+   merge that finds the same files files nothing more. The merge does not wait
+   on the hand-off, whatever it answers. A branch's own commits add none of
+   that text: the pre-commit hook and the remedy above render `--since` a
+   revision, which keeps each file the change does not move as that revision
+   has it. The exceptions are a file the branch re-rendered itself, as the
+   re-audit does, and a page gc added or removed while the branch moves
+   `INDEX.md`, which lists every page. The re-rendered file is rendered fresh,
+   so when gc moves again before the re-audit merges, the same remedy renews
+   its text, and the held merge clears. The page goes with the index, so the
+   index lists no page the merge leaves out.
 
    What the artifact commits is chosen to stay out of the queue's way. A line
    that moves on every edit to one agent's prompt, committed beside the lines
@@ -289,7 +313,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    rework child or visit and opens the same validation pass arm 7 would, then
    stops — no write-back sweep, no external-fact reconciliation, none of the
    arms that belong at the tail. A batch it routes is live work on the anchor,
-   which the `status:` label reads, so it re-derives that PR's label as it
+   which the `status:` label reads, so it re-derives that PR's labels as it
    routes. Arm 7 still runs the routing idempotently (a
    landed batch's watermark and `pr_comment_disposition` make the re-run a
    no-op) and still owns the write-back and the terminal-state records. Its rc

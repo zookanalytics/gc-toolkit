@@ -155,9 +155,7 @@ names what failed, and close this step.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -230,9 +228,7 @@ why it matters / the fix, `file`, and `line` or range), `evidence` (what you
 read), `read_only_enforcement` (`baseline_command`, `after_command`,
 `passed`), `mutations_delta` (empty if none).
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack}"
 # LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
 # you (a direct single-step claim, so the claimed id IS this lane step). Write
@@ -292,9 +288,7 @@ names what failed, and close this step.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -367,9 +361,7 @@ why it matters / the fix, `file`, and `line` or range), `evidence` (what you
 read), `read_only_enforcement` (`baseline_command`, `after_command`,
 `passed`), `mutations_delta` (empty if none).
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack}"
 # LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
 # you (a direct single-step claim, so the claimed id IS this lane step). Write
@@ -435,9 +427,7 @@ rather than approve on one lane.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -517,9 +507,7 @@ whose problems it lists, wrote nothing, so re-run it corrected. Never post the
 review yourself, write to the anchor, file beads, or run
 `gh pr review --approve`.
 ```bash
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/signoff.sh" ] || SCRIPTS=""
 "${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
 ```
 
@@ -533,9 +521,7 @@ restore its route from `metadata.review_pool` and drain.
 step through step-close.sh in forward order; the lanes closed their own beads,
 so those report "not this session's to close". Never close `workflow-finalize`.
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack}"
 for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
   "$SC" --step "mol-review-quorum-signoff.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"

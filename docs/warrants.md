@@ -151,15 +151,25 @@ shares only the word ([authority-map.md](authority-map.md)).
     removes its prep worktree after a gate that can leave files in it and after
     a landing on the target, and it clears a leftover of an interrupted
     iteration without knowing which bead staged it.
+  - With `auto_reap_closed_bead_worktrees`, the reconciler removes a per-bead
+    worktree once its work bead is closed. With `auto_prune_worker_dir`, it
+    removes a pool session's `worker_dir` once the session bead is closed
+    (`DaemonConfig` in `docs/reference/config.md`). Each removal refuses a
+    worktree with uncommitted changes or a stash, and each acts only under the
+    city's `.gc/worktrees/` tree, where the reaper takes a worktree's bead from
+    its directory name (`reapClosedBeadWorktrees` in
+    `cmd/gc/bead_worktree_reaper.go`). Neither reaches the prep worktree.
   - No formula or order in Gas City's bundled `core` pack calls `gc worktree`.
     No pack in `gastownhall/gascity-packs` calls it either, and the gastown
     pack's `mol-refinery-patrol` stages every bead on one local `temp` branch
     and records nothing about which bead that branch holds.
   - In `gastownhall/beads`, `bd worktree create` checks out a branch in the
     worktree it adds and records no bead.
-- **Verified.** 2026-10-24, at `gastownhall/gascity` main 47b36c3a0f1b,
-  `gastownhall/gascity-packs` main 8a93f3d12d92 and `gastownhall/beads` main
-  12c20a6e8170.
+- **Verified.** 2026-10-27, at `gastownhall/gascity` main f11f48825520,
+  `gastownhall/gascity-packs` main dac12a4a802c and `gastownhall/beads` main
+  5011528b3ad5. The gastown pack was also read at 66c672b5ed00, the release
+  Gas City pins (`PublicGastownPackVersion` in
+  `internal/config/public_packs.go`).
 - **Retires when.** Gas City can bind a detached worktree to a bead and remove
   the attempt that created it whatever state it is in, for example through
   `gc worktree`. The record's readers then move onto that primitive, and the
@@ -183,3 +193,130 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Verified.** 2026-10-24, at `gastownhall/gascity` main 7cff3a265.
 - **Retires when.** Gas City can set a merge strategy for a target branch, so the
   rule becomes a line of the rig's config.
+
+## Machine axis
+
+- **Covers.** The `pr.machine`, `pr.machine_cause` and `pr.machine_reason`
+  keys: `[machine_axis]` in `lifecycle/lifecycle.toml`, with its `machines`
+  and `causes` lists, and the keys' entry in its `[metadata.pr_round_trip]`
+  table. Their writers: `recordMachine`, `recordBlocked` and `handleBlocked`
+  in `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh`
+  runs, and the "record the pass's own verdict on the anchor" section of
+  `assets/scripts/gate-ensure.sh`. The readers of the causes: package
+  `services/gctk/prstatus`, and the helm board's machine reads in
+  `services/helm/internal/board/derive.go`.
+- **Stands in for.** A merge-readiness verdict kept on the bead whose pull
+  request it is, which tells a block no automated actor will clear from a wait
+  the city is acting on, with the block's cause as a value a reader keys on.
+- **Evidence.**
+  - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor
+    classifies an open PR from its draft flag, its merge state and its check
+    rollup alone, so every `BLOCKED` PR is `blocked` and actionable, a
+    required check still running included (`classifyPullRequest` in
+    `internal/githubmonitor/monitor.go`). It reads no branch rule, review
+    thread or approval, and it records its class on a repair bead it files
+    (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`), not on the bead
+    whose PR it is. Only `gc github pr backfill` runs it (`gc github pr
+    backfill` in `docs/reference/cli.md`, and `GitHubPRMonitor` in
+    `docs/reference/config.md`).
+  - The one state dimension Gas City reads as a bead label is `hold`, for
+    its dispatch holds `hold:mayor` and `hold:external`
+    (`engdocs/contributors/hold-label-conventions.md`, and
+    `DispatchHoldLabels` in `internal/beadmeta/hold_labels.go`). Its other
+    label reads are flags and markers, such as a convoy's `owned`
+    (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`), and none of them is
+    a verdict tied to a head.
+  - In `gastownhall/beads`, labels as state keep one value per dimension,
+    read on its own, with an event bead as its history (*Labels as State
+    Cache* in `docs/core-concepts/labels.md`). `bd set-state` refuses an
+    empty value, and no state command removes a dimension (`setStateCmd`
+    and `runSetState` in `cmd/bd/state.go`), so a cause could not be
+    cleared when the verdict it qualifies moves on. A custom status (*Custom
+    Statuses and Types* in `docs/reference/configuration.md`) would take the
+    place of the bead's own status.
+  - In `gastownhall/gascity-packs`, no pack reads a branch's rules or a
+    check's required flag, and none records why a PR cannot merge as a value
+    a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
+    lifecycle in `pr_state`, a key of its own.
+  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37,
+  `gastownhall/gascity-packs` main 5bf643ca55bd with the packs Gas City
+  bundles at 66c672b5ed00, and `gastownhall/beads` main e46de42b3c59.
+- **Retires when.** Gas City records a pull request's merge readiness where a
+  reader of the PR's own bead finds it, and tells a required check still
+  running from a block, for example once its PR monitor reads the base
+  branch's rules. The axis then moves onto that record.
+
+## Owed status label clear
+
+- **Covers.** The `status_label_clear_owed` key, in the
+  `[metadata.pr_status_label]` table of `lifecycle/lifecycle.toml`. Its
+  writers: `clearStatusLabel` in `services/gctk/internal/cli/merge.go`, and
+  `clear_status_label` in `assets/scripts/pr-facts.sh`. Its reader: the
+  "retry the status: label clears that terminal records still owe" section of
+  `assets/scripts/pr-facts.sh`.
+- **Stands in for.** A retry of a failed write to an outside service, kept
+  until a later pass lands it.
+- **Evidence.**
+  - In `gastownhall/gascity`, a failed order is not retried ("No retry on
+    dispatch failure" in `engdocs/architecture/orders.md`), and
+    `[steps.retry]` retries a formula step's attempt within its run (section
+    3.2 of `docs/reference/specs/formula-spec-v2.md`). Gas City keeps no
+    outbox or retry queue that a pack can hand a write to an outside
+    service. Its usage facts retry a failed write with a marker of their
+    own: a fact whose sink fails leaves the session bead's
+    `usage_compute_emitted_at` marker unset for the next reconcile tick
+    (`emitComputeFactForBead` in `cmd/gc/usage_compute.go`).
+  - In `gastownhall/gascity-packs`, a pack that retries such a write keeps a
+    marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
+    the `oversight-rig` pack's `delivered` label.
+  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 and
+  `gastownhall/gascity-packs` main 5bf643ca55bd.
+- **Retires when.** Gas City ships a retry that a pack can hand a failed write
+  to an outside service, such as an outbox that a later pass drains.
+
+## Unanswered review threads
+
+- **Covers.** The `pr.unanswered_threads` key, in the
+  `[metadata.pr_round_trip]` table of `lifecycle/lifecycle.toml`. Its writer:
+  `recordUnansweredThreads` and `unansweredThreads` in
+  `services/gctk/internal/cli/merge.go`, which `assets/scripts/merge.sh` runs.
+  The definition it counts by: `gc_thread_awaits_answer` in
+  `assets/scripts/pr-post.sh`, which reads a thread's posts through
+  `live_comments` in `assets/scripts/review-dismissal.sh` and sets aside a post
+  carrying the reaction the write-back in `assets/scripts/pr-facts.sh` marks a
+  handled post with (`WB_RESOLVED_REACTION`). Its readers:
+  `unansweredFeedback` in package `services/gctk/prstatus`,
+  `gctk pr-status derive` in `services/gctk/internal/cli/prstatus.go`, and
+  `phaseFacts` in the helm board's `services/helm/internal/board/derive.go`.
+- **Stands in for.** A record of a pull request's review threads kept on the
+  bead whose pull request it is, which says whether review feedback still
+  waits on an answer.
+- **Evidence.**
+  - In `gastownhall/gascity`, the `gc` binary's pull request readiness monitor
+    reads each open PR's draft flag, merge state, head and check rollup
+    (`pullRequestsQuery` in `internal/githubmonitor/client.go`, and
+    `classifyPullRequest` in `internal/githubmonitor/monitor.go`), and records
+    its class on a repair bead it files. No source under `cmd/`, `internal/` or
+    `examples/`, tests aside, reads a pull request's reviews, review threads or
+    review comments.
+  - A webhook rule hands one verified provider event to an order or a
+    conversation and keeps no state of its own
+    ([WebhookRule](https://docs.gascity.com/reference/config#webhookrule) in
+    the configuration reference).
+  - In `gastownhall/beads`, the example formula `gh-pr-review` tells the agent
+    running it to check for unresolved review threads, and records none
+    (`examples/formulas/gh-pr-review.formula.toml`).
+  - In `gastownhall/gascity-packs`, no pack reads whether a review thread is
+    resolved or answered. The `compound-engineering` pack's
+    `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
+    keeps no record of it.
+  - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 with
+  the `gastown` pack it bundles at 66c672b5ed00, `gastownhall/gascity-packs`
+  main 5bf643ca55bd, and `gastownhall/beads` main e46de42b3c59.
+- **Retires when.** Gas City records a pull request's review threads where a
+  reader of the PR's own bead finds them, for example once its readiness
+  monitor reads review threads, or a webhook receiver keeps their state from
+  GitHub's review thread events. The count then moves onto that record.

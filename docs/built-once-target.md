@@ -355,7 +355,7 @@ Each item is carried by the bead it names.
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
 | P3 | One decline call replaces the 20 copies of the decline sequence in step text, under rule 2 | 20 copies, 29 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
-| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.9k lines of shell in step text, 52 tests of 16.4k lines | tk-udqthpx states the rule and adds its lint, and tk-1tfzr71.12, .19 and .20 apply it to the formulas they rewrite | this page landing, for tk-udqthpx |
+| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.9k lines of shell in step text, 52 tests of 16.4k lines | tk-1tfzr71.12, .19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
 ## The rules
@@ -364,13 +364,14 @@ Every change follows these rules.
 
 1. **Code the deletion plan retires gets no new work.** The plan is the
    schedule above, and [`tools/deletion-plan.tsv`](../tools/deletion-plan.tsv)
-   lists the whole files it retires, each with the bead that retires it. A
-   problem found in that code goes to the bead that retires it, as a note
-   there, and the problem's own bead waits on that retirement. A problem that
-   hurts the operator now gets the smallest stopgap and no new test suite.
-2. **Step text holds no procedures.** A formula step calls a tested script, and
-   anything two steps need is one script. Existing step text changes at its own
-   rewrite.
+   lists the whole files it retires, each with the bead that retires it.
+   [AGENTS.md](../AGENTS.md) says what becomes of a problem found in that
+   code. Every session that works in a gc-toolkit worktree loads it, a first
+   reaction's included, and the mechanik's prompt points at it.
+2. **Step text holds no procedures.**
+   [pack-authoring.md](pack-authoring.md#step-text-calls-a-tested-script)
+   states the rule where formulas are written, and `tools/lint-step-text.sh`
+   fails a change that adds a procedure to step text.
 3. **Every PR shows its size change.** The size line is computed from git, from
    the merge base to the head: the net runtime and test lines, by subsystem. It
    names separately the lines the change adds to code the plan retires, and the
@@ -378,11 +379,6 @@ Every change follows these rules.
    history. The PR's CI test run time can sit beside it as information.
    `tools/measure.sh --pr` computes it, and each PR's managed summary ends
    with it as its Size section.
-
-tk-udqthpx states rules 1 and 2 where agents file and route work and where they
-write formula steps, and adds a lint that flags a procedure in the lines a
-formula change adds. Until it lands, an agent meets those two rules only on
-this page.
 
 ## Keeping it true
 

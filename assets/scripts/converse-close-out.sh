@@ -36,9 +36,7 @@ _close_rc=$?
 # not mask the close's own exit code.
 if [ "$_close_rc" -eq 0 ]; then
   PVC=""
-  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$cand/assets/scripts/pr-visit-comment.sh" ] && { PVC="$cand/assets/scripts/pr-visit-comment.sh"; break; }
-  done
+  [ -x "$SELF_DIR/pr-visit-comment.sh" ] && PVC="$SELF_DIR/pr-visit-comment.sh"
   [ -n "$PVC" ] && "$PVC" close --visit "$VISIT" --subject "$SUBJECT" --outcome "$OUTCOME" --summary "$DETAIL" || true
 fi
 exit "$_close_rc"

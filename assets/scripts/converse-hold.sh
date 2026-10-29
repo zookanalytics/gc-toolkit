@@ -31,8 +31,9 @@
 # default it does not.
 #
 # Every write lands on the subject or the visit. The writers (gc-helm.sh,
-# lifecycle.sh) are SEARCHED for on the candidate roots, never assumed, because
-# $GC_RIG_ROOT is the rig that imported this agent and may hold no assets/.
+# lifecycle.sh) are this script's siblings in the copy of the pack that is
+# running, never a script under $GC_RIG_ROOT, which is the rig that imported
+# this agent and may hold no assets/.
 #
 # The visit is read before the first write, and a visit that cannot be read
 # stops the hold (exit 1). Every demand this hold files carries the visit's
@@ -120,10 +121,8 @@ SUBJECT="${SUBJECT:-}"
 command -v jq >/dev/null 2>&1 || { echo "converse-hold: jq is required" >&2; exit 2; }
 command -v gc >/dev/null 2>&1 || { echo "converse-hold: gc is required" >&2; exit 2; }
 HELM=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
-done
-[ -n "$HELM" ] || { echo "converse-hold: NO TAKEAWAY WRITER (gc-helm.sh) on any candidate root. Neither the headline nor the demand can land without it, and nothing was written, so do NOT post the framing. Raise it in the thread." >&2; exit 2; }
+[ -x "$HERE/gc-helm.sh" ] && HELM="$HERE/gc-helm.sh"
+[ -n "$HELM" ] || { echo "converse-hold: NO TAKEAWAY WRITER (gc-helm.sh) beside $0. Neither the headline nor the demand can land without it, and nothing was written, so do NOT post the framing. Raise it in the thread." >&2; exit 2; }
 
 # >>> hold-headline-length-gate
 # The takeaway is the headline "holding — <need>", and gc-helm.sh refuses one
@@ -202,9 +201,7 @@ DEMAND_TOPIC=()
 # moving. A pre-PR (unanchored) subject takes the demand itself, because its
 # `held` marker needs that edge.
 LC=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
-done
+[ -x "$HERE/lifecycle.sh" ] && LC="$HERE/lifecycle.sh"
 STATE=""
 [ -n "$LC" ] && STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
 # Gate the VISIT only when $SUBJECT is PROVABLY anchored — a readable PR-anchor
@@ -315,7 +312,7 @@ if [ -n "$HOLD_MERGE" ] && [ "$GATED" = "$VISIT" ]; then
   fi
 fi
 # <<< hold-merge-opt-in
-if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER on any candidate root — the demand gates the subject and keeps it blocked, but no 'held' lifecycle marker is recorded"
+if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER (lifecycle.sh) beside $0 — the demand gates the subject and keeps it blocked, but no 'held' lifecycle marker is recorded"
 elif [ "$STATE" = "unanchored" ]; then
   "$LC" transition "$GATED" --to held --route human \
     || echo "HELD TRANSITION FAILED on $GATED — the hold is prose-only; re-run it before you wait"

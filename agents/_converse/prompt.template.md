@@ -130,15 +130,12 @@ The loop, every visit:
    verdicts applies. Resolve it once, then let it decide:
 
    ```bash
-   CONV=""
-   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-     [ -x "$cand/assets/scripts/converse-claim.sh" ] && { CONV="$cand/assets/scripts"; break; }
-   done
+   CONV=$(gc {{ .BindingName }} scripts-dir) && [ -x "$CONV/converse-claim.sh" ] || CONV=""
    if [ -z "$CONV" ]; then
      # Nothing here can tell a held visit from a fresh one without it, and
      # claiming raw would work a held visit to its close.
      gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: converse-claim.sh missing" \
-       -m "No converse-claim.sh on any candidate root; this converse session cannot claim. Not claiming raw."
+       -m "gc {{ .BindingName }} scripts-dir named no pack holding converse-claim.sh; this converse session cannot claim. Not claiming raw."
      gc runtime drain-ack; exit 0
    fi
    # --sh sets ACTION / VISIT / SUBJECT / REASON and echoes the verdict and the

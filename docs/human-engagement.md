@@ -214,7 +214,7 @@ data plane never blocks an intake.
 
 **Two paths, and the choice is not a preference.** The preferred path files a
 first reaction at the new subject. The reaction triages the subject and takes
-one of its five dispositions. On the two that put the subject to the operator, a
+one of its dispositions. On the two that put the subject to the operator, a
 ruling or a recommend, it files a human gate on the subject, and
 `gate-visit-sweep` files the visit that resolves it on its next pass (see "How a
 sitting ends" below). A

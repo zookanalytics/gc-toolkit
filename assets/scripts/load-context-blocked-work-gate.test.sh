@@ -73,7 +73,9 @@ case "$GATE" in
   *)    ok  "snippet is backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
 
-printf '%s\n' "$GATE" > "$TMP/gate.sh"
+# The pour renders {{binding_prefix}}, the binding the city imports the pack
+# under plus a dot; this city's is gc-toolkit.
+printf '%s\n' "${GATE//'{{binding_prefix}}'/gc-toolkit.}" > "$TMP/gate.sh"
 bash -n "$TMP/gate.sh" \
   && ok "extracted gate is syntactically valid bash" \
   || bad "extracted gate failed bash -n"
@@ -86,6 +88,7 @@ bash -n "$TMP/gate.sh" \
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}"; exit 0 ;;
 esac
@@ -94,8 +97,8 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# run-cancel.sh, escalate.sh, deferred-dispatch.sh resolved out of
-# $GC_PACK_DIR exactly as the arm resolves them. Each records its verb into the
+# run-cancel.sh, escalate.sh, deferred-dispatch.sh in the pack the fake gc
+# names for `gc gc-toolkit scripts-dir`, $STUB_PACK. Each records its verb into the
 # ordered trace and its argv where the reason/target assertions can read it,
 # and returns a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
@@ -120,7 +123,7 @@ ARM
 chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" \
          "$TMP/pack/assets/scripts/escalate.sh" \
          "$TMP/pack/assets/scripts/deferred-dispatch.sh"
-export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
+export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 
 # run <work-bead-json> -> prints "<rc>|<ordered verb log>"
 #   FAKE_*_RC control each stub's exit; FAKE_UPDATE/CANCEL/ESC/ARM capture argv.

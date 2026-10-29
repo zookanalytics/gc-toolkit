@@ -313,7 +313,13 @@ case "$sub" in
           else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
-  *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
+  *)
+    # `gc <binding> scripts-dir`: gc names the pack it loaded for the binding the
+    # city imports it under. A suite names that pack in STUB_PACK.
+    if [ "$sub" = gc-toolkit ] && [ "${1:-}" = scripts-dir ] && [ -n "${STUB_PACK:-}" ]; then
+      printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+    fi
+    echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 verb="${1:-}"; shift || true
 # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
@@ -697,11 +703,14 @@ case "$verb" in
               else                  { if (b == id) print a "|" ty "|" issue "|" dep }   # legacy: who names me
             }' "$D"
         done)
+        # The rows reach jq through a pipe. A long dependency list passes the
+        # 128 KiB Linux allows any one argument, and bash writes a large
+        # here-string to a temp file, which a suite's file-size limit refuses.
         if [ "${#qids[@]}" -gt 1 ] && [ "$dir" = "down" ]; then
-          jq -c --arg rows "$rows" '[ $rows | split("\n")[] | select(. != "") | split("|")
+          printf '%s' "$rows" | jq -c --rawfile rows /dev/stdin '[ $rows | split("\n")[] | select(. != "") | split("|")
             | {issue_id: .[2], depends_on_id: .[3], type: .[1]} ]' -n || exit $?
         else
-          jq -c --arg rows "$rows" '
+          printf '%s' "$rows" | jq -c --rawfile rows /dev/stdin '
             [ $rows | split("\n")[] | select(. != "") | split("|") | {id: .[0], t: .[1]} ] as $want
             | [ .[] | . as $b | $want[] | select(.id == $b.id) | ($b + {dependency_type: .t}) ]' "$S" || exit $?
         fi
@@ -1019,6 +1028,15 @@ case "$sub" in
         done < <(grep -lF -- "\"$1\"" "$G"/threads_*.json 2>/dev/null)
         return 1
       }
+      # GraphQL answers only the fields a query names, so a review thread's
+      # comment keeps its review's state, which a dismissal is read from, and its
+      # reactionGroups only for a query that asks for each. asked($q) trims a
+      # list of comments to what the query $q names.
+      ASKED_JQ='def asked($q):
+        ($q | test("pullRequestReview\\s*\\{[^}]*\\bstate\\b")) as $st
+        | ($q | test("\\breactionGroups\\b")) as $rx
+        | map(if $st or (.pullRequestReview | type) != "object" then . else .pullRequestReview |= del(.state) end
+              | if $rx then . else del(.reactionGroups) end);'
       case "$gqquery" in
         *pullRequests\(states:OPEN*)
           # merge.sh's visit-order read: every open PR, served as one page from
@@ -1091,13 +1109,19 @@ case "$sub" in
         *reviewThreads*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
-          # `first: 100` is a real cap, so a thread longer than a page comes back
-          # cut to one — which is the whole reason the caller tops such a thread
-          # up. A stub handing back the full list would make that read look
-          # unnecessary and hide the resolve it gets wrong.
-          jq -c '{data: {repository: {pullRequest: {
+          # A thread's comments come back cut to the window the query names, its
+          # oldest for `first: N` and its newest for `last: N`, as the API cuts
+          # them. So a thread longer than a window comes back holding exactly one,
+          # which is the whole reason a caller reads such a thread again to its
+          # end. A stub handing back the full list would make that read look
+          # unnecessary and hide the answer it gets wrong.
+          jq -c --arg q "$gqquery" "$ASKED_JQ"'
+            (($q | capture("comments\\((?<end>first|last):(?<n>[0-9]+)")) // {end: "first", n: "100"}) as $w
+            | ($w.n | tonumber) as $n
+            | {data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
-                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])
+                  | if $w.end == "last" then .[-$n:] else .[0:$n] end | asked($q)) ]}}}}}' "$f"
           # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
           # hands back when a later page came back garbled.
           [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"
@@ -1109,9 +1133,9 @@ case "$sub" in
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           # The caller pages this one to exhaustion, so it answers with the whole
           # thread — the state the real API reaches after following its cursor.
-          jq -c --arg t "$tid" '{data: {node: {comments: {
+          jq -c --arg t "$tid" --arg q "$gqquery" "$ASKED_JQ"'{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
-              nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+              nodes: ([ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ] | asked($q))}}}}' "$f"
           exit 0 ;;
         *commits\(first:100,after:*)
           # The PR's commits, which a fix's answer cites. Served from the PR
@@ -1340,7 +1364,9 @@ case "$sub" in
     if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi ;;
   label)
     # The repo's label set, so `pr edit --add-label` can refuse one that was
-    # never created. `list` serves it (honouring -q); `create` appends if absent.
+    # never created. `list` serves it (honouring -q); `create` appends if absent;
+    # `edit` rewrites a label's description, refusing one that does not exist,
+    # as real gh does. Each keeps the description it was given.
     v="${1:-}"; shift || true
     LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
     case "$v" in
@@ -1348,12 +1374,21 @@ case "$sub" in
         lq=""
         while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; lq="${1:-}" ;; esac; shift || true; done
         if [ -n "$lq" ]; then jq -r "$lq" "$LBLS"; else cat "$LBLS"; fi ;;
-      create)
+      create|edit)
         name="${1:-}"; shift || true
-        [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
-        if ! jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
+        desc=""
+        while [ $# -gt 0 ]; do case "$1" in --description) shift; desc="${1:-}" ;; esac; shift || true; done
+        if [ "$v" = create ]; then
+          [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 && exit 0
           t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
-          jq --arg n "$name" '. + [{name: $n}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+          jq --arg n "$name" --arg d "$desc" '. + [{name: $n, description: $d}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+        else
+          [ "${STUB_LABEL_EDIT_RC:-0}" = "0" ] || exit "${STUB_LABEL_EDIT_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 \
+            || { echo "gh: label '$name' not found" >&2; exit 1; }
+          t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
+          jq --arg n "$name" --arg d "$desc" 'map(if .name == $n then .description = $d else . end)' "$LBLS" > "$t" && mv "$t" "$LBLS"
         fi
         exit 0 ;;
       *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;

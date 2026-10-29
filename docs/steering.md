@@ -45,7 +45,11 @@ A bead may be routed or armed to a work pool only when one of these holds:
 - it is a member of an epic, which means it has a parent-child parent;
 - it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
 - it is an emergency, a red main or a broken gate, checked rather than asserted;
-- the operator routed it, through a sitting, a hand sling or an Accept.
+- the operator routed it, through a sitting, a hand sling or an Accept;
+- it is the seed audit's re-audit, the one bead `seed-audit-reaudit.sh` slings
+  to re-render the default branch's `generated/seed-audit` once the merge gate
+  finds files there that the `gc` binary moved, a route the operator made
+  standing ([refinery-merge-cadence.md](refinery-merge-cadence.md)).
 
 Every other bead waits for placement. A bead held this way carries
 `placement=pending` and no route and no arm, so no pool is offered it.
@@ -61,8 +65,10 @@ Each writer that files or disposes new work follows the rule.
   route. The blocked exit's `--then-route` arms a dispatch only for a bead the
   rule admits. Any other bead it marks, and arms nothing, while its wait still
   lands as a `blocks` edge. The close exit keeps its validating closer, because a
-  close shrinks the queue. Work that is a named agent's own (`--assign`,
-  `--then-assign`) is not pool work, so the rule does not read it.
+  close shrinks the queue. The until exit routes, arms and marks nothing, because
+  its bead closes once the bead that ends its job lands. Work that is a named
+  agent's own (`--assign`, `--then-assign`) is not pool work, so the rule does
+  not read it.
 - **The witness** files mail about a pack defect as a bug marked
   `placement=pending` and routed to no pool (`formulas/mol-witness-patrol.toml`,
   the `bug-file` block).
@@ -266,15 +272,19 @@ ancestors.
 
 ### What reads a park as a fault
 
-These readers report a held bead as a fault:
+`doctor/check-blocked-work-armed` reports a held bead as a fault. It reads
+`bd blocked`, which lists each member a park holds, and flags one that has
+neither a route nor an arm. Its remedy, arming the member, leaves the member
+held until the park is released, since deferred dispatch reads its ancestors'
+blockers.
 
-- `doctor/check-blocked-work-armed` reads `bd blocked`, which lists each member
-  a park holds, and flags one that has neither a route nor an arm. Its remedy,
-  arming the member, leaves the member held until the park is released, since
-  deferred dispatch reads its ancestors' blockers.
-- The helm board files an epic whose open children sit idle, with nothing in
-  flight, under STALLED, so a parked epic reads as stalled. The board's word
-  "parked" means a bead carrying a takeaway, not a park.
+The helm board reads a park as a hold, not a fault. It reads the blockers of
+each member and of the parents above it on the board, so a member under a park
+that nothing else holds counts as parked for the operator rather than
+stranded, and the parked epic names the gate that holds it. A member that has a
+row of its own reads parked there too and names the gate, so the board asks for
+no disposition of it while the park holds it. The board's `parked` kind is
+something else: a bead the board lists because it carries a takeaway.
 
 ### Where a park goes
 

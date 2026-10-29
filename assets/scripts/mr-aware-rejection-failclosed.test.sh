@@ -76,11 +76,12 @@ esac
 # $FAKE_META, so a block that reads the bead itself is caught rather than
 # served. rejection-repool.sh: records its argv, one argument per field, prints
 # the row it read ($FAKE_META, or nothing when FAKE_NO_ROW=1) on stdout, and
-# exits $FAKE_REPOOL_RC; it lives under a fake rig root so the block's candidate
-# resolution finds it.
+# exits $FAKE_REPOOL_RC; it lives in a stub pack, which gc names for
+# `gc gc-toolkit scripts-dir`.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show") printf 'SHOW|%s\n' "$3" >> "$FAKE_LOG"
              printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
@@ -98,17 +99,17 @@ REPOOL
 chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/rejection-repool.sh"
 export PATH="$TMP/bin:$PATH"
 
-# run <block#> <meta-json|-> [rig-root] [repool-rc] [shell] -> "<rc>|<log>"
+# run <block#> <meta-json|-> [pack] [repool-rc] [shell] -> "<rc>|<log>"
 # A meta of "-" is a repool that read no row.
 run() {
   : > "$TMP/log"
   local rc=0 norow=0 meta="$2"
   [ "$meta" = "-" ] && { norow=1; meta='{}'; }
-  # cwd = $TMP (not a git repo) so the block's `git rev-parse --show-toplevel`
-  # fallback cannot resolve the real repo and shadow the stub repool.
+  # cwd = $TMP (not a git repo), and no rig root is set, so only the pack gc
+  # names can hold a repool.
   ( cd "$TMP" && \
     WORK=tk-work REJECT_REASON="conflict with main; resume by merge" \
-    GC_RIG_ROOT="${3-$TMP/rig}" GC_CITY_PATH="" \
+    STUB_PACK="${3-$TMP/rig}" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_META="$meta" FAKE_NO_ROW="$norow" FAKE_REPOOL_RC="${4:-0}" FAKE_LOG="$TMP/log" \
     "${5:-bash}" "$TMP/run-$1.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"

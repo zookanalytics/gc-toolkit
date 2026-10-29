@@ -15,7 +15,7 @@ supervisor's API (`internal/gcbd`).
 |---|---|---|
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares | `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
-| `pr-status` | a PR's status tri-state (working, needs-review or needs-attention), the one derivation the `status:` label and the helm board share | `internal/cli/prstatus.go`, `prstatus` |
+| `pr-status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share | `internal/cli/prstatus.go`, `prstatus` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
 
@@ -40,10 +40,10 @@ one and a refused merge pass as `merge rc=1`, and retries both on its next
 pass. A fresh city has no binary until that order's first build, and a city
 whose build failed keeps serving the last good binary.
 
-`assets/scripts/pr-status-label.sh` writes the `status:` label in shell and
-takes the value from `gctk pr-status derive`. It resolves the binary the same
-way, and when there is none, or the binary is too old to carry `pr-status`, it
-leaves the label unchanged.
+`assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
+shell and takes their values from `gctk pr-status derive`. It resolves the
+binary the same way, and when there is none, or the binary is too old to carry
+`pr-status` or its `--json`, it leaves the labels unchanged.
 
 ## rig
 

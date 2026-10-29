@@ -242,7 +242,8 @@ assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 tools/gc-proactive.sh
-assets/scripts/until-resolved.sh"
+assets/scripts/until-resolved.sh
+assets/scripts/blocker-holder.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"

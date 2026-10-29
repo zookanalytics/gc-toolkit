@@ -193,21 +193,20 @@ eq "$(grep -c 'bd update' "$STUB_GC_LOG")" 0 "no refused call wrote anything"
 echo "# the callers, as the formulas ship them"
 ROOT="$(cd "$HERE/../.." && pwd)"
 # block <toml> <marker> : the marked block, its placeholders filled for check
-# lint and trackers tk-t1 and tk-t2.
+# lint and trackers tk-t1 and tk-t2, and the binding the pour renders.
 block() {
   awk -v m="$2" '$0 ~ ("# >>> " m "$") {f = 1; next} $0 ~ ("# <<< " m "$") {f = 0} f' "$ROOT/formulas/$1" \
-    | sed -e 's/^CHECK=".*"$/CHECK="lint"/' -e 's/^TRACKERS=".*"$/TRACKERS="tk-t1 tk-t2"/'
+    | sed -e 's/^CHECK=".*"$/CHECK="lint"/' -e 's/^TRACKERS=".*"$/TRACKERS="tk-t1 tk-t2"/' \
+          -e 's/{{binding_prefix}}/gc-toolkit./g'
 }
-# The pack the callers find the writer in.
+# The pack the callers find the writer in, which the stub gc names.
 PACK="$TMP/pack"
 mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh"
-mkdir -p "$TMP/city/rigs"
-ln -s "$PACK" "$TMP/city/rigs/gc-toolkit"
 
 block mol-polecat-work.toml self-review-pre-existing > "$TMP/self-review.sh"
 [ -s "$TMP/self-review.sh" ] && ok "self-review-pre-existing extracts" || bad "self-review-pre-existing extracts"
 store '[{"id":"tk-w","status":"open","metadata":{}}]'
-( cd "$REPO" && env PATH="$REAL_PATH" GC_PACK_DIR="$PACK" WORK_BEAD_ID=tk-w bash "$TMP/self-review.sh" ) >/dev/null 2>&1
+( cd "$REPO" && env PATH="$REAL_PATH" STUB_PACK="$PACK" WORK_BEAD_ID=tk-w bash "$TMP/self-review.sh" ) >/dev/null 2>&1
 eq "$(value tk-w lint)" "$(mark "$WORK_HEAD" "$RL" tk-t1 tk-t2)" "the self-review marks lint's record at the worktree's HEAD on the work bead"
 
 block mol-refinery-patrol.toml refinery-pre-existing-mark > "$TMP/refinery.sh"
@@ -216,11 +215,11 @@ rec "$PREP" lint --command false
 RPL=$(recorded "$PREP" lint)
 store '[{"id":"tk-anchor","status":"open","metadata":{}},{"id":"tk-child","status":"open","metadata":{"anchor_bead":"tk-anchor"}},{"id":"tk-fresh","status":"open","metadata":{}}]'
 # From a directory outside any repo, as a patrol shell may be, so the rig root
-# and the city are the only places the block can find its pieces.
-( cd "$TMP" && env PATH="$REAL_PATH" GC_RIG_ROOT="$REPO" GC_CITY_PATH="$TMP/city" WORK=tk-child bash "$TMP/refinery.sh" ) >/dev/null 2>&1
+# names the rig, gc names the pack, and the cwd lends the block nothing.
+( cd "$TMP" && env PATH="$REAL_PATH" GC_RIG_ROOT="$REPO" STUB_PACK="$PACK" WORK=tk-child bash "$TMP/refinery.sh" ) >/dev/null 2>&1
 eq "$(value tk-anchor lint)" "$(mark "$PREP_HEAD" "$RPL" tk-t1 tk-t2)" "the refinery marks the prep worktree's lint record on a rework child's anchor"
 eq "$(value tk-child lint)" "" "…and not the child"
-( cd "$TMP" && env PATH="$REAL_PATH" GC_RIG_ROOT="$REPO" GC_CITY_PATH="$TMP/city" WORK=tk-fresh bash "$TMP/refinery.sh" ) >/dev/null 2>&1
+( cd "$TMP" && env PATH="$REAL_PATH" GC_RIG_ROOT="$REPO" STUB_PACK="$PACK" WORK=tk-fresh bash "$TMP/refinery.sh" ) >/dev/null 2>&1
 eq "$(value tk-fresh lint)" "$(mark "$PREP_HEAD" "$RPL" tk-t1 tk-t2)" "the refinery marks a work bead that is its own anchor"
 
 echo "---"

@@ -121,21 +121,24 @@ export interface Tile {
   priority: number | null;
   /** Bead ids belonging to OTHER rigs, scanned out of the anchor's prose. */
   cross_rig_refs: string[] | null;
-  /** Idle open children — unclaimed, not carried by a live workflow, and not parked. */
+  /**
+   * Stranded open children — unclaimed, not carried by a live workflow, and
+   * waiting on nothing: no open wait, no route, no arm.
+   */
   open_heads: string[] | null;
   dead_owner_heads: string[] | null;
   /**
-   * Open children that carry a board row of their own — routed to the operator,
-   * or holding a takeaway. Split out of `open_heads` so a parent cannot report
-   * a child that is waiting on a ruling as work nobody has picked up. `open`
-   * still counts them.
+   * Open children a person holds — each waits on an open park or demand gate,
+   * is routed to the operator, or carries a visit no one has engaged. A
+   * takeaway alone parks nothing. `open` still counts them.
    */
   parked_heads: string[] | null;
   /**
    * Beads this row depends on by a `blocks` edge, and the subset still open.
    * On a parked conversation these are the work a sitting routed out of it:
-   * `disposition_due` is true once every one of them has closed, which is the
-   * board's only way to tell a finished topic from a live hold (tk-2plde).
+   * `disposition_due` is true once every one of them has closed and nothing
+   * else holds or moves the bead, which is the board's only way to tell a
+   * finished topic from a live hold (tk-2plde).
    */
   waiting_on: string[] | null;
   waiting_on_open: string[] | null;
@@ -184,10 +187,14 @@ export interface Tile {
    * `'blocked'`, or `'unknown'`.
    *
    * `'blocked'` is a hold no automated actor will clear and no review verdict is
-   * owed on — an unresolved required review thread, a base gone BEHIND, or an
-   * unrouted blocker. It is owed by the operator (needs-attention), distinct from
-   * `'settled'`, which waits on a review or the merge pass. Its specific cause is
-   * spelled out in `needs`.
+   * owed on — an unresolved required review thread, a failed required check, a
+   * base gone BEHIND, a conflict whose merge-in a hold defers, a blocker no
+   * automated actor holds, or a branch rule the merge pass cannot name. It is
+   * owed by the operator (needs-attention), distinct from `'settled'`, which
+   * waits on a review or the merge pass. Its specific cause is spelled out in
+   * `needs`. A recorded blocked verdict reads `'blocked'` only while the rule
+   * `pr_phase` reads it by counts it, and `'progressing'` otherwise, since the
+   * next merge pass replaces it.
    *
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
    * same choice `waiting_unknown` makes on the gather side. A missing key means
@@ -292,17 +299,17 @@ export interface Tile {
   pr_branch_url: string;
   /**
    * This merge anchor's PR status. On a live anchor it is who must act next —
-   * `'working'`, `'needs-review'`, or `'needs-attention'` — the same status:
-   * taxonomy the GitHub PR list carries, so the board and the label read one
-   * vocabulary. On a closed (`DONE`) anchor it is the PR's resolved state,
+   * `'working'`, `'merging'`, `'needs-review'`, or `'needs-attention'` — the
+   * same status: taxonomy the GitHub PR list carries, so the board and the
+   * label read one vocabulary. On a closed (`DONE`) anchor it is the PR's resolved state,
    * `'merged'` or `'closed'`, so a done row names how its PR ended. `''` on a
    * non-merge row.
    */
   pr_phase: string;
   /**
-   * This bead's liveness in the same tri-state vocabulary — `'working'`,
-   * `'needs-review'`, or `'needs-attention'` — on EVERY live row, and the word
-   * the `frontier` string leads with. It begins as the per-bead value derived
+   * This bead's liveness in the same status vocabulary — `'working'`,
+   * `'merging'`, `'needs-review'`, or `'needs-attention'` — on EVERY live row,
+   * and the word the `frontier` string leads with. It begins as the per-bead value derived
    * from the same inputs as `pr_phase`, but a row with child tiles then takes its
    * children's rolled-up state instead: an epic's frontier is its children's.
    *
@@ -330,6 +337,18 @@ export interface Tile {
    * is `'start-failed'`, `''` on every other row. Always present.
    */
   visit_start_failure: string;
+  /**
+   * What holds this live merge anchor's PR that the city will not clear on its
+   * own, in order — `'visit'` (an open visit covers the anchor or one of its
+   * live review or rework children), `'review'` (an unresolved review thread
+   * holds the merge), `'blocked'` (a blocker no automated actor will clear, or
+   * one a person owes). Each is the value of one GitHub `held:` label, derived
+   * by the same code, and any of them reads `pr_phase` `'needs-attention'`.
+   * `null` on a PR nothing holds, on a closed row, and on a non-merge row. It is
+   * the PR's own: `held` is the visit on this row's bead, so a PR whose rework a
+   * visit holds carries `'visit'` here with `held` false.
+   */
+  pr_held: string[] | null;
 }
 
 /**
