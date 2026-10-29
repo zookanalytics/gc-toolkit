@@ -47,7 +47,8 @@ the checkpoint below reads the measured and graded criteria it brought.
 ## Facts this design rests on
 
 Each was read on 2026-10-28, at gc-toolkit main ec0a1401, in bd 1.3.2, or in
-Gas City upstream main 221b1476d.
+Gas City upstream main 221b1476d. Each fact about gc-toolkit's code was read
+again on 2026-10-29, at main 3db3f983.
 
 1. **bd's types.** `bd types` describes `epic` as a "Large body of work spanning
    multiple issues" and `feature` as a "New feature or enhancement". It
@@ -57,16 +58,16 @@ Gas City upstream main 221b1476d.
    single change with `--type feature`.
 2. **The board's rows.** Of the issue types, both board sources give a row of
    its own only to epic, decision and convoy (`typedAnchorKinds`,
-   `services/helm/internal/source/beads.go:486`, also read at
+   `services/helm/internal/source/beads.go:487`, also read at
    `supervisor.go:692`). `assignGroupRoots`
-   (`services/helm/internal/board/derive.go:2939`) nests a row under the row
+   (`services/helm/internal/board/derive.go:3025`) nests a row under the row
    its parent-child edge climbs to. So a child epic's row sits under its
    parent's, and a member's row, such as a PR's, sits under the child epic's.
    A child epic whose members have all closed reads
    `all N closed — close or extend` (`derive.go:1093`) and bands LOW
    (`derive.go:800`). The sources differ in what an epic's row carries. The
    default source, the direct store reader, carries each row's metadata
-   (`newAnchor`, `beads.go:1255`). The supervisor source, the fallback
+   (`newAnchor`, `beads.go:1315`). The supervisor source, the fallback
    (`selectSource`, `services/helm/cmd/helm-svc/main.go:225`), builds an
    epic's row with no metadata (`gatherEpics`, `supervisor.go:350`), though
    the `/beads` list it reads carries it. The native-gates branch builds the
