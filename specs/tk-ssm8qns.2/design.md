@@ -335,14 +335,16 @@ graph from the start and never a conflict found at merge.
     and bd closes it;
   - a parentless bead on an `all-children` gate whose spawner closed with a
     child still open is held out of `bd ready`, and `bd blocked` leaves it
-    out. The adapter returns the error;
+    out. The adapter returns the `waits-for` error, not the read error a
+    marked bead the listing leaves out gets;
   - the same gate on a bead whose parent is not blocked is named by
-    `bd blocked` as held through that parent. The adapter returns the error;
+    `bd blocked` as held through that parent. The adapter returns the
+    `waits-for` error;
   - a bead whose `any-children` gate one closed child has opened, and that is
     held only through a blocked parent, is named by `bd blocked` as blocked on
-    its open spawner. The adapter returns the error;
+    its open spawner. The adapter returns the `waits-for` error;
   - a bead whose `also_blocks` edge holds on an open spawner with no open
-    child gets the error too;
+    child gets the `waits-for` error too;
   - the marks read names every bead that a case above holds, the one that
     `bd blocked` leaves out included.
 
@@ -420,9 +422,9 @@ graph from the start and never a conflict found at merge.
 
 - A `blocks` edge onto tk-ssm8qns.1 from tk-1tfzr71.16, .18, .20, .21, .22 and
   .24, with a note on each naming the domain it builds. tk-1tfzr71.16's note
-  also names the start's window, a death after a sling returns and before its
-  proven mark, which docs/gctk-architecture.md leaves to that member's design of
-  the start order.
+  also names the start's window, a sling that lands before its mark is proven,
+  which docs/gctk-architecture.md leaves to that member's design of the start
+  order.
 - A rule-1 note on each member that retires a copy, naming the one rule its
   replacement follows: tk-1tfzr71.12, .15, .17, .19, .20, .21, .22, and
   tk-1tfzr71.4, the native-gates effort's landing bead. Its convoy, tk-iirrmiw,

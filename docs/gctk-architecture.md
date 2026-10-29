@@ -87,8 +87,7 @@ enumerated, so nothing could hold its verb to the bar. The Go packages,
 `waits`, the ledger and the adapters among them, are implementation beneath
 the verbs, and a package that no verb of any class reaches is dead code.
 
-A row's defense cell carries the verb's whole meaning, and links the steward
-doc that holds the verb's semantics where one does. A verb gets a contract
+A row's defense cell carries the verb's whole meaning. A verb gets a contract
 section below only when no steward doc holds its semantics, and its row links
 that section. `bead holds` has one, because no other doc defines what holds a
 bead.
@@ -98,7 +97,7 @@ bead.
 | `gctk bead holds <bead>...` | agent, hook, order | what holds each bead: one status, the waits behind it, its own pending waits and when the last one landed, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([its contract](#the-bead-holds-contract)). A raw row read stays native, and any question about what holds a bead, or what its close waits on, is this verb. |
 | `gctk bead arm <bead>` | agent, hook | start this bead by itself once nothing holds it, on a formula if one is named | One intent over gc's lower-level sling and routing calls. The caller states what starts and on what, and the machinery performs every later step. |
 | `gctk bead disarm <bead>` | agent, hook | stop an armed bead from starting by itself | The other half of the arm's intent. |
-| `gctk bead start-armed` | order | start each armed bead that nothing holds any more: sling one armed for a pool, or send its notice to the named agent one is assigned to | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). A notice takes cascade-nudge's shape with a dedup ledger. A sling rests on a mark on the arm, which lands first, unproven, in one write with the attempt count. A sling that fails takes the mark off in one write, so the next pass tries again. One that returns makes the mark proven before the arm is cleared, so a pass that finds a proven mark clears the arm without a sling, and one that finds an unproven mark slings again ([deferred-dispatch.md](deferred-dispatch.md#what-performs-it)). That leaves one window, a death after a sling returns and before its proven mark lands, where the next pass slings a second time. Gas City's per-bead launch lock refuses a second pour of a graph.v2 formula while the first run is live, and the rest of the window is debt the deferred-dispatch member (tk-1tfzr71.16) retires in its design of this order. |
+| `gctk bead start-armed` | order | start each armed bead that nothing holds any more: sling one armed for a pool, or send its notice to the named agent one is assigned to | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). A notice takes cascade-nudge's shape with a dedup ledger. A sling rests on a mark on the arm, which lands first, unproven, in one write with the attempt count. A sling that fails takes the mark off in one write, so the next pass tries again. One that returns makes the mark proven before the arm is cleared, so a pass that finds a proven mark clears the arm without a sling, and one that finds an unproven mark slings again ([deferred-dispatch.md](deferred-dispatch.md#what-performs-it)). That leaves one window, a sling that lands before its mark is proven, where the next pass slings a second time. A pass that dies after the sling lands and before the proven mark opens it, and so does a sling that fails after it lands. Gas City's per-bead launch lock refuses a second pour of a graph.v2 formula while the first run is live, and the rest of the window is debt the deferred-dispatch member (tk-1tfzr71.16) retires in its design of this order. |
 | `gctk bead dispose-resolved` | order | close each open, unassigned bead whose `until` targets have all closed, with a pointer to what resolved it | An `until` edge closes nothing in bd or Gas City ([warrants.md](warrants.md#deferred-dispatch-residual)). Gas City's own `convoy-autoclose-backstop` order is the precedent: a close that follows from durable state, recomputed each pass. |
 | `gctk priority shift <bead> <±n>` | agent | raise or lower a bead against what it follows, and re-rank the queue, in one act | The native surface writes only an absolute priority, which carries no intent term, so the next settle reads it as drift and overwrites it. The stored shift is that term ([steering.md](steering.md#the-rule)). Its callers are sittings and the board. |
 | `gctk priority settle <bead>` | hook | give a bead the priority of what it follows before anything claims or pours it | A pour copies a bead's priority once, so the bead carries its derived priority before the pour. The pack's own writers run it before they make a bead claimable: filing follow-up work, a sling, a release, and the board's priority verb. |
@@ -226,8 +225,9 @@ instead:
   write is never lost, only late: by up to one cadence, plus the orders lane's
   wait, the pass's own run and any delay a loaded store adds, and the next pass
   heals it. An event can start a pass sooner but bounds nothing shorter than
-  the cadence, because a bare `bd` write reaches the bus only when the
-  controller's cache rescans the store.
+  the cadence, because no write is sure to reach an order as an event. The bus
+  is lossy by design, and the cache rescan that carries a bare `bd` write to
+  it by default skips some changes.
 - **What the city gives an order** (read at Gas City 221b1476dc10,
   2026-10-28):
   - A write through bare `bd`, an agent's or a person's, emits no event of its

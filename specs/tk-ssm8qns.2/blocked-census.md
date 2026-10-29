@@ -217,9 +217,9 @@ of a different rule, and each stays until its member deletes it.
 | A blocker at `hooked` or `in_progress` | holds everywhere | holds |
 | A bead whose own status is `hooked` | not ready for the store; stranded in deferred dispatch's list; refused by `arm`; parked at load-context; claimed for bead-context, gc-helm's park survey and queue-priority; idle on the board | in flight; its status is not a wait, so only its own waits hold it |
 | The statuses that resolve a blocker | closed or pinned (D1 to D10); closed only (D11 to D13, D17 to D26); anything outside the live set (D14 to D16), so a custom status resolves there | closed or pinned |
-| The edge types that hold | `blocks`, `conditional-blocks`, `waits-for` and the cascade in the store's queries; `blocks` alone elsewhere; D15 adds children and PR references, and D19 and D20 add `until` | the store's. A child or a PR reference that holds a merge is the merge's own rule, and `until` is dispatch's disposal, not a wait. A bead with a `waits-for` edge of its own gets an error until bd's listing judges the gate, and every caller holds it until then |
+| The edge types that hold | `blocks`, `conditional-blocks`, `waits-for` and the cascade in the store's queries; `blocks` alone elsewhere; D15 adds children and PR references, and D19 and D20 add `until` | the store's. A child or a PR reference that holds a merge is the merge's own rule, and `until` is dispatch's disposal, not a wait. A bead with a `waits-for` edge of its own reads `unjudged` until bd's listing judges the gate, and every caller holds it until then |
 | When a bead is in flight | `hold-lib.sh`: it carries `branch`, `merge_result` or `rejection_reason` | steering.md's definition, which adds a claim and a run past load-context |
-| A failed read | refuse, proceed, held or empty, by caller | an error. Each caller keeps its own policy for what an error means. A bead the store marks blocked that `bd blocked` leaves out gets one too. The error for a bead with a `waits-for` edge of its own is not a failed read, since it stands until bd's repair, so no caller applies that policy to it |
+| A failed read | refuse, proceed, held or empty, by caller | an error. Each caller keeps its own policy for what an error means. A bead the store marks blocked that `bd blocked` leaves out gets one too. A bead with a `waits-for` edge of its own reads `unjudged`, which is not a failed read, since it stands until bd's repair, so no caller applies that policy to it |
 
 ## Live beads on each disagreement
 
@@ -269,8 +269,8 @@ own work, which reaches the pool once the park is released
 - A demand gate on an ancestor holds the work under it that has not started.
   `hold-lib.sh`'s exemption goes.
 - `conditional-blocks` holds wherever the store says it does. A bead with a
-  `waits-for` edge of its own gets an error from `waits` until the bd the city
-  runs judges the gate in its listing and its close rule
+  `waits-for` edge of its own reads `unjudged` from `waits` until the bd the
+  city runs judges the gate in its listing and its close rule
   ([design.md](design.md#what-the-operator-approves)). Every caller holds such
   a bead until then, even once its gate opens.
 - A claimed bead, and a bead with a run past load-context, is in flight, so an
