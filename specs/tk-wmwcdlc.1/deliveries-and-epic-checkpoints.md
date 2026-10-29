@@ -112,7 +112,7 @@ again on 2026-10-29, at main 3db3f983.
    `internal/storage/issueops/close.go:150`;
    [steer-by-epic, fact 5](../tk-rl8gz4b.2/steer-by-epic.md#facts-this-design-rests-on)).
    The same policy refuses, unless forced, to close a bead that has an open
-   direct blocker, such as the gate of a park on it (`close.go:153`).
+   direct blocker, such as the gate of a park on it (`close.go:153-159`).
    `bd epic close-eligible` closes every epic in the store whose children are
    all complete, and takes no scope.
 6. **Listing an epic's open child epics.**
@@ -410,10 +410,11 @@ these writes in order:
    until the refinery's next pass over that PR completes the retirement. The
    sitting then releases the bead from each open blocker on it, such as a
    park, as [steering.md](../../docs/steering.md#releasing-a-park) releases a
-   park, which starts nothing because nothing under the bead is open. Only
-   then does it close the bead. A Delivery can land while it is parked
-   (fact 4), and bd refuses to close a bead that an open park still blocks
-   (fact 5).
+   park, which starts nothing because nothing under the bead is open. A gate
+   that also holds other beads stays open, and only this bead's edge onto it
+   is removed. Only then does the sitting close the bead. A Delivery can land
+   while it is parked (fact 4), and bd refuses to close a bead that an open
+   park still blocks (fact 5).
 4. On continue or shift, it files the next Delivery with its aim when the
    ruling aims one, after re-aiming the epic's contract fields on a shift. It
    then sets the epic's next priority and park with the verbs on main:
