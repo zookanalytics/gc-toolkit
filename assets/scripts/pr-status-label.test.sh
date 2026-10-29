@@ -323,6 +323,156 @@ eq "$(pv_labels 51)" "status: needs-review" "reconcile leaves the label as-is wh
 hasnt "$(ghlog)" "pr edit" "reconcile writes nothing when it cannot derive a status"
 
 # ---------------------------------------------------------------------------
+# held: what holds an open PR that the city will not clear on its own, one
+# label per value beside the one status: value. reconcile writes both families
+# from one derivation, and any held value reads status: needs-attention.
+# ---------------------------------------------------------------------------
+rm -f "$STUB_GH_DIR/labels.json"
+"$SUT" ensure --repo "$REPO" >/dev/null 2>&1
+for v in visit review blocked; do
+  { repo_has "held: $v" && ok "ensure creates 'held: $v'"; } || bad "ensure missed 'held: $v'"
+done
+rm -f "$STUB_GH_DIR/labels.json"
+resetlog
+"$SUT" ensure --repo "$REPO" >/dev/null 2>&1
+has "$(ghlog)" "label create held: visit --repo $REPO --color D93F0B" "the held: labels take a colour of their own"
+has "$(ghlog)" "label create status: working --repo $REPO --color 1D76DB" "…apart from the status: group's"
+
+# a PR nothing holds carries no held: label.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]'
+: > "$STUB_DEPS"
+pv 70 '[{"name":"bug"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 70 --repo "$REPO" --current-labels "bug"
+eq "$(pv_labels 70)" "bug,status: merging" "a PR nothing holds gets its status: label and no held: label"
+
+# held: visit — a visit on the PR's own rework holds it, though the rework is
+# live work the city would otherwise be doing.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}},
+        {"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.routed_to":"human"}}]'
+printf 'tk-v|tracks|tk-k\n' > "$STUB_DEPS"
+pv 71 '[{"name":"status: working"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 71 --repo "$REPO" --current-labels "status: working"
+eq "$(pv_labels 71)" "held: visit,status: needs-attention" "a visit on the PR's rework => held: visit, and status: needs-attention"
+eq "$(grep -c 'pr edit 71' "$STUB_GH_LOG")" "1" "…written in one edit"
+
+# the same PR re-reconciled over an unchanged store writes nothing.
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 71 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
+hasnt "$(ghlog)" "pr edit" "a reconcile over labels already right writes nothing"
+
+# the visit closes: held: visit comes off and the status follows the rework.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}},
+        {"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-v","status":"closed","metadata":{"task_kind":"visit","gc.routed_to":"human"}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 71 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
+eq "$(pv_labels 71)" "status: working" "the visit closed => held: visit comes off, and the PR reads working again"
+: > "$STUB_DEPS"
+
+# held: blocked — a live blocker routed to a person, which no automated actor clears.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}},
+        {"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"}}]'
+printf 'tk-d|blocks|tk-a\n' > "$STUB_DEPS"
+pv 72 '[{"name":"status: merging"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "status: merging"
+eq "$(pv_labels 72)" "held: blocked,status: needs-attention" "a blocker a person owes => held: blocked, and needs-attention over merging"
+
+# a blocker the city is landing is no hold, and the PR keeps its status.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}},
+        {"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "held: blocked,status: needs-attention"
+eq "$(pv_labels 72)" "status: merging" "a blocker a pool is landing => held: blocked comes off, and the PR reads merging"
+: > "$STUB_DEPS"
+
+# held: blocked off the merge pass's stuck-blocker verdict, and held: review off
+# its unresolved-thread verdict, both at the posture's head.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]'
+pv 73 '[]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 73 --repo "$REPO" --current-labels ""
+eq "$(pv_labels 73)" "held: blocked,status: needs-attention" "the merge pass's stuck-blocker verdict => held: blocked"
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"review-threads"}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 73 --repo "$REPO"
+eq "$(pv_labels 73)" "held: review,status: needs-attention" "the merge pass's unresolved-thread verdict => held: review, held: blocked off"
+
+# a failed check reads needs-attention and names no hold.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 73 --repo "$REPO"
+eq "$(pv_labels 73)" "status: needs-attention" "a failed required check => needs-attention with no held: label"
+
+# held: review off review feedback the city has not answered, which holds an
+# unapproved PR on a base that requires no thread resolution: the merge pass
+# counted a thread no post of the city's answers, and nothing is in flight.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"review_required@abc@t","pr.machine":"settled@abc@t","pr.unanswered_threads":"1@abc"}}]'
+pv 79 '[{"name":"status: needs-review"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 79 --repo "$REPO" --current-labels "status: needs-review"
+eq "$(pv_labels 79)" "held: review,status: needs-attention" "feedback the city has not answered => held: review, and needs-attention over needs-review"
+
+# a rework in flight is the city answering it, so the count holds nothing while it runs.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"review_required@abc@t","pr.machine":"progressing@abc@t","pr.unanswered_threads":"1@abc"}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 79 --repo "$REPO" --current-labels "held: review,status: needs-attention"
+eq "$(pv_labels 79)" "status: working" "a rework in flight to answer it => held: review comes off, and the PR reads working"
+
+# the thread answered or resolved: the merge pass counts none, and the PR is
+# the operator's to review again.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"review_required@abc@t","pr.machine":"settled@abc@t","pr.unanswered_threads":"0@abc"}}]'
+pv 80 '[{"name":"held: review"},{"name":"status: needs-attention"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 80 --repo "$REPO" --current-labels "held: review,status: needs-attention"
+eq "$(pv_labels 80)" "status: needs-review" "the feedback answered or resolved => held: review comes off, and the PR reads needs-review"
+
+# more than one value stands at once, each its own label.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"review-threads"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}},
+        {"id":"tk-d","status":"open","issue_type":"decision","metadata":{}}]'
+printf 'tk-d|blocks|tk-a\n' > "$STUB_DEPS"
+pv 74 '[{"name":"status: merging"},{"name":"bug"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 74 --repo "$REPO" --current-labels "status: merging,bug"
+eq "$(pv_labels 74)" "bug,held: blocked,held: review,held: visit,status: needs-attention" "a visit, a thread verdict and a decision blocker => three held: labels"
+: > "$STUB_DEPS"
+
+# the merge freeze reads needs-attention with no held value, and a stale held:
+# label comes off.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","merge_hold":"true"}}]'
+pv 75 '[{"name":"held: visit"},{"name":"status: needs-attention"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 75 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
+eq "$(pv_labels 75)" "status: needs-attention" "the merge freeze => needs-attention, and the stale held: visit comes off"
+
+# a held: label of a value the writer does not derive comes off, as a status:
+# one does; a label that only looks like one is a human's and stays.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]'
+pv 76 '[{"name":"held: legal"},{"name":"held:visit"},{"name":"release held: legal"},{"name":"on hold"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 76 --repo "$REPO" --current-labels "held: legal,held:visit,release held: legal,on hold"
+eq "$(pv_labels 76)" "held:visit,on hold,release held: legal,status: needs-review" "every label under the held: prefix is the writer's; one carrying it mid-name, or no space, is left alone"
+
+# a derivation that cannot answer leaves both families as they are.
+store '[]'
+pv 77 '[{"name":"held: visit"},{"name":"status: needs-attention"}]'
+resetlog
+"$SUT" reconcile --anchor tk-missing --pr 77 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
+eq "$(pv_labels 77)" "held: visit,status: needs-attention" "reconcile leaves both families as they are when the anchor does not resolve"
+hasnt "$(ghlog)" "pr edit" "…and writes nothing"
+
+# set writes the status: value alone and leaves the held: labels to reconcile.
+pv 78 '[{"name":"held: blocked"},{"name":"status: working"}]'
+resetlog
+"$SUT" set --pr 78 --value needs-attention --repo "$REPO" --current-labels "held: blocked,status: working"
+eq "$(pv_labels 78)" "held: blocked,status: needs-attention" "set flips the status: value and leaves held: alone"
+
+# ---------------------------------------------------------------------------
 # clear: a PR that merged or closed carries no status: label; GitHub's own
 # Merged or Closed state takes over.
 # ---------------------------------------------------------------------------
@@ -341,6 +491,16 @@ pv 62 '[{"name":"bug"}]'
 resetlog
 "$SUT" clear --pr 62 --repo "$REPO" --current-labels "bug"
 hasnt "$(ghlog)" "pr edit" "clear writes nothing on a PR with no status: label"
+
+pv 64 '[{"name":"status: needs-attention"},{"name":"held: visit"},{"name":"held: blocked"},{"name":"bug"}]'
+resetlog
+"$SUT" clear --pr 64 --repo "$REPO"
+eq "$(pv_labels 64)" "bug" "clear takes every held: label off with the status: label"
+
+pv 65 '[{"name":"held: review"}]'
+resetlog
+"$SUT" clear --pr 65 --repo "$REPO" --current-labels "held: review"
+eq "$(pv_labels 65)" "" "clear takes a held: label off a PR that carries no status: label"
 
 resetlog
 "$SUT" clear --pr 63 --repo "$REPO" >/dev/null 2>&1

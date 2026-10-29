@@ -217,6 +217,17 @@ type Anchor struct {
 	// metadata-keyed row it serves.
 	Reviews        []Child `json:"reviews,omitempty"`
 	ReviewsUnknown bool    `json:"reviews_unknown,omitempty"`
+
+	// InFlight is a live merge anchor's in-flight set: every bead that names it
+	// in anchor_bead, any task_kind, at one of prstatus.InFlightStatuses, the set
+	// `gctk pr-status derive` reads for the PR labels. Its phase and held values
+	// count it ([anchorWorkSet]), so the board and the labels read the same work.
+	// The beads source reads it for each live merge anchor
+	// ([source.BeadsSource.readInFlight]). A read that fails is noted partial
+	// and leaves it empty, and the board then counts the live review and rework
+	// rows it gathered for the anchor, which the set also holds. The supervisor
+	// backend gathers neither.
+	InFlight []Child `json:"in_flight,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.
@@ -540,7 +551,7 @@ type Tile struct {
 	// leads with on every live row. It begins as the per-bead value
 	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
 	// visit, posture, the merge pass's verdict, the draft stage, and for a merge
-	// anchor its open rework/review children, or for any other bead the
+	// anchor its in-flight set ([Anchor.InFlight]), or for any other bead the
 	// live-workflow signal standing over it. A bead's board liveness and its
 	// GitHub `status:` label come from that one core. A row WITH child tiles then
 	// takes their rolled-up state in place of that per-bead value
@@ -572,6 +583,19 @@ type Tile struct {
 	// non-empty exactly when VisitState is VisitStartFailed, so a consumer reads
 	// the state and its reason off one row.
 	VisitStartFailure string `json:"visit_start_failure"`
+
+	// PRHeld is what holds this live merge anchor's PR that the city will not
+	// clear on its own, the values prstatus.Held names in its order: `visit`
+	// (an open visit covers the anchor or one of its live review or rework
+	// children), `review` (review feedback the city has not answered, or a
+	// review thread the merge waits on), and
+	// `blocked` (a blocker no automated actor will clear, or one a person
+	// owes). Each is the value of one GitHub held: label pr-status-label.sh
+	// writes from the same derivation, and any of them reads PRPhase
+	// needs-attention. Null on a PR nothing holds, on a closed row, and on a
+	// non-merge row. It is the PR's own: Held is the visit on this row's bead,
+	// so a PR whose rework a visit holds carries `visit` here with Held false.
+	PRHeld []string `json:"pr_held"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

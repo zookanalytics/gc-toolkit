@@ -7,7 +7,9 @@
 # comments on /pulls/N/comments, but they stop counting as feedback.
 # REVIEW_DISMISSAL_DEF states that second rule once, for every reader of the
 # comment space. pr-facts.sh reads only the comments no dismissal has retired
-# (live_comments) before it counts or routes any feedback. A dismisser asks
+# (live_comments) before it counts or routes any feedback, and pr-post.sh's
+# gc_thread_awaits_answer reads a review thread's posts through it before it
+# asks whether the thread waits on the city's answer. A dismisser asks
 # which comments a dismissal would retire before pr-facts.sh routes them
 # (unrouted_comment_ids), so it never drops feedback nobody has read. One
 # definition, no copies: review-dismissal.test.sh fails when a reader stops
@@ -22,6 +24,8 @@
 # rule pr-post.sh prints with `pr-post.sh feedback-def`, so a program prepends
 # that definition first:
 #   jq -n "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'... live_comments($revs) ...'
+# feedback-def prints these definitions too, ahead of its thread rule, so a
+# program composed this way defines each of them twice, the same way.
 # No comment inside the program may carry an apostrophe: the program is one
 # single-quoted shell word.
 # shellcheck disable=SC2034  # read by the scripts that source this file

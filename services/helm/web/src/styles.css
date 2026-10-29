@@ -403,6 +403,19 @@ th {
 }
 
 /*
+ * The PR held chips: what holds a live PR that the city will not clear on its
+ * own, one per held: label. Each is a person's to act on, so it reads in the
+ * needs-attention colour, set bold, beside the phase chip it explains.
+ */
+.pr-held {
+  font-size: 0.8125rem;
+  margin-right: 0.4em;
+  white-space: nowrap;
+  color: #b3261e;
+  font-weight: 600;
+}
+
+/*
  * The PR conversation chip: where the exchange with the operator stands on the
  * pull request. outstanding, answered and asking carry the operator's side of
  * the conversation, so they are colored to read at a glance; quiet stays muted,

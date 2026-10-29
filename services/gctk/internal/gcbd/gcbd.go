@@ -50,6 +50,7 @@ type Bead struct {
 	Notes        any            `json:"notes"`
 	Metadata     map[string]any `json:"metadata"`
 	Dependencies any            `json:"dependencies"`
+	IssueType    any            `json:"issue_type"`
 }
 
 // Scrub strips every C0 control byte (U+0000–U+001F), the range JSON requires
@@ -135,6 +136,9 @@ func (b *Bead) AssigneeString() string { return jqString(b.Assignee) }
 
 // NotesString returns `.notes // "" | tostring`.
 func (b *Bead) NotesString() string { return jqString(b.Notes) }
+
+// IssueTypeString returns `.issue_type // "" | tostring`.
+func (b *Bead) IssueTypeString() string { return jqString(b.IssueType) }
 
 // StatusLower returns `.status // "" | tostring | ascii_downcase`.
 func (b *Bead) StatusLower() string { return b.StatusLowerOr("") }
