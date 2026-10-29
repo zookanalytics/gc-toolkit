@@ -134,16 +134,16 @@ again on 2026-10-29, at main 3db3f983.
 12. **Work in flight on the same files.** The native-gates branch
     (`integration/tk-iirrmiw`) rewrites `docs/steering.md`,
     `docs/epic-stewardship.md`, the work skill, the converse prompt and skills,
-    and `derive.go`. It also edits the two readers unit 7 changes,
-    `assets/scripts/live-work.sh` and `doctor/check-blocked-work-armed`. It
-    rewords the comment over live-work.sh's plain-work list and the check's
-    one-line `doctor.toml` description. A trial merge on 2026-10-29 found that
-    main's copies of both files merge cleanly with the branch's head,
-    bd518614, and that with unit 7's edits on them both conflict. On the
-    branch a ruling's `epic_ruling_evidence` is "the human gate the ruling
-    cleared". Landing bead tk-1tfzr71.4 carries the branch to main,
-    and it closes when the branch lands. The convoy the branch is named for,
-    tk-iirrmiw, is closed, and what waited on it waits on tk-1tfzr71.4.
+    and `derive.go`. It also edits every file unit 7 changes but
+    `live-work.test.sh`. Among them, it rewords the comment over
+    `live-work.sh`'s plain-work list and the one-line description in
+    `doctor/check-blocked-work-armed/doctor.toml`. A trial merge on 2026-10-29
+    found that main's copies of those two files merge cleanly with the
+    branch's head, bd518614, and that with unit 7's edits on them both
+    conflict. On the branch a ruling's `epic_ruling_evidence` is "the human
+    gate the ruling cleared". Landing bead tk-1tfzr71.4 carries the branch to
+    main, and it closes when the branch lands. The convoy the branch is named
+    for, tk-iirrmiw, is closed, and what waited on it waits on tk-1tfzr71.4.
     Steer-by-epic's unit 11 (tk-rl8gz4b.14), which states a checkpoint's
     priority and park moves, is parked.
 
@@ -190,10 +190,10 @@ epic and Delivery
 **Each bd type keeps its own meaning.** A bd type is used only with its own
 semantics, or not at all. So bd's `feature`, which bd and Gas City use for a
 single change (fact 1), types a Story and never a container, the Delivery
-included. `milestone` stays reserved for a marker that holds no work,
-which is what bd says it is (fact 1). A filing rule against a type would bind
-only this pack's filers, while the stores go on receiving beads of that type
-from everyone else, so the design keeps each type to bd's meaning rather than
+included. `milestone` stays reserved for a marker that holds no work, which is
+what bd says it is (fact 1). A filing rule against a type would bind only this
+pack's filers, while the stores go on receiving beads of that type from
+everyone else, so the design keeps each type to bd's meaning rather than
 banning any.
 
 **Rejected.**
@@ -201,9 +201,9 @@ banning any.
 - *bd's `feature` type.* bd describes it as a feature or enhancement, Gas City's
   tutorial files a single change with it (fact 1), and the pack's checks count
   it as work (fact 3). A container of that type would give it a meaning it
-  does not have. The board gives it no row, and a row
-  would be new work in the board's direct store reader, which tk-1tfzr71.24
-  retires ([built-once-target.md](../../docs/built-once-target.md#3-the-lanes)).
+  does not have. The board gives it no row, and a row would be new work in the
+  board's direct store reader, which tk-1tfzr71.24 retires
+  ([built-once-target.md](../../docs/built-once-target.md#3-the-lanes)).
 - *A convoy.* A convoy is the engine's dispatch-time grouping, which
   [epics.md](../../docs/epics.md#scope) leaves to the engine. Its members are
   `tracks` edges, which priority and parks do not follow (fact 4), so each Story
@@ -218,7 +218,7 @@ banning any.
 - *A label on the Stories.* A label groups beads with no row, no aim and no end.
 - *A hypothesis of its own, the benefit hypothesis SAFe gives this level.* SAFe
   judges at this level too. Here the operator judges only the epic, which keeps
-  one ruling per landing.
+  one ruling per checkpoint.
 - *The aim in a metadata key.* Nothing reads it but the checkpoint sitting,
   which reads prose. A key waits for machinery that reads it (unit 6).
 
@@ -322,9 +322,9 @@ and that open row is what shows the operator a checkpoint is owed.
 work its aim covers, such as a follow-up that finishes one of its Stories. A
 follow-up still open at the checkpoint is settled with the operator before the
 Delivery closes (section 5, write 3). Other work found after it lands goes
-under its epic. Once closed, a Delivery
-takes nothing. Later work for the same part of the product goes under the epic,
-and the next checkpoint gathers it into the Delivery it aims. A part of the
+under its epic. Once closed, a Delivery takes nothing. Later work for the same
+part of the product goes under the epic, and the next checkpoint gathers it
+into the Delivery it aims. A part of the
 product with a hypothesis of its own is an epic of its own, and one that is
 only ever improvable is ordinary flow
 ([epics.md](../../docs/epics.md#epics-are-mortal)).
@@ -490,8 +490,8 @@ own store (unit 5), each child is read against section 1:
 
 - A child epic that holds bounded work, such as the first phase of a product
   area that the operator approved, gets its `Aim:` and `Done when:` lines and
-  its `Delivery: ` title. It goes on as a Delivery that
-  closes at its checkpoint.
+  its `Delivery: ` title. It goes on as a Delivery that closes at its
+  checkpoint.
 - A child epic that groups an area, a theme or a track with no end is
   dissolved. Its open members move under the epic, or under the Delivery whose
   aim covers them, and it closes through the disposition writer. It carries no
@@ -567,8 +567,8 @@ Until the units land:
 - **Checkpoints spend the operator's attention.** Only the operator's aim files
   a Delivery (section 2), and one checkpoint may close every Delivery that has
   landed by then (section 5).
-- **A landed Delivery waits on the operator.** It takes no new work while it
-  waits, but it stays open until its checkpoint. Unit 4 bands it with what the
+- **A landed Delivery waits on the operator.** It takes only work its aim
+  covers while it waits, but it stays open until its checkpoint. Unit 4 bands it with what the
   operator owes, and unit 6 files the checkpoint once the hand runs show how.
 - **A shift can strand another open Delivery's aim, and a close can strand the
   epic's other open work.** The checkpoint reads every open Delivery of the
