@@ -46,7 +46,8 @@ the checkpoint below reads the measured and graded criteria it brought.
   into the next Delivery once a checkpoint aims one (section 4).
 - **The Epic Checkpoint is a sitting on the epic, run by hand from a recipe.**
   It re-reads the landed work, re-runs the measures, and records the ruling in
-  the fields epic stewardship already registers. It closes the Delivery. On
+  the fields epic stewardship already registers. It closes each Delivery that
+  has landed, once it has confirmed every Story under it is still closed. On
   continue or shift it files the next one, and on close it settles the epic's
   other open work, item by item, before it closes the epic (section 5).
 - **Each child epic already filed is read against the rule.** One that holds
@@ -225,10 +226,11 @@ operator's, made at one of three points:
   filed as its Stories;
 - an Epic Checkpoint's continue or shift ruling, which aims the next one.
 
-Each Delivery costs the operator one checkpoint, so the operator decides how many
-there are. A product area, a theme or a wish to find work on the board does not
-file one. Work the operator wants to find gets a Delivery only when it is a
-bounded step toward the epic's hypothesis, and then its row comes with it.
+Each Delivery spends the operator's judgment at a checkpoint, so the operator
+decides how many there are. A product area, a theme or a wish to find work on
+the board does not file one. Work the operator wants to find gets a Delivery
+only when it is a bounded step toward the epic's hypothesis, and then its row
+comes with it.
 
 **How it is filed.** The filer lists the epic's open Deliveries first (fact 6).
 Work an open Delivery's aim already covers goes into that one. A list that
@@ -248,18 +250,19 @@ and the next checkpoint gathers it into a Delivery or leaves it there. An epic's
 members filed before this layer stay where they are, and its next checkpoint
 follows their landing.
 
-**An epic may have more than one open Delivery.** Each lands and is judged on its
-own. The checkpoint after one reads the others in flight. A shift ruling
-re-aims them in the same pass, and a close ruling settles each of them before
-the epic closes (section 5).
+**An epic may have more than one open Delivery.** Each lands on its own. A
+checkpoint reads every Delivery of the epic. It may close each one that has
+landed, under its one ruling, and it reads the others as work in flight. A
+shift ruling re-aims those in the same pass, and a close ruling settles each of
+them before the epic closes (section 5).
 
 **Rejected.**
 
 - *A Delivery for each product area that has none open* (PR #1349's rule). Its
   trigger is an area, which never lands, so its Delivery would never end
   ([epics.md](../../docs/epics.md#epics-are-mortal)).
-- *Agents filing Deliveries on their own judgment.* Each Delivery spends one
-  checkpoint of the operator's attention, so filing one is the operator's call.
+- *Agents filing Deliveries on their own judgment.* Each Delivery spends the
+  operator's judgment at a checkpoint, so filing one is the operator's call.
 - *One open Delivery per epic.* Independent steps of one epic would share one
   Delivery, which lands only when its slowest Story does, so the faster step's
   checkpoint would come late.
@@ -303,8 +306,10 @@ cannot close before then. Between its landing and its checkpoint it stays open,
 and that open row is what shows the operator a checkpoint is owed.
 
 **What it takes before and after.** Until its checkpoint, a Delivery takes only
-work its aim covers, such as a follow-up that finishes one of its Stories.
-Other work found after it lands goes under its epic. Once closed, a Delivery
+work its aim covers, such as a follow-up that finishes one of its Stories. A
+follow-up still open at the checkpoint is settled with the operator before the
+Delivery closes (section 5, write 3). Other work found after it lands goes
+under its epic. Once closed, a Delivery
 takes nothing. Later work for the same part of the product goes under the epic,
 and the next checkpoint gathers it into the Delivery it aims. A part of the
 product with a hypothesis of its own is an epic of its own, and one that is
@@ -331,9 +336,15 @@ ancestor.
 
 ## 5. The Epic Checkpoint
 
-**What prompts it.** A Delivery's landing. By hand, the operator calls a sitting
-on the epic once the Delivery's row shows it has landed (unit 4). An epic with no
-Deliveries gets a checkpoint when the operator calls a sitting on it, as today.
+**What prompts it.** A Delivery's landing. By hand, the operator calls a
+sitting on the epic once the Delivery's row shows it has landed (unit 4). An
+epic with no Deliveries gets a checkpoint when the operator calls a sitting on
+it, as today.
+
+Nothing prompts a checkpoint while nothing lands, and that gap is known. A
+Delivery that stalls before it lands is inspected only by a sitting the
+operator calls. Unit 6's machinery may add a nudge on a Delivery's age,
+designed from what the hand runs record.
 
 **What it re-reads.** The ruling is the operator's, and the judge is never the
 worker that built the Delivery, so the sitting reads the work itself rather than
@@ -342,14 +353,15 @@ the workers' accounts of it
 
 - each Story's merged change on main and its closed bead, read directly;
 - the epic's closure checks, each re-run;
-- its measured criteria, re-run by one method at the commit the Delivery landed
-  at and at the previous checkpoint's commit. A measure that the city's other
-  work also moves is read against that work, so the Delivery is not credited
-  with the whole change (fact 10);
+- its measured criteria, re-run by one method at the commit of the latest
+  landing the checkpoint reads and at the previous checkpoint's commit. A
+  measure that the city's other work also moves is read against that work, so
+  the landed work is not credited with the whole change (fact 10);
 - its graded criteria, each graded by the operator. A criterion with no way to
   grade it is recorded as such;
 - its leading indicators and its backstop invariant;
-- the Delivery's aim, and whether the landing showed it;
+- each landed Delivery's aim, and what its landing showed about that portion of
+  the hypothesis;
 - the epic's other open work: open Deliveries, members under the epic itself,
   and PRs in flight.
 
@@ -357,19 +369,23 @@ the workers' accounts of it
 these writes in order:
 
 1. It appends the checkpoint record to the epic's notes, under
-   `## Epic Checkpoint after <Delivery id>, <date>`. The record holds the
-   ruling, each measure with its commit and method, the grades, the
-   indicators, and what comes next. On a close, what comes next names each
-   piece of the epic's other open work and what becomes of it (write 5). While
-   checkpoints run by hand, it also holds what was mechanical, what took
-   judgment and what the contract lacked.
+   `## Epic Checkpoint after <Delivery ids>, <date>`, naming each Delivery it
+   closes. The record holds the ruling, each measure with its commit and
+   method, the grades, the indicators, and what comes next. On a close, what
+   comes next names each piece of the epic's other open work and what becomes
+   of it (write 5). While checkpoints run by hand, it also holds what was
+   mechanical, what took judgment and what the contract lacked.
 2. It records the ruling on the epic, in the fields
    [epic stewardship](../../docs/epic-stewardship.md#recording-a-ruling)
    registers: `epic_ruling`, `epic_ruling_reason` (on a close, the outcome),
    `epic_ruling_at`, `epic_ruling_by`, and `epic_ruling_evidence`. The evidence
    is the sitting's visit until the native-gates cutover, and the human gate
    the ruling cleared after it (fact 12).
-3. It closes the Delivery, with the ruling as the close reason.
+3. It closes each landed Delivery, with the ruling as the close reason. Before
+   each close it confirms that every Story under the Delivery is still closed.
+   A follow-up opened under it since it landed is settled with the operator
+   first, in one of the ways write 5 settles an item, so the close is never
+   forced.
 4. On continue or shift, it files the next Delivery with its aim, after
    re-aiming the epic's contract fields on a shift. It then sets the epic's
    next priority and park with the verbs on main: `gc-helm.sh priority`, and
@@ -417,15 +433,19 @@ these writes in order:
    accept the epic's close on the close ruling with its outcome.
 
 Each ruling overwrites the epic's last one, so each checkpoint's lasting record
-is its block in the epic's notes and the close reason of the Delivery it closed.
+is its block in the epic's notes and the close reasons of the Deliveries it
+closed. It is also why one checkpoint may read and close every Delivery of the
+epic that has landed by then, under one ruling, rather than one sitting for
+each. Two sittings run back to back would each write the epic's ruling fields,
+and the second would overwrite the first's.
 
 **By hand first.** The recipe is a pack skill (unit 3), not a formula. It names
 the writes a sitting makes in order. The machinery that would gather the
-evidence, file the sitting when a Delivery lands and make the writes in one call
-is designed from what the hand runs record (unit 6). The converse prompt gains
-the closes a checkpoint makes (fact 9): the landed Delivery, and on a close
-ruling the open work the ruling retires or re-homes, each other Delivery and the
-epic.
+evidence, file the sitting when a Delivery lands and make the writes in one
+call is designed from what the hand runs record (unit 6). The converse prompt
+gains the closes a checkpoint makes (fact 9): each landed Delivery, the open
+work the ruling retires or re-homes, and on a close ruling each other Delivery
+and the epic.
 
 **Rejected.**
 
@@ -484,7 +504,7 @@ each waits for the branch to land and is written against what it leaves.
 | 3 | **The Epic Checkpoint by hand.** A pack skill that a sitting on an epic follows after a Delivery lands: the evidence, the record, and section 5's writes in order. The converse prompt names the closes a checkpoint makes. | 5 | 1, tk-1tfzr71.4 | The skill and prompt suites pass, with the prompt's pins moved with its sentence. |
 | 4 | **A landed Delivery asks for its checkpoint.** The board's derivation rewords a landed Delivery's row to name its checkpoint and bands it with the rows the operator owes. The supervisor source carries an epic's metadata on its row, as the direct store reader does. The derivation's comments say Delivery where they say sub-epic. | 3 | 1, tk-1tfzr71.4 | A board fixture renders a landed Delivery that way, and a landed top-level epic and a landed child epic with a hypothesis as before. A supervisor source test reads an epic's `epic_hypothesis` off its row. The direct store reader is unchanged, and the wire contract gains no field. |
 | 5 | **The child epics on file.** A sitting on each epic that has an open child epic, asked for in that epic's store, reads each child against section 6. It is not a PR. | 6 | 1, 2 | No open child epic of an epic, in any rig store, lacks both an `Aim:` line and a hypothesis. |
-| 6 | **The checkpoint's machinery.** A design, drawn from the hand-run records, for what they show to be mechanical. Plausibly that is a formula that files the checkpoint and gathers its evidence when a Delivery lands, and one verb that makes the ruling's writes. | 5 | 3, and two checkpoints run from the skill | The operator approves the design at its PR. |
+| 6 | **The checkpoint's machinery.** A design, drawn from the hand-run records, for what they show to be mechanical. Plausibly that is a formula that files the checkpoint and gathers its evidence when a Delivery lands, and one verb that makes the ruling's writes. It may add a nudge on the age of a Delivery that has not landed, designed from the same records. | 5 | 3, and two checkpoints run from the skill | The operator approves the design at its PR. |
 
 A successor bead under the epic (tk-wmwcdlc.2) waits on this spec, and its
 dispatch is armed. Once the spec merges, it files this epic's first Delivery,
@@ -526,8 +546,9 @@ Until the units land:
   create-time classifier that tk-rctkrj owns proposes a contract for an epic
   that lacks one, so it has to apply the same test, or it would ask for a
   hypothesis on every Delivery.
-- **A checkpoint per Delivery spends the operator's attention.** Only the
-  operator's aim files a Delivery (section 2).
+- **Checkpoints spend the operator's attention.** Only the operator's aim files
+  a Delivery (section 2), and one checkpoint may close every Delivery that has
+  landed by then (section 5).
 - **A landed Delivery waits on the operator.** It takes no new work while it
   waits, but it stays open until its checkpoint. Unit 4 bands it with what the
   operator owes, and unit 6 files the checkpoint once the hand runs show how.
