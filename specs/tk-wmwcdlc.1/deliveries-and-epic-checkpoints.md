@@ -85,9 +85,14 @@ again on 2026-10-29, at main 3db3f983.
    the direct reader goes
    ([built-once-target.md](../../docs/built-once-target.md#board)).
 3. **What counts as work.** `doctor/check-blocked-work-armed` counts bug,
-   feature, task, chore and spike as work (`run.sh:75`), and its header names
-   epic, milestone and story as containers whose children are the routed work.
-   The proactive scan, the refinery's find-work and the witness's read of the
+   feature, task, chore and spike as work (`run.sh:75`), and the comment over
+   that list names epic, milestone and story as containers whose children are
+   the routed work. `assets/scripts/live-work.sh` holds the same five as plain
+   work (`live_work_plain_types`, `live-work.sh:72`). A bead of any other type
+   carries a mark of live work there, so the until consumer never disposes of
+   it. `docs/deferred-dispatch.md` and the waits skill name the same five. The
+   gc-toolkit store held three story-typed beads on 2026-10-29, all closed. The
+   proactive scan, the refinery's find-work and the witness's read of the
    refinery's queue each pass `--exclude-type=epic`.
 4. **Priority and parks pass through a parent of any type.** `priority-lib.sh`'s
    `prio_follows` follows any parent-child parent, and `prio_live` skips a
@@ -129,8 +134,14 @@ again on 2026-10-29, at main 3db3f983.
 12. **Work in flight on the same files.** The native-gates branch
     (`integration/tk-iirrmiw`) rewrites `docs/steering.md`,
     `docs/epic-stewardship.md`, the work skill, the converse prompt and skills,
-    and `derive.go`. On it a ruling's `epic_ruling_evidence` is "the human gate
-    the ruling cleared". Landing bead tk-1tfzr71.4 carries the branch to main,
+    and `derive.go`. It also edits the two readers unit 7 changes,
+    `assets/scripts/live-work.sh` and `doctor/check-blocked-work-armed`. It
+    rewords the comment over live-work.sh's plain-work list and the check's
+    one-line `doctor.toml` description. A trial merge on 2026-10-29 found that
+    main's copies of both files merge cleanly with the branch's head,
+    bd518614, and that with unit 7's edits on them both conflict. On the
+    branch a ruling's `epic_ruling_evidence` is "the human gate the ruling
+    cleared". Landing bead tk-1tfzr71.4 carries the branch to main,
     and it closes when the branch lands. The convoy the branch is named for,
     tk-iirrmiw, is closed, and what waited on it waits on tk-1tfzr71.4.
     Steer-by-epic's unit 11 (tk-rl8gz4b.14), which states a checkpoint's
@@ -169,9 +180,11 @@ had one (fact 5).
 
 **Its Stories.** A Story is a child of its Delivery, or of its epic until a
 checkpoint gathers it (section 2). It is typed by its work: task, bug, chore,
-spike, or bd's `feature`. It is never bd's `story` type, which
-the stranded-work check reads as a container (fact 3). PR-finishing work stays
-outside every epic and Delivery
+spike, or bd's `feature`. Until unit 7 lands it is never bd's `story` type,
+which the stranded-work check names a container and live-work.sh does not
+count as plain work (fact 3). Unit 7 makes both read `story` as plain work, and
+from then on a Story may be story-typed. PR-finishing work stays outside every
+epic and Delivery
 ([steering.md](../../docs/steering.md#pr-finishing-work)).
 
 **Each bd type keeps its own meaning.** A bd type is used only with its own
@@ -491,11 +504,13 @@ keeps taking its area's work and never closes, which the operator retired PR
 
 ## Implementation units
 
-Each unit is filed under tk-wmwcdlc. Units 1 to 4 and 6 are each one
+Each unit is filed under tk-wmwcdlc. Units 1 to 4, 6 and 7 are each one
 reviewable change, pack-side, and none needs a Gas City change. Each updates
 the central documents its change makes stale. Unit 5 is sittings, not a
-change. Units 1 to 4 edit files the native-gates branch rewrites (fact 12), so
-each waits for the branch to land and is written against what it leaves.
+change. Units 1 to 4 and 7 edit files the native-gates branch also changes
+(fact 12), so each waits for the branch to land and is written against what it
+leaves. Unit 7 is severable. Without it a Story is never story-typed, and no
+other unit depends on it.
 
 | # | Unit | Section | Needs | Done when |
 |---|---|---|---|---|
@@ -505,13 +520,14 @@ each waits for the branch to land and is written against what it leaves.
 | 4 | **A landed Delivery asks for its checkpoint.** The board's derivation rewords a landed Delivery's row to name its checkpoint and bands it with the rows the operator owes. The supervisor source carries an epic's metadata on its row, as the direct store reader does. The derivation's comments say Delivery where they say sub-epic. | 3 | 1, tk-1tfzr71.4 | A board fixture renders a landed Delivery that way, and a landed top-level epic and a landed child epic with a hypothesis as before. A supervisor source test reads an epic's `epic_hypothesis` off its row. The direct store reader is unchanged, and the wire contract gains no field. |
 | 5 | **The child epics on file.** A sitting on each epic that has an open child epic, asked for in that epic's store, reads each child against section 6. It is not a PR. | 6 | 1, 2 | No open child epic of an epic, in any rig store, lacks both an `Aim:` line and a hypothesis. |
 | 6 | **The checkpoint's machinery.** A design, drawn from the hand-run records, for what they show to be mechanical. Plausibly that is a formula that files the checkpoint and gathers its evidence when a Delivery lands, and one verb that makes the ruling's writes. It may add a nudge on the age of a Delivery that has not landed, designed from the same records. | 5 | 3, and two checkpoints run from the skill | The operator approves the design at its PR. |
+| 7 | **A Story may be story-typed.** A census of the story-typed beads in every rig store comes first, so that any bead a rig uses as a container is known before the check reads the type as work. Then `assets/scripts/live-work.sh` adds `story` to `live_work_plain_types`. `doctor/check-blocked-work-armed` adds it to its work list in `run.sh` and to the set its `doctor.toml` names, and drops it from the containers the comment over the list names. `docs/deferred-dispatch.md` and the waits skill, which name the plain-work types, add it too. The proactive scan's own type list, which admits a type only by a deliberate choice, is left as it is. | 1 | tk-1tfzr71.4 | The census's counts are in the PR. `live-work.test.sh` pins the six types, and the check's test reports a blocked, unarmed story-typed bead as stranded work. No pack file names `story` a container. |
 
 A successor bead under the epic (tk-wmwcdlc.2) waits on this spec, and its
 dispatch is armed. Once the spec merges, it files this epic's first Delivery,
 which the operator's approval of this design aims (section 2). It files units 1
-to 5 as that Delivery's Stories and unit 6 under the epic, so this epic's own
-checkpoint is one of the two hand runs unit 6 waits for. It wires the edges the
-table gives, arms the units for the polecat pool, and holds unit 6 behind a
+to 5 and 7 as that Delivery's Stories and unit 6 under the epic, so this epic's
+own checkpoint is one of the two hand runs unit 6 waits for. It wires the edges
+the table gives, arms the units for the polecat pool, and holds unit 6 behind a
 park whose gate the operator closes after the second checkpoint run from the
 skill. It also appends two notes. The note on tk-rl8gz4b.14 says that unit 3
 applies steer-by-epic section 6's moves, so a second recipe is not written. The
@@ -538,6 +554,8 @@ Until the units land:
 - **Checkpoints run without a recipe**, as goal-one's did, so their records
   differ and the machinery has less to be designed from.
 - **The child epics on file keep collecting work** with no aim and no end.
+- **A Story is never story-typed.** bd's own type for a user story stays out of
+  use for one, because two pack readers do not count it as work.
 
 ## Risks
 
