@@ -48,8 +48,9 @@ the checkpoint below reads the measured and graded criteria it brought.
   It re-reads the landed work, re-runs the measures, and records the ruling in
   the fields epic stewardship already registers. It closes each Delivery that
   has landed, once it has confirmed every Story under it is still closed. On
-  continue or shift it files the next one, and on close it settles the epic's
-  other open work, item by item, before it closes the epic (section 5).
+  continue or shift it files the next Delivery when the ruling aims one, and on
+  close it settles the epic's other open work, item by item, before it closes
+  the epic (section 5).
 - **Each child epic already filed is read against the rule.** One that holds
   bounded work becomes a Delivery. One that groups an area with no end is
   dissolved into its epic (section 6).
@@ -178,13 +179,13 @@ ruling. A Delivery with a hypothesis of its own would need its own continue,
 shift or close after every landing, and the close gate would hold it until it
 had one (fact 5).
 
-**Its Stories.** A Story is a child of its Delivery, or of its epic until a
-checkpoint gathers it (section 2). It is typed by its work: task, bug, chore,
-spike, or bd's `feature`. Until unit 7 lands it is never bd's `story` type,
-which the stranded-work check names a container and live-work.sh does not
-count as plain work (fact 3). Unit 7 makes both read `story` as plain work, and
-from then on a Story may be story-typed. PR-finishing work stays outside every
-epic and Delivery
+**Its Stories.** A Story is a child of its Delivery, or of the epic itself when
+no open Delivery's aim covers it (section 2). It is typed by its work: task,
+bug, chore, spike, or bd's `feature`. Until unit 7 lands it is never bd's
+`story` type, which the stranded-work check names a container and live-work.sh
+does not count as plain work (fact 3). Unit 7 makes both read `story` as plain
+work, and from then on a Story may be story-typed. PR-finishing work stays
+outside every epic and Delivery
 ([steering.md](../../docs/steering.md#pr-finishing-work)).
 
 **Each bd type keeps its own meaning.** A bd type is used only with its own
@@ -234,10 +235,10 @@ under it, and its checkpoint comes when the operator calls a sitting on it
 **A Delivery is filed by the decision that aims it.** That decision is the
 operator's, made at one of three points:
 
-- the sitting that elaborates an epic, which aims its first Delivery;
+- the sitting that elaborates an epic and aims its first Delivery;
 - the approval of a design whose units deliver it, after which the units are
   filed as its Stories;
-- an Epic Checkpoint's continue or shift ruling, which aims the next one.
+- an Epic Checkpoint's continue or shift ruling that aims the next one.
 
 Each Delivery spends the operator's judgment at a checkpoint, so the operator
 decides how many there are. A product area, a theme or a wish to find work on
@@ -324,9 +325,9 @@ follow-up still open at the checkpoint is settled with the operator before the
 Delivery closes (section 5, write 3). Other work found after it lands goes
 under its epic. Once closed, a Delivery takes nothing. Later work for the same
 part of the product goes under the epic, and the next checkpoint gathers it
-into the Delivery it aims. A part of the
-product with a hypothesis of its own is an epic of its own, and one that is
-only ever improvable is ordinary flow
+into a Delivery it aims or leaves it there (section 2). A part of the product
+with a hypothesis of its own is an epic of its own, and one that is only ever
+improvable is ordinary flow
 ([epics.md](../../docs/epics.md#epics-are-mortal)).
 
 Today, a follow-up a sitting files from a Story of a closed Delivery would land
@@ -399,10 +400,11 @@ these writes in order:
    A follow-up opened under it since it landed is settled with the operator
    first, in one of the ways write 5 settles an item, so the close is never
    forced.
-4. On continue or shift, it files the next Delivery with its aim, after
-   re-aiming the epic's contract fields on a shift. It then sets the epic's
-   next priority and park with the verbs on main: `gc-helm.sh priority`, and
-   `gc-helm.sh park` or the close of the park gate, as
+4. On continue or shift, it files the next Delivery with its aim when the
+   ruling aims one, after re-aiming the epic's contract fields on a shift. It
+   then sets the epic's next priority and park with the verbs on main:
+   `gc-helm.sh priority`, and `gc-helm.sh park` or the close of the park
+   gate, as
    [steer-by-epic section 6](../tk-rl8gz4b.2/steer-by-epic.md#6-a-checkpoint-records-the-next-priority)
    decides.
 5. On close, it settles the epic's other open work before it releases
@@ -568,8 +570,9 @@ Until the units land:
   a Delivery (section 2), and one checkpoint may close every Delivery that has
   landed by then (section 5).
 - **A landed Delivery waits on the operator.** It takes only work its aim
-  covers while it waits, but it stays open until its checkpoint. Unit 4 bands it with what the
-  operator owes, and unit 6 files the checkpoint once the hand runs show how.
+  covers while it waits, but it stays open until its checkpoint. Unit 4 bands
+  it with what the operator owes, and unit 6 files the checkpoint once the
+  hand runs show how.
 - **A shift can strand another open Delivery's aim, and a close can strand the
   epic's other open work.** The checkpoint reads every open Delivery of the
   epic. A shift re-aims each one in the same ruling. A close settles each open
