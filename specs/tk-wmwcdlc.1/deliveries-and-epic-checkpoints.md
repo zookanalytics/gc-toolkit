@@ -505,8 +505,10 @@ own store (unit 5), each child is read against section 1:
   checkpoint.
 - A child epic that groups an area, a theme or a track with no end is
   dissolved. Its open members move under the epic, or under the Delivery whose
-  aim covers them, and it closes through the disposition writer. It carries no
-  hypothesis, so nothing holds the close.
+  aim covers them. It then closes through the disposition writer, the way
+  section 5's write 3 makes every close, so a park on it is released first. It
+  carries no hypothesis, so neither the finalize-gate clause nor I15 holds the
+  close (fact 5).
 - A child epic that carries a hypothesis of its own is an epic and stays one.
 
 **Rejected.** *Leaving them as they are.* A child epic with no aim and no end
