@@ -1,6 +1,6 @@
 ---
 name: gctk architecture — the CLI, its callers, the ledger and the adapters
-description: The shape gctk is built to. Its CLI is a product, and every verb on it is called by an agent, a hook or an order and defends the feature it adds over the native call it wraps, or names the debt it contains and what retires it. The page covers that bar, the surface and its caller classes, the rule that admits an order and what an order guarantees, the code that parallels Gas City's, the ledger, the adapters, how commands, orders, doctor checks and the board compose the domains, the one rule for whether a bead is blocked, and the rules a domain move follows. Read it before moving logic into gctk, adding a verb or an order, declaring a metadata key, or deciding whether a bead is blocked.
+description: The shape gctk is built to. Its CLI is a product, and every verb on it is called by an agent, a hook or an order and defends the feature it adds over the native call it wraps, or names the debt it contains and what retires it. The page covers that bar, the surface and its caller classes, the rule that names a verb, the rule that admits an order and what an order guarantees, the code that parallels Gas City's, the ledger, the adapters, how commands, orders, doctor checks and the board compose the domains, the contract of `bead holds`, which answers what holds a bead, and the rules a domain move follows. Read it before moving logic into gctk, adding or naming a verb or an order, declaring a metadata key, or deciding what holds a bead.
 ---
 
 # gctk architecture
@@ -17,10 +17,11 @@ domain's questions and never reads its keys.
 ## Scope
 
 **Mandate.** The shape of gctk's code: the bar every element meets, the CLI
-surface with each verb's caller class, intent and defense, the rule that admits
-an order and what an order guarantees, the code that parallels Gas City's, the
-ledger, the adapters, how commands, orders, doctor checks and the helm board
-compose the domains, the one rule for whether a bead is blocked, and the rules
+surface with each verb's caller class, intent and defense, the rule that names
+a verb, the rule that admits an order and what an order guarantees, the code
+that parallels Gas City's, the ledger, the adapters, how commands, orders,
+doctor checks and the helm board compose the domains, the contract of
+`bead holds`, where the one rule for what holds a bead lives, and the rules
 every domain move follows.
 
 **Boundaries.** Which pack logic survives at all is
@@ -86,12 +87,18 @@ enumerated, so nothing could hold its verb to the bar. The Go packages,
 `waits`, the ledger and the adapters among them, are implementation beneath
 the verbs, and a package that no verb of any class reaches is dead code.
 
+A row's defense cell carries the verb's whole meaning, and links the steward
+doc that holds the verb's semantics where one does. A verb gets a contract
+section below only when no steward doc holds its semantics, and its row links
+that section. `bead holds` has one, because no other doc defines what holds a
+bead.
+
 | Verb | Caller class | Intent | Defense |
 |---|---|---|---|
-| `gctk bead blocked <bead>...` | agent, hook, order | what holds each bead: one status, the waits behind it, its own pending waits and when the last one landed, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([Is this bead blocked?](#is-this-bead-blocked)). |
+| `gctk bead holds <bead>...` | agent, hook, order | what holds each bead: one status, the waits behind it, its own pending waits and when the last one landed, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([its contract](#the-bead-holds-contract)). A raw row read stays native, and any question about what holds a bead, or what its close waits on, is this verb. |
 | `gctk bead arm <bead>` | agent, hook | start this bead by itself once nothing holds it, on a formula if one is named | One intent over gc's lower-level sling and routing calls. The caller states what starts and on what, and the machinery performs every later step. |
 | `gctk bead disarm <bead>` | agent, hook | stop an armed bead from starting by itself | The other half of the arm's intent. |
-| `gctk bead start-unblocked` | order | start each armed bead that nothing holds any more: sling one armed for a pool, or send its notice to the named agent one is assigned to | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). A notice takes cascade-nudge's shape with a dedup ledger, and a sling runs only under Gas City's per-bead launch lock, with a mark on the arm that keeps it from running twice. |
+| `gctk bead start-armed` | order | start each armed bead that nothing holds any more: sling one armed for a pool, or send its notice to the named agent one is assigned to | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). A notice takes cascade-nudge's shape with a dedup ledger. A sling rests on a mark on the arm, which lands first, unproven, in one write with the attempt count. A sling that fails takes the mark off in one write, so the next pass tries again. One that returns makes the mark proven before the arm is cleared, so a pass that finds a proven mark clears the arm without a sling, and one that finds an unproven mark slings again ([deferred-dispatch.md](deferred-dispatch.md#what-performs-it)). That leaves one window, a death after a sling returns and before its proven mark lands, where the next pass slings a second time. Gas City's per-bead launch lock refuses a second pour of a graph.v2 formula while the first run is live, and the rest of the window is debt the deferred-dispatch member (tk-1tfzr71.16) retires in its design of this order. |
 | `gctk bead dispose-resolved` | order | close each open, unassigned bead whose `until` targets have all closed, with a pointer to what resolved it | An `until` edge closes nothing in bd or Gas City ([warrants.md](warrants.md#deferred-dispatch-residual)). Gas City's own `convoy-autoclose-backstop` order is the precedent: a close that follows from durable state, recomputed each pass. |
 | `gctk priority shift <bead> <±n>` | agent | raise or lower a bead against what it follows, and re-rank the queue, in one act | The native surface writes only an absolute priority, which carries no intent term, so the next settle reads it as drift and overwrites it. The stored shift is that term ([steering.md](steering.md#the-rule)). Its callers are sittings and the board. |
 | `gctk priority settle <bead>` | hook | give a bead the priority of what it follows before anything claims or pours it | A pour copies a bead's priority once, so the bead carries its derived priority before the pour. The pack's own writers run it before they make a bead claimable: filing follow-up work, a sling, a release, and the board's priority verb. |
@@ -99,13 +106,13 @@ the verbs, and a package that no verb of any class reaches is dead code.
 | `gctk pr summary <bead>` | agent, hook | record what the change does, for its PR's summary | Gas Town's refinery fills a PR's summary from its bead's description, which is written before the work. This summary is written once the work is done, and says what the diff does. |
 | `gctk pr compose <bead>` | hook | the PR's conventional-commit title and managed summary region, from the bead that owns it | Gas Town's refinery titles a PR with its bead's title and writes the body once, when it opens the PR. Compose puts the type prefix the repository's title check requires ahead of the title, and keeps a marked region of the body current with the summary while leaving the text people add. |
 | `gctk pr owner <pr>` | agent, order | which bead owns this PR | Nothing in Gas City's PR concept takes a GitHub event on an open PR to the bead that owns it, and the hop is what turns a review comment into work on that bead. |
-| `gctk pr status <bead>` | order | where the PR stands: working, needs-review or needs-attention | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. |
+| `gctk pr status <bead>` | hook, order | where the PR stands: working, needs-review or needs-attention | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. A pack writer that changes one of its inputs, opening the PR or recording a review verdict, sets the label in the same act. The order is the backstop: the merge cadence's pass walks the open beads that carry a PR, a set bounded by the open PRs, in a rotation that starts no bead past the pass's deadline, and writes a label only where its value changed. |
 | `gctk pr post <pr>` | agent, hook | post the city's comment, review or reply on a PR, carrying the city's mark | Every agent's `gh` token is one bot account, so a post's author cannot tell the city's notice from feedback. The mark can, and this one writer owns the mark and the definition of which posts are feedback. |
 | `gctk pr guard` | hook | refuse an agent's `gh` write outside the rig's own origin, or an unmarked post on it | Gas City scopes no agent's writes ([warrants.md](warrants.md#gh-write-containment)). The rule lives in the GitHub adapter, so gctk's own writes meet it, and the tool-use hook every agent carries applies it to the commands an agent types. |
 | `gctk rig test`, `lint`, `typecheck`, `setup`, `build` | agent, hook | run a rig's check and record its result at the commit, or read that record | One consistent surface that simplifies an agent's logic, caches each result at its commit, and processes every check the same way. |
-| `gctk review checks` | agent, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The loop's shape is the review-lane member's design. |
+| `gctk review checks` | hook, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The review formula's steps read it at the reviewed commit, a lane for its own row and triage for the whole index, and the merge cadence reads it for the lanes a change needs before it dispatches them or lands the change. The loop's shape is the review-lane member's design. |
 | `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
-| `gctk review passed <bead>` | order | whether every lane has passed at the head: the loop's pass-or-iterate check | The loop's check script, which holds the pass rule over the lanes that the loop itself cannot. |
+| `gctk review passed <bead>` | hook | whether every lane has passed at the head: the loop's pass-or-iterate check | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, which the loop itself cannot. |
 | `gctk quota-park nudge` | order | nudge each live session parked at a provider's limit banner, backing off per session and telling a person once an episode | Nothing in Gas City wakes a live session idle under a limit banner ([warrants.md](warrants.md#quota-park-nudging)). A nudge costs a busy or still-blocked agent nothing, and the pass polls rather than trusting the banner's reset time, because quota returns by routes no banner predicts. The standing revisit of its cadence, backoff and scope is tk-vtnyw8d. |
 | `gctk quota-park status <session>` | hook | whether this session is parked on a provider limit | The patrols read it, rather than the session's pane, before they warrant a session. |
 | `gctk seed render` | hook, order | render every agent's prompt and every formula's recipe into the audit under `generated/seed-audit/` | Gas City renders one prompt or recipe on demand and keeps no copy. The audit keeps them all in the tree, so a PR's diff shows what each agent will receive. It writes only the output it owns, which is what lets an order run it. |
@@ -143,7 +150,7 @@ What gets a verb:
 
 - **A verb carries an intent that survives the migration onto Gas City.** An
   intent the migration retires gets no verb, because porting it would carry it
-  forward. The exceptions are `bead blocked`, which is the proof's and defends
+  forward. The exceptions are `bead holds`, which is the proof's and defends
   itself, and the commands gctk holds now, below.
 - **A verb is wrong if its caller still needs a script** to turn its intent
   into action.
@@ -155,6 +162,29 @@ What gets a verb:
 - **The commands gctk holds now keep their place.** `rig` and `version` stay,
   `pr-status` becomes `pr status`, and `lifecycle` and `merge` join the tree
   unchanged.
+
+## The rule that names a verb
+
+A term's relation to its native meaning decides its name.
+
+- **Same meaning, same word.** A noun means what Gas City and bd mean by it, as
+  `bead`, `pr`, `rig` and `dolt` do. A status value is the word the board's
+  labels show for the same state, so `pr status` answers in the words its
+  `status:` label shows.
+- **A verb that does the whole act over a native primitive keeps its word.**
+  When agents are documented onto the verb alone, no agent chooses between it
+  and the primitive beneath it, so its word misleads no one. `bead arm` slings
+  through `gc sling` once nothing holds the bead, and an agent that wants that
+  learns only the arm.
+- **A verb whose answer can differ from the native call it would be taken for
+  gets a fresh word, always.** A shared word would tell an agent the two are
+  one. `bd blocked` answers differently for work in flight and for a bead with
+  a `waits-for` edge of its own, so the bead read is `bead holds`, a word no
+  native call uses.
+
+Each verb takes one test: is there a native call it could be mistaken for, and
+could the two answers ever differ? When both hold, the verb takes a fresh word
+or is cut.
 
 ## The rule that admits an order
 
@@ -193,8 +223,11 @@ instead:
 
 - **Per cadence, never per change.** Nothing may rely on an order having run
   because a write happened. Each pass recomputes from durable state, so a raw
-  write is never lost, only late: by one cadence at worst, seconds when its
-  event fires, plus any delay a loaded store adds, and the next pass heals it.
+  write is never lost, only late: by up to one cadence, plus the orders lane's
+  wait, the pass's own run and any delay a loaded store adds, and the next pass
+  heals it. An event can start a pass sooner but bounds nothing shorter than
+  the cadence, because a bare `bd` write reaches the bus only when the
+  controller's cache rescans the store.
 - **What the city gives an order** (read at Gas City 221b1476dc10,
   2026-10-28):
   - A write through bare `bd`, an agent's or a person's, emits no event of its
@@ -221,6 +254,9 @@ instead:
 
 ## The re-implementation register
 
+Every row stands on the register: no verb parallels Gas City's logic except
+where an entry here says why.
+
 Where gctk parallels Gas City's logic, it states why it is re-implemented, keeps
 the goal of staying in step with upstream, and carries the divergence risk as a
 stated burden.
@@ -233,8 +269,8 @@ stated burden.
   GitHub's branch rules retires them (tk-1tfzr71.20). The risk is that a change
   to Gas Town's refinery flow does not reach the pack's refinery before then, so
   the two drift. They gain nothing new.
-- **The store adapter's compensations.** The error for a bead with a
-  `waits-for` edge of its own and the marks read that checks bd's blocked
+- **The store adapter's compensations.** The `waits-for` error for a bead with
+  a `waits-for` edge of its own and the marks read that checks bd's blocked
   listing ([The adapters](#the-adapters)) stand in for bd's own answers where
   its listing cannot give them. The goal is that every answer stays the
   store's. The risk is that the marks read repeats the query `bd blocked`
@@ -279,6 +315,9 @@ questions, and the domains form no cycle. Only the ledger reaches the store,
 and only an adapter reaches an outside system.
 
 ## The ledger
+
+Every row stands on the ledger: a verb reads and writes bead state only
+through it.
 
 The ledger is the one module that turns bead rows into typed records and back.
 Nothing outside it parses a metadata value or spells a key's name.
@@ -329,6 +368,9 @@ Nothing outside it parses a metadata value or spells a key's name.
 
 ## The adapters
 
+Every row stands on the adapters: a verb reaches an outside system only
+through one.
+
 There is one adapter per outside system. Only an adapter starts a process or
 opens a connection, and each has a fake, so every domain rule is tested in Go
 and CI runs those tests on every PR.
@@ -350,29 +392,36 @@ held through. It judges a `waits-for` edge by its spawner's status rather
 than by its gate, though, and bd's close rule judges it the same way. So for a
 bead with a `waits-for` edge of its own, the listing can leave the bead out,
 blame a parent that holds nothing, or name a spawner whose gate has opened. The
-adapter answers such a bead with an error.
+adapter finds that edge among the edges it reads with the bead, and answers
+such a bead with the `waits-for` error, whatever the listing says of it.
 
 The listing can also lose beads to a read that failed. When its read of parents
 fails, `gc bd blocked` leaves out every bead held only through a parent and
 still exits 0. So the adapter also reads the ids the store marks blocked,
 through `gc bd sql` with the query the listing starts from, and answers a
-marked bead that the listing leaves out with an error. It answers every other
-bead from the listing. The two reads are not one transaction, so a bead that
-changes between them can get an error, which the next read clears. The blocked
-mark on the supervisor's bead rows cannot stand in for that read, because it is
-Gas City's readiness answer, which also holds a bead whose blocker closed with
-`gc.work_outcome=blocked`.
+marked bead that the listing leaves out with a read error, the error any read
+that fails returns. It answers every other bead from the listing. The two reads
+are not one transaction, so a bead that changes between them can get a read
+error, which the next read clears. The blocked mark on the supervisor's bead
+rows cannot stand in for that read, because it is Gas City's readiness answer,
+which also holds a bead whose blocker closed with `gc.work_outcome=blocked`.
+
+The adapter's errors are distinct types. The `waits-for` error comes from a
+bead's own edges and stands until bd's repair, and a read error says only that
+one read could not answer, so a caller tells them apart by type alone.
 
 The compensations retire with one repair of bd. Once the bd the city runs
 judges a `waits-for` edge by its gate and returns an error when its read of
-parents fails (tk-ssm8qns.5), the adapter drops the error and the marks read
-(tk-ssm8qns.6).
+parents fails (tk-ssm8qns.5), the adapter drops the `waits-for` error and the
+marks read (tk-ssm8qns.6).
 
 The adapter's own tests drive it through a stub `gc` on `PATH`, so they pin the
-questions it asks, and a marked bead that the stub listing leaves out gets the
-error. Its acceptance test runs the bd the city runs against a scratch store,
-so it pins the answer that bd gives for each kind of wait, each gate included,
-and the beads it marks blocked. The domains' tests run on the fake.
+questions it asks. A marked bead that the stub listing leaves out gets a read
+error, and a bead with a `waits-for` edge of its own gets the `waits-for` error
+whether the stub listing names it or not. Its acceptance test runs the bd the
+city runs against a scratch store, so it pins the answer that bd gives for each
+kind of wait, each gate included, and the beads it marks blocked. The domains'
+tests run on the fake.
 
 ## Compositions
 
@@ -389,12 +438,13 @@ and the beads it marks blocked. The domains' tests run on the fake.
   the loops act on. Its ranking, bands and grouping are its own. A question
   that a loop also acts on belongs to a domain, not to the board.
 
-## Is this bead blocked?
+## The `bead holds` contract
 
-`gctk bead blocked` answers it through the `waits` package, and the answer is
-the store's. [The census](../specs/tk-ssm8qns.2/blocked-census.md) holds the
-store's rules, every place in the pack that decides the question, and where
-those places disagree.
+`gctk bead holds` answers what holds a bead, through the `waits` package, and
+the answer is the store's. Whether the bead is blocked is one question inside
+it. [The census](../specs/tk-ssm8qns.2/blocked-census.md) holds the store's
+rules, every place in the pack that decides that question, and where those
+places disagree.
 
 What `waits` adds over the store's answer:
 
@@ -413,10 +463,12 @@ What `waits` adds over the store's answer:
 - **One status.** A bead is `blocked` when a wait of its own holds it, and
   `held` when only an ancestor's wait holds it and its work has not started.
   It is `unjudged` when it has a `waits-for` edge of its own. bd's listing
-  cannot answer such a bead, so the adapter answers it with an error, and
-  `waits` reads that error as this status, not as a failed read. Every caller
-  that acts treats the edge as a wait that holds. Otherwise the bead is `clear`.
-  A read that fails returns an error, never a status.
+  cannot answer such a bead, so the adapter answers it with the `waits-for`
+  error, and `waits` reads that error, and no other, as this status. Every
+  caller that acts treats the edge as a wait that holds. Otherwise the bead is
+  `clear`. A read that fails returns an error, never a status, and so does a
+  marked bead the listing lost, so a listing that misses a bead for one read
+  cannot stand as `unjudged`, and the next read clears it.
 
 The status rests on these answers.
 

@@ -6,7 +6,7 @@ description: Every place in gc-toolkit's runtime code that decides whether a bea
 # "Is this blocked?": the census and what the one rule changes
 
 The one rule is in
-[docs/gctk-architecture.md](../../docs/gctk-architecture.md#is-this-bead-blocked).
+[docs/gctk-architecture.md](../../docs/gctk-architecture.md#the-bead-holds-contract).
 This record holds the evidence for it. The places were read at b25a5c06. The
 live beads were read on 2026-10-27 at 18:33Z from all seven stores the pack
 serves, the city store and six rig stores, each pinned with `--db`.
