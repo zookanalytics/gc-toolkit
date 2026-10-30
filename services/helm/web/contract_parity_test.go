@@ -527,6 +527,9 @@ func fixtureBoard() board.Board {
 				// TypeScript check.
 				AcceptWithheld: &tileDensity,
 				GatesInSession: &tileDensity,
+				// That gate blocks the epic, so its work is held, as the board
+				// derives for any row an open human gate blocks.
+				WorkHeld: true,
 			},
 			{
 				ID:       "gt-1a2b3",

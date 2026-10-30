@@ -72,7 +72,7 @@
       "gates_in_session": "Which tile density should the canvas default to?",
       "sitting_start_failure": "",
       "pr_held": null,
-      "work_held": false
+      "work_held": true
     },
     {
       "id": "gt-1a2b3",

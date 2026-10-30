@@ -85,8 +85,9 @@ held row, and empty on a row nothing holds. `work_held` refines `held`: it is
 true when an open human gate blocks the bead or an acceptance an earlier Accept
 left unfinished keeps it, so the operator's answer is required before the work
 can move. A held row where it is false only has a conversation on it, which
-blocks nothing, and the boards mark it apart: ◌ in both terminal views, and a
-chip reading `conversation` rather than `gate` on the web. `acceptable` reads
+blocks nothing, and the boards mark it apart: ◌ in both terminal views, except
+where the overview's ● marks a row that wants you, and a chip reading
+`conversation` rather than `gate` on the web. `acceptable` reads
 Accept's three conditions (`docs/human-engagement.md`, "Accept").
 `accept_withheld` is set on a row that
 meets the first two and fails the third: it names the open human gates that
