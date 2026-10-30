@@ -6,9 +6,17 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SUT="$HERE/upstream-finding.sh"
+UF="$HERE/upstream-finding.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-upstream-finding-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+
+# A public send is parked only with the preparer's reading of the target's
+# security policy. Most cases below test something else, so "$SUT" passes a
+# reading; the cases about the reading and the private report call "$UF".
+POLICY_READ="No security policy: isSecurityPolicyEnabled is false for this repository."
+SUT="$TMP/upstream-finding-with-policy"
+printf '#!%s\nexec %q --security-policy %q "$@"\n' "${BASH:-/usr/bin/env bash}" "$UF" "$POLICY_READ" > "$SUT"
+chmod +x "$SUT"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -214,6 +222,9 @@ has "$OUT" "--repo <owner/name>" "the refusal names the missing flag"
 OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --body-file /tmp/body.md 2>&1)
 eq "$?" "2" "a --body-file is refused"
 has "$OUT" "gone when the command is pasted" "the refusal says why a file path cannot be parked"
+OUT=$("$SUT" --message "why" -- gh pr review 5 --repo a/b --comment -F/tmp/body.md 2>&1)
+eq "$?" "2" "a -F with its path attached is refused too"
+has "$OUT" "gone when the command is pasted" "the attached -F refusal says why"
 
 OUT=$("$SUT" --message "why" -- "gh issue create --repo a/b --title T" 2>&1)
 eq "$?" "2" "a command quoted into one argument is refused"
@@ -424,6 +435,129 @@ has "$OUT" "run the command" "the refusal says to just run it"
 OUT=$("$SUT" --message "why" -- gh issue create --repo github.com/ZookAnalytics/GC-Toolkit --title T --body B 2>&1)
 eq "$?" "2" "the own-origin match survives host prefix and case"
 
+# ── a public send needs the target's security policy, as read ─────────────
+# A parked send is pasted as it stands, so a public one publishes the finding
+# the moment it is pasted. It is parked only once the preparer has read the
+# target's security policy, and the operator reads that beside the command.
+reset_state
+OUT=$("$UF" --message "why" -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "2" "a public send with no security-policy reading is refused"
+eq "$(count)" "0" "nothing is parked before the policy is read"
+has "$OUT" "--security-policy" "the refusal names the reading it needs"
+has "$OUT" "isSecurityPolicyEnabled securityPolicyUrl" "the refusal says how to find the policy"
+has "$OUT" "repos/otherowner/widget/private-vulnerability-reporting" "the refusal says how to check for private reporting"
+has "$OUT" "gh api --method POST repos/otherowner/widget/security-advisories/reports" "the refusal names this target's private report"
+eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no human is asked to paste an unchecked public send"
+
+OUT=$("$UF" --message "why" --security-policy "  " -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "2" "a blank reading is no reading"
+OUT=$("$UF" --message "why" -- gh pr comment 7 --repo otherowner/widget --body B 2>&1)
+eq "$?" "2" "a public comment needs the reading too"
+eq "$(count)" "0" "nothing is parked for either"
+
+reset_state
+READING="SECURITY.md asks for vulnerabilities in private; this is a typo in the docs, not one."
+"$UF" --message "why" --security-policy "$READING" \
+  -- gh issue create --repo otherowner/widget --title T --body B >/dev/null 2>&1
+eq "$?" "0" "a public send carrying the reading parks"
+DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
+has "$DESC" "Public: everyone who can see otherowner/widget can read it once it is sent." "the bead says the send is public"
+has "$DESC" "Security policy, as read before parking: $READING" "the bead carries the reading"
+has "$(cat "$STUB_ESC_LOG")" "Security policy, as read before parking: $READING" "the visit carries the reading beside the command"
+
+# ── a private vulnerability report parks as gh api ────────────────────────
+# The private channel a security policy can name that gh reaches. gh api has
+# no --repo, so the target is the repository its endpoint path names.
+reset_state
+REPORT_TEXT='GET /export returns rows the caller cannot read.
+
+Repro: `curl -H "Authorization: $TOKEN" /export?all=1`.'
+OUT=$("$UF" --message "why" -- gh api --method POST repos/otherowner/widget/security-advisories/reports \
+  -f summary="Export skips the row access check" -f description="$REPORT_TEXT" -f severity=high 2>&1)
+eq "$?" "0" "a private vulnerability report parks with no security-policy reading"
+eq "$(count)" "1" "the report parks one bead"
+has "$OUT" "parked private vulnerability report on otherowner/widget" "it reports the private report it parked"
+eq "$(meta up-1 gh_target_repo)" "otherowner/widget" "the target is the repository the endpoint path names"
+eq "$(meta up-1 gh_verb)" "api" "the verb is api, not the endpoint"
+has "$(jq -r '.[] | select(.id == "up-1") | .title' "$STUB_STORE")" "private vulnerability report on otherowner/widget" "the title names the private channel"
+DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
+has "$DESC" "Private: the report goes to the maintainers of otherowner/widget, not to a public page." "the bead says the send is private"
+hasnt "$DESC" "Security policy, as read" "a report parked with no reading records none"
+has "$(cat "$STUB_ESC_LOG")" "Approve or decline an outbound private vulnerability report on otherowner/widget" "the visit names the private channel"
+PARKED=$(meta up-1 gh_command)
+eval "set -- $PARKED"
+eq "$#" "11" "the parked report re-splits into the same argument count"
+eq "$5" "repos/otherowner/widget/security-advisories/reports" "the endpoint survives"
+eq "$9" "description=$REPORT_TEXT" "a multi-line report with backticks, quotes and \$ survives verbatim"
+
+# gh's other spellings of the same report park the same way: a leading slash,
+# an attached method, attached fields, a lowercase method, and a value flag.
+reset_state
+"$UF" --message "why" -- gh api /repos/otherowner/widget/security-advisories/reports -XPOST \
+  --raw-field=summary=S -fdescription=D >/dev/null 2>&1
+eq "$?" "0" "a leading slash, -XPOST and attached fields park"
+eq "$(meta up-1 gh_target_repo)" "otherowner/widget" "the leading-slash path still names the target"
+reset_state
+"$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports --method post \
+  -f summary=S --jq .html_url -f description=D >/dev/null 2>&1
+eq "$?" "0" "a lowercase method and a value flag among the fields park"
+reset_state
+"$UF" --message "why" -- gh api --hostname ghe.example.com repos/otherowner/widget/security-advisories/reports \
+  -f summary=S -f description=D >/dev/null 2>&1
+eq "$(meta up-1 gh_target_repo)" "ghe.example.com/otherowner/widget" "a report sent to another GitHub host names that host in its target"
+
+reset_state
+"$UF" --message "why" --security-policy "SECURITY.md asks for a private advisory." \
+  -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D >/dev/null 2>&1
+has "$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")" \
+  "Security policy, as read before parking: SECURITY.md asks for a private advisory." "a reading given with a report is recorded"
+
+# ── a gh api command that is not a pasteable private report is refused ───
+reset_state
+OUT=$("$UF" --message "why" -- gh api --method POST 'repos/{owner}/{repo}/security-advisories/reports' -f summary=S -f description=D 2>&1)
+eq "$?" "2" "a placeholder endpoint is refused"
+has "$OUT" "placeholder fills in from the directory" "the refusal says where a placeholder resolves"
+
+OUT=$("$UF" --message "why" -- gh api --repo otherowner/widget repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D 2>&1)
+eq "$?" "2" "gh api with --repo is refused"
+has "$OUT" "no --repo flag" "the refusal says gh api takes no --repo"
+
+OUT=$("$UF" --message "why" --security-policy "$POLICY_READ" -- gh api --method POST repos/otherowner/widget/issues -f title=T -f body=B 2>&1)
+eq "$?" "2" "a gh api write other than a private report is refused, with a reading or without"
+has "$OUT" "got 'repos/otherowner/widget/issues'" "the refusal names the endpoint it got"
+
+OUT=$("$UF" --message "why" -- gh api graphql -f query='mutation { x }' 2>&1)
+eq "$?" "2" "a graphql call is refused"
+
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports repos/otherowner/widget/issues -f summary=S -f description=D 2>&1)
+eq "$?" "2" "a second endpoint is refused"
+has "$OUT" "more words after it" "the refusal names the extra word"
+
+OUT=$("$UF" --message "why" -- gh api --method GET repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D 2>&1)
+eq "$?" "2" "a report sent as GET is refused"
+has "$OUT" "is a POST" "the refusal says a report is a POST"
+
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S 2>&1)
+eq "$?" "2" "a report with no description is refused"
+has "$OUT" "-f description=<the report>" "the refusal names the missing description"
+hasnt "$OUT" "-f summary=<one line>" "…and not the summary it carries"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f description=D -f summary= 2>&1)
+eq "$?" "2" "an empty summary is refused"
+
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -F description=@report.md 2>&1)
+eq "$?" "2" "-F on gh api is refused"
+has "$OUT" "fills {owner} and {repo}" "the refusal says what -F reads besides the text"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D -Fextra=@/etc/hosts 2>&1)
+eq "$?" "2" "-F with its value attached is refused, so pasting reads no local file into the report"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S --field=description=@report.md 2>&1)
+eq "$?" "2" "--field on gh api is refused"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports --input report.json 2>&1)
+eq "$?" "2" "--input on gh api is refused"
+has "$OUT" "Pass each field inline as a string with -f" "the refusal says how to pass a field"
+OUT=$("$UF" --message "why" -- gh api repos/zookanalytics/gc-toolkit/security-advisories/reports -f summary=S -f description=D 2>&1)
+eq "$?" "2" "a report to the rig's own origin is refused like any send there"
+eq "$(count)" "0" "no refused report is parked"
+
 # ── usage ─────────────────────────────────────────────────────────────────
 OUT=$("$SUT" -- gh issue create --repo a/b --title T --body B 2>&1)
 eq "$?" "2" "--message is required"
@@ -503,6 +637,8 @@ eq "$(meta "$VISIT" "gc.routed_to")" "testrig/gc-toolkit.converse" "the pool thi
 has "$(cat "$STUB_DEPS")" "$VISIT|up-1|tracks" "the visit tracks the bead by edge, not only by metadata"
 has "$(jq -r --arg id "$VISIT" '.[] | select(.id == $id) | .description' "$STUB_STORE")" \
   "$(meta up-1 gh_command)" "the visit a human reads carries the pasteable command"
+has "$(jq -r --arg id "$VISIT" '.[] | select(.id == $id) | .description' "$STUB_STORE")" \
+  "Security policy, as read before parking: $POLICY_READ" "the visit a human reads carries the security-policy reading"
 
 eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh was never invoked by any case"
 

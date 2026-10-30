@@ -6,8 +6,14 @@
 # command is parked verbatim on a bead as `gh_command`, ready to paste, and a
 # visit asks a human for the send.
 #   upstream-finding.sh --message <why this send is warranted>
+#                       [--security-policy <the target's policy, as read>]
 #                       [--key <situation-key>] [--pool <converse pool>]
 #                       -- gh <verb> --repo <owner/name> [args...]
+# A finding the target's security policy asks to receive privately is parked
+# as GitHub's private vulnerability report instead:
+#                       -- gh api --method POST
+#                          repos/<owner/name>/security-advisories/reports
+#                          -f summary=<one line> -f description=<the report>
 # This script contacts nothing. It runs no `gh`, and it is not a send path a
 # guard can be talked through.
 # Exit: 0 parked, already parked or already answered · 1 could not file or
@@ -29,30 +35,43 @@ scrub() { tr -d '\000-\037'; }
 usage() {
   cat >&2 <<'U'
 usage: upstream-finding.sh --message <why this send is warranted>
+                           [--security-policy <the target's policy, as read>]
                            [--key <situation-key>] [--pool <converse pool>]
                            -- gh <verb> --repo <owner/name> [args...]
+       upstream-finding.sh --message <why this send is warranted> [...]
+                           -- gh api --method POST
+                              repos/<owner/name>/security-advisories/reports
+                              -f summary=<one line> -f description=<the report>
 
   --message  what the operator is being asked to approve, in their terms: what
              was found, where it was hit, why it is worth someone else's time.
              The `gh` body is written for the upstream maintainer and does not
              answer this (required)
+  --security-policy
+             the target's security policy as you read it, and why it lets this
+             report be public: where the policy is or that there is none, and
+             whether this finding falls under it. A public send publishes its
+             text the moment it is pasted, so every send but a private
+             vulnerability report requires it
   --key      names the SITUATION: one bead per key, so a re-run of the same
              finding refreshes rather than files again. [A-Za-z0-9._-] only.
              Default: target repo, verb and a digest of the command
   --pool     converse pool the visit routes to; passed through to escalate.sh,
              which owns the default and the route check
   --         everything after it is the command, verbatim. It must name its
-             target with `--repo <owner/name>`: the operator pastes it in
-             their own shell, where an implicit repo resolves somewhere else
+             target with `--repo <owner/name>`, or a private vulnerability
+             report in its endpoint path: the operator pastes it in their own
+             shell, where an implicit repo resolves somewhere else
 U
 }
 
 warn() { echo "$PROG: $*" >&2; }
 
-MESSAGE=""; KEY=""; POOL_ARG=""; CMD=()
+MESSAGE=""; POLICY=""; KEY=""; POOL_ARG=""; CMD=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --message) MESSAGE="${2:-}"; shift 2 || { usage; exit 2; } ;;
+    --security-policy) POLICY="${2:-}"; shift 2 || { usage; exit 2; } ;;
     --key)     KEY="${2:-}";     shift 2 || { usage; exit 2; } ;;
     --pool)    POOL_ARG="${2:-}"; shift 2 || { usage; exit 2; } ;;
     -h|--help) usage; exit 2 ;;
@@ -93,6 +112,9 @@ for a in "${CMD[@]:1}"; do
   esac
 done
 [ -n "$VERB" ] || VERB="gh"
+# `gh api` takes its endpoint where another command takes a second verb word,
+# so its verb is `api` alone. The endpoint is read with the report's checks.
+case "$VERB" in "api "*) VERB="api" ;; esac
 
 # gh reads the word AFTER a value flag as that flag's value, whatever it is:
 # `gh issue create --title --body B` sets the title to `--body` and then chokes
@@ -140,20 +162,90 @@ for i in "${!CMD[@]}"; do
   fi
   TARGET="$v"
 done
-if [ "$REPO_SEEN" = 0 ]; then
+if [ "$REPO_SEEN" = 0 ] && [ "$VERB" != "api" ]; then
   warn "the command names no repository. Add \`--repo <owner/name>\`: the operator pastes this in their own shell, where an implicit repo resolves against whatever they are standing in."
   exit 2
 fi
 
 # The flags that read a value out of a file park a path, not the value, and
-# the path is gone by the time a human pastes the command.
+# the path is gone by the time a human pastes the command. gh api's -F/--field
+# and --input read files too. gh takes a short flag's value attached (-Fpath),
+# so every -F spelling counts.
 for a in "${CMD[@]}"; do
-  case "$a" in
-    --body-file|-F|--body-file=*)
+  case "$VERB:$a" in
+    api:-F*|api:--field|api:--field=*)
+      warn "\`$a\` reads a value from a file after @, and fills {owner} and {repo} from the directory the command is pasted in. Pass each field inline as a string with -f."
+      exit 2 ;;
+    api:--input|api:--input=*)
+      warn "\`$a\` reads the request body from a file, and the file is gone when the command is pasted. Pass each field inline as a string with -f."
+      exit 2 ;;
+    *:--body-file|*:-F*|*:--body-file=*)
       warn "\`$a\` takes its value from a file, and the file is gone when the command is pasted. Inline the text (--body, or -f for a field)."
       exit 2 ;;
   esac
 done
+
+# A private vulnerability report is the one `gh api` write this path parks: it
+# is the private channel a security policy can name that `gh` reaches
+# (docs/outbound-sends.md). gh api has no --repo, so the report names its
+# repository in the endpoint path, and literally, because a {owner} or {repo}
+# placeholder fills in from the directory the command is pasted in.
+PRIVATE_REPORT=0
+REPORT_FORM="gh api --method POST repos/<owner>/<name>/security-advisories/reports -f summary=<one line> -f description=<the report>"
+REPORT_RE='^/?repos/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/security-advisories/reports$'
+# gh api's flags that take a value. The word after one is that value, not the
+# endpoint; an attached value (--method=POST, -XPOST) takes no word.
+API_VALUE_FLAGS="-X --method -F --field -f --raw-field -H --header -p --preview --input -t --template -q --jq --hostname --cache"
+has_field() {
+  local f
+  for f in ${FIELDS[@]+"${FIELDS[@]}"}; do
+    case "$f" in "$1="?*) return 0 ;; esac
+  done
+  return 1
+}
+if [ "$VERB" = "api" ]; then
+  if [ "$REPO_SEEN" = 1 ]; then
+    warn "\`gh api\` has no --repo flag, so gh rejects the pasted command. Name the repository in the endpoint path: $REPORT_FORM"
+    exit 2
+  fi
+  ENDPOINT=""; METHOD="POST"; API_HOST=""; FIELDS=(); WORDS=0
+  for (( i = 1; i < ${#CMD[@]}; i++ )); do
+    a="${CMD[$i]}"
+    case "$a" in
+      -X|--method)    METHOD="${CMD[$((i + 1))]:-}"; i=$((i + 1)) ;;
+      --method=*)     METHOD="${a#--method=}" ;;
+      -X?*)           METHOD="${a#-X}"; METHOD="${METHOD#=}" ;;
+      --hostname)     API_HOST="${CMD[$((i + 1))]:-}"; i=$((i + 1)) ;;
+      --hostname=*)   API_HOST="${a#--hostname=}" ;;
+      -f|--raw-field) FIELDS+=("${CMD[$((i + 1))]:-}"); i=$((i + 1)) ;;
+      --raw-field=*)  FIELDS+=("${a#--raw-field=}") ;;
+      -f?*)           a="${a#-f}"; FIELDS+=("${a#=}") ;;
+      --*=*)          : ;;
+      -*)             case " $API_VALUE_FLAGS " in *" $a "*) i=$((i + 1)) ;; esac ;;
+      *)              WORDS=$((WORDS + 1)); [ "$WORDS" = 2 ] && ENDPOINT="$a" ;;
+    esac
+  done
+  if [ "$WORDS" -gt 2 ] || ! [[ "$ENDPOINT" =~ $REPORT_RE ]]; then
+    MORE=""; [ "$WORDS" -gt 2 ] && MORE=" and more words after it"
+    warn "the one \`gh api\` write this path parks is a private vulnerability report, one endpoint naming its repository literally: $REPORT_FORM (got '${ENDPOINT:-no endpoint}'$MORE). A {owner} or {repo} placeholder fills in from the directory the command is pasted in. Park any other write as the gh command for it, with --repo."
+    exit 2
+  fi
+  # --hostname sends the report to another GitHub host, so the target the
+  # operator reads names that host.
+  TARGET="${API_HOST:+$API_HOST/}${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+  if [ "$(printf '%s' "$METHOD" | tr '[:lower:]' '[:upper:]')" != "POST" ]; then
+    warn "a private vulnerability report is a POST, and this command's method is '${METHOD}'. Leave --method out, or give POST."
+    exit 2
+  fi
+  WANT=""
+  has_field summary || WANT="-f summary=<one line>"
+  has_field description || WANT="${WANT:+$WANT and }-f description=<the report>"
+  if [ -n "$WANT" ]; then
+    warn "GitHub refuses a private vulnerability report without a summary and a description, so the pasted command would fail. Add $WANT."
+    exit 2
+  fi
+  PRIVATE_REPORT=1
+fi
 
 # This rig's own origin, for the one refusal that belongs here: preparing a
 # send to the repo we own asks a human for permission we already have.
@@ -275,6 +367,32 @@ if [ "$NEED_SELECTOR" = 1 ] && ! has_selector; then
   exit 2
 fi
 
+# A parked send is pasted as it stands, so whether its text may be public is
+# settled before it is parked. A public write publishes the finding the moment
+# it is pasted, so it carries the preparer's reading of the target's security
+# policy, and the operator reads that beside the command. A private
+# vulnerability report needs none: it reaches the maintainers alone.
+POLICY_SET=0
+[ -n "$(printf '%s' "$POLICY" | tr -d '[:space:]')" ] && POLICY_SET=1
+if [ "$PRIVATE_REPORT" = 1 ]; then
+  SEND_LABEL="private vulnerability report"
+  CHANNEL="Private: the report goes to the maintainers of $TARGET, not to a public page."
+else
+  SEND_LABEL="$VERB"
+  CHANNEL="Public: everyone who can see $TARGET can read it once it is sent."
+  if [ "$POLICY_SET" = 0 ]; then
+    OWNER_NAME="$TARGET"; case "$OWNER_NAME" in */*/*) OWNER_NAME="${OWNER_NAME#*/}" ;; esac
+    OWNER="${OWNER_NAME%%/*}"; NAME="${OWNER_NAME#*/}"
+    warn "\`$VERB\` on $TARGET is public: once pasted, everyone who can see $TARGET can read it. Read $TARGET's security policy first, and pass what it says as --security-policy \"<where it is or that there is none, and why it lets this report be public>\"."
+    warn "  GitHub says whether $TARGET has one and where, its owner's default included: gh api graphql -f query='{repository(owner:\"$OWNER\",name:\"$NAME\"){isSecurityPolicyEnabled securityPolicyUrl}}'"
+    warn "  If it asks for this finding in private, park the private channel it names instead. GitHub's private vulnerability reporting is one wherever gh api repos/$OWNER/$NAME/private-vulnerability-reporting reads {\"enabled\":true}: gh api --method POST repos/$OWNER/$NAME/security-advisories/reports -f summary=<one line> -f description=<the report>"
+    warn "  A private channel gh cannot reach, such as an email address, is the operator's to use: ask through escalate.sh with the report in its message, and park nothing public."
+    exit 2
+  fi
+fi
+[ "$POLICY_SET" = 1 ] && CHANNEL="$CHANNEL
+Security policy, as read before parking: $POLICY"
+
 # A stable digest over the exact argv, NUL-joined so no argument boundary can
 # be forged by an argument's own bytes.
 sig() {
@@ -354,13 +472,15 @@ fi
 
 BEAD="$EXISTING"
 if [ -z "$BEAD" ]; then
-  HEADLINE="$VERB on $TARGET"
+  HEADLINE="$SEND_LABEL on $TARGET"
   TITLE="upstream send (awaiting operator): $(printf '%s' "$HEADLINE" | head -n 1 | cut -c1-120)"
   BODY="$MESSAGE
 
 ## The send, prepared not sent
 
 Target repo: \`$TARGET\`$ORIGIN_NOTE
+
+$CHANNEL
 
 Paste this, unedited, to send it:
 
@@ -391,9 +511,11 @@ fi
 
 # The visit is how a human hears about it; escalate.sh owns the route, the
 # dedup and the refresh, so a re-run lands on the same visit.
-ESC_MESSAGE="Approve or decline an outbound $VERB on $TARGET (bead $BEAD)
+ESC_MESSAGE="Approve or decline an outbound $SEND_LABEL on $TARGET (bead $BEAD)
 
 $MESSAGE
+
+$CHANNEL
 
 Paste this, unedited, to send it:
 
@@ -418,6 +540,6 @@ printf '%s\n' "$ESC_OUT"
 if [ -n "$EXISTING" ]; then
   echo "$PROG: $BEAD already carries this send — refreshed the ask, nothing filed twice"
 else
-  echo "$PROG: parked $VERB on $TARGET as $BEAD [$KEY] — nothing sent"
+  echo "$PROG: parked $SEND_LABEL on $TARGET as $BEAD [$KEY] — nothing sent"
 fi
 exit 0
