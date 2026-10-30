@@ -258,6 +258,31 @@ if [ "$VERB" = "api" ]; then
     warn "GitHub refuses a private vulnerability report without a summary and a description, so the pasted command would fail. Add $WANT."
     exit 2
   fi
+  # gh builds the request body from the fields before it sends anything, and
+  # refuses the command over a field it cannot place. For a key written as a
+  # name with optional [sub] parts, as the report's fields are, a field needs
+  # an =, apart from a name[] that sends an empty array, and a key with no []
+  # in it names one value, which gh will not set twice or nest another field
+  # under. A name[] appends, so it may repeat. A key of another shape, such as
+  # an empty one, is left to gh.
+  NAMED_KEY='^[^]=[]+(\[[^][]*\])*$'
+  for (( i = 0; i < ${#FIELDS[@]}; i++ )); do
+    f="${FIELDS[$i]}"; k="${f%%=*}"
+    if [ -z "$f" ] || { [ "$k" = "$f" ] && [[ "$f" =~ $NAMED_KEY ]] && [[ "$f" != *"[]" ]]; }; then
+      warn "gh refuses the field '$f', which has no =, so the pasted command would fail before it sends anything. Write it as -f <name>=<value>."
+      exit 2
+    fi
+    [[ "$k" =~ $NAMED_KEY ]] || continue
+    case "$k" in *"[]"*) continue ;; esac
+    for (( j = 0; j < ${#FIELDS[@]}; j++ )); do
+      [ "$j" = "$i" ] && continue
+      o="${FIELDS[$j]%%=*}"
+      if [ "$o" = "$k" ] || [[ "$o" == "${k}["* ]]; then
+        warn "the report sets '$k' twice (-f $k=… and -f $o=…), and gh refuses to set a field it already holds, so the pasted command would fail before it sends anything. Give each field once."
+        exit 2
+      fi
+    done
+  done
   PRIVATE_REPORT=1
 fi
 

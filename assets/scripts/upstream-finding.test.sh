@@ -643,9 +643,41 @@ eq "$?" "2" "--field on gh api is refused"
 OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports --input report.json 2>&1)
 eq "$?" "2" "--input on gh api is refused"
 has "$OUT" "Pass each field inline as a string with -f" "the refusal says how to pass a field"
+# gh builds the body from the fields before it sends anything, and refuses the
+# command over a field it cannot place, so such a report never reaches GitHub.
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D -f summary= 2>&1)
+eq "$?" "2" "a summary given twice is refused, since gh will not set a field it already holds"
+has "$OUT" "sets 'summary' twice" "the refusal names the repeated field"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -fsummary=S -f description=D --raw-field=summary=T 2>&1)
+eq "$?" "2" "a summary repeated in the attached spellings is refused"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D --raw-field description=E 2>&1)
+eq "$?" "2" "a description repeated through --raw-field is refused"
+has "$OUT" "sets 'description' twice" "the refusal names the repeated description"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -if description=D -f=description=E 2>&1)
+eq "$?" "2" "a description repeated after -i and as -f= is refused"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D -f severity=high -f 'severity[level]=x' 2>&1)
+eq "$?" "2" "a field nested under a key that holds a value is refused"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D -f severity 2>&1)
+eq "$?" "2" "a field with no = is refused"
+has "$OUT" "-f <name>=<value>" "the refusal says how a field is written"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D -f 2>&1)
+eq "$?" "2" "a -f with no field after it is refused"
 OUT=$("$UF" --message "why" -- gh api repos/zookanalytics/gc-toolkit/security-advisories/reports -f summary=S -f description=D 2>&1)
 eq "$?" "2" "a report to the rig's own origin is refused like any send there"
 eq "$(count)" "0" "no refused report is parked"
+
+# A key[] field adds to an array, so it may repeat, and the report parks.
+reset_state
+"$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D \
+  -f 'cwe_ids[]=CWE-79' -f 'cwe_ids[]=CWE-89' >/dev/null 2>&1
+eq "$?" "0" "a repeated [] field parks, since gh appends it"
+eq "$(count)" "1" "…as one report"
+# A key that does not begin with a name is left to gh, which sends a field with
+# an empty key, twice even.
+reset_state
+"$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D \
+  -f =a -f =b >/dev/null 2>&1
+eq "$?" "0" "a field with an empty key parks, twice even, since gh sends it"
 
 # ── usage ─────────────────────────────────────────────────────────────────
 OUT=$("$SUT" -- gh issue create --repo a/b --title T --body B 2>&1)

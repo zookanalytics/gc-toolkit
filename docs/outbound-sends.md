@@ -125,6 +125,12 @@ a person, somewhere else:
   prompt, so a parked command missing it would wait instead of carrying the
   prepared text. A flag whose value is the next flag counts as missing: `gh`
   takes that flag as the value and prompts anyway.
+- **Each report field once.** `gh` builds a private report from its `-f`
+  fields before it sends anything, and refuses the whole command over a field
+  it cannot place: the same name given twice, a field nested under a name that
+  already holds a value, or a name with no `=` after it, apart from a `name[]`
+  that sends an empty array. Each of those is refused. A `name[]=<value>`
+  field adds to an array, so it may repeat.
 
 The command is quoted with `printf %q`, which collapses a multi-line body to
 one pasteable line, and the script then re-splits what it quoted and requires
