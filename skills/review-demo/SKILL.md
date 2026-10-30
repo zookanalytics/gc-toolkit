@@ -148,12 +148,18 @@ reports whether the `gh` it needs is present.
   video takes. A `--serve` command given `--port` finds that port in `$PORT`,
   and `--port 0` picks a free one, so two captures never share a server.
   `--selector <css>` captures one element instead of the viewport, and
-  `--full-page` captures the whole page. For a terminal, the command runs
-  with bash from `--cwd`, so a relative path runs the reviewed commit's script.
-  The capture shows the command after a `$` prompt, then what it printed. Run
-  only a command that reads, because one that files, routes or closes anything
-  does it in the live city. `--text <file>` renders output captured earlier
-  instead. For markdown, write the markdown the reviewed commit composes to the
+  `--full-page` captures the whole page. For a terminal, the engine types the
+  command at a bash prompt in a terminal of its own, whose shell starts in
+  `--cwd`, so a relative path runs the reviewed commit's script. The capture
+  shows the command after a `$` prompt, then what it printed, or the screen a
+  full-screen program it starts draws. A command that waits for input is no
+  capture, and one that pages a long output in a terminal, such as `git log`,
+  waits in its pager, so run it with the pager off (`git --no-pager log`). The
+  capture is as tall as the session, so bound a long output with the command's
+  own limit. Run only a command that reads, because one that files, routes or
+  closes anything does it in the live city. `--text <file>` shows output
+  captured earlier, which the terminal prints with `cat`. For markdown, write
+  the markdown the reviewed commit composes to the
   file. GitHub's own markdown renderer turns it into HTML in the context of the
   rig's origin, so the capture shows it as the PR would. github.com's page
   script finishes some blocks after that renderer returns, such as a mermaid
@@ -167,7 +173,8 @@ reports whether the `gh` it needs is present.
   the file's name is the image's alt text on the PR. Exit 0 is a capture. For a
   page, exit 3 is a capture in which at least one step failed its proof. Exit 1
   is no capture. The last line names the PNG and its size, and for a command it
-  gives the command's exit status. Open the PNG before you deliver it with
+  says how the command ended: its exit status, or that it took over the screen
+  and was still running. Open the PNG before you deliver it with
   `demo-deliver.sh --file <name>.png --subject <anchor_bead> --body "<what it
   shows, and what it was rendered from>"`.
 

@@ -6,10 +6,12 @@
 # The engine is the npm package @zookanalytics/sprintshow. A city that has the
 # engine's source as a rig uses that checkout: the rig `gc rig list` names
 # sprintshow, taken only when its package.json names the package, so an
-# unrelated rig of that name is passed over. A checkout without node_modules
-# has its dependencies installed first, and its CLI runs from its TypeScript
-# source under node, as the engine's own package scripts run it. Any other city
-# uses the published package through npx.
+# unrelated rig of that name is passed over. A checkout has its dependencies
+# installed first when it has no node_modules, or when its node_modules lacks a
+# package its package.json depends on, as it does once an update of the
+# checkout adds one. Its CLI runs from its TypeScript source under node, as the
+# engine's own package scripts run it. Any other city uses the published
+# package through npx.
 #
 # The engine's package requires Node 22.18 or later, and a checkout's CLI needs
 # that release too, because it is where node starts stripping TypeScript without
@@ -90,11 +92,23 @@ demo_engine_find() {
   return 0
 }
 
+# _demo_engine_deps_missing <checkout>: true when the checkout has no
+# node_modules, or when a package its package.json lists in dependencies is not
+# installed there.
+_demo_engine_deps_missing() {
+  local name
+  [ -d "$1/node_modules" ] || return 0
+  while IFS= read -r name; do
+    [ -z "$name" ] || [ -f "$1/node_modules/$name/package.json" ] || return 0
+  done < <(jq -r '(.dependencies // {}) | keys[]' "$1/package.json" 2>/dev/null)
+  return 1
+}
+
 demo_engine_resolve() {
   _demo_engine_node_ok || return 1
   demo_engine_find
   if [ -n "$DEMO_ENGINE_DIR" ]; then
-    if [ ! -d "$DEMO_ENGINE_DIR/node_modules" ] && ! ( cd "$DEMO_ENGINE_DIR" && npm install ) >&2; then
+    if _demo_engine_deps_missing "$DEMO_ENGINE_DIR" && ! ( cd "$DEMO_ENGINE_DIR" && npm install ) >&2; then
       _demo_engine_say "'npm install' failed in the sprintshow rig checkout"
       return 1
     fi
