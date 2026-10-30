@@ -217,6 +217,9 @@ case "$1 ${2:-}" in
       list) printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;;
     esac ;;
   "bd close") printf 'CLOSE %s\n' "$*" >> "$FAKE_LOG" ;;
+  # The real human-gate.sh, which one case runs in place of the stubbed helper,
+  # resolves a gate through this verb.
+  "bd gate") printf 'BDGATE %s\n' "$*" >> "$FAKE_LOG" ;;
   "sling "*) printf 'SLING %s\n' "$*" >> "$FAKE_LOG"
     # FAKE_SLING_RC is the exit gc sling returns: 3 is its live-workflow
     # conflict, the only code it exits on a bead a workflow already drives.
@@ -1068,7 +1071,9 @@ unset FAKE_SHOW_JSON FAKE_DEPS_JSON
 #              withdrawn before the new one, and this reaction's own is kept
 #   (RULTITLE) the gate's title line is the takeaway on one line, as the
 #              board shows it, so a re-run of a takeaway that spans lines
-#              keeps its gate
+#              keeps its gate; a takeaway past the 400 bytes the real helper
+#              holds a title under keeps its gate by the description's first
+#              line
 #   (RULKIDS)  a subject with open children is gated like any other bead
 #   (RULCAP)   a takeaway over the 140-character cap is refused first
 # The exit files no visit. The FAKE dep list answers with the gate so the hold
@@ -1142,6 +1147,46 @@ eq "$RC" "0" "(RULTITLE) a takeaway that spans lines takes the ruling exit"
 has "GATE --subject tk-sub --key first-reaction --message needs a ruling: which default" "$LOG" \
    "(RULTITLE) …and the gate's title line is the takeaway on one line, as the board shows it"
 hasnt "--retract" "$LOG" "(RULTITLE) …so a re-run finds the gate it filed and withdraws nothing"
+# real_gate_title <message> — the title the real human-gate.sh files for the
+# message, read off its create under a gc that answers no gates and records the
+# title it is given.
+real_gate_title() {
+  mkdir -p "$TMP/real-gate/bin"
+  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/real-gate/bin/gc" <<'RG'
+case "$1 ${2:-} ${3:-}" in
+  "bd dep list") echo '[]' ;;
+  "bd gate create")
+    while [ $# -gt 0 ]; do
+      [ "$1" = --title ] && printf '%s' "$2" > "$REAL_GATE_TITLE"
+      shift
+    done
+    echo '[{"id":"tk-real"}]' ;;
+esac
+exit 0
+RG
+  chmod +x "$TMP/real-gate/bin/gc"
+  : > "$TMP/real-gate/title"
+  PATH="$TMP/real-gate/bin:$PATH" REAL_GATE_TITLE="$TMP/real-gate/title" \
+    "$HERE/human-gate.sh" --subject tk-sub --key first-reaction --message "$1" >/dev/null 2>&1 || true
+  cat "$TMP/real-gate/title"
+}
+# 134 CJK characters are 402 bytes. The real helper files them under a title
+# cut below 400 bytes, and the description it writes holds the message whole,
+# so a re-run of the same reaction through the real helper finds that gate by
+# its description's first line and keeps it.
+CJK=$(printf '問%.0s' $(seq 1 134))
+CJK_TITLE=$(real_gate_title "$CJK")
+[ -n "$CJK_TITLE" ] && [ "$CJK_TITLE" != "$CJK" ] \
+  && ok "(RULTITLE) the real helper titles a 402-byte takeaway with a shorter line" \
+  || bad "(RULTITLE) the real helper's title for a 402-byte takeaway is '$CJK_TITLE', so the next case tests no cut"
+FAKE_DEPS_JSON="$(jq -cn --arg t "$CJK_TITLE" --arg d "$CJK
+Filed by a first reaction on tk-sub (ruling), which waits on it." \
+  '[{id: "tk-gate1", issue_type: "gate", await_type: "human", await_id: "first-reaction", status: "open", title: $t, description: $d}]')"
+export FAKE_DEPS_JSON
+GC_HUMAN_GATE_TOOL="$HERE/human-gate.sh" run tk-sub --disposition ruling --reason "r" --takeaway "$CJK" --reaction-bead "$R"
+eq "$RC" "0" "(RULTITLE) a re-run with a takeaway past 400 bytes succeeds through the real helper"
+has "disposed as ruling (tk-gate1)" "$OUT" "(RULTITLE) …onto the gate it filed before"
+hasnt "BDGATE" "$LOG" "(RULTITLE) …resolving no gate, since the gate's description leads with the takeaway"
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{}},{"id":"tk-sub.1","parent":"tk-sub","status":"open"}]'
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"

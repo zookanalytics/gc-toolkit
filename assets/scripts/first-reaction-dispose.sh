@@ -1027,11 +1027,16 @@ fi
 # board shows on the subject. The helper titles a gate with its message's first
 # line, so that one line leads the message. The helper files nothing while an
 # open gate under the key blocks the subject, so a re-run of this reaction after
-# a partial finds the gate it filed. An open first-reaction gate whose title is
-# not this takeaway asks a superseded reaction's question, so it is withdrawn
-# first, and the new gate carries this reaction's. A reaction is an event of its
-# own, so the call declares no quiet window. On a subject with open children the
-# gate blocks the parent, and its unstarted parts wait with it.
+# a partial finds the gate it filed. An open first-reaction gate asks this
+# reaction's question when its title or its description's first line is this
+# takeaway. The description holds the message whole, while the helper keeps a
+# title under 400 bytes, so a longer takeaway matches only by the description,
+# and a gate whose description does not lead with the takeaway matches by its
+# title. Any other open first-reaction gate asks a superseded reaction's
+# question, so it is withdrawn first, and the new gate carries this reaction's.
+# A reaction is an event of its own, so the call declares no quiet window. On a
+# subject with open children the gate blocks the parent, and its unstarted parts
+# wait with it.
 GATE=""
 if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
     [ -x "$HUMAN_GATE" ] \
@@ -1042,7 +1047,8 @@ if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
                          and (.await_id // "") == "first-reaction" and (.status // "") != "closed") ]
         else error("not an array") end' 2>/dev/null) \
         || die "could not read the human gates of $BEAD, so whether a first-reaction gate already asks is unknown; nothing was filed. Clear the cause and re-run this command."
-    if printf '%s' "$FR_GATES" | jq -e --arg t "$TITLE_WANT" 'any(.[]; (.title // "") != $t)' >/dev/null 2>&1; then
+    if printf '%s' "$FR_GATES" | jq -e --arg t "$TITLE_WANT" \
+        'any(.[]; (.title // "") != $t and ((.description // "") | tostring | split("\n")[0]) != $t)' >/dev/null 2>&1; then
         "$HUMAN_GATE" --retract --subject "$BEAD" --key first-reaction \
             --message "superseded by a newer first reaction on $BEAD, which asks: $TITLE_WANT" >/dev/null \
             || die "could not withdraw the superseded first-reaction gate on $BEAD; nothing new was filed. Clear the cause and re-run this command."
