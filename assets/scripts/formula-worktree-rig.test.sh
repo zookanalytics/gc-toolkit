@@ -607,7 +607,7 @@ done
 # case arm and its guard names the PR, so it is not one of these;
 # find-work-gating-guard.test.sh runs it.
 echo "── mol-refinery-patrol: one rig-root lookup ──"
-LOOKUPS=$(awk '/^RR=""; for c in / { l = $0; getline a; getline b; print l " " a " " b }' "$PATROL_TOML")
+LOOKUPS=$(awk '/^RR=/ { l = $0; getline a; getline b; print l " " a " " b }' "$PATROL_TOML")
 N=$(printf '%s\n' "$LOOKUPS" | count)
 [ "$N" -ge 2 ] && ok "patrol: $N RIG_ROOT resolutions found" || bad "patrol: RIG_ROOT resolutions found" "$N"
 eq "$(printf '%s\n' "$LOOKUPS" | sort -u | count)" 1 "patrol: every RIG_ROOT resolution is the same lookup, copied verbatim"

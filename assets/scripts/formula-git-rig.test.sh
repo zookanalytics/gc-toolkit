@@ -57,12 +57,14 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# gc answers `rig list` from the roster file and `bd show` from the bead file,
-# and logs every other call, one line each. A `bd update` then exits
-# FAKE_UPDATE_RC, so a case can have the store refuse the write.
+# gc names the pack for `gc gc-toolkit scripts-dir` ($STUB_PACK), answers
+# `rig list` from the roster file and `bd show` from the bead file, and logs
+# every other call, one line each. A `bd update` then exits FAKE_UPDATE_RC, so
+# a case can have the store refuse the write.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
   *)          printf '%s\n' "$*" | tr '\n' ' ' >> "$FAKE_LOG"; echo >> "$FAKE_LOG"
@@ -73,14 +75,12 @@ GC
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 
-# Each block resolves its rig through rig-root.sh, which it finds in the pack
-# under GC_CITY_PATH, since GC_RIG_ROOT here names a rig without the pack. Every
-# run reads this city unless it names its own, and pack_into gives a city of
-# its own the script.
+# Each block resolves its rig through rig-root.sh, since GC_RIG_ROOT here names a
+# rig without the pack. The pack's own formulas find the script in the pack gc
+# names, the repository under test. The gascity-keeper's formulas look for it
+# under GC_CITY_PATH, and pack_into gives a keeper case's city the script.
+export STUB_PACK="$ROOT"
 pack_into() { mkdir -p "$1/rigs/gc-toolkit/assets/scripts"; cp "$HERE/rig-root.sh" "$1/rigs/gc-toolkit/assets/scripts/"; }
-PACK_CITY="$TMP/pack-city"
-pack_into "$PACK_CITY"
-export GC_CITY_PATH="$PACK_CITY"
 
 # copy <toml> <marker> <n>: the n-th copy of a marked block.
 copy() {
@@ -92,7 +92,8 @@ copy() {
 copies() { grep -c -- "# >>> $2\$" "$1" || true; }
 
 # block <toml> <marker> <out> [<n>]: the n-th copy (default 1) of the marked
-# block, with formula placeholders rendered as the materializer renders them.
+# block, with formula placeholders rendered as the materializer renders them:
+# the binding as the binding plus a dot, gc-toolkit. here.
 block() {
   local body
   body="$(copy "$1" "$2" "${4:-1}")"
@@ -105,7 +106,7 @@ block() {
   printf '%s\n' "$body" | sed -e 's|{{issue}}|tk-iss|g' -e 's|{{origin_remote}}|origin|g' \
     -e 's|{{upstream_remote}}|upstream|g' -e 's|{{upstream_branch}}|main|g' \
     -e 's|{{notify_recipient}}|mayor/|g' -e 's|{{requesting_keeper}}|keeper/from-var|g' \
-    -e 's|{{base_ref}}|origin/main|g' > "$3"
+    -e 's|{{base_ref}}|origin/main|g' -e 's|{{binding_prefix}}|gc-toolkit.|g' > "$3"
   case "$(cat "$3")" in
     *'{{'*) bad "$2: no unrendered formula placeholder left" ;;
     *)      ok "$2: no unrendered formula placeholder left" ;;
@@ -181,17 +182,18 @@ eq "$(cd "$C/cwd" && git -C "" rev-parse --show-toplevel 2>/dev/null || true)" "
 # where the check's method reads the diff. review-methods.test.sh holds the
 # four steps that carry it to one text, so mol-review's copy runs for all four,
 # filled in as a pour fills it for a correctness review of feature onto main.
-# GC_PACK_DIR names this checkout, so the block runs the rig-root.sh,
+# gc names this checkout as the pack, so the block runs the rig-root.sh,
 # review-workspace.sh and review-checks.sh under test.
 # formula-worktree-rig.test.sh proves where the worktree is registered, and
-# that the pack-script locator's call is the block's one git call without -C.
+# that every git call in the block names its repository.
 echo "── mol-review: review-gather ──"
 GATHER="$(copy "$REVIEW_TOML" review-gather 1)"
 [ -n "$GATHER" ] && ok "review-gather: block extracted between markers" \
   || bad "review-gather: block extracted between markers" "markers missing from ${REVIEW_TOML#"$ROOT"/}"
 gather_render() { # <reviewed oid>
   printf '%s\n' "$GATHER" | sed -e 's|{{review_bead}}|rb|g' -e "s|{{reviewed_oid}}|$1|g" -e 's|{{review_base}}|main|g' \
-    -e 's|{{review_branch}}|feature|g' -e 's|{{anchor_bead}}|tk-anc|g' -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g'
+    -e 's|{{review_branch}}|feature|g' -e 's|{{anchor_bead}}|tk-anc|g' -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g' \
+    -e 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 gather_render 0123456789abcdef0123456789abcdef01234567 > "$TMP/gather.sh"
 case "$(cat "$TMP/gather.sh")" in
@@ -232,7 +234,7 @@ gather_case() {
   [ -z "${GATHER_UNREACHABLE:-}" ] || git -C "$d/rig" remote set-url origin "$d/gone.git"
   FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
   gather_render "$review" > "$d/gather.sh"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" \
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" \
       FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" bash "$d/gather.sh" ) >"$d/out" 2>&1 || rc=$?
   WT=$(sed -n "s/^== The review's worktree: //p" "$d/out")
   RC=$rc; D=$d
@@ -499,19 +501,25 @@ has "$(cat "$MN/gc.log")" "runtime drain-ack" "miner/mine-and-file: the session 
 # rig-root.sh holds the lookup, so a fix to it lands once. In the formulas whose
 # git calls name a rig by path no block reads the roster for a rig's path
 # itself, every block finds rig-root.sh by one locator line, and the line after
-# each locator calls it. The refinery scripts that resolve the rig themselves
-# run the rig-root.sh beside them. rig-root.test.sh proves the lookup.
+# each locator calls it. The pack's own formulas ask gc for the pack, as every
+# step that runs a pack script does. The gascity-keeper's formulas carry no
+# binding for this pack, so theirs is the loop their other lookups of the
+# pack's scripts use. The refinery scripts that resolve the rig themselves run
+# the rig-root.sh beside them. rig-root.test.sh proves the lookup.
 echo "── one rig-root lookup ──"
-LOCATOR='RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done'
+LOCATOR='RR="$(b='"'"'{{binding_prefix}}'"'"'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""'
+KEEPER_LOCATOR='RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done'
 SITES=0
 for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$POLECAT_TOML" "$SYNC_TOML"; do
   name="${f##*/}"
+  want="$LOCATOR"
+  case "$f" in "$ROOT"/packs/gascity-keeper/*) want="$KEEPER_LOCATOR" ;; esac
   eq "$(grep -c 'rig list --json[[:space:]]*|' "$f" || true)" 0 "$name: no block reads the roster for a rig's path itself"
-  LINES=$(grep -F 'assets/scripts/rig-root.sh' "$f" | grep -vE '^[[:space:]]*#|`' | sed 's/^[[:space:]]*//' || true)
+  LINES=$(grep -E '^[[:space:]]*RR=' "$f" | sed 's/^[[:space:]]*//' || true)
   n=$(printf '%s\n' "$LINES" | awk 'NF { n++ } END { print n + 0 }')
   [ "$n" -ge 1 ] && ok "$name: $n block(s) find rig-root.sh" || bad "$name: blocks find rig-root.sh" "none"
-  eq "$(printf '%s\n' "$LINES" | sort -u)" "$LOCATOR" "$name: every block finds rig-root.sh by the one locator line"
-  CALLS=$(awk 'f { sub(/^[[:space:]]*/, ""); print; f = 0 } index($0, "assets/scripts/rig-root.sh\" ] && { RR=") && $0 !~ /^[[:space:]]*#/ { f = 1 }' "$f")
+  eq "$(printf '%s\n' "$LINES" | sort -u)" "$want" "$name: every block finds rig-root.sh by the one locator line"
+  CALLS=$(awk 'f { sub(/^[[:space:]]*/, ""); print; f = 0 } /^[[:space:]]*RR=/ { f = 1 }' "$f")
   eq "$(printf '%s\n' "$CALLS" | grep -cF '$("${RR:?rig-root.sh not found in the pack}"' || true)" "$n" "$name: the line after each locator calls rig-root.sh"
   SITES=$((SITES + n))
 done

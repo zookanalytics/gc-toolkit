@@ -275,14 +275,17 @@ session starts in its agent home, and an agent can `cd` anywhere between calls.
 The step takes the rig root from `assets/scripts/rig-root.sh`, which prints
 `GC_RIG_ROOT`, else the `gc rig list --json` entry for `GC_RIG`, and passes it
 as `git -C "$RIG_ROOT"` or as a wrapper's own flag
-(`review-workspace.sh add --repo`). One locator line finds the script in
-`GC_PACK_DIR`, `GC_RIG_ROOT` or `$GC_CITY_PATH/rigs/gc-toolkit`, never in the
-cwd's checkout, and the step refuses to run when the script prints no root,
+(`review-workspace.sh add --repo`). One locator line reaches the script through
+`gc <binding> scripts-dir`, as any step reaches a pack script
+([above](#step-text-and-skills-reach-pack-scripts-at-runtime)), never through
+the cwd's checkout, and the step refuses to run when the script prints no root,
 because `git -C ""` runs in the cwd. A formula that works one fixed rig, as the
 gascity-keeper's upstream formulas work gascity, passes `--rig <name>`, so the
-pool it was slung to does not choose. `assets/scripts/formula-worktree-rig.test.sh`
-and `assets/scripts/formula-git-rig.test.sh` run these blocks from a foreign
-cwd, and the latter holds each of these formulas to the one locator line.
+pool it was slung to does not choose. Those formulas carry no binding for this
+pack, so their locator line is a loop over candidate directories.
+`assets/scripts/formula-worktree-rig.test.sh` and
+`assets/scripts/formula-git-rig.test.sh` run these blocks from a foreign cwd,
+and the latter holds each of these formulas to one locator line.
 
 ## Patrol agents run a patrol-wisp cycle
 

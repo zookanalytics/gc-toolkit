@@ -91,7 +91,7 @@ fence shared-branch-merge-mode > "$TMP/prep.sh"
 {
   echo 'BEAD_JSON=$(gc bd show $WORK --json)'
   echo 'MERGE_STRATEGY="$STRATEGY"'
-  echo 'LC="${TEST_LC:-$(gc gc-toolkit scripts-dir)/lifecycle.sh}"'
+  echo 'LC="$(gc gc-toolkit scripts-dir)/lifecycle.sh"'
   fence branch-has-real-change
   fence zero-diff-guard
   echo 'if [ "$MERGE_STRATEGY" = direct ]; then'
@@ -453,48 +453,46 @@ has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion"
 eq "$(merged_tries)" 0 "stale: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "stale: nothing is pushed"
 
-echo "── a refusal files its visit through the pack lifecycle.sh came from ──"
-# The refinery sits in a scratch directory, GC_RIG_ROOT is unset so the rig
-# comes from the roster, and GC_CITY_PATH names no pack. GC_PACK_DIR holds
-# rig-root.sh alone, so the block resolves the rig, and the only place that
-# names the rest of the pack is the lifecycle.sh the step found.
-RR_ONLY="$TMP/rig-root-only"
-mkdir -p "$RR_ONLY/assets/scripts"
-cp "$HERE/rig-root.sh" "$RR_ONLY/assets/scripts/"
+echo "── a refusal files its visit through the pack gc names ──"
+# The refinery sits in a scratch directory, and GC_RIG_ROOT is unset, so the
+# rig comes from the roster. Every script the block runs is the pack's that gc
+# names.
 fixture "$TMP/nopack" nowork
 : > "$D/gc.log"; : > "$D/lc.log"
-( cd "$ELSEWHERE" && env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main \
+( cd "$ELSEWHERE" && env GC_RIG_ROOT="$D/rig" GC_RIG=myrig STUB_PACK="$CITY/rigs/gc-toolkit" WORK=wb BRANCH=polecat/wb TARGET=main \
     TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log" \
     FAKE_LC_LOG="$D/lc.log" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
-eq "$PREP_RC" 0 "nopack: the prepare stages the branch"
-nopack_merge_push() { # <lifecycle.sh> [<GC_PACK_DIR>]
+eq "$PREP_RC" 0 "pack: the prepare stages the branch"
+pack_merge_push() { # <the pack gc names>
   : > "$D/gc.log"; : > "$D/lc.log"
-  OUT=$(cd "$ELSEWHERE" && env GC_PACK_DIR="${2-$RR_ONLY}" GC_RIG_ROOT="" GC_RIG=myrig GC_CITY_PATH="" TEST_LC="$1" WORK=wb BRANCH=polecat/wb \
+  OUT=$(cd "$ELSEWHERE" && env STUB_PACK="$1" GC_RIG_ROOT="" GC_RIG=myrig WORK=wb BRANCH=polecat/wb \
     TARGET=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" \
     STRATEGY=direct bash "$TMP/merge-push.sh" 2>&1); RC=$?
 }
-nopack_merge_push "$PACK/lifecycle.sh"
-eq "$RC" 1 "nopack: merge-push stops"
-has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nopack: the bead is parked as a false completion"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "nopack: the refusal files its visit"
-# A lifecycle.sh with no escalate.sh beside it, and no other pack location:
-# the park stands, and the block says no visit was filed.
-mkdir -p "$TMP/lc-only/assets/scripts"
-cp "$PACK/lifecycle.sh" "$TMP/lc-only/assets/scripts/lifecycle.sh"
-nopack_merge_push "$TMP/lc-only/assets/scripts/lifecycle.sh"
-eq "$RC" 1 "nopack/no escalate.sh: merge-push stops"
-has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nopack/no escalate.sh: the bead is parked as a false completion"
-hasnt "$(cat "$D/gc.log")" "escalate " "nopack/no escalate.sh: no visit is filed"
-has "$OUT" "is parked for a human with no refinery-false-completion visit" "nopack/no escalate.sh: the block says the park has no visit"
-# With no pack location at all, rig-root.sh is not found, so the rig does not
-# resolve: the block stops before the check, parks nothing and leaves the work
-# with the refinery to retry.
-nopack_merge_push "$PACK/lifecycle.sh" ""
-eq "$RC" 1 "nopack/no rig-root.sh: merge-push stops"
-has "$OUT" "cannot resolve the rig root; leaving the work with the refinery to retry" "nopack/no rig-root.sh: the block says the rig did not resolve"
-hasnt "$(cat "$D/lc.log")" "transition" "nopack/no rig-root.sh: nothing is parked"
-hasnt "$(cat "$D/gc.log")" "escalate " "nopack/no rig-root.sh: nothing is escalated"
-has "$(cat "$D/gc.log")" "runtime drain-ack" "nopack/no rig-root.sh: the session drains"
+pack_merge_push "$CITY/rigs/gc-toolkit"
+eq "$RC" 1 "pack: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "pack: the bead is parked as a false completion"
+has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "pack: the refusal files its visit"
+# A pack with no escalate.sh: the park stands, and the block says no visit was
+# filed.
+mkdir -p "$TMP/no-escalate/assets/scripts"
+cp "$PACK/lifecycle.sh" "$PACK/rig-root.sh" "$TMP/no-escalate/assets/scripts/"
+pack_merge_push "$TMP/no-escalate"
+eq "$RC" 1 "pack/no escalate.sh: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "pack/no escalate.sh: the bead is parked as a false completion"
+hasnt "$(cat "$D/gc.log")" "escalate " "pack/no escalate.sh: no visit is filed"
+has "$OUT" "escalate.sh not found in the pack; wb is parked for a human with no refinery-false-completion visit" "pack/no escalate.sh: the block says the park has no visit"
+# A pack with no rig-root.sh, so the rig does not resolve: the block stops
+# before the check, parks nothing and leaves the work with the refinery to
+# retry.
+mkdir -p "$TMP/no-rig-root/assets/scripts"
+cp "$PACK/lifecycle.sh" "$PACK/escalate.sh" "$TMP/no-rig-root/assets/scripts/"
+pack_merge_push "$TMP/no-rig-root"
+eq "$RC" 1 "pack/no rig-root.sh: merge-push stops"
+has "$OUT" "cannot resolve the rig root; leaving the work with the refinery to retry" "pack/no rig-root.sh: the block says the rig did not resolve"
+hasnt "$(cat "$D/lc.log")" "transition" "pack/no rig-root.sh: nothing is parked"
+hasnt "$(cat "$D/gc.log")" "escalate " "pack/no rig-root.sh: nothing is escalated"
+has "$(cat "$D/gc.log")" "runtime drain-ack" "pack/no rig-root.sh: the session drains"
 
 echo "── a branch whose commits net to no change is refused ──"
 fixture "$TMP/netzero" netzero
@@ -521,7 +519,7 @@ nocheck_fixture() {
     '.[0].status = "open" | .[0].assignee = $a | .[0].metadata["gc.execution_routed_to"] = $p' \
     "$D/bead.json" > "$D/bead.json.new" && mv "$D/bead.json.new" "$D/bead.json"
   printf '[]\n' > "$D/store.json"; : > "$D/deps.txt"; : > "$D/gc.log"; : > "$D/lc.log"
-  NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" GC_AGENT="$REFINERY" WORK=wb BRANCH=polecat/wb
+  NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig STUB_PACK="$CITY/rigs/gc-toolkit" GC_AGENT="$REFINERY" WORK=wb BRANCH=polecat/wb
     TARGET=main TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json"
     FAKE_STORE="$D/store.json" FAKE_DEPS="$D/deps.txt" FAKE_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" STRATEGY=direct)
   ( cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
@@ -613,14 +611,14 @@ eq "$(jq length "$D/store.json")" 0 "escalation refused: no visit exists"
 eq "$(grep -c . "$D/deps.txt" || true)" 0 "escalation refused: no edge is written"
 hasnt "$(cat "$D/gc.log")" "bd unclaim" "escalation refused: the assignment is never released"
 
-# A lifecycle.sh whose pack holds escalate.sh and no await-ruling.sh. The block
-# takes both from one pack, so it files no visit that no wait could follow.
+# A pack that holds escalate.sh and no await-ruling.sh. The block takes both
+# from one pack, so it files no visit that no wait could follow.
 third_failure "$TMP/noawait"
 mkdir -p "$TMP/esc-only/assets/scripts"
-cp "$PACK/lifecycle.sh" "$PACK/escalate.sh" "$TMP/esc-only/assets/scripts/"
-nocheck_merge_push TEST_LC="$TMP/esc-only/assets/scripts/lifecycle.sh"
+cp "$PACK/lifecycle.sh" "$PACK/escalate.sh" "$PACK/rig-root.sh" "$TMP/esc-only/assets/scripts/"
+nocheck_merge_push STUB_PACK="$TMP/esc-only"
 kept "no await-ruling.sh"
-has "$OUT" "escalate.sh and await-ruling.sh were not found together beside $TMP/esc-only/assets/scripts/lifecycle.sh or in any pack location, so no visit asks about wb" \
+has "$OUT" "escalate.sh and await-ruling.sh were not both found in the pack, so no visit asks about wb" \
   "no await-ruling.sh: the patrol says no visit was filed"
 hasnt "$(cat "$D/gc.log")" "escalate " "no await-ruling.sh: no visit is filed"
 
@@ -699,7 +697,7 @@ has "$OUT" "no blocks edge from wb onto its visit landed, so wb is not parked" \
 echo "── a check that runs again clears the count, and the landing goes on ──"
 fixture "$TMP/recheck" work
 : > "$D/gc.log"; : > "$D/lc.log"
-NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
+NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig STUB_PACK="$CITY/rigs/gc-toolkit" WORK=wb BRANCH=polecat/wb TARGET=main
   TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
   FAKE_LC_LOG="$D/lc.log" DIRECT_MERGE_PUSH_BACKOFF=0 STRATEGY=direct)
 ( cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?

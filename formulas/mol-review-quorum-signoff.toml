@@ -152,7 +152,7 @@ nothing, as for a missing key: write a `blocked` lane output whose summary
 names what failed, and close this step.
 ```bash
 # >>> review-gather
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
@@ -285,7 +285,7 @@ nothing, as for a missing key: write a `blocked` lane output whose summary
 names what failed, and close this step.
 ```bash
 # >>> review-gather
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
@@ -424,7 +424,7 @@ rather than approve on one lane.
 **3. Gather what the review reads,** as each lane did:
 ```bash
 # >>> review-gather
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""

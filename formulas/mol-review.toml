@@ -158,7 +158,7 @@ writes to disk goes in the workspace beside the worktree, never loose in
 printed into the steps that follow.
 ```bash
 # >>> review-gather
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""

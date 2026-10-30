@@ -104,7 +104,7 @@ no_op() {
 # cwd may sit in any checkout, and a miner reading it would mine and file
 # another repository's PRs.
 # >>> feedback-miner-repo
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 # <<< feedback-miner-repo
 [ -n "$REPO" ] || no_op "cannot resolve the rig root"
@@ -157,7 +157,7 @@ FM="${SC%/*}/feedback-miner.sh"
 # as load-context's no-op does and names the cause, which the message of a
 # sweep that did not complete would not.
 # >>> feedback-miner-repo
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 # <<< feedback-miner-repo
 [ -n "$REPO" ] || { echo "feedback-miner: cannot resolve the rig root — nothing to mine this run."; "${SC:?step-close.sh not found in the pack}" --step mol-feedback-miner.mine-and-file --outcome pass; gc runtime drain-ack; exit 0; }

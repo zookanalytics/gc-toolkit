@@ -500,11 +500,11 @@ staged_block() {
 drains() { grep -c 'drain-ack' "$GC_LOG"; }
 went_on() { case "$OUT" in *"ACTS FOR"*) echo yes ;; *) echo no ;; esac; }
 # The block resolves the rig through rig-root.sh before it looks for the
-# script, so a city whose gc-toolkit rig holds rig-root.sh alone is one where
-# the script is not reachable.
-RR_CITY="$TMP/rig-root-city"
-mkdir -p "$RR_CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/rig-root.sh" "$RR_CITY/rigs/gc-toolkit/assets/scripts/"
+# script, so a pack that holds rig-root.sh alone is one where the script is not
+# reachable.
+RR_PACK="$TMP/rig-root-pack"
+mkdir -p "$RR_PACK/assets/scripts"
+cp "$HERE/rig-root.sh" "$RR_PACK/assets/scripts/"
 
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 staged_block "$TMP/pack" wa polecat/wa
@@ -544,7 +544,7 @@ eq "$RC" 4 "prep-staged-work, no prep worktree: exits 4"
 eq "$(went_on)" no "prep-staged-work, no prep worktree: nothing after the block runs"
 eq "$(drains)" 0 "prep-staged-work, no prep worktree: the session does not drain"
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
-staged_block "$RR_CITY" wb polecat/wb
+staged_block "$RR_PACK" wb polecat/wb
 eq "$RC" 1 "prep-staged-work, no script reachable: exits 1"
 eq "$(went_on)" no "prep-staged-work, no script reachable: nothing after the block runs"
 has "$OUT" "refinery-workspace.sh not found" "prep-staged-work, no script reachable: it says why"

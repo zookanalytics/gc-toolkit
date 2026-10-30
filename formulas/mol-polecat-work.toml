@@ -446,7 +446,7 @@ else
   # cwd sits in another repo still registers it in the rig, not that repo.
   # An empty RIG_ROOT would let `git -C ""` operate on cwd — the coupling this
   # avoids — so fail closed when rig-root.sh resolves no rig.
-  RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+  RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
   RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
   [ -n "$RIG_ROOT" ] || { echo "workspace-setup: cannot resolve the rig root" >&2; exit 1; }
   git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
