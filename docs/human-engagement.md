@@ -696,10 +696,10 @@ Two endings the idle setting does not own:
   manual session, which Gas City keeps desired for as long as it is neither
   closed nor drained
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
-  so the `no-wake-reason` drain that collects an ended pool session never
-  reaches it. Its own `drain-ack` ends it, `gc-helm dismiss` stops it, and
-  `converse-reap` above closes one that outlives its conversation anyway. See
-  *How a pane dies when no sitting is live*, below.
+  so the `no-wake-reason` drain that collects an ended pool session in about
+  a minute never reaches it. Its own `drain-ack` ends it, `gc-helm dismiss`
+  stops it, and `converse-reap` above closes one that outlives its
+  conversation anyway. See *How a pane dies when no sitting is live*, below.
 - **No max-age restart reaches a sitting.** No `converse-<model>` template
   sets `max_session_age`, and an unset age is off. Gas City's max-age restart
   defers while the session holds open assigned work and has no attachment

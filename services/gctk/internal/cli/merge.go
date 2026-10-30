@@ -841,7 +841,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 			fmt.Fprintf(m.stdout, "%s: PR#%s %s; merge held (anchor %s)\n", mergeProg, num, saWhy, id)
 			m.printIndented(saOut, 6)
 			m.humanGate("--subject", id, "--key", "seed-audit-merge-gate."+num, "--quiet-window", standingQuietWindow,
-				"--message", "PR#"+num+" "+saWhy+"; the merge is held.\n\ngenerated/seed-audit is rendered from the whole source tree and committed per\nbranch, so a branch carrying a render made at an older base lands over prompt\ninputs it never saw. Bring the head branch current with '"+base+"', run\nassets/scripts/render-seed-audit.sh, commit generated/seed-audit, and push.\n\n"+saOut)
+				"--message", "PR#"+num+" "+saWhy+"; the merge is held.\n\ngenerated/seed-audit is rendered from the whole source tree and committed per\nbranch, so a branch carrying a render made at an older base lands over prompt\ninputs it never saw. Bring the head branch current with '"+base+"', run\nassets/scripts/render-seed-audit.sh --since origin/"+base+", commit generated/seed-audit,\nand push.\n\n"+saOut)
 			m.held++
 			return
 		}

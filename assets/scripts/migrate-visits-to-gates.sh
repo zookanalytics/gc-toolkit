@@ -483,7 +483,7 @@ release_and_close() {
   holder=$(rf "$ROW" '.assignee'); status=$(rf "$ROW" '.status')
   [ "$status" = closed ] && return 0
   if [ -n "$holder" ]; then
-    gc bd update "$b" --if-assignee "$holder" --if-status "$status" --status open --assignee "" </dev/null >/dev/null 2>&1 || true
+    gc bd update "$b" --if-assignee "$holder" --if-status "$status" --status=open --assignee "" </dev/null >/dev/null 2>&1 || true
     if ! show_row "$b" || [ -n "$(rf "$ROW" '.assignee')" ] || [ "$(rf "$ROW" '.status')" != open ]; then
       left_open "$label $b: its release from $holder did not land, because it changed after this run read it or bd refused it; a rerun releases it from the holder it names then"
       return 1

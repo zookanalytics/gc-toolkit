@@ -17,7 +17,8 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 
 [ -s "$TOML" ] || { echo "missing $TOML" >&2; exit 1; }
 
-CALLS=$(grep -n '"\$SCRIPTS/human-gate\.sh"' "$TOML")
+# A call, not the resolver's `[ -x "$SCRIPTS/human-gate.sh" ]` probe.
+CALLS=$(grep -n '"\$SCRIPTS/human-gate\.sh"' "$TOML" | grep -v -- '-x "\$SCRIPTS/human-gate\.sh"')
 [ -n "$CALLS" ] \
   && ok "the dance files its human gate through human-gate.sh" \
   || bad "the dance never calls human-gate.sh"

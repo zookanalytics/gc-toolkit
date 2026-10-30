@@ -81,8 +81,13 @@ if [ "${1:-}" = "sling" ]; then
 fi
 # The rig list the SUT finds the anchor's rig checkout in (bead-store.sh): the
 # anc prefix is the rig at STUB_RIG_PATH, unless STUB_RIG_UNLISTED leaves it out.
+# Over two stores it lists rig-a (ra) and rig-b (rb) as well, each at that same
+# checkout, since the run reads only the anchor branch's head there.
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
   if [ -n "${STUB_RIG_UNLISTED:-}" ]; then echo '{"rigs":[]}'
+  elif [ -n "${STUB_STORES_DIR:-}" ]; then
+    printf '{"rigs":[{"name":"anc-rig","prefix":"anc","path":"%s"},{"name":"rig-a","prefix":"ra","path":"%s"},{"name":"rig-b","prefix":"rb","path":"%s"}]}\n' \
+      "${STUB_RIG_PATH:?}" "$STUB_RIG_PATH" "$STUB_RIG_PATH"
   else printf '{"rigs":[{"name":"anc-rig","prefix":"anc","path":"%s"}]}\n' "${STUB_RIG_PATH:?}"; fi
   exit 0
 fi
