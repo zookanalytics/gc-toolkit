@@ -99,7 +99,7 @@ fixture() {
      "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2",
                  "gc.input_convoy_id":"tk-convoy","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "gc.session_name":"polecat-2-pool"}},
-    {"id":"tk-review","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+    {"id":"tk-review","status":"in_progress","assignee":"hq-dead","title":"Review branch polecat/tk-anc -> main: a finding",
      "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
                  "review_branch":"polecat/tk-anc","review_base":"main",
                  "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
@@ -124,9 +124,9 @@ eq "$(gate_says tk-bare)"  "1" "pre-work source bead, no work_dir/branch -> IS_W
 
 # A review that also carries step metadata is still a review — task_kind
 # outranks a step_ref, exactly as orphan-dispose.sh's classification order does.
-store '[{"id":"tk-rv2","status":"in_progress","assignee":"lx-dead","title":"review",
+store '[{"id":"tk-rv2","status":"in_progress","assignee":"hq-dead","title":"review",
          "metadata":{"task_kind":"review","gc.step_ref":"mol-review.review",
-                     "gc.routed_to":"r","gc.session_id":"lx-dead"}}]'
+                     "gc.routed_to":"r","gc.session_id":"hq-dead"}}]'
 eq "$(gate_says tk-rv2)" "0" "task_kind=review outranks a step_ref"
 
 # Fail safe: an unreadable/absent bead must default to the work-bead path so a

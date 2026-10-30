@@ -104,14 +104,14 @@ msg_has()  { grep -qF -- "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); 
 # must refuse: a polecat, a template that only starts with the word, a closed
 # past session, and two live records sharing a name.
 SESSIONS='{"sessions":[
- {"id":"lx-conv1","session_name":"s-lx-conv1","alias":"gc-toolkit/gc-toolkit.tk-conv1","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
- {"id":"lx-base1","session_name":"s-lx-base1","alias":"other/gc-toolkit.tk-vis2","template":"other/gc-toolkit.converse","rig":"other","closed":false},
- {"id":"lx-noal1","session_name":"s-lx-noal1","template":"gc-toolkit/gc-toolkit.converse-fable","rig":"gc-toolkit","closed":false},
- {"id":"lx-pole1","session_name":"gc-toolkit__polecat-lx-pole1","alias":"gc-toolkit/gc-toolkit.polecat-1","template":"gc-toolkit/gc-toolkit.polecat","rig":"gc-toolkit","closed":false},
- {"id":"lx-near1","session_name":"s-lx-near1","alias":"gc-toolkit/gc-toolkit.tk-vis3","template":"gc-toolkit/gc-toolkit.conversely","rig":"gc-toolkit","closed":false},
- {"id":"lx-old1","session_name":"s-lx-old1","alias":"gc-toolkit/gc-toolkit.tk-vis0","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":true},
- {"id":"lx-dup1","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false},
- {"id":"lx-dup2","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false}
+ {"id":"hq-conv1","session_name":"s-hq-conv1","alias":"gc-toolkit/gc-toolkit.tk-conv1","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
+ {"id":"hq-base1","session_name":"s-hq-base1","alias":"other/gc-toolkit.tk-vis2","template":"other/gc-toolkit.converse","rig":"other","closed":false},
+ {"id":"hq-noal1","session_name":"s-hq-noal1","template":"gc-toolkit/gc-toolkit.converse-fable","rig":"gc-toolkit","closed":false},
+ {"id":"hq-pole1","session_name":"gc-toolkit__polecat-hq-pole1","alias":"gc-toolkit/gc-toolkit.polecat-1","template":"gc-toolkit/gc-toolkit.polecat","rig":"gc-toolkit","closed":false},
+ {"id":"hq-near1","session_name":"s-hq-near1","alias":"gc-toolkit/gc-toolkit.tk-vis3","template":"gc-toolkit/gc-toolkit.conversely","rig":"gc-toolkit","closed":false},
+ {"id":"hq-old1","session_name":"s-hq-old1","alias":"gc-toolkit/gc-toolkit.tk-vis0","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":true},
+ {"id":"hq-dup1","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false},
+ {"id":"hq-dup2","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false}
 ]}'
 
 # ── Fake config dir: the script resolves gc-helm.sh under it ────────────────
@@ -258,7 +258,7 @@ has "$SAID" "tmux did not say which session" "(NOSESSION) …and it says so"
 quiet "no session"
 
 echo "# a dismiss that refuses reports its reason"
-FAKE_HELM_RC=2 FAKE_HELM_OUT="" FAKE_HELM_ERR="gc-helm: no open conversation is assigned to this session (s-lx-conv1); there is no current sitting." run s-lx-conv1
+FAKE_HELM_RC=2 FAKE_HELM_OUT="" FAKE_HELM_ERR="gc-helm: no open conversation is assigned to this session (s-hq-conv1); there is no current sitting." run s-hq-conv1
 has "$SAID" "NOT dismissed — gc-helm: no open conversation is assigned to this session" "(REFUSED) the reason reaches the operator"
 hasnt "$SAID" "is over" "(REFUSED) …and the sitting is not claimed ended"
 quiet "refused"
@@ -266,7 +266,7 @@ FAKE_HELM_RC=4 FAKE_HELM_OUT="" FAKE_HELM_ERR="" run s-hq-conv1
 has "$SAID" "gc-helm dismiss exited 4 with no diagnostic" "(REFUSED) a silent failure still says it failed"
 
 echo "# a dismiss that found nothing open says so"
-FAKE_HELM_OUT='{"subject":"tk-sub1","matched":[],"closed":0,"ok":true}' run s-lx-conv1
+FAKE_HELM_OUT='{"subject":"tk-sub1","matched":[],"closed":0,"ok":true}' run s-hq-conv1
 has "$SAID" "no live sitting on tk-sub1" "(NOOP) nothing was holding a sitting"
 
 echo "# shown text is never expanded as a tmux format"
@@ -376,7 +376,7 @@ if [ -n "$LIVE_TERM" ]; then
     live=$(cat "$LIVE_CALLS" 2>/dev/null)
     has "$live" "ARGS=dismiss --operator --json" "(LIVE-YES) a real press, confirmed, runs dismiss as the operator"
     eq "$(grep -c '^ARGS=' "$LIVE_CALLS")" "1" "(LIVE-YES) …exactly once"
-    has "$live" "GC_SESSION_NAME=s-lx-conv1" "(LIVE-YES) …under the pressed pane's session"
+    has "$live" "GC_SESSION_NAME=s-hq-conv1" "(LIVE-YES) …under the pressed pane's session"
     has "$live" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-conv1" "(LIVE-YES) …and its alias"
     has "$live" "GC_CITY_PATH=$LIVE_CITY" "(LIVE-YES) …with the city path baked in at install"
     has "$(cat "$PRESS_MSGS")" "the sitting on tk-sub1 is over" "(LIVE-YES) the outcome reaches the operator"

@@ -53,12 +53,12 @@ hasnt(){ case "$1" in *"$2"*) bad "$3 (unexpected '$2' in: $1)" ;; *) ok "$3" ;;
 
 [ -f "$SCRIPT" ] && ok "gc-helm.sh present" || bad "gc-helm.sh missing at $SCRIPT"
 
-mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/sl/.beads"
+mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/ra/.beads"
 
 # --- gc stub ------------------------------------------------------------------
 # One JSON file per bead under $STORE/b/<id>.json, its edges as deps
 # [{type, on}] on the bead the edge starts from. Two rigs: gc-toolkit (prefix
-# tk, no .beads, so its reads run unpinned) and signal-loom (prefix sl, whose
+# tk, no .beads, so its reads run unpinned) and rig-a (prefix ra, whose
 # .beads makes the pin visible). Every write is appended to $CALLS, and the
 # store each tracks lookup and each listing read is appended to $READS.
 # Hooks: DEP_DOWN fails every `bd dep list`, LIST_DOWN every `bd list`,
@@ -75,8 +75,8 @@ show_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] | {id: .on, dependen
 list_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)'; }
 case "$1 ${2:-}" in
   "rig list")
-    jq -n --arg sl "$SL_PATH" '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
-                                     {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
+    jq -n --arg ra "$RA_PATH" '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
+                                     {name:"rig-a", path:$ra, prefix:"ra"}]}' ;;
   "session list")
     [ -n "${SESSIONS_DOWN:-}" ] && { echo "session list: data plane down" >&2; exit 1; }
     jq -n --slurpfile s "$STORE/sessions.json" '{sessions: $s[0]}' ;;
@@ -168,7 +168,7 @@ REC
 chmod +x "$TMP/rec-psc"
 
 export PATH="$TMP/bin:$PATH"
-export STORE="$TMP/store" CALLS="$TMP/calls" READS="$TMP/reads" SL_PATH="$TMP/sl"
+export STORE="$TMP/store" CALLS="$TMP/calls" READS="$TMP/reads" RA_PATH="$TMP/ra"
 export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 unset GC_HELM_FIXTURE GC_RIG BEADS_DIR GC_SESSION_ID GC_SESSION_NAME GC_ALIAS 2>/dev/null || true
 export TMPDIR="$TMP"
@@ -295,9 +295,9 @@ has "$ERR" "bead not found" "(VERIFY) …saying why"
 eq "$(grep -c '^bd ' "$CALLS" || true)" "0" "(VERIFY) …and writing nothing"
 
 echo "# the lookup reads the bead's own rig store"
-fresh; bead sl-9001 task open ""
-run_dismiss sl-9001
-has "$(grep '^dep sl-9001' "$READS")" "$TMP/sl/.beads" "(RIG) the conversation lookup is pinned at the bead's rig"
+fresh; bead ra-9001 task open ""
+run_dismiss ra-9001
+has "$(grep '^dep ra-9001' "$READS")" "$TMP/ra/.beads" "(RIG) the conversation lookup is pinned at the bead's rig"
 
 echo "# with no bead named, dismiss ends the sitting this session holds"
 fresh; GC_SESSION_ID=gc-toolkit/gc-toolkit.tk-conv run_dismiss --reason "from the pane"
@@ -320,11 +320,11 @@ GC_ALIAS=gc-toolkit/gc-toolkit.tk-conv GC_SESSION_ID=gc-toolkit/gc-toolkit.tk-co
 eq "$RC" 2 "(INFER-AMBIG) a session holding two conversations refuses to guess"
 has "$ERR" "more than one open conversation" "(INFER-AMBIG) …naming the ambiguity"
 eq "$(grep -c '^bd ' "$CALLS" || true)" "0" "(INFER-AMBIG) …and writing nothing"
-fresh; bead sl-subj task open ""; bead sl-conv task in_progress gc-toolkit/gc-toolkit.sl-conv; edge sl-conv tracks sl-subj
-sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.sl-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"signal-loom"}]'
-GC_SESSION_ID=gc-60 GC_ALIAS=gc-toolkit/gc-toolkit.sl-conv run_dismiss
-has "$(grep '^list' "$READS")" "$TMP/sl/.beads" "(INFER-RIG) the current-sitting lookup is pinned at the session's own rig"
-eq "$(field sl-conv status)" "closed" "(INFER-RIG) …and finds the conversation there"
+fresh; bead ra-subj task open ""; bead ra-conv task in_progress gc-toolkit/gc-toolkit.ra-conv; edge ra-conv tracks ra-subj
+sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"rig-a"}]'
+GC_SESSION_ID=gc-60 GC_ALIAS=gc-toolkit/gc-toolkit.ra-conv run_dismiss
+has "$(grep '^list' "$READS")" "$TMP/ra/.beads" "(INFER-RIG) the current-sitting lookup is pinned at the session's own rig"
+eq "$(field ra-conv status)" "closed" "(INFER-RIG) …and finds the conversation there"
 
 echo "# dismiss stops the session that held the conversation it closed"
 # A sitting must not outlive its conversation, and a session viewed in a tab is

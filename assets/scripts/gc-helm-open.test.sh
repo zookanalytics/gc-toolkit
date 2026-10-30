@@ -1275,7 +1275,7 @@ case "$1 ${2:-}" in
   "session list")
     jq -n '{sessions:[]}' ;;
   "session new")
-    jq -n '{session_id:"lx-fake", session_name:"s-lx-fake", alias:"gc-toolkit/gc-toolkit.tk-convE"}' ;;
+    jq -n '{session_id:"hq-fake", session_name:"s-hq-fake", alias:"gc-toolkit/gc-toolkit.tk-convE"}' ;;
 esac
 exit 0
 REBIN

@@ -140,7 +140,7 @@ fixture() {
      "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2",
                  "gc.input_convoy_id":"tk-convoy","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "gc.session_name":"polecat-2-pool"}},
-    {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
+    {"id":"tk-work","status":"in_progress","assignee":"hq-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "workflow_id":"tk-root","gc.session_id":"hq-dead","gc.session_name":"polecat-3-pool"}}
   ]'
@@ -652,7 +652,7 @@ for conv in "tk-conv:in_progress:gc-toolkit/gc-toolkit.tk-conv" "tk-convq:open:h
     eq "$(bstatus "$cid")" "$cst" "…and it is left as it was ($cas)"
 done
 store '[{"id":"tk-notconv","status":"in_progress","issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-other","title":"a task under an alias naming another bead",
-         "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}}]'
+         "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-dead"}}]'
 OUT=$("$SCRIPT" tk-notconv 2>&1)
 has "$OUT" "action=delegate-source-workflow" "a task whose alias names another id is no conversation, and delegates"
 

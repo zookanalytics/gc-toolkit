@@ -337,7 +337,7 @@ eq "$RC" 0 "in_progress under an owner no session lists: the wait lands"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a crashed owner's claim is released"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a crashed owner's claim: the re-sling is armed"
 eq "$(on_v1)" 1 "a crashed owner's claim: the work bead waits on the gate"
-eq "$(grep -c '^bd unclaim tk-work --if-assignee lx-dead$' "$GC_LOG" | tr -d ' ')" 1 \
+eq "$(grep -c '^bd unclaim tk-work --if-assignee hq-dead$' "$GC_LOG" | tr -d ' ')" 1 \
   "a crashed owner's claim: the release is a compare-and-swap on that owner"
 eq "$(grep -c '^session list --state all --json$' "$GC_LOG" | tr -d ' ')" 1 \
   "a crashed owner: proven gone by one read of every session, asleep ones included"
@@ -372,7 +372,7 @@ for list in FAIL "" '{"error":"supervisor down"}' '{"sessions":"none"}' '{"sessi
   eq "$RC" 1 "an unreadable session list ('$list'): exit 1"
   has "$OUT" "gc session list could not be read, so nothing proves that owner gone" "an unreadable session list ('$list'): says why"
   eq "$(edge_adds)" 0 "an unreadable session list ('$list'): refused before the edge"
-  eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|lx-dead" "an unreadable session list ('$list'): the claim is kept"
+  eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-dead" "an unreadable session list ('$list'): the claim is kept"
 done
 
 # An open bead under another assignee is a hand-off, whatever the list says.
@@ -382,7 +382,7 @@ eq "$RC" 1 "open under another assignee no session lists: exit 1"
 has "$OUT" "is open under hq-dead, a claim not in this session's name: an open bead under another assignee is a hand-off" \
   "open under another assignee: says it is a hand-off"
 eq "$(edge_adds)" 0 "open under another assignee: refused before the edge"
-eq "$(field tk-work status)|$(field tk-work assignee)" "open|lx-dead" "open under another assignee: left as it was"
+eq "$(field tk-work status)|$(field tk-work assignee)" "open|hq-dead" "open under another assignee: left as it was"
 eq "$(grep -c '^session list' "$GC_LOG" | tr -d ' ')" 0 "open under another assignee: no session list is read"
 
 # An in_progress bead that names no assignee is reopened.
@@ -403,7 +403,7 @@ OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "after a refused release: a re-run lands the wait"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "after a refused release: the re-run releases the claim"
 eq "$(on_v1)" 1 "after a refused release: still one edge"
-reset; claim open lx-me
+reset; claim open hq-me
 OUT=$(env "${SELF[@]}" FAKE_UNCLAIM_NOOP=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
 eq "$RC" 1 "a release that reports success and changes nothing: the read-back fails it"
 has "$OUT" "assignee 'hq-me'" "the read-back names the assignee it found"
@@ -570,7 +570,7 @@ arm() { # <session list> -> "<rc>|<ordered trace>"
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/trace")"
 }
 arm_reset() {
-  reset; claim in_progress lx-dead
+  reset; claim in_progress hq-dead
   jq -c '. + [{"id":"tk-vm","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-missing-branch","created_at":"2026-10-22T02:00:00Z","metadata":{}}]' \
     "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
   printf 'tk-work|blocks|tk-vm\n' >> "$FAKE_DEPS"
@@ -582,7 +582,7 @@ eq "$(grep -c '^tk-work|blocks|tk-vm$' "$FAKE_DEPS" | tr -d ' ')" 1 "a later arm
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a later arm on a crashed owner's claim: the claim is released"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a later arm on a crashed owner's claim: clearing the gate re-slings the work"
 arm_reset
-jq -c 'map(if .id == "tk-work" then .assignee = "lx-live" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+jq -c 'map(if .id == "tk-work" then .assignee = "hq-live" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
 eq "$(arm "$LIVE_LIST")" "1|GATE;AWAIT;" \
    "a later arm on a listed owner's claim: the wait does not land, so no cancel and no drain"
 eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-live" "a later arm on a listed owner's claim: the claim is kept"

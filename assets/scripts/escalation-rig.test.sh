@@ -36,7 +36,7 @@ STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 unset STUB_RIGS_FAIL GC_RIG 2>/dev/null || true
-export STUB_RIGS='{"rigs":[{"name":"loomington","prefix":"lx","path":"/c"},
+export STUB_RIGS='{"rigs":[{"name":"mycity","prefix":"hq","path":"/c"},
   {"name":"gc-toolkit","prefix":"tk","path":"/c/rigs/gc-toolkit"},
   {"name":"gascity","prefix":"gc","path":"/c/rigs/gascity"}]}'
 
@@ -49,8 +49,8 @@ eq "$OUT" "gascity" "  ... to the rig its id prefix names"
 run --db gc-yxpj8
 eq "$RC" "0" "--db resolves (rc)"
 eq "$OUT" "/c/rigs/gascity/.beads" "  ... to that rig's .beads path"
-run lx-abc12
-eq "$OUT" "loomington" "a city-store bead names the city's rig"
+run hq-abc12
+eq "$OUT" "mycity" "a city-store bead names the city's rig"
 BOUND=$(GC_RIG="$("$SUT" tk-3y6toq)" sh -c 'printf "[%s]" "$GC_RIG"')
 eq "$BOUND" "[gc-toolkit]" "the output binds straight into GC_RIG with no trailing junk"
 
@@ -87,13 +87,13 @@ eq "$(cat "$STUB_HG_LOG")" "GC_RIG=gc-toolkit [--subject] [tk-3y6toq] [--key] [d
 
 echo "# the dog's warrant derivation still lets its wedged-session call file"
 : > "$STUB_HG_LOG"
-warrant_id=lx-w4rr4nt target=lx-wisp-p3
+warrant_id=hq-w4rr4nt target=hq-wisp-p3
 ESC_RIG="$("$SCRIPTS/escalation-rig.sh" "$warrant_id")" || ESC_RIG=""
 if [ -n "$ESC_RIG" ]; then
   GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$warrant_id" --key "wedged-$target" --message "kill failed" >/dev/null 2>&1
 fi
-eq "$ESC_RIG" "loomington" "the warrant's store resolves, so the call is made"
-has "$(cat "$STUB_HG_LOG")" "[--subject] [lx-w4rr4nt] [--key] [wedged-lx-wisp-p3]" "human-gate.sh receives the wedged-session call on the warrant"
+eq "$ESC_RIG" "mycity" "the warrant's store resolves, so the call is made"
+has "$(cat "$STUB_HG_LOG")" "[--subject] [hq-w4rr4nt] [--key] [wedged-hq-wisp-p3]" "human-gate.sh receives the wedged-session call on the warrant"
 
 echo
 echo "escalation-rig: $PASS passed, $FAIL failed"

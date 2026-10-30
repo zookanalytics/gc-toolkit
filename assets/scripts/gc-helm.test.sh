@@ -95,7 +95,7 @@ case "$1 ${2:-}" in
     # exercises the rig pin.
     jq -n --arg ra "$FAKE_RA_PATH" \
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
-               {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
+               {name:"rig-a", path:$ra, prefix:"ra"}]}' ;;
   "bd list")
     # Record the store this list actually read, so a lookup that searched the
     # caller's rig instead of the subject's is visible rather than silent.
@@ -308,7 +308,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_CONVOY_CALLS="$TMP/convoy-calls"
-mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists"
+mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists"
 : > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`

@@ -90,7 +90,7 @@ C1_HEAD=$(git -C "$SRC" rev-parse polecat/tk-c1)
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh"
 SUT="$SD/pre-open-rebase.sh"
-POOL="loomington/gc-toolkit.polecat"
+POOL="mycity/gc-toolkit.polecat"
 # human-gate.sh as the supersession guard reads it back: one open human gate
 # per subject and key, blocking the subject, which the guard's lookup finds
 # through the subject's blocks edges. STUB_GATE_RC models a refusal.

@@ -284,8 +284,8 @@ done
 # A closed bead is decided by its status before any owner or liveness check, so
 # a closed bead under a foreign owner the session list reports live is finished,
 # not a live conflict, and asks nothing.
-eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-      run '[{"status":"closed","assignee":"lx-other","metadata":{}}]')" \
+eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+      run '[{"status":"closed","assignee":"hq-other","metadata":{}}]')" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "closed under a LIVE foreign owner: finished, cancels with nothing asked — the liveness probe does not apply"
 
@@ -398,8 +398,8 @@ no  "$(cat "$TMP/cancel")" 'closed before claim' "closed + merge_result: the sta
 eq  "$(asked)"  '' "closed + merge_result: nothing asked"
 
 # LIVE duplicate: nothing asked; the note and the cancel reason name the live owner.
-FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-  run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]' >/dev/null
+FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+  run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]' >/dev/null
 eq  "$(asked)"    '' "in-flight: nothing asked — the live run builds the work"
 has "$(cat "$TMP/update")" 'Duplicate dispatch refused; run cancelled' "in-flight: the note names the duplicate"
 has "$(cat "$TMP/update")" 'under live hq-other' "in-flight: the note names the live owner"
@@ -446,8 +446,8 @@ eq "$out" "1|UPDATE;CANCEL;" \
 out="$(FAKE_CANCEL_RC=1 run '[{"status":"closed","assignee":"","metadata":{}}]')"
 eq "$out" "1|UPDATE;CANCEL;" \
    "closed, cancel fails: does not drain, asks nothing"
-out="$(FAKE_CANCEL_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-      run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]')"
+out="$(FAKE_CANCEL_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+      run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]')"
 eq "$out" "1|UPDATE;CANCEL;" \
    "live duplicate, cancel fails: does not drain"
 
@@ -546,7 +546,7 @@ no "$(cat "$TMP/gate")" "--quiet-window" "parked: the gate declares no quiet win
 # let through, a crashed owner's or this session's, is the wait's to release,
 # and the wait proves which it may release, so the gate names no owner.
 eq "$(FAKE_SESSIONS="$SESS_EMPTY" FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" \
-      run '[{"status":"in_progress","assignee":"lx-dead","metadata":{}}]')" \
+      run '[{"status":"in_progress","assignee":"hq-dead","metadata":{}}]')" \
    "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "undecided tree, in_progress under a crashed foreign owner: files a gate, waits, cancels"
 eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work" \

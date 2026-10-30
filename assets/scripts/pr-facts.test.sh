@@ -491,7 +491,7 @@ has "$out" "withdrew stale gate V22" "the withdrawal is reported"
 # the answer to its question, so it is withdrawn all the same, and a gate
 # resolves whatever its assignee.
 echo "# a pre-recorded disposition withdraws the rework-or-close gate a person holds"
-store "[$(anchor F2n 39 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-vn"'), $(hgate VN F2n pr-abandoned.39 in_progress lx-sitting)]"
+store "[$(anchor F2n 39 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-vn"'), $(hgate VN F2n pr-abandoned.39 in_progress hq-sitting)]"
 printf '%s' "$(prview 39 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_39.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
@@ -766,7 +766,7 @@ eq "$(filings F2n pr-dispose-failed.120)" "0" "…and nothing is re-filed"
 
 echo "# a pr-dispose-failed gate a person has claimed still holds the close"
 : > "$STUB_DEPS"
-store "[$(anchor F2o 121 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-o"'), $(hgate VC F2o pr-dispose-failed.121 in_progress lx-sitting)]"
+store "[$(anchor F2o 121 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-o"'), $(hgate VC F2o pr-dispose-failed.121 in_progress hq-sitting)]"
 printf '%s' "$(prview 121 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_121.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
@@ -779,7 +779,7 @@ echo "# a pr-dispose-failed gate assigned to a person but not yet claimed still 
 # The finalize gate excepts only a gate no person is assigned, whatever its
 # status, so an assignment alone takes the gate out of the retry's hands.
 : > "$STUB_DEPS"
-store "[$(anchor F2oa 124 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-oa"'), $(hgate VE F2oa pr-dispose-failed.124 open lx-sitting)]"
+store "[$(anchor F2oa 124 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-oa"'), $(hgate VE F2oa pr-dispose-failed.124 open hq-sitting)]"
 printf '%s' "$(prview 124 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_124.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
@@ -859,7 +859,7 @@ hasnt "$out" "refreshed its pr-dispose-failed gate VX" "…and writes nothing"
 
 echo "# a gate a person is assigned keeps its description"
 : > "$STUB_DEPS"
-store "[$(anchor F2y 132 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-y"'), $(hgate VY F2y pr-dispose-failed.132 open lx-sitting "an earlier report")]"
+store "[$(anchor F2y 132 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-y"'), $(hgate VY F2y pr-dispose-failed.132 open hq-sitting "an earlier report")]"
 printf '%s' "$(prview 132 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_132.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
@@ -904,13 +904,13 @@ echo "# a merge-path gate a person is assigned keeps holding the close"
 # That person clears it. Only the rework-or-close gate is withdrawn over an
 # assignment, because the disposition answers its question.
 : > "$STUB_DEPS"
-store "[$(anchor F2za 134 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-za"'), $(hgate VCE F2za pr-comments.134.1.2 open lx-sitting)]"
+store "[$(anchor F2za 134 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-za"'), $(hgate VCE F2za pr-comments.134.1.2 open hq-sitting)]"
 printf '%s' "$(prview 134 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_134.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
 eq "$(bstatus VCE)" "open" "the assigned feedback gate is left to its holder"
 eq "$(bstatus F2za)" "open" "…and it holds the anchor's close"
-has "$out" "gate VCE (pr-comments.134.1.2) is assigned to lx-sitting" "…which the pass reports"
+has "$out" "gate VCE (pr-comments.134.1.2) is assigned to hq-sitting" "…which the pass reports"
 has "$out" "held by open human gate VCE" "…and names as the hold"
 
 echo "# a gate for another PR, or under a key this script does not file, is not withdrawn"
@@ -1831,7 +1831,7 @@ eq "$(cat "$STUB_ESC_LOG")" "" "the sweep files nothing — it only withdraws"
 # reported, and the sweep goes on to the next gate; a gate listing that does not
 # read withdraws nothing.
 echo "# the approval retire withdraws an assigned gate, and a refused resolve leaves it for the next pass"
-store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, $(hgate AV4 MC2 merge-blocked-approval open lx-sitting), $(hgate AV5 MC2 merge-blocked-approval), $(hgate AV6 MC2 merge-blocked-approval)]"
+store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, $(hgate AV4 MC2 merge-blocked-approval open hq-sitting), $(hgate AV5 MC2 merge-blocked-approval), $(hgate AV6 MC2 merge-blocked-approval)]"
 out=$(STUB_GATE_LIST_FAIL=1 run); rc=$?
 eq "$rc" 0 "an unreadable gate listing does not fail the pass"
 has "$out" "merge-blocked-approval gate sweep skipped — could not list the store's gates" "…it is reported"
@@ -2701,7 +2701,7 @@ echo "# the full pass withdraws its own merge-path gates once their situation is
 # base, with one thread still unresolved under a rule that requires them
 # resolved.
 : > "$STUB_DEPS"
-store "[$(anchor SG1 601), $(hgate SGu1 SG1 pr-unengaged-threads.601.sha-OLD), $(hgate SGu2 SG1 pr-unengaged-threads.601.sha-601), $(hgate SGu3 SG1 pr-unengaged-threads.601.sha-PRIOR open lx-sitting), $(hgate SGb SG1 merge-blocked-threads), $(hgate SGc SG1 pr-comments.601.5.7), $(hgate SGk SG1 pr-fix-noncode.601), $(hgate SGr SG1 pr-retargeted.601), $(hgate SGa SG1 pr-abandoned.601), $(hgate SGq SG1 some-other-question)]"
+store "[$(anchor SG1 601), $(hgate SGu1 SG1 pr-unengaged-threads.601.sha-OLD), $(hgate SGu2 SG1 pr-unengaged-threads.601.sha-601), $(hgate SGu3 SG1 pr-unengaged-threads.601.sha-PRIOR open hq-sitting), $(hgate SGb SG1 merge-blocked-threads), $(hgate SGc SG1 pr-comments.601.5.7), $(hgate SGk SG1 pr-fix-noncode.601), $(hgate SGr SG1 pr-retargeted.601), $(hgate SGa SG1 pr-abandoned.601), $(hgate SGq SG1 some-other-question)]"
 printf '%s' "$(prview 601 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_601.json"
 echo '{"threads":[{"id":"t601","isResolved":false}]}' > "$GH_DIR/threads_601.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
@@ -2713,7 +2713,7 @@ has "$(cat "$STUB_ESC_LOG")" "--retract --subject SG1 --key pr-unengaged-threads
 has "$out" "withdrew its stale pr-unengaged-threads.601.sha-OLD gate" "…and the pass says so"
 eq "$(bstatus SGu2)" "open" "the one filed at the live head stays open"
 eq "$(bstatus SGu3)" "open" "an older head's gate a person is assigned stays open"
-has "$out" "its pr-unengaged-threads.601.sha-PRIOR gate is assigned to lx-sitting, who is left to clear it" "…left to them, and the pass says so"
+has "$out" "its pr-unengaged-threads.601.sha-PRIOR gate is assigned to hq-sitting, who is left to clear it" "…left to them, and the pass says so"
 eq "$(bstatus SGb)" "open" "merge-blocked-threads stays open while a thread is still unresolved"
 eq "$(bstatus SGr)" "closed" "the retarget gate is withdrawn once the base is the recorded target again"
 has "$(creason SGr)" "moot: PR#601's base is main again" "…moot, naming the base"

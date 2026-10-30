@@ -228,7 +228,7 @@ eq "$(esc_count beta)"  "1" "diverged rig files a human gate through human-gate.
 eq "$(esc_subject beta)" "$(bead_for beta)" "the gate's subject is the reconcile bead"
 eq "$(esc_last_window beta)" "86400" "the call declares a day-long quiet window, since every pass detects the blocked rig again"
 eq "$(esc_count alpha)" "0" "advanced rig files no gate"
-eq "$(esc_count loomington)" "0" "HQ root files no gate"
+eq "$(esc_count mycity)" "0" "HQ root files no gate"
 # A still-diverged rig's gate stays open: nothing is withdrawn while the
 # subject is unresolved.
 eq "$(retract_count beta)" "0" "a still-diverged rig withdraws no gate"

@@ -256,7 +256,7 @@ describe('DrillPanel', () => {
     // An agent working the anchor is not the same as a conversation the
     // operator can have about it, so the action stands beside the session.
     expect(await screen.findByRole('button', { name: /file a conversation/i })).toBeTruthy();
-    expect(await screen.findByText(/gc-toolkit__polecat-lx-8y6j/)).toBeTruthy();
+    expect(await screen.findByText(/gc-toolkit__polecat-hq-8y6j/)).toBeTruthy();
   });
 
   // Discuss (engage) and Dismiss are the drill panel's home for the two verbs the

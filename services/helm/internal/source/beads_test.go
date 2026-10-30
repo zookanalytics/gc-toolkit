@@ -1738,7 +1738,7 @@ func TestGatherJoinsInflight(t *testing.T) {
 		t.Fatalf("Gather: %v", err)
 	}
 
-	if got := res.Facts.Inflight["tk-work1"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+	if got := res.Facts.Inflight["tk-work1"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-hq-live" {
 		t.Errorf("root with its own session_name resolves: got %v", got)
 	}
 	if got := res.Facts.Inflight["tk-work2"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-hq-steps" {

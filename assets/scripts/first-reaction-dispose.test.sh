@@ -598,7 +598,7 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on ra-for
 eq "$RC" "2" "(BLKCROSS) a blocker in another store is refused"
 eq "$LOG" "" "(BLKCROSS) …and nothing was written"
 has "holds nothing" "$ERR" "(BLKCROSS) …because the edge would report success and hold nothing"
-has "store that names sl-foreign" "$ERR" "(BLKCROSS) …and the refusal names the remedy"
+has "store that names ra-foreign" "$ERR" "(BLKCROSS) …and the refusal names the remedy"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-sub --reaction-bead "$R"
 eq "$RC" "2" "(BLKSELF) a bead cannot wait on itself"

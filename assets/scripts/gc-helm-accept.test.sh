@@ -161,7 +161,7 @@ all_ids()  { for f in "$B"/*.json; do [ -f "$f" ] && basename "$f" .json; done; 
 
 case "$1 ${2:-}" in
   "rig list")
-    jq -n --arg city "$CITY_ROOT" '{rigs:[{name:"loomington", path:$city, prefix:"lx", hq:true},
+    jq -n --arg city "$CITY_ROOT" '{rigs:[{name:"mycity", path:$city, prefix:"hq", hq:true},
                                           {name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk", hq:false}]}' ;;
   "session list")
     jq -n --slurpfile s "$ST/sessions.json" '{sessions: $s[0]}' ;;

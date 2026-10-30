@@ -293,11 +293,11 @@ export FAKE_READY="$TMP/ready.json" FAKE_LIVE="$TMP/live.json" FAKE_WIDEN="$TMP/
 # carries is held by a gone sitting.
 cat > "$TMP/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"testrig__conv-lx-live-1","agent_name":"testrig/testrig.tk-conv-held"},
-  {"id":"lx-live-2","state":"active","closed":false,"session_name":"s-lx-live-2","alias":"c-tk-conv-f","name":"","agent_name":""},
-  {"id":"lx-live-3","state":"active","closed":false,"session_name":"s-lx-live-3","alias":"tk-conv-root","name":"","agent_name":""},
-  {"id":"lx-live-4","state":"active","closed":false,"session_name":"s-lx-live-4","alias":"hl-c-live","name":"","agent_name":""},
-  {"id":"lx-live-5","state":"active","closed":false,"session_name":"s-lx-live-5","alias":"","name":"","agent_name":"testrig/testrig.hl-c-liveroot"}
+  {"id":"hq-live-1","state":"active","closed":false,"session_name":"s-hq-live-1","alias":"","name":"testrig__conv-hq-live-1","agent_name":"testrig/testrig.tk-conv-held"},
+  {"id":"hq-live-2","state":"active","closed":false,"session_name":"s-hq-live-2","alias":"c-tk-conv-f","name":"","agent_name":""},
+  {"id":"hq-live-3","state":"active","closed":false,"session_name":"s-hq-live-3","alias":"tk-conv-root","name":"","agent_name":""},
+  {"id":"hq-live-4","state":"active","closed":false,"session_name":"s-hq-live-4","alias":"hl-c-live","name":"","agent_name":""},
+  {"id":"hq-live-5","state":"active","closed":false,"session_name":"s-hq-live-5","alias":"","name":"","agent_name":"testrig/testrig.hl-c-liveroot"}
 ]}
 JSON
 export FAKE_SESSIONS="$TMP/sessions.json"
@@ -1017,7 +1017,7 @@ eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-green" "…and reports it again"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Conversations track ready subjects: one held by a sitting a listed session
-# carries (lx-live-4's alias), one held under an alias no listed session
+# carries (hq-live-4's alias), one held under an alias no listed session
 # carries, and one in the queue of the operator. The live-held subject and the
 # queued one stay covered; the dead-held subject returns to the census. Two more track workflow ROOTS, so the ready steps under
 # them are covered through gc.root_bead_id by the same holder test.
@@ -1046,10 +1046,10 @@ printf '%s\n' '[{"id":"hl-live-root","metadata":{}}]' > "$TMP/show/hl-live-root.
 printf '%s\n' '[{"id":"hl-dead-root","metadata":{}}]' > "$TMP/show/hl-dead-root.json"
 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
-case ",$BL," in *",hl-live-subj,"*) bad "live-held conversation over-surfaces" "hl-live-subj surfaced though lx-live-4 carries its alias" ;; *) ok "a live-held conversation keeps its subject out of the census" ;; esac
+case ",$BL," in *",hl-live-subj,"*) bad "live-held conversation over-surfaces" "hl-live-subj surfaced though hq-live-4 carries its alias" ;; *) ok "a live-held conversation keeps its subject out of the census" ;; esac
 case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held conversation returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
 case ",$BL," in *",hl-queue-subj,"*) bad "queued conversation's subject surfaced" "hl-queue-subj reached the census though a conversation about it waits in the operator's queue (baseline: $BL)" ;; *) ok "a conversation in the queue keeps its subject out of the census: a person is already asked" ;; esac
-case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held conversation's root over-surfaces" "hl-live-root-step surfaced though its root's conversation is held by lx-live-5" ;; *) ok "a step whose root a live-held conversation tracks stays out of the census" ;; esac
+case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held conversation's root over-surfaces" "hl-live-root-step surfaced though its root's conversation is held by hq-live-5" ;; *) ok "a step whose root a live-held conversation tracks stays out of the census" ;; esac
 case ",$BL," in *",hl-dead-root-step,"*) ok "a step whose root a dead-held conversation tracks returns to the census" ;; *) bad "dead-held root step hidden" "hl-dead-root-step stayed masked (baseline: $BL)" ;; esac
 
 echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not live ──"
@@ -1059,9 +1059,9 @@ echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not 
 # gate excludes the terminal states only, not everything that is not "active".
 cat > "$TMP/hl-term-sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"hl-c-closed","name":"","agent_name":""},
-  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"hl-c-arch","name":"","agent_name":""},
-  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"hl-c-asleep","name":"","agent_name":""}
+  {"id":"hq-closed-7","state":"closed","closed":true,"session_name":"s-hq-closed-7","alias":"hl-c-closed","name":"","agent_name":""},
+  {"id":"hq-arch-8","state":"archived","closed":true,"session_name":"s-hq-arch-8","alias":"hl-c-arch","name":"","agent_name":""},
+  {"id":"hq-asleep-2","state":"asleep","closed":false,"session_name":"s-hq-asleep-2","alias":"hl-c-asleep","name":"","agent_name":""}
 ]}
 JSON
 cat > "$TMP/hl-term-ready.json" <<'JSON'
@@ -1083,7 +1083,7 @@ FAKE_SESSIONS="$TMP/hl-term-sessions.json" FAKE_READY="$TMP/hl-term-ready.json" 
 BLT="$(cat "$BASELINE_FILE" 2>/dev/null)"
 case ",$BLT," in *",hl-closed-subj,"*) ok "a CLOSED but still-listed holder returns its subject to the census" ;; *) bad "closed-held subject hidden" "hl-closed-subj stayed masked (baseline: $BLT)" ;; esac
 case ",$BLT," in *",hl-arch-subj,"*) ok "an ARCHIVED but still-listed holder returns its subject to the census" ;; *) bad "archived-held subject hidden" "hl-arch-subj stayed masked (baseline: $BLT)" ;; esac
-case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held conversation over-surfaces" "hl-asleep-subj surfaced though lx-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
+case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held conversation over-surfaces" "hl-asleep-subj surfaced though hq-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
 
 echo "── an unreadable session list keeps every held conversation covering (unprovable death) ──"
 GC_SESSION_FAIL=1 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT

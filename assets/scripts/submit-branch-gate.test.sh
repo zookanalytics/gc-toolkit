@@ -340,7 +340,7 @@ eq "$(run_gate polecat/rb-uzy9.5 '{"branch":"polecat/rb-uzy9.5"}')" \
 # The rework harm the gate still has to catch: a polecat that cut
 # polecat/<bead-id> from the reviewed branch instead of resuming it. That forks
 # the branch under review, so it must halt even though the name looks correct.
-eq "$(run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}')" \
+eq "$(run_gate polecat/tk-work '{"branch":"polecat/rb-uzy9.5"}')" \
    "1|GATE;AWAIT;CANCEL;DRAIN;" \
    "rework: halts on a forked polecat/<bead-id> branch, not just any mismatch"
 
@@ -348,7 +348,7 @@ eq "$(run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}')" \
 # is ordered behind every durable write the step owes (asserted in section 7),
 # so a detached HEAD here is not a stage the recipe walks through on its way
 # to one.
-eq "$(run_gate '' '{"branch":"polecat/su-uzy9.5"}')" \
+eq "$(run_gate '' '{"branch":"polecat/rb-uzy9.5"}')" \
    "1|GATE;AWAIT;CANCEL;DRAIN;" \
    "detached HEAD with metadata.branch set: halts"
 eq "$(run_gate '' '{}')" \
@@ -496,7 +496,7 @@ has_cancel "--step mol-polecat-work.submit-and-exit" \
 # An arm that drains leaving its step claimable hands it to a fresh polecat,
 # which re-derives the same refusal. Every arm below cancels the run of the
 # step it holds, through run-cancel.sh, after the work bead waits on the gate.
-run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}' >/dev/null
+run_gate polecat/tk-work '{"branch":"polecat/rb-uzy9.5"}' >/dev/null
 has_cancel "--step mol-polecat-work.submit-and-exit" \
   && ok "branch-shape refusal cancels the run of its own step" \
   || bad "branch-shape refusal drained without cancelling: $(cat "$TMP/cancel")"
@@ -868,7 +868,7 @@ FAKE_CANCEL_RC=1
 eq "$(run_gate polecat/tk-agent-home '{}')" \
    "1|GATE;AWAIT;CANCEL;" \
    "branch-shape refusal: a cancel that did not land halts WITHOUT draining"
-run_resolve polecat/su-uzy9.5 polecat/su-uzy9.5 '{}' >/dev/null
+run_resolve polecat/rb-uzy9.5 polecat/rb-uzy9.5 '{}' >/dev/null
 eq "$(tr '\n' ';' < "$TMP/log")" "GATE;AWAIT;CANCEL;" \
    "target resolution: a cancel that did not land halts WITHOUT draining"
 eq "$(run_consume '')" \

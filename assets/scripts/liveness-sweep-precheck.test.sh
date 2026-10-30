@@ -232,9 +232,9 @@ EXCLUDED_IDS="$(jq -nc --arg kinds "$STANDING_KINDS" '
 # conversation it holds, qualified (agent_name) or bare (alias).
 cat > "$TMP/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"n","agent_name":"testrig/testrig.fc-held"},
-  {"id":"lx-live-2","state":"active","closed":false,"session_name":"s-lx-live-2","alias":"c-fc-fb","name":"","agent_name":""},
-  {"id":"lx-live-3","state":"active","closed":false,"session_name":"s-lx-live-3","alias":"fc-root","name":"","agent_name":""}
+  {"id":"hq-live-1","state":"active","closed":false,"session_name":"s-hq-live-1","alias":"","name":"n","agent_name":"testrig/testrig.fc-held"},
+  {"id":"hq-live-2","state":"active","closed":false,"session_name":"s-hq-live-2","alias":"c-fc-fb","name":"","agent_name":""},
+  {"id":"hq-live-3","state":"active","closed":false,"session_name":"s-hq-live-3","alias":"fc-root","name":"","agent_name":""}
 ]}
 JSON
 export FAKE_SESSIONS="$TMP/sessions.json"
@@ -869,7 +869,7 @@ cat > "$HLFIX/live.json" <<'JSON'
 JSON
 printf '[]\n' > "$HLFIX/widen.json"
 cat > "$TMP/hl-sessions.json" <<'JSON'
-{"sessions":[{"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"hl-c-live","name":"n","agent_name":""}]}
+{"sessions":[{"id":"hq-live-1","state":"active","closed":false,"session_name":"s-hq-live-1","alias":"hl-c-live","name":"n","agent_name":""}]}
 JSON
 FIXDIR="$HLFIX"; export FIXDIR
 FAKE_SESSIONS="$TMP/hl-sessions.json"; export FAKE_SESSIONS
@@ -913,9 +913,9 @@ JSON
 printf '[]\n' > "$HLTERM/widen.json"
 cat > "$TMP/hlterm-sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"hl-c-closed","name":"","agent_name":""},
-  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"hl-c-arch","name":"","agent_name":""},
-  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"hl-c-asleep","name":"","agent_name":""}
+  {"id":"hq-closed-7","state":"closed","closed":true,"session_name":"s-hq-closed-7","alias":"hl-c-closed","name":"","agent_name":""},
+  {"id":"hq-arch-8","state":"archived","closed":true,"session_name":"s-hq-arch-8","alias":"hl-c-arch","name":"","agent_name":""},
+  {"id":"hq-asleep-2","state":"asleep","closed":false,"session_name":"s-hq-asleep-2","alias":"hl-c-asleep","name":"","agent_name":""}
 ]}
 JSON
 FIXDIR="$HLTERM"; export FIXDIR
