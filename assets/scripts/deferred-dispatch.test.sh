@@ -1378,6 +1378,55 @@ eq "$(slings)" "0" "a malformed arg list does not produce a sling"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a malformed arg list leaves the record for a human"
 has "$out" "malformed" "the malformed record is reported"
 
+# A converse sitting's hold moves a pre-PR bead to merge_result=held, routed to
+# a person, beside a demand that blocks it. That records a wait on the
+# operator's ruling and no delivery, so the arm stays through the hold, and
+# through the moment its demand has closed but the sign-off has not yet released
+# the state. The release (lifecycle.sh transition --to unanchored, with the
+# empty route the sign-off gives an armed subject) clears both, and the arm
+# fires once the bead's own prerequisite lands.
+A_ON='"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"'
+echo "# a converse sitting's hold keeps the arm, which fires once the ruling releases it"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A_ON"'},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","title":"Land b-0","assignee":"","metadata":{},"notes":""}]'
+# The hold: the demand that blocks the subject, then the held state the
+# lifecycle writer records with the route to a person.
+jq -c '. + [{"id":"dg","status":"open","issue_type":"gate","title":"Build b-1 now?","assignee":"","metadata":{"gc.demand_for":"b-1"},"notes":""}]
+       | map(if .id == "b-1" then ._deps += [{"id":"dg","dependency_type":"blocks"}] else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+gc bd update b-1 --set-metadata merge_result=held --set-metadata gc.routed_to=human >/dev/null
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass over a held bead is clean"
+eq "$(slings)" "0" "a bead a sitting holds is NOT slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the hold keeps the arm: merge_result=held is no delivery"
+hasnt "$(notes b-1)" "work already delivered" "no retire note reads the hold as a delivery"
+has "$out" "1 held" "the summary counts the arm as held"
+hasnt "$out" "retired arm" "the pass retires nothing"
+out="$("$SUT" list 2>&1)"
+has "$out" "b-1 -> rig/pool [HELD by a converse sitting — merge_result=held" "list names the sitting's hold"
+hasnt "$out" "DELIVERED" "list does not read the hold as a delivery"
+# The ruling resolves the demand before the sign-off releases the state, so for
+# a moment nothing but `held` keeps the bead: its prerequisite is still open,
+# and bd would report it ready once that lands. The arm waits for the release.
+gc bd close dg --reason "build it" >/dev/null
+jq -c 'map(if .id == "b-0" then .status = "closed" elif .id == "b-1" then ._ready = true else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "a bead still at merge_result=held is NOT slung once nothing else holds it"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm waits for the sign-off's release"
+# The release. A prerequisite reopened meanwhile still holds the arm.
+jq -c 'map(if .id == "b-0" then .status = "open" elif .id == "b-1" then ._ready = false else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+gc bd update b-1 --unset-metadata merge_result --set-metadata gc.routed_to= >/dev/null
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "a released bead its own prerequisite still blocks is NOT slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "it keeps the arm while the prerequisite is open"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by b-0 "Land b-0"]' "list names the prerequisite once the sitting has released the bead"
+jq -c 'map(if .id == "b-0" then .status = "closed" elif .id == "b-1" then ._ready = true else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass that fires the arm is clean"
+eq "$(slings)" "1" "the arm fires once the hold is released and its prerequisite lands"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1 --on mol-polecat-work" "it sends the bead to the armed target by the armed method"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the fired arm is retired"
+
 # --- RECONCILE: the until resolved-by consumer -------------------------------
 # An `until` dep means "X resolves me": when X closes the bead is DISPOSED, not
 # re-triaged. The same pass disposes every open, unassigned bead whose own
