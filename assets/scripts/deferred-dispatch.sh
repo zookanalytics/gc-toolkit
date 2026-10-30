@@ -1653,7 +1653,7 @@ reconcile_dispatch() {
                     fi
                 elif [ -x "$HUMAN_GATE" ]; then
                     pass_child "$HUMAN_GATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
-                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg" >/dev/null 2>&1 || true
+                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg Then clear this gate. It blocks $id, so the retry stays held while the gate is open, and a gate cleared while $id is still armed at the cap is asked again by a later pass." >/dev/null 2>&1 || true
                 else
                     echo "$PROG: WARN human-gate.sh '$HUMAN_GATE' not executable — capped $id has no gate; disarm or clear its fail count by hand" >&2
                 fi

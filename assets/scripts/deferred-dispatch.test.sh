@@ -612,29 +612,32 @@ if [ -n "${STUB_FD9_LOG:-}" ]; then
     if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
     printf 'human-gate fd9=%s\n' "$fd9" >> "$STUB_FD9_LOG"
 fi
-subject=""; key=""; window=""
+subject=""; key=""; window=""; message=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) shift; subject="${1:-}" ;;
     --key) shift; key="${1:-}" ;;
     --quiet-window) shift; window="${1:-}" ;;
-    --message) shift ;;
+    --message) shift; message="${1:-}" ;;
     *) : ;;
   esac
   shift || true
 done
 printf '%s\t%s\t%s\n' "$subject" "$key" "$window" >> "${ESC_CALLS:?}"
+printf '%s\n' "$message" >> "${ESC_MESSAGES:?}"
 echo "tk-gate1"
 ESC
-# gc-helm.sh stub: records each `open` (the bead and its reason), the
-# conversation a capped bead with an open child gets in place of a gate.
+# gc-helm.sh stub: records each `open` (the bead and its reason, and its body
+# apart), the conversation a capped bead with an open child gets in place of a
+# gate.
 cat > "$BIN/gc-helm.sh" <<'HELM'
 #!/usr/bin/env bash
 set -u
 [ "${1:-}" = open ] || { echo "gc-helm stub: unsupported '$*'" >&2; exit 2; }
-shift; bead="${1:-}"; shift || true; reason=""
-while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
+shift; bead="${1:-}"; shift || true; reason=""; body=""
+while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; --body) shift; body="${1:-}" ;; esac; shift || true; done
 printf '%s\t%s\n' "$bead" "$reason" >> "${HELM_CALLS:?}"
+printf '%s\n' "$body" >> "${HELM_BODIES:?}"
 HELM
 # bead-rehome.sh stub: the resolved-by consumer's disposer. Records each call
 # (origin + successor + kind, then the two stores it was told, "-" for one it
@@ -732,8 +735,8 @@ export STUB_SLING_LOG="$TMP/sling.log"
 export STUB_MAIL_LOG="$TMP/mail.log"
 export STUB_MAILBOX="$TMP/mailbox"
 export STUB_NUDGE_LOG="$TMP/nudge.log"
-export ESC_CALLS="$TMP/human-gate.log"
-export HELM_CALLS="$TMP/helm.log"
+export ESC_CALLS="$TMP/human-gate.log" ESC_MESSAGES="$TMP/human-gate-messages.log"
+export HELM_CALLS="$TMP/helm.log" HELM_BODIES="$TMP/helm-bodies.log"
 export REHOME_CALLS="$TMP/rehome.log"
 export STUB_RACE_FIRED="$TMP/race.fired"
 export GC_HUMAN_GATE_TOOL="$BIN/human-gate.sh"
@@ -753,7 +756,7 @@ unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE STUB_RIGS_JSON \
 
 store() {
     printf '%s' "$1" > "$STUB_STORE"
-    : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"; : > "$ESC_CALLS"; : > "$HELM_CALLS"; : > "$REHOME_CALLS"
+    : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"; : > "$ESC_CALLS"; : > "$ESC_MESSAGES"; : > "$HELM_CALLS"; : > "$HELM_BODIES"; : > "$REHOME_CALLS"
     rm -f "$STUB_RACE_FIRED"
 }
 # The store as the fresh read finds it, for STUB_FRESH_STORE, with the switch
@@ -1418,6 +1421,8 @@ eq "$(slings)" "$before" "a capped bead is NOT re-slung — the convoy-per-pass 
 eq "$(escalations)" "1" "a capped bead is handed to a person exactly once"
 eq "$(head -1 "$ESC_CALLS" | cut -f2)" "deferred-dispatch-sling-failed.b-1" "the gate is keyed per bead, so repeated passes dedup to one gate"
 eq "$(head -1 "$ESC_CALLS" | cut -f3)" "86400" "the call declares a day-long quiet window, since every pass that finds the bead unheld detects the cap again"
+has "$(cat "$ESC_MESSAGES")" "clear gc.dispatch_when_ready_fail_count on b-1 to re-arm the retry. Then clear this gate. It blocks b-1, so the retry stays held while the gate is open" \
+    "the gate asks for the fail count cleared first and then the gate, since the gate holds the arm on its own"
 eq "$(conversations)" "0" "a bead with no open child gets a gate, not a conversation"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a capped bead keeps its arm for the person, never a silent retire"
 has "$out" "CAPPED b-1" "the cap is reported"
@@ -1432,6 +1437,8 @@ eq "$(slings)" "0" "the capped parent is NOT re-slung"
 eq "$(escalations)" "0" "no gate is filed on a bead with an open child"
 eq "$(conversations)" "1" "a conversation is opened on it instead"
 eq "$(head -1 "$HELM_CALLS" | cut -f1)" "b-1" "on the capped bead itself"
+has "$(cat "$HELM_BODIES")" "clear gc.dispatch_when_ready_fail_count on b-1 to re-arm the retry." "the conversation names the fail count"
+hasnt "$(cat "$HELM_BODIES")" "clear this gate" "and no gate, since a conversation holds nothing"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the bead keeps its arm"
 
 echo "# a proven dispatch clears the accumulated fail count, resetting the budget"
