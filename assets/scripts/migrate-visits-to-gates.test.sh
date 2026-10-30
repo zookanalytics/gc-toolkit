@@ -46,6 +46,8 @@ harness_init
 #                                      note once, as its live sitting would
 #   MIG_CHANGE_HOLDER="<bead>:<who>"   the first guarded release of the bead
 #                                      finds this holder instead
+#   MIG_UNSET_KEEPS="<bead>:<key>"     an unset of the key on the bead leaves
+#                                      it in place
 set -u
 S="${MIG_STORE:?}"
 printf '%s\n' "$*" >> "${MIG_LOG:-/dev/null}"
@@ -276,10 +278,11 @@ case "$verb" in
         | ($a == "__unset__" or ((.assignee // "") == $a)) and ($s == "__unset__" or ((.status // "open") == $s))' "$S" >/dev/null \
         || { echo "Error: conditional update refused: $id changed" >&2; exit 13; }
     fi
-    jq --arg id "$id" --argjson ops "$ops" 'map(if .id == $id then
+    jq --arg id "$id" --argjson ops "$ops" --arg keep "${MIG_UNSET_KEEPS:-}" 'map(if .id == $id then
         reduce $ops[] as $o (.;
           if $o.f == "append_notes" then .notes = (if (.notes // "") == "" then $o.v else .notes + "\n" + $o.v end)
           elif $o.f == "set" then ($o.v | index("=")) as $i | .metadata = ((.metadata // {}) + {($o.v[:$i]): $o.v[$i + 1:]})
+          elif $o.f == "unset" and $keep == ($id + ":" + $o.v) then .
           elif $o.f == "unset" then .metadata = ((.metadata // {}) | del(.[$o.v]))
           elif $o.f == "assignee" and $o.v == "" then del(.assignee)
           else .[$o.f] = $o.v end)
@@ -336,7 +339,7 @@ SUT="$SD/migrate-visits-to-gates.sh"
 export MIG_STORE="$TMP/store.json" MIG_SESSIONS="$TMP/sessions.json" MIG_RIGS="$TMP/rigs.json"
 export MIG_WRITES="$TMP/writes" MIG_LOG="$TMP/gc-calls.log"
 MIG_TEST_PGID="$(ps -o pgid= -p $$ | tr -d ' ')"; export MIG_TEST_PGID
-export MIG_STOP_AFTER="" MIG_SESSION_STUCK="" MIG_STUCK_NOTE="" MIG_CHANGE_HOLDER=""
+export MIG_STOP_AFTER="" MIG_SESSION_STUCK="" MIG_STUCK_NOTE="" MIG_CHANGE_HOLDER="" MIG_UNSET_KEEPS=""
 cat > "$MIG_RIGS" <<'RIGS'
 {"city_path":"/city","rigs":[
  {"name":"mycity","prefix":"hq","path":"/city","hq":true,"suspended":false},
@@ -503,6 +506,11 @@ if part review; then
   eq "$(g ra-anc4 '.metadata.pr_comment_disposition')" "human:ra-vold4" "a disposition on a visit closed before the cutover names that visit"
   eq "$(g hq-n1 '.status'):$(g hq-n2 '.status')" "closed:open" "the city's gate notice closes and the escalation notice stays"
   sweep "review" --all
+
+  fx_restore
+  MIG_UNSET_KEEPS="ra-dfr1:gc.takeaway" run_mig --all
+  has "$OUT" "LEFT OPEN for a person: gate ra-dfr1: its pack keys did not all go" "a pack key the unset leaves behind leaves the gate for a person"
+  eq "$(pack_keys ra-dfr1)" "gc.takeaway" "and that key is still on the gate"
 fi
 
 # ── holds: held visits, the hold-merge pair, a liveness sweep's visit ──

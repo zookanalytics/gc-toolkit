@@ -956,7 +956,7 @@ EOF
 
 DEFER=""
 shape_pass() {
-  local gates ids g row key tk title shaped present ups
+  local gates ids g row key tk title shaped present ups left
   gates=$(bd_list --db "$STORE_DB" --include-gates --type gate --status "$LIVE") || return 1
   deferred_gates || return 1
   ids=$(printf '%s' "$gates" | jq -r '[ .[] | select((.await_type // "") == "human") ] | sort_by((.created_at // ""), .id) | .[].id' 2>/dev/null) || return 1
@@ -987,8 +987,15 @@ shape_pass() {
       local args=() k
       for k in $present; do args+=(--unset-metadata "$k"); done
       gc bd update "$g" "${args[@]}" </dev/null >/dev/null 2>&1 || true
-      if ! show_row "$g" || printf '%s' "$ROW" | jq -e --arg keys "$PACK_KEYS" \
-          'any(($keys | split(" "))[]; . as $k | (.metadata // {}) | has($k))' >/dev/null 2>&1; then
+      left=2
+      if show_row "$g"; then
+        printf '%s' "$ROW" | jq -e --arg keys "$PACK_KEYS" \
+          '(.metadata // {}) as $m | any(($keys | split(" "))[]; . as $k | $m | has($k))' >/dev/null 2>&1
+        left=$?
+      fi
+      # jq -e exits 1 only when no pack key is left. A key left behind, a failed
+      # predicate or a row that did not read leaves the gate for a person.
+      if [ "$left" -ne 1 ]; then
         left_open "gate $g: its pack keys did not all go"; continue
       fi
     fi
