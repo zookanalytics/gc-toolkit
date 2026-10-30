@@ -21,6 +21,11 @@
 # green derives from. request-changes: file ONE routed rework child through
 # rework-child.sh, with the reviewer's findings beside it and the lane's
 # validation pass, then close the review bead signoff_verdict=request-changes.
+# The finding set (--findings-file) is checked against the finding contract
+# before anything is written, and the posted artifact renders it as its Findings
+# block. A P2 is filed only on request-changes: that PR goes back for a rework
+# round anyway, so the validator rules each P2 in that round, and an approve
+# records its P2s on the verdict with nothing filed or fixed.
 # Convergence is judged, not counted. The validator rules whether a further
 # whole-diff review is warranted once the must-fix set closes
 # (specs/tk-ztapg/review-cycle-architecture.md), so request-changes files a
@@ -39,6 +44,9 @@
 # stops seeing it and pours a fresh review at the live head next pass.
 # Both are refused on an already-closed review bead: signoff closes the bead
 # itself, last, so a closed one was recorded or retired before it was judged.
+# A correctness approve on a change that edits its own review guidance
+# (review-checks.toml, docs/review-*.md) is refused until --needs-you names the
+# edit for the person who approves the merge.
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
 # Exit: 0 recorded, or refused-as-superseded with the review closed for a fresh
 #       dispatch · 1 refused, no verdict written · 2 a write did not read back
@@ -59,7 +67,7 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # still-unruled findings through it. Overridable so the hermetic test can stand
 # in for it without a live store.
 FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
-# The check-index parser (review-checks.sh) lives beside this script.
+# The check-index resolver (review-checks.sh) lives beside this script.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 # The one writer of a rework child. request-changes files its fix unit through it,
 # under this review's provenance, and the writer proves the pool route, the work
@@ -100,26 +108,48 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  it; absent, it says nothing needs them. A finding is not one,
                  because the city fixes it. Refused beside a ruling that lifts
                  the approval, on this call or recorded by this review's
-                 earlier attempt, whose round reason is the decision.
+                 earlier attempt, whose round reason is the decision. Required
+                 on a correctness approve whose change edits review-checks.toml
+                 or a docs/review-*.md, where it says what the edit changes
+                 about the review that ran under it.
   --findings-file
                  the structured finding set as a JSON array, one object per
-                 blocking finding, each with a rebase-stable `locus` (a file and
-                 symbol or section, never a line or oid) and a `message`; `[]` on
-                 approve. request-changes files each as a first-class finding bead
-                 beside the rework child, deduped on locus and message. Default:
-                 none filed, and the findings live only in the verdict prose.
-  --reviewed-oid the commit the review read; default: the review bead's own
-                 reviewed_oid (stamped at dispatch), else the live head of the
-                 anchor's branch (git ls-remote origin <branch>). It names the
-                 commit in the posted artifact and binds the verdict to no
-                 head, except that a pin the branch no longer carries
-                 (rewritten out from under it) is refused, not recorded.
-                 Whichever source wins is written back to the review bead as
-                 the commit this verdict judged.
+                 finding, each with a rebase-stable `locus` (a file and symbol or
+                 section, never a line or oid) and a `message`, and the finding
+                 contract: a `severity` of P0, P1 or P2, which every correctness
+                 finding carries, and with a severity a `category` and a
+                 `failure_scenario`, and on a P0 or P1 a `verification` opening
+                 CONFIRMED or PLAUSIBLE and then the evidence. A candidate
+                 whose verification is REFUTED is not a finding at any grade,
+                 and stays out of the set. A P2 does not block, and a finding
+                 with no severity does. An approve carries no blocking finding
+                 and request-changes at least one. A set that breaks any of
+                 this is refused with nothing written. The posted
+                 artifact renders the set as its Findings block, and
+                 request-changes files each finding, a P2 among them, as a
+                 first-class finding bead beside the rework child, deduped on
+                 locus and message with the rest of its contract outside that
+                 key; approve files none. Default: none filed or rendered, and
+                 the findings live only in the verdict prose.
+  --reviewed-oid the commit the review read. A review bead whose reviewed_oid
+                 the dispatch pinned takes that commit: this flag may name it,
+                 in full or abbreviated, and a value naming any other commit
+                 is refused with nothing written. On a review bead with no pin
+                 it names the commit, in full or abbreviated to a commit this
+                 checkout holds, and the commit is taken in full; an
+                 abbreviation this checkout cannot expand is refused. With
+                 neither a pin nor this flag, the live head of the anchor's
+                 branch (git ls-remote origin <branch>) is the commit. The
+                 posted artifact names the commit, and the verdict is bound to
+                 no head, except that a commit the branch no longer carries
+                 (rewritten out from under it) is refused, not recorded. The
+                 commit is written back to the review bead as the one this
+                 verdict judged.
   --add-gates    checks to union into the anchor's check_set (triage only, with
                  --verdict approve). A set union with read-back that can never
-                 remove a declared check, validated against the check index at
-                 the reviewed commit; each check added is recorded on the anchor
+                 remove a declared check, validated against the effective check
+                 index at the reviewed commit, the pack's checks with the rows
+                 that commit carries; each check added is recorded on the anchor
                  as a `triage-add:` note.
   --visual       the demo check's decision: none when the change needs no
                  visual, else the modality that conveys it (repo-artifact,
@@ -207,6 +237,8 @@ esac
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=git-lib.sh
+. "$_bd_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 1; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
 
@@ -225,31 +257,110 @@ gate_tokens() {
 }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-# Read the reviewer's structured findings — a JSON array of {locus, message} —
-# and file each as a finding bead through the finding primitive, deduped by
-# finding.key. Prints the finding ids, one per line. Best-effort: a store that
-# will not take a finding costs that finding, never the rework dispatch the
-# merge is held by, so a failure warns and the caller proceeds. The reviewer's
-# prose verdict is still the fix unit's rejection_reason and the review bead's
-# notes; the beads are the queryable record the validator and check readers use.
-file_findings() { # <anchor> <lane> <findings-file>
-  local anchor="$1" lane="$2" ff="$3" obj locus message fid
-  [ -n "$ff" ] && [ -r "$ff" ] || return 0
-  if ! jq -e 'type == "array"' "$ff" >/dev/null 2>&1; then
-    warn "findings file is not a JSON array; no findings filed (the rework child still holds the merge)"
-    return 0
-  fi
+# The finding set as --findings-file holds it, slurped, checked against the
+# verdict ($verdict) and the check ($check). Prints {errors, set}: each way the
+# set breaks its shape or the finding contract, and the set with every field
+# trimmed, absent ones empty, and each grade upper-cased. P0, P1 and a finding
+# with no grade block; a P2 does not. A candidate whose verification is REFUTED
+# is no finding at any grade, so the set may not carry one.
+FINDINGS_CHECK_JQ='
+  def field($k): if (.[$k] // null) == null then ""
+                 elif (.[$k] | type) == "string" then .[$k] | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+                 else null end;
+  def grade: field("severity") | if type == "string" then ascii_upcase else . end;
+  def refuted: field("verification") | type == "string" and test("^REFUTED([^[:alnum:]]|$)"; "i");
+  def problems:
+    grade as $g
+    | [ ( ("locus", "message", "severity", "category", "failure_scenario", "verification") as $k
+          | select(field($k) == null) | "its `\($k)` is not a string" ),
+        ( select(field("locus") == "") | "it has no `locus`" ),
+        ( select(field("message") == "") | "it has no `message`" ),
+        ( select(($g // "") != "" and (($g // "") | IN("P0", "P1", "P2") | not))
+          | "its `severity` is \(field("severity") | @json), not P0, P1 or P2" ),
+        ( select($check == "correctness" and $g == "")
+          | "it has no `severity`, and every correctness finding is graded" ),
+        ( select(($g // "") | IN("P0", "P1", "P2"))
+          | (select(field("category") == "") | "it names no `category`"),
+            (select(field("failure_scenario") == "") | "it names no `failure_scenario`") ),
+        ( select(refuted)
+          | "its `verification` is REFUTED, and a refuted candidate is not a finding: leave it out of the set, and keep its refutation in the trail" ),
+        ( select(($g // "") | IN("P0", "P1"))
+          | field("verification") as $v
+          | if $v == null or refuted then empty
+            elif $v == "" then "it is a \($g) with no `verification`"
+            elif ($v | test("^(CONFIRMED|PLAUSIBLE)[^[:alnum:]]+[^[:space:]]"; "i")) then empty
+            else "its `verification` does not open with CONFIRMED or PLAUSIBLE and then the evidence" end ) ];
+  if length != 1 or (.[0] | type) != "array" then
+    {errors: ["it is not one JSON array of findings"], set: []}
+  else .[0]
+    | [ to_entries[] | (.key + 1) as $n | .value
+        | if type != "object" then {errors: ["finding \($n) is not an object"]}
+          else problems as $p
+            | ((field("locus") // "") | if . == "" then "" else " (\(.))" end) as $at
+            | {errors: [ $p[] | "finding \($n)\($at): \(.)" ],
+               f: (if ($p | length) > 0 then null
+                   else {locus: field("locus"), message: field("message"), severity: grade,
+                         category: field("category"), failure_scenario: field("failure_scenario"),
+                         verification: field("verification")} end)}
+          end ] as $rows
+    | [ $rows[].errors[] ] as $errs
+    | [ $rows[].f | select(. != null) ] as $set
+    | ([ $set[] | select(.severity != "P2") ] | length) as $blocking
+    | {set: $set,
+       errors: ($errs
+         + if ($errs | length) > 0 then []
+           elif $verdict == "approve" and $blocking > 0 then
+             ["an approve carries no blocking finding, and this set carries \($blocking): a P0, a P1 or a finding with no grade"]
+           elif $verdict == "request-changes" and $blocking == 0 then
+             ["request-changes needs a blocking finding, and this set carries none"
+              + (if ($set | length) > 0 then ": when only P2s remain, the review approves" else "" end)]
+           else [] end)}
+  end'
+# The Findings block the posted artifact carries, from the checked set, the most
+# severe finding first: a summary counting the findings per grade, then each one
+# with its grade and category, its locus, its message and the rest of its
+# contract. An approve's block also says that none of its findings is filed.
+FINDINGS_RENDER_JQ='
+  def rank: .severity as $s | (["P0", "P1", "P2"] | index($s)) // 3;
+  def code: if test("`") then . else "`" + . + "`" end;
+  sort_by(rank) as $fs
+  | [ "P0", "P1", "P2" | . as $g | [ $fs[] | select(.severity == $g) ] | length | select(. > 0) | "\(.) \($g)" ] as $graded
+  | ([ $fs[] | select(.severity == "") ] | length) as $ungraded
+  | ($graded + (if $ungraded == 0 then [] elif ($graded | length) == 0 then ["\($ungraded)"] else ["\($ungraded) ungraded"] end)) as $counts
+  | "<details>\n<summary>Findings: \($counts | join(", "))</summary>\n\n"
+    + (if $verdict == "approve" then "None of these is filed or fixed: a review whose findings are all P2 approves.\n\n" else "" end)
+    + ([ $fs | to_entries[] | (.key + 1) as $n | .value
+         | ([ .severity, .category ] | map(select(. != "")) | join(", ")) as $label
+         | "**\($n).\(if $label == "" then "" else " " + $label end)** \(.locus | code)\n\n\(.message)"
+           + (if .failure_scenario == "" then "" else "\n\nFailure scenario: \(.failure_scenario)" end)
+           + (if .verification == "" then "" else "\n\nVerification: \(.verification)" end) ]
+       | join("\n\n"))
+    + "\n\n</details>"'
+
+# File the checked finding set as finding beads through the finding primitive,
+# each deduped by finding.key, with the rest of its contract beside the key.
+# Prints the finding ids, one per line. Best-effort: a store that will not take
+# a finding costs that finding, never the rework dispatch the merge is held by,
+# so a failure warns and the caller proceeds. The posted verdict still carries
+# every finding; the beads are the queryable record the validator and check
+# readers use.
+file_findings() { # <anchor> <lane>
+  local anchor="$1" lane="$2" obj fid args kf v
+  [ -n "$FINDINGS_SET" ] || return 0
   while IFS= read -r obj; do
     [ -n "$obj" ] || continue
-    locus=$(printf '%s' "$obj" | jq -r '.locus // ""' 2>/dev/null)
-    message=$(printf '%s' "$obj" | jq -r '.message // ""' 2>/dev/null)
-    [ -n "$locus" ] && [ -n "$message" ] || continue
-    if fid=$("$FINDING" upsert --anchor "$anchor" --lane "$lane" --locus "$locus" --message "$message" 2>/dev/null) && [ -n "$fid" ]; then
+    args=(--anchor "$anchor" --lane "$lane")
+    for kf in locus:--locus message:--message severity:--severity category:--category \
+              failure_scenario:--failure-scenario verification:--verification; do
+      v=$(printf '%s' "$obj" | jq -r --arg k "${kf%%:*}" '.[$k] // ""' 2>/dev/null)
+      [ -z "$v" ] || args+=("${kf#*:}" "$v")
+    done
+    if fid=$("$FINDING" upsert "${args[@]}" 2>/dev/null) && [ -n "$fid" ]; then
       printf '%s\n' "$fid"
     else
-      warn "could not file finding for locus '$locus'; it is left to the verdict prose"
+      warn "could not file finding for locus '$(printf '%s' "$obj" | jq -r '.locus' 2>/dev/null)'; the posted verdict alone carries it"
     fi
-  done < <(jq -c '.[]?' "$ff" 2>/dev/null)
+  done < <(printf '%s' "$FINDINGS_SET" | jq -c '.[]' 2>/dev/null)
 }
 
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
@@ -318,6 +429,31 @@ if [ "$CHECK" = "$VISUAL_GATE" ]; then
 elif [ -n "$VISUAL" ] || [ -n "$VISUAL_FALLBACK" ]; then
   warn "only the '$VISUAL_GATE' check records a visual decision (this review is '$CHECK_NAME'); nothing written"
   exit 1
+fi
+
+# The finding set, checked before anything is written (FINDINGS_CHECK_JQ), and
+# the Findings block the posted artifact renders from it. Both stay empty when
+# no --findings-file names a set.
+FINDINGS_SET=""; FINDINGS_BLOCK=""
+if [ -n "$FINDINGS_FILE" ]; then
+  FINDINGS_PARSE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-findings.XXXXXX") || { warn "mktemp failed; nothing written"; exit 1; }
+  FINDINGS_CHECKED=$(jq -c -s --arg check "$CHECK" --arg verdict "$VERDICT" "$FINDINGS_CHECK_JQ" "$FINDINGS_FILE" 2>"$FINDINGS_PARSE")
+  FINDINGS_WHY=$(head -1 "$FINDINGS_PARSE"); rm -f "$FINDINGS_PARSE"
+  if [ -z "$FINDINGS_CHECKED" ]; then
+    warn "--findings-file '$FINDINGS_FILE' is not JSON${FINDINGS_WHY:+ ($FINDINGS_WHY)}; nothing written. Correct it and re-run this call"
+    exit 1
+  fi
+  FINDINGS_ERRORS=$(printf '%s' "$FINDINGS_CHECKED" | jq -r '.errors[]' 2>/dev/null)
+  if [ -n "$FINDINGS_ERRORS" ]; then
+    warn "the finding set in '$FINDINGS_FILE' is refused, nothing written. Correct it and re-run this call:"
+    printf '%s\n' "$FINDINGS_ERRORS" | sed 's/^/  - /' >&2
+    exit 1
+  fi
+  FINDINGS_SET=$(printf '%s' "$FINDINGS_CHECKED" | jq -c '.set' 2>/dev/null)
+  if [ "$(printf '%s' "$FINDINGS_SET" | jq 'length' 2>/dev/null)" != 0 ]; then
+    FINDINGS_BLOCK=$(printf '%s' "$FINDINGS_SET" | jq -r --arg verdict "$VERDICT" "$FINDINGS_RENDER_JQ" 2>/dev/null)
+    [ -n "$FINDINGS_BLOCK" ] || { warn "the Findings block did not render from '$FINDINGS_FILE'; nothing written"; exit 1; }
+  fi
 fi
 
 # The anchor the check lands on: the durable anchor_bead stamp first, the
@@ -411,14 +547,48 @@ fi
 
 BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 [ -n "$BRANCH" ] || BRANCH=$(row_meta "$REVIEW_ROW" review_branch)
-# The commit this verdict READ, in order: the caller's --reviewed-oid; the
-# reviewed_oid the DISPATCH pinned on the review bead (gate-ensure/pr-facts
-# stamp the live head at dispatch time); only then the live head. It names the
-# commit in the posted artifact and in the pre-open record, so a dispatch pin
-# wins over a live head read after the fact. The verdict is about the lane and
+# The commit this verdict READ. A review's record pins the commit its dispatch
+# read, and nothing moves it, so a verdict names that commit or is not
+# recorded: a --reviewed-oid naming any other is refused before anything is
+# written, and an abbreviation of the pinned commit names the pinned commit. A
+# record with no pin, a review made by hand or before the dispatch wrote one,
+# takes the caller's --reviewed-oid in full, else the live head. The posted
+# artifact and the record name this commit. The verdict is about the lane and
 # is not bound to it, and the merge compares no verdict to a head.
-REVIEWED_OID="$OID_OVERRIDE"
-[ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid)
+PINNED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid | tr '[:upper:]' '[:lower:]')
+OID_OVERRIDE=$(printf '%s' "$OID_OVERRIDE" | tr '[:upper:]' '[:lower:]')
+# The full id <oid> names. The record and every reader at the commit take a full
+# id, and the resolver fetches a commit no repository here holds only by its
+# full id. A full id is taken as given. An abbreviation is expanded in this
+# checkout or GC_RIG_ROOT's, and is non-zero where neither holds one commit it
+# names, which is so for a commit this checkout has not fetched.
+full_oid() { # <oid>
+  local r full
+  case "$1" in ''|*[!0-9a-f]*) return 1 ;; esac
+  if [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]; then printf '%s\n' "$1"; return 0; fi
+  for r in . "${GC_RIG_ROOT:-}"; do
+    [ -n "$r" ] || continue
+    full=$(git -C "$r" rev-parse --verify -q "$1^{commit}" 2>/dev/null) || continue
+    case "$full" in ''|*[!0-9a-f]*) continue ;; esac
+    printf '%s\n' "$full"; return 0
+  done
+  return 1
+}
+REVIEWED_OID="$PINNED_OID"
+if [ -n "$OID_OVERRIDE" ]; then
+  if [ -z "$PINNED_OID" ]; then
+    REVIEWED_OID=$(full_oid "$OID_OVERRIDE") || {
+      warn "--reviewed-oid $OID_OVERRIDE names no commit this checkout can expand to its full id, and $REVIEW_BEAD pins none to take its place; re-run naming the full commit id. Nothing written"
+      exit 1
+    }
+  elif [ "$OID_OVERRIDE" != "$PINNED_OID" ] && { [ "${#OID_OVERRIDE}" -lt 7 ] || [ "${PINNED_OID#"$OID_OVERRIDE"}" = "$PINNED_OID" ]; }; then
+    warn "--reviewed-oid $OID_OVERRIDE is not the commit $REVIEW_BEAD was dispatched to review ($PINNED_OID), and a review's commit is never moved; re-run naming $PINNED_OID. Nothing written"
+    exit 1
+  fi
+fi
+
+# The head of the anchor's branch on origin, read in this checkout.
+branch_head() { remote_branch_head . "$BRANCH"; }
 
 # The live head of the anchor's branch: the PR's own head post-open (what the
 # merge condition compares against), the remote ref pre-open. Empty is
@@ -427,18 +597,17 @@ live_head() {
   if [ -n "$POST_OPEN" ]; then
     gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null
   elif [ -n "$BRANCH" ]; then
-    git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}'
+    branch_head
   fi
 }
 
 if [ -z "$REVIEWED_OID" ]; then
   [ -n "$BRANCH" ] || { warn "anchor $ANCHOR names no branch and no --reviewed-oid was given; nothing names the commit this verdict read"; exit 1; }
-  REVIEWED_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}')
+  REVIEWED_OID=$(branch_head)
 fi
 # The artifact names the commit judged, and the pre-open record stamps it back
-# on the review bead, so a verdict still needs one. It is not held to a length:
-# nothing compares it to a head any more, and an abbreviated sha still names the
-# commit a reader would look up.
+# on the review bead, so a verdict still needs one: the record's pin, the
+# caller's commit expanded above, or the live head.
 REVIEWED_OID=$(printf '%s' "$REVIEWED_OID" | tr '[:upper:]' '[:lower:]')
 case "$REVIEWED_OID" in
   ''|*[!0-9a-f]*) warn "no usable reviewed oid for branch '${BRANCH:-?}' (got '${REVIEWED_OID:-}'); nothing written"; exit 1 ;;
@@ -471,35 +640,15 @@ oid_on_branch() { # <oid> <live-head>
 
 LIVE_HEAD=$(live_head)
 if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
-  # A dispatch pin that no longer names real content: gate-ensure/pr-facts
-  # stamped it at a head the branch has since been rewritten out from under
-  # (rebase, amend, force-push), so what mol-review read and tested is not
-  # mergeable content. This is not "moved" — commits added on top stay 'on'
-  # and are not this check's business — and it is not a failure to retry: the
-  # review bead is closed superseded so gate-ensure's in-flight probe stops
-  # seeing it and pours a fresh review at the live head next pass. Neither
-  # verdict is recorded.
-  #
-  # mol-review re-reads the dispatch pin on the next claim, so a dead one left
-  # in place would re-review the same departed commit — clear only the bead's
-  # own pin: a caller who overrode a live one has not staled the dispatch.
-  # Best-effort — the refusal proceeds either way.
-  if [ "$(row_meta "$REVIEW_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
-    gc bd update "$REVIEW_BEAD" --unset-metadata reviewed_oid >/dev/null 2>&1 || true
-    # A denied or raced delete does not always fail the call, and the note and
-    # warning below both state the pin as cleared. Read it back. row_meta
-    # answers '' for a key that is gone and for a row it could not read, so
-    # absence is proof only from a row that resolved.
-    AFTER_ROW=$(bd_json show "$REVIEW_BEAD")
-    if ! is_rows "$AFTER_ROW"; then
-      warn "head moved to ${LIVE_HEAD:-unknown}, but $REVIEW_BEAD would not resolve on the read-back after clearing the dead dispatch pin, so whether reviewed_oid=$REVIEWED_OID is gone is unproven. Nothing was written, no round was spent, and the review bead is left OPEN rather than closed superseded on an unproven clear. If the pin survived, the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Check it by hand: gc bd show $REVIEW_BEAD --json, then gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
-      exit 2
-    fi
-    if [ "$(row_meta "$AFTER_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
-      warn "head moved to ${LIVE_HEAD:-unknown}, but clearing the dead dispatch pin did not read back on $REVIEW_BEAD: reviewed_oid is still $REVIEWED_OID. Nothing was written, no round was spent, and the review bead is left OPEN rather than closed superseded while the pin still stands. Clear it by hand: gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
-      exit 2
-    fi
-  fi
+  # A dispatch pin that no longer names real content: gate-ensure stamped it at
+  # a head the branch has since been rewritten out from under (rebase, amend,
+  # force-push), so what the review read and tested is not mergeable content.
+  # This is not "moved": commits added on top stay 'on' and are not this
+  # check's business. Neither verdict is recorded. The review bead is closed
+  # superseded so gate-ensure's in-flight probe stops seeing it and pours a
+  # fresh review at the live head next pass. The pin stays as the dispatch
+  # wrote it, so a retry after a close that did not land reviews this same
+  # commit once more and meets this same refusal.
   gc bd update "$REVIEW_BEAD" --append-notes \
     "signoff refused a verdict at $REVIEWED_OID: that commit has left branch '${BRANCH:-?}', now at ${LIVE_HEAD:-unknown}. No verdict recorded; closing this review as superseded so gate-ensure pours a fresh one at the live head." \
     >/dev/null 2>&1 || true
@@ -508,7 +657,7 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
   SUPERSEDED_ST=$(printf '%s' "$SUPERSEDED_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
   SUPERSEDED_OC=$(row_meta "$SUPERSEDED_ROW" gc.outcome)
   if [ "$SUPERSEDED_ST" != "closed" ] || [ "$SUPERSEDED_OC" != "superseded" ]; then
-    warn "head moved to ${LIVE_HEAD:-unknown} and the pin was cleared, but closing $REVIEW_BEAD as superseded did not read back (status='$SUPERSEDED_ST' gc.outcome='$SUPERSEDED_OC'); review left open for a retry"
+    warn "head moved to ${LIVE_HEAD:-unknown}, but closing $REVIEW_BEAD as superseded did not read back (status='$SUPERSEDED_ST' gc.outcome='$SUPERSEDED_OC'); no verdict recorded, review left open for a retry"
     exit 2
   fi
   warn "head moved: reviewed oid $REVIEWED_OID has left branch '${BRANCH:-?}', now at $LIVE_HEAD. No verdict written — review $REVIEW_BEAD closed as superseded; gate-ensure pours a fresh review at the live head."
@@ -519,13 +668,13 @@ fi
 # The artifact body. Its first line is the same for every check: the check and
 # its verdict, then the one decision this review needs from the operator, or
 # that nothing does, so a busy reader can stop there. Under it come the round's
-# account when a triage ruling rides this verdict, the reviewer's notes as the
-# trail, and the lines scripts read: the demo decision, and the trailer naming
-# the anchor and the exact commit judged, which traces the posted comment back
-# to the check it satisfied.
+# account when a triage ruling rides this verdict, the Findings block rendered
+# from the finding set, the reviewer's notes as the trail, and the lines scripts
+# read: the demo decision, and the trailer naming the anchor and the exact
+# commit judged, which traces the posted comment back to the check it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
 TRAIL_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-trail.XXXXXX") || { rm -f "$BODY_FILE"; warn "mktemp failed"; exit 1; }
-trap 'rm -f "$BODY_FILE" "$TRAIL_FILE" "${INDEX_FILE:-}"' EXIT
+trap 'rm -f "$BODY_FILE" "$TRAIL_FILE"' EXIT
 if [ -n "$NOTES_FILE" ]; then
   cat "$NOTES_FILE" > "$TRAIL_FILE"
 else
@@ -558,6 +707,7 @@ compose_artifact() {
   {
     printf '%s %s\n\n' "$(verdict_head)" "$needs"
     [ -z "$ROUND_BODY" ] || printf '%s\n\n' "$ROUND_BODY"
+    [ -z "$FINDINGS_BLOCK" ] || printf '%s\n\n' "$FINDINGS_BLOCK"
     [ ! -s "$TRAIL_FILE" ] || printf '%s\n\n' "$(cat "$TRAIL_FILE")"
     [ -z "$VISUAL" ] || printf 'Visual: %s%s\n' "$VISUAL" "${visual_note:+ ($visual_note)}"
     printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID"
@@ -856,28 +1006,48 @@ if [ -n "$DISPOSED" ]; then
   exit 0
 fi
 
-# The check index at the reviewed commit — materialized once, removed on exit.
-# A branch is judged against the index it carries, never the working tree's.
-INDEX_FILE=""; INDEX_READ=""
-resolve_index() {
-  [ -z "$INDEX_READ" ] || return 0
-  INDEX_READ=1
-  [ -n "$REVIEWED_OID" ] || return 0
-  local root blob
-  blob=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-index.XXXXXX") || return 0
-  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-    [ -n "$root" ] || continue
-    if git -C "$root" show "$REVIEWED_OID:review-checks.toml" >"$blob" 2>/dev/null && [ -s "$blob" ]; then
-      INDEX_FILE="$blob"; return 0
-    fi
-  done
-  rm -f "$blob"
-}
-# rc: 0 declared · 1 index readable but check undeclared · 2 no index at the reviewed commit
+# Whether the effective check index at the reviewed commit declares <check>: the
+# pack's checks with the rows that commit carries laid over them, read through
+# the one resolver, never the working tree's. Non-zero for a check no layer
+# declares, one whose phase is outside the ordered set, and a commit the
+# resolver cannot read; INDEX_WHY then carries the resolver's reason.
+INDEX_WHY=""
 index_has_check() { # <check>
-  resolve_index
-  [ -n "$INDEX_FILE" ] && [ -x "$INDEX_PARSER" ] || return 2
-  "$INDEX_PARSER" --file "$INDEX_FILE" --check "$1" >/dev/null 2>&1
+  INDEX_WHY=""
+  [ -x "$INDEX_PARSER" ] || { INDEX_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
+  INDEX_WHY=$("$INDEX_PARSER" --check "$1" --at "$REVIEWED_OID" 2>&1 >/dev/null) && return 0
+  INDEX_WHY=$(printf '%s' "$INDEX_WHY" | tr '\n' ' ' | sed 's/^review-checks: //; s/ *$//')
+  return 1
+}
+
+# The review guidance a change edits, as the one resolver lists it:
+# review-checks.toml and the docs/review-*.md files among the paths it touches
+# from where its branch left its base to the reviewed commit. The resolver finds
+# the commit as it finds any commit it reads, fetching it by id when no
+# repository here holds it yet. Every reader takes that guidance at the commit
+# it judges, so a branch's edit to it governed the branch's own review. Sets
+# GUIDANCE_EDITS, space-separated, and returns 0 once the paths are listed;
+# non-zero, with GUIDANCE_WHY, when they cannot be: no base names where the
+# branch left, or the resolver could not list them and says why.
+GUIDANCE_EDITS=""; GUIDANCE_WHY=""
+guidance_edits() {
+  local base err out rc
+  base=$(row_meta "$REVIEW_ROW" review_base)
+  [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" merged_target)
+  [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" target)
+  [ -n "$base" ] || { GUIDANCE_WHY="neither the review nor its anchor names the base the branch left"; return 1; }
+  [ -x "$INDEX_PARSER" ] || { GUIDANCE_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
+  err=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-edits.XXXXXX") || { GUIDANCE_WHY="no scratch file for the resolver's reason"; return 1; }
+  out=$("$INDEX_PARSER" --edits --base "$base" --at "$REVIEWED_OID" 2>"$err"); rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$err"
+    GUIDANCE_EDITS=$(printf '%s\n' "$out" | sed '/^$/d' | paste -sd' ' -)
+    return 0
+  fi
+  GUIDANCE_WHY=$(tr '\n' ' ' < "$err" | sed 's/review-checks: //g; s/ *$//')
+  rm -f "$err"
+  [ -n "$GUIDANCE_WHY" ] || GUIDANCE_WHY="the check resolver exited $rc"
+  return 1
 }
 
 # Triage's classification: union the added checks into check_set and record one
@@ -888,7 +1058,7 @@ index_has_check() { # <check>
 WIDEN_SUMMARY=""
 apply_triage_decision() {
   [ -n "$ADD_GATES" ] || return 0
-  local fresh cur canon union tok rc added newset got missing lines first
+  local fresh cur canon union tok added newset got missing lines first
   fresh=$(bd_json show "$ANCHOR")
   is_rows "$fresh" || { warn "anchor $ANCHOR did not resolve for the widening read; nothing written"; exit 2; }
   cur=$(row_meta "$fresh" check_set)
@@ -900,17 +1070,8 @@ apply_triage_decision() {
   esac
   union=$(gate_tokens "$cur"); added=""; lines=""
   for tok in $(gate_tokens "$ADD_GATES"); do
-    index_has_check "$tok"; rc=$?
-    if [ "$rc" -eq 1 ]; then
-      warn "check '$tok' is not on the index at $REVIEWED_OID; the index is closed and triage classifies over it — nothing written"; exit 1
-    fi
-    if [ "$rc" -eq 2 ]; then
-      # No index at the reviewed commit: triage has no declared menu to classify
-      # over, so it widens nothing and the standing correctness review carries the
-      # change (the index gap is triage's finding). A check added here would name a
-      # method the repo does not declare, so skip it rather than accept it blind.
-      warn "no check index is readable at $REVIEWED_OID; triage widens nothing without an index — '$tok' not added, correctness carries the change"
-      continue
+    if ! index_has_check "$tok"; then
+      warn "check '$tok' is not on the effective index at $REVIEWED_OID (${INDEX_WHY:-the resolver gave no reason}); the index is closed and triage classifies over it — nothing written"; exit 1
     fi
     grep -qx -- "$tok" <<< "$union" && continue
     union="$union
@@ -968,6 +1129,22 @@ apply_round_decision() {
   rm -f "$round_body" "$round_ask"
 }
 
+# A correctness approve on a change that edits its own review guidance names the
+# edit to the person who approves the merge, so it is refused, with nothing
+# written, until --needs-you says what the edit changes about the review. Paths
+# that cannot be listed leave the edit unchecked, which the opening line then
+# says, so the approver reads the diff for one instead.
+if [ "$CHECK" = correctness ] && [ "$VERDICT" = approve ] && [ -z "$NEEDS_YOU" ]; then
+  if guidance_edits; then
+    if [ -n "$GUIDANCE_EDITS" ]; then
+      warn "this change edits its own review guidance ($GUIDANCE_EDITS), and its review ran under that edit, since every reader takes the guidance at the commit it judges. A correctness approve names the edit to the person who approves the merge: re-run with --needs-you saying what the edit changes about the review. Nothing written"
+      exit 1
+    fi
+  else
+    NEEDS_YOU="signoff could not list the paths this change touches ($GUIDANCE_WHY), so whether it edits its own review guidance (review-checks.toml, docs/review-*.md) is unchecked; read its diff for such an edit before you approve the merge."
+  fi
+fi
+
 if [ "$VERDICT" = "approve" ]; then
   apply_triage_decision
   apply_round_decision
@@ -1000,10 +1177,7 @@ post_artifact
 # the fix unit so its work order can name them. Best-effort by construction (see
 # file_findings): the fix unit's own blocks edge onto the anchor holds the merge,
 # so a store that will not take a finding costs the finding, never the hold.
-FINDING_IDS=""
-if [ -n "$FINDINGS_FILE" ]; then
-  FINDING_IDS=$(file_findings "$ANCHOR" "$CHECK_NAME" "$FINDINGS_FILE" | paste -sd, -)
-fi
+FINDING_IDS=$(file_findings "$ANCHOR" "$CHECK_NAME" | paste -sd, -)
 FINDING_COUNT=0
 [ -n "$FINDING_IDS" ] && FINDING_COUNT=$(printf '%s' "$FINDING_IDS" | tr ',' '\n' | grep -c '[^[:space:]]')
 
@@ -1055,8 +1229,11 @@ read -r FIX_BEAD FIX_POOL FIX_STATE <<< "$FILED"
 # fix unit's edge onto the anchor is what holds the merge in the meantime.
 ensure_validation_pass
 close_review
-# A rework child now stands on the anchor; the city holds the ball until it lands.
-[ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
+# A rework child now stands on the anchor, so the city holds the ball until it
+# lands. Reconcile rather than assert a value: the child reads working on an
+# unapproved PR and merging on an approved one, and an open visit still reads
+# needs-attention.
+[ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
   --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
 if [ "$FIX_STATE" = in-flight ]; then
   echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $FIX_POOL"

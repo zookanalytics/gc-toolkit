@@ -59,8 +59,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass. An anchor whose standing posture is already `commented@` is exempt:
    it is holding its own merge, and failing the arm over it would hold every
    other anchor's too. Where this arm changes an anchor's posture value, it also
-   re-derives that PR's `status:` label, so an approval moves the label in the
-   pass that records it
+   re-derives that PR's `status:` and `held:` labels, so an approval moves them
+   in the pass that records it
    ([state-machine.md](state-machine.md#the-status-label-github-projection)).
 
    Its cost follows the PRs that moved, not the PR set. One paginated GraphQL
@@ -131,6 +131,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
+   record how many of its review threads wait on the city's answer
+   (`pr.unanswered_threads`, which the labels and the board read for
+   `held: review` and the merge does not), then
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
    that the merge makes no `generated/seed-audit` render stale, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
@@ -205,7 +208,28 @@ the cadence — the arms run whether or not any refinery session is awake.
    refinery's host. Any other file, or a probe that cannot answer, holds the
    merge and files one visit per PR under `seed-audit-merge-gate.<n>`, naming
    each file and why it failed. Nothing is routed from here: the way out is to
-   bring the head branch current with its base, re-render, and push.
+   bring the head branch current with its base, render what the branch moves
+   (`render-seed-audit.sh --since origin/<base>`), and push.
+
+   A file the base is already stale in went stale with no merge behind it,
+   since this check holds every merge that would make one stale. What moves
+   such a file is the `gc` binary: the agents and recipes gc's own packs
+   define, and this pack's formulas that extend one of them, render whatever
+   the installed build emits, so a newer build makes them stale on every branch
+   at once. The check names those files
+   (`--base-stale-out`), and the arm hands them to `seed-audit-reaudit.sh`,
+   which slings the one bead that re-renders the default branch and lands the
+   new text in a pull request of its own. While that bead is live, a later
+   merge that finds the same files files nothing more. The merge does not wait
+   on the hand-off, whatever it answers. A branch's own commits add none of
+   that text: the pre-commit hook and the remedy above render `--since` a
+   revision, which keeps each file the change does not move as that revision
+   has it. The exceptions are a file the branch re-rendered itself, as the
+   re-audit does, and a page gc added or removed while the branch moves
+   `INDEX.md`, which lists every page. The re-rendered file is rendered fresh,
+   so when gc moves again before the re-audit merges, the same remedy renews
+   its text, and the held merge clears. The page goes with the index, so the
+   index lists no page the merge leaves out.
 
    What the artifact commits is chosen to stay out of the queue's way. A line
    that moves on every edit to one agent's prompt, committed beside the lines
@@ -254,10 +278,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    refinery's to flip only when the city opened it as a draft and nobody has
    re-drafted it since. Any other draft is adopted without that claim and stays
    with whoever parked it.
-   The body's `## Summary` is the polecat's `pr_summary`, written at handoff
-   by the only actor that has read the diff; the anchor's description is
-   dispatch text, demoted to a collapsed section and standing in as the
-   summary only when the handoff carried none. The region writes that heading
+   The body's `## Summary` is the anchor's `pr_summary`, written by an actor
+   that has read the diff: the polecat at its handoff, or, on a landing bead,
+   its effort's summary task once the effort's work has landed. The anchor's
+   description is dispatch text, demoted to a collapsed section and standing
+   in as the summary only when no summary was written. The region writes that heading
    itself, so a `pr_summary` opening with one of its own is de-duplicated. The
    composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
    re-splices it from the anchor's current `pr_summary` — a rework's restamp
@@ -272,7 +297,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
    rather than flip a managed body that may be stale. This adopt-time re-splice
    covers only the `pre_open_gate` window; once the anchor is `pull_request`,
-   republishing a rework's restamp is arm 12's job (`pr-stack.sh`), the anchor
+   republishing a rework's restamp is arm 11's job (`pr-stack.sh`), the anchor
    never returning to the state this arm scans (no `pull_request → pre_open_gate`
    lifecycle edge).
 4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
@@ -283,7 +308,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    rework child or visit and opens the same validation pass arm 7 would, then
    stops — no write-back sweep, no external-fact reconciliation, none of the
    arms that belong at the tail. A batch it routes is live work on the anchor,
-   which the `status:` label reads, so it re-derives that PR's label as it
+   which the `status:` label reads, so it re-derives that PR's labels as it
    routes. Arm 7 still runs the routing idempotently (a
    landed batch's watermark and `pr_comment_disposition` make the re-run a
    no-op) and still owns the write-back and the terminal-state records. Its rc
@@ -421,8 +446,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
    rework child or a visit. Feedback is every review, inline comment and
-   conversation comment that is not the city's own post
-   ([state-machine.md](state-machine.md#operator-feedback)), whoever wrote it.
+   conversation comment that is neither the city's own post nor marked as not
+   for review ([state-machine.md](state-machine.md#operator-feedback)), whoever
+   wrote it.
    The posture write is idempotent, so re-running it
    here after arm 1 costs nothing when nothing changed. The routing runs in two
    places by design: arm 4 picks the feedback up ahead of the slow arms, and this
@@ -565,8 +591,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    any other locus becomes a Conversation comment. Once the finding closes, the
    comment is answered with how it closed: the fix units and the commits they
    made, the deferral's follow-up, or the decline. A fixed finding's
-   thread is then resolved unless a post that is not the city's own has come
-   after it. A thread the identity cannot resolve leaves the finding owed its
+   thread is then resolved unless a post that is feedback has come after it.
+   A thread the identity cannot resolve leaves the finding owed its
    answer, as above. A declined or deferred finding's thread stays open for the
    operator to accept or overrule. A Conversation comment is edited to carry the
    answer. A finding that closed
@@ -585,15 +611,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    comments, unless its answer carries the `<!-- gc-finding:<id>:open -->` line
    a declined or deferred finding's answer adds, since that thread waits for a
    person.
-8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
-   onto the integration branch AND no hold/branch veto → assignee=refinery,
-   `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's
-   store. The arm lists the rig's open owned convoys first, then reads each
-   candidate's parent-child children and `tracks` targets, so a rig with no
-   owned integration convoy costs one read. A pass that answers every
-   candidate writes `convoy-graduate.stamp` in the pass state dir, and the arm
-   reads nothing until that stamp is 15 minutes old.
-9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+8. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
    marker to a commit and there is no commit, and `request-changes` would
@@ -605,7 +623,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 6 and arm 7.
-10. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
+9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
    `gc.superseded_by` (the pointer `bead-rehome.sh` stamps) or
    `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
@@ -632,7 +650,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    the one anchor whose PR-close disposition it is consummating, just before
    that close, so the close lands in the pass that reads the closed PR. A
    merged anchor is a landing, never a disposal, and is skipped.
-11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
+10. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
    waits for a human ruling, one bead at a time. This arm closes the ones that
@@ -671,7 +689,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    twin in this pass, and the next pass finishes it. Closing the twin releases
    its blocks edge. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
-12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
+11. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that
    writes no bead. A body is composed once, by arm 3, out of one anchor; then two
    things drift it, and this arm lands both fixes in one body edit.
@@ -684,9 +702,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    each open anchor recording a `pr_number`, this arm reads the branch's bead
    ledger — `branch` (committed onto the branch: the anchor, plus every rework
    hand-back), `fold_target` (folded onto it by a polecat), and `merged_target`
-   with `merge_result=merged` (landed its own PR into it) — and splices the list
-   into a delimited section. A branch carrying one bead publishes nothing here,
-   because arm 3 already named it.
+   with `merge_result=merged` (landed on it, with or without a PR of its own) —
+   and splices the list into a delimited section. A branch carrying one bead
+   publishes nothing here, because arm 3 already named it.
 
    The `gc:pr-summary` region: a rework restamps the anchor's `pr_summary`, but
    arm 3 composes that region only at `pre_open_gate` and an open anchor never
@@ -818,7 +836,6 @@ how a pass ended:
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
 | `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
-| `convoy-graduate: last complete pass <s>s ago; next one after 900s` | arm 8 read nothing this pass: its last complete pass is younger than its 15-minute interval |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |

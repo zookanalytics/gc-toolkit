@@ -34,7 +34,7 @@ cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
   {"name":"alpha","path":"$TMP/rigs/alpha","prefix":"al","hq":false},
   {"name":"beta","path":"$TMP/rigs/beta","prefix":"bt","hq":false},
-  {"name":"town","path":"$TMP/hq","prefix":"lx","hq":true},
+  {"name":"town","path":"$TMP/hq","prefix":"hq","hq":true},
   {"name":"void","path":"","prefix":"vd","hq":false}
 ]}
 JSON
@@ -107,7 +107,7 @@ unset FAKE_RIGS_FAIL 2>/dev/null || true
 
 mkbead "$TMP/rigs/alpha" al-lives
 mkbead "$TMP/rigs/beta"  bt-lives
-mkbead "$TMP/hq"         lx-lives
+mkbead "$TMP/hq"         hq-lives
 # For the exact-id checks below: `al-uniq` is a prefix of exactly one bead, and
 # `al-dup` a prefix of two — a unique-partial hit and an ambiguous reference.
 mkbead "$TMP/rigs/alpha" al-uniqfull
@@ -124,7 +124,7 @@ eq "$OUT" alpha "  ... to alpha"
 run --path bt-anything
 eq "$OUT" "$TMP/rigs/beta" "--path names the owning rig's repo, resolved from the prefix alone"
 
-run --db lx-anything
+run --db hq-anything
 eq "$OUT" "$TMP/hq/.beads" "--db reaches the HQ store, which no --rig value names"
 
 # --- the finding: a foreign bead is not an absent one -----------------------
@@ -177,14 +177,15 @@ eq "$(grep -c "show al- --json" "$FAKE_GC_LOG" || true)" "0" \
 
 FAKE_RIGS_FAIL=1 run --absent al-gone
 eq "$RC" 3 "an unreadable rig list is unproven, not absent"
-has "$ERR" "could not read" "  ... reported apart from 'no such prefix', which has a different repair"
+has "$ERR" "could not read the rig map" "  ... reported apart from 'no such prefix', which has a different repair"
+has "$ERR" "gc: rig list unavailable" "  ... and carries the reason the listing gave"
 FAKE_RIGS_FAIL=1 run al-lives
 eq "$RC" 3 "  ... and resolution reports it apart from a prefix nobody carries"
 
 printf 'not a rig list\n' > "$TMP/garbage.json"
 FAKE_RIGS="$TMP/garbage.json" run --absent al-gone
 eq "$RC" 3 "a rig list that is not one is unproven, not a prefix nobody carries"
-has "$ERR" "did not answer with a rig list" "  ... and says the answer was the wrong shape"
+has "$ERR" "printed something that is not JSON" "  ... and says the answer was the wrong shape"
 
 run --absent vd-anything
 eq "$RC" 3 "a rig that reports no path is a store that cannot be asked"

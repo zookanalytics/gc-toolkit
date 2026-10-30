@@ -210,8 +210,8 @@ func TestIsLiveDefaultsOnlyANullStatusToOpen(t *testing.T) {
 		if got := isLive(&b[0]); got != tc.live {
 			t.Errorf("isLive(%s) = %v, want %v", tc.row, got, tc.live)
 		}
-		if got := stuckHolder(b) != ""; got != tc.live {
-			t.Errorf("stuckHolder(%s) holds = %v, want %v", tc.row, got, tc.live)
+		if got := hasLiveBlocker(b); got != tc.live {
+			t.Errorf("hasLiveBlocker(%s) = %v, want %v", tc.row, got, tc.live)
 		}
 	}
 }
@@ -410,6 +410,121 @@ func TestOpenPRsReadsTheWholeStreamOrNothing(t *testing.T) {
 		stubGH(t, tc.payload, tc.rc)
 		if open, ok := m.openPRs(); ok {
 			t.Errorf("%s: (%v, ok=true); want unreadable", tc.name, open)
+		}
+	}
+}
+
+// A thread read again to its end is one paginated GraphQL call, read whole or
+// not at all: a failed call, an empty answer, a page that does not decode or
+// carries no comments, or a thread that comes back with none leaves the count
+// unreadable, never counted over part of the thread.
+func TestThreadCommentsReadsTheWholeThreadOrNothing(t *testing.T) {
+	page := func(more bool, nodes string) string {
+		return `{"data":{"node":{"comments":{"pageInfo":{"hasNextPage":` + strconv.FormatBool(more) +
+			`,"endCursor":"c"},"nodes":[` + nodes + `]}}}}`
+	}
+	p1 := page(true, `{"body":"one"},{"body":"two"}`)
+	p2 := page(false, `{"body":"three"}`)
+	m := &merger{originHost: "github.com", originRepo: "zook/gc-toolkit"}
+
+	args := stubGH(t, p1+"\n"+p2+"\n", 0)
+	nodes, ok := m.threadComments("PRRT_1")
+	if !ok || len(nodes) != 3 || string(nodes[0]) != `{"body":"one"}` || string(nodes[2]) != `{"body":"three"}` {
+		t.Fatalf("two good pages: (%s, ok=%v); want the three comments, oldest first", nodes, ok)
+	}
+	want := "api --hostname github.com graphql --paginate -f query=" + feedbackThreadCommentsQuery + " -f id=PRRT_1"
+	if got := readFile(t, args); got != want {
+		t.Errorf("gh args =\n%s\nwant\n%s", got, want)
+	}
+
+	for _, tc := range []struct {
+		name, payload string
+		rc            int
+	}{
+		{"a failed call", p2, 1},
+		{"no answer", "", 0},
+		{"a page cut short", p1 + "\n" + p2[:40], 0},
+		{"a page whose thread does not resolve", p1 + "\n" + `{"data":{"node":null}}`, 0},
+		{"a page whose node is not a review thread", p1 + "\n" + `{"data":{"node":{}}}`, 0},
+		{"a page that is a GraphQL error", p1 + "\n" + `{"data":null,"errors":[{"message":"timeout"}]}`, 0},
+		{"a thread with no comments", page(false, ""), 0},
+	} {
+		stubGH(t, tc.payload, tc.rc)
+		if nodes, ok := m.threadComments("PRRT_1"); ok {
+			t.Errorf("%s: (%s, ok=true); want unreadable", tc.name, nodes)
+		}
+	}
+	args = stubGH(t, p2, 0)
+	if nodes, ok := m.threadComments(""); ok {
+		t.Errorf("no thread id: (%s, ok=true); want unreadable", nodes)
+	}
+	if _, err := os.Stat(args); err == nil {
+		t.Errorf("no thread id: gh was called with %q; want no call", readFile(t, args))
+	}
+}
+
+// The rollup keeps every run on the head, so a re-run lists beside the run it
+// superseded, and each case is read in both row orders: the verdict must not
+// depend on which row gh prints first. A start gh prints as the zero instant is
+// unset, so a run with none is waiting when it has not ended, and has no start
+// to order it by when it has.
+func TestRequiredCheckStatesJudgesEachCheckByItsNewestRun(t *testing.T) {
+	const zt = "0001-01-01T00:00:00Z"
+	run := func(status, conclusion, startedAt, completedAt string) string {
+		return fmt.Sprintf(`{"__typename":"CheckRun","name":"test","workflowName":"tests","status":%q,"conclusion":%q,"startedAt":%q,"completedAt":%q}`,
+			status, conclusion, startedAt, completedAt)
+	}
+	greenEarly := run("COMPLETED", "SUCCESS", "2026-10-27T00:30:00Z", "2026-10-27T00:45:00Z")
+	failed := run("COMPLETED", "FAILURE", "2026-10-27T01:00:00Z", "2026-10-27T01:10:00Z")
+	greenBeside := run("COMPLETED", "SUCCESS", "2026-10-27T01:00:00Z", "2026-10-27T01:05:00Z")
+	running := run("IN_PROGRESS", "", "2026-10-27T01:30:00Z", zt)
+	greenLate := run("COMPLETED", "SUCCESS", "2026-10-27T01:30:00Z", "2026-10-27T01:45:00Z")
+	queued := run("QUEUED", "", zt, zt)
+	cancelledUnstarted := run("COMPLETED", "CANCELLED", zt, "2026-10-27T01:20:00Z")
+	for _, tc := range []struct {
+		name string
+		rows []string
+		want string // failed, pending or green
+	}{
+		{"a re-run still running beside the failed run it superseded", []string{failed, running}, "pending"},
+		{"a queued re-run beside a failed run", []string{failed, queued}, "pending"},
+		{"a green re-run beside the failed run it superseded", []string{failed, greenLate}, "green"},
+		{"a failed run after a green one", []string{greenEarly, failed}, "failed"},
+		{"a failed run and a green run that started at the same instant", []string{failed, greenBeside}, "failed"},
+		{"a run cancelled before it started beside a later run still running", []string{cancelledUnstarted, running}, "pending"},
+		{"a run cancelled before it started beside a queued run", []string{cancelledUnstarted, queued}, "pending"},
+		{"a run cancelled before it started beside a later green run", []string{cancelledUnstarted, greenLate}, "green"},
+		{"a run cancelled before it started beside any run that started", []string{cancelledUnstarted, greenEarly}, "green"},
+		{"a run cancelled before it started, alone", []string{cancelledUnstarted}, "failed"},
+		{"no run yet", nil, "pending"},
+	} {
+		orders := [][]string{tc.rows}
+		if len(tc.rows) == 2 {
+			orders = append(orders, []string{tc.rows[1], tc.rows[0]})
+		}
+		for i, rows := range orders {
+			raw := []byte(`{"statusCheckRollup":[` + strings.Join(rows, ",") + `]}`)
+			f, p, ok := requiredCheckStates(raw, []string{"test"})
+			got := "green"
+			switch {
+			case !ok:
+				got = "unreadable"
+			case len(f) > 0:
+				got = "failed"
+			case len(p) > 0:
+				got = "pending"
+			}
+			if got != tc.want {
+				t.Errorf("%s (order %d): %s, want %s", tc.name, i+1, got, tc.want)
+			}
+		}
+	}
+
+	unreadable := strings.Replace(running, `"startedAt":"2026-10-27T01:30:00Z"`, `"startedAt":5`, 1)
+	for i, rows := range [][]string{{failed, unreadable}, {unreadable, failed}} {
+		raw := []byte(`{"statusCheckRollup":[` + strings.Join(rows, ",") + `]}`)
+		if f, p, ok := requiredCheckStates(raw, []string{"test"}); ok {
+			t.Errorf("a start that is not an instant (order %d): failed=%v pending=%v, want unreadable", i+1, f, p)
 		}
 	}
 }

@@ -23,10 +23,11 @@
 # branch_has_real_change's git calls take their repository from the cwd.
 # Proves:
 #   - an attempt that pushes and then cannot record leaves the landing on
-#     origin and the stamp on the bead, and the next attempt records the
-#     landing at the stamped commit without parking, escalating or draining,
-#     whether origin/main stayed at the landing or moved on past it, and
-#     whatever strategy the bead reads by then;
+#     origin, the stamp on the bead and the branch on origin, and the next
+#     attempt stages the branch again and records the landing at the stamped
+#     commit without parking, escalating or draining, whether origin/main
+#     stayed at the landing or moved on past it, and whatever strategy the
+#     bead reads by then; the branch is deleted once the landing is recorded;
 #   - a branch that never introduced work is still refused, parked and
 #     escalated, with no stamp and with a stamp its target does not carry.
 set -uo pipefail
@@ -57,21 +58,24 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML"; }
+# A block comes out with {{binding_prefix}} rendered as the patrol fills it in:
+# the binding it was poured with, gc-toolkit. here.
+fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
 
 echo "── the blocks ──"
 for m in shared-branch-merge-mode branch-has-real-change zero-diff-guard direct-merge-push; do
   if [ -n "$(fence "$m")" ]; then ok "$m: extracted between its markers"; else bad "$m: extracted between its markers"; fi
 done
 fence shared-branch-merge-mode > "$TMP/prep.sh"
+# delete_merged_branches takes the patrol's default, true.
 {
   echo 'BEAD_JSON=$(gc bd show $WORK --json)'
   echo 'MERGE_STRATEGY="$STRATEGY"'
-  echo 'LC="$GC_CITY_PATH/rigs/gc-toolkit/assets/scripts/lifecycle.sh"'
+  echo 'LC="$(gc gc-toolkit scripts-dir)/lifecycle.sh"'
   fence branch-has-real-change
   fence zero-diff-guard
   echo 'if [ "$MERGE_STRATEGY" = direct ]; then'
-  fence direct-merge-push
+  fence direct-merge-push | sed 's|{{delete_merged_branches}}|true|g'
   echo 'fi'
   echo 'echo "MERGE_STRATEGY=$MERGE_STRATEGY"'
 } > "$TMP/merge-push.sh"
@@ -83,7 +87,7 @@ for f in prep merge-push; do
   if bash -n "$TMP/$f.sh" 2>/dev/null; then ok "$f: valid bash"; else bad "$f: valid bash"; fi
 done
 
-# The pack the blocks find their scripts in, through GC_CITY_PATH.
+# The pack the blocks find their scripts in, which gc names.
 CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
@@ -99,12 +103,14 @@ cat > "$PACK/escalate.sh" <<'ESC'
 echo "escalate $*" >> "$FAKE_LOG"
 ESC
 chmod +x "$PACK"/*.sh
-# gc answers the roster for `rig list` and the bead file for `bd show`, applies
+# gc names the pack for `gc gc-toolkit scripts-dir`, answers the roster for
+# `rig list` and the bead file for `bd show`, applies
 # each --set-metadata and --unset-metadata of a `bd update` to that file, and
 # logs every other call.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
   *)
@@ -139,6 +145,7 @@ commit() {
   git -C "$1" rev-parse HEAD
 }
 stamp() { jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json"; }
+on_origin() { if git -C "$D/origin.git" rev-parse -q --verify "refs/heads/$1" >/dev/null; then echo yes; else echo no; fi; }
 merged_tries() { grep -c '^transition wb --to merged ' "$D/lc.log"; }
 
 # fixture <dir> work|nowork: origin with main at BASE and polecat/wb one commit
@@ -167,7 +174,7 @@ fixture() {
 # Sets PREP_RC, RC and OUT.
 attempt() {
   : > "$D/gc.log"; : > "$D/lc.log"
-  local run=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
+  local run=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig STUB_PACK="$CITY/rigs/gc-toolkit" WORK=wb BRANCH=polecat/wb TARGET=main
     TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
     FAKE_LC_LOG="$D/lc.log" DIRECT_MERGE_PUSH_BACKOFF=0 STRATEGY=direct "$@")
   ( cd "$D/rig" && "${run[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
@@ -193,6 +200,7 @@ unrecorded_landing() {
   eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "$1, first attempt: the push landed on origin/main"
   eq "$(merged_tries)" 3 "$1, first attempt: the record was tried three times"
   eq "$(stamp)" "$FEATURE" "$1, first attempt: the bead keeps the stamp"
+  eq "$(on_origin polecat/wb)" yes "$1, first attempt: the branch stays on origin for the next attempt to stage"
   hasnt "$(cat "$D/lc.log")" "refused_false_completion" "$1, first attempt: the bead is not parked as a false completion"
 }
 
@@ -207,6 +215,7 @@ has "$OUT" "pushed without recording; taking the direct path to record it" "same
 recorded_at "same, next attempt" "$FEATURE"
 not_parked "same, next attempt"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "same, next attempt: origin/main is unchanged"
+eq "$(on_origin polecat/wb)" no "same, next attempt: the branch is deleted once the landing is recorded"
 
 echo "── the same, after origin/main moved on past the landing ──"
 fixture "$TMP/later" work

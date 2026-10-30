@@ -73,7 +73,7 @@ description: The operator's rulings on the nine attention items from the rewrite
      Observed, not just inferred from the order shapes: every manifest
      under `$GC_CITY_PATH/.dolt-backup` was written at 2026-08-26 06:00,
      well inside the 12h threshold, and the five directories carrying them
-     (`gc`, `lx`, `sl`, `su`, `tk`) are exactly the five databases
+     (`gc`, `hq`, `ra`, `rb`, `tk`) are exactly the five databases
      `gc dolt health` reports live. A sixth directory, `sp`, is frozen at
      2026-07-21 and has no live database behind it, so the deacon's
      verifier passes it to the extra-directory branch and emits
@@ -152,7 +152,7 @@ description: The operator's rulings on the nine attention items from the rewrite
   off by policy, not unattended.** Surfaced while closing TODO-4 item 1:
   `gc doctor` warns that two scopes have not synced their embedded-store
   backup in a very long time — `rigs/gascity` at 1625h25m and
-  `rigs/shutupandlisten` at 1902h25m, against a 24h threshold. This is a
+  `rigs/rig-b` at 1902h25m, against a 24h threshold. This is a
   different pipeline from `mol-dog-backup`, which writes
   `$GC_CITY_PATH/.dolt-backup`; the warning reads `.beads/backup/` inside
   each rig.

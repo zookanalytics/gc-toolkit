@@ -41,7 +41,7 @@ ledgers because the two beads live in two ledgers:
 
 | Side | Bead | Ledger | Keys |
 |---|---|---|---|
-| **Reverse** (source of truth) | the **session** bead | HQ `lx` (type=session) | `hosts_bead = <work-bead-id>` |
+| **Reverse** (source of truth) | the **session** bead | HQ `hq` (type=session) | `hosts_bead = <work-bead-id>` |
 | **Forward** (optional cache) | the **work** bead | rig `tk` | `host_session = <session-bead-id>`, `host_session_name = <session_name>`, `host_session_epoch = <continuation_epoch>` |
 | **Lineage** (0..N / replay hook) | the **work** bead | rig `tk` | `gc.session_lineage = <JSON array of {session,name,epoch,at}>` |
 
@@ -74,13 +74,13 @@ The design specifies reverse resolution as `ListByMetadata hosts_bead=<bead>`.
 ExactMetadataSessionCandidates`) used by the controller — it is **not exposed
 through any `gc bd` / `gc session` CLI**. Concretely:
 
-- Session beads (`issue_type=session`) live in the HQ `lx` ledger and are
+- Session beads (`issue_type=session`) live in the HQ `hq` ledger and are
   **addressable by id** (`gc bd show <id>` / `gc bd update <id> --set-metadata`
-  both prefix-route to `lx`), **but**
+  both prefix-route to `hq`), **but**
 - `gc bd list` **filters the `session` type out entirely** — even with
   `--include-infra` (which only covers agent/rig/role/message). So
   `gc bd list --metadata-field "hosts_bead=<bead>"` **never returns a session
-  bead**. (Verified against persistent session beads in `lx.issues`.)
+  bead**. (Verified against persistent session beads in `hq.issues`.)
 
 So `gc-bead-host.sh resolve` realizes the reverse search over the only available
 CLI surface: it **enumerates `gc session list --json`** (the lone command that
@@ -149,7 +149,7 @@ is the live-session half of assertions 2, 3, and 5 — modeled on the `tk-oml75`
 §C probe, now against the **shipped** agent + tool. Use a real, low-stakes bead.
 
 ```bash
-cd /home/zook/loomington
+cd /home/zook/mycity
 BEAD=<a-real-low-stakes-bead-id>
 
 # 1. Create the host + write the durable link (one command).

@@ -104,8 +104,9 @@ the current wisp.
   roots (`gc.kind` workflow/scope/spec — not recoverable work; their steps carry
   the work and the control-dispatcher's `workflow-finalize` closes the root), and
   beads owned by configured named identities are not orphans. A visit whose
-  session died DOES return to the pool — respawn-and-reconstitute is the designed
-  path.
+  sitting is gone is recovered too: its release keeps the route, so the visit
+  parks on the board again, and the sitting the operator engages next
+  reconstitutes the conversation from the record.
 
 ## Findings
 
@@ -114,11 +115,7 @@ situation key. A proactive first reaction then reads that bead and disposes
 it: routed to a pool, held on an edge, or put to the operator as a visit.
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
+"$(gc {{ .BindingName }} scripts-dir)/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
 `--about` names the bead the finding is about, and the dedup matches on it
@@ -141,9 +138,9 @@ take yourself.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — goes straight to a visit
-through `"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key>
---message "<what is wrong + recommendation>"`. Context recycling is the
-cycle-recycle Stop hook's job — never something you ask about.
+through `"$(gc {{ .BindingName }} scripts-dir)/escalate.sh" --subject <bead>
+--key <situation-key> --message "<what is wrong + recommendation>"`. Context
+recycling is the cycle-recycle Stop hook's job — never something you ask about.
 
 {{ template "visit-close" . }}
 

@@ -102,7 +102,7 @@ git check-ref-format "refs/heads/$BRANCH" 2>/dev/null \
   || { echo "$PROG: '$BRANCH' is not a branch name" >&2; exit 2; }
 
 # --- the rig: its checkout carries the origin, its store is the ledger -------
-RIG_PATH=$(gc rig list --json 2>/dev/null | scrub \
+RIG_PATH=$("$HERE/rig-map.sh" \
   | jq -r --arg n "$RIG" '[.rigs[]? | select(.name == $n) | .path // empty][0] // empty' 2>/dev/null)
 [ -n "$RIG_PATH" ] || not_ended "rig '$RIG' does not resolve through gc rig list"
 git -C "$RIG_PATH" rev-parse --git-dir >/dev/null 2>&1 \

@@ -89,9 +89,9 @@ gate_says() {
 # nothing-to-salvage arm skips.
 fixture() {
   store '[
-    {"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"Implement the solution",
+    {"id":"tk-step","status":"in_progress","assignee":"hq-dead","title":"Implement the solution",
      "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead",
+                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-dead",
                  "gc.session_name":"polecat-2-pool","gc.session_affinity":"require",
                  "gc.continuation_group":"cg-1",
                  "gc.native_step_dependencies.v1":"[\"mol-polecat-work.preflight-tests\"]"}},
@@ -99,21 +99,21 @@ fixture() {
      "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2",
                  "gc.input_convoy_id":"tk-convoy","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "gc.session_name":"polecat-2-pool"}},
-    {"id":"tk-visit","status":"in_progress","assignee":"lx-dead","title":"visit",
+    {"id":"tk-visit","status":"in_progress","assignee":"hq-dead","title":"visit",
      "metadata":{"task_kind":"visit","gc.routed_to":"gc-toolkit/gc-toolkit.converse",
-                 "gc.continuation_group":"cg-visit","gc.session_id":"lx-dead"}},
-    {"id":"tk-review","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+                 "gc.continuation_group":"cg-visit","gc.session_id":"hq-dead"}},
+    {"id":"tk-review","status":"in_progress","assignee":"hq-dead","title":"Review branch polecat/tk-anc -> main: a finding",
      "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
                  "review_branch":"polecat/tk-anc","review_base":"main",
                  "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
                  "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
-                 "gc.session_id":"lx-dead","gc.session_name":"polecat-5-pool"}},
-    {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
+                 "gc.session_id":"hq-dead","gc.session_name":"polecat-5-pool"}},
+    {"id":"tk-work","status":"in_progress","assignee":"hq-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
-                 "workflow_id":"tk-root","gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}},
-    {"id":"tk-bare","status":"in_progress","assignee":"lx-dead","title":"a pre-work source bead",
+                 "workflow_id":"tk-root","gc.session_id":"hq-dead","gc.session_name":"polecat-3-pool"}},
+    {"id":"tk-bare","status":"in_progress","assignee":"hq-dead","title":"a pre-work source bead",
      "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
-                 "gc.session_id":"lx-dead","gc.session_name":"polecat-4-pool"}}
+                 "gc.session_id":"hq-dead","gc.session_name":"polecat-4-pool"}}
   ]'
 }
 
@@ -128,9 +128,9 @@ eq "$(gate_says tk-bare)"  "1" "pre-work source bead, no work_dir/branch -> IS_W
 
 # A visit that also carries step metadata is still a visit — task_kind outranks a
 # step_ref, exactly as orphan-dispose.sh's classification order does.
-store '[{"id":"tk-v2","status":"in_progress","assignee":"lx-dead","title":"visit",
+store '[{"id":"tk-v2","status":"in_progress","assignee":"hq-dead","title":"visit",
          "metadata":{"task_kind":"visit","gc.step_ref":"mol-visit.converse",
-                     "gc.routed_to":"r","gc.session_id":"lx-dead"}}]'
+                     "gc.routed_to":"r","gc.session_id":"hq-dead"}}]'
 eq "$(gate_says tk-v2)" "0" "task_kind=visit outranks a step_ref"
 
 # Fail safe: an unreadable/absent bead must default to the work-bead path so a

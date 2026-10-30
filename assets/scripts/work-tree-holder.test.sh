@@ -19,13 +19,16 @@
 #      that is a session's own directory is held by that session.
 #   3. FAIL CLOSED — a failed git worktree list, an unreadable session list or
 #      bead listing, a tree no session directory accounts for, and a claim
-#      whose molecule cannot be traced to its work. Held outranks undecided.
+#      whose molecule cannot be read or whose run names no work. Held outranks
+#      undecided.
 #   4. The finding names the tree by its resolved path and counts its
 #      uncommitted paths, so the holder's work can be salvaged.
 #
 # Runs the real script against real git repositories laid out like pool slots
-# ($ROOT/slots/<slot>/worktrees/<bead>) and a fake gc that serves the session
-# list and the bead listing. No live city, Dolt, or network.
+# ($ROOT/slots/<slot>/worktrees/<bead>), a fake gc that serves the session list
+# and the bead listing, and the run-lib.sh stub, which serves the runs of each
+# case's rows as run-lib.sh's own run_rows names them. No live city, Dolt, or
+# network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -104,6 +107,10 @@ convoy() { # <id> <member> [status]
   jq -nc --arg id "$1" --arg m "$2" --arg st "${3:-open}" '{id: $id, issue_type: "convoy", status: $st, assignee: null, metadata: {}, dependencies: [{issue_id: $id, depends_on_id: $m, type: "tracks"}]}'
 }
 beads() { printf '%s\n' "$@" | jq -sc '.'; }
+# The runs the stub serves: those of the case's rows, by run-lib.sh's own rule.
+# shellcheck source=run-lib.sh
+. "$HERE/run-lib.sh" || { echo "cannot source run-lib.sh" >&2; exit 1; }
+export GC_RUN_LIB="$HERE/run-lib.stub.sh"
 # A molecule run by <session> over <work>: its claimed step, root and convoy.
 molecule() { # <tag> <session-id> <work-id> [step-status]
   step "st-$1" "root-$1" "$2" "${4:-in_progress}"
@@ -121,18 +128,21 @@ fresh() {
   git -C "$REPO" -c commit.gpgsign=false commit -q --allow-empty -m init
   git -C "$REPO" worktree add -q --detach "$ME"
   git -C "$REPO" worktree add -q --detach "$PEER"
-  unset FAKE_SESSIONS FAKE_LIST_FAIL FAKE_ID_FAIL FAKE_LIST_HIDE
+  unset FAKE_SESSIONS FAKE_LIST_FAIL FAKE_ID_FAIL FAKE_LIST_HIDE FAKE_RUN_FAIL
   FAKE_BEADS='[]'
-  : > "$R/gc.log"
+  : > "$R/gc.log"; : > "$R/run-lib.log"
 }
 tree_at() { git -C "$REPO" worktree add -q --detach "$1"; }        # <path>
 branch_at() { git -C "$REPO" worktree add -q -b "$2" "$1"; }       # <path> <branch>
 
 # run [args...] — the script as the gate calls it, from this session's slot.
-# Prints "<rc>|<stdout>"; $R/gc.log holds the gc calls.
+# Prints "<rc>|<stdout>"; $R/gc.log holds the gc calls and $R/run-lib.log the
+# run-lib.sh calls. FAKE_RUN_FAIL fails the run-lib.sh calls it names.
 run() {
   local rc=0 out
+  printf '%s' "$FAKE_BEADS" | jq -c "$RUN_JQ"'run_rows' > "$R/runs.json"
   out=$(cd "$ME" && GC_DIR="$ME" GC_RIG_ROOT="${RIG:-$REPO}" FAKE_GC_LOG="$R/gc.log" \
+        RUN_LIB_STUB_RUNS="$R/runs.json" RUN_LIB_STUB_LOG="$R/run-lib.log" RUN_LIB_STUB_FAIL="${FAKE_RUN_FAIL:-}" \
         FAKE_SESSIONS="${FAKE_SESSIONS:-}" FAKE_BEADS="$FAKE_BEADS" \
         FAKE_LIST_FAIL="${FAKE_LIST_FAIL:-}" FAKE_ID_FAIL="${FAKE_ID_FAIL:-}" FAKE_LIST_HIDE="${FAKE_LIST_HIDE:-}" \
         "$SCRIPT" "$@") || rc=$?
@@ -155,7 +165,7 @@ eq "$(cat "$R/gc.log")" "" "own tree: no session list is read"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "0" "a gone holder (no listed session in the tree's slot): adoptable"
 has "$out" "no listed session works in $PEER" "gone holder: the finding names the empty slot"
@@ -164,15 +174,15 @@ has "$out" "no listed session works in $PEER" "gone holder: the finding names th
 # the slot is on other work.
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule o lx-peer tk-other)" "$(work tk-other open polecat/tk-other "$PEER/worktrees/tk-other")" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule o hq-peer tk-other)" "$(work tk-other open polecat/tk-other "$PEER/worktrees/tk-other")" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "0" "slot reuse: the slot's session is working other work, so the tree is adoptable"
 has "$out" "working other work (tk-other)" "slot reuse: the finding names the other work"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
 FAKE_BEADS=$(beads "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "0" "the slot's session holds no claim (idle between beads): adoptable"
@@ -182,14 +192,14 @@ has "$out" "holds no claim" "idle slot session: the finding says so"
 # surviving tree still has the branch checked out.
 fresh
 branch_at "$PEER/worktrees/tk-a" polecat/tk-a
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule o lx-peer tk-other)" "$(work tk-other open polecat/tk-other "$PEER/worktrees/tk-other")" "$(work tk-a open polecat/tk-a "$PEER/worktrees/tk-a")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule o hq-peer tk-other)" "$(work tk-other open polecat/tk-other "$PEER/worktrees/tk-other")" "$(work tk-a open polecat/tk-a "$PEER/worktrees/tk-a")")
 out=$(run --bead tk-c --work-dir "" --branch polecat/tk-a)
 eq "${out%%|*}" "0" "rework child whose branch the anchor's old tree holds, slot session on other work: adoptable"
 has "$out" "worktree $PEER/worktrees/tk-a" "rework adoption: the finding names the anchor's tree"
 
 fresh
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)" "0|" \
    "a recorded work_dir with no directory behind it: nothing to adopt from anyone"
 
@@ -198,12 +208,12 @@ eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)" 
 fresh
 tree_at "$PEER/worktrees/tk-w"
 echo a > "$PEER/worktrees/tk-w/a.txt"; echo b > "$PEER/worktrees/tk-w/b.txt"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "1" "live peer running a molecule over this bead in its recorded work_dir: held"
 has "$out" "worktree $PEER/worktrees/tk-w (uncommitted paths: 2)" "held: names the resolved tree and counts its uncommitted paths"
-has "$out" "pool__polecat-lx-peer" "held: names the holder session"
+has "$out" "pool__polecat-hq-peer" "held: names the holder session"
 has "$out" "working tk-w" "held: names the work it is on"
 
 # The bead under this session's own claim, its branch checked out in the peer's
@@ -211,8 +221,8 @@ has "$out" "working tk-w" "held: names the work it is on"
 fresh
 branch_at "$PEER/worktrees/tk-w" polecat/tk-w
 echo wip > "$PEER/worktrees/tk-w/wip.txt"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)" "$(work tk-w in_progress polecat/tk-w "" lx-me)")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)" "$(work tk-w in_progress polecat/tk-w "" hq-me)")
 out=$(run --bead tk-w --work-dir "" --branch polecat/tk-w)
 eq "${out%%|*}" "1" "live peer has the recorded branch checked out and is working this bead: held"
 has "$out" "(uncommitted paths: 1)" "branch tree: counts the peer's uncommitted path"
@@ -220,15 +230,15 @@ has "$out" "(uncommitted paths: 1)" "branch tree: counts the peer's uncommitted 
 # workspace-setup cuts polecat/<bead> before it records metadata.branch.
 fresh
 branch_at "$PEER/worktrees/tk-w" polecat/tk-w
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)" "$(work tk-w open)")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)" "$(work tk-w open)")
 out=$(run --bead tk-w --work-dir "" --branch "")
 eq "${out%%|*}" "1" "no branch recorded, a live peer has polecat/<bead> checked out for it: held"
 
 fresh
 branch_at "$PEER/worktrees/tk-c1" polecat/tk-a
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-c1)" "$(work tk-c1 open polecat/tk-a "$PEER/worktrees/tk-c1")" "$(work tk-a open polecat/tk-a)")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-c1)" "$(work tk-c1 open polecat/tk-a "$PEER/worktrees/tk-c1")" "$(work tk-a open polecat/tk-a)")
 out=$(run --bead tk-c2 --work-dir "" --branch polecat/tk-a)
 eq "${out%%|*}" "1" "a sibling rework child on the same branch is live in the tree: held"
 has "$out" "working tk-c1 on polecat/tk-a" "sibling: names the sibling and the shared branch"
@@ -236,8 +246,8 @@ has "$out" "working tk-c1 on polecat/tk-a" "sibling: names the sibling and the s
 # A direct-routed holder claims the work bead itself: no molecule root.
 fresh
 branch_at "$PEER/worktrees/tk-a" polecat/tk-a
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(work tk-a in_progress polecat/tk-a "$PEER/worktrees/tk-a" lx-peer)")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(work tk-a in_progress polecat/tk-a "$PEER/worktrees/tk-a" hq-peer)")
 out=$(run --bead tk-c --work-dir "" --branch polecat/tk-a)
 eq "${out%%|*}" "1" "the anchor itself is live in the tree under a direct claim: held"
 has "$out" "working tk-a on polecat/tk-a" "anchor: names it"
@@ -247,8 +257,8 @@ has "$out" "working tk-a on polecat/tk-a" "anchor: names it"
 fresh
 tree_at "$PEER/worktrees/tk-w"
 ln -s "$PEER/worktrees/tk-w" "$R/link-to-tree"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-x)" "$(work tk-x open polecat/tk-x "$R/link-to-tree")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-x)" "$(work tk-x open polecat/tk-x "$R/link-to-tree")")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "1" "the holder's work records this tree (by a symlinked path) as its work_dir: held"
 has "$out" "working tk-x in this worktree" "same tree: names the bead that records it"
@@ -256,49 +266,50 @@ has "$out" "working tk-x in this worktree" "same tree: names the bead that recor
 # A step assigned but not yet claimed is still the holder's.
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w open)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w open)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w | cut -d'|' -f1)" "1" \
    "the slot session's next step is assigned and open (between steps): held"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER" asleep)")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER" asleep)")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w | cut -d'|' -f1)" "1" \
    "an asleep session with a claim on this work: listed, so not provably gone, held"
 
 # A claim may carry any of a session's names: here the slot's agent address.
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
 FAKE_BEADS=$(beads "$(molecule p rig/rig.peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w | cut -d'|' -f1)" "1" \
    "a claim under the holder's agent address (agent_name, not id): held"
 
 fresh
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
 out=$(run --bead tk-w --work-dir "$PEER" --branch polecat/tk-w)
 eq "${out%%|*}" "1" "a recorded work_dir that is a live session's own directory: held by that session"
 has "$out" "whose directory it is" "session directory: the finding says why"
 no "$(cat "$R/gc.log")" "bd list" "session directory: no claim lookup is needed"
 
-# The convoy is not in the open listing (closed early); the script fetches it.
+# The convoy is not in the open listing (closed early); its run still names
+# the work, so the claim is traced.
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(step st-p root-p lx-peer)" "$(root root-p cv-p)" "$(convoy cv-p tk-w closed)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(step st-p root-p hq-peer)" "$(root root-p cv-p)" "$(convoy cv-p tk-w closed)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w | cut -d'|' -f1)" "1" \
-   "a convoy outside the open listing is fetched by id and traced: held"
-has "$(cat "$R/gc.log")" "--id cv-p" "the missing convoy is fetched by id"
+   "a run whose convoy is outside the open listing is traced: held"
+has "$(cat "$R/run-lib.log")" "subject tree_bd root-p" "the claim's molecule is traced through run-lib.sh"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 FAKE_LIST_HIDE=root-p
 eq "$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w | cut -d'|' -f1)" "1" \
-   "a molecule root missing from the listing is fetched by id and traced: held"
+   "a molecule root missing from the open listing is traced through its run: held"
 
 # --- 3. Fail closed. ----------------------------------------------------------
 
@@ -311,7 +322,7 @@ has "$out" "worktree $PEER/worktrees/tk-w (uncommitted paths: 0) could not be cl
 
 fresh
 branch_at "$R/elsewhere/tk-w" polecat/tk-w
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
 out=$(run --bead tk-w --work-dir "" --branch polecat/tk-w)
 eq "${out%%|*}" "2" "a tree no session directory accounts for: undecided"
 has "$out" "no session directory accounts for it" "unattributable: the finding says so"
@@ -324,31 +335,32 @@ has "$out" "git could not list the worktrees" "git failure: the finding says so"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
 FAKE_LIST_FAIL=1
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "2" "the bead listing cannot be read while a session sits in the slot: undecided"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)")
-FAKE_LIST_HIDE=root-p; FAKE_ID_FAIL=1
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)")
+FAKE_RUN_FAIL="subject:root-p"
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
-eq "${out%%|*}" "2" "the holder's molecule root cannot be fetched: undecided"
+eq "${out%%|*}" "2" "the holder's molecule cannot be read: undecided"
+has "$out" "the molecule root-p live pool__polecat-hq-peer is running could not be read" "unreadable molecule: the finding names it"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(step st-p root-p lx-peer)" "$(jq -nc '{id: "root-p", status: "in_progress", metadata: {"gc.kind": "workflow"}, dependencies: []}')")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(step st-p root-p hq-peer)" "$(jq -nc '{id: "root-p", status: "in_progress", metadata: {"gc.kind": "workflow"}, dependencies: []}')")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
-eq "${out%%|*}" "2" "the holder's molecule names no input convoy: undecided"
-has "$out" "molecule root-p names no input convoy" "untraced claim: the finding says which and why"
+eq "${out%%|*}" "2" "the holder's molecule names no input convoy, so its run names no work: undecided"
+has "$out" "the run of molecule root-p names no work" "untraced claim: the finding says which and why"
 
 fresh
 tree_at "$PEER/worktrees/tk-w"
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-gone)")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-gone)")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "2" "the holder's work bead cannot be read: undecided"
 has "$out" "work tk-gone could not be read" "unreadable work: the finding names it"
@@ -358,8 +370,8 @@ has "$out" "work tk-gone could not be read" "unreadable work: the finding names 
 fresh
 tree_at "$PEER/worktrees/tk-w"
 branch_at "$R/elsewhere/tk-w" polecat/tk-w
-FAKE_SESSIONS=$(sessions "$(sess lx-me "$ME")" "$(sess lx-peer "$PEER")")
-FAKE_BEADS=$(beads "$(molecule p lx-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
+FAKE_SESSIONS=$(sessions "$(sess hq-me "$ME")" "$(sess hq-peer "$PEER")")
+FAKE_BEADS=$(beads "$(molecule p hq-peer tk-w)" "$(work tk-w open polecat/tk-w "$PEER/worktrees/tk-w")")
 out=$(run --bead tk-w --work-dir "$PEER/worktrees/tk-w" --branch polecat/tk-w)
 eq "${out%%|*}" "1" "one tree held, the other undecided: held"
 has "$out" "no session directory accounts for it" "both findings are reported"

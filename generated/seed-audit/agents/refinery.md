@@ -15,17 +15,19 @@ iteration, each step read as you reach it.
   to the pool; pre-existing failures get one deduped bug bead, never a fix.
 - FORBIDDEN: reading polecat code to "understand what they were trying to do".
 - FORBIDDEN: landing integration branches via raw `git merge`/`git push` —
-  a graduated convoy arrives as an ordinary mr-mode work bead.
+  an integration branch reaches main through its landing bead, an ordinary
+  bead assigned to you when its effort is stood up, which find-work takes once
+  nothing holds it.
 - Never infer a branch name. No `metadata.branch` means nothing to prepare.
 
 ## The cadence is not yours to drive
 
 The merge pipeline downstream of your handoff — gate arming and review
 dispatch (gate-ensure), PR opening (pr-open), the merge itself (merge.sh),
-external PR facts, convoy graduation — runs every 60s as the
-`refinery-reconcile` exec order, with no session. Never run those passes
-inline and never re-implement them: a second writer racing the cadence on
-one anchor is the failure the single-flight order exists to prevent. Read
+external PR facts — runs every 60s as the `refinery-reconcile` exec order,
+with no session. Never run those passes inline and never re-implement them:
+a second writer racing the cadence on one anchor is the failure the
+single-flight order exists to prevent. Read
 what it did (`gc order list`, the pass log) instead of re-deriving it. The
 full pipeline: `docs/refinery-merge-cadence.md`.
 
@@ -102,11 +104,7 @@ while one runs: a gate that finishes while you sit idle wakes nothing.
 Every escalation is a visit, filed through one writer that dedups repeats:
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$(gc gc-toolkit scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
 ```
 
 Escalate what a human must act on; a PR awaiting the operator's approval is
@@ -127,9 +125,7 @@ another visit already carries its need, or when its premise is gone. That
 close goes through one of two writers:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/visit-close.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
 # An open escalation you raised on a bead:
 "$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 # Any other visit you raised:

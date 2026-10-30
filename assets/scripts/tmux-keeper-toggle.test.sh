@@ -91,11 +91,11 @@ bead() { printf '[{"id":"%s","metadata":%s}]\n' "$1" "$2" > "$FIX/bead_$1.json";
 # The live row shape: a pinned mechanik, a pool worker with no alias, then the
 # keeper.
 LIVE_ROSTER='{"schema_version":"1","ok":true,"filters":{},"sessions":[
-  {"id":"lx-mech","name":"gc-toolkit.mechanik","alias":"gc-toolkit.mechanik","template":"gc-toolkit.mechanik","state":"active","closed":false},
-  {"id":"lx-pool","name":"gc-toolkit__polecat-lx-pool","template":"gc-toolkit/gc-toolkit.polecat","state":"active","closed":false},
-  {"id":"lx-keeper","name":"gascity/gascity-keeper.keeper","alias":"gascity/gascity-keeper.keeper","template":"gascity/gascity-keeper.keeper","state":"asleep","closed":false}
+  {"id":"hq-mech","name":"gc-toolkit.mechanik","alias":"gc-toolkit.mechanik","template":"gc-toolkit.mechanik","state":"active","closed":false},
+  {"id":"hq-pool","name":"gc-toolkit__polecat-hq-pool","template":"gc-toolkit/gc-toolkit.polecat","state":"active","closed":false},
+  {"id":"hq-keeper","name":"gascity/gascity-keeper.keeper","alias":"gascity/gascity-keeper.keeper","template":"gascity/gascity-keeper.keeper","state":"asleep","closed":false}
 ],"summary":{"total":3}}'
-bead lx-mech '{"pin_awake":"true"}'
+bead hq-mech '{"pin_awake":"true"}'
 
 # OUT is the script's stdout; the three logs hold this run's calls only.
 OUT=""
@@ -106,27 +106,27 @@ run() { # run <script args...>
 
 echo "── LIVE: lower-case rows under .sessions ──"
 roster "$LIVE_ROSTER"
-bead lx-keeper '{"pin_awake":"true"}'
+bead hq-keeper '{"pin_awake":"true"}'
 run state
 eq "$OUT" "up" "LIVE: a pinned keeper reads up"
-has "$(cat "$STUB_GC_LOG")" "bd show lx-keeper" "LIVE: ...read from the keeper's own session bead"
+has "$(cat "$STUB_GC_LOG")" "bd show hq-keeper" "LIVE: ...read from the keeper's own session bead"
 
-bead lx-keeper '{"session_origin":"named"}'
+bead hq-keeper '{"session_origin":"named"}'
 run state
 eq "$OUT" "down" "LIVE: an unpinned keeper reads down, though another session is pinned"
 
-bead lx-keeper '{"pin_awake":true}'
+bead hq-keeper '{"pin_awake":true}'
 run state
 eq "$OUT" "up" "LIVE: a boolean pin reads up"
 
 echo "── LEGACY: a bare array of ID/Alias rows ──"
-roster '[{"ID":"lx-mech","Alias":"gc-toolkit.mechanik"},{"ID":"lx-old","Alias":"gascity/gascity-keeper.keeper"}]'
-bead lx-old '{"pin_awake":"true"}'
+roster '[{"ID":"hq-mech","Alias":"gc-toolkit.mechanik"},{"ID":"hq-old","Alias":"gascity/gascity-keeper.keeper"}]'
+bead hq-old '{"pin_awake":"true"}'
 run state
 eq "$OUT" "up" "LEGACY: a pinned keeper in the bare-array shape reads up"
 
 echo "── DOWN: no keeper row ──"
-roster '{"schema_version":"1","sessions":[{"id":"lx-mech","alias":"gc-toolkit.mechanik"}]}'
+roster '{"schema_version":"1","sessions":[{"id":"hq-mech","alias":"gc-toolkit.mechanik"}]}'
 run state
 eq "$OUT" "down" "DOWN: a roster with no keeper row reads down"
 hasnt "$(cat "$STUB_GC_LOG")" "bd show" "DOWN: ...without reading any session bead"
@@ -137,7 +137,7 @@ eq "$OUT" "down" "DOWN: an empty roster reads down"
 
 echo "── UNKNOWN: an answer the script cannot read ──"
 roster "$LIVE_ROSTER"
-bead lx-keeper '{"pin_awake":"true"}'
+bead hq-keeper '{"pin_awake":"true"}'
 export STUB_LIST_FAIL=1; run state; unset STUB_LIST_FAIL
 eq "$OUT" "unknown" "UNKNOWN: a failed session list reads unknown"
 export STUB_SHOW_FAIL=1; run state; unset STUB_SHOW_FAIL
@@ -147,7 +147,7 @@ roster '{"schema_version":"1","ok":true}'
 run state
 eq "$OUT" "unknown" "UNKNOWN: a roster with no row array reads unknown, not down"
 
-roster '{"schema_version":"1","sessions":[{"alias":"gascity/gascity-keeper.keeper","session_name":"lx-keeper"}]}'
+roster '{"schema_version":"1","sessions":[{"alias":"gascity/gascity-keeper.keeper","session_name":"hq-keeper"}]}'
 run state
 eq "$OUT" "unknown" "UNKNOWN: a keeper row with no id reads unknown, not down"
 
@@ -161,12 +161,12 @@ eq "$OUT" "unknown" "UNKNOWN: an empty answer from a successful list reads unkno
 
 echo "── TOGGLE: the action follows the state ──"
 roster "$LIVE_ROSTER"
-bead lx-keeper '{"pin_awake":"true"}'
+bead hq-keeper '{"pin_awake":"true"}'
 run toggle
 eq "$(cat "$STUB_PIN_LOG")" "unpin $KEEPER" "TOGGLE: a pinned keeper is unpinned"
 has "$(cat "$STUB_TMUX_LOG")" "keeper unpinned" "TOGGLE: ...and the operator is told"
 
-bead lx-keeper '{}'
+bead hq-keeper '{}'
 run toggle
 eq "$(cat "$STUB_PIN_LOG")" "pin $KEEPER" "TOGGLE: an unpinned keeper is pinned"
 has "$(cat "$STUB_TMUX_LOG")" "keeper pinned" "TOGGLE: ...and the operator is told"
@@ -177,11 +177,11 @@ has "$(cat "$STUB_TMUX_LOG")" "not toggling" "TOGGLE: ...and says so"
 
 echo "── CITY: --city-path reaches every gc call ──"
 roster "$LIVE_ROSTER"
-bead lx-keeper '{"pin_awake":"true"}'
+bead hq-keeper '{"pin_awake":"true"}'
 run --city-path "$TMP/city" toggle
 GC_CALLS="$(cat "$STUB_GC_LOG")"
 has "$GC_CALLS" "session list --json --city $TMP/city" "CITY: the session list is the city's"
-has "$GC_CALLS" "bd show lx-keeper --json --city $TMP/city" "CITY: the bead read is the city's"
+has "$GC_CALLS" "bd show hq-keeper --json --city $TMP/city" "CITY: the bead read is the city's"
 has "$GC_CALLS" "session unpin $KEEPER --city $TMP/city" "CITY: the unpin is the city's"
 
 echo

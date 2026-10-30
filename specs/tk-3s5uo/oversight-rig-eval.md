@@ -16,7 +16,7 @@ change in this bead.**
 | `project-lead` role | gascity-packs | `oversight-rig/agents/project-lead/{agent.toml,prompt.template.md,project-brief.template.md}` @ `a1490ecf9` | 2026-06-24 |
 | Escalation machinery | gascity-packs | `oversight-rig/orders/{patrol-project-leads,escalate-rollups}.toml` + `assets/scripts/{nudge-project-leads,has-undelivered-escalates,deliver-rollup}.sh` @ `a1490ecf9` | 2026-06-24 |
 | Release metadata | gascity-packs | `registry.toml` → `pack.release` v0.1.0, commit `a1490ecf9`, dated 2026-06-20 | 2026-06-24 |
-| Our roster | gc-toolkit pack | `pack.toml`, `agents/mechanik/{agent.toml,prompt.template.md}`, `/home/zook/loomington/city.toml` | 2026-06-24 |
+| Our roster | gc-toolkit pack | `pack.toml`, `agents/mechanik/{agent.toml,prompt.template.md}`, `/home/zook/mycity/city.toml` | 2026-06-24 |
 | Strategic context | gc-toolkit rig beads | `tk-2r8sp6` ("Make codex review a structural pipeline gate") | 2026-06-24 |
 | RAM grounding | host | `free`, `ps -eo rss` (per-claude-session RSS), `/proc/meminfo` | 2026-06-24 |
 
@@ -140,8 +140,8 @@ polecat-codex, `_polecat-gemini`, mayor-thread, mechanik-thread).
 ### What the pack provisions
 
 `pack.toml` ships `[[named_session]] template = "project-lead", scope = "rig",
-mode = "always"`. With our four non-HQ rigs (`gc-toolkit`, `signal-loom`,
-`gascity`, `shutupandlisten`) that's **four always-on sessions** (HQ/`loomington`
+mode = "always"`. With our four non-HQ rigs (`gc-toolkit`, `rig-a`,
+`gascity`, `rig-b`) that's **four always-on sessions** (HQ/`mycity`
 is the city ledger, not a project rig — no project-lead needed).
 
 ### Measured RAM

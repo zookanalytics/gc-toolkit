@@ -34,7 +34,7 @@ quote below is verbatim.
 ### The capture's own case
 
 Visit tk-wyqkhqz, on subject tk-m7n9yal, 2026-10-13
-(`-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-wyqkhqz/72399f1c-a616-4361-87ed-0e1f1bcee98e.jsonl`).
+(`-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-wyqkhqz/72399f1c-a616-4361-87ed-0e1f1bcee98e.jsonl`).
 
 At 17:14:43Z the sitting wrote: "The operator's reply settles the open
 question. I'll check how the sitting should carry out the routing before
@@ -92,30 +92,30 @@ had a qualifying hunt: the witness's escalations are scripted by its patrol
 formula.
 
 Session files, under `/Users/gc/orch-homes/agent1/.claude/projects/`:
-1. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-jliz3j/10e87087-8917-4fc9-bc74-ad5743eb0162.jsonl`
-2. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-nekbtz/6c01302e-2116-4e4d-9a38-f5c53b3c972f.jsonl`
-3. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-0x913e/18518ac8-ac92-4cb5-8ebc-2e13f71d4405.jsonl`
-4. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-fable-gc-toolkit-tk-tomdkqk/c165c45f-9c7c-4d8c-82eb-2bf0335e7970.jsonl`
-5. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-hpjrr0/b1e99e3b-4753-424a-b4f3-ae0fb91d1b7a.jsonl`
-6. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-l26xp9/3dd1d6b7-e4c2-419e-823a-bcf37f74447e.jsonl`
-7. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-5/44c89b63-d199-475a-9fa4-5afc52cee60a.jsonl`
-8. `-Users-gc-Code-loomington--gc-agents-mechanik/12cf364e-7ae1-4022-bd91-8a3f3d67a524.jsonl`
-9. `-Users-gc-Code-loomington--gc-agents-mechanik/9606d217-ce4d-4ab1-ae6b-e07fd0d25e17.jsonl`
-10. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-2/d6d44716-5f36-4de7-baf4-45d236de8984.jsonl`
-11. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-proactive-gc-toolkit-proactive-2/bd09c0b1-783b-43e0-8e91-d14d8d647611.jsonl`
-12. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-proactive-gc-toolkit-proactive-1/2da1b587-a367-4068-9139-ac34babe3ad6.jsonl`
-13. `-Users-gc-Code-loomington--gc-worktrees-gascity-polecats-gc-toolkit-polecat-2/abf8066b-022e-47e2-968d-735aef67b537.jsonl`
-14. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-fable-gc-toolkit-tk-fw8w1w/1d34eda6-c66d-400c-937b-c77dd7f68953.jsonl`
-15. and 24. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-a9fnmtw/b1def40f-40f0-49ea-a4e6-d4ccb90e7dca.jsonl`
-16. and 17. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-fable-gc-toolkit-tk-eywd7n/05d7d8cb-d80e-4f87-a5bc-9d6c2d39281e.jsonl`
-18. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-vijqp9x/00947cbb-e6bd-48ae-b3d6-361ab703548f.jsonl`
-19. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-m8ibue/409b8fb7-f9e2-422d-bb7b-1801f99eddac.jsonl`
-20. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-5/1a90cfab-0820-4be4-b266-0bed5f8f2543.jsonl`
-21. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-ghgl4x/2870ce8f-74d7-4801-a351-5a8f11a76929.jsonl`
-22. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-hmhbznk/ffa6d173-74bf-4661-bc87-c13688b80ebe.jsonl`
-23. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-r2zb925/83d72190-fb6e-4007-ad00-82433fa76257.jsonl`
-25. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-glv85mz/ea641b9f-f319-4234-aa60-de610911f34f.jsonl`
-26. `-Users-gc-Code-loomington--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-3/7b1883f2-6c81-454c-b6fa-87b52c42ea86.jsonl`
+1. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-jliz3j/10e87087-8917-4fc9-bc74-ad5743eb0162.jsonl`
+2. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-nekbtz/6c01302e-2116-4e4d-9a38-f5c53b3c972f.jsonl`
+3. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-0x913e/18518ac8-ac92-4cb5-8ebc-2e13f71d4405.jsonl`
+4. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-fable-gc-toolkit-tk-tomdkqk/c165c45f-9c7c-4d8c-82eb-2bf0335e7970.jsonl`
+5. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-hpjrr0/b1e99e3b-4753-424a-b4f3-ae0fb91d1b7a.jsonl`
+6. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-l26xp9/3dd1d6b7-e4c2-419e-823a-bcf37f74447e.jsonl`
+7. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-5/44c89b63-d199-475a-9fa4-5afc52cee60a.jsonl`
+8. `-Users-gc-Code-mycity--gc-agents-mechanik/12cf364e-7ae1-4022-bd91-8a3f3d67a524.jsonl`
+9. `-Users-gc-Code-mycity--gc-agents-mechanik/9606d217-ce4d-4ab1-ae6b-e07fd0d25e17.jsonl`
+10. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-2/d6d44716-5f36-4de7-baf4-45d236de8984.jsonl`
+11. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-proactive-gc-toolkit-proactive-2/bd09c0b1-783b-43e0-8e91-d14d8d647611.jsonl`
+12. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-proactive-gc-toolkit-proactive-1/2da1b587-a367-4068-9139-ac34babe3ad6.jsonl`
+13. `-Users-gc-Code-mycity--gc-worktrees-gascity-polecats-gc-toolkit-polecat-2/abf8066b-022e-47e2-968d-735aef67b537.jsonl`
+14. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-fable-gc-toolkit-tk-fw8w1w/1d34eda6-c66d-400c-937b-c77dd7f68953.jsonl`
+15. and 24. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-a9fnmtw/b1def40f-40f0-49ea-a4e6-d4ccb90e7dca.jsonl`
+16. and 17. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-fable-gc-toolkit-tk-eywd7n/05d7d8cb-d80e-4f87-a5bc-9d6c2d39281e.jsonl`
+18. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-vijqp9x/00947cbb-e6bd-48ae-b3d6-361ab703548f.jsonl`
+19. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-m8ibue/409b8fb7-f9e2-422d-bb7b-1801f99eddac.jsonl`
+20. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-5/1a90cfab-0820-4be4-b266-0bed5f8f2543.jsonl`
+21. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-ghgl4x/2870ce8f-74d7-4801-a351-5a8f11a76929.jsonl`
+22. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-hmhbznk/ffa6d173-74bf-4661-bc87-c13688b80ebe.jsonl`
+23. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-r2zb925/83d72190-fb6e-4007-ad00-82433fa76257.jsonl`
+25. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-converse-opus-gc-toolkit-tk-glv85mz/ea641b9f-f319-4234-aa60-de610911f34f.jsonl`
+26. `-Users-gc-Code-mycity--gc-worktrees-gc-toolkit-polecats-gc-toolkit-polecat-3/7b1883f2-6c81-454c-b6fa-87b52c42ea86.jsonl`
 
 ## The description check
 

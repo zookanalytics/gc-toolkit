@@ -97,7 +97,7 @@ FIX='[
   {"id":"r1","metadata":{"gc.kind":"workflow","gc.session_name":"slot-1"}},
   {"id":"r2","metadata":{"gc.kind":"scope","gc.session_name":"slot-1"}},
   {"id":"r3","metadata":{"gc.kind":"spec","gc.session_name":"slot-1"}},
-  {"id":"s1","metadata":{"gc.session_id":"lx-1","gc.session_affinity":"require"}},
+  {"id":"s1","metadata":{"gc.session_id":"hq-1","gc.session_affinity":"require"}},
   {"id":"w1","assignee":"gc-toolkit/gc-toolkit.rictus"},
   {"id":"v1","metadata":{"task_kind":"visit","gc.continuation_group":"tk-subj"}}
 ]'
@@ -126,15 +126,15 @@ FIX3='[
   {"id":"m1","metadata":null},
   {"id":"m2","assignee":""},
   {"id":"m3","metadata":{"gc.kind":""}},
-  {"id":"m4","metadata":{"gc.session_id":"lx-9"}}
+  {"id":"m4","metadata":{"gc.session_id":"hq-9"}}
 ]'
 eq "$(keep "$FIX3")" "m1,m2,m3,m4" \
    "null, absent, and empty gc.kind all survive (no topology kind to match)"
 
 # Survivors keep every field they arrived with — the liveness loop reads the bead,
 # and host-bead-skip's `.owner` stamp must survive.
-eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"gc.session_id":"lx-9"}}]' \
-      | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "lx-9" \
+eq "$(printf '%s' '[{"id":"f1","owner":"hq-9","metadata":{"gc.session_id":"hq-9"}}]' \
+      | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "hq-9" \
    "a survivor keeps its fields (including the .owner host-bead-skip stamped)"
 
 # --- The composed pipeline: host-bead-skip then topology-root-skip. -----------
@@ -146,7 +146,7 @@ eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"gc.session_id":"lx-9"
 # survives to be recovered.
 FIX4='[
   {"id":"tk-root","assignee":null,"metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-2-pool"}},
-  {"id":"tk-step","assignee":null,"metadata":{"gc.session_id":"lx-dead","gc.session_affinity":"require","branch":"polecat/tk-step"}}
+  {"id":"tk-step","assignee":null,"metadata":{"gc.session_id":"hq-dead","gc.session_affinity":"require","branch":"polecat/tk-step"}}
 ]'
 eq "$(pipeline "$FIX4")" "tk-step" \
    "host-bead-skip | topology-root-skip drops the owned workflow root (tk-usezg2 shape), keeps the dead-session step orphan"

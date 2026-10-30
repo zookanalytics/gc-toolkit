@@ -133,8 +133,8 @@ old_map() {
 # A city-scoped wisp registers a BARE alias; its beads carry a rig-qualified
 # assignee. A pool polecat registers a RIG-QUALIFIED alias; a bead may carry the
 # bare form. Same city, both directions, at the same time.
-MAP_CITYWISP='{"lx-wisp-q5qbl":"active","s-lx-wisp-q5qbl":"active","gc-toolkit.gc-z0vi2":"active"}'
-MAP_POOL='{"lx-fjnq1":"active","gc-toolkit__polecat-lx-fjnq1":"active","gc-toolkit/gc-toolkit.furiosa":"active"}'
+MAP_CITYWISP='{"hq-wisp-q5qbl":"active","s-hq-wisp-q5qbl":"active","gc-toolkit.gc-z0vi2":"active"}'
+MAP_POOL='{"hq-fjnq1":"active","gc-toolkit__polecat-hq-fjnq1":"active","gc-toolkit/gc-toolkit.furiosa":"active"}'
 
 # --- Premise: the bug is real and this is the exact shape that fired. ---------
 eq "$(old_state "$MAP_CITYWISP" "gascity/gc-toolkit.gc-z0vi2")" "absent" \
@@ -222,27 +222,27 @@ eq "$(state "$MAP_CITYWISP" "gascity/")" "absent" \
 # session's bead or orphans a live one. A workflow ROOT names only
 # gc.session_name, but a root is not recoverable work: topology-root-skip drops
 # it before the lookup (case S).
-MAP_STEP='{"lx-3rk8v":"active","gc-toolkit--gc-toolkit__polecat-1-pool":"active"}'
+MAP_STEP='{"hq-3rk8v":"active","gc-toolkit--gc-toolkit__polecat-1-pool":"active"}'
 
 # (Q) The recovery case: the session gc.session_id names is gone from the map.
-eq "$(bead_state "$MAP_STEP" '{"id":"st1","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit__polecat-lx-7xcse","gc.session_affinity":"require"}}')" "absent" \
+eq "$(bead_state "$MAP_STEP" '{"id":"st1","metadata":{"gc.session_id":"hq-7xcse","gc.session_name":"gc-toolkit__polecat-hq-7xcse","gc.session_affinity":"require"}}')" "absent" \
    "(Q) step bead, no assignee, DEAD gc.session_id -> absent (orphaned)"
 # (Q) The same shape on a live session must be left alone.
-eq "$(bead_state "$MAP_STEP" '{"id":"st2","metadata":{"gc.session_id":"lx-3rk8v","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "active" \
+eq "$(bead_state "$MAP_STEP" '{"id":"st2","metadata":{"gc.session_id":"hq-3rk8v","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "active" \
    "(Q) step bead, no assignee, LIVE gc.session_id -> active (not orphaned)"
 # (R) A dead id beside a live session name still reads dead. A session name
 #     derived from an identity, such as a tmux_alias pool's runtime name, is
 #     carried again by whichever session holds that identity next; the id names
 #     only the session that will never return. This is why the owner precedence
 #     puts the id ahead of BOTH labels.
-eq "$(bead_state "$MAP_STEP" '{"id":"st3","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "absent" \
+eq "$(bead_state "$MAP_STEP" '{"id":"st3","metadata":{"gc.session_id":"hq-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "absent" \
    "(R) dead session id outranks a live pool slot name -> still orphaned"
 # (R) The same, one level in: the assignee is the alias the dead session
 #     claimed under, which the next session given that alias carries again, as
 #     a named session's or a namepool member's is. An assignee-first precedence
 #     reads that later session's life as the dead owner's, and the bead is
 #     stranded in_progress forever. Only the id remembers who died.
-eq "$(bead_state "$MAP_STEP" '{"id":"st4","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "absent" \
+eq "$(bead_state "$MAP_STEP" '{"id":"st4","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"hq-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "absent" \
    "(R) dead session id outranks a LIVE alias assignee -> orphaned, not stranded"
 # (S) A workflow root is topology, not recoverable work — topology-root-skip
 #     drops it before the lookup, so it never resolves to a liveness state at
@@ -253,7 +253,7 @@ eq "$(bead_state "$MAP_STEP" '{"id":"st4","assignee":"gc-toolkit--gc-toolkit__po
 #     not liveness: the same drop whether the name is live or dead.
 eq "$(bead_state "$MAP_STEP" '{"id":"rt1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "" \
    "(S) workflow root on a LIVE session name is dropped, never resolved (no warrant against a live session)"
-eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-lx-7xcse"}}')" "" \
+eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-hq-7xcse"}}')" "" \
    "(S) workflow root on a dead per-instance name is dropped too (kind decides, not liveness)"
 # (T) With no session id to be more specific than it, the assignee decides —
 #     the established assignee path is untouched for every bead that has one.
@@ -261,7 +261,7 @@ eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"active"}' '{"id":"b1","assig
    "(T) assignee alone still decides a bead carrying no session id"
 # (T) A live session id keeps its bead when the assignee is the one that died,
 #     so the reordering cannot manufacture an orphan either.
-eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"closed","lx-3rk8v":"active"}' '{"id":"b3","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_id":"lx-3rk8v"}}')" "active" \
+eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"closed","hq-3rk8v":"active"}' '{"id":"b3","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_id":"hq-3rk8v"}}')" "active" \
    "(T) live session id outranks a dead assignee -> not orphaned"
 # (U) The normalizing retry applies to a session-derived owner like any other.
 eq "$(bead_state '{"gascity/gc-toolkit.gc-z0vi2":"active"}' '{"id":"b2","metadata":{"gc.session_name":"gc-toolkit.gc-z0vi2"}}')" "active" \
@@ -270,6 +270,18 @@ eq "$(bead_state '{"gascity/gc-toolkit.gc-z0vi2":"active"}' '{"id":"b2","metadat
 #     resolve, and inventing an owner for it would be the false-orphan path.
 eq "$(bead_state "$MAP_STEP" '{"id":"n1","metadata":{"gc.kind":"workflow","gc.root_bead_id":"tk-root"}}')" "" \
    "(V) ownerless bead is dropped by the filter, never classified"
+# (AF) A visit engage bound to a sitting names that sitting's runtime name in its
+#      assignee, before the sitting starts. When the create fails, its row
+#      either stays open in failed-create or, closed by the rollback, leaves
+#      the list. Both are dead, so the visit is orphaned. A sitting still
+#      starting is owned, and its visit is left alone.
+VISIT_BOUND='{"id":"gc-v1","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human"}}'
+eq "$(bead_state '{"hq-wisp-tjt3y":"failed-create","s-hq-wisp-tjt3y":"failed-create"}' "$VISIT_BOUND")" "failed-create" \
+   "(AF) visit bound to a sitting whose failed create is still open -> failed-create (orphaned)"
+eq "$(bead_state "$MAP_STEP" "$VISIT_BOUND")" "absent" \
+   "(AF) visit bound to a sitting whose failed create closed -> absent (orphaned)"
+eq "$(bead_state '{"hq-wisp-tjt3y":"start-pending","s-hq-wisp-tjt3y":"start-pending"}' "$VISIT_BOUND")" "start-pending" \
+   "(AF) visit bound to a sitting the reconciler has not started yet -> start-pending (owned)"
 
 # --- Fail-safe guard: only an unloadable map may skip orphan recovery. -------
 # The fail safe is a predicate, not a judgment call. The liveness-map-guard
@@ -362,8 +374,8 @@ guard_map() {
 # The live steady state: the session list names every session that has not
 # closed, and no closed one.
 SESSIONS_LIVE='{"ok":true,"sessions":[
-  {"id":"lx-3rk8v","name":"gc-toolkit--gc-toolkit__polecat-1-pool","state":"active"},
-  {"id":"lx-fjnq1","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active"}]}'
+  {"id":"hq-3rk8v","name":"gc-toolkit--gc-toolkit__polecat-1-pool","state":"active"},
+  {"id":"hq-fjnq1","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active"}]}'
 
 # (W) The shape the fail safe must not fire on: a populated map that omits the
 #     sessions the stalled beads name. Orphan recovery must proceed.
@@ -371,7 +383,7 @@ eq "$(guard "$SESSIONS_LIVE")" "4|" \
    "(W) populated map, owners it does not name -> no trip, recovery proceeds"
 # (W) The two halves must agree: the same map that does not trip still resolves
 #     the missing owner to 'absent', which is the orphan signal, not drift.
-eq "$(state "$(guard_map "$SESSIONS_LIVE")" "lx-41aa7")" "absent" \
+eq "$(state "$(guard_map "$SESSIONS_LIVE")" "hq-41aa7")" "absent" \
    "(W) an owner absent from a non-tripping map still classifies as orphaned"
 # (W) And a named owner in that same map is still live — the map is usable, so
 #     both answers come from it rather than from a blanket skip.
@@ -396,7 +408,7 @@ eq "$(guard '[]')" "0|session list unreadable" \
 # (Z) The session list is the map's only source: every key is one of a listed
 #     session's identities, carrying that session's state.
 eq "$(guard_map "$SESSIONS_LIVE" | jq -cS .)" \
-   '{"gc-toolkit--gc-toolkit__polecat-1-pool":"active","gc-toolkit/gc-toolkit.furiosa":"active","lx-3rk8v":"active","lx-fjnq1":"active"}' \
+   '{"gc-toolkit--gc-toolkit__polecat-1-pool":"active","gc-toolkit/gc-toolkit.furiosa":"active","hq-3rk8v":"active","hq-fjnq1":"active"}' \
    "(Z) the map is exactly the listed sessions' identities"
 # (Z) And the guard reads nothing else. Closed sessions are session beads in
 #     the city store, a set that grows with every session the city runs. A
@@ -464,11 +476,11 @@ grep -qF 'never returns a row' "$TOML" \
 # the session that replaces it. The session list puts the newest session first,
 # so the dead predecessor is listed AFTER its live successor.
 SHARED_SLOT='{"ok":true,"sessions":[
-  {"id":"lx-new","session_name":"gc-toolkit__polecat-lx-new","agent_name":"gc-toolkit/gc-toolkit.polecat-2","state":"active"},
-  {"id":"lx-old","session_name":"gc-toolkit__polecat-lx-old","agent_name":"gc-toolkit/gc-toolkit.polecat-2","state":"archived"}]}'
+  {"id":"hq-new","session_name":"gc-toolkit__polecat-hq-new","agent_name":"gc-toolkit/gc-toolkit.polecat-2","state":"active"},
+  {"id":"hq-old","session_name":"gc-toolkit__polecat-hq-old","agent_name":"gc-toolkit/gc-toolkit.polecat-2","state":"archived"}]}'
 SHARED_ALIAS='{"ok":true,"sessions":[
-  {"id":"lx-new","alias":"gc-toolkit/gc-toolkit.witness","state":"active"},
-  {"id":"lx-old","alias":"gc-toolkit/gc-toolkit.witness","state":"failed-create"}]}'
+  {"id":"hq-new","alias":"gc-toolkit/gc-toolkit.witness","state":"active"},
+  {"id":"hq-old","alias":"gc-toolkit/gc-toolkit.witness","state":"failed-create"}]}'
 SLOT="gc-toolkit/gc-toolkit.polecat-2"
 WITNESS="gc-toolkit/gc-toolkit.witness"
 
@@ -484,14 +496,14 @@ eq "$(state "$(guard_map "$SHARED_SLOT")" "$SLOT")" "active" \
 eq "$(state "$(guard_map "$SHARED_ALIAS")" "$WITNESS")" "active" \
    "(AD) alias shared with a failed-create predecessor -> live successor's state"
 SHARED_ALIAS_DEAD_FIRST='{"ok":true,"sessions":[
-  {"id":"lx-old","alias":"gc-toolkit/gc-toolkit.witness","state":"failed-create"},
-  {"id":"lx-new","alias":"gc-toolkit/gc-toolkit.witness","state":"active"}]}'
+  {"id":"hq-old","alias":"gc-toolkit/gc-toolkit.witness","state":"failed-create"},
+  {"id":"hq-new","alias":"gc-toolkit/gc-toolkit.witness","state":"active"}]}'
 eq "$(state "$(guard_map "$SHARED_ALIAS_DEAD_FIRST")" "$WITNESS")" "active" \
    "(AD) the shared key resolves live whichever row is listed first"
 # (AD) The predecessor's own keys stay dead, so its work is still recovered.
-eq "$(state "$(guard_map "$SHARED_ALIAS")" "lx-old")" "failed-create" \
+eq "$(state "$(guard_map "$SHARED_ALIAS")" "hq-old")" "failed-create" \
    "(AD) the failed-create session's own id still resolves dead (orphaned)"
-eq "$(state "$(guard_map "$SHARED_SLOT")" "gc-toolkit__polecat-lx-old")" "archived" \
+eq "$(state "$(guard_map "$SHARED_SLOT")" "gc-toolkit__polecat-hq-old")" "archived" \
    "(AD) the archived session's own name still resolves dead (orphaned)"
 # (AD) A key every holder of which is dead stays dead, and two live holders
 #      keep the later entry, as the map always did.

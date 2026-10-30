@@ -83,8 +83,8 @@ them.
 
 ## Evidence
 
-Session `lx-3r9dc`, template `gc-toolkit/gc-toolkit.converse`, tmux
-session `gc-toolkit__converse-lx-3r9dc`.
+Session `hq-3r9dc`, template `gc-toolkit/gc-toolkit.converse`, tmux
+session `gc-toolkit__converse-hq-3r9dc`.
 
 | time (2026-08-20 UTC) | fact | source |
 |---|---|---|
@@ -114,7 +114,7 @@ Two facts pin the mechanism:
   chose to exit" is exactly the wrong conclusion, and it is the reading
   the string invites.
 
-The session id is not guesswork: `lx-3r9dc` appears 11 times inside the
+The session id is not guesswork: `hq-3r9dc` appears 11 times inside the
 lost transcript, and it is the id carried in the 22:04:15 stop payload.
 
 ## The window, and why nothing closed it

@@ -60,11 +60,14 @@ design record.
    `tools/gc-proactive.sh demand`.
 
 3. **mr-only for code.** A first reaction is notes-only by default. The
-   security invariant — any code-producing proactive output takes the
-   correctness-gated `mr` path, never `direct` — is enforced by the city default
-   (`default_merge_strategy = "mr"`) and this agent's `GC_DEFAULT_MERGE_
-   STRATEGY = "mr"`. A reaction bead is a plain task with no merge path of its
-   own: work a reaction routes goes to the polecat pool, whose default is `mr`.
+   security invariant is that code a reaction produces reaches main only
+   through a PR. Code a reaction writes carries `merge_strategy=mr` itself, as
+   this agent's prompt tells it to, so it opens a PR wherever it lands. A
+   reaction bead is a plain task with no merge path of its own. Work a reaction
+   routes is its subject's own, and it lands by the subject's target like any
+   bead's. Aimed at main, it goes through a PR, because the refinery resolves
+   a bead that would land `direct` on the default branch to `mr`. Aimed at an
+   integration branch, it reaches main in that branch's PR.
 
 ## Notes
 
@@ -77,7 +80,7 @@ The first reaction NEVER closes its subject — every disposition advances it
 and leaves it open, the `close` disposition included: it routes the subject to a
 validating closer (mol-validate-close), which re-checks the no-work call and
 closes the subject on its own confident check or escalates.
-`assets/scripts/first-reaction-dispose.sh` performs the five, stamps
+`assets/scripts/first-reaction-dispose.sh` performs each of them, stamps
 `gc.reacted_by=<R>` on the subject as the completion marker, and closes the
 reaction bead R — exactly-once is the substrate's, keyed on R's identity, not a
 done-marker on the subject. The card in the subject's notes records which
@@ -98,6 +101,6 @@ Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — `sling` files a
 reaction bead tracking the subject and routes it here; the create-R-once dedup
 skips a subject that already has an open reaction; scan/demand drop graph-structural
 beads; one `scan --sling` sweep is capped; the slice tool fences reached content.
-`assets/scripts/first-reaction-dispose.test.sh` covers the five exits themselves.
+`assets/scripts/first-reaction-dispose.test.sh` covers the exits themselves.
 Design refs: specs/tk-5n01ns/reaction-bead-first-reaction.md; design-doc.md Key
 Components 5-6, Phase 4.

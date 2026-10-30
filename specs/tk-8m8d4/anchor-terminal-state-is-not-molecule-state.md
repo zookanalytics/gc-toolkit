@@ -10,8 +10,8 @@ Design record for the tk-8m8d4 fix to `assets/scripts/quiesce-completed-workflow
 ## 1. What happened
 
 The pass de-routed and un-assigned the frontier step of a LIVE rework molecule 87
-seconds after a polecat claimed it (signal-loom `sl-xhfl`, step `sl-um8j`
-`workspace-setup.attempt.1`, anchor `sl-ew4w` / PR #533). The molecule kept moving
+seconds after a polecat claimed it (rig-a `ra-xhfl`, step `ra-um8j`
+`workspace-setup.attempt.1`, anchor `ra-ew4w` / PR #533). The molecule kept moving
 for eleven more minutes and then stopped for good.
 
 Reconstructed from `dolt_history_issues`, the strip is unambiguous — route cleared
@@ -19,8 +19,8 @@ first, assignee one second later, this pass's exact two-write signature:
 
 | time (2026-08-11) | event |
 |---|---|
-| 19:16:41 | rework molecule `sl-xhfl` materialized (root + 29 step beads) |
-| 19:17:42 | polecat `lx-vge0` claims `sl-um8j` |
+| 19:16:41 | rework molecule `ra-xhfl` materialized (root + 29 step beads) |
+| 19:17:42 | polecat `hq-vge0` claims `ra-um8j` |
 | 19:19:09 | `gc.routed_to` cleared |
 | 19:19:10 | assignee cleared |
 | 19:19:39 | the molecule closes `load-context.attempt.1` — it was still running |
@@ -42,7 +42,7 @@ Any predicate read from the anchor alone is therefore ambiguous in two direction
 2. **The marker arrived mid-flight.** `mol-scoped-work` dispatches its steps one at
    a time and the refinery stamps the anchor at the submit step, while
    `cleanup-worktree` and `workflow-finalize` still have to run. Observed on
-   `sl-jnjd`, whose `cleanup-worktree.attempt.1` (`sl-wmf1`) was left unrouted and
+   `ra-jnjd`, whose `cleanup-worktree.attempt.1` (`ra-wmf1`) was left unrouted and
    never claimed, so the root could never close. Protecting only `workflow-finalize`
    does not help: the escape path is a chain, and this de-routes a link before it.
 
@@ -57,10 +57,10 @@ records the latter. Measured, not assumed:
 | Candidate | Verdict |
 |---|---|
 | a companion `merge_result_at` field | does not exist; every writer of `merge_result` in this pack stamps the value alone |
-| the anchor's `updated_at` | rewritten constantly by other patrols — `sl-ew4w` was written 30+ times in the three minutes around the strip |
-| the anchor's `started_at` | moves with the anchor's LATEST claim: `sl-ew4w` reads 2026-08-13, two days after the rework molecule it was supposed to date |
+| the anchor's `updated_at` | rewritten constantly by other patrols — `ra-ew4w` was written 30+ times in the three minutes around the strip |
+| the anchor's `started_at` | moves with the anchor's LATEST claim: `ra-ew4w` reads 2026-08-13, two days after the rework molecule it was supposed to date |
 | `bd history <id> --json` | its snapshots carry no `metadata` and no `assignee` at all (keys stop at `updated_at`), so it cannot answer when a marker was written |
-| `bd history <id> --events --json` | does carry metadata diffs, but is a strict subset of the commit history (44 events against 100+ commits on `sl-ew4w`) — an audit log, not a reconstruction source |
+| `bd history <id> --events --json` | does carry metadata diffs, but is a strict subset of the commit history (44 events against 100+ commits on `ra-ew4w`) — an audit log, not a reconstruction source |
 | the anchor's session vs the molecule's | ~half of real anchors carry no `gc.session_name` at all (12 recent gc-toolkit anchors sampled: 6 empty), and a freshly-poured root has none either, so the comparison fails closed on the common case and silently matches empty-to-empty on the dangerous one |
 | a grace period on molecule age | narrows the window; a rework that runs longer than the grace is stripped exactly as before |
 
@@ -93,7 +93,7 @@ claimed a third property — *no rollout gap*: the stamp was written on first si
 and the same pass swept, on the reasoning that "every molecule alive when a stamp
 lands predates it, so behavior on the existing population is unchanged". Both halves
 are true and the conclusion does not follow. Behavior on the existing population being
-*unchanged* is the defect, not the safety argument: `sl-xhfl` — a live rework molecule
+*unchanged* is the defect, not the safety argument: `ra-xhfl` — a live rework molecule
 under an anchor terminal for three hours — is a member of that population, and a stamp
 written after it was poured places nothing. Guard 1 swept the exact molecule it was
 written to protect, whenever the pass met the anchor mid-episode: at rollout, after a
@@ -140,9 +140,9 @@ sibling pass measured three such molecules on this rig, all with landed anchors.
 
 They cover each other's blind spot, and neither covers both live instances:
 
-| | `sl-xhfl` (rework) | `sl-jnjd` (mid-flight teardown) |
+| | `ra-xhfl` (rework) | `ra-jnjd` (mid-flight teardown) |
 |---|---|---|
-| guard 1 | catches it — the anchor was terminal for three hours before the pour, so a dated transition postdates the molecule and an undated episode declines to decide (tk-fotoi; the historical strip is the undated arm, since the pass had never seen `sl-ew4w` live) | misses — the anchor went terminal DURING the molecule's life |
+| guard 1 | catches it — the anchor was terminal for three hours before the pour, so a dated transition postdates the molecule and an undated episode declines to decide (tk-fotoi; the historical strip is the undated arm, since the pass had never seen `ra-ew4w` live) | misses — the anchor went terminal DURING the molecule's life |
 | guard 2 | misses at the moment of the strip: the molecule had closed nothing yet (its first close came 30s later) | catches it — the graph had closed many steps |
 
 Guard 2 alone would also have left the dominant case unfixed: a rework dispatched
@@ -164,7 +164,7 @@ needs to see which of the two is holding a husk back. Three inputs land there: a
 anchor never observed live, a transition stamp the store REFUSED, and one it accepted
 and did not store. The last is why the write is read back at all; no exit status
 distinguishes it from a clean write, and the earlier cut treated both as bookkeeping
-and swept anyway — which put the `sl-xhfl` strip one wedged store away.
+and swept anyway — which put the `ra-xhfl` strip one wedged store away.
 
 ## 7. Not in this change
 
@@ -179,5 +179,5 @@ and swept anyway — which put the `sl-xhfl` strip one wedged store away.
   worth of husks.
 - Finalizing a husk's step graph rather than quiescing it, which remains the durable
   upstream fix and is out of scope here as it was in tk-p9ji9.
-- Unsticking `sl-xhfl` / `sl-jnjd` themselves — both were already force-closed by
+- Unsticking `ra-xhfl` / `ra-jnjd` themselves — both were already force-closed by
   hand on 2026-08-13/14, before this bead was claimed.

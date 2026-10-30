@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # pr-visit-comment-wiring.test.sh — proves the converse close paths produce the
 # right PR-reminder update. The moot/benign silent close (converse-close-out.sh)
-# closes the visit itself, so it reaches pr-visit-comment.sh directly, resolved
-# off a candidate root — a recorder planted at
-# $GC_RIG_ROOT/assets/scripts/pr-visit-comment.sh stands in and records the call.
+# closes the visit itself, so it reaches pr-visit-comment.sh directly, beside
+# itself in the pack — a recorder planted beside a copy of the pack's scripts
+# stands in and records the call.
 # The normal sign-off (converse-signoff.sh) runs BEFORE the visit closes, so it
 # must not post yet: it stashes the close text (gc.pr_visit_summary /
 # gc.pr_visit_actions) on the visit, and converse-settle's close step or
@@ -29,10 +29,15 @@ TMPD="$(mktemp -d "${TMPDIR:-/tmp}/pr-visit-comment-wiring.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; mkdir -p "$BIN"
 
-# A stub rig root the candidate loop finds first (GC_RIG_ROOT), carrying the
-# recorder in place of pr-visit-comment.sh and a no-op gc-helm.sh for the
-# sign-off's takeaway write.
-SR="$TMPD/rig"; mkdir -p "$SR/assets/scripts"
+# A stub pack whose scripts link to this tree's, with the recorder in place of
+# pr-visit-comment.sh and a no-op gc-helm.sh for the sign-off's takeaway write.
+# The sign-off and the close-out run from it, so their siblings are these.
+SR="$TMPD/pack"; mkdir -p "$SR/assets/scripts"
+for f in "$HERE"/*.sh; do
+  case "$f" in *.test.sh) continue ;; esac
+  ln -s "$f" "$SR/assets/scripts/${f##*/}"
+done
+rm -f "$SR/assets/scripts/pr-visit-comment.sh" "$SR/assets/scripts/gc-helm.sh"
 cat >"$SR/assets/scripts/pr-visit-comment.sh" <<'REC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${PVC_LOG:?}"
@@ -86,8 +91,8 @@ chmod +x "$BIN/gc"
 echo "── converse-signoff.sh stashes the PR-reminder close text on the visit (posted only after the close) ──"
 PVC_LOG="$TMPD/signoff.pvc"; : >"$PVC_LOG"
 GC_UPDATE_LOG="$TMPD/signoff.upd"; : >"$GC_UPDATE_LOG"
-( PATH="$BIN:$PATH" GC_RIG_ROOT="$SR" PVC_LOG="$PVC_LOG" GC_UPDATE_LOG="$GC_UPDATE_LOG" \
-  bash "$SIGNOFF" --visit tk-vis --subject tk-subj --outcome "we shipped it" --ruled no --still-owed "await deploy" ) >/dev/null 2>&1
+( PATH="$BIN:$PATH" PVC_LOG="$PVC_LOG" GC_UPDATE_LOG="$GC_UPDATE_LOG" \
+  bash "$SR/assets/scripts/converse-signoff.sh" --visit tk-vis --subject tk-subj --outcome "we shipped it" --ruled no --still-owed "await deploy" ) >/dev/null 2>&1
 has "the stash lands on the visit" 'update tk-vis' "$GC_UPDATE_LOG"
 has "the takeaway is stashed as the summary" 'gc.pr_visit_summary=we shipped it' "$GC_UPDATE_LOG"
 has "what is still owed is stashed as the actions" 'gc.pr_visit_actions=still owed: await deploy' "$GC_UPDATE_LOG"
@@ -100,8 +105,8 @@ else bad "the sign-off does not post the reminder before the close" "PVC_LOG not
 echo "── converse-close-out.sh updates the reminder on a moot/benign close ──"
 PVC_LOG="$TMPD/closeout.pvc"; : >"$PVC_LOG"
 rm -f "$STATE.o" "$STATE.r" "$STATE.st"   # a fresh visit: no stamp yet, status open
-( PATH="$BIN:$PATH" GC_RIG_ROOT="$SR" PVC_LOG="$PVC_LOG" \
-  VISIT=tk-vis SUBJECT=tk-subj bash "$CLOSEOUT" moot "the premise died before anyone claimed it" ) >/dev/null 2>&1
+( PATH="$BIN:$PATH" PVC_LOG="$PVC_LOG" \
+  VISIT=tk-vis SUBJECT=tk-subj bash "$SR/assets/scripts/converse-close-out.sh" moot "the premise died before anyone claimed it" ) >/dev/null 2>&1
 has "the reminder is closed for the visit, on its subject" \
     'close --visit tk-vis --subject tk-subj' "$PVC_LOG"
 has "the outcome word is carried" '--outcome moot' "$PVC_LOG"

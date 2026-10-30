@@ -7,9 +7,10 @@
 # situation under a single continuation group, so the group is a bucket, not a
 # topic. Keying the fold on the group alone folds unrelated sittings together
 # (one lost) or folds two live sittings into each other (both lost). The TOPIC
-# that decides sameness is a `key:`-prefixed escalation_key, else the subject;
-# and the lowest-id tiebreak plus the tracks-edge recovery of an empty group
-# stamp are each load-bearing.
+# that decides sameness is the visit's fold topic (visit-topic.sh): its
+# escalation_key, the visit itself when it was filed for a distinct concern,
+# else its subject. The lowest-id tiebreak and the tracks-edge recovery of an
+# empty group stamp are each load-bearing.
 #
 # A fold never crosses stores. Folding closes the visit and moves any PR merge
 # hold it carries onto the holder (visit-close.sh --into), and merge.sh reads a
@@ -27,10 +28,10 @@
 # Output: four eval-able assignments on stdout, each value single-quoted so a
 # caller can `eval` them without a metacharacter in the data becoming syntax —
 #   SUBJECT=<recovered-or-passed group>
-#   TOPIC=<what decides sameness>
+#   TOPIC=<what decides sameness; empty when this visit's own row did not read>
 #   HOLDER=<$VISIT when you hold it, the id of another visit in this one's
-#           store to fold into it, EMPTY when this visit's own store did not
-#           read (hold, do not fold)>
+#           store to fold into it, EMPTY when this visit's own row or its
+#           own store did not read (hold, do not fold)>
 #   MISFILED=<the live visits on this topic, this one included, that sit in a
 #           different store from their subject, space-separated; empty when
 #           there are none or no rig carries the subject's prefix>
@@ -42,6 +43,10 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "converse-fold: cannot source visit-identity.sh from $HERE" >&2; exit 3; }
+# The one definition of a visit's topic, shared with converse-hold.sh and
+# converse-signoff.sh. Exposes $VISIT_TOPIC_JQ.
+# shellcheck source=visit-topic.sh
+. "$HERE/visit-topic.sh" || { echo "converse-fold: cannot source visit-topic.sh from $HERE" >&2; exit 3; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -84,19 +89,27 @@ V=$(gc bd show "$VISIT" --json | scrub)
 if [ -z "$SUBJECT" ]; then
   SUBJECT=$(printf '%s' "$V" | jq -r "$VISIT_IDENTITY_JQ"'(.[0] // {}) | visit_subject')
 fi
-# The TOPIC decides sameness, and it is not always a bead: an escalate.sh
-# visit carries its situation in escalation_key, which is the only stamp
-# that tells two findings of one bucket apart. The `key:` prefix keeps a
-# key and a bead id from ever comparing equal. This one definition computes
-# the topic of this visit and of every sibling it is compared against.
-TOPIC_JQ='
-  def topic($subject):
-    (.metadata.escalation_key // "") as $k
-    | if $k != "" then "key:" + $k else $subject end;'
-TOPIC=$(printf '%s' "$V" | jq -r --arg s "$SUBJECT" "$TOPIC_JQ"'(.[0] // {}) | topic($s)')
-TOPIC="${TOPIC:-$SUBJECT}"
+# The TOPIC decides sameness, and it is not always a bead. visit_fold_topic
+# computes it, for this visit and for every sibling it is compared against. A
+# visit filed for a distinct concern has itself as its topic, so it matches no
+# sibling: it never folds into a live sitting on its subject, and no later
+# sitting on the subject folds into it.
+# The topic is read off this visit's own row. A row that did not read carries
+# no stamp, and taking it as keyless would give it the subject's topic and fold
+# a visit that has a topic of its own into a sibling, so an unread row proves
+# no sameness: hold, never fold.
+VISIT_READ=$(printf '%s' "$V" | jq -r --arg v "$VISIT" 'if type == "array" and ((.[0].id // "") == $v) then "yes" else "" end' 2>/dev/null)
+if [ -n "$VISIT_READ" ]; then
+  TOPIC=$(printf '%s' "$V" | jq -r --arg s "$SUBJECT" "$VISIT_TOPIC_JQ"'.[0] | visit_fold_topic($s)')
+  TOPIC="${TOPIC:-$SUBJECT}"
+else
+  TOPIC=""
+fi
 MISFILED=""
-if [ -z "$SUBJECT" ]; then
+if [ -n "$SUBJECT" ] && [ -z "$VISIT_READ" ]; then
+  echo "converse-fold: $VISIT did not read, so its topic cannot be proven; hold, do not fold" >&2
+  HOLDER=""
+elif [ -z "$SUBJECT" ]; then
   # Neither recording resolved. With an empty $s every predicate below
   # degenerates to matching every empty-group visit — an unstamped visit's
   # topic falls back to $s and matches as well — and the lowest-id
@@ -111,7 +124,7 @@ else
   # The scan reads the in_progress listing, the live sittings, of every rig's
   # store: this visit's own for the holder, and every other one for a sitting on
   # this topic that was filed in the wrong store.
-  SCOPES=$(run_bounded gc rig list --json 2>/dev/null | scrub \
+  SCOPES=$("$HERE/rig-map.sh" \
     | jq -r '.rigs[]? | select((.path // "") != "")
              | [.path, ((.suspended // false) | tostring), (.prefix // "")] | join("\u001f")' 2>/dev/null)
   if [ -z "$SCOPES" ]; then
@@ -151,13 +164,13 @@ SCOPES_EOF
     # so ITS subject is read the shared way.
     SCAN=$(printf '%s' "$UNION" | jq -s -c --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" \
         --arg vp "$VISIT_PREFIX" --arg sp "$SUBJECT_PREFIX" --argjson sk "$SUBJECT_STORE" \
-        "$VISIT_IDENTITY_JQ$TOPIC_JQ"'
+        "$VISIT_IDENTITY_JQ$VISIT_TOPIC_JQ"'
         def store: split("-")[0];
         [ (add // [])[]
           | select((.metadata.task_kind // "")=="visit")
           | (visit_subject) as $cg
           | select($cg==$s)
-          | select(topic($s)==$t)
+          | select(visit_fold_topic($s)==$t)
           | select((.assignee // "")!="")
           | (.id // "") | strings | select(. != "") ]
         + [$v] | unique

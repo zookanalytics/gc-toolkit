@@ -760,7 +760,7 @@ reset_and_advance() {
 }
 
 advanced=0; healed=0; blocked=0
-rigs=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"') || exit 0
+rigs=$("$SELF_DIR/rig-map.sh" | jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"') || exit 0
 
 while IFS=$'\t' read -r name path; do
     [ -n "${name:-}" ] && [ -d "$path/.git" ] || continue

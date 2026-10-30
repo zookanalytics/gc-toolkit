@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for the gctk-bin block: the one line by which a formula step,
-# the review frame, self-review-check.sh and rig-check-pre-existing.sh find the
-# gctk binary they call directly, as $GCTK. Formula text has no include
+# review-evidence.sh, self-review-check.sh and rig-check-pre-existing.sh find
+# the gctk binary they call directly, as $GCTK. Formula text has no include
 # mechanism, so each caller carries the line in a `# >>> gctk-bin` block, and
 # this holds every copy to the one definition and runs it.
 #
@@ -12,9 +12,7 @@
 #   - the line takes $GCTK_BIN as given, else the city's build under
 #     $GC_CITY_PATH, and names no binary a caller could run when neither is
 #     set, under bash and zsh;
-#   - every file that calls "$GCTK" sets it through the block, except the
-#     correctness method, whose review frame sets it in the review-workspace-add
-#     block that the method's blocks run after.
+#   - every file that calls "$GCTK" sets it through the block.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +29,7 @@ LINE='GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'
 
 echo "# every copy is the one line"
 git -C "$ROOT" grep -l -F -e '# >>> gctk-bin' -- formulas skills assets/scripts ':!*.test.sh' > "$TMP/files"
-eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/rig-check-pre-existing.sh assets/scripts/self-review-check.sh formulas/mol-polecat-work.toml formulas/mol-refinery-patrol.toml formulas/mol-review.toml " \
+eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/self-review-check.sh formulas/mol-polecat-work.toml formulas/mol-refinery-patrol.toml " \
   "the block sits in the files that call gctk directly"
 while IFS= read -r f; do
   awk '/# >>> gctk-bin$/ {f = 1; n++; next} /# <<< gctk-bin$/ {f = 0; next} f {print n "\t" $0}' "$ROOT/$f" > "$TMP/copies"
@@ -56,15 +54,7 @@ done
 echo "# every caller sets GCTK through the block"
 git -C "$ROOT" grep -l -F -e '"$GCTK" rig' -- formulas skills assets/scripts ':!*.test.sh' > "$TMP/callers"
 while IFS= read -r f; do
-  case "$f" in
-    skills/review-correctness/SKILL.md)
-      awk '/^# >>> review-workspace-add$/ {f = 1} f {print} /^# <<< review-workspace-add$/ {f = 0}' "$ROOT/formulas/mol-review.toml" > "$TMP/frame"
-      grep -q -F -x -e "$LINE" "$TMP/frame" \
-        && ok "$f: its review frame sets GCTK in review-workspace-add" \
-        || bad "$f: its review frame's review-workspace-add block sets no GCTK" ;;
-    *)
-      grep -q -F -x -e '# >>> gctk-bin' "$ROOT/$f" && ok "$f: sets GCTK through the block" || bad "$f: calls \"\$GCTK\" with no gctk-bin block" ;;
-  esac
+  grep -q -F -x -e '# >>> gctk-bin' "$ROOT/$f" && ok "$f: sets GCTK through the block" || bad "$f: calls \"\$GCTK\" with no gctk-bin block"
 done < "$TMP/callers"
 
 echo "---"

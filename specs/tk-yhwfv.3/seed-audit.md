@@ -8,7 +8,7 @@ description: Design record for generated/seed-audit/ and assets/scripts/render-s
 - **Bead:** tk-yhwfv.3 — "Materialize the agent seed as a versioned audit artifact"
 - **Epic:** tk-yhwfv — Context budget: audit and reduce always-on prompt context
 - **Siblings:** tk-23wdf (per-agent ledger), tk-yhwfv.1 (leg 2 cuts), tk-yhwfv.2 (harness floor)
-- **Built:** 2026-08-23, city `/home/zook/loomington`, `gc` 1.4.1, git 2.55.0
+- **Built:** 2026-08-23, city `/home/zook/mycity`, `gc` 1.4.1, git 2.55.0
 - **Author:** gc-toolkit/gc-toolkit.nux (polecat, claude provider)
 
 ## Scope
@@ -45,7 +45,7 @@ The bead's premise was that both halves already render deterministically via
 anything a golden file can hold, because **`gc prime` renders against whatever
 city is in scope, and a city contributes prompt text of its own.**
 
-`/home/zook/loomington/city.toml` carries:
+`/home/zook/mycity/city.toml` carries:
 
 ```toml
 [agent_defaults]
@@ -55,7 +55,7 @@ append_fragments = ["command-glossary", "operational-awareness"]
 
 Those two fragments are **6,773 B — 19% — of the polecat seed**. Measured:
 `gc prime polecat` renders 29,289 B against a pack-only city and 36,062 B
-against loomington; the entire delta is `## Operational Awareness` and the
+against mycity; the entire delta is `## Operational Awareness` and the
 command glossary, and neither is in this repo.
 
 That leaves two candidate render bases, and only one of them can be committed:
@@ -73,7 +73,7 @@ That leaves two candidate render bases, and only one of them can be committed:
 The resolution is to keep the second and remove its blind spot by **pinning the
 city-level scenario inside the renderer**: the throwaway city declares the same
 `[agent_defaults]`, the same providers, and two rig shapes matching the two that
-exist in loomington. The scenario is repo content, so it is reviewed and diffed
+exist in mycity. The scenario is repo content, so it is reviewed and diffed
 like anything else, and the artifact stays a pure function of the repo.
 
 Three mechanical requirements follow, and all are load-bearing:
@@ -91,7 +91,7 @@ Three mechanical requirements follow, and all are load-bearing:
   *caller's* identity into the output — a polecat running the renderer by hand
   otherwise writes its own agent name and worktree path into the committed
   artifact. Measured: with the ambient environment intact the render emitted
-  `Working directory: /home/zook/loomington/.gc/worktrees/.../gc-toolkit.nux`.
+  `Working directory: /home/zook/mycity/.gc/worktrees/.../gc-toolkit.nux`.
 - **Machine paths are normalized** to `[[PACK-ROOT]]`, `[[CITY-ROOT]]`,
   `[[HOME]]`, longest-needle-first. Twelve agents cite the city root; mechanik
   and keeper cite their own pack dir via `{{.ConfigDir}}`.
@@ -108,16 +108,16 @@ pre-seeded cache. Without them the formula roster comes back at 14 of 28.
 The bead asked for the rendered polecat prompt to match a live polecat seed
 within ~1%. The result is far tighter, and it holds across the roster.
 
-Method: render each agent in the live loomington city with the same scrubbed
+Method: render each agent in the live mycity city with the same scrubbed
 environment and the same path normalization, then diff against the committed
 artifact.
 
 ```bash
-cd /home/zook/loomington/rigs/gc-toolkit
+cd /home/zook/mycity/rigs/gc-toolkit
 env -i PATH="$PATH" HOME="$HOME" TERM=dumb NO_COLOR=1 \
-    gc --city /home/zook/loomington prime polecat \
-  | sed -e "s|/home/zook/loomington/rigs/gc-toolkit|[[PACK-ROOT]]|g" \
-        -e "s|/home/zook/loomington|[[CITY-ROOT]]|g" \
+    gc --city /home/zook/mycity prime polecat \
+  | sed -e "s|/home/zook/mycity/rigs/gc-toolkit|[[PACK-ROOT]]|g" \
+        -e "s|/home/zook/mycity|[[CITY-ROOT]]|g" \
         -e "s|/home/zook|[[HOME]]|g" \
   | diff - docs/seed-audit/agents/polecat.md
 ```
@@ -154,7 +154,7 @@ live:     rig repo at `[[PACK-ROOT]]`
 artifact: rig repo at `[[CITY-ROOT]]/rigs/gc-toolkit`
 ```
 
-That is a fact about loomington, not about rendering: there the rig checkout
+That is a fact about mycity, not about rendering: there the rig checkout
 *is* the pack directory (`[rigs.imports.gc-toolkit] source = "rigs/gc-toolkit"`),
 so `RigRoot` and the pack root coincide. In the scenario they are different
 directories. Worst case 0.04%.
@@ -181,7 +181,7 @@ gc prime polecat --rig <plain rig>     → 36,346 B   (identical)
 ```
 
 Confirmed against the live city too: `polecat` renders 36,062 B for all four of
-`gc-toolkit`, `signal-loom`, `gascity`, `shutupandlisten`, and
+`gc-toolkit`, `rig-a`, `gascity`, `rig-b`, and
 `gascity/gc-toolkit.polecat`, `gc-toolkit/gc-toolkit.polecat` and bare `polecat`
 all render the same bytes — while `gc config show` reports gascity's polecat and
 refinery carrying `rebase-conventions` + `polecat-patterns` /

@@ -83,7 +83,7 @@ func TestProbeTimeoutRejectsZero(t *testing.T) {
 // pickerReads are the tile fields tmux-pick-helm.sh dereferences, read off the
 // script rather than listed here: a remembered list drifts out of step with the
 // script without failing.
-var pickerReads = regexp.MustCompile(`\.(held|severity|id|rig|title|frontier)\b`)
+var pickerReads = regexp.MustCompile(`\.(held|visit_state|severity|id|rig|title|frontier|needs)\b`)
 
 // emittedKeys serializes one tile through the CLI's own renderer and reads the
 // real bytes rather than reflecting over the struct, so a stray omitempty is
@@ -97,7 +97,7 @@ func emittedKeys(t *testing.T) []string {
 		ID: "tk-parity", Title: "parity fixture", Kind: "convoy", Source: "convoy",
 		Rig: "gc-toolkit", Prefix: "tk", Priority: &prio,
 		UpdatedAt:   time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
-		Description: "blocks sl-abc12",
+		Description: "blocks ra-abc12",
 		Owned:       &owned,
 		Takeaway:    "a headline", TakeawayAt: "2026-08-11T15:00:00Z", TakeawayBy: "host",
 		WaitingOn: []string{"tk-w1"}, WaitingOnClosed: []string{"tk-w1"},
@@ -111,8 +111,8 @@ func emittedKeys(t *testing.T) []string {
 	f := board.Facts{
 		Visits:     map[string]bool{"tk-parity": true},
 		OwnerState: map[string]string{"polecat-live": "active"},
-		Prefixes:   []string{"tk", "sl"},
-		RigNames:   []string{"gc-toolkit", "signal-loom"},
+		Prefixes:   []string{"tk", "ra"},
+		RigNames:   []string{"gc-toolkit", "rig-a"},
 	}
 	b := board.BuildBoard([]board.Anchor{a}, time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC), false, nil, f)
 
@@ -206,7 +206,7 @@ func boardWithAnOwedRow(partial bool) board.Board {
 	}
 	var errs []string
 	if partial {
-		errs = []string{"signal-loom: store unreadable"}
+		errs = []string{"rig-a: store unreadable"}
 	}
 	return board.BuildBoard(anchors, now, partial, errs, board.Facts{})
 }
@@ -280,7 +280,7 @@ func TestEmptyQueueFromAPartialGatherIsNotAnAnswer(t *testing.T) {
 		t.Error("an empty queue from a WHOLE gather is a real answer")
 	}
 
-	partial := board.BuildBoard(nil, time.Now(), true, []string{"signal-loom: store unreadable"}, board.Facts{})
+	partial := board.BuildBoard(nil, time.Now(), true, []string{"rig-a: store unreadable"}, board.Facts{})
 	if !selectView(partial, false, 0).unprovable {
 		t.Error("an empty queue from a PARTIAL gather proves nothing")
 	}

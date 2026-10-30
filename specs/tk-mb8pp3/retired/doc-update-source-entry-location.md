@@ -9,9 +9,9 @@ metadata:
 
 doc-keeper `doc-update` beads (label `doc-keeper`/`doc-update`, `task_kind=doc-update`) carry a **Provenance** block ending in `Source entry: <name>.md`. That file lives in the **mechanik / town-root auto-memory**, NOT this rig's memory:
 
-`/home/zook/.claude/projects/-home-zook-loomington/memory/<name>.md`
+`/home/zook/.claude/projects/-home-zook-mycity/memory/<name>.md`
 
-(distinct from a polecat/refinery's own rig memory at `-home-zook-loomington-rigs-gc-toolkit/memory/`). Read it directly with the Read tool — one `find /home/zook -maxdepth 6 -name '<name>.md'` locates it if the path drifts.
+(distinct from a polecat/refinery's own rig memory at `-home-zook-mycity-rigs-gc-toolkit/memory/`). Read it directly with the Read tool — one `find /home/zook -maxdepth 6 -name '<name>.md'` locates it if the path drifts.
 
 **Mandate:** the source entry is a mechanik incident note; the brief gets the **durable principle + audit/method only, paraphrased**. Deliberately OMIT the volatile incident detail the source carries: dated inventories (e.g. "2026-05-27"), bead/commit IDs, absolute home paths, internal fork URLs, and stale pack paths (`.gc/system/packs/...` is retired; "maintenance" pack folded into core — don't transcribe either; see [[gascity-agents-doc-source-of-truth]]). If review shows the fact is already in the brief or doesn't belong, close as a no-op.
 

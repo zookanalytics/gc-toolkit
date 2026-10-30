@@ -52,7 +52,11 @@ Definitions:
   visit and make it unclaimable (`formulas/mol-visit.toml`).
 - **Topic** — what makes two visits the same sitting, which is not always
   a bead: `escalation_key` when `escalate.sh` filed the visit for one
-  situation, the subject otherwise. The fold check keys on `$TOPIC`.
+  situation, the visit itself when it was opened for a concern of its own
+  (`visit_topic=own`, stamped by `gc-helm.sh open --allow-duplicate`, which
+  `engage` uses when the operator asks for a new visit), the subject
+  otherwise. The fold check keys on `$TOPIC`, and a sitting whose topic is
+  not its subject files its demands under that topic.
 - **Demand** — what a person owes, as a native human gate
   (`issue_type=gate`, `await_type=human`): a ruling files unassigned, a task
   only a person can perform is assigned to them, and the assignment is what
@@ -101,6 +105,14 @@ step-5 hold and the step-7 sign-off both.
   reassurance-adjective (`proven`, `safe`, `costs nothing`). A single
   obvious course is one recommendation, not a manufactured list.
 
+**Record each hand-back on the visit, then post it.** The operator reads a
+sitting in a terminal tab, and the pane goes when the sitting ends. The tab
+then prints the last hand-back recorded on the visit, so record every one you
+post, each framing and the sign-off, as its own text: the header, the body and
+the decision, never the detail above them or the close-out line below. Each
+record replaces the one before. The step-5 and step-7 skills carry the command,
+and a record that fails does not hold the post back.
+
 **A hand-back with nothing for the operator to decide is legal.**
 Sometimes the whole point of a sitting is that they wanted to know
 something and now do, and an invented decision spends the attention
@@ -112,29 +124,23 @@ one held visit. Erring closed loses the thread.
 The loop, every visit:
 
 1. **Claim.** `assets/scripts/converse-claim.sh` is your only source of
-   work. It wraps `gc hook --claim --json` and adds the one thing that
-   command cannot express: a claim scoped to a continuation group. It puts
-   an out-of-group turn back unclaimed, completes the close of a sitting
-   whose record is already done, and reports which of the four verdicts
-   applies. Resolve it once, then let it decide:
+   work. It wraps `gc hook --claim --json`: it names a visit this session
+   already holds rather than working it again, completes the close of a
+   sitting whose record is already done, and reports which of the four
+   verdicts applies. Resolve it once, then let it decide:
 
    ```bash
-   CONV=""
-   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-     [ -x "$cand/assets/scripts/converse-claim.sh" ] && { CONV="$cand/assets/scripts"; break; }
-   done
+   CONV=$(gc {{ .BindingName }} scripts-dir) && [ -x "$CONV/converse-claim.sh" ] || CONV=""
    if [ -z "$CONV" ]; then
-     # Nothing here can scope or release a claim without it, and claiming raw
-     # would strand a held visit or run an out-of-group turn to its close.
+     # Nothing here can tell a held visit from a fresh one without it, and
+     # claiming raw would work a held visit to its close.
      gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: converse-claim.sh missing" \
-       -m "No converse-claim.sh on any candidate root; this converse session cannot claim within its group. Not claiming raw."
+       -m "gc {{ .BindingName }} scripts-dir named no pack holding converse-claim.sh; this converse session cannot claim. Not claiming raw."
      gc runtime drain-ack; exit 0
    fi
    # --sh sets ACTION / VISIT / SUBJECT / REASON and echoes the verdict and the
-   # BEGAN diagnostic to stderr. First claim passes no group; a re-claim (step 8)
-   # passes $SUBJECT. A finish keeps the caller's $SUBJECT, since its own group
-   # is not this thread's.
-   eval "$("$CONV/converse-claim.sh" --sh "${SUBJECT:-}")"
+   # BEGAN diagnostic to stderr.
+   eval "$("$CONV/converse-claim.sh" --sh)"
    case "$ACTION" in
      drain) gc runtime drain-ack; exit 0 ;;
      # Only drain is cased: hold, finish and work fall through with ACTION /
@@ -144,29 +150,22 @@ The loop, every visit:
    Work only the bead the claim returns. `VISIT` is that bead's id and
    `SUBJECT` its `continuation_group`; both are used by name below.
 
-   **A claim outside your current group is not yours to work.** The
-   script puts an out-of-group turn BACK, unclaimed, and tells you to
-   drain. `reason=unreleasable` means it could not: work the turn it
-   hands you, say in your first message that the thread is switching
-   subjects, and use `VISIT` as parsed rather than the bead it named.
-
    **`action=finish` — this visit's sitting is over and only its close is
    missing.** Everything durable a sitting writes had already landed when
    the session died: the takeaway on the subject, the demand and the hold
    discharged, and `gc.outcome` stamped on the visit. What was lost is the
    `gc bd close` that follows that stamp, and the claimer performs it as it
-   hands the line back. Then go to step 8 and claim again.
+   hands the line back. Then drain (**How this thread ends**).
    **Post nothing, and run none of steps 2 through 7.** Their writes all
    landed once already, so re-running them stamps a second takeaway over the
    sitting's own and re-states a demand that was answered. A visit carrying
    the stamp already had its last word, and repeating a sign-off for a
    conversation this pane never saw reads as a sitting nobody had.
 
-   Re-claiming only ends the finish when the close took. A visit still open
-   is offered back under the same reason and finishes to the same refusal,
-   so escalate and `gc runtime drain-ack` instead of returning to step 8. A
-   visit that cannot be closed keeps its subject out of the unnamed-wait
-   census for as long as it stands, and clearing it is a person's work.
+   A close the claimer could not complete leaves the visit open, and it says
+   so on stderr. Escalate that before you drain: a visit that cannot be
+   closed keeps its subject out of the unnamed-wait census for as long as it
+   stands, and clearing it is a person's work.
 
    **`action=hold` — this bead is already assigned to this session
    identity.** Do not `drain-ack` it and do not work it: draining
@@ -238,9 +237,9 @@ The loop, every visit:
    "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
      --into "$HOLDER" --outcome folded --reason "folded into $HOLDER"
    ```
-   Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
-   continue. When it is EMPTY the listing did not read, which proves nothing —
-   hold.
+   Then drain (**How this thread ends**). When `$HOLDER` is `$VISIT` you are the holder: prep and
+   continue. When it is EMPTY the listing or the visit's own row did not
+   read, which proves nothing — hold.
 
    `$HOLDER` is always a visit in this visit's own store, because a fold never
    crosses stores: the merge-hold keys it moves hold a PR's merge only in that
@@ -251,9 +250,9 @@ The loop, every visit:
    framing's detail which visits are misfiled, because correcting a misfile is
    the operator's call.
 
-**Steps 2–8 — the working procedure lives in skills that load when you
+**Steps 2–7 — the working procedure lives in skills that load when you
 reach the step.** Step 1 is the entry point and stays inline; steps 2
-through 8 are carried by the skills named below. Load the named skill WHEN
+through 7 are carried by the skills named below. Load the named skill WHEN
 you reach its step, and run the step from the skill rather than from memory.
 
 **This table is the authoritative route — load by the name here, never by
@@ -271,7 +270,6 @@ even when you think you remember the procedure.
 | **Steps 3–4** — title the session, then prime the subject, once the premise holds | `converse-prep` |
 | **Step 5** — hold: file the demand gate and post the framing *(safety-critical)* | `converse-hold` |
 | **Steps 6–7** — record the outcome, sign off, and close the visit *(safety-critical close)* | `converse-settle` |
-| **Step 8** — continue within this group, or drain | `converse-continue` |
 | **Acting on a ruling, at any step** | `work`, `waits`, `records`, `prs` |
 
 Step 1's arms name later steps by number: its `action=hold` recovery
@@ -280,8 +278,7 @@ re-opens a held sitting "at step 4 and then step 5", its `finish` arm runs
 "fall through to step 2". The Rules below do the same — the low-context
 path runs "step 6 ... then step 7". Read every such step number through
 this table: step 2 is `converse-recheck-premise`, step 4 `converse-prep`,
-step 5 `converse-hold`, steps 6–7 `converse-settle`, step 8
-`converse-continue`.
+step 5 `converse-hold`, and steps 6–7 `converse-settle`.
 
 Rules:
 
@@ -313,30 +310,38 @@ Rules:
   `gc.hold_demand` it stamps there before it waits. A sitting dropped
   before step 5 never stamped it, so `action=hold` reads it as a fresh
   claim rather than a hold to resume.
-- **How this thread ends — a closed visit, and no clock cuts the hold short.**
-  A held sitting ends when its visit closes. Two things close one, and
-  both are explicit: your own sign-off (step 7) and the operator's
-  `gc-helm dismiss` — the close-out you put at the foot of every framing
-  (step 5); it infers this sitting's subject, so it needs no id. Your
-  sign-off closes only when nothing important is still pending: a turn that
-  hands the operator important information — a live decision, a routing
-  answer, anything they may want to respond to — posts the hand-back and
-  leaves the visit open, and that thread ends on a later turn instead.
-  `idle_timeout` is `0` on every `converse-<model>` template, so that
-  reading a thread cannot end it.
-  Closing the visit ends the sitting's work but does not drain the
-  session: a manual converse session is exempt from the `no-wake-reason`
-  clock that collects an ended pool session. The `converse-reap` order
-  (`assets/scripts/converse-reap.sh`) closes the settled session on a
-  later pass, once its visit reads closed or gone; it reaps only an
-  UNATTACHED pane, so a closed-visit sitting you are still attached to
-  waits until it is no longer attended. The per-model sittings run
-  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a
-  restart replays the thread and the sitting continues; the durable
-  demand and the step-1 re-claim guard cover the rare respawn that comes
-  up without it. The record never lives only in the thread, and the
-  discipline is unchanged: the sign-off has to land before you close, not after;
-  stamp the takeaway when the hold BEGINS (step 5); and append the outcome as
+- **How this thread ends — a closed visit ends the session, and no clock
+  cuts the hold short.** A held sitting ends when its visit closes. Two
+  things close one, and both are explicit: your own sign-off (step 7) and
+  the operator's `gc-helm dismiss` — the close-out you put at the foot of
+  every framing (step 5); it infers this sitting's subject, so it needs no
+  id. Your sign-off closes only when nothing important is still pending: a
+  turn that hands the operator important information — a live decision, a
+  routing answer, anything they may want to respond to — posts the
+  hand-back and leaves the visit open, and that thread ends on a later turn
+  instead. `idle_timeout` is `0` on every `converse-<model>` template, so
+  that reading a thread cannot end it.
+  A closed visit ends this session, whichever path closed it: the
+  sign-off, a fold at step 1, a moot or benign close at step 2, or a
+  finish. Once the close has landed and every write that must follow it
+  has run, such as a no-work disposal's second `bead-rehome.sh` run, drain,
+  with nothing after it:
+  ```bash
+  gc runtime drain-ack
+  ```
+  Never claim again. A closed visit has no next turn here, and a turn on
+  another subject belongs to a sitting of its own. The operator's
+  `gc-helm dismiss` stops this session itself. A tab showing the sitting
+  does not hold it open: the tab exits when the session ends and prints
+  the last hand-back recorded on the visit. The `converse-reap` order
+  (`assets/scripts/converse-reap.sh`) closes any converse session that
+  outlives its closed visit. The per-model sittings run
+  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a restart
+  replays the thread and the sitting continues; the durable demand and
+  step 1's `action=hold` arm cover the rare respawn that comes up without
+  it. The record never lives only in the thread, and the discipline is
+  unchanged: the sign-off has to land before you close, not after; stamp
+  the takeaway when the hold BEGINS (step 5); and append the outcome as
   soon as a sitting settles anything (step 6). That is what the board reads
   and a later reader inherits. Mechanism: `docs/human-engagement.md`
   → "How a held sitting ends".

@@ -60,7 +60,7 @@ HELM="$REPO/assets/scripts/gc-helm.sh"
 # pages: each pin below reads the one that carries the text it guards.
 ENGAGE="$REPO/docs/human-engagement.md"
 ENGAGE_GC="$REPO/docs/gascity/human-engagement.md"
-# Steps 2–8 are carried by on-demand skills; step 1 and the routing table stay
+# Steps 2–7 are carried by on-demand skills; step 1 and the routing table stay
 # in the prompt. Each pin below reads the file that carries the text it guards:
 # the prompt for step 1, the routing table and the shared Definitions/Rules, and
 # the per-step skill for a moved step body.
@@ -68,7 +68,7 @@ SK_RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"  # step 2
 SK_PREP="$REPO/skills/converse-prep/SKILL.md"                # steps 3–4
 SK_HOLD="$REPO/skills/converse-hold/SKILL.md"                # step 5
 SK_SETTLE="$REPO/skills/converse-settle/SKILL.md"            # steps 6–7
-SK_CONTINUE="$REPO/skills/converse-continue/SKILL.md"        # step 8
+SK_CONTINUE="$REPO/skills/converse-continue/SKILL.md"        # must not ship
 
 PASS=0
 FAIL=0
@@ -101,7 +101,7 @@ eq() {
 }
 
 for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" "$ENGAGE_GC" \
-    "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE" "$SK_CONTINUE"; do
+    "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE"; do
     [ -r "$f" ] || {
         printf 'converse-signoff: cannot read %s\n' "$f" >&2
         exit 1
@@ -312,7 +312,7 @@ echo "── the loop's step numbering still resolves ──"
 # Inserting a step renumbers every step after it AND every cross-reference to
 # them ("stamp the takeaway at hold time (step 5)"). A stale pointer sends the
 # role to the wrong step, and nothing at runtime notices. Step 1 is inline
-# (`1. **Claim.**`); steps 2–8 are named by the routing table (`**Step N**` /
+# (`1. **Claim.**`); steps 2–7 are named by the routing table (`**Step N**` /
 # `**Steps N–M**`). The steps that EXIST are the union of the two, ranges
 # expanded, and a `step N` reference is stale when it points outside that set.
 steps_defined="$(
@@ -529,54 +529,51 @@ lacks "no 'is one bounded sitting' definition anywhere in the doc" \
     "a visit is a request FOR one bounded sitting; the bare equation is the bug written as the model"
 
 echo "── the post-sitting ending is documented, not just the held one ──"
-# An operator lost an unsubmitted multi-paragraph reply. The
-# held-sitting section above reads as the complete account of how the pane
-# goes; it is not. Once a sitting ENDS its manual session stays up until the
-# converse-reap order closes it, on the first pass that finds the visit closed
-# and the pane unattached, and that close kills the pane and its process tree
-# outright: nothing reads the composer, and nothing warns. Every claim below is
-# load-bearing for a reader deciding whether a visible pane is safe to type
-# into, so each is pinned inside that section rather than anywhere in the doc.
-# The HEADING, not the phrase: the forward pointer in the held-sitting
-# section quotes the section name, so a bare phrase match passes even
-# with the section itself deleted (caught by mutating this file).
+# Once a sitting ENDS, its session goes, and the pane with it: the sitting's
+# own drain-ack ends it, dismiss stops it, and converse-reap closes one that
+# outlives its closed visit, attached or not. The stop kills the pane and its
+# process tree outright, so a reply typed and not sent goes with it. Every claim
+# below is load-bearing for a reader deciding whether a visible pane is safe to
+# type into, so each is pinned inside that section rather than anywhere in the
+# doc. The HEADING, not the phrase: the forward pointer in the held-sitting
+# section quotes the section name, so a bare phrase match passes even with the
+# section itself deleted.
 have "doc carries the post-sitting ending" '## How a pane dies when no sitting is live' "$ENGAGE"
 POST_SEC="$TMPD/post-sitting-section.txt"
 awk '/^## How a pane dies when no sitting is live/ {f=1; next} f && /^## / {exit} f {print}' \
-    "$ENGAGE" >"$POST_SEC"
-# What ends a settled sitting is the pack's reap, not a runtime clock: the
+    "$ENGAGE" | tr '\n' ' ' | tr -s ' ' >"$POST_SEC"
+# What ends a settled sitting is its own drain-ack, not a runtime clock: the
 # awake set keeps a manual session, so the pool's no-wake-reason drain never
-# reaches one. A section that drops either half has a reader trusting a clock
-# that does not run, or missing the one that does.
-have "the section names the reap that ends a settled sitting" 'converse-reap' "$POST_SEC"
-have "the section names the reap's close" 'gc session close' "$POST_SEC"
-have "the section says what holds the pane up" 'manual origin' "$POST_SEC"
+# reaches one. The reap is the backstop, and it no longer spares an attached
+# session.
+have "the section says the sitting ends its own session" 'gc runtime drain-ack' "$POST_SEC"
 have "the section says the pool drain does not reach a sitting" 'no-wake-reason' "$POST_SEC"
+have "the section names the reap as the backstop" 'converse-reap' "$POST_SEC"
+have "the section names the reap's close" 'gc session close' "$POST_SEC"
+have "…which closes a session whether or not anyone is attached" 'attached or not' "$POST_SEC"
 # The mechanism, pinned at the call that destroys the pane. A reader who
 # trusts a visible pane needs to know there is no interruption, no prompt and
 # no read-out first — the pane and everything composed in it goes in one step.
 have "the section names the destructor" 'KillSessionWithProcesses' "$POST_SEC"
 have "the section rules out the keystroke" 'no Ctrl-C keystroke injection into the pane' "$POST_SEC"
-# Regression guard, not decoration. The first version of this section
-# said the drain's first act was `Provider.Interrupt` -> SendKeysRaw C-c
-# clearing the composer, and THIS suite pinned that string — so the false
-# mechanism was load-bearing in two places at once and a corrected doc
-# would have failed the tests. `verifiedInterrupt` is the drain code's
-# only interrupt wrapper and has no caller outside its own unit test;
-# nothing on this path types into the pane. Keep it that way.
+have "…and says an unsent reply goes with the pane" 'goes with the pane' "$POST_SEC"
+# Regression guard: nothing on this path types into the pane. The stop kills
+# the pane's process tree through Provider.Stop and sends no keys.
 lacks "doc does not revive the keystroke mechanism" 'SendKeysRaw' "$ENGAGE" \
     "the stop kills the pane's process tree through Provider.Stop; it sends no keys"
-# Attachment is the reap's only proxy for a reader, and with one tmux client
-# switched between sessions it covers only the pane on screen. A reader who
-# takes "the reap skips attached panes" as protection for a pane they switched
-# away from is the one who loses a draft.
-have "the section says attachment covers only the pane on screen" 'one tmux client' "$POST_SEC"
-have "the section points at the upstream filing" 'gc-ze774' "$POST_SEC"
-# The operator's ruling is a PROHIBITION, and it is the part most likely
-# to be softened by a later edit into "capture it on the way out" — which
-# is the option they explicitly overrode. Pin the ruling itself, not a
-# paraphrase of it.
-have "doc carries the hard-no ruling" 'should be a hard no' "$POST_SEC"
+# The city's tmux server carries a client per sitting tab beside the main
+# connection, so attachment was never a single pane on screen.
+lacks "the doc does not claim the city runs one tmux client" 'one tmux client' "$ENGAGE" \
+    "the operator keeps a tab per sitting beside the main connection"
+# Viewing does not hold a sitting open, a tab exits and prints the last
+# hand-back, and the main connection moves on. Nothing copies the pane, so the
+# visit's record is what the tab prints. Pin the constraint and the mechanism
+# that carries it.
+have "doc says viewing holds no sitting open" 'nothing holds a session open because someone is viewing it' "$POST_SEC"
+have "…and that nothing copies the pane" 'Nothing copies the pane' "$POST_SEC"
+have "…the per-session tmux option that carries it" 'detach-on-destroy' "$POST_SEC"
+have "…the client flag the main connection keeps moving on with" '-f no-detach-on-destroy' "$POST_SEC"
+have "…and the tab printing the sitting's last hand-back" 'last hand-back the sitting recorded on it' "$POST_SEC"
 # A reader who finds the held-sitting section first must not stop there:
 # without a forward pointer the held-sitting account silently doubles as "all
 # the ways the pane goes", which is the reading that left this window
@@ -591,8 +588,8 @@ fi
 # Both role-facing copies carry it too. converse-opus is where someone goes to
 # tune idle_timeout, and the prompt is what the session reads at wake; a
 # correction that lands only in the central doc reaches neither.
-have "config names the reap that ends a settled sitting" 'converse-reap' "$ATOML"
-have "prompt names the reap that ends a settled sitting" 'converse-reap' "$PROMPT"
+have "config names the reap that closes a sitting outliving its visit" 'converse-reap' "$ATOML"
+have "prompt names the reap that closes a sitting outliving its visit" 'converse-reap' "$PROMPT"
 
 echo "── the writer the contract depends on still exists ──"
 have "gc-helm exposes the takeaway verb" 'cmd_takeaway()' "$HELM"
@@ -602,43 +599,42 @@ have "takeaway usage documents the converse caller" 'host|proactive|converse' "$
 have "takeaway stamps gc.takeaway" 'gc.takeaway=$text' "$HELM"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# THE CLAIM BOUNDARY — a turn is claimed WITHIN a continuation group
+# THE CLAIM — a sitting works the one visit its claim hands it
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# THE BUG: the converse design authority, `specs/tk-h9pq5/design-doc.md`, says
-# the role "re-claims within the group and drains when the group is dry". The
-# shipped prompt said the opposite — "a claim is authoritative even when it
-# names a different subject than your last one" — because `gc hook --claim`
-# has no group filter, so the scoped re-claim was not expressible with the tool
-# the prompt calls its only source of work. On 2026-08-22 an operator
-# mid-conversation about the helm board UI had an unrelated merge-skill visit
-# prepped in the same thread.
+# A sitting works one visit and ends its session as soon as that visit closes:
+# the sign-off, a fold, a moot or benign close and a finish each end in
+# `gc runtime drain-ack`, and nothing claims again. So the claim is never
+# scoped to a group, and a turn on another subject is never reached in a thread
+# an operator is reading: it belongs to a sitting of its own.
 #
-# THE FIX: `assets/scripts/converse-claim.sh` claims, and puts a foreign turn
-# BACK, unclaimed, before telling the session to drain. The release is the
-# load-bearing half — draining on a turn still assigned to a dying session is
-# worse than the bug, because the reconciler's reassign path refuses a held
-# visit by design.
+# `assets/scripts/converse-claim.sh` claims, and names a turn this session
+# already holds (hold) or whose record is complete with only its close missing
+# (finish), because `gc hook --claim` reports both as existing_assignment.
 #
 # These run the REAL script against a stubbed `gc` on PATH: no city, no Dolt.
 
-echo "── the claim boundary is scoped to the continuation group ──"
+echo "── the claim is the session's one visit ──"
 
 CLAIMER="$REPO/assets/scripts/converse-claim.sh"
-have "the claimer ships" "claim one turn FOR A CONTINUATION GROUP" "$CLAIMER"
+have "the claimer ships" "claim the turn a converse session works" "$CLAIMER"
 [ -x "$CLAIMER" ] && ok "the claimer is executable" || bad "the claimer is executable" "chmod +x $CLAIMER"
 
 # The prompt must not carry the sentence that broadened the contract, and must
 # route its claim through the claimer. Prose is where this silently reverts.
-# Key on the IMPERATIVE half. The sentence itself is QUOTED in step 1 as the
-# thing that was removed, so a literal matching the quote would fire on the
-# fix's own prose; "work it the same way" is the directive and appears nowhere
-# in that quotation.
-lacks "the prompt no longer authorises an out-of-group claim" \
+# Key on the IMPERATIVE half: "work it the same way" is the directive.
+lacks "the prompt does not authorise working a claim on another subject" \
       "work it the same way" "$PROMPT" \
-      "the broadened contract is back — this is the directive tk-msfmu removed"
+      "the broadened contract is back — a sitting works only its own visit"
 have "the prompt claims through the claimer" 'converse-claim.sh' "$PROMPT"
-have "step 8 re-claims within the group" "scoped to this thread's group" "$SK_CONTINUE"
+# No step re-claims after the close: the step that did is gone, its skill with
+# it, and every path that closes the visit drains instead.
+[ ! -e "$SK_CONTINUE" ] && ok "no skill re-claims after the visit closes" \
+    || bad "no skill re-claims after the visit closes" "$SK_CONTINUE still ships"
+lacks "the prompt routes no step to a re-claim" 'converse-continue' "$PROMPT" \
+      "the step table still sends a closed sitting to claim again"
+lacks "…and sends no path back to step 8" 'step 8' "$PROMPT" \
+      "a path that closes the visit must drain, not claim again"
 # The wake nudge is read BEFORE step 1, so a nudge naming the raw command
 # re-teaches the unscoped claim whatever the prompt says.
 #
@@ -762,313 +758,101 @@ exit 0
 GCC
 chmod +x "$CTMP/bin/gc"
 
-# run_claim <claim-json> <current-group> <show-json> [held-id ...]
-#   -> CRC / COUT / CUPD / CCLOSE
-# Any id listed after the show fixture reads back as STILL HELD, so a case can
-# hold one turn of a vacuumed set back and prove the verdict is gated on the
-# whole set rather than on the turn the claim happened to name.
+# run_claim <claim-json> <show-json> -> CRC / COUT / CUPD / CCLOSE
+# A trailing group argument is passed to the claimer the way a sitting started
+# on an earlier prompt still passes one, and the claimer reads none.
 # CLOSE_REFUSE arms the close-authority refusal for ONE run and is cleared
 # afterwards, so a refusal case cannot leak into the cases that follow it.
 CLOSE_REFUSE=""
 run_claim() {
     printf '%s' "$1" > "$CTMP/claim.json"
-    printf '%s' "$3" > "$CTMP/show.json"
+    printf '%s' "$2" > "$CTMP/show.json"
     rm -rf "$CTMP/show.d"
     mkdir -p "$CTMP/show.d"
-    _rc_group="$2"
-    shift 3
-    for _rc_held in "$@"; do
-        printf '[{"id":"%s","status":"in_progress","assignee":"converse-1"}]' \
-            "$_rc_held" > "$CTMP/show.d/$_rc_held.json"
-    done
     : > "$CTMP/updates"
     : > "$CTMP/closes"
     CRC=0
-    COUT=$(env PATH="$CTMP/bin:$PATH" FAKE_CLAIM="$CTMP/claim.json" \
+    # The sitting is converse-1, recorded under its alias as gc hook records a
+    # converse claim. No other identity from the shell running this suite
+    # reaches it.
+    COUT=$(env -u GC_SESSION_ID -u GC_SESSION_NAME -u GC_AGENT GC_ALIAS=converse-1 \
+               PATH="$CTMP/bin:$PATH" FAKE_CLAIM="$CTMP/claim.json" \
                FAKE_UPDATES="$CTMP/updates" FAKE_SHOW="$CTMP/show.json" \
                FAKE_SHOW_DIR="$CTMP/show.d" FAKE_CLOSES="$CTMP/closes" \
                FAKE_CLOSE_REFUSE="$CLOSE_REFUSE" \
-               sh "$CLAIMER" "$_rc_group" 2>"$CTMP/err") || CRC=$?
+               sh "$CLAIMER" tk-subj 2>"$CTMP/err") || CRC=$?
     CUPD=$(cat "$CTMP/updates")
     CCLOSE=$(cat "$CTMP/closes")
     CLOSE_REFUSE=""
 }
 
-RELEASED='[{"id":"tk-foreign","status":"open","assignee":null}]'
-HELD='[{"id":"tk-foreign","status":"in_progress","assignee":"converse-1"}]'
+OPENROW='[{"id":"tk-a","status":"open","assignee":null}]'
 
 # --- (NOWORK) an empty claim drains, and writes nothing ----------------------
-run_claim '{"ok":true}' "tk-subj" "$RELEASED"
+run_claim '{"ok":true}' "$OPENROW"
 eq "$COUT" "action=drain reason=no-work" "(NOWORK) an empty claim drains"
 eq "$CRC"  "1"                           "(NOWORK) …and exits 1 so a caller can branch on status"
 eq "${CUPD:-<none>}" "<none>"            "(NOWORK) …touching no bead"
 
-# --- (FIRST) the session's first claim has no group to scope to --------------
-run_claim '{"bead_id":"tk-a","continuation_group":"tk-subj"}' "" "$RELEASED"
-eq "$COUT" "action=work bead=tk-a group=tk-subj" "(FIRST) the first claim of a session is always workable"
-eq "$CRC"  "0"                                    "(FIRST) …exit 0"
-eq "${CUPD:-<none>}" "<none>"                     "(FIRST) …and is never released"
+# --- (WORK) the claim is this session's visit, whatever its group -----------
+run_claim '{"bead_id":"tk-a","continuation_group":"tk-subj"}' "$OPENROW"
+eq "$COUT" "action=work bead=tk-a group=tk-subj" "(WORK) a fresh claim is worked"
+eq "$CRC"  "0"                                    "(WORK) …exit 0"
+eq "${CUPD:-<none>}" "<none>"                     "(WORK) …and nothing is written"
+run_claim '{"bead_id":"tk-a","continuation_group":"tk-other"}' "$OPENROW"
+eq "$COUT" "action=work bead=tk-a group=tk-other" \
+   "(WORK) a claim in another group than the one a caller passes is worked too"
+eq "${CUPD:-<none>}" "<none>" "(WORK) …and is never put back"
 
-# --- (SAME) the group this thread is already about ---------------------------
-run_claim '{"bead_id":"tk-b","continuation_group":"tk-subj"}' "tk-subj" "$RELEASED"
-eq "$COUT" "action=work bead=tk-b group=tk-subj" "(SAME) a turn in the current group is worked"
-eq "${CUPD:-<none>}" "<none>"                     "(SAME) …with no release writes"
-
-# --- (NOGROUP) a claim that names no group cannot be proven foreign ----------
-run_claim '{"bead_id":"tk-c"}' "tk-subj" "$RELEASED"
-eq "$COUT" "action=work bead=tk-c group=" "(NOGROUP) an ungrouped turn is worked, not released on a guess"
+# --- (NOGROUP) a claim that names no group -----------------------------------
+run_claim '{"bead_id":"tk-c"}' "$OPENROW"
+eq "$COUT" "action=work bead=tk-c group=" "(NOGROUP) an ungrouped turn is worked"
 eq "${CUPD:-<none>}" "<none>"             "(NOGROUP) …and nothing is written"
 
 # --- (EMPTYSTAMP) the stamp is empty; the tracks edge still carries it -------
-# `gc hook --claim` reports the gc.continuation_group STAMP, and the
-# stamp lands empty on a minority of visits. An empty group turns the
-# deliberate (NOGROUP) fallback above from a rare benign case into THE failure
-# case, silently disabling this guard for exactly the turn it was written to
-# catch: an unrelated visit vacuumed onto a live sitting. A visit records its
-# subject twice, and the `tracks` edge has held where the stamp did not
-# (su-ab9je).
+# `gc hook --claim` reports the gc.continuation_group STAMP, and the stamp
+# lands empty on a minority of visits. The group is the SUBJECT the caller
+# works the sitting on, and the `tracks` edge has held where the stamp did not
+# (rb-ab9je), so the subject is recovered from it.
 VISIT_TRACKS='[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{"task_kind":"visit"},"dependencies":[{"id":"tk-other","dependency_type":"tracks"}]}]'
-
-run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-subj" "$VISIT_TRACKS"
-eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \
-   "(EMPTYSTAMP) an empty stamp is recovered from the tracks edge, and the guard fires"
-eq "$CRC" "1" "(EMPTYSTAMP) …the session is told to drain"
-grep -q -- '--status=open' <<< "$CUPD" \
-  && ok "(EMPTYSTAMP) …and the turn goes back to the pool" \
-  || bad "(EMPTYSTAMP) the recovered-foreign turn was never released: $CUPD"
-
-# The mirror. Recovery must not release a turn that IS this thread's — without
-# it the fix would drain every sitting whose stamp went missing.
-run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-other" "$VISIT_TRACKS"
+run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "$VISIT_TRACKS"
 eq "$COUT" "action=work bead=tk-foreign group=tk-other" \
-   "(EMPTYSTAMP) a recovered group that MATCHES this thread is worked"
-eq "${CUPD:-<none>}" "<none>" "(EMPTYSTAMP) …and nothing is released"
-
-# A visit carrying neither recording is still unprovable, so the pre-existing
-# fallback stands: work it rather than release on a guess.
-run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-subj" \
+   "(EMPTYSTAMP) an empty stamp is recovered from the visit's tracks edge"
+eq "${CUPD:-<none>}" "<none>" "(EMPTYSTAMP) …and nothing is written"
+run_claim '{"bead_id":"tk-foreign","continuation_group":""}' \
     '[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{"task_kind":"visit"}}]'
 eq "$COUT" "action=work bead=tk-foreign group=" \
-   "(EMPTYSTAMP) a visit with no tracks edge keeps the cannot-prove-foreign fallback"
-eq "${CUPD:-<none>}" "<none>" "(EMPTYSTAMP) …and is not released"
-
+   "(EMPTYSTAMP) a visit carrying neither recording reports an empty group"
 # SCOPE. `tracks` is not a visit-only edge — a convoy tracks its members — so
-# resolving it for any bead would invent a group for something that never had
-# one and release a turn this session was entitled to work.
-run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-subj" \
+# resolving it for any bead would hand the caller a subject the bead never had.
+run_claim '{"bead_id":"tk-foreign","continuation_group":""}' \
     '[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{},"dependencies":[{"id":"tk-kid","dependency_type":"tracks"}]}]'
 eq "$COUT" "action=work bead=tk-foreign group=" \
    "(EMPTYSTAMP) a NON-visit tracks edge invents no group"
-eq "${CUPD:-<none>}" "<none>" "(EMPTYSTAMP) …and releases nothing"
-
-# --- (FOREIGN) the defect itself --------------------------------------------
-run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "$RELEASED"
-eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \
-   "(FOREIGN) a turn on another subject is NOT worked in this thread"
-eq "$CRC"  "1" "(FOREIGN) …and the session is told to drain"
-grep -q -- '--status=open' <<< "$CUPD" \
-  && ok "(FOREIGN) the turn is reopened" || bad "(FOREIGN) never reopened: $CUPD"
-grep -q -- '--assignee=' <<< "$CUPD" \
-  && ok "(FOREIGN) …and unassigned, so the pool can offer it again" \
-  || bad "(FOREIGN) the assignee was never cleared: $CUPD"
-
-# (SPLIT) bd's claim guard refuses --assignee "" on an in_progress bead and
-# rolls the WHOLE update back, so batching the clears loses the ones that
-# needed no claim. One call doing both is the shape that fails.
-if grep -qE -- '--status=open.*--assignee=|--assignee=.*--status=open' <<< "$CUPD"; then
-    bad "(SPLIT) the release is split into separate writes" \
-        "status and assignee ride one update — the claim guard rolls both back"
-else
-    ok "(SPLIT) the release is split into separate writes"
-fi
-
-# (ORDER) the session pointers must be gone BEFORE the bead becomes offerable,
-# or the pool offers a turn that still names a dead session.
-sess_ln=$(grep -n -- '--unset-metadata gc.session_id' <<< "$CUPD" | head -1 | cut -d: -f1)
-asg_ln=$(grep -n -- '--assignee=' <<< "$CUPD" | head -1 | cut -d: -f1)
-if [ -n "$sess_ln" ] && [ -n "$asg_ln" ] && [ "$sess_ln" -lt "$asg_ln" ]; then
-    ok "(ORDER) the session pointers are cleared before the turn is offerable"
-else
-    bad "(ORDER) the session pointers are cleared before the turn is offerable" \
-        "unset=${sess_ln:-none} assignee=${asg_ln:-none} in: $CUPD"
-fi
-
-# (NOROUTE) gc.routed_to is the pool's offer predicate. Clearing it would PARK
-# the turn instead of returning it — the same failure by another route.
-if grep -q -- 'gc.routed_to' <<< "$CUPD"; then
-    bad "(NOROUTE) the release leaves gc.routed_to alone" \
-        "the route was cleared — a parked turn is not a returned one: $CUPD"
-else
-    ok "(NOROUTE) the release leaves gc.routed_to alone"
-fi
-
-# --- (FAILSAFE) never drain on a turn still held -----------------------------
-# The read is trusted over the writes: every update can exit 0 and the bead
-# still be held. Stranding it is the hazard that made a prompt-only fix
-# unshippable, so an unreleasable turn is WORKED instead.
-run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "$HELD"
-eq "$COUT" "action=work bead=tk-foreign group=tk-other reason=unreleasable" \
-   "(FAILSAFE) a turn that could not be released is worked, never stranded"
-eq "$CRC" "0" "(FAILSAFE) …and the session does not drain onto a held bead"
-grep -q 'could not release' "$CTMP/err" \
-  && ok "(FAILSAFE) …and the failure is reported, not swallowed" \
-  || bad "(FAILSAFE) the failed release was silent: $(cat "$CTMP/err")"
-
-# --- (VACUUM) one claim can assign MORE turns than the one it names ---------
-# `gc hook --claim` preassigns the claimed bead's continuation-group siblings
-# onto the SAME session in the SAME call — `preassignHookContinuationGroup` in
-# cmd/gc/cmd_hook_claim.go — and reports them back as `continuation_assigned`.
-# Releasing only `.bead_id` drained with every vacuumed sibling still
-# in_progress on a dying session: the exact strand this script exists to
-# prevent, reached through the door next to the one it was watching. The
-# siblings are in the claimed turn's group by construction (the preassign
-# filters on it), so when the named turn is foreign they all are.
-run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1","tk-sib2"]}' \
-          "tk-subj" "$RELEASED"
-eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \
-   "(VACUUM) the named turn still decides the verdict"
-eq "$CRC" "1" "(VACUUM) …and the session is told to drain"
-for vb in tk-foreign tk-sib1 tk-sib2; do
-    if grep -q -- "update $vb --unset-metadata gc.session_id" <<< "$CUPD" \
-       && grep -q -- "update $vb --status=open" <<< "$CUPD" \
-       && grep -q -- "update $vb --assignee=" <<< "$CUPD"; then
-        ok "(VACUUM) $vb is put back before the drain"
-    else
-        bad "(VACUUM) $vb is put back before the drain" "not fully released in: $CUPD"
-    fi
-done
-
-# (VACUUM-ORDER) the ordered writes are PER TURN, not just for the first one:
-# a sibling made offerable while it still names a dead session is the same
-# failure the (ORDER) case pins for the named turn.
-v_sess=$(grep -n -- 'update tk-sib2 --unset-metadata gc.session_id' <<< "$CUPD" | head -1 | cut -d: -f1)
-v_asg=$(grep -n -- 'update tk-sib2 --assignee=' <<< "$CUPD" | head -1 | cut -d: -f1)
-if [ -n "$v_sess" ] && [ -n "$v_asg" ] && [ "$v_sess" -lt "$v_asg" ]; then
-    ok "(VACUUM-ORDER) a sibling's session pointers are cleared before it is offerable"
-else
-    bad "(VACUUM-ORDER) a sibling's session pointers are cleared before it is offerable" \
-        "unset=${v_sess:-none} assignee=${v_asg:-none} in: $CUPD"
-fi
-
-# (VACUUM-SPLIT) the split that the claim guard forces applies to siblings too.
-if grep -qE -- 'update tk-sib1 .*(--status=open.*--assignee=|--assignee=.*--status=open)' <<< "$CUPD"; then
-    bad "(VACUUM-SPLIT) a sibling's release is split into separate writes" \
-        "status and assignee ride one update — the claim guard rolls both back"
-else
-    ok "(VACUUM-SPLIT) a sibling's release is split into separate writes"
-fi
-
-# (VACUUM-NOROUTE) parking a sibling is as bad as parking the named turn.
-if grep -q -- 'gc.routed_to' <<< "$CUPD"; then
-    bad "(VACUUM-NOROUTE) the sibling release leaves gc.routed_to alone" \
-        "the route was cleared — a parked turn is not a returned one: $CUPD"
-else
-    ok "(VACUUM-NOROUTE) the sibling release leaves gc.routed_to alone"
-fi
-
-# --- (VACUUM-FAILSAFE) a sibling that will not go back blocks the drain -----
-# The named turn releases cleanly here; only tk-sib1 stays held. Draining on
-# that is the strand, so the whole set gates the verdict.
-run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1"]}' \
-          "tk-subj" "$RELEASED" tk-sib1
-eq "$CRC" "0" "(VACUUM-FAILSAFE) …and the session does not drain onto it"
-grep -q 'could not release .*tk-sib1' "$CTMP/err" \
-  && ok "(VACUUM-FAILSAFE) …and the held sibling is named in the report" \
-  || bad "(VACUUM-FAILSAFE) …and the held sibling is named in the report" \
-         "tk-sib1 missing from: $(cat "$CTMP/err")"
-
-# (VACUUM-HELD-NAMED) the turn the caller is sent to work must be one this
-# session still HOLDS. This is the exact split the fixture above builds and the
-# reason it exists: tk-foreign reads back open/unassigned (it released), tk-sib1
-# reads back in_progress/assigned (it did not). Naming tk-foreign here hands the
-# sitting a bead this script has just returned to the pool — another session can
-# claim it concurrently — while tk-sib1 stays assigned to this session and
-# unworked. Both halves of that split are asserted first, so a fixture that
-# stopped producing it could never leave the verdict assertion vacuously green.
-# read_back <id> -> "<status>|<assignee>", through the SAME stub lookup the
-# script's own read-back uses, so these assert what the script saw and not just
-# what the fixture files contain.
-read_back() {
-    env PATH="$CTMP/bin:$PATH" FAKE_SHOW="$CTMP/show.json" \
-        FAKE_SHOW_DIR="$CTMP/show.d" gc bd show "$1" --json \
-        | sed -E -e 's/.*"status":"([^"]*)".*"assignee":("([^"]*)"|null).*/\1|\3/'
-}
-eq "$(read_back tk-foreign)" "open|" \
-   "(VACUUM-HELD-NAMED) fixture: the named turn did read back released"
-eq "$(read_back tk-sib1)" "in_progress|converse-1" \
-   "(VACUUM-HELD-NAMED) fixture: the sibling did read back still held"
-eq "$COUT" "action=work bead=tk-sib1 group=tk-other reason=unreleasable" \
-   "(VACUUM-HELD-NAMED) the held sibling is worked, not the turn already put back"
-
-# (VACUUM-HELD-FIRST) when the NAMED turn is among the stuck ones it wins, so
-# the single-turn (FAILSAFE) contract is unchanged by the rule above. Both are
-# held here; the claimed turn is released first, so it is the first failure.
-run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1"]}' \
-          "tk-subj" "$RELEASED" tk-foreign tk-sib1
-eq "$COUT" "action=work bead=tk-foreign group=tk-other reason=unreleasable" \
-   "(VACUUM-HELD-FIRST) a stuck claimed turn still outranks a stuck sibling"
-grep -q 'could not release .*tk-foreign.*tk-sib1' "$CTMP/err" \
-  && ok "(VACUUM-HELD-FIRST) …and both stuck turns are reported" \
-  || bad "(VACUUM-HELD-FIRST) …and both stuck turns are reported" \
-         "expected both ids in: $(cat "$CTMP/err")"
-
-# (VACUUM-HELD-LATER) the named turn and the FIRST sibling both go back; only
-# the second sibling sticks. Guards the off-by-one shape of "first failure":
-# a fix that reported the last-processed id, or the first id of the set, or the
-# first SIBLING regardless of outcome, all pass the case above and fail here.
-run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other","continuation_assigned":["tk-sib1","tk-sib2"]}' \
-          "tk-subj" "$RELEASED" tk-sib2
-eq "$COUT" "action=work bead=tk-sib2 group=tk-other reason=unreleasable" \
-   "(VACUUM-HELD-LATER) the one stuck turn is named even when it is last"
-eq "$CRC" "0" "(VACUUM-HELD-LATER) …and the session does not drain onto it"
-
-# --- (VACUUM-ABSENT) an older gc names no siblings — unchanged behaviour ----
-# Guards the other direction: the release set must not invent ids when the key
-# is missing, or every claim writes to beads that were never assigned.
-run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "$RELEASED"
-eq "$(grep -c -- '--status=open' <<< "$CUPD")" "1" \
-   "(VACUUM-ABSENT) a claim naming no siblings still releases exactly one turn"
 
 echo "── a turn already underway is held, not worked and not drained ──"
 
 UNDERWAY='{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"existing_assignment"}'
 
 # --- (HOLD) the sitting this thread is in ------------------------------------
-run_claim "$UNDERWAY" "tk-subj" "$RELEASED"
+run_claim "$UNDERWAY" "$OPENROW"
 eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
    "(HOLD) a turn already in_progress under this session is a sitting underway"
 eq "$CRC" "3" "(HOLD) …with an exit status distinct from work and from drain"
 eq "${CUPD:-<none>}" "<none>" "(HOLD) …and the claimer issues no write of its own"
 
-# --- (HOLD-BARE) the claimer invoked with no group ---------------------------
-# An invocation naming no group leaves CURRENT_GROUP empty, so the out-of-group
-# guard cannot fire; the hold must not depend on the caller passing its subject.
-run_claim "$UNDERWAY" "" "$RELEASED"
-eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
-   "(HOLD-BARE) an unscoped nudge invocation still holds"
-eq "${CUPD:-<none>}" "<none>" "(HOLD-BARE) …and still writes nothing of its own"
-
-# --- (HOLD-FOREIGN) the hold outranks the out-of-group guard -----------------
-run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existing_assignment"}' \
-          "tk-subj" "$RELEASED"
-eq "$COUT" "action=hold bead=tk-held group=tk-other reason=already-underway" \
-   "(HOLD-FOREIGN) a sitting underway is not released for being out of group"
-eq "${CUPD:-<none>}" "<none>" "(HOLD-FOREIGN) …and the release never runs"
-
 # --- (HOLD-VACUUM) a hold keeps the siblings adoption took, and says so ------
 # The claim is not side-effect free on this path: the same result that reports
 # existing_assignment can pre-assign open same-group siblings and name them in
 # continuation_assigned. They are later turns of the sitting's OWN group, so
-# releasing them is the destruction this verdict exists to prevent by a third
-# door — but a hold that drops the field silently leaves the caller believing
-# it holds one turn when it holds several.
+# a hold that dropped the field would leave the caller believing it holds one
+# turn when it holds several.
 run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existing_assignment","continuation_assigned":["tk-sib1","tk-sib2"]}' \
-          "tk-subj" "$RELEASED"
+          "$OPENROW"
 eq "$COUT" "action=hold bead=tk-held group=tk-other reason=already-underway adopted=tk-sib1,tk-sib2" \
    "(HOLD-VACUUM) a held sitting names the siblings the claim assigned to it"
 eq "${CUPD:-<none>}" "<none>" "(HOLD-VACUUM) …and puts no sibling back"
 eq "$CRC" "3" "(HOLD-VACUUM) …and still holds rather than working or draining"
-
 # The caller parses `bead=` and `group=` off this same line, so the added field
 # must not move what those resolve to.
 eq "$(printf '%s' "$COUT" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')" "tk-held" \
@@ -1077,11 +861,11 @@ eq "$(printf '%s' "$COUT" | sed -n 's/.*group=\([^ ]*\).*/\1/p')" "tk-other" \
    "(HOLD-VACUUM) …and its group with it"
 
 # --- (HOLD-VACUUM-ABSENT) no siblings, no field ------------------------------
-# The mirror. An empty adopted= would read as a set that arrived and name none
-# of it, and visits are filed without gc.root_bead_id, so preassignment returns
-# nothing and this is the shape every hold has today.
+# An empty adopted= would read as a set that arrived and name none of it, and
+# visits are filed without gc.root_bead_id, so preassignment returns nothing
+# and this is the shape every hold has today.
 run_claim '{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"existing_assignment","continuation_assigned":[]}' \
-          "tk-subj" "$RELEASED"
+          "$OPENROW"
 eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
    "(HOLD-VACUUM-ABSENT) an empty sibling set adds no field to the line"
 
@@ -1091,35 +875,27 @@ eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
 # identity reports `existing_assignment` (hookClaimExistingAssignment,
 # cmd/gc/cmd_hook_claim.go).
 for fresh in claimed ready_assignment; do
-    run_claim "{\"bead_id\":\"tk-new\",\"continuation_group\":\"tk-subj\",\"reason\":\"$fresh\"}" \
-              "tk-subj" "$RELEASED"
+    run_claim "{\"bead_id\":\"tk-new\",\"continuation_group\":\"tk-subj\",\"reason\":\"$fresh\"}" "$OPENROW"
     eq "$COUT" "action=work bead=tk-new group=tk-subj" \
        "(HOLD-FRESH) reason=$fresh is fresh work, not a sitting underway"
     eq "$CRC" "0" "(HOLD-FRESH) …and exits 0"
 done
 
-run_claim '{"bead_id":"tk-new","continuation_group":"tk-other","reason":"claimed"}' "tk-subj" "$RELEASED"
-eq "$COUT" "action=drain reason=out-of-group bead=tk-new group=tk-other" \
-   "(HOLD-FRESH) a freshly claimed foreign turn is still released and drained"
-
 echo "── a sitting stranded between its outcome stamp and its close is finished ──"
 
 # A sitting does not end in one write. Step 7 posts the sign-off, then stamps
-# gc.outcome on the visit, reads it back, and closes last of all. A session that
-# dies between the stamp and the close leaves a visit that is in_progress,
-# assigned, and carrying a final outcome, and every re-claim reports it as
-# `existing_assignment`. The hold answered, the prompt read that as a sitting
-# still underway and went back to waiting, and the close never ran. A finished
-# sitting was indistinguishable from a held one, and liveness-sweep.sh classifies
-# the live visit's subject as `conversing`, so nothing else raised it either.
-# The stamp lands after the sign-off, so a visit carrying the outcome has already
-# had its last word: finishing it closes a sitting that is over, not one whose
-# sign-off is still owed.
+# gc.outcome on the visit, reads it back, and closes. A session that dies
+# between the stamp and the close leaves a visit that is in_progress, assigned,
+# and carrying a final outcome, and the respawn's claim reports it as
+# `existing_assignment`. A hold there would send the session back to waiting on
+# a sitting that is over, and the close would never run. The stamp lands after
+# the sign-off, so a visit carrying the outcome has already had its last word:
+# finishing it closes a sitting that is over, not one whose sign-off is owed.
 STRANDED='[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"task_kind":"visit","gc.outcome":"settled"}}]'
 LIVE_VISIT='[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"task_kind":"visit"}}]'
 
 # --- (FINISH) the stamped turn is finished, not held -------------------------
-run_claim "$UNDERWAY" "tk-subj" "$STRANDED"
+run_claim "$UNDERWAY" "$STRANDED"
 eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped" \
    "(FINISH) a turn carrying a final outcome is a sitting over, not one underway"
 eq "$CRC" "4" "(FINISH) …with an exit status distinct from work, hold and drain"
@@ -1132,7 +908,7 @@ fi
 
 # The mirror, and the reason the arm is keyed on the stamp rather than on the
 # claim reason: a live sitting carries no outcome and must still be held.
-run_claim "$UNDERWAY" "tk-subj" "$LIVE_VISIT"
+run_claim "$UNDERWAY" "$LIVE_VISIT"
 eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
    "(FINISH) a sitting with no outcome stamp is still held"
 eq "${CCLOSE:-<none>}" "<none>" "(FINISH) …and nothing is closed under a live operator"
@@ -1141,7 +917,7 @@ eq "${CCLOSE:-<none>}" "<none>" "(FINISH) …and nothing is closed under a live 
 # A dog warrant and a graph.v2 step both carry it. Closing whatever the pool
 # hands this role because it has the field would be destruction, so the arm is
 # keyed on task_kind=visit exactly as the group recovery above is.
-run_claim "$UNDERWAY" "tk-subj" \
+run_claim "$UNDERWAY" \
     '[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"gc.outcome":"pass"}}]'
 eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
    "(FINISH-SCOPE) a NON-visit carrying gc.outcome is held, not disposed of"
@@ -1152,8 +928,7 @@ eq "${CCLOSE:-<none>}" "<none>" "(FINISH-SCOPE) …and is never closed"
 # which is what `existing_assignment` reports. A stamped visit arriving as a
 # FRESH claim means something else reopened it, which is a different question;
 # disposing of it here would answer it by accident.
-run_claim '{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"claimed"}' \
-          "tk-subj" "$STRANDED"
+run_claim '{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"claimed"}' "$STRANDED"
 eq "$COUT" "action=work bead=tk-held group=tk-subj" \
    "(FINISH-FRESH) the finish arm does not fire on a claim it did not start from"
 eq "${CCLOSE:-<none>}" "<none>" "(FINISH-FRESH) …and closes nothing out from under it"
@@ -1164,7 +939,7 @@ eq "${CCLOSE:-<none>}" "<none>" "(FINISH-FRESH) …and closes nothing out from u
 # dismiss escalates the same way. Plain close FIRST, so a close needing no
 # override never pays for one.
 CLOSE_REFUSE=plain
-run_claim "$UNDERWAY" "tk-subj" "$STRANDED"
+run_claim "$UNDERWAY" "$STRANDED"
 eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped" \
    "(FINISH-FORCE) a refused close escalates rather than standing"
 if grep -q -- '--force' <<< "$CCLOSE"; then
@@ -1192,7 +967,7 @@ esac
 # over, which is the defect itself, so the verdict stands and the operator gets
 # the line naming the command that ends it.
 CLOSE_REFUSE=all
-run_claim "$UNDERWAY" "tk-subj" "$STRANDED"
+run_claim "$UNDERWAY" "$STRANDED"
 eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped" \
    "(FINISH-STUCK) a close that would not take does not fall back to a hold"
 eq "$CRC" "4" "(FINISH-STUCK) …and keeps the finish status"
@@ -1207,7 +982,7 @@ fi
 # Siblings are later turns of the sitting's own group. The stamp is on the one
 # visit that ended, so it is the only bead the arm may dispose of.
 run_claim '{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"existing_assignment","continuation_assigned":["tk-sib1"]}' \
-          "tk-subj" "$STRANDED"
+          "$STRANDED"
 eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped adopted=tk-sib1" \
    "(FINISH-VACUUM) a finished turn still names what the claim assigned with it"
 # Both halves, so a run that closed NOTHING cannot read as "no sibling closed".
@@ -1220,43 +995,41 @@ else
     ok "(FINISH-VACUUM) only the stranded turn is closed"
 fi
 
-# --- (FINISH-FOREIGN) disposal outranks the release, as the hold does --------
-# Releasing a finished sitting puts the strand back in the pool for the next
-# session to be told to wait on. The group guard never gets to it.
-run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existing_assignment"}' \
-          "tk-subj" "$STRANDED"
-eq "$COUT" "action=finish bead=tk-held group=tk-other reason=outcome-stamped" \
-   "(FINISH-FOREIGN) an out-of-group strand is finished, not put back"
-# The release is three writes: the session pins unset, --status=open, and the
-# assignee cleared. The finish writes only the visit's work outcome before its
-# close (work-outcome.sh).
-eq "$(grep -cE -- '--status=open|--assignee=|--unset-metadata gc\.session_(id|name)' <<< "$CUPD" || true)" "0" \
-   "(FINISH-FOREIGN) …and the release never runs"
-eq "$(grep -v -- '--set-metadata gc.work_outcome=no-op' <<< "$CUPD" | grep -c . || true)" "0" \
-   "(FINISH-FOREIGN) …and the finish writes nothing but the work outcome"
-
-# --- the prompt and the doc carry the verdict the script now returns ---------
+# --- the prompt and the doc carry the verdict the script returns -------------
 # An unknown action falls through the prompt's case with VISIT set, so a prompt
 # that never learned this verdict walks a closed visit into step 2 and holds a
 # second sitting on a subject that already settled one.
 have "the prompt has a branch for a sitting already over" 'action=finish' "$PROMPT"
 have "…and posts nothing into a thread the session took with it" \
      'Post nothing, and run none of' "$PROMPT"
-# A finish returns to step 8, and step 8 re-runs step 1. That terminates on the
-# close: a closed visit is no longer in_progress, so the existing-assignment
-# tier stops matching it. A close that will not take leaves every one of those
-# conditions in place, and the arm would re-derive the same finish for as long
-# as the pane lives. The hold it replaced could not spin — it ends at a human.
-have "…and a close that will not take ends the pane rather than re-deriving" \
-     'escalate and `gc runtime drain-ack` instead of returning to step 8' "$PROMPT"
-# The turn is being disposed of, not entered. Letting its group land in
-# $SUBJECT re-scopes step 8's re-claim onto a subject this thread never had.
-# The prompt evals the verdict, so the claimer's --sh mode is what keeps the
-# caller's group across a finish (behavior pinned in converse-claim.test.sh).
-have "…and a finish keeps the caller's group, not its own" \
-     '"$_A" = "finish" ] && _G="$_CG"' "$CLAIMER"
 have "the central doc states the fourth verdict" 'action=finish' "$ENGAGE"
 
+# --- every path that closes the visit ends the session ------------------------
+# The drain is the last act wherever the visit closes, and nothing claims
+# after it. Collapsed to one line per surface, because the prose is
+# hard-wrapped and a multi-word literal breaks when a sentence ahead of it
+# grows.
+ENDS_PROSE="$TMPD/ends-prose.txt"
+awk '/^- \*\*How this thread ends/ {f=1} f && /^- \*\*Disposing of a subject/ {exit} f {print}' "$PROMPT" \
+    | tr '\n' ' ' | tr -s ' ' >"$ENDS_PROSE"
+have "the prompt says a closed visit ends the session, whichever path closed it" \
+     'A closed visit ends this session, whichever path closed it' "$ENDS_PROSE"
+have "…drains after the writes that follow the close" 'gc runtime drain-ack' "$ENDS_PROSE"
+have "…and never claims again" 'Never claim again' "$ENDS_PROSE"
+FINISH_PROSE="$TMPD/finish-prose.txt"
+awk '/action=finish. — this visit/ {f=1} f && /action=hold. — this bead/ {exit} f {print}' "$PROMPT" \
+    | tr '\n' ' ' | tr -s ' ' >"$FINISH_PROSE"
+have "the finish arm drains once the close is done" 'Then drain' "$FINISH_PROSE"
+have "…and escalates a close it could not complete before it drains" 'Escalate that before you drain' "$FINISH_PROSE"
+FOLD_LINE="$TMPD/fold-line.txt"
+grep -F -A3 -e '--into "$HOLDER" --outcome folded' "$PROMPT" | tr '\n' ' ' >"$FOLD_LINE"
+have "the fold arm drains once it has closed the visit" 'Then drain' "$FOLD_LINE"
+have "a moot or benign close drains once the close-out exits 0" \
+     'Once it exits 0, drain' "$SK_RECHECK"
+SETTLE_TAIL="$TMPD/settle-tail.txt"
+tr '\n' ' ' < "$SK_SETTLE" | tr -s ' ' >"$SETTLE_TAIL"
+have "the sign-off drains once the close has landed" 'Run `gc runtime drain-ack` once the close has landed' "$SETTLE_TAIL"
+have "…and not when the close did not land" 'and do not drain' "$SETTLE_TAIL"
 
 # --- the prompt is the half that decides what a hold MEANS -------------------
 # The script can state that a sitting is underway; whether this session's
@@ -1266,8 +1039,6 @@ have "the central doc states the fourth verdict" 'action=finish' "$ENGAGE"
 have "the prompt has a branch for a sitting already underway" 'action=hold' "$PROMPT"
 have "…and the claimer-less fallback renders the same verdict" \
      'existing_assignment' "$PROMPT"
-have "…and step 8 sends a hold back to step 1 instead of draining on it" \
-     "step 1's arms decide every action" "$SK_CONTINUE"
 # cut-short is a real outcome with one legitimate door; left unqualified it
 # reads as the generic way out of any stuck sitting.
 have "…and cut-short is confined to the low-context exit" \
@@ -1334,8 +1105,7 @@ have "…and re-opens a scrollback-less respawn once its trace proves the hold" 
      'Re-open it at step 4' "$HOLD_PROSE"
 
 # The nudge is read before step 1, so naming the script alone lands the session
-# outside the block where the hold verdict is read, and passes no group, which
-# disables the out-of-group guard on every wake. The field is empty while the
+# outside the block where the hold verdict is read. The field is empty while the
 # backstops are silenced, and these bind whatever text re-arms them.
 if [ -s "$NUDGE_VAL" ]; then
     have "the wake nudge sends the session through the prompt's claim block" \
@@ -1642,8 +1412,8 @@ fi
 # fenced block; here the whole discharge is RUN). These assertions drive the
 # script against stubs: the takeaway lands on the subject with the WAIT disposition,
 # the demand discharges one of two ways keyed to --ruled, and a held subject is
-# released only when the sitting ruled. The writers are searched for on the
-# candidate roots, never assumed.
+# released only when the sitting ruled. The writers are the script's siblings in
+# the copy of the pack that runs, never a rig root's or the city's.
 echo "── step 7 discharge ships and runs as converse-signoff.sh ──"
 SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
 [ -x "$SIGNOFF_SUT" ] && ok "converse-signoff.sh is present and executable" \
@@ -1690,12 +1460,15 @@ case "${2:-}" in
             echo '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1
         fi
         case "$id" in
-            v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
-                    --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
+            # SO_VISIT_META is a metadata object the visit carries as well.
+            v-x) vm="${SO_VISIT_META:-}"; [ -n "$vm" ] || vm='{}'
+                 jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" --arg vt "${SO_VISIT_TOPIC:-}" \
+                    --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" --argjson vm "$vm" \
                     --arg rl "$(cat "$SOST/v-x.ruling" 2>/dev/null)" \
-                    '[{id:"v-x",metadata:(({"task_kind":"visit"}
+                    '[{id:"v-x",metadata:(({"task_kind":"visit"} + $vm
                         +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
                         +(if $tp=="" then {} else {"escalation_key":$tp} end)
+                        +(if $vt=="" then {} else {"visit_topic":$vt} end)
                         +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)
                         +(if $rl=="" then {} else {"gc.ruling":$rl} end)))}
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
@@ -1771,11 +1544,18 @@ case "${1:-}" in
 esac
 LC
 chmod +x "$SOPACK/assets/scripts/lifecycle.sh"
+# so_pack <dir> — a copy of the sign-off under <dir>, beside the libraries it
+# sources, so it runs the writers <dir> carries.
+so_pack() {
+    mkdir -p "$1/assets/scripts"
+    cp "$SIGNOFF_SUT" "$REPO/assets/scripts/visit-identity.sh" "$REPO/assets/scripts/visit-topic.sh" "$1/assets/scripts/"
+}
+so_pack "$SOPACK"; so_pack "$SOFOR"; so_pack "$SOCITY/rigs/gc-toolkit"
 
-# run_so [VAR=val ...] — run converse-signoff.sh with the flags in SOARGS from a
-# non-git cwd; trailing VAR=val pairs override the base env (env: last wins), so
-# a case dials SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
-# GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs, and the
+# run_so [VAR=val ...] — run the copy of converse-signoff.sh in SO_PACK (SOPACK by
+# default) with the flags in SOARGS from a non-git cwd; trailing VAR=val pairs
+# override the base env (env: last wins), so a case dials SO_DEMAND /
+# SO_TAKEAWAY / SO_GATE_RC / STUB_STATE inline. Captures SO_OUT and SO_RC; resets the two logs, and the
 # store's closes and the visit's gc.ruling too unless SO_KEEP=1 (a re-run against
 # the store a first run left behind). SO_SEED_RULING, set on the call, seeds the
 # visit with a ruling an earlier run left.
@@ -1787,7 +1567,7 @@ run_so() {
     [ -z "${SO_SEED_RULING:-}" ] || printf '%s' "$SO_SEED_RULING" >"$SOST/v-x.ruling"
     SO_OUT="$(cd "$SOBARE" && env PATH="$SOBIN:$PATH" \
         GC_RIG_ROOT="$SOPACK" GC_CITY_PATH="$SOCITY" GIT_CEILING_DIRECTORIES="$TMPD" \
-        SOLOG="$SOLOG" SOGC="$SOGC" SOST="$SOST" "$@" bash "$SIGNOFF_SUT" "${SOARGS[@]}" 2>&1)"
+        SOLOG="$SOLOG" SOGC="$SOGC" SOST="$SOST" "$@" bash "${SO_PACK:-$SOPACK}/assets/scripts/converse-signoff.sh" "${SOARGS[@]}" 2>&1)"
     SO_RC=$?
 }
 # no_writes <label> — the run reached no writer: no gc-helm.sh or lifecycle.sh
@@ -1865,6 +1645,60 @@ echo "── the discharge isolates by topic even with no gc.hold_demand stamp �
 run_so SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
 have "the topic-scoped fallback resolves finding-b's demand" 'bd gate resolve dB --reason approved' "$SOGC"
 if grep -q 'gate resolve dA' "$SOGC"; then bad "…and not finding-a's" "the fallback scan resolved a sibling topic's demand"; else ok "…and not finding-a's demand"; fi
+
+# A visit filed for a distinct concern (visit_topic=own) sits beside the live
+# sitting on its subject, and its topic is `visit:` and its own id. The live
+# sitting's keyless demand on item-x comes first in the listing, so the unscoped
+# first-match would resolve dA; the topic keeps the ruling on this sitting's dB.
+echo "── a distinct-concern sitting discharges its own demand, not the live sitting's ──"
+BESIDE_LIVE='[{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x","metadata":{"gc.demand_for":"item-x"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:visit:v-x","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"visit:v-x"}}]'
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so SO_VISIT_TOPIC=own SO_DEMAND_LIST="$BESIDE_LIVE"
+eq "$SO_RC" "0" "the own-topic discharge exits 0"
+have "the ruling resolves the demand filed under the visit's own topic" 'bd gate resolve dB --reason approved' "$SOGC"
+lacks "…and never the live sitting's demand beside it" 'gate resolve dA' "$SOGC" \
+      "gate resolve reached dA — the operator question of the live sitting on the same subject"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_VISIT_TOPIC=own SO_DEMAND_LIST="$BESIDE_LIVE"
+have "a cut-short re-states the wait on the subject under the visit's own topic" \
+     'helm[RIG] demand item-x still need X --by converse --topic visit:v-x' "$SOLOG"
+lacks "…and leaves the live sitting's demand alone" 'gate resolve dA' "$SOGC" \
+      "the cut-short resolved dA, the live sitting's demand"
+
+echo "── every case of the shared topic fixture discharges under its demand topic ──"
+# visit-topic.sh is the one definition of a visit's topic, and
+# visit-topic.fixture.json holds the cases the fold, the hold and the sign-off
+# each run. The stub serves the fixture's visit carrying each case's metadata.
+# A ruling resolves the merge hold filed on the subject under the case's demand
+# topic, the topic converse-hold.sh files it under. A cut-short re-states the
+# visit's wait on the subject under that topic, or under none.
+FX="$REPO/assets/scripts/visit-topic.fixture.json"
+eq "$(jq -r '.visit' "$FX")" "v-x" "the fixture's visit is the one the stub serves"
+eq "$(jq -r '.subject' "$FX")" "item-x" "the fixture's subject is the one the sign-off is handed"
+while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    name="$(printf '%s' "$c" | jq -r '.name')"
+    meta="$(printf '%s' "$c" | jq -c '.metadata')"
+    want="$(printf '%s' "$c" | jq -r '.demand_topic')"
+    UNDER_TOPIC="$(jq -nc --arg t "$want" '[{id:"dT", assignee:"", issue_type:"gate", await_type:"human",
+        await_id:("gc-demand:item-x" + (if $t == "" then "" else ":" + $t end)),
+        metadata:({"gc.demand_for":"item-x"} + (if $t == "" then {} else {"gc.demand_topic":$t} end))}]')"
+    SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+    run_so SO_VISIT_META="$meta" SO_DEMAND_LIST="$UNDER_TOPIC" STUB_STATE=pull_request
+    eq "$SO_RC" "0" "(FIXTURE) $name: the ruled sign-off exits 0"
+    have "(FIXTURE) $name: the ruling resolves the merge hold filed under its demand topic" \
+         'bd gate resolve dT --reason approved' "$SOGC"
+    SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+    run_so SO_VISIT_META="$meta" SO_HOLD_DEMAND=d-v SO_DEMAND=0 SO_VISIT_DEMAND=1
+    if [ -n "$want" ]; then
+        have "(FIXTURE) $name: a cut-short re-states the wait under its demand topic" \
+             "helm[RIG] demand item-x still need X --by converse --topic $want" "$SOLOG"
+    else
+        have "(FIXTURE) $name: a cut-short re-states the wait" \
+             'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+        lacks "(FIXTURE) $name: …under no topic" '--topic' "$SOLOG" "the re-state carried a topic"
+    fi
+done <<< "$(jq -c '.cases[]' "$FX")"
 
 echo "── the conversation wait gates the VISIT: a ruling resolves the visit demand ──"
 # Default Phase A shape: converse-hold files the conversation demand on the visit,
@@ -1988,11 +1822,13 @@ if grep -qE 'demand|gate resolve' "$SOLOG" "$SOGC" 2>/dev/null; then
     bad "no demand present means no discharge" "found a discharge with no demand present"
 else ok "no demand present means no discharge"; fi
 
-echo "── the writer is searched for; none on any root is LOUD ──"
+echo "── no writer beside the sign-off is LOUD, though the rig root and the city hold one ──"
 SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
-run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$TMPD/no-such-city"
-case "$SO_OUT" in *"NO TAKEAWAY WRITER"*) ok "no writer on any candidate root is LOUD" ;;
-                  *) bad "no writer on any candidate root is LOUD" "got: $SO_OUT" ;; esac
+SO_PACK="$SOFOR" run_so GC_RIG_ROOT="$SOPACK"
+case "$SO_OUT" in *"NO TAKEAWAY WRITER"*) ok "no writer beside the script is LOUD" ;;
+                  *) bad "no writer beside the script is LOUD" "got: $SO_OUT" ;; esac
+case "$(cat "$SOLOG")" in *"helm["*) bad "…and neither the rig root's nor the city's writer is used" "found: $(cat "$SOLOG")" ;;
+                          *) ok "…and neither the rig root's nor the city's writer is used" ;; esac
 
 echo "── the flag contract fails closed on a missing judgment ──"
 SOARGS=(--visit v-x --outcome "o — p" --ruled yes --route human); run_so; eq "$SO_RC" "2" "--ruled yes without --ruling is refused"
@@ -2048,10 +1884,10 @@ else bad "…no demand resolved and no close text stashed, so a merge hold still
 if [ -s "$SOLOG" ]; then bad "…and no takeaway or release written" "found: $(cat "$SOLOG")"
 else ok "…and no takeaway or release written"; fi
 
-echo "── a rework script that resolves nowhere stops the sign-off too ──"
-# The city root carries a takeaway writer but no converse-rework.sh, so a sign-off
-# that ran on past the missing script would reach that writer.
-run_so GC_RIG_ROOT="$SOFOR"
+echo "── a rework script the pack lacks stops the sign-off too ──"
+# The city's copy carries a takeaway writer but no converse-rework.sh, so a
+# sign-off that ran on past the missing script would reach that writer.
+SO_PACK="$SOCITY/rigs/gc-toolkit" run_so GC_RIG_ROOT="$SOPACK"
 eq "$SO_RC" "1" "a missing converse-rework.sh exits 1"
 case "$SO_OUT" in *"REWORK NOT COMPLETE on item-x: no converse-rework.sh"*) ok "…and says the script resolved nowhere" ;;
                   *) bad "…and says the script resolved nowhere" "got: $SO_OUT" ;; esac
@@ -2105,11 +1941,12 @@ SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r 
 run_so; eq "$SO_RC" "2" "--rework with --no-rework is refused"
 have "the settle skill teaches the forced answer" '--no-rework' "$SK_SETTLE"
 
-# Every script the sign-off runs is found by one search order: the rig root, then
-# the working directory's checkout, then the city's gc-toolkit rig. A rig root
-# carrying none of them sends all three to the city root, each logging its root.
-echo "── one search order finds every script the sign-off runs ──"
+# Every script the sign-off runs is its sibling in the copy of the pack that
+# runs. A copy carrying all three uses them, each logging its copy, whatever the
+# rig root and the city hold.
+echo "── every script the sign-off runs is the one beside it ──"
 SOCITY2="$SO/city2"; mkdir -p "$SOCITY2/rigs/gc-toolkit/assets/scripts"
+so_pack "$SOCITY2/rigs/gc-toolkit"
 so_helm "$SOCITY2/rigs/gc-toolkit" CITY2
 cat >"$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
@@ -2126,8 +1963,8 @@ echo "converse-rework: filed rework rw-1 on anchor item-x"
 CR
 chmod +x "$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" "$SOCITY2/rigs/gc-toolkit/assets/scripts/converse-rework.sh"
 SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
-run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$SOCITY2" SO_MERGE_RESULT=pull_request
-eq "$SO_RC" "0" "a sign-off whose scripts sit only on the city root runs"
+SO_PACK="$SOCITY2/rigs/gc-toolkit" run_so GC_RIG_ROOT="$SOPACK" GC_CITY_PATH="$SOCITY" SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "a sign-off runs from the copy of the pack that carries its scripts"
 have "…finding the rework script there" 'REWORK[CITY2]: --anchor item-x' "$SOGC"
 have "…the takeaway writer" 'helm[CITY2] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
 have "…and the lifecycle writer" 'lc[CITY2] transition item-x --to unanchored --route human' "$SOLOG"

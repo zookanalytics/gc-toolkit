@@ -7,7 +7,7 @@ description: Numbered findings from running specs/2026-08-fresh-start/live-adopt
 
 **Branch:** `claude/gc-toolkit-fresh-start-ehvljb` @ `a295fb7`
 ("feat(cutover): retire bead-host — the visit spine is the only conversation mechanism")
-**City:** `/Users/zook/Code/gc-next` (test city), rigs `gc-toolkit` (tk) and `signal-loom` (sl)
+**City:** `/Users/zook/Code/gc-next` (test city), rigs `gc-toolkit` (tk) and `rig-a` (ra)
 **Host:** darwin 25.6.0 (macOS, arm64), `gc version` = `edge`, dolt 2.2.3, bd 1.1.0 (dev)
 **Run:** 2026-08-08 22:00–23:05Z. Runbook steps 1–4; step 5 (intake default) deliberately skipped.
 **Recommendation: ADAPT.** Reasons in §Recommendation.
@@ -43,7 +43,7 @@ Stated up front so nothing below reads as broader than it is.
   board observation below (F-16, F-17) was made through a hand-written `timeout`
   shim. They are evidence about the board's *logic*, not about it working on
   this host.
-- Both rigs were repointed at the new pack (see F-01), so signal-loom results
+- Both rigs were repointed at the new pack (see F-01), so rig-a results
   are a second data point, not a control.
 
 ---
@@ -60,7 +60,7 @@ in the gc-toolkit rig checkout … the branch is self-contained."
 `packs/gc-next/`. The city could not load at all:
 
 ```
-gc status: expanding packs: rig "signal-loom" import "gc-next": loading pack.toml:
+gc status: expanding packs: rig "rig-a" import "gc-next": loading pack.toml:
   open /Users/zook/Code/gc-toolkit/packs/gc-next/pack.toml: no such file or directory
 ```
 
@@ -137,7 +137,7 @@ to the default agent prompt."*
 
 ```
 ⚠ config-refs — 3 config reference issue(s)
-  agent "signal-loom/gc-toolkit.polecat-codex": prompt_template
+  agent "rig-a/gc-toolkit.polecat-codex": prompt_template
     "/Users/zook/Code/gc-toolkit/gastown/agents/polecat/prompt.template.md" not found
   agent "gc-toolkit/gc-toolkit.polecat-codex": prompt_template … not found
   agent "gc-toolkit.mayor-thread": prompt_template
@@ -298,7 +298,7 @@ run was for, and it lands on the primary mechanism.
 Verbatim tail of the hold (`gc session peek gn-u1ry`):
 
 ```
-  Next (yours): ratify the probe as renamed (or send it to signal-loom), name
+  Next (yours): ratify the probe as renamed (or send it to rig-a), name
   <SUBJ>, and say whether the heartbeat bug gets filed — then I'll apply the
   stamps, write gate-evidence.md, and route the filing.
 ```
@@ -467,7 +467,7 @@ I did not have to force it — it fired within ~3 minutes of `gc start`:
 
 ```
 ORDER            RIG          BEAD          EXECUTED
-liveness-sweep   signal-loom  sl-cc77       2026-08-08T22:21:08Z
+liveness-sweep   rig-a  ra-cc77       2026-08-08T22:21:08Z
 liveness-sweep   gc-toolkit   tk-lcd03      2026-08-08T22:18:12Z
 ```
 
@@ -477,11 +477,11 @@ session holding it.
 ```
 gc-toolkit:  tk-uorin  "triage: unnamed waits (this rig)"
              tk-7f7kk  "visit: tk-uorin — unnamed waits: 66 candidates to disposition"
-signal-loom: sl-k7wk   "triage: unnamed waits (this rig)"
-             sl-g0jc   "visit: sl-k7wk — unnamed waits: 6 candidates to disposition"
+rig-a: ra-k7wk   "triage: unnamed waits (this rig)"
+             ra-g0jc   "visit: ra-k7wk — unnamed waits: 6 candidates to disposition"
 ```
 
-**First-census volume: 66 candidates (gc-toolkit), 6 (signal-loom) — one
+**First-census volume: 66 candidates (gc-toolkit), 6 (rig-a) — one
 conversation each.** The runbook predicted a long list; 66 out of 279 open beads
 is that, and it cost exactly one visit. The batching decision is vindicated: the
 per-bead form would have filed 66 conversations.

@@ -1,66 +1,120 @@
 #!/usr/bin/env bash
-# review-checks — the one parser AND resolver of the check index. The index is
-# review-checks.toml at the repo root; it declares each check's name, the method
-# that governs it, one line of purpose, and the phase it gates. Two jobs:
+# review-checks — the one parser AND resolver of the check index. An index is a
+# review-checks.toml that declares each check's name, one line of purpose, and
+# the phase it gates. A rig's effective index has two layers:
 #
-#   review-checks.sh --file <index> [--check <name>]
-#     Emit the index as TSV, one row per check:
-#       <name>\t<method>\t<purpose>\t<phase>
+#   The pack's index: the review-checks.toml at the root of the pack this script
+#   ships in, two directories above it. It declares every check the pack ships a
+#   skill for, so every rig gets every one of them.
+#   The rig's index: the review-checks.toml the commit --at names carries, read
+#   from the repository of the checkout the caller runs in or GC_RIG_ROOT's, and
+#   fetched from origin by id when neither holds the commit. It is optional. A
+#   row for a check the pack declares changes that check's purpose or phase, key
+#   by key, and a key it leaves out (or leaves empty) keeps the pack's value. A
+#   row for any other check adds a check of the rig's own.
+#
+# A caller names the commit it judges, and the rig's rows come from that commit
+# and from nowhere else. A call that names no commit (--at missing or empty) is a
+# usage error, so a reader that lost its commit fails instead of resolving under
+# the pack's rows alone. Two exceptions name an index outright and stand in for
+# both layers: --file <index>, and GC_REVIEW_CHECKS_INDEX, which names the whole
+# effective index so a hermetic test fixes what every reader sees. --file wins
+# over the variable, and both win over --at.
 #
 #   review-checks.sh --resolve --check-set <cs> --through <phase> \
-#       [--file <index> | --at <oid>] [--with-phase]
-#     Emit the checks in <cs> that gate the transition <phase> — every check
-#     whose phase is at or before <phase> — one per line (or `<name>\t<phase>`
-#     with --with-phase). This is the ONE place that knows none/off are the
-#     gateless sentinels and `approval` is a merge rule, not a lane; all three
-#     are dropped here so no transition re-derives the drop. Each stage
-#     transition (create, draft-to-ready, merge) asks this instead of carrying
-#     its own list, so one anchor is judged by one rule.
+#       (--at <oid> | --file <index>) [--with-phase]
+#     Emit the checks in <cs> that gate the transition <phase>: every check whose
+#     phase is at or before <phase>, one per line, or `<name>\t<phase>` with
+#     --with-phase. This is the ONE place that knows none/off are the gateless
+#     sentinels and `approval` is a merge rule, not a lane; all three are dropped
+#     here so no transition re-derives the drop.
 #
-# Both jobs know a check by its name case-folded. --check TRIAGE emits the
-# [checks.triage] row as the index writes it, and a check_set token Correctness
-# resolves by [checks.correctness] but is emitted as written, since it names a
-# lane.
+#   review-checks.sh --show (--at <oid> | --file <index>)
+#   review-checks.sh --check <name> (--at <oid> | --file <index>)
+#     Emit the effective index as TSV, one row per check, `<name>\t<purpose>\t<phase>`:
+#     every row, or the one row --check names. A check is known by its name
+#     case-folded: --check TRIAGE emits the triage row as its index writes it, and
+#     a check_set token Correctness resolves by [checks.correctness] but is
+#     emitted as written, since it names a lane. A row the pack and a rig both
+#     declare keeps the pack's name.
+#
+#   review-checks.sh --extension <check> --at <oid>
+#     Print the rig's guidance for <check>, the docs/review-<check>.md the commit
+#     carries, <check> folded to lowercase. A commit that carries none prints
+#     nothing and exits 0, the common case. The file exists only at a commit, so
+#     this always needs --at, even when GC_REVIEW_CHECKS_INDEX names the index.
+#
+#   review-checks.sh --edits --base <branch> --at <oid>
+#     Print the rig's guidance the change at <oid> edits, one path per line:
+#     review-checks.toml and each docs/review-*.md among the paths it touches
+#     from where it left <branch> on origin. A change that edits none prints
+#     nothing and exits 0. A rename counts at both of its paths, so a guidance
+#     file renamed away is an edit to it. A change exists only at a commit, so
+#     this always needs --at, even when GC_REVIEW_CHECKS_INDEX names the index.
+#
+# A call is one of these forms and takes only the flags its form names, in any
+# order. A second form's verb is a usage error, and so is a flag only another
+# form takes, such as --through on --show or --file on --extension: the call
+# would not read it, so it is refused rather than ignored.
 #
 # Phase ordering: pre-open < open-as-draft < ready-for-review < merge. A check
 # that reads only the diff is pre-open; one that needs the deployed preview is
-# open-as-draft. A check_set token the index does not declare takes pre-open
-# (the backstop the dispatcher can act on), never dropped silently — merge
-# alone would strand it (see the resolve loop). A declared check with no phase
-# also takes pre-open, with a warning. A declared phase outside the ordered set
-# is an index error: the resolve refuses it rather than guess a phase.
+# open-as-draft. A check_set token no layer declares takes pre-open (the backstop
+# the dispatcher can act on), never dropped silently: merge alone would strand it
+# (see the resolve loop). A declared check with no phase also takes pre-open, with
+# a warning. A declared phase outside the ordered set is an index error: the
+# resolve of a set naming that check refuses it rather than guess a phase, --check
+# of it refuses, and --show leaves it out and names it on stderr. Read at a
+# commit, such a row holds only the branches whose commit carries it.
 #
-# Index resolution for --resolve: --file wins; else GC_REVIEW_CHECKS_INDEX;
-# else --at reads the index a commit carries (git show <oid>:review-checks.toml
-# in the toplevel's or GC_RIG_ROOT's repository, fetching the commit from
-# origin when neither holds it); else the working-tree review-checks.toml. A
-# commit that carries no index falls through to the working tree. A commit
-# that no repository here holds or can fetch fails the resolve: another
-# tree's index never answers for that head. When no index is readable at all
-# (a repo that keeps none), every token is undeclared and takes pre-open, so
-# every non-sentinel, non-approval token gates every transition and a readless
-# pass never opens an ungated PR. The index text is read through pipes, never
-# a scratch file.
+# A commit that carries no review-checks.toml adds no rows. A commit that no
+# repository here holds or can fetch fails the call: another tree's index never
+# answers for that commit. So does a call with no repository here at all (no
+# checkout around the caller, GC_RIG_ROOT unset), since the rig's rows at that
+# commit cannot be read, and resolving under the pack's rows alone would hand a
+# rig the pack's phases in place of its own. The index text is read through
+# pipes, never a scratch file. The `method` key of an older index is ignored: a
+# check's method is the skill named from the check.
 #
-# The index declares mechanical facts only — a check's name, its method, its
-# purpose, its phase. When a check applies to a given diff is a judgment its
-# method states in prose, not a column here, so this parser reads no applies-when.
-# Callers: signoff.sh, skills/review-triage, pr-open.sh, gctk merge, gate-ensure.sh,
+# The index declares mechanical facts only. When a check applies to a given diff
+# is a judgment its method states in prose, not a column here.
+# Callers: signoff.sh, skills/review-triage, formulas/mol-review.toml and
+# mol-review-quorum-signoff.toml, pr-open.sh, gctk merge, gate-ensure.sh,
 # pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
 # review-checks.test.sh.
-# Exit: 0 ok · 1 no readable index or --check not declared (emit), or a --at
-# commit that cannot be read or a declared phase outside the ordered set
-# (resolve) · 2 usage.
+# Exit: 0 ok · 1 a commit --at names cannot be read (no repository here holds or
+# can fetch it, or there is no repository here at all), an extension at a
+# readable commit cannot be read, the paths --edits lists cannot be listed,
+# --check names a check no layer declares or one whose phase is outside the
+# ordered set, a resolved check's phase is outside the ordered set, or (emit) no
+# index declares any check · 2 usage, a call that names no commit, or a flag its
+# form does not take, included.
 set -uo pipefail
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 warn() { echo "review-checks: $*" >&2; }
 
-MODE="emit"
-FILE=""; ONLY_CHECK=""; CHECK_SET=""; THROUGH=""; AT=""; WITH_PHASE=""
+HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PACK_INDEX="$(CDPATH='' cd -- "$HERE/../.." && pwd)/review-checks.toml"
+
+MODE=""; GIVEN=""
+FILE=""; ONLY_CHECK=""; CHECK_SET=""; THROUGH=""; AT=""; WITH_PHASE=""; EXT_CHECK=""; EDIT_BASE=""
+set_mode() { # <mode> — one mode per call
+  if [ -n "$MODE" ] && [ "$MODE" != "$1" ]; then
+    echo "review-checks: --$MODE and --$1 are different calls; name one" >&2; usage >&2; exit 2
+  fi
+  MODE="$1"
+}
+# Each pass of the loop starts at a flag, because a flag's value is shifted with
+# it, so GIVEN lists the flags the call named.
 while [ $# -gt 0 ]; do
+  GIVEN="$GIVEN $1"
   case "$1" in
-    --resolve)     MODE="resolve"; shift ;;
+    --resolve)     set_mode resolve; shift ;;
+    --show)        set_mode show; shift ;;
+    --extension)   set_mode extension; EXT_CHECK="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
+    --edits)       set_mode edits; shift ;;
+    --base)        EDIT_BASE="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
     --file)        FILE="${2:-}";      shift 2 || { usage >&2; exit 2; } ;;
     --check)       ONLY_CHECK="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
     --check-set)   CHECK_SET="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
@@ -71,6 +125,36 @@ while [ $# -gt 0 ]; do
     *) echo "review-checks: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
   esac
 done
+[ -n "$MODE" ] || MODE=show
+
+# The flags each form takes beside its verb. The loop above refused every flag
+# no form takes, so one not listed here is another form's.
+case "$MODE" in
+  resolve)   TAKES="--check-set --through --with-phase --at --file" ;;
+  show)      TAKES="--check --at --file" ;;
+  extension) TAKES="--at" ;;
+  edits)     TAKES="--base --at" ;;
+esac
+for flag in $GIVEN; do
+  case " --$MODE $TAKES " in *" $flag "*) continue ;; esac
+  echo "review-checks: --$MODE takes ${TAKES// /, }; $flag is another call's flag" >&2; usage >&2; exit 2
+done
+
+# A call names the commit it judges, unless an index is named outright. The
+# extension is a file only a commit carries, and the edits a change only a
+# commit makes, so nothing stands in for their commit.
+if [ -z "$AT" ]; then
+  if [ "$MODE" = extension ]; then
+    echo "review-checks: --extension needs --at <oid>, the commit whose docs/review-<check>.md it reads" >&2; exit 2
+  fi
+  if [ "$MODE" = edits ]; then
+    echo "review-checks: --edits needs --at <oid>, the commit whose change it lists" >&2; exit 2
+  fi
+  if [ -z "$FILE" ] && [ -z "${GC_REVIEW_CHECKS_INDEX:-}" ]; then
+    echo "review-checks: no commit named (--at is missing or empty) and no index named (--file, GC_REVIEW_CHECKS_INDEX); a rig's rows are read only at the commit being judged" >&2
+    exit 2
+  fi
+fi
 
 # Rank a phase, or empty for a value outside the ordered set.
 phase_rank() {
@@ -83,12 +167,12 @@ phase_rank() {
   esac
 }
 
-# Parse an index file into TSV rows: <name>\t<method>\t<purpose>\t<phase>.
-# A check is a [checks.<name>] table with string keys. The grammar is a minimal
-# TOML subset: table headers, `key = "value"` lines, `#` comments, blanks. A
-# value's surrounding double quotes are stripped; any other table ends the checks
-# context so a stray key outside a [checks.*] header is never read into a check.
-parse_index() { # <file>
+# Parse index text on stdin into TSV rows: <name>\t<purpose>\t<phase>. A check is a
+# [checks.<name>] table with string keys. The grammar is a minimal TOML subset:
+# table headers, `key = "value"` lines, `#` comments, blanks. A value's surrounding
+# double quotes are stripped; any other table ends the checks context so a stray
+# key outside a [checks.*] header is never read into a check.
+parse_index() {
   awk '
     function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
     function val(l,   v) {
@@ -98,8 +182,8 @@ parse_index() { # <file>
       return v
     }
     function flush() {
-      if (name != "") printf "%s\t%s\t%s\t%s\n", name, method, purpose, phase
-      name = ""; method = ""; purpose = ""; phase = ""
+      if (name != "") printf "%s\t%s\t%s\n", name, purpose, phase
+      name = ""; purpose = ""; phase = ""
     }
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*\[/ {
@@ -110,83 +194,180 @@ parse_index() { # <file>
       }
       next
     }
-    name != "" && /^[[:space:]]*method[[:space:]]*=/  { method  = val($0); next }
     name != "" && /^[[:space:]]*purpose[[:space:]]*=/ { purpose = val($0); next }
     name != "" && /^[[:space:]]*phase[[:space:]]*=/   { phase   = val($0); next }
     END { flush() }
-  ' "$1"
+  '
 }
 
-# The index text for --resolve and a name for where it came from; both stay empty
-# when no index is readable. The text travels through variables and pipes, never
-# a scratch file, so a full TMPDIR cannot turn a readable index into a missing one.
-IDX_TEXT=""; IDX_SRC=""
+# Lay rows over rows. Lines tagged P are the pack's and R the rig's; within a
+# layer the first row for a name stands. A rig row for a pack check replaces each
+# key it gives a value; any other rig row is appended, so the pack's checks come
+# first in the pack's order and the rig's own follow in the rig's.
+overlay() {
+  awk -F'\t' -v OFS='\t' '
+    NF < 2 || $2 == "" { next }
+    {
+      k = tolower($2)
+      if ($1 == "P") {
+        if (k in pk) next
+        pk[k] = 1; ord[++n] = k; nm[k] = $2; pu[k] = $3; ph[k] = $4
+        next
+      }
+      if (k in rk) next
+      rk[k] = 1
+      if (k in pk) { if ($3 != "") pu[k] = $3; if ($4 != "") ph[k] = $4; next }
+      pk[k] = 1; ord[++n] = k; nm[k] = $2; pu[k] = $3; ph[k] = $4
+    }
+    END { for (i = 1; i <= n; i++) { k = ord[i]; print nm[k], pu[k], ph[k] } }
+  '
+}
+
+# The repositories a commit is looked for in: the toplevel of the checkout the
+# caller runs in, then GC_RIG_ROOT's. Each is listed once, keyed by the object
+# store it reads: the same directory named twice, or a worktree and the checkout
+# it was added to, hold the same commits, and a commit missing from one would be
+# fetched into that store a second time.
+REPOS=(); REPO_STORES=()
+for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+  [ -n "$root" ] || continue
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || continue
+  rstore=$(cd "$root" 2>/dev/null && rcommon=$(git rev-parse --git-common-dir 2>/dev/null) \
+           && [ -n "$rcommon" ] && cd "$rcommon" 2>/dev/null && pwd -P) || rstore=""
+  [ -n "$rstore" ] || rstore="$root"
+  rdup=""
+  for s in ${REPO_STORES[@]+"${REPO_STORES[@]}"}; do [ "$s" = "$rstore" ] && rdup=1; done
+  [ -n "$rdup" ] && continue
+  REPOS+=("$root"); REPO_STORES+=("$rstore")
+done
 # A full commit id, the only form worth asking origin for by name.
 is_oid() {
   case "$1" in ""|*[!0-9a-f]*) return 1 ;; esac
   [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
 }
-read_index_file() { # <path> — 0 and IDX_TEXT/IDX_SRC set when it reads
-  local t
-  [ -r "$1" ] || return 1
-  t=$(cat "$1") || return 1
-  IDX_TEXT="$t"; IDX_SRC="$1"
-}
-# Sets IDX_TEXT/IDX_SRC from --file, else the GC_REVIEW_CHECKS_INDEX override,
-# else the commit --at names, else the working-tree file. Non-zero only when --at
-# names a commit that no repository here holds or can fetch: the caller asked for
-# that head's gates, and another tree's index is not an answer for it.
-resolve_index() {
-  local root at_repo="" t
-  local -a roots=() repos=()
-  if [ -n "$FILE" ]; then read_index_file "$FILE"; return 0; fi
-  # An explicit environment override, authoritative when set: readable, it is the
-  # index; unreadable, there is none (every token takes pre-open), never a silent
-  # reach past it. It lets a hermetic test fix the index a cadence caller's --at
-  # would otherwise resolve from the live checkout.
-  if [ -n "${GC_REVIEW_CHECKS_INDEX:-}" ]; then read_index_file "$GC_REVIEW_CHECKS_INDEX"; return 0; fi
-  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-    [ -n "$root" ] || continue
-    roots+=("$root")
-    git -C "$root" rev-parse --git-dir >/dev/null 2>&1 && repos+=("$root")
+# The repository that holds the commit --at names, in AT_REPO. A commit pushed
+# since this checkout last fetched is not here yet: it is fetched by id, once,
+# rather than some other commit's file read for it. Non-zero when there are
+# repositories and none holds or can fetch the commit. With none at all, AT_REPO
+# stays empty and the call returns 0, and each caller below refuses on that.
+AT_REPO=""
+find_at_repo() {
+  local root
+  [ "${#REPOS[@]}" -gt 0 ] || return 0
+  for root in "${REPOS[@]}"; do
+    git -C "$root" cat-file -e "$AT^{commit}" 2>/dev/null && { AT_REPO="$root"; return 0; }
   done
-  if [ -n "$AT" ] && [ "${#repos[@]}" -gt 0 ]; then
-    for root in "${repos[@]}"; do
-      git -C "$root" cat-file -e "$AT^{commit}" 2>/dev/null && { at_repo="$root"; break; }
+  if is_oid "$AT"; then
+    for root in "${REPOS[@]}"; do
+      git -C "$root" fetch --quiet --no-tags --no-write-fetch-head origin "$AT" >/dev/null 2>&1 || continue
+      git -C "$root" cat-file -e "$AT^{commit}" 2>/dev/null && { AT_REPO="$root"; return 0; }
     done
-    # A head pushed since this checkout last fetched is not here yet: fetch it by
-    # id, once, rather than read some other commit's index for it.
-    if [ -z "$at_repo" ] && is_oid "$AT"; then
-      for root in "${repos[@]}"; do
-        git -C "$root" fetch --quiet --no-tags --no-write-fetch-head origin "$AT" >/dev/null 2>&1 || continue
-        git -C "$root" cat-file -e "$AT^{commit}" 2>/dev/null && { at_repo="$root"; break; }
-      done
-    fi
-    [ -n "$at_repo" ] || return 1
-    if t=$(git -C "$at_repo" show "$AT:review-checks.toml" 2>/dev/null) && [ -n "$t" ]; then
-      IDX_TEXT="$t"; IDX_SRC="$AT:review-checks.toml"; return 0
-    fi
-    # The commit carries no index of its own: the working tree's stands in below.
   fi
-  for root in ${roots[@]+"${roots[@]}"}; do
-    read_index_file "$root/review-checks.toml" && return 0
-  done
-  return 0
+  return 1
+}
+# The text of <path> at the commit in AT_REPO, in AT_TEXT. 0 and AT_TEXT empty when
+# the commit carries no such file; non-zero when it carries one that will not read.
+AT_TEXT=""
+read_at() { # <path>
+  AT_TEXT=""
+  git -C "$AT_REPO" cat-file -e "$AT:$1" 2>/dev/null || return 0
+  AT_TEXT=$(git -C "$AT_REPO" show "$AT:$1" 2>/dev/null) || return 1
+}
+no_commit_warning() {
+  warn "commit '$AT' is in no repository here and could not be fetched from origin; the rig's files at that commit are unreadable"
+}
+
+# --- the extension ------------------------------------------------------------
+if [ "$MODE" = extension ]; then
+  case "$EXT_CHECK" in
+    ""|*[!A-Za-z0-9_-]*) echo "review-checks: --extension takes a check name ([A-Za-z0-9_-]+), got '$EXT_CHECK'" >&2; exit 2 ;;
+  esac
+  EXT_PATH="docs/review-$(printf '%s' "$EXT_CHECK" | tr '[:upper:]' '[:lower:]').md"
+  find_at_repo || { no_commit_warning; exit 1; }
+  if [ -z "$AT_REPO" ]; then
+    warn "no repository here to read '$AT' from (no checkout toplevel, GC_RIG_ROOT unset); $EXT_PATH went unread"
+    exit 1
+  fi
+  read_at "$EXT_PATH" || { warn "$AT:$EXT_PATH is there but would not read"; exit 1; }
+  [ -z "$AT_TEXT" ] || printf '%s\n' "$AT_TEXT"
+  exit 0
+fi
+
+# --- the guidance a change edits ---------------------------------------------
+if [ "$MODE" = edits ]; then
+  if [ -z "$EDIT_BASE" ] || ! git check-ref-format "refs/heads/$EDIT_BASE" >/dev/null 2>&1; then
+    echo "review-checks: --edits takes --base <branch>, the branch the change left, got '$EDIT_BASE'" >&2; exit 2
+  fi
+  find_at_repo || { no_commit_warning; exit 1; }
+  if [ -z "$AT_REPO" ]; then
+    warn "no repository here to read '$AT' from (no checkout toplevel, GC_RIG_ROOT unset); the paths it touches went unread"
+    exit 1
+  fi
+  # The base as origin has it now, so the fork point is where the change left it.
+  git -C "$AT_REPO" fetch --quiet --no-tags --no-write-fetch-head origin \
+    "+refs/heads/$EDIT_BASE:refs/remotes/origin/$EDIT_BASE" >/dev/null 2>&1 || true
+  FORK=$(git -C "$AT_REPO" merge-base "refs/remotes/origin/$EDIT_BASE" "$AT" 2>/dev/null)
+  [ -n "$FORK" ] || { warn "no fork point between origin/$EDIT_BASE and $AT reads"; exit 1; }
+  # --no-renames: rename detection names a renamed file by the path it lands at
+  # alone, and a guidance file moved away is an edit to the guidance.
+  PATHS=$(git -C "$AT_REPO" diff --no-renames --name-only "$FORK" "$AT" 2>/dev/null) \
+    || { warn "the paths from $FORK to $AT did not read"; exit 1; }
+  printf '%s\n' "$PATHS" | awk '/^review-checks\.toml$/ || /^docs\/review-[^\/]*\.md$/'
+  exit 0
+fi
+
+# --- the effective index ------------------------------------------------------
+# ROWS holds it as <name>\t<purpose>\t<phase>; IDX_SRC names what was read, and
+# stays empty when nothing was.
+ROWS=""; IDX_SRC=""
+read_named_index() { # <path> — the whole index; unreadable leaves it empty
+  local t
+  if [ -r "$1" ] && t=$(cat "$1"); then
+    ROWS=$(printf '%s\n' "$t" | parse_index); IDX_SRC="$1"
+  fi
+}
+if [ -n "$FILE" ]; then
+  read_named_index "$FILE"
+elif [ -n "${GC_REVIEW_CHECKS_INDEX:-}" ]; then
+  read_named_index "$GC_REVIEW_CHECKS_INDEX"
+else
+  PACK_ROWS=""; RIG_ROWS=""
+  if [ -r "$PACK_INDEX" ] && PACK_TEXT=$(cat "$PACK_INDEX"); then
+    PACK_ROWS=$(printf '%s\n' "$PACK_TEXT" | parse_index); IDX_SRC="$PACK_INDEX"
+  fi
+  find_at_repo || { no_commit_warning; exit 1; }
+  if [ -z "$AT_REPO" ]; then
+    warn "no repository here to read '$AT' from (no checkout toplevel, GC_RIG_ROOT unset), so the rig's rows at that commit are unreadable"
+    exit 1
+  fi
+  read_at review-checks.toml || { warn "$AT:review-checks.toml is there but would not read"; exit 1; }
+  if [ -n "$AT_TEXT" ]; then
+    RIG_ROWS=$(printf '%s\n' "$AT_TEXT" | parse_index)
+    IDX_SRC="${IDX_SRC:+$IDX_SRC + }$AT:review-checks.toml"
+  fi
+  ROWS=$( { [ -z "$PACK_ROWS" ] || printf '%s\n' "$PACK_ROWS" | awk '{ print "P\t" $0 }'
+            [ -z "$RIG_ROWS" ]  || printf '%s\n' "$RIG_ROWS"  | awk '{ print "R\t" $0 }'; } | overlay)
+fi
+
+# A row's phase as every reader takes it: a missing phase is pre-open, with a
+# warning, and a phase outside the ordered set is refused (non-zero) after its
+# warning, so no reader guesses one.
+row_phase() { # <name> <declared-phase>
+  if [ -z "$2" ]; then
+    warn "check '$1' is declared with no phase ($IDX_SRC); defaulting to pre-open"
+    printf 'pre-open'; return 0
+  fi
+  if [ -z "$(phase_rank "$2")" ]; then
+    warn "check '$1' declares phase '$2', which is not a phase (pre-open|open-as-draft|ready-for-review|merge), in $IDX_SRC; fix the index"
+    return 1
+  fi
+  printf '%s' "$2"
 }
 
 if [ "$MODE" = "resolve" ]; then
-  [ -n "$CHECK_SET" ] || CHECK_SET=""   # an empty set resolves to no gates
   [ -n "$THROUGH" ] || { echo "review-checks: --resolve needs --through <phase>" >&2; usage >&2; exit 2; }
   THRU_RANK=$(phase_rank "$THROUGH")
   [ -n "$THRU_RANK" ] || { echo "review-checks: --through '$THROUGH' is not a phase (pre-open|open-as-draft|ready-for-review|merge)" >&2; exit 2; }
-
-  if ! resolve_index; then
-    warn "commit '$AT' is in no repository here and could not be fetched from origin; the index at that head is unreadable"
-    exit 1
-  fi
-  # name<TAB>phase from the index, the name lowercased for a case-insensitive lookup.
-  PHASES=""
-  [ -n "$IDX_TEXT" ] && PHASES=$(printf '%s\n' "$IDX_TEXT" | parse_index - | awk -F'\t' '{ print tolower($1) "\t" $4 }')
 
   emit_one() { # <original-token> <phase>
     if [ -n "$WITH_PHASE" ]; then printf '%s\t%s\n' "$1" "$2"; else printf '%s\n' "$1"; fi
@@ -202,9 +383,9 @@ if [ "$MODE" = "resolve" ]; then
     case "$low" in none|off|approval) continue ;; esac
     case " $seen " in *" $low "*) continue ;; esac
     seen="$seen $low"
-    row=$(printf '%s\n' "$PHASES" | awk -F'\t' -v n="$low" '$1 == n { print "y:" $2; exit }')
+    row=$(printf '%s\n' "$ROWS" | awk -F'\t' -v n="$low" 'NF && tolower($1) == n { print "y:" $3; exit }')
     if [ -z "$row" ]; then
-      # Undeclared, including every token when there is no index at all: pre-open,
+      # Undeclared, including every token when no index read at all: pre-open,
       # the earliest phase and the one gate-ensure dispatches at every stage, so
       # the token always has a path to its review rather than a merge-only gate
       # that could hold the merge with no review ever produced. Pre-open gates
@@ -215,45 +396,42 @@ if [ "$MODE" = "resolve" ]; then
       emit_one "$tok" pre-open
       continue
     fi
-    ph="${row#y:}"
-    if [ -z "$ph" ]; then
-      # Declared with no phase key, the shape of an index written before the phase
-      # column: every declared check of that shape gated the create, so it takes
-      # pre-open rather than open the PR ungated.
-      warn "check '$tok' is declared with no phase ($IDX_SRC); defaulting to pre-open"
-      emit_one "$tok" pre-open
-      continue
-    fi
-    rank=$(phase_rank "$ph")
-    if [ -z "$rank" ]; then
-      # A phase value outside the ordered set (a misspelling, a wrong case) is an
-      # index error, not an absent phase: guessing pre-open would make a
-      # merge-phase check gate the create, and guessing merge would open the PR
-      # ungated. Refuse, and every caller holds its transition.
-      warn "check '$tok' declares phase '$ph', which is not a phase (pre-open|open-as-draft|ready-for-review|merge), in $IDX_SRC; fix the index"
-      exit 1
-    fi
-    if [ "$rank" -le "$THRU_RANK" ]; then emit_one "$tok" "$ph"; fi
+    # A phase outside the ordered set (a misspelling, a wrong case) is an index
+    # error, not an absent phase: guessing pre-open would make a merge-phase check
+    # gate the create, and guessing merge would open the PR ungated. Refuse, and
+    # every caller holds its transition.
+    ph=$(row_phase "$tok" "${row#y:}") || exit 1
+    if [ "$(phase_rank "$ph")" -le "$THRU_RANK" ]; then emit_one "$tok" "$ph"; fi
   done < <(printf '%s\n' "$CHECK_SET" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
-  [ -n "$IDX_SRC" ] || warn "no readable check index (--file, GC_REVIEW_CHECKS_INDEX, --at and the working tree all came up empty); every non-sentinel token takes pre-open and gates every transition"
+  [ -n "$IDX_SRC" ] || warn "no readable check index (the pack's index, the commit's and any index named outright all came up empty); every non-sentinel token takes pre-open and gates every transition"
   exit 0
 fi
 
 # --- emit mode (the TSV) -------------------------------------------------------
-[ -n "$FILE" ] || { usage >&2; exit 2; }
-[ -r "$FILE" ] || { echo "review-checks: no readable index at '$FILE'" >&2; exit 1; }
-
-ROWS=$(parse_index "$FILE")
 if [ -z "$ROWS" ]; then
-  echo "review-checks: '$FILE' declares no checks" >&2
+  if [ -n "$IDX_SRC" ]; then echo "review-checks: '$IDX_SRC' declares no checks" >&2
+  elif [ -n "$FILE" ]; then echo "review-checks: no readable index at '$FILE'" >&2
+  else echo "review-checks: no readable check index" >&2; fi
   exit 1
 fi
 
+# The rows are split on the unit separator, which a TOML string here never
+# carries: tab is whitespace to read, which would fold an empty purpose away.
+emit_row() { # <tsv-row> — 0 printed, non-zero when its phase is refused
+  local name purpose declared ph
+  IFS=$'\037' read -r name purpose declared <<< "$(printf '%s' "$1" | tr '\t' '\037')"
+  ph=$(row_phase "$name" "$declared") || return 1
+  printf '%s\t%s\t%s\n' "$name" "$purpose" "$ph"
+}
 if [ -n "$ONLY_CHECK" ]; then
-  ROW=$(printf '%s\n' "$ROWS" | awk -F'\t' -v c="$ONLY_CHECK" 'tolower($1) == tolower(c) { print; exit }')
-  [ -n "$ROW" ] || { echo "review-checks: '$FILE' does not declare check '$ONLY_CHECK'" >&2; exit 1; }
-  printf '%s\n' "$ROW"
+  ROW=$(printf '%s\n' "$ROWS" | awk -F'\t' -v c="$ONLY_CHECK" 'NF && tolower($1) == tolower(c) { print; exit }')
+  [ -n "$ROW" ] || { echo "review-checks: '$IDX_SRC' does not declare check '$ONLY_CHECK'" >&2; exit 1; }
+  emit_row "$ROW" || exit 1
   exit 0
 fi
-printf '%s\n' "$ROWS"
+while IFS= read -r row; do
+  [ -n "$row" ] || continue
+  # A refused row is not on the menu; its warning names it.
+  emit_row "$row" || continue
+done <<< "$ROWS"
 exit 0

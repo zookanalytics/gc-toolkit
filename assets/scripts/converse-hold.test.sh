@@ -69,8 +69,9 @@ PREFIX="holding — "
 BUDGET=$((CAP - $(printf '%s' "$PREFIX" | jq -Rsr 'length')))
 
 # A stub gc serving the two reads/one write the script makes: `bd show` returns
-# the visit with whatever the stamp has persisted, or STUB_SHOW_OUT in its place
-# when that is set (empty for no answer at all), and exits STUB_SHOW_RC. Its
+# the visit with whatever the stamp has persisted, plus the metadata object
+# STUB_VISIT_META carries, or STUB_SHOW_OUT in its place when that is set
+# (empty for no answer at all), and exits STUB_SHOW_RC. Its
 # first STUB_SHOW_FAILS reads answer nothing and exit 1, a store that recovers
 # between the hold's reads. `bd update` persists the stamped id unless
 # STAMP_PERSIST=0, overridable by STAMP_VALUE for the landed-wrong case, and
@@ -89,11 +90,13 @@ case "${2:-}" in
             printf '%s' "$STUB_SHOW_OUT"
         else
             hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
-            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
-                --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
-                '[{id:"v-x", metadata:(({"task_kind":"visit"}
+            vm="${STUB_VISIT_META:-}"; [ -n "$vm" ] || vm='{}'
+            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" --arg vt "${STUB_VISIT_TOPIC:-}" \
+                --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" --argjson vm "$vm" \
+                '[{id:"v-x", metadata:(({"task_kind":"visit"} + $vm
                     + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
                     + (if $tp == "" then {} else {"escalation_key":$tp} end)
+                    + (if $vt == "" then {} else {"visit_topic":$vt} end)
                     + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
                   + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]'
         fi
@@ -177,12 +180,19 @@ chmod +x "$PACK/assets/scripts/lifecycle.sh"
 stub_helm "$PACK" RIG
 stub_helm "$CITY/rigs/gc-toolkit" CITY
 stub_helm "$CAPLESS" CAPLESS nocap
+# The script takes its writers from beside itself, in the copy of the pack that
+# runs, so each pack here carries its own copy of the script and the libraries
+# it sources. FOREIGN carries no writer at all.
+for d in "$PACK" "$CITY/rigs/gc-toolkit" "$CAPLESS" "$FOREIGN"; do
+    mkdir -p "$d/assets/scripts"
+    cp "$SUT" "$REPO/assets/scripts/visit-identity.sh" "$REPO/assets/scripts/visit-topic.sh" "$d/assets/scripts/"
+done
 
-# run_need <need> [VAR=val ...] — run converse-hold.sh "<need>" from a non-git
-# cwd with the owning-rig pack on GC_RIG_ROOT, resetting the persist file, the
+# run_need <need> [VAR=val ...] — run the copy of converse-hold.sh "<need>" in
+# RUN_PACK (PACK by default) from a non-git cwd, resetting the persist file, the
 # stub's read count and the call log first. Trailing VAR=val pairs override any
 # default (env: last assignment wins), so a case dials STAMP_RC/STAMP_PERSIST/
-# STUB_DEMAND_RC/GC_RIG_ROOT/… inline. run [VAR=val ...] is run_need "need X".
+# STUB_DEMAND_RC/… inline. run [VAR=val ...] is run_need "need X".
 OUT=""; RC=0
 run_need() {
     local need="$1"; shift
@@ -190,7 +200,7 @@ run_need() {
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
-        VISIT=v-x SUBJECT=item-x "$@" bash "$SUT" "$need" 2>&1)"
+        VISIT=v-x SUBJECT=item-x "$@" bash "${RUN_PACK:-$PACK}/assets/scripts/converse-hold.sh" "$need" 2>&1)"
     RC=$?
 }
 run() { run_need "need X" "$@"; }
@@ -200,7 +210,7 @@ run_hold_merge() {
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
-        VISIT=v-x SUBJECT=item-x "$@" bash "$SUT" --hold-merge "need X" 2>&1)"
+        VISIT=v-x SUBJECT=item-x "$@" bash "${RUN_PACK:-$PACK}/assets/scripts/converse-hold.sh" --hold-merge "need X" 2>&1)"
     RC=$?
 }
 calls() { cat "$HLOG" 2>/dev/null; }
@@ -245,7 +255,7 @@ is "a decision that is only whitespace is refused as usage" "$RC" "2"
 is "…before any write" "$(calls)" ""
 
 echo "── the visit read gate: a visit that cannot be read stops the hold before any write ──"
-# The visit's escalation_key is the topic every demand carries. A failed read
+# Every demand carries the visit's topic, here its escalation_key. A failed read
 # taken as an empty answer files the demand with no topic, and a topic-less
 # demand matches whatever demand already sits on the gated bead, a sibling
 # sitting's on a shared subject. So a read counts only when it exits 0 with the
@@ -297,12 +307,12 @@ is "an anchored hold whose headline is refused is refused too" "$RC" "1"
 hasnt "…with no demand on the visit" "demand v-x" "$(calls)"
 # A writer whose cap cannot be read leaves the length to it, and its refusal must
 # still stop the hold.
-run_need "$(rep x $((BUDGET + 1)))" GC_RIG_ROOT="$CAPLESS"
+RUN_PACK="$CAPLESS" run_need "$(rep x $((BUDGET + 1)))"
 is "a writer whose cap cannot be read still stops an over-long hold" "$RC" "1"
 has "…because the writer refused the headline" "the cap is $CAP" "$OUT"
 hasnt "…and no demand is filed under it" "demand item-x" "$(calls)"
 is "…and no hold_demand is stamped" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
-run_need "$(rep x "$BUDGET")" GC_RIG_ROOT="$CAPLESS"
+RUN_PACK="$CAPLESS" run_need "$(rep x "$BUDGET")"
 is "…while a decision within the budget holds through it" "$(verdict)" "held"
 
 echo "── the demand gate fails closed unless a demand id lands ──"
@@ -430,6 +440,50 @@ has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] dem
 run_hold_merge STUB_STATE=pull_request
 hasnt "an ordinary visit (no escalation_key) files no topic" "--topic" "$(calls)"
 
+echo "── a visit filed for a distinct concern scopes its demands to itself ──"
+# gc-helm.sh open --allow-duplicate (engage --reason, --template, a new visit
+# picked at the prompt) files a second visit on a subject that may already have a
+# live sitting, and stamps it visit_topic=own. The two sittings share the subject,
+# so each demand this one files carries `visit:` and its own id as the topic, and
+# its lookup never matches the live sitting's demand on the subject. The live
+# sitting's lookup carries no topic and still matches this one's demand, so the
+# protection runs one way.
+run STUB_VISIT_TOPIC=own
+has "a pre-PR subject's conversation demand carries the visit's own topic" "helm[RIG] demand item-x need X --by converse --topic visit:v-x" "$(calls)"
+run_hold_merge STUB_STATE=pull_request STUB_VISIT_TOPIC=own
+has "an anchored hold's visit demand carries it" "helm[RIG] demand v-x need X --by converse --topic visit:v-x" "$(calls)"
+has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] demand item-x need X --by converse --topic visit:v-x" "$(calls)"
+run STUB_VISIT_TOPIC=own STUB_TOPIC=finding-b
+has "an escalation_key still names the topic when both are stamped" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
+run STUB_VISIT_TOPIC=other
+hasnt "a visit_topic other than own is no topic of its own" "--topic" "$(calls)"
+
+echo "── every case of the shared topic fixture files its demands under its demand topic ──"
+# visit-topic.sh is the one definition of a visit's topic, and
+# visit-topic.fixture.json holds the cases the fold, the hold and the sign-off
+# each run. The stub serves the fixture's visit carrying each case's metadata.
+# An anchored hold with --hold-merge files both demands a sitting can file, the
+# conversation demand on the visit and the merge hold on the anchor, and each
+# carries the case's demand topic, or none.
+FX="$REPO/assets/scripts/visit-topic.fixture.json"
+is "the fixture's visit is the one the stub serves" "$(jq -r '.visit' "$FX")" "v-x"
+is "the fixture's subject is the one the hold is handed" "$(jq -r '.subject' "$FX")" "item-x"
+while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    name="$(printf '%s' "$c" | jq -r '.name')"
+    want="$(printf '%s' "$c" | jq -r '.demand_topic')"
+    run_hold_merge STUB_STATE=pull_request STUB_VISIT_META="$(printf '%s' "$c" | jq -c '.metadata')"
+    is "(FIXTURE) $name: the hold proceeds" "$(verdict)" "held"
+    if [ -n "$want" ]; then
+        has "(FIXTURE) $name: the visit demand carries its demand topic" \
+            "helm[RIG] demand v-x need X --by converse --topic $want" "$(calls)"
+        has "(FIXTURE) $name: …and so does the merge hold" \
+            "helm[RIG] demand item-x need X --by converse --topic $want" "$(calls)"
+    else
+        hasnt "(FIXTURE) $name: no demand carries a topic" "--topic" "$(calls)"
+    fi
+done <<< "$(jq -c '.cases[]' "$FX")"
+
 echo "── fail closed: an unreadable or missing lifecycle state gates the SUBJECT ──"
 # The gate switches to the visit only for a PROVEN PR-anchor state. A state that
 # cannot be read must fail closed to the subject — defaulting to the visit would drop
@@ -440,19 +494,18 @@ is "a failed state read still lets the hold proceed" "$(verdict)" "held"
 has "…with the demand on the SUBJECT (fail closed)" "demand item-x" "$(calls)"
 hasnt "…and never on the visit" "demand v-x" "$(calls)"
 hasnt "…and no held transition on an unprovable state" "lc transition" "$(calls)"
-run GC_RIG_ROOT="$FOREIGN"
+RUN_PACK="$CITY/rigs/gc-toolkit" run
 has "a missing lifecycle writer still finds the demand writer" "helm[CITY]" "$(calls)"
 has "…and with no state readable, the demand fails closed to the SUBJECT" "helm[CITY] demand item-x need X --by converse" "$(calls)"
 hasnt "…never the visit" "demand v-x" "$(calls)"
 
-echo "── the writers are searched for on the candidate roots, not assumed ──"
-run
-has "the owning rig's gc-helm.sh wins when present" "helm[RIG]" "$(calls)"
+echo "── the writers are the ones beside the script, never a rig's or the city's ──"
 run GC_RIG_ROOT="$FOREIGN"
-has "a rig with no assets/ falls through to the city pack" "helm[CITY]" "$(calls)"
-run GC_RIG_ROOT="$FOREIGN" GC_CITY_PATH="$TMPD/no-such-city"
-has "no writer on any candidate root is LOUD" "NO TAKEAWAY WRITER" "$OUT"
+has "the pack's own gc-helm.sh writes, whatever the rig root holds" "helm[RIG]" "$(calls)"
+RUN_PACK="$FOREIGN" run GC_RIG_ROOT="$PACK"
+has "a pack with no writer beside the script is LOUD" "NO TAKEAWAY WRITER" "$OUT"
 is "…and with no writer the hold cannot land, so it refuses" "$(verdict)" "refused"
+hasnt "…though the rig root and the city each hold one, neither is used" "helm[" "$(calls)"
 
 echo "── the shipped writer's cap falls on the budget's boundary ──"
 # The stub writers enforce the cap read off the shipped gc-helm.sh, so this holds

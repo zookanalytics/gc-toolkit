@@ -12,7 +12,11 @@
 # review's child never adopted for a ruling, the open-PR guards (a live anchor
 # at pull_request, carrying no disposition, naming its branch, target and PR),
 # the no-double-dispatch refusal on a partial pour, and every lane returned to
-# unreviewed (review-outcome.sh, run for real) once the child is dispatched.
+# unreviewed (review-outcome.sh, run for real) once the child is dispatched,
+# resolved at the head of the anchor's branch, whose failed read refuses before
+# anything is filed. The head is read, and the lanes are resolved, in the
+# anchor's rig checkout, whatever directory the sitting runs from, and an anchor
+# whose rig checkout does not resolve refuses too. A git stub answers the read.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,9 +64,16 @@ if [ "${1:-}" = "sling" ]; then
   fi
   exit 0
 fi
-# Any non-bd command (agent list for pool-route, session wake/nudge) is a quiet
-# success: pool-route reads an empty agent set as UNREADABLE and returns the
-# route UNVERIFIED (exit 0), which is enough for the dispatch to proceed.
+# The rig list the SUT finds the anchor's rig checkout in (bead-store.sh): the
+# anc prefix is the rig at STUB_RIG_PATH, unless STUB_RIG_UNLISTED leaves it out.
+if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
+  if [ -n "${STUB_RIG_UNLISTED:-}" ]; then echo '{"rigs":[]}'
+  else printf '{"rigs":[{"name":"anc-rig","prefix":"anc","path":"%s"}]}\n' "${STUB_RIG_PATH:?}"; fi
+  exit 0
+fi
+# Any other non-bd command (agent list for pool-route, session wake/nudge) is a
+# quiet success: pool-route reads an empty agent set as UNREADABLE and returns
+# the route UNVERIFIED (exit 0), which is enough for the dispatch to proceed.
 [ "${1:-}" = "bd" ] || exit 0
 shift
 # Every bead bd prints carries a priority, P2 unless one was written.
@@ -173,6 +184,26 @@ case "${1:-}" in
 esac
 STUB
 chmod +x "$BIN/gc"
+# A git stub for the one remote read the run makes, the anchor branch's head:
+# ls-remote answers STUB_LS_REMOTE_HEAD, else the sha1, for each refs/heads/<branch>
+# it is asked for, unless STUB_LS_REMOTE_MISS names that branch, and logs the
+# call to STUB_GIT_LOG. Every other call is the real git.
+REAL_GIT="$(command -v git)"
+{ printf '#!/usr/bin/env bash\nREAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$BIN/git" <<'GIT'
+case " $* " in
+  *" ls-remote "*)
+    printf '%s\n' "$*" >> "${STUB_GIT_LOG:?}"
+    for a in "$@"; do
+      case "$a" in refs/heads/*) ;; *) continue ;; esac
+      b="${a#refs/heads/}"
+      [ "${STUB_LS_REMOTE_MISS:-}" = "$b" ] && continue
+      printf '%s\t%s\n' "${STUB_LS_REMOTE_HEAD:-$(printf '%s' "$b" | sha1sum | cut -d' ' -f1)}" "$a"
+    done
+    exit 0 ;;
+esac
+exec "$REAL_GIT" "$@"
+GIT
+chmod +x "$BIN/git"
 export PATH="$BIN:$PATH"
 export GC_RIG="gc-toolkit"
 # The priority writer rework-child.sh settles the child with: this tree's
@@ -192,12 +223,17 @@ export STUB_DEPS="$TMP/deps"
 export STUB_GC_LOG="$TMP/gc.log"
 export STUB_SEQ="$TMP/seq"
 export STUB_CREATED="$TMP/created"
+export STUB_GIT_LOG="$TMP/git.log"
+# The anchor's rig checkout, which the rig list names for the anc prefix.
+export STUB_RIG_PATH="$TMP/anc-rig"
+git init -q "$STUB_RIG_PATH"
+git -C "$STUB_RIG_PATH" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m "the anchor's head"
 
 # reset <anchor-json>: seed the store with one anchor and clear the logs.
 reset() {
   printf '%s\n' "$1" > "$STUB_STORE"
-  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; printf '0' > "$STUB_SEQ"
-  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_CREATE_NOID STUB_LIST_FAIL 2>/dev/null || true
+  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; : > "$STUB_GIT_LOG"; printf '0' > "$STUB_SEQ"
+  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_CREATE_NOID STUB_LIST_FAIL STUB_LS_REMOTE_MISS STUB_LS_REMOTE_HEAD STUB_RIG_UNLISTED 2>/dev/null || true
 }
 meta()    { jq -r --arg id "$1" --arg k "$2" 'first(.[] | select(.id == $id) | .metadata[$k]) // ""' "$STUB_STORE"; }
 created() { wc -l < "$STUB_CREATED" | tr -d ' '; }
@@ -391,6 +427,48 @@ OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2
 eq "$RC" "0" "the re-run exits 0"
 has "$OUT" "0 standing review(s) superseded" "…with nothing left to supersede"
 eq "$(created)" "1" "…and no second child"
+
+echo "# --- the lanes are resolved at the head of the anchor's branch ---"
+reset "$WITH_LANES"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "exit 0"
+has "$(cat "$STUB_GIT_LOG")" "-C $STUB_RIG_PATH ls-remote origin refs/heads/polecat/anc-1" "the head of the anchor's branch is read from origin in the anchor's rig checkout"
+eq "$(meta rv-c gc.outcome)" "superseded" "…and the supersede it names resolves the lanes"
+
+echo "# --- from another checkout, the head is read and the lanes resolved in the anchor's rig ---"
+# A sitting runs from the city or another rig's checkout. With no index named
+# outright, the lanes resolve at the head's commit, which the anchor's rig
+# checkout holds and the sitting's checkout does not, so a supersede resolved
+# in the sitting's directory finds no repository holding it.
+OTHER="$TMP/other-checkout"; git init -q "$OTHER"
+RIG_HEAD=$(git -C "$STUB_RIG_PATH" rev-parse HEAD)
+reset "$WITH_LANES"
+OUT=$(cd "$OTHER" && env -u GC_REVIEW_CHECKS_INDEX -u GC_RIG_ROOT STUB_LS_REMOTE_HEAD="$RIG_HEAD" \
+  "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "exit 0 from another checkout"
+has "$(cat "$STUB_GIT_LOG")" "-C $STUB_RIG_PATH ls-remote origin refs/heads/polecat/anc-1" "…the head read in the anchor's rig checkout"
+eq "$(meta rv-c gc.outcome)" "superseded" "…and the lanes resolved at that head there and returned"
+eq "$(meta rv-a gc.outcome)" "superseded" "…every lane"
+
+echo "# --- an anchor whose rig checkout does not resolve refuses with nothing written ---"
+reset "$WITH_LANES"
+OUT=$(STUB_RIG_UNLISTED=1 "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "2" "exit 2 when no rig carries the anchor's prefix"
+has "$OUT" "rig checkout did not resolve" "…saying why"
+eq "$(created)" "0" "…no child filed"
+eq "$(grep -c 'ls-remote' "$STUB_GIT_LOG")" "0" "…and no head read in any other repository"
+eq "$(meta rv-c gc.outcome)" "recorded" "…and the approves stand"
+
+echo "# --- a head that does not read refuses with nothing written ---"
+reset "$WITH_LANES"
+export STUB_LS_REMOTE_MISS="polecat/anc-1"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+unset STUB_LS_REMOTE_MISS
+eq "$RC" "2" "exit 2 when the branch's head does not read"
+has "$OUT" "did not read from origin" "…saying why"
+eq "$(created)" "0" "…no child filed"
+eq "$(meta rv-c gc.outcome)" "recorded" "…and the approves stand"
+eq "$(grep -c '^bd list' "$STUB_GC_LOG")" "0" "…before the writer's dedup read"
 
 echo "# --- a supersede that fails fails the run, and the re-run finishes it ---"
 reset "$(printf '%s' "$WITH_LANES" | jq -c '(.[] | select(.id == "anc-1") | .metadata) |= del(.check_set)')"

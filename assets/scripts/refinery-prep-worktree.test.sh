@@ -16,6 +16,13 @@
 # when that gate will not stop, or when no detached-job.sh or
 # refinery-workspace.sh is reachable.
 #
+# merge-push's first block takes WORK and BRANCH from the record the stage left
+# in the prep worktree. Run ahead of the push block in a shell carrying another
+# bead's WORK or BRANCH, it sends the prepared head to the branch it was staged
+# from and leaves the other bead's branch where it was. The push block run
+# without it, with the same variables, force-pushes the prepared head over the
+# other bead's branch.
+#
 # Runs the REAL blocks extracted verbatim from the formula against a real git
 # repo (worktrees need one), the real detached-job.sh and refinery-workspace.sh,
 # and a stub `gc`. cwd is deliberately the rig root — the exact case that used
@@ -52,7 +59,9 @@ command -v jq  >/dev/null 2>&1 || { echo "jq required"  >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git required" >&2; exit 1; }
 [ -s "$TOML" ] || { echo "missing $TOML" >&2; exit 1; }
 
-fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML"; }
+# A block comes out with {{binding_prefix}} rendered as the patrol fills it in:
+# the binding it was poured with, gc-toolkit. here.
+fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
 
 # --- 1. Extraction + shape. ----------------------------------------------------
 fence shared-branch-merge-mode > "$TMP/merge.sh"
@@ -82,10 +91,12 @@ grep -q 'git checkout temp' "$TMP/push.sh" \
   && bad "push block does not check temp out in cwd" \
   || ok "push block does not check temp out in cwd"
 
-# --- 2. Stub gc: bd show returns $FAKE_META; bd update / drain-ack are no-ops. --
+# --- 2. Stub gc: bd show returns $FAKE_META; bd update / drain-ack are no-ops;
+# `gc gc-toolkit scripts-dir` names the pack, $STUB_PACK. --------------------------
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "bd show")          printf '%s' "${FAKE_META:-[]}" ;;
   "bd update")        exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
@@ -96,9 +107,9 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/drain.log"
 
-# The pack, where the merge block finds detached-job.sh to stop a gate left
-# running in the prep worktree, and refinery-workspace.sh to stage it:
-# $GC_CITY_PATH/rigs/gc-toolkit.
+# The pack gc names, where the merge block finds detached-job.sh to stop a gate
+# left running in the prep worktree, and refinery-workspace.sh to stage it. Each
+# case's pack sits at <city>/rigs/gc-toolkit, as a rig checkout of it does.
 CITY="$TMP/city"
 mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
 cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
@@ -123,9 +134,9 @@ build_repo() {
 }
 
 # Run an extracted block from INSIDE the rig root (the stranding case). RUN_CITY
-# names another pack to find detached-job.sh in.
+# names another city whose pack gc names instead.
 run_block() { # <rig> <block-file>
-  ( cd "$1" && GC_RIG_ROOT="$1" GC_CITY_PATH="${RUN_CITY:-$CITY}" WORK=wb TARGET_BRANCH_DEFAULT=main bash "$2" ) >/dev/null 2>&1
+  ( cd "$1" && GC_RIG_ROOT="$1" STUB_PACK="${RUN_CITY:-$CITY}/rigs/gc-toolkit" WORK=wb TARGET_BRANCH_DEFAULT=main bash "$2" ) >/dev/null 2>&1
 }
 head_of()  { git -C "$1" rev-parse --abbrev-ref HEAD; }
 prep_of()  { echo "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"; }
@@ -156,10 +167,73 @@ git -C "$PW" merge-base --is-ancestor origin/polecat/wb HEAD \
   || bad "polecat/* branch: origin/branch stays an ancestor of the prepared head (merged, not rewritten)"
 
 # push block: ships the prepared head -> origin/<branch> without a cwd checkout; root unmoved.
-( cd "$R/rig" && GC_RIG_ROOT="$R/rig" BRANCH=polecat/wb bash "$TMP/push.sh" ) >/dev/null 2>&1 \
+( cd "$R/rig" && GC_RIG_ROOT="$R/rig" STUB_PACK="$CITY/rigs/gc-toolkit" WORK=wb BRANCH=polecat/wb bash "$TMP/push.sh" ) >/dev/null 2>&1 \
   && ok "push block exits 0" || bad "push block exits 0"
 eq "$(head_of "$R/rig")" "main" "after push: rig root still on main"
 eq "$(git -C "$R/rig" rev-parse origin/polecat/wb)" "$(git -C "$PW" rev-parse HEAD)" "after push: origin/branch == the merged prepared head"
+
+# --- 3b. a WORK or BRANCH the shell carries cannot steer the push. --------------
+# The prep worktree holds one bead's prepared head. merge-push opens with
+# prep-staged-work, which takes WORK and BRANCH from the record the stage left,
+# and every block after it runs in the same shell. Origin carries two beads'
+# branches, wb's head is staged, and the step's first block and its push block
+# run together in a shell carrying another bead's variables.
+# build_two <dir>: origin carries main, and polecat/wa and polecat/wb one commit
+# each ahead of the base, with the base advanced under both.
+build_two() {
+  local d="$1"
+  rm -rf "$d"; mkdir -p "$d"
+  git init -q --bare "$d/origin.git"
+  git init -q "$d/seed"; (
+    cd "$d/seed"; git config user.email t@t; git config user.name t
+    echo base > f; git add f; git commit -qm base; git branch -M main
+    git remote add origin ../origin.git; git push -q origin main
+    git checkout -qb polecat/wa; echo a > a; git add a; git commit -qm "wa's work"; git push -q origin polecat/wa
+    git checkout -q main; git checkout -qb polecat/wb; echo b > b; git add b; git commit -qm "wb's work"; git push -q origin polecat/wb
+    git checkout -q main; echo landed > h; git add h; git commit -qm "landed underneath"; git push -q origin main
+  )
+  git clone -q "$d/origin.git" "$d/rig"
+  ( cd "$d/rig"; git config user.email r@r; git config user.name r; git checkout -q -B main origin/main )
+}
+# push_as <rig> <work> <branch> <block>: the block from inside the rig, with
+# that WORK and BRANCH. Sets RC.
+push_as() {
+  : > "$FAKE_LOG"
+  ( cd "$1" && GC_RIG_ROOT="$1" STUB_PACK="$CITY/rigs/gc-toolkit" WORK="$2" BRANCH="$3" bash "$4" ) >"$TMP/push.out" 2>&1 && RC=0 || RC=$?
+}
+fence prep-staged-work > "$TMP/staged.sh"
+[ -s "$TMP/staged.sh" ] && ok "prep-staged-work extracted" || bad "prep-staged-work extracted"
+cat "$TMP/staged.sh" "$TMP/push.sh" > "$TMP/staged-push.sh"
+T="$TMP/two"; build_two "$T"
+export FAKE_META='[{"metadata":{"branch":"polecat/wb","target":"main"}}]'
+run_block "$T/rig" "$TMP/merge.sh" && ok "two beads: wb's branch is prepared" || bad "two beads: wb's branch is prepared"
+PWT="$(prep_of "$T/rig")"
+WA_TIP=$(git -C "$T/origin.git" rev-parse polecat/wa)
+git -C "$PWT" merge-base --is-ancestor origin/polecat/wa HEAD \
+  && bad "precondition: origin/polecat/wa is no ancestor of wb's prepared head, so its push would take the force arm" \
+  || ok "precondition: origin/polecat/wa is no ancestor of wb's prepared head, so its push would take the force arm"
+for vars in "wa polecat/wa" "wa polecat/wb" "wb polecat/wa"; do
+  read -r V_WORK V_BRANCH <<< "$vars"
+  push_as "$T/rig" "$V_WORK" "$V_BRANCH" "$TMP/staged-push.sh"
+  eq "$RC" 0 "WORK=$V_WORK BRANCH=$V_BRANCH over wb's prepared head: the first block and the push block exit 0"
+  eq "$(git -C "$T/origin.git" rev-parse polecat/wb)" "$(git -C "$PWT" rev-parse HEAD)" \
+    "WORK=$V_WORK BRANCH=$V_BRANCH: wb's prepared head goes to origin/polecat/wb, the branch it was staged from"
+  eq "$(git -C "$T/origin.git" rev-parse polecat/wa)" "$WA_TIP" "WORK=$V_WORK BRANCH=$V_BRANCH: origin/polecat/wa is untouched"
+  grep -q DRAIN "$FAKE_LOG" && bad "WORK=$V_WORK BRANCH=$V_BRANCH: the refinery does not drain" \
+    || ok "WORK=$V_WORK BRANCH=$V_BRANCH: the refinery does not drain"
+  [ "$V_WORK" = wa ] && { grep -qF "WORK was wa, but the prep worktree holds polecat/wb for wb, so this step acts for wb" "$TMP/push.out" \
+    && ok "WORK=$V_WORK BRANCH=$V_BRANCH: the step says it acts for wb" \
+    || bad "WORK=$V_WORK BRANCH=$V_BRANCH: the step says it acts for wb" "$(cat "$TMP/push.out")"; }
+done
+
+# Control: the push block run without the first block, in a shell carrying wa's
+# variables, forces wb's prepared head over polecat/wa, so the first block's
+# read of the record is what keeps the push on wb's branch above.
+C="$TMP/two-control"; build_two "$C"
+run_block "$C/rig" "$TMP/merge.sh" && ok "control: wb's branch is prepared" || bad "control: wb's branch is prepared"
+push_as "$C/rig" wa polecat/wa "$TMP/push.sh"
+eq "$(git -C "$C/origin.git" rev-parse polecat/wa)" "$(git -C "$(prep_of "$C/rig")" rev-parse HEAD)" \
+  "control: without the first block, wa's variables put wb's prepared head on origin/polecat/wa"
 
 # --- 4. idempotency: a leftover prep worktree from an interrupted run. ---------
 run_block "$R/rig" "$TMP/merge.sh" && ok "merge block re-runs cleanly over a leftover prep worktree" || bad "merge block re-runs cleanly over a leftover prep worktree"

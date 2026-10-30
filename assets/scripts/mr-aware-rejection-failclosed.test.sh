@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for the refinery's rejection repool (both `mr-aware-rejection`
-# blocks in formulas/mol-refinery-patrol.toml).
+# blocks in formulas/mol-refinery-patrol.toml) and for its one reading of the
+# merge strategy (merge-push's `merge-strategy-resolve` block).
 #
 # THE CONTRACT:
 #   1. The repool is ONE call to rejection-repool.sh, which owns the release and
@@ -12,18 +13,16 @@
 #   3. A repool that stops short but leaves an armed dispatch or a visit (exit 2)
 #      ends the arm as a landed one does. One that recorded nothing (exit 1 or
 #      3) ends the turn.
-#   4. The block reads no bead of its own. rejection-repool.sh prints the row it
-#      read, and the branch decision reads that; a repool that could read no
-#      row keeps the branch.
-#   5. The rejection KEEPS the branch unless the bead is direct-mode with
-#      nothing PR-shaped on it. In mr mode the PR is opened later by the
-#      cadence's pr-open, so "no PR on the bead yet" is not evidence that
-#      nothing needs the branch.
-#   6. Both steps that branch on the merge strategy read it through ONE
-#      spliced block, so keeping a branch and opening a PR for it cannot
-#      disagree about which mode the bead is in.
-#   7. The delete is cleanup behind a repool that already stands, so a push
-#      that cannot delete is reported and the cycle continues.
+#   4. The block reads no bead of its own, and the row rejection-repool.sh
+#      prints is captured, not echoed into the cycle log.
+#   5. Neither rejection arm deletes a branch. The rebuild the repool dispatches
+#      resumes the branch, whatever the bead's merge strategy.
+#   6. merge-push reads the merge strategy once, through one block. A bead that
+#      names no strategy takes the formula's default, direct, and pr is mr. A
+#      bead that would land direct on the default branch, or names no target,
+#      resolves to mr, so the default branch takes work only through a PR.
+#      local passes through, and merge-push's existing_pr rule after the block
+#      still turns direct into mr.
 #
 # Executes the real blocks extracted verbatim from the formula against stub
 # `gc` + `rejection-repool.sh`. No live city, Dolt, network, or worktrees.
@@ -77,11 +76,12 @@ esac
 # $FAKE_META, so a block that reads the bead itself is caught rather than
 # served. rejection-repool.sh: records its argv, one argument per field, prints
 # the row it read ($FAKE_META, or nothing when FAKE_NO_ROW=1) on stdout, and
-# exits $FAKE_REPOOL_RC; it lives under a fake rig root so the block's candidate
-# resolution finds it.
+# exits $FAKE_REPOOL_RC; it lives in a stub pack, which gc names for
+# `gc gc-toolkit scripts-dir`.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show") printf 'SHOW|%s\n' "$3" >> "$FAKE_LOG"
              printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
@@ -99,17 +99,17 @@ REPOOL
 chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/rejection-repool.sh"
 export PATH="$TMP/bin:$PATH"
 
-# run <block#> <meta-json|-> [rig-root] [repool-rc] [shell] -> "<rc>|<log>"
+# run <block#> <meta-json|-> [pack] [repool-rc] [shell] -> "<rc>|<log>"
 # A meta of "-" is a repool that read no row.
 run() {
   : > "$TMP/log"
   local rc=0 norow=0 meta="$2"
   [ "$meta" = "-" ] && { norow=1; meta='{}'; }
-  # cwd = $TMP (not a git repo) so the block's `git rev-parse --show-toplevel`
-  # fallback cannot resolve the real repo and shadow the stub repool.
+  # cwd = $TMP (not a git repo), and no rig root is set, so only the pack gc
+  # names can hold a repool.
   ( cd "$TMP" && \
     WORK=tk-work REJECT_REASON="conflict with main; resume by merge" \
-    GC_RIG_ROOT="${3-$TMP/rig}" GC_CITY_PATH="" \
+    STUB_PACK="${3-$TMP/rig}" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_META="$meta" FAKE_NO_ROW="$norow" FAKE_REPOOL_RC="${4:-0}" FAKE_LOG="$TMP/log" \
     "${5:-bash}" "$TMP/run-$1.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
@@ -168,164 +168,136 @@ else
 fi
 
 # --- One reading of the merge strategy. -----------------------------------------
-# handle-failures decides whether the branch survives a rejection; merge-push
-# decides whether a PR is opened for it. Two readings can disagree, and the
-# disagreement that matters is silent: a delete guard keyed on "nothing
-# PR-shaped on the bead" is satisfied for every mr-mode bead until pr-open runs.
+# merge-push is the one step that branches on the strategy, so it carries the
+# one block that reads it, and no step reads metadata.merge_strategy anywhere
+# else.
 echo "── merge-strategy-resolve ──"
 NSTRAT=$(awk '
   /# >>> merge-strategy-resolve$/ { n++; f=1; next }
   /# <<< merge-strategy-resolve$/ { f=0; next }
   f { print > ("'"$TMP"'/strategy-" n ".sh") }
-  END { print n }' "$TOML")
-eq "$NSTRAT" "2" "both steps that branch on the strategy carry the resolve block"
-cmp -s "$TMP/strategy-1.sh" "$TMP/strategy-2.sh" \
-  && ok "the two resolve blocks are byte-identical (they cannot drift apart)" \
-  || bad "the two resolve blocks are byte-identical (they cannot drift apart)"
+  END { print n + 0 }' "$TOML")
+eq "$NSTRAT" "1" "one block reads the strategy"
+eq "$(awk '/^\[\[steps\]\]$/ { id = "" } /^id = "/ { id = $3; gsub(/"/, "", id) } /^# >>> merge-strategy-resolve$/ { print id }' "$TOML")" \
+   "merge-push" "the block sits in merge-push, the step that branches on it"
 STRAY=$(awk '
   /# >>> merge-strategy-resolve$/ { f=1; next }
   /# <<< merge-strategy-resolve$/ { f=0; next }
   !f' "$TOML" | grep -c 'jq .*metadata\.merge_strategy' || true)
 eq "$STRAY" "0" "no step reads metadata.merge_strategy outside that block"
 
-# --- The rejection's branch decision. -------------------------------------------
-echo "── rejection-branch-keep ──"
-awk '
-  /# >>> rejection-branch-keep$/ { f=1; next }
-  /# <<< rejection-branch-keep$/ { f=0; next }
-  f' "$TOML" > "$TMP/branch-keep.sh"
-[ -s "$TMP/branch-keep.sh" ] \
-  && ok "the rejection arm carries the branch decision" \
-  || bad "the rejection arm carries the branch decision"
-for b in strategy-1 strategy-2 branch-keep; do
-  case "$(cat "$TMP/$b.sh")" in
-    *\\*) bad "$b is backslash-free (TOML would eat it)" ;;
-    *)    ok  "$b is backslash-free (TOML would eat it)" ;;
-  esac
+# --- The rejection keeps the branch. ---------------------------------------------
+# The repool dispatches a rebuild that resumes metadata.branch, so a deleted
+# branch would stop that rebuild at workspace-setup's missing-branch visit.
+# Every line of both rejection arms counts, prose included: a command quoted in
+# a step's prose is one an agent types.
+echo "── the rejection keeps the branch ──"
+step() { awk -v want="$1" '/^\[\[steps\]\]$/ { id = "" } /^id = "/ { id = $3; gsub(/"/, "", id) } id == want' "$TOML"; }
+# deletes <file>... prints file:line for each command shape that removes a branch.
+deletes() { grep -nE 'push[^#]*(--delete|[[:space:]]:[^[:space:]])|branch-end[.]sh|branch[[:space:]]+-[dD]([[:space:]]|$)' "$@" || true; }
+cat > "$TMP/delete-shapes" <<'SAMPLE'
+git push origin --delete "$BRANCH"
+git -C "$RIG_ROOT" push origin :polecat/tk-work
+"$SCRIPTS/branch-end.sh" polecat/tk-work
+git branch -D "$BRANCH"
+SAMPLE
+cat > "$TMP/delete-free" <<'SAMPLE'
+Do NOT delete `origin/$BRANCH` (the rebuild resumes it, in every merge mode).
+git push origin HEAD:refs/heads/polecat/tk-work
+gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
+git push --force-with-lease origin "$BRANCH"
+SAMPLE
+eq "$(deletes "$TMP/delete-shapes" | wc -l | tr -d ' ')" "4" "detector: flags every branch-delete shape in the sample"
+eq "$(deletes "$TMP/delete-free" | wc -l | tr -d ' ')" "0" "detector: passes a push, a workflow delete and prose"
+for s in rebase handle-failures; do
+  step "$s" > "$TMP/step-$s.txt"
+  grep -q '^# >>> mr-aware-rejection$' "$TMP/step-$s.txt" \
+    && ok "$s: the extracted step carries the repool block" \
+    || bad "$s: the extracted step carries the repool block"
+  eq "$(deletes "$TMP/step-$s.txt")" "" "$s: the rejection arm deletes no branch"
 done
 
-# git: records the branch delete. Everything else fails, so the block's
-# `git rev-parse --show-toplevel` fallback stays unresolved and the stub
-# rejection-repool.sh under the fake rig root remains the only candidate.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
-case "$1 $2 $3" in
-  "push origin --delete")
-    [ "${FAKE_DELETE_FAILS:-0}" = "1" ] && { printf 'DELETE-REFUSED|%s\n' "$4" >> "$FAKE_LOG"; exit 1; }
-    printf 'DELETE|%s\n' "$4" >> "$FAKE_LOG"; exit 0 ;;
-esac
-exit 1
-GIT
-chmod +x "$TMP/bin/git"
-
-# The decision reads $BEAD_JSON, the row the repool block above it captured in
-# the same shell, so the whole arm is what gets executed here, not the tail
-# alone.
-# arm <meta-json|-> [default_merge_strategy] [repool-rc] -> "<rc>|<deletes>"
-# A meta of "-" is a repool that read no row.
-arm() {
-  : > "$TMP/log"
-  local rc=0 norow=0 meta="$1"
-  [ "$meta" = "-" ] && { norow=1; meta='{}'; }
-  cat "$TMP/block-2.sh" "$TMP/branch-keep.sh" \
-    | sed -e "s|{{binding_prefix}}|gc-toolkit.|g" \
-          -e "s|{{default_merge_strategy}}|${2:-mr}|g" > "$TMP/run-arm.sh"
-  ( cd "$TMP" && \
-    WORK=tk-work REJECT_REASON="section 15e fixture clock" GC_RIG="" \
-    GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
-    FAKE_META="$meta" FAKE_NO_ROW="$norow" FAKE_REPOOL_RC="${3:-0}" FAKE_LOG="$TMP/log" \
-    bash "$TMP/run-arm.sh" > "$TMP/out" 2>&1 ) || rc=$?
-  printf '%s|%s' "$rc" "$(grep '^DELETE|' "$TMP/log" | tr '\n' ';')"
+# --- The resolve block, run on its own. -------------------------------------------
+# It is filled with the formula's own defaults, read from its [vars], so a
+# changed default changes the cases here instead of leaving a stale fixture.
+echo "── the resolve block, run on its own ──"
+var_default() {
+  awk -v v="[vars.$1]" '$0 == v { f = 1; next } /^\[/ { f = 0 } f && /^default = / { sub(/^default = "/, ""); sub(/"$/, ""); print; exit }' "$TOML"
 }
-BR='"branch":"polecat/tk-work"'
+DEFAULT_MS=$(var_default default_merge_strategy)
+DEFAULT_BRANCH=$(var_default target_branch)
+eq "$DEFAULT_MS" "direct" "the formula's default merge strategy is direct"
+eq "$DEFAULT_BRANCH" "main" "the formula's default branch is main"
+case "$(cat "$TMP/strategy-1.sh")" in
+  *\\*) bad "the resolve block is backslash-free (TOML would eat it)" ;;
+  *)    ok  "the resolve block is backslash-free (TOML would eat it)" ;;
+esac
+render() { sed -e "s|{{default_merge_strategy}}|$DEFAULT_MS|g" -e "s|{{target_branch}}|$DEFAULT_BRANCH|g"; }
+SHOW='printf "MS=%s\n" "$MERGE_STRATEGY"'
+{ render < "$TMP/strategy-1.sh"; printf '%s\n' "$SHOW"; } > "$TMP/resolve.sh"
+# merge-push's existing_pr rule: the lines after the block, through its fi.
+awk '/# <<< merge-strategy-resolve$/ { f = 1; next } f { print } f && /^fi$/ { exit }' "$TOML" > "$TMP/existing-pr.sh"
+grep -q 'EXISTING_PR=' "$TMP/existing-pr.sh" \
+  && ok "merge-push's existing_pr rule follows the block" \
+  || bad "merge-push's existing_pr rule follows the block"
+{ render < "$TMP/strategy-1.sh"; cat "$TMP/existing-pr.sh"; printf '%s\n' "$SHOW"; } > "$TMP/resolve-pr.sh"
+for f in resolve resolve-pr; do
+  case "$(cat "$TMP/$f.sh")" in
+    *'{{'*) bad "$f: no unrendered formula placeholder left" ;;
+    *)      ok  "$f: no unrendered formula placeholder left" ;;
+  esac
+  bash -n "$TMP/$f.sh" && ok "$f: valid bash" || bad "$f: valid bash"
+done
 
-# (6) THE BUG: mr is the shipped default and the PR does not exist until the
-#     cadence's pr-open runs, so a first-pass test rejection lands in the
-#     window where the bead carries no PR and the branch is still needed.
-eq "$(arm "{$BR}")" "0|" \
-   "(6) default mr, no PR yet -> branch kept (pr-open has not run)"
-eq "$(arm "{$BR,\"merge_strategy\":\"mr\"}")" "0|" \
-   "(7) explicit mr -> branch kept"
-eq "$(arm "{$BR,\"merge_strategy\":\"pr\"}")" "0|" \
-   "(8) pr -> branch kept"
-grep -q 'merge_strategy=mr' "$TMP/out" \
-  && ok "(8b) pr is normalised to mr, the vocabulary merge-push branches on" \
-  || bad "(8b) pr is normalised to mr, the vocabulary merge-push branches on"
-eq "$(arm "{$BR,\"merge_strategy\":\"direct\"}")" "0|DELETE|polecat/tk-work;" \
-   "(9) direct with nothing PR-shaped -> branch deleted"
-eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"pr_url\":\"https://github.com/o/r/pull/7\"}")" "0|" \
-   "(10) direct + pr_url -> branch kept"
-eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"pr_number\":7}")" "0|" \
-   "(11) direct + pr_number -> branch kept"
-eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"existing_pr\":\"https://github.com/o/r/pull/7\"}")" "0|" \
-   "(12) direct + existing_pr -> branch kept"
-eq "$(arm - mr 2)" "0|" \
-   "(13) no row from the repool -> branch kept"
-grep -q 'could not read the bead' "$TMP/out" \
-  && ok "(13b) the kept branch names the unread row as its reason" \
-  || bad "(13b) the kept branch names the unread row as its reason"
-eq "$(arm - direct 2)" "0|" \
-   "(13c) no row from the repool, rig default direct -> still no delete"
-eq "$(arm "{$BR,\"merge_strategy\":\"direct\"}" mr 2)" "0|DELETE|polecat/tk-work;" \
-   "(13d) a repool that stopped short (exit 2) still decides from the row it read"
-grep -q '^SHOW|' "$TMP/log" \
-  && bad "(13e) the decision reads no bead of its own" "found a gc bd show" \
-  || ok "(13e) the decision reads no bead of its own"
-# The mode comes from the formula's own var, so a rig that ships direct still
-# gets the direct-mode cleanup.
-eq "$(arm "{$BR}" direct)" "0|DELETE|polecat/tk-work;" \
-   "(14) default_merge_strategy=direct, strategy unset -> branch deleted"
-eq "$(arm '{"merge_strategy":"direct"}')" "0|" \
-   "(15) direct with no metadata.branch -> no branch-less delete"
-arm "{$BR}" >/dev/null
-grep -q 'keeping origin/polecat/tk-work' "$TMP/out" \
-  && ok "(16) a kept branch is named in the cycle log, not silently skipped" \
-  || bad "(16) a kept branch is named in the cycle log, not silently skipped"
-eq "$(arm '{}')" "0|" \
-   "(17) mr with no metadata.branch -> nothing to delete"
-grep -q 'no metadata.branch on tk-work' "$TMP/out" \
-  && ok "(17b) a branch-less bead is named as such, not logged as 'keeping origin/'" \
-  || bad "(17b) a branch-less bead is named as such, not logged as 'keeping origin/'"
+# resolve <meta-json> [script] [shell] -> the strategy the block resolves for a
+# bead carrying that metadata, in the row merge-push read.
+resolve() {
+  BEAD_JSON="[{\"id\":\"tk-work\",\"metadata\":$1}]" "${3:-bash}" "${2:-$TMP/resolve.sh}" 2>&1 | sed -n 's/^MS=//p'
+}
+IB='"target":"integration/cv-1"'
+PH='"target":"polecat/tk-anchor"'
+MAIN='"target":"main"'
+RX='"target":"release/x"'
 
-# The delete is the last thing the arm does and the repool above it has already
-# committed. A push that cannot delete leaves a branch for the later sweep,
-# which the cycle tolerates; aborting here would strand the cycle instead.
-export FAKE_DELETE_FAILS=1
-eq "$(arm "{$BR,\"merge_strategy\":\"direct\"}")" "0|" \
-   "(18) a refused delete does not fail the cycle"
-grep -q 'could not delete origin/polecat/tk-work' "$TMP/out" \
-  && ok "(18b) a refused delete is reported, not swallowed" \
-  || bad "(18b) a refused delete is reported, not swallowed"
-grep -q '^DELETE-REFUSED|polecat/tk-work$' "$TMP/log" \
-  && ok "(18c) the delete was actually attempted (the case is not vacuous)" \
-  || bad "(18c) the delete was actually attempted (the case is not vacuous)"
-unset FAKE_DELETE_FAILS
-
-# A target under polecat/ is another bead's per-bead PR head. Work landing there
-# folds into that PR; opening a nested branch -> polecat/* PR is never the
-# intent. The refinery resolves such a bead to direct and KEEPS its branch (the
-# branch carries the fold), with no operator picking a strategy by hand.
-# (19) fold-in target -> direct, branch kept (not a nested PR, not a deleted branch).
-arm "{$BR,\"target\":\"polecat/tk-anchor\"}" >/dev/null
-eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(19) fold-in target polecat/* + no own PR -> branch kept"
-grep -q 'folds into the PR at polecat/tk-anchor' "$TMP/out" \
-  && ok "(19b) kept for the fold reason (strategy resolved to direct, not mr)" \
-  || bad "(19b) kept for the fold reason (strategy resolved to direct, not mr)"
-
-# (20) A non-polecat non-default target (integration/*, a named branch) is NOT a
-#      fold-in: it stays mr so convoy/integration work keeps its review PR.
-arm "{$BR,\"target\":\"integration/cv-1\"}" >/dev/null
-eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(20) integration/* target -> branch kept"
-grep -q 'the PR pipeline needs the branch' "$TMP/out" \
-  && ok "(20b) integration/* target -> stays mr (not flipped to a fold-in direct)" \
-  || bad "(20b) integration/* target -> stays mr (not flipped to a fold-in direct)"
-
-# (21) A bead already recording its own PR keeps mr even under a polecat/ target:
-#      the recorded PR is reused, not folded over.
-arm "{$BR,\"target\":\"polecat/tk-anchor\",\"existing_pr\":\"https://github.com/o/r/pull/7\"}" >/dev/null
-eq "$(grep -c '^DELETE|' "$TMP/log")" "0" "(21) polecat/ target + own existing_pr -> branch kept (mr)"
-grep -q 'the PR pipeline needs the branch' "$TMP/out" \
-  && ok "(21b) own existing_pr keeps mr, not flipped to a fold-in direct" \
-  || bad "(21b) own existing_pr keeps mr, not flipped to a fold-in direct"
+# An integration effort's branch takes its beads with no PR of their own, and a
+# stage asks for one with mr.
+eq "$(resolve "{$IB}")" "direct" "integration/cv-1, no strategy -> direct"
+eq "$(resolve "{$IB,\"merge_strategy\":\"direct\"}")" "direct" "integration/cv-1, direct -> direct"
+eq "$(resolve "{$IB,\"merge_strategy\":\"mr\"}")" "mr" "integration/cv-1, mr -> mr (a stage's PR into the branch)"
+eq "$(resolve "{$IB,\"merge_strategy\":\"pr\"}")" "mr" "integration/cv-1, pr -> mr"
+eq "$(resolve "{$IB,\"merge_strategy\":\"\"}")" "direct" "integration/cv-1, an empty strategy -> direct"
+# Another PR's head: no strategy folds onto it, and mr opens a PR into it.
+eq "$(resolve "{$PH}")" "direct" "polecat/tk-anchor, no strategy -> direct (folds onto that head)"
+eq "$(resolve "{$PH,\"merge_strategy\":\"mr\"}")" "mr" "polecat/tk-anchor, mr -> mr (a PR into that head)"
+# The rule for main: the default branch takes work only through a PR.
+eq "$(resolve "{$MAIN}")" "mr" "main, no strategy -> mr"
+eq "$(resolve "{$MAIN,\"merge_strategy\":\"direct\"}")" "mr" "main, direct -> mr"
+eq "$(resolve "{$MAIN,\"merge_strategy\":\"mr\"}")" "mr" "main, mr -> mr"
+eq "$(resolve "{$MAIN,\"merge_strategy\":\"pr\"}")" "mr" "main, pr -> mr"
+eq "$(resolve "{$MAIN,\"merge_strategy\":\"\"}")" "mr" "main, an empty strategy -> mr"
+eq "$(resolve '{}')" "mr" "no target, no strategy -> mr (a bead with no target lands on main)"
+eq "$(resolve '{"merge_strategy":"direct"}')" "mr" "no target, direct -> mr"
+eq "$(resolve '{"target":"","merge_strategy":"direct"}')" "mr" "an empty target, direct -> mr (read as no target)"
+eq "$(BEAD_JSON='' bash "$TMP/resolve.sh" 2>&1 | sed -n 's/^MS=//p')" "mr" \
+   "a row merge-push could not read -> mr (the block fails toward a PR)"
+# Any other branch lands as its strategy says.
+eq "$(resolve "{$RX}")" "direct" "release/x, no strategy -> direct"
+eq "$(resolve "{$RX,\"merge_strategy\":\"direct\"}")" "direct" "release/x, direct -> direct"
+# local lands nothing, so the rule does not apply to it.
+eq "$(resolve "{$MAIN,\"merge_strategy\":\"local\"}")" "local" "main, local -> local"
+eq "$(resolve '{"merge_strategy":"local"}')" "local" "no target, local -> local"
+eq "$(resolve "{$IB,\"merge_strategy\":\"local\"}")" "local" "integration/cv-1, local -> local"
+# A bead's own PR to reuse needs the PR pipeline wherever it lands.
+eq "$(resolve "{$PH,\"existing_pr\":\"https://github.com/o/r/pull/7\"}" "$TMP/resolve-pr.sh")" "mr" \
+   "polecat/tk-anchor with its own existing_pr -> mr, through merge-push's existing_pr rule"
+eq "$(resolve "{$PH}" "$TMP/resolve-pr.sh")" "direct" \
+   "polecat/tk-anchor with no existing_pr -> direct through the same rule (the case above is not vacuous)"
+if command -v zsh >/dev/null 2>&1; then
+  eq "$(resolve "{$MAIN,\"merge_strategy\":\"direct\"}" "$TMP/resolve.sh" zsh)" "mr" "zsh: main, direct -> mr"
+  eq "$(resolve "{$IB}" "$TMP/resolve.sh" zsh)" "direct" "zsh: integration/cv-1, no strategy -> direct"
+else
+  echo "skip - zsh not installed; the zsh run of the resolve block is not exercised"
+fi
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
