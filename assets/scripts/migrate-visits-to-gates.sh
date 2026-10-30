@@ -63,8 +63,8 @@ PACK_KEYS="gc.demand_for gc.demand_topic gc.gate_visit gc.routed_to gc.takeaway 
 SWEEP_CREATOR="order:gate-visit-sweep"
 NOTICE_PREFIX="Human gate awaiting you: "
 TAKEAWAY_MAX=140
-# The feedback batch ledgers pr-facts.sh keeps on a PR anchor, one per comment id
-# space. Each is `<disposition>|<floor>|<mark>` records joined by ";".
+# The feedback batch ledgers pr-facts.sh keeps on a PR anchor, one per comment
+# id space. Each is `<disposition>|<floor>|<mark>` records joined by ";".
 LEDGERS="pr_comment_batch pr_review_batch pr_issue_comment_batch"
 
 usage() { sed -n '2,/^set -u/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//;/^set -u/d' >&2; }

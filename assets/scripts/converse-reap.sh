@@ -19,15 +19,15 @@
 # session. A conversation its sitting still holds is a live sitting, and is
 # kept.
 #
-# Two sessions are never closed, each for --min-age, the reap's own interval.
-# One is younger than that. engage starts a session before it binds the
-# conversation to it, so a session that young holding the alias of a
-# conversation still in the queue may be a sitting about to take it. The other's
-# conversation was written less than that ago. A sitting's sign-off writes the
-# close or the hand-back to the queue, and the sitting records its last
-# hand-back on the conversation on its next tool call, which the operator's tab
-# prints once the session ends. A dismiss records no hand-back, so the interval
-# also bounds that wait.
+# A session younger than --min-age, the reap's own interval, is never closed.
+# engage starts a session before it binds the conversation to it, so a session
+# that young holding the alias of a conversation still in the queue may be a
+# sitting about to take it. A session whose conversation closed or came back to
+# the queue also waits until the conversation has gone that long without a
+# write. A sitting's sign-off writes the close or the hand-back to the queue,
+# and the sitting records its last hand-back on the conversation on its next
+# tool call, which the operator's tab prints once the session ends. A dismiss
+# records no hand-back, so the interval also bounds that wait.
 #
 # Fully mechanical: `gc session list` + one `gc bd show` per candidate session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
