@@ -261,7 +261,7 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # and the subject is still named by its open visit meanwhile.
 LIVE_SESSIONS_JSON="[]"
 LIVENESS_KNOWN=false
-SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
+SESS_RAW=$(bounded env GC_NO_API=1 gc session list --state=all --json 2>/dev/null | scrub)
 if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/dev/null 2>&1; then
     LIVE_SESSIONS_JSON=$(printf '%s' "$SESS_RAW" \
         | jq -c '[ (.sessions // [])[]? | select((.state // "") as $s | ($s != "archived") and ($s != "closed")) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "") ] | unique' 2>/dev/null)

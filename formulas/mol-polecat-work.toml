@@ -140,7 +140,7 @@ case "$WORK_STATUS" in
           # the session id, or the agent address — and a session record exposes
           # them as .session_name, .id and .alias respectively, with no .name
           # field. Match all of them.
-          OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
+          OWNER_LIVE=$(GC_NO_API=1 gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
           # No answer means you could not disprove a live owner — assume one.
           # The live owner builds the work, so this run ends with no visit.
           if [ "${OWNER_LIVE:-1}" != "0" ]; then

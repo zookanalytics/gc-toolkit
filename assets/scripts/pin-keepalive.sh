@@ -204,7 +204,7 @@ enumerate_targets() {
     TARGETS=""
     ENUM_STATUS=ok
     local sess cand id alias b cns pin
-    sess="$(bounded gc session list "${CITY_FLAG[@]}" --state all --json 2>/dev/null | scrub)"
+    sess="$(bounded env GC_NO_API=1 gc session list "${CITY_FLAG[@]}" --state all --json 2>/dev/null | scrub)"
     if ! printf '%s' "$sess" | jq -e '(.sessions // empty) | type == "array"' >/dev/null 2>&1; then
         ENUM_STATUS=list_fail
         return 0

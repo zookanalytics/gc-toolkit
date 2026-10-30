@@ -367,7 +367,7 @@ temp file, never --argjson (ARG_MAX):
 SESSIONS_RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
 trap 'rm -f "$SESSIONS_RAW" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
+GC_NO_API=1 gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
 # The session list is the map's only source. A non-object, or an object with
 # no .sessions array, is the READ failing, which is a different fact from a
 # city that reports no sessions.

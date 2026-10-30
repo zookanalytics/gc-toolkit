@@ -12,7 +12,7 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded, doc-filing, create-then-stamp.
+# id-read-unguarded, doc-filing, create-then-stamp, session-list-no-api.
 #
 # Every detector in the directory, one added later included, is also held to
 # the runner's rule that a broken detector never reads as a clean scan. When a
@@ -2438,6 +2438,122 @@ OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_CS" "$TMP/cs-stamp.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
 has "$OUT" "detector cannot scan it" "and says which file it could not scan"
 
+echo "── session-list-no-api: what is a finding ──"
+
+# Fixtures spell the subcommand @SL@, for the reason the other detectors use
+# placeholders: the runner scans this file too.
+DET_SL="$HERE/lint-learned.d/session-list-no-api.sh"
+[ -x "$DET_SL" ] || { echo "no detector at $DET_SL"; exit 1; }
+runsl() { OUT="$("$DET_SL" "$@" 2>&1)"; RC=$?; }
+plantsl() { sed 's/@SL@/session list/g' > "$1"; }
+
+# Every name the pack reaches gc by, bare and inside a substitution, and an
+# assignment that does not reach the call: one on another command, one with no
+# command of its own, one that turns nothing off, and one written after it.
+plantsl "$TMP/nap-violations.sh" <<'FIX'
+#!/usr/bin/env bash
+gc @SL@ --state all --json
+rows=$(gc @SL@ --json | jq -r .)
+rows="$(gc @SL@ --json 2>/dev/null)"
+x=$("$GC" @SL@ --json)
+out=$(run_bounded gc @SL@ --json)
+list="$(timeout 30 "$GC" @SL@ --json)"
+rows=$(bounded_gc "$bound" @SL@ --json)
+GC_NO_API=1 true && gc @SL@ --json
+GC_NO_API=1 rows=$(gc @SL@ --json)
+GC_NO_API=0 gc @SL@ --json
+gc @SL@ --json GC_NO_API=1
+gc \
+  @SL@ --json
+FIX
+runsl "$TMP/nap-violations.sh"
+eq "$RC" 1 "a file with an unpinned call exits 1"
+for n in 2 3 4 5 6 7 8 9 10 11 12 13; do
+    has "$OUT" "nap-violations.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 12 "a continued call is reported once, under its first line, and nothing else is"
+has "$OUT" "session-list-no-api" "the finding names the rule"
+has "$OUT" "env GC_NO_API=1 gc" "the finding names the fix"
+
+# A formula recipe and a doc's marker block are run as written.
+plantsl "$TMP/nap-recipe.toml" <<'FIX'
+description = """
+Prose may say gc @SL@ --json and it is not a finding.
+```bash
+OWNER=$(gc @SL@ --state all --json | jq -r .)
+GC_NO_API=1 gc @SL@ --json
+```
+"""
+FIX
+runsl "$TMP/nap-recipe.toml"
+eq "$RC" 1 "a fenced recipe with an unpinned call exits 1"
+has "$OUT" "nap-recipe.toml:4:" "the fenced call is reported"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "the pinned call and the prose are not"
+
+plantsl "$TMP/nap-doc.md" <<'FIX'
+# doc
+
+`gc @SL@` in prose is not a finding.
+
+# >>> block
+gc @SL@ --json
+# <<< block
+FIX
+runsl "$TMP/nap-doc.md"
+eq "$RC" 1 "a marker block with an unpinned call exits 1"
+has "$OUT" "nap-doc.md:6:" "the marked call is reported"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "and the prose is not"
+
+echo "── session-list-no-api: what is not ──"
+
+# The pin in every place it reaches the call, every value gc reads as switching
+# the API off, and the subcommand held as data: a comment, a message, a
+# here-doc body.
+plantsl "$TMP/nap-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+# gc @SL@ --json   <- a commented-out call is prose
+GC_NO_API=1 gc @SL@ --state all --json
+rows=$(GC_NO_API=1 gc @SL@ --json | jq -r .)
+rows="$(GC_NO_API=1 gc @SL@ --json 2>/dev/null)"
+x=$(GC_NO_API=1 "$GC" @SL@ --json)
+out=$(run_bounded env GC_NO_API=1 gc @SL@ --json)
+list="$(timeout 30 env GC_NO_API=1 "$GC" @SL@ --json)"
+rows=$(bounded_gc "$bound" env GC_NO_API=1 gc @SL@ --json)
+if GC_NO_API=1 gc @SL@ --json >/dev/null; then :; fi
+GC_NO_API=true gc @SL@ --json
+GC_NO_API=YES gc @SL@ --json
+GC_NO_API="1" gc @SL@ --json
+GC_NO_API=' yes ' gc @SL@ --json
+GC_NO_API=1 \
+  gc @SL@ --json
+echo "could not read the @SL@ (rc=$rc)"
+detail "\`gc @SL@ --json\` failed"
+die 'gc @SL@ failed'
+n=${#rows}  # then read the @SL@ # again
+cat <<EOF
+gc @SL@ --json
+EOF
+FIX
+runsl "$TMP/nap-clean.sh"
+eq "$RC" 0 "pinned calls in every spelling, comments, messages and here-doc bodies are clean"
+[ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
+
+echo "── session-list-no-api: scope ──"
+
+mkdir -p "$TMP/nap-scope/specs/tk-x" "$TMP/nap-scope/generated/agents" "$TMP/nap-scope/lint-learned.d"
+cp "$TMP/nap-violations.sh" "$TMP/nap-scope/specs/tk-x/repro.sh"
+cp "$TMP/nap-recipe.toml" "$TMP/nap-scope/generated/agents/recipe.toml"
+cp "$TMP/nap-violations.sh" "$TMP/nap-scope/lint-learned.d/other-detector.sh"
+cp "$TMP/nap-violations.sh" "$TMP/nap-scope/sessions.go"
+runsl "$TMP/nap-scope/specs/tk-x/repro.sh" "$TMP/nap-scope/generated/agents/recipe.toml" \
+    "$TMP/nap-scope/lint-learned.d/other-detector.sh" "$TMP/nap-scope/sessions.go" "$TMP/nap-scope/missing.sh"
+eq "$RC" 0 "specs/, generated/, the detector directory, other file types and missing paths are skipped"
+
+echo "── session-list-no-api: a detector that cannot scan says so ──"
+OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_SL" "$TMP/nap-violations.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
+has "$OUT" "detector cannot scan it" "and says which file it could not scan"
+
 echo "── every detector: a tool that fails never reads as a clean scan ──"
 
 # The runner tells a broken detector from a clean one only by its exit status,
@@ -2496,7 +2612,8 @@ ct_locs() { printf '%s\n' "$1" | grep -oE '^[^: ]+:[0-9]+:' | sort -u; }
 plantct() {
     sed -e 's/@BD@/bd/g' -e 's/@MKT@/mktemp/g' -e 's/@J@/bd_json/g' -e 's/@CTL@/[:cntrl:]/g' \
         -e 's/@GH@/gh/g' -e 's/@NOTES@/--notes/g' -e 's#@OR@#//#g' \
-        -e 's/@PF@/pipefail/g' -e 's/@GQ@/grep -q/g' -e 's/@SM@/--set-metadata/g' > "$CT/tree/$1"
+        -e 's/@PF@/pipefail/g' -e 's/@GQ@/grep -q/g' -e 's/@SM@/--set-metadata/g' \
+        -e 's/@SL@/session list/g' > "$CT/tree/$1"
 }
 plantct x.sh <<'FIX'
 #!/usr/bin/env bash
@@ -2512,6 +2629,7 @@ gc @BD@ update "$ID" @NOTES@ "x"
 ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
 Y=$(gc @BD@ create "t" --json | jq -r '.id')
 gc @BD@ update "$Y" @SM@ k=v
+rows=$(gc @SL@ --json)
 FIX
 plantct formulas/x.toml <<'FIX'
 [[steps]]
@@ -2525,6 +2643,7 @@ gc @BD@ update "$ID" @NOTES@ "x"
 ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
 @MKT@ -d
 @GH@ pr comment 5 --body x
+rows=$(gc @SL@ --json)
 # >>> contract
 printf '%s\n' "$X" | @GQ@ x
 # <<< contract
@@ -2542,6 +2661,7 @@ printf '%s\n' "$X" | @GQ@ x
 gc @BD@ update "$ID" @NOTES@ "x"
 ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
 @BD@ close "$GC_BEAD_ID"
+rows=$(gc @SL@ --json)
 # <<< contract
 ```
 FIX

@@ -86,7 +86,7 @@ so the operator sees confirmation without having to re-query:
 ## View
 
 ```bash
-gc session list --json \
+GC_NO_API=1 gc session list --json \
     | jq -r --arg id "$GC_SESSION_ID" \
         '.sessions[]
          | select(.id == $id)

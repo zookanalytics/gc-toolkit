@@ -98,7 +98,7 @@ session_is_live() {
   # A failed listing (city down, dolt wedged) yields no allowlist, so nothing
   # validates and every named session is refused. That is the fail-closed
   # direction: the default target does not consult this at all.
-  listing="$(gc session list --json 2>/dev/null || true)"
+  listing="$(GC_NO_API=1 gc session list --json 2>/dev/null || true)"
   [ -n "$listing" ] || return 1
   printf '%s' "$listing" | jq -e --arg want "$want" '
     [.sessions[]? | .id, .alias, .session_name] | any(. == $want)

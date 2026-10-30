@@ -52,7 +52,7 @@ GC="${CONVERSE_REAP_GC:-gc}"
 # own, so the visit lookup is store-agnostic and this pass reads the whole city.
 # A non-object answer, or one without a .sessions array, is a listing we cannot
 # trust — reap nothing and say so with exit 1.
-sessions_json="$("$GC" session list --state all --json 2>/dev/null)" || sessions_json=""
+sessions_json="$(GC_NO_API=1 "$GC" session list --state all --json 2>/dev/null)" || sessions_json=""
 if ! printf '%s' "$sessions_json" | jq -e 'type=="object" and (.sessions|type=="array")' >/dev/null 2>&1; then
     echo "$PROG: could not read the session list — reaping nothing" >&2
     exit 1

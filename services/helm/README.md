@@ -853,10 +853,10 @@ kinds are filtered out of client-side, and whose parent-child edges are inverted
 into those anchors' child roll-ups so they cost no request of their own.
 
 **The `gc` CLI (`internal/source/gccli.go`) — for the one fact no bead carries.**
-`gc session list --state all --json` for session liveness (the gate that tells
-work in flight from an abandoned husk). This is the same read `gc-helm.sh`
-makes, so the two boards agree on liveness by construction rather than by two
-derivations. The work bead a root's run works — the other half of the
+`GC_NO_API=1 gc session list --state all --json` for session liveness (the gate
+that tells work in flight from an abandoned husk). This is the same read
+`gc-helm.sh` makes, so the two boards agree on liveness by construction rather
+than by two derivations. The work bead a root's run works — the other half of the
 in-flight join — is read in-process from its input convoy's `tracks` edge in the
 rig store (`internal/source/facts.go`, `convoyMembers`), so it costs no
 `gc convoy status` per root. That join copies the part of the rule
