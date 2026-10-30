@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# patrol-continue-hook.test.sh — hermetic test for the deacon's Stop hook,
-# overlays/cycle-recycle/.claude/hooks/patrol-continue.sh.
+# patrol-continue-hook.test.sh — hermetic test for the Stop hook of the deacon
+# and the witness, overlays/cycle-recycle/.claude/hooks/patrol-continue.sh.
 #
-# At a deacon turn boundary the hook prints a block decision that hands the
-# next patrol cycle back. It prints nothing for any other agent, while a
-# background task runs, or on a payload it cannot read. After MAX_RAPID stops
+# At a deacon or witness turn boundary the hook prints a block decision that
+# hands the next patrol cycle back. It prints nothing for any other agent, while
+# a background task runs, or on a payload it cannot read. After MAX_RAPID stops
 # in a row that each came within MIN_TURN seconds of a hand-back, it resets the
-# session instead, unless an operator is attached or its recovery line does not
-# reach the incident ledger. Every path exits 0, so the exit code tells nothing
-# apart; this test reads stdout, the state file and the calls the hook makes.
+# session instead, unless an operator is attached or, for the deacon, its
+# recovery line does not reach the incident ledger. Every path exits 0, so the
+# exit code tells nothing apart; this test reads stdout, the state file and the
+# calls the hook makes.
 #
 # It runs the SHIPPED script, never a copy. gc and tmux are stubbed by pointing
 # HOME at the sandbox: the hook prepends "$HOME/go/bin" to PATH itself, so a
@@ -98,23 +99,31 @@ payload() { # payload <session-id> [background_tasks-json]
 RUNNING='[{"id":"b1","type":"shell","status":"running","description":"wait out the cycle","command":"sleep 600"}]'
 FINISHED='[{"id":"b1","type":"shell","status":"completed","description":"wait out the cycle","command":"sleep 600"}]'
 
-echo "== role gate: only the deacon is handed back its turn =="
-for agent in "gc-toolkit/gc-toolkit.witness" "gc-toolkit/gc-toolkit.refinery" "gc-toolkit.mechanik" "gc-toolkit.polecat" ""; do
+echo "== role gate: only the deacon and the witness are handed back their turn =="
+for agent in "gc-toolkit/gc-toolkit.refinery" "gc-toolkit.mechanik" "gc-toolkit.polecat" ""; do
     rm -f "$STATE"
     run_hook "$agent" "$(payload s1)"
     eq "$OUT|$RC" "|0" "${agent:-<no GC_AGENT>}: no output, exit 0"
     [ ! -e "$STATE" ] && ok "${agent:-<no GC_AGENT>}: no state written" || bad "${agent:-<no GC_AGENT>}: no state written" "found $STATE"
 done
 
-echo "== a deacon turn boundary is handed back =="
-for agent in "gc-toolkit.deacon" "deacon"; do
+echo "== a deacon or witness turn boundary is handed back with its own patrol =="
+# Each entry is the agent, then the role whose patrol formula the reason names.
+for entry in "gc-toolkit.deacon deacon" "deacon deacon" "gc-toolkit/gc-toolkit.witness witness" "rig-a/gc-toolkit.witness witness"; do
+    agent="${entry% *}"; role="${entry##* }"
+    case "$role" in deacon) other=witness ;; *) other=deacon ;; esac
     rm -f "$STATE"
     run_hook "$agent" "$(payload s1)"
     eq "$RC" "0" "$agent: exit 0"
     eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "$agent: the decision blocks the stop"
     REASON="$(printf '%s' "$OUT" | jq -r '.reason' 2>/dev/null)"
     has "$REASON" "next-iteration" "$agent: the reason names next-iteration"
-    has "$REASON" "mol-deacon-patrol" "$agent: the reason names the patrol formula"
+    has "$REASON" "a $role turn" "$agent: the reason names the $role's turn"
+    has "$REASON" "mol-$role-patrol from check-inbox" "$agent: the reason names the $role's patrol formula"
+    case "$REASON" in
+        *"mol-$other-patrol"*) bad "$agent: the reason names no other patrol" "mol-$other-patrol in: $REASON" ;;
+        *) ok "$agent: the reason names no other patrol" ;;
+    esac
     eq "$(printf '%s' "$OUT" | jq -r 'keys | join(",")' 2>/dev/null)" "decision,reason" "$agent: stdout is the decision object and nothing else"
     eq "$(cut -d' ' -f1,3 < "$STATE")" "s1 0" "$agent: the state names this conversation, no rapid stops"
 done
@@ -227,15 +236,42 @@ eq "$(cat "$SANDBOX/gc.log")" "" "no ledger script: the session is not reset"
 eq "$(cat "$STATE")" "s1 $now 2" "no ledger script: the state file keeps its count"
 has "$ERR" "gc-deacon-ledger.sh not found" "a missing ledger script is reported on stderr"
 
+echo "== the witness's reset writes no ledger line =="
+WSTATE="$STATE_DIR/gc-patrol-continue.hq-witness"
+WITNESS_ENV=(GC_ALIAS=rig-a/gc-toolkit.witness GC_SESSION_ID=hq-witness GC_SESSION_NAME=rig-a--gc-toolkit__witness)
+printf 's1 %s 1\n' "$now" > "$WSTATE"
+run_hook rig-a/gc-toolkit.witness "$(payload s1)" "${WITNESS_ENV[@]}"
+eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "a witness's second rapid stop is still handed back"
+eq "$(cut -d' ' -f3 < "$WSTATE")" "2" "a witness's rapid stop is counted in its own state file"
+
+printf 's1 %s 2\n' "$now" > "$WSTATE"
+run_hook rig-a/gc-toolkit.witness "$(payload s1)" "${WITNESS_ENV[@]}"
+eq "$OUT|$RC" "|0" "a witness's third rapid stop is not handed back"
+eq "$(cat "$SANDBOX/gc.log")" "session reset rig-a/gc-toolkit.witness" "a witness's third rapid stop resets the session by its alias"
+eq "$(cat "$SANDBOX/ledger.log")" "" "a witness's reset writes no ledger line"
+eq "$(cat "$WSTATE")" "s1 0 0" "a witness's reset starts the count over"
+
+printf 's1 %s 2\n' "$now" > "$WSTATE"
+run_hook rig-a/gc-toolkit.witness "$(payload s1)" "${WITNESS_ENV[@]}" GC_CITY_PATH="$SANDBOX/no-ledger"
+eq "$(cat "$SANDBOX/gc.log")" "session reset rig-a/gc-toolkit.witness" "a missing ledger script does not hold a witness's reset"
+
+printf 's1 %s 2\n' "$now" > "$WSTATE"
+run_hook rig-a/gc-toolkit.witness "$(payload s1)" "${WITNESS_ENV[@]}" "$IN_TMUX" TMUX_ATTACHED=1
+eq "$OUT|$RC" "|0" "an attached operator: a witness's third rapid stop is not handed back"
+eq "$(cat "$SANDBOX/gc.log")" "" "an attached operator holds a witness's reset"
+eq "$(cat "$WSTATE")" "s1 $now 2" "an attached operator: a witness's state file keeps its count"
+
 echo "== a real cycle outlasts the rapid-stop bound =="
 # A turn that runs a cycle spends the patrol's whole event_timeout in its
 # inter-cycle wait, so MIN_TURN must sit under every event_timeout the pack
 # pours with. Otherwise each real cycle counts as a rapid stop and the hook
-# resets the deacon every MAX_RAPID cycles.
+# resets the session every MAX_RAPID cycles.
 MIN_TURN_SET=$(sed -n 's/^MIN_TURN=\([0-9][0-9]*\).*/\1/p' "$HOOK")
-FORMULA_WAIT=$(awk '/^\[vars\.event_timeout\]/ { f = 1; next } /^\[/ { f = 0 } f && /^default *=/ { gsub(/[^0-9]/, ""); print; exit }' "$REPO/formulas/mol-deacon-patrol.toml")
+formula_wait() { awk '/^\[vars\.event_timeout\]/ { f = 1; next } /^\[/ { f = 0 } f && /^default *=/ { gsub(/[^0-9]/, ""); print; exit }' "$REPO/formulas/$1.toml"; }
+FORMULA_WAIT=$(formula_wait mol-deacon-patrol)
 POUR_WAIT=$(grep -F 'gc bd mol wisp mol-deacon-patrol ' "$REPO/agents/deacon/prompt.template.md" | sed -n "s/.*--var event_timeout='\([0-9][0-9]*\)'.*/\1/p")
-for pair in "the formula default=$FORMULA_WAIT" "the startup pour=$POUR_WAIT"; do
+WITNESS_WAIT=$(formula_wait mol-witness-patrol)
+for pair in "the deacon formula default=$FORMULA_WAIT" "the deacon startup pour=$POUR_WAIT" "the witness formula default=$WITNESS_WAIT"; do
     name="${pair%%=*}"; wait_s="${pair#*=}"
     case "$MIN_TURN_SET" in '' | *[!0-9]*) bad "MIN_TURN is read from the hook" "got '$MIN_TURN_SET'"; continue ;; esac
     case "$wait_s" in '' | *[!0-9]*) bad "the event_timeout of $name is read" "got '$wait_s'"; continue ;; esac
@@ -244,6 +280,13 @@ for pair in "the formula default=$FORMULA_WAIT" "the startup pour=$POUR_WAIT"; d
     else
         bad "MIN_TURN is under the event_timeout of $name" "MIN_TURN $MIN_TURN_SET, event_timeout $wait_s"
     fi
+done
+# The witness's pours pass no event_timeout, so every witness wisp waits the
+# formula default checked above.
+for f in agents/witness/prompt.template.md formulas/mol-witness-patrol.toml; do
+    POURS=$(grep -F 'gc bd mol wisp mol-witness-patrol ' "$REPO/$f")
+    if [ -n "$POURS" ]; then ok "$f: its witness pour is read"; else bad "$f: its witness pour is read" "no pour line found"; fi
+    eq "$(printf '%s\n' "$POURS" | grep -c 'event_timeout')" "0" "$f: no witness pour passes an event_timeout of its own"
 done
 
 echo "== wiring: the overlay runs the hook at every Stop, beside cycle-recycle =="

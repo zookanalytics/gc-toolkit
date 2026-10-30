@@ -1,30 +1,32 @@
 #!/bin/sh
-# patrol-continue.sh — the deacon's Stop hook. A turn that ends between patrol
-# cycles is handed back with the next cycle, so the patrol never idles.
+# patrol-continue.sh — the Stop hook of the deacon and the witness. A turn that
+# ends between patrol cycles is handed back with the next cycle, so the patrol
+# never idles.
 #
-# The deacon's patrol is a loop of mol-deacon-patrol wisps, one cycle each, and
-# the loop lives in the conversation: next-iteration pours the next wisp and
-# the session goes on to it. The model ends its turn after a cycle anyway, and
-# nothing gives an ended turn another one: the deacon is a named session in
-# mode "always", which no idle timeout stops, and its configured nudge is
-# delivered once per session. So at every turn boundary this hook blocks the
-# stop and hands the next cycle back (docs/patrol-continue.md).
+# Each patrol is a loop of wisps, one cycle each: mol-deacon-patrol for the
+# deacon and mol-witness-patrol for the witness. The loop lives in the
+# conversation: next-iteration pours the next wisp and the session goes on to
+# it. The model ends its turn after a cycle anyway, and nothing gives an ended
+# turn another one: both are named sessions in mode "always", which no idle
+# timeout stops, and the configured nudge is delivered once per session. So at
+# every turn boundary this hook blocks the stop and hands the next cycle back
+# (docs/patrol-continue.md).
 #
 # It lets the turn end, printing nothing, when:
-#   * the agent is not the deacon. The witness and the refinery share this
-#     overlay, and the refinery ends its turn when it runs out of work.
+#   * the agent is neither the deacon nor the witness. The refinery shares this
+#     overlay, and it ends its turn when it runs out of work.
 #   * a background task is still running. Its completion notification starts
 #     the next turn, and a hand-back now would race the wait the task serves.
 #   * the payload carries no session id or no readable task list.
-#   * the deacon has stopped MAX_RAPID times in a row within MIN_TURN seconds of
-#     a hand-back. A real cycle spends the formula's event_timeout (600s) in
+#   * the session has stopped MAX_RAPID times in a row within MIN_TURN seconds
+#     of a hand-back. A real cycle spends the formula's event_timeout (600s) in
 #     its inter-cycle wait, so those turns ran no cycle, and another hand-back
 #     would only loop. The hook resets the session instead: the fresh
-#     conversation starts from the deacon's prompt, whose startup reconcile
+#     conversation starts from the role's prompt, whose startup reconcile
 #     adopts the wisp the patrol left. While an operator is attached to the
 #     pane the reset waits, because it would end the conversation under them.
-#     It also goes ahead only once the hook has written its recovery line to
-#     the incident ledger.
+#     The deacon's reset also goes ahead only once the hook has written its
+#     recovery line to the incident ledger.
 #
 # Invariants:
 #   * ALWAYS exit 0. A block rides the JSON decision on stdout, never the exit
@@ -41,11 +43,14 @@ export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
 MIN_TURN=300  # seconds: half the 600s inter-cycle wait every real cycle spends
 MAX_RAPID=3   # consecutive stops within MIN_TURN of a hand-back before the reset
 
-# --- 1. Self-gate: the deacon only -------------------------------------------
+# --- 1. Self-gate: the deacon and the witness --------------------------------
 AGENT="${GC_AGENT:-}"
 base="${AGENT##*/}"  # "gc-toolkit/gc-toolkit.witness" -> "gc-toolkit.witness"
 role="${base##*.}"   # "gc-toolkit.deacon" -> "deacon"
-[ "$role" = deacon ] || exit 0
+case "$role" in
+  deacon | witness) ;;
+  *) exit 0 ;;
+esac
 
 # --- 2. Read the turn from the hook payload ----------------------------------
 [ -t 0 ] && exit 0  # no payload (invoked by hand)
@@ -109,23 +114,26 @@ if [ "$rapid" -ge "$MAX_RAPID" ]; then
         exit 0 ;;
     esac
   fi
-  # The reset also waits for its recovery line in the incident ledger, which
-  # the fresh conversation reads in place of the transcript the reset ends. The
-  # line goes first because the reset can end this process with the session.
-  # When the ledger script is missing or the append fails, the turn ends with
-  # the count kept, as it does under an attached operator, so the next rapid
-  # stop tries the line again.
-  LEDGER=""
-  for C in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$C/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$C/assets/scripts/gc-deacon-ledger.sh"; break; }
-  done
-  if [ -z "$LEDGER" ]; then
-    echo "patrol-continue: $WHY; gc-deacon-ledger.sh not found, so the reset waits for its recovery line and the turn ends" >&2
-    exit 0
-  fi
-  if ! "$LEDGER" append recovery "patrol-continue reset the session: $WHY (${GC_SESSION_NAME:-$SID})" - >&2; then
-    echo "patrol-continue: $WHY; the recovery line did not reach the ledger, so the reset waits and the turn ends" >&2
-    exit 0
+  # The deacon's reset also waits for its recovery line in the incident
+  # ledger, which the deacon's fresh conversation reads in place of the
+  # transcript the reset ends. The line goes first because the reset can end
+  # this process with the session. When the ledger script is missing or the
+  # append fails, the turn ends with the count kept, as it does under an
+  # attached operator, so the next rapid stop tries the line again. The
+  # witness's prompt reads no ledger, so its reset writes no line.
+  if [ "$role" = deacon ]; then
+    LEDGER=""
+    for C in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$C/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$C/assets/scripts/gc-deacon-ledger.sh"; break; }
+    done
+    if [ -z "$LEDGER" ]; then
+      echo "patrol-continue: $WHY; gc-deacon-ledger.sh not found, so the reset waits for its recovery line and the turn ends" >&2
+      exit 0
+    fi
+    if ! "$LEDGER" append recovery "patrol-continue reset the session: $WHY (${GC_SESSION_NAME:-$SID})" - >&2; then
+      echo "patrol-continue: $WHY; the recovery line did not reach the ledger, so the reset waits and the turn ends" >&2
+      exit 0
+    fi
   fi
   printf '%s 0 0\n' "$SID" > "$STATE" 2>/dev/null || true
   echo "patrol-continue: $WHY; resetting the session" >&2
@@ -141,7 +149,7 @@ fi
 printf '%s %s %s\n' "$SID" "$now" "$rapid" > "$STATE" 2>/dev/null \
   || echo "patrol-continue: could not write $STATE, so this hand-back is not counted" >&2
 
-REASON="Patrol continues: a deacon turn does not end between cycles, so this one is handed back. If next-iteration has poured your next wisp, run the startup wisp reconcile from your prompt to adopt it, then work mol-deacon-patrol from check-inbox. Otherwise finish the current cycle through next-iteration."
+REASON="Patrol continues: a $role turn does not end between cycles, so this one is handed back. If next-iteration has poured your next wisp, run the startup wisp reconcile from your prompt to adopt it, then work mol-$role-patrol from check-inbox. Otherwise finish the current cycle through next-iteration."
 if [ "$rapid" -gt 0 ]; then
   REASON="$REASON The last hand-back ended within ${MIN_TURN}s with no cycle run; run the cycle's steps now."
 fi

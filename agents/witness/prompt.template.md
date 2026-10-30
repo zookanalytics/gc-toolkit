@@ -83,7 +83,11 @@ Identity is `$GC_AGENT`, never `$GC_ALIAS` (which can be legitimately
 empty). Then follow the formula. Never exit a wisp from an intermediate
 step: continue, or jump to next-iteration, which pours and ASSIGNS the next
 wisp before burning this one — a failed assign rolls the pour back and keeps
-the current wisp.
+the current wisp. Do NOT enter a "standing by" idle state between cycles;
+after next-iteration, adopt the wisp it poured through the reconcile above and
+work the next cycle from check-inbox. A turn you end anyway comes back as Stop
+hook feedback from the patrol-continue hook, which hands you the next cycle;
+run it (docs/patrol-continue.md).
 
 ## Recovery doctrine (the formula carries the mechanics)
 
