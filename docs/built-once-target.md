@@ -379,7 +379,8 @@ Every change follows these rules.
    history. The PR's CI test run time can sit beside it as information.
    `tools/measure.sh --pr` computes it, and gc-toolkit's CI
    ([pr-size.yml](../.github/workflows/pr-size.yml)) posts it on each PR as one
-   comment that it rewrites on each push.
+   comment that it rewrites on each push and each change of the PR's base
+   branch.
 
 ## Keeping it true
 

@@ -2,7 +2,8 @@
 # pr-size.sh — keeps one comment on a gc-toolkit pull request current with the
 # change's size: the section `tools/measure.sh --pr` prints from the merge base
 # to the head, which rule 3 of docs/built-once-target.md asks each pull request
-# to show. pr-size.yml runs it on each push to a pull request.
+# to show. pr-size.yml runs it on each push to a pull request and each change of
+# the branch the pull request merges into.
 #
 # The tool and the deletion plan it reads are the merge base's, never the
 # head's, so a change cannot edit either to hide what it adds. The tool runs

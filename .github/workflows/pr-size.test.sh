@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # pr-size.test.sh — pr-size.sh keeps one comment current with a pull request's
 # size, measured with the merge base's tool and plan, and pr-size.yml runs as
-# the default branch carries it, from the tip of the pull request's base branch.
+# the default branch carries it, from the tip of the pull request's base branch,
+# and again when the pull request changes that branch.
 #
 # The cases build a repository whose base commit carries tools/measure.sh and a
 # deletion plan, and whose head adds lines to a file the plan retires while it
@@ -197,6 +198,27 @@ eq "$RC" 1 "a merge base's tool that exits 3 makes the run exit 1"
 has "$(posted)" "could not be measured" "…and the comment says the size could not be measured"
 hasnt "$(posted)" "carries no" "…never that the merge base carries no tool"
 
+echo "# a pull request that changes its base branch is measured from the new one"
+RT="$TMP/retarget"; mkdir -p "$RT/tools" "$RT/assets/scripts"; cd "$RT" && git init -q
+cp "$TOOL" tools/measure.sh && : > tools/deletion-plan.tsv && printf 'a\n' > assets/scripts/x.sh && commit base
+git update-ref refs/remotes/origin/main HEAD
+printf 'b\nc\nd\n' >> assets/scripts/x.sh && commit "the integration branch adds three lines"
+git update-ref refs/remotes/origin/integration HEAD
+printf 'e\n' >> assets/scripts/x.sh && commit "the head adds one more"
+RHEAD=$(git rev-parse HEAD)
+INTO_MAIN=$(bash "$TOOL" --pr refs/remotes/origin/main "$RHEAD")
+INTO_INT=$(bash "$TOOL" --pr refs/remotes/origin/integration "$RHEAD")
+has "$INTO_INT" "runtime +1" "the tool counts one line from the integration branch's merge base"
+hasnt "$INTO_MAIN" "runtime +1" "…and more from main's"
+BASE=refs/remotes/origin/main run "$NONE" "$RHEAD" "$RT"
+has "$(posted)" "$INTO_MAIN" "into main, the comment carries the size from main's merge base"
+INTO=$(page "$(jq -n --arg b "$(posted)" '[{id: 33, user: {login: "github-actions[bot]"}, body: $b}]')" into.json)
+BASE=refs/remotes/origin/integration run "$INTO" "$RHEAD" "$RT"
+eq "$RC" 0 "retargeted to the integration branch, it exits 0"
+eq "$(calls | sed -n '2p' | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/33" \
+  "…rewriting the comment the run into main posted"
+has "$(posted)" "$INTO_INT" "…with the size from the integration branch's merge base"
+
 echo "# usage"
 run "$NONE" ""; eq "$RC" 2 "a missing --head is a usage error"
 "$SUT" --repo o/r --pr 7 --base a --head b >/dev/null 2>&1; eq "$?" 2 "--repo must name its host"
@@ -211,6 +233,14 @@ CODE=$(grep -vE '^[[:space:]]*#' "$WF")
 has "$CODE" 'BASE_REF: ${{ github.event.pull_request.base.ref }}' "it names the branch the pull request merges into"
 has "$CODE" '--base "refs/remotes/origin/$BASE_REF"' "…and measures from that branch's tip"
 hasnt "$CODE" GITHUB_SHA "…not from GITHUB_SHA, the default branch's tip under this event"
+
+echo "# pr-size.yml measures again when a pull request changes its base branch"
+has "$ON" "types: [opened, synchronize, reopened, edited]" \
+  "it runs on edited, which is how GitHub reports a change of the base branch"
+eq "$(grep -E '^    if:' "$WF")" "    if: github.event.action != 'edited' || github.event.changes.base" \
+  "…and the job runs for an edit only when the edit changes the base branch"
+eq "$(grep -E '^  group:' "$WF")" "  group: pr-size-\${{ github.event.pull_request.number }}\${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}" \
+  "…while any other edit takes a concurrency group of its own, so it cancels no run that measures"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
