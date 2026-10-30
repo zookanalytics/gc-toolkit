@@ -71,6 +71,8 @@
 # blocker-holder.sh takes the runs that work each live blocker of an anchor
 # that no route or claim marks, to tell one a live run works from one nothing
 # does.
+# store-only-exit.sh takes the live run poured over a store-only step's
+# --convoy, whose root holds the validating closer it arms until that run ends.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

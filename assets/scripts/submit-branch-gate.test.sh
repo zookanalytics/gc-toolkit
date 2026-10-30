@@ -18,7 +18,8 @@
 #      store-only exit), and workflow-finalize is never touched.
 #   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
 #      way the halt arm does, a metadata write and then the hand-back, and
-#      refuses the arm outright when the run has a diff to land.
+#      store-only-exit.sh, run for real, refuses the arm outright when the run
+#      has a diff to land.
 #   6. SESSION PINS — every terminal exit that lets go of the bead removes the
 #      claim's gc.session_id and gc.session_name, the same pair at all three:
 #      the refinery handoff in its first write, the halt and store-only exits
@@ -134,9 +135,10 @@ BP_DEFAULT="$(awk '
   || bad "binding_prefix default is EMPTY — a source-read renders <rig>/refinery, which names no agent"
 
 # --- Fakes. -------------------------------------------------------------------
-# git   : `branch --show-current` answers $FAKE_BRANCH; the three probes the
-#         store-only arm makes answer $FAKE_AHEAD / $FAKE_DIRTY / $FAKE_PUSHED,
-#         each empty by default so the arm sees a run with nothing to land.
+# git   : `branch --show-current` answers $FAKE_BRANCH; the three probes
+#         store-only-exit.sh makes, each after a `-C <tree>`, answer
+#         $FAKE_AHEAD / $FAKE_DIRTY / $FAKE_PUSHED, each empty by default so
+#         the arm sees a run with nothing to land.
 # gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
 #         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
 #         assertions can prove WHAT was written and WHETHER the arm halted.
@@ -162,6 +164,7 @@ BP_DEFAULT="$(awk '
 mkdir -p "$TMP/bin"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
+[ "${1:-}" = "-C" ] && shift 2
 case "$1 $2" in
   "branch --show-current") printf '%s\n' "${FAKE_BRANCH:-}"; exit 0 ;;
   "rev-list --count")      printf '%s\n' "${FAKE_AHEAD:-0}"; exit 0 ;;
@@ -272,9 +275,12 @@ ESC
 chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" "$TMP/pack/assets/scripts/escalate.sh"
 # hand-back.sh is the pack's own script, run for real: the halt and store-only
 # arms hand the bead back through it, and the fake gc answers its read and its
-# write.
+# write. So is store-only-exit.sh, with the two libraries it sources beside it:
+# the store-only arm runs it before its first write, and the fake gc and git
+# answer its read and its probes. Its --done hand-off has a suite of its own.
 cp "$HERE/hand-back.sh" "$TMP/pack/assets/scripts/hand-back.sh"
-chmod +x "$TMP/pack/assets/scripts/hand-back.sh"
+cp "$HERE/store-only-exit.sh" "$HERE/bd-lib.sh" "$HERE/run-lib.sh" "$TMP/pack/assets/scripts/"
+chmod +x "$TMP/pack/assets/scripts/hand-back.sh" "$TMP/pack/assets/scripts/store-only-exit.sh"
 export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 export FAKE_CANCEL="$TMP/cancel" FAKE_CANCEL_RC=0 FAKE_AWAIT="$TMP/await" FAKE_AWAIT_RC=0 FAKE_ESCALATE="$TMP/escalate" FAKE_ESC_RC=0
 : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/escalate"
@@ -1223,7 +1229,7 @@ run_store() {
 # The shipped snippet declares STORE_ONLY_RECORD empty — the polecat fills it
 # in. `armed` is that same snippet with the declaration filled, which is what
 # taking the arm looks like.
-printf '%s\n' "$STORE" | sed "s|{{base_branch}}|main|g" > "$TMP/store.sh"
+printf '%s\n' "$STORE" | sed "s|{{base_branch}}|main|g; s|{{convoy_id}}|tk-convoy|g" > "$TMP/store.sh"
 sed 's|^STORE_ONLY_RECORD=""$|STORE_ONLY_RECORD="tk-filed,gc-filed"|' "$TMP/store.sh" > "$TMP/store-armed.sh"
 bash -n "$TMP/store.sh" \
   && ok "extracted store-only arm is syntactically valid bash" \
@@ -1231,6 +1237,18 @@ bash -n "$TMP/store.sh" \
 [ "$(cmp -s "$TMP/store.sh" "$TMP/store-armed.sh"; echo $?)" = "1" ] \
   && ok "store-only arm ships STORE_ONLY_RECORD empty (the polecat opts in)" \
   || bad "store-only arm does not ship an empty STORE_ONLY_RECORD declaration"
+# The close brief is a quoted heredoc the polecat writes only when the record
+# finishes the bead, so the shipped one is empty and hands nothing off.
+eq "$(bash -c "$(sed -n '/^STORE_ONLY_DONE=/,/^)$/p' "$TMP/store.sh")"'
+printf "[%s]" "$STORE_ONLY_DONE"')" "[]" \
+   "store-only arm ships STORE_ONLY_DONE empty (the polecat writes a brief only for a record that finishes the bead)"
+# store-only-exit.sh runs before the arm's first write, so its refusal leaves
+# nothing written.
+CHECK_LN=$(grep -n 'store-only-exit.sh" --bead' "$TMP/store.sh" | head -1 | cut -d: -f1)
+RECORD_LN=$(grep -n 'halt_reason=store_only' "$TMP/store.sh" | head -1 | cut -d: -f1)
+{ [ -n "$CHECK_LN" ] && [ -n "$RECORD_LN" ] && [ "$CHECK_LN" -lt "$RECORD_LN" ]; } \
+  && ok "the store-only arm runs store-only-exit.sh before it records the exit" \
+  || bad "store-only-exit.sh must run before the record write (check ${CHECK_LN:-?}, record ${RECORD_LN:-?})"
 
 # Not opted in: the arm is inert. A polecat with a branch to push must fall
 # through to the gate having written nothing and drained nothing.
@@ -1295,6 +1313,12 @@ eq "$(run_store "$TMP/store-armed.sh" FAKE_DIRTY=' M formulas/mol-polecat-work.t
    "uncommitted changes: refuses, drains, writes nothing"
 eq "$(run_store "$TMP/store-armed.sh" FAKE_PUSHED='abc123	refs/heads/polecat/tk-work')|$(trace)" "1|DRAIN" \
    "branch already on origin: refuses, drains, writes nothing"
+# A check that cannot run is no clearance: with store-only-exit.sh gone from
+# the pack, the arm stops the same way.
+mv "$TMP/pack/assets/scripts/store-only-exit.sh" "$TMP/store-only-exit.sh.aside"
+eq "$(run_store "$TMP/store-armed.sh")|$(trace)" "1|DRAIN" \
+   "store-only-exit.sh missing from the pack: refuses, drains, writes nothing"
+mv "$TMP/store-only-exit.sh.aside" "$TMP/pack/assets/scripts/store-only-exit.sh"
 
 # The arm must not reach the push, and must not hand the bead to the refinery:
 # there is no branch, so a handoff would strand it in the merge queue forever.
