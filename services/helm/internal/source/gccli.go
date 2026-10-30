@@ -19,8 +19,8 @@ import (
 //     is what separates work in flight from an orphan, and no bead carries it.
 //     The supervisor API has no sessions endpoint and the beads library cannot
 //     see sessions at all; `gc session list` is the only reader. This is the
-//     same read gc-helm.sh makes (`gcq session list`), so the two boards agree
-//     by construction rather than by two independent derivations.
+//     same read gc-helm.sh makes (`GC_NO_API=1 gc session list`), so the two
+//     boards agree by construction rather than by two independent derivations.
 //
 //   - CITY DISCOVERY. When no city env var is set, the city root comes from
 //     `gc config show` — the city gc itself resolves — rather than a discovery
@@ -75,8 +75,9 @@ func newGCExec(cityPath string) *gcExec {
 	return &gcExec{bin: bin, cityPath: cityPath, timeout: defaultGCTimeout}
 }
 
-// run invokes one `gc` subcommand and decodes its JSON into out.
-func (g *gcExec) run(ctx context.Context, out any, args ...string) error {
+// run invokes one `gc` subcommand and decodes its JSON into out. env holds
+// entries added to that one command's environment.
+func (g *gcExec) run(ctx context.Context, out any, env []string, args ...string) error {
 	if g.bin == "" {
 		return fmt.Errorf("gc binary not found (set GC_HELM_GC_BIN or put gc on PATH)")
 	}
@@ -88,7 +89,10 @@ func (g *gcExec) run(ctx context.Context, out any, args ...string) error {
 	// up from the working directory, and this process may be started anywhere.
 	if g.cityPath != "" {
 		cmd.Dir = g.cityPath
-		cmd.Env = append(os.Environ(), "GC_CITY_PATH="+g.cityPath)
+		env = append([]string{"GC_CITY_PATH=" + g.cityPath}, env...)
+	}
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -152,7 +156,12 @@ func (g *gcExec) Sessions(ctx context.Context) (map[string]string, error) {
 			State       string `json:"state"`
 		} `json:"sessions"`
 	}
-	if err := g.run(ctx, &payload, "session", "list", "--state", "all", "--json"); err != nil {
+	// GC_NO_API=1 keeps the read on gc's local path, which lists open sessions
+	// only. When the controller is slow to answer gc's ping, gc otherwise asks
+	// the supervisor API, which lists every session the city has had, newest
+	// first. An older closed session under a live one's alias would then
+	// overwrite the live state below.
+	if err := g.run(ctx, &payload, []string{"GC_NO_API=1"}, "session", "list", "--state", "all", "--json"); err != nil {
 		return nil, err
 	}
 	out := make(map[string]string, len(payload.Sessions)*2)
@@ -180,7 +189,7 @@ func (g *gcExec) CityPath(ctx context.Context) (string, error) {
 	var payload struct {
 		CityPath string `json:"city_path"`
 	}
-	if err := g.run(ctx, &payload, "config", "show", "--json"); err != nil {
+	if err := g.run(ctx, &payload, nil, "config", "show", "--json"); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(payload.CityPath), nil
