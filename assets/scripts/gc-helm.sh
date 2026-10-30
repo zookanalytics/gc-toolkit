@@ -70,9 +70,10 @@ Usage:
 The board is `helm-svc board` (services/helm). This script renders no
 board. open, engage and react take the subject as a bead id, a PR number
 or URL, or a superseded bead id, and resolve it to the LIVE bead that owns the
-work by metadata and the graph — a PR number/URL to the anchor whose
-pr_number/pr_url records it, a closed+superseded id along gc.superseded_by to
-its successor — never an id scraped from a title. An unresolvable or ambiguous
+work by metadata and the graph — a PR number/URL to its anchor, a
+closed+superseded id along gc.superseded_by to its successor — never an id
+scraped from a title. A live bead recording a PR in pr_number/pr_url stands
+for the anchor it names in anchor_bead, if any. An unresolvable or ambiguous
 reference is refused, naming what it could not resolve; nothing is filed.
 open files a visit in the picked bead's continuation group and
 parks it on the board (gc.routed_to=human); its --reason is the short title
@@ -527,13 +528,16 @@ rig_db_for_session() {
 # resolve_live_subject <reference> sets RESOLVED_SUBJECT. A live bead id, and
 # any reference this resolver does not recognize (a topic string), pass through
 # unchanged for the caller's own existence gate to judge. It fails CLOSED
-# (exit 4) on a PR that resolves to no live bead or to several, when a store
+# (exit 4) on a PR that resolves to no live anchor or to several, when a store
 # the PR search must read is unreadable, and on a superseded-by cycle, naming
 # what it could not resolve — the alternative is filing on the wrong bead,
 # which is the defect this exists to end.
 #
-#   PR number (615) or URL (…/pull/615)  ->  the anchor whose pr_number / pr_url
-#                                            metadata matches (never a title)
+#   PR number (615) or URL (…/pull/615)  ->  the anchor of the live beads whose
+#                                            pr_number / pr_url matches: each
+#                                            one's anchor_bead, or the bead
+#                                            itself when it names none (never a
+#                                            title)
 #   closed + gc.superseded_by            ->  followed to the live successor
 #   live bead id                         ->  unchanged
 RESOLVED_SUBJECT=""
@@ -570,10 +574,17 @@ resolve_live_subject() {
 }
 
 # _resolve_pr_reference <number> <url-or-empty> — set RESOLVED_SUBJECT to the
-# LIVE bead that RECORDS this PR, or exit 4 fail-closed. pr_number / pr_url are
+# LIVE anchor that owns this PR, or exit 4 fail-closed. pr_number / pr_url are
 # bare metadata keys (signoff.sh, pr-facts.sh). Filtered CLIENT-SIDE: bd list's
 # --metadata-field mangles a numeric value into non-JSON here. A URL additionally
 # pins the repo, so a bare number several repos share is disambiguated by it.
+# The anchor records its own PR, and so does a bead that works on the PR or
+# holds its merge, such as a rework child or a visit pr-facts.sh files, which
+# names the anchor in anchor_bead. So each bead that records the PR stands for
+# its anchor_bead, or for itself when it names none, and the PR is ambiguous
+# only when those are two different anchors. An anchor_bead must name a bead
+# live in a store the search read, so a live rework of a closed anchor refuses,
+# naming both.
 # The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh,
 # mergeLiveStatuses in gctk merge): an anchor is live in deferred/hooked/pinned
 # too, so a narrower query would fail to resolve a PR whose bead sits in one of
@@ -588,7 +599,7 @@ _resolve_pr_reference() {
     # or carry a query string, but pr-open.sh stores and merge.sh compares the
     # canonical …/pull/<number> form, so canonicalize the paste before matching.
     _pr_url=$(printf '%s' "$_pr_url" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
-    _pr_hits=""
+    _pr_hits=""; _pr_live=""
     _pr_paths=$(printf '%s' "$RIGS" | jq -r '.[].path // ""' 2>/dev/null) || _pr_paths=""
     _pr_saved_ifs=$IFS
     IFS='
@@ -620,19 +631,34 @@ _resolve_pr_reference() {
             echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} ($_pr_led) did not read ($_pr_why). A bare PR number is unique only across every live store, so resolving it from the stores that answered could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
             exit 4
         fi
+        # One "<id> <anchor>" line per bead that records the PR.
         _pr_found=$(printf '%s' "$_pr_rows" | jq -r --arg n "$_pr_num" --arg u "$_pr_url" '
-            [ .[]? | objects
-              | select(((.metadata.pr_number // "") | tostring) == $n)
-              | select($u == "" or (((.metadata.pr_url // "") | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p)) == $u))
-              | .id ] | .[]' 2>/dev/null) || _pr_found=""
-        for _pr_id in $_pr_found; do
-            [ -n "$_pr_id" ] && _pr_hits="$_pr_hits$_pr_id
+            .[]? | objects
+            | select(((.metadata.pr_number // "") | tostring) == $n)
+            | select($u == "" or (((.metadata.pr_url // "") | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p)) == $u))
+            | ((.metadata.anchor_bead // "") | tostring | gsub("[[:space:]]";"")) as $a
+            | "\(.id) \(if $a == "" then .id else $a end)"' 2>/dev/null) || _pr_found=""
+        for _pr_pair in $_pr_found; do
+            [ -n "$_pr_pair" ] && _pr_hits="$_pr_hits$_pr_pair
 "
         done
+        _pr_live="$_pr_live$(printf '%s' "$_pr_rows" | jq -r '.[]? | objects | .id // empty' 2>/dev/null)
+"
+    done
+
+    _pr_anchors=""
+    for _pr_pair in $_pr_hits; do
+        _pr_id=${_pr_pair%% *}; _pr_anchor=${_pr_pair#* }
+        if [ "$_pr_anchor" != "$_pr_id" ] && ! printf '%s\n' "$_pr_live" | awk -v a="$_pr_anchor" '$0 == a {f = 1} END {exit !f}'; then
+            echo "$PROG: PR #$_pr_num has no live anchor: $_pr_id records it as work on $_pr_anchor, which is not live in any store the search read. Pass the live bead id directly. Nothing filed." >&2
+            exit 4
+        fi
+        _pr_anchors="$_pr_anchors$_pr_anchor
+"
     done
     IFS=$_pr_saved_ifs
 
-    _pr_uniq=$(printf '%s' "$_pr_hits" | awk 'NF && !seen[$0]++')
+    _pr_uniq=$(printf '%s' "$_pr_anchors" | awk 'NF && !seen[$0]++')
     _pr_count=$(printf '%s\n' "$_pr_uniq" | awk 'NF{c++} END{print c + 0}')
 
     if [ "$_pr_count" -eq 0 ]; then
@@ -640,7 +666,7 @@ _resolve_pr_reference() {
         exit 4
     fi
     if [ "$_pr_count" -gt 1 ]; then
-        echo "$PROG: PR #$_pr_num is ambiguous — recorded by $(printf '%s' "$_pr_uniq" | tr '\n' ' '). Pass the PR URL to pin the repo, or the live bead id directly. Nothing filed." >&2
+        echo "$PROG: PR #$_pr_num is ambiguous — it resolves to more than one bead: $(printf '%s' "$_pr_uniq" | tr '\n' ' '). Pass the PR URL to pin the repo, or the live bead id directly. Nothing filed." >&2
         exit 4
     fi
     RESOLVED_SUBJECT=$(printf '%s' "$_pr_uniq" | awk 'NF{print; exit}')
@@ -1985,10 +2011,10 @@ cmd_priority() {
 
 # ── Verb: resolve ────────────────────────────────────────────────────
 # resolve <reference> — print the LIVE bead a reference resolves to, the same
-# way open/engage/react resolve their subject: a PR number/URL to the anchor
-# that records it, a closed+superseded id to its successor. A live bead id, or
-# any reference the resolver does not recognize (a topic string), prints
-# unchanged; an unresolvable or ambiguous PR, or a superseded-by cycle, is
+# way open/engage/react resolve their subject: a PR number/URL to its anchor,
+# a closed+superseded id to its successor. A live bead id, or any reference
+# the resolver does not recognize (a topic string), prints unchanged; an
+# unresolvable or ambiguous PR, or a superseded-by cycle, is
 # refused (exit 4) naming what it could not resolve. Read-only — it files
 # nothing. gc-visit-open.sh calls this before it decides a reference is a new
 # topic, so a PR number or URL reaches the resolver instead of becoming a topic
