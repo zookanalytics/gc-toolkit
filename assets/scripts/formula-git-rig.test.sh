@@ -13,10 +13,9 @@
 # cwd is a clone of the same origin wherever that makes a cwd-steered call
 # succeed, so "read the rig, not cwd" discriminates. Controls prove that a bare
 # git call and an empty `git -C ""` both follow cwd. The refinery's zero-diff
-# check, its rejection's branch delete and its recorded-PR lookup are proven
-# the same way in the suites that run those blocks (unrecorded-direct-landing,
-# mr-aware-rejection-failclosed and find-work-gating-guard). No live city,
-# store, or network.
+# check and its recorded-PR lookup are proven the same way in the suites that
+# run those blocks (unrecorded-direct-landing and find-work-gating-guard). No
+# live city, store, or network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

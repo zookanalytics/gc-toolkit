@@ -613,9 +613,6 @@ for it in the foreground as run-tests does.
 **Branch-caused:** retire the workflow and repool with the failure summary,
 the same repool as the rebase step:
 ```bash
-RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
-RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="<failure summary>"
 # >>> mr-aware-rejection
