@@ -199,9 +199,10 @@ block() {
     | sed -e 's/^CHECK=".*"$/CHECK="lint"/' -e 's/^TRACKERS=".*"$/TRACKERS="tk-t1 tk-t2"/' \
           -e 's/{{binding_prefix}}/gc-toolkit./g'
 }
-# The pack the callers find the writer in, which the stub gc names.
+# The pack the callers find the writer in, and the refinery's block finds
+# rig-root.sh in to resolve the rig, which the stub gc names.
 PACK="$TMP/pack"
-mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh"
+mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh" "$HERE/rig-root.sh"
 
 block mol-polecat-work.toml self-review-pre-existing > "$TMP/self-review.sh"
 [ -s "$TMP/self-review.sh" ] && ok "self-review-pre-existing extracts" || bad "self-review-pre-existing extracts"

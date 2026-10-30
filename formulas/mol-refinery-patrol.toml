@@ -261,9 +261,9 @@ fi
 # same rig-root lookup, so all of them name one repo. The lookup never falls
 # back to cwd, and an empty root fails closed because `git -C ""` follows cwd.
 # A leftover from an interrupted iteration is cleared first.
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 git -C "$RIG_ROOT" fetch --prune origin
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 # A gate an interrupted iteration left running still runs in the prep worktree,
@@ -316,8 +316,16 @@ taken the bead out of this queue, so a repool that stops short arms a retry
 or files a visit:
 
 ```bash
+# >>> rejection-conflict-reason
+# The reason names origin/$TARGET's head in the rig's repository, read by path:
+# the session's cwd may sit in another checkout, whose origin/$TARGET belongs
+# to another repository.
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+REJECT_REASON="Conflicts with $TARGET at $(git -C "$RIG_ROOT" rev-parse "origin/$TARGET"); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
+# <<< rejection-conflict-reason
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
-REJECT_REASON="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
 # >>> mr-aware-rejection
 REPOOL="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rejection-repool.sh" && [ -x "$REPOOL" ] || REPOOL=""
 if [ -z "$REPOOL" ]; then
@@ -394,9 +402,9 @@ that sets no check commands, and a gate with no check never starts, so the
 gates are never skipped silently. Start the gate:
 ```bash
 # >>> refinery-gate-start
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 COMMON="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)"
 PREP_WT="$COMMON/gc-refinery-prep"
 GATE="$COMMON/gc-refinery-gate"
@@ -534,9 +542,9 @@ gate, which keeps running. Point it at the pack and wait again; do not drain
 on it.
 ```bash
 # >>> refinery-gate-wait
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
 JOB="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/detached-job.sh" && [ -x "$JOB" ] || JOB=""
 [ -n "$JOB" ] || { echo "detached-job.sh not found from here, so this call cannot wait on the gate, which keeps running in $GATE; run this block again from the pack checkout, or with GC_RIG_ROOT or GC_CITY_PATH naming it, and do not end the turn"; exit 1; }
@@ -728,9 +736,9 @@ pinned there does not run into the known wall again:
 # >>> refinery-pre-existing-mark
 CHECK="<test, lint or typecheck: the check whose failures you judged pre-existing>"
 TRACKERS="<the tracker id each run of the block above printed for it, space-separated>"
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 HEAD_OID=$(git -C "$PREP_WT" rev-parse HEAD)
 ANCHOR=$(gc bd show "$WORK" --json 2>/dev/null | jq -r '.[0].metadata.anchor_bead // empty' 2>/dev/null)
@@ -765,9 +773,9 @@ tears down what is there, pushes and records nothing, and exits 4 without
 draining: jump to next-iteration, and the next patrol prepares the work again.
 ```bash
 # >>> prep-staged-work
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 WS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-workspace.sh" && [ -x "$WS" ] || WS=""
 [ -n "$WS" ] || { echo "refinery-workspace.sh not found, so nothing shows which bead the prep worktree holds; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 if ! HELD=$("$WS" held --rig-root "$RIG_ROOT"); then
@@ -808,13 +816,37 @@ if [ -z "$LC" ]; then
 fi
 # >>> branch-has-real-change
 branch_has_real_change() {
-  # 0-diff/0-commit guard: does <branch-ref> introduce a real change vs its
-  # merge-base with <target-ref>? 0 = yes; 1 = empty (REFUSE close-as-merged);
-  # 2 = could not compute (fail closed — a tool error is a suspect).
-  bhrc_base=$(git merge-base "$1" "$2" 2>/dev/null) || return 2
-  git diff --quiet "$bhrc_base" "$2"
-  case "$?" in 0) return 1 ;; 1) : ;; *) return 2 ;; esac
-  [ "$(git rev-list --count "$bhrc_base..$2" 2>/dev/null || echo 0)" -ge 1 ] || return 1
+  # 0-diff/0-commit guard: in the repository at <repo>, does <branch-ref>
+  # introduce a real change vs its merge-base with <target-ref>?
+  #   branch_has_real_change <repo> <target-ref> <branch-ref>
+  # 0 = yes; 1 = empty (REFUSE close-as-merged); 2 = could not compute (fail
+  # closed — a tool error is a suspect), with BHRC_ERROR naming the git call
+  # that failed and what git said. Every call names <repo>: git otherwise reads
+  # the cwd, which may be another checkout or no checkout at all. Each call runs
+  # once, its stderr captured with its stdout, so the error reported is the one
+  # the failed call wrote, never a rerun's. A call that succeeds answers on its
+  # last line, below any warning git wrote.
+  BHRC_ERROR=""
+  if ! bhrc_out=$(git -C "$1" merge-base "$2" "$3" 2>&1); then
+    bhrc_said=$(printf '%s' "$bhrc_out" | tr -s '[:space:]' ' ' | sed 's/ $//')
+    BHRC_ERROR="merge-base $2 $3 failed: ${bhrc_said:-no common ancestor}"
+    return 2
+  fi
+  bhrc_base=$(printf '%s' "$bhrc_out" | tail -n 1)
+  bhrc_out=$(git -C "$1" diff --quiet "$bhrc_base" "$3" 2>&1)
+  bhrc_rc=$?
+  [ "$bhrc_rc" != 0 ] || return 1
+  if [ "$bhrc_rc" != 1 ]; then
+    bhrc_said=$(printf '%s' "$bhrc_out" | tr -s '[:space:]' ' ' | sed 's/ $//')
+    BHRC_ERROR="diff $bhrc_base $3 failed: ${bhrc_said:-exit $bhrc_rc}"
+    return 2
+  fi
+  if ! bhrc_out=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>&1); then
+    bhrc_said=$(printf '%s' "$bhrc_out" | tr -s '[:space:]' ' ' | sed 's/ $//')
+    BHRC_ERROR="rev-list $bhrc_base..$3 failed: ${bhrc_said:-no output}"
+    return 2
+  fi
+  [ "$(printf '%s' "$bhrc_out" | tail -n 1)" -ge 1 ] || return 1
   return 0
 }
 # <<< branch-has-real-change
@@ -828,23 +860,99 @@ A branch with no change is not always a false completion. `direct-merge-push.sh`
 stamps `direct_landing_sha` on the bead before it pushes, so a target that
 carries the stamped commit holds a direct landing an earlier patrol pushed and
 did not record. The block sends that bead down the direct path, which records
-it:
+it. A check that cannot run verifies nothing either way, and its cause is often
+gone by the next patrol, so the block leaves that bead with the refinery to
+retry, as this step's other infrastructure failures do. It counts the failures
+in a row on the bead. At the third it files a visit, with `escalate.sh`'s
+verdict window off, that names git's error and the directory the check ran in,
+so nobody reads it as a branch with no change. Then `await-ruling.sh` makes the
+work wait on that visit. It adds a `blocks` edge from the work onto the visit,
+releases the refinery's assignment, which takes the work off the queue, and
+arms a fresh `mol-polecat-work` pour for when the visit closes. That run hands
+the branch back to the refinery. The work is not parked `blocked`: a park
+records a `merge_result`, the pour's load-context reads a bead carrying one as
+finished work, and on a rework child it would be a second anchor on the PR.
+A graduated convoy is the exception, because a run poured onto a convoy works
+on the beads the convoy tracks. The convoy is parked `blocked` once a `blocks`
+edge holds it on the visit, and a person hands it back.
+When the visit, the convoy's edge or the wait does not land, the work stays
+with the refinery, which takes back an assignment the wait released, and the
+count stays at the cap, so the next failed check asks again. A check that runs
+clears the count:
 ```bash
 # >>> zero-diff-guard
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
+BHRC_RC=0
+branch_has_real_change "$RIG_ROOT" "origin/$TARGET" "$PREP_SHA" || BHRC_RC=$?
+CHECK_FAIL_CAP=3
+CHECK_FAILS=$(printf '%s' "$BEAD_JSON" | jq -r '(.[0].metadata.zero_diff_check_failures // "0") | tostring' 2>/dev/null)
+case "$CHECK_FAILS" in ''|*[!0-9]*) CHECK_FAILS=0 ;; esac
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
+if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
+  CHECK_FAILS=$((CHECK_FAILS + 1))
+  if [ "$CHECK_FAILS" -lt "$CHECK_FAIL_CAP" ]; then
+    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK, so the visit after $CHECK_FAIL_CAP in a row may come later"
+    echo "the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR (failure $CHECK_FAILS of $CHECK_FAIL_CAP in a row); leaving the work with the refinery to retry"
+    gc runtime drain-ack
+    exit 1
+  fi
+  echo "the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR (failure $CHECK_FAILS in a row); asking a person, and taking $WORK off the refinery's queue until they answer"
+  # A run poured onto a convoy works on the beads the convoy tracks, so no pour
+  # rebuilds a graduated convoy. It is parked blocked instead, held by a blocks
+  # edge onto the visit, and a person hands it back.
+  WORK_KIND=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].issue_type // empty' 2>/dev/null)
+  HANDBACK="close this visit: closing it pours a fresh run on $WORK, and that run hands the branch back to the refinery"
+  [ "$WORK_KIND" != convoy ] || HANDBACK="hand $WORK back to the refinery and close this visit"
+  WAITS=""
+  if [ -z "$SCRIPTS" ] || [ ! -x "$SCRIPTS/await-ruling.sh" ]; then
+    echo "escalate.sh and await-ruling.sh were not both found in the pack, so no visit asks about $WORK"
+  elif ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this visit. Fix that error, then $HANDBACK. To drop the work instead, close $WORK first, then this visit."; then
+    echo "escalate.sh recorded no visit for $WORK"
+  elif [ "$WORK_KIND" = convoy ]; then
+    VISIT=$(gc bd list --status=open,in_progress --metadata-field escalation_key=refinery-zero-diff-check-failed --metadata-field "gc.continuation_group=$WORK" --limit=20 --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" then ([ .[].id ] | sort | .[0] // empty) else empty end' 2>/dev/null)
+    [ -z "$VISIT" ] || gc bd dep add "$WORK" "$VISIT" --type=blocks >/dev/null 2>&1 || true
+    if [ -z "$VISIT" ] || ! gc bd dep list "$WORK" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -e --arg v "$VISIT" 'any(.[]?; (.id // "") == $v and (.dependency_type // "") == "blocks")' >/dev/null 2>&1; then
+      echo "no blocks edge from $WORK onto its visit landed, so $WORK is not parked"
+    else
+      "$LC" transition "$WORK" --to blocked --assignee "" --route human --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its visit names, then hand the convoy back" && WAITS=1
+    fi
+  elif "$SCRIPTS/await-ruling.sh" "$WORK" --key refinery-zero-diff-check-failed --formula mol-polecat-work; then
+    WAITS=1
+    gc bd update "$WORK" --unset-metadata zero_diff_check_failures --append-notes "Refinery: the zero-diff check of $BRANCH could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row ($BHRC_ERROR), so the branch was not judged and nothing was merged. $WORK waits on its refinery-zero-diff-check-failed visit. Closing that visit pours a fresh run, and that run hands the branch back to the refinery." >/dev/null 2>&1 || echo "could not clear the failed-check count on $WORK, so its next failed check asks a person at once"
+  fi
+  if [ -z "$WAITS" ]; then
+    # A wait that did not land leaves the work with the refinery to retry.
+    # await-ruling.sh releases the assignment before it arms, so the refinery
+    # takes back a bead it finds open and unassigned.
+    gc bd update "$WORK" --if-assignee "" --if-status open --assignee "$GC_AGENT" >/dev/null 2>&1 || true
+    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK"
+    HOLDER=$(gc bd show "$WORK" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" and length > 0 then ((.[0].assignee // "") | if . == "" then "nobody" else . end) else empty end' 2>/dev/null)
+    if [ "$HOLDER" = "$GC_AGENT" ]; then
+      echo "the wait did not land, so $WORK stays with the refinery, and the next patrol checks it again"
+    else
+      echo "the wait did not land, and $WORK could not be left with the refinery (its assignee reads ${HOLDER:-unreadable}), so nothing takes it up again; assign it to $GC_AGENT once the check can run"
+    fi
+  fi
+  gc runtime drain-ack
+  exit 1
+fi
+[ "$CHECK_FAILS" = 0 ] || gc bd update "$WORK" --unset-metadata zero_diff_check_failures >/dev/null 2>&1 || true
+if [ "$BHRC_RC" = 1 ]; then
   LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
   if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
     echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
     MERGE_STRATEGY=direct
   else
     "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    if [ -n "$SCRIPTS" ]; then
+      "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    else
+      echo "escalate.sh not found in the pack; $WORK is parked for a human with no refinery-false-completion visit"
+    fi
     gc runtime drain-ack
     exit 1
   fi
@@ -917,9 +1025,9 @@ history — derived from ancestry, not the branch name:
 # The prepared head is the detached prep worktree's HEAD (the rebase step staged
 # it there), never a branch in the rig root; push it from there so the root's
 # HEAD is never moved to it.
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 # Deliberately NO fetch here. `--force-with-lease` with no explicit expected
 # value compares against the LOCAL remote-tracking ref, so a fetch immediately
@@ -939,8 +1047,8 @@ re-run the prepare block, retry. Never plain `--force`, and never force a
 branch the prepare block put in merge mode.
 
 2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
-base==$TARGET, in the origin repo — `gh pr view <ref> --repo "$(git remote
-get-url origin)" --json url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
+base==$TARGET, in the rig's origin repo — `gh pr view <ref> --repo "$(git -C
+"$RIG_ROOT" remote get-url origin)" --json url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
 not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
 `--takeaway` the one line the operator's board renders as what this bead
 needs, capped at 140 characters.
@@ -973,15 +1081,24 @@ fi
 # skipped by merge.sh and pr-facts.sh forever).
 PR_URL=""; PR_NUMBER=""
 if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
-  # A bare pr_number resolves against gh's default repository, which with no
-  # `gh repo set-default` is the first remote in gh's own order, upstream ahead
-  # of origin. Naming origin pins it; a recorded URL names its own repository.
-  PR_REPO=$(git remote get-url origin 2>/dev/null)
-  if [ -n "$PR_REPO" ]; then
-    PR_VIEW=$(gh pr view "$RECORDED_PR" --repo "$PR_REPO" --json url,number,state,headRefName,baseRefName 2>/dev/null)
-  else
-    PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
-  fi
+  case "$RECORDED_PR" in
+    http://*|https://*)
+      # A recorded URL names its own repository, so it needs no rig.
+      PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null) ;;
+    *)
+      # Anything else, a bare pr_number included, resolves against a repository
+      # gh picks from the cwd's checkout: with no `gh repo set-default`, its
+      # first remote in gh's own order, upstream ahead of origin. Naming the
+      # rig's origin, read by path, pins it. Only this lookup needs the rig, and
+      # it stops when the rig or its origin cannot be named, because an unpinned
+      # view can stamp another repository's PR on the bead.
+      RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+      RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+      [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root to look PR $RECORDED_PR up in; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+      PR_REPO=$(git -C "$RIG_ROOT" remote get-url origin 2>/dev/null)
+      [ -n "$PR_REPO" ] || { echo "the rig at $RIG_ROOT has no origin to look PR $RECORDED_PR up in; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+      PR_VIEW=$(gh pr view "$RECORDED_PR" --repo "$PR_REPO" --json url,number,state,headRefName,baseRefName 2>/dev/null) ;;
+  esac
   PR_URL=$(printf '%s' "$PR_VIEW" | jq -r '.url // empty' 2>/dev/null)
   PR_NUMBER=$(printf '%s' "$PR_VIEW" | jq -r '.number // empty | tostring' 2>/dev/null)
 fi
@@ -1147,9 +1264,9 @@ GATING_ANCHOR="${EXISTING_ANCHOR:-${LANDS_ON:-$WORK}}"
 # >>> one-anchor-per-pr-terminal
 # The rework arm reads the prepared head back from the prep worktree, so this
 # block resolves that path itself, as the push block does.
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 # The gating transition, onto the bead this landing anchors: pull_request once
 # both PR coordinates resolved, else pre_open_gate.

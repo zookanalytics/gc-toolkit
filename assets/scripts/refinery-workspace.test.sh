@@ -26,7 +26,8 @@
 #   - checks leaves the gate's checks directory empty, creating it when
 #     absent, removes every entry the next gate could run, touches nothing else
 #     in the gate's record, and fails when it cannot empty it;
-#   - the rig root comes from --rig-root, then GC_RIG_ROOT, then the roster;
+#   - the rig root comes from --rig-root, else from the rig-root.sh beside the
+#     script: GC_RIG_ROOT, then the roster;
 #   - the patrol's formula and the refinery's prompt carry no removal, and the
 #     patrol's blocks hand theirs to this script;
 #   - each point a cycle ends carries the same teardown block, which finds
@@ -419,10 +420,11 @@ case "$(cat "$TEARDOWN")" in
 esac
 bash -n "$TEARDOWN" && ok "the teardown block is valid bash" || bad "the teardown block is valid bash"
 
-# The block runs from a cwd in another repository, with the script in the pack
-# gc names, and none in the rig. no-pack is a pack without it. Sets RC and OUT.
+# The block runs from a cwd in another repository, with the script, and the
+# rig-root.sh it resolves the rig through, in the pack gc names, and none in
+# the rig. no-pack is a pack without them. Sets RC and OUT.
 mkdir -p "$TMP/pack/assets/scripts" "$TMP/no-pack"
-cp "$SUT" "$TMP/pack/assets/scripts/"
+cp "$SUT" "$HERE/rig-root.sh" "$TMP/pack/assets/scripts/"
 teardown_block() { OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" STUB_PACK="$1" bash "$TEARDOWN" 2>&1); RC=$?; }
 : > "$GC_LOG"
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
@@ -497,6 +499,12 @@ staged_block() {
 }
 drains() { grep -c 'drain-ack' "$GC_LOG"; }
 went_on() { case "$OUT" in *"ACTS FOR"*) echo yes ;; *) echo no ;; esac; }
+# The block resolves the rig through rig-root.sh before it looks for the
+# script, so a pack that holds rig-root.sh alone is one where the script is not
+# reachable.
+RR_PACK="$TMP/rig-root-pack"
+mkdir -p "$RR_PACK/assets/scripts"
+cp "$HERE/rig-root.sh" "$RR_PACK/assets/scripts/"
 
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 staged_block "$TMP/pack" wa polecat/wa
@@ -519,7 +527,7 @@ case "$OUT" in *"WORK was"*) bad "prep-staged-work, nothing in the shell: no not
 OUT=$(cd "$D/cwd" && env -u GC_RIG_ROOT GC_RIG=myrig STUB_PACK="$TMP/pack" WORK=wa BRANCH=polecat/wa bash "$TMP/staged-run.sh" 2>&1); RC=$?
 eq "$RC" 0 "prep-staged-work, the rig from the roster: exits 0"
 has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, the rig from the roster: the block acts for the bead staged in the rig it resolved"
-eq "$(grep -c '^rig list' "$GC_LOG")" 1 "prep-staged-work, the rig from the roster: the roster is read once, by the block, not again by the script"
+eq "$(grep -c '^rig list' "$GC_LOG")" 1 "prep-staged-work, the rig from the roster: the roster is read once, by the rig-root.sh the block runs, not again by the script"
 
 # A worktree at the prep path with no record, such as one any other path added.
 ws teardown --rig-root "$D/rig" >/dev/null
@@ -536,7 +544,7 @@ eq "$RC" 4 "prep-staged-work, no prep worktree: exits 4"
 eq "$(went_on)" no "prep-staged-work, no prep worktree: nothing after the block runs"
 eq "$(drains)" 0 "prep-staged-work, no prep worktree: the session does not drain"
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
-staged_block "$TMP/no-pack" wb polecat/wb
+staged_block "$RR_PACK" wb polecat/wb
 eq "$RC" 1 "prep-staged-work, no script reachable: exits 1"
 eq "$(went_on)" no "prep-staged-work, no script reachable: nothing after the block runs"
 has "$OUT" "refinery-workspace.sh not found" "prep-staged-work, no script reachable: it says why"

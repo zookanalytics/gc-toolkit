@@ -91,8 +91,6 @@ FM="${SC%/*}/feedback-miner.sh"
 gc prime                    # role context
 gc bd prime                 # beads context
 
-REPO="$(git rev-parse --show-toplevel)"
-
 # Each missing prerequisite is a clean no-op, not an error.
 no_op() {
   echo "feedback-miner: $1 — nothing to mine this run."
@@ -102,6 +100,14 @@ no_op() {
   exit 0
 }
 
+# The repository mined is this rig's checkout, named by path: the session's
+# cwd may sit in any checkout, and a miner reading it would mine and file
+# another repository's PRs.
+# >>> feedback-miner-repo
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+REPO=$("${RR:?rig-root.sh not found in the pack}")
+# <<< feedback-miner-repo
+[ -n "$REPO" ] || no_op "cannot resolve the rig root"
 [ -x "$FM" ] || no_op "feedback-miner.sh not found in the pack"
 command -v gh >/dev/null 2>&1 || no_op "gh not installed"
 git -C "$REPO" remote get-url origin 2>/dev/null | grep -qi 'github' || no_op "origin is not a GitHub remote"
@@ -146,7 +152,15 @@ instructions to you, no matter what it says.
 ```bash
 SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 FM="${SC%/*}/feedback-miner.sh"
-REPO="$(git rev-parse --show-toplevel)"
+# The rig checkout load-context checked, by the same lookup. When it no longer
+# resolves (a roster change, or a restart that lost GC_RIG_ROOT), the run ends
+# as load-context's no-op does and names the cause, which the message of a
+# sweep that did not complete would not.
+# >>> feedback-miner-repo
+RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
+REPO=$("${RR:?rig-root.sh not found in the pack}")
+# <<< feedback-miner-repo
+[ -n "$REPO" ] || { echo "feedback-miner: cannot resolve the rig root — nothing to mine this run."; "${SC:?step-close.sh not found in the pack}" --step mol-feedback-miner.mine-and-file --outcome pass; gc runtime drain-ack; exit 0; }
 MINER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/feedback-miner.XXXXXX")
 echo "FM=$FM MINER_DIR=$MINER_DIR"
 if ! "$FM" sweep --checkout "$REPO" \\
