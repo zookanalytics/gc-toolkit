@@ -167,8 +167,35 @@ cp "$TOOL" tools/measure.sh && printf 'b\n' >> a.sh && commit "the head adds the
 OHEAD=$(git rev-parse HEAD)
 BASE=$OBASE run "$NONE" "$OHEAD" "$OLD"
 eq "$RC" 0 "it exits 0"
-eq "$(calls)" "" "…and calls gh for nothing"
+eq "$(calls | cut -d' ' -f1-3)" "api --paginate repos/o/r/issues/7/comments" \
+  "…and only reads the comments, so a pull request with none gets none"
 has "$OUT" "carries no tools/measure.sh, so it has no size to show" "…and its log says why"
+
+echo "# a size comment says so when the head moves to a merge base that carries no tool"
+EARLIER=$(page "$(jq -n --arg b "$BODY" '[{id: 22, user: {login: "github-actions[bot]"}, body: $b}]')" earlier.json)
+BASE=$OBASE run "$EARLIER" "$OHEAD" "$OLD"
+eq "$RC" 0 "it exits 0"
+eq "$(calls | sed -n '2p' | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" \
+  "it rewrites the comment the first case posted"
+eq "$(calls | wc -l | tr -d ' ')" 2 "…and posts nothing new"
+GONE=$(posted)
+eq "$(printf '%s\n' "$GONE" | sed -n '1,3p')" "<!-- gc-toolkit:pr-size -->
+<!-- gc:no-review -->
+## Size" "…keeping the marks the next run finds it by"
+has "$GONE" "The size at head \`$(git rev-parse --short=12 "$OHEAD")\` is not shown, because its merge base \`$(git rev-parse --short=12 "$OBASE")\` carries no \`tools/measure.sh\`." \
+  "…to say this head's merge base has no size to show"
+hasnt "$GONE" "Measured at head" "…so the earlier head's size is no longer shown"
+eq "$(feedback "$GONE")" false "…and the city does not read it as feedback"
+
+echo "# a tool that fails is not taken for a missing one"
+BAD="$TMP/bad"; mkdir -p "$BAD/tools"; cd "$BAD" && git init -q
+printf 'exit 3\n' > tools/measure.sh && printf 'a\n' > a.sh && commit base
+BBASE=$(git rev-parse HEAD)
+printf 'b\n' >> a.sh && commit "the head adds a line"
+BASE=$BBASE run "$EARLIER" "$(git rev-parse HEAD)" "$BAD"
+eq "$RC" 1 "a merge base's tool that exits 3 makes the run exit 1"
+has "$(posted)" "could not be measured" "…and the comment says the size could not be measured"
+hasnt "$(posted)" "carries no" "…never that the merge base carries no tool"
 
 echo "# usage"
 run "$NONE" ""; eq "$RC" 2 "a missing --head is a usage error"

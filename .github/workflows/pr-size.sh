@@ -8,14 +8,14 @@
 # head's, so a change cannot edit either to hide what it adds. The tool runs
 # from the merge base's blob, and it reads the plan at the merge base itself.
 # The head is read only as git objects, and nothing from it runs. A merge base
-# that carries no tools/measure.sh has no size to show, and nothing is posted.
+# that carries no tools/measure.sh has no size to show.
 #
 # The comment opens with this script's mark, by which the next run finds it,
 # and then the no-review mark (docs/not-for-review.md), so the city never reads
 # it as review feedback. It is posted through assets/scripts/pr-post.sh, and
-# only a comment the Actions bot wrote is rewritten. When the size cannot be
-# measured, a comment an earlier head left is rewritten to say so, and none is
-# posted where there was none.
+# only a comment the Actions bot wrote is rewritten. When the merge base has no
+# size to show, or the size cannot be measured, a comment an earlier head left
+# is rewritten to say so, and none is posted where there was none.
 #
 # Usage: pr-size.sh --repo <host/owner/name> --pr <n> --base <commit> --head <commit>
 #   --base is the tip of the branch the pull request merges into. It runs from
@@ -58,19 +58,18 @@ trap 'rm -rf "$TMP"' EXIT
 git cat-file -e "$HEAD^{commit}" 2>/dev/null \
   || git fetch --quiet --no-tags origin "$HEAD" 2>/dev/null || true
 
-# 0 measured, into $TMP/section; 3 the merge base carries no tool; 1 failed.
+# 0 measured, into $TMP/section; 3 the merge base, MB, carries no tool; 1
+# failed. A tool that fails returns 1 whatever its own exit, so 3 means only
+# that the tool is missing.
+MB=""
 measure() {
-  local mb
-  mb=$(git merge-base "$BASE" "$HEAD" 2>/dev/null) || return 1
-  git cat-file -e "$mb:tools/measure.sh" 2>/dev/null || return 3
-  git show "$mb:tools/measure.sh" > "$TMP/measure.sh" || return 1
-  bash "$TMP/measure.sh" --pr "$mb" "$HEAD" > "$TMP/section" && [ -s "$TMP/section" ]
+  MB=$(git merge-base "$BASE" "$HEAD" 2>/dev/null) || return 1
+  git cat-file -e "$MB:tools/measure.sh" 2>/dev/null || return 3
+  git show "$MB:tools/measure.sh" > "$TMP/measure.sh" || return 1
+  bash "$TMP/measure.sh" --pr "$MB" "$HEAD" > "$TMP/section" && [ -s "$TMP/section" ] || return 1
 }
 measure; RC=$?
-if [ "$RC" -eq 3 ]; then
-  echo "$PROG: the merge base of PR#$PR carries no tools/measure.sh, so it has no size to show"
-  exit 0
-fi
+[ "$RC" -ne 3 ] || echo "$PROG: the merge base of PR#$PR carries no tools/measure.sh, so it has no size to show"
 
 SHORT=$(git rev-parse --short=12 "$HEAD" 2>/dev/null) || SHORT=${HEAD:0:12}
 {
@@ -78,6 +77,9 @@ SHORT=$(git rev-parse --short=12 "$HEAD" 2>/dev/null) || SHORT=${HEAD:0:12}
   if [ "$RC" -eq 0 ]; then
     cat "$TMP/section"
     printf '\nMeasured at head `%s`.\n' "$SHORT"
+  elif [ "$RC" -eq 3 ]; then
+    printf 'The size at head `%s` is not shown, because its merge base `%s` carries no `tools/measure.sh`.\n' \
+      "$SHORT" "$(git rev-parse --short=12 "$MB")"
   else
     printf 'The size at head `%s` could not be measured.\n' "$SHORT"
     [ -z "${GITHUB_RUN_ID:-}" ] \
@@ -101,4 +103,4 @@ elif [ "$RC" -eq 0 ]; then
     || { echo "$PROG: could not post on PR#$PR" >&2; exit 1; }
   echo "$PROG: posted the size of PR#$PR at head $SHORT"
 fi
-[ "$RC" -eq 0 ] || { echo "$PROG: the size of PR#$PR at head $SHORT could not be measured" >&2; exit 1; }
+[ "$RC" -ne 1 ] || { echo "$PROG: the size of PR#$PR at head $SHORT could not be measured" >&2; exit 1; }
