@@ -49,7 +49,7 @@ jobs:
     steps:
       # The default branch at its tip, and every branch with its history, so
       # the branch the pull request merges into and the merge base are here.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
