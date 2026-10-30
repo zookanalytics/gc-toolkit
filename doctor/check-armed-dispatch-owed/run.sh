@@ -271,8 +271,9 @@ scan_store() {
     # reconcile pass has already escalated it), assigned (reconcile will not sling
     # over a holder) — need no further read. deferred-dispatch.sh's `list`
     # classifies CAPPED ahead of stranded and dispatchable, so the cap test
-    # precedes the status test here too. Only an open, unassigned, live arm is a CANDIDATE whose blockers, on
-    # it and on its ancestors, decide whether a dispatch is owed.
+    # precedes the status test here too. Only an open, unassigned, live arm is
+    # a CANDIDATE whose blockers, on it and on its ancestors, decide whether a
+    # dispatch is owed.
     classified=$(jq -r \
         --arg slung "$K_SLUNG" --arg armed_at "$K_ARMED_AT" --arg fails "$K_FAILS" \
         --argjson cap "$MAX_SLING_FAILURES" '
