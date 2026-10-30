@@ -17,10 +17,9 @@ import (
 //
 //   - SESSION LIVENESS. Whether the session that claimed a child is still alive
 //     is what separates work in flight from an orphan, and no bead carries it.
-//     The supervisor API has no sessions endpoint and the beads library cannot
-//     see sessions at all; `gc session list` is the only reader. This is the
-//     same read gc-helm.sh makes (`GC_NO_API=1 gc session list`), so the two
-//     boards agree by construction rather than by two independent derivations.
+//     The beads library cannot see sessions at all. helm-svc reads them the way
+//     gc-helm.sh does, with `GC_NO_API=1 gc session list`, so the two boards
+//     agree by construction rather than by two independent derivations.
 //
 //   - CITY DISCOVERY. When no city env var is set, the city root comes from
 //     `gc config show` — the city gc itself resolves — rather than a discovery

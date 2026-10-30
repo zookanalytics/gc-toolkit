@@ -22,12 +22,14 @@
 #             older than the bound as well
 #
 # UNHELD is read off the bead alone. The other three are read out of the
-# session roster, and `_cache_age_s` sits beside `sessions` rather than inside
-# each one, so it ages the whole roster and not just `last_active`. Against a
-# roster older than the bound, an absent session may be a holder that started
-# after the snapshot, and a non-`active` state may be one its holder has since
-# left. So all three degrade to warnings there, and only UNHELD still reports
-# as an error. `gc session list` exposes no uncached mode to fall back on.
+# session roster, which the check reads from gc's local listing (GC_NO_API=1).
+# That listing carries no `_cache_age_s`. A listing that gc serves from the
+# supervisor API's cache carries the age beside `sessions` rather than inside
+# each one, so the age covers the whole roster and not just `last_active`.
+# Against a roster older than the bound, an absent session may be a holder that
+# started after the snapshot, and a non-`active` state may be one its holder has
+# since left. So all three degrade to warnings there, and only UNHELD still
+# reports as an error.
 #
 # UNHELD is reachable by neither path: nothing holds it, and `bd ready` skips
 # it because its status is not open. The two checks that would otherwise see it
