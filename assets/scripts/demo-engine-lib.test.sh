@@ -10,9 +10,10 @@
 #   (FLOOR)     a Node below the engine's floor of 22.18, or no node at all,
 #               stops the capture before anything is installed
 #   (LOCAL)     a rig named sprintshow whose package.json names the engine is
-#               the engine: its dependencies are installed when it has none, its
-#               own provision:browser runs before the capture starts, and the
-#               capture runs the checkout's CLI under node
+#               the engine: its dependencies are installed when it has none or
+#               lacks one its package.json lists, its own provision:browser
+#               runs before the capture starts, and the capture runs the
+#               checkout's CLI under node
 #   (REJECT)    a rig named sprintshow that is not the engine is passed over,
 #               and nothing runs in it
 #   (PUBLISHED) with no local engine, or with a rig list that cannot be read,
@@ -239,6 +240,20 @@ for cap in video screenshot; do
   hasnt "added 412 packages" "$(cat "$OUTF")" "($cap) the dependency install writes nothing to stdout"
   hasnt "is already installed" "$(cat "$OUTF")" "($cap) the browser install writes nothing to stdout"
   has "captured $(output_of "$cap")" "$(tail -n 1 "$OUTF")" "($cap) the last line on stdout is the capture's report"
+
+  echo "# ($cap) LOCAL: a checkout whose node_modules lacks a package its package.json depends on has its dependencies installed first"
+  printf '{"name":"@zookanalytics/sprintshow","dependencies":{"@example/pty":"^1.1.0","playwright":"^1.63.0"}}\n' >"$ENGINE/package.json"
+  mkdir -p "$ENGINE/node_modules/playwright"; printf '{"name":"playwright"}\n' >"$ENGINE/node_modules/playwright/package.json"
+  capture "$cap" SS_RIG="$ENGINE"
+  eq "$RC" 0 "($cap) a checkout missing a dependency captures"
+  I=$(line_of "npm install (in $ENGINE)"); P=$(line_of "provision:browser")
+  ok "($cap) the dependencies are installed in the checkout before the browser is provisioned (install line $I, provision line $P)" "[ '$I' -gt 0 ] && [ '$P' -gt '$I' ]"
+  mkdir -p "$ENGINE/node_modules/@example/pty"; printf '{"name":"@example/pty"}\n' >"$ENGINE/node_modules/@example/pty/package.json"
+  capture "$cap" SS_RIG="$ENGINE"
+  eq "$RC" 0 "($cap) a checkout with every dependency installed captures"
+  hasnt "npm install" "$(calls)" "($cap) and does not reinstall them"
+  printf '{"name":"@zookanalytics/sprintshow"}\n' >"$ENGINE/package.json"
+  rm -rf "$ENGINE/node_modules"; mkdir -p "$ENGINE/node_modules"
 
   echo "# ($cap) FAIL: the dependency install fails"
   rm -rf "$ENGINE/node_modules"
