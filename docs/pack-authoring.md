@@ -82,9 +82,16 @@ only once the session ends, so the next worker retries it.
 A molecule keeps the step text it was poured with, while the scripts that text
 calls are read from the installed pack when the step runs. So a pack script that
 open step text names stays callable under that name until no open step bead
-names it. Step text from an earlier version of these formulas requires
-`assets/scripts/molecule-hold.sh` to exist before it resolves the pack's
-scripts, and calls it to decline. That script hands the call to
+names it. The merge enforces it: `gctk merge` holds a change that removes a
+script under `assets/scripts/` while a formula at its base or head names it, or
+while an open step in any store of the city calls it
+([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2). A change that
+stops calling a script therefore keeps a file at its path, a hand-off to what
+replaces it, and a later change removes that file once the runs poured before
+it have ended. `assets/scripts/script-callers.sh <script>` lists the open steps
+that still call one. Step text from an earlier version of these formulas
+requires `assets/scripts/molecule-hold.sh` to exist before it resolves the
+pack's scripts, and calls it to decline. That script hands the call to
 `run-cancel.sh --step` unchanged, so such a run ends through gascity's run
 cancel like any other.
 

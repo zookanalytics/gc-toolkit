@@ -1308,7 +1308,7 @@ approved 85
 export STUB_FETCH_RC="" STUB_FETCHED_HEAD="sha-moved"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "head moved during the freshness probe (fetched 'sha-moved', validated 'sha-85')" \
+has "$out" "head moved during the merge-result probe (fetched 'sha-moved', validated 'sha-85')" \
   "a head that moved under the probe holds rather than answering about the wrong tree"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 
@@ -1336,6 +1336,83 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded S7" "a re-audit that is not dispatched holds no merge"
 has "$out" "the re-audit was not dispatched (seed-audit-reaudit.sh exit 2); the next merge that finds 'main' stale asks again" \
   "…and the pass says the next merge asks again"
+echo "# pack scripts the merge removes while live text still calls them"
+# The arm exists because a run keeps the step text it was poured with and calls
+# the pack's scripts from the city's copy of the pack, so a merge that removes a
+# script stops every open step that names it once that copy takes the merge.
+CALLERS_LOG="$TMP/callers.log"; : > "$CALLERS_LOG"
+cat > "$SD/script-callers.sh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$CALLERS_LOG"
+printf '%s\n' "\${STUB_CALLERS_OUT:-the merge removes no pack script}"
+exit "\${STUB_CALLERS_RC:-0}"
+STUB
+chmod +x "$SD/script-callers.sh"
+# No rendered audit here, so this arm alone fetches what the merge would land.
+rm -f "$TMP/repo/generated/seed-audit/INDEX.md"
+export STUB_TOPLEVEL="$TMP/repo" STUB_RENDER_RC=0 STUB_RENDER_OUT="" STUB_CALLERS_RC=0 STUB_CALLERS_OUT=""
+
+store "[$(anchor C1 91), $(rev C1)]"
+printf '%s' "$(prview 91 OPEN CLEAN)" > "$GH_DIR/pr_view_91.json"
+approved 91
+export STUB_FETCHED_HEAD="sha-91"
+: > "$RENDER_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded C1" "a merge whose removed scripts no formula names and no open step calls merges"
+has "$(cat "$CALLERS_LOG")" "--root $TMP/repo --check-merge refs/gc-toolkit/merge-gate/base refs/gc-toolkit/merge-gate/head" \
+  "…and the question was asked of the merge, in the probe's own refs"
+eq "$(wc -c < "$RENDER_LOG" | tr -d ' ')" "0" "…while a repository with no rendered audit runs no freshness probe"
+
+store "[$(anchor C2 92), $(rev C2)]"
+printf '%s' "$(prview 92 OPEN CLEAN)" > "$GH_DIR/pr_view_92.json"
+approved 92
+export STUB_FETCHED_HEAD="sha-92" STUB_CALLERS_RC=1 \
+  STUB_CALLERS_OUT="1 formula file(s) name a script the merge removes. Keep a file at each such path"
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#92 removes a pack script a formula still names; merge held" "a removed script a formula still names holds"
+has "$out" "1 formula file(s) name a script the merge removes" "…quoting what the check found"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+has "$(cat "$STUB_ESC_LOG")" "--key script-callers-merge-gate.92" "…and one visit carries it to a person, since no wait clears it"
+has "$(cat "$STUB_ESC_LOG")" "PR#92 removes a pack script a formula still names; the merge is held." \
+  "…whose first line is a headline, since escalate.sh titles the visit from it"
+has "$(cat "$STUB_ESC_LOG")" "Keep a file at each such path" "…carrying the check's own remedy"
+eq "$(bstatus C2)" "open" "the anchor stays open"
+
+store "[$(anchor C3 93), $(rev C3)]"
+printf '%s' "$(prview 93 OPEN CLEAN)" > "$GH_DIR/pr_view_93.json"
+approved 93
+export STUB_FETCHED_HEAD="sha-93" STUB_CALLERS_RC=3 \
+  STUB_CALLERS_OUT="2 open step(s) call a script the merge removes (assets/scripts/x.sh). The merge waits for their runs to end"
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#93 removes a pack script open steps still call; merge held until their runs end" "a removed script open steps call holds"
+has "$out" "2 open step(s) call a script the merge removes" "…quoting the count"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no visit, since the runs end on their own"
+has "$(meta C3 pr.machine)" "progressing@sha-93" "…and the machine axis says the city is moving it"
+
+store "[$(anchor C4 94), $(rev C4)]"
+printf '%s' "$(prview 94 OPEN CLEAN)" > "$GH_DIR/pr_view_94.json"
+approved 94
+export STUB_FETCHED_HEAD="sha-94" STUB_CALLERS_RC=2 STUB_CALLERS_OUT="script-callers: a store did not answer; nothing was decided"
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "could not be determined (script-callers.sh exit 2); merge held" "a check that decides nothing holds rather than passing"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…and the next pass asks again, with no visit"
+
+store "[$(anchor C5 95), $(rev C5)]"
+printf '%s' "$(prview 95 OPEN CLEAN)" > "$GH_DIR/pr_view_95.json"
+approved 95
+export STUB_CALLERS_RC=0 STUB_CALLERS_OUT="" STUB_FETCH_RC=1
+: > "$STUB_GH_LOG"; : > "$CALLERS_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "could not fetch 'main' and 'polecat/x95'" "an unreachable remote holds this arm too"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+eq "$(wc -c < "$CALLERS_LOG" | tr -d ' ')" "0" "…before the check is asked about refs it does not have"
+export STUB_FETCH_RC=""
+rm -f "$SD/script-callers.sh"
 export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_BASE_STALE="" STUB_REAUDIT_RC=0
 
 fi # part record

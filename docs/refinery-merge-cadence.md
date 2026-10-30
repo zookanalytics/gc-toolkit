@@ -135,7 +135,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    (`pr.unanswered_threads`, which the labels and the board read for
    `held: review` and the merge does not), then
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
-   that the merge makes no `generated/seed-audit` render stale, re-read the full
+   that the merge makes no `generated/seed-audit` render stale and removes no
+   pack script that a formula names or an open step calls, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record in one lifecycle
    transition, which `gctk merge` runs in-process. The posture it validates is
@@ -187,8 +188,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    refusal of the transition's own write, which a bare `--set-metadata` on the
    same bead is not subject to.
 
-   The seed-audit check is the one gate here that is a property of the merge
-   rather than of the head. `generated/seed-audit` is rendered from the whole
+   The seed-audit check and the removed-script check are the gates here that
+   are properties of the merge rather than of the head. `generated/seed-audit` is rendered from the whole
    source tree and committed per branch, so a PR carrying a render made at an
    older base overwrites prompt inputs it never saw, and two PRs that touch no
    common file still clobber each other. A lane's green derives from its
@@ -237,6 +238,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    whatever else they do. So `generated/seed-audit/` holds the renders and an
    `INDEX.md` that moves only when the pack's composition moves, and byte and
    token counts print on request (`render-seed-audit.sh --sizes`).
+
+   The removed-script check exists because a run keeps the step text it was
+   poured with, and that text calls the pack's scripts from the city's copy of
+   the pack as each step runs. A merge that removes a script, a rename's old
+   path included, stops every open step that names it once that copy takes the
+   merge. `script-callers.sh --check-merge` reads the same two fetched commits
+   and takes the files under `assets/scripts/` the change removes that the base
+   still carries, tests aside. A formula at the base or at the head that still
+   names one pours runs that call it until the merge reaches the city, so no
+   wait clears it: the arm holds the merge and files one visit per PR under
+   `script-callers-merge-gate.<n>`. The way out is to keep a file at the path, a
+   hand-off to what replaces the script, and remove it in a later change. Open
+   steps in any store of the city that call a removed script hold the merge
+   until their runs end, and the arm records the anchor as `progressing`, since
+   those runs end with no one acting. A check that cannot read a revision, the
+   rig list or a store holds the merge for the pass.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of

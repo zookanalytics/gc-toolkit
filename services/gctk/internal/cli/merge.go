@@ -37,9 +37,9 @@ import (
 // writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git/jq
 // and the sibling shell helpers (escalate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
-// pr-status-label.sh, blocker-holder.sh, pr-post.sh), resolved from
-// GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's directory
-// before it execs this binary.
+// script-callers.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh),
+// resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's
+// directory before it execs this binary.
 // Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
 // the observability and permissions surfaces those tools have for every other
 // caller. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass refuses
@@ -804,10 +804,13 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 
-	// --- generated-artifact freshness AT THE MERGE RESULT --------------------------
+	// --- what the MERGE RESULT lands, in a repository that is a pack ---------------
 	renderer := m.scriptPath("render-seed-audit.sh")
-	if m.repoRoot != "" && fileExists(filepath.Join(m.repoRoot, "pack.toml")) &&
-		fileExists(filepath.Join(m.repoRoot, "generated/seed-audit/INDEX.md")) && fileExists(renderer) {
+	callers := m.scriptPath("script-callers.sh")
+	packRepo := m.repoRoot != "" && fileExists(filepath.Join(m.repoRoot, "pack.toml"))
+	checkFreshness := packRepo && fileExists(filepath.Join(m.repoRoot, "generated/seed-audit/INDEX.md")) && fileExists(renderer)
+	checkCallers := packRepo && fileExists(callers)
+	if checkFreshness || checkCallers {
 		if rc := runRC("git", "fetch", "--quiet", "--no-tags", "origin",
 			"+refs/heads/"+base+":"+mergeGateRef+"/base", "+refs/heads/"+headRef+":"+mergeGateRef+"/head"); rc != 0 {
 			fmt.Fprintf(m.stdout, "%s: PR#%s could not fetch '%s' and '%s' to check what the merge would land; merge held (anchor %s)\n", mergeProg, num, base, headRef, id)
@@ -820,10 +823,14 @@ func (m *merger) handle(row *gcbd.Bead) {
 			if shown == "" {
 				shown = "none"
 			}
-			fmt.Fprintf(m.stdout, "%s: PR#%s head moved during the freshness probe (fetched '%s', validated '%s'); merge held (anchor %s)\n", mergeProg, num, shown, headOid, id)
+			fmt.Fprintf(m.stdout, "%s: PR#%s head moved during the merge-result probe (fetched '%s', validated '%s'); merge held (anchor %s)\n", mergeProg, num, shown, headOid, id)
 			m.held++
 			return
 		}
+	}
+
+	// --- generated-artifact freshness at the merge result ---------------------------
+	if checkFreshness {
 		saArgs := []string{renderer, "--root", m.repoRoot, "--check-merge", mergeGateRef + "/base", mergeGateRef + "/head"}
 		staleList := ""
 		if f, err := os.CreateTemp("", "gctk-merge-base-stale.*"); err == nil {
@@ -847,6 +854,36 @@ func (m *merger) handle(row *gcbd.Bead) {
 		}
 		if staleList != "" {
 			m.reaudit(base, num, readLines(staleList))
+		}
+	}
+
+	// --- pack scripts the merge removes while live text still calls them -----------
+	// A run keeps the step text it was poured with and calls the pack's scripts
+	// from the city's copy of the pack, so a removed script stops every open
+	// step that names it once the merge reaches that copy. A formula that still
+	// names it is the change's to fix; open steps that call it end on their own.
+	if checkCallers {
+		scOut, scRC := runCombined("bash", callers, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
+		switch scRC {
+		case 0:
+		case 1:
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script a formula still names; merge held (anchor %s)\n", mergeProg, num, id)
+			m.printIndented(scOut, 12)
+			m.escalate("--subject", id, "--key", "script-callers-merge-gate."+num,
+				"--message", "PR#"+num+" removes a pack script a formula still names; the merge is held.\n\n"+scOut)
+			m.held++
+			return
+		case 3:
+			m.recordMachine(id, "progressing", headOid, aroute)
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script open steps still call; merge held until their runs end (anchor %s)\n", mergeProg, num, id)
+			m.printIndented(scOut, 12)
+			m.held++
+			return
+		default:
+			fmt.Fprintf(m.stdout, "%s: PR#%s: whether the merge removes a pack script open steps still call could not be determined (script-callers.sh exit %d); merge held (anchor %s)\n", mergeProg, num, scRC, id)
+			m.printIndented(scOut, 6)
+			m.held++
+			return
 		}
 	}
 
@@ -1483,11 +1520,12 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // that anchor. A missing blocker-holder.sh records no verdict for an anchor a
 // live blocker holds, whose merge is held anyway. A missing pr-post.sh counts
 // no PR's unanswered review threads. A missing escalate.sh,
-// record-failure-cap.sh, render-seed-audit.sh or pr-status-label.sh is skipped.
+// record-failure-cap.sh, render-seed-audit.sh, script-callers.sh or
+// pr-status-label.sh is skipped.
 // The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, script-callers.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
