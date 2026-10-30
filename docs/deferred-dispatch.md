@@ -209,7 +209,9 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
-- **retires** the record on an armed bead that has closed, or whose sling
+- **retires** the record on an armed bead that has closed, or whose work
+  another path already delivered, as a `merge_result` other than `held`
+  records, or whose sling
   reconcile has proven — a `slung@` (or pre-two-state bare-timestamp)
   `gc.dispatch_when_ready_slung` marker surviving into a later pass, from a
   pass that died before disarming — so recovery reads one marker reconcile
@@ -221,7 +223,9 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   whose rollback did not land — because that dispatch was never proven and
   retiring it would silently lose the work;
 - **withholds** — leaving the record armed and saying so — when a blocker
-  holds the bead, on it or on an ancestor, when someone has it by `assignee`,
+  holds the bead, on it or on an ancestor, when a converse sitting holds it
+  (`merge_result=held`, which records a wait on the operator's ruling and no
+  delivery) until the sign-off releases it, when someone has it by `assignee`,
   when the sling fails, when the recorded arguments are malformed, when
   the pass has spent its budget, or when the bead is in progress or closed
   under the resolved-by consumer's claim, a disposal no pass has finished;
