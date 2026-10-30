@@ -26,7 +26,10 @@ the invariant→check binding by [component-model.md](component-model.md); the
 filing conventions by [file-structure.md](file-structure.md); how work is
 structured into epics and when an epic closes by [epics.md](epics.md); how a
 pack skill is named and surfaced by [skills.md](skills.md); how pack text
-reaches the pack's scripts by [pack-authoring.md](pack-authoring.md).
+reaches the pack's scripts by [pack-authoring.md](pack-authoring.md); the shape
+of `gctk`, the pack's CLI, with its domains, the ledger, its adapters and the
+one rule for whether a bead is blocked by
+[gctk-architecture.md](gctk-architecture.md).
 
 ## The boundary
 
