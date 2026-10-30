@@ -79,8 +79,8 @@
 #                Exactly one of --command / --text is required.
 #   --title      the window's title bar text (default: the command, or the
 #                file's name).
-#   --columns    the terminal's width in columns, at which a line wraps
-#                (default 120). The terminal is 30 rows tall, which is the
+#   --columns    the terminal's width in columns, 20 to 300, at which a line
+#                wraps (default 120). The terminal is 30 rows tall, which is the
 #                screen a full-screen program draws. Output longer than that is
 #                captured whole, and a session longer than the engine's
 #                terminal keeps, or one capture holds, shows its last lines.
@@ -195,6 +195,11 @@ case "$KIND" in
     esac
     case "$TITLE" in *[[:cntrl:]]*) usage_err "--title must be one line with no control characters" ;; esac
     case "${TEXT##*/}" in *[[:cntrl:]]*|*'`'*) usage_err "--text's file name must hold no control character or backtick, because the terminal prints the file by that name" ;; esac
+    # The engine's terminal is 20 to 300 columns wide. It refuses any other
+    # width too, but this script reaches the engine only after provisioning its
+    # browser. posint has refused a leading zero, so four digits is over 300.
+    [ -z "$COLS" ] || { [ "${#COLS}" -le 3 ] && [ "$COLS" -ge 20 ] && [ "$COLS" -le 300 ]; } \
+      || usage_err "--columns must be 20 to 300, the widths the engine's terminal takes (got '$COLS')"
     [ -z "$TEXT" ] || [ -f "$TEXT" ] || fail "--text '$TEXT' does not exist"
     [ -z "$CWD" ] || [ -n "$COMMAND" ] || usage_err "--cwd is where --command runs; --text takes none"
     [ -z "$CWD" ] || [ -d "$CWD" ] || fail "--cwd '$CWD' is not a directory" ;;
@@ -271,11 +276,13 @@ case "$KIND" in
   terminal)
     # The script's one step types the command at the prompt of a shell that
     # starts in --cwd. Output captured earlier is printed by cat, by the file's
-    # name, in the directory that holds it.
+    # name, in the directory that holds it. A name that starts with a dash is
+    # given as ./<name>, because cat reads a bare one as its options.
     if [ -n "$COMMAND" ]; then
       RUN="$COMMAND"; SHELL_DIR="${CWD:-$(pwd)}"
     else
-      RUN="cat $(printf '%q' "${TEXT##*/}")"; SHELL_DIR=$(dirname "$TEXT")
+      TEXT_NAME=${TEXT##*/}; case "$TEXT_NAME" in -*) TEXT_NAME="./$TEXT_NAME" ;; esac
+      RUN="cat $(printf '%q' "$TEXT_NAME")"; SHELL_DIR=$(dirname "$TEXT")
     fi
     case "$TITLE" in *[![:space:]]*) ;; *) TITLE="${COMMAND:-${TEXT##*/}}" ;; esac
     printf '%s\n' "# Demo: $TITLE" '' "**Terminal:** ${COLS:-120}x30" '' '## Steps' '' \

@@ -250,6 +250,13 @@ eq "$rc" 2 "a --title of two lines exits 2"
 BACKTICKED="$WORK/out\`put.txt"; printf 'x\n' >"$BACKTICKED"
 out="$(run -- terminal --output "$OUT" --text "$BACKTICKED")"; rc=$?
 eq "$rc" 2 "a --text file whose name holds a backtick exits 2"
+for bad in 19 301 1000 99999999999999999999; do
+  out="$(run -- terminal --output "$OUT" --command ls --columns "$bad")"; rc=$?
+  eq "$rc" 2 "--columns $bad, a width the engine's terminal does not take, exits 2"
+  eq "$(calls)" "" "--columns $bad is refused before the engine's browser is provisioned"
+done
+has "--columns must be 20 to 300, the widths the engine's terminal takes (got '99999999999999999999')" "$out" "it names the widths the terminal takes"
+hasnt "integer expected" "$out" "a width too long for a shell integer is refused as one out of range"
 out="$(run -- markdown --output "$OUT")"; rc=$?
 eq "$rc" 2 "markdown without --file exits 2"
 for bad in nope a/b/c /a a/ 'a b/c'; do
@@ -423,6 +430,11 @@ has "[--cwd] [$WORK] [--full-page]" "$(calls)" "the shell starts where this scri
 has "the command exited 0" "$out" "the last line gives the exit status"
 out="$(run -- terminal --command 'ls -l' --title '   ' --output "$OUT")"; rc=$?
 has "# Demo: ls -l" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "a blank --title titles the window with the command too"
+for cols in 20 300; do
+  out="$(run -- terminal --command ls --columns "$cols" --output "$OUT")"; rc=$?
+  eq "$rc" 0 "--columns $cols, at the edge of the widths the engine's terminal takes, captures"
+  has "**Terminal:** ${cols}x30" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "and is the terminal's width"
+done
 
 echo "# terminal: how the command ended, read from the engine's log"
 out="$(run ENGINE_RUN=took -- terminal --command 'node board.mjs' --output "$OUT")"; rc=$?
@@ -454,6 +466,10 @@ has "   \`run cat out\\ put.txt\`" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "cat pr
 has "# Demo: out put.txt" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "the window is titled with the file's name"
 has "[--cwd] [$WORK] [--full-page]" "$(calls)" "the shell starts in the directory that holds the file"
 hasnt "exited" "$(printf '%s\n' "$out" | tail -n 1)" "no exit status is claimed for output this run did not produce"
+DASHED="$WORK/-n.txt"; printf 'line one\n' >"$DASHED"
+out="$(run -- terminal --text "$DASHED" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a file whose name starts with a dash is printed and captured"
+has "   \`run cat ./-n.txt\`" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "cat is given it as ./<name>, which it reads as no option"
 out="$(run ENGINE_RUN=exited:1 -- terminal --text "$TXT" --output "$OUT")"; rc=$?
 eq "$rc" 1 "output that cat could not print exits 1"
 has "the terminal could not print '$TXT' (cat exited 1)" "$out" "it says cat failed"
