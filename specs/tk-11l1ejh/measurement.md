@@ -6,14 +6,15 @@ description: The derivations behind docs/built-once-target.md at main b09345315 
 # The measurements behind the built-once target
 
 Every number here was taken at main b09345315 (2026-10-25) unless its row
-names another commit. `measure.sh` in this directory produced the tables, and
-each other count comes from the command shown with it, run from the
-repository root.
+names another commit. `tools/measure.sh` produced the tables, and each other
+count comes from the command shown with it, run from the repository root. The
+tool was written in this directory and moved to `tools/` after, and it gives
+every table and net below as it gave them here.
 
 ## 1. The baseline table
 
 ```
-$ specs/tk-11l1ejh/measure.sh b09345315
+$ tools/measure.sh b09345315
 lines at b09345315
 
 kind          lines
@@ -215,7 +216,8 @@ all 28,500.
 
 The files each bead's contract retires, with their tests (`X.test.sh` beside
 `X.sh`, and a doctor check's `run.test.sh`), summed at the baseline. A bead
-that rewrites part of a file retires more than this.
+that rewrites part of a file retires more than this. The plan's current file
+list is `tools/deletion-plan.tsv`, one row per file.
 
 | Bead | Whole files | Lines (of which tests) |
 |---|---|---|
