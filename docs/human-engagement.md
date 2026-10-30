@@ -523,7 +523,11 @@ sign-off has handed the conversation back, its last act is
 closes any converse session whose conversation has closed, is gone, or is back
 in the operator's queue, attached or not, once the session is older than the
 reap's interval, which keeps it off a session engage has started and not yet
-bound. It reads the
+bound. A session whose conversation closed or came back to the queue also
+waits until the conversation has taken no write for that interval, because the
+sitting records its last hand-back on the conversation on the tool call after
+its sign-off, and the operator's tab prints that record once the session ends.
+It reads the
 conversation's id from the session's alias and strips the `c-` prefix. Its
 warrant, with the trigger that retires it, is in [warrants.md](warrants.md).
 

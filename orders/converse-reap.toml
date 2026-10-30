@@ -7,18 +7,20 @@
 # dismiss closed, and one a sitting cut short handed back to the operator's
 # queue. This is the close those endings assume, under the warrant in
 # docs/warrants.md (Converse reap): a converse session whose conversation reads
-# closed, gone or back in the queue is settled, so it is closed. An ATTACHED
-# session is left alone, because the pack cannot see typed text in the
-# composer and draining a pane that has some is the operator's one hard no.
-# --min-age is this order's interval in seconds: a session younger than one
-# pass may be a sitting engage has started and not yet bound.
+# closed, gone or back in the queue is settled, so it is closed, attached or
+# not. Viewing a sitting does not keep it open: an attached tab exits when the
+# session ends and prints the last hand-back recorded on the conversation.
+# --min-age is this order's interval in seconds. A session younger than one pass
+# may be a sitting engage has started and not yet bound, and a conversation
+# written less than one pass ago may still be taking its sitting's last
+# hand-back, so either waits a pass.
 #
 # City scope: converse sessions span rigs and `gc bd show` resolves a
 # conversation across ledgers, so one pass reads the whole city. A pass skipped
 # or cut short costs only the reap the next pass takes instead; the reap is
 # idempotent.
 [order]
-description = "Close converse sittings whose conversation has closed, gone or returned to the operator's queue (unattached only); ends the live sessions they leak"
+description = "Close converse sittings whose conversation is gone, or has closed or returned to the operator's queue and taken no write for a pass, attached or not; ends the live sessions they leak"
 trigger = "cooldown"
 interval = "5m"
 exec = "$PACK_DIR/assets/scripts/converse-reap.sh --min-age 300"

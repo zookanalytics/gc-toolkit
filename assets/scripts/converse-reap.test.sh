@@ -26,6 +26,11 @@
 #             conversation
 #   (YOUNG)   a session younger than --min-age is never closed, so a sitting
 #             engage has started and not yet bound keeps its alias
+#   (SETTLING) a session whose conversation closed or came back to the queue
+#             less than --min-age ago is kept for a pass, so its sitting can
+#             record its last hand-back, and one past that is closed
+#   (NOSTAMP) a settled conversation whose last write time does not read is
+#             left alone
 #   (NOAGE)   a session whose creation time does not read is left alone
 #   (NONCONV) an alias that resolves to a bead that is no conversation is left
 #             alone
@@ -106,14 +111,15 @@ sess() { # <id> <alias|null> <state> <attached> <closed> [template] [created_at|
   printf '{"id":"%s","template":"%s","alias":%s,"state":"%s","attached":%s,"closed":%s%s}' \
     "$1" "$tmpl" "$alias_json" "$3" "$4" "$5" "$created_json"
 }
-# conv <id> <status> <assignee> — a conversation, a task that tracks tk-subj, in
-# the `gc bd show` edge spelling.
+# conv <id> <status> <assignee> [updated_at|none] — a conversation, a task that
+# tracks tk-subj, in the `gc bd show` edge spelling, last written long ago unless
+# a time is given.
 conv() {
-  jq -n --arg v "$1" --arg s "$2" --arg a "$3" '[{id:$v, issue_type:"task", status:$s, assignee:$a,
-      dependencies:[{id:"tk-subj", dependency_type:"tracks"}]}]' > "$BEADS_DIR/$1.json"
+  jq -n --arg v "$1" --arg s "$2" --arg a "$3" --arg u "${4:-2026-01-01T00:00:00Z}" '[{id:$v, issue_type:"task", status:$s, assignee:$a,
+      dependencies:[{id:"tk-subj", dependency_type:"tracks"}]} + (if $u == "none" then {} else {updated_at:$u} end)]' > "$BEADS_DIR/$1.json"
 }
 conv_obj() { # <id> <status> <assignee> — bd answers with a bare object, not an array
-  jq -n --arg v "$1" --arg s "$2" --arg a "$3" '{id:$v, issue_type:"task", status:$s, assignee:$a,
+  jq -n --arg v "$1" --arg s "$2" --arg a "$3" '{id:$v, issue_type:"task", status:$s, assignee:$a, updated_at:"2026-01-01T00:00:00Z",
       dependencies:[{id:"tk-subj", dependency_type:"tracks"}]}' > "$BEADS_DIR/$1.json"
 }
 task_bead() { # <id> <status> — a task that tracks nothing: work a person owes, no conversation
@@ -240,6 +246,34 @@ eq "$RC" "0" "OTHERERR: the pass completes"
 eq "$CLOSED" "" "OTHERERR: a non not-found conversation failure is NOT reaped"
 has "$OUT" "closed 0 settled" "OTHERERR: nothing reaped"
 has "$OUT" "skipped 1" "OTHERERR: the unreadable conversation is counted skipped"
+
+# --- a conversation settled within the last interval waits a pass -------------
+# The sign-off writes the close or the hand-back to the queue, and the sitting
+# records its last hand-back on its next tool call. A pass in between would end
+# the session before that record lands, so a conversation written less than
+# --min-age ago keeps its session for a pass, attached or not, and one written
+# longer ago is reaped.
+: > "$CALLS"; rm -f "$TMP/beads"/*.json
+NOW_TS="$(jq -nr 'now | strftime("%Y-%m-%dT%H:%M:%SZ")')"
+PAST_TS="$(jq -nr '(now - 360) | strftime("%Y-%m-%dT%H:%M:%SZ")')"
+conv tk-justclosed closed gc-toolkit/gc-toolkit.tk-justclosed "$NOW_TS"
+conv tk-justqueued open   human                               "$NOW_TS"
+conv tk-pastgrace  closed gc-toolkit/gc-toolkit.tk-pastgrace  "$PAST_TS"
+conv tk-nostamp    closed gc-toolkit/gc-toolkit.tk-nostamp    none
+printf '{"sessions":[%s,%s,%s,%s]}' \
+  "$(sess s-justclosed gc-toolkit/gc-toolkit.tk-justclosed active true false)" \
+  "$(sess s-justqueued gc-toolkit/gc-toolkit.tk-justqueued active false false)" \
+  "$(sess s-pastgrace  gc-toolkit/gc-toolkit.tk-pastgrace  active false false)" \
+  "$(sess s-nostamp    gc-toolkit/gc-toolkit.tk-nostamp    asleep false false)" > "$SESSIONS_FILE"
+OUT="$(bash "$SUT" 2>&1)"; RC=$?
+CLOSED="$(cat "$CALLS" 2>/dev/null)"
+eq "$RC" "0" "SETTLING: the pass completes"
+hasnt "$CLOSED" "close s-justclosed" "SETTLING: a session whose conversation closed seconds ago is kept for a pass"
+hasnt "$CLOSED" "close s-justqueued" "SETTLING: and one whose conversation came back to the queue seconds ago"
+has "$CLOSED" "close s-pastgrace" "SETTLING: one whose conversation closed longer than --min-age ago is closed"
+hasnt "$CLOSED" "close s-nostamp" "NOSTAMP: a settled conversation whose last write time does not read is left alone"
+has "$OUT" "kept 2 settled within the last 300s" "SETTLING: the summary counts the two that wait"
+has "$OUT" "skipped 1" "NOSTAMP: and counts the unreadable one skipped"
 
 # --- nothing to do ------------------------------------------------------------
 : > "$CALLS"

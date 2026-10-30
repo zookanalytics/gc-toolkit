@@ -19,17 +19,23 @@
 # session. A conversation its sitting still holds is a live sitting, and is
 # kept.
 #
-# One session is never closed: one younger than --min-age, the reap's own
-# interval. engage starts a session before it binds the conversation to it, so a
-# session that young holding the alias of a conversation still in the queue may
-# be a sitting about to take it.
+# Two sessions are never closed, each for --min-age, the reap's own interval.
+# One is younger than that. engage starts a session before it binds the
+# conversation to it, so a session that young holding the alias of a
+# conversation still in the queue may be a sitting about to take it. The other's
+# conversation was written less than that ago. A sitting's sign-off writes the
+# close or the hand-back to the queue, and the sitting records its last
+# hand-back on the conversation on its next tool call, which the operator's tab
+# prints once the session ends. A dismiss records no hand-back, so the interval
+# also bounds that wait.
 #
 # Fully mechanical: `gc session list` + one `gc bd show` per candidate session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
 #
 # Bias: an unreadable probe reaps NOTHING. A session whose conversation cannot
-# be read, whose alias names no bead id, or whose bead is no conversation is
-# left alone: the pass only ever ends a sitting it can prove is settled.
+# be read, whose alias names no bead id, whose bead is no conversation, or whose
+# settled conversation's last write time does not read is left alone: the pass
+# only ever ends a sitting it can prove is settled.
 #
 # Usage:
 #   converse-reap.sh [--min-age <seconds>]            reap, print one summary line
@@ -90,7 +96,7 @@ candidates="$(printf '%s' "$sessions_json" | jq -r --argjson age "$MIN_AGE" '
     | [ .id, (if ($tail | test("^c-[a-z]+-[a-z0-9]+$")) then ($tail | ltrimstr("c-")) else $tail end) ]
     | @tsv')"
 
-reaped=0; kept=0; skipped=0
+reaped=0; kept=0; settling=0; skipped=0
 reaped_lines=""
 
 # Drive the loop from a checked, producer-named temp file rather than a `<<<`
@@ -178,6 +184,19 @@ while IFS=$'\t' read -r sid cid; do
         kept=$((kept + 1)); continue
     fi
 
+    # A settled conversation written less than --min-age ago may still be taking
+    # its sitting's last hand-back, so its session waits a pass.
+    if [ "$verdict" != gone ]; then
+        quiet="$(printf '%s' "$row" | jq -r --argjson age "$MIN_AGE" '
+            [ .updated_at, .closed_at ] | map(select(. != null) | tostring | sub("\\.[0-9]+"; "") | fromdateiso8601?) | max
+            | if . == null then "unread" elif . <= (now - $age) then "quiet" else "recent" end' 2>/dev/null)"
+        case "$quiet" in
+            quiet) ;;
+            recent) settling=$((settling + 1)); continue ;;
+            *) skipped=$((skipped + 1)); continue ;;
+        esac
+    fi
+
     # Record the per-session line only once the sitting is actually gone. A close
     # that FAILS is reported on stderr and counted skipped; it must NOT land in the
     # reaped list, which is the summary's account of the sittings this pass closed,
@@ -206,6 +225,6 @@ rm -f "$ROWS"
 }
 
 verb="closed"; [ "$DRY_RUN" -eq 1 ] && verb="would close"
-echo "$PROG: $verb $reaped settled converse sittings (conversation closed, gone or back in the queue), kept $kept held, skipped $skipped"
+echo "$PROG: $verb $reaped settled converse sittings (conversation closed, gone or back in the queue), kept $kept held, kept $settling settled within the last ${MIN_AGE}s, skipped $skipped"
 [ -n "$reaped_lines" ] && printf '%s' "$reaped_lines"
 exit 0
