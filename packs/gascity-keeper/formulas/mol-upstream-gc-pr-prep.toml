@@ -12,9 +12,10 @@ when to run the assembled `gh pr create` command.
 
 Extends `mol-polecat-base` for load-context but replaces the implement /
 self-review chain with cherry-pick / scrub / test / push / draft / handback.
-Every abort path (cherry-pick conflict, test failure, push race) mails the
-keeper + operator and hands the bead back open, assigned and routed to the
-keeper — never stranded `in_progress` on the drained session."""
+Every abort path (a roster with no gascity rig, cherry-pick conflict, test
+failure, push race) mails the keeper + operator and hands the bead back open,
+assigned and routed to the keeper — never stranded `in_progress` on the drained
+session."""
 formula = "mol-upstream-gc-pr-prep"
 extends = ["mol-polecat-base"]
 version = 3
@@ -70,10 +71,52 @@ escalate to the operator with subject `pr-prep: missing metadata` and exit.
 Do not invent defaults.
 
 **2. Reuse or create the worktree.** Check `metadata.work_dir` first; if it
-exists, `cd` there and skip to step 3. Otherwise:
+exists, `cd` there and skip to step 3. Otherwise locate the gascity rig by
+name, with `assets/scripts/rig-root.sh --rig gascity`, which reads
+`gc rig list --json`. Every git call below names it as `git -C "$RIG_ROOT"`,
+and `git -C ""` runs in the session's cwd, so a roster in which no single rig
+called gascity resolves hands the bead back before anything is fetched or
+created.
+The mail goes out, and the session drains, only after that hand-back is
+written. The worktree is anchored to `$GC_CITY_PATH` beside the rebase
+formula's, never to `$(pwd)`: nothing pins a session's cwd between steps, and
+a worktree made inside another checkout's tree is nested in that checkout and
+dirties it:
 
 ```bash
-RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+# >>> upstream-pr-prep-worktree-setup
+: "${GC_CITY_PATH:?GC_CITY_PATH must be set; refusing to derive the worktree path from the cwd}"
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}" --rig gascity)
+if [ -z "$RIG_ROOT" ]; then
+  # An absent key reads as empty, never as the literal "null", and the keeper
+  # the run was slung with stands in for one the bead does not name.
+  REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+  [ -n "$REQUESTING_KEEPER" ] || REQUESTING_KEEPER="{{requesting_keeper}}"
+  # The hand-back is written before any mail: a refused write leaves the step
+  # to a retry, and each retry would otherwise mail about a hand-back the bead
+  # does not carry.
+  if ! gc bd update {{issue}} \
+    --set-metadata aborted_at=workspace-setup \
+    --status=open \
+    --assignee="$REQUESTING_KEEPER" \
+    --set-metadata gc.routed_to="$REQUESTING_KEEPER"; then
+    echo "pr-prep: the hand-back of {{issue}} to $REQUESTING_KEEPER did not land; NOT draining, so the next worker retries" >&2
+    exit 1
+  fi
+  gc mail send "$REQUESTING_KEEPER" -s "pr-prep: no gascity rig for {{issue}}" -m "$(cat <<EOF
+No single rig called gascity resolves in gc rig list --json, so no path
+names the repository to branch from. Nothing was fetched, created or pushed.
+
+Bead: {{issue}}
+
+Next: register the gascity rig, then re-dispatch this prep.
+EOF
+)"
+  gc mail send human -s "pr-prep: no gascity rig for {{issue}}" -m "(see keeper mail)"
+  gc runtime drain-ack
+  exit 0
+fi
 
 # Split the ordered SHA list explicitly with awk: zsh — the shell this block
 # is pasted into — performs NO word-splitting on an unquoted expansion, so
@@ -96,7 +139,8 @@ elif [ "$N" -eq 1 ]; then
 else
   BRANCH="upstream-pr/{{issue}}"
 fi
-WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
+WORKTREE_PATH="$GC_CITY_PATH/.gc/worktrees/gascity/pr-prep-{{issue}}"
+mkdir -p "$(dirname "$WORKTREE_PATH")"
 
 git -C "$RIG_ROOT" fetch --prune {{upstream_remote}}
 git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "$BRANCH" "{{upstream_remote}}/{{upstream_branch}}"
@@ -104,6 +148,7 @@ cd "$WORKTREE_PATH"
 gc bd update {{issue}} \
   --set-metadata work_dir="$WORKTREE_PATH" \
   --set-metadata branch="$BRANCH"
+# <<< upstream-pr-prep-worktree-setup
 ```
 
 If the branch name collides with an existing worktree branch, append

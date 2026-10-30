@@ -12,9 +12,10 @@ when to run the assembled `gh pr create` command.
 
 Extends `mol-polecat-base` for load-context but replaces the implement /
 self-review chain with cherry-pick / scrub / test / push / draft / handback.
-Every abort path (cherry-pick conflict, test failure, push race) mails the
-keeper + operator and hands the bead back open, assigned and routed to the
-keeper — never stranded `in_progress` on the drained session.
+Every abort path (a roster with no gascity rig, cherry-pick conflict, test
+failure, push race) mails the keeper + operator and hands the bead back open,
+assigned and routed to the keeper — never stranded `in_progress` on the drained
+session.
 
 Required vars:
   {{commit_sha}}: Whitespace-separated, ORDERED list of one-or-more local commits on origin/main to extract for upstream submission. Apply order is topological — old→new, as the commits sit on origin/main. A single SHA (N=1) is the original single-commit behavior.

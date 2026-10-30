@@ -51,10 +51,11 @@ ADD="$(extract workspace-setup-worktree-add)"
   && ok "worktree-add snippet extracted between markers" \
   || bad "worktree-add extraction EMPTY — markers missing from $TOML"
 
-# `{{base_branch}}` is a formula placeholder, substituted here exactly as the
-# molecule materializer does before the polecat reads the step.
+# `{{base_branch}}` and `{{binding_prefix}}` are formula placeholders,
+# substituted here exactly as the molecule materializer does before the polecat
+# reads the step: the binding as the binding plus a dot, gc-toolkit. here.
 SNIPPET="$TMP/add.sh"
-printf '%s\n' "$ADD" | sed "s|{{base_branch}}|main|g" > "$SNIPPET"
+printf '%s\n' "$ADD" | sed -e "s|{{base_branch}}|main|g" -e "s|{{binding_prefix}}|gc-toolkit.|g" > "$SNIPPET"
 bash -n "$SNIPPET" \
   && ok "extracted worktree-add snippet is valid bash" \
   || bad "extracted worktree-add snippet failed bash -n"
@@ -88,12 +89,30 @@ in_wt_list() {
   echo "$found"
 }
 
+# A fake `gc` names this checkout as the pack for `gc gc-toolkit scripts-dir`,
+# so every run resolves the rig through the rig-root.sh under test, and it
+# answers the roster, so rig-root.sh's roster arm runs without a live city.
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gc" <<EOF
+#!/bin/sh
+if [ "\$1" = gc-toolkit ] && [ "\$2" = scripts-dir ]; then
+  printf '%s\n' "$ROOT/assets/scripts"
+  exit 0
+fi
+if [ "\$1" = rig ] && [ "\$2" = list ]; then
+  printf '%s\n' '{"rigs":[{"name":"myrig","path":"$RIG"}]}'
+  exit 0
+fi
+exit 1
+EOF
+chmod +x "$TMP/bin/gc"
+
 # --- Treatment: the extracted snippet, run from the WRONG cwd. ---------------
 # GC_RIG_ROOT names the rig; cwd is an unrelated repo. The worktree must land
 # in the rig, and at the absolute WORKTREE_PATH the caller chose.
 WT_FIX="$TMP/wt-fix"
 ( cd "$CWD"
-  WORKTREE_PATH="$WT_FIX" GC_RIG_ROOT="$RIG" GC_RIG=ignored bash "$SNIPPET" ) >"$TMP/out.fix" 2>&1 \
+  PATH="$TMP/bin:$PATH" WORKTREE_PATH="$WT_FIX" GC_RIG_ROOT="$RIG" GC_RIG=ignored bash "$SNIPPET" ) >"$TMP/out.fix" 2>&1 \
   || { echo "snippet run failed:"; cat "$TMP/out.fix"; }
 eq "$(in_wt_list "$RIG" "$WT_FIX")" yes "fix: worktree registered in the RIG repo"
 eq "$(in_wt_list "$CWD" "$WT_FIX")" no  "fix: worktree NOT registered in the cwd repo"
@@ -112,18 +131,7 @@ eq "$(in_wt_list "$CWD" "$WT_BARE")" yes "control: bare add follows cwd (registe
 eq "$(in_wt_list "$RIG" "$WT_BARE")" no  "control: bare add never reaches the rig repo"
 
 # --- Fallback: GC_RIG_ROOT empty resolves the rig via `gc rig list --json`. --
-# The snippet's second arm. A fake `gc` answers the roster so the jq path runs
-# without a live city.
-mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<EOF
-#!/bin/sh
-if [ "\$1" = rig ] && [ "\$2" = list ]; then
-  printf '%s\n' '{"rigs":[{"name":"myrig","path":"$RIG"}]}'
-  exit 0
-fi
-exit 1
-EOF
-chmod +x "$TMP/bin/gc"
+# rig-root.sh's roster arm, answered by the fake `gc`.
 WT_FB="$TMP/wt-fallback"
 ( cd "$CWD"
   PATH="$TMP/bin:$PATH" WORKTREE_PATH="$WT_FB" GC_RIG_ROOT="" GC_RIG=myrig bash "$SNIPPET" ) >"$TMP/out.fb" 2>&1 \
@@ -135,7 +143,7 @@ eq "$(in_wt_list "$CWD" "$WT_FB")" no  "fallback: worktree NOT registered in the
 # RIG_ROOT resolves to the empty string, so a bare `git -C ""` would follow cwd
 # — the exact coupling this block binds against. The snippet must fail closed
 # and register nothing, in the rig or in cwd. The same fake `gc` roster answers;
-# GC_RIG names a rig it does not carry, so the jq select yields nothing.
+# GC_RIG names a rig it does not carry, so rig-root.sh resolves nothing.
 WT_NOMATCH="$TMP/wt-nomatch"
 nomatch_rc=0
 ( cd "$CWD"

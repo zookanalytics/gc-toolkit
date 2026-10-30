@@ -351,6 +351,7 @@ echo "── mol-upstream-gc-sync: upstream-sync-worktree-add ──"
 block "$SYNC_TOML" upstream-sync-worktree-add "$TMP/sync.sh"
 eq "$(bare_git "$TMP/sync.sh")" "" "sync: every git call in the block names its repo with -C"
 
+# GC_PACK_DIR names this checkout, so the block runs the rig-root.sh under test.
 sync_case() { # <mode>; sets RC, D, NEW, STALE
   local d="$TMP/sync-$1" rc=0
   mkdir -p "$d"
@@ -371,7 +372,7 @@ sync_case() { # <mode>; sets RC, D, NEW, STALE
   git -C "$d/cwd" remote add origin "$d/foreign.git"
   git -C "$d/cwd" push -q origin main
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" WORKTREE_PATH="$d/wt" bash "$TMP/sync.sh" ) >"$d/out" 2>&1 || rc=$?
+  ( cd "$d/cwd" && GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORKTREE_PATH="$d/wt" bash "$TMP/sync.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -428,7 +429,7 @@ printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/m
 # sources and a lifecycle.sh that logs. gc names it, so the cwd plays no part.
 PACK="$TMP/pack"
 mkdir -p "$PACK/assets/scripts"
-cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$PACK/assets/scripts/"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
 cp "$BIN/lifecycle" "$PACK/assets/scripts/lifecycle.sh"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
@@ -601,8 +602,12 @@ done
 # --- 6. mol-refinery-patrol resolves RIG_ROOT one way. -------------------------
 # Every refinery block derives the prep worktree's path from RIG_ROOT, so two
 # blocks that resolved it differently could stage and read different repos.
+# Each resolves it through rig-root.sh: the locator line, the call, and the
+# fail-closed guard, copied verbatim. The recorded-PR lookup sits indented in a
+# case arm and its guard names the PR, so it is not one of these;
+# find-work-gating-guard.test.sh runs it.
 echo "── mol-refinery-patrol: one rig-root lookup ──"
-LOOKUPS=$(awk '/^RIG_ROOT=/ { l = $0; getline a; getline b; print l " " a " " b }' "$PATROL_TOML")
+LOOKUPS=$(awk '/^RR=/ { l = $0; getline a; getline b; print l " " a " " b }' "$PATROL_TOML")
 N=$(printf '%s\n' "$LOOKUPS" | count)
 [ "$N" -ge 2 ] && ok "patrol: $N RIG_ROOT resolutions found" || bad "patrol: RIG_ROOT resolutions found" "$N"
 eq "$(printf '%s\n' "$LOOKUPS" | sort -u | count)" 1 "patrol: every RIG_ROOT resolution is the same lookup, copied verbatim"
@@ -610,8 +615,9 @@ case "$LOOKUPS" in
   *show-toplevel*) bad "patrol: no RIG_ROOT resolution falls back to cwd" ;;
   *)               ok  "patrol: no RIG_ROOT resolution falls back to cwd" ;;
 esac
-eq "$(printf '%s\n' "$LOOKUPS" | grep -cF '[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root' || true)" "$N" \
-  "patrol: every RIG_ROOT resolution ends in the fail-closed guard"
+eq "$(printf '%s\n' "$LOOKUPS" | grep -cF 'RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}") [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }' || true)" "$N" \
+  "patrol: every RIG_ROOT resolution calls rig-root.sh and ends in the fail-closed guard"
+eq "$(grep -c 'rig list --json[[:space:]]*|' "$PATROL_TOML" || true)" 0 "patrol: no block reads the roster for the rig's path itself"
 
 echo "-----"
 echo "formula-worktree-rig: $PASS passed, $FAIL failed"
