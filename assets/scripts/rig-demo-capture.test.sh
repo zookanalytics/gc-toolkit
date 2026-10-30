@@ -9,7 +9,10 @@
 # case runs under `env -i` with a PATH of only a coreutils symlink farm and those
 # stubs — no host node, npx, gc, or sprintshow — so nothing touches the network
 # or the real engine, and each case plants exactly the install result, lint
-# result, run result, and output-file outcome it means to exercise.
+# result, run result, and output-file outcome it means to exercise. A
+# sandbox-exec stub runs the engine it is handed, and a node stub answers the
+# library's port pick and port check; demo-engine-lib.test.sh checks the
+# sandbox itself.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,14 +25,15 @@ has()   { case "$2" in *"$1"*) printf 'ok   - %s\n' "$3" ;; *) printf 'FAIL - %s
 hasnt() { case "$2" in *"$1"*) printf 'FAIL - %s\n     unwanted substring: %s\n     in: %s\n' "$3" "$1" "$2"; FAIL=1 ;; *) printf 'ok   - %s\n' "$3" ;; esac; }
 
 TMPD="$(mktemp -d "${TMPDIR:-/tmp}/rig-demo-capture.XXXXXX")"
-trap 'rm -rf "$TMPD"' EXIT
+ETMP="$(mktemp -d "${TMPDIR:-/tmp}/rig-demo-capture-engine.XXXXXX")"
+trap 'rm -rf "$TMPD" "$ETMP"' EXIT
 
 # Only the coreutils the script actually calls; env -i keeps everything else off
 # PATH, so a path that should resolve the real engine instead finds nothing —
 # which is why every happy case either sets $SPRINTSHOW_BIN or puts the
 # resolution stubs on PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat; do
+for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat env readlink; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
@@ -74,8 +78,29 @@ exit 0
 STUB
 chmod +x "$STUB"
 
+# The sandbox and the port pick. sandbox-exec logs the command it runs to
+# $SANDBOX_LOG, then runs it. node answers the free-port pick with 50123 and
+# says no server answers on a port it is asked about.
+SBX="$TMPD/sandbox-bin"; mkdir -p "$SBX"
+cat >"$SBX/sandbox-exec" <<'SBXSTUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "-p" ] && [ $# -ge 3 ] || { echo "sandbox-exec stub: expected -p <profile> <command...>" >&2; exit 64; }
+shift 2
+printf 'sandbox-exec %s\n' "$*" >>"${SANDBOX_LOG:-/dev/null}"
+exec "$@"
+SBXSTUB
+cat >"$SBX/node" <<'NODE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-e" ] && [ $# -ge 3 ]; then exit 0; fi
+if [ "${1:-}" = "-e" ]; then printf 50123; exit 0; fi
+echo "node stub: unexpected call: $*" >&2; exit 97
+NODE
+chmod +x "$SBX/sandbox-exec" "$SBX/node"
+SANDBOX_LOG="$TMPD/sandbox.log"
+
 RUNLOG="$TMPD/run.log"
 # run [KEY=VAL ...] -- <sut args...>; per-call knobs, combined stdout+stderr.
+# $RUN_PATH replaces the sandbox directory on PATH for one call.
 run() {
   local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0
   while [ $# -gt 0 ]; do
@@ -92,8 +117,8 @@ run() {
     esac
     shift
   done
-  : >"$RUNLOG"; rm -f "$OUT"
-  ( cd "$TMPD" && env -i PATH="$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" \
+  : >"$RUNLOG"; : >"$SANDBOX_LOG"; rm -f "$OUT"
+  ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" \
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
       bash "$SUT" "$@" 2>&1 )
@@ -109,16 +134,29 @@ has "--mode walkthrough" "$RL" "walkthrough is the default mode"
 has "-o $OUT" "$RL" "the output path is forwarded"
 has "--serve-dir $SERVE_DIR" "$RL" "the serve-dir target is forwarded"
 has "captured $OUT" "$out" "it reports the captured file"
+has "sandbox-exec $STUB lint $SCRIPT" "$(cat "$SANDBOX_LOG")" "the stand-in engine lints inside the sandbox"
+has "sandbox-exec $STUB run $SCRIPT" "$(cat "$SANDBOX_LOG")" "and captures inside it"
+has "--port 50123" "$RL" "a --serve-dir is given the free port the sandbox opens"
+
+echo "# no sandbox -> exit 1, and the engine never runs"
+out="$(RUN_PATH="" run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "a host without sandbox-exec exits 1" "[ '$rc' = 1 ]"
+has "sandbox-exec not found" "$out" "it says there is no sandbox"
+ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
 
 echo "# --mode proof is forwarded"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR" --mode proof)"; rc=$?
 ok "proof mode exits 0" "[ '$rc' = 0 ]"
 has "--mode proof" "$(cat "$RUNLOG")" "proof mode is forwarded"
 
-echo "# --base-url and --serve are each forwarded; --no-narrate too"
-out="$(run -- --script "$SCRIPT" --output "$OUT" --base-url http://localhost:3000)"; rc=$?
+echo "# --base-url and --serve are each forwarded; --no-narrate too; a --base-url on this host is refused"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --base-url https://preview.example.com)"; rc=$?
 ok "base-url exits 0" "[ '$rc' = 0 ]"
-has "--base-url http://localhost:3000" "$(cat "$RUNLOG")" "base-url is forwarded"
+has "--base-url https://preview.example.com" "$(cat "$RUNLOG")" "base-url is forwarded"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --base-url http://localhost:3000)"; rc=$?
+ok "a base-url on this host exits 1" "[ '$rc' = 1 ]"
+has "names a server on this host" "$out" "it says a server here runs outside the sandbox"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 4321 --no-narrate --cwd "$SERVE_DIR")"; rc=$?
 ok "serve exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"
@@ -211,6 +249,7 @@ ln -s "$JQ" "$RBIN/jq"
 cat >"$RBIN/node" <<'NODE'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then echo v24.0.0; exit 0; fi
+if [ "${1:-}" = "-e" ]; then exec "${SBX:?}/node" "$@"; fi
 printf 'node %s\n' "$*" >>"${CALLLOG:?}"
 case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
 echo "node stub: unexpected call: $*" >&2; exit 97
@@ -242,14 +281,16 @@ echo "npx stub: unexpected call: $*" >&2; exit 97
 NPX
 chmod +x "$RBIN"/node "$HOSTBIN"/ffmpeg "$RBIN"/gc "$RBIN"/npm "$RBIN"/npx
 # A local engine checkout with its deps installed. Its path is the one cd
-# reports, since npm's log line records the directory it ran in as $PWD.
-ENGINE="$(cd "$TMPD" && pwd)/sprintshow"; mkdir -p "$ENGINE/node_modules"
+# reports, since npm's log line records the directory it ran in as $PWD. It is
+# a rig checkout, so it lies outside $TMPD, which holds the clip, because the
+# sandbox refuses a run that writes to a directory holding one.
+ENGINE="$(cd "$ETMP" && pwd)/sprintshow"; mkdir -p "$ENGINE/node_modules"
 printf '{"name":"@zookanalytics/sprintshow"}\n' >"$ENGINE/package.json"
 CALLLOG="$TMPD/calls.log"
 # resolve_run [VAR=VAL ...] -- <sut args...>; the stubs above, never $SPRINTSHOW_BIN.
 # Stderr joins stdout, unless STDERR_FILE=<path> keeps it apart in that file.
 resolve_run() {
-  local envs=() path="$RBIN:$FARM" errf=""
+  local envs=() path="$RBIN:$SBX:$FARM" errf=""
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do
     case "$1" in
       HOST_FFMPEG=1) path="$HOSTBIN:$path" ;;
@@ -262,7 +303,7 @@ resolve_run() {
   : >"$RUNLOG"; : >"$CALLLOG"; rm -f "$OUT"
   ( cd "$TMPD" || exit 1
     if [ -n "$errf" ]; then exec 2>"$errf"; else exec 2>&1; fi
-    env -i PATH="$path" RUNLOG="$RUNLOG" CALLLOG="$CALLLOG" ENGINE_STUB="$STUB" \
+    env -i PATH="$path" RUNLOG="$RUNLOG" CALLLOG="$CALLLOG" ENGINE_STUB="$STUB" SBX="$SBX" \
       ${envs[@]+"${envs[@]}"} bash "$SUT" "$@" )
 }
 # line_of <substring> — the first $CALLLOG line holding it, or 0 when none does.
