@@ -426,7 +426,7 @@ GONE_SITTING_TAKEAWAY="Reclaimed from a gone sitting; re-parked for re-engagemen
 # session present but closed still counts as a match, never as gone.
 sitting_is_gone() {
     _sn="$1"; [ -n "$_sn" ] || return 1
-    _sl=$(gc session list --state all --json 2>/dev/null | scrub) || return 1
+    _sl=$(GC_NO_API=1 gc session list --state all --json 2>/dev/null | scrub) || return 1
     printf '%s' "$_sl" | jq -e --arg n "$_sn" \
         'if (type == "object" and ((.sessions // null) | type) == "array")
          then ([ .sessions[]
@@ -500,7 +500,7 @@ rig_db_for_session() {
     if [ -z "$_srig" ]; then
         _sids=$(session_identities)
         [ -n "$_sids" ] || return 0
-        _srig=$(gc session list --state all --json 2>/dev/null | scrub \
+        _srig=$(GC_NO_API=1 gc session list --state all --json 2>/dev/null | scrub \
             | jq -r --arg ids "$_sids" '
                 ($ids | split("\n") | map(select(. != ""))) as $me
                 | [ .sessions[]? | objects | . as $s
@@ -2563,7 +2563,7 @@ sitting_session_of() {
     _sso_sn=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.session_name"] // ""' 2>/dev/null || true)
     _sso_as=$(printf '%s' "$1" | jq -r '.assignee // ""' 2>/dev/null || true)
     [ -n "$_sso_sid$_sso_sn$_sso_as" ] || return 0
-    gc session list --state all --json 2>/dev/null | scrub | jq -r \
+    GC_NO_API=1 gc session list --state all --json 2>/dev/null | scrub | jq -r \
         --arg id "$_sso_sid" --arg sn "$_sso_sn" --arg as "$_sso_as" --arg me "$(session_identities)" '
         ($me | split("\n") | map(select(. != ""))) as $mine
         | if type == "object" and ((.sessions // null) | type) == "array" then
@@ -4379,7 +4379,7 @@ cmd_engage() {
         # converse-reap.sh makes. A listing that does not answer with a sessions
         # array names no holder and proves none gone.
         _ah_list_ok=1
-        _ah_holder=$(gc session list --state all --json 2>/dev/null | scrub | jq -er --arg a "$session_alias" '
+        _ah_holder=$(GC_NO_API=1 gc session list --state all --json 2>/dev/null | scrub | jq -er --arg a "$session_alias" '
             if (type == "object" and ((.sessions // null) | type) == "array")
             then ([ .sessions[]
                     | select((.closed // false) == false)
@@ -4606,7 +4606,7 @@ cmd_engage() {
         _start_seen=0; _start_told=0; _start_shown=""; _start_tick=30
         start_state=""; start_waited=0
         while :; do
-            start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
+            start_state=$(GC_NO_API=1 gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
                 if type == "object" and ((.sessions // null) | type) == "array"
                 then (first(.sessions[] | select((.id // "") == $id)
                             | if (.state // "") == "" then "closed" else .state end)

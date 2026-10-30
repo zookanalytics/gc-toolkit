@@ -41,15 +41,16 @@ gc_session() {
     fi
 }
 
-# bounded_gc <seconds> <gc args…> — a bounded read-only gc call (timeout
-# execs a binary, so the shell function above cannot sit under it).
+# bounded_gc <seconds> <gc command…> — a bounded read-only gc call (timeout
+# execs a binary, so the shell function above cannot sit under it). The
+# caller writes the gc command whole, so a call can put env in front of it.
 bounded_gc() {
     bound="$1"; shift
     if command -v timeout >/dev/null 2>&1; then
         # shellcheck disable=SC2086 # ${CITY_PATH:+…} expands to 0 or 2 fields
-        timeout "$bound" gc "$@" ${CITY_PATH:+--city "$CITY_PATH"}
+        timeout "$bound" "$@" ${CITY_PATH:+--city "$CITY_PATH"}
     else
-        gc "$@" ${CITY_PATH:+--city "$CITY_PATH"}
+        "$@" ${CITY_PATH:+--city "$CITY_PATH"}
     fi
 }
 
@@ -64,7 +65,7 @@ bounded_gc() {
 # as unpinned.
 keeper_pin_state() {
     bound="$1"
-    rows=$(bounded_gc "$bound" session list --json 2>/dev/null) \
+    rows=$(bounded_gc "$bound" env GC_NO_API=1 gc session list --json 2>/dev/null) \
         || { printf 'unknown'; return 0; }
     id=$(printf '%s\n' "$rows" | jq -er --arg a "$KEEPER_ALIAS" '
         (if type == "array" then . else .sessions end)
@@ -72,7 +73,7 @@ keeper_pin_state() {
         || { printf 'unknown'; return 0; }
     # No session row: the keeper has never been created — down/unpinned.
     [ -n "$id" ] || { printf 'down'; return 0; }
-    pin=$(bounded_gc "$bound" bd show "$id" --json 2>/dev/null) \
+    pin=$(bounded_gc "$bound" gc bd show "$id" --json 2>/dev/null) \
         || { printf 'unknown'; return 0; }
     pin=$(printf '%s\n' "$pin" | jq -r \
         'if type=="array" then .[0] else . end | .metadata.pin_awake' 2>/dev/null) \

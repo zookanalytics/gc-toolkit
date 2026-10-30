@@ -629,7 +629,7 @@ write_coverage() {
 # into one, so an empty field would shift every field after it. An unknown time
 # is "-", and an empty alias falls back like a missing one.
 LIST_AT="$(date +%s)"
-sessions=$(run_bounded gc session list --json 2>/dev/null \
+sessions=$(run_bounded env GC_NO_API=1 gc session list --json 2>/dev/null \
     | jq -r '
         # RFC3339 at any offset to epoch seconds. Nothing when absent, zero-valued
         # (Go renders an unset time as year 1) or unparseable.

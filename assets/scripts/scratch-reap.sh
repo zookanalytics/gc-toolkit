@@ -396,7 +396,7 @@ gc_session_keys() {
     [ -n "$cities" ] || { echo "no city is registered" > "$SKIP_REASON"; return 1; }
     while IFS= read -r city; do
         [ -d "$city" ] || continue
-        list="$(timeout 30 "$GC" session list --state all --json --city "$city" 2>/dev/null)" \
+        list="$(timeout 30 env GC_NO_API=1 "$GC" session list --state all --json --city "$city" 2>/dev/null)" \
             || { echo "the session list of $city could not be read" > "$SKIP_REASON"; return 1; }
         printf '%s' "$list" | jq -r '
             if (.sessions | type) == "array" then .sessions[] else error("no session list") end

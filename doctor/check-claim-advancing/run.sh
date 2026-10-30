@@ -222,7 +222,7 @@ held_note() {
     return 0
 }
 
-sessions_raw=$(run_bounded gc session list --json 2>/dev/null); sessions_rc=$?
+sessions_raw=$(run_bounded env GC_NO_API=1 gc session list --json 2>/dev/null); sessions_rc=$?
 sessions=$(printf '%s' "$sessions_raw" | scrub \
     | jq -c '[(.sessions // [])[]? | select(type == "object")]' 2>/dev/null)
 if [ "$sessions_rc" -ne 0 ] || [ -z "$sessions" ]; then

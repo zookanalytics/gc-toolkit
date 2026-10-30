@@ -96,7 +96,7 @@ fi
 
 # 2. Liveness in the session list. Absent/closed/archived = nothing to
 # interrogate; an unreadable list proves nothing and the pane probe decides.
-STATE="$(run_bounded gc session list --state=all --json 2>/dev/null \
+STATE="$(run_bounded env GC_NO_API=1 gc session list --state=all --json 2>/dev/null \
   | jq -r --arg s "$SESSION" '[.sessions[]? | select(.id == $s or (.alias // "") == $s or (.session_name // "") == $s)][0].state // "absent"' 2>/dev/null)"
 [ -n "$STATE" ] || STATE="unreadable"
 evidence "session-state: $STATE"

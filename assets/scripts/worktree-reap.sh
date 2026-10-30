@@ -165,7 +165,7 @@ protect_with_ancestors() { # <path> <why>
 # under the templated roots.
 while IFS= read -r d; do
     [ -n "$d" ] && protect_with_ancestors "$d" session
-done < <(gc session list --state all --json 2>/dev/null | jq -r '.sessions[]? | select((.work_dir // "") != "") | .work_dir' 2>/dev/null)
+done < <(GC_NO_API=1 gc session list --state all --json 2>/dev/null | jq -r '.sessions[]? | select((.work_dir // "") != "") | .work_dir' 2>/dev/null)
 
 # A running process's cwd is the one certain signal: whatever the ledger says,
 # something is standing in that directory right now. The signal only ever

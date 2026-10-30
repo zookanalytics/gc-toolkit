@@ -100,7 +100,7 @@ safe_id() {
 # yields a refusal upstream.
 resolve_live_session() {
   local owner="$1" json
-  json="$(gc session list --state=all --json 2>/dev/null | scrub)"
+  json="$(GC_NO_API=1 gc session list --state=all --json 2>/dev/null | scrub)"
   [ -n "$json" ] || return 0
   printf '%s' "$json" | jq -r --arg o "$owner" '
     def live: (.state // "") | (. != "absent" and . != "closed" and . != "archived");

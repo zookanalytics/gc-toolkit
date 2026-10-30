@@ -150,7 +150,7 @@ uncommitted() {
   fi
 }
 
-gc session list --state all --json 2>/dev/null </dev/null | scrub > "$SCRATCH/sessions.json"
+GC_NO_API=1 gc session list --state all --json 2>/dev/null </dev/null | scrub > "$SCRATCH/sessions.json"
 SESSIONS_READ=1
 jq -e '.sessions | type == "array" and all(.[]; type == "object")' "$SCRATCH/sessions.json" >/dev/null 2>&1 || SESSIONS_READ=0
 SESSION_DIRS=""

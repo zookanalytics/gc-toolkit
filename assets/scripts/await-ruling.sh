@@ -177,7 +177,7 @@ esac
 # alias or the end of one. The same match decides load-context's owner check.
 # Prints nothing when the list cannot be read.
 owner_listed() {
-  gc session list --state all --json 2>/dev/null </dev/null | scrub | jq -r --arg o "$1" '
+  GC_NO_API=1 gc session list --state all --json 2>/dev/null </dev/null | scrub | jq -r --arg o "$1" '
     if type == "object" and (.sessions | type) == "array" and all(.sessions[]; type == "object") then
       [ .sessions[] | select(((.alias // "") == $o) or ((.alias // "") | endswith($o))
                              or ((.session_name // "") == $o) or ((.id // "") == $o)) ] | length

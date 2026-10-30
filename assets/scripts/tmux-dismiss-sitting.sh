@@ -86,7 +86,7 @@ fi
 # The record behind this pane. A listing that did not answer is a fault, never
 # a reading of "not a converse sitting", so it gets its own message. A closed
 # record is a past session under the same name, not the pane on screen.
-LIST=$(gc session list --state all --json 2>/dev/null | scrub)
+LIST=$(GC_NO_API=1 gc session list --state all --json 2>/dev/null | scrub)
 if ! printf '%s' "$LIST" | jq -e 'type == "object" and ((.sessions // null) | type) == "array"' >/dev/null 2>&1; then
     say 10000 "dismiss: could not read 'gc session list' — nothing dismissed"
     exit 0

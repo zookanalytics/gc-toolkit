@@ -90,7 +90,7 @@ bead's last assignee — and check its state:
 
 ```bash
 OWNER=$(basename "$PREDECESSOR_WORK_DIR")   # e.g. gc-toolkit.capable
-gc session list --state all --json \
+GC_NO_API=1 gc session list --state all --json \
   | jq -r --arg o "$OWNER" \
       '.sessions[] | select((.alias // "") | endswith($o)) | "\(.state) running=\(.running)"'
 ```
