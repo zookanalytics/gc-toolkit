@@ -6,9 +6,18 @@
 # clears the gate with `bd gate resolve`, whose reason is the answer, headed
 # `ruled:`, `moot:` or `benign:`. Any pack, formula or person may file one with
 # that call, and every reader treats it the same. This helper makes the same
-# call and adds what the call does not do: it files nothing while an open human
-# gate under the key already blocks the bead, it keeps the quiet period a call
-# declares, and it makes the gate's description the message it was given.
+# call, and around it:
+#   - it files nothing while an open human gate under the key already blocks
+#     the bead, and resolves its own gate as a duplicate when a racing
+#     writer's gate comes first;
+#   - it files nothing inside a quiet period the call declares;
+#   - it refuses a `*-wisp-*` id as the subject, a patrol wisp's or a
+#     session's;
+#   - it titles the gate with the message's first line, capped;
+#   - it makes the gate's description the message it was given;
+#   - it reads the gate back from the bead's side;
+#   - it records a gate the deacon files in the deacon's incident ledger
+#     (gc-deacon-ledger.sh).
 #   human-gate.sh --subject <bead-id> --key <situation-key> --message <text>
 #                 [--quiet-window <seconds>]
 # The counterpart withdraws the filer's own gate once the situation it asked
@@ -16,8 +25,6 @@
 # reason:
 #   human-gate.sh --retract --subject <bead-id> --key <situation-key> --message <reading>
 # A changed situation gets a NEW key.
-# A gate filed by the deacon also lands one entry in its incident ledger
-# (gc-deacon-ledger.sh); see the marked block at the foot of this file.
 #
 # The gate lands in the store of the bead it blocks, because `gc bd gate create`
 # runs in the store that owns the bead named after --blocks, and a bead that
@@ -26,9 +33,10 @@
 # names no bead that can wait, so a situation with no bead of its own is a
 # patrol finding (patrol-finding.sh), which a first reaction puts to a person as
 # a human gate on the finding when it needs one.
-# stdout carries the id of the open gate that asks (the one filed, or the one
-# already open), and with --retract the id of each gate this call resolved.
-# Everything else goes to stderr.
+# stdout carries the id of the open gate that asks as of this call's last read
+# of the bead's gates (the one filed, the one already open, or the first one
+# still open after this call resolves its own duplicate), and with --retract the
+# id of each gate this call resolved. Everything else goes to stderr.
 # Exit: 0 filed, already open, inside a declared quiet window, or (--retract)
 # resolved or nothing open · 1 could not read the bead's gates, file, verify or
 # resolve · 2 usage, or a wisp named as the subject
@@ -41,6 +49,12 @@ PROG="human-gate"
 # message is the gate's description, so an over-cap first line is cut with an
 # ellipsis, not refused.
 TITLE_MAX=140
+
+# The head of the reason a writer that lost a create race resolves its own
+# gate with (below). It is headed `moot:`, because the duplicate needs nobody
+# once the first gate asks. The quiet window skips a gate closed with it,
+# because no person answered that gate.
+DUP_REASON_HEAD="moot: a duplicate of gate"
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -139,6 +153,9 @@ if ! GATES=$(bd_human_gates "$SUBJECT"); then
   warn "could not read the human gates of '$SUBJECT' (no such bead, or its store did not answer). Nothing was filed or resolved."
   exit 1
 fi
+# The open human gates under the key are read in bd-lib.sh's one order
+# (bd_gates_open_under_key), so two writers that read the same gates name the
+# same first gate, and await-ruling.sh waits on that gate too.
 
 # >>> retract-moot
 # --retract withdraws the filer's own gate: it resolves every open human gate
@@ -153,7 +170,7 @@ fi
 # situation finds and resolves.
 if [ "$RETRACT" = 1 ]; then
   REASON="moot: $MESSAGE"
-  OPEN_IDS=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$HUMAN_GATE_JQ"'.[] | select(open_human_gate($k)) | .id' 2>/dev/null)
+  OPEN_IDS=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY" | jq -r '.[].id' 2>/dev/null)
   if [ -z "$OPEN_IDS" ]; then
     warn "no open human gate under [$KEY] blocks $SUBJECT — nothing to withdraw"
     exit 0
@@ -186,10 +203,7 @@ fi
 # An open human gate under the key means the person is already asked. That
 # holds for a gate filed on another bead that this one already waits on, such
 # as the bring-current gate on an anchor that its rework child waits on too.
-# bd keeps no idempotency at create, so two writers racing in the same instant
-# can both file; the board folds both onto the bead's row, and one answer
-# clears both.
-OPEN_GATE=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate($k)) ][0].id // empty' 2>/dev/null)
+OPEN_GATE=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
 if [ -n "$OPEN_GATE" ]; then
   warn "gate $OPEN_GATE already asks for $SUBJECT [$KEY] — not filing another"
   printf '%s\n' "$OPEN_GATE"
@@ -197,14 +211,18 @@ if [ -n "$OPEN_GATE" ]; then
 fi
 
 # The quiet period the call declares. The newest closed gate under the key
-# decides: a reason headed `moot:` or `benign:` says a person judged the
-# situation needs nobody, and a re-detection inside the window files nothing.
-# Any other answer means the person acted, so the next occurrence stands on new
-# ground. Without --quiet-window there is no window, because only the filer
-# knows whether a repeat is the same condition seen again or a new event.
+# that a person answered decides: a reason headed `moot:` or `benign:` says a
+# person judged the situation needs nobody, and a re-detection inside the
+# window files nothing. Any other answer means the person acted, so the next
+# occurrence stands on new ground. A gate a writer resolved as its own
+# duplicate is skipped, because nobody judged the situation by closing it, and
+# it can close after the person's answer, when its repair runs later. Without
+# --quiet-window there is no window, because only the filer knows whether a
+# repeat is the same condition seen again or a new event.
 if [ -n "$QUIET_WINDOW" ] && [ "$QUIET_WINDOW" -gt 0 ]; then
-  QUIET_ROW=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" '
+  QUIET_ROW=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" --arg dup "$DUP_REASON_HEAD " '
     [ .[] | select((.await_id // "") == $k and (.status // "") == "closed")
+          | select((.close_reason // "") | tostring | startswith($dup) | not)
           | { id: .id, reason: (.close_reason // ""),
               at: (((.closed_at // "") | sub("\\.[0-9]+"; "") | fromdateiso8601?) // 0) }
           | select(.at > 0) ]
@@ -259,7 +277,7 @@ if ! GOT=$(bd_human_gates "$SUBJECT"); then
   warn "gate $GATE was filed, but the human gates of $SUBJECT did not read back; check that it blocks $SUBJECT under [$KEY]: gc bd dep list $SUBJECT --type blocks --json"
   exit 1
 fi
-if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg k "$KEY" "$HUMAN_GATE_JQ"'any(.[]; .id == $g and open_human_gate($k))' >/dev/null 2>&1; then
+if ! printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1; then
   warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
   exit 1
 fi
@@ -267,6 +285,46 @@ fi
 # under bd's head, so the filing stands and only the repair is named.
 if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg m "$MESSAGE" 'any(.[]; .id == $g and (.description // "") == $m)' >/dev/null 2>&1; then
   warn "gate $GATE asks for $SUBJECT [$KEY], but its description did not become the message, so bd's own head stands above it; repair: gc bd update $GATE --description <the message>"
+fi
+
+# bd keeps no idempotency at create, so two writers racing in the same instant
+# can both pass the dedup above and file. Each reads the gates back after its
+# own create, and a writer whose gate is not the first resolves it as a
+# duplicate and names the gate still open. A writer resolves only the gate it
+# filed, because the other writer's caller may already wait on its own gate by
+# id. Two gates stand only when one create landed after the other writer read
+# back, and then the bead moves once both are cleared.
+FIRST_GATE=$(printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
+if [ -n "$FIRST_GATE" ] && [ "$FIRST_GATE" != "$GATE" ]; then
+  DUP_REASON="$DUP_REASON_HEAD $FIRST_GATE, filed for the same situation in the same instant"
+  gc bd gate resolve "$GATE" --reason "$DUP_REASON" </dev/null >/dev/null 2>&1
+  # bd's exit says nothing about whether the duplicate closed: it reports
+  # success on a resolve that closed nothing and on a gate another resolver
+  # closed first, as the retract above finds. So the duplicate is read back.
+  DUP_ROW=$(bd_json show "$GATE")
+  DUP_STATUS=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
+  DUP_GOT=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].close_reason // "") else "" end' 2>/dev/null)
+  if [ "$DUP_STATUS" != closed ]; then
+    warn "this call's gate $GATE duplicates gate $FIRST_GATE and did not resolve (its status reads '${DUP_STATUS:-unreadable}'), so $SUBJECT stays blocked until both are cleared. repair: gc bd gate resolve $GATE --reason \"$DUP_REASON\""
+  elif [ "$DUP_GOT" = "$DUP_REASON" ]; then
+    warn "resolved this call's duplicate, gate $GATE, of gate $FIRST_GATE"
+  else
+    warn "this call's duplicate, gate $GATE, was already cleared, and its answer stands: $DUP_GOT"
+  fi
+  # The gate named is the one still open once this call's own is resolved.
+  # FIRST_GATE can itself be a duplicate: with three writers racing, a third
+  # gate that came first but was not yet in this call's read-back can be in
+  # FIRST_GATE's writer's, and that writer resolves FIRST_GATE in the same
+  # instant. So the gates are read again, and the first open one under the key
+  # is named. A read that fails, or finds none open, names FIRST_GATE. The name
+  # is the gate that asks as of that read, so a caller that waits later reads
+  # the gate again in the same order (bd_gates_open_under_key), as
+  # await-ruling.sh does.
+  ASKS=$(bd_human_gates "$SUBJECT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
+  [ -n "$ASKS" ] || ASKS="$FIRST_GATE"
+  warn "gate $ASKS already asks for $SUBJECT [$KEY]"
+  printf '%s\n' "$ASKS"
+  exit 0
 fi
 
 # The deacon's shift record. Filing a gate is a non-routine action, and this is

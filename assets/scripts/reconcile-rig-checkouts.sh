@@ -150,7 +150,9 @@
 # durable, self-healing SUBJECT: it carries the diagnosis and auto-closes when
 # the rig next fast-forwards cleanly with no kept copy waiting aside.
 # human-gate.sh files a human gate that blocks it, which the helm board shows
-# to the operator, and exits non-zero when it files nothing.
+# to the operator. It files nothing and exits 0 while that gate is open or
+# while the quiet window below holds. It exits non-zero when it could not read
+# the bead's gates, or could not file the gate and read it back.
 #
 # Runs as an exec order (no LLM, no agent, no wisp).
 set -euo pipefail

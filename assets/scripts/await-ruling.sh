@@ -207,13 +207,14 @@ elif [ "$STATUS" = in_progress ]; then
   RELEASE=reopen
 fi
 
-# The open human gate under the key, read by bd_open_human_gates: among the
-# subject's gates first, then among the work bead's own. The oldest is taken
-# when a race filed two, as the board folds both and one answer clears both.
+# The open human gate under the key, read by the one reader rule: among the
+# subject's gates first, then among the work bead's own. Two stand when racing
+# writers both kept theirs, and the first is taken, in the order human-gate.sh's
+# dedup reads them in (bd-lib.sh's bd_gates_open_under_key).
 open_gate_under_key() { # <bead> -> the id, or nothing; non-zero on a failed read
   local gates
-  gates=$(bd_open_human_gates "$1" "$KEY") || return 1
-  printf '%s' "$gates" | jq -r 'sort_by(.created_at // "", .id) | .[0].id // empty' 2>/dev/null
+  gates=$(bd_human_gates "$1") || return 1
+  printf '%s' "$gates" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null
 }
 if ! GATE=$(open_gate_under_key "$SUBJECT"); then
   echo "$PROG: could not read the human gates of $SUBJECT; no wait was recorded" >&2

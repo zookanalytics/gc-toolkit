@@ -173,11 +173,13 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   `ruled:`, `moot:` or `benign:`. A quiet period applies only where a call
   declares `--quiet-window`, and `--retract` resolves the filer's own gate as
   moot once its situation has gone. `escalate.sh` is the name that step text
-  from an earlier version of a formula calls, and it hands the call to
-  `human-gate.sh` unchanged. There is no mayor; a situation that needs a human
-  is a human gate, same as any other. A patrol files a human gate on the bead a
-  situation is about, or a finding (`patrol-finding.sh`), rather than mail,
-  because a patrol sits at the top of the agent tier and has no peer to mail.
+  from an earlier version of a formula calls. It hands the call to
+  `human-gate.sh` without the retired `--pool`, and a call about a wisp, a
+  session or a subject that names no bead to `patrol-finding.sh`. There is no
+  mayor; a situation that needs a human is a human gate, same as any other. A
+  patrol files a human gate on the bead a situation is about, or a finding
+  (`patrol-finding.sh`), rather than mail, because a patrol sits at the top of
+  the agent tier and has no peer to mail.
   Every reader finds a bead's human gates the one way, through the bead's
   `blocks` edges (`bd_human_gates` in `assets/scripts/bd-lib.sh`), and takes a
   cleared gate's answer from its resolve reason, so a gate holds what it blocks

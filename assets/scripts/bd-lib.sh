@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, the read of a bead's human gates every reader of them makes, the
-# one-write create every script files a stamped bead through,
-# the metadata read-back that gates handing such a bead on, the close that
-# unmakes a bead no reader can find, the birth, settle and route of PR-finishing
-# work, the validation pass's work order, the gating-PR read's field set, the
-# per-rig key an order's state lives under, and the pass lock that lets an order
-# run one pass at a time. Sourced, never executed.
+# queries it, the read of a bead's human gates every reader of them makes and
+# the order its open gates under one key are read in, the one-write create every
+# script files a stamped bead through, the metadata read-back that gates handing
+# such a bead on, the close that unmakes a bead no reader can find, the birth,
+# settle and route of PR-finishing work, the validation pass's work order, the
+# gating-PR read's field set, the per-rig key an order's state lives under, and
+# the pass lock that lets an order run one pass at a time. Sourced, never
+# executed.
 #
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
@@ -227,6 +228,41 @@ bd_open_human_gates() {
   local gates
   gates=$(bd_human_gates "${1:-}") || return 1
   printf '%s' "$gates" | jq -c --arg k "${2:-}" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate($k)) ]' 2>/dev/null
+}
+
+# bd_gates_open_under_key <key> — the open gates under a situation key, read
+# from a bd_human_gates array on stdin and printed as one JSON array, first to
+# last by when each was created, then id. The first is the gate that asks:
+# human-gate.sh keeps it and resolves its own gate when another comes first,
+# and await-ruling.sh makes the work bead wait on it, so every writer and
+# reader of one situation orders the gates here. created_at is read as a time,
+# its fractional seconds and its offset included, because as text a time with
+# a fraction sorts ahead of the whole second it follows, and one with an offset
+# sorts by its local clock. A gate whose created_at is absent or does not read
+# as an RFC 3339 time sorts after every gate whose does. Input that is not an
+# array prints nothing and returns 1. Which gates are open is open_human_gate's
+# rule, above.
+bd_gates_open_under_key() {
+  jq -ce --arg k "$1" "$HUMAN_GATE_JQ"'
+    def created_order:
+      ([ (.created_at // "") | tostring
+         | capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})$") ]
+       | .[0]) as $m
+      | (if $m == null then null
+         else try (
+           (($m.d + "Z") | fromdateiso8601)
+           - (if $m.z == "Z" then 0
+              else ($m.z | capture("^(?<s>[+-])(?<h>[0-9]{2}):?(?<mi>[0-9]{2})$")) as $o
+                | (($o.h | tonumber) * 3600 + ($o.mi | tonumber) * 60)
+                | if $o.s == "-" then -. else . end
+              end)
+         ) catch null end) as $sec
+      | if $sec == null then [1, 0, 0]
+        else [0, $sec, (("0" + ($m.f // "")) | tonumber)] end;
+    if type == "array"
+    then [ .[] | select(open_human_gate($k)) ]
+         | sort_by(created_order, (.id // "" | tostring))
+    else error("not an array") end' 2>/dev/null || return 1
 }
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework

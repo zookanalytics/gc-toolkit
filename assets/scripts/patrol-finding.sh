@@ -20,12 +20,13 @@
 # mol-polecat-work's refusals of a work bead it cannot read, the refinery
 # reconcile's assets/scripts/merge-tail-report.sh and
 # assets/scripts/pr-facts.sh, assets/scripts/rejection-repool.sh for a handoff
-# it cannot read, and the feedback miner's assets/scripts/feedback-miner.sh.
-# The visit is not this path's exit. A finding needing the operator's judgment
-# gets there through the reaction's `ruling` or `recommend` disposition, which
-# files a human gate on it, and orders/gate-visit-sweep files that gate's visit.
-# A patrol
-# files a human gate directly, through assets/scripts/human-gate.sh, only for an
+# it cannot read, the hand-off at assets/scripts/escalate.sh for a call about
+# a wisp, a session or a subject that names no bead, and the feedback miner's
+# assets/scripts/feedback-miner.sh.
+# Filing a finding asks no person anything. A finding needing the operator's
+# judgment gets there through the reaction's `ruling` or `recommend`
+# disposition, which files a human gate on the finding through
+# assets/scripts/human-gate.sh. A patrol files a human gate directly only for an
 # emergency about a bead that cannot wait for a disposition. A situation with no
 # bead of its own comes here, because the helper refuses a patrol wisp.
 # Exit: 0 filed or already tracked · 1 could not file/verify · 2 usage ·

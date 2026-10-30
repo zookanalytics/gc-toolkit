@@ -11,7 +11,8 @@
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
 #
 # row_meta, the metadata read the library shares with every script that sources
-# it, is pinned first; it reads no store.
+# it, and bd_gates_open_under_key, the order every writer and reader of one
+# situation's human gates reads them in, are pinned first; they read no store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -26,6 +27,29 @@ eq "$(row_meta "$ROW" pr_number)" "42" "…a number as its string"
 eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
 eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
 eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
+
+# --- bd_gates_open_under_key: the open gates under a key, in the one order ----
+# gate_row <id> <key> <status> <created_at> — one row as bd_human_gates prints it.
+gate_row() { jq -nc --arg id "$1" --arg k "$2" --arg st "$3" --arg at "$4" \
+  '{id: $id, status: $st, issue_type: "gate", await_type: "human", await_id: $k} + (if $at == "" then {} else {created_at: $at} end)'; }
+open_ids() { bd_gates_open_under_key "$1" | jq -r '[.[].id] | join(" ")'; }
+GATES_IN="[$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-b k open 2026-10-22T00:00:01Z),$(gate_row g-a k open 2026-10-22T00:00:01Z),$(gate_row g-shut k closed 2026-10-21T00:00:00Z),$(gate_row g-other other open 2026-10-21T00:00:00Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-a g-b g-late" "bd_gates_open_under_key keeps the open gates under the key, by created_at, then id"
+eq "$(printf '%s' "$GATES_IN" | open_ids none)" "" "…and is an empty array when none is open under the key"
+# created_at is read as a time. As text, '.' sorts before 'Z', so a fraction
+# would sort ahead of the whole second it follows, and an offset would sort by
+# its local clock.
+GATES_IN="[$(gate_row g-whole k open 2026-10-22T00:00:01Z),$(gate_row g-frac k open 2026-10-22T00:00:00.900Z),$(gate_row g-zero k open 2026-10-22T00:00:00Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-zero g-frac g-whole" "…a fractional second sorts after the whole second it follows"
+GATES_IN="[$(gate_row g-utc k open 2026-10-22T00:00:00Z),$(gate_row g-east k open 2026-10-22T01:59:59+02:00),$(gate_row g-west k open 2026-10-21T17:59:58-06:00)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-west g-east g-utc" "…an offset is read as the instant it names"
+GATES_IN="[$(gate_row g-none k open ""),$(gate_row g-word k open yesterday),$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-early k open 2026-10-22T00:00:01Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-early g-late g-none g-word" "…a created_at that is absent or not a time sorts after every one that is, then by id"
+for bad_in in '{"error":"not found"}' ''; do
+  out=$(printf '%s' "$bad_in" | bd_gates_open_under_key k); rc=$?
+  eq "$rc" 1 "…returns 1 on input that is not an array ('$bad_in')"
+  eq "$out" "" "…and prints nothing then"
+done
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 

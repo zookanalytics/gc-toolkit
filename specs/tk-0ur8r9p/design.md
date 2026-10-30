@@ -708,13 +708,19 @@ It files in four steps:
    bead that this one already waits on: a rework child whose wait on its
    anchor's bring-current gate is in place files nothing more under that key.
    This is the idempotency the initiative's ruling asks for. bd has none at
-   create, so two writers racing in the same instant can both file. The board
-   folds both, and a sitting answers both with one reason.
+   create, so two writers racing in the same instant can both file. Each reads
+   the bead's gates back after its create, and a writer whose gate is not the
+   first open one under the key, by created_at read as a time and then id,
+   resolves its own as a duplicate, reads it back, and names the first gate
+   still open. Two gates stand only when one create lands after the other
+   writer read back. The board folds those two, and a sitting answers both with
+   one reason.
 3. **It keeps a quiet period the call declares.** With `--quiet-window`, the
    helper files nothing, and says so, while the newest closed human gate under
-   the key among the bead's gates closed with a reason headed `moot:` or
-   `benign:` less than that many seconds ago. It reads that gate in step 2's
-   listing. Without the option there is no window. The window is the filer's
+   the key among the bead's gates that a person answered closed with a reason
+   headed `moot:` or `benign:` less than that many seconds ago. A gate a writer
+   resolved as its own duplicate is no person's answer, so it is skipped. It
+   reads that gate in step 2's listing. Without the option there is no window. The window is the filer's
    policy, because only the filer knows the shape of what it files. The helper
    cannot tell a re-detection of one persisting condition, such as a patrol
    re-reporting a red check after a benign answer, from a new occurrence of an
@@ -786,7 +792,9 @@ ruling of sitting tk-tdt71ue left it the helper's name:
   (escalate.sh 624-629). escalation-rig.sh's other callers, the deacon prompt
   and mol-dog-shutdown-dance, run it only to set `GC_RIG` for escalate.sh.
   Their derivations re-express the same mechanism, so they go with the
-  helper's (section 3), and escalation-rig.sh retires (section 10).
+  helper's (section 3). A dog run poured before the cutover and a deacon
+  session started before it still run escalation-rig.sh, so it stays as a
+  hand-off to bead-store.sh under a dated debt (section 10).
 - **The redirect of a wisp's gate onto the rig's standing triage bead is
   dropped.** The redirect files the gate on a standing bead that waits on
   nothing (escalate.sh 536-605), so the gate would be about a stand-in rather
@@ -828,11 +836,26 @@ ruling of sitting tk-tdt71ue left it the helper's name:
   patrol-finding.sh and upstream-finding.sh do. Unit A already decides every
   call site (section 3), so the new name is one more word in each call it
   reads, and the tests named for the helper are renamed with it (section 10).
-  The old name stays as a hand-off that runs human-gate.sh with the same
-  arguments. A run poured before the cutover keeps its steps' text, and
-  mol-polecat-work's load-context looks for escalate.sh on every run, so
-  without the hand-off every such run would stop at its first step (see the
-  platform section). The hand-off retires under a dated debt (section 10).
+  The old name stays as a hand-off that runs human-gate.sh. A run poured
+  before the cutover keeps its steps' text, and mol-polecat-work's
+  load-context looks for escalate.sh on every run, so without the hand-off
+  every such run would stop at its first step (see the platform section). The
+  hand-off passes a call's arguments through, except where the old contract
+  took what the helper refuses or cannot read. It drops `--pool` with a
+  notice. A call about a `*-wisp-*` id, or about a subject bead-store.sh
+  proves names no bead, went to the redirect, and the hand-off files it as a
+  patrol finding under its key, the route the helper's refusal names. So does
+  a call about a subject that reads as a session bead, whatever the shape of
+  its id, because a session names no work that can wait, and its finding is
+  about that session (`--about`), so each session's report is its own finding,
+  as each was its own visit. A retract about any of these subjects has no gate
+  to resolve, because the call was filed as a finding, so it exits 2, as the
+  old script's retract of a subject on its standing triage bead did, and the
+  finding's first reaction disposes of the finding. A call whose subject does
+  not read as one bead files or resolves nothing and fails, so its caller
+  retries, because the helper reads only the subject's edges, and those can
+  answer where the row did not. So an old call the old script filed still
+  files. The hand-off retires under a dated debt (section 10).
   Keeping the old name would cost nothing to build, and it would leave the
   retired word in the call most filers make.
 
@@ -1837,7 +1860,7 @@ main's visit machinery was added to it:
 | converse-recheck-hook.sh | Retires with `visit.recheck`. |
 | orphan-dispose.sh's visit arm | Retires. |
 | gc-helm.sh demand | Retires. Its callers file through the helper or the native call, and an action a named person must perform is a human gate assigned to them (section 2). |
-| escalate.sh's own store derivation, its escalation-rig.sh call and the `--db` pin on every call, and the derivations in the deacon prompt and mol-dog-shutdown-dance | Retire. `gc bd` runs each call in the bead's own store (section 2). escalation-rig.sh has no caller left and retires with escalation-rig.test.sh. bead-store.sh stays for its other callers. |
+| escalate.sh's own store derivation, its escalation-rig.sh call and the `--db` pin on every call, and the derivations in the deacon prompt and mol-dog-shutdown-dance | Retire. `gc bd` runs each call in the bead's own store (section 2). No text the pack ships calls escalation-rig.sh, and it stays as a hand-off to bead-store.sh for the runs and sessions that still do (below). bead-store.sh stays for its other callers. |
 | escalate.sh's ephemeral-subject redirect, and the standing bucket it mints | Retires. A wisp is refused, and the callers that passed a wisp, or a bead they could not read, file patrol findings (section 2). |
 | notification-wisp-reap | Its gate-notice pass retires, and its pass over core's `ESCALATION:` mails stays. |
 | converse-reap, its order and script | Stays, keyed on conversation tasks (section 6). |
@@ -1859,7 +1882,8 @@ debt with the trigger that retires it:
 | engage's `v-` alias fallback | Renamed `c-` (section 6). The cutover closes every converse session whose alias names a visit (section 11), so no reader keeps `v-`. |
 | `visit_state` on the board's wire | Renamed `sitting_state` (section 8). |
 | the PR reminder's marker `<!-- gc:visit:<id> -->` | Renamed `<!-- gc:sitting:<task> -->` (section 7). pr-post.sh keeps counting a post that carries the old marker as the city's own. Debt, dated 2026-10-20: the old marker is recognized while an open PR carries a reminder posted before the cutover, so that reminder never reads as an unanswered human comment. Trigger: no open PR carries one. The cutover's follow-up (section 12) checks, and drops the old marker or files its removal for when the last such PR closes. |
-| escalate.sh, the helper | Renamed human-gate.sh (section 2). The old name stays as a hand-off that runs human-gate.sh with the same arguments and does nothing of its own. Debt, dated 2026-10-21: the hand-off stays while an open step bead's description names escalate.sh, because a run keeps the text its steps were poured with (see the platform section), or while a session that read the old name in its prompt before the cutover still runs. Trigger: neither remains. The cutover's follow-up (section 12) checks, and deletes the hand-off or files its deletion for when the last such run closes. |
+| escalate.sh, the helper | Renamed human-gate.sh (section 2). The old name stays as a hand-off that runs human-gate.sh with a call's arguments, except that it drops the retired `--pool` with a notice, files a call about a wisp, a session or a subject that names no bead as a patrol finding under its key, refuses a retract about such a subject, and fails a call whose subject does not read (section 2). Debt, dated 2026-10-21: the hand-off stays while an open step bead's description names escalate.sh, because a run keeps the text its steps were poured with (see the platform section), or while a session that read the old name in its prompt before the cutover still runs. Trigger: neither remains. The cutover's follow-up (section 12) checks, and deletes the hand-off or files its deletion for when the last such run closes. |
+| escalation-rig.sh | Stays as a hand-off that runs bead-store.sh with the same arguments and does nothing of its own. mol-dog-shutdown-dance's receive-warrant, in a run poured before the cutover, and the deacon's emergency recipe, in a session that read its prompt before the cutover, derive `GC_RIG` through it and file through escalate.sh only once it answers. human-gate.sh files in the subject's own store whatever `GC_RIG` says. Debt, dated 2026-10-23: the hand-off stays while an open step bead's description names escalation-rig.sh, or while a session that read the old name in its prompt before the cutover still runs. Trigger: neither remains. The cutover's follow-up (section 12) checks, and deletes the hand-off and escalation-rig.test.sh or files their deletion for when the last such run closes. |
 | escalate.test.sh, escalation-binding.test.sh, refinery-stuck-escalate.test.sh and the `*-escalation-wiring.test.sh` set | Renamed in unit A beside the change to what each pins (below): escalate.test.sh becomes human-gate.test.sh, and the others take names in the Terms' words. |
 
 **The keys.** A key goes only when its last reader moves. Each retired key joins
@@ -1914,7 +1938,6 @@ deletes the script retires them (section 12).
 - converse-close-out.test.sh: the moot and benign close through visit-close.sh.
 - visit-close.test.sh: the outcome pair, the fold and its merge-hold key transfer.
 - visit-identity.test.sh: coverage by the `tracks` edge with the stamp fallback.
-- escalation-rig.test.sh: the rig a bead's id names.
 - doctor/check-visit-outcome-recorded and its run.test.sh: a closed visit carries `gc.outcome`.
 - liveness-recheck.test.sh's cases for `visit.recheck` and the visit-id form.
 - notification-wisp-reap.test.sh's gate-notice cases.
@@ -1924,6 +1947,8 @@ These tests are rewritten on gates and conversations rather than retired:
 escalate.test.sh, which adds the key's dedup through the bead's `blocks` edges,
 a gate filed on a bead with open children, the refusal of a wisp and the
 hand-off at the old name, and loses its store-pin and triage-redirect cases,
+escalation-rig.test.sh, which pins the hand-off at that name and the two
+derivations that still call it,
 escalation-binding.test.sh, which keeps its rig binding for patrol-finding.sh's
 call sites and drops it for the helper's, because the helper picks no store
 (section 2), refinery-stuck-escalate.test.sh, which
@@ -2616,7 +2641,8 @@ states this section names:
    commit on main then deletes the migration script and its test, and retires
    the keys only the script still read (section 10). The follow-up runs the
    check first and deletes nothing while it fails. It also checks the debts on
-   the PR reminder's old marker and on the hand-off at escalate.sh (section 10).
+   the PR reminder's old marker and on the hand-offs at escalate.sh and
+   escalation-rig.sh (section 10).
    Unit D files that follow-up as a bead blocked on the cutover, so it is
    tracked from the start.
 
@@ -2632,7 +2658,7 @@ brief allows when the design calls for a split:
 
 | Unit | What it carries |
 |---|---|
-| A. The helper and its callers | The helper on gates, renamed human-gate.sh with a hand-off at escalate.sh and every call renamed with it, with the key as the await id, the dedup and the quiet window read through the bead's `blocks` edges, the retract by resolve, the refusal of a wisp, and `--quiet-window` as the only quiet period: each caller that re-detects one condition declares its window at its call site with its why, the others declare none, and the `GC_ESCALATE_VERDICT_WINDOW=0` prefixes go. Its store derivation and its triage redirect retired, with the deacon prompt's and mol-dog-shutdown-dance's derivations and escalation-rig.sh. The calls that named a wisp, a session or a bead they could not read, and the reports that nothing waits on, on patrol-finding.sh (section 3). await-ruling.sh, with the work bead's edge onto a gate filed on another bead. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on the helper, each with its call-site policy on a bead with open children, and the recommend exit's gate filed after an older recommendation is cleared and before its own (section 3). mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the human-gate-withdraw fragment, and the deacon, refinery and witness prompts. The tests named for the helper, renamed with it (section 10). The registry entries of the keys the helper stops writing. |
+| A. The helper and its callers | The helper on gates, renamed human-gate.sh with a hand-off at escalate.sh and every call renamed with it, with the key as the await id, the dedup and the quiet window read through the bead's `blocks` edges, the retract by resolve, the refusal of a wisp, and `--quiet-window` as the only quiet period: each caller that re-detects one condition declares its window at its call site with its why, the others declare none, and the `GC_ESCALATE_VERDICT_WINDOW=0` prefixes go. Its store derivation and its triage redirect retired, with the deacon prompt's and mol-dog-shutdown-dance's derivations, and escalation-rig.sh reduced to a hand-off (section 10). The calls that named a wisp, a session or a bead they could not read, and the reports that nothing waits on, on patrol-finding.sh (section 3). await-ruling.sh, with the work bead's edge onto a gate filed on another bead. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on the helper, each with its call-site policy on a bead with open children, and the recommend exit's gate filed after an older recommendation is cleared and before its own (section 3). mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the human-gate-withdraw fragment, and the deacon, refinery and witness prompts. The tests named for the helper, renamed with it (section 10). The registry entries of the keys the helper stops writing. |
 | B. The readers | finalize-gate. gctk merge and pr-status, with `OpenHumanGate`. finding.sh and review-answer.sh. pr-facts.sh. branch-supersession.sh. The liveness scripts, with conversing read from conversations, the census in the re-check command and the re-file check on closed gates, hold-lib.sh, deferred-dispatch.sh, bead-context.sh and pre-open-rebase.sh. orphan-dispose.sh and the witness patrol. bead-rehome.sh, with the retry's withdrawal before the close. The doctor checks, `RETIRED_KEYS`, and the docs that teach these components (section 13). |
 | C. Converse and the board | The conversation task, which tracks one bead and replies to each gate it answers, and gc-helm.sh engage, open, accept and dismiss on it, with engage's choice of one bead for a gate and its reply onto that gate, pinned by the shared-gate case below, its guarded bind and `c-` fallback, the hand-off, and Accept's lock on the bead, its read-back and its finish of an acceptance an earlier run left unfinished. The converse prompt and agent headers, the five converse skills and the shared skills. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten to resolve only gates its conversation replies to, converse-reap re-keyed with its warrant in `docs/warrants.md`, Accept's lock with a warrant of its own there, and the converse scripts that retire. gc-helm.sh demand retired here, with its last callers: converse-hold.sh, converse-signoff.sh, and the waits, prs and converse-settle skills. pr-sitting-comment.sh with its new marker, and operator-intake.sh. The tmux scripts, tmux-intake-prompt.sh among them. The board's source, with each gate's `blocks` dependents in its batched read, each conversation's replies, and the sittings card's pass over the conversations closed inside its window, its derive, with a gate folded onto each bead it blocks, a conversation onto the one bead it tracks, and a gate a live sitting replies to marked in session, its model, its wire contract with `accept_withheld` and `gates_in_session`, and its web and text boards. The human-engagement docs and the board's README. |
 | D. The cutover | The migration script, with its copy of the visit walk, its filing of each legacy demand again as a gate, its count of the steps poured with the gate-visit block, and its check, and its test, which stops a run after each write and holds section 11's fixtures. gate-visit-sweep's order, script and test, whose legacy case retires only beside the migration's fixtures for a legacy demand, and visit-identity.sh, which the sweep sources. notification-wisp-reap's gate pass retired. The cutover runbook in its own spec. The remaining docs. |
