@@ -28,9 +28,12 @@
 #   * the brief is appended to the bead's notes as a
 #     `## Close brief (store-only exit, <time>)` section, the claim the closer
 #     tests, before the closer is armed;
-#   * a `blocks` edge holds the bead on the root of the live run working it,
-#     the run run-lib.sh finds poured over --convoy, so the closer pours once
-#     this run ends and never beside it as a second live run on the bead;
+#   * a `blocks` edge holds the bead on the root of the run this session
+#     executes, so the closer pours once this run ends and never beside it as
+#     a second live run on the bead. Gas City records the step a session
+#     claimed, `gc hook current` reads it back, and the step names its run's
+#     root in gc.root_bead_id; run-lib.sh confirms that run is live and works
+#     the bead over --convoy;
 #   * deferred-dispatch.sh arms mol-validate-close on the pool this run
 #     executes on (gc.execution_routed_to, else gc.routed_to), and its
 #     reconcile pass slings it once nothing holds the bead.
@@ -68,8 +71,9 @@ usage: store-only-exit.sh --bead <work-bead> --base <branch>
 
   --bead     the work bead the run was poured for
   --base     the branch the run's worktree was cut from
-  --convoy   the run's input convoy, which names the run whose root holds the
-             validating closer until the run ends; required with --done
+  --convoy   the run's input convoy; the run this session executes, whose
+             root holds the validating closer until the run ends, must be
+             poured over it. Required with --done
   --done     the close brief, when the record the run wrote finishes the bead:
              what the record shows, why that meets what the bead asks for, and
              anything that argues for keeping it open. Empty means the record
@@ -109,7 +113,7 @@ if [ -z "$BEAD" ] || [ -z "$BASE" ]; then
   echo "$PROG: --bead and --base are required" >&2; usage; exit 2
 fi
 if [ -n "$DONE" ] && [ -z "$CONVOY" ]; then
-  echo "$PROG: --done needs --convoy, the input convoy that names the run whose root holds the closer" >&2; usage; exit 2
+  echo "$PROG: --done needs --convoy, the input convoy of the run whose root holds the closer" >&2; usage; exit 2
 fi
 case "$BEAD$BASE$CONVOY" in
   *'{{'*|*'}}'*)
@@ -180,15 +184,25 @@ case "$POOL" in
     exit 1 ;;
 esac
 [ -x "$DEFERRED" ] || { echo "$PROG: deferred-dispatch.sh not found at $DEFERRED; nothing was written" >&2; exit 1; }
-if ! RUNS=$(run_lib subject store_read "$CONVOY"); then
-  echo "$PROG: could not read the runs poured over $CONVOY; nothing was written" >&2
+STEP=$(gc hook current --id-only </dev/null 2>/dev/null) || STEP=""
+case "$STEP" in
+  ''|*[!A-Za-z0-9._-]*)
+    echo "$PROG: gc hook current names no step this session claimed, so no run root can hold its validating closer; nothing was written" >&2
+    exit 1 ;;
+esac
+ROOT=$(row_meta "$(bd_json show "$STEP")" gc.root_bead_id)
+case "$ROOT" in
+  ''|*[!A-Za-z0-9._-]*)
+    echo "$PROG: $STEP, the step this session claimed, names no run root in gc.root_bead_id; nothing was written" >&2
+    exit 1 ;;
+esac
+if ! RUNS=$(run_lib subject store_read "$ROOT"); then
+  echo "$PROG: could not read the run rooted at $ROOT; nothing was written" >&2
   exit 1
 fi
-ROOT=$(printf '%s' "$RUNS" | jq -r --arg b "$BEAD" '
-  [ .[] | select(.live and .bead == $b) | .root ] | unique
-  | if length == 1 then .[0] else empty end' 2>/dev/null)
-if [ -z "$ROOT" ]; then
-  echo "$PROG: no single live run over $CONVOY works $BEAD, so no run root can hold its validating closer until the run ends; nothing was written" >&2
+if ! printf '%s' "$RUNS" | jq -e --arg r "$ROOT" --arg b "$BEAD" --arg c "$CONVOY" '
+    [ .[] | select(.root == $r) ] | length == 1 and (.[0] | .live and .bead == $b and .convoy == $c)' >/dev/null 2>&1; then
+  echo "$PROG: the run rooted at $ROOT, which this session executes, is not a live run over $CONVOY that works $BEAD, so it cannot hold its validating closer; nothing was written" >&2
   exit 1
 fi
 

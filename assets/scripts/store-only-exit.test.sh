@@ -15,9 +15,14 @@
 #   * --done: the brief lands in the bead's notes, then the bead is blocked by
 #     its run's root, then the real deferred-dispatch.sh arms mol-validate-close
 #     on the pool the run executes on;
+#   * the run is the one this session executes: the root that `gc hook
+#     current`'s step names, which run-lib.sh is asked about, so a second live
+#     run over the convoy holds nothing;
 #   * every --done precondition refuses before anything is written: a claimed,
-#     routed or closed bead, no rig-qualified pool, no single live run over the
-#     convoy, a run read that fails, no deferred-dispatch.sh, an unreadable bead;
+#     routed or closed bead, no rig-qualified pool, no claimed step, a step that
+#     names no root, a run that has ended, works another bead or is poured over
+#     another convoy, a run read that fails, no deferred-dispatch.sh, an
+#     unreadable bead;
 #   * a write that does not land exits 1 and stops what follows it;
 #   * a re-run converges on one edge and the arm;
 #   * the step's own call, taken from the formula, runs against this script, and
@@ -59,7 +64,9 @@ mkdir -p "$TMP/bin"
 # that sets gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set; with
 # $FAKE_ARM_WRITE_NOOP set it answers that write with success and stores
 # nothing, as a store can. `gc-toolkit scripts-dir` names this directory, the pack the step's call runs.
-# `runtime drain-ack` records DRAIN in $FAKE_TRACE.
+# `runtime drain-ack` records DRAIN in $FAKE_TRACE. `hook current` prints
+# $FAKE_HOOK_CURRENT, the step this session claimed, and fails as gc does for a
+# session that claimed nothing when $FAKE_HOOK_FAIL is set.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 S="${FAKE_STORE:?}"; D="${FAKE_DEPS:?}"
@@ -69,6 +76,9 @@ case "${1:-} ${2:-}" in
     printf '%s\n' "${FAKE_SCRIPTS_DIR:?}"; exit 0 ;;
   "runtime drain-ack")
     printf 'DRAIN\n' >> "${FAKE_TRACE:-/dev/null}"; exit 0 ;;
+  "hook current")
+    [ -n "${FAKE_HOOK_FAIL:-}" ] && { echo "gc hook current: session has no claimed bead (stub)" >&2; exit 1; }
+    printf '%s\n' "${FAKE_HOOK_CURRENT:?}"; exit 0 ;;
 esac
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
 shift
@@ -159,8 +169,9 @@ GIT
 chmod +x "$TMP/bin/gc" "$TMP/bin/git"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STORE="$TMP/store.json" FAKE_DEPS="$TMP/deps.txt" GC_LOG="$TMP/gc.log" GIT_LOG="$TMP/git.log" \
-  FAKE_TRACE="$TMP/trace" FAKE_SCRIPTS_DIR="$HERE"
-export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_FAIL=""
+  FAKE_TRACE="$TMP/trace" FAKE_SCRIPTS_DIR="$HERE" FAKE_HOOK_CURRENT="tk-step"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_FAIL="" \
+  RUN_LIB_STUB_LOG="$TMP/run-lib.log"
 
 POOL="gc-toolkit/gc-toolkit.polecat"
 LIVE_RUN='{"root":"tk-root","convoy":"tk-cv","bead":"tk-work","formula":"mol-polecat-work","live":true}'
@@ -170,11 +181,12 @@ reset() {
   cat > "$FAKE_STORE" <<JSON
 [
  {"id":"tk-work","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"$POOL","branch":"polecat/tk-work","work_dir":"$TMP/wt"}},
- {"id":"tk-root","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow"}}
+ {"id":"tk-root","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow"}},
+ {"id":"tk-step","status":"in_progress","assignee":"","metadata":{"gc.root_bead_id":"tk-root","gc.step_ref":"mol-polecat-work.submit-and-exit"}}
 ]
 JSON
   printf '[%s]\n' "$LIVE_RUN" > "$RUN_LIB_STUB_RUNS"
-  : > "$FAKE_DEPS"; : > "$GC_LOG"; : > "$GIT_LOG"; : > "$FAKE_TRACE"
+  : > "$FAKE_DEPS"; : > "$GC_LOG"; : > "$GIT_LOG"; : > "$FAKE_TRACE"; : > "$RUN_LIB_STUB_LOG"
 }
 # set_work <jq update> — rewrite the work bead's row.
 set_work() {
@@ -243,6 +255,14 @@ ARM_LN=$(grep -n -- '--set-metadata gc.dispatch_when_ready=' "$GC_LOG" | head -1
 { [ -n "$BRIEF_LN" ] && [ -n "$EDGE_LN" ] && [ -n "$ARM_LN" ] && [ "$BRIEF_LN" -lt "$EDGE_LN" ] && [ "$EDGE_LN" -lt "$ARM_LN" ]; } \
   && ok "--done: the brief lands before the hold, and the hold before the arm" \
   || bad "--done: the brief, the hold and the arm out of order (brief ${BRIEF_LN:-?}, edge ${EDGE_LN:-?}, arm ${ARM_LN:-?})"
+has "$(cat "$GC_LOG")" "hook current --id-only" "--done: the run comes from the step this session claimed"
+eq "$(cat "$RUN_LIB_STUB_LOG")" "subject store_read tk-root" "--done: run-lib.sh is asked about the root the claimed step names, not the convoy"
+
+# A second live run over the convoy is not this session's: the hold goes on the
+# root the claimed step names.
+reset; printf '[%s,%s]\n' "${LIVE_RUN/tk-root/tk-root0}" "$LIVE_RUN" > "$RUN_LIB_STUB_RUNS"
+run "${DONE_ARGS[@]}"
+eq "$RC|$(edge_rows)|$(grep -c '|tk-root0$' "$FAKE_DEPS" | tr -d ' ')" "0|1|0" "a second live run over the convoy: held on this session's run alone"
 
 reset; set_work '.metadata |= (del(.["gc.execution_routed_to"]) | .["gc.routed_to"] = "")'
 jq -c 'map(if .id == "tk-work" then .metadata["gc.execution_routed_to"] = "gc-toolkit/gc-toolkit.polecat-codex" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
@@ -275,15 +295,25 @@ reset; set_work '.metadata |= del(.["gc.execution_routed_to"])'
 run "${DONE_ARGS[@]}"; refused "no pool" "names no rig-qualified pool"
 reset; set_work '.metadata["gc.execution_routed_to"] = "gc-toolkit.polecat"'
 run "${DONE_ARGS[@]}"; refused "a pool that is not rig-qualified" "gave 'gc-toolkit.polecat'"
+reset
+OUT=$(FAKE_HOOK_FAIL=1 "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
+refused "no step this session claimed" "gc hook current names no step this session claimed"
+reset
+OUT=$(FAKE_HOOK_CURRENT=tk-unknown "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
+refused "a claimed step the store does not return" "tk-unknown, the step this session claimed, names no run root"
+reset; jq -c 'map(if .id == "tk-step" then (.metadata |= del(.["gc.root_bead_id"])) else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+run "${DONE_ARGS[@]}"; refused "a claimed step that names no root" "tk-step, the step this session claimed, names no run root"
 reset; printf '[%s]\n' "${LIVE_RUN/\"live\":true/\"live\":false}" > "$RUN_LIB_STUB_RUNS"
-run "${DONE_ARGS[@]}"; refused "a run that has ended" "no single live run over tk-cv works tk-work"
+run "${DONE_ARGS[@]}"; refused "a run that has ended" "the run rooted at tk-root, which this session executes, is not a live run over tk-cv that works tk-work"
 reset; printf '[%s]\n' "${LIVE_RUN/\"tk-work\"/\"tk-else\"}" > "$RUN_LIB_STUB_RUNS"
-run "${DONE_ARGS[@]}"; refused "a run over the convoy that works another bead" "no single live run over tk-cv works tk-work"
-reset; printf '[%s,%s]\n' "$LIVE_RUN" "${LIVE_RUN/tk-root/tk-root2}" > "$RUN_LIB_STUB_RUNS"
-run "${DONE_ARGS[@]}"; refused "two live runs" "no single live run over tk-cv works tk-work"
+run "${DONE_ARGS[@]}"; refused "a run that works another bead" "is not a live run over tk-cv that works tk-work"
+reset; printf '[%s]\n' "${LIVE_RUN/\"tk-cv\"/\"tk-cv2\"}" > "$RUN_LIB_STUB_RUNS"
+run "${DONE_ARGS[@]}"; refused "a run poured over another convoy" "is not a live run over tk-cv that works tk-work"
+reset; printf '[]\n' > "$RUN_LIB_STUB_RUNS"
+run "${DONE_ARGS[@]}"; refused "a root run-lib.sh finds no run for" "is not a live run over tk-cv that works tk-work"
 reset
 OUT=$(RUN_LIB_STUB_FAIL=subject "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
-refused "a run read that fails" "could not read the runs poured over tk-cv"
+refused "a run read that fails" "could not read the run rooted at tk-root"
 reset
 OUT=$(GC_DEFERRED_DISPATCH_TOOL="$TMP/missing.sh" "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 refused "no deferred-dispatch.sh" "deferred-dispatch.sh not found"
