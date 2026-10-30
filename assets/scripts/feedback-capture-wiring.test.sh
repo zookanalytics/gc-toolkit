@@ -18,6 +18,11 @@
 # The fragment is checked first, so a render that lacks a sentence its source
 # carries reads as a stale render. Text is compared with its line breaks
 # joined, so re-wrapping a paragraph passes and rewording one fails.
+#
+# Check 2 reads every render, so an edit to any agent's prompt template can
+# break this suite without touching a path it names.
+#
+# run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
