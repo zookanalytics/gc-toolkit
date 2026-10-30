@@ -21,7 +21,8 @@
 #             the command at its prompt, and the capture is the window once the
 #             command has finished, or once a full-screen program it starts has
 #             taken the screen. --text names output captured earlier, which the
-#             terminal prints with cat instead.
+#             terminal prints with cat instead, and that capture is the window
+#             once cat has exited 0.
 #   markdown  markdown as GitHub shows a PR comment. GitHub's own renderer, its
 #             markdown API, turns the file into HTML in the context of the rig's
 #             origin, so #123 and @name link as they do on the PR, and the HTML is
@@ -39,10 +40,11 @@
 # terminal capture on an engine with no terminal surface, a browser that cannot
 # be installed, a renderer that errors or refuses its surface, a drawn surface
 # the engine cannot prove is on its page, a command the engine stopped waiting
-# on before it finished or took the screen, or a capture that leaves no PNG
-# behind all exit 1, because a capture that quietly produces nothing is the
-# undelivered visual this modality exists to end, and one that shows a surface
-# unfinished misleads whoever reads it.
+# on before it finished or took the screen, output captured earlier that cat
+# could not print or had not finished printing when the engine stopped waiting
+# on it, or a capture that leaves no PNG behind all exit 1, because a capture
+# that quietly produces nothing is the undelivered visual this modality exists
+# to end, and one that shows a surface unfinished misleads whoever reads it.
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
@@ -75,7 +77,9 @@
 #                starts draws. The command holds no backtick, which would end
 #                the engine's directive.
 #   --text       a file of output captured earlier, which the terminal prints
-#                with cat, escape sequences included.
+#                with cat, escape sequences included. The capture waits for
+#                cat to exit 0, even when the file switches the terminal to the
+#                alternate screen a full-screen program draws.
 #                Exactly one of --command / --text is required.
 #   --title      the window's title bar text (default: the command, or the
 #                file's name).
@@ -277,16 +281,20 @@ case "$KIND" in
     # The script's one step types the command at the prompt of a shell that
     # starts in --cwd. Output captured earlier is printed by cat, by the file's
     # name, in the directory that holds it. A name that starts with a dash is
-    # given as ./<name>, because cat reads a bare one as its options.
+    # given as ./<name>, because cat reads a bare one as its options. The engine
+    # stops waiting on a command once its output switches the terminal to the
+    # alternate screen, so the step that prints a file also proves cat's exit
+    # status, and the engine waits for that proof to hold.
     if [ -n "$COMMAND" ]; then
-      RUN="$COMMAND"; SHELL_DIR="${CWD:-$(pwd)}"
+      RUN="$COMMAND"; SHELL_DIR="${CWD:-$(pwd)}"; PROVE=""
     else
       TEXT_NAME=${TEXT##*/}; case "$TEXT_NAME" in -*) TEXT_NAME="./$TEXT_NAME" ;; esac
       RUN="cat $(printf '%q' "$TEXT_NAME")"; SHELL_DIR=$(dirname "$TEXT")
+      PROVE='   _Prove:_ cat has printed the whole file `exit == 0`'
     fi
     case "$TITLE" in *[![:space:]]*) ;; *) TITLE="${COMMAND:-${TEXT##*/}}" ;; esac
     printf '%s\n' "# Demo: $TITLE" '' "**Terminal:** ${COLS:-120}x30" '' '## Steps' '' \
-        '1. **The command runs**' "   \`run $RUN\`" >"$TMPD/terminal.md" \
+        '1. **The command runs**' "   \`run $RUN\`" ${PROVE:+"$PROVE"} >"$TMPD/terminal.md" \
       || fail "cannot write the script that captures the terminal"
     # --full-page grows the window to hold the whole session, so short output
     # leaves no blank rows under it, and a full-screen program keeps its screen.
@@ -341,9 +349,14 @@ demo_engine_cli screenshot "$@" -o "$OUTPUT" --scale 2 | tee "$TMPD/report"
 RC=${PIPESTATUS[0]}
 # The engine exits 3 when a step fails its proof and the capture shows the
 # state the steps left. A markdown surface's one step proves only that the
-# surface is on its page, so a 3 there is a surface that was not drawn, and a
-# terminal's step carries no proof.
-case "$KIND:$RC" in *:0|page:3) ;; *) fail "capture failed (sprintshow screenshot exited $RC)" ;; esac
+# surface is on its page, so a 3 there is a surface that was not drawn. A
+# command's step carries no proof, and the step that prints --text proves that
+# cat exited 0, so a 3 there is read with how the command ended, below.
+case "$KIND:$RC" in
+  *:0|page:3) ;;
+  terminal:3) [ -n "$TEXT" ] || fail "capture failed (sprintshow screenshot exited $RC)" ;;
+  *) fail "capture failed (sprintshow screenshot exited $RC)" ;;
+esac
 
 # --- the produced file must be a PNG -------------------------------------
 [ -f "$OUTPUT" ] || fail "the capture reported success but '$OUTPUT' does not exist"
@@ -379,10 +392,13 @@ if [ "$KIND" = terminal ]; then
     *) ENDED="the command exited $ST" ;;
   esac
   # cat printed output captured earlier, so the status is cat's, and only a
-  # failure to print is reported.
+  # failure to print is reported. The engine captures soon after a command's
+  # output takes the alternate screen, so output that took it is trusted only
+  # when the step's proof held, which says that cat exited 0.
   if [ -n "$TEXT" ]; then
-    case "$ENDED" in
-      "the command exited 0"|"the command took over"*) ENDED="" ;;
+    case "$RC:$ENDED" in
+      "0:the command exited 0"|"0:the command took over"*) ENDED="" ;;
+      *":the command took over"*) rm -f "$OUTPUT"; fail "'$TEXT' switched the terminal to its alternate screen, and cat had not exited 0 when the engine stopped waiting on it, so a capture could show it part-printed" ;;
       *) rm -f "$OUTPUT"; fail "the terminal could not print '$TEXT' (cat ${ENDED#the command })" ;;
     esac
   fi

@@ -366,11 +366,12 @@ has "but 2 step(s) failed their proof" "$out" "it counts the failed steps"
 out="$(run ENGINE_MODE=failed-nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a failed-proof report with no PNG exits 1"
 
-echo "# terminal and markdown: an engine that reports a failed proof leaves no capture -> exit 1"
-# A markdown surface's one step proves only that it is drawn, and a terminal's
-# step carries no proof, so neither yields a capture with a failed proof.
-out="$(run ENGINE_MODE=failed -- terminal --text "$TXT" --output "$OUT")"; rc=$?
-eq "$rc" 1 "a terminal capture the engine reports a failed proof for exits 1"
+echo "# a command's terminal and markdown: an engine that reports a failed proof leaves no capture -> exit 1"
+# A markdown surface's one step proves only that it is drawn, and the step that
+# runs a command carries no proof, so neither yields a capture with a failed
+# proof.
+out="$(run ENGINE_MODE=failed -- terminal --command ls --output "$OUT")"; rc=$?
+eq "$rc" 1 "a command's capture the engine reports a failed proof for exits 1"
 has "capture failed (sprintshow screenshot exited 3)" "$out" "it reports the engine's exit"
 hasnt "captured $OUT (" "$out" "it reports no capture"
 out="$(run ENGINE_MODE=failed -- markdown --file "$MD" --output "$OUT")"; rc=$?
@@ -463,6 +464,8 @@ SPACED="$WORK/out put.txt"; printf 'line one\n' >"$SPACED"
 out="$(run -- terminal --text "$SPACED" --output "$OUT")"; rc=$?
 eq "$rc" 0 "captured output is printed and captured"
 has "   \`run cat out\\ put.txt\`" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "cat prints the file by its name, quoted for the shell"
+has "   \`run cat out\\ put.txt\`
+   _Prove:_ cat has printed the whole file \`exit == 0\`" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "and the step proves that cat exited 0, which the engine waits for"
 has "# Demo: out put.txt" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "the window is titled with the file's name"
 has "[--cwd] [$WORK] [--full-page]" "$(calls)" "the shell starts in the directory that holds the file"
 hasnt "exited" "$(printf '%s\n' "$out" | tail -n 1)" "no exit status is claimed for output this run did not produce"
@@ -474,6 +477,20 @@ out="$(run ENGINE_RUN=exited:1 -- terminal --text "$TXT" --output "$OUT")"; rc=$
 eq "$rc" 1 "output that cat could not print exits 1"
 has "the terminal could not print '$TXT' (cat exited 1)" "$out" "it says cat failed"
 ok "and its PNG is removed" "[ ! -e '$OUT' ]"
+out="$(run ENGINE_RUN=exited:1 ENGINE_MODE=failed -- terminal --text "$TXT" --output "$OUT")"; rc=$?
+eq "$rc" 1 "output that cat could not print, whose proof the engine reports failed, exits 1"
+has "the terminal could not print '$TXT' (cat exited 1)" "$out" "it says cat failed"
+ok "and its PNG is removed" "[ ! -e '$OUT' ]"
+ALT="$WORK/board.txt"; printf '\033[?1049hthe board\n' >"$ALT"
+out="$(run ENGINE_RUN=took -- terminal --text "$ALT" --output "$OUT")"; rc=$?
+eq "$rc" 0 "output that took the alternate screen captures once the proof that cat exited 0 held"
+has "captured $OUT (terminal, 1948x1132 px, " "$out" "it names the PNG"
+hasnt "took over" "$(printf '%s\n' "$out" | tail -n 1)" "and claims no outcome for output this run did not produce"
+out="$(run ENGINE_RUN=took ENGINE_MODE=failed -- terminal --text "$ALT" --output "$OUT")"; rc=$?
+eq "$rc" 1 "output that took the alternate screen before cat exited 0 exits 1"
+has "'$ALT' switched the terminal to its alternate screen, and cat had not exited 0 when the engine stopped waiting on it" "$out" "it says cat had not finished"
+hasnt "captured $OUT (" "$out" "it reports no capture"
+ok "and its PNG, which could show the file part-printed, is removed" "[ ! -e '$OUT' ]"
 
 echo "# markdown: GitHub's renderer, in the repository's context, then the renderer and the engine"
 out="$(run -- markdown --file "$MD" --repo octo/widgets --title 'Rendered comment' --expand --output "$OUT")"; rc=$?
