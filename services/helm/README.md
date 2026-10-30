@@ -75,13 +75,18 @@ takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 section cluster_key group_root group_parent
 acceptable accept_formula pr_branch_url pr_phase phase recommendation
-accept_withheld gates_in_session sitting_start_failure pr_held
+accept_withheld gates_in_session sitting_start_failure pr_held work_held
 ```
 
 `sitting_state` is `in_session` on a row a live sitting is in, `start-failed`
 on a row whose conversation's sitting failed to start (`sitting_start_failure`
 says why; see *A sitting that failed to start*, below), `waiting` on any other
-held row, and empty on a row nothing holds. `acceptable` reads
+held row, and empty on a row nothing holds. `work_held` refines `held`: it is
+true when an open human gate blocks the bead or an acceptance an earlier Accept
+left unfinished keeps it, so the operator's answer is required before the work
+can move. A held row where it is false only has a conversation on it, which
+blocks nothing, and the boards mark it apart: ◌ in both terminal views, and a
+chip reading `conversation` rather than `gate` on the web. `acceptable` reads
 Accept's three conditions (`docs/human-engagement.md`, "Accept").
 `accept_withheld` is set on a row that
 meets the first two and fails the third: it names the open human gates that
@@ -255,18 +260,21 @@ conversations, by their native shape.
 | `conversation` | a task that tracks one bead and is assigned to `human` or to the alias that names its own id | folds onto the row of the bead it tracks | a dialogue waiting in the operator's queue or held by a sitting |
 
 `gate` and `conversation` are WRAPPERS: each folds onto the rows of the beads
-it concerns (`board.foldWrappers`), which it marks `held`. An open gate makes
-each bead it blocks owed, even while work on the bead is in flight, and NEEDS
-names the gate's title, or `N× — a · b` over several. A conversation not in
-session makes its bead owed, one in the operator's queue or one whose sitting's
-session has closed, and a row no gate holds shows its conversation's title, or
-"in conversation" while a sitting holds it. A merge anchor keeps its own PR
-needs, whose `asking` already names the gate that blocks it. The owed clock is
-the earliest `updated_at` among the row's open gates and owed conversations. A
-bead that carries `gc.recommended_formula` and that no open gate under the key
-`first-reaction` blocks has its own `blocks` listing read too, which returns a
-closed gate with its close reason: that is how the board finds an acceptance an
-earlier Accept left unfinished, which keeps the row owed.
+it concerns (`board.foldWrappers`), which it marks `held`. A gate also marks
+them `work_held`, because it holds their work until a person clears it, and a
+conversation does not, because it blocks nothing. An open gate makes each bead
+it blocks owed, even while work on the bead is in flight, and NEEDS names the
+gate's title, or `N× — a · b` over several. A conversation not in session makes
+its bead owed, one in the operator's queue or one whose sitting's session has
+closed, and a row no gate holds shows its conversation's title, or "in
+conversation" while a sitting holds the conversation. A merge anchor keeps its
+own PR needs, whose `asking` already names the gate that blocks it. The owed
+clock is the earliest `updated_at` among the row's open gates and owed
+conversations. A bead that carries `gc.recommended_formula` and that no open
+gate under the key `first-reaction` blocks has its own `blocks` listing read
+too, which returns a closed gate with its close reason: that is how the board
+finds an acceptance an earlier Accept left unfinished, which keeps the row
+owed.
 
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
 at `pre_open_gate` has a branch, a gate set and a machine axis with no number

@@ -71,7 +71,8 @@
       "accept_withheld": "Which tile density should the canvas default to?",
       "gates_in_session": "Which tile density should the canvas default to?",
       "sitting_start_failure": "",
-      "pr_held": null
+      "pr_held": null,
+      "work_held": false
     },
     {
       "id": "gt-1a2b3",
@@ -131,7 +132,8 @@
       "accept_withheld": null,
       "gates_in_session": null,
       "sitting_start_failure": "",
-      "pr_held": null
+      "pr_held": null,
+      "work_held": false
     },
     {
       "id": "tk-01n5cc",
@@ -194,7 +196,8 @@
       "sitting_start_failure": "",
       "pr_held": [
         "blocked"
-      ]
+      ],
+      "work_held": false
     },
     {
       "id": "tk-9tbbk",
@@ -255,7 +258,8 @@
       "accept_withheld": null,
       "gates_in_session": null,
       "sitting_start_failure": "",
-      "pr_held": null
+      "pr_held": null,
+      "work_held": false
     }
   ],
   "sittings": [

@@ -68,9 +68,10 @@ export interface Tile {
   /** Rank proxy: subtree size + priority weight + capped cross-rig refs. */
   weight: number;
   /**
-   * The operator's side holds this bead: an open human gate blocks it, an
+   * The operator's side has this bead: an open human gate blocks it, an
    * acceptance an earlier Accept left unfinished keeps it, or an open
-   * conversation tracks it.
+   * conversation tracks it. Only the first two hold its work (`work_held`); a
+   * conversation blocks nothing.
    */
   held: boolean;
   /**
@@ -368,9 +369,19 @@ export interface Tile {
    * person owes). Each is the value of one GitHub `held:` label, derived by the
    * same code, and any of them reads `pr_phase` `'needs-attention'`. `null` on
    * a PR nothing holds, on a closed row, and on a non-merge row. `held` is
-   * wider: a conversation that tracks the bead holds the row and no PR.
+   * wider: a conversation that tracks the bead makes its row held and holds no
+   * PR.
    */
   pr_held: string[] | null;
+  /**
+   * Refines `held`: true when the operator's answer is required before this
+   * bead's work can move, because an open human gate blocks it or an acceptance
+   * an earlier Accept left unfinished keeps it. A held row where it is false
+   * only has a conversation on it, which blocks nothing, so the work can move
+   * and merge. False on every row that is not held. Derived on the Go side and
+   * read as-is here.
+   */
+  work_held: boolean;
 }
 
 /**

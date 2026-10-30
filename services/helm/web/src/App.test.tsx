@@ -71,6 +71,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     gates_in_session: null,
     sitting_start_failure: '',
     pr_held: null,
+    work_held: false,
     ...over,
   };
 }
@@ -393,6 +394,7 @@ it('marks a held row with a visible waiting/in-session chip and reveals the sitt
         severity: 'ELEVATED',
         section: 'gate',
         held: true,
+        work_held: true,
         sitting_state: 'in_session',
         group_root: 'tk-fam',
         frontier: 'PR #7',
@@ -454,6 +456,23 @@ it('marks a held row with a visible waiting/in-session chip and reveals the sitt
   expect(both.textContent).toContain('●');
   expect(within(both).getByRole('button', { name: /in session/i })).toBeTruthy();
 
+  // What the row has rides the chip, read off work_held: a human gate holds the
+  // work until the operator answers, and a conversation holds nothing. The card
+  // says which in words, and a conversation-only chip wears its own outline.
+  expect(engagedChip.textContent).toContain('conversation · in session');
+  expect(engagedChip.getAttribute('aria-label')).toContain('the work is not held');
+  expect(engagedCard.textContent).toContain('a conversation is on this bead and holds nothing: the work is not held');
+  expect(engaged.querySelector('.sitting-marker--conversation')).not.toBeNull();
+  expect(parkedChip.textContent).toContain('conversation · waiting');
+  expect(parkedCard.textContent).toContain('the work is not held');
+  const bothChip = within(both).getByRole('button', { name: /in session/i });
+  expect(bothChip.textContent).toContain('gate · in session');
+  expect(bothChip.getAttribute('aria-label')).toContain('a human gate holds the work until you answer');
+  const bothCard = document.getElementById('sitting-card-tk-both') as HTMLElement;
+  expect(bothCard.textContent).toContain('a human gate holds the work until you answer');
+  expect(bothCard.textContent).not.toContain('not held');
+  expect(both.querySelector('.sitting-marker--conversation')).toBeNull();
+
   // A plain person's move, unheld: the ● leads and there is no sitting chip.
   const wants = rowFor('wants a person') as HTMLElement;
   expect(wants.textContent).toContain('●');
@@ -472,7 +491,10 @@ it('shows a key for the row markers and the state tints', async () => {
   expect(key.textContent).toContain('needs you');
   expect(key.textContent).toContain('waiting for you');
   expect(key.textContent).toContain('a sitting in session');
-  expect(key.textContent).toContain('a gate or a conversation holds it');
+  expect(key.textContent).toContain('a human gate or a conversation is on it');
+  expect(key.textContent).toContain('gate = a human gate holds the work until you answer');
+  expect(key.textContent).toContain('conversation = a conversation holds nothing, so the work is not held');
+  expect(key.textContent).not.toContain('conversation holds it');
   expect(key.textContent).not.toContain('visit');
 });
 
@@ -800,14 +822,14 @@ it('highlights needs-you rows in place without reordering the board', async () =
   expect(precedes(epic, review)).toBe(true);
 });
 
-// A held row — a gate or a conversation holds the bead — carries the row tint too, the
-// second of the two signals the highlight speaks.
+// A held row — a human gate holds the bead or a conversation is on it — carries the row
+// tint too, the second of the two signals the highlight speaks.
 it('highlights a held row in place', async () => {
   serve([
     tile({
       id: 'tk-held',
       kind: 'human',
-      title: 'an anchor a conversation is holding',
+      title: 'an anchor a sitting talks over',
       severity: 'NORMAL',
       section: 'active',
       held: true,
@@ -815,9 +837,9 @@ it('highlights a held row in place', async () => {
     }),
   ]);
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/a conversation is holding/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/a sitting talks over/)).toBeTruthy());
 
-  const row = rowFor(/a conversation is holding/) as HTMLElement;
+  const row = rowFor(/a sitting talks over/) as HTMLElement;
   expect(row.className).toContain('row-held');
 });
 

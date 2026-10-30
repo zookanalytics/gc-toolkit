@@ -2015,7 +2015,7 @@ func TestTakeawayRowSpeaksItsState(t *testing.T) {
 		{"ra-queued-bare", "needs-review · queued · waiting on 1", "queued behind Platform admin", false},
 		{"ra-parked", "needs-review · parked · waiting on 2", "parked: parked until the design is signed", false},
 		{"ra-talk", "needs-review · in conversation", "in conversation", false},
-		{"ra-asked", "needs-review · held by a human gate or a conversation", "close it or say why not", false},
+		{"ra-asked", "needs-review · a conversation waits for you · the work is not held", "close it or say why not", false},
 		{"ra-armed", "needs-review · queued · starts by itself", "queued — starts by itself", false},
 		{"ra-done", "needs-review · blocker landed", "blocker landed — dispose or resume", true},
 	}
@@ -2932,8 +2932,12 @@ func TestOpenHumanGateHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
 	if h := mustTile(t, b, "tk-listed"); h.Needs != "asking: "+ask || h.PRConversation != ConversationAsking {
 		t.Errorf("the needs line asks the gate's question: needs=%q conversation=%q", h.Needs, h.PRConversation)
 	}
-	if c := mustTile(t, b, "tk-talked"); c.Phase != PhaseMerging || c.Needs != fr.Needs || !c.Held {
-		t.Errorf("a conversation holds its bead's row but not the merge: held=%v phase=%q needs=%q", c.Held, c.Phase, c.Needs)
+	if c := mustTile(t, b, "tk-talked"); c.Phase != PhaseMerging || c.Needs != fr.Needs || !c.Held || c.WorkHeld {
+		t.Errorf("a conversation makes its bead's row held and holds neither the merge nor the work: held=%v work_held=%v phase=%q needs=%q",
+			c.Held, c.WorkHeld, c.Phase, c.Needs)
+	}
+	if h := mustTile(t, b, "tk-folded"); !h.Held || !h.WorkHeld {
+		t.Errorf("the gate the gather admitted holds the anchor's work: held=%v work_held=%v", h.Held, h.WorkHeld)
 	}
 }
 

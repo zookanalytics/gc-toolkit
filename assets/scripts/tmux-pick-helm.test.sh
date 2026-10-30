@@ -252,13 +252,15 @@ has "$CALLS" "DEMAND-SENTENCE" "(SHIFT) with the demand intact, not shifted out 
 # ==============================================================================
 # helm-svc marks a row whose conversation's sitting failed to start
 # (sitting_state start-failed) and leads its needs with why. In a column of held rows the glyph
-# is what tells that row apart at a glance, in both menus.
-FAILED='[{"id":"tk-fail1","rig":"gc-toolkit","severity":"ELEVATED","title":"the plan","frontier":"needs-review · 1 open","needs":"start failed (startup timeout): talk it over","held":true,"sitting_state":"start-failed"},{"id":"tk-held1","rig":"gc-toolkit","severity":"ELEVATED","title":"another plan","frontier":"needs-review · 1 open","needs":"an ask","held":true,"sitting_state":"waiting"},{"id":"tk-none1","rig":"gc-toolkit","severity":"ELEVATED","title":"an owed demand","frontier":"routed","needs":"a demand","held":false,"sitting_state":""}]'
+# is what tells that row apart at a glance, in both menus. A row whose work a human gate
+# holds and a row only a conversation is on wear glyphs of their own too.
+FAILED='[{"id":"tk-fail1","rig":"gc-toolkit","severity":"ELEVATED","title":"the plan","frontier":"needs-review · 1 open","needs":"start failed (startup timeout): talk it over","held":true,"sitting_state":"start-failed"},{"id":"tk-held1","rig":"gc-toolkit","severity":"ELEVATED","title":"another plan","frontier":"needs-review · 1 open","needs":"an ask","held":true,"work_held":true,"sitting_state":"waiting"},{"id":"tk-talk1","rig":"gc-toolkit","severity":"ELEVATED","title":"a third plan","frontier":"needs-review · 1 open","needs":"talk it over","held":true,"work_held":false,"sitting_state":"waiting"},{"id":"tk-none1","rig":"gc-toolkit","severity":"ELEVATED","title":"an owed demand","frontier":"routed","needs":"a demand","held":false,"sitting_state":""}]'
 fixture
 BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$FAILED"
 run_pick
 has "$CALLS" "✗ ELEVATED tk-fail1" "(FAILED) a failed start leads with ✗"
-has "$CALLS" "● ELEVATED tk-held1" "(FAILED) any other held row keeps ●"
+has "$CALLS" "● ELEVATED tk-held1" "(FAILED) a row whose work a human gate holds keeps ●"
+has "$CALLS" "◌ ELEVATED tk-talk1" "(FAILED) a row only a conversation is on wears ◌, since a conversation holds nothing"
 has "$CALLS" "· ELEVATED tk-none1" "(FAILED) a row nothing holds keeps ·"
 has "$CALLS" "start failed (startup timeout)" "(FAILED) the reason reaches the label"
 

@@ -536,34 +536,49 @@ function FamilySummary({ descendants, collapsed }: { descendants: Tile[]; collap
   );
 }
 
-// The sitting marker: a visible, self-evident chip on a held row — one a human
-// gate or a conversation holds. It says at a glance which of the two states the
-// row is in — WAITING for the operator, or IN SESSION (a live sitting is on it
-// right now) — in a word, a colour and an icon, read straight off
-// tile.sitting_state (derived once in the Go layer, never re-derived here). The
-// chip is a real button so it is keyboard-reachable and announced as
-// interactive; hovering or focusing it reveals a details card naming the
-// sittings on the bead — each one's headline, whether it runs, and the session
-// to attach to. The details live in this
-// card rather than a native `title` tooltip because a native tooltip has no
-// visible affordance and stays invisible until an exact hover lands on a
-// one-character glyph. The card is non-interactive text, so it needs no click
-// to open or dismiss.
+// The sitting marker: a visible, self-evident chip on a held row, one the
+// operator's side has. It says at a glance what the row has — a human gate,
+// which holds the work until the operator answers, or only a conversation,
+// which holds nothing (tile.work_held) — and which of two states it is in:
+// WAITING for the operator, or IN SESSION (a live sitting is on it right now).
+// It says so in words, a colour, an icon and, on a conversation-only row, a
+// dashed outline, all read straight off the tile (derived once in the Go layer,
+// never re-derived here). The chip is a real button so it is keyboard-reachable
+// and announced as interactive; hovering or focusing it reveals a details card
+// that says whether the work is held and names the sittings on the bead — each
+// one's headline, whether it runs, and the session to attach to. The details
+// live in this card rather than a native `title` tooltip because a native
+// tooltip has no visible affordance and stays invisible until an exact hover
+// lands on a one-character glyph. The card is non-interactive text, so it needs
+// no click to open or dismiss.
 function SittingMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
   const inSession = tile.sitting_state === SITTING_IN_SESSION;
   const word = inSession ? 'in session' : 'waiting';
+  const what = tile.work_held ? 'gate' : 'conversation';
   const heading = inSession ? 'In session — being worked right now' : 'Waiting for you';
+  const hold = tile.work_held
+    ? 'a human gate holds the work until you answer'
+    : 'a conversation is on this bead and holds nothing: the work is not held';
   const label = inSession
-    ? 'in session — a live sitting is on this row now; hover or focus for details'
-    : 'waiting for you; hover or focus for details';
+    ? `in session — a live sitting is on this row now; ${hold}; hover or focus for details`
+    : `waiting for you — ${hold}; hover or focus for details`;
   const cardId = `sitting-card-${tile.id}`;
+  const className = [
+    'sitting-marker',
+    `sitting-marker--${inSession ? 'in-session' : 'waiting'}`,
+    tile.work_held ? '' : 'sitting-marker--conversation',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <span className={`sitting-marker sitting-marker--${inSession ? 'in-session' : 'waiting'}`}>
+    <span className={className}>
       <button type="button" className="sitting-chip" aria-label={label} aria-describedby={cardId}>
         <span className="sitting-chip__icon" aria-hidden="true">
           {inSession ? '◉' : '○'}
         </span>
-        <span className="sitting-chip__text">{word}</span>
+        <span className="sitting-chip__text">
+          {what} · {word}
+        </span>
       </button>
       {/* Non-interactive detail, revealed on hover or focus of the chip (CSS).
           role=tooltip + aria-describedby hands the same text to a screen reader
@@ -571,20 +586,17 @@ function SittingMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) 
           pointer. */}
       <span role="tooltip" id={cardId} className="sitting-card">
         <span className="sitting-card__heading">{heading}</span>
-        {sittings.length > 0 ? (
-          sittings.map((s) => (
-            <span key={s.id} className="sitting-card__sitting">
-              {sittingHeadline(s)}
-              <span className="sitting-card__meta">
-                {' · '}
-                {isRunning(s) ? 'running' : 'closed'}
-                {s.session ? ` · ${s.session}` : ''}
-              </span>
+        <span className="sitting-card__hold">{hold}</span>
+        {sittings.map((s) => (
+          <span key={s.id} className="sitting-card__sitting">
+            {sittingHeadline(s)}
+            <span className="sitting-card__meta">
+              {' · '}
+              {isRunning(s) ? 'running' : 'closed'}
+              {s.session ? ` · ${s.session}` : ''}
             </span>
-          ))
-        ) : (
-          <span className="sitting-card__meta">a human gate or a conversation holds this row</span>
-        )}
+          </span>
+        ))}
       </span>
     </span>
   );
@@ -615,7 +627,7 @@ function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
 // summary of its subtree, and every row is indented by its depth in the family
 // tree) and the attention highlight rides the row in place: a ● and a tint where
 // a row's next move is the operator's (wantsPerson), a tint on a row a human gate
-// or a conversation is holding (held).
+// holds or a conversation is on (held).
 function AnchorRow({
   row,
   drilled,
@@ -776,7 +788,12 @@ function Legend() {
         <span className="legend__swatch legend__swatch--wants" aria-hidden="true" /> row needs you
       </span>
       <span className="legend__item">
-        <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a gate or a conversation holds it
+        <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a human gate or a conversation
+        is on it
+      </span>
+      <span className="legend__item">
+        on the chip: gate = a human gate holds the work until you answer · conversation = a conversation
+        holds nothing, so the work is not held
       </span>
       <span className="legend__item">
         <span className="pr-held" aria-hidden="true">

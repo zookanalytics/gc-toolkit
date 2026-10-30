@@ -427,6 +427,38 @@ func TestHeldBeadRanksAlikeUnderAGateAndAQueuedConversation(t *testing.T) {
 	}
 }
 
+// TestOnlyAGateHoldsTheWork: a bead is held alike under a gate and under a
+// conversation, but only the gate holds its work, because a conversation
+// blocks nothing. WorkHeld carries the difference on the row, and the row's
+// frontier names which of the two the operator's side has on it. A
+// conversation's own row, kept because its bead has none, holds no work either.
+func TestOnlyAGateHoldsTheWork(t *testing.T) {
+	build := func(id string, anchors ...Anchor) Tile {
+		return mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), id)
+	}
+	gate := gateAnchor("tk-g", "an ask", "tk-subj")
+	queued := conversationAnchor("tk-c", "tk-subj", "talk it over", "human")
+	for _, c := range []struct {
+		name           string
+		row            Tile
+		held, workHeld bool
+		frontier       string
+	}{
+		{"a gate", build("tk-subj", epicSubject("tk-subj"), gate), true, true, "1 open · held by a human gate"},
+		{"a queued conversation", build("tk-subj", epicSubject("tk-subj"), queued), true, false, "1 open · in conversation"},
+		{"a gate and a conversation", build("tk-subj", epicSubject("tk-subj"), gate, queued), true, true, "1 open · held by a human gate"},
+		{"nothing", build("tk-subj", epicSubject("tk-subj")), false, false, "1 open · 0 in flight (stranded)"},
+		{"a conversation's own row", build("tk-c", queued), true, false, ""},
+	} {
+		if c.row.Held != c.held || c.row.WorkHeld != c.workHeld {
+			t.Errorf("%s: held=%v work_held=%v, want %v / %v", c.name, c.row.Held, c.row.WorkHeld, c.held, c.workHeld)
+		}
+		if !strings.HasSuffix(c.row.Frontier, c.frontier) {
+			t.Errorf("%s: frontier %q, want it to end %q", c.name, c.row.Frontier, c.frontier)
+		}
+	}
+}
+
 // TestClosedConversationIsOnTheCardAndHoldsNothing is the sittings-card case
 // at the derive: a conversation a sign-off closed inside the window is on the
 // card, with its close reason as the headline when the sitting left no
@@ -562,9 +594,9 @@ func TestUnfinishedAcceptanceKeepsTheBeadOwedAndAcceptable(t *testing.T) {
 	}
 
 	row := build("ruled: accepted mol-polecat-work accept:0a1b2c3d")
-	if !row.Owed || !row.Held || !row.Acceptable || row.Needs != "Accept mol-polecat-work?" || row.SittingState != SittingWaiting {
-		t.Errorf("an unfinished acceptance is owed, held and acceptable: owed=%v held=%v acceptable=%v needs=%q state=%q",
-			row.Owed, row.Held, row.Acceptable, row.Needs, row.SittingState)
+	if !row.Owed || !row.Held || !row.WorkHeld || !row.Acceptable || row.Needs != "Accept mol-polecat-work?" || row.SittingState != SittingWaiting {
+		t.Errorf("an unfinished acceptance is owed, holds the work and is acceptable: owed=%v held=%v work_held=%v acceptable=%v needs=%q state=%q",
+			row.Owed, row.Held, row.WorkHeld, row.Acceptable, row.Needs, row.SittingState)
 	}
 	if !row.PROwedSince.Equal(daysAgo(2)) {
 		t.Errorf("the unfinished acceptance dates the row by its gate: got %v", row.PROwedSince)

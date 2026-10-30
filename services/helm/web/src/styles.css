@@ -114,8 +114,9 @@ th {
 }
 
 /* The attention highlight, in place: a row whose next move is the operator's, or
-   one a human gate or a conversation is holding, is tinted where it already sits. wants-person is
-   the stronger signal, so its rule follows and wins when a row is both. */
+   one a human gate holds or a conversation is on, is tinted where it already
+   sits. wants-person is the stronger signal, so its rule follows and wins when a
+   row is both. */
 .row-held {
   background: rgb(128 128 128 / 10%);
 }
@@ -272,6 +273,12 @@ th {
   margin-right: 0.2em;
 }
 
+/* A conversation holds nothing, so the chip of a row only a conversation is on
+   wears a dashed outline beside the solid one of a row a human gate holds. */
+.sitting-marker--conversation .sitting-chip {
+  border-style: dashed;
+}
+
 .sitting-card {
   background: Canvas;
   border: 1px solid rgb(128 128 128 / 45%);
@@ -300,6 +307,12 @@ th {
   color: inherit;
   display: block;
   font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.sitting-card__hold {
+  color: CanvasText;
+  display: block;
   margin-bottom: 0.25rem;
 }
 

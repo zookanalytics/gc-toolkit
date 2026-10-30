@@ -255,10 +255,12 @@ func TestNeedsCellNamesWithheldAcceptAndGatesInSession(t *testing.T) {
 	}
 }
 
-// The overview's leading glyph encodes a held row as well as a person's move: ○
-// a row a human gate or a conversation holds, ◉ a row that is both held and
-// wants a person, ● a plain person's move. In this view ● means wants-a-person, so a held row takes
-// its own ○ rather than colliding with it.
+// The overview's leading glyph encodes what holds a row as well as a person's
+// move: ○ a row whose work a human gate holds, ◉ a row whose work is held and
+// that wants a person, ◌ a row a conversation is on, which holds nothing, and ●
+// a plain person's move. In this view ● means wants-a-person, so a row whose
+// work is held takes its own ○ rather than colliding with it, and a
+// conversation-only row that wants a person keeps ●.
 func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
 	tiles := []board.Tile{
@@ -266,11 +268,17 @@ func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 			Section: board.SectionStalled, MTotal: 3, Open: 3, Frontier: "3 open",
 			Needs: "decomposed, idle", GroupRoot: "tk-fam", RankScore: 3_000_000},
 		{ID: "tk-held", Rig: "gc-toolkit", Kind: "task", Title: "held only", Severity: board.SevNormal,
-			Section: board.SectionActive, Held: true, Frontier: "in flight",
+			Section: board.SectionActive, Held: true, WorkHeld: true, Frontier: "in flight",
 			Needs: "working", GroupRoot: "tk-fam", RankScore: 2_500_000},
+		{ID: "tk-talk", Rig: "gc-toolkit", Kind: "task", Title: "a conversation only", Severity: board.SevNormal,
+			Section: board.SectionActive, Held: true, Frontier: "in flight",
+			Needs: "in conversation", GroupRoot: "tk-fam", RankScore: 2_450_000},
 		{ID: "tk-both", Rig: "gc-toolkit", Kind: "review", Title: "held and gated", Severity: board.SevElevated,
-			Section: board.SectionGate, Held: true, Frontier: "PR #7",
+			Section: board.SectionGate, Held: true, WorkHeld: true, Frontier: "PR #7",
 			Needs: "answer", GroupRoot: "tk-fam", RankScore: 2_400_000},
+		{ID: "tk-asks", Rig: "gc-toolkit", Kind: "task", Title: "a conversation that waits", Severity: board.SevElevated,
+			Section: board.SectionGate, Held: true, Frontier: "in flight",
+			Needs: "talk it over", GroupRoot: "tk-fam", RankScore: 2_350_000},
 		{ID: "tk-wants", Rig: "gc-toolkit", Kind: "review", Title: "wants a person", Severity: board.SevElevated,
 			Section: board.SectionReview, Frontier: "PR #8",
 			Needs: "review", GroupRoot: "tk-fam", RankScore: 2_300_000},
@@ -296,16 +304,20 @@ func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 		return "«no row for " + id + "»"
 	}
 	for _, c := range []struct{ id, glyph, why string }{
-		{"tk-held", "○", "a held row no one owes leads with ○"},
-		{"tk-both", "◉", "a held row that also wants a person leads with ◉"},
+		{"tk-held", "○", "a row whose work a gate holds and no one owes leads with ○"},
+		{"tk-talk", "◌", "a row only a conversation is on leads with ◌, not the held ○"},
+		{"tk-both", "◉", "a row whose work is held that also wants a person leads with ◉"},
+		{"tk-asks", "●", "a conversation-only row that wants a person leads with the wants-you ●"},
 		{"tk-wants", "●", "a plain person's move still leads with ●"},
 	} {
 		if g := glyphFor(c.id); g != c.glyph {
 			t.Errorf("%s: want %q, got %q\n%s", c.why, c.glyph, g, got)
 		}
 	}
-	// The legend teaches all three glyphs, not just ●.
-	for _, want := range []string{"○ a human gate or a conversation holds the row", "◉ both"} {
+	// The legend teaches every glyph, not just ●, and says a conversation holds
+	// nothing.
+	for _, want := range []string{"○ a human gate holds the row's work until you answer", "◉ both",
+		"◌ a conversation is on the row and holds nothing"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("family legend must explain %q; got:\n%s", want, got)
 		}

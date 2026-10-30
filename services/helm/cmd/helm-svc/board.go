@@ -513,15 +513,18 @@ func renderRows(w io.Writer, shown []board.Tile) {
 }
 
 // renderTileLine writes one anchor's row in the sized columns. Its glyph is ✗
-// on a row whose conversation's sitting failed to start, and ● on any other row
-// a human gate or a conversation holds.
+// on a row whose conversation's sitting failed to start, ● on any other row
+// whose work a human gate or an unfinished acceptance holds, and ◌ on any other
+// row a conversation is on, which holds nothing.
 func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 	glyph := " "
 	switch {
 	case t.SittingState == board.SittingStartFailed:
 		glyph = "✗"
-	case t.Held:
+	case t.WorkHeld:
 		glyph = "●"
+	case t.Held:
+		glyph = "◌"
 	}
 	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
@@ -624,22 +627,25 @@ func wantsPerson(t board.Tile) bool {
 }
 
 // familyGlyph is the overview's leading marker: ● a row whose next move is a
-// person's (review or gate), ○ a row a human gate or a conversation holds, ◉
-// both, and ✗ a row whose conversation's sitting failed to start, which wants a
-// person whatever else it is. The overview's ● is the wants-you
-// highlight, so a held row takes its own glyph here rather than colliding with
+// person's (review or gate), ○ a row whose work a human gate or an unfinished
+// acceptance holds, ◉ both, ◌ a row a conversation is on, which holds nothing,
+// and ✗ a row whose conversation's sitting failed to start, which wants a
+// person whatever else it is. The overview's ● is the wants-you highlight, so a
+// row whose work is held takes its own glyph here rather than colliding with
 // it. The default queue view has no wants-you axis, so there ● stays free to
-// mean held on its own (renderTileLine).
+// mean the work is held on its own (renderTileLine).
 func familyGlyph(t board.Tile) string {
 	switch {
 	case t.SittingState == board.SittingStartFailed:
 		return "✗"
-	case wantsPerson(t) && t.Held:
+	case wantsPerson(t) && t.WorkHeld:
 		return "◉"
 	case wantsPerson(t):
 		return "●"
-	case t.Held:
+	case t.WorkHeld:
 		return "○"
+	case t.Held:
+		return "◌"
 	default:
 		return " "
 	}
@@ -670,8 +676,9 @@ func renderFamilyRows(w io.Writer, shown []board.Tile) {
 
 // familyBanner is the labelled divider that opens a family block: the root's id,
 // kind, roll-up, frontier and needs, with the [familyGlyph] marking when the root
-// itself wants a person, is held by a gate or a conversation, or both. The root is the
-// family header rather than a member row, so its own ask rides here.
+// itself wants a person, has its work held by a gate, or both, or has a
+// conversation on it. The root is the family header rather than a member row,
+// so its own ask rides here.
 func familyBanner(root board.Tile) string {
 	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", familyGlyph(root), root.ID, root.Kind, nmCell(root), root.Frontier)
 	if n := needsCell(root); n != "" {
@@ -681,8 +688,8 @@ func familyBanner(root board.Tile) string {
 }
 
 // renderMemberLine writes one family member: its within-family band, the
-// [familyGlyph] marking a person's move and/or a gate or conversation holding it, and the
-// same columns as an anchor row.
+// [familyGlyph] marking a person's move, a gate holding its work, or a
+// conversation on it, and the same columns as an anchor row.
 func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
 	fmt.Fprint(w, rpad(familyGlyph(t), colHeld)+rpad(t.Section, colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
@@ -694,7 +701,7 @@ func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
 func renderFamilyLegend(w io.Writer) {
 	fmt.Fprint(w, "\nFamilies (▌) group by dependency structure: a top-level anchor and the children, blockers, reviews and rework that hang off it, so a family reads as one thing\n")
 	fmt.Fprint(w, "BAND orders each family by the move a member wants: review=a pull request · gate=a person must answer · stalled=nothing moving · active=in-flight · cleanup=finished/empty · done=closed\n")
-	fmt.Fprint(w, "● wants YOU (review, gate) · ○ a human gate or a conversation holds the row · ◉ both · ✗ the sitting spawned for a conversation on the row failed to start, and NEEDS says why. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
+	fmt.Fprint(w, "● wants YOU (review, gate) · ○ a human gate holds the row's work until you answer · ◉ both · ◌ a conversation is on the row and holds nothing, so the work can move and merge · ✗ the sitting spawned for a conversation on the row failed to start, and NEEDS says why. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a bead with a takeaway · review/rework=a gate child in flight · gate/conversation=a question or a conversation whose bead has no row (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
@@ -775,7 +782,7 @@ func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a bead with a takeaway · gate/conversation=a question or a conversation whose bead has no row (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
-	fmt.Fprint(w, "Held: ● a human gate or a conversation holds this bead (attach to a sitting in session via the sessions picker) · ✗ the sitting spawned for a conversation on this bead failed to start, NEEDS says why, and the row leads the queue until the conversation is engaged again or closed · blank = none\n")
+	fmt.Fprint(w, "Held: ● a human gate holds this bead's work until you answer · ◌ a conversation is on this bead and holds nothing, so the work can move and merge (attach to a sitting in session via the sessions picker) · ✗ the sitting spawned for a conversation on this bead failed to start, NEEDS says why, and the row leads the queue until the conversation is engaged again or closed · blank = none\n")
 	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. A row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, openAcceptLegend)

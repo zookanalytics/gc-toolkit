@@ -35,12 +35,17 @@ func startFailedTiles() []board.Tile {
 			Section: board.SectionGate, Owed: true, Held: true, GroupRoot: "tk-parked",
 			SittingState: board.SittingWaiting, Frontier: "needs-review · 1 open · in conversation",
 			Needs: "look at it", RankScore: 2_000_000},
+		{ID: "tk-gated", Rig: "gc-toolkit", Kind: "epic", Title: "a third plan", Severity: board.SevElevated,
+			Section: board.SectionGate, Owed: true, Held: true, WorkHeld: true, GroupRoot: "tk-gated",
+			SittingState: board.SittingWaiting, Frontier: "needs-review · 1 open · held by a human gate",
+			Needs: "rule on it", RankScore: 1_999_000},
 	}
 }
 
 // TestRenderQueueMarksAFailedStart: in the queue a row whose conversation's
-// sitting failed to start leads with ✗ where any other held row leads with ●,
-// and the trailer says what ✗ means and that the row leads the queue.
+// sitting failed to start leads with ✗, where a row whose work a human gate
+// holds leads with ● and a row only a conversation is on leads with ◌, and the
+// trailer says what ✗ means and that the row leads the queue.
 func TestRenderQueueMarksAFailedStart(t *testing.T) {
 	tiles := startFailedTiles()
 	now := time.Date(2026, 10, 26, 8, 0, 0, 0, time.UTC)
@@ -51,8 +56,11 @@ func TestRenderQueueMarksAFailedStart(t *testing.T) {
 	if g := glyphOf(got, "tk-failed"); g != "✗" {
 		t.Errorf("a failed start leads with ✗, got %q\n%s", g, got)
 	}
-	if g := glyphOf(got, "tk-parked"); g != "●" {
-		t.Errorf("a held row waiting for the operator still leads with ●, got %q\n%s", g, got)
+	if g := glyphOf(got, "tk-gated"); g != "●" {
+		t.Errorf("a row whose work a human gate holds still leads with ●, got %q\n%s", g, got)
+	}
+	if g := glyphOf(got, "tk-parked"); g != "◌" {
+		t.Errorf("a row only a conversation waiting for the operator is on leads with ◌, got %q\n%s", g, got)
 	}
 	for _, want := range []string{
 		"start failed (startup timeout)",
@@ -78,8 +86,11 @@ func TestRenderTableMarksAFailedStart(t *testing.T) {
 	if !strings.Contains(got, "✗ ▌ tk-failed") {
 		t.Errorf("a family headed by a failed start carries ✗; got:\n%s", got)
 	}
-	if !strings.Contains(got, "◉ ▌ tk-parked") {
-		t.Errorf("a held row that wants a person keeps ◉; got:\n%s", got)
+	if !strings.Contains(got, "◉ ▌ tk-gated") {
+		t.Errorf("a row whose work is held that wants a person keeps ◉; got:\n%s", got)
+	}
+	if !strings.Contains(got, "● ▌ tk-parked") {
+		t.Errorf("a conversation-only row that wants a person takes the wants-you ●; got:\n%s", got)
 	}
 	if !strings.Contains(got, "✗ the sitting spawned for a conversation on the row failed to start") {
 		t.Errorf("the family legend explains ✗; got:\n%s", got)

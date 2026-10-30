@@ -572,12 +572,12 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string, own beadState) bool
 // STRANDED (HIGH) is open work with nothing LIVE in it and nothing holding it.
 // Three things make that different from the naive "0 in progress":
 // inProgressLive counts a slung bead whose movement lives on its workflow,
-// `held` means a human gate or a conversation is holding the anchor — attention
-// is already on it, so silence in the child beads is not abandonment — and a
-// child whose state names what it waits on (a person, its turn, a review or a
-// conversation, [Facts.stateOf]) is not work nobody has picked up, so
-// [rollup.idle] excludes it. An anchor whose every open child waits that way
-// falls through to NORMAL: nothing under it is idle.
+// `held` means a human gate holds the anchor or a conversation is on it, so
+// attention is already on it and silence in the child beads is not
+// abandonment, and a child whose state names what it waits on (a person, its
+// turn, a review or a conversation, [Facts.stateOf]) is not work nobody has
+// picked up, so [rollup.idle] excludes it. An anchor whose every open child
+// waits that way falls through to NORMAL: nothing under it is idle.
 func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledCheck bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
@@ -680,7 +680,7 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, own beadState, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
+func frontier(a Anchor, r rollup, held, workHeld bool, takeaway string, waitingOpen []string, own beadState, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight bool,
 	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
@@ -782,6 +782,11 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return strings.Join(r.waitingCounts(), " · ") + " · nothing idle"
 	case inProgressLive == 0 && dead > 0 && !held:
 		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.idle(), dead) + waitSfx
+	// A human gate holds the work until the operator answers, and a
+	// conversation holds nothing, so the phrase names which of the two the
+	// operator's side has on the row.
+	case inProgressLive == 0 && workHeld:
+		return fmt.Sprintf("%d open · held by a human gate", r.idle()) + deadSfx + waitSfx
 	case inProgressLive == 0 && held:
 		return fmt.Sprintf("%d open · in conversation", r.idle()) + deadSfx + waitSfx
 	case inProgressLive == 0:
@@ -1789,8 +1794,10 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 	r := rollUp(a, f)
 	// Accept's conditions, read off the bead's own `blocks` listing. An
 	// acceptance an earlier Accept left unfinished holds the bead as its open
-	// gate did, so it is part of the held fact.
+	// gate did, so it is part of the held fact, and of the part of it that holds
+	// the work.
 	acc := readAcceptance(a)
+	workHeld := f.human.holdsWork(a.ID) || acc.unfinished != nil
 	held := f.human.holds(a.ID) || acc.unfinished != nil
 	stale := staleDays(a.UpdatedAt, now)
 	closedDays := staleDays(a.ClosedAt, now)
@@ -1901,8 +1908,9 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 		// the merge anchor's included.
 		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight && !humanGatedInFlight) || dispDue || prIsOwed || convOwed),
 
-		Weight: w,
-		Held:   held,
+		Weight:   w,
+		Held:     held,
+		WorkHeld: workHeld,
 
 		NClosed:    r.nClosed,
 		MTotal:     r.mTotal,
@@ -1949,7 +1957,7 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, own, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
+		Frontier:  frontier(a, r, held, workHeld, takeaway, waitingOpen, own, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
 		Needs:     needs(a, r, held, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
@@ -2620,7 +2628,8 @@ func wrapperAsk(a Anchor, t Tile, f Facts) foldedAsk {
 // column the CLI board prints — and the TITLE names the wrapper's kind and the
 // beads it concerns, so a surface that prints both columns (the web board
 // renders title beside needs) does not repeat one sentence in each. A
-// conversation's row is held by the conversation it is, in session or waiting.
+// conversation's own row is Held, in session or waiting, and its WorkHeld
+// stays false, because a conversation blocks nothing.
 func keepWrapper(t *Tile, a Anchor, fa foldedAsk) {
 	t.Title = a.Source
 	if len(a.Subjects) > 0 {
@@ -2642,16 +2651,17 @@ func keepWrapper(t *Tile, a Anchor, fa foldedAsk) {
 }
 
 // applyFold moves the asks folded onto one row. The row is now held: a human
-// gate, an unfinished acceptance or a conversation holds its bead. It is owed
-// when any ask is — an open gate, an unfinished acceptance, or a conversation
-// no live sitting holds — and its owed clock takes the earliest of those asks,
-// so the queue dates the row by when the ask began; an existing earlier
-// instant, such as a merge anchor's PR clock, is kept rather than moved
-// forward. Its needs names the gates, the gate of an unfinished acceptance
-// among them; a row no gate holds shows its conversation's title, or reads "in
-// conversation" while a sitting holds it. A merge anchor keeps its own PR
-// needs, whose `asking` already names the gate that blocks it. GatesInSession
-// names each gate a live sitting is answering.
+// gate holds its bead's work, which sets WorkHeld, or a conversation tracks
+// the bead and holds nothing. It is owed when any ask is — an open gate, an
+// unfinished acceptance, or a conversation no live sitting holds — and its
+// owed clock takes the earliest of those asks, so the queue dates the row by
+// when the ask began; an existing earlier instant, such as a merge anchor's PR
+// clock, is kept rather than moved forward. Its needs names the gates, the
+// gate of an unfinished acceptance among them; a row no gate holds shows its
+// conversation's title, or reads "in conversation" while a live sitting holds
+// the conversation. A merge anchor keeps its own PR needs, whose `asking`
+// already names the gate that blocks it. GatesInSession names each gate a live
+// sitting is answering.
 func applyFold(t *Tile, folded []foldedAsk) {
 	t.Held = true
 	var gates, answering, waiting []string
@@ -2659,6 +2669,7 @@ func applyFold(t *Tile, folded []foldedAsk) {
 	for _, fa := range folded {
 		switch fa.kind {
 		case KindGate:
+			t.WorkHeld = true
 			gates = append(gates, fa.ask)
 			if fa.inSession {
 				answering = append(answering, fa.ask)

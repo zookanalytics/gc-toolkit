@@ -116,7 +116,8 @@ SQ_ATTN=$(sq "$ATTN")
 
 # One TSV row per anchor: glyph, severity, id, rig, title, frontier, needs. The
 # glyph is ✗ when the sitting spawned for a conversation on the row failed to
-# start, ● when a human gate or a conversation holds the row, and · otherwise.
+# start, ● when a human gate holds the row's work until the operator answers, ◌
+# when a conversation is on the row, which holds nothing, and · otherwise.
 # helm-svc puts a failed start at the head of the queue menu, inside the cap
 # above, and its needs leads with why.
 #
@@ -125,7 +126,7 @@ SQ_ATTN=$(sq "$ATTN")
 # shifts left — a row with no title would render its frontier as its title.
 ROWS=$(printf '%s' "$BOARD" | jq -r '
     def nz(v; d): (v // "") | if . == "" then d else . end;
-    .[] | [(if .sitting_state == "start-failed" then "✗" elif .held then "●" else "·" end), nz(.severity; "?"), .id, nz(.rig; "?"),
+    .[] | [(if .sitting_state == "start-failed" then "✗" elif .work_held then "●" elif .held then "◌" else "·" end), nz(.severity; "?"), .id, nz(.rig; "?"),
            (nz(.title; "—")[0:38]), (nz(.frontier; "—")[0:34]),
            (nz(.needs; "—")[0:48])] | @tsv')
 

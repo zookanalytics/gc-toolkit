@@ -256,9 +256,16 @@ func indexHuman(anchors []Anchor, f Facts) humanIndex {
 }
 
 // holds reports whether an open human gate blocks the bead or an open
-// conversation tracks it.
+// conversation tracks it: the operator's side has the bead. Only the gate
+// holds its work ([humanIndex.holdsWork]).
 func (ix humanIndex) holds(id string) bool {
 	return len(ix.gates[id]) > 0 || len(ix.convs[id]) > 0
+}
+
+// holdsWork reports whether an open human gate blocks the bead, so its work
+// cannot move until the operator answers. A conversation blocks nothing.
+func (ix humanIndex) holdsWork(id string) bool {
+	return len(ix.gates[id]) > 0
 }
 
 // inSessionOn reports whether a live sitting is on the row: the row is a
