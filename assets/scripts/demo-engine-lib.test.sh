@@ -46,10 +46,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$HERE/demo-engine-lib.sh"
 VIDEO="$HERE/rig-demo-capture.sh"
 SHOT="$HERE/demo-screenshot.sh"
-RENDERER="$HERE/demo-screenshot.mjs"
 SKILLS="$(cd "$HERE/../../skills" && pwd)"
 SKILL="$SKILLS/demo-capture/SKILL.md"
-for f in "$LIB" "$VIDEO" "$SHOT" "$RENDERER" "$SKILL"; do
+for f in "$LIB" "$VIDEO" "$SHOT" "$SKILL"; do
   [ -f "$f" ] || { echo "not found: $f" >&2; exit 2; }
 done
 
@@ -69,9 +68,8 @@ for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk; do
   ln -s "$p" "$FARM/$c"
 done
 
-# Stubs. node answers --version, hands a checkout's CLI to $ENGINE_STUB, and
-# otherwise stands in for the screenshot's renderer, leaving a page at
-# --output. npm and npx stand in for the installers: each prints what an
+# Stubs. node answers --version and hands a checkout's CLI to $ENGINE_STUB.
+# npm and npx stand in for the installers: each prints what an
 # installer prints, to the stdout it was given, and fails on NPM_INSTALL_RC or
 # INSTALL_RC. npx hands the published engine's CLI to $ENGINE_STUB. gc lists
 # the sprintshow rig at $SS_RIG beside another rig, or fails on GC_RC, and
@@ -85,10 +83,7 @@ cat >"$BIN/node" <<'NODE'
 if [ "${1:-}" = "--version" ]; then echo "${NODE_VERSION:-v24.0.0}"; exit 0; fi
 printf 'node' >>"${CALLLOG:?}"; printf ' [%s]' "$@" >>"$CALLLOG"; printf '\n' >>"$CALLLOG"
 case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
-o=""; prev=""
-for a in "$@"; do [ "$prev" = "--output" ] && o="$a"; prev="$a"; done
-printf '<!doctype html><div id="surface">drawn</div>\n' >"$o"
-exit 0
+echo "node stub: unexpected call: $*" >&2; exit 97
 NODE
 cat >"$BIN/npm" <<'NPM'
 #!/usr/bin/env bash
@@ -165,7 +160,6 @@ printf '{"name":"sprintshow-notes"}\n' >"$OTHER/package.json"
 WORK="$TMPD/work"; mkdir -p "$WORK/app"
 SCRIPT="$WORK/demo.md"; printf '# Demo: fixture\n\n**Start:** `/`\n' >"$SCRIPT"
 printf '<!doctype html><title>x</title>\n' >"$WORK/app/index.html"
-TXT="$WORK/output.txt"; printf 'line one\n' >"$TXT"
 CALLLOG="$TMPD/calls.log"; OUTF="$TMPD/stdout"; ERRF="$TMPD/stderr"
 
 # Each capture as this suite drives it: the file it writes, the call that
@@ -184,7 +178,7 @@ capture() {
   local -a argv
   case "$cap" in
     video)      argv=(bash "$VIDEO" --script "$SCRIPT" --output "$(output_of video)" --serve-dir "$WORK/app") ;;
-    screenshot) argv=(bash "$SHOT" terminal --text "$TXT" --output "$(output_of screenshot)") ;;
+    screenshot) argv=(bash "$SHOT" page --script "$SCRIPT" --serve-dir "$WORK/app" --output "$(output_of screenshot)") ;;
   esac
   : >"$CALLLOG"; rm -f "$(output_of "$cap")"
   ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \

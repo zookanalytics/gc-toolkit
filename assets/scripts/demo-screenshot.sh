@@ -16,10 +16,12 @@
 #             capture is that state: the viewport, the whole page, or one
 #             element. Each step's proof is checked, and a step whose proof
 #             fails still yields the capture, which shows what failed.
-#   terminal  a command's output, as a terminal window shows it, colour
-#             included. The command runs with bash from --cwd and its stdout and
-#             stderr are captured together; --text names output captured
-#             earlier instead.
+#   terminal  a command's output, as a terminal window shows it. The engine's
+#             own terminal runs a bash session in a pseudo-terminal and types
+#             the command at its prompt, and the capture is the window once the
+#             command has finished, or once a full-screen program it starts has
+#             taken the screen. --text names output captured earlier, which the
+#             terminal prints with cat instead.
 #   markdown  markdown as GitHub shows a PR comment. GitHub's own renderer, its
 #             markdown API, turns the file into HTML in the context of the rig's
 #             origin, so #123 and @name link as they do on the PR, and the HTML is
@@ -27,24 +29,27 @@
 #             page script finishes some blocks after the API returns, such as a
 #             mermaid diagram or math, and markdown holding one is refused,
 #             because the page drawn here has no script.
-# A terminal or markdown surface has no app to drive. demo-screenshot.mjs,
-# beside this script, draws it as a page of its own, and the engine serves that
-# page from a directory and captures the surface's element, with a one-step
-# script whose proof is that the surface is drawn.
+# A terminal surface is the engine's: the capture drives a one-step terminal
+# script whose step runs the command. A markdown surface has no app to drive.
+# demo-screenshot.mjs, beside this script, draws it as a page of its own, and
+# the engine serves that page from a directory and captures the surface's
+# element, with a one-step script whose proof is that the surface is drawn.
 #
 # It FAILS CLOSED. A missing engine, an engine with no screenshot command, a
-# browser that cannot be installed, a renderer that errors or refuses its
-# surface, a drawn surface the engine cannot prove is on its page, or a capture
-# that leaves no PNG behind all exit 1, because a capture that quietly produces
-# nothing is the undelivered visual this modality exists to end, and one that
-# shows a surface unfinished misleads whoever reads it.
+# terminal capture on an engine with no terminal surface, a browser that cannot
+# be installed, a renderer that errors or refuses its surface, a drawn surface
+# the engine cannot prove is on its page, a command the engine stopped waiting
+# on before it finished or took the screen, or a capture that leaves no PNG
+# behind all exit 1, because a capture that quietly produces nothing is the
+# undelivered visual this modality exists to end, and one that shows a surface
+# unfinished misleads whoever reads it.
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
 #       ( --serve-dir <dir> | --serve <command> | --base-url <url> ) [--port <n>]
 #       [--cwd <dir>] [--selector <css> | --full-page]
 #   demo-screenshot.sh terminal --output <file.png> ( --command <command> | --text <file> )
-#       [--cwd <dir>] [--title <text>] [--columns <n>] [--max-lines <n>]
+#       [--cwd <dir>] [--title <text>] [--columns <n>]
 #   demo-screenshot.sh markdown --file <file.md> --output <file.png>
 #       [--repo <owner/name>] [--title <text>] [--expand]
 #
@@ -64,13 +69,21 @@
 #   --full-page  capture the whole scrollable page instead of the viewport.
 #                At most one of --selector / --full-page is given.
 #   terminal:
-#   --command    the command to run with bash from --cwd (default: here). The
-#                capture shows it after a $ prompt, then what it printed.
-#   --text       a file of output captured earlier, rendered as it stands.
+#   --command    one line of bash, typed at the prompt of a shell that starts in
+#                --cwd (default: here). The capture shows it after a $ prompt,
+#                then what it printed, or the screen a full-screen program it
+#                starts draws. The command holds no backtick, which would end
+#                the engine's directive.
+#   --text       a file of output captured earlier, which the terminal prints
+#                with cat, escape sequences included.
 #                Exactly one of --command / --text is required.
-#   --title      the window's title bar text.
-#   --columns    the widest line, in columns, before a line wraps (default 120).
-#   --max-lines  the lines shown before the rest is cut and counted (default 200).
+#   --title      the window's title bar text (default: the command, or the
+#                file's name).
+#   --columns    the terminal's width in columns, at which a line wraps
+#                (default 120). The terminal is 30 rows tall, which is the
+#                screen a full-screen program draws. Output longer than that is
+#                captured whole, and a session longer than the engine's
+#                terminal keeps, or one capture holds, shows its last lines.
 #   markdown:
 #   --file       the markdown to render.
 #   --repo       the owner/name its #123 and @name references resolve in
@@ -79,7 +92,8 @@
 #   --expand     open every <details>, which GitHub shows collapsed.
 #
 # The last line names the PNG and its size in pixels. For --command it also
-# gives the command's exit status, which does not decide this script's: a
+# says how the command ended: its exit status, or that it took over the screen
+# and was still running. That does not decide this script's exit status: a
 # command that fails can still print the surface the change affects.
 #
 # Exit: 0 captured, 3 a page captured with at least one step whose proof failed,
@@ -105,12 +119,12 @@ case "$KIND" in
 esac
 
 OUTPUT=""; SCRIPT=""; SERVE_DIR=""; SERVE_CMD=""; BASE_URL=""; PORT=""; CWD=""
-SELECTOR=""; FULL_PAGE=0; COMMAND=""; TEXT=""; TITLE=""; COLUMNS=""; MAX_LINES=""
+SELECTOR=""; FULL_PAGE=0; COMMAND=""; TEXT=""; TITLE=""; COLS=""
 FILE=""; REPO=""; EXPAND=0
 # Each kind takes only its own flags.
 case "$KIND" in
   page)     ALLOWED=" --output --script --serve-dir --serve --base-url --port --cwd --selector --full-page " ;;
-  terminal) ALLOWED=" --output --command --text --cwd --title --columns --max-lines " ;;
+  terminal) ALLOWED=" --output --command --text --cwd --title --columns " ;;
   markdown) ALLOWED=" --output --file --repo --title --expand " ;;
 esac
 while [ $# -gt 0 ]; do
@@ -133,8 +147,7 @@ while [ $# -gt 0 ]; do
     --command)   COMMAND="$2" ;;
     --text)      TEXT="$2" ;;
     --title)     TITLE="$2" ;;
-    --columns)   COLUMNS="$2" ;;
-    --max-lines) MAX_LINES="$2" ;;
+    --columns)   COLS="$2" ;;
     --file)      FILE="$2" ;;
     --repo)      REPO="$2" ;;
   esac
@@ -149,8 +162,7 @@ case "$OUTPUT" in *.png|*.PNG) ;; *) usage_err "--output must name a .png file (
 case "${OUTPUT##*/}" in *'#'*) usage_err "--output's file name must not contain '#', which gh reads as the start of an image's alt text" ;; esac
 posint() { case "$2" in ''|*[!0-9]*|0*) usage_err "$1 must be a positive integer (got '$2')" ;; esac; }
 [ -z "$PORT" ] || [ "$PORT" = 0 ] || posint --port "$PORT"
-[ -z "$COLUMNS" ] || posint --columns "$COLUMNS"
-[ -z "$MAX_LINES" ] || posint --max-lines "$MAX_LINES"
+[ -z "$COLS" ] || posint --columns "$COLS"
 case "$KIND" in
   page)
     [ -n "$SCRIPT" ] || usage_err "page needs --script"
@@ -171,6 +183,18 @@ case "$KIND" in
   terminal)
     if [ -n "$COMMAND" ] && [ -n "$TEXT" ]; then usage_err "terminal takes --command or --text, not both"; fi
     [ -n "$COMMAND" ] || [ -n "$TEXT" ] || usage_err "terminal needs --command or --text"
+    # The engine's script carries the command on one line, between backticks,
+    # and the terminal types it at the shell's prompt, where a control character
+    # is a key that edits the line. The title, and the name of the file cat
+    # prints, are on lines of that script too.
+    case "$COMMAND" in
+      *[[:cntrl:]]*) usage_err "--command must be one line with no control characters, because it is typed at the shell's prompt" ;;
+      *'`'*) usage_err "--command must not contain a backtick, which ends the engine's directive; write a command substitution as \$(...)" ;;
+      ''|*[![:space:]]*) ;;
+      *) usage_err "--command is blank" ;;
+    esac
+    case "$TITLE" in *[[:cntrl:]]*) usage_err "--title must be one line with no control characters" ;; esac
+    case "${TEXT##*/}" in *[[:cntrl:]]*|*'`'*) usage_err "--text's file name must hold no control character or backtick, because the terminal prints the file by that name" ;; esac
     [ -z "$TEXT" ] || [ -f "$TEXT" ] || fail "--text '$TEXT' does not exist"
     [ -z "$CWD" ] || [ -n "$COMMAND" ] || usage_err "--cwd is where --command runs; --text takes none"
     [ -z "$CWD" ] || [ -d "$CWD" ] || fail "--cwd '$CWD' is not a directory" ;;
@@ -187,7 +211,7 @@ case "$KIND" in
     command -v gh >/dev/null 2>&1 || fail "gh not found; GitHub's markdown renderer is reached through it"
     command -v jq >/dev/null 2>&1 || fail "jq not found; it builds the renderer's request" ;;
 esac
-[ "$KIND" = page ] || [ -f "$RENDERER" ] || fail "demo-screenshot.mjs not found beside this script"
+[ "$KIND" != markdown ] || [ -f "$RENDERER" ] || fail "demo-screenshot.mjs not found beside this script"
 
 # The engine resolves relative paths against its own working directory, so every
 # path it is handed is absolute.
@@ -206,8 +230,9 @@ trap 'rm -rf "$TMPD"' EXIT
 # demo-engine-lib.sh holds Node to the engine's floor, finds the engine,
 # provisions its browser and runs its CLI. A sprintshow checkout that predates
 # the screenshot command, or a published package without it, can capture
-# nothing here, so the engine's own help is read for the command before a
-# command runs or a renderer is called.
+# nothing here, and one that predates the engine's terminal surface can capture
+# no terminal. So the engine's own help is read for what the kind needs before
+# a command runs or a renderer is called.
 demo_engine_resolve || exit 1
 ENGINE_HELP=$(demo_engine_cli help 2>"$TMPD/help.err")
 HELP_RC=$?
@@ -216,21 +241,14 @@ case "$ENGINE_HELP" in
   *"sprintshow screenshot "*) ;;
   *) fail "the SprintShow engine (${DEMO_ENGINE_DIR:-the published $DEMO_ENGINE_PACKAGE}) has no screenshot command, which every kind captures through; update it to a SprintShow whose 'sprintshow help' lists 'sprintshow screenshot'" ;;
 esac
-
-# draw <renderer options...>: the renderer draws the surface as the page
-# $TMPD/surface/index.html, whose element #surface the capture crops to, and
-# $TMPD/surface.md is the one-step script the engine captures it with.
-draw() {
-  mkdir -p "$TMPD/surface" || fail "cannot make a directory for the $KIND page"
-  node "$RENDERER" "$KIND" "$@" --output "$TMPD/surface/index.html" \
-    || fail "the renderer could not draw the $KIND surface"
-  printf '%s\n' "# Demo: $KIND" '**Start:** `/`' '' '## Steps' \
-      '1. **The surface is drawn**' '   _Prove:_ the surface is on the page `visible #surface`' \
-      >"$TMPD/surface.md" || fail "cannot write the script that captures the $KIND page"
-}
+if [ "$KIND" = terminal ]; then
+  case "$ENGINE_HELP" in
+    *"terminal scripts:"*) ;;
+    *) fail "the SprintShow engine (${DEMO_ENGINE_DIR:-the published $DEMO_ENGINE_PACKAGE}) has no terminal surface, which the terminal kind captures through; update it to a SprintShow whose 'sprintshow help' lists 'terminal scripts:'" ;;
+  esac
+fi
 
 # --- what the engine captures --------------------------------------------
-CMD_RC=""
 case "$KIND" in
   page)
     # The engine reuses whatever already answers on a --serve port and spawns
@@ -251,19 +269,21 @@ case "$KIND" in
     [ -z "$SELECTOR" ] || set -- "$@" --selector "$SELECTOR"
     [ "$FULL_PAGE" -eq 0 ] || set -- "$@" --full-page ;;
   terminal)
+    # The script's one step types the command at the prompt of a shell that
+    # starts in --cwd. Output captured earlier is printed by cat, by the file's
+    # name, in the directory that holds it.
     if [ -n "$COMMAND" ]; then
-      # stdin is closed, so a command that would prompt reads end of input
-      # instead of waiting on a terminal that is not there.
-      ( cd "${CWD:-.}" && bash -c "$COMMAND" ) >"$TMPD/output.txt" 2>&1 </dev/null
-      CMD_RC=$?
-      set -- --text "$TMPD/output.txt" --prompt "$COMMAND"
+      RUN="$COMMAND"; SHELL_DIR="${CWD:-$(pwd)}"
     else
-      set -- --text "$TEXT"
+      RUN="cat $(printf '%q' "${TEXT##*/}")"; SHELL_DIR=$(dirname "$TEXT")
     fi
-    [ -z "$TITLE" ] || set -- "$@" --title "$TITLE"
-    [ -z "$COLUMNS" ] || set -- "$@" --columns "$COLUMNS"
-    [ -z "$MAX_LINES" ] || set -- "$@" --max-lines "$MAX_LINES"
-    draw "$@" ;;
+    case "$TITLE" in *[![:space:]]*) ;; *) TITLE="${COMMAND:-${TEXT##*/}}" ;; esac
+    printf '%s\n' "# Demo: $TITLE" '' "**Terminal:** ${COLS:-120}x30" '' '## Steps' '' \
+        '1. **The command runs**' "   \`run $RUN\`" >"$TMPD/terminal.md" \
+      || fail "cannot write the script that captures the terminal"
+    # --full-page grows the window to hold the whole session, so short output
+    # leaves no blank rows under it, and a full-screen program keeps its screen.
+    set -- "$TMPD/terminal.md" --cwd "$SHELL_DIR" --full-page ;;
   markdown)
     # The context is the repository the comment's references resolve in: --repo,
     # else this rig's origin, else the origin of the checkout this runs from.
@@ -291,11 +311,18 @@ case "$KIND" in
     set -- --html "$TMPD/comment.html"
     [ -z "$TITLE" ] || set -- "$@" --title "$TITLE"
     [ "$EXPAND" -eq 0 ] || set -- "$@" --expand
-    draw "$@" ;;
+    # The renderer draws the comment as the page $TMPD/surface/index.html, and
+    # $TMPD/surface.md is the one-step script the engine captures it with. The
+    # capture crops to the page's element #surface, with no page background
+    # around its rounded corners.
+    mkdir -p "$TMPD/surface" || fail "cannot make a directory for the markdown page"
+    node "$RENDERER" "$@" --output "$TMPD/surface/index.html" \
+      || fail "the renderer could not draw the markdown surface"
+    printf '%s\n' "# Demo: markdown" '**Start:** `/`' '' '## Steps' \
+        '1. **The surface is drawn**' '   _Prove:_ the surface is on the page `visible #surface`' \
+        >"$TMPD/surface.md" || fail "cannot write the script that captures the markdown page"
+    set -- "$TMPD/surface.md" --serve-dir "$TMPD/surface" --selector '#surface' --transparent ;;
 esac
-# A drawn surface is captured by its element, with no page background around
-# its rounded corners.
-[ "$KIND" = page ] || set -- "$TMPD/surface.md" --serve-dir "$TMPD/surface" --selector '#surface' --transparent
 
 # --- capture --------------------------------------------------------------
 # A GitHub comment shows an image at most as wide as its column, so a capture is
@@ -306,8 +333,9 @@ echo "$PROG: capturing $KIND -> $OUTPUT" >&2
 demo_engine_cli screenshot "$@" -o "$OUTPUT" --scale 2 | tee "$TMPD/report"
 RC=${PIPESTATUS[0]}
 # The engine exits 3 when a step fails its proof and the capture shows the
-# state the steps left. A drawn surface's one step proves only that the surface
-# is on its page, so a 3 there is a surface that was not drawn.
+# state the steps left. A markdown surface's one step proves only that the
+# surface is on its page, so a 3 there is a surface that was not drawn, and a
+# terminal's step carries no proof.
 case "$KIND:$RC" in *:0|page:3) ;; *) fail "capture failed (sprintshow screenshot exited $RC)" ;; esac
 
 # --- the produced file must be a PNG -------------------------------------
@@ -319,13 +347,47 @@ SIG=$(head -c 8 "$OUTPUT" | od -An -tx1 | tr -d ' \n')
 dim() { od -An -tu1 -j "$1" -N4 "$OUTPUT" | awk 'NF == 4 { print $1 * 16777216 + $2 * 65536 + $3 * 256 + $4; exit }'; }
 SIZE="$(dim 16)x$(dim 20) px, $(wc -c <"$OUTPUT" | tr -d ' ') bytes"
 
+# --- how the command ended -----------------------------------------------
+# The engine logs how the step's command ended on the first marked line after
+# the step's own: the command, or the shell, exited with a status, the command
+# took over the screen, or the action did not settle because the engine
+# stopped waiting on a command still running on the normal screen. A capture
+# of that last one shows the command unfinished, so it is refused, as is one
+# whose log says none of these, and the PNG is removed.
+ENDED=""
+if [ "$KIND" = terminal ]; then
+  RAN=$(awk 'step && /^  · / { print; exit } /^step 1\/1: / { step = 1 }' "$TMPD/report")
+  ST=${RAN##* exited }
+  case "$RAN" in
+    "  · action \`run "*)
+      rm -f "$OUTPUT"
+      fail "the command neither finished nor took over the screen before the engine stopped waiting on it, so a capture would show it unfinished; a command that waits for input, a pager's included, is no capture (${RAN#  · })" ;;
+  esac
+  case "$ST" in
+    ''|*[!0-9]*)
+      case "$RAN" in
+        *" took over the screen") ENDED="the command took over the screen and was still running" ;;
+        *) rm -f "$OUTPUT"; fail "the engine's log does not say how the command ended, so the capture is not trusted (${RAN:-the step logged no outcome})" ;;
+      esac ;;
+    *) ENDED="the command exited $ST" ;;
+  esac
+  # cat printed output captured earlier, so the status is cat's, and only a
+  # failure to print is reported.
+  if [ -n "$TEXT" ]; then
+    case "$ENDED" in
+      "the command exited 0"|"the command took over"*) ENDED="" ;;
+      *) rm -f "$OUTPUT"; fail "the terminal could not print '$TEXT' (cat ${ENDED#the command })" ;;
+    esac
+  fi
+fi
+
 if [ "$RC" -eq 3 ]; then
   FAILED=$(sed -n -E 's/.* ([0-9]+) step\(s\) failed their proof.*/\1/p' "$TMPD/report" | tail -n 1)
   echo "$PROG: captured $OUTPUT ($KIND, $SIZE), but ${FAILED:-at least one} step(s) failed their proof"
   exit 3
 fi
-if [ -n "$CMD_RC" ]; then
-  echo "$PROG: captured $OUTPUT (terminal, $SIZE); the command exited $CMD_RC"
+if [ -n "$ENDED" ]; then
+  echo "$PROG: captured $OUTPUT (terminal, $SIZE); $ENDED"
 else
   echo "$PROG: captured $OUTPUT ($KIND, $SIZE)"
 fi

@@ -2,10 +2,12 @@
 # demo-screenshot.test.sh — hermetic coverage of the screenshot modality.
 #
 # demo-screenshot.sh validates its arguments, resolves the SprintShow engine,
-# reads the engine's help for its screenshot command, prepares what a kind
-# captures (an app page's script and target, or a terminal or markdown surface
-# the renderer draws as a page of its own), runs the engine's screenshot
-# command, and checks the PNG it leaves. demo-engine-lib.sh holds Node to the
+# reads the engine's help for its screenshot command and, for a terminal, its
+# terminal surface, prepares what a kind captures (an app page's script and
+# target, a one-step terminal script that runs the command, or a markdown
+# surface the renderer draws as a page of its own), runs the engine's
+# screenshot command, checks the PNG it leaves, and reads how a terminal
+# command ended from the engine's log. demo-engine-lib.sh holds Node to the
 # engine's floor, finds the engine, provisions its browser and runs its CLI,
 # and demo-engine-lib.test.sh checks that through this script. Every case runs
 # under `env -i` with a PATH of a coreutils symlink farm and stubs for node,
@@ -13,11 +15,12 @@
 # node stub hands the engine checkout's CLI to an engine stub, and otherwise
 # stands in for the renderer: it logs its argv, keeps a copy of the file it was
 # handed, and leaves a page at --output. The engine stub keeps the script and
-# the page it was handed, and leaves the PNG, or the failure, each case plants.
+# the page it was handed, logs a terminal step's outcome as the engine does,
+# and leaves the PNG, or the failure, each case plants.
 #
-# The renderers are pure functions of their input, so the last part imports
+# The renderer is a pure function of its input, so the last part imports
 # demo-screenshot.mjs into a real node, when the host has Node 18 or later, and
-# checks what they emit; without one those cases are skipped. There the gh stub
+# checks what it emits; without one those cases are skipped. There the gh stub
 # answers with HTML GitHub's markdown API returned, kept verbatim, and the node
 # stub runs the real renderer on it, so a markdown capture is checked end to
 # end on what GitHub actually sends. That part also runs the renderer from a
@@ -68,7 +71,6 @@ if [ "${1:-}" = "-e" ]; then [ -z "${REAL_NODE:-}" ] || exec "$REAL_NODE" "$@"; 
 o=""; prev=""
 for a in "$@"; do
   [ "$prev" = "--output" ] && o="$a"
-  [ "$prev" = "--text" ] && cp "$a" "${HANDED:?}"
   [ "$prev" = "--html" ] && cp "$a" "${HANDED:?}"
   prev="$a"
 done
@@ -98,9 +100,12 @@ GH
 chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh
 
 # The engine's CLI. help lists the screenshot command unless $ENGINE_OLD is set,
-# and exits $HELP_RC. screenshot logs the PORT its environment carries, which a
+# and its terminal scripts unless $ENGINE_OLD or $ENGINE_NO_TERMINAL is, and
+# exits $HELP_RC. screenshot logs the PORT its environment carries, which a
 # --serve command it spawns would inherit, keeps the script it was handed and
-# the page a --serve-dir serves, then leaves what $ENGINE_MODE plants.
+# the page a --serve-dir serves, logs a terminal script's step the way the
+# engine does, its command's outcome as $ENGINE_RUN names it, then leaves what
+# $ENGINE_MODE plants.
 ENGINE_STUB="$TMPD/engine"
 cat >"$ENGINE_STUB" <<'ENGINE'
 #!/usr/bin/env bash
@@ -109,20 +114,34 @@ case "${1:-}" in
   help)
     printf 'Usage:\n  sprintshow run <demo.md> [options]\n'
     [ -n "${ENGINE_OLD:-}" ] || printf '  sprintshow screenshot <demo.md> -o <file.png> [options]\n'
+    [ -n "${ENGINE_OLD:-}${ENGINE_NO_TERMINAL:-}" ] || printf '\nterminal scripts:\n  A script that declares **Terminal:** drives a bash session.\n'
     if [ "${HELP_RC:-0}" != 0 ]; then echo 'SyntaxError: Unexpected token' >&2; exit "$HELP_RC"; fi
     exit 0 ;;
   screenshot) ;;
   *) echo "engine stub: unexpected command: $*" >&2; exit 97 ;;
 esac
 printf 'engine-env PORT=%s\n' "${PORT-unset}" >>"$CALLLOG"
-o=""; d=""; prev=""
+o=""; d=""; cwd=""; prev=""
 for a in "$@"; do
   [ "$prev" = "-o" ] && o="$a"
   [ "$prev" = "--serve-dir" ] && d="$a"
+  [ "$prev" = "--cwd" ] && cwd="$a"
   prev="$a"
 done
 cp "$2" "${SCRIPT_HANDED:?}"
 [ -z "$d" ] || [ ! -f "$d/index.html" ] || cp "$d/index.html" "${SERVED:?}"
+if [ -n "$(sed -n '/^\*\*Terminal:\*\*/p' "$2")" ]; then
+  run=$(sed -n 's/^   `run \(.*\)`$/\1/p' "$2"); mode="${ENGINE_RUN:-exited:0}"
+  printf 'terminal: bash in %s · 120x30\nstep 1/1: The command runs\n' "$cwd"
+  case "$mode" in
+    exited:*)  printf '  · `%s` exited %s\n' "$run" "${mode#exited:}" ;;
+    shell:*)   printf '  · the shell exited %s\n' "${mode#shell:}" ;;
+    took)      printf '  · `%s` took over the screen\n' "$run" ;;
+    unsettled) printf '  · action `run %s` did not settle: `%s` showed no prompt within 60s\n' "$run" "$run" ;;
+    none)      : ;;
+  esac
+  printf '  ✓ (manual — no machine assertion)\nscreenshot: capturing the whole terminal session → %s\n' "${o##*/}"
+fi
 # A PNG signature and an IHDR chunk naming a 1948x1132 image.
 png() { printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x07\x9c\x00\x00\x04\x6c\x08\x06\x00\x00\x00' >"$1"; }
 case "${ENGINE_MODE:-png}" in
@@ -210,6 +229,27 @@ out="$(run -- terminal --output "$OUT" --command ls --text "$TXT")"; rc=$?
 eq "$rc" 2 "terminal with both --command and --text exits 2"
 out="$(run -- terminal --output "$OUT" --text "$TXT" --cwd "$WORK")"; rc=$?
 eq "$rc" 2 "terminal --cwd beside --text exits 2"
+out="$(run -- terminal --output "$OUT" --command ls --max-lines 50)"; rc=$?
+eq "$rc" 2 "terminal --max-lines exits 2"
+has "terminal takes no '--max-lines'" "$out" "it names the flag the terminal kind no longer takes"
+TWO_LINES='echo one
+echo two'
+out="$(run -- terminal --output "$OUT" --command "$TWO_LINES")"; rc=$?
+eq "$rc" 2 "a --command of two lines exits 2"
+has "--command must be one line with no control characters, because it is typed at the shell's prompt" "$out" "it says the command is typed at the prompt as one line"
+out="$(run -- terminal --output "$OUT" --command "$(printf 'ls\t-l')")"; rc=$?
+eq "$rc" 2 "a --command holding a tab, which completes at the prompt, exits 2"
+out="$(run -- terminal --output "$OUT" --command 'echo `date`')"; rc=$?
+eq "$rc" 2 "a --command holding a backtick exits 2"
+has "write a command substitution as \$(...)" "$out" "it names the form to write instead"
+eq "$(calls)" "" "a refused command reaches neither the engine nor a shell"
+out="$(run -- terminal --output "$OUT" --command '   ')"; rc=$?
+eq "$rc" 2 "a blank --command exits 2"
+out="$(run -- terminal --output "$OUT" --command ls --title "$TWO_LINES")"; rc=$?
+eq "$rc" 2 "a --title of two lines exits 2"
+BACKTICKED="$WORK/out\`put.txt"; printf 'x\n' >"$BACKTICKED"
+out="$(run -- terminal --output "$OUT" --text "$BACKTICKED")"; rc=$?
+eq "$rc" 2 "a --text file whose name holds a backtick exits 2"
 out="$(run -- markdown --output "$OUT")"; rc=$?
 eq "$rc" 2 "markdown without --file exits 2"
 for bad in nope a/b/c /a a/ 'a b/c'; do
@@ -230,7 +270,7 @@ eq "$rc" 1 "a missing --cwd exits 1"
 out="$(run -- markdown --file "$WORK/nope.md" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a missing --file exits 1"
 
-echo "# the engine: its help must list the screenshot command, read before anything is run or rendered"
+echo "# the engine: its help must list the screenshot command, and for a terminal its terminal surface, read before anything is run or rendered"
 out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 0 "an engine with the command captures"
 P=$(line_of "provision:browser"); H=$(line_of "engine [help]"); S=$(line_of "engine [screenshot]")
@@ -244,8 +284,17 @@ hasnt "engine [screenshot]" "$(calls)" "nothing is captured"
 ok "no PNG is written" "[ ! -e '$OUT' ]"
 out="$(run ENGINE_OLD=1 -- terminal --command 'echo ran >ran' --cwd "$WORK" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a terminal on an engine without the command exits 1"
-ok "the command does not run" "[ ! -e '$WORK/ran' ]"
-hasnt "[$RENDERER]" "$(calls)" "the renderer does not run"
+hasnt "engine [screenshot]" "$(calls)" "the command is not handed to the engine"
+out="$(run ENGINE_NO_TERMINAL=1 -- terminal --command 'echo ran >ran' --cwd "$WORK" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a terminal on an engine with no terminal surface exits 1"
+has "the SprintShow engine ($ENGINE) has no terminal surface, which the terminal kind captures through" "$out" "it names the engine that lacks the surface"
+has "lists 'terminal scripts:'" "$out" "it says what the engine must offer"
+hasnt "engine [screenshot]" "$(calls)" "the command is not handed to the engine"
+ok "no PNG is written" "[ ! -e '$OUT' ]"
+out="$(run ENGINE_NO_TERMINAL=1 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a page needs no terminal surface"
+out="$(run ENGINE_NO_TERMINAL=1 -- markdown --file "$MD" --output "$OUT")"; rc=$?
+eq "$rc" 0 "nor does markdown"
 out="$(run ENGINE_OLD=1 -- markdown --file "$MD" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a markdown capture on an engine without the command exits 1"
 hasnt "gh api" "$(calls)" "GitHub's renderer is not asked"
@@ -310,9 +359,11 @@ has "but 2 step(s) failed their proof" "$out" "it counts the failed steps"
 out="$(run ENGINE_MODE=failed-nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a failed-proof report with no PNG exits 1"
 
-echo "# terminal and markdown: a drawn surface whose one step fails its proof is no capture -> exit 1"
+echo "# terminal and markdown: an engine that reports a failed proof leaves no capture -> exit 1"
+# A markdown surface's one step proves only that it is drawn, and a terminal's
+# step carries no proof, so neither yields a capture with a failed proof.
 out="$(run ENGINE_MODE=failed -- terminal --text "$TXT" --output "$OUT")"; rc=$?
-eq "$rc" 1 "a terminal surface the engine cannot prove is drawn exits 1"
+eq "$rc" 1 "a terminal capture the engine reports a failed proof for exits 1"
 has "capture failed (sprintshow screenshot exited 3)" "$out" "it reports the engine's exit"
 hasnt "captured $OUT (" "$out" "it reports no capture"
 out="$(run ENGINE_MODE=failed -- markdown --file "$MD" --output "$OUT")"; rc=$?
@@ -339,41 +390,74 @@ out="$(run ENGINE_MODE=nofile -- page --script "$SCRIPT" --serve-dir "$APP" --ou
 eq "$rc" 1 "a PNG left by an earlier run does not pass for this one"
 ok "the earlier PNG was removed before the capture" "[ ! -e '$OUT' ]"
 
-echo "# terminal: the command runs in --cwd, stdout and stderr together, stdin closed"
-mkdir -p "$WORK/repo"; printf 'from the reviewed tree\n' >"$WORK/repo/marker"
-CMD='cat marker; echo "to stderr" >&2; if read -r line; then echo "read: $line"; else echo "stdin closed"; fi; exit 3'
-# Input waits on the script's stdin, so a command that could read it would.
-out="$(printf 'typed\n' | run -- terminal --command "$CMD" --cwd "$WORK/repo" --title 'gc-toolkit' --columns 100 --max-lines 50 --output "$OUT")"; rc=$?
+echo "# terminal: a one-step terminal script, whose step runs the command in the engine's terminal from --cwd"
+mkdir -p "$WORK/repo"
+# terminal_script: the script the last terminal capture handed the engine,
+# which sits in a directory of the capture's own.
+terminal_script() { sed -n 's/.*\[screenshot\] \[\([^]]*\/terminal\.md\)\] \[--cwd\].*/\1/p' "$CALLLOG" | head -n 1; }
+CMD='cat marker; echo "to stderr" >&2; echo ran >ran; exit 3'
+out="$(run ENGINE_RUN=exited:3 -- terminal --command "$CMD" --cwd "$WORK/repo" --title 'gc-toolkit' --columns 100 --output "$OUT")"; rc=$?
 eq "$rc" 0 "a command that exits 3 still captures"
 has "captured $OUT (terminal, 1948x1132 px, " "$out" "it names the PNG"
-has "the command exited 3" "$out" "the last line gives the command's exit status"
-H="$(cat "$HANDED" 2>/dev/null)"
-has "from the reviewed tree" "$H" "the command ran in --cwd"
-has "to stderr" "$H" "stderr is captured with stdout"
-has "stdin closed" "$H" "the command reads no input"
-D=$(surface_dir)
-case "$D" in "$TMPD"/demo-screenshot.*/surface) printf 'ok   - %s\n' "the surface is served from a directory of the capture's own" ;; *) printf 'FAIL - %s\n     got: %s\n' "the surface is served from a directory of the capture's own" "$D"; FAIL=1 ;; esac
-has "node [$RENDERER] [terminal] [--text] [" "$(calls)" "the renderer draws the captured output"
-has "[--prompt] [$CMD] [--title] [gc-toolkit] [--columns] [100] [--max-lines] [50] [--output] [$D/index.html]" "$(calls)" "the command is the prompt line, the window options reach the renderer, and its page is the one served"
-has "node [$CLI] [screenshot] [$D.md] [--serve-dir] [$D] [--selector] [#surface] [--transparent] [-o] [$OUT] [--scale] [2]" "$(calls)" "the engine captures the drawn surface's element, with no page background, at a scale of 2"
-R=$(line_of "[$RENDERER]"); S=$(line_of "engine [screenshot]")
-ok "the surface is drawn before the engine captures it (renderer line $R, capture line $S)" "[ '$R' -gt 0 ] && [ '$S' -gt '$R' ]"
-has "drawn by the renderer" "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the renderer's"
-eq "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "# Demo: terminal
-**Start:** \`/\`
+has "the command exited 3" "$(printf '%s\n' "$out" | tail -n 1)" "the last line gives the command's exit status, as the engine's log reports it"
+ok "this script does not run the command itself" "[ ! -e '$WORK/repo/ran' ]"
+eq "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "# Demo: gc-toolkit
+
+**Terminal:** 100x30
 
 ## Steps
-1. **The surface is drawn**
-   _Prove:_ the surface is on the page \`visible #surface\`" "the engine's script opens the page and proves the surface is drawn"
-out="$(run -- terminal --text "$TXT" --output "$OUT")"; rc=$?
-eq "$rc" 0 "captured output renders"
-has "[--text] [$TXT]" "$(calls)" "the renderer gets the captured output's absolute path"
-hasnt "[--prompt]" "$(calls)" "output captured earlier has no prompt line"
-hasnt "exited" "$out" "no exit status is claimed for output this run did not produce"
-out="$(run RENDER_RC=1 -- terminal --text "$TXT" --output "$OUT")"; rc=$?
-eq "$rc" 1 "a renderer that fails exits 1"
-has "the renderer could not draw the terminal surface" "$out" "it says the surface was not drawn"
-hasnt "engine [screenshot]" "$(calls)" "nothing is captured without a drawn surface"
+
+1. **The command runs**
+   \`run $CMD\`" "the engine's script is a terminal --columns wide and 30 rows tall, titled --title, whose one step runs the command"
+TS=$(terminal_script)
+case "$TS" in "$TMPD"/demo-screenshot.*/terminal.md) printf 'ok   - %s\n' "the script is written in a directory of the capture's own" ;; *) printf 'FAIL - %s\n     got: %s\n' "the script is written in a directory of the capture's own" "$TS"; FAIL=1 ;; esac
+has "node [$CLI] [screenshot] [$TS] [--cwd] [$WORK/repo] [--full-page] [-o] [$OUT] [--scale] [2]" "$(calls)" "the engine's shell starts in --cwd, and the capture holds the whole session at a scale of 2"
+hasnt "[$RENDERER]" "$(calls)" "no renderer draws the terminal"
+hasnt "--serve-dir" "$(calls)" "the terminal is served by no directory"
+hasnt "--selector" "$(calls)" "the engine captures its own terminal window"
+out="$(run -- terminal --command 'ls -l' --output "$OUT")"; rc=$?
+eq "$rc" 0 "a command with no --cwd, --title or --columns captures"
+has "# Demo: ls -l" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "the window is titled with the command"
+has "**Terminal:** 120x30" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "the terminal is 120 columns wide"
+has "[--cwd] [$WORK] [--full-page]" "$(calls)" "the shell starts where this script was run"
+has "the command exited 0" "$out" "the last line gives the exit status"
+out="$(run -- terminal --command 'ls -l' --title '   ' --output "$OUT")"; rc=$?
+has "# Demo: ls -l" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "a blank --title titles the window with the command too"
+
+echo "# terminal: how the command ended, read from the engine's log"
+out="$(run ENGINE_RUN=took -- terminal --command 'node board.mjs' --output "$OUT")"; rc=$?
+eq "$rc" 0 "a full-screen program that holds the screen captures"
+has "the command took over the screen and was still running" "$(printf '%s\n' "$out" | tail -n 1)" "the last line says the program held the screen"
+out="$(run ENGINE_RUN=shell:4 -- terminal --command 'exit 4' --output "$OUT")"; rc=$?
+eq "$rc" 0 "a command that ends the shell captures"
+has "the command exited 4" "$out" "the shell's exit status is the command's"
+LOOKALIKE='echo the board took over the screen exited 5'
+out="$(run ENGINE_RUN=exited:0 -- terminal --command "$LOOKALIKE" --output "$OUT")"; rc=$?
+has "the command exited 0" "$out" "a command whose own text reads like an outcome is read by the status the engine gives after it"
+out="$(run ENGINE_RUN=took -- terminal --command "$LOOKALIKE" --output "$OUT")"; rc=$?
+has "the command took over the screen" "$out" "and the same command holding the screen reads as one that held it"
+out="$(run ENGINE_RUN=unsettled -- terminal --command 'read -r answer' --output "$OUT")"; rc=$?
+eq "$rc" 1 "a command the engine stopped waiting on exits 1"
+has "the command neither finished nor took over the screen before the engine stopped waiting on it" "$out" "it says the command did not end"
+has "showed no prompt within 60s" "$out" "the engine's reason reaches the caller"
+ok "its PNG, which shows the command unfinished, is removed" "[ ! -e '$OUT' ]"
+out="$(run ENGINE_RUN=none -- terminal --command ls --output "$OUT")"; rc=$?
+eq "$rc" 1 "a log that gives the command no outcome exits 1"
+has "the engine's log does not say how the command ended" "$out" "it says the outcome is unknown"
+ok "and its PNG is removed" "[ ! -e '$OUT' ]"
+
+echo "# terminal: output captured earlier, printed by cat"
+SPACED="$WORK/out put.txt"; printf 'line one\n' >"$SPACED"
+out="$(run -- terminal --text "$SPACED" --output "$OUT")"; rc=$?
+eq "$rc" 0 "captured output is printed and captured"
+has "   \`run cat out\\ put.txt\`" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "cat prints the file by its name, quoted for the shell"
+has "# Demo: out put.txt" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "the window is titled with the file's name"
+has "[--cwd] [$WORK] [--full-page]" "$(calls)" "the shell starts in the directory that holds the file"
+hasnt "exited" "$(printf '%s\n' "$out" | tail -n 1)" "no exit status is claimed for output this run did not produce"
+out="$(run ENGINE_RUN=exited:1 -- terminal --text "$TXT" --output "$OUT")"; rc=$?
+eq "$rc" 1 "output that cat could not print exits 1"
+has "the terminal could not print '$TXT' (cat exited 1)" "$out" "it says cat failed"
+ok "and its PNG is removed" "[ ! -e '$OUT' ]"
 
 echo "# markdown: GitHub's renderer, in the repository's context, then the renderer and the engine"
 out="$(run -- markdown --file "$MD" --repo octo/widgets --title 'Rendered comment' --expand --output "$OUT")"; rc=$?
@@ -434,7 +518,7 @@ eq "$rc" 1 "a markdown capture with no jq exits 1"
 has "jq not found; it builds the renderer's request" "$out" "it says jq is missing"
 eq "$(calls)" "" "nor before it says jq is missing"
 
-# --- the renderers, in a real node ------------------------------------------
+# --- the renderer, in a real node -------------------------------------------
 NODE_BIN=""
 for c in "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node; do
   [ -n "$c" ] && [ -x "$c" ] || continue
@@ -443,54 +527,13 @@ for c in "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/
   [ "$m" -ge 18 ] && { NODE_BIN="$c"; break; }
 done
 if [ -z "$NODE_BIN" ]; then
-  echo "# the renderers: SKIPPED (no Node 18 or later on this host)"
+  echo "# the renderer: SKIPPED (no Node 18 or later on this host)"
 else
-  echo "# the renderers ($NODE_BIN)"
+  echo "# the renderer ($NODE_BIN)"
   # js <expression>: what the expression evaluates to, with the renderer imported
   # as m and node's readFileSync as read.
   js() { "$NODE_BIN" --input-type=module -e "import * as m from '$RENDERER'; import { readFileSync as read } from 'node:fs'; const v = await ($1); process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v));" 2>&1; }
 
-  r=$(js "m.ansiToHtml('\x1b[1;32mok\x1b[0m plain').html")
-  eq "$r" '<span style="color:#0dbc79;font-weight:bold">ok</span> plain' "SGR colour and weight become a span, and a reset ends it"
-  r=$(js "m.ansiToHtml('\x1b[38;5;208ma\x1b[48;2;1;2;3mb\x1b[39;49m c').html")
-  eq "$r" '<span style="color:#ff8700">a</span><span style="color:#ff8700;background:#010203">b</span> c' "256-colour and truecolour, and 39/49 restore the defaults"
-  r=$(js "m.ansiToHtml('\x1b[7minv\x1b[27m').html")
-  eq "$r" '<span style="color:#1e1e1e;background:#cccccc">inv</span>' "inverse swaps the default colours"
-  r=$(js "m.ansiToHtml('a\x1b[2Kb\x1b]0;title\x07c\x1b(Bd').html")
-  eq "$r" 'abcd' "every escape that is not SGR draws nothing"
-  r=$(js "m.ansiToHtml('10%\r\x1b[31m50%\r100%').html")
-  eq "$r" '<span style="color:#cd3131">100%</span>' "a carriage return keeps the last redraw, with the styles earlier segments set"
-  r=$(js "m.ansiToHtml('abc\r\r\nnext\r').html")
-  eq "$r" 'abc
-next' "a carriage return that ends a line redraws nothing"
-  r=$(js "m.ansiToHtml('\x1b[38:2::1:2:3ma\x1b[48:5:208mb\x1b[39;49;4:3mc\x1b[4:0md').html")
-  eq "$r" '<span style="color:#010203">a</span><span style="color:#010203;background:#ff8700">b</span><span style="text-decoration:underline">c</span>d' "a colon joins one parameter's sub-parameters: a colour, an underline style"
-  r=$(js "m.ansiToHtml('\x1b[58;2;1;2;3ma\x1b[58:5:1mb\x1b[>4;2mc').html")
-  eq "$r" 'abc' "an underline colour is skipped, and a CSI with a private marker sets nothing"
-  r=$(js "m.ansiToHtml('<a href=\"x\">&</a>').html")
-  eq "$r" '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;' "text is HTML-escaped"
-  r=$(js "m.ansiToHtml('a\x07b\x08c\x00d').html")
-  eq "$r" 'abcd' "control bytes draw nothing"
-  r=$(js "m.ansiToHtml('ab\tc\nxyz').widest")
-  eq "$r" '9' "the widest line counts a tab to its next stop"
-  r=$(js "(() => { const o = m.ansiToHtml('1\n2\n3\n4\n', 2); return o.html + '|' + o.hidden; })()")
-  eq "$r" '1
-2|2' "lines past the cap are cut and counted, and a final newline is not a line"
-  r=$(js "m.terminalDocument({ text: 'x\n', prompt: 'ls -l', title: '<t>', maxLines: 1 })")
-  has '<span class="prompt">$</span> ls -l' "$r" "the command is the prompt line"
-  has '<div class="title">&lt;t&gt;</div>' "$r" "the title is escaped"
-  has 'width: 40ch' "$r" "a narrow output keeps the narrowest window"
-  hasnt 'more line(s)' "$r" "output within the cap shows no cut line"
-  has '<div class="terminal" id="surface">' "$r" "the terminal window is the surface a capture crops to"
-  hasnt '<script' "$r" "the terminal page carries no script"
-  r=$(js "m.terminalDocument({ text: 'a\nb\nc\n', maxLines: 1 })")
-  has '[2 more line(s) not shown]' "$r" "a cut says how many lines it hid"
-  r=$(js "m.terminalDocument({ text: 'x'.repeat(300) + '\n', columns: 100 })")
-  has 'width: 100ch' "$r" "a wide output wraps at --columns"
-  r=$(js "m.terminalDocument({ text: 'x'.repeat(300) + '\n', columns: 30 })")
-  has 'width: 30ch' "$r" "--columns below 40 is honoured"
-  r=$(js "m.terminalDocument({ text: 'x\n', columns: 30 })")
-  has 'width: 30ch' "$r" "even for a narrow output, which otherwise keeps 40"
   r=$(js "m.commentDocument({ fragment: '<details><summary>s</summary>x</details><detailsx>', title: 'a&b', expand: true })")
   has '<details open><summary>s</summary>' "$r" "--expand opens each <details>"
   has '</details><detailsx>' "$r" "an element merely named like details is left alone"
@@ -499,14 +542,16 @@ next' "a carriage return that ends a line redraws nothing"
   r=$(js "m.commentDocument({ fragment: '<details><summary>s</summary></details>' })")
   hasnt 'details open' "$r" "a <details> stays collapsed without --expand"
   hasnt '<div class="comment-header">' "$r" "no title draws no header"
-  r=$(js "(() => { try { m.parseArgs(['page', '--output', 'o.html', '--script', 'd.md']); return 'parsed'; } catch (e) { return e.message; } })()")
-  eq "$r" "a kind is required: terminal or markdown (got 'page')" "the renderer draws no page kind, which the engine drives itself"
-  r=$(js "(() => { try { m.parseArgs(['toString', '--output', 'o.html']); return 'parsed'; } catch (e) { return e.message; } })()")
-  eq "$r" "a kind is required: terminal or markdown (got 'toString')" "a name every object inherits is no kind"
-  r=$(js "(() => { try { m.parseArgs(['terminal', '--output', 'o.html', '--text', 't', '--html', 'h']); return 'parsed'; } catch (e) { return e.message; } })()")
-  eq "$r" 'terminal takes no --html' "the renderer refuses a flag of another kind"
-  r=$(js "m.parseArgs(['markdown', '--output', 'o.html', '--html', 'h', '--expand'])")
-  eq "$r" '{"kind":"markdown","output":"o.html","html":"h","expand":true}' "the renderer parses a markdown call"
+  r=$(js "m.parseArgs(['--output', 'o.html', '--html', 'h', '--title', 't', '--expand'])")
+  eq "$r" '{"output":"o.html","html":"h","title":"t","expand":true}' "the renderer parses a call"
+  r=$(js "(() => { try { m.parseArgs(['markdown', '--output', 'o.html', '--html', 'h']); return 'parsed'; } catch (e) { return e.message; } })()")
+  eq "$r" "unexpected argument 'markdown'" "the renderer takes no kind, since it draws one surface"
+  r=$(js "(() => { try { m.parseArgs(['--output', 'o.html', '--html', 'h', '--text', 't']); return 'parsed'; } catch (e) { return e.message; } })()")
+  eq "$r" 'unknown flag --text' "the renderer refuses a flag it does not take"
+  r=$(js "(() => { try { m.parseArgs(['--output', 'o.html', '--toString', 'x']); return 'parsed'; } catch (e) { return e.message; } })()")
+  eq "$r" 'unknown flag --toString' "a name every object inherits is no flag"
+  r=$(js "(() => { try { m.parseArgs(['--output', 'o.html']); return 'parsed'; } catch (e) { return e.message; } })()")
+  eq "$r" '--html is required' "the renderer needs the HTML it draws"
 
   # GitHub's markdown API output, kept verbatim. A mermaid fence comes back as
   # an enrichment section holding the fence's source and a loading spinner.
@@ -639,11 +684,10 @@ HTML
   eq "$order" 'true' "the muted colour follows the border rule it recolours, as in GitHub's stylesheet"
 
   # Run as a script, the renderer writes the page and nothing else.
-  printf '\033[31mred\033[0m\n' >"$TMPD/real.txt"
-  out=$("$NODE_BIN" "$RENDERER" terminal --text "$TMPD/real.txt" --output "$TMPD/real.html" --title t 2>&1); rc=$?
+  out=$("$NODE_BIN" "$RENDERER" --html "$TMPD/rule.html" --output "$TMPD/real.html" --title t 2>&1); rc=$?
   eq "$rc" 0 "the renderer exits 0 once the page is written"
   eq "$out" "" "the renderer prints nothing on success"
-  has '<span style="color:#cd3131">red</span>' "$(cat "$TMPD/real.html" 2>/dev/null)" "the page holds the rendered output"
+  has '<p dir="auto">Above the rule.</p>' "$(cat "$TMPD/real.html" 2>/dev/null)" "the page holds the comment"
   # Node runs a script from its real path, and the path it is run by can pass
   # through a symlink, as macOS's /var does to /private/var. Through a
   # symlinked directory, or a symlink to the file itself, the renderer still
@@ -652,22 +696,22 @@ HTML
   ln -s "$RENDERER" "$TMPD/linked.mjs"
   for via in "$TMPD/linked-dir/demo-screenshot.mjs" "$TMPD/linked.mjs"; do
     rm -f "$TMPD/linked.html"
-    out=$("$NODE_BIN" "$via" terminal --text "$TMPD/real.txt" --output "$TMPD/linked.html" 2>&1); rc=$?
+    out=$("$NODE_BIN" "$via" --html "$TMPD/rule.html" --output "$TMPD/linked.html" 2>&1); rc=$?
     eq "$rc" 0 "the renderer run as ${via#"$TMPD"/} exits 0"
-    has '<span style="color:#cd3131">red</span>' "$(cat "$TMPD/linked.html" 2>/dev/null)" "and writes its page"
+    has '<p dir="auto">Above the rule.</p>' "$(cat "$TMPD/linked.html" 2>/dev/null)" "and writes its page"
   done
   rm -f "$TMPD/linked.html"
-  "$NODE_BIN" --preserve-symlinks-main "$TMPD/linked-dir/demo-screenshot.mjs" terminal --text "$TMPD/real.txt" --output "$TMPD/linked.html" >/dev/null 2>&1
-  has '<span style="color:#cd3131">red</span>' "$(cat "$TMPD/linked.html" 2>/dev/null)" "so does one run under --preserve-symlinks-main, which keeps the symlink in its own URL"
+  "$NODE_BIN" --preserve-symlinks-main "$TMPD/linked-dir/demo-screenshot.mjs" --html "$TMPD/rule.html" --output "$TMPD/linked.html" >/dev/null 2>&1
+  has '<p dir="auto">Above the rule.</p>' "$(cat "$TMPD/linked.html" 2>/dev/null)" "so does one run under --preserve-symlinks-main, which keeps the symlink in its own URL"
   r=$("$NODE_BIN" --input-type=module -e "import * as m from '$RENDERER'; process.stdout.write(typeof m.parseArgs);" no-such-file 2>&1)
   eq "$r" 'function' "imported with an argument that names no file, the renderer only exports"
-  out=$("$NODE_BIN" "$RENDERER" terminal --output "$TMPD/real.html" 2>&1); rc=$?
+  out=$("$NODE_BIN" "$RENDERER" --output "$TMPD/real2.html" 2>&1); rc=$?
   eq "$rc" 2 "the renderer exits 2 on bad arguments"
-  has "terminal needs --text" "$out" "it names what is missing"
-  out=$("$NODE_BIN" "$RENDERER" markdown --html "$TMPD/nope.html" --output "$TMPD/real2.html" 2>&1); rc=$?
+  has "--html is required" "$out" "it names what is missing"
+  out=$("$NODE_BIN" "$RENDERER" --html "$TMPD/nope.html" --output "$TMPD/real2.html" 2>&1); rc=$?
   eq "$rc" 1 "the renderer exits 1 when its input cannot be read"
   ok "no page is written for input that cannot be read" "[ ! -e '$TMPD/real2.html' ]"
-  out=$("$NODE_BIN" "$RENDERER" markdown --html "$TMPD/mermaid.html" --output "$TMPD/refused.html" 2>&1); rc=$?
+  out=$("$NODE_BIN" "$RENDERER" --html "$TMPD/mermaid.html" --output "$TMPD/refused.html" 2>&1); rc=$?
   eq "$rc" 1 "the renderer exits 1 for a comment it refuses"
   has "demo-screenshot.mjs: github.com finishes part of this comment" "$out" "it says why"
   ok "no page is written for a refused comment" "[ ! -e '$TMPD/refused.html' ]"
@@ -697,10 +741,10 @@ HTML
   has '.markdown-body hr { height: 1px; margin: 24px 0; background-color: #d1d9e0; border: 0; padding: 0; }' "$(cat "$SERVED" 2>/dev/null)" "and as GitHub's stylesheet draws it: a 1px line in GitHub's border colour, 24px from the text around it"
 
   echo "# a capture from a symlinked checkout, through the real renderer"
-  out="$(SUT="$TMPD/linked-dir/demo-screenshot.sh" run REAL_NODE="$NODE_BIN" -- terminal --text "$TXT" --output "$OUT")"; rc=$?
-  eq "$rc" 0 "a terminal capture run from a symlinked checkout exits 0"
-  has "node [$TMPD/linked-dir/demo-screenshot.mjs] [terminal]" "$(calls)" "the renderer is run by its symlinked path"
-  has 'line one' "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the one the real renderer drew"
+  out="$(SUT="$TMPD/linked-dir/demo-screenshot.sh" run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/rule.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+  eq "$rc" 0 "a markdown capture run from a symlinked checkout exits 0"
+  has "node [$TMPD/linked-dir/demo-screenshot.mjs] [--html]" "$(calls)" "the renderer is run by its symlinked path"
+  has 'Above the rule.' "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the one the real renderer drew"
 fi
 
 echo
