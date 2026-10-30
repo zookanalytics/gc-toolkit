@@ -5,9 +5,9 @@
 #     --db, for beads carrying gc.step_ref in every status but closed, and
 #     lists a step only when its text names the script whole: no letter,
 #     digit, dot, dash or underscore on either side;
-#   - --check-merge takes the files the change removes from assets/scripts/,
-#     a rename's old path included, that the base still carries, and leaves
-#     tests out;
+#   - --check-merge takes the files the change removes from assets/scripts/
+#     and from a sub-pack's packs/<name>/assets/scripts/, a rename's old path
+#     included, that the base still carries, and leaves tests out;
 #   - a removed script that a formula at the base, at the head or at the
 #     checkout's HEAD still names, a sub-pack's formula included, exits 1
 #     before any store is read, since no wait clears it, and a checkout at the
@@ -94,7 +94,8 @@ step() { # id step_ref status assignee root description
     '{id: $id, status: $st, assignee: $as, description: $d, metadata: {"gc.step_ref": $ref, "gc.root_bead_id": $root}}'
 }
 callers_on() {
-  printf '[]' > "$STORES/harbor/.beads/steps.json"
+  printf '[%s]' "$(step hb-s1 mol-k.probe open "" hb-r1 'PROBE="$c/assets/scripts/sub-tool.sh"')" \
+    > "$STORES/harbor/.beads/steps.json"
   printf '[%s,%s,%s,%s,%s]' \
     "$(step ws-s1 mol-a.load open "" ws-r1 "$(printf 'Run:\n"$SCRIPTS/old-tool.sh" --flag')")" \
     "$(step ws-s2 mol-a.submit in_progress worker-1 ws-r1 'x=$(gc kit scripts-dir)/old-tool.sh')" \
@@ -167,6 +168,9 @@ git init -q "$REPO"
 put assets/scripts/old-tool.sh '#!/bin/sh'
 put assets/scripts/keep.sh '#!/bin/sh'
 put assets/scripts/old-tool.test.sh '#!/bin/sh'
+put packs/sub/assets/scripts/sub-tool.sh '#!/bin/sh'
+put packs/sub/assets/scripts/sub-tool.test.sh '#!/bin/sh'
+put packs/sub/docs/notes.md 'how sub-tool.sh runs'
 put formulas/mol-a.toml 'run = "$SCRIPTS/keep.sh"'
 put formulas/mol-b.toml 'run = "$SCRIPTS/old-tool.sh"'
 put docs/notes.md 'old-tool.sh is documented here'
@@ -185,7 +189,8 @@ G checkout -q main; G checkout -q -b head-names
 G rm -q assets/scripts/old-tool.sh
 put formulas/mol-c.toml 'run = "$SCRIPTS/old-tool.sh"'
 G add -A; G commit -qm head-names
-G checkout -q main; G checkout -q -b tests-only; G rm -q assets/scripts/old-tool.test.sh; G commit -qm tests-only
+G checkout -q main; G checkout -q -b tests-only
+G rm -q assets/scripts/old-tool.test.sh packs/sub/assets/scripts/sub-tool.test.sh; G commit -qm tests-only
 G checkout -q main; G checkout -q -b rename; G mv assets/scripts/old-tool.sh assets/scripts/new-tool.sh; G commit -qm rename
 G checkout -q main; G checkout -q -b edit-only; put assets/scripts/keep.sh '#!/bin/sh
 true'; G commit -qam edit-only
@@ -195,6 +200,12 @@ put packs/sub/formulas/mol-s.toml 'run = "$SCRIPTS/old-tool.sh"'
 G add -A; G commit -qm subpack
 G checkout -q -b subpack-delete; G rm -q assets/scripts/old-tool.sh; G commit -qm subpack-delete
 G checkout -q main; G checkout -q -b main-dropped; G rm -q assets/scripts/keep.sh; G commit -qm main-dropped
+G checkout -q main; G checkout -q -b sub-delete; G rm -q packs/sub/assets/scripts/sub-tool.sh; G commit -qm sub-delete
+G checkout -q main; G checkout -q -b sub-doc-drop; G rm -q packs/sub/docs/notes.md; G commit -qm sub-doc-drop
+G checkout -q main; G checkout -q -b sub-named
+G rm -q packs/sub/assets/scripts/sub-tool.sh
+put packs/sub/formulas/mol-t.toml 'run = "$PACK/assets/scripts/sub-tool.sh"'
+G add -A; G commit -qm sub-named
 G checkout -q main
 
 callers_on; : > "$STUB_GC_LOG"
@@ -204,7 +215,7 @@ has "$out" "the merge removes no pack script" "...and says so"
 eq "$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0" "...without reading a store"
 
 run --root "$REPO" --check-merge main tests-only
-eq "$rc" "0" "removing a test is not removing a script"
+eq "$rc" "0" "removing a test, the pack's or a sub-pack's, is not removing a script"
 has "$out" "the merge removes no pack script" "...so nothing is asked about it"
 
 run --root "$REPO" --check-merge main-dropped drop-keep
@@ -239,6 +250,24 @@ has "$(cat "$STUB_GC_LOG")" "--desc-contains old-tool.sh" "...asking the stores 
 run --root "$REPO" --check-merge main rename
 eq "$rc" "3" "a rename removes the old path"
 has "$out" "(assets/scripts/old-tool.sh)" "...which is the path the callers lose"
+
+# A sub-pack's formulas call the scripts it ships beside them.
+run --root "$REPO" --check-merge main sub-named
+eq "$rc" "1" "removing a sub-pack's script that a formula still names exits 1"
+has "$out" "packs/sub/assets/scripts/sub-tool.sh: the merge removes it, and packs/sub/formulas/mol-t.toml at the head (sub-named) still names it" \
+  "...naming the script by its path in the sub-pack"
+: > "$STUB_GC_LOG"
+run --root "$REPO" --check-merge main sub-delete
+eq "$rc" "3" "removing a sub-pack's script that open steps call exits 3"
+has "$out" "sub-tool.sh: step hb-s1 (mol-k.probe, open, unassigned) in run hb-r1, store of rig harbor" "...listing its caller"
+has "$(printf '%s\n' "$out" | head -1)" "1 open step(s) call a script the merge removes (packs/sub/assets/scripts/sub-tool.sh)" \
+  "...under a headline naming its path"
+has "$(cat "$STUB_GC_LOG")" "--desc-contains sub-tool.sh" "...asking the stores by its file name"
+: > "$STUB_GC_LOG"
+run --root "$REPO" --check-merge main sub-doc-drop
+eq "$rc" "0" "a sub-pack's file outside its assets/scripts/ is not a script"
+has "$out" "the merge removes no pack script" "...so nothing is asked about it"
+eq "$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0" "...and no store is read"
 
 # The city pours from the checkout it imports the pack from, which reaches the
 # base only when it is fast-forwarded.

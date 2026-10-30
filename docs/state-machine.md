@@ -737,7 +737,7 @@ ones.
 
 | Value | Meaning |
 |---|---|
-| `progressing` | some automated actor will act: one holds a live blocker, a declared lane is short of green, a required check is still running, or a conflicting branch waits on its merge-in rework |
+| `progressing` | some automated actor will act: one holds a live blocker, a declared lane is short of green, a required check is still running, a conflicting branch waits on its merge-in rework, or the merge waits for open runs that call a pack script it removes |
 | `settled` | every declared check derives `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `blocked` | a hold no automated actor will clear and no review verdict is owed on. The cause rides `pr.machine_cause` as one of the values below and `pr.machine_reason` as a sentence, and the board and the `status:` label show it as needs-attention rather than folding it into the awaiting-review tail |
 

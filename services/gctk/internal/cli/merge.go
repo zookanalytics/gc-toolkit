@@ -861,7 +861,8 @@ func (m *merger) handle(row *gcbd.Bead) {
 	// A run keeps the step text it was poured with and calls the pack's scripts
 	// from the city's copy of the pack, so a removed script stops every open
 	// step that names it once the merge reaches that copy. A formula that still
-	// names it is the change's to fix; open steps that call it end on their own.
+	// names it is the change's to fix. Open steps that call it hold the merge
+	// until their runs end, with nothing on the PR to change.
 	if checkCallers {
 		scOut, scRC := runCombined("bash", callers, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
 		switch scRC {

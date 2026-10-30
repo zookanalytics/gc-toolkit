@@ -8,10 +8,10 @@
 #                  file name (foo.sh), one line per step: the script, the step
 #                  with its step ref, status and assignee, the run's root, and
 #                  the rig whose store holds it.
-#   --check-merge  the files under assets/scripts/ that merging <head> into
-#                  <base> removes, tests aside, and for each the formulas at
-#                  <base>, at <head> or at the checkout's HEAD that still name
-#                  it and the open steps that call it.
+#   --check-merge  the pack scripts that merging <head> into <base> removes,
+#                  and for each the formulas at <base>, at <head> or at the
+#                  checkout's HEAD that still name it and the open steps that
+#                  call it.
 #   --root <dir>   the repository <base> and <head> are read in, the current
 #                  directory's by default.
 #
@@ -33,8 +33,10 @@
 # A text names a script when it holds the file name with no letter, digit,
 # dot, dash or underscore on either side. A step is a bead carrying
 # gc.step_ref, in any status but closed. The stores are those of every rig
-# `gc rig list` names, the city's own among them. The formulas are the files
-# under formulas/ and under each sub-pack's packs/<name>/formulas/.
+# `gc rig list` names, the city's own among them. The pack scripts are the
+# files under assets/scripts/ and under each sub-pack's
+# packs/<name>/assets/scripts/, tests aside. The formulas are the files under
+# formulas/ and under each sub-pack's packs/<name>/formulas/.
 #
 # Callers: gctk merge (services/gctk/internal/cli/merge.go), which holds a pull
 # request's merge on every exit but 0, and anyone about to remove a script.
@@ -136,13 +138,14 @@ git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || fail "not a git repository
 BASE_OID=$(git -C "$ROOT" rev-parse --verify --quiet "$MERGE_BASE^{commit}") || fail "'$MERGE_BASE' names no commit in $ROOT; fetch it first"
 HEAD_OID=$(git -C "$ROOT" rev-parse --verify --quiet "$MERGE_HEAD^{commit}") || fail "'$MERGE_HEAD' names no commit in $ROOT; fetch it first"
 CHECKOUT_OID=$(git -C "$ROOT" rev-parse --verify --quiet "HEAD^{commit}") || fail "the checkout in $ROOT has no HEAD commit"
-# The change's own deletions, from where it left <base>, that <base> still
-# carries. A rename deletes the old path.
-REMOVED=$(git -C "$ROOT" diff --name-only --no-renames --diff-filter=D "$MERGE_BASE...$MERGE_HEAD" -- assets/scripts) \
+# The change's own deletions of pack scripts, from where it left <base>, that
+# <base> still carries. A rename deletes the old path.
+REMOVED=$(git -C "$ROOT" diff --name-only --no-renames --diff-filter=D "$MERGE_BASE...$MERGE_HEAD" -- assets/scripts packs) \
   || fail "cannot list what '$MERGE_HEAD' removes from '$MERGE_BASE'"
 PATHS=(); NAMES=(); NREMOVED=0
 while IFS= read -r p; do
-  case "$p" in ''|*.test.sh|*/testdata/*) continue ;; esac
+  case "$p" in assets/scripts/*|packs/*/assets/scripts/*) ;; *) continue ;; esac
+  case "$p" in *.test.sh|*/testdata/*) continue ;; esac
   git -C "$ROOT" cat-file -e "$MERGE_BASE:$p" 2>/dev/null || continue
   PATHS+=("$p"); NAMES+=("${p##*/}"); NREMOVED=$((NREMOVED + 1))
 done <<< "$REMOVED"

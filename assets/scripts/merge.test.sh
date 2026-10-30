@@ -1389,7 +1389,7 @@ out=$("$SUT" 2>&1)
 has "$out" "PR#93 removes a pack script open steps still call; merge held until their runs end" "a removed script open steps call holds"
 has "$out" "2 open step(s) call a script the merge removes" "…quoting the count"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
-eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no visit, since the runs end on their own"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no visit, since nothing on the PR has to change"
 has "$(meta C3 pr.machine)" "progressing@sha-93" "…and the machine axis says the city is moving it"
 
 store "[$(anchor C4 94), $(rev C4)]"

@@ -244,18 +244,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pack as each step runs. A merge that removes a script, a rename's old
    path included, stops every open step that names it once that copy takes the
    merge. `script-callers.sh --check-merge` reads the same two fetched commits
-   and takes the files under `assets/scripts/` the change removes that the base
-   still carries, tests aside. A formula that still names one keeps pouring
-   runs that call it, so no wait clears it. That is a formula at the base, at
-   the head, or at the rig checkout's HEAD, which the city pours its runs from
-   until the checkout is fast-forwarded. The arm then holds the merge and files
-   one visit per PR under `script-callers-merge-gate.<n>`. The way out is to
-   keep a file at the path, a hand-off to what replaces the script, and remove
-   it in a later change. Open
-   steps in any store of the city that call a removed script hold the merge
-   until their runs end, and the arm records the anchor as `progressing`, since
-   those runs end with no one acting. A check that cannot read a revision, the
-   rig list or a store holds the merge for the pass.
+   and takes the files the change removes, from `assets/scripts/` and from each
+   sub-pack's `packs/<name>/assets/scripts/`, that the base still carries,
+   tests aside. A formula that still names one keeps pouring runs that call
+   it, so no wait clears it. That is a formula at the base, at the head, or at
+   the rig checkout's HEAD, which the city pours its runs from until the
+   checkout is fast-forwarded. The arm then holds the merge and files one visit
+   per PR under `script-callers-merge-gate.<n>`. The way out is to keep a file
+   at the path, a hand-off to what replaces the script, and remove it in a
+   later change. Open steps in any store of the city that call a removed script
+   hold the merge until their runs end. Nothing on the PR has to change for
+   that, so the arm files no visit and records the anchor as `progressing`. A
+   run parked behind a person's gate ends only once that gate is released or
+   the run is cancelled, and the merge waits that long.
+   `script-callers.sh <script>` lists each calling step with its run and the
+   rig whose store holds it. A check that cannot read a revision, the rig list
+   or a store holds the merge for the pass.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of

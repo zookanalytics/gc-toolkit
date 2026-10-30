@@ -83,7 +83,8 @@ A molecule keeps the step text it was poured with, while the scripts that text
 calls are read from the installed pack when the step runs. So a pack script that
 open step text names stays callable under that name until no open step bead
 names it. The merge enforces it: `gctk merge` holds a change that removes a
-script under `assets/scripts/` while a formula at its base, at its head or at
+script under `assets/scripts/`, or under a sub-pack's
+`packs/<name>/assets/scripts/`, while a formula at its base, at its head or at
 the checkout the city pours from names it, or while an open step in any store
 of the city calls it
 ([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2). A change that
