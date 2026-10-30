@@ -14,11 +14,14 @@ open, and why the review went out. One sling pours the two lanes and the
 synthesis, so all three read the same commit.
 
 The mol-review hard contract is preserved intact: ONE verdict per claim — the
-synthesis makes the single signoff.sh call and the lanes never call it; the
-verdict is posted as a COMMENT, never a GitHub approval (signoff.sh owns
-that). The lanes add reviewer breadth on a second
-provider; the check, the finding beads, and the rework child are the same
-machinery mol-review hands to.
+synthesis makes the single signoff.sh call, and neither the lanes nor any
+subagent a lane or the synthesis runs ever calls it; the verdict is posted as
+a COMMENT, never a GitHub approval (signoff.sh owns that). Every subagent is
+read-only in the review's workspace and returns what it found to the agent
+that ran it. The lanes add reviewer breadth on a second provider, and a lane
+may itself fan out to subagents, which write no lane output of their own, so
+the quorum keeps its two lanes, one per provider. The check, the finding
+beads, and the rework child are the same machinery mol-review hands to.
 
 Lane routing is per-step: each lane carries gc.run_target / gc.provider, so
 the two lanes land on two provider pools and each runs on its pool's default
@@ -140,9 +143,10 @@ done
 ```
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
-page when one is open, the rig's guidance for this check, and the path of the
-review's worktree at `{{reviewed_oid}}`, which the two lanes and the synthesis
-share. Read the change there with git, read-only: its diff is
+page when one is open, the rig's guidance for this check, what `gctk rig`
+recorded at `{{reviewed_oid}}`, and the path of the review's worktree at that
+commit, which the two lanes and the synthesis share. Read the change there
+with git, read-only: its diff is
 `git diff origin/{{review_base}}...HEAD`. When the block exits non-zero, review
 nothing, as for a missing key: write a `blocked` lane output whose summary
 names what failed, and close this step.
@@ -151,9 +155,7 @@ names what failed, and close this step.
 RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -167,6 +169,8 @@ if [ -n "{{review_pr_url}}" ]; then
 fi
 echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
 "$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== What gctk rig recorded at {{reviewed_oid}}"
+"$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
 echo "== The review's worktree: $WT"
 # <<< review-gather
@@ -200,10 +204,18 @@ A lane reads what the method reads and judges as the method does, and runs
 nothing the method runs, anywhere: not at the reviewed commit and not against
 the pre-change code. The synthesis step runs all of that once for the quorum,
 and a finding that depends on its result is the synthesis's to confirm. Where
-the method passes a flag or approves with `--needs-you`, say so in your
-summary for the synthesis. Record a mutation baseline with
-`git status --porcelain=v1 -z` in the worktree before and after, and report any
-delta you introduced (there should be none).
+the method passes a flag, approves with `--needs-you` or puts a line in the
+trail, say so in your summary for the synthesis. Record a mutation baseline
+with `git status --porcelain=v1 -z` in the worktree before and after, and
+report any delta you introduced (there should be none).
+
+<!-- >>> review-subagents -->
+The check's method may hand part of the reading to subagents, where your
+provider offers them. Every subagent is read-only in the review's workspace:
+it runs nothing the method runs, changes nothing there or anywhere else, and
+never calls signoff.sh. It returns what it found to you, and you judge it and
+write every finding yourself.
+<!-- <<< review-subagents -->
 
 **4. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
@@ -216,9 +228,7 @@ why it matters / the fix, `file`, and `line` or range), `evidence` (what you
 read), `read_only_enforcement` (`baseline_command`, `after_command`,
 `passed`), `mutations_delta` (empty if none).
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack}"
 # LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
 # you (a direct single-step claim, so the claimed id IS this lane step). Write
@@ -266,9 +276,10 @@ done
 ```
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
-page when one is open, the rig's guidance for this check, and the path of the
-review's worktree at `{{reviewed_oid}}`, which the two lanes and the synthesis
-share. Read the change there with git, read-only: its diff is
+page when one is open, the rig's guidance for this check, what `gctk rig`
+recorded at `{{reviewed_oid}}`, and the path of the review's worktree at that
+commit, which the two lanes and the synthesis share. Read the change there
+with git, read-only: its diff is
 `git diff origin/{{review_base}}...HEAD`. When the block exits non-zero, review
 nothing, as for a missing key: write a `blocked` lane output whose summary
 names what failed, and close this step.
@@ -277,9 +288,7 @@ names what failed, and close this step.
 RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -293,6 +302,8 @@ if [ -n "{{review_pr_url}}" ]; then
 fi
 echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
 "$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== What gctk rig recorded at {{reviewed_oid}}"
+"$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
 echo "== The review's worktree: $WT"
 # <<< review-gather
@@ -326,10 +337,18 @@ A lane reads what the method reads and judges as the method does, and runs
 nothing the method runs, anywhere: not at the reviewed commit and not against
 the pre-change code. The synthesis step runs all of that once for the quorum,
 and a finding that depends on its result is the synthesis's to confirm. Where
-the method passes a flag or approves with `--needs-you`, say so in your
-summary for the synthesis. Record a mutation baseline with
-`git status --porcelain=v1 -z` in the worktree before and after, and report any
-delta you introduced (there should be none).
+the method passes a flag, approves with `--needs-you` or puts a line in the
+trail, say so in your summary for the synthesis. Record a mutation baseline
+with `git status --porcelain=v1 -z` in the worktree before and after, and
+report any delta you introduced (there should be none).
+
+<!-- >>> review-subagents -->
+The check's method may hand part of the reading to subagents, where your
+provider offers them. Every subagent is read-only in the review's workspace:
+it runs nothing the method runs, changes nothing there or anywhere else, and
+never calls signoff.sh. It returns what it found to you, and you judge it and
+write every finding yourself.
+<!-- <<< review-subagents -->
 
 **4. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
@@ -342,9 +361,7 @@ why it matters / the fix, `file`, and `line` or range), `evidence` (what you
 read), `read_only_enforcement` (`baseline_command`, `after_command`,
 `passed`), `mutations_delta` (empty if none).
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack}"
 # LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
 # you (a direct single-step claim, so the claimed id IS this lane step). Write
@@ -410,9 +427,7 @@ rather than approve on one lane.
 RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -426,6 +441,8 @@ if [ -n "{{review_pr_url}}" ]; then
 fi
 echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
 "$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== What gctk rig recorded at {{reviewed_oid}}"
+"$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
 echo "== The review's worktree: $WT"
 # <<< review-gather
@@ -462,6 +479,14 @@ bead_id your gc hook --claim returned for this step> -- <command>`, from the
 pack's scripts the gather printed. Anything else you write to disk goes in the
 review's workspace, beside the worktree.
 
+<!-- >>> review-subagents -->
+The check's method may hand part of the reading to subagents, where your
+provider offers them. Every subagent is read-only in the review's workspace:
+it runs nothing the method runs, changes nothing there or anywhere else, and
+never calls signoff.sh. It returns what it found to you, and you judge it and
+write every finding yourself.
+<!-- <<< review-subagents -->
+
 **5. Synthesize the verdict body.** UNION the lanes' findings, then dedupe
 those that are the same defect at the same locus, keeping lane provenance. A
 finding either lane raises as blocking under the method that survives your
@@ -471,36 +496,32 @@ lanes and your own run, else `request-changes`. Write the body to
 self-contained because pre-open it is the PR's opening comment, and note in
 the trail which lanes covered what and any reduced coverage.
 
-**6. Emit `findings.json`** beside it, one `{locus, message}` per blocking
-finding and `[]` on approve, exactly as `formulas/mol-review.toml`'s `review`
-step 5b specifies.
+**6. Emit `findings.json`** beside it, every finding that stands for the
+quorum, exactly as `formulas/mol-review.toml`'s `review` step 5b specifies.
 
 **7. One call, through the one writer.** The verdict names `{{reviewed_oid}}`,
 the commit the quorum read, and signoff.sh refuses any other. Pass every flag
 the method names for the verdict, and `--needs-you` when a decision is the
-operator's; a call refused for a missing or invalid flag wrote nothing, so
-re-run it corrected. Never post the review yourself, write to the anchor, file
-beads, or run `gh pr review --approve`.
+operator's; a call refused for a missing or invalid flag, or for a finding set
+whose problems it lists, wrote nothing, so re-run it corrected. Never post the
+review yourself, write to the anchor, file beads, or run
+`gh pr review --approve`.
 ```bash
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/signoff.sh" ] || SCRIPTS=""
 "${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
 ```
 
 **8. Failure arms** are mol-review's `verdict-and-drain` arms: after a
 `superseded` or `already closed` exit, close the chain and drain; after any
-other failure, part 3's gather included, append your findings to the review
-bead (`--append-notes`), close the chain, then restore its route from
-`metadata.review_pool` and drain.
+other failure, part 3's gather included, append `findings.md` and
+`findings.json` to the review bead (`--append-notes`), close the chain, then
+restore its route from `metadata.review_pool` and drain.
 
 **9. Close the chain forward, remove the workspace, then drain.** Close every
 step through step-close.sh in forward order; the lanes closed their own beads,
 so those report "not this session's to close". Never close `workflow-finalize`.
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack}"
 for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
   "$SC" --step "mol-review-quorum-signoff.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"

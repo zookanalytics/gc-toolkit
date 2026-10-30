@@ -94,7 +94,7 @@ words, and editing one does not desync a convention or turn a suite red.
 The wider sweep is its own job, and a costly one to specify. A pattern over
 short hyphenated tokens cannot find its targets here, because the pack's
 scripts are full of synthetic fixture ids of exactly that shape — `tk-work`,
-`tk-foreign`, `tk-abc12`, `lx-codex` — which outnumber the real citations by
+`tk-foreign`, `tk-abc12`, `hq-codex` — which outnumber the real citations by
 more than an order of magnitude. Separating a citation from a fixture is a
 reading task, not a matching one.
 

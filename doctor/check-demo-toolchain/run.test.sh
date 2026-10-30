@@ -4,7 +4,8 @@
 # only a stub dir plus a minimal symlink farm of the coreutils it calls, never
 # /usr/bin, so no host node, gc, ffmpeg, jq, or gh is reachable and each case
 # stubs back exactly what it means to be present. env -i keeps an ambient
-# OPENAI_API_KEY, FFMPEG_BIN, or GC_HOME from leaking in.
+# OPENAI_API_KEY, VERCEL_AUTOMATION_BYPASS_SECRET, GC_SUPERVISOR_ENV, FFMPEG_BIN,
+# or GC_HOME from leaking in.
 
 set -u
 
@@ -24,10 +25,10 @@ STUBS="$TMP/bin"; mkdir -p "$STUBS"
 # ffmpeg-static branch (alongside gc), so symlink the real one in.
 if command -v jq >/dev/null 2>&1; then ln -s "$(command -v jq)" "$STUBS/jq"; fi
 # The check's PATH carries only the stub dir and a symlink farm of the coreutils
-# it calls — never /usr/bin, so a host tool there cannot stand in for a stub a
-# case leaves out.
+# it calls, rig-map.sh's among them — never /usr/bin, so a host tool there
+# cannot stand in for a stub a case leaves out.
 COREUTILS="$TMP/coreutils"; mkdir -p "$COREUTILS"
-for c in bash sed grep head; do
+for c in bash sed grep head dirname tr mktemp cut rm; do
   p="$(command -v "$c")" || { echo "test setup: required coreutil '$c' not found" >&2; exit 2; }
   ln -s "$p" "$COREUTILS/$c"
 done
@@ -106,7 +107,7 @@ OUT="$(run_check "$HOME_KEY")"; RC=$?   # no OPENAI_API_KEY in env
 eq "$RC" 1 "case4: key only in the secrets file exits Warning"
 has "$OUT" "OPENAI_API_KEY is in $HOME_KEY/.gc/secrets.env but not in this environment" "case4: names the file that holds the key"
 has "$OUT" "gc supervisor install" "case4: names the command that carries the key to sessions"
-hasnt "$OUT" "is not set" "case4: does not report a placed key as missing"
+hasnt "$OUT" "OPENAI_API_KEY is not set" "case4: does not report a placed key as missing"
 hasnt "$OUT" "sk-fixture-value" "case4: never prints the key value"
 
 # --- Case 5: node present but below the floor → Warning ------------------
@@ -149,6 +150,81 @@ for form in 'OPENAI_API_KEY=' 'OPENAI_API_KEY=""' "OPENAI_API_KEY=''" '# OPENAI_
 ")"
   OUT="$(run_env HOME="$HOME_BARE" GC_HOME="$GCH")"
   has "$OUT" "OPENAI_API_KEY is not set" "case8: no usable key reads as not set: $form"
+done
+
+# --- Case 9: the Vercel key in this environment → OK, named ---------------
+stub_rest
+OUT="$(run_env HOME="$HOME_KEY" OPENAI_API_KEY=sk-env-value VERCEL_AUTOMATION_BYPASS_SECRET=vercel-env-value)"; RC=$?
+eq "$RC" 0 "case9: the Vercel key in this environment exits OK"
+has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET (environment)" "case9: names the Vercel key as reaching this environment"
+hasnt "$OUT" "not set" "case9: reports no absent key"
+hasnt "$OUT" "vercel-env-value" "case9: never prints the key value"
+
+# --- Case 10: the Vercel key only in the secrets file → Warning naming the opt-in ---
+# The key has no provider prefix, so the file carries it into sessions only when
+# GC_SUPERVISOR_ENV names it. The fix names that opt-in, set where the city's
+# setup gives the supervisor install its environment, and never a shell profile.
+stub_rest
+GCH="$(gc_home vercel 'OPENAI_API_KEY=sk-fixture-value
+VERCEL_AUTOMATION_BYPASS_SECRET=vercel-fixture-value
+')"
+OUT="$(run_env HOME="$HOME_BARE" GC_HOME="$GCH" OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 1 "case10: the Vercel key only in the secrets file exits Warning"
+has "$OUT" "incomplete — 1 item(s) to provision" "case10: counts the stranded key as the one item"
+has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET is in $GCH/secrets.env but not in this environment" "case10: names the file that holds the key"
+has "$OUT" "GC_SUPERVISOR_ENV here does not name it" "case10: says this environment's opt-in list does not name the key"
+has "$OUT" "Add the key, and GC_SUPERVISOR_ENV itself, to the GC_SUPERVISOR_ENV list the city's setup gives that install" "case10: names the opt-in, set through the city's setup, as the fix"
+hasnt "$OUT" "profile" "case10: tells no one to edit a shell profile"
+hasnt "$OUT" "is not set" "case10: does not report a placed key as missing"
+hasnt "$OUT" "vercel-fixture-value" "case10: never prints the key value"
+# A list naming only a longer key with the same stem does not opt this key in.
+OUT="$(run_env HOME="$HOME_BARE" GC_HOME="$GCH" OPENAI_API_KEY=sk-env-value GC_SUPERVISOR_ENV=GC_SUPERVISOR_ENV,VERCEL_AUTOMATION_BYPASS_SECRET_OLD)"; RC=$?
+eq "$RC" 1 "case10: a longer key in GC_SUPERVISOR_ENV leaves the key stranded"
+has "$OUT" "GC_SUPERVISOR_ENV here does not name it" "case10: a longer key's name is not this key's opt-in"
+
+# --- Case 11: in the secrets file and opted in, yet not here → Warning: reinstall ---
+# GC_SUPERVISOR_ENV already names the key, so the opt-in is in place, and what
+# is owed is the install that copies the key from the file into the service env.
+# gascity splits the list on commas, semicolons and whitespace.
+for list in 'GC_SUPERVISOR_ENV,VERCEL_AUTOMATION_BYPASS_SECRET' 'GC_SUPERVISOR_ENV VERCEL_AUTOMATION_BYPASS_SECRET' 'VERCEL_AUTOMATION_BYPASS_SECRET;GC_SUPERVISOR_ENV'; do
+  OUT="$(run_env HOME="$HOME_BARE" GC_HOME="$GCH" OPENAI_API_KEY=sk-env-value GC_SUPERVISOR_ENV="$list")"; RC=$?
+  eq "$RC" 1 "case11: an opted-in key this environment lacks exits Warning: $list"
+  has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET is in $GCH/secrets.env and GC_SUPERVISOR_ENV here names it" "case11: reads the opt-in list as gascity splits it: $list"
+  has "$OUT" "'gc supervisor install' runs with GC_SUPERVISOR_ENV naming it, so run the install again" "case11: names the install as the fix: $list"
+  hasnt "$OUT" "Add the key" "case11: asks for no opt-in already in place: $list"
+  hasnt "$OUT" "vercel-fixture-value" "case11: never prints the key value: $list"
+done
+
+# --- Case 12: the Vercel key set nowhere → reported, not an item ----------
+# The report says only that the key is absent, and claims nothing about what a
+# capture does with it.
+stub_rest
+OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?   # HOME_KEY's file holds no Vercel key
+eq "$RC" 0 "case12: an absent Vercel key leaves the check OK"
+has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET (not set)" "case12: the OK line reports the key absent"
+NOTE="$(printf '%s\n' "$OUT" | grep -F 'VERCEL_AUTOMATION_BYPASS_SECRET is not set')"
+eq "$NOTE" "  - VERCEL_AUTOMATION_BYPASS_SECRET is not set (checked the environment and $HOME_KEY/.gc/secrets.env). A key set nowhere is reported and not counted as an item." "case12: a detail line says only that the key is absent, and where the check looked"
+clear_stubs; stub_node 22.18.0; stub_gh 2.99.0   # no ffmpeg, so one item
+OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
+eq "$RC" 1 "case12: with another gap the check warns"
+has "$OUT" "incomplete — 1 item(s) to provision" "case12: the absent key is not counted"
+has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET is not set" "case12: the absent key is still reported"
+
+# --- Case 13: the Vercel key's file probe follows the same dotenv grammar ---
+stub_rest
+for form in 'export VERCEL_AUTOMATION_BYPASS_SECRET=vercel-fixture-value' "  VERCEL_AUTOMATION_BYPASS_SECRET = 'vercel-fixture-value'"; do
+  GCH="$(gc_home vform "$form
+")"
+  OUT="$(run_env HOME="$HOME_BARE" GC_HOME="$GCH" OPENAI_API_KEY=sk-env-value)"; RC=$?
+  eq "$RC" 1 "case13: a set key exits Warning: $form"
+  has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET is in $GCH/secrets.env" "case13: a set key reads as placed: $form"
+done
+for form in 'VERCEL_AUTOMATION_BYPASS_SECRET=' '# VERCEL_AUTOMATION_BYPASS_SECRET=vercel-fixture-value' 'VERCEL_AUTOMATION_BYPASS_SECRET_OLD=vercel-fixture-value'; do
+  GCH="$(gc_home vform "$form
+")"
+  OUT="$(run_env HOME="$HOME_BARE" GC_HOME="$GCH" OPENAI_API_KEY=sk-env-value)"; RC=$?
+  eq "$RC" 0 "case13: no usable key leaves the check OK: $form"
+  has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET is not set" "case13: no usable key reads as not set: $form"
 done
 
 echo "check-demo-toolchain: $PASS passed, $FAIL failed"

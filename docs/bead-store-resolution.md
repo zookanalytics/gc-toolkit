@@ -17,8 +17,8 @@ to reading: given an id, which store answers for it, and what its silence means.
 
 ## A lookup resolves a live id but not its absence
 
-Every bead id begins with a prefix its store owns — `tk-` for gc-toolkit,
-`su-` for shutupandlisten, `lx-` for the city's own store. The prefix is the
+Every bead id begins with a prefix its store owns: `tk-` for gc-toolkit, and
+another rig's prefix or the city store's for each of theirs. The prefix is the
 whole of that binding, and nothing else in a lookup carries it. An unpinned
 `gc bd show` resolves a live id from whichever store holds it, wherever the
 caller stands. What it cannot carry is an absence: a miss is answered by the
@@ -79,8 +79,8 @@ its `key=value` argument never parses as a bare id.
 
 The failure is not the empty answer. It is a gate that reads one as
 permission: no owning bead, so nothing is protected, so delete. A prune run
-from inside a `tk-` rig that reads a `su-` bead's ambient-store miss as its
-absence takes a whole live rig's worktrees for unowned.
+from inside a `tk-` rig that reads the ambient-store miss on another rig's
+bead as its absence takes a whole live rig's worktrees for unowned.
 
 So any gate whose next act is destructive — worktree prune or reclaim,
 witness salvage, source disposal — resolves the owning store from the id
@@ -166,6 +166,47 @@ reference to a dozen live beads.
 A gate that concludes absence without going through it is reporting on
 whichever store it happened to be standing in.
 
+## Reading the rig map
+
+Every derivation above starts from the rig map: each rig's name, path, prefix
+and suspension, and a row for the city itself. The pack reads it through one
+helper, `assets/scripts/rig-map.sh`, so the reasons a listing fails and the
+time it may take are decided in one place. The helper runs `gc rig list --json`
+and prints the listing. When the listing does not read, it prints nothing on
+stdout, names the reason on stderr and exits 3. A caller then reports that the
+map did not read, and why, rather than reading the failure as a city with no
+rigs or a prefix no rig carries. The helper writes to stderr only then, so a
+caller may capture both streams in one.
+
+The helper puts one bound on the call, `GC_RIG_LIST_TIMEOUT`, 120 seconds by
+default. The bound exists to cut off a `gc` that never answers, so it sits far
+above what the listing takes on a loaded host, and no caller tunes it as a
+latency budget. A caller under a deadline it does not set bounds the call by the
+time it has left, as it bounds any other call. A doctor check does so within
+`gc doctor`'s per-check timeout, and a board verb within the board's deadline
+for the verb.
+
+`gc rig list --json` is slow on a loaded host because of the `running` flag on
+each rig row. Gas City's `doRigList` fills it with `rigHasRunningAgent`. For
+each unlimited pool agent the rig configures, until it finds one running, that
+asks `discoverPoolInstances` for the pool's instances, and each such call lists
+the city's running sessions again. With tmux sessions every list starts its own
+`tmux list-sessions`, so one listing starts a few dozen processes, and on a
+loaded host each of them waits to be scheduled. The text listing computes no
+`running` and starts two. No pack caller reads a rig row's `running`. The flag
+on the city's own row is the controller probe that `city-liveness.sh` reads.
+
+No cheaper source carries the whole map:
+
+- `gc rig list` without `--json` prints a table for people, not a contract.
+- `gc config show --json` carries each configured rig's name, path and prefix.
+  Its suspension is only what `city.toml` says, so a rig suspended with
+  `gc rig suspend` reads as not suspended, and the city's own row is not among
+  its rigs.
+- `gc status --json` carries no prefixes.
+- `.beads/routes.jsonl` maps each prefix to a relative path, with no names and
+  no suspension.
+
 ## Reading a bead's whole context
 
 `assets/scripts/bead-context.sh <id>` rebuilds a subject's working context in
@@ -178,7 +219,8 @@ dance by hand. It returns, and nothing outside this:
   merged_target) when the bead carries a merge_result; the first_reaction fields;
   gc.origin; and the distilled gc.takeaway headline with its settled flag.
 - **Context edges**, shown but never gating — the parent, the relates-to edges,
-  the tracked-by visits, and a count per class.
+  the tracked-by visits, the beads that wait on it by a `blocks` or an `until`
+  edge, and a count per class.
 - **Store** — the store that answered, and the db it read.
 
 and, each behind an opt-in flag so a caller pays only for what it needs:
@@ -232,9 +274,10 @@ context as one object; the default is a human-readable block. It reads only.
 ### What it returns, and what it leaves out
 
 The free-text body — descriptions, notes and comments, of the subject or of any
-listed bead — is never returned, and no blocker or child is carried beyond
+listed bead — is never returned. No blocker or child is carried beyond
 `{id, title, status, advance}` and, when it is stuck, the `stuck_on {id, why}`
-that names its cause. That text is unbounded, and returning it
+that names its cause, and no bead that waits on the subject beyond
+`{id, title, status, edge}`. That text is unbounded, and returning it
 proactively is the context bloat this tool exists to cut. So it complements `gc
 bd show <id>`, which the reader still runs for the one bead whose full body a
 decision turns on, and does not replace it.
@@ -247,12 +290,27 @@ edges (either the `relates-to` or the older `related` spelling), and the
 children an inbound `parent-child` edge, each stored on the other bead, so each
 is read with one reverse query the subject's own row cannot answer.
 
+Each bead that waits on the subject carries a `blocks` or an `until` edge to
+it, another inbound edge. That is how a closed design's read names the build it
+released. The subject's read asks bd for its dependents too
+(`--include-dependents`), and bd returns each one cut to its identity fields and
+the edge's type, never its body. The dependents also hold every child and every
+inbound `related` edge, the review, validation and rework beads that gather on a
+design, so the list keeps only the `blocks` and `until` ones. It names the open
+ones first, each with its edge, and at most ten of them. Its counts give how
+many wait in all and how many of those are open, since a gate can hold a hundred
+parked beads. bd reads only the subject's store, so a bead in another store that
+waits on the subject is not listed.
+
 The counts are over a bead's own edges and its direct children, never its whole
 subtree. A `parent-child` edge is stored on the child pointing up, so an epic
 carries no edge per story; `--horizon` lists the direct children by the
 `--parent` query, asked for with `--all`. bd's default scope leaves out closed
 and pinned children, and a `--status` list leaves out any status it does not
 name, so with `--all` a child in any status is counted, a done one included.
+The listing also returns the closed event bead `bd set-state` files under a
+bead each time its state changes. An event records the change, not work, so it
+is not counted as a child.
 
 The subject read passes `--brief-deps`, so a listed bead's body is never fetched
 to read its status, and a same-store closed blocker's status rides the edge at no

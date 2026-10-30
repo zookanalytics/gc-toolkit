@@ -77,6 +77,8 @@ PROG="queue-priority"
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=priority-lib.sh
 . "$SCRIPTS_DIR/priority-lib.sh" || { echo "$PROG: cannot source priority-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$SCRIPTS_DIR/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
 
 # How long a move or a settle waits for the lock, and how long a holder may hold
 # it before a pass reports it wedged. The stall bound sits above the order's
@@ -166,7 +168,7 @@ EOF
 resolve_db() {
     [ -n "$BD_DB" ] && return 0
     local prefix="${1%%-*}" path=""
-    path="$(gc rig list --json 2>/dev/null 9>&- | scrub | jq -r --arg p "$prefix" '.rigs[]? | objects | select((.prefix // "") == $p) | .path // empty' 2>/dev/null | head -n1)"
+    path="$("$SCRIPTS_DIR/rig-map.sh" 9>&- | jq -r --arg p "$prefix" '.rigs[]? | objects | select((.prefix // "") == $p) | .path // empty' 2>/dev/null | head -n1)"
     if [ -n "$path" ] && [ -d "$path/.beads" ]; then BD_DB="$path/.beads"; return 0; fi
     if [ -n "${GC_RIG_ROOT:-}" ] && [ -d "$GC_RIG_ROOT/.beads" ]; then BD_DB="$GC_RIG_ROOT/.beads"; return 0; fi
     return 1
@@ -263,40 +265,44 @@ WRITABLE_JQ='
 POURED_JQ='def poured_for($on): prio_live and (prio_follows | .kind == "workflow" and .on == [$on]);'
 
 # workflow_rows <subject-row-json> — every live workflow poured for the
-# subject, printed as one JSON array of rows: each input convoy gascity made for
-# it, the live root poured over that convoy, and the root's live steps. A
-# subject that is itself a convoy, slung as it is, has its roots poured over it
-# directly. A subject that is itself a workflow root has its own steps: a root
-# whose input convoy is gone, or that a launch poured with none, follows no
-# convoy, so it is the bead its steps were poured for. Each bead is one that
-# follows the bead it was found through (POURED_JQ), so an input convoy that
-# tracks more than one bead, which follows none of them, is no bead's workflow.
-# Returns 1 when a read fails, so a settle never reports a workflow it could not
-# read as settled.
+# subject, printed as one JSON array of rows: the input convoy and the root of
+# each live run that works it (run-lib.sh), and the root's live steps. A subject
+# that is itself a convoy, slung as it is, has the runs poured over it directly.
+# A subject that is itself a workflow root has its own steps: a root whose input
+# convoy is gone, or that a launch poured with none, follows no convoy, so it is
+# the bead its steps were poured for. Each bead is one that follows the bead it
+# was found through (POURED_JQ), so an input convoy that tracks more than one
+# bead, which follows none of them, is no bead's workflow, and neither is a
+# convoy whose sling poured no root yet, which no run names. Returns 1 when a
+# read fails, so a settle never reports a workflow it could not read as settled.
 workflow_rows() {
-    local row="$1" subject is_convoy raw ids convoys all c roots root_ids="" r steps
+    local row="$1" subject is_convoy runs over raw ids all='[]' roots root_ids="" r steps
     subject="$(printf '%s' "$row" | jq -r '.id')"
     is_convoy="$(printf '%s' "$row" | jq -r '(.issue_type // "") == "convoy"')"
     printf '%s' "$row" | jq -e '(((.metadata // {}) | if type == "object" then . else {} end)["gc.kind"] // "" | tostring) == "workflow"' >/dev/null 2>&1 \
         && root_ids="$subject"
-    # A row of `dep list` carries none of the convoy's own edges, so each convoy
-    # is read again to count the beads it tracks.
-    raw="$(bd_ dep list "$subject" --direction up -t tracks --json 2>/dev/null)" || return 1
-    ids="$(printf '%s' "$raw" | scrub | jq -r "$ROWS_JQ"' | [ .[] | objects | select((.issue_type // "") == "convoy") | .id | tostring ] | unique | join(",")' 2>/dev/null)" || return 1
-    convoys='[]'
+    runs="$(run_lib runs bd_ "$subject")" || return 1
+    if [ "$is_convoy" = true ]; then
+        over="$(run_lib subject bd_ "$subject")" || return 1
+        runs="$(jq -cn --argjson a "$runs" --argjson b "$over" '$a + $b')" || return 1
+    fi
+    runs="$(printf '%s' "$runs" | jq -c '[ .[] | select(.live) ]' 2>/dev/null)" || return 1
+    ids="$(printf '%s' "$runs" | jq -r '[ .[] | .convoy, .root | select(. != "") ] | unique | join(",")' 2>/dev/null)" || return 1
     if [ -n "$ids" ]; then
         raw="$(qp_read "$ids")" || return 1
-        convoys="$(printf '%s' "$raw" | scrub | jq -c --arg on "$subject" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1
-        [ -n "$convoys" ] || return 1
+        # A run's convoy is written when it follows the subject, and its root
+        # when it follows a convoy that is the subject or one written here.
+        all="$(printf '%s' "$raw" | scrub | jq -c --arg on "$subject" --argjson runs "$runs" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"'
+            | ([ .[] | objects | {key: (.id | tostring), value: .} ] | from_entries) as $by
+            | [ $runs[] | select(.convoy != $on) | $by[.convoy] // empty | select(poured_for($on)) ] as $convoys
+            | ([$on] + [ $convoys[] | .id | tostring ]) as $followed
+            | $convoys + [ $runs[] | . as $run | select(any($followed[]; . == $run.convoy))
+                           | $by[$run.root] // empty | select(poured_for($run.convoy)) ]
+            | unique_by(.id)' 2>/dev/null)" || return 1
+        [ -n "$all" ] || return 1
+        roots="$(printf '%s' "$all" | jq -r --argjson runs "$runs" '[ .[] | (.id | tostring) as $i | select(any($runs[]; .root == $i)) | $i ] | join(" ")')" || return 1
+        root_ids="$root_ids $roots"
     fi
-    all="$convoys"
-    for c in $(printf '%s' "$convoys" | jq -r '.[].id') $( [ "$is_convoy" = true ] && printf '%s' "$subject" ); do
-        raw="$(qp_list --metadata-field "gc.input_convoy_id=$c")" || return 1
-        roots="$(printf '%s' "$raw" | scrub | jq -c --arg on "$c" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1
-        [ -n "$roots" ] || return 1
-        all="$(jq -cn --argjson a "$all" --argjson b "$roots" '$a + $b')" || return 1
-        root_ids="$root_ids $(printf '%s' "$roots" | jq -r '.[].id')"
-    done
     for r in $root_ids; do
         raw="$(qp_list --metadata-field "gc.root_bead_id=$r")" || return 1
         steps="$(printf '%s' "$raw" | scrub | jq -c --arg on "$r" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1

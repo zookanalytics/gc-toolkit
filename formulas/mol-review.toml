@@ -30,12 +30,15 @@ Hard rules, in force for every step:
   and how, and one party's code read is not that. When the dispatch says not
   to re-raise something and you find it, report it and say in the verdict
   that you are contradicting the dispatch and why.
-- Single honest pass. Read the diff yourself and write your findings
-  yourself. No subagents doing the review, no persona
-  reviewers. The review may run as a two-provider quorum instead: two lanes
-  each do one honest pass, and one synthesizer combines their findings into
-  the single verdict (the mol-review-quorum-signoff formula). One verdict per
-  claim holds either way, because the synthesizer makes the one signoff call.
+- One writer of the verdict: the agent holding this claim judges every
+  finding and makes the one signoff.sh call. The check's method may hand part
+  of the reading to subagents. Each one is read-only in the review's
+  workspace, returns what it found to that agent, and never calls
+  signoff.sh. The review may run as a two-provider quorum instead: two lanes
+  each read the diff and may fan out the same way, and one synthesizer
+  combines their findings into the single verdict (the
+  mol-review-quorum-signoff formula). One verdict per claim holds either way,
+  because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: each step closes its own bead through
 assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,
@@ -129,9 +132,7 @@ fi
 ```
 When it exits 1, end the run with the route left empty:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-dispatch review verdict-and-drain; do
   "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
@@ -145,8 +146,9 @@ reopens the bead and releases its claim and the route it claimed it by in one
 write.
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
-page when one is open, the rig's guidance for this check, and the path of the
-review's worktree at `{{reviewed_oid}}`. The worktree is a detached checkout in
+page when one is open, the rig's guidance for this check, what `gctk rig`
+recorded at `{{reviewed_oid}}`, and the path of the review's worktree at that
+commit. The worktree is a detached checkout in
 a workspace named for this review, so running the block again in a later shell
 returns the same worktree. Read the change there with git. Its diff is
 `git diff origin/{{review_base}}...HEAD`, with three dots, so it shows what the
@@ -159,9 +161,7 @@ printed into the steps that follow.
 RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
 REPO=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-workspace.sh" ] || SCRIPTS=""
 : "${SCRIPTS:?review-workspace.sh not found in the pack}"
 git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
 git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
@@ -175,6 +175,8 @@ if [ -n "{{review_pr_url}}" ]; then
 fi
 echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
 "$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== What gctk rig recorded at {{reviewed_oid}}"
+"$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
 echo "== The review's worktree: $WT"
 # <<< review-gather
@@ -185,9 +187,7 @@ run as the verdict step's failure arm does.
 **3. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `review`:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.load-dispatch --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -234,6 +234,14 @@ command runs under the claim-lease keepalive, so a reviewer whose lease would
 lapse during it does not read as dead: `lease-heartbeat.sh <the bead_id your gc
 hook --claim returned for this step> -- <command>`, from the pack's scripts
 load-dispatch printed.
+
+<!-- >>> review-subagents -->
+The check's method may hand part of the reading to subagents, where your
+provider offers them. Every subagent is read-only in the review's workspace:
+it runs nothing the method runs, changes nothing there or anywhere else, and
+never calls signoff.sh. It returns what it found to you, and you judge it and
+write every finding yourself.
+<!-- <<< review-subagents -->
 
 **3. Locate every finding.** Every finding carries a location, what is wrong,
 why it matters, and what would fix it. In the tree the location is
@@ -283,18 +291,12 @@ re-probes.
 
 **5. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step. `signoff.sh` opens the posted comment
-with one line, the check and its verdict and then what needs the operator, so
-the body is the trail under that line, collapsed. Every check writes this
-envelope, and the check's method adds its own lines to it:
+with one line, the check and its verdict and then what needs the operator, and
+renders the Findings block under it from `findings.json` (part 5b), so the body
+is the trail under them, collapsed. Every check writes this envelope, and the
+check's method adds its own lines to it:
 
 ```
-<details>
-<summary>Findings: <none, or how many the check's method found></summary>
-
-<every finding, each with its location, impact, and the fix>
-
-</details>
-
 <details>
 <summary><Check> trail: <what it holds, e.g. scope and files read></summary>
 
@@ -309,16 +311,18 @@ Filed: <bug ids for findings out of scope for this diff, or "none">
 </details>
 ```
 
-A check that files no findings leaves that block out. Say what you did **not**
-check — an honest coverage line is worth more than an implied "I read
-everything". When a decision is the operator's to make, pass it on the verdict
-call as `--needs-you "<the decision, what it means, where to look>"`; a finding
-is not one, because the city fixes it.
+Write no findings block of your own: each finding is written once, in
+`findings.json`. Say what you did **not** check — an honest coverage line is
+worth more than an implied "I read everything". When a decision is the
+operator's to make, pass it on the verdict call as
+`--needs-you "<the decision, what it means, where to look>"`; a finding is not
+one, because the city fixes it.
 
 **5b. Emit the finding set** to `findings.json` beside `findings.md`: a JSON
-array, one object per finding the check's method counts as blocking, each
-carrying a `locus` and a `message`. signoff.sh files each as a bead beside the
-rework child.
+array, one object per finding the check's method raises, each carrying a
+`locus` and a `message`, and the fields the method's verdict section adds. A
+method that grades its findings puts the grade in `severity` and says which
+grades block, and a finding with no grade blocks.
 
 ```bash
 cat > findings.json <<'JSON'
@@ -330,17 +334,18 @@ JSON
 
 The `locus` names a file and a symbol, function, or section, never a line
 number or a commit oid, so it survives a rebase; on the PR page it is the part
-that is wrong, as in `PR #<n> body / ## Summary`. signoff.sh dedups on a
-normalized locus and message, so a re-review of the same objection files no
-second bead. An `approve` carries no blocking finding: write `[]`. The
-out-of-scope bugs from part 4 stay out of it; they are their own beads already.
+that is wrong, as in `PR #<n> body / ## Summary`. signoff.sh refuses a set that
+disagrees with the verdict or lacks a field the method requires, with nothing
+written. It renders the set on the posted verdict, and on request-changes files
+each finding as a bead beside the rework child, deduped on a normalized locus
+and message, so a re-review of the same objection files no second bead. A
+verdict with no finding writes `[]`. The out-of-scope bugs from part 4 stay out
+of it; they are their own beads already.
 
 **6. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `verdict-and-drain`:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.review --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -369,9 +374,7 @@ one slung rework child on request-changes, and refusing a commit the branch no
 longer carries. The verdict names `{{reviewed_oid}}`, the commit the review
 read, and signoff.sh refuses any other:
 ```bash
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/signoff.sh" ] || SCRIPTS=""
 "${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
 ```
 Do not post the review yourself, do not write to the anchor, do not file rework
@@ -380,8 +383,9 @@ beads or finding beads (signoff.sh files the findings from your
 
 Pass on this same call every flag the check's method names for the verdict,
 and `--needs-you` when the review step named a decision for the operator.
-When signoff.sh refuses a verdict for a missing or invalid flag, it has written
-nothing, so re-run the call with the flag corrected; that is still the one
+When signoff.sh refuses a verdict for a missing or invalid flag, or refuses
+the finding set and lists what is wrong with it, it has written nothing, so
+correct the flag or `findings.json` and re-run the call; that is still the one
 verdict.
 
 **2. Failure arms.** signoff.sh binds no verdict to a later head: commits that
@@ -392,8 +396,9 @@ bead itself `gc.outcome=superseded` and exits 0 — there is nothing here to
 append and nothing to restore, and gate-ensure pours a fresh review at the live
 head next pass. "already closed" is not a failure either: this dispatch was
 recorded or retired before you judged it, so drop the verdict, close the chain
-and drain. Any other failure, in this order: append your findings to the review
-bead (`gc bd update "{{review_bead}}" --append-notes ...`); close the step chain
+and drain. Any other failure, in this order: append `findings.md` and
+`findings.json` to the review bead
+(`gc bd update "{{review_bead}}" --append-notes ...`); close the step chain
 forward with part 3's step-close loop; then — only after the chain is closed —
 restore the bead's claimability from the dispatch-stamped pool and drain:
 ```bash
@@ -417,9 +422,7 @@ blocks the next); close only through step-close.sh, which resolves by
 (gc.root_bead_id, gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead
 after a claim. Never close `workflow-finalize` (the control-dispatcher's):
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-dispatch review verdict-and-drain; do
   "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"

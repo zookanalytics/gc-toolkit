@@ -15,7 +15,7 @@ import (
 
 // mountPrefix is a realistic external mount: the service is reached under a
 // runtime-city-named path, never at the origin root.
-const mountPrefix = "/v0/city/loomington/svc/helm"
+const mountPrefix = "/v0/city/mycity/svc/helm"
 
 // mountProxy mimics the supervisor's service proxy (gascity
 // internal/workspacesvc/manager.go, serviceSubpath): it strips the mount from

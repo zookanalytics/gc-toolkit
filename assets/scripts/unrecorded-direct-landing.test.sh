@@ -78,7 +78,9 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML"; }
+# A block comes out with {{binding_prefix}} rendered as the patrol fills it in:
+# the binding it was poured with, gc-toolkit. here.
+fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
 
 echo "── the blocks ──"
 for m in shared-branch-merge-mode branch-has-real-change zero-diff-guard direct-merge-push; do
@@ -89,7 +91,7 @@ fence shared-branch-merge-mode > "$TMP/prep.sh"
 {
   echo 'BEAD_JSON=$(gc bd show $WORK --json)'
   echo 'MERGE_STRATEGY="$STRATEGY"'
-  echo 'LC="${TEST_LC:-$GC_CITY_PATH/rigs/gc-toolkit/assets/scripts/lifecycle.sh}"'
+  echo 'LC="${TEST_LC:-$(gc gc-toolkit scripts-dir)/lifecycle.sh}"'
   fence branch-has-real-change
   fence zero-diff-guard
   echo 'if [ "$MERGE_STRATEGY" = direct ]; then'
@@ -124,7 +126,7 @@ fence zero-diff-guard > "$TMP/zdg.sh"
 eq "$(bare_git "$TMP/bhrc.sh")" "" "branch-has-real-change: every git call names its repo with -C"
 eq "$(bare_git "$TMP/zdg.sh")" "" "zero-diff-guard: every git call names its repo with -C, and its script lookup reads no cwd checkout"
 
-# The pack the blocks find their scripts in, through GC_CITY_PATH.
+# The pack the blocks find their scripts in, which gc names.
 CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
@@ -164,7 +166,8 @@ jq -c --arg id "$id" --arg k "$key" --arg s "$subject" --arg t "${message%%. *}"
 printf '%s|tracks|%s\n' "$id" "$subject" >> "$FAKE_DEPS"
 ESC
 chmod +x "$PACK"/*.sh
-# gc answers the roster for `rig list`. The work bead is the one row of the
+# gc names the pack for `gc gc-toolkit scripts-dir` and answers the roster for
+# `rig list`. The work bead is the one row of the
 # bead file; FAKE_STORE, when set, holds every other bead, and FAKE_DEPS the
 # edges, one "A|type|B" line for "A depends on B". `bd show` answers a row, or
 # bd's error object for an id it does not hold. `bd list` filters on --status,
@@ -191,6 +194,7 @@ edges() {
   { [ -n "${FAKE_DEPS:-}" ] && [ -f "$FAKE_DEPS" ] && cat "$FAKE_DEPS"; } | jq -R -s -c 'split("\n") | map(select(length > 0) | split("|") | {from: .[0], type: .[1], to: .[2]})'
 }
 case "$1 ${2:-}" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")
     if [ "${3:-}" = "$(work_id)" ]; then cat "$FAKE_META"
@@ -360,7 +364,7 @@ fixture() {
 # Sets PREP_RC, RC and OUT.
 attempt() {
   : > "$D/gc.log"; : > "$D/lc.log"
-  local run=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
+  local run=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig STUB_PACK="$CITY/rigs/gc-toolkit" WORK=wb BRANCH=polecat/wb TARGET=main
     TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
     FAKE_LC_LOG="$D/lc.log" DIRECT_MERGE_PUSH_BACKOFF=0 STRATEGY=direct "$@")
   ( cd "$ELSEWHERE" && "${run[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?

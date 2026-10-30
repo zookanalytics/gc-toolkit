@@ -7,7 +7,10 @@
 # never escalate, and a false escalation here is the defect this block fixes. A
 # count-nudge is gone: it went stale the moment the assignee set drained. The
 # counterpart retract withdraws a visit only when the handoff's own row shows it
-# left the refinery; absence from the queue listing alone withdraws nothing.
+# left the refinery; absence from the queue listing alone withdraws nothing. A
+# bead something holds (hold-lib.sh) is waiting, not stuck, as a landing bead
+# waits on its effort, and a wait is aged from the close that released its last
+# hold when that is later than its last write.
 #
 # The queue is read at the refinery's live identity, resolved by the real
 # resolve-route.sh against a stubbed roster. The store stub answers only that
@@ -50,7 +53,10 @@ hasnt "$BLOCK" 'gc session nudge' "the block no longer nudges a count"
 # hand from the unrendered formula, so a wrong or empty prefix is a live input.
 # An empty prefix renders gc-toolkit/refinery, the address a wisp poured with
 # binding_prefix='' builds and no agent holds. A prefix missing its trailing dot
-# renders an address whose role is not a refinery's.
+# renders an address whose role is not a refinery's. The block also names the
+# pack's binding through the same token, so an empty or misspelled prefix names
+# no pack and stops the block before it reads anything, while a dotless one
+# still names the pack and reaches the address checks.
 render() { printf '%s\n' "$BLOCK" | sed "s|{{binding_prefix}}|$1|g"; }
 render gc-toolkit. > "$TMP/block.sh"
 render '' > "$TMP/block-noprefix.sh"
@@ -61,14 +67,18 @@ bash -n "$TMP/block.sh" \
   && ok "extracted block is syntactically valid bash" \
   || bad "extracted block failed bash -n"
 
-# Stub `gc` (bd list and agent list) and a stub escalate.sh resolved via
-# GC_RIG_ROOT, which the block probes first, so the real pack escalate.sh is
-# never reached. The rig root also holds a copy of the real resolver.
+# Stub `gc` (bd list, agent list, and `gc-toolkit scripts-dir`, which names the
+# stub pack) and a stub escalate.sh in that pack, so the real pack escalate.sh
+# is never reached. The stub pack also holds a copy of the real resolver.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
-cp "$ROOT/assets/scripts/resolve-route.sh" "$TMP/rig/assets/scripts/"
+cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/hold-lib.sh" "$TMP/rig/assets/scripts/"
 chmod +x "$TMP/rig/assets/scripts/resolve-route.sh"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 case "$1 $2" in
+  "gc-toolkit scripts-dir")
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK"
+    ;;
   "agent list")
     [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_AGENTS:-}"
@@ -142,8 +152,7 @@ AGENTS_DEFAULT='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},
   {"qualified_name":"gc-toolkit/gc-toolkit.polecat"},{"qualified_name":"gc-toolkit.dog"}]}'
 
 # run <fixture-json> [stderr-noise] [list-rc] [shell-prelude] [esc-list-json] [handoff-json]
-#   -> the escalate log. Runs from a non-repo cwd so the block's git-toplevel
-# probe finds nothing and GC_RIG_ROOT (the stub) wins. The 5th arg is the
+#   -> the escalate log. Runs from a non-repo cwd, with gc naming the stub pack. The 5th arg is the
 # retract arm's open-escalation set; omitted leaves it an empty array, so the
 # queue-only tests never retract. The 6th is the rows its by-id read of the
 # candidate handoffs serves; omitted leaves it an empty array, so every
@@ -166,7 +175,7 @@ run() {
     QUEUE_STDERR="${2:-}" GC_RIG="${GC_RIG_OVERRIDE-gc-toolkit}" LIST_RC="${3:-0}" \
     STUB_AGENTS="${AGENTS_OVERRIDE-$AGENTS_DEFAULT}" STUB_AGENTS_FAIL="${AGENTS_FAIL:-}" \
     QUEUE_OWNER="${QUEUE_OWNER_OVERRIDE-gc-toolkit/gc-toolkit.refinery}" \
-    GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="$TMP/nocity" \
+    STUB_PACK="$TMP/rig" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/nocity" \
       bash "$TMP/run.sh" > "$TMP/out" 2>&1 || true )
   cat "$TMP/esc"
 }
@@ -293,6 +302,49 @@ case "$BLOCK" in
   *)     ok "block is backslash-free" ;;
 esac
 
+# --- A held bead is waiting, not stuck -----------------------------------------
+# A landing bead sits in the queue from the moment its effort is stood up, so it
+# is past the bound long before its effort's beads close. Its blockers are read
+# by id, served here from the 6th run() argument with the retract arm's rows.
+# blocked <id> <updated_at> <blocker>...: a queue row with a blocks edge onto each.
+blocked() { local id="$1" when="$2"; shift 2
+  jq -nc --arg id "$id" --arg u "$when" --args '{id: $id, updated_at: $u, title: "handoff",
+    metadata: {branch: ("integration/" + $id)},
+    dependencies: [ $ARGS.positional[] as $b | {issue_id: $id, depends_on_id: $b, type: "blocks"} ]}' "$@"; }
+LAND="$(blocked tk-land "$OLD1" tk-e1 tk-sum)"
+OPEN_BLOCKERS='[{"id":"tk-e1","status":"open","title":"effort bead","metadata":{}},{"id":"tk-sum","status":"open","title":"summary task","metadata":{}}]'
+eq "$(run "[$LAND]" "" "" "" "" "$OPEN_BLOCKERS")" "" "a held landing bead past the stuck bound files no visit"
+has "$(out)" "no stuck handoffs" "and the queue reads as churning normally"
+has "$(cat "$TMP/lists")" "--id=tk-e1,tk-sum" "its blockers are read by id"
+HELD_AND_STUCK="$(run "[$LAND,{\"id\":\"tk-stuck\",\"updated_at\":\"$OLD2\",\"title\":\"handoff\",\"metadata\":{}}]" "" "" "" "" "$OPEN_BLOCKERS")"
+eq "$(printf '%s' "$HELD_AND_STUCK" | grep -c . || true)" "1" "an unheld handoff past the bound beside it still files one visit"
+has "$HELD_AND_STUCK" "--subject tk-stuck" "the visit is the unheld handoff's"
+hasnt "$HELD_AND_STUCK" "tk-land" "and not the held landing bead's"
+# Released a minute ago, last written years ago: the wait starts at the release.
+JUST="$(date -u -r "$(( $(date -u +%s) - 60 ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-60 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+RELEASED='[{"id":"tk-e1","status":"closed","closed_at":"'"$OLD2"'","metadata":{}},{"id":"tk-sum","status":"closed","closed_at":"'"$JUST"'","metadata":{}}]'
+eq "$(run "[$LAND]" "" "" "" "" "$RELEASED")" "" "a landing bead its summary task released a minute ago is not stuck"
+LONG_GONE='[{"id":"tk-e1","status":"closed","closed_at":"2020-03-01T00:00:00Z","metadata":{}},{"id":"tk-sum","status":"closed","closed_at":"'"$OLD2"'","metadata":{}}]'
+LG="$(run "[$LAND]" "" "" "" "" "$LONG_GONE")"
+has "$LG" "--subject tk-land" "one released past the bound and still not taken is stuck"
+has "$LG" "since $OLD2" "and its wait is dated from the release, not its last write"
+# Held only by a blocker the store does not return: find-work never takes it,
+# so it is stuck past the bound, and the visit names the blocker.
+GHOSTED="$(run "[$(blocked tk-ghosted "$OLD1" tk-ghost)]" "" "" "" "" '[]')"
+has "$GHOSTED" "--subject tk-ghosted" "a bead held only by an unreadable blocker is escalated past the bound"
+has "$GHOSTED" "waits on tk-ghost (unreadable), a blocker this store does not return" "the visit names the blocker it waits on"
+# A walk of the holds that cannot read blinds the monitor.
+WALK="$(HANDOFF_RC_OVERRIDE=1 run "[$LAND]" "" "" "" "" "$OPEN_BLOCKERS")"
+has "$WALK" "--key witness-refinery-queue-unreadable" "a hold walk that cannot read escalates the blind monitor"
+hasnt "$WALK" "--subject tk-" "naming no stuck bead"
+has "$(out)" "could not read what holds the handoffs past the stuck bound" "and says why"
+has "$(HANDOFF_RC_OVERRIDE=1 run "$STUCK_ONE")" "--subject tk-stuck" "a past-bound bead with no blocker needs no hold read"
+for PRELUDE in 'set -e' 'set -euo pipefail'; do
+  eq "$(run "[$LAND]" "" "" "$PRELUDE" "" "$OPEN_BLOCKERS")" "" "$PRELUDE: a held landing bead files no visit"
+  has "$(HANDOFF_RC_OVERRIDE=1 run "[$LAND]" "" "" "$PRELUDE" "" "$OPEN_BLOCKERS")" "--key witness-refinery-queue-unreadable" \
+     "$PRELUDE: a hold walk that cannot read still escalates the blind monitor"
+done
+
 # --- Retract arm: a departed handoff's escalation is withdrawn moot -----------
 # A handoff that an open witness-refinery-queue visit escalates and that the
 # readable queue no longer carries is only a candidate. The block reads each
@@ -336,11 +388,11 @@ hasnt "$RB" "--retract" "an empty listing does not retract a handoff still assig
 has "$(out)" "tk-gone is missing from the queue listing but is still unprepared and assigned to $REF (status open)" \
    "the kept escalation is reported with what the handoff's row showed"
 
-# An empty binding_prefix renders the address gc-toolkit/refinery, which no
-# handoff carries. The block reads it only when the roster cannot be read to
-# refute it, and its listing comes back empty.
-RBW="$(AGENTS_FAIL=1 BLOCK_FILE_OVERRIDE="$TMP/block-noprefix.sh" run '[]' "" "" "" "$ESC_GONE" "$H_HELD")"
-has "$(cat "$TMP/lists")" "--assignee=gc-toolkit/refinery" "the empty-prefix render under an unreadable roster lists under the wrong address"
+# A dotless binding_prefix renders the address gc-toolkit/gc-toolkitrefinery,
+# which no handoff carries. The block reads it only when the roster cannot be
+# read to refute it, and its listing comes back empty.
+RBW="$(AGENTS_FAIL=1 BLOCK_FILE_OVERRIDE="$TMP/block-nodot.sh" run '[]' "" "" "" "$ESC_GONE" "$H_HELD")"
+has "$(cat "$TMP/lists")" "--assignee=gc-toolkit/gc-toolkitrefinery" "the dotless-prefix render under an unreadable roster lists under the wrong address"
 hasnt "$RBW" "--retract" "a wrong-address listing retracts nothing while the handoff is still with the refinery"
 
 # The assignee is compared by role, so any form of the refinery's address keeps
@@ -367,9 +419,9 @@ has "$RUN1" "is unassigned" "the reading says it is unassigned"
 H_NOKEY='[{"id":"tk-gone","status":"open","title":"handoff","metadata":{"branch":"polecat/tk-gone"}}]'
 has "$(run '[]' "" "" "" "$ESC_GONE" "$H_NOKEY")" "--retract --subject tk-gone" \
    "a handoff whose row carries no assignee has left"
-RPC="$(run '[]' "" "" "" "$ESC_GONE" "$(handoff in_progress '"lx-wisp-abc"')")"
+RPC="$(run '[]' "" "" "" "$ESC_GONE" "$(handoff in_progress '"hq-wisp-abc"')")"
 has "$RPC" "--retract --subject tk-gone" "a handoff reassigned to a worker has left"
-has "$RPC" "is assigned to lx-wisp-abc, not a refinery" "the reading names the new assignee"
+has "$RPC" "is assigned to hq-wisp-abc, not a refinery" "the reading names the new assignee"
 
 # A handoff that cannot be read keeps its escalation: a failed read, an error
 # object, and a row for some other bead are none of them a departure.
@@ -432,18 +484,26 @@ done
 # valid empty array, which reads as a clean queue, so a stuck handoff would never
 # escalate. Here tk-stuck is in the live queue and its visit is open.
 ESC_STUCK_OPEN='[{"id":"tk-v-stuck","metadata":{"task_kind":"visit","escalation_key":"witness-refinery-queue","gc.continuation_group":"tk-stuck"}}]'
+# An empty or misspelled prefix names no binding gc knows, so the block finds no
+# pack: it stops loud before it reads, files or retracts anything, and never
+# falls back to a script outside the pack gc names.
 for PFX in noprefix typo; do
   NESC="$(BLOCK_FILE_OVERRIDE="$TMP/block-$PFX.sh" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN")"
-  has "$NESC" "--key witness-refinery-queue-unroutable" \
-     "$PFX: an address no agent holds escalates the blind monitor"
-  hasnt "$NESC" "--retract" "$PFX: and retracts no escalation, though its handoff is unseen"
-  hasnt "$NESC" "--subject tk-stuck" "$PFX: and files nothing about a queue it never read"
+  eq "$NESC" "" "$PFX: no binding gc knows, so nothing is escalated or retracted"
   eq "$(cat "$TMP/lists")" "" "$PFX: no queue and no escalation set is read"
   hasnt "$(out)" "no stuck handoffs" "$PFX: an unread queue is never reported clean"
-  has "$(out)" "no live refinery identity resolves" "$PFX: the diagnostic says why"
+  has "$(out)" "escalate.sh, resolve-route.sh and hold-lib.sh not found in the pack" "$PFX: the stop names the scripts it could not reach"
 done
+# A dotless prefix still names the pack, and its address is one no agent holds,
+# which escalates the blind monitor.
+NESC="$(BLOCK_FILE_OVERRIDE="$TMP/block-nodot.sh" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN")"
+has "$NESC" "--key witness-refinery-queue-unroutable" "nodot: an address no agent holds escalates the blind monitor"
+hasnt "$NESC" "--retract" "nodot: and retracts no escalation, though its handoff is unseen"
+hasnt "$NESC" "--subject tk-stuck" "nodot: and files nothing about a queue it never read"
+eq "$(cat "$TMP/lists")" "" "nodot: no queue and no escalation set is read"
+has "$(out)" "no live refinery identity resolves" "nodot: the diagnostic says why"
 for PRELUDE in 'set -e' 'set -euo pipefail'; do
-  NESC="$(BLOCK_FILE_OVERRIDE="$TMP/block-noprefix.sh" run "$STUCK_ONE" '' 0 "$PRELUDE" "$ESC_STUCK_OPEN")"
+  NESC="$(BLOCK_FILE_OVERRIDE="$TMP/block-nodot.sh" run "$STUCK_ONE" '' 0 "$PRELUDE" "$ESC_STUCK_OPEN")"
   has "$NESC" "--key witness-refinery-queue-unroutable" \
      "$PRELUDE: an address no agent holds still escalates the blind monitor"
   hasnt "$NESC" "--retract" "$PRELUDE: and still retracts nothing"

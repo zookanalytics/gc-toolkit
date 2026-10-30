@@ -108,7 +108,7 @@ narrated video. Triage decides whether it runs. You do neither. Your only visual
 concern is the one folded into presentation: when the change is one the operator
 must see to trust and the PR gives them nothing to look at, that is a
 presentation finding you name, pointing at the `demo` check's method
-(`skills/review-demo/SKILL.md`). Whether a visual that exists proves its claim is
+(`gc-toolkit.review-demo`). Whether a visual that exists proves its claim is
 not your call.
 
 ## What blocks

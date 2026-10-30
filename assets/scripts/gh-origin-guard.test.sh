@@ -115,7 +115,7 @@ git -C "$SANDBOX/noremote" remote remove origin 2>/dev/null || true
 # second rig's origin sits outside the operator's org on purpose: it is the case
 # an org-keyed rule would have broken, so the fixture keeps that honest.
 mkrepo "$SANDBOX/city/rigs/gc-toolkit"      "git@github.com:zookanalytics/gc-toolkit.git"
-mkrepo "$SANDBOX/city/rigs/shutupandlisten" "https://github.com/suandl/shutupandlisten.git"
+mkrepo "$SANDBOX/city/rigs/rig-b" "https://github.com/otherowner/rig-b.git"
 
 RIG="$SANDBOX/rig"
 OWN="github.com/zookanalytics/gc-toolkit"
@@ -333,15 +333,15 @@ allowed "own origin from an ssh remote"  "$SANDBOX/rig" "gh pr create --title 'x
 # A rig agent is measured against its OWN rig, narrowly: another rig in the same
 # city is still someone else's repository for it.
 echo "  -- the owned set"
-denied "rig agent writing to another rig" "$RIG" "gh issue create --repo suandl/shutupandlisten --title 'x'"
+denied "rig agent writing to another rig" "$RIG" "gh issue create --repo otherowner/rig-b --title 'x'"
 
 # A city-scope agent carries no rig root and works across rigs, so every rig in
 # the city is a legitimate target — including the one outside the operator's org,
 # which is the case an org allowlist would have refused.
 GC_RIG_ROOT=""; export GC_RIG_ROOT
 allowed "city agent, first rig"        "$SANDBOX/city/rigs/gc-toolkit" "gh issue create --title 'x'"
-allowed "city agent, out-of-org rig"   "$SANDBOX/city/rigs/shutupandlisten" "gh pr create --title 'x'"
-allowed "city agent, rig named by flag" "$SANDBOX/plain" "gh issue create --repo suandl/shutupandlisten --title 'x'"
+allowed "city agent, out-of-org rig"   "$SANDBOX/city/rigs/rig-b" "gh pr create --title 'x'"
+allowed "city agent, rig named by flag" "$SANDBOX/plain" "gh issue create --repo otherowner/rig-b --title 'x'"
 denied  "city agent, third-party clone" "$SANDBOX/third" "gh issue create --title 'x'"
 denied  "city agent, third-party flag"  "$SANDBOX/city/rigs/gc-toolkit" "gh issue create --repo get-convex/agent --title 'x'"
 denied  "city agent, no target at all"  "$SANDBOX/plain" "gh issue create --title 'x'"
@@ -365,7 +365,7 @@ denied "own rig, target unresolvable" "$SANDBOX/plain" "gh issue create --title 
 # someone else's repository, reached through a broken rig, would authorize its
 # own writes.
 GC_RIG_ROOT="$SANDBOX/plain"; export GC_RIG_ROOT
-denied "broken rig root, no fallthrough to city" "$SANDBOX/plain" "gh issue create --repo suandl/shutupandlisten --title 'x'"
+denied "broken rig root, no fallthrough to city" "$SANDBOX/plain" "gh issue create --repo otherowner/rig-b --title 'x'"
 denied "broken rig root, no fallthrough to cwd"  "$SANDBOX/third" "gh issue create --title 'x'"
 GC_RIG_ROOT="$RIG"; export GC_RIG_ROOT
 

@@ -4,8 +4,10 @@
 # The tool rebuilds a subject's opening context in one call, so the assertions
 # target the contract that opening reads: subject core (A) with the anchor,
 # first_reaction, origin and takeaway fields; context edges (D) — parent,
-# relates-to (both the `relates-to` and older `related` spellings), and the
-# reverse `tracks` visits — each with a count; the store that answered (E); and,
+# relates-to (both the `relates-to` and older `related` spellings), the reverse
+# `tracks` visits, and the beads that wait on it by a reverse `blocks` or
+# `until` edge, open ones first and capped — each with a count; the store that
+# answered (E); and,
 # each behind its opt-in flag, the frontier verdict over {ready, advancing,
 # stuck} (B) and the direct-children epic-health snapshot (C). The advance enum,
 # the cross-store fold, the fail-closed unknown, the status scope of the child
@@ -34,7 +36,7 @@ cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
   {"name":"gc-toolkit","path":"$R_TK","prefix":"tk","hq":false},
   {"name":"otherrig","path":"$R_OR","prefix":"or","hq":false},
-  {"name":"loomington","path":"$HQ","prefix":"lx","hq":true}
+  {"name":"mycity","path":"$HQ","prefix":"hq","hq":true}
 ]}
 JSON
 export FAKE_RIGS="$TMP/rigs.json"
@@ -81,6 +83,59 @@ bead "$R_TK" tk-visit <<'J'
 {"id":"tk-visit","title":"visit: tk-anchor","status":"closed","issue_type":"task","metadata":{},
  "dependencies":[{"id":"tk-anchor","dependency_type":"tracks","status":"open"}]}
 J
+
+# tk-design: a closed design and the beads that wait on it, each by its own
+# reverse edge. The build it released (open) and its docs (in progress) wait by
+# blocks edges; an earlier build (closed) by a blocks edge and a duplicate it
+# answered (closed) by an until edge. The closed ones' ids sort before the open
+# ones', so only an open-first order lists the build first. A review's inbound
+# `related` edge, a visit's `tracks` edge and a child's `parent-child` edge also
+# point at it, and none of those waits on it. The build carries a body the read
+# must never surface.
+bead "$R_TK" tk-design <<'J'
+{"id":"tk-design","title":"the design","status":"closed","issue_type":"task","metadata":{}}
+J
+bead "$R_TK" tk-aw-next <<'J'
+{"id":"tk-aw-next","title":"the build it released","status":"open","issue_type":"task",
+ "description":"build body prose the read must never surface","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"blocks","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-polish <<'J'
+{"id":"tk-aw-polish","title":"its docs","status":"in_progress","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"blocks","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-earlier <<'J'
+{"id":"tk-aw-earlier","title":"an earlier build","status":"closed","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"blocks","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-dup <<'J'
+{"id":"tk-aw-dup","title":"a duplicate it answered","status":"closed","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"until","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-review <<'J'
+{"id":"tk-aw-review","title":"review the design","status":"open","issue_type":"task",
+ "metadata":{"task_kind":"review"},
+ "dependencies":[{"id":"tk-design","dependency_type":"related","status":"closed","title":"the design"}]}
+J
+bead "$R_TK" tk-aw-track <<'J'
+{"id":"tk-aw-track","title":"visit: tk-design","status":"closed","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"tracks","status":"closed"}]}
+J
+bead "$R_TK" tk-aw-kid <<'J'
+{"id":"tk-aw-kid","title":"a child of the design","status":"open","issue_type":"task","parent":"tk-design","metadata":{},
+ "dependencies":[{"id":"tk-design","dependency_type":"parent-child","status":"closed","title":"the design"}]}
+J
+
+# tk-hub: a gate twelve beads wait on, more than the list names. tk-hw-00 is
+# closed and sorts first by id; tk-hw-01 to tk-hw-11 are open.
+bead "$R_TK" tk-hub <<'J'
+{"id":"tk-hub","title":"a gate","status":"open","issue_type":"gate","metadata":{}}
+J
+for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
+  st=open; [ "$i" = 00 ] && st=closed
+  printf '{"id":"tk-hw-%s","title":"parked %s","status":"%s","issue_type":"task","metadata":{},"dependencies":[{"id":"tk-hub","dependency_type":"blocks","status":"open","title":"a gate"}]}\n' \
+    "$i" "$i" "$st" > "$R_TK/.beads/tk-hw-$i.json"
+done
 
 # Frontier verdict fixtures: one open unrouted blocker (stuck), one open
 # pool-routed blocker (advancing), one open human-gated blocker (stuck).
@@ -260,9 +315,11 @@ J
 # in statuses a default or --status listing can leave out: a hooked child
 # advances, a pinned one is a hold whatever its route, and one in a status its
 # store adds is unknown to the classifier, so it fails closed. One done child is
-# counted, never listed. The epic's own blocks are none, so its frontier verdict
-# is ready. The plain unrouted-stuck case is covered by tk-stuck in the frontier
-# section above, off the same shared classifier.
+# counted, never listed. tk-kid-event is the closed event `bd set-state` files
+# under a bead whose state changed, and it is neither counted nor listed. The
+# epic's own blocks are none, so its frontier verdict is ready. The plain
+# unrouted-stuck case is covered by tk-stuck in the frontier section above, off
+# the same shared classifier.
 bead "$R_TK" tk-epic <<'J'
 {"id":"tk-epic","title":"the epic","status":"open","issue_type":"epic","priority":2,
  "metadata":{},
@@ -281,6 +338,9 @@ bead "$R_TK" tk-kid-human <<'J'
 J
 bead "$R_TK" tk-kid-done <<'J'
 {"id":"tk-kid-done","title":"done child","status":"closed","issue_type":"task","parent":"tk-epic","metadata":{}}
+J
+bead "$R_TK" tk-kid-event <<'J'
+{"id":"tk-kid-event","title":"State change: situation → cleared","status":"closed","issue_type":"event","priority":4,"parent":"tk-epic","metadata":{}}
 J
 bead "$R_TK" tk-kid-rework <<'J'
 {"id":"tk-kid-rework","title":"rework child","status":"open","issue_type":"task","parent":"tk-epic",
@@ -303,9 +363,9 @@ bead "$R_TK" tk-kid-custom <<'J'
  "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 J
 
-# lx-city lives in the HQ store, which no --rig value names — only --db reaches.
-bead "$HQ" lx-city <<'J'
-{"id":"lx-city","title":"city bead","status":"open","issue_type":"task","metadata":{}}
+# hq-city lives in the HQ store, which no --rig value names — only --db reaches.
+bead "$HQ" hq-city <<'J'
+{"id":"hq-city","title":"city bead","status":"open","issue_type":"task","metadata":{}}
 J
 
 # tk-ctrl carries a raw C0 byte (SOH \001) in its notes, the payload real bd
@@ -318,10 +378,10 @@ printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes"
   > "$R_TK/.beads/tk-nul.json"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-# Only the surface bead-context.sh touches: rig list; bd show; bd list --parent
-# (children); bd dep list --direction=up --type tracks (reverse trackers). Every
-# call is logged so the test can prove which store was asked, not just what came
-# back.
+# Only the surface bead-context.sh touches: rig list; bd show, with the bead's
+# dependents on --include-dependents; bd list --parent (children); bd dep list
+# --direction=up --type tracks (reverse trackers). Every call is logged so the
+# test can prove which store was asked, not just what came back.
 set -u
 printf '%s\n' "$*" >> "$FAKE_GC_LOG"
 preface() { [ -n "${STUB_PREFACE:-}" ] && echo 'gc bd: answering from the rig "fake" store'; }
@@ -334,16 +394,38 @@ miss() { printf '{"error":"no issues found matching the provided IDs","schema_ve
 # the tool must survive. Brackets keep the array shape the tool discriminates on.
 serve() {
   preface; printf '['
-  local first=1 f out
+  local first=1 f out deps
   for f in "$@"; do
     [ "$first" = 1 ] || printf ','; first=0
     if out=$(jq -c '.dependencies = [(.dependencies // [])[] | select(.status != null)]' "$f" 2>/dev/null); then
+      if [ -n "$WITH_DEPENDENTS" ]; then
+        deps=$(dependents_of "$(printf '%s' "$out" | jq -r '.id')")
+        [ "$deps" = "[]" ] || out=$(printf '%s' "$out" | jq -c --argjson d "$deps" '.dependents = $d')
+      fi
       printf '%s' "$out"
     else
       cat "$f"
     fi
   done
   printf ']\n'; exit 0
+}
+# Real `bd show --include-dependents` adds every bead in the store with an edge to
+# the shown one, of any type, cut to its identity fields and the edge's type, and
+# leaves the key out when there are none. It streams them oldest first, so here
+# they come in descending id order, an order the tool must not lean on.
+dependents_of() {
+  local d f row first=1
+  printf '['
+  for d in $(stores); do
+    for f in $(grep -laF "\"$1\"" "$d"/*.json 2>/dev/null | sort -r); do
+      row=$(jq -c --arg s "$1" '. as $b | (.dependencies // [])[] | select(.id == $s)
+        | {id: $b.id, title: $b.title, status: $b.status, issue_type: $b.issue_type, dependency_type}' "$f" 2>/dev/null) || continue
+      [ -n "$row" ] || continue
+      [ "$first" = 1 ] || printf ','; first=0
+      printf '%s' "$row"
+    done
+  done
+  printf ']'
 }
 # A list row renders every edge, another store's included, in the shape real
 # `gc bd list` emits: {issue_id, depends_on_id, type}, no embedded status.
@@ -359,7 +441,7 @@ case "${1:-} ${2:-}" in
 esac
 [ "${1:-}" = bd ] || { echo "gc: unsupported ($*)" >&2; exit 1; }
 shift
-DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""
+DB=""; SUB=""; SUB2=""; ID=""; IDS=(); LIST_IDS=""; GATES=""; PARENT=""; DIRECTION="down"; TYPE=""; STATUS=""; ALL=""; WITH_DEPENDENTS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --db)          DB="$2"; shift 2 ;;
@@ -367,6 +449,7 @@ while [ $# -gt 0 ]; do
     --all)         ALL=1; shift ;;
     --id)          LIST_IDS="$2"; shift 2 ;;
     --include-gates) GATES=1; shift ;;
+    --include-dependents) WITH_DEPENDENTS=1; shift ;;
     --direction|--direction=*) case "$1" in *=*) DIRECTION="${1#*=}"; shift ;; *) DIRECTION="$2"; shift 2 ;; esac ;;
     -t|--type)     TYPE="$2"; shift 2 ;;
     -s|--status)   STATUS="$2"; shift 2 ;;
@@ -464,6 +547,8 @@ runj() { run "$@" --json; JQ=$(printf '%s' "$OUT" | jq -r "$JQF" 2>/dev/null); }
 # Bounded variant for a call that could spin before a fix: a wedged SUT surfaces
 # as timeout's rc 124 (a test failure) instead of hanging the whole suite.
 runb() { OUT=$(timeout 10 "$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
+# One run per subject; each assertion queries that run's output.
+jr()  { printf '%s' "$OUT" | jq -r "$1" 2>/dev/null; }
 
 # --- A. Subject core --------------------------------------------------------
 run tk-anchor
@@ -516,6 +601,48 @@ JQF='.edges.tracked_by[0].id'         runj tk-anchor; eq "$JQ" tk-visit    "  ..
 has "$(cat "$FAKE_GC_LOG")" "dep list tk-anchor --direction=up --type tracks" \
   "  ... via a reverse dep-list, since the subject carries no tracked-by edge itself"
 
+# The beads that wait on a bead: a closed design names the build it released.
+: > "$FAKE_GC_LOG"
+run tk-design --json
+eq "$(jr '[.edges.awaited_by[] | "\(.id):\(.status):\(.edge)"] | join(" ")')" \
+  "tk-aw-next:open:blocks tk-aw-polish:in_progress:blocks tk-aw-dup:closed:until tk-aw-earlier:closed:blocks" \
+  "awaited-by names the beads with a blocks or until edge to the subject, open ones first, each with its status and edge"
+eq "$(jr '.edges.awaited_by[0].title')" "the build it released" "  ... and its title"
+eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "4 2" "  ... counted in all and open"
+eq "$(jr '[.edges.tracked_by[].id] | join(",")')" tk-aw-track \
+  "  ... while a visit's tracks edge stays tracked-by, and a related review and a child are in neither"
+eq "$(jr '[.edges.awaited_by[] | keys | join(",")] | unique | join(" ")')" "edge,id,status,title" \
+  "  ... each cut to its id, title, status and edge"
+eq "$(jr '[paths | join(".")] | map(select(test("description|notes|comment"; "i"))) | length')" 0 \
+  "  ... and no waiter's body rides along"
+eq "$(grep -c -- 'show tk-design --brief-deps --include-dependents' "$FAKE_GC_LOG")" 1 \
+  "  ... taken from the dependents the subject's own read carries"
+eq "$(grep -- 'dep list tk-design' "$FAKE_GC_LOG" | grep -vc -- '--type tracks')" 0 \
+  "  ... with no reverse read of its own beside tracked-by's"
+run tk-design
+has "$OUT" "awaited-by  4 (2 open): tk-aw-next (open, blocks), tk-aw-polish (in_progress, blocks), tk-aw-dup (closed, until), tk-aw-earlier (closed, blocks)" \
+  "  ... and the text view names them on one line after the counts"
+
+run tk-hub --json
+eq "$(jr '[.edges.awaited_by[].id] | join(",")')" \
+  "tk-hw-01,tk-hw-02,tk-hw-03,tk-hw-04,tk-hw-05,tk-hw-06,tk-hw-07,tk-hw-08,tk-hw-09,tk-hw-10" \
+  "a bead with more waiters than the cap names ten, open ones first, so a closed one that sorts first is cut"
+eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "12 11" "  ... and counts all twelve, eleven open"
+run tk-hub
+has "$OUT" "awaited-by  12 (11 open): tk-hw-01 (open, blocks), " "  ... the text view leads with the counts"
+has "$OUT" "tk-hw-10 (open, blocks), and 2 more" "  ... and says how many it left out"
+# The Edges section's line for a bead with no edge of any class.
+NO_EDGES=$'\n    (none)'
+hasnt "$OUT" "$NO_EDGES" "  ... and a bead whose only edges are its waiters does not read as having none"
+
+run tk-anchor --json
+eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "0 0" "a bead nothing waits on counts no waiters"
+eq "$(jr '.edges.awaited_by | length')" 0 "  ... and names none"
+run tk-anchor
+hasnt "$OUT" "awaited-by" "  ... and prints no awaited-by line"
+run hq-city --db "$HQ/.beads"
+has "$OUT" "$NO_EDGES" "a bead with no edge of any class reads (none)"
+
 # --- B. Frontier (opt-in) ---------------------------------------------------
 # Default output carries no frontier; it is added only on --frontier.
 JQF='has("frontier")'  runj tk-anchor;             eq "$JQ" false "frontier is absent by default (opt-in)"
@@ -547,8 +674,6 @@ JQF='.frontier.open[0].stuck_on | "\(.id) \(.why)"' runj tk-failclosed --frontie
 eq "$JQ" "zz-ghost unknown" "  ... and names itself unknown"
 
 # --- B2. The transitive walk --------------------------------------------------
-# One run per subject; each assertion queries that run's output.
-jr()  { printf '%s' "$OUT" | jq -r "$1" 2>/dev/null; }
 blkr() { jr "[.frontier.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
 logcount() { grep -c -- "$1" "$FAKE_GC_LOG" | tr -d ' '; }
 
@@ -656,9 +781,9 @@ has "$OUT" "(open, stuck: unrouted)" "  ... and a blocker that stops itself as j
 
 # --- C. Horizon (opt-in) ----------------------------------------------------
 JQF='has("horizon")'                 runj tk-epic;            eq "$JQ" false "horizon is absent by default (opt-in)"
-JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 10 "every direct child is counted, in any status"
+JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 10 "every direct child is counted, in any status, and a bd set-state event is not a child"
 JQF='.horizon.children.open'         runj tk-epic --horizon;  eq "$JQ" 9 "  ... nine are open"
-JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the listing asks for every status)"
+JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the listing asks for every status), and the closed event is not"
 JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 5 "  ... pool-routed, in-progress, hooked, a progressing anchor and a pour-cleared rework child advance"
 JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 4 "  ... the human-gated, armed-behind-the-gate, pinned and custom-status children are stuck"
 JQF='.horizon.open | length'         runj tk-epic --horizon;  eq "$JQ" 9 "open children are listed; the done one is not"
@@ -692,9 +817,9 @@ run tk-missing
 eq "$RC" 4 "a not-found id (\`{\"error\":…}\` object) is reported, not parsed as a bead"
 has "$ERR" "did not resolve to a bead" "  ... with a diagnostic"
 
-run lx-city --db "$HQ/.beads"
+run hq-city --db "$HQ/.beads"
 eq "$RC" 0 "--db reaches the HQ store, which no --rig value names"
-has "$OUT" "Store       loomington" "  ... and the rig is recovered from the db path"
+has "$OUT" "Store       mycity" "  ... and the rig is recovered from the db path"
 
 JQF='.subject.status'  runj or-far --store rig:otherrig
 eq "$JQ" closed "--store rig:<name> pins the read to that rig's store"

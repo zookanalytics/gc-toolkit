@@ -38,7 +38,8 @@ BLOCK="$(awk '
   f' "$TOML")"
 [ -n "$BLOCK" ] && ok "notice-finding block extracted" \
   || bad "notice-finding block EMPTY — markers missing from $TOML"
-printf '%s\n' "$BLOCK" > "$TMP/block.sh"
+# The pour renders {{binding_prefix}} as the binding plus a dot, gc-toolkit. here.
+printf '%s\n' "$BLOCK" | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$TMP/block.sh"
 bash -n "$TMP/block.sh" && ok "the block is valid bash" || bad "the block failed bash -n"
 # The formula is a TOML basic string, which rewrites a backslash escape. This
 # test reads the raw file, so a backslash would make it check text that differs
@@ -60,6 +61,9 @@ case "${1:-} ${2:-}" in
     [ -n "${3:-}" ] || { echo "gc mail ${2}: beadmail get: message not found" >&2; exit 1; } ;;
 esac
 case "${1:-} ${2:-}" in
+  "gc-toolkit scripts-dir")
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "mail peek")
     if [ -n "${STUB_PEEK_FAIL:-}" ]; then
       echo "gc mail peek: beadmail get: message not found" >&2
@@ -91,7 +95,7 @@ chmod +x "$BIN/gc" "$BIN/git" "$RIG/assets/scripts/patrol-finding.sh"
 # parameter, a command substitution, a backslash and blank lines.
 mail_json() {  # <subject> -> a `gc mail peek --json` payload
   jq -nc --arg s "$1" '{schema_version:"1", ok:true, message:{
-    id:"lx-wisp-m1", from:"gc-toolkit__polecat-lx-wisp-abc",
+    id:"hq-wisp-m1", from:"gc-toolkit__polecat-hq-wisp-abc",
     to:"gc-toolkit/gc-toolkit.witness", subject:$s,
     body:"Root tk-root is held and blocks the gate.\n\nIt says \"held\", costs $HOME and `date`, and ends in a back\\slash.",
     created_at:"2026-10-05T10:00:00Z", read:false, thread_id:"t-1"}}'
@@ -112,7 +116,7 @@ run() {
   : > "$TMP/log"; rm -f "$TMP/args.json"
   { printf '%s\n' "$prelude"; cat "$TMP/block.sh"; } > "$TMP/run.sh"
   OUT=$(cd "$TMP/cwd" && env -i PATH="$BIN:$PATH" HOME="$TMP/home" STUB_LOG="$TMP/log" \
-        PF_ARGS="$TMP/args.json" REAL_PF="$REAL_PF" GC_RIG=gc-toolkit GC_RIG_ROOT="$RIG" \
+        PF_ARGS="$TMP/args.json" REAL_PF="$REAL_PF" GC_RIG=gc-toolkit STUB_PACK="$RIG" \
         GC_CITY_PATH="$TMP/nocity" STUB_MAIL="$TMP/notice.json" "$@" "${shell[@]}" "$TMP/run.sh" 2>&1); RC=$?
   LOG=$(cat "$TMP/log")
   ARGS=$(cat "$TMP/args.json" 2>/dev/null || echo '[]')
@@ -123,7 +127,7 @@ before() {  # <first> <second> -> 0 when <first> is logged before <second>
   awk -v a="$1" -v b="$2" 'index($0, a) && !x {x=NR} index($0, b) && !y {y=NR} END {exit !(x && y && x < y)}' "$TMP/log"
 }
 
-BASE='MAIL_ID=lx-wisp-m1; KEY=held-gate-molecule; ABOUT=tk-root'
+BASE='MAIL_ID=hq-wisp-m1; KEY=held-gate-molecule; ABOUT=tk-root'
 
 echo "# a NOTICE that names its bead is filed, then archived"
 run bash "$BASE"
@@ -135,24 +139,24 @@ eq "$(arg --title)" "held root tk-root blocks the merge gate" "titled by the sub
 MSG="$(arg --message)"
 SOURCE_SEP=$'\n\n## Source'
 eq "${MSG%%"$SOURCE_SEP"*}" "$WANT_BODY" "the mail body reaches the finding verbatim"
-has "$MSG" "Mail lx-wisp-m1 from gc-toolkit__polecat-lx-wisp-abc, sent 2026-10-05T10:00:00Z." "the finding names the mail, its sender and when it was sent"
+has "$MSG" "Mail hq-wisp-m1 from gc-toolkit__polecat-hq-wisp-abc, sent 2026-10-05T10:00:00Z." "the finding names the mail, its sender and when it was sent"
 has "$MSG" "Subject: NOTICE: held root tk-root blocks the merge gate" "and carries the subject unmodified"
 hasnt "$MSG" "## Witness" "no witness section when NOTE is unset"
 has "$OUT" "key=held-gate-molecule scope=witness-findings" "the real patrol-finding.sh parser accepted every flag"
 has "$OUT" "about=tk-root" "and read the --about"
-has "$LOG" "gc mail peek lx-wisp-m1 --json" "the mail is read with peek, which leaves it unread"
-has "$LOG" "gc mail archive lx-wisp-m1" "the mail is archived"
+has "$LOG" "gc mail peek hq-wisp-m1 --json" "the mail is read with peek, which leaves it unread"
+has "$LOG" "gc mail archive hq-wisp-m1" "the mail is archived"
 before "patrol-finding" "gc mail archive" && ok "the archive comes after the filing" \
   || bad "the mail was archived before the finding was filed"
 hasnt "$LOG" "mark-unread" "a filed mail is not returned to the inbox"
 
 echo "# a mail that names no bead files with an empty --about, which the parser reads as none"
-run bash 'MAIL_ID=lx-wisp-m1; KEY=held-gate-molecule; ABOUT='
+run bash 'MAIL_ID=hq-wisp-m1; KEY=held-gate-molecule; ABOUT='
 eq "$(arg --about)" "" "the --about value is empty"
 has "$OUT" "key=held-gate-molecule scope=witness-findings" "the real parser still accepts it"
 hasnt "$OUT" "about=" "and records no about, the same as omitting the flag"
-has "$LOG" "gc mail archive lx-wisp-m1" "the mail is archived"
-run bash 'MAIL_ID=lx-wisp-m1; KEY=held-gate-molecule'
+has "$LOG" "gc mail archive hq-wisp-m1" "the mail is archived"
+run bash 'MAIL_ID=hq-wisp-m1; KEY=held-gate-molecule'
 hasnt "$OUT" "about=" "an unset ABOUT is the same as an empty one"
 
 echo "# NOTE adds what the witness knows, under its own heading"
@@ -170,30 +174,30 @@ eq "$(arg --title)" "NOTICE: " "a subject that is only the prefix falls back to 
 mail_json "NOTICE: held root tk-root blocks the merge gate" > "$TMP/notice.json"
 
 echo "# a raw control byte in the mail does not make it unreadable"
-jq -nc '{schema_version:"1", ok:true, message:{id:"lx-wisp-m1", from:"p", to:"w",
+jq -nc '{schema_version:"1", ok:true, message:{id:"hq-wisp-m1", from:"p", to:"w",
   subject:"NOTICE: raw XX byte", body:"b", created_at:"2026-10-05T10:00:00Z"}}' \
   | sed "s/XX/$(printf '\001')/" > "$TMP/notice.json"
 run bash "$BASE"
 eq "$(arg --title)" "raw  byte" "the byte is stripped and the mail is filed"
-has "$LOG" "gc mail archive lx-wisp-m1" "and archived"
+has "$LOG" "gc mail archive hq-wisp-m1" "and archived"
 mail_json "NOTICE: held root tk-root blocks the merge gate" > "$TMP/notice.json"
 
 echo "# a filing that fails leaves the mail unread for the next cycle"
 run bash "$BASE" STUB_PF_RC=1
 has "$LOG" "patrol-finding" "the filing was attempted"
 hasnt "$LOG" "gc mail archive" "the mail is NOT archived"
-has "$LOG" "gc mail mark-unread lx-wisp-m1" "the mail is returned to the unread inbox"
-has "$OUT" "filed nothing for mail lx-wisp-m1" "the witness is told nothing was filed"
+has "$LOG" "gc mail mark-unread hq-wisp-m1" "the mail is returned to the unread inbox"
+has "$OUT" "filed nothing for mail hq-wisp-m1" "the witness is told nothing was filed"
 eq "$RC" 0 "the patrol step survives the failure"
-run bash 'MAIL_ID=lx-wisp-m1; KEY="bad key"; ABOUT=tk-root'
+run bash 'MAIL_ID=hq-wisp-m1; KEY="bad key"; ABOUT=tk-root'
 hasnt "$LOG" "gc mail archive" "a key the real parser refuses archives nothing"
-has "$LOG" "gc mail mark-unread lx-wisp-m1" "and leaves the mail unread"
+has "$LOG" "gc mail mark-unread hq-wisp-m1" "and leaves the mail unread"
 
 echo "# a refusal for a live finding sharing KEY or ABOUT names both re-runs"
 run bash "$BASE" STUB_PF_RC=3
 hasnt "$LOG" "gc mail archive" "a refused mail is NOT archived"
-has "$LOG" "gc mail mark-unread lx-wisp-m1" "and is returned to the unread inbox"
-has "$OUT" "refused mail lx-wisp-m1" "the witness is told the filing was refused"
+has "$LOG" "gc mail mark-unread hq-wisp-m1" "and is returned to the unread inbox"
+has "$OUT" "refused mail hq-wisp-m1" "the witness is told the filing was refused"
 has "$OUT" "with that finding's KEY and ABOUT" "and that the listed finding's KEY and ABOUT file it there"
 has "$OUT" "with DISTINCT=1" "and that DISTINCT=1 files a different situation"
 hasnt "$OUT" "stays unread for the next cycle" "and is not told the next cycle files it"
@@ -203,14 +207,14 @@ echo "# DISTINCT=1 files a mail its refusal listed as a different situation"
 run bash "$BASE; DISTINCT=1"
 eq "$(printf '%s' "$ARGS" | jq 'index("--distinct") != null')" "true" "DISTINCT=1 passes --distinct"
 has "$OUT" "about=tk-root distinct" "the real patrol-finding.sh parser accepted it"
-has "$LOG" "gc mail archive lx-wisp-m1" "the mail is archived"
+has "$LOG" "gc mail archive hq-wisp-m1" "the mail is archived"
 run bash "$BASE"
 eq "$(printf '%s' "$ARGS" | jq 'index("--distinct") != null')" "false" "an unset DISTINCT passes no --distinct, so the refusal still applies"
 run bash "$BASE; DISTINCT="
 eq "$(printf '%s' "$ARGS" | jq 'index("--distinct") != null')" "false" "an empty DISTINCT is the same as an unset one"
 
 echo "# nothing is filed, and nothing archived, when a prerequisite is missing"
-run bash 'MAIL_ID=lx-wisp-m1; ABOUT=tk-root'
+run bash 'MAIL_ID=hq-wisp-m1; ABOUT=tk-root'
 hasnt "$LOG" "patrol-finding" "no KEY: no filing"
 hasnt "$LOG" "gc mail archive" "no KEY: no archive"
 has "$OUT" "KEY is unset" "no KEY: the witness is told why"
@@ -218,7 +222,7 @@ run bash "$BASE" STUB_PEEK_FAIL=1
 hasnt "$LOG" "patrol-finding" "an unreadable mail is not filed blind"
 hasnt "$LOG" "gc mail archive" "and is not archived"
 has "$OUT" "the mail is unreadable" "and the witness is told why"
-run bash "$BASE" GC_RIG_ROOT="$NORIG"
+run bash "$BASE" STUB_PACK="$NORIG"
 hasnt "$LOG" "gc mail archive" "with no patrol-finding.sh in reach, nothing is archived"
 has "$OUT" "patrol-finding.sh is not in the pack" "and the witness is told why"
 
@@ -231,13 +235,13 @@ eq "$RC" 0 "and the step survives it"
 echo "# the block runs in whatever shell the witness has set up"
 for PRELUDE in 'set -e' 'set -euo pipefail'; do
   run bash "$PRELUDE; $BASE"
-  has "$LOG" "gc mail archive lx-wisp-m1" "$PRELUDE: a filed mail is archived"
+  has "$LOG" "gc mail archive hq-wisp-m1" "$PRELUDE: a filed mail is archived"
   run bash "$PRELUDE; $BASE" STUB_PF_RC=1
-  has "$LOG" "gc mail mark-unread lx-wisp-m1" "$PRELUDE: a failed filing leaves the mail unread"
+  has "$LOG" "gc mail mark-unread hq-wisp-m1" "$PRELUDE: a failed filing leaves the mail unread"
   hasnt "$LOG" "gc mail archive" "$PRELUDE: and archives nothing"
   run bash "$PRELUDE; $BASE" STUB_PF_RC=3
-  has "$OUT" "refused mail lx-wisp-m1" "$PRELUDE: a refusal reaches its diagnostic"
-  has "$LOG" "gc mail mark-unread lx-wisp-m1" "$PRELUDE: and leaves the mail unread"
+  has "$OUT" "refused mail hq-wisp-m1" "$PRELUDE: a refusal reaches its diagnostic"
+  has "$LOG" "gc mail mark-unread hq-wisp-m1" "$PRELUDE: and leaves the mail unread"
   run bash "$PRELUDE; $BASE" STUB_PEEK_FAIL=1
   has "$OUT" "the mail is unreadable" "$PRELUDE: an unreadable mail reaches the diagnostic"
   run bash "$PRELUDE; KEY=k"
@@ -249,9 +253,9 @@ if command -v zsh >/dev/null 2>&1; then
   run bash "$BASE"; BASH_ARGS="$ARGS"
   run zsh "$BASE"
   eq "$ARGS" "$BASH_ARGS" "zsh: the block hands patrol-finding.sh the same argv as bash"
-  has "$LOG" "gc mail archive lx-wisp-m1" "zsh: the mail is archived"
-  run bash 'MAIL_ID=lx-wisp-m1; KEY=held-gate-molecule; ABOUT='; BASH_ARGS="$ARGS"
-  run zsh 'MAIL_ID=lx-wisp-m1; KEY=held-gate-molecule; ABOUT='
+  has "$LOG" "gc mail archive hq-wisp-m1" "zsh: the mail is archived"
+  run bash 'MAIL_ID=hq-wisp-m1; KEY=held-gate-molecule; ABOUT='; BASH_ARGS="$ARGS"
+  run zsh 'MAIL_ID=hq-wisp-m1; KEY=held-gate-molecule; ABOUT='
   eq "$ARGS" "$BASH_ARGS" "zsh: an empty ABOUT is the same argv as under bash"
   run zsh "$BASE" STUB_PF_RC=1
   hasnt "$LOG" "gc mail archive" "zsh: a failed filing archives nothing"
@@ -259,7 +263,7 @@ if command -v zsh >/dev/null 2>&1; then
   run zsh "$BASE; DISTINCT=1"
   eq "$ARGS" "$BASH_ARGS" "zsh: DISTINCT=1 is the same argv as under bash"
   run zsh "$BASE" STUB_PF_RC=3
-  has "$OUT" "refused mail lx-wisp-m1" "zsh: a refusal reaches its diagnostic"
+  has "$OUT" "refused mail hq-wisp-m1" "zsh: a refusal reaches its diagnostic"
 else
   echo "skip - zsh not installed; the zsh runs are skipped"
 fi

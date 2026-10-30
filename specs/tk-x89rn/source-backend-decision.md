@@ -32,7 +32,7 @@ sanctioned:
 
 ## What was measured
 
-Probing the live supervisor (loomington, 2026-08-10) established what the
+Probing the live supervisor (mycity, 2026-08-10) established what the
 HTTP API can and cannot supply. The `Bead` schema *declares* `updated_at`,
 `metadata` and `assignee`, so the gap is not visible from the OpenAPI
 document alone — it only shows in the payloads:
@@ -107,7 +107,7 @@ backends:
 
 ### The anchor-count difference is the supervisor's status flattening
 
-The one extra anchor over HTTP was `su-av11`, an epic whose real status is
+The one extra anchor over HTTP was `rb-av11`, an epic whose real status is
 **`deferred`**. gascity's `mapBdStatus` collapses every status that is not
 `closed`/`in_progress` into `open`, so a deferred (or blocked, or pinned)
 anchor arrives over HTTP indistinguishable from an open one, and the HTTP

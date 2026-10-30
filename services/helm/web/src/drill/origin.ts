@@ -42,7 +42,7 @@ export interface SupervisorOrigin {
    * is the tailscale host in normal use.
    */
   baseUrl: string;
-  /** City name segment of the mount, e.g. 'loomington'. */
+  /** City name segment of the mount, e.g. 'mycity'. */
   city: string;
 }
 

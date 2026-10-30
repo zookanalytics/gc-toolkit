@@ -67,6 +67,10 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
+# rig-map.sh prints the map when the listing reads and only its reason when it
+# does not, so one capture holds whichever came back.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+
 # `gc rig list` names the stores this check scans, and it can fail
 # transiently: a momentary Dolt or lock blip returns a non-zero rc that a
 # later call clears. Since this check files an all-rigs BLOCKING finding when
@@ -82,7 +86,7 @@ RIGS_MAX_ATTEMPTS=3
 rigs_attempt=0
 while : ; do
     rigs_attempt=$((rigs_attempt + 1))
-    rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+    rigs_raw=$(run_bounded "$RIG_MAP" 2>&1); rigs_rc=$?
     [ "$rigs_rc" -eq 0 ] && break
     [ "$rigs_attempt" -ge "$RIGS_MAX_ATTEMPTS" ] && break
     budget_spent && break
@@ -94,6 +98,7 @@ scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether closed anchors landed (I5)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths after $rigs_attempt attempt(s); there is no set of bead stores to scan."
+    [ "$rigs_rc" -eq 0 ] || [ -z "$rigs_raw" ] || detail "$rigs_raw"
     exit 1
 fi
 

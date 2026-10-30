@@ -16,9 +16,9 @@
 #             store with no candidate makes no status read
 #   (FRESH)   until_fresh finds the edge to the successor gone, a target or a
 #             blocker reopened or added, an edge `bd show` leaves out because
-#             its target has no row in the store, live work on the row or the
-#             edges, or nothing, and fails closed on a read that fails or does
-#             not parse; it reads the pass's own claim as the bead the pass
+#             its target has no row in the store, live work on the row, on the
+#             edges or in a live run that works the bead, or nothing, and fails
+#             closed on a read that fails or does not parse; it reads the pass's own claim as the bead the pass
 #             claimed, without a successor pointer the claim's mark names, and
 #             with `closed` reads a bead the pass just closed the same way,
 #             without the pointer its close recorded, so only what landed on it
@@ -27,7 +27,8 @@
 #             call both functions
 #   (NO-COPY) no other file in the pack defines these names
 # The behavioral half of each reader lives beside it (deferred-dispatch.test.sh,
-# doctor/check-until-resolved-owed/run.test.sh).
+# doctor/check-until-resolved-owed/run.test.sh). The runs that work a bead are
+# run-lib.sh's reads, which run-lib.stub.sh answers here from runs.json.
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 
@@ -43,6 +44,9 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_FAIL=""
+runs_file() { printf '%s' "$1" > "$TMP/runs.json"; }
+runs_file '[]'
 # shellcheck source=until-resolved.sh
 . "$LIB" || { echo "FAIL - cannot source $LIB" >&2; exit 1; }
 [ -n "${UNTIL_RESOLVED_JQ:-}" ] && ok "(SCAN) sourcing the file exposes \$UNTIL_RESOLVED_JQ" \
@@ -210,8 +214,15 @@ fresh_case "a blocks blocker open now reads blocked" \
     '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"',{"id":"y-1","dependency_type":"blocks","issue_type":"task","status":"in_progress"}]}' '[]' "$(printf 'blocked\ty-1')"
 fresh_case "a route stamped since the listing reads live" \
     '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{"gc.routed_to":"rig/rig.polecat"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.routed_to=rig/rig.polecat')"
-fresh_case "a convoy tracking the bead reads live" \
-    '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"closed"}]' "$(printf 'live\ttracked by convoy c-1 (closed)')"
+fresh_case "a bead a closed convoy tracks, with no live run, reads clear" \
+    '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"closed"}]' "$(printf 'clear\t-')"
+runs_file '[{"root":"r-1","convoy":"c-1","bead":"g-1","formula":"mol-polecat-work","live":true}]'
+fresh_case "a live run working the bead reads live" \
+    '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]' "$(printf 'live\tworked by live run r-1 (mol-polecat-work)')"
+runs_file '[{"root":"r-1","convoy":"c-1","bead":"g-1","formula":"mol-polecat-work","live":false}]'
+fresh_case "a run that has finished reads clear" \
+    '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]' "$(printf 'clear\t-')"
+runs_file '[]'
 fresh_case "a claim since the listing reads live" \
     '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"rig__polecat-1","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=in_progress; assignee=rig__polecat-1')"
 fresh_case "the pass's own claim reads as the bead it claimed" \
@@ -245,8 +256,10 @@ closed_case "so does one closed and unassigned" \
     '{"id":"g-1","issue_type":"task","status":"closed","assignee":"","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'clear\t-')"
 closed_case "a route that landed on it reads live" \
     '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.routed_to":"rig/rig.polecat"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.routed_to=rig/rig.polecat')"
-closed_case "a convoy that began tracking it reads live" \
-    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]' "$(printf 'live\ttracked by convoy c-1 (open)')"
+runs_file '[{"root":"r-1","convoy":"c-1","bead":"g-1","formula":"mol-polecat-work","live":true}]'
+closed_case "a run poured over it meanwhile reads live" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]' "$(printf 'live\tworked by live run r-1 (mol-polecat-work)')"
+runs_file '[]'
 closed_case "a bead closed under another assignee reads live, its pointer with it" \
     '{"id":"g-1","issue_type":"task","status":"closed","assignee":"rig__polecat-1","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=closed; assignee=rig__polecat-1; gc.superseded_by=x-1')"
 closed_case "the pointer and the mark the pass's close left read as the bead it claimed" \
@@ -276,6 +289,8 @@ out="$(FAIL_SHOW=1 until_fresh fake_bd g-1 x-1)"; rc=$?
 eq "$rc:$out" "1:" "(FRESH) a show that fails exits 1 with nothing printed"
 out="$(FAIL_UP=1 until_fresh fake_bd g-1 x-1)"; rc=$?
 eq "$rc:$out" "1:" "(FRESH) a dependents read that fails exits 1 with nothing printed"
+out="$(RUN_LIB_STUB_FAIL=runs until_fresh fake_bd g-1 x-1)"; rc=$?
+eq "$rc:$out" "1:" "(FRESH) a read of the runs that work it that fails exits 1 with nothing printed"
 printf '%s' '{"error":"no issues found matching the provided IDs"}' > "$TMP/show_g-1"
 out="$(until_fresh fake_bd g-1 x-1)"; rc=$?
 [ "$rc" != 0 ] && [ -z "$out" ] && ok "(FRESH) a show that answers an error object fails closed" \

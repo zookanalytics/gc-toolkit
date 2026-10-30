@@ -7,7 +7,9 @@
 # comments on /pulls/N/comments, but they stop counting as feedback.
 # REVIEW_DISMISSAL_DEF states that second rule once, for every reader of the
 # comment space. pr-facts.sh reads only the comments no dismissal has retired
-# (live_comments) before it counts or routes any feedback. A dismisser asks
+# (live_comments) before it counts or routes any feedback, and pr-post.sh's
+# gc_thread_awaits_answer reads a review thread's posts through it before it
+# asks whether the thread waits on the city's answer. A dismisser asks
 # which comments a dismissal would retire before pr-facts.sh routes them
 # (unrouted_comment_ids), so it never drops feedback nobody has read. One
 # definition, no copies: review-dismissal.test.sh fails when a reader stops
@@ -18,10 +20,12 @@
 # they dismiss (approval_phrase).
 #
 # Usage follows the in-variable jq convention (review-verdict.sh): prepend the
-# defs to a jq program. unrouted_comment_ids reads gc_city_own, the city's-own
-# rule pr-post.sh prints with `pr-post.sh own-def`, so a program prepends that
-# definition first:
+# defs to a jq program. unrouted_comment_ids reads gc_feedback, the feedback
+# rule pr-post.sh prints with `pr-post.sh feedback-def`, so a program prepends
+# that definition first:
 #   jq -n "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'... live_comments($revs) ...'
+# feedback-def prints these definitions too, ahead of its thread rule, so a
+# program composed this way defines each of them twice, the same way.
 # No comment inside the program may carry an apostrophe: the program is one
 # single-quoted shell word.
 # shellcheck disable=SC2034  # read by the scripts that source this file
@@ -56,16 +60,16 @@ REVIEW_DISMISSAL_DEF='
     | map(tostring | if test("^[0-9]+$") then tonumber else 0 end) | max;
   # The ids of the inline comments on input that dismissing the reviews $rids
   # would retire before the feedback loop routes them. Each is live, carried by
-  # one of $rids, feedback rather than the city own post (gc_city_own, dated by
-  # the anchor pr_provenance_since), and above comment_routed_through($m), where
-  # $m is the metadata of the anchor whose PR carries them.
+  # one of $rids, feedback (gc_feedback, dated by the anchor
+  # pr_provenance_since), and above comment_routed_through($m), where $m is the
+  # metadata of the anchor whose PR carries them.
   def unrouted_comment_ids($revs; $rids; $m; $self):
     comment_routed_through($m) as $mark
     | ((($m.pr_provenance_since // "") | tostring)) as $since
     | ([ $rids[] | tostring ]) as $want
     | [ live_comments($revs)[]
         | select(((.pull_request_review_id // "") | tostring) as $p | any($want[]; . == $p))
-        | select(gc_city_own($self; $since) | not)
+        | select(gc_feedback($self; $since))
         | select(((.id // 0) | tonumber) > $mark)
         | (.id // 0) ];
 '

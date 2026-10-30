@@ -59,7 +59,9 @@ command -v jq  >/dev/null 2>&1 || { echo "jq required"  >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git required" >&2; exit 1; }
 [ -s "$TOML" ] || { echo "missing $TOML" >&2; exit 1; }
 
-fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML"; }
+# A block comes out with {{binding_prefix}} rendered as the patrol fills it in:
+# the binding it was poured with, gc-toolkit. here.
+fence() { awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$TOML" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
 
 # --- 1. Extraction + shape. ----------------------------------------------------
 fence shared-branch-merge-mode > "$TMP/merge.sh"
@@ -89,10 +91,12 @@ grep -q 'git checkout temp' "$TMP/push.sh" \
   && bad "push block does not check temp out in cwd" \
   || ok "push block does not check temp out in cwd"
 
-# --- 2. Stub gc: bd show returns $FAKE_META; bd update / drain-ack are no-ops. --
+# --- 2. Stub gc: bd show returns $FAKE_META; bd update / drain-ack are no-ops;
+# `gc gc-toolkit scripts-dir` names the pack, $STUB_PACK. --------------------------
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "bd show")          printf '%s' "${FAKE_META:-[]}" ;;
   "bd update")        exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
@@ -103,11 +107,12 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/drain.log"
 
-# The pack, where the merge block finds rig-root.sh to resolve the rig,
-# detached-job.sh to stop a gate left running in the prep worktree, and
-# refinery-workspace.sh to stage it: $GC_CITY_PATH/rigs/gc-toolkit. pack_city
-# <dir> makes one holding rig-root.sh alone, since the block resolves the rig
-# through it before it looks for anything else.
+# The pack gc names, where the merge block finds rig-root.sh to resolve the
+# rig, detached-job.sh to stop a gate left running in the prep worktree, and
+# refinery-workspace.sh to stage it. Each case's pack sits at
+# <city>/rigs/gc-toolkit, as a rig checkout of it does. pack_city <dir> makes
+# one holding rig-root.sh alone, since the block resolves the rig through it
+# before it looks for anything else.
 pack_city() { mkdir -p "$1/rigs/gc-toolkit/assets/scripts"; cp "$HERE/rig-root.sh" "$1/rigs/gc-toolkit/assets/scripts/"; }
 CITY="$TMP/city"
 pack_city "$CITY"
@@ -133,9 +138,9 @@ build_repo() {
 }
 
 # Run an extracted block from INSIDE the rig root (the stranding case). RUN_CITY
-# names another pack to find detached-job.sh in.
+# names another city whose pack gc names instead.
 run_block() { # <rig> <block-file>
-  ( cd "$1" && GC_RIG_ROOT="$1" GC_CITY_PATH="${RUN_CITY:-$CITY}" WORK=wb TARGET_BRANCH_DEFAULT=main bash "$2" ) >/dev/null 2>&1
+  ( cd "$1" && GC_RIG_ROOT="$1" STUB_PACK="${RUN_CITY:-$CITY}/rigs/gc-toolkit" WORK=wb TARGET_BRANCH_DEFAULT=main bash "$2" ) >/dev/null 2>&1
 }
 head_of()  { git -C "$1" rev-parse --abbrev-ref HEAD; }
 prep_of()  { echo "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"; }
@@ -166,7 +171,7 @@ git -C "$PW" merge-base --is-ancestor origin/polecat/wb HEAD \
   || bad "polecat/* branch: origin/branch stays an ancestor of the prepared head (merged, not rewritten)"
 
 # push block: ships the prepared head -> origin/<branch> without a cwd checkout; root unmoved.
-( cd "$R/rig" && GC_RIG_ROOT="$R/rig" GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb bash "$TMP/push.sh" ) >/dev/null 2>&1 \
+( cd "$R/rig" && GC_RIG_ROOT="$R/rig" STUB_PACK="$CITY/rigs/gc-toolkit" WORK=wb BRANCH=polecat/wb bash "$TMP/push.sh" ) >/dev/null 2>&1 \
   && ok "push block exits 0" || bad "push block exits 0"
 eq "$(head_of "$R/rig")" "main" "after push: rig root still on main"
 eq "$(git -C "$R/rig" rev-parse origin/polecat/wb)" "$(git -C "$PW" rev-parse HEAD)" "after push: origin/branch == the merged prepared head"
@@ -198,7 +203,7 @@ build_two() {
 # that WORK and BRANCH. Sets RC.
 push_as() {
   : > "$FAKE_LOG"
-  ( cd "$1" && GC_RIG_ROOT="$1" GC_CITY_PATH="$CITY" WORK="$2" BRANCH="$3" bash "$4" ) >"$TMP/push.out" 2>&1 && RC=0 || RC=$?
+  ( cd "$1" && GC_RIG_ROOT="$1" STUB_PACK="$CITY/rigs/gc-toolkit" WORK="$2" BRANCH="$3" bash "$4" ) >"$TMP/push.out" 2>&1 && RC=0 || RC=$?
 }
 fence prep-staged-work > "$TMP/staged.sh"
 [ -s "$TMP/staged.sh" ] && ok "prep-staged-work extracted" || bad "prep-staged-work extracted"

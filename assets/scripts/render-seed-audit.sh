@@ -21,21 +21,20 @@
 # holds only what moves when the pack's composition moves.
 #
 # WHY A SYNTHETIC CITY AND NOT THE LIVE ONE. `gc prime` renders against whatever
-# city is in scope, and a city contributes real prompt text of its own: the
-# loomington `city.toml` appends `command-glossary` and `operational-awareness`
-# to every agent via [agent_defaults], which is 6,773 B — 19% — of the polecat
-# seed. A golden file rendered against the operator's live city would move
-# whenever that file moved, with no commit in this repo to explain it, and the
-# check would fail for reasons nobody here controls. So the harness builds its
-# own throwaway city from a scenario pinned BELOW (see synth_city), renders
-# against that, and normalizes machine paths out of the result. The artifact is
-# then a pure function of this repo, which is what a committed golden file has
-# to be.
+# city is in scope, and a city contributes prompt text of its own: its
+# [agent_defaults] can append fragments to every agent, and its rig names are
+# substituted into every prompt that cites a rig. A golden file rendered against
+# the operator's live city would move whenever that file moved, with no commit in
+# this repo to explain it, and the check would fail for reasons nobody here
+# controls. So the harness builds its own throwaway city from a scenario pinned
+# BELOW (see synth_city), renders against that, and normalizes machine paths out
+# of the result. The artifact is then a function of this repo and of the `gc`
+# binary that renders it, and of nothing else.
 #
-# Fidelity is not assumed, it is measured. Against `gc prime` in the live
-# loomington city, seven of nine agents render BYTE-IDENTICAL (refinery, mayor,
+# Fidelity is not assumed, it is measured. Against `gc prime` in the operator's
+# live city, seven of nine agents render BYTE-IDENTICAL (refinery, mayor,
 # deacon, converse, mechanik, proactive, keeper); polecat and witness differ by
-# one line of 36 KB — the rig checkout path, which in loomington happens to be
+# one line of 36 KB — the rig checkout path, which in that city happens to be
 # the pack directory itself. Worst case 0.04%.
 # specs/tk-yhwfv.3/seed-audit.md records the table and how to re-run it.
 #
@@ -49,7 +48,18 @@
 # what the running binary emits, so prose that reads wrong in one of these
 # files is corrected upstream and arrives here on the next regeneration.
 # Editing the render instead would make the audit disagree with the text the
-# agents actually receive.
+# agents actually receive. Recipes come the same way: the core pack defines
+# formulas of its own, mol-polecat-base among them, and a formula of this pack's
+# that extends one of them carries its text.
+#
+# That text ships inside the `gc` binary, so a newer build can move it with no
+# commit here, and the files that carry it go stale on every branch at once. The
+# new text lands in a change of its own. A render --since a revision keeps each
+# file the change does not move as that revision commits it, so the pre-commit
+# hook does not fold the new text into an unrelated commit. The merge gate
+# reports such a file as the base's own staleness and hands it to
+# assets/scripts/seed-audit-reaudit.sh, which slings the one bead that
+# re-renders the default branch and lands the text in a pull request of its own.
 #
 # WHAT IS NOT RENDERED — and cannot be, by this or any `gc prime` caller.
 # `gc prime` resolves the CITY-scope agent and ignores rig-scoped patches
@@ -67,10 +77,13 @@
 #
 # USAGE
 #   render-seed-audit.sh                  regenerate generated/seed-audit/
+#   render-seed-audit.sh --since <rev>    regenerate, keeping each file the change
+#                                         since <rev> does not move as <rev> has it
 #   render-seed-audit.sh --check          fail if the committed tree is stale
-#   render-seed-audit.sh --check-merge <base> <head>
+#   render-seed-audit.sh --check-merge <base> <head> [--base-stale-out FILE]
 #                                         render that merge, and fail if it lands
-#                                         a render the merge made stale
+#                                         a render the merge made stale; FILE
+#                                         gets each file <base> is already stale in
 #   render-seed-audit.sh --sizes [<rev>]  print each render's bytes and tokens,
 #                                         and the change since <rev> when given
 #   render-seed-audit.sh --install-hook   point core.hooksPath at assets/hooks
@@ -88,7 +101,9 @@ JOBS=""
 MODE="render"
 MERGE_BASE=""
 MERGE_HEAD=""
+BASE_STALE_OUT=""
 SIZES_BASE=""
+SINCE=""
 
 die() { printf 'render-seed-audit: %s\n' "$*" >&2; exit 2; }
 
@@ -96,6 +111,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --check)         MODE="check" ;;
         --check-merge)   MODE="check-merge"; shift; MERGE_BASE="${1:-}"; shift; MERGE_HEAD="${1:-}" ;;
+        --base-stale-out) shift; BASE_STALE_OUT="${1:-}"; [ -n "$BASE_STALE_OUT" ] || die "--base-stale-out needs a file" ;;
+        --since)         shift; SINCE="${1:-}"; [ -n "$SINCE" ] || die "--since needs a revision" ;;
         # The base is optional, so an argument that is a flag is not one.
         --sizes)         MODE="sizes"
                          if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then shift; SIZES_BASE="$1"; fi ;;
@@ -111,6 +128,8 @@ done
 
 [ -n "$OUT" ] || OUT="$ROOT/generated/seed-audit"
 [ -f "$ROOT/pack.toml" ] || die "not a pack checkout (no pack.toml): $ROOT"
+[ -z "$SINCE" ] || [ "$MODE" = "render" ] || die "--since applies to a render, not to --$MODE"
+[ -z "$BASE_STALE_OUT" ] || [ "$MODE" = "check-merge" ] || die "--base-stale-out applies to --check-merge"
 
 if [ -z "$JOBS" ]; then
     JOBS="$(command -v nproc >/dev/null 2>&1 && nproc || echo 4)"
@@ -132,12 +151,13 @@ PH_HOME="[[HOME]]"
 
 # ---------------------------------------------------------- trees at a revision
 #
-# --check-merge and --sizes <rev> render trees that are not checked out. Each
-# tree is written out of the object store into a scratch directory and rendered
-# by the copy of this script the tree carries. This script is part of what a
-# tree renders to, because the synthetic city below is a variable every rendered
-# prompt depends on, so a revision that edits the script is rendered by its own
-# copy. A tree that carries no copy is rendered by this one.
+# --check-merge, --since <rev> and --sizes <rev> render trees that are not
+# checked out. Each tree is written out of the object store into a scratch
+# directory and rendered by the copy of this script the tree carries. This
+# script is part of what a tree renders to, because the synthetic city below is
+# a variable every rendered prompt depends on, so a revision that edits the
+# script is rendered by its own copy. A tree that carries no copy is rendered by
+# this one.
 #
 # A render is bounded by `timeout` where the host has one. The merge gate runs
 # inside the refinery's merge cadence, where a `gc` that never returns would
@@ -175,9 +195,20 @@ render_failed() { # <what was rendered> <out> <rc>
     exit 2
 }
 
+# The audit's place in a tree, and the two reads every judgement of a rendered
+# file rests on: whether two paths hold the same bytes or both hold no file, and
+# the files under a directory, by their paths within it.
+AUDIT="generated/seed-audit"
+same() { if [ -f "$1" ] && [ -f "$2" ]; then cmp -s "$1" "$2"; else [ ! -f "$1" ] && [ ! -f "$2" ]; fi; }
+files_under() { [ -d "$1" ] && ( cd "$1" && find . -type f -print ) | sed 's|^\./||'; }
+
 if [ "$MODE" = "sizes" ] && [ -n "$SIZES_BASE" ]; then
     git -C "$ROOT" rev-parse --verify --quiet "$SIZES_BASE^{commit}" >/dev/null 2>&1 \
         || die "--sizes: '$SIZES_BASE' names no commit in $ROOT"
+fi
+if [ -n "$SINCE" ]; then
+    git -C "$ROOT" rev-parse --verify --quiet "$SINCE^{commit}" >/dev/null 2>&1 \
+        || die "--since: '$SINCE' names no commit in $ROOT"
 fi
 
 # --------------------------------------------------------- merge-result check
@@ -216,6 +247,17 @@ if [ "$MODE" = "check-merge" ]; then
         git -C "$ROOT" rev-parse --verify --quiet "$rev^{commit}" >/dev/null 2>&1 \
             || die "--check-merge: '$rev' names no commit in $ROOT; fetch it first"
     done
+    # --base-stale-out names the files <base> is already stale in, one per line,
+    # for a caller that acts on the base's own staleness (the merge gate hands it
+    # to seed-audit-reaudit.sh). It starts empty, so a check that ends before
+    # rendering the base names none. The list informs and never decides the
+    # verdict, so a file that cannot be written is reported, and the check goes
+    # on without it.
+    if [ -n "$BASE_STALE_OUT" ] && ! true 2>/dev/null > "$BASE_STALE_OUT"; then
+        printf 'render-seed-audit: could not write --base-stale-out %s; the check goes on without it\n' \
+            "$BASE_STALE_OUT" >&2
+        BASE_STALE_OUT=""
+    fi
 
     mt_out="$(git -C "$ROOT" merge-tree --write-tree "$MERGE_BASE" "$MERGE_HEAD" 2>/dev/null)"; mt_rc=$?
     merged_tree="${mt_out%%$'\n'*}"
@@ -227,17 +269,12 @@ if [ "$MODE" = "check-merge" ]; then
     trap 'rm -rf "$SCRATCH"' EXIT
     # Each tree and each render gets a directory of its own, so nothing written
     # beside a tree is mistaken for part of it.
-    AUDIT="generated/seed-audit"
     MERGED="$SCRATCH/merged"
     MERGED_RENDER="$SCRATCH/merged.render"
     BASE="$SCRATCH/base"
     BASE_RENDER="$SCRATCH/base.render"
     materialize "$merged_tree" "$MERGED" \
         || die "--check-merge: could not materialize merged tree $merged_tree"
-
-    # Two files with the same bytes, or two paths that both hold no file.
-    same() { if [ -f "$1" ] && [ -f "$2" ]; then cmp -s "$1" "$2"; else [ ! -f "$1" ] && [ ! -f "$2" ]; fi; }
-    files_under() { [ -d "$1" ] && ( cd "$1" && find . -type f -print ) | sed 's|^\./||'; }
 
     # The merge result carries no audit when it commits no file under the
     # audit's directory, or only the README.md stub a pack carries there before
@@ -278,6 +315,10 @@ if [ "$MODE" = "check-merge" ]; then
                 held+=("$p")
             fi
         done
+    fi
+    if [ -n "$BASE_STALE_OUT" ] && [ "${#base_stale[@]}" -gt 0 ]; then
+        printf '%s\n' "${base_stale[@]}" 2>/dev/null > "$BASE_STALE_OUT" \
+            || printf 'render-seed-audit: could not write --base-stale-out %s\n' "$BASE_STALE_OUT" >&2
     fi
 
     # Why one file fails both tests, in the terms a person fixing it acts on.
@@ -325,8 +366,8 @@ if [ "$MODE" = "check-merge" ]; then
         for p in "${held[@]}"; do reasons+=("$p ($(why_held "$p"))"); done
         list "${reasons[@]}"
         report_base_stale
-        printf 'Bring the head branch current with %s, then:\n' "$MERGE_BASE"
-        printf '  assets/scripts/render-seed-audit.sh && git add generated/seed-audit\n'
+        printf 'Bring the head branch current with %s, then render what the branch moves:\n' "$MERGE_BASE"
+        printf '  assets/scripts/render-seed-audit.sh --since %s && git add generated/seed-audit\n' "$MERGE_BASE"
     } >&2
     exit 1
 fi
@@ -406,21 +447,20 @@ source = "https://github.com/gastownhall/gascity.git//examples/bd"
 [imports.gc-toolkit]
 source = "@@ROOT@@"
 
-# Mirrors the loomington city.toml. These two fragments are 19% of the polecat
-# seed and they are a CITY-level setting, so a pack-only render omits them and
-# under-reports every agent. Pinning them here is what makes the artifact match
-# what agents actually receive.
+# Mirrors the [agent_defaults] of the operator's city.toml. A fragment appended
+# there reaches every agent's seed, so a fragment the city appends is appended
+# here too.
 [agent_defaults]
 default_sling_formula = "mol-polecat-work"
-append_fragments = ["command-glossary", "operational-awareness"]
 
-# Two rig shapes, and they carry the names of the two that exist in loomington
-# because the rig name is substituted INTO the rendered prompt ("a worker agent
-# in the gc-toolkit rig", "gc session nudge gc-toolkit/..."). A scenario rig
-# called "plain" would render an audit nobody can compare against a live seed.
+# Two rig shapes, and they carry the names of the two that exist in the
+# operator's city because the rig name is substituted INTO the rendered prompt
+# ("a worker agent in the gc-toolkit rig", "gc session nudge gc-toolkit/...").
+# A scenario rig called "plain" would render an audit nobody can compare
+# against a live seed.
 #
-# gc-toolkit is the plain shape: this pack and nothing else, shared with
-# signal-loom and shutupandlisten. gascity adds the opt-in sub-pack plus the
+# gc-toolkit is the plain shape: this pack and nothing else, shared with the
+# city's application rigs. gascity adds the opt-in sub-pack plus the
 # [[rigs.patches]] that append its rebase doctrine to two agents — not
 # decoration, it is the only way the fragment table in INDEX.md can show the
 # rig-scope divergence that `gc prime` cannot render.
@@ -1065,8 +1105,133 @@ if [ "$MODE" = "sizes" ]; then
     exit 0
 fi
 
+# --since <rev> writes what the change since <rev> moves, and nothing else. A
+# file the fresh render writes the way <rev> commits it needs no judgement. Any
+# other file is judged against a render of <rev> itself, which runs only when
+# some file needs it. A file that renders differently at <rev> moved with the
+# change and is written as rendered. A file that renders the same at <rev> did
+# not move with the change, so it is kept as <rev> commits it, or left out when
+# <rev> commits none: its text moved with the `gc` binary (see WHOSE TEXT IT
+# IS), or <rev> had it stale already.
+#
+# That holds unless the branch adopted gc's text for the file by re-rendering
+# it. HEAD's copy is the branch's own when it differs from <rev>'s, and the
+# branch's commits are the ones HEAD has and <rev> does not. When the first of
+# them to change the file changed nothing outside the audit, a re-render started
+# that copy, and its text came from gc, as the re-audit's does. Such a file is
+# the branch's own change, so it is written as rendered, like a file the change
+# moves, and a copy HEAD already commits as rendered stays as it is. Once gc
+# moves again, the copy HEAD commits is neither <rev>'s nor the render, and
+# putting back <rev>'s copy would undo the adoption. A copy that a change to
+# anything else started is no adoption, even one HEAD commits as rendered, so
+# <rev>'s copy is written back. Reverting such a change therefore restores
+# <rev>'s copy, and gc text that rode in beside one is taken back out. The
+# commit that brought in a page brought in its INDEX.md row, so the page and its
+# row are judged alike and go back together. A revision that carries no audit,
+# or only the stub a pack ships before its first render, keeps nothing.
+#
+# INDEX.md lists every page, so the pages a commit carries follow the index it
+# carries. An index written as rendered, because the change moves it or the
+# branch re-rendered it, lists what renders now. So a page that the render
+# writes and <rev> commits none of is written as rendered too, gc's text and
+# all, and a page that <rev> commits and the render writes none of is left out.
+# The index then lists no page the commit leaves out and leaves out none it
+# carries, and the merge gate finds the index and the page as they render. A
+# page that only gc's text moved is still kept as <rev> commits it, because the
+# index lists it either way. An index kept as <rev> commits it lists <rev>'s
+# pages, and every page follows <rev>.
+#
+# Whether HEAD commits <file> under the audit with <path>'s bytes, or commits no
+# such file where <path> holds none.
+head_commits() { # <file> <path>
+    local blob
+    if blob="$(git -C "$ROOT" rev-parse -q --verify "HEAD:$AUDIT/$1" 2>/dev/null)"; then
+        [ -f "$2" ] && git -C "$ROOT" cat-file blob "$blob" | cmp -s - "$2"
+    else
+        [ ! -f "$2" ]
+    fi
+}
+# The blob <rev> commits for <file> under the audit, and nothing where it
+# commits none.
+audit_blob() { git -C "$ROOT" rev-parse -q --verify "$1:$AUDIT/$2" 2>/dev/null; } # <rev> <file>
+# Whether a re-render of the branch started HEAD's own copy of <file>. The
+# branch's commits are read along first parents, so a merge that brought the
+# file in from another line counts as one commit, with everything it brought.
+head_adopted() { # <file>
+    local first
+    [ "$(audit_blob HEAD "$1")" != "$(audit_blob "$SINCE" "$1")" ] || return 1
+    first="$(git -C "$ROOT" log --first-parent --reverse --format=%H "$SINCE..HEAD" -- "$AUDIT/$1" 2>/dev/null | head -n 1)"
+    [ -n "$first" ] && git -C "$ROOT" diff --quiet "$first^1" "$first" -- . ":(exclude)$AUDIT" 2>/dev/null
+}
+# Whether the render writes <file> where <rev> commits none, or the other way round.
+presence_differs() { # <file>
+    if [ -f "$STAGE/$1" ]; then [ ! -f "$since_audit/$1" ]; else [ -f "$since_audit/$1" ]; fi
+}
+KEPT=()
+RENEWED=()
+LISTED=()
+if [ -n "$SINCE" ]; then
+    SINCE_TREE="$TMPROOT/since"
+    SINCE_RENDER="$TMPROOT/since.render"
+    materialize "$SINCE" "$SINCE_TREE" || die "--since: could not materialize $SINCE"
+    since_audit="$SINCE_TREE/$AUDIT"
+    since_carries=""
+    while IFS= read -r p; do
+        [ "$p" = README.md ] || since_carries=1
+    done < <(files_under "$since_audit")
+    differs=()
+    if [ -n "$since_carries" ]; then
+        while IFS= read -r p; do
+            same "$STAGE/$p" "$since_audit/$p" || differs+=("$p")
+        done < <({ files_under "$STAGE"; files_under "$since_audit"; } | LC_ALL=C sort -u)
+    fi
+    if [ "${#differs[@]}" -gt 0 ]; then
+        render_tree "$SINCE_TREE" "$SINCE_RENDER"; rc=$?
+        [ "$rc" -eq 0 ] || render_failed "$SINCE" "$SINCE_RENDER" "$rc"
+        unmoved=()
+        index_kept=""
+        for p in "${differs[@]}"; do
+            same "$SINCE_RENDER/$p" "$STAGE/$p" || continue
+            if head_adopted "$p"; then
+                head_commits "$p" "$STAGE/$p" || RENEWED+=("$p")
+                continue
+            fi
+            unmoved+=("$p")
+            [ "$p" != INDEX.md ] || index_kept=1
+        done
+        for p in ${unmoved[@]+"${unmoved[@]}"}; do
+            if [ -z "$index_kept" ] && [ "$p" != INDEX.md ] && presence_differs "$p"; then
+                LISTED+=("$p")
+                continue
+            fi
+            KEPT+=("$p")
+            if [ -f "$since_audit/$p" ]; then
+                mkdir -p "$(dirname "$STAGE/$p")" && cp "$since_audit/$p" "$STAGE/$p" \
+                    || die "--since: could not keep $p as $SINCE commits it"
+            else
+                rm -f "$STAGE/$p"
+            fi
+        done
+    fi
+fi
+
 rm -rf "$OUT"
 mkdir -p "$(dirname "$OUT")"
 cp -r "$STAGE" "$OUT"
 printf 'wrote %s (%s agents, %s formulas)\n' "${OUT#"$ROOT"/}" "${#AGENTS[@]}" "${#FORMULAS[@]}"
 report_totals "$OUT"
+if [ "${#KEPT[@]}" -gt 0 ]; then
+    printf 'kept %s file(s) as %s commits them: each renders differently now but the same at %s, so the change does not move it. Text that moves with the gc binary lands through the default branch'"'"'s re-audit (seed-audit-reaudit.sh):\n' \
+        "${#KEPT[@]}" "$SINCE" "$SINCE"
+    printf '  %s\n' "${KEPT[@]}"
+fi
+if [ "${#RENEWED[@]}" -gt 0 ]; then
+    printf 'renewed %s file(s) a re-render of this branch adopted: each renders differently now but the same at %s, and is written as rendered rather than put back as %s commits it:\n' \
+        "${#RENEWED[@]}" "$SINCE" "$SINCE"
+    printf '  %s\n' "${RENEWED[@]}"
+fi
+if [ "${#LISTED[@]}" -gt 0 ]; then
+    printf 'wrote %s page(s) as rendered to match the index this commit writes: the render adds or removes each one where %s commits it the other way:\n' \
+        "${#LISTED[@]}" "$SINCE"
+    printf '  %s\n' "${LISTED[@]}"
+fi

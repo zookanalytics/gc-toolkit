@@ -2,32 +2,56 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// gcStub answers `bd show` with $STUB_SHOW, the anchor's incoming tracks edges
-// (`bd dep list`) with $STUB_TRACKERS, the beads stamped with the anchor (the
-// `bd list` selecting gc.continuation_group) with $STUB_STAMPED, `[]` when either
-// is unset, and every other `bd list` with $STUB_LIST, so a derive test drives
-// the whole gathering path with no live store — the same `gc bd` seam
-// pr-status-label.test.sh exercises through the shell, proven here in-process.
-// $STUB_TRACKERS_FAIL and $STUB_STAMPED_FAIL fail one visit read each, and
-// $STUB_LOG, when set, records the arguments of every call.
+// gcStub answers `bd show` with $STUB_SHOW, the anchor's blockers (`bd dep list
+// -t blocks`) with $STUB_BLOCKERS, the anchor tk-a's incoming tracks edges (`bd
+// dep list`) with $STUB_TRACKERS, the beads stamped with tk-a (the `bd list`
+// selecting gc.continuation_group) with $STUB_STAMPED, the same reads for any
+// other bead, the anchor's work, with $STUB_WORK_TRACKERS and
+// $STUB_WORK_STAMPED, `[]` when any is unset, and every other `bd list` with
+// $STUB_LIST, so a derive test drives the whole gathering path with no live
+// store — the same `gc bd` seam pr-status-label.test.sh exercises through the
+// shell, proven here in-process. A work bead named in $STUB_VISITED, a
+// space-separated list, answers its tracks read with an open visit instead.
+// $STUB_TRACKERS_FAIL and $STUB_STAMPED_FAIL fail one of the anchor's visit
+// reads each, $STUB_WORK_FAIL every one of the work's, and $STUB_BLOCKERS_FAIL
+// the blockers read. $STUB_LOG, when set, records the arguments of every call.
 const gcStub = `#!/bin/sh
 [ -z "$STUB_LOG" ] || printf '%s\n' "$*" >> "$STUB_LOG"
 case "$2" in
   show) printf '%s\n' "$STUB_SHOW" ;;
   dep)
-    [ -z "$STUB_TRACKERS_FAIL" ] || { echo "simulated dep list failure" >&2; exit 1; }
-    printf '%s\n' "${STUB_TRACKERS:-[]}" ;;
+    case "$*" in
+      *" -t blocks "*)
+        [ -z "$STUB_BLOCKERS_FAIL" ] || { echo "simulated blockers failure" >&2; exit 1; }
+        printf '%s\n' "${STUB_BLOCKERS:-[]}" ;;
+      *)
+        if [ "$4" = tk-a ]; then
+          [ -z "$STUB_TRACKERS_FAIL" ] || { echo "simulated dep list failure" >&2; exit 1; }
+          printf '%s\n' "${STUB_TRACKERS:-[]}"
+        else
+          [ -z "$STUB_WORK_FAIL" ] || { echo "simulated work dep list failure" >&2; exit 1; }
+          case " $STUB_VISITED " in
+            *" $4 "*) printf '%s\n' '[{"id":"tk-w","status":"open","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]' ;;
+            *) printf '%s\n' "${STUB_WORK_TRACKERS:-[]}" ;;
+          esac
+        fi ;;
+    esac ;;
   list)
     case "$*" in
-      *gc.continuation_group=*)
+      *"gc.continuation_group=tk-a "*)
         [ -z "$STUB_STAMPED_FAIL" ] || { echo "simulated list failure" >&2; exit 1; }
         printf '%s\n' "${STUB_STAMPED:-[]}" ;;
+      *gc.continuation_group=*)
+        [ -z "$STUB_WORK_FAIL" ] || { echo "simulated work list failure" >&2; exit 1; }
+        printf '%s\n' "${STUB_WORK_STAMPED:-[]}" ;;
       *) printf '%s\n' "$STUB_LIST" ;;
     esac ;;
   *) echo unsupported >&2; exit 2 ;;
@@ -45,10 +69,10 @@ func stubGC(t *testing.T, show, list string) {
 	t.Setenv("STUB_LIST", list)
 }
 
-func derive(t *testing.T, anchor string) (string, int) {
+func derive(t *testing.T, anchor string, extra ...string) (string, int) {
 	t.Helper()
 	var out, errbuf bytes.Buffer
-	code := PRStatus([]string{"derive", "--anchor", anchor}, &out, &errbuf)
+	code := PRStatus(append([]string{"derive", "--anchor", anchor}, extra...), &out, &errbuf)
 	return out.String(), code
 }
 
@@ -106,16 +130,34 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 	})
 
-	// An approved PR the merge pass would land reads working until an open visit
+	// An approved PR the merge pass would land reads merging until an open visit
 	// covers its anchor; the visit is a hold, so the same PR then reads
 	// needs-attention.
-	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}}]`
+	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
 	stamped := `[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"}}]`
 
-	t.Run("approved and merging, no open visit => working", func(t *testing.T) {
+	t.Run("approved and merging, no open visit => merging", func(t *testing.T) {
 		stubGC(t, approved, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
+		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
+		}
+	})
+
+	// The machine verdict and its cause are read off the anchor: a blocked
+	// verdict at the posture's head holds the PR, and one whose cause is a live
+	// blocker no automated actor holds counts whatever is in flight.
+	t.Run("approved, blocked by the merge pass at the posture's head => needs-attention", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]`, `[]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
+		}
+	})
+
+	t.Run("the blocker cause beside live work => needs-attention", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]`,
+			`[{"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a"}}]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
 		}
 	})
 
@@ -157,24 +199,24 @@ func TestPRStatusDerive(t *testing.T) {
 		{"an in_progress visit tracking the anchor => needs-attention",
 			`[{"id":"tk-v","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other"},"dependency_type":"tracks"}]`, ``,
 			"needs-attention\n"},
-		{"a closed visit tracking the anchor => working",
+		{"a closed visit tracking the anchor => merging",
 			`[{"id":"tk-v","status":"closed","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]`, ``,
-			"working\n"},
-		{"a non-visit bead tracking the anchor => working",
+			"merging\n"},
+		{"a non-visit bead tracking the anchor => merging",
 			`[{"id":"tk-r","status":"open","metadata":{"task_kind":"reaction"},"dependency_type":"tracks"}]`, ``,
-			"working\n"},
+			"merging\n"},
 		{"an in_progress visit stamped with the anchor, no tracks edge => needs-attention",
 			``, `[{"id":"tk-v","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"}}]`,
 			"needs-attention\n"},
-		{"an anchor stamp beside a tracks edge to another bead => working",
+		{"an anchor stamp beside a tracks edge to another bead => merging",
 			``, `[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]`,
-			"working\n"},
+			"merging\n"},
 		{"an edge of another type leaves the stamp to cover => needs-attention",
 			``, `[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"blocks"}]}]`,
 			"needs-attention\n"},
-		{"a non-visit bead stamped with the anchor => working",
+		{"a non-visit bead stamped with the anchor => merging",
 			``, `[{"id":"tk-s","status":"open","metadata":{"gc.continuation_group":"tk-a"}}]`,
-			"working\n"},
+			"merging\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubGC(t, approved, `[]`)
@@ -188,12 +230,15 @@ func TestPRStatusDerive(t *testing.T) {
 
 	// Both visit reads name the anchor, so the cost follows the anchor rather than
 	// the number of open visits in the store, and neither lists every open visit.
+	// The in-flight read names the anchor too, over bd-lib.sh's live statuses,
+	// spelled out here as the helm board's source test spells them, so both pin
+	// the one list.
 	t.Run("the visit reads are scoped to the anchor", func(t *testing.T) {
 		stubGC(t, approved, `[]`)
 		log := filepath.Join(t.TempDir(), "gc.log")
 		t.Setenv("STUB_LOG", log)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
+		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
 		}
 		raw, err := os.ReadFile(log)
 		if err != nil {
@@ -201,8 +246,10 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 		calls := string(raw)
 		for _, want := range []string{
+			"bd list --metadata-field anchor_bead=tk-a --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json\n",
 			"bd dep list tk-a --direction=up -t tracks --json\n",
 			"bd list --metadata-field gc.continuation_group=tk-a --status open,in_progress --limit 0 --json\n",
+			"bd dep list tk-a --direction=down -t blocks --json\n",
 		} {
 			if !strings.Contains(calls, want) {
 				t.Errorf("the derive did not make the read %q; calls:\n%s", want, calls)
@@ -212,6 +259,195 @@ func TestPRStatusDerive(t *testing.T) {
 			t.Errorf("the derive listed the open visits store-wide; calls:\n%s", calls)
 		}
 	})
+}
+
+// --json prints the status beside what holds the PR, the values the held: labels
+// carry. A visit on the PR's own work in flight holds it as one on the anchor
+// does, and a live blocker routed to a person or a decision holds it as the
+// merge pass's stuck-blocker verdict does.
+func TestPRStatusDeriveHeld(t *testing.T) {
+	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
+	rework := `[{"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
+	workVisit := `[{"id":"tk-w","status":"open","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]`
+	for _, tc := range []struct {
+		name, show, list string
+		env              map[string]string
+		want             string
+	}{
+		{"nothing holds an approved PR", approved, `[]`, nil,
+			`{"status":"merging","held":[]}`},
+		{"an open visit on the anchor", approved, `[]`,
+			map[string]string{"STUB_TRACKERS": workVisit},
+			`{"status":"needs-attention","held":["visit"]}`},
+		{"an open visit tracking the PR's rework child", approved, rework,
+			map[string]string{"STUB_WORK_TRACKERS": workVisit},
+			`{"status":"needs-attention","held":["visit"]}`},
+		{"an open visit stamped with the PR's review child", approved,
+			`[{"id":"tk-r","status":"open","metadata":{"task_kind":"review","anchor_bead":"tk-a"}}]`,
+			map[string]string{"STUB_WORK_STAMPED": `[{"id":"tk-w","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-r"}}]`},
+			`{"status":"needs-attention","held":["visit"]}`},
+		{"a closed visit on the rework releases the PR", approved, rework,
+			map[string]string{"STUB_WORK_TRACKERS": `[{"id":"tk-w","status":"closed","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]`},
+			`{"status":"merging","held":[]}`},
+		{"a visit on a validation pass, which is not the PR's review or rework work", approved,
+			`[{"id":"tk-v","status":"open","metadata":{"task_kind":"validation","anchor_bead":"tk-a"}}]`,
+			map[string]string{"STUB_WORK_TRACKERS": workVisit},
+			`{"status":"merging","held":[]}`},
+		{"a visit on a rework child that is not open or in_progress", approved,
+			`[{"id":"tk-k","status":"deferred","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`,
+			map[string]string{"STUB_WORK_TRACKERS": workVisit},
+			`{"status":"merging","held":[]}`},
+		{"a live blocker routed to a person", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
+			`{"status":"needs-attention","held":["blocked"]}`},
+		{"a live decision blocker", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
+			`{"status":"needs-attention","held":["blocked"]}`},
+		{"a blocker routed to a person with no status reads open", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
+			`{"status":"needs-attention","held":["blocked"]}`},
+		{"a closed blocker routed to a person no longer holds", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"closed","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
+			`{"status":"merging","held":[]}`},
+		{"a blocker a pool will claim is the city's", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependency_type":"blocks"}]`},
+			`{"status":"merging","held":[]}`},
+		{"the merge pass's thread verdict", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"review-threads"}}]`, `[]`, nil,
+			`{"status":"needs-attention","held":["review"]}`},
+		{"the merge pass's stuck-blocker verdict", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]`, `[]`, nil,
+			`{"status":"needs-attention","held":["blocked"]}`},
+		{"a failed check reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]`, `[]`, nil,
+			`{"status":"needs-attention","held":[]}`},
+		{"the merge freeze reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","merge_hold":"true"}}]`, `[]`, nil,
+			`{"status":"needs-attention","held":[]}`},
+		{"a visit on the anchor beside a person's blocker", approved, `[]`,
+			map[string]string{"STUB_TRACKERS": workVisit, "STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
+			`{"status":"needs-attention","held":["visit","blocked"]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubGC(t, tc.show, tc.list)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			if out, code := derive(t, "tk-a", "--json"); code != 0 || out != tc.want+"\n" {
+				t.Fatalf("derive --json = (%q, %d), want (%q, 0)", out, code, tc.want+"\n")
+			}
+		})
+	}
+
+	// Without --json the derive prints the status alone, the line every other
+	// caller reads, and a held value reads in it as needs-attention.
+	t.Run("a visit on the rework without --json prints needs-attention", func(t *testing.T) {
+		stubGC(t, approved, rework)
+		t.Setenv("STUB_WORK_TRACKERS", workVisit)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
+		}
+	})
+
+	// A read the held values rest on that does not answer derives nothing, so the
+	// labels stay as they are rather than flip on a guess.
+	for _, fail := range []string{"STUB_WORK_FAIL", "STUB_BLOCKERS_FAIL"} {
+		t.Run("unreadable ("+fail+") => exit 2, no guess", func(t *testing.T) {
+			stubGC(t, approved, rework)
+			t.Setenv(fail, "1")
+			if out, code := derive(t, "tk-a", "--json"); code != 2 || out != "" {
+				t.Fatalf("derive --json with a read failing = (%q, %d), want (%q, 2)", out, code, "")
+			}
+		})
+	}
+
+	// A visit on the anchor already holds the PR, so the visits on its work are
+	// not read.
+	t.Run("a visit on the anchor skips the reads of its work's visits", func(t *testing.T) {
+		stubGC(t, approved, rework)
+		t.Setenv("STUB_TRACKERS", workVisit)
+		log := filepath.Join(t.TempDir(), "gc.log")
+		t.Setenv("STUB_LOG", log)
+		if out, code := derive(t, "tk-a", "--json"); code != 0 || out != `{"status":"needs-attention","held":["visit"]}`+"\n" {
+			t.Fatalf("derive --json = (%q, %d)", out, code)
+		}
+		raw, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "tk-k") {
+			t.Errorf("the derive read the work's visits with a visit on the anchor; calls:\n%s", raw)
+		}
+	})
+}
+
+// parityCase is one row of prstatus/testdata/parity.json, the table the PR
+// labels and the helm board are both held to: anchor tk-a's metadata, its
+// in-flight set, the beads an open visit covers, and the status and held values
+// both derive from them.
+type parityCase struct {
+	Name     string            `json:"name"`
+	Metadata map[string]string `json:"metadata"`
+	InFlight []struct {
+		ID       string `json:"id"`
+		TaskKind string `json:"task_kind"`
+		Status   string `json:"status"`
+	} `json:"in_flight"`
+	Visits []string `json:"visits"`
+	Want   struct {
+		Status string   `json:"status"`
+		Held   []string `json:"held"`
+	} `json:"want"`
+}
+
+// The label's side of the parity table: each case reaches the derive as the
+// `gc bd` reads return it. The helm board's TestPRHeldParity builds the same
+// cases as the rows its beads source gathers, so neither side can drift from the
+// other unseen.
+func TestPRStatusDeriveParity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "prstatus", "testdata", "parity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []parityCase
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
+		t.Fatalf("parity.json: %d cases, err %v", len(cases), err)
+	}
+	visit := `[{"id":"tk-w","status":"open","metadata":{"task_kind":"visit"},"dependency_type":"tracks"}]`
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			show, err := json.Marshal([]any{map[string]any{"id": "tk-a", "status": "open", "metadata": tc.Metadata}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := []any{}
+			for _, c := range tc.InFlight {
+				rows = append(rows, map[string]any{"id": c.ID, "status": c.Status,
+					"metadata": map[string]string{"task_kind": c.TaskKind, "anchor_bead": "tk-a"}})
+			}
+			list, err := json.Marshal(rows)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stubGC(t, string(show), string(list))
+			var work []string
+			for _, v := range tc.Visits {
+				if v == "tk-a" {
+					t.Setenv("STUB_TRACKERS", visit)
+				} else {
+					work = append(work, v)
+				}
+			}
+			t.Setenv("STUB_VISITED", strings.Join(work, " "))
+			out, code := derive(t, "tk-a", "--json")
+			var got struct {
+				Status string   `json:"status"`
+				Held   []string `json:"held"`
+			}
+			if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
+				t.Fatalf("derive --json = (%q, %d)", out, code)
+			}
+			if got.Status != tc.Want.Status || !slices.Equal(got.Held, tc.Want.Held) {
+				t.Errorf("status=%q held=%v, want %q and %v", got.Status, got.Held, tc.Want.Status, tc.Want.Held)
+			}
+		})
+	}
 }
 
 func TestPRStatusUsageErrors(t *testing.T) {

@@ -106,11 +106,11 @@ which is how two of the four ended up missing passes the other two had.
   first attempt returned an empty diff *because both sides exited 1*; the
   stripped run is the real control. Diff: exactly four added rows,
   `refinery-reconcile exec cooldown 60s` on gascity, gc-toolkit,
-  shutupandlisten and signal-loom, with identical stderr.
+  rig-b and rig-a, with identical stderr.
 - **Execution.** The runner was run against the live city with the seven passes
   replaced by argv-recording stubs and the real `gc` and `git` — read-only, no
   writer ran — for the owning rig (gc-toolkit) and an importer rig
-  (signal-loom). Both resolved `<rig>/gc-toolkit.refinery`, derived both pool
+  (rig-a). Both resolved `<rig>/gc-toolkit.refinery`, derived both pool
   addresses from it, and wrote a per-rig log.
 - **Behaviour.** `assets/scripts/refinery-reconcile.test.sh`, 46 hermetic
   assertions, with a positive control (deleting a pass from the runner fails

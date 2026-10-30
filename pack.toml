@@ -39,12 +39,11 @@ name = "gc-toolkit"
 schema = 2
 
 [global]
-# Ordering is load-bearing: bindings first, then the status-line override,
-# which rewrites status-right to gc-toolkit-status-line.sh (composable title
-# and indicator slots) while preserving the tier theme and %H:%M time slot.
+# Gas City runs tmux-bindings.sh after every agent session starts, and it
+# installs the pack's key bindings on the city's tmux server. The pack sets no
+# status bar, so a session shows the bar the operator's own tmux config sets.
 session_live = [
     "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
-    "{{.ConfigDir}}/assets/scripts/tmux-status-line-override.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
 ]
 
 # Deterministic work-bead description delivery: a Claude PostToolUse hook
@@ -57,7 +56,9 @@ overlay_dir = "overlays/work-context"
 
 # Deterministic context recycle for the long-running patrol roles: a Claude
 # Stop hook recycles the session past a 200K input-token threshold
-# (docs/cycle-recycle.md). Gates itself to witness | deacon | refinery.
+# (docs/cycle-recycle.md). Gates itself to witness | deacon | refinery. The
+# same overlay carries the deacon's patrol-continue Stop hook, which hands back
+# a turn that ends between patrol cycles (docs/patrol-continue.md).
 [[patches.agent]]
 name = "refinery"
 overlay_dir = "overlays/cycle-recycle"

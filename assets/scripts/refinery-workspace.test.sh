@@ -77,6 +77,8 @@ cat > "$TMP/bin/gc" <<'GC'
 printf '%s\n' "$*" >> "$GC_LOG"
 case "$1 $2" in
   "rig list") cat "$FAKE_ROSTER" ;;
+  # gc names the pack it loaded for the binding the city imports it under.
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
 esac
 exit 0
 GC
@@ -409,7 +411,9 @@ eq "$NBLOCKS" 4 "four teardown blocks are extracted"
 SAME=yes
 for i in 2 3 4; do cmp -s "$TMP/teardown-1.sh" "$TMP/teardown-$i.sh" || SAME=no; done
 eq "$SAME" yes "every teardown block is the same block"
-TEARDOWN="$TMP/teardown-1.sh"
+# The pour renders {{binding_prefix}} as the binding plus a dot, gc-toolkit. here.
+sed 's|{{binding_prefix}}|gc-toolkit.|g' "$TMP/teardown-1.sh" > "$TMP/teardown.sh"
+TEARDOWN="$TMP/teardown.sh"
 case "$(cat "$TEARDOWN")" in
   *\\*) bad "the teardown block is backslash-free (TOML would eat it)" ;;
   *)    ok  "the teardown block is backslash-free (TOML would eat it)" ;;
@@ -417,15 +421,14 @@ esac
 bash -n "$TEARDOWN" && ok "the teardown block is valid bash" || bad "the teardown block is valid bash"
 
 # The block runs from a cwd in another repository, with the script, and the
-# rig-root.sh it resolves the rig through, reachable only through the city's
-# gc-toolkit rig, the way a rig other than gc-toolkit reaches them. Sets RC and
-# OUT.
-mkdir -p "$TMP/city/rigs/gc-toolkit/assets/scripts" "$TMP/no-pack-city"
-cp "$SUT" "$HERE/rig-root.sh" "$TMP/city/rigs/gc-toolkit/assets/scripts/"
-teardown_block() { OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$1" bash "$TEARDOWN" 2>&1); RC=$?; }
+# rig-root.sh it resolves the rig through, in the pack gc names, and none in
+# the rig. no-pack is a pack without them. Sets RC and OUT.
+mkdir -p "$TMP/pack/assets/scripts" "$TMP/no-pack"
+cp "$SUT" "$HERE/rig-root.sh" "$TMP/pack/assets/scripts/"
+teardown_block() { OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" STUB_PACK="$1" bash "$TEARDOWN" 2>&1); RC=$?; }
 : > "$GC_LOG"
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
-teardown_block "$TMP/city"
+teardown_block "$TMP/pack"
 eq "$RC" 0 "teardown block: exits 0"
 [ ! -e "$PREP" ] && ok "teardown block: the prep worktree is gone" || bad "teardown block: the prep worktree is gone"
 eq "$(registered "$D/rig" "$PREP")" no "teardown block: the worktree is unregistered"
@@ -434,7 +437,7 @@ case "$OUT" in
   *)            ok  "teardown block: a teardown that completes says nothing of carrying on" ;;
 esac
 mkdir -p "$PREP" && : > "$PREP/not-a-worktree"
-teardown_block "$TMP/city"
+teardown_block "$TMP/pack"
 eq "$RC" 0 "teardown block, the teardown fails: exits 0"
 has "$OUT" "is still there" "teardown block, the teardown fails: the script's reason is shown"
 has "$OUT" "carry on" "teardown block, the teardown fails: it says to carry on"
@@ -442,7 +445,7 @@ has "$OUT" "carry on" "teardown block, the teardown fails: it says to carry on"
   || bad "teardown block, the teardown fails: the leftover is left for the next stage"
 chmod -R u+w "$PREP"; ( cd "$TMP" && rm -rf -- "${PREP:?}" )
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
-teardown_block "$TMP/no-pack-city"
+teardown_block "$TMP/no-pack"
 eq "$RC" 0 "teardown block, no script reachable: exits 0"
 has "$OUT" "carry on" "teardown block, no script reachable: it says to carry on"
 eq "$(registered "$D/rig" "$PREP")" yes "teardown block, no script reachable: the prep worktree is left for the next stage"
@@ -468,7 +471,8 @@ fi
 eq "$(awk '/^# >>> prep-staged-work$/ {f=1} /^# <<< prep-staged-work$/ {f=0; next} !f' "$TMP/merge-push-step.txt" \
       | grep -cE '(^|[^[:alnum:]_])(WORK|BRANCH)=|read -r (WORK|BRANCH)' || true)" 0 \
   "no other line of merge-push sets WORK or BRANCH"
-awk '/^# >>> prep-staged-work$/ {f=1; next} /^# <<< prep-staged-work$/ {f=0; next} f' "$PATROL_TOML" > "$TMP/staged.sh"
+awk '/^# >>> prep-staged-work$/ {f=1; next} /^# <<< prep-staged-work$/ {f=0; next} f' "$PATROL_TOML" \
+  | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$TMP/staged.sh"
 grep -qF '"$WS" held --rig-root "$RIG_ROOT"' "$TMP/staged.sh" \
   && ok "the block hands the script the rig root it resolved" \
   || bad "the block hands the script the rig root it resolved"
@@ -481,16 +485,16 @@ bash -n "$TMP/staged.sh" && ok "the prep-staged-work block is valid bash" || bad
 # The block runs from a cwd in another repository. What follows it in the step
 # is stood for by one line that shows the bead and branch it hands on.
 { cat "$TMP/staged.sh"; echo 'echo "ACTS FOR $WORK ON $BRANCH"'; } > "$TMP/staged-run.sh"
-# staged_block <city> [<work> <branch>]: the block with the script reachable
-# through that city's gc-toolkit rig, GC_RIG_ROOT naming the rig, and the
-# shell's WORK and BRANCH when given. Sets RC and OUT.
+# staged_block <pack> [<work> <branch>]: the block with the script in the pack
+# gc names, GC_RIG_ROOT naming the rig, and the shell's WORK and BRANCH when
+# given. Sets RC and OUT.
 staged_block() {
-  local city="$1"; shift
+  local pack="$1"; shift
   : > "$GC_LOG"
   if [ "$#" -eq 2 ]; then
-    OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$city" WORK="$1" BRANCH="$2" bash "$TMP/staged-run.sh" 2>&1); RC=$?
+    OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" STUB_PACK="$pack" WORK="$1" BRANCH="$2" bash "$TMP/staged-run.sh" 2>&1); RC=$?
   else
-    OUT=$(cd "$D/cwd" && env -u WORK -u BRANCH GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$city" bash "$TMP/staged-run.sh" 2>&1); RC=$?
+    OUT=$(cd "$D/cwd" && env -u WORK -u BRANCH GC_RIG_ROOT="$D/rig" STUB_PACK="$pack" bash "$TMP/staged-run.sh" 2>&1); RC=$?
   fi
 }
 drains() { grep -c 'drain-ack' "$GC_LOG"; }
@@ -503,42 +507,39 @@ mkdir -p "$RR_CITY/rigs/gc-toolkit/assets/scripts"
 cp "$HERE/rig-root.sh" "$RR_CITY/rigs/gc-toolkit/assets/scripts/"
 
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
-staged_block "$TMP/city" wa polecat/wa
+staged_block "$TMP/pack" wa polecat/wa
 eq "$RC" 0 "prep-staged-work, another bead's WORK and BRANCH in the shell: exits 0"
 has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, another bead's WORK and BRANCH in the shell: the step acts for the bead staged, on its branch"
 has "$OUT" "WORK was wa, but the prep worktree holds polecat/wb for wb, so this step acts for wb" \
   "prep-staged-work, another bead's WORK and BRANCH in the shell: it says which bead it acts for"
 eq "$(drains)" 0 "prep-staged-work, another bead's WORK and BRANCH in the shell: the session does not drain"
-staged_block "$TMP/city" wb polecat/wa
+staged_block "$TMP/pack" wb polecat/wa
 has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, the staged bead with another bead's BRANCH: the step acts on the staged branch"
 case "$OUT" in *"WORK was"*) bad "prep-staged-work, the staged bead's own WORK: no notice" ;; *) ok "prep-staged-work, the staged bead's own WORK: no notice" ;; esac
-staged_block "$TMP/city"
+staged_block "$TMP/pack"
 eq "$RC" 0 "prep-staged-work, nothing in the shell: exits 0"
 has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, nothing in the shell: the step acts for the bead staged"
 case "$OUT" in *"WORK was"*) bad "prep-staged-work, nothing in the shell: no notice" ;; *) ok "prep-staged-work, nothing in the shell: no notice" ;; esac
 
-# GC_RIG_ROOT unset, so the rig comes from the roster, and the script sits only
-# in that rig's checkout, which is where the rebase step looks first.
-mkdir -p "$D/rig/assets/scripts"
-cp "$SUT" "$D/rig/assets/scripts/"
+# GC_RIG_ROOT unset, so the rig comes from the roster, and the script is the
+# pack's, which gc names.
 : > "$GC_LOG"
-OUT=$(cd "$D/cwd" && env -u GC_RIG_ROOT GC_RIG=myrig GC_CITY_PATH="$RR_CITY" WORK=wa BRANCH=polecat/wa bash "$TMP/staged-run.sh" 2>&1); RC=$?
-eq "$RC" 0 "prep-staged-work, the rig from the roster and the script only in it: exits 0"
-has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, the rig from the roster and the script only in it: the block finds the script in the rig it resolved"
+OUT=$(cd "$D/cwd" && env -u GC_RIG_ROOT GC_RIG=myrig STUB_PACK="$TMP/pack" WORK=wa BRANCH=polecat/wa bash "$TMP/staged-run.sh" 2>&1); RC=$?
+eq "$RC" 0 "prep-staged-work, the rig from the roster: exits 0"
+has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, the rig from the roster: the block acts for the bead staged in the rig it resolved"
 eq "$(grep -c '^rig list' "$GC_LOG")" 1 "prep-staged-work, the rig from the roster: the roster is read once, by the rig-root.sh the block runs, not again by the script"
-( cd "$TMP" && rm -rf -- "${D:?}/rig/assets" )
 
 # A worktree at the prep path with no record, such as one any other path added.
 ws teardown --rig-root "$D/rig" >/dev/null
 git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
-staged_block "$TMP/city" wb polecat/wb
+staged_block "$TMP/pack" wb polecat/wb
 eq "$RC" 4 "prep-staged-work, a prep worktree with no record: exits 4"
 eq "$(went_on)" no "prep-staged-work, a prep worktree with no record: nothing after the block runs"
 has "$OUT" "nothing shows which bead the prep worktree holds" "prep-staged-work, a prep worktree with no record: it says why"
 has "$OUT" "jump to next-iteration" "prep-staged-work, a prep worktree with no record: it sends the cycle to next-iteration"
 eq "$(registered "$D/rig" "$PREP")" no "prep-staged-work, a prep worktree with no record: the block tears it down"
 eq "$(drains)" 0 "prep-staged-work, a prep worktree with no record: the session does not drain"
-staged_block "$TMP/city" wb polecat/wb
+staged_block "$TMP/pack" wb polecat/wb
 eq "$RC" 4 "prep-staged-work, no prep worktree: exits 4"
 eq "$(went_on)" no "prep-staged-work, no prep worktree: nothing after the block runs"
 eq "$(drains)" 0 "prep-staged-work, no prep worktree: the session does not drain"

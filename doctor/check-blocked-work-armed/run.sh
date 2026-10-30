@@ -20,12 +20,11 @@
 # graph.v2 pour — open, unassigned, `gc.routed_to` retired by the pour, the exec
 # stamp set — so flagging on a missing route alone would flag in-flight work, and
 # the arm remedy would double-dispatch it. Liveness is consulted before a
-# candidate is flagged: a bead a not-closed workflow drives — tracked by a convoy
-# some not-closed bead names via `gc.input_convoy_id`, the forward resolution
-# assets/scripts/liveness-sweep.sh uses — is in-flight and exempt; only a bead no
-# live molecule drives is the stranded shape this reports. When a candidate
+# candidate is flagged: a bead a live run works (assets/scripts/run-lib.sh's map,
+# which assets/scripts/liveness-sweep.sh reads too) is in-flight and exempt; only
+# a bead no live run works is the stranded shape this reports. When a candidate
 # carries the exec stamp and liveness cannot be confirmed, it is reported as
-# unverifiable and never flagged, so an unreadable molecule is never turned into a
+# unverifiable and never flagged, so an unreadable run is never turned into a
 # double-dispatch.
 #
 # The other workflow-driven state that legitimately rests unrouted-and-unassigned
@@ -104,6 +103,15 @@ WORK_TYPES=" bug feature task chore spike "
     printf '  - %s\n' "assets/scripts/placement.sh could not be sourced from this pack, so a bead waiting for placement cannot be told from stranded work."
     exit 1
 }
+# The one reader of a run's link to the bead it works. An unsourceable one
+# warns: without it a bead a live run works would read as stranded work and draw
+# the arm remedy.
+# shellcheck source=../../assets/scripts/run-lib.sh
+. "${GC_RUN_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/run-lib.sh}" || {
+    echo "cannot determine whether blocked work carries a dispatch path"
+    printf '  - %s\n' "assets/scripts/run-lib.sh could not be sourced from this pack, so a bead a live run works cannot be told from stranded work."
+    exit 1
+}
 
 findings=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -140,6 +148,8 @@ run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || re
 budget_init
 # <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
+# The reader run-lib.sh reads the store of the rig being scanned through.
+rig_bd() { run_bounded gc bd "$@" --db "$rig_path/.beads"; }
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -148,12 +158,16 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+# rig-map.sh prints the map when the listing reads and only its reason when it
+# does not, so one capture holds whichever came back.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+rigs_raw=$(run_bounded "$RIG_MAP" 2>&1); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)] | join("")' 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether blocked work carries a dispatch path"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
+    [ "$rigs_rc" -eq 0 ] || [ -z "$rigs_raw" ] || detail "$rigs_raw"
     exit 1
 fi
 
@@ -219,31 +233,18 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     }
     [ -n "$cand" ] || continue
 
-    # Candidates exist, so resolve which of them a LIVE molecule already drives.
-    # A slung work bead carries no worker stamp of its own; coverage is a
-    # not-closed bead naming a convoy (gc.input_convoy_id) whose tracks members
-    # include the bead — the forward resolution liveness-sweep.sh uses. Computed
-    # only when there is something to filter, and left partial ($liveness_ok=0)
-    # if the alive listing or any convoy read fails, so a candidate carrying the
+    # Candidates exist, so resolve which of them a LIVE run already works. A
+    # slung work bead carries no worker stamp of its own; coverage is a live run
+    # that works the bead (run-lib.sh's map), the resolution liveness-sweep.sh
+    # uses. Computed only when there is something to filter, and left unconfirmed
+    # ($liveness_ok=0) when the runs cannot be read, so a candidate carrying the
     # exec stamp is warned rather than flagged when coverage cannot be confirmed.
     worked=" "; liveness_ok=1
-    alive=$(run_bounded gc bd list --db "$rig_path/.beads" --status open,in_progress --json --limit 0 2>/dev/null); alive_rc=$?
-    alive=$(printf '%s' "$alive" | scrub)
-    if [ "$alive_rc" -eq 0 ] && printf '%s' "$alive" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        convoys=$(printf '%s' "$alive" | jq -r '[ .[]? | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' 2>/dev/null)
-        while IFS= read -r convoy; do
-            [ -n "$convoy" ] || continue
-            crows=$(run_bounded gc bd show "$convoy" --db "$rig_path/.beads" --json 2>/dev/null); crows_rc=$?
-            crows=$(printf '%s' "$crows" | scrub)
-            if [ "$crows_rc" -eq 0 ] && printf '%s' "$crows" | jq -e 'type == "array"' >/dev/null 2>&1; then
-                while IFS= read -r m; do [ -n "$m" ] && worked="$worked$m "; done \
-                    <<< "$(printf '%s' "$crows" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id' 2>/dev/null)"
-            else
-                liveness_ok=0   # a convoy we could not read may cover a candidate
-            fi
-        done <<< "$convoys"
+    if runs=$(run_lib map rig_bd); then
+        while IFS= read -r m; do [ -n "$m" ] && worked="$worked$m "; done \
+            <<< "$(printf '%s' "$runs" | jq -r '.[] | .bead | select(. != "")' 2>/dev/null)"
     else
-        liveness_ok=0           # no alive listing: cannot confirm any coverage
+        liveness_ok=0           # the runs could not be read: cannot confirm any coverage
     fi
 
     # A marked candidate waits for the placement sitting unless the sitting
@@ -270,9 +271,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
     while IFS=$'\t' read -r id btype has_exec held title; do
         [ -n "$id" ] || continue
-        case "$worked" in *" $id "*) continue ;; esac   # a live molecule drives it
+        case "$worked" in *" $id "*) continue ;; esac   # a live run works it
         if [ "$has_exec" = "1" ] && [ "$liveness_ok" != "1" ]; then
-            warnings+=("$label bead $id [$btype]: blocked and carries gc.execution_routed_to, but molecule liveness could not be confirmed in $rig_path/.beads — NOT flagged, because arming a bead a live workflow still drives would double-dispatch it. Verify by hand whether a live molecule drives it; if not, arm it ($title)")
+            warnings+=("$label bead $id [$btype]: blocked and carries gc.execution_routed_to, but whether a live run works it could not be confirmed in $rig_path/.beads — NOT flagged, because arming a bead a live workflow still drives would double-dispatch it. Verify by hand whether a live run works it; if not, arm it ($title)")
             continue
         fi
         if [ "$held" = "1" ]; then

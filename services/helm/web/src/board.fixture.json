@@ -31,7 +31,7 @@
       "stale_days": 4,
       "priority": 1,
       "cross_rig_refs": [
-        "sl-9k2mq"
+        "ra-9k2mq"
       ],
       "open_heads": [
         "tk-eemvf.5",
@@ -67,7 +67,9 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "needs-review",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": "",
+      "pr_held": null
     },
     {
       "id": "gt-1a2b3",
@@ -106,7 +108,7 @@
       "takeaway_at": null,
       "takeaway_by": null,
       "frontier": "needs-review · all 2 closed · 0 open",
-      "needs": "all 2 closed — graduate",
+      "needs": "all 2 tracked closed",
       "rank_score": 3000,
       "pr_number": 0,
       "pr_url": "",
@@ -115,7 +117,7 @@
       "pr_conversation": "",
       "pr_approval": "",
       "section": "cleanup",
-      "cluster_key": "all 2 closed — graduate",
+      "cluster_key": "all 2 tracked closed",
       "group_root": "gt-1a2b3",
       "group_parent": "",
       "acceptable": false,
@@ -123,7 +125,9 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "needs-review",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": "",
+      "pr_held": null
     },
     {
       "id": "tk-01n5cc",
@@ -180,7 +184,11 @@
       "pr_branch_url": "",
       "pr_phase": "needs-attention",
       "phase": "needs-attention",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": "",
+      "pr_held": [
+        "blocked"
+      ]
     },
     {
       "id": "tk-9tbbk",
@@ -237,7 +245,9 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": "",
+      "pr_held": null
     }
   ],
   "sittings": [
@@ -271,7 +281,7 @@
   ],
   "partial": true,
   "partial_errors": [
-    "rig shutupandlisten: context canceled"
+    "rig rig-b: context canceled"
   ],
   "pack_health": [
     {
@@ -293,10 +303,10 @@
       "last_build_rc": 0,
       "restart_pending": false,
       "probe_status": "unreadable",
-      "probe_detail": "rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+      "probe_detail": "rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused",
       "checked_at": "2026-08-11T15:00:00Z",
       "severity": "HIGH",
-      "detail": "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused"
+      "detail": "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused"
     },
     {
       "component": "helm",

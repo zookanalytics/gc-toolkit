@@ -21,6 +21,11 @@
 # green derives from. request-changes: file ONE routed rework child through
 # rework-child.sh, with the reviewer's findings beside it and the lane's
 # validation pass, then close the review bead signoff_verdict=request-changes.
+# The finding set (--findings-file) is checked against the finding contract
+# before anything is written, and the posted artifact renders it as its Findings
+# block. A P2 is filed only on request-changes: that PR goes back for a rework
+# round anyway, so the validator rules each P2 in that round, and an approve
+# records its P2s on the verdict with nothing filed or fixed.
 # Convergence is judged, not counted. The validator rules whether a further
 # whole-diff review is warranted once the must-fix set closes
 # (specs/tk-ztapg/review-cycle-architecture.md), so request-changes files a
@@ -109,11 +114,23 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  about the review that ran under it.
   --findings-file
                  the structured finding set as a JSON array, one object per
-                 blocking finding, each with a rebase-stable `locus` (a file and
-                 symbol or section, never a line or oid) and a `message`; `[]` on
-                 approve. request-changes files each as a first-class finding bead
-                 beside the rework child, deduped on locus and message. Default:
-                 none filed, and the findings live only in the verdict prose.
+                 finding, each with a rebase-stable `locus` (a file and symbol or
+                 section, never a line or oid) and a `message`, and the finding
+                 contract: a `severity` of P0, P1 or P2, which every correctness
+                 finding carries, and with a severity a `category` and a
+                 `failure_scenario`, and on a P0 or P1 a `verification` opening
+                 CONFIRMED or PLAUSIBLE and then the evidence. A candidate
+                 whose verification is REFUTED is not a finding at any grade,
+                 and stays out of the set. A P2 does not block, and a finding
+                 with no severity does. An approve carries no blocking finding
+                 and request-changes at least one. A set that breaks any of
+                 this is refused with nothing written. The posted
+                 artifact renders the set as its Findings block, and
+                 request-changes files each finding, a P2 among them, as a
+                 first-class finding bead beside the rework child, deduped on
+                 locus and message with the rest of its contract outside that
+                 key; approve files none. Default: none filed or rendered, and
+                 the findings live only in the verdict prose.
   --reviewed-oid the commit the review read. A review bead whose reviewed_oid
                  the dispatch pinned takes that commit: this flag may name it,
                  in full or abbreviated, and a value naming any other commit
@@ -240,31 +257,110 @@ gate_tokens() {
 }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-# Read the reviewer's structured findings — a JSON array of {locus, message} —
-# and file each as a finding bead through the finding primitive, deduped by
-# finding.key. Prints the finding ids, one per line. Best-effort: a store that
-# will not take a finding costs that finding, never the rework dispatch the
-# merge is held by, so a failure warns and the caller proceeds. The reviewer's
-# prose verdict is still the fix unit's rejection_reason and the review bead's
-# notes; the beads are the queryable record the validator and check readers use.
-file_findings() { # <anchor> <lane> <findings-file>
-  local anchor="$1" lane="$2" ff="$3" obj locus message fid
-  [ -n "$ff" ] && [ -r "$ff" ] || return 0
-  if ! jq -e 'type == "array"' "$ff" >/dev/null 2>&1; then
-    warn "findings file is not a JSON array; no findings filed (the rework child still holds the merge)"
-    return 0
-  fi
+# The finding set as --findings-file holds it, slurped, checked against the
+# verdict ($verdict) and the check ($check). Prints {errors, set}: each way the
+# set breaks its shape or the finding contract, and the set with every field
+# trimmed, absent ones empty, and each grade upper-cased. P0, P1 and a finding
+# with no grade block; a P2 does not. A candidate whose verification is REFUTED
+# is no finding at any grade, so the set may not carry one.
+FINDINGS_CHECK_JQ='
+  def field($k): if (.[$k] // null) == null then ""
+                 elif (.[$k] | type) == "string" then .[$k] | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+                 else null end;
+  def grade: field("severity") | if type == "string" then ascii_upcase else . end;
+  def refuted: field("verification") | type == "string" and test("^REFUTED([^[:alnum:]]|$)"; "i");
+  def problems:
+    grade as $g
+    | [ ( ("locus", "message", "severity", "category", "failure_scenario", "verification") as $k
+          | select(field($k) == null) | "its `\($k)` is not a string" ),
+        ( select(field("locus") == "") | "it has no `locus`" ),
+        ( select(field("message") == "") | "it has no `message`" ),
+        ( select(($g // "") != "" and (($g // "") | IN("P0", "P1", "P2") | not))
+          | "its `severity` is \(field("severity") | @json), not P0, P1 or P2" ),
+        ( select($check == "correctness" and $g == "")
+          | "it has no `severity`, and every correctness finding is graded" ),
+        ( select(($g // "") | IN("P0", "P1", "P2"))
+          | (select(field("category") == "") | "it names no `category`"),
+            (select(field("failure_scenario") == "") | "it names no `failure_scenario`") ),
+        ( select(refuted)
+          | "its `verification` is REFUTED, and a refuted candidate is not a finding: leave it out of the set, and keep its refutation in the trail" ),
+        ( select(($g // "") | IN("P0", "P1"))
+          | field("verification") as $v
+          | if $v == null or refuted then empty
+            elif $v == "" then "it is a \($g) with no `verification`"
+            elif ($v | test("^(CONFIRMED|PLAUSIBLE)[^[:alnum:]]+[^[:space:]]"; "i")) then empty
+            else "its `verification` does not open with CONFIRMED or PLAUSIBLE and then the evidence" end ) ];
+  if length != 1 or (.[0] | type) != "array" then
+    {errors: ["it is not one JSON array of findings"], set: []}
+  else .[0]
+    | [ to_entries[] | (.key + 1) as $n | .value
+        | if type != "object" then {errors: ["finding \($n) is not an object"]}
+          else problems as $p
+            | ((field("locus") // "") | if . == "" then "" else " (\(.))" end) as $at
+            | {errors: [ $p[] | "finding \($n)\($at): \(.)" ],
+               f: (if ($p | length) > 0 then null
+                   else {locus: field("locus"), message: field("message"), severity: grade,
+                         category: field("category"), failure_scenario: field("failure_scenario"),
+                         verification: field("verification")} end)}
+          end ] as $rows
+    | [ $rows[].errors[] ] as $errs
+    | [ $rows[].f | select(. != null) ] as $set
+    | ([ $set[] | select(.severity != "P2") ] | length) as $blocking
+    | {set: $set,
+       errors: ($errs
+         + if ($errs | length) > 0 then []
+           elif $verdict == "approve" and $blocking > 0 then
+             ["an approve carries no blocking finding, and this set carries \($blocking): a P0, a P1 or a finding with no grade"]
+           elif $verdict == "request-changes" and $blocking == 0 then
+             ["request-changes needs a blocking finding, and this set carries none"
+              + (if ($set | length) > 0 then ": when only P2s remain, the review approves" else "" end)]
+           else [] end)}
+  end'
+# The Findings block the posted artifact carries, from the checked set, the most
+# severe finding first: a summary counting the findings per grade, then each one
+# with its grade and category, its locus, its message and the rest of its
+# contract. An approve's block also says that none of its findings is filed.
+FINDINGS_RENDER_JQ='
+  def rank: .severity as $s | (["P0", "P1", "P2"] | index($s)) // 3;
+  def code: if test("`") then . else "`" + . + "`" end;
+  sort_by(rank) as $fs
+  | [ "P0", "P1", "P2" | . as $g | [ $fs[] | select(.severity == $g) ] | length | select(. > 0) | "\(.) \($g)" ] as $graded
+  | ([ $fs[] | select(.severity == "") ] | length) as $ungraded
+  | ($graded + (if $ungraded == 0 then [] elif ($graded | length) == 0 then ["\($ungraded)"] else ["\($ungraded) ungraded"] end)) as $counts
+  | "<details>\n<summary>Findings: \($counts | join(", "))</summary>\n\n"
+    + (if $verdict == "approve" then "None of these is filed or fixed: a review whose findings are all P2 approves.\n\n" else "" end)
+    + ([ $fs | to_entries[] | (.key + 1) as $n | .value
+         | ([ .severity, .category ] | map(select(. != "")) | join(", ")) as $label
+         | "**\($n).\(if $label == "" then "" else " " + $label end)** \(.locus | code)\n\n\(.message)"
+           + (if .failure_scenario == "" then "" else "\n\nFailure scenario: \(.failure_scenario)" end)
+           + (if .verification == "" then "" else "\n\nVerification: \(.verification)" end) ]
+       | join("\n\n"))
+    + "\n\n</details>"'
+
+# File the checked finding set as finding beads through the finding primitive,
+# each deduped by finding.key, with the rest of its contract beside the key.
+# Prints the finding ids, one per line. Best-effort: a store that will not take
+# a finding costs that finding, never the rework dispatch the merge is held by,
+# so a failure warns and the caller proceeds. The posted verdict still carries
+# every finding; the beads are the queryable record the validator and check
+# readers use.
+file_findings() { # <anchor> <lane>
+  local anchor="$1" lane="$2" obj fid args kf v
+  [ -n "$FINDINGS_SET" ] || return 0
   while IFS= read -r obj; do
     [ -n "$obj" ] || continue
-    locus=$(printf '%s' "$obj" | jq -r '.locus // ""' 2>/dev/null)
-    message=$(printf '%s' "$obj" | jq -r '.message // ""' 2>/dev/null)
-    [ -n "$locus" ] && [ -n "$message" ] || continue
-    if fid=$("$FINDING" upsert --anchor "$anchor" --lane "$lane" --locus "$locus" --message "$message" 2>/dev/null) && [ -n "$fid" ]; then
+    args=(--anchor "$anchor" --lane "$lane")
+    for kf in locus:--locus message:--message severity:--severity category:--category \
+              failure_scenario:--failure-scenario verification:--verification; do
+      v=$(printf '%s' "$obj" | jq -r --arg k "${kf%%:*}" '.[$k] // ""' 2>/dev/null)
+      [ -z "$v" ] || args+=("${kf#*:}" "$v")
+    done
+    if fid=$("$FINDING" upsert "${args[@]}" 2>/dev/null) && [ -n "$fid" ]; then
       printf '%s\n' "$fid"
     else
-      warn "could not file finding for locus '$locus'; it is left to the verdict prose"
+      warn "could not file finding for locus '$(printf '%s' "$obj" | jq -r '.locus' 2>/dev/null)'; the posted verdict alone carries it"
     fi
-  done < <(jq -c '.[]?' "$ff" 2>/dev/null)
+  done < <(printf '%s' "$FINDINGS_SET" | jq -c '.[]' 2>/dev/null)
 }
 
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
@@ -333,6 +429,31 @@ if [ "$CHECK" = "$VISUAL_GATE" ]; then
 elif [ -n "$VISUAL" ] || [ -n "$VISUAL_FALLBACK" ]; then
   warn "only the '$VISUAL_GATE' check records a visual decision (this review is '$CHECK_NAME'); nothing written"
   exit 1
+fi
+
+# The finding set, checked before anything is written (FINDINGS_CHECK_JQ), and
+# the Findings block the posted artifact renders from it. Both stay empty when
+# no --findings-file names a set.
+FINDINGS_SET=""; FINDINGS_BLOCK=""
+if [ -n "$FINDINGS_FILE" ]; then
+  FINDINGS_PARSE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-findings.XXXXXX") || { warn "mktemp failed; nothing written"; exit 1; }
+  FINDINGS_CHECKED=$(jq -c -s --arg check "$CHECK" --arg verdict "$VERDICT" "$FINDINGS_CHECK_JQ" "$FINDINGS_FILE" 2>"$FINDINGS_PARSE")
+  FINDINGS_WHY=$(head -1 "$FINDINGS_PARSE"); rm -f "$FINDINGS_PARSE"
+  if [ -z "$FINDINGS_CHECKED" ]; then
+    warn "--findings-file '$FINDINGS_FILE' is not JSON${FINDINGS_WHY:+ ($FINDINGS_WHY)}; nothing written. Correct it and re-run this call"
+    exit 1
+  fi
+  FINDINGS_ERRORS=$(printf '%s' "$FINDINGS_CHECKED" | jq -r '.errors[]' 2>/dev/null)
+  if [ -n "$FINDINGS_ERRORS" ]; then
+    warn "the finding set in '$FINDINGS_FILE' is refused, nothing written. Correct it and re-run this call:"
+    printf '%s\n' "$FINDINGS_ERRORS" | sed 's/^/  - /' >&2
+    exit 1
+  fi
+  FINDINGS_SET=$(printf '%s' "$FINDINGS_CHECKED" | jq -c '.set' 2>/dev/null)
+  if [ "$(printf '%s' "$FINDINGS_SET" | jq 'length' 2>/dev/null)" != 0 ]; then
+    FINDINGS_BLOCK=$(printf '%s' "$FINDINGS_SET" | jq -r --arg verdict "$VERDICT" "$FINDINGS_RENDER_JQ" 2>/dev/null)
+    [ -n "$FINDINGS_BLOCK" ] || { warn "the Findings block did not render from '$FINDINGS_FILE'; nothing written"; exit 1; }
+  fi
 fi
 
 # The anchor the check lands on: the durable anchor_bead stamp first, the
@@ -547,10 +668,10 @@ fi
 # The artifact body. Its first line is the same for every check: the check and
 # its verdict, then the one decision this review needs from the operator, or
 # that nothing does, so a busy reader can stop there. Under it come the round's
-# account when a triage ruling rides this verdict, the reviewer's notes as the
-# trail, and the lines scripts read: the demo decision, and the trailer naming
-# the anchor and the exact commit judged, which traces the posted comment back
-# to the check it satisfied.
+# account when a triage ruling rides this verdict, the Findings block rendered
+# from the finding set, the reviewer's notes as the trail, and the lines scripts
+# read: the demo decision, and the trailer naming the anchor and the exact
+# commit judged, which traces the posted comment back to the check it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
 TRAIL_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-trail.XXXXXX") || { rm -f "$BODY_FILE"; warn "mktemp failed"; exit 1; }
 trap 'rm -f "$BODY_FILE" "$TRAIL_FILE"' EXIT
@@ -586,6 +707,7 @@ compose_artifact() {
   {
     printf '%s %s\n\n' "$(verdict_head)" "$needs"
     [ -z "$ROUND_BODY" ] || printf '%s\n\n' "$ROUND_BODY"
+    [ -z "$FINDINGS_BLOCK" ] || printf '%s\n\n' "$FINDINGS_BLOCK"
     [ ! -s "$TRAIL_FILE" ] || printf '%s\n\n' "$(cat "$TRAIL_FILE")"
     [ -z "$VISUAL" ] || printf 'Visual: %s%s\n' "$VISUAL" "${visual_note:+ ($visual_note)}"
     printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID"
@@ -1055,10 +1177,7 @@ post_artifact
 # the fix unit so its work order can name them. Best-effort by construction (see
 # file_findings): the fix unit's own blocks edge onto the anchor holds the merge,
 # so a store that will not take a finding costs the finding, never the hold.
-FINDING_IDS=""
-if [ -n "$FINDINGS_FILE" ]; then
-  FINDING_IDS=$(file_findings "$ANCHOR" "$CHECK_NAME" "$FINDINGS_FILE" | paste -sd, -)
-fi
+FINDING_IDS=$(file_findings "$ANCHOR" "$CHECK_NAME" | paste -sd, -)
 FINDING_COUNT=0
 [ -n "$FINDING_IDS" ] && FINDING_COUNT=$(printf '%s' "$FINDING_IDS" | tr ',' '\n' | grep -c '[^[:space:]]')
 
@@ -1110,8 +1229,11 @@ read -r FIX_BEAD FIX_POOL FIX_STATE <<< "$FILED"
 # fix unit's edge onto the anchor is what holds the merge in the meantime.
 ensure_validation_pass
 close_review
-# A rework child now stands on the anchor; the city holds the ball until it lands.
-[ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
+# A rework child now stands on the anchor, so the city holds the ball until it
+# lands. Reconcile rather than assert a value: the child reads working on an
+# unapproved PR and merging on an approved one, and an open visit still reads
+# needs-attention.
+[ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
   --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
 if [ "$FIX_STATE" = in-flight ]; then
   echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $FIX_POOL"

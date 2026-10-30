@@ -65,11 +65,10 @@ FINDING="$SCRIPTS_DIR/finding.sh"
 # be gated, so nothing opens.
 REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); NOTHING is opened or readied this pass" >&2; exit 1; }
-# The single writer of the workflow-owned PR labels. A PR is born check-green with
-# no review yet, so its initial status is needs-review, or working while it is a
-# draft whose ready flip the city still owes; reconcile derives that (and
-# self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
-# on an integration-targeted checkpoint, the PR-list counterpart to the body banner.
+# The single writer of the workflow-owned `status:` PR label. A PR is born
+# check-green with no review yet, so its initial status is needs-review, or working
+# while it is a draft whose ready flip the city still owes; reconcile derives that
+# (and self-heals an adopted PR mid-rework).
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 # The single writer of the city's PR posts. The verdict replay and the
 # superseded notice go through it so they carry the city's mark, which is what
@@ -482,10 +481,6 @@ while IFS= read -r tagged; do
         # rework state rather than assuming ready. Best-effort.
         "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$CERT_NUM" \
           --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
-        # Standing base marker: an integration-targeted checkpoint is labelled so the
-        # PR list never reads it as a merge to main. Best-effort; a no-op off integration/.
-        "$PR_STATUS_LABEL" mark-base --pr "$CERT_NUM" --target "$target" \
-          --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
         echo "$PROG: $id branch '$branch' already has PR#$CERT_NUM ($CERT_STATE); flipped to pull_request"
       else
         echo "$PROG: $id PR#$CERT_NUM adoption transition failed; anchor stays pre_open_gate (retry next pass)" >&2
@@ -684,9 +679,6 @@ GATES
     # Born check-green: seed the initial status label (and its group). Best-effort
     # — a label failure never unwinds an opened PR; pr-facts.sh reconciles it.
     "$PR_STATUS_LABEL" reconcile --anchor "$id" --pr "$CERT_NUM" \
-      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
-    # Standing base marker for an integration checkpoint (no-op off integration/).
-    "$PR_STATUS_LABEL" mark-base --pr "$CERT_NUM" --target "$target" \
       --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
     echo "$PROG: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (check_set '$checkset' green)${SUP_NUM:+, superseding closed PR#$SUP_NUM}; flipped to pull_request"
   else

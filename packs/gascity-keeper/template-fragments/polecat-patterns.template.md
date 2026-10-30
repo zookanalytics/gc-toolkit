@@ -26,7 +26,7 @@ gc bd list --status=closed --json \
 
 Open polecat-routed beads still have `assignee` set (until claimed);
 only closed ones get cleared. Confirmed in production 2026-05-06
-against signal-loom pilot beads.
+against a pilot rig's beads.
 
 **Related:** pool routing requires `gc.routed_to` to be set
 explicitly (via `gc sling` or formula). Bare `bd create` calls

@@ -112,7 +112,7 @@ if [ -n "${WORKTREE_REAP_REPOS:-}" ]; then
         REPO_DBS+=(""); REPO_PATHS+=("$p")
     done <<< "$WORKTREE_REAP_REPOS"
 else
-    RIGS="$(gc rig list --json 2>/dev/null | jq -r '.rigs[]? | [.path, (.hq // false | tostring)] | join("\u001f")' 2>/dev/null)" || RIGS=""
+    RIGS="$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rig-map.sh" | jq -r '.rigs[]? | [.path, (.hq // false | tostring)] | join("\u001f")' 2>/dev/null)" || RIGS=""
     if [ -z "$RIGS" ]; then
         echo "$PROG: no rigs readable — nothing to reap"
         exit 0

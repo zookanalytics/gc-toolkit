@@ -8,7 +8,7 @@ import type { SupervisorOrigin } from './origin';
 // asks for must be reachable from a device that is not the city host.
 const ORIGIN: SupervisorOrigin = {
   baseUrl: 'https://gc-host.tail1234.ts.net',
-  city: 'loomington',
+  city: 'mycity',
 };
 
 /** Envelope the /pending read answers with. */
@@ -31,9 +31,9 @@ function routeFetch(input: Request | string | URL): Response {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   requested.push(url);
   const { pathname } = new URL(url);
-  if (pathname === '/v0/city/loomington/pending') return jsonResponse(pendingBody);
-  if (pathname === '/v0/city/loomington/mail/count') return jsonResponse(mailBody);
-  if (pathname === '/v0/city/loomington/beads') return jsonResponse(waitingBody);
+  if (pathname === '/v0/city/mycity/pending') return jsonResponse(pendingBody);
+  if (pathname === '/v0/city/mycity/mail/count') return jsonResponse(mailBody);
+  if (pathname === '/v0/city/mycity/beads') return jsonResponse(waitingBody);
   return new Response(JSON.stringify({ title: 'not found' }), {
     status: 404,
     headers: { 'Content-Type': 'application/json' },
@@ -94,7 +94,7 @@ afterEach(() => {
 
 describe('CitySignals', () => {
   it('states plain counts when every store answered', async () => {
-    pendingBody = { items: [{ session_id: 'lx-8y6j' }], total: 1 };
+    pendingBody = { items: [{ session_id: 'hq-8y6j' }], total: 1 };
     mailBody = { unread: 2, total: 9 };
     waitingBody = { items: [{ id: 'tk-parked' }], total: 1 };
     renderStrip();
@@ -131,7 +131,7 @@ describe('CitySignals', () => {
       items: [],
       total: 0,
       partial: true,
-      partial_errors: ['rig signal-loom: context canceled'],
+      partial_errors: ['rig rig-a: context canceled'],
     };
     renderStrip();
 
@@ -150,7 +150,7 @@ describe('CitySignals', () => {
   // The supervisor counts the whole match set and returns a page of it. Counting
   // the page instead understates the total the moment a response is truncated.
   it('counts what the supervisor counted, not the page it returned', async () => {
-    pendingBody = { items: [{ session_id: 'lx-1' }, { session_id: 'lx-2' }], total: 7 };
+    pendingBody = { items: [{ session_id: 'hq-1' }, { session_id: 'hq-2' }], total: 7 };
     renderStrip();
 
     expect(await stripText()).toContain('7 waiting on you');

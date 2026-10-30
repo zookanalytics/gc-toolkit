@@ -2,7 +2,7 @@ description = """
 Deacon patrol loop — city infrastructure health. Poured as a root-only wisp
 on startup (the agent prompt's startup reconcile adopts before it pours):
 
-  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}'
+  gc bd mol wisp mol-deacon-patrol --city="$GC_CITY_PATH" --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: mail, orphan-process cleanup, Dolt health,
@@ -56,9 +56,7 @@ archive. Archive processed messages — inbox near-empty after this step.
 Ledger what you ACTED on. An escalation records itself, so what is owed here
 is the message you resolved yourself and the outcome a `DOG_DONE:` reports:
 ```bash
-LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-done
+LEDGER="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/gc-deacon-ledger.sh" && [ -x "$LEDGER" ] || LEDGER=""
 "$LEDGER" append recovery "<what you resolved, and how>" "mail:<message-id>"
 "$LEDGER" append warrant "<session> <pardoned|executed> by the dog" "bead:<warrant-id>"
 ```
@@ -80,9 +78,7 @@ command. Kill confirmed orphans with `kill <pid>`.
 A kill is an action nothing else records, so ledger it — one entry for the
 pass, naming what made those processes orphans:
 ```bash
-LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-done
+LEDGER="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/gc-deacon-ledger.sh" && [ -x "$LEDGER" ] || LEDGER=""
 "$LEDGER" append cleanup "killed <n> orphaned subagents (<pids>; <what marked them orphaned>)" -
 ```
 A pass that killed nothing appends nothing. Close this step either way."""
@@ -250,9 +246,7 @@ read or treat as FLAG).
 verdict line VERBATIM (each is a complete one-line reason; do not
 re-template it):
 ```bash
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
 # GC_RIG is bound because the deacon is city-scoped: it selects the store the
 # finding bead lands in, and it rig-qualifies the proactive pool whose worker
 # reacts to it.
@@ -278,9 +272,7 @@ Before restarting anything, collect non-fatal diagnostics first
 own entry carrying the visit id. A zombie PID you killed, or a Dolt process
 you restarted, is an action with no other durable record:
 ```bash
-LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-done
+LEDGER="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/gc-deacon-ledger.sh" && [ -x "$LEDGER" ] || LEDGER=""
 "$LEDGER" append cleanup "killed zombie dolt PIDs <pids> on <db>" -
 "$LEDGER" append recovery "restarted the Dolt server after <diagnostic finding>" -
 ```
@@ -309,9 +301,7 @@ Run the script once per cycle and let it decide whether to start a sweep, wait
 for one, or collect it:
 ```bash
 # >>> doctor-sweep-run
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/doctor-sweep.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/doctor-sweep.sh" ] || SCRIPTS=""
 # A runner that cannot sweep reports why and exits 2. An uncaptured non-zero
 # aborts the assignment under a strict shell, before the report is echoed.
 RC=0
@@ -362,9 +352,7 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 A FAILED scan carries no payload to filter, so it files one finding under the
 shared key and the step is done:
 ```bash
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
 # GC_RIG is bound because the deacon is city-scoped: it selects the store the
 # finding bead lands in, and it rig-qualifies the proactive pool whose worker
 # reacts to it.
@@ -393,9 +381,7 @@ cleanup, `gc doctor --fix`-able); file the rest. `--check` derives the
 situation key from the check's own name, so every recurrence lands on one
 bead:
 ```bash
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
 FINDING=$(jq -c '.results[] | select(.name=="<check>")' "$PAYLOAD")
 CHECK=$(printf '%s' "$FINDING" | jq -r '.name')
 VERDICT=$(printf '%s' "$FINDING" | jq -r '.message')
@@ -418,9 +404,7 @@ occurrence.
 A finding you FIXED yourself leaves no visit behind it, so it leaves no
 record unless you write one:
 ```bash
-LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-done
+LEDGER="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/gc-deacon-ledger.sh" && [ -x "$LEDGER" ] || LEDGER=""
 "$LEDGER" append cleanup "<check-name>: <what you cleared, and how>" -
 ```
 A sweep whose findings were all already tracked, and a `state=complete` with
@@ -438,9 +422,7 @@ Also run every cycle, whatever the sweep is doing:
   requires, dedups on it, and refuses if nothing live matches:
   ```bash
   # >>> warrant-file
-  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/file-warrant.sh" ] && [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/file-warrant.sh" ] && [ -x "$SCRIPTS/gc-deacon-ledger.sh" ] || SCRIPTS=""
   # file-warrant.sh resolves the owner to a live session id, validates it against
   # dance-probe.sh's charset, dedups on that id, and files the warrant: exit 0
   # filed a new one, 3 found one already open, 1 refused (no live session). Ledger
@@ -495,14 +477,16 @@ burn, never on a half-done cycle whose current wisp the next boot's reconcile
 would burn as a stale orphan. `GC_BEAD_ID` is empty on a fresh session, so the
 fallback that resolves the current wisp has to work: a wisp is an ephemeral
 molecule, which means `--type=molecule --include-infra` plus the title filter,
-and any narrower query reads empty.
+and any narrower query reads empty. The query and the pour name the city store
+with `--city`, because the shell keeps the directory it last changed to, and
+from a rig checkout they would read and pour into that rig's store instead.
 ```bash
 # >>> patrol-wisp-pour
 CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
-  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-deacon-patrol")][0].id // empty')
+  CURRENT_WISP=$(gc bd list --city="$GC_CITY_PATH" --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-deacon-patrol")][0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}' --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-deacon-patrol --city="$GC_CITY_PATH" --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next deacon wisp; NOT burning this one."
   exit 1

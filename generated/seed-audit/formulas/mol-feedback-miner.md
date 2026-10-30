@@ -9,7 +9,8 @@ learning system's cold-capture surface, and it makes two captures:
   about standing behavior. A post is outside when it carries no city mark and
   another login posted it, or when it is Claude Code's `/code-review` output
   posted under the city's own login. The distiller reads these observations as
-  a set, for what the city's review missed (skills/learning-distill/SKILL.md).
+  a set, for what the city's review missed (the gc-toolkit.learning-distill
+  skill).
 - **The standing-behavior capture.** The city's own posts in the window, its
   reviewers' verdicts and findings among them, are read for corrective feedback
   about standing agent behavior that self-report missed.
@@ -49,6 +50,7 @@ claim is a hint inside that root, never a way to establish one).
 
 
 Variables:
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Non-empty default on purpose: this formula is poured by a gc order, and order dispatch injects no routing vars. (default=gc-toolkit.)
   {{max_obs_per_run}}: Maximum observation beads the standing-behavior capture files per run. Candidates beyond the cap are dropped with a logged count; the window re-covers them next run. The outside capture files one observation per outside post and has no cap. (default=10)
   {{miner_window_days}}: Sweep window in days: merged or closed PRs updated within the last N days are read, and earlier ones while the outside capture still owes them (outside_backfill_days). The standing-behavior capture reads the PRs that closed within the window. Windows overlap across runs by design — dedup on (obs.provenance, obs.category) makes re-reading a post idempotent, and the overlap is what makes a capped or interrupted run naturally resumable. (default=3)
   {{outside_backfill_days}}: How far back a rig's first run starts the outside capture. The rig's store records the day from which the capture still owes a read of every PR updated since, and every run reads back to it. After each run the day moves to the oldest last update among the PRs the run still owes, one that did not read or has an outside post not yet recorded, or to the run's own day when it owes none, so a back-fill one run could not finish, or a PR that did not read, is read again by the next run. (default=30)

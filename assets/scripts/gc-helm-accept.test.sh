@@ -85,6 +85,10 @@ mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="${1:-}"; verb="${2:-}"
 case "$sub" in
+  gc-toolkit)
+    # gc <binding> scripts-dir names the pack, $STUB_PACK.
+    [ "$verb" = scripts-dir ] && [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   rig)
     jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   sling)
@@ -110,7 +114,7 @@ case "$sub" in
       _grc=0
       ( cd "$FAKE_GUARD_CWD" \
           && WORK_BEAD_ID="$FAKE_SUBJECT_ID" WORK_BEAD_JSON="$_work" CLAIMED_STEP_BEAD_ID=tk-step1 \
-             GC_PACK_DIR="$FAKE_GUARD_PACK" GC_RIG_ROOT="" GC_CITY_PATH="" bash "$FAKE_GUARD" ) \
+             STUB_PACK="$FAKE_GUARD_PACK" GC_RIG_ROOT="" GC_CITY_PATH="" bash "$FAKE_GUARD" ) \
           >> "$FAKE_GUARD_LOG" 2>&1 || _grc=$?
       printf 'GUARD rc=%s\n' "$_grc" >> "$FAKE_GUARD_LOG"
     fi
@@ -128,7 +132,7 @@ case "$sub" in
             oc="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id" 2>/dev/null || true)"
             or="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reason" 2>/dev/null || true)"
             if [ -n "${FAKE_VISIT_EDGE:-}" ]; then
-              # The su-ab9je shape: the continuation_group stamp landed EMPTY and
+              # The rb-ab9je shape: the continuation_group stamp landed EMPTY and
               # only the tracks edge names the subject, rendered in the bd show
               # dep shape {dependency_type, id}.
               jq -n --arg i "$id" --arg s "$FAKE_SUBJECT_ID" --arg oc "$oc" --arg or "$or" \
@@ -273,10 +277,12 @@ chmod +x "$TMP/bin/rec-pvc"
 # mol-polecat-work's load-context blocked-work guard, extracted verbatim from the
 # formula, so the run a landed sling starts reads its work bead the way the
 # formula's own step does (load-context-blocked-work-gate.test.sh pins the guard
-# itself). The guard takes its release scripts from GC_PACK_DIR first, and the
-# stubs there record what it did.
+# itself). The guard takes its release scripts from the pack gc names, and the
+# stubs there record what it did. The pour renders {{binding_prefix}} as the
+# binding plus a dot, gc-toolkit. here.
 TOML="$(cd "$HERE/../.." && pwd)/formulas/mol-polecat-work.toml"
-awk '/^# >>> load-context-blocked-work-decline$/ {f=1; next} /^# <<< load-context-blocked-work-decline$/ {f=0} f' "$TOML" > "$TMP/guard.sh"
+awk '/^# >>> load-context-blocked-work-decline$/ {f=1; next} /^# <<< load-context-blocked-work-decline$/ {f=0} f' "$TOML" \
+  | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$TMP/guard.sh"
 [ -s "$TMP/guard.sh" ] && bash -n "$TMP/guard.sh" \
   && ok "mol-polecat-work's load-context blocked-work guard extracted" \
   || bad "the load-context-blocked-work-decline block did not extract from $TOML"
@@ -307,12 +313,12 @@ export GC_VISIT_COMMENT_TOOL="$TMP/bin/rec-pvc" REC_PVC_LOG="$TMP/pvc.log"
 unset GC_HELM_FIXTURE GC_RIG || true
 export TMPDIR="$TMP"
 
-# run_accept <arg...> -> sets RC/OUT/ERR/CALLS/GUARD from the per-case FAKE_* env.
+# run_accept <arg...> -> sets RC/ERR/CALLS/GUARD from the per-case FAKE_* env.
 run_accept() {
     : > "$FAKE_CALLS"; : > "$FAKE_GUARD_LOG"
     rm -f "$FAKE_OUTCOME_DIR"/* 2>/dev/null || true
     set +e
-    OUT="$(sh "$SCRIPT" accept "$@" 2>"$TMP/err")"; RC=$?
+    sh "$SCRIPT" accept "$@" >/dev/null 2>"$TMP/err"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
@@ -604,7 +610,7 @@ grep -q "bd close $VIS" <<< "$CALLS" \
   && ok "(VISITID) dismisses the visit" || bad "(VISITID) visit dismissed (calls: $CALLS)"
 
 # --- (VISITEDGE) an empty continuation_group stamp resolves via the tracks edge -
-# The su-ab9je shape (bd show dep {dependency_type, id}). The resolution must not
+# The rb-ab9je shape (bd show dep {dependency_type, id}). The resolution must not
 # read the bd list dep shape here, which would silently miss the subject.
 export FAKE_VISIT_EDGE=1
 run_accept "$VIS"

@@ -30,12 +30,15 @@ Hard rules, in force for every step:
   and how, and one party's code read is not that. When the dispatch says not
   to re-raise something and you find it, report it and say in the verdict
   that you are contradicting the dispatch and why.
-- Single honest pass. Read the diff yourself and write your findings
-  yourself. No subagents doing the review, no persona
-  reviewers. The review may run as a two-provider quorum instead: two lanes
-  each do one honest pass, and one synthesizer combines their findings into
-  the single verdict (the mol-review-quorum-signoff formula). One verdict per
-  claim holds either way, because the synthesizer makes the one signoff call.
+- One writer of the verdict: the agent holding this claim judges every
+  finding and makes the one signoff.sh call. The check's method may hand part
+  of the reading to subagents. Each one is read-only in the review's
+  workspace, returns what it found to that agent, and never calls
+  signoff.sh. The review may run as a two-provider quorum instead: two lanes
+  each read the diff and may fan out the same way, and one synthesizer
+  combines their findings into the single verdict (the
+  mol-review-quorum-signoff formula). One verdict per claim holds either way,
+  because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: each step closes its own bead through
 assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,

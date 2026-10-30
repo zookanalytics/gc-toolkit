@@ -14,8 +14,8 @@ survived was decided by pass ordering rather than by design.
 | A | `formulas/mol-refinery-patrol.toml` (`merge-push`) and `template-fragments/polecat-non-impl-done.template.md` (`signoff-round-cap`) | `gc.routed_to=human`, `blocked_reason`, **`--unset-metadata check.<gate>`** |
 | B | `assets/scripts/reconcile-gate-verdicts.sh` R11 | **`check.<gate>=exception@<head>`** + `.reason` + `.attempts` |
 
-Both orderings were observed in production: su-uzy9.5 (2026-08-13) ended with
-B's stamp 43s after A's clear; sl-ew4w / PR#533 (2026-08-19) ended with A's
+Both orderings were observed in production: rb-uzy9.5 (2026-08-13) ended with
+B's stamp 43s after A's clear; ra-ew4w / PR#533 (2026-08-19) ended with A's
 clear over B's stamp, on a different rig.
 
 ## It was not a coin-flip — it oscillated once per wake
@@ -32,8 +32,8 @@ merge-push   →  the cap arm                (arm A: cleared check.<gate>)
 So every wake ended with the marker **absent**, and the next wake's
 `check-set-heal.sh` read that as Unevaluated and dispatched another codex
 review. The cap's whole purpose is to stop that dispatch; the clear re-armed
-it. On sl-ew4w the loop ran at roughly the patrol cadence — a no-op review
-about every 14 minutes (`sl-88w0u`, `sl-o8akz`, `sl-pv0md`, `sl-3bi4n`, each
+it. On ra-ew4w the loop ran at roughly the patrol cadence — a no-op review
+about every 14 minutes (`ra-88w0u`, `ra-o8akz`, `ra-pv0md`, `ra-3bi4n`, each
 `gc.work_outcome=no-op`) — while an APPROVED + CLEAN + MERGEABLE PR sat unable
 to land for ~14h.
 
@@ -68,7 +68,7 @@ Three things had to be true for that to be safe, and all three are:
 
 The sidecars are the tell that the clear was never coherent: it removed
 `check.<gate>` but not `check.<gate>.reason` / `.exception_escalated`, leaving
-sl-ew4w asserting that an exception had been escalated for a gate that was
+ra-ew4w asserting that an exception had been escalated for a gate that was
 never evaluated.
 
 ### What was deliberately *not* changed

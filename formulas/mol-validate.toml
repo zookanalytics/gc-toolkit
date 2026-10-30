@@ -71,6 +71,10 @@ land the PR and fix it fresh afterward. A finding that is not a real objection
 reason, never deferred.
 """
 
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default."
+default = "gc-toolkit."
+
 [[steps]]
 id = "load-dispatch"
 title = "Read the dispatch and pin the batch you are validating"
@@ -85,7 +89,7 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 # >>> validate-malformed-convoy-refuse
 if [ -z "$VALIDATION_PASS" ]; then
   echo "mol-validate needs an input convoy with exactly one tracked member" >&2
-  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
   : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
   if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key validate-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-validate cannot derive its validation-pass bead; the pour is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
     echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
@@ -101,7 +105,7 @@ fi
 # A pass closed before its run reached this step was withdrawn by whoever closed
 # it, so the run ends with no visit and nothing is ruled.
 if [ "$(gc bd show "$VALIDATION_PASS" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
-  CANCEL=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { CANCEL="$c/assets/scripts/run-cancel.sh"; break; }; done
+  CANCEL="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" && [ -x "$CANCEL" ] || CANCEL=""
   if [ -n "$CANCEL" ] && "$CANCEL" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass $VALIDATION_PASS was closed before its run ruled it"; then
     gc runtime drain-ack
   else
@@ -123,7 +127,7 @@ REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # >>> validate-no-anchor-refuse
 if [ -z "$ANCHOR" ]; then
   echo "validation pass carries no anchor_bead; nothing to rule" >&2
-  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
   : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
   if ! "$SCRIPTS/escalate.sh" --subject "$VALIDATION_PASS" --key validate-no-anchor --message "Validation pass $VALIDATION_PASS carries no anchor_bead, so there is nothing to rule; the dispatch is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
     echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
@@ -175,7 +179,8 @@ printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
       | "\\(.id)\\t\\(.title)"'
 ```
 Read each finding's full body (`gc bd show <id>`) — the locus, what is wrong,
-why it matters, and the fix the reviewer proposed. That is what you rule on.
+why it matters, and the fix the reviewer proposed, and for a reviewer's finding
+its grade, its failure scenario and its verification. That is what you rule on.
 
 **4. Read the intent.** The anchor bead (`metadata.anchor_bead`) and the PR or
 branch it gates tell you what the diff was for, which is what makes a finding
@@ -184,9 +189,7 @@ branch it gates tell you what the diff was for, which is what makes a finding
 **5. Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `triage-findings`:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one}" --step mol-validate.load-dispatch --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -214,9 +217,7 @@ M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 [ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/finding.sh" ] || SCRIPTS=""
 [ -n "$SCRIPTS" ] || { echo "finding.sh not found in the pack" >&2; exit 1; }
 BATCH_JSON=$(gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json) \
   || { echo "cannot read the finding ledger for anchor $ANCHOR; refusing to treat an unreadable store as an empty batch" >&2; exit 1; }
@@ -263,12 +264,20 @@ carries the finding's question the same way.
 
 {{defer_policy}}
 
+**A P2.** A reviewer's finding graded P2 (`Severity: P2` in its body) is filed
+only beside a blocking finding, because its review sent the PR back for a
+rework round anyway, and that round is its one chance. Rule it must-fix when
+its fix is low-risk and net-positive, so it lands in that round, and declined,
+with the reason, when it is risky or marginal. Never defer a P2: a follow-up PR
+for a minor improvement costs the operator an approval, and `finding.sh`
+refuses the deferral.
+
 **Rule every finding the block above printed.** For each id in that
 reconstructed batch, read its full body (`gc bd show <id>`) for the locus, the
-objection, and the fix proposed, judge it against the threshold above, and write
-ONE disposition through `finding.sh set-disposition` (the finding id replaces
-`<F>`) — the primitive owns the edge each disposition takes, so you never touch a
-dependency edge by hand:
+objection, and the fix proposed, judge it against the threshold above, and a P2
+against the rule for one, and write ONE disposition through `finding.sh
+set-disposition` (the finding id replaces `<F>`) — the primitive owns the edge
+each disposition takes, so you never touch a dependency edge by hand:
 
 - **must-fix** — a real objection to fix before merge. This is the default.
   `finding.sh` wires the finding `--blocks` the anchor, the hold merge.sh's
@@ -367,15 +376,17 @@ looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
 exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
-leave the chain open for the next claim to resume. Exit 3 is the one exception:
-it wrote nothing, because an open visit already carries the finding's question,
-so re-rule that finding as the first paragraph says and carry on. The rulings that owe an answer
-ride the same guard: a declined finding's `--reply`, a deferred finding's
-follow-up and its reply, and a needs-you finding's visit and its reply are all
-recorded BEFORE the finding is closed or left open, and `set-disposition` exits
-non-zero if any does not stick — so an answer the raiser would never hear leaves
-the finding unruled and the pass open to retry rather than closing over a silent
-overrule or a deferral with no tracked follow-up.
+leave the chain open for the next claim to resume. Two refusals are the
+exceptions, because each wrote nothing: exit 3, because an open visit already
+carries the finding's question, so re-rule that finding as the first paragraph
+says; and a P2's deferral, so rule it must-fix or declined. Carry on after
+either. The rulings that owe an answer ride the same guard: a declined finding's
+`--reply`, a deferred finding's follow-up and its reply, and a needs-you
+finding's visit and its reply are all recorded BEFORE the finding is closed or
+left open, and `set-disposition` exits non-zero if any does not stick — so an
+answer the raiser would never hear leaves the finding unruled and the pass open
+to retry rather than closing over a silent overrule or a deferral with no
+tracked follow-up.
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
 to the merge predicate, so an objection you leave unruled is silently dropped. An
@@ -395,9 +406,7 @@ units.
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `rule-convergence`:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-validate.triage-findings --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -422,9 +431,7 @@ ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 [ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-outcome.sh" ] && [ -x "$c/assets/scripts/approval-withdraw.sh" ] && [ -r "$c/assets/scripts/git-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/review-outcome.sh" ] && [ -x "$SCRIPTS/approval-withdraw.sh" ] && [ -r "$SCRIPTS/git-lib.sh" ] || SCRIPTS=""
 [ -n "$SCRIPTS" ] || { echo "review-outcome.sh, approval-withdraw.sh and git-lib.sh not found in the pack" >&2; exit 1; }
 ```
 
@@ -533,9 +540,7 @@ the withdrawal appends when it dismisses an approval.
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `finalize-and-drain`:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 "${SC:?step-close.sh not found in the pack}" --step mol-validate.rule-convergence --convoy {{convoy_id}} --outcome pass
 ```
 
@@ -581,9 +586,7 @@ step-close.sh, which resolves by (gc.root_bead_id, gc.step_ref) — a GC_*BEAD_I
 env var names the wrong bead after a claim. Never close `workflow-finalize`
 (the control-dispatcher's):
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-dispatch triage-findings rule-convergence finalize-and-drain; do
   "$SC" --step "mol-validate.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-validate.$STEP was not this session's to close — left for the finalizer"

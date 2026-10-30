@@ -33,8 +33,8 @@
 # What is waiting on the subject is the caller's to state: one --waiting-on per
 # bead it ROUTED work into, --no-wait when it settled the subject and nothing is
 # waiting, and NEITHER where the subject is parked for a person. The scripts it
-# runs (converse-rework.sh, gc-helm.sh, lifecycle.sh) are SEARCHED for on the
-# candidate roots, in the one order pack_script holds.
+# runs (converse-rework.sh, gc-helm.sh, lifecycle.sh) are its siblings in the
+# pack's assets/scripts, found through pack_script.
 #
 # Usage:
 #   converse-signoff.sh --visit <id> --outcome "<takeaway, ≤140 chars>" \
@@ -119,17 +119,12 @@ demand_closed() {
   printf '%s' "$got" | jq -e '((.[0].status // "") | ascii_downcase) == "closed"' >/dev/null 2>&1
 }
 
-# pack_script <name> — the first candidate root's assets/scripts/<name>: the rig
-# root, then the git checkout of the working directory, then the city's
-# gc-toolkit rig. Every script this sign-off runs is found through it, so the
-# three share one search order. Non-zero, printing nothing, when no root
-# carries it.
+# pack_script <name> — <name> beside this script, in the copy of the pack that
+# is running. Every script this sign-off runs is found through it. Non-zero,
+# printing nothing, when the pack does not carry it.
 pack_script() {
-  local cand
-  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$cand/assets/scripts/$1" ] && { printf '%s' "$cand/assets/scripts/$1"; return 0; }
-  done
-  return 1
+  [ -x "$HERE/$1" ] || return 1
+  printf '%s' "$HERE/$1"
 }
 
 # The one definition of what subject a visit covers (its tracks edge, the
@@ -138,6 +133,10 @@ pack_script() {
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || die "cannot source visit-identity.sh from $HERE"
+# The one definition of a visit's topic, shared with converse-fold.sh and
+# converse-hold.sh. Exposes $VISIT_TOPIC_JQ.
+# shellcheck source=visit-topic.sh
+. "$HERE/visit-topic.sh" || die "cannot source visit-topic.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -209,10 +208,13 @@ fi
 # The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
 # on a shared standing-scope bucket (same subject, distinct escalation_key)
 # keeps its own demand: this sign-off neither resolves it nor overwrites its
-# operator question with a re-state. escalation_key is that per-sitting
-# discriminator, empty on an ordinary visit — which keeps the pre-topic
-# behaviour. An array so an empty topic expands to no argument under zsh.
-TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
+# operator question with a re-state. The visit's demand topic is that
+# per-sitting discriminator, the one converse-hold.sh filed its demands under:
+# the escalation_key, or `visit:` and the visit's own id for a visit filed for
+# a distinct concern beside a live sitting on its subject. The topic is empty on
+# an ordinary visit, which keeps the pre-topic behaviour. An array so an empty
+# topic expands to no argument under zsh.
+TOPIC=$(printf '%s' "$V" | jq -r "$VISIT_TOPIC_JQ"'.[0] | visit_demand_topic')
 DEMAND_TOPIC=()
 [ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
 # The hold to discharge. A conversation wait gates the VISIT (the default — a
@@ -281,7 +283,7 @@ REWORK_FILED=""
 if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
   CR=$(pack_script converse-rework.sh)
   if [ -z "$CR" ]; then
-    REWORK_OUT="no converse-rework.sh on any candidate root"
+    REWORK_OUT="no converse-rework.sh beside $0"
   elif REWORK_OUT=$("$CR" --anchor "$SUBJECT" --ruling-bead "$VISIT" --ruling "$RULING" 2>&1); then
     echo "$REWORK_OUT"
     REWORK_FILED=yes
@@ -294,7 +296,7 @@ if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
   fi
 fi
 HELM=$(pack_script gc-helm.sh)
-[ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the subject carries no trace of this sitting"
+[ -n "$HELM" ] || echo "NO TAKEAWAY WRITER (gc-helm.sh) beside $0 — say so in the sign-off; the subject carries no trace of this sitting"
 # What is waiting on $SUBJECT now that this sitting is over. Three shapes,
 # exactly one true, and this sitting is the last reader that can tell them
 # apart: one --waiting-on per bead it ROUTED work into; --no-wait when it

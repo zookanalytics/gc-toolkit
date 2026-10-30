@@ -73,7 +73,9 @@ wires `assets/hooks/pre-commit`, which regenerates `generated/seed-audit/` —
 the rendered standing prompt of every agent and compiled recipe of every
 formula, against a synthetic city — whenever a commit touches a renderer
 input (`agents/`, `template-fragments/`, `formulas/`, `packs/`, `pack.toml`,
-or the renderer itself). Nothing under `generated/` is hand-edited.
+or the renderer itself). The commit carries only the renders its change moves:
+text the `gc` binary moved lands through the default branch's re-audit, a pull
+request of its own. Nothing under `generated/` is hand-edited.
 `render-seed-audit.sh --check` verifies the artifact by re-rendering it, the
 merge gate re-renders every merge before it lands, and
 `doctor/check-seed-audit-current` warns when the artifact is absent or the
@@ -102,6 +104,8 @@ render's byte and token counts.
 - [docs/review-triage.md](docs/review-triage.md) — the changes that make the arch check mandatory on this rig, which the review formula prints for each triage review at the commit it reviews
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
+- [docs/not-for-review.md](docs/not-for-review.md) — the pull-request comments the city never reads as review feedback: the no-review mark, and the third-party markers a rig declares
+- [docs/built-once-target.md](docs/built-once-target.md) — the shape the pack would have if built once and where its weight is, subsystem by subsystem beside its measured size, the removals in the order they land, and the rules every change follows
 
 ## Related
 

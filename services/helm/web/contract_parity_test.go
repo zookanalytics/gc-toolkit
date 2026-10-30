@@ -495,7 +495,7 @@ func fixtureBoard() board.Board {
 				Complete:       false,
 				StaleDays:      4,
 				Priority:       &p1,
-				CrossRigRefs:   []string{"sl-9k2mq"},
+				CrossRigRefs:   []string{"ra-9k2mq"},
 				OpenHeads:      []string{"tk-eemvf.5", "tk-eemvf.6"},
 				DeadOwnerHeads: []string{"tk-eemvf.4"},
 				// The populated case: one of the eight open children is parked,
@@ -565,17 +565,17 @@ func fixtureBoard() board.Board {
 				TakeawayBy: nil,
 
 				Frontier:  "needs-review · all 2 closed · 0 open",
-				Needs:     "all 2 closed — graduate",
+				Needs:     "all 2 tracked closed",
 				RankScore: 3000,
-				// Settled at the head with nothing in flight — awaiting a human's
-				// graduate decision — so the shared core reads it needs-review.
+				// Settled at the head with nothing in flight, so the shared core
+				// reads it needs-review.
 				Phase: board.PhaseNeedsReview,
 				// A LOW row with nothing asking bands cleanup. ClusterKey is pinned
 				// here — the fixture's one clustered row — to carry the field into
 				// the TypeScript check, the way the DONE tile carries closed_at; on
 				// a live board it is set only when at least three rows share it.
 				Section:    board.SectionCleanup,
-				ClusterKey: "all 2 closed — graduate",
+				ClusterKey: "all 2 tracked closed",
 				GroupRoot:  "gt-1a2b3",
 			},
 			// A merge anchor: the PR round-trip's row, blocked on the operator
@@ -628,8 +628,8 @@ func fixtureBoard() board.Board {
 				Needs:     "blocked: held by tk-01n5cc.1 — an unrouted blocker no automated actor will clear",
 				RankScore: 2003003,
 				// A blocked live merge anchor: a human must unstick it. On a merge
-				// anchor the per-bead Phase equals PRPhase — one bead, one tri-state
-				// — because both read the same shared core off the same facts.
+				// anchor the per-bead Phase equals PRPhase — one bead, one state —
+				// because both read the same shared core off the same facts.
 				PRPhase: board.PhaseNeedsAttention,
 				Phase:   board.PhaseNeedsAttention,
 
@@ -654,6 +654,10 @@ func fixtureBoard() board.Board {
 				// fixture carries both fields non-zero into the TypeScript check.
 				Acceptable:    true,
 				AcceptFormula: "mol-dispose-pr",
+				// The unrouted blocker holds the PR, the one held: label it
+				// carries, so the fixture takes pr_held into the TypeScript check
+				// as a list.
+				PRHeld: []string{"blocked"},
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into
@@ -707,7 +711,7 @@ func fixtureBoard() board.Board {
 			},
 		},
 		Partial:       true,
-		PartialErrors: []string{"rig shutupandlisten: context canceled"},
+		PartialErrors: []string{"rig rig-b: context canceled"},
 
 		// The three shapes a build row takes: one current, one whose build
 		// failed and left an older binary serving, and one whose binary builds
@@ -735,11 +739,11 @@ func fixtureBoard() board.Board {
 				LastBuildRC:    0,
 				RestartPending: false,
 				ProbeStatus:    "unreadable",
-				ProbeDetail:    "rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+				ProbeDetail:    "rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused",
 				CheckedAt:      time.Date(2026, 8, 11, 15, 0, 0, 0, time.UTC),
 				Severity:       board.SevHigh,
 				Detail: "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: " +
-					"rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+					"rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused",
 			},
 			{
 				Component:      "helm",

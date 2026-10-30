@@ -33,8 +33,14 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 ('$2' not in '$1')" ;; esac; 
 
 # --- stub gc: record each `bd heartbeat <id>`, honor a configurable exit code --
 # A refusal prints the store's own wording, so the report's reason is checkable.
+# `gc-toolkit scripts-dir` names the pack, $STUB_PACK, as gc does for the
+# binding the city imports the pack under, and fails when none is set.
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'EOF'
+if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+fi
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "heartbeat" ]; then
     printf '%s\n' "${3:-}" >> "$HB_LOG"
     rc="${FAKE_GC_HB_RC:-0}"
@@ -123,11 +129,13 @@ run 2> /dev/null; eq "$RC" "2" "missing bead id exits 2"
 # to a distinct value, so the region's target is read off what it passed.
 ROOT="$(cd "$HERE/../.." && pwd)"
 
+# A region comes out with {{binding_prefix}} rendered as the pour renders it:
+# the binding the city imports the pack under plus a dot, gc-toolkit. here.
 extract() {  # extract <toml> <marker>
     awk -v m="$2" '
         $0 ~ ("# >>> " m "$") {f=1; next}
         $0 ~ ("# <<< " m "$") {f=0}
-        f' "$1"
+        f' "$1" | sed 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 
 STUB_PACK="$TMP/pack"
@@ -146,7 +154,7 @@ export TARGET_LOG="$TMP/target.log"
 run_region() {
     : > "$TARGET_LOG"
     rm -f "$TMP/hb-ran"
-    ( cd "$TMP" && env GC_PACK_DIR="$2" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
+    ( cd "$TMP" && env STUB_PACK="$2" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
         CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
         WORK_BEAD_ID=tk-work-bead \
         bash -c '. "$1" && hb touch "$2"' _ "$1" "$TMP/hb-ran" )
@@ -240,7 +248,7 @@ run_block() {  # run_block <toml-path-under-root> <marker> : status lands in BLO
     : > "$GCTK_LOG"
     rm -f "$TMP/cmd-out"
     BLOCK_RC=0
-    ( cd "$TMP" && env GC_PACK_DIR="$STUB_PACK" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
+    ( cd "$TMP" && env STUB_PACK="$STUB_PACK" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
         GCTK_BIN="$TMP/gctk" WORK_BEAD_ID=tk-work-bead \
         CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
         bash -c '. "$1"; . "$2"' _ "$TMP/region.sh" "$TMP/tail.sh" ) 2> /dev/null || BLOCK_RC=$?

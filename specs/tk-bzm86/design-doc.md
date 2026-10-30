@@ -6,7 +6,7 @@ description: Fixes a converse thread vanishing mid-attention with no operator-fa
 # Design: the converse thread's ending is an event, not an absence
 
 Design record for `tk-bzm86` (P1 bug, two operator-reported instances:
-2026-08-10 gc-toolkit, 2026-08-11 signal-loom). Companion to
+2026-08-10 gc-toolkit, 2026-08-11 rig-a). Companion to
 `specs/tk-h9pq5/design-doc.md`, which built the visit/converse spine; this
 records what that spine does when a sitting *ends*, which it did not say.
 
@@ -107,8 +107,8 @@ subject the operator is mid-conversation about.
 **Finding the writer is a search, not a path.** converse is
 `scope = "rig"`, so it is imported into every rig and
 `rigNameForQualifiedAgent` resolves the rig from the qualified name: a
-`signal-loom/gc-toolkit.converse` session runs with `GC_RIG_ROOT` at
-*signal-loom*, which ships no `assets/` at all. Both stamps therefore
+`rig-a/gc-toolkit.converse` session runs with `GC_RIG_ROOT` at
+*rig-a*, which ships no `assets/` at all. Both stamps therefore
 walk the pack's standard candidate list — `$GC_RIG_ROOT`, the git
 toplevel, `$GC_CITY_PATH/rigs/gc-toolkit` — taking the first root with
 an **executable** copy, and say so loudly when none has one.
@@ -116,7 +116,7 @@ an **executable** copy, and say so loudly when none has one.
 A single default (`${GC_RIG_ROOT:-<pack>}`) cannot do this: `GC_RIG_ROOT`
 is *non-empty* in the broken case, so the fallback never fires and the
 stamp fails before writing. That is not a hypothetical rig — this bug's
-second instance was a signal-loom sitting (session `lx-qk9v`), so the
+second instance was a rig-a sitting (session `hq-qk9v`), so the
 first form would have left exactly the case that motivated the fix
 untraced. A missing writer is now announced in-thread rather than
 swallowed, because a stamp that silently does not happen is the original
@@ -217,7 +217,7 @@ runs before invoking the writer), so a prompt that reverts to assuming
 one path is *run and fails on behaviour* rather than skipped for want of
 a matching pattern. 41 assertions pass here; 7 fail against the
 round-2 tree, where the imported-session case resolves the writer to
-`…/rigs/signal-loom/assets/scripts/gc-helm.sh` — a file that does not
+`…/rigs/rig-a/assets/scripts/gc-helm.sh` — a file that does not
 exist.
 
 ## Files

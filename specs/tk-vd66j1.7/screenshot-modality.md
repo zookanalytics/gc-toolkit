@@ -47,14 +47,14 @@ and the engine's `joinUrl` and `PROVE_TIMEOUT`. Reviewing PR 1266, the operator
 asked why SprintShow did not capture the screenshot instead of the pack
 duplicating its logic. While the copy existed, a screenshot checked the same
 proofs as a video only as long as the two copies agreed. So the still capture
-went into the engine (ss-pc8t, sprintshow PR 3), and the pack's copy, its
+went into the engine (sprintshow PR 3), and the pack's copy, its
 browser launch and its free-port probe went. The operator's question set the
 terminal kind aside. It rendered through the same pack-side browser launch as
 markdown, though, and keeping that launch for one kind would have kept a second
 browser path, so the terminal kind captures through the engine too.
 
 **An engine without the command is refused.** The sprintshow rig checkout can
-lag sprintshow's main, and the published package is not on npm (ss-rck). So
+lag sprintshow's main, and the published package is not on npm. So
 before a command runs or GitHub renders anything, `demo-screenshot.sh` reads
 the engine's own `sprintshow help`. An engine whose help lists no
 `sprintshow screenshot` stops the capture with exit 1 and a message naming the
@@ -141,9 +141,9 @@ either one rendered reaches the refusal.
 **A port of the capture's own.** The engine serves a `--serve-dir` on a free
 port unless `--port` names one, so reviews capturing side by side on one host
 never share a server. The engine used to listen on 5173 for every one of them,
-and the first build probed for a free port itself until ss-pc8t moved the
-choice into the engine. That server listens on every network interface while a
-capture runs (ss-tbv5, open in sprintshow). An app page served with
+and the first build probed for a free port itself until the engine's own
+change moved the choice into the engine. That server listens on every network interface while a
+capture runs (a bead still open in the engine's own store). An app page served with
 `--serve-dir` was already exposed that way. A terminal or markdown page is now
 exposed too, on its random port, for the seconds its capture takes. A `--serve`
 command gets the same separation another way. The engine reuses whatever

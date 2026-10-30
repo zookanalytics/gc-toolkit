@@ -31,7 +31,7 @@ Use this skill when:
 
 You receive parsed arguments from the command wrapper:
 
-- **Bead ID** (required) — e.g., `sl-8jv`
+- **Bead ID** (required) — e.g., `tk-8jv`
 - **`--pr <number>`** (optional) — PR number, otherwise derived from
   `metadata.pr_number` on the bead
 - **`--focus "area"`** (optional) — bias the demo narration toward a
@@ -73,7 +73,7 @@ From the JSON, extract and keep in working memory:
 - `description` — original assignment (the "what to build"). Scan for:
   - Goals and scope priorities (TIER 1, TIER 2, MUST HAVE)
   - Locked decisions or must-have behaviors
-  - References to sibling beads (e.g., `sl-9hi`, `sl-so9`)
+  - References to sibling beads (e.g., `tk-9hi`, `tk-so9`)
   - Test strategies (hints about what to verify in the demo)
 - `notes` — the polecat's implementation report. Scan for:
   - "Implemented:" section — lists what was actually built
@@ -105,13 +105,13 @@ mattered, and how it fits with other beads.
 ### Step A3: Read sibling design-leg beads
 
 Scan the work bead's `description` and `notes` for bead IDs referenced in
-prose (e.g., "per sl-so9 §6", "sl-9hi G2.1").
+prose (e.g., "per tk-so9 §6", "tk-9hi G2.1").
 Extract candidate IDs with a regex, validate each against the ledger, and
 read the real ones:
 
 ```bash
 # Bead IDs are <prefix>-<suffix>. Rig prefixes vary by consuming rig
-# (lx, gc, tk, sl, su, mr, gx, …), so match the bead-id SHAPE — a short
+# (tk, gc, …), so match the bead-id SHAPE — a short
 # lowercase prefix + '-' + alphanumeric suffix — instead of a fixed
 # prefix list, then VALIDATE each candidate with `bd show` before
 # reading it. Validation drops the false positives the broader regex
@@ -272,7 +272,7 @@ Keep each heading under 80 characters.
 Below each bold heading, write a short action description for the executor
 (one or two sentences). Then, for **every** step, write the two REQUIRED
 lines that `demo:capture` consumes to score the frame (see
-`skills/demo-capture/SKILL.md` §"Demo Script Format" — the executor treats
+`gc-toolkit.demo-capture` §"Demo-script format" — the executor treats
 `_Prove:_` as the contract and marks the frame an error if it isn't met):
 
 - `_Prove:_ <criterion>` — what the captured frame must **visibly**
@@ -400,8 +400,8 @@ Filename: `<bead-id>-<slug>.md`.
 
 Examples:
 
-- `sl-8jv-conv-ui-polish.md`
-- `sl-ya9-gc-demo-script.md`
+- `tk-8jv-conv-ui-polish.md`
+- `tk-ya9-gc-demo-script.md`
 
 ### Step E3: Write the file
 

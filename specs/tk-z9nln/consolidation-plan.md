@@ -173,7 +173,7 @@ The mirror is one of the five deliberate shadows documented in
 `docs/gascity-packs.md` §7a. It owns `submit-and-exit` — the step §6
 identifies as "the one that unblocks finalize". Confirmed live: this
 document's own molecule root carries
-`gc.formula_source = /home/zook/loomington/rigs/gc-toolkit/formulas/mol-polecat-work.toml`.
+`gc.formula_source = /home/zook/mycity/rigs/gc-toolkit/formulas/mol-polecat-work.toml`.
 
 ### Why the tooling is already here
 
@@ -323,8 +323,8 @@ it gained 434 lines in twelve hours.
 **Removes 761 lines. Risk: low.**
 
 The script recovers merge handoffs stranded by a near-miss refinery address
-(`shutupandlisten/refinery` where the canonical identity is
-`shutupandlisten/gc-toolkit.refinery`). `tk-0nn3f`'s own notes name the
+(`rig-b/refinery` where the canonical identity is
+`rig-b/gc-toolkit.refinery`). `tk-0nn3f`'s own notes name the
 root-cause site — the formula computing `REFINERY_TARGET` without the binding
 prefix. **That site is fixed:**
 

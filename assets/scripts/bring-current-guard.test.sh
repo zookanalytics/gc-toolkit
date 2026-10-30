@@ -983,9 +983,11 @@ UNRES=$(awk '/# >>> bring-current-unresolvable$/ {f=1; next} /# <<< bring-curren
   | sed -e 's/"<file>"/"v.txt"/' \
         -e 's/"<the two intents that met>"/"main set x to 3 while the branch set it to 2"/' \
         -e 's/"<the one decision you need>"/"which default wins?"/' \
-        -e 's/"<the step you hold, e.g. mol-polecat-work.workspace-setup>"/"mol-polecat-work.workspace-setup"/')
+        -e 's/"<the step you hold, e.g. mol-polecat-work.workspace-setup>"/"mol-polecat-work.workspace-setup"/' \
+        -e 's/{{binding_prefix}}/gc-toolkit./g')
 [ -n "$UNRES" ] && ok "the stop-and-ask block is extracted from the formula" || bad "the stop-and-ask block is not extracted from the formula"
 hasnt "$UNRES" "git push" "the block pushes nothing"
+# The block's scripts are in the pack the stub gc names, $STUB_PACK.
 PK="$TMP/askpack/assets/scripts"; mkdir -p "$PK"
 cat > "$PK/bring-current-audit.sh" <<'S'
 #!/usr/bin/env bash
@@ -1005,7 +1007,7 @@ chmod +x "$PK/bring-current-audit.sh" "$PK/await-ruling.sh" "$PK/run-cancel.sh"
 # is handed back through it, as this session, whose claim records it as polecat.
 cp "$HERE/hand-back.sh" "$PK/hand-back.sh"; chmod +x "$PK/hand-back.sh"
 export ASK_LOG="$TMP/ask.log" GC_SESSION_ID=polecat
-unres() { ( cd "$R" && GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID="$1" bash -c "$UNRES" ) >/dev/null 2>&1; }
+unres() { ( cd "$R" && STUB_PACK="$TMP/askpack" WORK_BEAD_ID="$1" bash -c "$UNRES" ) >/dev/null 2>&1; }
 # The claim a hook claim leaves on a bead it hands this session: both session
 # pins, and the pool route the bead was offered on.
 HELD=',"gc.session_id":"polecat","gc.session_name":"gc-toolkit__polecat-polecat","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"'
@@ -1050,7 +1052,7 @@ case " \$* " in *" bd update "*" --status=open "*) printf 'bd update %s refused 
 exec "$BIN/gc" "\$@"
 S
 chmod +x "$TMP/refuse-reopen/gc"
-( cd "$R" && PATH="$TMP/refuse-reopen:$PATH" GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI26 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+( cd "$R" && PATH="$TMP/refuse-reopen:$PATH" STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI26 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
 eq "$rc" "0" "a bead with no molecule whose reopen the store refuses: the block exits 0"
 eq "$(bstatus MI26) $(bassignee MI26)" "in_progress polecat" "…and the claim is left held, never in_progress with no assignee"
 eq "$(meta MI26 gc.session_id)|$(meta MI26 gc.session_name)" "polecat|gc-toolkit__polecat-polecat" \
@@ -1061,16 +1063,16 @@ has "$(notes MI26)" "Hand-back refused: the write that reopens MI26 and releases
 has "$(notes MI26)" "Stopped bringing the branch current" "…beside why it stopped"
 restart; bring
 store "[$(child MI27 "$HELD")]"
-jq -c 'map(if .id == "MI27" then .assignee = "lx-other" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+jq -c 'map(if .id == "MI27" then .assignee = "hq-other" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
 unres MI27; rc=$?
-eq "$rc|$(bstatus MI27)|$(bassignee MI27)" "0|in_progress|lx-other" "a bead with no molecule that another session holds is not released"
+eq "$rc|$(bstatus MI27)|$(bassignee MI27)" "0|in_progress|hq-other" "a bead with no molecule that another session holds is not released"
 eq "$(meta MI27 gc.session_id)|$(meta MI27 gc.routed_to)" "polecat|gc-toolkit/gc-toolkit.polecat" "…its pins and route untouched"
-has "$(notes MI27)" "Hand-back refused: MI27 shows status in_progress and assignee lx-other" "…and the notes say so"
+has "$(notes MI27)" "Hand-back refused: MI27 shows status in_progress and assignee hq-other" "…and the notes say so"
 restart; bring
 store "[$(child MI21)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI21 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+( cd "$R" && STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI21 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
 eq "$rc" "0" "a molecule's step: the block exits 0"
 has "$(cat "$ASK_LOG")" "AWAIT MI21 --key bring-current-question.MI21 --subject ANC --formula mol-polecat-work" "the work bead waits on the question's visit, filed on its anchor"
 has "$(cat "$ASK_LOG")" "CANCEL --step mol-polecat-work.workspace-setup --bead ST1" "…and the run is cancelled at the step"
@@ -1079,20 +1081,20 @@ eq "$(meta MI21 gc.routed_to)" "<absent>" "…and the bead is not parked as well
 restart; bring
 store "[$(child MI23)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && AWAIT_RC=1 GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI23 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+( cd "$R" && AWAIT_RC=1 STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI23 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
 eq "$rc" "1" "a molecule's step whose wait does not land exits 1"
 hasnt "$(cat "$ASK_LOG")" "CANCEL" "…and cancels nothing"
 hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and does not drain"
 restart; bring
 store "[$(child MI24)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && CANCEL_RC=1 GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI24 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+( cd "$R" && CANCEL_RC=1 STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI24 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
 eq "$rc" "1" "a molecule's step whose cancel does not land exits 1"
 hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and does not drain"
 restart; bring
 store "[$(child MI22)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && ASK_RC=1 GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI22 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+( cd "$R" && ASK_RC=1 STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI22 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
 eq "$rc" "1" "a question that reached no visit exits 1"
 [ -f "$R/.git/MERGE_HEAD" ] && ok "…leaving the merge in progress, for the retry" || bad "the merge must not be aborted before a visit asks the question"
 hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and not draining"

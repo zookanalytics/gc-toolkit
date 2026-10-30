@@ -60,9 +60,13 @@ export STUB_STATUS="$TMP/status.tsv" STUB_GC_LOG="$TMP/gc.log" STUB_ROOT="$TMP" 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf '%s\n' "$*" >> "$STUB_GC_LOG"
 case "$1 $2" in
+    "gc-toolkit scripts-dir")
+        # gc names the pack it loaded for the binding the city imports it under.
+        [ -n "${STUB_PACK:-}" ] || exit 1
+        printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
     "rig list")
         [ -z "$STUB_RIGS_FAIL" ] || { echo "not in a city directory" >&2; exit 1; }
-        printf '{"city_path":"%s","rigs":[{"name":"city","path":"%s","prefix":"lx","hq":true},{"name":"toolkit","path":"%s/rig-tk","prefix":"tk"},{"name":"loom","path":"%s/rig-sl","prefix":"sl"}]}\n' \
+        printf '{"city_path":"%s","rigs":[{"name":"city","path":"%s","prefix":"hq","hq":true},{"name":"toolkit","path":"%s/rig-tk","prefix":"tk"},{"name":"rig-a","path":"%s/rig-ra","prefix":"ra"}]}\n' \
             "$STUB_ROOT" "$STUB_ROOT" "$STUB_ROOT" "$STUB_ROOT"
         exit 0 ;;
     "bd show")
@@ -179,7 +183,7 @@ extract() { # <toml> <marker>
 render() {
     printf '%s\n' "$1" | sed -e "s|{{review_bead}}|$2|g" -e "s|{{reviewed_oid}}|$3|g" \
         -e 's|{{review_base}}|main|g' -e 's|{{review_branch}}|polecat/x|g' -e 's|{{anchor_bead}}|tk-anc|g' \
-        -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g'
+        -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g' -e 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 GATHER="$(extract "$ROOT/formulas/mol-review.toml" review-gather)"
 REMOVE="$(extract "$ROOT/formulas/mol-review.toml" review-workspace-remove)"
@@ -187,7 +191,9 @@ QREMOVE="$(extract "$ROOT/formulas/mol-review-quorum-signoff.toml" quorum-review
 for v in GATHER REMOVE QREMOVE; do
     if [ -n "${!v}" ]; then ok "the formula's $v lines extract"; else bad "the formula's $v lines extract (markers missing)"; fi
 done
-PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$HERE/review-checks.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
+# The pack gc names holds the scripts the gather calls and the libs they source.
+PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
+cp "$SUT" "$HERE/review-checks.sh" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
 # The gather fetches the base and the branch from origin before it makes the
 # worktree, and reads the anchor.
 ORIGIN="$TMP/origin.git"; git init -q --bare "$ORIGIN"
@@ -198,14 +204,14 @@ cd "$REPO" || exit 1
 # The gather resolves the rig through the pack's rig-root.sh and refuses to
 # run without a rig root, so each run names this repository as the rig.
 for n in 1 2; do
-    GOT="$(GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fx "$C1")
+    GOT="$(STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fx "$C1")
 pwd -P" 2>/dev/null | tail -1)"
     eq "$GOT" "$WS/gc-review-tk-fx/wt" "block $n running the formula's gather stands in the review's worktree"
 done
 eq "$(git -C "$WS/gc-review-tk-fx/wt" rev-parse HEAD)" "$C1" "at the reviewed commit"
 SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$REMOVE" tk-fx "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fx"; then bad "the verdict step's remove line takes the workspace"; else ok "the verdict step's remove line takes the workspace"; fi
-GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fq "$C1")" >/dev/null 2>&1
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fq "$C1")" >/dev/null 2>&1
 SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$QREMOVE" tk-fq "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fq"; then bad "the quorum's remove line takes the workspace"; else ok "the quorum's remove line takes the workspace"; fi
 
@@ -218,8 +224,8 @@ mk() { # <name> <hours old> — a workspace directory with one file in it
 }
 
 WT_CLOSED="$(bash "$SUT" add --review-bead tk-closed --oid "$C1" 2>/dev/null)"; status tk-closed closed
-mk gc-review-sl-done 1;          status sl-done closed
-mk gc-review-lx-city 1;          status lx-city closed
+mk gc-review-ra-done 1;          status ra-done closed
+mk gc-review-hq-city 1;          status hq-city closed
 # A name with anything after the bead id is not looked up: it ages out.
 g worktree add -q --detach "$R/gc-review-tk-old.Ab12Cd" "$C1"; age "$R/gc-review-tk-old.Ab12Cd" 48
 status tk-old closed
@@ -270,10 +276,10 @@ gone_ok() { if exists "$R/$1"; then bad "$2"; else ok "$2"; fi; }
 kept_ok() { if exists "$R/$1"; then ok "$2"; else bad "$2"; fi; }
 gone_ok gc-review-tk-closed          "the workspace of a closed review goes"
 if is_registered "$WT_CLOSED"; then bad "and its worktree registration with it"; else ok "and its worktree registration with it"; fi
-gone_ok gc-review-sl-done            "a closed review in another rig's store goes"
-has "$(cat "$STUB_GC_LOG")" "bd show sl-done --db $TMP/rig-sl/.beads --json" "a bead is looked up in the store its prefix names"
-has "$(cat "$STUB_GC_LOG")" "bd show lx-city --db $TMP/.beads --json" "the city's own prefix reads the city store"
-gone_ok gc-review-lx-city            "a closed review in the city store goes"
+gone_ok gc-review-ra-done            "a closed review in another rig's store goes"
+has "$(cat "$STUB_GC_LOG")" "bd show ra-done --db $TMP/rig-ra/.beads --json" "a bead is looked up in the store its prefix names"
+has "$(cat "$STUB_GC_LOG")" "bd show hq-city --db $TMP/.beads --json" "the city's own prefix reads the city store"
+gone_ok gc-review-hq-city            "a closed review in the city store goes"
 gone_ok gc-review-tk-old.Ab12Cd      "a suffixed name idle past the horizon goes"
 if is_registered "$R/gc-review-tk-old.Ab12Cd"; then bad "and its worktree registration with it"; else ok "and its worktree registration with it"; fi
 kept_ok gc-review-tk-new.Zz99Yy      "a suffixed name inside the horizon is kept, its bead unread"

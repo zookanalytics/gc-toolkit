@@ -47,12 +47,26 @@
 #             reserves the alias under a lock, as gascity does: one spawns and
 #             binds, and the other spawns nothing and points at the winner
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
+#   (ENDED*, DETACHED, UNREAD, ATTACH-FAIL-*) once the attach returns, the visit
+#             says what the tab prints: a closed visit prints how it closed and
+#             the last hand-back recorded on it, its control bytes dropped; a
+#             visit still open prints the re-attach command; an unreadable one
+#             says the ending is unknown; and a failed attach on a closed visit
+#             reports the ending rather than an attach to retry
 #   (START-*) the attach waits until the sitting's `gc session list` state reads
 #             active, because an attach that reaches a sitting the reconciler
-#             has not started launches it without its prompt. A sitting still
-#             unstarted at GC_HELM_ENGAGE_WAIT_TIMEOUT is left unattached, with
-#             the attach to run later; one that ends first exits 4 at once; a
-#             sitting not yet listed, or a listing that fails, is waited through.
+#             has not started launches it without its prompt. It waits however
+#             long the start takes (START-LONG, minutes on a fake clock), and
+#             says so when the wait opens, when the state changes, and every
+#             30s (START-PROGRESS). One that ends first exits 4 at once, early
+#             or late; a sitting not yet listed, or a listing that fails, is
+#             waited through. A sitting still unstarted at
+#             GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
+#             (START-BACKSTOP), is left unattached and exits 4, with the attach
+#             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
+#             visit bound and the sitting open, and prints the attach, after
+#             kicking a codex sitting (INTERRUPT-KICK); a hang-up or a TERM
+#             stops it the same way (INTERRUPT-HUP, INTERRUPT-TERM).
 #             (NOATTACH-*) --no-attach does not wait, and (KICK-AFTER-START) a
 #             codex kick on the attach path follows the wait
 #   (BOUND-EXISTING) engaging a SUBJECT that binds a pre-existing visit names that
@@ -125,7 +139,7 @@ case "$1 ${2:-}" in
     jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" --arg hq "${HQ_RUNNING-}" \
           --arg nohq "${NO_HQ_ROW-}" \
       '{rigs:[ (if $nohq != "" then empty
-                else {name:"loomington", path:"/nonexistent-city", prefix:"lx", hq:true}
+                else {name:"mycity", path:"/nonexistent-city", prefix:"hq", hq:true}
                      + (if $hq   != "" then {running:   ($hq   == "true")} else {} end) end),
                ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk", hq:false}
                + (if $susp != "" then {suspended: ($susp == "true")} else {} end)
@@ -207,6 +221,7 @@ case "$1 ${2:-}" in
   "bd show")
     id="$3"
     if [ "$id" = "tk-vis" ]; then
+      [ -f "$VIS_UNREAD" ] && { echo "bd show: data plane down" >&2; exit 1; }
       # Once a spawn is refused at the alias ($ALIAS_REFUSED exists), the
       # refused engage polls this visit. The change it waits for lands on the
       # $AFTER_REFUSAL_READS-th read: a concurrent engage's bind
@@ -227,9 +242,13 @@ case "$1 ${2:-}" in
       # blank $VIS_CGROUP and set $VIS_TRACKS to exercise the tracks-edge fallback:
       # `gc bd show` renders that edge as a dependency bead row keyed
       # .dependency_type/.id, which is the shape the fallback must read.
+      # $VIS_META_EXTRA, a JSON object, adds metadata keys such as the outcome
+      # and the hand-back a closed sitting leaves.
+      _extra="${VIS_META_EXTRA:-}"; [ -n "$_extra" ] || _extra='{}'
       jq -n --arg i "$id" --arg s "$st" --arg a "$who" \
             --arg cg "${VIS_CGROUP-tk-subj}" --arg tr "${VIS_TRACKS-}" \
-        '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:{task_kind:"visit","gc.continuation_group":$cg}}
+            --argjson extra "$_extra" \
+        '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:({task_kind:"visit","gc.continuation_group":$cg} + $extra)}
           + (if $tr != "" then {dependencies:[{id:$tr, dependency_type:"tracks", title:"the subject under engagement", status:"open", issue_type:"task", priority:2}]} else {} end)]'
     else
       jq -n --arg i "$id" --arg k "${BEAD_KIND:-task}" --arg t "${SUBJ_TITLE:-the subject under engagement}" \
@@ -326,7 +345,14 @@ case "$1 ${2:-}" in
           + (if $amb != "" then ["contributing.review-arch"] else [] end)
           | map({name:., source:(split(".")[0]), path:("/skills/" + . + "/SKILL.md")}))}' ;;
   "session attach")
-    printf 'session attach %s\n' "$*" >> "$CALLS" ;;
+    # The attach returns when the tab's client exits. $ATTACH_ENDS is the visit's
+    # status by then: closed for a sitting that ended under the tab, in_progress
+    # for one the operator detached from. $ATTACH_UNREADABLE makes every later
+    # read of the visit fail, and $ATTACH_FAIL fails the attach itself.
+    printf 'session attach %s\n' "$*" >> "$CALLS"
+    [ -n "${ATTACH_ENDS:-}" ] && printf '%s' "$ATTACH_ENDS" > "$VIS_STATUS"
+    [ -n "${ATTACH_UNREADABLE:-}" ] && : > "$VIS_UNREAD"
+    [ -n "${ATTACH_FAIL:-}" ] && { echo "gc session attach: session not found" >&2; exit 1; } ;;
   "session suspend")
     printf 'session suspend %s\n' "$*" >> "$CALLS" ;;
   "session close")
@@ -411,10 +437,36 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+# --- clock stubs --------------------------------------------------------------
+# engage's start wait reads the time with `date +%s` and sleeps a second between
+# listings. With $FAKE_CLOCK naming a file, `date +%s` prints the epoch second
+# the file holds, and a whole-second `sleep N` returns at once and moves that
+# clock N times ${FAKE_CLOCK_SCALE:-1} seconds on, so a case can wait minutes in
+# a few listings. Without it, and for every other argument, both are the real
+# commands.
+REAL_DATE=$(command -v date); REAL_SLEEP=$(command -v sleep)
+cat > "$TMP/bin/date" <<EOF
+#!/bin/sh
+if [ -n "\${FAKE_CLOCK:-}" ] && [ "\$*" = "+%s" ]; then cat "\$FAKE_CLOCK"; exit 0; fi
+exec "$REAL_DATE" "\$@"
+EOF
+cat > "$TMP/bin/sleep" <<EOF
+#!/bin/sh
+[ -n "\${FAKE_CLOCK:-}" ] || exec "$REAL_SLEEP" "\$@"
+case "\${1:-}" in ''|*[!0-9]*) exec "$REAL_SLEEP" "\$@" ;; esac
+echo \$(( \$(cat "\$FAKE_CLOCK") + \$1 * \${FAKE_CLOCK_SCALE:-1} )) > "\$FAKE_CLOCK"
+EOF
+chmod +x "$TMP/bin/date" "$TMP/bin/sleep"
+# reps <token> <n> — the token n times over, for a START_STATES walk.
+reps() { _r=""; _n=0; while [ "$_n" -lt "$2" ]; do _r="$_r $1"; _n=$((_n + 1)); done; printf '%s' "$_r"; }
+
 export PATH="$TMP/bin:$PATH"
 export CALLS="$TMP/calls" ASSIGNEE="$TMP/assignee" VIS_STATUS="$TMP/vstatus" ALIAS_REFUSED="$TMP/alias-refused"
-export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
+export SPAWNED="$TMP/spawned" POLLS="$TMP/polls" VIS_UNREAD="$TMP/vis-unread"
 unset GC_HELM_FIXTURE || true
+# The START-BACKSTOP case reads the default bound, and only a case's own prefix
+# runs the clock stubs fake or picks the signal an interrupted case sends.
+unset GC_HELM_ENGAGE_WAIT_TIMEOUT FAKE_CLOCK FAKE_CLOCK_SCALE INTERRUPT_SIG || true
 export TMPDIR="$TMP"
 
 # A fixture agents dir, so the converse-<model> list engage globs is hermetic —
@@ -440,11 +492,47 @@ export RIG_PATH="$TMP/rig"
 # suite is launched from ([ -t 0 ] is false); the interactive path is driven by
 # run_engage_tty below.
 run_engage() {
-    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads" "$VIS_UNREAD"
+    printf '1700000000' > "$TMP/clock"
     set +e
     OUT="$(sh "$SCRIPT" engage "$@" </dev/null 2>"$TMP/err")"; RC=$?
     set -e
     OUT="$OUT$(cat "$TMP/err")"
+    CALLED="$(cat "$CALLS")"
+}
+
+# polls_read — how many listings the start wait has made, 0 before the first.
+polls_read() { _p=$(cat "$POLLS" 2>/dev/null || true); printf '%s' "${_p:-0}"; }
+
+# run_engage_interrupted <bead> [extra-args...] — run_engage, with a Ctrl-C sent
+# once the start wait has read the sitting twice: SIGINT, or the signal
+# $INTERRUPT_SIG names. Job control puts engage in a process group of its own,
+# as a terminal puts its foreground job, and the signal goes to that whole
+# group, as a terminal's Ctrl-C does. A shell that starts with a signal ignored
+# cannot trap it, and a suite started in the background by a shell without job
+# control inherits SIGINT ignored, so perl puts the default back for each
+# signal a case sends before engage starts. The case's own bound turns a signal
+# that never lands into a failure within a minute, not a hang.
+run_engage_interrupted() {
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads" "$VIS_UNREAD"
+    set +e
+    set -m
+    if command -v perl >/dev/null 2>&1; then
+        GC_HELM_ENGAGE_WAIT_TIMEOUT=60 perl -e '$SIG{$_} = "DEFAULT" for qw(INT TERM HUP); exec @ARGV or die "exec: $!\n"' \
+            sh "$SCRIPT" engage "$@" </dev/null >"$TMP/out" 2>"$TMP/err" &
+    else
+        GC_HELM_ENGAGE_WAIT_TIMEOUT=60 sh "$SCRIPT" engage "$@" </dev/null >"$TMP/out" 2>"$TMP/err" &
+    fi
+    _eng_pid=$!
+    set +m
+    _w=0
+    while [ "$(polls_read)" -lt 2 ] && [ "$_w" -lt 1200 ] && kill -0 "$_eng_pid" 2>/dev/null; do
+        sleep 0.05; _w=$((_w + 1))
+    done
+    kill -"${INTERRUPT_SIG:-INT}" -- "-$_eng_pid" 2>/dev/null
+    wait "$_eng_pid"; RC=$?
+    set -e
+    OUT="$(cat "$TMP/out")$(cat "$TMP/err")"
     CALLED="$(cat "$CALLS")"
 }
 
@@ -562,6 +650,9 @@ has "$CALLED" "bd create" "(REASON-NEW) …a NEW visit is filed, not the existin
 has "$CALLED" "visit: tk-subj — a distinct concern" "(REASON-NEW) …its title tail carries the reason"
 has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and its body (the claim-time brief) too"
 hasnt "$OUT" "already open" "(REASON-NEW) …bypassing the one-visit-per-subject dedup on purpose"
+# The new visit is about its own concern, so it carries a topic of its own and
+# converse's fold never closes it into the live sitting on the subject.
+has "$CALLED" '"visit_topic":"own"' "(REASON-NEW) …and it carries a topic of its own (visit_topic=own)"
 # The internal file-a-visit path must not leak cmd_open's terminal success
 # chatter: engage emits the human summary on stdout and one [debug] line on
 # stderr, and cmd_open's "…filed / Engage it when ready" advice is stale once
@@ -587,6 +678,7 @@ printf 'open' > "$VIS_STATUS"
 run_engage tk-subj --no-attach
 eq "$RC" 0 "(NOREASON-EXISTING) engaging a subject-with-visit and no reason exits 0"
 hasnt "$CALLED" "bd create" "(NOREASON-EXISTING) …no new visit is filed"
+hasnt "$CALLED" "visit_topic" "(NOREASON-EXISTING) …and no topic is stamped on the visit it engages"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(NOREASON-EXISTING) …the existing visit is engaged"
 has "$OUT" "bound the pre-existing" "(BOUND-EXISTING) …and the output flags that a visit that already existed was bound"
 has "$OUT" "compare notes on the WIP proposals" "(BOUND-EXISTING) …naming the bound visit's subject, not just its id"
@@ -984,7 +1076,7 @@ export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
 run_engage tk-vis
 eq "$(cat "$POLLS")" 1 "(START-ACTIVE) a sitting already started is read once"
-hasnt "$OUT" "waiting up to" "(START-ACTIVE) …and attached with no wait announced"
+hasnt "$OUT" "waiting for the reconciler" "(START-ACTIVE) …and attached with no wait announced"
 
 START_STATES="start-pending creating active" run_engage tk-vis
 eq "$RC" 0 "(START-WAIT) an engage whose sitting starts on the third listing exits 0"
@@ -996,11 +1088,36 @@ if [ -n "$last_poll" ] && [ -n "$attach_line" ] && [ "$last_poll" -lt "$attach_l
 else
   bad "(START-WAIT) expected the last listing (line ${last_poll:-none}) before the attach (line ${attach_line:-none})"
 fi
-has "$OUT" "waiting up to 120s for the reconciler to start gc-toolkit__converse-1" \
-    "(START-WAIT) …telling the operator what it waits on, and for how long"
+has "$OUT" "waiting for the reconciler to start gc-toolkit__converse-1 (it is start-pending), then attaching; Ctrl-C stops the wait and leaves it starting" \
+    "(START-WAIT) …telling the operator what it waits on, and that Ctrl-C leaves it starting"
+
+# A start on a busy controller can take minutes, so nothing short of the
+# backstop ends the wait. On the fake clock the listings are ten seconds apart,
+# so the fifteenth reads the sitting 140s after the wait opened.
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=10 START_STATES="$(reps start-pending 14) active" run_engage tk-vis
+eq "$RC" 0 "(START-LONG) a sitting still start-pending after two minutes is waited on"
+eq "$(cat "$POLLS")" 15 "(START-LONG) …read until it reads active, 140s in"
+has "$CALLED" "session attach gc-77" "(START-LONG) …and attached then"
+hasnt "$OUT" "has not started" "(START-LONG) …with no give-up"
+has "$OUT" "still waiting after 2m00s: gc-toolkit__converse-1 is start-pending" \
+    "(START-LONG) …reporting the time waited as it passes two minutes"
+
+# The wait reports itself: a line when it opens, one when the state changes,
+# and one every 30s. A listing that did not read is no change of state, and
+# neither is the same state read again after it.
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=10 START_STATES="start-pending start-pending creating broken creating active" run_engage tk-vis
+eq "$RC" 0 "(START-PROGRESS) an engage whose sitting goes start-pending, creating, active exits 0"
+has "$OUT" "waiting for the reconciler to start gc-toolkit__converse-1 (it is start-pending)" \
+    "(START-PROGRESS) the wait opens with the state it read"
+has "$OUT" "gc-toolkit__converse-1 is now creating, after 20s" "(START-PROGRESS) …prints a line when the state changes"
+eq "$(printf '%s\n' "$OUT" | grep -c 'is now' || true)" 1 \
+    "(START-PROGRESS) …and only then: neither a listing that did not read nor the same state read again prints one"
+has "$OUT" "still waiting after 30s: gc-toolkit__converse-1 could not be read from 'gc session list'" \
+    "(START-PROGRESS) …and a line every 30s with the time waited and what the last listing read"
+has "$CALLED" "session attach gc-77" "(START-PROGRESS) …then attaches"
 
 GC_HELM_ENGAGE_WAIT_TIMEOUT=2 START_STATES="start-pending" run_engage tk-vis
-eq "$RC" 0 "(START-TIMEOUT) a sitting still unstarted at the bound exits 0: the visit is bound and the sitting may yet start"
+eq "$RC" 4 "(START-TIMEOUT) a sitting still unstarted at the GC_HELM_ENGAGE_WAIT_TIMEOUT bound exits 4: the engage put no sitting in front of the operator"
 hasnt "$CALLED" "session attach" "(START-TIMEOUT) …and is NOT attached, since the attach would launch it without its prompt"
 polls=$(cat "$POLLS")
 if [ "${polls:-0}" -ge 2 ]; then
@@ -1010,7 +1127,23 @@ else
 fi
 has "$OUT" "the reconciler has not started gc-toolkit__converse-1 after 2s" "(START-TIMEOUT) …saying the reconciler has not started it"
 has "$OUT" "start-pending" "(START-TIMEOUT) …naming the state it last read"
-has "$OUT" "gc session attach gc-77" "(START-TIMEOUT) …and giving the attach to run once it is up"
+has "$OUT" "Attach once it reads active there: gc session attach gc-77" "(START-TIMEOUT) …and giving the attach to run once it is up"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(START-TIMEOUT) …leaving the visit bound to the sitting"
+
+# The bound is a backstop set above the controller's own limits: 15 minutes
+# unless GC_HELM_ENGAGE_WAIT_TIMEOUT says otherwise. On the fake clock the
+# listings are a minute apart, at minutes 0 through 15.
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=60 START_STATES="start-pending" run_engage tk-vis
+eq "$RC" 4 "(START-BACKSTOP) a sitting that never leaves start-pending exits 4 at the default bound"
+eq "$(cat "$POLLS")" 16 "(START-BACKSTOP) …which is 15 minutes"
+has "$OUT" "the reconciler has not started gc-toolkit__converse-1 after 15m00s" "(START-BACKSTOP) …naming the wait in minutes"
+hasnt "$CALLED" "session attach" "(START-BACKSTOP) …without attaching"
+
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=10 START_STATES="$(reps start-pending 14) gone" run_engage tk-vis
+eq "$RC" 4 "(START-ENDED-LATE) a sitting that ends after a wait of minutes exits 4"
+eq "$(cat "$POLLS")" 15 "(START-ENDED-LATE) …at the first listing it is gone from"
+has "$OUT" "ended before the reconciler started it (its state in 'gc session list': gone)" "(START-ENDED-LATE) …saying the sitting ended"
+hasnt "$CALLED" "session attach" "(START-ENDED-LATE) …without attaching"
 
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_engage tk-vis
 eq "$RC" 4 "(START-CLOSED) a sitting listed and then gone from the list (closed, read from the store) exits 4"
@@ -1044,7 +1177,7 @@ GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_engage tk-vis --
 eq "$RC" 0 "(NOATTACH-NOWAIT) --no-attach on an unstarted sitting exits 0"
 polls=$(cat "$POLLS")
 eq "${polls:-0}" 0 "(NOATTACH-NOWAIT) …without reading the sitting's state"
-hasnt "$OUT" "waiting up to" "(NOATTACH-NOWAIT) …or announcing a wait"
+hasnt "$OUT" "waiting for the reconciler" "(NOATTACH-NOWAIT) …or announcing a wait"
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_engage tk-vis --model codex --no-attach
 has "$CALLED" "session nudge gc-77" "(NOATTACH-KICK) a codex sitting on --no-attach is kicked without a start wait"
 
@@ -1064,6 +1197,33 @@ has "$CALLED" "session nudge gc-77" "(TIMEOUT-KICK) a codex sitting unstarted at
 hasnt "$CALLED" "session attach" "(TIMEOUT-KICK) …but not attached"
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_engage tk-vis --model codex
 hasnt "$CALLED" "session nudge" "(CLOSED-NOKICK) a codex sitting that ended before it started is not kicked"
+
+echo "# Ctrl-C during the wait stops the wait and leaves the sitting starting"
+# The operator who stops waiting keeps the engage: the visit stays bound, the
+# sitting is neither closed nor attached, and engage says how to reach it once
+# it is up.
+START_STATES="start-pending" run_engage_interrupted tk-vis
+eq "$RC" 130 "(START-INTERRUPT) Ctrl-C during the wait exits 130"
+has "$OUT" "stopped waiting after" "(START-INTERRUPT) …saying the wait stopped"
+has "$OUT" "Visit tk-vis stays bound to gc-toolkit__converse-1, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach gc-77" \
+    "(START-INTERRUPT) …and printing the attach to run once the sitting is up"
+hasnt "$CALLED" "session attach" "(START-INTERRUPT) …without attaching"
+hasnt "$CALLED" "session close" "(START-INTERRUPT) …or closing the sitting"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(START-INTERRUPT) …and the visit still bound to it"
+hasnt "$CALLED" "session nudge" "(START-INTERRUPT) …and an opus sitting is not kicked"
+START_STATES="start-pending" run_engage_interrupted tk-vis --model codex
+eq "$RC" 130 "(INTERRUPT-KICK) Ctrl-C during a codex sitting's wait exits 130"
+has "$CALLED" "session nudge gc-77" "(INTERRUPT-KICK) …after kicking the sitting, so it begins once it starts"
+# A terminal that goes away under the wait, and a TERM, stop it the same way.
+INTERRUPT_SIG=HUP START_STATES="start-pending" run_engage_interrupted tk-vis --model codex
+eq "$RC" 129 "(INTERRUPT-HUP) a hang-up during a codex sitting's wait exits 129"
+has "$OUT" "stopped waiting after" "(INTERRUPT-HUP) …through the same stop as Ctrl-C"
+has "$CALLED" "session nudge gc-77" "(INTERRUPT-HUP) …kicking the sitting, so it begins once it starts"
+hasnt "$CALLED" "session close" "(INTERRUPT-HUP) …and leaving it open"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(INTERRUPT-HUP) …with the visit still bound to it"
+INTERRUPT_SIG=TERM START_STATES="start-pending" run_engage_interrupted tk-vis
+eq "$RC" 143 "(INTERRUPT-TERM) a TERM during the wait exits 143"
+has "$OUT" "stopped waiting after" "(INTERRUPT-TERM) …through the same stop as Ctrl-C"
 
 echo "# a suspended subject rig is refused before anything spawns"
 # engage spawns a sitting the reconciler must sustain; on a suspended rig the
@@ -1330,6 +1490,7 @@ has "$CALLED" "bd create" "(IA-NEW-TEMPLATE) …a new visit is filed"
 hasnt "$OUT" "already open" "(IA-NEW-TEMPLATE) …deliberately, past the one-visit dedup"
 has "$CALLED" "talk through tk-subj broadly" "(IA-NEW-TEMPLATE) …its body is the seed, subject filled in"
 has "$CALLED" "visit: tk-subj — discuss broadly" "(IA-NEW-TEMPLATE) …titled by the seed label"
+has "$CALLED" '"visit_topic":"own"' "(IA-NEW-TEMPLATE) …with a topic of its own"
 has "$CALLED" "session new converse-opus" "(IA-NEW-TEMPLATE) …then a sitting is spawned"
 has "$OUT" "Skill — Enter = none" "(IA-SKILL-NONE) a new visit is asked for a skill"
 hasnt "$CALLED" "Load that skill" "(IA-SKILL-NONE) …and Enter seeds none, leaving the seed as the whole brief"
@@ -1407,6 +1568,7 @@ run_engage tk-subj --template unstick-a-stall --no-input --no-attach
 eq "$RC" 0 "(IA-TEMPLATE-FLAG) --template files a new visit with the seed, exit 0"
 has "$CALLED" "bd create" "(IA-TEMPLATE-FLAG) …a new visit is filed"
 has "$CALLED" "looks stalled" "(IA-TEMPLATE-FLAG) …carrying the seed body"
+has "$CALLED" '"visit_topic":"own"' "(IA-TEMPLATE-FLAG) …and a topic of its own"
 hasnt "$OUT" "already open" "(IA-TEMPLATE-FLAG) …past the dedup"
 unset HAVE_VISIT
 
@@ -1664,6 +1826,66 @@ eq "$RC" 0 "(IA-SKILL-FLAG) --skill on a TTY exits 0 with only the model asked"
 hasnt "$OUT" "starts a new one" "(IA-SKILL-FLAG) …no visit/starter prompt"
 hasnt "$OUT" "Skill — Enter" "(IA-SKILL-FLAG) …and no skill prompt, the flag answered it"
 has "$CALLED" "visit: tk-subj — review-arch lens" "(IA-SKILL-FLAG) …filing the new visit with the lens"
+unset HAVE_VISIT
+
+echo "# after the attach returns, the tab says how the sitting it showed ended"
+# The attach returns once the tab's tmux client exits. A closed visit is a
+# sitting that ended under the tab, and the tab prints how it closed and the
+# last hand-back it recorded; a visit still open is one the operator detached
+# from, and the tab prints how to re-attach.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+HB_TEXT='tk-subj — the board redesign
+
+Settled: the new layout is on for the operator, and the rest wait a week.'
+HB_META=$(jq -nc --arg t "$HB_TEXT" '{"gc.outcome":"done","gc.outcome_reason":"settled the rollout","gc.handback":$t,"gc.handback_at":"2026-10-26T12:00:00Z"}')
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA="$HB_META" run_engage tk-vis
+eq "$RC" 0 "(ENDED) a sitting that ended under the tab exits 0"
+has "$OUT" "The sitting on tk-subj has ended: visit tk-vis closed as done (settled the rollout)." \
+    "(ENDED) the tab says the sitting ended, and how its visit closed"
+has "$OUT" "Its last hand-back, recorded 2026-10-26T12:00:00Z:" "(ENDED) …then introduces the last hand-back"
+has "$OUT" "$HB_TEXT" "(ENDED) …and prints the hand-back whole"
+hasnt "$OUT" "Re-attach" "(ENDED) …offering no re-attach to a sitting that is gone"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA="$(jq -nc --arg t "$(printf 'tk-subj — label\n\nred\033[31m text\rover')" '{"gc.outcome":"done","gc.handback":$t}')" run_engage tk-vis
+case "$OUT" in
+  *"$(printf '\033')"*|*"$(printf '\r')"*) bad "(ENDED-CTRL) control bytes in a recorded hand-back are not printed to the terminal" ;;
+  *) ok "(ENDED-CTRL) control bytes in a recorded hand-back are not printed to the terminal" ;;
+esac
+has "$OUT" "red[31m textover" "(ENDED-CTRL) …while its text is"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA='{"gc.outcome":"dismissed","gc.outcome_reason":"dismissed by the operator"}' run_engage tk-vis
+has "$OUT" "visit tk-vis closed as dismissed (dismissed by the operator)." "(ENDED-NONE) a sitting that recorded no hand-back still says how it ended"
+has "$OUT" "It recorded no hand-back." "(ENDED-NONE) …and that it left none"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=in_progress VIS_META_EXTRA="$HB_META" run_engage tk-vis
+eq "$RC" 0 "(DETACHED) a tab the operator detached exits 0"
+has "$OUT" "The sitting on tk-subj is still open (visit tk-vis). Re-attach: gc session attach gc-77" \
+    "(DETACHED) a visit still open says the sitting is still going, with the re-attach command"
+hasnt "$OUT" "$HB_TEXT" "(DETACHED) …and prints no hand-back as if it had ended"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=in_progress ATTACH_UNREADABLE=1 run_engage tk-vis
+has "$OUT" "Could not read visit tk-vis, so whether its sitting has ended is unknown" \
+    "(UNREAD) a visit that does not read back is reported as unknown, not as ended or open"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_FAIL=1 ATTACH_ENDS=closed VIS_META_EXTRA="$HB_META" run_engage tk-vis
+has "$OUT" "The sitting on tk-subj has ended" "(ATTACH-FAIL-ENDED) an attach that failed because the sitting already ended reports the ending"
+hasnt "$OUT" "could not attach" "(ATTACH-FAIL-ENDED) …instead of an attach to retry"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_FAIL=1 ATTACH_ENDS=in_progress run_engage tk-vis
+has "$OUT" "could not attach to gc-77 — attach when ready: gc session attach gc-77" \
+    "(ATTACH-FAIL-OPEN) an attach that failed on a sitting still going says so, as before"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA="$HB_META" run_engage tk-vis --no-attach
+hasnt "$OUT" "has ended" "(NOATTACH-REPORT) --no-attach attaches nothing, so it reports no ending"
+printf 'open' > "$VIS_STATUS"
 unset HAVE_VISIT
 
 echo

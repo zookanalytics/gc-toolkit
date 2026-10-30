@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# cycle-recycle-hook.test.sh — hermetic test for the refinery git-op defer guard
-# in the shipped Stop hook overlays/cycle-recycle/.claude/hooks/cycle-recycle.sh.
+# cycle-recycle-hook.test.sh — hermetic test for the shipped hook
+# overlays/cycle-recycle/.claude/hooks/cycle-recycle.sh: the refinery git-op
+# defer guard, and the drift trigger.
 #
 # Over its threshold the hook recycles a refinery (gc handoff, then gc session
 # reset) unless a git op is in flight in the refinery's working directory or in
@@ -10,10 +11,17 @@
 # from outside a guard that defers every turn looks like a hook with nothing to
 # do. This test tells the two apart.
 #
-# It runs the SHIPPED script, never a copy, against real git repos. gc is
-# stubbed by pointing HOME at the sandbox: the hook prepends "$HOME/go/bin" to
-# PATH itself, so a stub placed there wins over the real gc. Every run starts
-# from env -i, so no live GC_* variable reaches the hook.
+# The hook also recycles a session when a pack file its prompt or patrol
+# formula comes from changed on disk after the session's first prompt, at a
+# turn's end and, under --prompt, before a prompt, which it then blocks once a
+# restart is requested.
+# The drift cases age real files and read a transcript whose first record
+# carries the session's start.
+#
+# It runs the SHIPPED script, never a copy, against real git repos. gc and tmux
+# are stubbed by pointing HOME at the sandbox: the hook prepends "$HOME/go/bin"
+# to PATH itself, so a stub placed there wins over the real one. Every run
+# starts from env -i, so no live GC_* variable reaches the hook.
 #
 # The test lives under assets/scripts/ rather than beside the hook because
 # everything under overlays/cycle-recycle/.claude/ is staged into the patrol
@@ -39,12 +47,44 @@ trap 'rm -rf "$SANDBOX"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 # The gc stub logs every call, so a recycle reads as handoff, then session reset.
+# GC_HANDOFF_RC, GC_RESET_RC and GC_ARCHIVE_RC make those calls and gc mail
+# archive fail. Each call prints on stdout what Gas City prints, so stdout the
+# hook fails to divert shows up in its own: the reset and archive lines come
+# from cmd/gc/cmd_session_reset.go and cmd/gc/cmd_mail.go, and the handoff's
+# report from cmd/gc/cmd_handoff.go. A handoff that succeeds reports by default
+# what the on-demand refinery's does, that it sent the mail and requested no
+# restart, and a failed one reports nothing. GC_HANDOFF_REPORT replaces the
+# report. RESTART_REPORT is an always-mode session's, which Gas City prints once
+# the restart is requested and keeps when the handoff then exits 1 because it
+# cannot signal the controller. The tmux stub answers the hook's attachment
+# query with TMUX_ATTACHED.
 mkdir -p "$SANDBOX/home/go/bin"
 cat > "$SANDBOX/home/go/bin/gc" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >> "$GC_LOG"
+case "$1 $2" in
+  "session reset")
+    [ "${GC_RESET_RC:-0}" != 0 ] || echo "Session $3 reset requested. Controller will restart it fresh."
+    exit "${GC_RESET_RC:-0}" ;;
+  "mail archive")
+    [ "${GC_ARCHIVE_RC:-0}" != 0 ] || echo "Archived message $3"
+    exit "${GC_ARCHIVE_RC:-0}" ;;
+  handoff*)
+    if [ -n "${GC_HANDOFF_REPORT:-}" ]; then
+      printf '%s\n' "$GC_HANDOFF_REPORT"
+    elif [ "${GC_HANDOFF_RC:-0}" = 0 ]; then
+      echo "Handoff: sent mail gm-1 (named session; restart skipped)."
+    fi
+    exit "${GC_HANDOFF_RC:-0}" ;;
+esac
+exit 0
 STUB
-chmod +x "$SANDBOX/home/go/bin/gc"
+RESTART_REPORT="Handoff: sent mail gm-1, requesting restart..."
+cat > "$SANDBOX/home/go/bin/tmux" <<'STUB'
+#!/bin/sh
+printf '%s\n' "${TMUX_ATTACHED:-0}"
+STUB
+chmod +x "$SANDBOX/home/go/bin/gc" "$SANDBOX/home/go/bin/tmux"
 
 # The newest usage entry totals 251100 tokens, over the hook's 200K threshold.
 TRANSCRIPT="$SANDBOX/session-1.jsonl"
@@ -168,6 +208,215 @@ reset_repo "$WT"
 dirty "$WT/README.md"
 expect recycled "$WT" "the guard is the refinery's alone: a witness with a dirty tree recycles" alpha/gc-toolkit.witness
 reset_repo "$WT"
+
+echo "cycle-recycle hook: pack drift"
+
+# The pack a city imports from its rigs/gc-toolkit checkout. GC_RIG_ROOT is the
+# rig checkout above, which carries no patrol formula, so the hook reads this
+# one. Every file starts two hours old, the ones the hook watches and the ones
+# it does not: hook settings reach a live session through Claude Code's
+# settings watcher, so a change to them is no drift.
+PACK="$SANDBOX/city/rigs/gc-toolkit"
+WATCHED="agents/refinery/prompt.template.md agents/deacon/prompt.template.md
+formulas/mol-refinery-patrol.toml formulas/mol-deacon-patrol.toml
+template-fragments/visit-close.template.md template-fragments/scratch-reclaim.template.md"
+UNWATCHED="docs/notes.md overlays/cycle-recycle/.claude/settings.json"
+epoch_stamp() { date -d "@$1" '+%Y%m%d%H%M.%S' 2>/dev/null || date -r "$1" '+%Y%m%d%H%M.%S'; }
+# age <file> <seconds ago> — a negative age stamps the file in the future.
+age() { touch -t "$(epoch_stamp "$(($(date +%s) - $2))")" "$1"; }
+age_pack() { local f; for f in $WATCHED $UNWATCHED; do age "$PACK/$f" 7200; done; }
+for f in $WATCHED $UNWATCHED; do mkdir -p "$(dirname "$PACK/$f")"; printf 'text\n' > "$PACK/$f"; done
+age_pack
+
+# The session's first prompt was an hour ago, under the context threshold. The
+# records before it carry no timestamp, as a Claude transcript's first lines do.
+DRIFT_T="$SANDBOX/drift-session.jsonl"
+{
+    printf '%s\n' '{"type":"last-prompt","sessionId":"drift-session"}' '{"type":"mode","mode":"normal"}'
+    jq -nc --arg ts "$(jq -nr --argjson t "$(($(date +%s) - 3600))" '$t | todate' | sed 's/Z$/.157Z/')" \
+        '{type: "user", timestamp: $ts, message: {content: "startup prompt"}}'
+    printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":1000,"cache_creation_input_tokens":10}}}'
+} > "$DRIFT_T"
+NOSTART_T="$SANDBOX/no-start.jsonl"
+printf '%s\n' '{"type":"last-prompt","sessionId":"no-start"}' > "$NOSTART_T"
+PROMPT_TEXT="Run gc prime to check merge queue and begin processing."
+
+# run_drift [hook args] — the shipped hook as DRIFT_AGENT (the alpha refinery
+# unless set), run from the clean worktree, its payload naming DRIFT_TRANSCRIPT
+# (DRIFT_T unless set) and carrying PROMPT_TEXT. TMUX_UNDER_TEST, TMUX_ATTACHED,
+# GC_HANDOFF_RC, GC_HANDOFF_REPORT, GC_RESET_RC and GC_ARCHIVE_RC reach it when
+# set. Sets RC, OUT, ERR and CALLS.
+run_drift() {
+    : > "$SANDBOX/gc.log"
+    ( cd "$WT" && jq -nc --arg t "${DRIFT_TRANSCRIPT:-$DRIFT_T}" --arg p "$PROMPT_TEXT" '{transcript_path: $t, prompt: $p}' \
+        | env -i PATH="$PATH" HOME="$SANDBOX/home" GC_LOG="$SANDBOX/gc.log" \
+            GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+            GC_AGENT="${DRIFT_AGENT-alpha/gc-toolkit.refinery}" GC_RIG_ROOT="${DRIFT_RIG_ROOT:-$RIG}" \
+            GC_CITY_PATH="$SANDBOX/city" GC_SESSION_ID=session-1 \
+            ${TMUX_UNDER_TEST:+TMUX="$TMUX_UNDER_TEST"} TMUX_ATTACHED="${TMUX_ATTACHED:-0}" \
+            GC_HANDOFF_RC="${GC_HANDOFF_RC:-0}" GC_RESET_RC="${GC_RESET_RC:-0}" \
+            GC_HANDOFF_REPORT="${GC_HANDOFF_REPORT:-}" GC_ARCHIVE_RC="${GC_ARCHIVE_RC:-0}" \
+            sh "$HOOK" "$@" >"$SANDBOX/out" 2>"$SANDBOX/err" )
+    RC=$?
+    OUT=$(cat "$SANDBOX/out"); ERR=$(cat "$SANDBOX/err"); CALLS=$(cat "$SANDBOX/gc.log")
+}
+# drift_verdict — "recycled" when the hook sent the drift handoff and then
+# reset the session, "recycled, HANDOFF archived" when it then archived the
+# HANDOFF it sent, "none" when it called no gc, else what it did instead.
+drift_verdict() {
+    case "$CALLS" in
+        "") echo none ;;
+        "handoff pack drift: "*"
+session reset session-1") echo recycled ;;
+        "handoff pack drift: "*"
+session reset session-1
+mail archive gm-1") echo "recycled, HANDOFF archived" ;;
+        *) echo "neither, gc calls [$CALLS], stderr [$ERR]" ;;
+    esac
+}
+# block_reason — the reason the last run's block decision gives.
+block_reason() { printf '%s' "$OUT" | jq -r '.reason // empty' 2>/dev/null; }
+blocked() { printf '%s' "$OUT" | jq -r 'select(.decision == "block") | "block"' 2>/dev/null; }
+
+# --- 6. no watched file changed: nothing recycles ------------------------------
+for f in $UNWATCHED; do age "$PACK/$f" 60; done
+run_drift
+eq "$(drift_verdict)" "none" "a change to the docs or the hook settings recycles nothing"
+eq "$OUT" "" "and prints nothing"
+run_drift --prompt
+eq "$(drift_verdict)" "none" "before a prompt, no drift lets the prompt through"
+eq "$OUT" "" "with no block decision"
+age_pack
+
+# --- 7. a watched file changed after the first prompt: the turn's end recycles -
+for f in agents/refinery/prompt.template.md formulas/mol-refinery-patrol.toml \
+         template-fragments/visit-close.template.md; do
+    age "$PACK/$f" 60
+    run_drift
+    eq "$(drift_verdict)" "recycled" "a turn's end recycles when $f changed"
+    has_file=$(case "$CALLS" in *"$f"*) echo yes ;; *) echo no ;; esac)
+    eq "$has_file" "yes" "the handoff names $f"
+    eq "$OUT$RC" "0" "the turn-end recycle prints nothing and exits 0"
+    age_pack
+done
+
+# --- 8. before a prompt: recycle, carry the prompt, then block it ---------------
+age "$PACK/formulas/mol-refinery-patrol.toml" 60
+run_drift --prompt
+eq "$(drift_verdict)" "recycled" "a drifted session recycles before the prompt reaches it"
+eq "$(blocked)" "block" "and blocks the prompt"
+eq "$RC" "0" "the prompt-time recycle exits 0"
+carried=$(case "$CALLS" in *"$PROMPT_TEXT"*) echo yes ;; *) echo no ;; esac)
+eq "$carried" "yes" "the handoff carries the blocked prompt"
+
+says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "and the block reason says the HANDOFF carries it"
+
+# The refinery's handoff only sends the mail, so its reset is the one restart
+# request. A failed reset leaves no restart, so the prompt goes through, and the
+# HANDOFF the report names is archived, since the prompt runs in this session.
+GC_RESET_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled, HANDOFF archived" "a failed reset on the refinery archives the HANDOFF its handoff sent"
+eq "$OUT" "" "and the prompt goes through, since no restart backs a block"
+eq "$RC" "0" "and the hook exits 0"
+
+GC_RESET_RC=1 GC_ARCHIVE_RC=1 run_drift --prompt
+eq "$OUT$RC" "0" "a failed archive still lets the prompt through, exiting 0 with nothing on stdout"
+named=$(case "$ERR" in *"gc mail archive gm-1 failed"*) echo yes ;; *) echo no ;; esac)
+eq "$named" "yes" "and names the HANDOFF it could not archive"
+
+GC_HANDOFF_REPORT="Handoff: sent mail gm-1." GC_RESET_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled" "a handoff report the hook does not recognize archives nothing"
+eq "$OUT" "" "and lets the prompt through"
+
+GC_HANDOFF_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled" "a failed handoff still requests the reset"
+eq "$(blocked)" "block" "and still blocks, since the requested restart would end the turn mid-command"
+says=$(case "$(block_reason)" in *"failed before confirming its HANDOFF mail"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "the block reason says the HANDOFF mail is unconfirmed"
+
+GC_HANDOFF_RC=1 GC_RESET_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled" "with the handoff and the reset both failed, no report names a mail to archive"
+eq "$OUT" "" "and the prompt goes through, since neither requested a restart"
+
+# The deacon's and the witness's handoff requests the restart itself before it
+# returns, so a failed reset leaves that restart standing. A prompt let through
+# would be killed mid-command when the restart lands.
+age "$PACK/formulas/mol-deacon-patrol.toml" 60
+DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_RESET_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled" "a drifted deacon recycles before the prompt, its handoff requesting the restart"
+eq "$(blocked)" "block" "and a failed reset still blocks, since the handoff's restart stands"
+says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "with the block reason saying the HANDOFF carries the prompt"
+
+DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_HANDOFF_RC=1 GC_RESET_RC=1 run_drift --prompt
+eq "$(blocked)" "block" "a handoff that requested the restart and then could not signal the controller still blocks"
+says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "and its report shows the HANDOFF was sent"
+
+DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_RESET_RC=1 run_drift
+eq "$OUT$RC" "0" "at a turn's end the same failed reset prints nothing and exits 0"
+stands=$(case "$ERR" in *"the restart gc handoff requested stands"*) echo yes ;; *) echo no ;; esac)
+eq "$stands" "yes" "and says the restart the handoff requested stands"
+age "$PACK/formulas/mol-deacon-patrol.toml" 7200
+
+TMUX_UNDER_TEST=/tmp/tmux-test,1,0 TMUX_ATTACHED=1 run_drift --prompt
+eq "$(drift_verdict)" "none" "with an operator attached the recycle defers"
+eq "$OUT" "" "and the prompt goes through"
+attached=$(case "$ERR" in *"attached"*) echo yes ;; *) echo no ;; esac)
+eq "$attached" "yes" "the deferral names the attachment"
+
+dirty "$WT/README.md"
+run_drift --prompt
+eq "$(drift_verdict)" "none" "a refinery mid git-op defers the drift recycle too"
+eq "$OUT" "" "and lets the prompt through"
+reset_repo "$WT"
+age_pack
+
+# --- 9. what counts as no drift -------------------------------------------------
+age "$PACK/formulas/mol-refinery-patrol.toml" -86400
+run_drift
+eq "$(drift_verdict)" "none" "an mtime later than now is no evidence of a change"
+age_pack
+
+age "$PACK/formulas/mol-refinery-patrol.toml" 60
+DRIFT_TRANSCRIPT="$NOSTART_T" run_drift
+eq "$(drift_verdict)" "none" "a transcript with no timestamped record has no start to compare"
+DRIFT_AGENT=gc-toolkit.deacon run_drift
+eq "$(drift_verdict)" "none" "the refinery's formula is not the deacon's: a deacon does not recycle"
+DRIFT_AGENT=alpha/gc-toolkit.polecat-1 run_drift
+eq "$(drift_verdict)" "none" "a polecat is never recycled"
+# A rig checkout that is itself the pack is read before the city's copy.
+RIGPACK="$SANDBOX/rigpack"
+mkdir -p "$RIGPACK/formulas"; printf 'text\n' > "$RIGPACK/formulas/mol-refinery-patrol.toml"
+age "$RIGPACK/formulas/mol-refinery-patrol.toml" 7200
+DRIFT_RIG_ROOT="$RIGPACK" run_drift
+eq "$(drift_verdict)" "none" "a GC_RIG_ROOT that carries the formula is the pack read, not the city's"
+age "$RIGPACK/formulas/mol-refinery-patrol.toml" 60
+DRIFT_RIG_ROOT="$RIGPACK" run_drift
+eq "$(drift_verdict)" "recycled" "and a change there recycles"
+age_pack
+
+age "$PACK/formulas/mol-deacon-patrol.toml" 60
+DRIFT_AGENT=gc-toolkit.deacon run_drift
+eq "$(drift_verdict)" "recycled" "the deacon recycles when its own formula changed"
+age_pack
+
+# --- 10. the context check stays at a turn's end --------------------------------
+DRIFT_TRANSCRIPT="$TRANSCRIPT" run_drift --prompt
+eq "$(drift_verdict)" "none" "before a prompt, a context over the threshold does not recycle"
+eq "$OUT" "" "and blocks nothing"
+
+# --- 11. --drift <role> prints what it finds and acts on nothing ----------------
+age "$PACK/formulas/mol-refinery-patrol.toml" 60
+age "$PACK/template-fragments/scratch-reclaim.template.md" 60
+DRIFT_AGENT="" run_drift --drift refinery
+eq "$OUT" "formulas/mol-refinery-patrol.toml
+template-fragments/scratch-reclaim.template.md" "--drift prints each changed file, with GC_AGENT empty"
+eq "$CALLS" "" "--drift calls no gc"
+DRIFT_AGENT="" run_drift --drift polecat
+eq "$OUT" "" "--drift reads no role but a patrol role's"
+age_pack
 
 echo "cycle-recycle-hook: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

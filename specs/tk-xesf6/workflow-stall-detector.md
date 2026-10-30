@@ -18,7 +18,7 @@ are structural, not incidental.
 |---|---|---|
 | mol-liveness-sweep | `gc bd ready` → per-candidate edge check | see below — it misses roots and steps for two *different* reasons |
 | witness `recover-orphaned-beads` | assignee + dead session | scoped to ASSIGNED beads by construction; a stalled frontier is unassigned |
-| `recover-stranded-branches.sh` | `metadata.branch` | requires a pushed branch; `sl-xhfl` never created a worktree |
+| `recover-stranded-branches.sh` | `metadata.branch` | requires a pushed branch; `ra-xhfl` never created a worktree |
 | `quiesce-completed-workflows.sh` | the anchor's terminal state | de-routes husks; it never asks whether a live workflow is moving |
 | deacon queue-starvation | a session's queue + `bead.updated_at` | keyed on ASSIGNED work; a stalled workflow has no assignee |
 | refinery patrols | the merge queue | a stalled workflow has no merge handoff |
@@ -28,9 +28,9 @@ over:
 
 - **Its roots are never candidates.** The candidate set is `gc bd ready`, and a
   graph.v2 root is blocked by its own `workflow-finalize` step. Verified: neither
-  `sl-xhfl` nor `sl-jnjd` appears in signal-loom's 25-row ready set, while their
-  finalize steps `sl-cutz` / `sl-vms6` are open blockers on them.
-- **Its steps are candidates and are then dropped.** `sl-um8j` *is* in the ready set
+  `ra-xhfl` nor `ra-jnjd` appears in rig-a's 25-row ready set, while their
+  finalize steps `ra-cutz` / `ra-vms6` are open blockers on them.
+- **Its steps are candidates and are then dropped.** `ra-um8j` *is* in the ready set
   and survives every jq filter — and is then dropped by the class-2(i)(c) edge check,
   because it `tracks` its still-open root. That edge is true of **every step of every
   workflow**, moving or stalled, so the check that names a legitimate wait is exactly
@@ -41,25 +41,25 @@ workflow is still MOVING, which is visible only in the time derivative.
 
 ## 2. A correction to the bead's reading of instance 1
 
-The bead recorded that `sl-xhfl`'s frontier steps "ARE in `gc bd ready`, so this is
+The bead recorded that `ra-xhfl`'s frontier steps "ARE in `gc bd ready`, so this is
 NOT the invisible-to-demand deadlock — something claims and abandons."
 
 Both halves are wrong, and the second one matters for anyone else who reads that
 signature. **Ready is not offered.** The pool's offer predicate is open + unassigned
 + ready + `gc.routed_to` non-empty; `gc bd ready` is demand-agnostic and answers only
-the first three. `sl-um8j` was ready and *unrouted*, so no polecat could ever be
+the first three. `ra-um8j` was ready and *unrouted*, so no polecat could ever be
 offered it — which is exactly the invisible-to-demand deadlock, and exactly why "no
 worktree created, no commit" was observed.
 
 ## 3. Instance 1 was not merely missed — it was caused
 
-`sl-um8j`'s Dolt history settles what happened, in four rows:
+`ra-um8j`'s Dolt history settles what happened, in four rows:
 
 | commit | assignee | `gc.routed_to` |
 |---|---|---|
 | 19:16:43 | — | present (routed to the pool) |
-| 19:17:42 | `gc-toolkit__polecat-lx-vge0` | present — a polecat CLAIMED it |
-| 19:19:09 | `gc-toolkit__polecat-lx-vge0` | **cleared** |
+| 19:17:42 | `gc-toolkit__polecat-hq-vge0` | present — a polecat CLAIMED it |
+| 19:19:09 | `gc-toolkit__polecat-hq-vge0` | **cleared** |
 | 19:19:10 | — | cleared |
 
 Route cleared first, assignee cleared one second later, in two separate writes: the
@@ -67,11 +67,11 @@ exact, documented signature of `quiesce-completed-workflows.sh`. It stripped a l
 rework molecule's frontier step out from under the polecat that had claimed it 87
 seconds earlier — the precise harm that script's own header warns about.
 
-It did so because `sl-xhfl` is the **rework** for `sl-ew4w` / PR #533, and it anchors
-on `sl-ew4w`, which carries `merge_result=pull_request` from the very PR the rework
+It did so because `ra-xhfl` is the **rework** for `ra-ew4w` / PR #533, and it anchors
+on `ra-ew4w`, which carries `merge_result=pull_request` from the very PR the rework
 exists to fix. `is_terminal_anchor()` reads that as "the molecule is dead".
 
-`sl-jnjd` wears the same shape for a different reason: mol-scoped-work stamps
+`ra-jnjd` wears the same shape for a different reason: mol-scoped-work stamps
 `pull_request` at its own submit step, so the anchor goes terminal while the
 molecule's cleanup and finalize steps are still to run, and those get de-routed too.
 
@@ -130,7 +130,7 @@ STALLED when all four hold for at least `--stall-minutes` (default 120):
 > is the contract-level statement of the inertness the filter keys on.
 
 **Closed members are not optional to (1).** A step *closing* is the graph advancing,
-and it is routinely the workflow's most recent event. Measured on `sl-xhfl`: its
+and it is routinely the workflow's most recent event. Measured on `ra-xhfl`: its
 closed steps were last written at 19:30:06Z while every live member sat at 19:19:10Z.
 Dated by its live members alone, a workflow that had just advanced would read as
 stalled. This costs one extra query per candidate
@@ -171,7 +171,7 @@ Both halves are load-bearing, and each was found by a live false positive:
   gc-toolkit: three such molecules, all reported by the closed-step test alone, all
   with anchors closed and merged (`tk-5eikz`/PR#306, `tk-0981e`/PR#299).
 
-Measured together on the two live rigs: **signal-loom, both true positives reported
+Measured together on the two live rigs: **rig-a, both true positives reported
 and nothing else; gc-toolkit, zero reported** — 7 moving, 8 exempt as never-advanced,
 3 exempt as landed.
 

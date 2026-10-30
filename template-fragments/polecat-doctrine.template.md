@@ -21,8 +21,8 @@ before it is where polecat-vs-polecat races live.
 ```bash
 # 1. Claim exactly one work item.
 gc hook --claim --json
-# 2. Only after a successful claim: read the bead and its formula steps.
-gc bd show <id> --json | jq '.[0].metadata'
+# 2. Only after a successful claim: orient from its result and one read.
+"{{ .ConfigDir }}/assets/scripts/claim-context.sh" <bead_id>
 # 3. Execute the steps in order. After closing any step bead, immediately run
 #    gc hook --claim --json again and keep going until a terminal step drains
 #    you or the hook returns no work.
@@ -33,8 +33,21 @@ Every `action: "work"` result is a claim you hold, whatever its `reason`.
 `existing_assignment` are claims already in your name, which is what a
 fresh-woken pool session sees when it was given work before it woke. All three
 mean the same thing for the next tool call: the `bead_id` in the response is
-yours, so go to step 2, read it, and continue the step you are on. None of them
-is a terminal answer, and only `action: "drain"` ends the turn.
+yours, so go to step 2 and continue the step you are on. None of them is a
+terminal answer, and only `action: "drain"` ends the turn.
+
+**Orient from the claim and one read.** Step 2 is the one read the claim
+needs. It prints the step's `gc.step_ref` and instructions, its workflow and
+input convoy, and the work bead's status, assignee, metadata, notes and
+description. A `step_reminder` in the result is the step's instructions, and a
+`claimed` result carries none. When the result carries one, add `--no-step`,
+so the read does not print the instructions again. Run it after your first
+claim of a bead or a workflow. A later claim in the same workflow, one with the
+same `root_bead_id`, needs no read when its result carries a `step_reminder`,
+and step 2 as written when it carries none. Do not read the claimed bead, its
+workflow root or its work bead again to learn what the work is. A step's own
+blocks still read what they act on, and a premise you read earlier is read
+again before you act on it.
 
 ## The governing rule: follow the formula the bead carries
 
@@ -76,7 +89,7 @@ The formula distinguishes two questions that look like one:
   and what self-review diffs against. On a rework child this is the branch
   under review, on purpose.
 - **Merge INTO** — `metadata.target`: where the refinery lands the work. A
-  caller-set target (a signoff's `REVIEW_BASE`, an owned convoy's
+  caller-set target (a signoff's `REVIEW_BASE`, an integration effort's
   `integration/<id>`) always wins; never overwrite it.
 
 Fresh work lives on `polecat/<bead-id>`, cut from freshly-fetched
@@ -86,21 +99,37 @@ is AUTHORITATIVE — check it out; do not cut a different branch. The
 submit-and-exit gate enforces `CURRENT_BRANCH == metadata.branch` and fails
 closed.
 
-### Integration branches (owned convoys)
+### Integration branches
 
-`metadata.target` is not always the default branch. A child of an owned
-convoy with an integration branch carries `metadata.target =
-integration/<convoy-id>`, which the owned-convoy recipe stamps when it links
-the child. `gc sling` takes the bead's own target as the base branch before
-anything else: you branch from `origin/integration/<convoy-id>`, the refinery
-lands your work on that integration branch, and main moves only when the
-convoy graduates later. Without the stamp, sling reads a convoy target only
-off the one parent chain bd reports, so a child whose reported parent is an
-epic outside the convoy is poured from the default branch. workspace-setup
-cancels that run before it cuts a branch, and the work waits on a visit that
-asks for the target. Otherwise there is nothing special to do, because the
-formula preserves `metadata.target`. Just do not read "landed in the refinery"
-as "main moved".
+`metadata.target` is not always the default branch. A bead filed for an
+integration effort carries the effort's branch, `integration/<landing-id>`, as
+its own `metadata.target`, written in the create that filed it. `gc sling` takes
+the bead's own target as the base branch before anything else: you branch from
+`origin/integration/<landing-id>`, and the refinery lands your work on that
+branch with no PR of its own, unless the bead is a stage, slung `--merge mr`,
+whose PR goes into the branch. The effort's landing bead carries the branch to
+main through the one PR the operator reviews, so do not read "landed in the
+refinery" as "main moved". There is nothing special to do, because the formula
+preserves `metadata.target`.
+
+An effort's summary task writes its landing bead's `pr_summary`, the `## Summary`
+of the effort's PR, once every bead it waits on has landed. It runs on
+`mol-polecat-report`, changes no file, and its description names the landing
+bead. This is how to write it:
+
+1. Read the landing bead's `branch` and `target`, fetch origin, and read the
+   whole branch against its target: `git log` and
+   `git diff origin/<target>...origin/<branch>`.
+2. Read the `pr_summary` that each landed bead's own polecat wrote. Those beads
+   are the ones the landing bead waits on.
+3. Write what the whole branch does, for the operator's merge decision. Name
+   where the finished work departs from the landing bead's description: work the
+   description promised that did not land, work that landed beyond it, and an
+   approach that changed.
+4. Stamp it on the landing bead with
+   `gc bd update <landing-bead> --set-metadata pr_summary="$(cat <file>)"`, read
+   it back, and write nothing else there. The formula's write-report step then
+   closes the task, which releases the landing bead to the refinery.
 
 ## Work bead metadata contract
 
@@ -109,7 +138,7 @@ as "main moved".
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
-| `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed |
+| `pr_summary` | you (submit), or an effort's summary task | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed; a summary task stamps its landing bead |
 | `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
@@ -214,10 +243,7 @@ exactly one open visit per situation key, and its exit 0 is the release path a
 human hears about and can claim:
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(gc {{ .BindingName }} scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] || SCRIPTS=""
 "$SCRIPTS/escalate.sh" --subject <work-bead> --key polecat-blocked \
   --message "Blocked: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```

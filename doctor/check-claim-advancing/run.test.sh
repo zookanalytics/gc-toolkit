@@ -137,7 +137,7 @@ agents "$(agent rig/pool.polecat false 2)"
 # --- 1. a holder that is running and producing output is SILENT -----------
 # The acceptance case: a long implementation step held for six hours by a
 # session that is still working must not be reported.
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(claim a-1 rig/pool.polecat 21600)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a working holder is silent however long it has held the step"
@@ -145,7 +145,7 @@ hasnt "$OUT" "a-1" "the working holder's step is not named"
 clear_stores
 
 # --- 2. a running holder that has produced nothing past the bound ---------
-sessions "$(live lx-1 pool-1 rig/pool.polecat 14400)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 14400)"
 store alpha "$(claim a-1 rig/pool.polecat 14400)"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a parked holder past the bound is an ERROR"
@@ -155,8 +155,8 @@ has "$OUT" "no output for 240m" "the error reports how long the holder has been 
 clear_stores
 
 # --- 3. identity matching on each of the three keys -----------------------
-for key in lx-1 pool-1 rig/pool.polecat; do
-    sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+for key in hq-1 pool-1 rig/pool.polecat; do
+    sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
     store alpha "$(claim a-1 "$key" 7200)"
     OUT=$(run_check); RC=$?
     eq "$RC" "0" "a claim stamped with $key resolves to its session"
@@ -164,7 +164,7 @@ for key in lx-1 pool-1 rig/pool.polecat; do
 done
 
 # --- 4. an assignee no session carries is ORPHANED ------------------------
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(claim a-1 rig/pool.gone 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a claim held by no session is an ERROR"
@@ -173,7 +173,7 @@ has "$OUT" "a-1" "the orphan error names the step"
 clear_stores
 
 # --- 5. a holder that is not running is DEAD ------------------------------
-sessions '{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"asleep","running":false,"last_active":""}'
+sessions '{"id":"hq-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"asleep","running":false,"last_active":""}'
 store alpha "$(claim a-1 rig/pool.polecat 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a claim whose holder is not running is an ERROR"
@@ -183,19 +183,19 @@ clear_stores
 # --- 6. the claim-age gate keeps a pool recycle quiet ---------------------
 # A claim younger than the bound is never judged, so an incarnation swap under
 # a live claim does not read as a fault.
-sessions "$(live lx-2 pool-1 rig/pool.polecat 30)"
-store alpha "$(claim a-1 lx-1 60)"
+sessions "$(live hq-2 pool-1 rig/pool.polecat 30)"
+store alpha "$(claim a-1 hq-1 60)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a claim younger than the bound is not judged"
 clear_stores
 # ...but the same orphaned claim IS reported once it is older than the bound.
-store alpha "$(claim a-1 lx-1 7200)"
+store alpha "$(claim a-1 hq-1 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "the same orphaned claim past the bound IS reported"
 clear_stores
 
 # --- 7. only formula steps in a claimed state are judged ------------------
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha \
   '{"id":"a-nostep","status":"in_progress","assignee":"rig/pool.gone","metadata":{}}' \
   '{"id":"a-open","status":"open","assignee":"rig/pool.gone","metadata":{"gc.step_ref":"mol-review.pin","gc.claimed_at":"2020-01-01T00:00:00Z"}}'
@@ -208,7 +208,7 @@ clear_stores
 # --- 7b. in_progress with NO assignee is UNHELD ---------------------------
 # Reachable by neither path: no holder, and bd ready skips it because its
 # status is not open. Both sibling checks scan --status open and miss it.
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(printf '{"id":"a-unheld","status":"in_progress","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin"}}' "$(ago 7200)")"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an in_progress step with no assignee is an ERROR"
@@ -224,7 +224,7 @@ eq "$RC" "0" "a just-released step inside the bound is not reported"
 clear_stores
 
 # --- 8. a stale session cache degrades the verdict to a warning -----------
-CACHE=7200 sessions "$(live lx-1 pool-1 rig/pool.polecat 14400)"
+CACHE=7200 sessions "$(live hq-1 pool-1 rig/pool.polecat 14400)"
 store alpha "$(claim a-1 rig/pool.polecat 14400)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a session cache older than the bound degrades STALLED to a warning"
@@ -234,7 +234,7 @@ clear_stores
 # ORPHANED and DEAD are read out of the same roster, so a stale one degrades
 # them too: an absent session may be a holder that started after the snapshot,
 # and a non-active state may be one its holder has since left.
-CACHE=7200 sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+CACHE=7200 sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(claim a-1 rig/pool.gone 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a stale cache degrades ORPHANED to a warning"
@@ -243,7 +243,7 @@ has "$OUT" "names no session" "the orphan warning still says the holder was not 
 has "$OUT" "started after that snapshot" "the orphan warning says why it is not judged"
 clear_stores
 
-CACHE=7200 sessions '{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"asleep","running":false,"last_active":""}'
+CACHE=7200 sessions '{"id":"hq-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"asleep","running":false,"last_active":""}'
 store alpha "$(claim a-1 rig/pool.polecat 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a stale cache degrades DEAD to a warning"
@@ -252,7 +252,7 @@ has "$OUT" "may be active now" "the dead warning says why it is not judged"
 clear_stores
 
 # UNHELD is read off the bead, not the roster, so a stale cache cannot soften it.
-CACHE=7200 sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+CACHE=7200 sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(printf '{"id":"a-unheld","status":"in_progress","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin"}}' "$(ago 7200)")"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a stale cache does not degrade UNHELD"
@@ -261,7 +261,7 @@ clear_stores
 unset CACHE
 
 # --- 9. the bound is configurable ----------------------------------------
-sessions "$(live lx-1 pool-1 rig/pool.polecat 600)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 600)"
 store alpha "$(claim a-1 rig/pool.polecat 600)"
 OUT=$(GC_DOCTOR_CLAIM_STALL_MINUTES=5 run_check); RC=$?
 eq "$RC" "2" "a 5m bound reports a holder quiet for 10m"
@@ -272,7 +272,7 @@ eq "$RC" "0" "a non-numeric bound falls back to the 30m default rather than 0"
 clear_stores
 
 # --- 10. multiple stores are all scanned ---------------------------------
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(claim a-1 rig/pool.gone 7200)"
 store beta  "$(claim b-1 rig/pool.gone 7200)"
 OUT=$(run_check); RC=$?
@@ -285,7 +285,7 @@ clear_stores
 cat > "$TMP/rigs-suspended.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha","suspended":true}]}
 EOF
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(claim a-1 rig/pool.gone 7200)"
 OUT=$(RIGS_JSON="$TMP/rigs-suspended.json" run_check); RC=$?
 eq "$RC" "0" "a suspended rig is skipped"
@@ -294,7 +294,7 @@ hasnt "$OUT" "a-1" "the suspended store's beads are not judged"
 clear_stores
 
 # --- 12. every probe fails closed ----------------------------------------
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(claim a-1 rig/pool.polecat 7200)"
 
 OUT=$(SESSIONS_RC=1 run_check); RC=$?
@@ -319,7 +319,7 @@ has "$OUT" "NOT checked" "the warning names the unchecked store"
 clear_stores
 
 # --- 13. an unparseable last_active is reported, not judged --------------
-sessions '{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"active","running":true,"last_active":"whenever"}'
+sessions '{"id":"hq-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"active","running":true,"last_active":"whenever"}'
 store alpha "$(claim a-1 rig/pool.polecat 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a holder whose last_active does not parse is a note, not an error"
@@ -332,7 +332,7 @@ clear_stores
 # and an offered step that have not met is the one shape a backlog cannot
 # explain.
 agents "$(agent rig/pool.polecat false 2)"
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -393,14 +393,14 @@ has "$OUT" "pool max 0" "the note says nothing is meant to claim it"
 
 # A pool scaled to zero with a queue behind it is the demand probe's business.
 agents "$(agent rig/pool.polecat false 2)"
-sessions "$(live lx-1 pool-1 "" 30 rig/other.agent)"
+sessions "$(live hq-1 pool-1 "" 30 rig/other.agent)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a step routed to a pool with no running session is silent"
 has "$OUT" "no running session" "the note says the pool is empty"
 
 # A route nothing answers is I3's finding, and reporting it here too would
 # double-report one defect.
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 agents "$(agent rig/other.agent false 2)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a route that names no agent is left to I3"
@@ -412,7 +412,7 @@ clear_stores
 # The live shape this had to get right: both polecats running, both holding a
 # step, two more work beads queued. That is a queue, not a strand.
 agents "$(agent rig/pool.polecat false 2)"
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 store alpha "$(openstep a-u1 rig/pool.polecat 7200)" "$(claim a-busy pool-1 60)"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -432,7 +432,7 @@ clear_stores
 # The codex-polecat shape: alias names the persona, template names the pool,
 # and the claim is stamped with the alias.
 agents "$(agent rig/pool.codex false 2)"
-sessions "$(live lx-1 sess-hicks rig/pool.hicks 30 rig/pool.codex)"
+sessions "$(live hq-1 sess-hicks rig/pool.hicks 30 rig/pool.codex)"
 store alpha "$(openstep a-u1 rig/pool.codex 7200)" "$(claim a-busy rig/pool.hicks 60)"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -452,7 +452,7 @@ store alpha "$(openstep a-u1 rig/pool.polecat 7200)" \
   '{"id":"a-anchor","status":"in_progress","assignee":"pool-1","metadata":{}}'
 ready alpha '{"id":"a-u1"}'
 agents "$(agent rig/pool.polecat false 2)"
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a session holding a NON-step bead is not counted free"
 has "$OUT" "backpressure" "the non-step holder makes the pool read as full"
@@ -462,7 +462,7 @@ clear_stores
 # away from rebinding `.` to a string, which aborts the whole pool join and
 # silently downgrades every strand to "no running session".
 agents "$(agent rig/pool.polecat false 2)"
-sessions '{"id":"lx-1","session_name":"","alias":"rig/pool.only-alias","state":"active","running":true,"last_active":"'"$(ago 30)"'","template":"rig/pool.polecat"}'
+sessions '{"id":"hq-1","session_name":"","alias":"rig/pool.only-alias","state":"active","running":true,"last_active":"'"$(ago 30)"'","template":"rig/pool.polecat"}'
 store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -473,7 +473,7 @@ clear_stores
 
 # --- 14d. gc.execution_routed_to is the fallback route --------------------
 agents "$(agent rig/pool.polecat false 2)"
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 store alpha "$(printf '{"id":"a-u1","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.execution_routed_to":"rig/pool.polecat"}}' "$(ago 7200)")"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -496,13 +496,13 @@ ready alpha '{"id":"a-u1"}'
 
 # Liveness comes from the same roster arm 1 uses, so a stale one softens this
 # verdict too: those sessions may have exited or taken work since.
-CACHE=7200 sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+CACHE=7200 sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a session cache older than the bound degrades the finding to a warning"
 has "$OUT" "a-u1" "the warning still names the step"
 has "$OUT" "cache" "the warning says the observation was cache-limited"
 unset CACHE
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 
 OUT=$(AGENTS_RC=1 run_check); RC=$?
 eq "$RC" "1" "an unreadable agent list WARNS, never passes"
@@ -523,7 +523,7 @@ agents "$(agent rig/pool.polecat false 2)"
 # The shape this exists to stop: the release hint applied to a parked step puts
 # it back at `open` while it still carries its pool route, and the pool claims
 # it. A hold is a non-empty gc.takeaway or hold_reason.
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 agents "$(agent rig/pool.polecat false 2)"
 
 store alpha "$(unheld a-held 7200 '"gc.takeaway":"parked pending a ruling"')"
@@ -587,7 +587,7 @@ clear_stores
 # --- 15b. arm 2: a held step must not be offered to the pool ---------------
 # Worse than arm 1: this step is `open`, routed and offered, so the advice the
 # check would otherwise give is what causes the claim.
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.takeaway":"parked pending a ruling"')"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -632,7 +632,7 @@ clear_stores
 
 # Arm 2 degrades the same way, and for the sharper reason: the advice it would
 # otherwise give is the claim itself.
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-1"')"
 ready alpha '{"id":"a-u1"}'
 OUT=$(BD_HOLD_FAIL_STORE=alpha run_check); RC=$?
@@ -640,7 +640,7 @@ eq "$RC" "1" "an unreadable root leaves arm 2 a warning, not the never-claimed e
 has "$OUT" "NOT judged" "the arm 2 warning says the step was not judged"
 hasnt "$OUT" "nudge the pool" "the pool is not nudged against an unreadable root"
 clear_stores
-sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 
 # --- 15d. a hold belongs to its own store ----------------------------------
 # Bead ids are per-store, so a root that holds in one store says nothing about
@@ -698,7 +698,7 @@ clear_stores
 
 # Arm 2 the same way, and for the sharper reason: the advice withheld here is
 # the claim itself.
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-gone"')"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -717,7 +717,7 @@ clear_stores
 fb_roster() { printf '{"sessions":[%s]}' "$1" > "$TMP/sessions.json"; }
 
 # arm 1: a working holder (state active) with no `running` field is not DEAD.
-fb_roster "$(printf '{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"active","last_active":"%s"}' "$(ago 30)")"
+fb_roster "$(printf '{"id":"hq-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"active","last_active":"%s"}' "$(ago 30)")"
 store alpha "$(claim a-1 rig/pool.polecat 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a working holder read through the fallback schema is not DEAD"
@@ -728,7 +728,7 @@ clear_stores
 # arm 2: a live pool session holding nothing, no `running` field, is the same
 # ERROR the API shape produces — not a silent "scaled to zero" note.
 agents "$(agent rig/pool.polecat false 2)"
-fb_roster "$(printf '{"id":"lx-1","session_name":"pool-1","alias":"","state":"active","last_active":"%s","template":"rig/pool.polecat"}' "$(ago 30)")"
+fb_roster "$(printf '{"id":"hq-1","session_name":"pool-1","alias":"","state":"active","last_active":"%s","template":"rig/pool.polecat"}' "$(ago 30)")"
 store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
@@ -742,7 +742,7 @@ clear_stores
 # at all, judging every holder against the absent field would classify them all
 # DEAD and every pool scaled to zero. Decline (warn) rather than emit those
 # false alarms.
-printf '{"sessions":[{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","last_active":"%s"}]}' "$(ago 30)" > "$TMP/sessions-noliveness.json"
+printf '{"sessions":[{"id":"hq-1","session_name":"pool-1","alias":"rig/pool.polecat","last_active":"%s"}]}' "$(ago 30)" > "$TMP/sessions-noliveness.json"
 store alpha "$(claim a-1 rig/pool.polecat 7200)"
 OUT=$(SESSIONS_JSON="$TMP/sessions-noliveness.json" run_check); RC=$?
 eq "$RC" "1" "a roster with neither state nor running WARNS, never mass-reports DEAD"
@@ -757,7 +757,7 @@ clear_stores
 # it stale the instant it is offered. The age is timed from the predecessor's
 # close instead.
 agents "$(agent rig/pool.polecat false 2)"
-sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 
 # Poured 2h ago, predecessor closed 30s ago: offered for 30s, not 2h.
 store alpha "$(openstep_pred a-succ rig/pool.polecat 7200 a-pred)" "$(closed_pred a-pred 30)"

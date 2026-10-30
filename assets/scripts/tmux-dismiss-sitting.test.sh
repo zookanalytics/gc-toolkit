@@ -18,10 +18,15 @@
 #   (CONVERSE)  a converse sitting is dismissed under its OWN identity:
 #               gc-helm.sh dismiss runs with the session name, id, alias and rig
 #               from the session record, and the operator is told which subject
-#               ended. That identity is what dismiss's inference reads.
+#               ended. That identity is what dismiss's inference reads. It runs
+#               with --operator, so the session is stopped as the operator
+#               stops it, from outside the sitting.
 #   (AMBIENT)   an identity or store pin already in the job's environment is
 #               replaced by the record's, never inherited. A record with no alias
-#               leaves GC_ALIAS empty rather than passing an ambient one through.
+#               leaves GC_ALIAS empty rather than passing an ambient one through,
+#               and an inherited incarnation token is dropped: the record
+#               carries none. gc-helm.test.sh (DISMISS-KEY) runs this script
+#               through the real dismiss.
 #   (NOTCONV)   a Gas City session that is not a converse sitting is refused and
 #               gc-helm.sh never runs. Its own identity may hold a visit that
 #               dismiss would close all the same. A template that merely starts
@@ -99,14 +104,14 @@ msg_has()  { grep -qF -- "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); 
 # must refuse: a polecat, a template that only starts with the word, a closed
 # past session, and two live records sharing a name.
 SESSIONS='{"sessions":[
- {"id":"lx-conv1","session_name":"s-lx-conv1","alias":"gc-toolkit/gc-toolkit.tk-vis1","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
- {"id":"lx-base1","session_name":"s-lx-base1","alias":"other/gc-toolkit.tk-vis2","template":"other/gc-toolkit.converse","rig":"other","closed":false},
- {"id":"lx-noal1","session_name":"s-lx-noal1","template":"gc-toolkit/gc-toolkit.converse-fable","rig":"gc-toolkit","closed":false},
- {"id":"lx-pole1","session_name":"gc-toolkit__polecat-lx-pole1","alias":"gc-toolkit/gc-toolkit.polecat-1","template":"gc-toolkit/gc-toolkit.polecat","rig":"gc-toolkit","closed":false},
- {"id":"lx-near1","session_name":"s-lx-near1","alias":"gc-toolkit/gc-toolkit.tk-vis3","template":"gc-toolkit/gc-toolkit.conversely","rig":"gc-toolkit","closed":false},
- {"id":"lx-old1","session_name":"s-lx-old1","alias":"gc-toolkit/gc-toolkit.tk-vis0","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":true},
- {"id":"lx-dup1","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false},
- {"id":"lx-dup2","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false}
+ {"id":"hq-conv1","session_name":"s-hq-conv1","alias":"gc-toolkit/gc-toolkit.tk-vis1","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
+ {"id":"hq-base1","session_name":"s-hq-base1","alias":"other/gc-toolkit.tk-vis2","template":"other/gc-toolkit.converse","rig":"other","closed":false},
+ {"id":"hq-noal1","session_name":"s-hq-noal1","template":"gc-toolkit/gc-toolkit.converse-fable","rig":"gc-toolkit","closed":false},
+ {"id":"hq-pole1","session_name":"gc-toolkit__polecat-hq-pole1","alias":"gc-toolkit/gc-toolkit.polecat-1","template":"gc-toolkit/gc-toolkit.polecat","rig":"gc-toolkit","closed":false},
+ {"id":"hq-near1","session_name":"s-hq-near1","alias":"gc-toolkit/gc-toolkit.tk-vis3","template":"gc-toolkit/gc-toolkit.conversely","rig":"gc-toolkit","closed":false},
+ {"id":"hq-old1","session_name":"s-hq-old1","alias":"gc-toolkit/gc-toolkit.tk-vis0","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":true},
+ {"id":"hq-dup1","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false},
+ {"id":"hq-dup2","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false}
 ]}'
 
 # ── Fake config dir: the script resolves gc-helm.sh under it ────────────────
@@ -121,6 +126,7 @@ mkcfg() {               # mkcfg <dir>
   printf 'GC_SESSION_ID=%s\n' "${GC_SESSION_ID-<unset>}"
   printf 'GC_ALIAS=%s\n' "${GC_ALIAS-<unset>}"
   printf 'GC_RIG=%s\n' "${GC_RIG-<unset>}"
+  printf 'GC_INSTANCE_TOKEN=%s\n' "${GC_INSTANCE_TOKEN-<unset>}"
   printf 'BEADS_DIR=%s\n' "${BEADS_DIR-<unset>}"
   printf 'GC_CITY_PATH=%s\n' "${GC_CITY_PATH-<unset>}"; } >> "$HELM_CALLS"
 [ -n "${FAKE_HELM_ERR:-}" ] && printf '%s\n' "$FAKE_HELM_ERR" >&2
@@ -189,10 +195,10 @@ quiet() {               # quiet <label> — the view-mode guard, on every path
 }
 
 echo "# a converse sitting is dismissed under its own identity"
-run s-lx-conv1
-has "$HELM" "ARGS=dismiss --json" "(CONVERSE) gc-helm.sh dismiss runs, with no bead named"
-has "$HELM" "GC_SESSION_NAME=s-lx-conv1" "(CONVERSE) …under the record's session name"
-has "$HELM" "GC_SESSION_ID=lx-conv1" "(CONVERSE) …its id"
+run s-hq-conv1
+has "$HELM" "ARGS=dismiss --operator --json" "(CONVERSE) gc-helm.sh dismiss runs as the operator, with no bead named"
+has "$HELM" "GC_SESSION_NAME=s-hq-conv1" "(CONVERSE) …under the record's session name"
+has "$HELM" "GC_SESSION_ID=hq-conv1" "(CONVERSE) …its id"
 has "$HELM" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-vis1" "(CONVERSE) …its alias"
 has "$HELM" "GC_RIG=gc-toolkit" "(CONVERSE) …and its rig"
 has "$SAID" "the sitting on tk-sub1 is over (visit tk-vis1 closed)" "(CONVERSE) the operator is told which subject ended"
@@ -201,25 +207,26 @@ has "$HELM" "GC_CITY_PATH=/my/city" "(CITY) --city-path reaches gc-helm.sh as GC
 quiet "converse"
 
 echo "# the base converse template, under another rig, is a converse sitting too"
-run s-lx-base1
-has "$HELM" "GC_SESSION_ID=lx-base1" "(CONVERSE) the base converse agent is accepted"
+run s-hq-base1
+has "$HELM" "GC_SESSION_ID=hq-base1" "(CONVERSE) the base converse agent is accepted"
 has "$HELM" "GC_RIG=other" "(CONVERSE) …with the rig its record names"
 
 echo "# the job's ambient identity never reaches dismiss"
-GC_SESSION_NAME=intruder GC_SESSION_ID=intruder GC_ALIAS=intruder GC_RIG=wrong BEADS_DIR=/wrong/.beads run s-lx-noal1
-has "$HELM" "GC_SESSION_NAME=s-lx-noal1" "(AMBIENT) the record's session name replaces an ambient one"
-has "$HELM" "GC_SESSION_ID=lx-noal1" "(AMBIENT) …and its id"
+GC_SESSION_NAME=intruder GC_SESSION_ID=intruder GC_ALIAS=intruder GC_RIG=wrong BEADS_DIR=/wrong/.beads GC_INSTANCE_TOKEN=intruder-token run s-hq-noal1
+has "$HELM" "GC_SESSION_NAME=s-hq-noal1" "(AMBIENT) the record's session name replaces an ambient one"
+has "$HELM" "GC_SESSION_ID=hq-noal1" "(AMBIENT) …and its id"
 has "$HELM" "GC_RIG=gc-toolkit" "(AMBIENT) …and its rig"
 has "$HELM" "BEADS_DIR=<unset>" "(AMBIENT) an ambient store pin is dropped"
+has "$HELM" "GC_INSTANCE_TOKEN=<unset>" "(AMBIENT) …and so is an inherited incarnation token"
 hasnt "$HELM" "intruder" "(AMBIENT) a record with no alias leaves no ambient identity behind"
 quiet "ambient"
 
 echo "# a session that is not a converse sitting is refused"
-run gc-toolkit__polecat-lx-pole1
+run gc-toolkit__polecat-hq-pole1
 eq "$HELM" "" "(NOTCONV) a polecat pane runs no dismiss"
 has "$SAID" "is not a converse sitting (template 'gc-toolkit/gc-toolkit.polecat')" "(NOTCONV) …and says why"
 quiet "not converse"
-run s-lx-near1
+run s-hq-near1
 eq "$HELM" "" "(NOTCONV) a template that only starts with the word is refused"
 
 echo "# a pane outside the session list is refused"
@@ -227,21 +234,21 @@ run my-own-shell
 eq "$HELM" "" "(UNKNOWN) no dismiss for a session the list does not hold"
 has "$SAID" "'my-own-shell' is not a live Gas City session" "(UNKNOWN) …and it says so"
 quiet "unknown"
-run s-lx-old1
+run s-hq-old1
 eq "$HELM" "" "(CLOSEDREC) a closed record is not the pane on screen"
 run s-dup
 eq "$HELM" "" "(AMBIG) two live records under one name run no dismiss"
 has "$SAID" "2 live sessions are named 's-dup'" "(AMBIG) …and it says so"
 
 echo "# an unreadable session list is a fault, not a refusal on the merits"
-FAKE_LIST_RC=1 run s-lx-conv1
+FAKE_LIST_RC=1 run s-hq-conv1
 eq "$HELM" "" "(LISTFAIL) a failed list runs no dismiss"
 has "$SAID" "could not read 'gc session list'" "(LISTFAIL) …and names the fault"
 quiet "list failed"
-FAKE_LIST='Error: no city' run s-lx-conv1
+FAKE_LIST='Error: no city' run s-hq-conv1
 eq "$HELM" "" "(LISTFAIL) a list that is not JSON runs no dismiss"
 has "$SAID" "could not read 'gc session list'" "(LISTFAIL) …with the same message"
-FAKE_LIST='{"error":"down"}' run s-lx-conv1
+FAKE_LIST='{"error":"down"}' run s-hq-conv1
 eq "$HELM" "" "(LISTFAIL) an answer with no sessions array runs no dismiss"
 
 echo "# a press tmux cannot place is refused"
@@ -251,15 +258,15 @@ has "$SAID" "tmux did not say which session" "(NOSESSION) …and it says so"
 quiet "no session"
 
 echo "# a dismiss that refuses reports its reason"
-FAKE_HELM_RC=2 FAKE_HELM_OUT="" FAKE_HELM_ERR="gc-helm: no open visit is assigned to this session (s-lx-conv1); there is no current sitting." run s-lx-conv1
+FAKE_HELM_RC=2 FAKE_HELM_OUT="" FAKE_HELM_ERR="gc-helm: no open visit is assigned to this session (s-hq-conv1); there is no current sitting." run s-hq-conv1
 has "$SAID" "NOT dismissed — gc-helm: no open visit is assigned to this session" "(REFUSED) the reason reaches the operator"
 hasnt "$SAID" "is over" "(REFUSED) …and the sitting is not claimed ended"
 quiet "refused"
-FAKE_HELM_RC=4 FAKE_HELM_OUT="" FAKE_HELM_ERR="" run s-lx-conv1
+FAKE_HELM_RC=4 FAKE_HELM_OUT="" FAKE_HELM_ERR="" run s-hq-conv1
 has "$SAID" "gc-helm dismiss exited 4 with no diagnostic" "(REFUSED) a silent failure still says it failed"
 
 echo "# a dismiss that found nothing open says so"
-FAKE_HELM_OUT='{"subject":"tk-sub1","matched":[],"closed":0,"ok":true}' run s-lx-conv1
+FAKE_HELM_OUT='{"subject":"tk-sub1","matched":[],"closed":0,"ok":true}' run s-hq-conv1
 has "$SAID" "no open visit on tk-sub1" "(NOOP) nothing was holding a sitting"
 
 echo "# shown text is never expanded as a tmux format"
@@ -269,7 +276,7 @@ hasnt "$SAID" "'s-#(touch pwned)'" "(FMT) …so no #( reaches tmux unescaped"
 
 echo "# a config dir without gc-helm.sh is reported"
 mkdir -p "$TMP/empty"
-RUN_CFG="$TMP/empty" run s-lx-conv1
+RUN_CFG="$TMP/empty" run s-hq-conv1
 eq "$HELM" "" "(NOHELM) nothing runs"
 has "$SAID" "gc-helm.sh not found" "(NOHELM) …and the message names the fault"
 quiet "no gc-helm"
@@ -357,34 +364,34 @@ if [ -n "$LIVE_TERM" ]; then
     # and never on the one the suite happens to run under.
     mkdir -p "$TMP/livebin"; cp "$TMP/bin/gc" "$TMP/livebin/gc"
     env -u TMUX -u TMUX_PANE -u GC_TMUX_SOCKET PATH="$TMP/livebin:$PATH" \
-        tmux -L "$SOCKET" -f /dev/null new-session -d -s s-lx-conv1 -x 100 -y 30 'sleep 600' >/dev/null 2>&1
-    tmux -L "$SOCKET" new-session -d -s gc-toolkit__polecat-lx-pole1 -x 100 -y 30 'sleep 600' >/dev/null 2>&1
+        tmux -L "$SOCKET" -f /dev/null new-session -d -s s-hq-conv1 -x 100 -y 30 'sleep 600' >/dev/null 2>&1
+    tmux -L "$SOCKET" new-session -d -s gc-toolkit__polecat-hq-pole1 -x 100 -y 30 'sleep 600' >/dev/null 2>&1
     tmux -L "$SOCKET" set-environment -g GC_TMUX_SOCKET "$SOCKET" >/dev/null 2>&1
     tmux -L "$SOCKET" set-environment -g HELM_CALLS "$LIVE_CALLS" >/dev/null 2>&1
     tmux -L "$SOCKET" set-environment -g FAKE_LIST "$SESSIONS" >/dev/null 2>&1
     GC_TMUX_SOCKET="$SOCKET" GC_CITY_PATH="$LIVE_CITY" sh "$BINDINGS" "$LIVE_CFG" >/dev/null 2>&1
 
     echo "# LIVE: prefix+X, y in a converse pane"
-    press s-lx-conv1 y msg_has "the sitting on tk-sub1 is over"
+    press s-hq-conv1 y msg_has "the sitting on tk-sub1 is over"
     live=$(cat "$LIVE_CALLS" 2>/dev/null)
-    has "$live" "ARGS=dismiss --json" "(LIVE-YES) a real press, confirmed, runs dismiss"
+    has "$live" "ARGS=dismiss --operator --json" "(LIVE-YES) a real press, confirmed, runs dismiss as the operator"
     eq "$(grep -c '^ARGS=' "$LIVE_CALLS")" "1" "(LIVE-YES) …exactly once"
-    has "$live" "GC_SESSION_NAME=s-lx-conv1" "(LIVE-YES) …under the pressed pane's session"
+    has "$live" "GC_SESSION_NAME=s-hq-conv1" "(LIVE-YES) …under the pressed pane's session"
     has "$live" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-vis1" "(LIVE-YES) …and its alias"
     has "$live" "GC_CITY_PATH=$LIVE_CITY" "(LIVE-YES) …with the city path baked in at install"
     has "$(cat "$PRESS_MSGS")" "the sitting on tk-sub1 is over" "(LIVE-YES) the outcome reaches the operator"
     # View mode would open as the job exits, just after its last message, so
     # give the exit a beat before reading the pane.
     sleep 1
-    eq "$(tmux -L "$SOCKET" display-message -p -t s-lx-conv1 '#{pane_in_mode}' 2>/dev/null)" "0" \
+    eq "$(tmux -L "$SOCKET" display-message -p -t s-hq-conv1 '#{pane_in_mode}' 2>/dev/null)" "0" \
         "(LIVE-YES) the pane is not put into view mode over the thread"
 
     echo "# LIVE: prefix+X, n — then y in a polecat pane"
     : > "$LIVE_CALLS"
-    press s-lx-conv1 n
+    press s-hq-conv1 n
     # The refused press below is the barrier: once its message is shown, the
     # declined press before it has had every chance to run something.
-    press gc-toolkit__polecat-lx-pole1 y msg_has "is not a converse sitting"
+    press gc-toolkit__polecat-hq-pole1 y msg_has "is not a converse sitting"
     has "$(cat "$PRESS_MSGS")" "is not a converse sitting" "(LIVE-GUARD) a confirmed press in a polecat pane is refused out loud"
     eq "$(cat "$LIVE_CALLS")" "" "(LIVE-NO) declining the prompt runs nothing, and (LIVE-GUARD) neither does the refused pane"
     tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true

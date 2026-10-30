@@ -25,10 +25,10 @@ STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 unset STUB_RIGS_FAIL 2>/dev/null || true
-export STUB_RIGS='{"rigs":[{"name":"loomington","prefix":"lx","path":"/c"},
+export STUB_RIGS='{"rigs":[{"name":"mycity","prefix":"hq","path":"/c"},
   {"name":"gc-toolkit","prefix":"tk","path":"/c/rigs/gc-toolkit"},
   {"name":"gascity","prefix":"gc","path":"/c/rigs/gascity"},
-  {"name":"signal-loom","prefix":"sl","path":"/c/rigs/signal-loom"}]}'
+  {"name":"rig-a","prefix":"ra","path":"/c/rigs/rig-a"}]}'
 
 run() { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 
@@ -47,8 +47,8 @@ run tk-3y6toq
 eq "$RC" "0" "a gc-toolkit bead resolves (rc)"
 eq "$OUT" "gc-toolkit" "  ... to gc-toolkit"
 
-run sl-abc12
-eq "$OUT" "signal-loom" "a signal-loom bead resolves to signal-loom"
+run ra-abc12
+eq "$OUT" "rig-a" "a rig-a bead resolves to rig-a"
 
 # Fail closed: every unresolved shape refuses with empty stdout, so a caller
 # binding GC_RIG=$(...) gets nothing to bind rather than a guess. The exit code
@@ -103,9 +103,9 @@ eq "$BOUND" "[gascity]" "the output binds straight into GC_RIG with no trailing 
 
 # The city's own store answers to its rig name in this mode, but `gc bd` ignores
 # that name as GC_RIG. --db prints the path, which selects every store.
-run lx-abc12
-eq "$OUT" "loomington" "a city-store bead names the city's rig"
-run --db lx-abc12
+run hq-abc12
+eq "$OUT" "mycity" "a city-store bead names the city's rig"
+run --db hq-abc12
 eq "$RC" "0" "--db resolves a city-store bead (rc)"
 eq "$OUT" "/c/.beads" "  ... to the city's own .beads path"
 run --db gc-yxpj8

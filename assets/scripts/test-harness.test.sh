@@ -14,8 +14,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-test-harness-test.XXXXXX")"; trap 'rm -rf
 # writer, an inherited gctk binary path and forced fallback, and the build a
 # suite makes before harness_init (harness_build_gctk sets GCTK_BUILT pre-init
 # because the stub git must not answer the Go build).
-export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=loomington
-export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=lx-live
+export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=mycity
+export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=hq-live
 export GC_TRIGGER_BEAD_ID=tk-live GC_RIG_ROOT=/live/rigs/gc-toolkit
 export BEADS_DIR=/live/beads BEADS_ACTOR=live-actor
 export GC_QUEUE_PRIORITY_TOOL=/live/rigs/gc-toolkit/assets/scripts/queue-priority.sh
@@ -45,10 +45,12 @@ done
 # adds must be gone too, or the leak returns one release later. The deliberate
 # exceptions are the pins harness_init sets itself, after the sweep, rather than
 # inheriting them: GC_NO_API pins the gctk read seam onto the stubbed gc the same
-# way GCTK_BIN is pinned, and GC_QUEUE_PRIORITY_TOOL points the priority writer
-# a script under test reaches at a wrapper over the stub store. The sweep
-# excludes each by exact name, and the assertions below prove each pin took.
-resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF -e GC_NO_API -e GC_QUEUE_PRIORITY_TOOL || true)"
+# way GCTK_BIN is pinned, GC_QUEUE_PRIORITY_TOOL points the priority writer a
+# script under test reaches at a wrapper over the stub store, and GC_RUN_LIB
+# points a script that sources run-lib.sh at its stub, which answers from the
+# stub store. The sweep excludes each by exact name, and the assertions below
+# prove each pin took.
+resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF -e GC_NO_API -e GC_QUEUE_PRIORITY_TOOL -e GC_RUN_LIB || true)"
 if [ -z "$resid" ]; then ok "no GC_/BEADS_ variable survives harness_init"; else bad "residual city vars: $resid"; fi
 eq "${GC_NO_API:-}" "1" "harness_init pins GC_NO_API=1 so a gctk read hits the stub, not the live daemon"
 # The writer finds a bead's store in the rig list, which the stub does not
@@ -63,6 +65,22 @@ store '[{"id":"tk-qp","status":"open","assignee":"","title":"q","notes":"","issu
 eq "$("$GC_QUEUE_PRIORITY_TOOL" settle tk-qp --print 2>/dev/null)" "3" \
    "…whose writer computes a bead's priority from the stub store"
 store '[]'; : > "$STUB_GC_LOG"
+
+# run-lib.sh's verbs answer from the stub store: a root over an input convoy
+# that tracks one bead in the dep rows is that bead's run, read at each call.
+eq "${GC_RUN_LIB:-}" "$HERE/run-lib.stub.sh" "harness_init points GC_RUN_LIB at run-lib.sh's stub"
+store '[{"id":"tk-w","status":"open","issue_type":"task","metadata":{}},
+        {"id":"tk-cv","status":"open","issue_type":"convoy","metadata":{}},
+        {"id":"tk-r","status":"in_progress","issue_type":"task","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv","gc.formula_name":"mol-x"}}]'
+printf 'tk-cv|tracks|tk-w\n' > "$STUB_DEPS"
+harness_rd() { gc bd "$@"; }
+# shellcheck source=run-lib.stub.sh
+eq "$( . "$GC_RUN_LIB" && run_lib runs harness_rd tk-w | jq -c 'map([.root, .convoy, .formula, .live])')" '[["tk-r","tk-cv","mol-x",true]]' \
+   "…whose runs are the store's roots over the convoys its dep rows say track a bead"
+store '[{"id":"tk-w","status":"open","issue_type":"task","metadata":{}}]'
+# shellcheck source=run-lib.stub.sh
+eq "$( . "$GC_RUN_LIB" && run_lib runs harness_rd tk-w)" '[]' "…read again at each call, so a store that changes answers anew"
+store '[]'; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"
 
 # GCTK_* is out of that sweep: the pre-init build path is not collateral — a
 # blanket GC* unset would have taken GCTK_BUILT with it — and GCTK_BIN is pinned
@@ -222,11 +240,11 @@ eq "$(bstatus new-9)|$(gc bd dep list tk-anc --direction=down -t blocks --json |
 store '[{"id":"tk-u","status":"open","assignee":"","title":"u","notes":"first","description":"","metadata":{"keep":"k","gone":"g","typed":"old"}},{"id":"tk-v","status":"open","assignee":"","title":"v","notes":"","metadata":{}}]'
 gc bd update tk-u --set-metadata typed=1 --set-metadata "eq=a=b" --set-metadata flag=true \
   --set-metadata typed=2.5 --set-metadata nul=null --set-metadata txt=" 007 " --unset-metadata gone \
-  --assignee lx-one --status=in_progress --append-notes "second" --description "d1" --json >/dev/null
+  --assignee hq-one --status=in_progress --append-notes "second" --description "d1" --json >/dev/null
 eq "$(jq -c '.[] | select(.id == "tk-u") | .metadata' "$STUB_STORE")" \
   '{"keep":"k","typed":2.5,"eq":"a=b","flag":true,"nul":null,"txt":" 007 "}' \
   "update: every set lands typed as bd types it, the later value of a repeated key wins, a value keeps its own = and the unset is gone"
-eq "$(bassignee tk-u)" "lx-one" "update: the assignee rides the same call"
+eq "$(bassignee tk-u)" "hq-one" "update: the assignee rides the same call"
 eq "$(bstatus tk-u)" "in_progress" "update: …and so does the status"
 eq "$(notes tk-u)" $'first\nsecond' "update: a note is appended on its own line"
 eq "$(jq -r '.[] | select(.id == "tk-u") | .description' "$STUB_STORE")" "d1" "update: …and the description lands"
@@ -234,10 +252,10 @@ eq "$(jq -c '.[] | select(.id == "tk-v")' "$STUB_STORE")" '{"id":"tk-v","status"
   "update: the other beads are untouched"
 gc bd update tk-v --append-notes "only" >/dev/null
 eq "$(notes tk-v)" "only" "update: the first note takes no leading newline"
-STUB_DROP_KEYS="tk-u:status,typed,assignee" gc bd update tk-u --status=closed --set-metadata typed=9 --set-metadata other=o --assignee lx-two --unset-metadata keep >/dev/null
+STUB_DROP_KEYS="tk-u:status,typed,assignee" gc bd update tk-u --status=closed --set-metadata typed=9 --set-metadata other=o --assignee hq-two --unset-metadata keep >/dev/null
 eq "$(bstatus tk-u)" "in_progress" "update: a dropped status leaves the bead as it was"
 eq "$(meta tk-u typed)" "2.5" "update: …and a dropped metadata key keeps its old value"
-eq "$(bassignee tk-u)" "lx-one" "update: …and a dropped assignee is not written"
+eq "$(bassignee tk-u)" "hq-one" "update: …and a dropped assignee is not written"
 eq "$(meta tk-u other)" "o" "update: …while the keys the knob does not name still land"
 eq "$(meta tk-u keep)" "<absent>" "update: …including an unset"
 eq "$(jq 'length' "$STUB_STORE")" "2" "update: no bead is lost to a dropped field"
@@ -273,7 +291,7 @@ eq "$(meta tk-s gc.execution_routed_to)" "<absent>" "sling: …and leaves the st
 # --status=closed` never runs the check. A caller that drops its --force passes
 # against a stub that refuses nothing, so the refusal is pinned here, and so is
 # the default: with the knob unset any actor closes, as every other suite expects.
-store '[{"id":"tk-held","status":"in_progress","assignee":"lx-sitting","title":"h","notes":"","metadata":{}},{"id":"tk-free","status":"open","assignee":"","title":"f","notes":"","metadata":{}},{"id":"tk-mine","status":"open","assignee":"rig/refinery","title":"m","notes":"","metadata":{}},{"id":"tk-upd","status":"in_progress","assignee":"lx-sitting","title":"u","notes":"","metadata":{}},{"id":"tk-off","status":"in_progress","assignee":"lx-sitting","title":"o","notes":"","metadata":{}}]'
+store '[{"id":"tk-held","status":"in_progress","assignee":"hq-sitting","title":"h","notes":"","metadata":{}},{"id":"tk-free","status":"open","assignee":"","title":"f","notes":"","metadata":{}},{"id":"tk-mine","status":"open","assignee":"rig/refinery","title":"m","notes":"","metadata":{}},{"id":"tk-upd","status":"in_progress","assignee":"hq-sitting","title":"u","notes":"","metadata":{}},{"id":"tk-off","status":"in_progress","assignee":"hq-sitting","title":"o","notes":"","metadata":{}}]'
 as_refinery() { STUB_ENFORCE_CLOSE_OWNER=1 BEADS_ACTOR=rig/refinery gc bd "$@" >/dev/null 2>&1; }
 as_refinery close tk-held --reason r; rc=$?
 eq "$rc" "1" "close: a bead assigned to another actor is refused without --force"

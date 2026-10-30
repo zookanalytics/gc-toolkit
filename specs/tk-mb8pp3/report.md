@@ -7,7 +7,7 @@ description: What the one-time gc-toolkit auto-memory compaction retired and why
 
 Move 2 of the durable-memory spike (`specs/tk-1co/spike-report.md`, on branch
 `polecat/tk-1co`): a one-time pass over the gc-toolkit auto-memory corpus at
-`~/.claude/projects/-home-zook-loomington-rigs-gc-toolkit/memory/`. The corpus
+`~/.claude/projects/-home-zook-mycity-rigs-gc-toolkit/memory/`. The corpus
 is not in git and has no backup, so the verbatim text of every retired file is
 committed under `retired/` here. That is the only thing that makes the
 retirement reversible.

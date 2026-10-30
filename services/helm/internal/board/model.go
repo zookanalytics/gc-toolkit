@@ -70,16 +70,20 @@ func (s Severity) rank() int {
 }
 
 // Child is a rolled-up member of an anchor (epic child or convoy dependent).
-// Only the status feeds the counts today; Assignee, UpdatedAt and Metadata are
-// carried for parity with the model and are what the consumer beads spend (a
-// dead-owner check, per-child staleness, the visit glyph). A source that cannot
-// read a field leaves it zero rather than approximating it.
+// The roll-up reads its status, assignee, metadata and waits to tell which
+// state an open child is in ([Facts.stateOf]). A source that cannot read a
+// field leaves it zero rather than approximating it.
 type Child struct {
 	ID        string            `json:"id"`
 	Status    string            `json:"status"`
 	Assignee  string            `json:"assignee,omitempty"`
 	UpdatedAt time.Time         `json:"updated_at,omitzero"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	// Blockers is the child's own `blocks` waits, read for an open child of a
+	// live anchor. It is what separates a child waiting its turn behind open
+	// work, or held at a gate, from one nothing will start. A source that did
+	// not read them leaves it empty, and the child is classified without them.
+	Blockers []Blocker `json:"blockers,omitempty"`
 }
 
 // Anchor is one raw gather result before derivation — the Go analogue of a line
@@ -213,6 +217,17 @@ type Anchor struct {
 	// metadata-keyed row it serves.
 	Reviews        []Child `json:"reviews,omitempty"`
 	ReviewsUnknown bool    `json:"reviews_unknown,omitempty"`
+
+	// InFlight is a live merge anchor's in-flight set: every bead that names it
+	// in anchor_bead, any task_kind, at one of prstatus.InFlightStatuses, the set
+	// `gctk pr-status derive` reads for the PR labels. Its phase and held values
+	// count it ([anchorWorkSet]), so the board and the labels read the same work.
+	// The beads source reads it for each live merge anchor
+	// ([source.BeadsSource.readInFlight]). A read that fails is noted partial
+	// and leaves it empty, and the board then counts the live review and rework
+	// rows it gathered for the anchor, which the set also holds. The supervisor
+	// backend gathers neither.
+	InFlight []Child `json:"in_flight,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.
@@ -231,6 +246,9 @@ type Blocker struct {
 	// IssueType is what the bead IS. A `decision` is a demand by construction,
 	// the way the board's own `decision` kind is.
 	IssueType string `json:"issue_type,omitempty"`
+	// AwaitType is a gate's await_type, what the gate waits on. It says whether
+	// the city resolves the gate by itself or a person must ([sweptGate]).
+	AwaitType string `json:"await_type,omitempty"`
 	// Assignee is who holds the child. It lets the derivation ask whether a
 	// pool-routed review or rework is actually being WORKED — claimed by a live
 	// session — rather than merely routed to a pool nothing is draining. Routed
@@ -270,15 +288,20 @@ type Tile struct {
 	// be flagged for lacking.
 	Held bool `json:"held"`
 	// VisitState refines Held into the visit's engagement: VisitEngaged when a
-	// live sitting is in the conversation right now, VisitParked when the visit
-	// stands open and un-engaged — filed and waiting for a person to pick it up.
-	// Empty on a row no open visit holds (Held is false), the same
-	// not-applicable empty a closed row's Phase carries.
+	// live sitting is in the conversation right now, VisitStartFailed when the
+	// sitting last spawned for the visit failed to start and none has been
+	// spawned since, VisitParked when the visit stands open and un-engaged —
+	// filed and waiting for a person to pick it up. Empty on a row no open visit
+	// holds (Held is false), the same not-applicable empty a closed row's Phase
+	// carries. The one row that is not held and still carries a value is a
+	// visit's own row whose sitting failed to start, which reads
+	// VisitStartFailed too ([classifyVisits]).
 	//
-	// It reads the same [unengagedVisit] rule Acceptable does, so the two never
-	// disagree: a parked visit is the one Accept is offered on, an engaged one
-	// suppresses it. It is derived here rather than in the browser because the
-	// rule reads the visit's assignee — the pending-engagement window — which
+	// Engaged ([engagedVisit]) and Acceptable ([unengagedVisit]) read one
+	// binding predicate, so the two never disagree: an engaged visit suppresses
+	// Accept, and Accept is offered only on a visit that stands open and
+	// unbound. It is derived here rather than in the browser because the rule
+	// reads the visit's assignee — the pending-engagement window — which
 	// [Sitting.Assignee] deliberately keeps off the wire.
 	VisitState string `json:"visit_state"`
 
@@ -316,24 +339,27 @@ type Tile struct {
 	// updated_at — indistinguishable, on the wire, from an anchor touched today.
 	// That ambiguity is why UpdatedAt is carried alongside: absent means unknown,
 	// present means genuinely fresh.
-	StaleDays      int      `json:"stale_days"`
-	Priority       *int     `json:"priority"`
-	CrossRigRefs   []string `json:"cross_rig_refs"`
+	StaleDays    int      `json:"stale_days"`
+	Priority     *int     `json:"priority"`
+	CrossRigRefs []string `json:"cross_rig_refs"`
+	// OpenHeads is the open children nothing holds and nothing will start: no
+	// open wait, no route, no arm, and nothing in progress. They are what
+	// strands an anchor when nothing else under it is in flight.
 	OpenHeads      []string `json:"open_heads"`
 	DeadOwnerHeads []string `json:"dead_owner_heads"`
 
-	// ParkedHeads is the open children that carry a board row of their OWN —
-	// routed to the operator, or holding a takeaway. They are split out of
-	// OpenHeads so a parent cannot report a child that is waiting on a ruling
-	// as work nobody has picked up. Open still counts them; this names which
-	// ones they are.
+	// ParkedHeads is the open children a person holds: each waits on an open
+	// park or demand gate, is routed to the operator, or carries a visit no
+	// one has engaged. A takeaway alone does not park a child. Open still
+	// counts them; this names which ones they are.
 	ParkedHeads []string `json:"parked_heads"`
 
 	// WaitingOn is every bead this row depends on by a `blocks` edge;
 	// WaitingOnOpen is the subset that has NOT closed. DispositionDue is the
-	// state the pair exists to express: a parked conversation that was waiting
-	// on something, all of which has now landed. It is no longer "wants
-	// nothing" — it wants a disposition, so it leaves the LOW floor.
+	// state the pair exists to express: a conversation that was waiting on
+	// something, all of which has now landed, and that nothing else holds or
+	// moves. It is no longer "wants nothing" — it wants a disposition, so it
+	// leaves the LOW floor.
 	//
 	// A blocker whose status could not be resolved counts as OPEN, so an
 	// unreadable graph keeps the pre-fix quiet row rather than inviting the
@@ -395,9 +421,14 @@ type Tile struct {
 	// pass: progressing, settled, blocked, or unknown.
 	//
 	// `blocked` is a hold no automated actor will clear and no review verdict is
-	// owed on — an unresolved required review thread, a base gone BEHIND, or an
-	// unrouted blocker. The operator is owed it, distinct from `settled`, and its
-	// cause rides `pr.machine_reason`, surfaced in the row's `needs`.
+	// owed on — an unresolved required review thread, a failed required check, a
+	// base gone BEHIND, a conflict whose merge-in a hold defers, a blocker no
+	// automated actor holds, or a branch rule the merge pass cannot name. The
+	// operator is owed it, distinct from `settled`. Its cause rides
+	// `pr.machine_cause` as a value and `pr.machine_reason` as the sentence
+	// surfaced in the row's `needs`. A recorded `blocked` reads `blocked` only
+	// while prstatus.Blocked counts it, the rule the row's phase reads it by, and
+	// `progressing` otherwise, since the next merge pass replaces it.
 	//
 	// `unknown` is a rendered value, not a fallback to the quiet end — the same
 	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An
@@ -506,24 +537,24 @@ type Tile struct {
 	// too. A rig the board holds no pull request URL for keeps the bare branch.
 	PRBranchURL string `json:"pr_branch_url"`
 
-	// PRPhase is this merge anchor's PR status. On a live anchor it is what stands
-	// between the PR and landing — `working`, `needs-review`, or
-	// `needs-attention` — the same status: taxonomy pr-status-label.sh projects
-	// to the GitHub PR list, so the board and the label read one vocabulary
-	// rather than two. On a closed anchor it is the PR's resolved state,
-	// `merged` or `closed`, so a done row names how its PR ended rather than
-	// freezing on its last live value. Empty on a non-merge row.
+	// PRPhase is this merge anchor's PR status. On a live anchor it is whose move
+	// the PR is — `working`, `merging`, `needs-review`, or `needs-attention` — the
+	// same status: taxonomy pr-status-label.sh projects to the GitHub PR list, so
+	// the board and the label read one vocabulary rather than two. On a closed
+	// anchor it is the PR's resolved state, `merged` or `closed`, so a done row
+	// names how its PR ended rather than freezing on its last live value. Empty on
+	// a non-merge row.
 	PRPhase string `json:"pr_phase"`
 
-	// Phase is this bead's liveness in the shared tri-state vocabulary —
-	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
+	// Phase is this bead's liveness in the shared status vocabulary — `working`,
+	// `merging`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
 	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
-	// visit, posture, the draft stage, and for a merge anchor its open
-	// rework/review children, or for any other bead the live-workflow signal
-	// standing over it. A bead's board liveness and its GitHub `status:` label
-	// come from that one core. A row WITH child tiles then takes their rolled-up
-	// state in place of that per-bead value
+	// visit, posture, the merge pass's verdict, the draft stage, and for a merge
+	// anchor its in-flight set ([Anchor.InFlight]), or for any other bead the
+	// live-workflow signal standing over it. A bead's board liveness and its
+	// GitHub `status:` label come from that one core. A row WITH child tiles then
+	// takes their rolled-up state in place of that per-bead value
 	// ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
 	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
@@ -532,7 +563,7 @@ type Tile struct {
 	// review children hang off it by a blocked/anchor_bead edge the roll-up does
 	// not climb — and diverges from it on a merge anchor that ALSO has
 	// parent-child child tiles, whose Phase becomes their roll-up. The one place
-	// the two cannot disagree is a blocked machine verdict, which lifts both to
+	// the two cannot disagree is a blocked machine verdict, which holds both at
 	// needs-attention together.
 	//
 	// Empty on a terminal (closed) row, where the live vocabulary has no answer,
@@ -546,6 +577,25 @@ type Tile struct {
 	// triple, and non-null exactly on an acceptable row (see computeTile): the
 	// accept affordance and the reasoning behind it ride the wire together.
 	Recommendation *string `json:"recommendation"`
+
+	// VisitStartFailure is why the sitting last spawned for this row's visit
+	// failed to start, in the words [Sitting.StartFailure] carries. It is
+	// non-empty exactly when VisitState is VisitStartFailed, so a consumer reads
+	// the state and its reason off one row.
+	VisitStartFailure string `json:"visit_start_failure"`
+
+	// PRHeld is what holds this live merge anchor's PR that the city will not
+	// clear on its own, the values prstatus.Held names in its order: `visit`
+	// (an open visit covers the anchor or one of its live review or rework
+	// children), `review` (review feedback the city has not answered, or a
+	// review thread the merge waits on), and
+	// `blocked` (a blocker no automated actor will clear, or one a person
+	// owes). Each is the value of one GitHub held: label pr-status-label.sh
+	// writes from the same derivation, and any of them reads PRPhase
+	// needs-attention. Null on a PR nothing holds, on a closed row, and on a
+	// non-merge row. It is the PR's own: Held is the visit on this row's bead,
+	// so a PR whose rework a visit holds carries `visit` here with Held false.
+	PRHeld []string `json:"pr_held"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —
@@ -606,6 +656,27 @@ type Sitting struct {
 	// engaged so it suppresses Accept in that window. It is a derivation input,
 	// not part of the record the web renders, so it carries no wire tag.
 	Assignee string `json:"-"`
+
+	// FiledAt is when the visit bead was created. A sitting spawned for the
+	// visit cannot have failed to start before then, so the gather bounds its
+	// read of failed starts by the earliest FiledAt among the open visits. A
+	// gather input, so it carries no wire tag.
+	FiledAt time.Time `json:"-"`
+
+	// StartFailure says why the sitting last spawned for this visit failed to
+	// start. It is empty unless that sitting failed and no sitting has been
+	// spawned for the visit since. Gas City records a failed start in the city
+	// store: the rollback closes the session bead as failed-create, and the
+	// session bead or a startup-health episode says why the start failed, when
+	// anything does ([source.BeadsSource.markStartFailures] reads them). The
+	// words are "startup timeout", "setup timeout", "provider error: <code>"
+	// for a provider error a person must fix, "never started" when Gas City
+	// recorded no cause, as for a create rolled back before any start ran,
+	// "start error: <error>" for any other error the episode recorded, or
+	// "reason unread" when the record could not be read. A derivation input
+	// that the tile carries as [Tile.VisitStartFailure], so it has no wire tag
+	// here.
+	StartFailure string `json:"-"`
 
 	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back
 	// to the bead's creation time for a visit that was never claimed. ClosedAt
@@ -699,10 +770,19 @@ type Facts struct {
 	Sittings []Sitting
 	// Prefixes is every rig's issue prefix; RigNames is every rig's name. The
 	// cross-rig-ref scan looks for OTHER rigs' prefixes in an anchor's prose and
-	// discards any hit that is really a rig name (so "signal-loom" is not read
-	// as a "signal-" bead id).
+	// discards any hit that is really a rig name (so "web-app" is not read as
+	// a "web-" bead id).
 	Prefixes []string
 	RigNames []string
+
+	// held and subtree are set by [BuildBoard], never by a source. held is, for
+	// every bead under a live anchor, the hold the open waits of its
+	// parent-child ancestors put on it ([holds]), keyed by that bead. subtree
+	// is, for each live anchor with open children, the state those children put
+	// it in ([subtreeStates]). A parent counts a child that is itself a parent
+	// by it when nothing holds the child's own bead.
+	held    map[string]hold
+	subtree map[string]string
 }
 
 // Board is the envelope returned by the service. Tiles are deduplicated by id

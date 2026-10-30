@@ -1,0 +1,15 @@
+# Branches whose formula changes were built before step text's rule
+# (docs/pack-authoring.md, "Step text calls a tested script"), one per line.
+# tools/lint-step-text.sh reads them from origin and from local branches of the
+# same name. A step made heavier only by lines one of them adds draws a warning
+# instead of a failure, so each lands as it was built. Once every branch here
+# has landed or been retired, this list and its reader go.
+integration/tk-iirrmiw
+polecat/tk-iirrmiw.1
+polecat/tk-5u2xpan
+polecat/tk-o6pd01i
+integration/tk-tggczbp
+polecat/tk-r5ofy4t
+polecat/tk-gfb2hbq
+polecat/tk-r451fjm
+polecat/tk-60i7nl6
