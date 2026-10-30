@@ -28,7 +28,8 @@
 #   5. shapes every open human gate that no visit still open needs: its await
 #      id becomes its key and its title its takeaway, and then its pack keys go.
 #   6. re-points the references read after the cutover: finding.visit,
-#      finding.ruling_visit and pr_comment_disposition=visit:<id>.
+#      finding.ruling_visit, pr_comment_disposition=visit:<id>, and each
+#      visit:<id> record of a PR anchor's feedback batch ledgers.
 #   7. in the city store, closes the "Human gate awaiting you" notices, which
 #      nothing else closes once the notify order is off.
 # Every write is read back before the next. A visit or a legacy demand closes
@@ -43,8 +44,9 @@
 #   --all      the city store, then every rig store, suspended rigs included
 #   --rig      one store, by its name in `gc rig list` (the city's own row too)
 #   --dry-run  print each item's plan and write nothing
-#   --check    read every store and name each open visit, open legacy demand
-#              and counted step; it passes only when there is none
+#   --check    read every store and name each open visit, open legacy demand,
+#              counted step and batch ledger record that names a visit; it
+#              passes only when there is none
 # Run one at a time.
 # Exit: 0 the run completed (its report names each item it left for a person),
 # or --check found nothing · 1 --check found something, or a store's listing did
@@ -61,6 +63,9 @@ PACK_KEYS="gc.demand_for gc.demand_topic gc.gate_visit gc.routed_to gc.takeaway 
 SWEEP_CREATOR="order:gate-visit-sweep"
 NOTICE_PREFIX="Human gate awaiting you: "
 TAKEAWAY_MAX=140
+# The feedback batch ledgers pr-facts.sh keeps on a PR anchor, one per comment id
+# space. Each is `<disposition>|<floor>|<mark>` records joined by ";".
+LEDGERS="pr_comment_batch pr_review_batch pr_issue_comment_batch"
 
 usage() { sed -n '2,/^set -u/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//;/^set -u/d' >&2; }
 
@@ -1037,8 +1042,21 @@ walk() {
   printf 'unreadable %s\n' "$1"
 }
 
+# visit_successor <visit> — the bead an anchor's reference to a visit names once
+# the visit has closed: the gate its `migrated: gate` close reason names, else
+# the visit itself. pr-facts.sh reads only the status of the bead such a
+# reference names, so only that close reason is followed. Sets SUCC. Returns 1
+# when the visit did not read, and 2 while it is still open.
+SUCC=""
+visit_successor() {
+  SUCC=""
+  show_row "$1" || return 1
+  [ "$(rf "$ROW" '.status')" = closed ] || return 2
+  SUCC=$(migrated_gate "$ROW") || SUCC="$1"
+}
+
 ref_pass() {
-  local rows f v end id reply posted args disp anchor
+  local rows f v end id reply posted args disp anchor field led m s want
   # finding.visit on a live finding.
   rows=$(bd_list --db "$STORE_DB" --has-metadata-key finding.visit --status "$LIVE") || return 1
   while IFS=$'\037' read -r f v reply posted; do
@@ -1090,15 +1108,17 @@ EOF
   done <<EOF
 $(printf '%s' "$rows" | jq -r '.[] | [.id, ((.metadata["finding.ruling_visit"] // "") | tostring), ((.metadata["finding.ruling_bead"] // "") | tostring)] | join("\u001f")')
 EOF
-  # pr_comment_disposition=visit:<id> on a live anchor. Its reader reads only the
-  # status of the bead it names, so only the migrated: reason is followed.
+  # pr_comment_disposition=visit:<id> on a live anchor.
   rows=$(bd_list --db "$STORE_DB" --has-metadata-key pr_comment_disposition --status "$LIVE") || return 1
   while IFS=$'\037' read -r anchor disp; do
     [ -n "$anchor" ] || continue
     v="${disp#visit:}"
-    show_row "$v" || { left_open "anchor $anchor: its disposition names visit $v, which did not read"; continue; }
-    if [ "$(rf "$ROW" '.status')" != closed ]; then left_open "anchor $anchor: its disposition names visit $v, which is still open; a rerun converts it"; continue; fi
-    id=$(migrated_gate "$ROW") || id="$v"
+    visit_successor "$v"
+    case $? in
+      1) left_open "anchor $anchor: its disposition names visit $v, which did not read"; continue ;;
+      2) left_open "anchor $anchor: its disposition names visit $v, which is still open; a rerun converts it"; continue ;;
+    esac
+    id="$SUCC"
     if [ "$DRY" = 1 ]; then note_line "would re-point anchor $anchor's disposition to human:$id"; continue; fi
     gc bd update "$anchor" --set-metadata "pr_comment_disposition=human:$id" </dev/null >/dev/null 2>&1 || true
     if ! show_row "$anchor" || [ "$(rf "$ROW" '.metadata.pr_comment_disposition')" != "human:$id" ]; then
@@ -1108,6 +1128,55 @@ EOF
   done <<EOF
 $(printf '%s' "$rows" | jq -r '.[] | ((.metadata.pr_comment_disposition // "") | tostring) as $d | select($d | startswith("visit:")) | [.id, $d] | join("\u001f")')
 EOF
+  # Each visit:<id> record of a live anchor's batch ledgers. It names the bead
+  # the disposition above names for its visit, and keeps its range and its place
+  # in the ledger. So pr-facts.sh reads a batch a person answered as answered,
+  # and its writeback extends the newest record rather than opening an empty one
+  # beside it.
+  for field in $LEDGERS; do
+    rows=$(bd_list --db "$STORE_DB" --has-metadata-key "$field" --status "$LIVE") || return 1
+    while IFS=$'\037' read -r anchor led; do
+      [ -n "$anchor" ] || continue
+      m='{}'
+      while IFS= read -r v; do
+        [ -n "$v" ] || continue
+        visit_successor "$v"
+        case $? in
+          1) left_open "anchor $anchor: its $field names visit $v, which did not read"; continue ;;
+          2) left_open "anchor $anchor: its $field names visit $v, which is still open; a rerun converts it"; continue ;;
+        esac
+        m=$(jq -cn --argjson m "$m" --arg v "$v" --arg s "$SUCC" '$m + {($v): $s}')
+      done <<EOF
+$(jq -rn --arg l "$led" '[ $l | split(";")[] | capture("^visit:(?<v>[^|]+)[|]").v ] | unique[]' 2>/dev/null)
+EOF
+      [ "$m" != '{}' ] || continue
+      if [ "$DRY" = 1 ]; then
+        while IFS=$'\037' read -r v s; do
+          [ -n "$v" ] && note_line "would re-point anchor $anchor's $field records of visit $v to human:$s"
+        done <<EOF
+$(printf '%s' "$m" | jq -r 'to_entries[] | "\(.key)\u001f\(.value)"')
+EOF
+        continue
+      fi
+      want=$(jq -rn --arg l "$led" --argjson m "$m" '$l | split(";")
+        | map((capture("^visit:(?<v>[^|]+)(?<r>[|].*)$") // null) as $c
+              | if $c != null and $m[$c.v] != null then "human:\($m[$c.v])\($c.r)" else . end)
+        | join(";")' 2>/dev/null) || { left_open "anchor $anchor: its $field did not parse"; continue; }
+      gc bd update "$anchor" --set-metadata "$field=$want" </dev/null >/dev/null 2>&1 || true
+      if ! show_row "$anchor" || [ "$(rf "$ROW" ".metadata.$field")" != "$want" ]; then
+        left_open "anchor $anchor: its $field did not take its human: records"; continue
+      fi
+      while IFS=$'\037' read -r v s; do
+        [ -n "$v" ] || continue
+        N_REFS=$((N_REFS + 1)); note_line "anchor $anchor: $field visit:$v became human:$s"
+      done <<EOF
+$(printf '%s' "$m" | jq -r 'to_entries[] | "\(.key)\u001f\(.value)"')
+EOF
+    done <<EOF
+$(printf '%s' "$rows" | jq -r --arg f "$field" '.[] | ((.metadata[$f] // "") | tostring) as $l
+    | select($l | split(";") | any(startswith("visit:"))) | [.id, $l] | join("\u001f")')
+EOF
+  done
   return 0
 }
 
@@ -1162,12 +1231,18 @@ run_store() {
 }
 
 check_store() {
-  local name="$1" db="$2" visits demands legacy found=0
+  local name="$1" db="$2" visits demands legacy field one ledgers="" found=0
   if ! visits=$(bd_list --db "$db" --metadata-field task_kind=visit --status "$LIVE") \
      || ! demands=$(bd_list --db "$db" --include-gates --has-metadata-key gc.demand_for --status "$LIVE") \
      || ! count_steps "$db"; then
     echo "$name: did not answer, so the check cannot pass" ; return 1
   fi
+  for field in $LEDGERS; do
+    one=$(bd_list --db "$db" --has-metadata-key "$field" --status "$LIVE") || { echo "$name: did not answer, so the check cannot pass"; return 1; }
+    ledgers="$ledgers$(printf '%s' "$one" | jq -r --arg f "$field" '.[] | .id as $a
+      | [ (.metadata[$f] // "") | tostring | split(";")[] | select(startswith("visit:")) | split("|")[0][6:] ]
+      | unique[] | "anchor \($a): \($f) still names visit \(.)"')$NL"
+  done
   legacy=$(printf '%s' "$demands" | jq -r '.[] | select(((.await_type // "") | tostring) == "")
     | select(((.metadata.task_kind // "") | tostring) != "visit") | .id')
   while IFS= read -r v; do [ -n "$v" ] && { echo "$name: open visit $v"; found=1; }; done <<EOF
@@ -1178,6 +1253,9 @@ $legacy
 EOF
   while IFS= read -r v; do [ -n "$v" ] && { echo "$name: step that can still file a visit: $v"; found=1; }; done <<EOF
 $STEP_LINES
+EOF
+  while IFS= read -r v; do [ -n "$v" ] && { echo "$name: $v"; found=1; }; done <<EOF
+$ledgers
 EOF
   return "$found"
 }
@@ -1192,7 +1270,7 @@ if [ "$MODE" = check ]; then
 $RIG_ROWS
 EOF
   if [ "$rc" -eq 0 ]; then
-    echo "$PROG: check passed: no store holds an open visit, an open legacy demand or a step that can still file a visit"
+    echo "$PROG: check passed: no store holds an open visit, an open legacy demand, a step that can still file a visit or a batch ledger record that names a visit"
   else
     echo "$PROG: check failed: the items named above remain; resolve them and run the migration again" >&2
   fi

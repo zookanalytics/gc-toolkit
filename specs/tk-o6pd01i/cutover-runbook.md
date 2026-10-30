@@ -137,8 +137,9 @@ every store again, then the check:
 
 The rerun converts each visit a step filed after a store's first run, and
 finishes any item a person settled. The check reads every store, and it fails
-and names each store's open visit, open legacy demand and counted step while
-any is left. Repeat step 4's settling and this step until it passes.
+and names each store's open visit, open legacy demand, counted step and batch
+ledger record that names a visit while any is left. Repeat step 4's settling
+and this step until it passes.
 
 When the check passes, open the board and confirm that it shows every human
 gate on the bead it blocks and every conversation waiting in the queue. Then

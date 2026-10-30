@@ -8,7 +8,7 @@
 # reference ends. A part that sweeps then stops a run after each write it makes,
 # runs the migration again, and checks that the store ends exactly where an
 # uninterrupted run leaves it. No live city, Dolt, gc, bd or gh.
-# run-tests-parts: review holds opened gates sittings stuck steps legacy
+# run-tests-parts: review holds opened gates sittings stuck steps legacy ledgers
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -819,6 +819,64 @@ if part legacy; then
   eq "$RC" 1 "the check fails while a legacy demand is open"
   has "$OUT" "rig-a: open legacy demand ra-L4" "and names it"
   sweep "legacy" --rig rig-a
+fi
+
+# ── ledgers: the feedback batch ledgers that name a visit ─────────────
+if part ledgers; then
+  echo "# the feedback batch ledgers that name a visit"
+  fx_begin
+  b '{"id":"ra-anc5","title":"PR anchor five","metadata":{"merge_result":"pull_request","pr_comment_disposition":"visit:ra-old","pr_comment_batch":"visit:ra-old|0|100","pr_review_batch":"visit:ra-old|0|100","pr_issue_comment_batch":"visit:ra-old|0|100"}}'
+  b '{"id":"ra-old","title":"visit: ra-anc5 — a routed batch","description":"The batch asks for a rename.","created_by":"hq-wisp-op","metadata":{"task_kind":"visit","gc.continuation_group":"ra-anc5","gc.routed_to":"human"},"deps":[["tracks","ra-anc5"]]}'
+  b '{"id":"ra-anc6","title":"PR anchor six","metadata":{"merge_result":"pull_request","pr_comment_disposition":"rework:ra-rw6","pr_comment_batch":"visit:ra-vold6|0|40;rework:ra-rw6|40|90","pr_review_batch":"rework:ra-rw6|0|7;visit:ra-vold6|7|9"}}'
+  b '{"id":"ra-vold6","status":"closed","close_reason":"answered","metadata":{"task_kind":"visit"}}'
+  b '{"id":"ra-anc7","title":"PR anchor seven","metadata":{"merge_result":"pull_request","pr_comment_disposition":"human:ra-g7","pr_issue_comment_batch":"visit:ra-v7|0|60"}}'
+  b '{"id":"ra-v7","status":"closed","close_reason":"migrated: gate ra-g7","metadata":{"task_kind":"visit"}}'
+  b '{"id":"ra-g7","issue_type":"gate","await_type":"human","await_id":"k7","title":"An earlier question"}'
+  b '{"id":"ra-anc8","status":"closed","title":"PR anchor eight, landed","metadata":{"merge_result":"merged","pr_comment_batch":"visit:ra-vold6|0|10"}}'
+  fx_end
+
+  run_mig --check
+  eq "$RC" 1 "the check fails while a live anchor's ledger names a visit"
+  for l in "ra-anc5: pr_comment_batch still names visit ra-old" "ra-anc5: pr_review_batch still names visit ra-old" \
+           "ra-anc5: pr_issue_comment_batch still names visit ra-old" "ra-anc6: pr_comment_batch still names visit ra-vold6" \
+           "ra-anc6: pr_review_batch still names visit ra-vold6" "ra-anc7: pr_issue_comment_batch still names visit ra-v7"; do
+    has "$OUT" "rig-a: anchor $l" "the check names anchor $l"
+  done
+  hasnt "$OUT" "ra-anc8" "the check leaves a closed anchor's ledger alone"
+
+  run_mig --rig rig-a --dry-run
+  eq "$RC:$(writes)" "0:0" "a dry run over the ledgers writes nothing"
+  has "$OUT" "would re-point anchor ra-anc6's pr_comment_batch records of visit ra-vold6 to human:ra-vold6" "the dry run plans each field's records"
+  has "$OUT" "would re-point anchor ra-anc7's pr_issue_comment_batch records of visit ra-v7 to human:ra-g7" "including a record whose visit an earlier run migrated"
+
+  run_mig --rig rig-a
+  eq "$RC" 0 "the run completes"
+  G5=$(gate_on ra-anc5 conversation.ra-old)
+  eq "$(g ra-old '.close_reason')" "migrated: gate $G5" "the routed batch's visit becomes a gate"
+  eq "$(g ra-anc5 '.metadata.pr_comment_disposition')" "human:$G5" "the disposition names that gate"
+  for f in pr_comment_batch pr_review_batch pr_issue_comment_batch; do
+    eq "$(g ra-anc5 ".metadata.$f")" "human:$G5|0|100" "$f names that gate and keeps the batch's range"
+  done
+  eq "$(g ra-anc6 '.metadata.pr_comment_batch')" "human:ra-vold6|0|40;rework:ra-rw6|40|90" "a record whose visit closed before the cutover names that visit, ahead of the rework record it precedes"
+  eq "$(g ra-anc6 '.metadata.pr_review_batch')" "rework:ra-rw6|0|7;human:ra-vold6|7|9" "and keeps its place after the record it follows"
+  eq "$(g ra-anc7 '.metadata.pr_issue_comment_batch')" "human:ra-g7|0|60" "a record whose visit an earlier run migrated names that visit's gate"
+  eq "$(g ra-anc8 '.metadata.pr_comment_batch')" "visit:ra-vold6|0|10" "a closed anchor's ledger is left as it is"
+  has "$OUT" "anchor ra-anc5: pr_review_batch visit:ra-old became human:$G5" "the report names each moved record"
+  run_mig --check
+  eq "$RC" 0 "the check passes once no live anchor's ledger names a visit"
+  jq 'map(if .id == "ra-anc7" then .metadata.pr_issue_comment_batch = "visit:ra-v7|0|60" else . end)' "$MIG_STORE" > "$MIG_STORE.new" && mv "$MIG_STORE.new" "$MIG_STORE"
+  run_mig --check
+  eq "$RC" 1 "a ledger record alone fails the check"
+  has "$OUT" "rig-a: anchor ra-anc7: pr_issue_comment_batch still names visit ra-v7" "and the check names it"
+  sweep "ledgers" --rig rig-a
+
+  fx_begin
+  b '{"id":"ra-anc9","title":"PR anchor nine","metadata":{"merge_result":"pull_request","pr_comment_batch":"visit:ra-v9|0|5"}}'
+  b '{"id":"ra-v9","title":"visit: a question about no bead","created_by":"hq-wisp-op","metadata":{"task_kind":"visit","gc.routed_to":"human"}}'
+  fx_end
+  run_mig --rig rig-a
+  has "$OUT" "LEFT OPEN for a person: anchor ra-anc9: its pr_comment_batch names visit ra-v9, which is still open; a rerun converts it" "a record whose visit the run leaves open is left for a person"
+  eq "$(g ra-anc9 '.metadata.pr_comment_batch')" "visit:ra-v9|0|5" "and its ledger is unchanged"
 fi
 
 echo
