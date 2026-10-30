@@ -14,6 +14,7 @@
 #   - it refuses a `*-wisp-*` id as the subject, a patrol wisp's or a
 #     session's;
 #   - it titles the gate with the message's first line, capped;
+#   - it makes the gate's description the message it was given;
 #   - it reads the gate back from the bead's side;
 #   - it records a gate the deacon files in the deacon's incident ledger
 #     (gc-deacon-ledger.sh).
@@ -43,9 +44,10 @@ set -uo pipefail
 
 PROG="human-gate"
 
-# A gate's title is the board's NEEDS cell, read at a glance, so it is capped at
-# the headline cap gc-helm.sh takeaway enforces. The full message is the gate's
-# description, so an over-cap first line is cut with an ellipsis, not refused.
+# A gate's title is what the board's NEEDS cell shows for it, read at a glance,
+# so it is capped at the headline cap gc-helm.sh takeaway enforces. The full
+# message is the gate's description, so an over-cap first line is cut with an
+# ellipsis, not refused.
 TITLE_MAX=140
 
 # The head of the reason a writer that lost a create race resolves its own
@@ -143,8 +145,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # Every decision below reads the bead's human gates through its `blocks` edges,
-# the one reader rule, closed gates included. A subject that names no bead
-# fails this read, and nothing is filed or resolved on an unreadable one.
+# the one reader rule, closed gates included, and tells the open ones by
+# open_human_gate, bd-lib.sh's rule of which gates still hold. A subject that
+# names no bead fails this read, and nothing is filed or resolved on an
+# unreadable one.
 if ! GATES=$(bd_human_gates "$SUBJECT"); then
   warn "could not read the human gates of '$SUBJECT' (no such bead, or its store did not answer). Nothing was filed or resolved."
   exit 1
@@ -258,6 +262,14 @@ if [ -z "$GATE" ] || [ "$GATE" = null ]; then
   exit 1
 fi
 
+# The gate's description is the whole message: what the person reads, and what
+# a filer that keeps its report current compares against. bd gate create puts a
+# head of its own above the reason it is given and takes no description, so the
+# description is set to the message in a second write, which the read-back below
+# checks. Filing is rare beside the dedup above, so the write is paid once per
+# gate.
+gc bd update "$GATE" --description "$MESSAGE" </dev/null >/dev/null 2>&1 || true
+
 # The gate asks only while it blocks the bead under the key, so its edge, its
 # type and its await id are read back from the bead's side, the read every other
 # reader makes.
@@ -268,6 +280,11 @@ fi
 if ! printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1; then
   warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
   exit 1
+fi
+# A description that did not take still leaves a gate that asks, its message
+# under bd's head, so the filing stands and only the repair is named.
+if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg m "$MESSAGE" 'any(.[]; .id == $g and (.description // "") == $m)' >/dev/null 2>&1; then
+  warn "gate $GATE asks for $SUBJECT [$KEY], but its description did not become the message, so bd's own head stands above it; repair: gc bd update $GATE --description <the message>"
 fi
 
 # bd keeps no idempotency at create, so two writers racing in the same instant

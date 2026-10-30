@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# work-outcome.test.sh — the shared visit work-outcome stamp
+# work-outcome.test.sh — the shared conversation work-outcome stamp
 # (assets/scripts/work-outcome.sh). work_outcome_noop stamps gc.work_outcome=no-op
 # in a write of its own, never over a work outcome the bead already records,
 # reads it back and repairs a dropped write once, writes nothing to a bead that
@@ -7,9 +7,9 @@
 # waits on it.
 #
 # Every case runs under each shell a caller sources the lib from: sh (gc-helm.sh
-# and converse-claim.sh are /bin/sh scripts), dash when present (CI's /bin/sh),
-# and bash under `set -euo pipefail` (bead-rehome.sh), where an unguarded failure
-# would abort the caller.
+# is a /bin/sh script), dash when present (CI's /bin/sh), and bash under
+# `set -euo pipefail` (bead-rehome.sh), where an unguarded failure would abort
+# the caller.
 #
 # Hermetic: a stub store script stands in for the caller's bd command; no city,
 # no network.

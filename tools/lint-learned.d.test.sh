@@ -1018,8 +1018,7 @@ mkdir -p "$ZC/formulas" "$ZC/agents/a" "$ZC/packs/k/agents/b" \
          "$ZC/template-fragments" "$ZC/skills/s" "$ZC/docs"
 
 # Every in-scope surface is scanned: a formula TOML's description, agent prompt
-# templates at the top level and under packs/, startup fragments, skills, and
-# the named docs runbook.
+# templates at the top level and under packs/, startup fragments, and skills.
 cat > "$ZC/formulas/f.toml" <<'FIX'
 description = """
 ```bash
@@ -1028,8 +1027,7 @@ git show "$REV:review-checks.toml"
 """
 FIX
 for p in agents/a/prompt.template.md packs/k/agents/b/prompt.template.md \
-         template-fragments/frag.template.md skills/s/SKILL.md \
-         docs/gascity-dispatch-containment.md; do
+         template-fragments/frag.template.md skills/s/SKILL.md; do
     cat > "$ZC/$p" <<'FIX'
 ```bash
 git show "$REV:review-checks.toml"
@@ -1038,15 +1036,13 @@ FIX
 done
 runz "$ZC/formulas/f.toml" "$ZC/agents/a/prompt.template.md" \
      "$ZC/packs/k/agents/b/prompt.template.md" \
-     "$ZC/template-fragments/frag.template.md" "$SKILL" \
-     "$ZC/docs/gascity-dispatch-containment.md"
+     "$ZC/template-fragments/frag.template.md" "$SKILL"
 eq "$RC" 1 "an unbraced modifier in any in-scope surface is a finding"
 has "$OUT" "formulas/f.toml:3:" "a formula TOML is scanned"
 has "$OUT" "agents/a/prompt.template.md:2:" "a top-level agent prompt is scanned"
 has "$OUT" "packs/k/agents/b/prompt.template.md:2:" "a pack agent prompt is scanned"
 has "$OUT" "template-fragments/frag.template.md:2:" "a startup fragment is scanned"
 has "$OUT" "skills/s/SKILL.md:2:" "a skill is scanned"
-has "$OUT" "docs/gascity-dispatch-containment.md:2:" "the named docs runbook is scanned"
 has "$OUT" 'unbraced $REV:r' "the finding names the expansion and its modifier"
 has "$OUT" 'write ${REV}:r' "the finding names the fix"
 has "$OUT" "zsh-colon-modifier" "the finding names the rule"
@@ -1266,8 +1262,7 @@ while IFS= read -r p; do
         formulas/*.toml | */formulas/*.toml \
         | template-fragments/*.template.md | */template-fragments/*.template.md \
         | agents/*/prompt.template.md | */agents/*/prompt.template.md \
-        | skills/*/SKILL.md | */skills/*/SKILL.md \
-        | docs/gascity-dispatch-containment.md) ;;
+        | skills/*/SKILL.md | */skills/*/SKILL.md) ;;
         *) continue ;;
     esac
     mkdir -p "$(dirname "$CAN/$p")"
@@ -1682,15 +1677,13 @@ DET_FUF="$HERE/lint-learned.d/formula-unquoted-for.sh"
 runf() { OUT="$("$DET_FUF" "$@" 2>&1)"; RC=$?; }
 
 # Every in-scope surface is scanned: formula TOMLs, agent prompt templates
-# (top-level and under packs/), startup fragments, skills, and the named docs
-# runbook.
+# (top-level and under packs/), startup fragments, and skills.
 mkdir -p "$TMP/formulas" "$TMP/agents/refinery" "$TMP/packs/k/agents/keeper" \
          "$TMP/template-fragments" "$TMP/skills/s" "$TMP/docs"
 for p in formulas/f.toml agents/refinery/prompt.template.md \
          packs/k/agents/keeper/prompt.template.md \
          template-fragments/frag.template.md \
-         skills/s/SKILL.md \
-         docs/gascity-dispatch-containment.md; do
+         skills/s/SKILL.md; do
     cat > "$TMP/$p" <<'FIX'
 ```bash
 for x in $LIST; do echo "$x"; done
@@ -1700,15 +1693,13 @@ done
 runf "$TMP/formulas/f.toml" "$TMP/agents/refinery/prompt.template.md" \
      "$TMP/packs/k/agents/keeper/prompt.template.md" \
      "$TMP/template-fragments/frag.template.md" \
-     "$TMP/skills/s/SKILL.md" \
-     "$TMP/docs/gascity-dispatch-containment.md"
+     "$TMP/skills/s/SKILL.md"
 eq "$RC" 1 "an unquoted loop in any in-scope surface is a finding"
 has "$OUT" "formulas/f.toml:2:" "the formula TOML is scanned"
 has "$OUT" "agents/refinery/prompt.template.md:2:" "a top-level agent prompt is scanned"
 has "$OUT" "packs/k/agents/keeper/prompt.template.md:2:" "a pack agent prompt is scanned"
 has "$OUT" "template-fragments/frag.template.md:2:" "a startup fragment is scanned"
 has "$OUT" "skills/s/SKILL.md:2:" "a skill is scanned"
-has "$OUT" "docs/gascity-dispatch-containment.md:2:" "the named docs runbook is scanned"
 has "$OUT" "formula-unquoted-for" "the finding names the rule"
 
 # Every parameter-expansion shape zsh leaves unsplit is a finding: the braced
@@ -2039,8 +2030,7 @@ while IFS= read -r p; do
         formulas/*.toml | */formulas/*.toml \
         | template-fragments/*.template.md | */template-fragments/*.template.md \
         | agents/*/prompt.template.md | */agents/*/prompt.template.md \
-        | skills/*/SKILL.md | */skills/*/SKILL.md \
-        | docs/gascity-dispatch-containment.md) ;;
+        | skills/*/SKILL.md | */skills/*/SKILL.md) ;;
         *) continue ;;
     esac
     mkdir -p "$(dirname "$FCAN/$p")"

@@ -28,7 +28,7 @@ pool so it is schedulable again.
   archive it.
 - Warrant a converse sitting that is only holding. The converse role runs
   `idle_timeout = 0`, so a held sitting waits at its prompt for the operator
-  for hours or days: its visit stays `in_progress` and its bead's
+  for hours or days: its conversation stays `in_progress` and that bead's
   `updated_at` never moves. That is the role's normal state, not a stall.
   Idle-at-prompt and a stale bead are not a wedge for a converse owner, or
   for any role that holds with `idle_timeout = 0`. Warrant one only on a
@@ -103,9 +103,9 @@ the current wisp.
 - **Skip infrastructure**: dispatcher-routed control beads, graph.v2 topology
   roots (`gc.kind` workflow/scope/spec — not recoverable work; their steps carry
   the work and the control-dispatcher's `workflow-finalize` closes the root), and
-  beads owned by configured named identities are not orphans. A visit whose
-  session died DOES return to the pool — respawn-and-reconstitute is the designed
-  path.
+  beads owned by configured named identities are not orphans. Nor is a
+  conversation, a task assigned to `human` or to the alias of its sitting: no
+  session carries either owner, and a new session under that alias takes it back.
 
 ## Findings
 

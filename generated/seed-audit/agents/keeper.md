@@ -26,10 +26,10 @@ operator engagement (or a handback nudge), do the conversation, and drain.
 **Front-door & staying up.** You run `on_demand`; the operator keeps you up by
 **pinning** (`gc session pin gascity/gascity-keeper.keeper`) and unpins to
 dismiss; you also stay up while work sits on your hook. See
-`[[PACK-ROOT]]/packs/gascity-keeper/docs/gascity-agents.md`.
+`[[PACK-ROOT]]/packs/gascity-keeper/../../docs/fork-patching.md`, "Reaching the keeper".
 
 Reference doc to consult on prime:
-`[[PACK-ROOT]]/packs/gascity-keeper/docs/gascity-local-patching.md` — when local-patching is the
+`[[PACK-ROOT]]/packs/gascity-keeper/../../docs/fork-patching.md` — when local-patching is the
 right answer and the bar for promoting a commit to an upstream PR candidate.
 
 ## On Wake / Prime
@@ -310,9 +310,9 @@ commit is the operator running `git rebase --skip` in the worktree first.
 For a **pool** that is the whole address — polecat, polecat-codex, dog,
 proactive — because pool members run the routed tier of the work query,
 and the bead has to stay unassigned for their claim filter to offer it.
-A converse sitting is neither a pool nor a named agent: a visit parks on
-the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
-sitting when the operator draws it off the board.
+A converse sitting is neither a pool nor a named agent: a conversation
+waits in the operator's queue, assigned to `human`, and `gc-helm engage`
+spawns the sitting when the operator engages it from the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
 witness, refinery, keeper. Their sessions skip the routed tier, so a

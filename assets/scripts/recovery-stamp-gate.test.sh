@@ -5,12 +5,12 @@
 # recovered=/recovered_at/recovered_count and reads the crash-loop RATE off them —
 # ONLY for a bead orphan-dispose actually returned to the pool. A disposal that
 # SKIPPED touched nothing: a workflow root, or a source bead whose work already
-# reached a downstream court (an in-flight PR, or a human gate). Stamping a
-# recovery on a skip would feed the crash-loop signal a RATE for work that was
-# never re-dispatched, which is the moot-visit escalation the downstream-court
-# filter exists to stop. The gate keys on orphan-dispose's own result verdict:
-# only `disposed` is a recovery; `skipped`, `partial`, `failed`, and an unread
-# empty are not.
+# reached a downstream court (an in-flight PR, a human route or a conversation).
+# Stamping a recovery on a skip would feed the crash-loop signal a RATE for work
+# that was never re-dispatched, which is the moot question to a person the
+# downstream-court filter exists to stop. The gate keys on orphan-dispose's own
+# result verdict: only `disposed` is a recovery; `skipped`, `partial`, `failed`,
+# and an unread empty are not.
 #
 # This test EXECUTES the real block extracted verbatim from the formula (between
 # the `recovery-stamp-gate` markers), so it cannot drift from the shipped

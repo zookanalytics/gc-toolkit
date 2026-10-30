@@ -3,13 +3,13 @@
 # queries it, the read of a bead's human gates every reader of them makes and
 # the order its open gates under one key are read in, the one-write create every
 # script files a stamped bead through, the metadata read-back that gates handing
-# such a bead on, the close that unmakes a bead no reader can find, the
-# validation pass's work order, the gating-PR read's field set, the per-rig key
-# an order's state lives under, and the pass lock that lets an order run one
-# pass at a time. Sourced, never executed.
+# such a bead on, the close that unmakes a bead no reader can find, the birth,
+# settle and route of PR-finishing work, the validation pass's work order, the
+# gating-PR read's field set, the per-rig key an order's state lives under, and
+# the pass lock that lets an order run one pass at a time. Sourced, never
+# executed.
 #
-# A caller resolves this file beside itself and sources it, the way
-# visit-identity.sh is sourced:
+# A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
 #   . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh" >&2; exit 1; }
 #
@@ -171,12 +171,16 @@ bd_list() {
 # reach whose issue_type is `gate` and whose await_type is `human`, open and
 # closed alike. This is the one read every reader of a bead's human gates
 # makes. It prints the rows `gc bd dep list <bead> --type blocks` returns, as
-# one JSON array, and each row carries the gate's id, status, await_id, title,
-# created_at, close_reason and closed_at, with an empty field left out. A read
-# that exits non-zero, or answers anything but an array, as bd answers a bead it
-# cannot find, prints nothing and returns 1, so "no gate" and "could not read"
-# stay apart. `bd gate list <bead>` is not this read: it returns the gates a
-# bead reaches through an edge of any type, without saying which edge.
+# one JSON array. For one bead, bd answers each edge with the whole row of the
+# bead it reaches plus the edge's dependency_type, and these are the fields of
+# that row the readers rely on: id, issue_type, await_type, await_id, status,
+# assignee, title, description, created_at, close_reason and closed_at. bd
+# leaves an empty field out, so a gate no person is assigned carries no
+# assignee. A read that exits non-zero, or answers anything but an array, as bd
+# answers a bead it cannot find, prints nothing and returns 1, so "no gate" and
+# "could not read" stay apart. `bd gate list <bead>` is not this read: it
+# returns the gates a bead reaches through an edge of any type, without saying
+# which edge.
 bd_human_gates() {
   local raw
   raw=$(_bd_call dep list "$1" --type blocks --json </dev/null 2>/dev/null) || return 1
@@ -184,6 +188,46 @@ bd_human_gates() {
   printf '%s' "$raw" | jq -ce 'if type == "array"
     then [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human") ]
     else error("not an array") end' 2>/dev/null
+}
+
+# $HUMAN_GATE_JQ — the one rule of which human gates still hold the bead they
+# block, as jq defs in the in-variable convention standing-kinds.sh describes,
+# so every reader prepends the same text. A human gate holds in every status but
+# closed, pinned included, because only its resolve clears the question it asks;
+# gctk merge and pr-status read a gate the same way. The defs:
+#   human_gate             on one row: issue_type gate and await_type human
+#   open_human_gate($k)    on one row: a human gate that still holds, and when $k
+#                          is not "", one under that situation key
+#   open_human_gates       on a listing array: the ids of its open human gates,
+#                          for a reader that classifies many beads from one
+#                          listing that includes gates (`gc bd list
+#                          --include-gates`, `gc bd gate list`)
+#   gates_blocking($ids)   on one row: the ids among $ids that its own blocks
+#                          edges reach, the gates that hold the bead
+#   blocked_by_any($ids)   on one row: whether gates_blocking($ids) names any
+# shellcheck disable=SC2034  # read by the scripts that source this file
+HUMAN_GATE_JQ='
+  def human_gate: (.issue_type // "") == "gate" and (.await_type // "") == "human";
+  def open_human_gate($k):
+    human_gate
+    and (((.status // "open") | tostring | ascii_downcase) != "closed")
+    and ($k == "" or ((.await_id // "") | tostring) == $k);
+  def open_human_gates: [ .[] | select(open_human_gate("")) | .id ];
+  def gates_blocking($ids):
+    [ .dependencies[]? | select((.type // "") == "blocks")
+      | (.depends_on_id // "") as $d | select(($ids | index($d)) != null) | $d ];
+  def blocked_by_any($ids): (gates_blocking($ids) | length) > 0;
+'
+
+# bd_open_human_gates <bead> [<key>] — the bead's human gates that still hold it
+# (open_human_gate above), and with <key> only those under that situation key,
+# as one JSON array of the rows bd_human_gates prints: the read for a reader
+# that asks which open gates hold one bead. A gate read that does not answer
+# prints nothing and returns 1, so "none open" and "could not read" stay apart.
+bd_open_human_gates() {
+  local gates
+  gates=$(bd_human_gates "${1:-}") || return 1
+  printf '%s' "$gates" | jq -c --arg k "${2:-}" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate($k)) ]' 2>/dev/null
 }
 
 # bd_gates_open_under_key <key> — the open gates under a situation key, read
@@ -196,9 +240,10 @@ bd_human_gates() {
 # a fraction sorts ahead of the whole second it follows, and one with an offset
 # sorts by its local clock. A gate whose created_at is absent or does not read
 # as an RFC 3339 time sorts after every gate whose does. Input that is not an
-# array prints nothing and returns 1.
+# array prints nothing and returns 1. Which gates are open is open_human_gate's
+# rule, above.
 bd_gates_open_under_key() {
-  jq -ce --arg k "$1" '
+  jq -ce --arg k "$1" "$HUMAN_GATE_JQ"'
     def created_order:
       ([ (.created_at // "") | tostring
          | capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})$") ]
@@ -215,7 +260,7 @@ bd_gates_open_under_key() {
       | if $sec == null then [1, 0, 0]
         else [0, $sec, (("0" + ($m.f // "")) | tonumber)] end;
     if type == "array"
-    then [ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ]
+    then [ .[] | select(open_human_gate($k)) ]
          | sort_by(created_order, (.id // "" | tostring))
     else error("not an array") end' 2>/dev/null || return 1
 }
@@ -691,6 +736,60 @@ bd_unmake_orphans() {
   return 0
 }
 
+# PR-finishing work, the reviews, validation passes, merge-ins, red-check fixes
+# and review reworks that carry an anchor's branch to its merge, is filed one
+# level sooner than its anchor (docs/steering.md, "PR-finishing work"). Each
+# creator files its child carrying this shift in the create, so the child is
+# born with it, and each creator's suite asserts it. A child adopted or re-routed
+# later keeps the shift it carries: after its birth the shift is the child's own
+# input, which a priority move may have set.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+PR_FINISHING_SHIFT=-1
+
+# pr_finishing_birth <metadata-json> — the create payload of a PR-finishing
+# child: its work order with priority_shift added. Prints nothing and returns
+# non-zero for a work order that is not a JSON object, an empty one included, so
+# the create that would carry it files nothing.
+pr_finishing_birth() {
+  printf '%s' "${1:-}" | jq -ce --argjson s "$PR_FINISHING_SHIFT" \
+    'if type == "object" then . + {priority_shift: $s} else error("not an object") end' 2>/dev/null
+}
+
+# The longest a settle of PR-finishing work waits for the store's priority lock
+# when a script of the merge cadence runs it: gate-ensure.sh, pr-facts.sh and
+# pre-open-rebase.sh. The cadence runs its arms one after another, so a longer
+# wait holds every arm after it, and a bead whose settle times out is settled by
+# a later pass. queue-priority.sh's own default wait is longer, and
+# rework-child.sh, which runs in a review or converse session rather than in the
+# cadence, keeps it.
+PR_FINISHING_LOCK_WAIT_SECS=30
+
+# pr_finishing_settle <bead> — the cadence's settle of a bead of PR-finishing
+# work: queue-priority.sh settle, which computes the bead's priority, writes it
+# to the bead and to every live workflow poured for it, and reads it back
+# (docs/steering.md#settle), waiting for the lock PR_FINISHING_LOCK_WAIT_SECS
+# at most. The writer's narrative goes to stdout and its refusal to stderr, for
+# the caller to keep or drop. GC_QUEUE_PRIORITY_TOOL names another writer, as
+# each suite's harness does. Non-zero when the bead did not settle.
+pr_finishing_settle() {
+  QUEUE_PRIORITY_LOCK_WAIT_SECS="$PR_FINISHING_LOCK_WAIT_SECS" \
+    "${GC_QUEUE_PRIORITY_TOOL:-$(dirname -- "${BASH_SOURCE[0]}")/queue-priority.sh}" settle "${1:-}" </dev/null
+}
+
+# route_finishing <child> <pool> — route a PR-finishing child to <pool> at its
+# priority, for the creators that route a child rather than sling it
+# (pr-facts.sh, pre-open-rebase.sh). The route makes the child claimable, so the
+# child is settled first (pr_finishing_settle), and the route is then written
+# alone, with no priority in it. No pool can claim the child before the route
+# lands, and a priority move that runs between the two writes rewrites the child
+# itself. Returns 1, having routed nothing, when the child does not settle; it
+# is left unrouted for a later pass. A route write bd refuses can still exit 0,
+# so the caller reads the route back.
+route_finishing() {
+  pr_finishing_settle "${1:-}" >/dev/null || return 1
+  gc bd update "$1" --set-metadata gc.routed_to="${2:-}" </dev/null >/dev/null 2>&1 || true
+}
+
 # The keys a validation pass is found by: signoff.sh's machine-lane probe and
 # pr-facts.sh's human-lane probe both select a pass by its task_kind, its anchor
 # and its lane, so a pass short of one of them is one neither can find.
@@ -698,15 +797,16 @@ bd_unmake_orphans() {
 VALIDATION_SELECT="task_kind,anchor_bead,check_name"
 
 # validation_work_order <anchor> <lane> <reviewed-oid> — the metadata a
-# validation pass carries, the shape mol-validate reads. task_kind, anchor_bead
-# and check_name are VALIDATION_SELECT. check_name is the lane: mol-validate
-# rules the findings whose finding.lane matches it. reviewed_oid pins the head
-# the batch was produced at, which mol-validate needs to back a machine lane; an
-# empty <reviewed-oid> leaves the pin out.
+# validation pass is filed with, the shape mol-validate reads, born carrying the
+# PR-finishing shift. task_kind, anchor_bead and check_name are
+# VALIDATION_SELECT. check_name is the lane: mol-validate rules the findings
+# whose finding.lane matches it. reviewed_oid pins the head the batch was
+# produced at, which mol-validate needs to back a machine lane; an empty
+# <reviewed-oid> leaves the pin out.
 validation_work_order() {
-  jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
+  pr_finishing_birth "$(jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
     '{task_kind: "validation", anchor_bead: $a, check_name: $l}
-     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null
+     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)"
 }
 
 # The gating-PR read. The pr-facts arm (pr-facts.sh) and the merge arm

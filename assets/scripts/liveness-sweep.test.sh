@@ -3,8 +3,9 @@
 # gc/gh/human-gate.sh; no city, Dolt, or network). Ports the delta and
 # classification assertions from the retired liveness-sweep-delta.test.sh
 # (which extracted blocks from formulas/mol-liveness-sweep.toml) and adds the
-# exec-order surface: state-file baseline, human-gate.sh filing, the census
-# stamp, and the absorbed triage recurrence.
+# exec-order surface: state-file baseline, human-gate.sh filing, the census in
+# the re-check command the gate's message carries, the re-file check on the
+# subject's cleared gates, and the absorbed triage recurrence.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +33,7 @@ mkdir -p "$TMP/bin" "$TMP/show"
 
 # --- gc stub -------------------------------------------------------------------
 # Serves the census reads from fixture files, `bd show` from $SHOW_DIR/<id>.json,
-# the refile guard's closed listing from $PRIOR_VISITS, and records every write.
+# `bd dep list` from $SHOW_DIR/dep-<id>.json, and records every write.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="$1 ${2:-}"
 args="$*"
@@ -57,28 +58,6 @@ case "$sub" in
           jq -c --arg st "$st" '[ .[] | . as $r | select($st == "" or ((($st | split(",")) | index($r.status // "open")) != null)) ]' "$f"
         else printf '[]\n'; fi
         exit 0 ;;
-      *--status=closed*)
-        # Model the server-side --metadata-field KEY=VALUE narrow: the store
-        # returns only rows whose metadata[KEY] equals VALUE. A stamp-keyed
-        # query (gc.continuation_group=<subject>) therefore hides a visit whose
-        # stamp landed empty — the refile-guard defect. Without this the mock
-        # would serve every prior regardless of the field, so a stamp-only query
-        # and a task_kind query are indistinguishable and the bug cannot repro.
-        if [ -n "${PRIOR_VISITS:-}" ] && [ -f "${PRIOR_VISITS:-}" ]; then
-          mf=""; prev=""
-          for a in "$@"; do
-            [ "$prev" = "--metadata-field" ] && { mf="$a"; break; }
-            case "$a" in --metadata-field=*) mf="${a#--metadata-field=}"; break ;; esac
-            prev="$a"
-          done
-          if [ -n "$mf" ]; then
-            jq --arg k "${mf%%=*}" --arg v "${mf#*=}" \
-               '[.[] | select(((.metadata // {})[$k] // "") == $v)]' "$PRIOR_VISITS"
-          else
-            cat "$PRIOR_VISITS"
-          fi
-        fi
-        exit "${GC_LIST_RC:-0}" ;;
       *blocked,deferred*) cat "${FAKE_WIDEN:-/dev/null}" 2>/dev/null || printf '[]'; exit 0 ;;
       *open,in_progress*) cat "$FAKE_LIVE"; exit 0 ;;
       *) printf '[]\n'; exit 0 ;;
@@ -95,16 +74,24 @@ case "$sub" in
     if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
     exit 0 ;;
   "bd dep")
-    # `dep list <id> ...` → the finding's blockers, served from
-    # $SHOW_DIR/dep-<id>.json (default []). Only the landed-fix-wedge backstop
-    # reads this; the id is the token after "list" so a --db pin cannot shift it.
+    # `dep list <id> ...` → the bead's dependencies, served from
+    # $SHOW_DIR/dep-<id>.json (default []): a finding's blockers for the
+    # landed-fix-wedge backstop, and the standing subject's human gates for the
+    # re-file guard. The id is the token after "list" so a --db pin cannot shift
+    # it. GC_DEP_FAIL makes every dep read fail.
+    [ -n "${GC_DEP_FAIL:-}" ] && exit 1
     depid=""; seen_list=0
     for a in "$@"; do
       [ "$seen_list" = 1 ] && { depid="$a"; break; }
       [ "$a" = list ] && seen_list=1
     done
+    # A gate the human-gate.sh stub filed this run is one of its subject's
+    # blocks edges from then on, as it is live.
     f="$SHOW_DIR/dep-$depid.json"
-    if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
+    rows='[]'; [ -f "$f" ] && rows="$(cat "$f")"
+    if [ -s "${ESC_FILED:-/dev/null}" ]; then
+      printf '%s' "$rows" | jq -c --arg id "$depid" --slurpfile filed "$ESC_FILED" '. + [ $filed[] | select(.subject == $id) | .row ]'
+    else printf '%s\n' "$rows"; fi
     exit 0 ;;
   "bd kv")
     # The store's anchor-edges mark: set when KV_JOINED is, unset otherwise
@@ -149,29 +136,34 @@ gh_prs() { # gh_prs <days-since-update:521> <days-since-update:522>
 gh_prs 0 0
 export GH_PRS="$TMP/gh-prs.json"
 
-# human-gate.sh stub: records the call and the quiet window it declares. It
-# answers with the visit line the sweep's census stamp still parses.
+# human-gate.sh stub: records the call and the quiet window it declares, files
+# the gate as human-gate.sh does, an open human gate on its subject whose
+# description is the message (kept in $ESC_FILED, which the gc stub's dep list
+# serves for the rest of the run), and prints its id.
 cat > "$TMP/bin/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 [ -n "${ESC_FAIL:-}" ] && { echo "human-gate: down" >&2; exit 1; }
-subject=""; key=""; window="-"
+subject=""; key=""; window="-"; message=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) subject="$2"; shift 2 ;;
     --key)     key="$2"; shift 2 ;;
     --quiet-window) window="$2"; shift 2 ;;
-    --message) printf '%s\n---\n' "$2" >> "$ESC_BODIES"; shift 2 ;;
+    --message) message="$2"; printf '%s\n---\n' "$2" >> "$ESC_BODIES"; shift 2 ;;
     *) shift ;;
   esac
 done
 printf '%s %s\n' "$subject" "$key" >> "$ESC_CALLS"
 printf '%s %s %s\n' "$subject" "$key" "$window" >> "$ESC_CALLS.windows"
-echo "filed visit tk-visit1 on $subject [$key]"
+jq -nc --arg s "$subject" --arg k "$key" --arg m "$message" \
+  '{subject: $s, row: {id: "gate-1", issue_type: "gate", await_type: "human", await_id: $k, status: "open",
+                       dependency_type: "blocks", title: ($m | split("\n")[0]), description: $m}}' >> "$ESC_FILED"
+echo "gate-1"
 ESC
 chmod +x "$TMP/bin/human-gate.sh"
 
 export PATH="$TMP/bin:$PATH"
-export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies"
+export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies" ESC_FILED="$TMP/esc-filed"
 export GC_HUMAN_GATE_TOOL="$TMP/bin/human-gate.sh"
 export GC_RIG=testrig
 export LIVENESS_SWEEP_STATE_DIR="$TMP/state"
@@ -188,16 +180,15 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-routed","title":"already dispatched","issue_type":"task","metadata":{"gc.routed_to":"rig/rig.polecat"}},
   {"id":"root-landed","title":"the ROOT of a spent molecule, still routed","issue_type":"task","metadata":{"gc.kind":"workflow","gc.routed_to":"rig/rig.polecat","gc.input_convoy_id":"conv-landed"}},
   {"id":"root-live","title":"the ROOT of an in-flight molecule, routed","issue_type":"task","metadata":{"gc.kind":"workflow","gc.routed_to":"rig/rig.polecat","gc.input_convoy_id":"conv-anchorlive"}},
-  {"id":"c-visit","title":"visit: something","issue_type":"task","metadata":{"task_kind":"visit"}},
   {"id":"c-subject","title":"triage: a scope","issue_type":"task","metadata":{"task_kind":"triage-subject"}},
   {"id":"c-pattern","title":"a distiller cluster anchor","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
   {"id":"c-docupdate","title":"a doc-update bead nobody routed","issue_type":"task","metadata":{"task_kind":"doc-update"}},
-  {"id":"c-ingroup","title":"subject of a live visit","issue_type":"task","metadata":{}},
-  {"id":"c-trackedvisit","title":"subject of a live visit whose stamp landed EMPTY","issue_type":"task","metadata":{}},
+  {"id":"c-conv-held","title":"subject of a conversation a live sitting holds","issue_type":"task","metadata":{}},
+  {"id":"c-conv-fallback","title":"subject of a held conversation under its c- alias","issue_type":"task","metadata":{}},
   {"id":"c-takeaway","title":"a sitting ended here and left its takeaway","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify"}},
   {"id":"c-takeaway-empty","title":"hold was cleared","issue_type":"task","metadata":{"gc.takeaway":""}},
   {"id":"c-demand-live","title":"a person owes an answer here","issue_type":"task","metadata":{"gc.takeaway":"holding — which of the two?"}},
-  {"id":"c-demand-widen","title":"its demand is deferred, not closed","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
+  {"id":"c-demand-widen","title":"its gate is deferred, not cleared","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
   {"id":"c-pr-open","title":"parked on an open PR","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
   {"id":"c-pr-case","title":"same PR, different case + trailing path","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://GitHub.com/zook/gc-toolkit/pull/522/files"}},
   {"id":"c-pr-merged","title":"landed — surfaces for close-out","issue_type":"task","metadata":{"merge_result":"merged","pr_url":"https://github.com/zook/gc-toolkit/pull/520"}},
@@ -233,41 +224,50 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-husk-step-2","title":"implement","issue_type":"task","metadata":{"gc.root_bead_id":"root-landed"}},
   {"id":"c-live-step","title":"a step of an in-flight workflow","issue_type":"task","metadata":{"gc.root_bead_id":"root-live"}},
   {"id":"c-noconvoy-step","title":"a step whose root names no convoy","issue_type":"task","metadata":{"gc.root_bead_id":"root-noconvoy"}},
-  {"id":"c-rootvisit-step","title":"a step of a root a live visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"root-underconversation"}},
+  {"id":"c-rootconv-step","title":"a step of a root a held conversation tracks","issue_type":"task","metadata":{"gc.root_bead_id":"root-underconversation"}},
   {"id":"c-parented","title":"a parent whose child is still open","issue_type":"epic","metadata":{}},
   {"id":"c-trackslive","title":"tracks a not-closed bead","issue_type":"task","metadata":{},"dependencies":[{"depends_on_id":"m-live","type":"tracks"}]}
 ]
 JSON
-# LIVE carries: the standing sweep subject, the visits (v-2 is the su-ab9je
-# empty-stamp shape, v-root tracks a workflow root), the live molecule that
-# names conv-live, and the open demand on c-demand-live. blocked-child gates
-# c-parented via the reverse parent-child index.
+# LIVE carries: the standing sweep subject, the conversations live sittings hold
+# (one by its qualified alias, one under the c- fallback, one about a workflow
+# root), the live molecule that names conv-live, and the open human gate on
+# c-demand-live. The two beads a gate blocks are listed too, as the open listing
+# carries them with their blocks edges: the ready read was cut before the gate
+# was filed. blocked-child gates c-parented via the reverse parent-child index.
 cat > "$TMP/live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"v-1","status":"open","title":"visit: c-ingroup","metadata":{"task_kind":"visit","gc.continuation_group":"c-ingroup"}},
-  {"id":"v-2","status":"open","title":"visit: c-trackedvisit","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-2","depends_on_id":"c-trackedvisit","type":"tracks"}]},
-  {"id":"v-root","status":"open","title":"visit: root-underconversation","metadata":{"task_kind":"visit","gc.continuation_group":"root-underconversation"},"dependencies":[{"issue_id":"v-root","depends_on_id":"root-underconversation","type":"tracks"}]},
+  {"id":"tk-conv-held","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.tk-conv-held","title":"about c-conv-held","dependencies":[{"issue_id":"tk-conv-held","depends_on_id":"c-conv-held","type":"tracks"}]},
+  {"id":"tk-conv-f","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.c-tk-conv-f","title":"about c-conv-fallback","dependencies":[{"issue_id":"tk-conv-f","depends_on_id":"c-conv-fallback","type":"tracks"}]},
+  {"id":"tk-conv-root","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.tk-conv-root","title":"about root-underconversation","dependencies":[{"issue_id":"tk-conv-root","depends_on_id":"root-underconversation","type":"tracks"}]},
   {"id":"m-live","status":"open","title":"a live molecule","metadata":{"gc.input_convoy_id":"conv-live"}},
-  {"id":"d-open","status":"open","title":"Rule: which of the two?","metadata":{"gc.demand_for":"c-demand-live"}},
+  {"id":"g-open","status":"open","issue_type":"gate","await_type":"human","await_id":"which-of-two","title":"Rule: which of the two?"},
+  {"id":"c-demand-live","status":"open","issue_type":"task","title":"a person owes an answer here","metadata":{"gc.takeaway":"holding — which of the two?"},"dependencies":[{"issue_id":"c-demand-live","depends_on_id":"g-open","type":"blocks"}]},
+  {"id":"c-demand-widen","status":"open","issue_type":"task","title":"its gate is deferred, not cleared","metadata":{"gc.takeaway":"holding — parked on a person"},"dependencies":[{"issue_id":"c-demand-widen","depends_on_id":"g-deferred","type":"blocks"}]},
   {"id":"child-open","status":"open","title":"an open child of c-parented","metadata":{},"dependencies":[{"depends_on_id":"c-parented","type":"parent-child"}]}
 ]
 JSON
-# WIDEN is every not-closed status LIVE omits. The deferred demand proves the
-# demand index reads ALIVE and not LIVE: not closed is not answered.
+# WIDEN is every not-closed status LIVE omits. The deferred gate proves the
+# gate index reads ALIVE and not LIVE: not cleared is not answered.
 cat > "$TMP/widen.json" <<'JSON'
 [
-  {"id":"d-deferred","status":"deferred","title":"Rule: the other one?","metadata":{"gc.demand_for":"c-demand-widen"}}
+  {"id":"g-deferred","status":"deferred","issue_type":"gate","await_type":"human","await_id":"the-other-one","title":"Rule: the other one?"}
 ]
 JSON
 export FAKE_READY="$TMP/ready.json" FAKE_LIVE="$TMP/live.json" FAKE_WIDEN="$TMP/widen.json"
 
-# The holder-liveness session set: lx-live-1 is listed (a visit it holds still
-# converses); a session absent from this set (e.g. lx-dead-9) is a gone sitting.
-# The existing visits above are all UNCLAIMED, so they cover regardless of this.
+# The holder-liveness session set: each listed session is a live sitting, and
+# the conversations above are held under the aliases they carry, qualified
+# (agent_name) or bare (alias). A conversation whose alias no listed session
+# carries is held by a gone sitting.
 cat > "$TMP/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"testrig__conv-lx-live-1","agent_name":"testrig/testrig.tk-livevisit"}
+  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"testrig__conv-lx-live-1","agent_name":"testrig/testrig.tk-conv-held"},
+  {"id":"lx-live-2","state":"active","closed":false,"session_name":"s-lx-live-2","alias":"c-tk-conv-f","name":"","agent_name":""},
+  {"id":"lx-live-3","state":"active","closed":false,"session_name":"s-lx-live-3","alias":"tk-conv-root","name":"","agent_name":""},
+  {"id":"lx-live-4","state":"active","closed":false,"session_name":"s-lx-live-4","alias":"hl-c-live","name":"","agent_name":""},
+  {"id":"lx-live-5","state":"active","closed":false,"session_name":"s-lx-live-5","alias":"","name":"","agent_name":"testrig/testrig.hl-c-liveroot"}
 ]}
 JSON
 export FAKE_SESSIONS="$TMP/sessions.json"
@@ -307,7 +307,7 @@ printf '%s\n' '[{"id":"rv-fix","status":"closed","metadata":{"task_kind":"review
 run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
     [ "${1:-ABSENT}" = "ABSENT" ] || printf '%s\n' "$1" > "$BASELINE_FILE"
-    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"; : > "$ESC_FILED"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
 }
@@ -332,20 +332,24 @@ grep -q "New this pass:" "$ESC_BODIES" && ok "the body lists the new candidates"
     || bad "the body lists the new candidates" "$(cat "$ESC_BODIES")"
 grep -q "c-plain — an ordinary idle bug" "$ESC_BODIES" \
     && ok "a new candidate is enumerated id — title" || bad "candidate enumeration" "$(head -5 "$ESC_BODIES")"
-grep -Eq 'sweep.new_ids=[a-z0-9,-]*c-plain' "$GC_CALLS" \
-    && ok "the census rides the visit as machine state (sweep.new_ids)" \
-    || bad "sweep.new_ids stamp" "$(grep 'bd update tk-visit1' "$GC_CALLS" || true)"
-grep -q 'visit.recheck=.*liveness-recheck.sh' "$GC_CALLS" \
-    && ok "visit.recheck stamps the resolved liveness-recheck.sh path" \
-    || bad "visit.recheck stamp" "$(cat "$GC_CALLS")"
+grep -Eq "^  $HERE/liveness-recheck\.sh --ids [a-z0-9,-]*c-plain[a-z0-9,-]* --pass-at [0-9T:Z-]+\$" "$ESC_BODIES" \
+    && ok "the census rides the gate's message as the re-check command, by the resolved script path" \
+    || bad "the re-check command in the message" "$(grep -n 'liveness-recheck' "$ESC_BODIES" || cat "$ESC_BODIES")"
+grep -q -- '--carried' "$ESC_BODIES" \
+    && bad "a pass with nothing carried names no --carried" "$(grep 'liveness-recheck' "$ESC_BODIES")" \
+    || ok "a pass with nothing carried names no --carried"
+grep -Eq 'sweep\.|visit\.recheck' "$GC_CALLS" \
+    && bad "nothing is stamped beside the gate" "$(cat "$GC_CALLS")" \
+    || ok "nothing is stamped beside the gate: the census rides its message"
+grep -q "filed batch gate gate-1 on tk-subject" <<< "$OUT" \
+    && ok "the pass names the gate it filed" || bad "the filed gate is named" "$OUT"
 
 echo "── a routed workflow ROOT is topology, never routed-and-claimable ──"
-# gc.routed_to on a root names the run; it is not an offer. The hook refuses a
-# workflow-topology candidate (hookCandidateClaimable) and the controller's
-# demand loop refuses to count one (demandRowServable), both keyed on gc.kind,
-# so no worker can ever take the row. Calling it claimable published a count of
-# pool demand that nothing could serve. c-routed is the discriminator: an
-# ordinary routed bead keeps the claimable class.
+# The comment on topology_kind in liveness-classify.sh names the Gas City check
+# it mirrors and where the two differ. topology_kind reads gc.kind alone, so
+# root-landed and root-live classify as topology though neither carries a
+# gc.workflow_expanded stamp. c-routed is the discriminator: an ordinary routed
+# bead keeps the claimable class.
 FUNNEL="$(printf '%s' "$OUT" | grep 'funnel:' || true)"
 # Exact count per class: a substring match would accept "topology 20" too.
 funnel_count() { printf '%s' "$FUNNEL" | sed 's/.*funnel: //; s/ \xc2\xb7 /\n/g' \
@@ -360,12 +364,12 @@ for r in root-landed root-live; do
 done
 
 echo "── each named class drops, each inverse-defect shape stays visible ──"
-for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \
+for drop in c-routed c-subject c-pattern c-conv-held c-conv-fallback \
             c-demand-live c-demand-widen \
             c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
             c-slingconvoy c-synthconvoy c-synthconvoy-bool c-wisp-order c-husk-step-1 c-husk-step-2 \
-            c-rootvisit-step c-parented c-trackslive c-placement; do
+            c-rootconv-step c-parented c-trackslive c-placement; do
     case ",$EXPECT_SURVIVORS," in
         *",$drop,"*) bad "dropped $drop" "still in the survivor set" ;;
         *) ok "dropped $drop" ;;
@@ -383,28 +387,34 @@ for keep in c-pr-merged c-pr-closed c-pr-otherrepo c-pr-nourl c-preopen-fixable 
     esac
 done
 
-echo "── the hold is a live demand bead, never the takeaway stamp ──"
+echo "── the hold is an open human gate, never the takeaway stamp ──"
 # Read as a hold, `gc.takeaway` exempts a bead from every later pass, because a
 # sitting stamps it at the hold, REPLACES it with its outcome at sign-off, and
 # nothing clears it. c-takeaway is that shape and is a candidate above; these
-# pin what does hold, and that it holds for the demand's sake.
+# pin what does hold, and that it holds for the gate's sake.
 run_sweep ABSENT
 if grep -q "c-demand-live" "$ESC_BODIES"; then
-    bad "an open demand holds its bead" "c-demand-live was reported"
-else ok "an open demand holds its bead"; fi
+    bad "an open human gate holds its bead" "c-demand-live was reported"
+else ok "an open human gate holds its bead"; fi
 if grep -q "c-demand-widen" "$ESC_BODIES"; then
-    bad "a deferred demand still holds" "c-demand-widen was reported"
-else ok "a deferred demand still holds (the index reads ALIVE, not LIVE)"; fi
+    bad "a deferred gate still holds" "c-demand-widen was reported"
+else ok "a deferred gate still holds (the index reads ALIVE, not LIVE)"; fi
 grep -q "c-takeaway — a sitting ended here" "$ESC_BODIES" \
-    && ok "a takeaway with no demand is reported — the sitting ended" \
+    && ok "a takeaway with no gate is reported — the sitting ended" \
     || bad "takeaway alone no longer exempts" "$(cat "$ESC_BODIES")"
-# Mutate the guard: with the demand closed (gone from every not-closed listing)
-# the same bead, takeaway and all, has to come back.
-jq 'map(select(.id != "d-open"))' "$TMP/live.json" > "$TMP/live-nodemand.json"
-FAKE_LIVE="$TMP/live-nodemand.json" run_sweep ABSENT
+# Mutate the guard: with the gate cleared (gone from every not-closed listing)
+# the same bead, takeaway, edge and all, has to come back.
+jq 'map(select(.id != "g-open"))' "$TMP/live.json" > "$TMP/live-nogate.json"
+FAKE_LIVE="$TMP/live-nogate.json" run_sweep ABSENT
 grep -q "c-demand-live" "$ESC_BODIES" \
-    && ok "the demand closes → the bead it held is reported again" \
-    || bad "closed demand releases" "$(cat "$ESC_BODIES")"
+    && ok "the gate clears → the bead it held is reported again" \
+    || bad "a cleared gate releases" "$(cat "$ESC_BODIES")"
+# …and a gate of another type holds nothing.
+jq 'map(if .id == "g-open" then .await_type = "timer" else . end)' "$TMP/live.json" > "$TMP/live-timer.json"
+FAKE_LIVE="$TMP/live-timer.json" run_sweep ABSENT
+grep -q "c-demand-live" "$ESC_BODIES" \
+    && ok "a gate that is not a human gate holds nothing here" \
+    || bad "a timer gate held the bead" "$(cat "$ESC_BODIES")"
 
 echo "── the delta splits new from carried; index 0 is a real hit ──"
 PARTIAL="$(printf '%s' "$EXPECT_SURVIVORS" | cut -d, -f2-)"   # all but the FIRST id
@@ -415,6 +425,9 @@ grep -q "delta: 1 new, 22 carried" <<< "$OUT" \
 grep -q "c-docupdate" "$ESC_BODIES" && ok "the new one is enumerated" || bad "new enumeration" "$(cat "$ESC_BODIES")"
 grep -q "Carried (still unnamed from earlier passes" "$ESC_BODIES" \
     && ok "carried ids listed as bare ids, not re-litigated" || bad "carried line" "$(cat "$ESC_BODIES")"
+grep -Eq -- 'liveness-recheck\.sh --ids c-docupdate --carried [a-z0-9,-]+ --pass-at ' "$ESC_BODIES" \
+    && ok "…and the re-check command names the carried ids beside the new one" \
+    || bad "the re-check command's carried ids" "$(grep 'liveness-recheck' "$ESC_BODIES")"
 
 echo "── a departed bead is pruned from the next baseline ──"
 run_sweep "$EXPECT_SURVIVORS,z-departed"
@@ -423,53 +436,113 @@ eq "$(cat "$BASELINE_FILE")" "$EXPECT_SURVIVORS" \
 
 echo "── an unchanged population files nothing and still advances ──"
 run_sweep "$EXPECT_SURVIVORS"
-eq "$(cat "$ESC_CALLS")" "" "0 new → no visit filed"
+eq "$(cat "$ESC_CALLS")" "" "0 new → no gate filed"
 grep -q "nothing new — nothing filed" <<< "$OUT" && ok "…and says so" || bad "quiet-pass line" "$OUT"
 
-echo "── a live visit on the subject skips AND leaves the baseline alone ──"
-jq '. + [{"id":"v-batch","status":"in_progress","title":"visit: tk-subject","metadata":{"task_kind":"visit","gc.continuation_group":"tk-subject"}}]' \
+echo "── an open human gate on the subject skips AND leaves the baseline alone ──"
+jq 'map(if .id == "tk-subject" then .dependencies = [{"issue_id":"tk-subject","depends_on_id":"g-batch","type":"blocks"}] else . end)
+    + [{"id":"g-batch","status":"open","issue_type":"gate","await_type":"human","await_id":"liveness-sweep","title":"unnamed waits"}]' \
     "$TMP/live.json" > "$TMP/live-held.json"
 FAKE_LIVE="$TMP/live-held.json" run_sweep "c-plain"
-eq "$(cat "$ESC_CALLS")" "" "no second visit stacked on a held sitting"
+eq "$(cat "$ESC_CALLS")" "" "no second gate stacked on an open one"
+grep -q "an open human gate already waits on tk-subject" <<< "$OUT" && ok "…and the pass says why" || bad "gate guard line" "$OUT"
 eq "$(cat "$BASELINE_FILE")" "c-plain" \
    "the baseline is NOT advanced — unseen candidates must not retire"
-# The su-ab9je shape: the stamp landed empty, only the tracks edge names it.
-jq '. + [{"id":"v-edge","status":"open","title":"visit: tk-subject","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-edge","depends_on_id":"tk-subject","type":"tracks"}]}]' \
-    "$TMP/live.json" > "$TMP/live-edge.json"
-FAKE_LIVE="$TMP/live-edge.json" run_sweep "c-plain"
-eq "$(cat "$ESC_CALLS")" "" "an edge-only visit (empty stamp) still reads as live"
+echo "── …and so does a conversation about the subject ──"
+jq '. + [{"id":"tk-conv-subj","status":"open","issue_type":"task","assignee":"human","title":"about the unnamed waits","dependencies":[{"issue_id":"tk-conv-subj","depends_on_id":"tk-subject","type":"tracks"}]}]' \
+    "$TMP/live.json" > "$TMP/live-conv.json"
+FAKE_LIVE="$TMP/live-conv.json" run_sweep "c-plain"
+eq "$(cat "$ESC_CALLS")" "" "a conversation about the subject, even in the queue, files no gate beside it"
+grep -q "a conversation already waits on tk-subject" <<< "$OUT" && ok "…and the pass says why" || bad "conversation guard line" "$OUT"
+eq "$(cat "$BASELINE_FILE")" "c-plain" "…and the baseline is NOT advanced"
 
-echo "── the re-file guard suppresses only a dispositioned identical SET ──"
+echo "── a gate on the subject at any status but closed still waits ──"
+# A human gate holds until a person resolves it, so one deferred, blocked,
+# hooked or pinned still asks, and human-gate.sh would answer this pass with it.
+# Only the not-closed listing carries it.
+jq 'map(if .id == "tk-subject" then .dependencies = [{"issue_id":"tk-subject","depends_on_id":"g-parked","type":"blocks"}] else . end)' \
+    "$TMP/live.json" > "$TMP/live-parked.json"
+for st in deferred blocked hooked pinned; do
+    jq --arg st "$st" '. + [{"id":"g-parked","status":$st,"issue_type":"gate","await_type":"human","await_id":"liveness-sweep","title":"unnamed waits"}]' \
+        "$TMP/widen.json" > "$TMP/widen-parked.json"
+    FAKE_LIVE="$TMP/live-parked.json" FAKE_WIDEN="$TMP/widen-parked.json" run_sweep "c-plain"
+    eq "$(cat "$ESC_CALLS")" "" "a $st gate on the subject: no gate filed beside it"
+    grep -q "an open human gate already waits on tk-subject" <<< "$OUT" \
+        && ok "…and the pass says a $st gate waits" || bad "$st gate guard line" "$OUT"
+    eq "$(cat "$BASELINE_FILE")" "c-plain" "…and the baseline is NOT advanced past what no one was shown"
+done
+# A conversation stands only at open or in_progress, as the classifier reads
+# conversations, so one deferred about the subject is no person on it.
+jq '. + [{"id":"tk-conv-subj","status":"deferred","issue_type":"task","assignee":"human","title":"about the unnamed waits","dependencies":[{"issue_id":"tk-conv-subj","depends_on_id":"tk-subject","type":"tracks"}]}]' \
+    "$TMP/widen.json" > "$TMP/widen-conv.json"
+FAKE_WIDEN="$TMP/widen-conv.json" run_sweep "c-plain"
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a deferred conversation about the subject does not hold the batch back"
+
+echo "── a gate filed after the listings: the census it never carried is not reported ──"
+# The listings carry no gate on the subject, so the guard passes. One was filed
+# under the key since, carrying an earlier census, and the real human-gate.sh
+# files nothing and answers with its id and exit 0. Only the gate read back
+# says this pass's census reached no one.
+late_gate() { # late_gate <subject> <key> <description> — an open gate the listings never saw
+    jq -nc --arg id "g-late" --arg k "$2" --arg d "$3" \
+        '[{id: $id, issue_type: "gate", await_type: "human", await_id: $k, status: "open",
+           dependency_type: "blocks", title: ($d | split("\n")[0]), description: $d}]' > "$SHOW_DIR/dep-$1.json"
+}
+late_gate tk-subject liveness-sweep "unnamed waits: 1 new, 0 carried
+Census cut 2026-10-01T00:00:00Z — a snapshot, not the board. Before acting, re-check it:
+  /x/assets/scripts/liveness-recheck.sh --ids c-old --pass-at 2026-10-01T00:00:00Z"
+GC_HUMAN_GATE_TOOL="$HERE/human-gate.sh" run_sweep "c-plain"
+eq "$RC" "0" "the pass completes"
+grep -q "gate g-late already asks on tk-subject with an earlier census" <<< "$OUT" \
+    && ok "…and names the gate that answered in its place" || bad "late gate line" "$OUT"
+grep -q "filed batch gate" <<< "$OUT" \
+    && bad "…and claims no filing" "$OUT" || ok "…and claims no filing"
+eq "$(cat "$BASELINE_FILE")" "c-plain" "…and the baseline is NOT advanced: the new set was never shown"
+rm -f "$SHOW_DIR/dep-tk-subject.json"
+# A filed gate that does not read back proves nothing either.
+GC_DEP_FAIL=1 run_sweep "c-plain"
+eq "$RC" "1" "a gate whose subject's gates do not read back fails the pass"
+eq "$(cat "$BASELINE_FILE")" "c-plain" "…and leaves the baseline for the next pass to re-report"
+
+echo "── the re-file guard suppresses only a set a person ruled on ──"
 NEWKEY="$(printf '%s' "$EXPECT_SURVIVORS" | tr ',' '\n' | sort | paste -sd, -)"
-prior() { printf '[{"id":"%s","metadata":{"task_kind":"visit","gc.outcome":"%s","sweep.new_ids":"%s","gc.continuation_group":"tk-subject"}}]' "$3" "$1" "$2" > "$TMP/prior.json"; }
-prior dispositioned "$NEWKEY" v-done
-PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
-eq "$(cat "$ESC_CALLS")" "" "the same NEW set, already dispositioned, is not re-filed"
-grep -q "not re-filed" <<< "$OUT" && ok "…and says which visit disposed it" || bad "refile line" "$OUT"
+# prior <close-reason> <new-ids-csv> <gate-id> [await-id] — one cleared gate on
+# the subject, as bd_human_gates reads it: its message carries the re-check
+# command naming the new set it asked about.
+prior() {
+    jq -nc --arg r "$1" --arg ids "$2" --arg id "$3" --arg k "${4:-liveness-sweep}" \
+        '[{id: $id, issue_type: "gate", await_type: "human", await_id: $k, status: "closed",
+           close_reason: $r, dependency_type: "blocks", title: "unnamed waits",
+           description: ("unnamed waits: 23 new, 0 carried\nCensus cut 2026-10-01T00:00:00Z — a snapshot, not the board. Before acting, re-check it:\n  /x/assets/scripts/liveness-recheck.sh --ids " + $ids + " --pass-at 2026-10-01T00:00:00Z\n\nNew this pass:")}]' \
+        > "$SHOW_DIR/dep-tk-subject.json"
+}
+prior "ruled: every item routed, parked or killed" "$NEWKEY" g-done
+run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "" "the same NEW set, ruled on already, is not re-filed"
+grep -q "same NEW set as gate g-done, which a person ruled on; not re-filed" <<< "$OUT" \
+    && ok "…and says which gate settled it" || bad "refile line" "$OUT"
 eq "$(cat "$BASELINE_FILE")" "$EXPECT_SURVIVORS" "…and the baseline advances (the set WAS seen)"
-# A cut-short sitting did not dispose of its agenda: file again.
-prior cut-short "$NEWKEY" v-cut
-PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
-eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a cut-short prior files again"
-# A FAILING listing files even when its payload matches (rc is the evidence).
-prior dispositioned "$NEWKEY" v-failed
-PRIOR_VISITS="$TMP/prior.json" GC_LIST_RC=1 run_sweep ABSENT
-eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
-   "a failing closed-visit listing files, even when what it printed matches"
-# The empty-stamp shape: a dispositioned prior identified ONLY by its tracks
-# edge still suppresses. The stamp-keyed server query could not see it and
-# re-filed a settled agenda; the edge-union resolution (visit_covers) does.
-printf '[{"id":"v-edge-done","metadata":{"task_kind":"visit","gc.outcome":"dispositioned","sweep.new_ids":"%s","gc.continuation_group":""},"dependencies":[{"issue_id":"v-edge-done","depends_on_id":"tk-subject","type":"tracks"}]}]' \
-    "$NEWKEY" > "$TMP/prior.json"
-PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
-eq "$(cat "$ESC_CALLS")" "" "an empty-stamp, edge-only dispositioned prior still suppresses the re-file"
-# …and visit_covers must DISCRIMINATE by subject: a dispositioned prior with the
-# same set but covering a DIFFERENT subject (no edge here, stamp names another)
-# is not this subject's prior, so it files.
-printf '[{"id":"v-elsewhere","metadata":{"task_kind":"visit","gc.outcome":"dispositioned","sweep.new_ids":"%s","gc.continuation_group":"some-other-subject"}}]' \
-    "$NEWKEY" > "$TMP/prior.json"
-PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
-eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a dispositioned prior on a DIFFERENT subject does not suppress this one"
+# The test is the id SET, whatever order the command names it in.
+prior "ruled: done" "$(printf '%s' "$NEWKEY" | tr ',' '\n' | sort -r | paste -sd, -)" g-rev
+run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "" "the same set named in another order is the same set"
+# A gate cleared moot or benign settled nothing: file again.
+prior "moot: the sitting was cut short" "$NEWKEY" g-cut
+run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a gate cleared moot files again"
+# A set that differs is news.
+prior "ruled: done" "$(printf '%s' "$NEWKEY" | cut -d, -f2-)" g-less
+run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a ruling on a different set does not suppress this one"
+# A ruling under another key is about another question.
+prior "ruled: done" "$NEWKEY" g-other some-other-question
+run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a ruled gate under another key does not suppress the sweep's"
+# Gates that do not read file, even when what they would say matches.
+prior "ruled: done" "$NEWKEY" g-unread
+GC_DEP_FAIL=1 run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "gates that do not read file again, the safe side"
+rm -f "$SHOW_DIR/dep-tk-subject.json"
 
 echo "── fail-safe: an unreadable listing aborts, files nothing, keeps the baseline ──"
 GC_READY_FAIL=1 run_sweep "old-baseline"
@@ -497,8 +570,8 @@ grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
 echo "── a PR-gated anchor is a named wait however long its PR sits ──"
 # An open PR names its anchor's wait, and the operator's review of it has no
 # deadline. With both open PRs dated a year back the pass classifies exactly as
-# it does with fresh ones: the anchors stay gated, the one visit filed is the
-# batch visit, and nothing is stamped on an anchor.
+# it does with fresh ones: the anchors stay gated, the one gate filed is the
+# batch gate, and nothing is stamped on an anchor.
 pass_funnel() { printf '%s' "$OUT" | grep 'funnel:' || true; }
 gh_prs 0 0
 run_sweep ABSENT
@@ -514,7 +587,7 @@ eq "$(pass_funnel)" "$FRESH_FUNNEL" "every class counts as it does with fresh PR
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "$EXPECT_SURVIVORS" \
    "…and the unnamed set is the one fresh PRs give"
 eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
-   "the one visit filed is the batch visit — no anchor is escalated for its PR's age"
+   "the one gate filed is the batch gate — no anchor is put to a person for its PR's age"
 grep -Eq 'c-pr-(open|case)' "$ESC_BODIES" \
     && bad "neither PR-gated anchor is listed as an unnamed wait" "$(cat "$ESC_BODIES")" \
     || ok "neither PR-gated anchor is listed as an unnamed wait"
@@ -530,9 +603,9 @@ grep -q 'bd create .*triage: unnamed waits' "$GC_CALLS" \
     && ok "no subject → one is created" || bad "subject creation" "$(cat "$GC_CALLS")"
 grep -q 'triage.scope=unnamed-waits' "$GC_CALLS" \
     && ok "…stamped task_kind + triage.scope" || bad "subject stamps" "$(cat "$GC_CALLS")"
-eq "$(cat "$ESC_CALLS")" "tk-subj-new liveness-sweep" "…and the visit files on the new subject"
+eq "$(cat "$ESC_CALLS")" "tk-subj-new liveness-sweep" "…and the batch gate files on the new subject"
 
-echo "── recurrence: a changed scope set files ONE visit and stamps last_seen ──"
+echo "── recurrence: a changed scope set files ONE gate and stamps last_seen ──"
 recur_live() { # recur_live <last_seen-json-or-absent> <extra-live-rows...>
     jq --argjson extra "$2" ". + [{\"id\":\"subj-ideas\",\"status\":\"open\",\"title\":\"triage: held ideas\",\"metadata\":{\"task_kind\":\"triage-subject\",\"triage.scope\":\"kind:idea\"$1}}] + \$extra" \
         "$TMP/live.json" > "$TMP/live-recur.json"
@@ -543,19 +616,19 @@ FAKE_LIVE="$TMP/live-recur.json" run_sweep "$EXPECT_SURVIVORS,idea-1"
 grep -q "subj-ideas triage-recurrence" "$ESC_CALLS" \
     && ok "a never-evaluated subject with candidates files" || bad "recurrence first file" "$(cat "$ESC_CALLS"; echo; cat "$TMP/err")"
 grep -q 'bd update subj-ideas --set-metadata triage.last_seen=idea-1' "$GC_CALLS" \
-    && ok "…and stamps last_seen AFTER the visit" || bad "last_seen stamp" "$(cat "$GC_CALLS")"
+    && ok "…and stamps last_seen AFTER the gate" || bad "last_seen stamp" "$(cat "$GC_CALLS")"
 
 recur_live ',"triage.last_seen":"idea-1"' "$IDEA"   # unchanged set
 FAKE_LIVE="$TMP/live-recur.json" run_sweep "$EXPECT_SURVIVORS,idea-1"
 grep -q "subj-ideas: skipped-unchanged" <<< "$OUT" \
     && ok "an unchanged set skips (the park-shaped case)" || bad "recurrence unchanged" "$OUT"
 grep -q "subj-ideas triage-recurrence" "$ESC_CALLS" \
-    && bad "no visit on an unchanged set" "filed anyway" || ok "no visit on an unchanged set"
+    && bad "no gate on an unchanged set" "filed anyway" || ok "no gate on an unchanged set"
 
 recur_live ',"triage.last_seen":"idea-1"' '[]'      # scope EMPTIED
 FAKE_LIVE="$TMP/live-recur.json" run_sweep "$EXPECT_SURVIVORS"
 grep -q "subj-ideas triage-recurrence" "$ESC_CALLS" \
-    && ok "an emptied scope is a change — one last visit names what left" \
+    && ok "an emptied scope is a change — one last gate names what left" \
     || bad "recurrence emptied" "$(cat "$ESC_CALLS")"
 grep -q "Left: idea-1" "$ESC_BODIES" && ok "…and the body names the leaver" || bad "leaver named" "$(cat "$ESC_BODIES")"
 grep -q 'bd update subj-ideas --set-metadata triage.last_seen=$' "$GC_CALLS" \
@@ -568,15 +641,48 @@ grep -q "subj-ideas: skipped-no-candidates" <<< "$OUT" \
 grep -q 'bd update subj-ideas --set-metadata triage.last_seen=$' "$GC_CALLS" \
     && ok "…and the ABSENT key is stamped to the empty set" || bad "absent-key stamp" "$(cat "$GC_CALLS")"
 
-recur_live ',"triage.last_seen":""' "$IDEA"          # live visit on the subject
-jq '. + [{"id":"v-ideas","status":"in_progress","title":"visit: subj-ideas","metadata":{"task_kind":"visit","gc.continuation_group":"subj-ideas"}}]' \
+recur_live ',"triage.last_seen":""' "$IDEA"          # a conversation about the subject
+jq '. + [{"id":"tk-conv-ideas","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.tk-conv-ideas","title":"about the ideas","dependencies":[{"issue_id":"tk-conv-ideas","depends_on_id":"subj-ideas","type":"tracks"}]}]' \
     "$TMP/live-recur.json" > "$TMP/live-recur2.json"
 FAKE_LIVE="$TMP/live-recur2.json" run_sweep "$EXPECT_SURVIVORS,idea-1"
-grep -q "subj-ideas: skipped-live-visit" <<< "$OUT" \
-    && ok "a live visit on the subject skips" || bad "recurrence live-visit skip" "$OUT"
+grep -q "subj-ideas: skipped-person-waiting" <<< "$OUT" \
+    && ok "a conversation about the subject skips" || bad "recurrence conversation skip" "$OUT"
 grep -q 'bd update subj-ideas' "$GC_CALLS" \
     && bad "…and stamps NOTHING on that path" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
     || ok "…and stamps NOTHING on that path (the set was never shown)"
+grep -q "tk-conv-ideas" <<< "$(cat "$ESC_BODIES")" \
+    && bad "a conversation is never part of a scope set" "$(cat "$ESC_BODIES")" \
+    || ok "a conversation is never part of a scope set"
+recur_live ',"triage.last_seen":""' "$IDEA"          # an open human gate on the subject
+jq 'map(if .id == "subj-ideas" then .dependencies = [{"issue_id":"subj-ideas","depends_on_id":"g-ideas","type":"blocks"}] else . end)
+    + [{"id":"g-ideas","status":"open","issue_type":"gate","await_type":"human","await_id":"triage-recurrence","title":"ideas"}]' \
+    "$TMP/live-recur.json" > "$TMP/live-recur3.json"
+FAKE_LIVE="$TMP/live-recur3.json" run_sweep "$EXPECT_SURVIVORS,idea-1"
+grep -q "subj-ideas: skipped-person-waiting" <<< "$OUT" \
+    && ok "an open human gate on the subject skips" || bad "recurrence gate skip" "$OUT"
+# The same gate deferred still asks, though only the not-closed listing has it.
+jq 'map(if .id == "subj-ideas" then .dependencies = [{"issue_id":"subj-ideas","depends_on_id":"g-ideas","type":"blocks"}] else . end)' \
+    "$TMP/live-recur.json" > "$TMP/live-recur4.json"
+jq '. + [{"id":"g-ideas","status":"deferred","issue_type":"gate","await_type":"human","await_id":"triage-recurrence","title":"ideas"}]' \
+    "$TMP/widen.json" > "$TMP/widen-recur.json"
+FAKE_LIVE="$TMP/live-recur4.json" FAKE_WIDEN="$TMP/widen-recur.json" run_sweep "$EXPECT_SURVIVORS,idea-1"
+grep -q "subj-ideas: skipped-person-waiting" <<< "$OUT" \
+    && ok "a deferred human gate on the subject skips too" || bad "recurrence deferred gate skip" "$OUT"
+grep -q 'bd update subj-ideas' "$GC_CALLS" \
+    && bad "…and stamps nothing" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
+    || ok "…and stamps nothing"
+# A gate filed under the key after the listings answers the call with an
+# earlier set, so the set this pass computed was shown to no one.
+late_gate subj-ideas triage-recurrence "triage recurrence: 1 candidates in scope
+First evaluation of this subject: all 1 are simply what is in scope now.
+Current set: idea-0"
+FAKE_LIVE="$TMP/live-recur.json" GC_HUMAN_GATE_TOOL="$HERE/human-gate.sh" run_sweep "$EXPECT_SURVIVORS,idea-1"
+grep -q "subj-ideas: gate g-late already asks with an earlier set — last_seen not advanced" <<< "$OUT" \
+    && ok "a recurrence answered with a gate filed since the listings says so" || bad "recurrence late gate" "$OUT"
+grep -q 'bd update subj-ideas' "$GC_CALLS" \
+    && bad "…and stamps no last_seen" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
+    || ok "…and stamps no last_seen, so a later run files the set"
+rm -f "$SHOW_DIR/dep-subj-ideas.json"
 
 echo "── the pass owns the cadence window and spends it before it reads ──"
 # liveness-sweep-precheck.sh, the order's `check`, never spends this stamp on
@@ -676,7 +782,7 @@ grep -q '^we-anchor landed-fix-wedge$' "$ESC_CALLS" \
     && ok "an edge-less finding whose lane fix landed escalates its wedged anchor" \
     || bad "edge-less wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
 grep -q 'edge-less' "$ESC_BODIES" \
-    && ok "…and the visit body names the edge-less shape" || bad "edge-less body" "$(cat "$ESC_BODIES")"
+    && ok "…and the gate's message names the edge-less shape" || bad "edge-less body" "$(cat "$ESC_BODIES")"
 
 echo "── …but an edge-less finding whose lane fix is still IN FLIGHT is not a wedge ──"
 printf '%s\n' '[{"id":"we-fix","status":"open","metadata":{"task_kind":"rework","anchor_bead":"we-anchor","source_review_bead":"we-rev"}}]' > "$TMP/show/reworks-we-anchor.json"
@@ -791,7 +897,7 @@ printf '%s\n' '[{"id":"ri-demo","title":"pre-open, correctness green, demo pendi
 backing ri-demo correctness
 in_rig() { # in_rig <rig> : run_sweep from the rig's checkout, with no index override
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
-    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"; : > "$ESC_FILED"
     RC=0
     OUT="$(cd "$1" && env -u GC_REVIEW_CHECKS_INDEX FAKE_READY="$TMP/ri-ready.json" bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
 }
@@ -805,29 +911,29 @@ eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" \
    "a rig whose own index phases demo open-as-draft gates the same anchor"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
-# Two visits track two ready subjects: one held by a live session (lx-live-1 is
-# in FAKE_SESSIONS), one by a gone session (lx-dead-9 is not). A third subject is
-# a visit bead left in the ready set by that gone session. The live-held subject
-# stays covered; the dead-held subject and the stranded visit bead return to the
-# census. Two more visits track workflow ROOTS, so the ready steps under them are
-# covered through gc.root_bead_id by the same holder test. Self-contained
-# fixtures — the suite above clobbers the shared ones.
+# Conversations track ready subjects: one held by a sitting a listed session
+# carries (lx-live-4's alias), one held under an alias no listed session
+# carries, and one in the queue of the operator. The live-held subject and the
+# queued one stay covered; the dead-held subject returns to the census. Two more track workflow ROOTS, so the ready steps under
+# them are covered through gc.root_bead_id by the same holder test.
+# Self-contained fixtures — the suite above clobbers the shared ones.
 cat > "$TMP/hl-ready.json" <<'JSON'
 [
-  {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
-  {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
-  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}},
-  {"id":"hl-live-root-step","title":"a step of a root a live-held visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-live-root"}},
-  {"id":"hl-dead-root-step","title":"a step of a root a dead-held visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-dead-root"}}
+  {"id":"hl-live-subj","title":"subject of a live-held conversation","issue_type":"task","metadata":{}},
+  {"id":"hl-dead-subj","title":"subject of a dead-held conversation","issue_type":"task","metadata":{}},
+  {"id":"hl-queue-subj","title":"subject of a conversation in the queue","issue_type":"task","metadata":{}},
+  {"id":"hl-live-root-step","title":"a step of a root a live-held conversation tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-live-root"}},
+  {"id":"hl-dead-root-step","title":"a step of a root a dead-held conversation tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-dead-root"}}
 ]
 JSON
 cat > "$TMP/hl-live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-live","status":"in_progress","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
-  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]},
-  {"id":"hl-v-liveroot","status":"in_progress","title":"visit: hl-live-root","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-liveroot","depends_on_id":"hl-live-root","type":"tracks"}]},
-  {"id":"hl-v-deadroot","status":"in_progress","title":"visit: hl-dead-root","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-deadroot","depends_on_id":"hl-dead-root","type":"tracks"}]}
+  {"id":"hl-c-live","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.hl-c-live","title":"about hl-live-subj","dependencies":[{"issue_id":"hl-c-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-c-dead","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.hl-c-dead","title":"about hl-dead-subj","dependencies":[{"issue_id":"hl-c-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]},
+  {"id":"hl-c-queue","status":"open","issue_type":"task","assignee":"human","title":"about hl-queue-subj","dependencies":[{"issue_id":"hl-c-queue","depends_on_id":"hl-queue-subj","type":"tracks"}]},
+  {"id":"hl-c-liveroot","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.hl-c-liveroot","title":"about hl-live-root","dependencies":[{"issue_id":"hl-c-liveroot","depends_on_id":"hl-live-root","type":"tracks"}]},
+  {"id":"hl-c-deadroot","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.hl-c-deadroot","title":"about hl-dead-root","dependencies":[{"issue_id":"hl-c-deadroot","depends_on_id":"hl-dead-root","type":"tracks"}]}
 ]
 JSON
 printf '[]\n' > "$TMP/hl-widen.json"
@@ -835,51 +941,52 @@ printf '%s\n' '[{"id":"hl-live-root","metadata":{}}]' > "$TMP/show/hl-live-root.
 printf '%s\n' '[{"id":"hl-dead-root","metadata":{}}]' > "$TMP/show/hl-dead-root.json"
 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
-case ",$BL," in *",hl-live-subj,"*) bad "live-held visit over-surfaces" "hl-live-subj surfaced though lx-live-1 is alive" ;; *) ok "a live-held visit keeps its subject out of the census" ;; esac
-case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held visit returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
-case ",$BL," in *",hl-ready-deadvisit,"*) ok "a visit stranded ready by a gone session surfaces (arm 1)" ;; *) bad "stranded visit bead hidden" "hl-ready-deadvisit stayed conversing (baseline: $BL)" ;; esac
-case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held visit's root over-surfaces" "hl-live-root-step surfaced though its root's visit is held by lx-live-1" ;; *) ok "a step whose root a live-held visit tracks stays out of the census" ;; esac
-case ",$BL," in *",hl-dead-root-step,"*) ok "a step whose root a dead-held visit tracks returns to the census" ;; *) bad "dead-held root step hidden" "hl-dead-root-step stayed masked (baseline: $BL)" ;; esac
+case ",$BL," in *",hl-live-subj,"*) bad "live-held conversation over-surfaces" "hl-live-subj surfaced though lx-live-4 carries its alias" ;; *) ok "a live-held conversation keeps its subject out of the census" ;; esac
+case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held conversation returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
+case ",$BL," in *",hl-queue-subj,"*) bad "queued conversation's subject surfaced" "hl-queue-subj reached the census though a conversation about it waits in the operator's queue (baseline: $BL)" ;; *) ok "a conversation in the queue keeps its subject out of the census: a person is already asked" ;; esac
+case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held conversation's root over-surfaces" "hl-live-root-step surfaced though its root's conversation is held by lx-live-5" ;; *) ok "a step whose root a live-held conversation tracks stays out of the census" ;; esac
+case ",$BL," in *",hl-dead-root-step,"*) ok "a step whose root a dead-held conversation tracks returns to the census" ;; *) bad "dead-held root step hidden" "hl-dead-root-step stayed masked (baseline: $BL)" ;; esac
 
 echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not live ──"
 # A sitting that lingers in the list as closed/archived is dead, per helm's
-# ownerLive — its held visit must stop covering its subject. A holder listed in
-# any other state (asleep here) is live and keeps covering, so the gate excludes
-# the terminal states only, not everything that is not "active".
+# ownerLive — its held conversation must stop covering its subject. A holder
+# listed in any other state (asleep here) is live and keeps covering, so the
+# gate excludes the terminal states only, not everything that is not "active".
 cat > "$TMP/hl-term-sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
-  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
-  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"hl-c-closed","name":"","agent_name":""},
+  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"hl-c-arch","name":"","agent_name":""},
+  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"hl-c-asleep","name":"","agent_name":""}
 ]}
 JSON
 cat > "$TMP/hl-term-ready.json" <<'JSON'
 [
-  {"id":"hl-closed-subj","title":"subject of a visit held by a CLOSED session","issue_type":"task","metadata":{}},
-  {"id":"hl-arch-subj","title":"subject of a visit held by an ARCHIVED session","issue_type":"task","metadata":{}},
-  {"id":"hl-asleep-subj","title":"subject of a visit held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
+  {"id":"hl-closed-subj","title":"subject of a conversation held by a CLOSED session","issue_type":"task","metadata":{}},
+  {"id":"hl-arch-subj","title":"subject of a conversation held by an ARCHIVED session","issue_type":"task","metadata":{}},
+  {"id":"hl-asleep-subj","title":"subject of a conversation held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
 ]
 JSON
 cat > "$TMP/hl-term-live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-closed","status":"in_progress","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
-  {"id":"hl-v-arch","status":"in_progress","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
-  {"id":"hl-v-asleep","status":"in_progress","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+  {"id":"hl-c-closed","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.hl-c-closed","title":"about hl-closed-subj","dependencies":[{"issue_id":"hl-c-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-c-arch","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.hl-c-arch","title":"about hl-arch-subj","dependencies":[{"issue_id":"hl-c-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-c-asleep","status":"in_progress","issue_type":"task","assignee":"testrig/testrig.hl-c-asleep","title":"about hl-asleep-subj","dependencies":[{"issue_id":"hl-c-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
 ]
 JSON
 FAKE_SESSIONS="$TMP/hl-term-sessions.json" FAKE_READY="$TMP/hl-term-ready.json" FAKE_LIVE="$TMP/hl-term-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BLT="$(cat "$BASELINE_FILE" 2>/dev/null)"
 case ",$BLT," in *",hl-closed-subj,"*) ok "a CLOSED but still-listed holder returns its subject to the census" ;; *) bad "closed-held subject hidden" "hl-closed-subj stayed masked (baseline: $BLT)" ;; esac
 case ",$BLT," in *",hl-arch-subj,"*) ok "an ARCHIVED but still-listed holder returns its subject to the census" ;; *) bad "archived-held subject hidden" "hl-arch-subj stayed masked (baseline: $BLT)" ;; esac
-case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held visit over-surfaces" "hl-asleep-subj surfaced though lx-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
+case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held conversation over-surfaces" "hl-asleep-subj surfaced though lx-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
 
-echo "── an unreadable session list keeps every visit covering (unprovable death) ──"
+echo "── an unreadable session list keeps every held conversation covering (unprovable death) ──"
 GC_SESSION_FAIL=1 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BLF="$(cat "$BASELINE_FILE" 2>/dev/null)"
-for hidden in hl-dead-subj hl-ready-deadvisit hl-live-subj hl-dead-root-step hl-live-root-step; do
+for hidden in hl-dead-subj hl-live-subj hl-dead-root-step hl-live-root-step; do
   case ",$BLF," in *",$hidden,"*) bad "fail-open surfaced $hidden" "an unreadable session list must hide nothing new (baseline: $BLF)" ;; *) ok "unreadable session list → $hidden keeps covering" ;; esac
 done
+case ",$BLF," in *",hl-queue-subj,"*) bad "queued subject surfaced on an unreadable list" "hl-queue-subj reached the census (baseline: $BLF)" ;; *) ok "…and a conversation in the queue still covers its subject" ;; esac
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"

@@ -19,7 +19,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     owed: false,
     weight: 0,
     held: false,
-    visit_state: '',
+    sitting_state: '',
     n_closed: 0,
     m_total: 0,
     open: 0,
@@ -65,6 +65,8 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     acceptable: false,
     accept_formula: '',
     recommendation: null,
+    accept_withheld: null,
+    gates_in_session: null,
     ...over,
   };
 }
@@ -92,15 +94,14 @@ function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
 }
 
 // The two halves of the conversation record: one sitting still running, one
-// closed with the outcome and the takeaway it left.
+// closed with the close reason and the takeaway it left.
 const SITTINGS: Sitting[] = [
   {
     id: 'tk-vst01',
     rig: 'gc-toolkit',
     subject: 'tk-epic',
-    title: 'visit: tk-epic — what the canvas owes the operator',
+    title: 'what the canvas owes the operator',
     status: 'in_progress',
-    outcome: '',
     outcome_reason: '',
     session: 'gc-toolkit__converse-1',
     opened_at: '2026-08-21T18:34:00Z',
@@ -111,9 +112,8 @@ const SITTINGS: Sitting[] = [
     id: 'tk-vst02',
     rig: 'gc-toolkit',
     subject: 'tk-yps55',
-    title: 'visit: tk-yps55 — the raw script path',
+    title: 'the raw script path',
     status: 'closed',
-    outcome: 'diagnosed',
     outcome_reason: '',
     session: 'gc-toolkit__converse-2',
     opened_at: '2026-08-21T17:20:00Z',
@@ -160,7 +160,7 @@ const BOARD: Board = {
       section: 'stalled',
       group_root: 'tk-epic',
       frontier: '2 open · 0 in-progress (stranded)',
-      needs: 'decomposed, idle — assign or visit',
+      needs: 'decomposed, idle — assign or discuss',
       rank_score: 3_005_003,
     }),
     // A merge anchor under review → the review band, another member of tk-epic.
@@ -310,12 +310,12 @@ it('surfaces the operator-owned bead as a gate row indented under its family', a
 });
 
 // A held row carries a VISIBLE, self-evident chip, not a bare glyph in a native
-// title: it names the state in a word — a parked visit waiting for the operator
-// vs an engaged one a live sitting is in now — is a real button announced as
-// interactive, and reveals the sittings (headline, state, session) in a details
-// card reached by hover or focus rather than a native `title`. The wire's
-// visit_state, not the sitting shape, decides parked vs engaged.
-it('marks a held row with a visible parked/engaged chip and reveals the sittings', async () => {
+// title: it names the state in a word — waiting for the operator vs in session,
+// a live sitting on it now — is a real button announced as interactive, and
+// reveals the sittings (headline, state, session) in a details card reached by
+// hover or focus rather than a native `title`. The wire's sitting_state, not
+// the sitting shape, decides waiting vs in session.
+it('marks a held row with a visible waiting/in-session chip and reveals the sittings', async () => {
   const board: Board = {
     generated_at: '2026-08-26T08:00:00Z',
     total: 5,
@@ -324,9 +324,8 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
         id: 'tk-vsit-engaged',
         rig: 'gc-toolkit',
         subject: 'tk-engaged',
-        title: 'visit: tk-engaged',
+        title: 'the engaged row',
         status: 'in_progress',
-        outcome: '',
         outcome_reason: '',
         session: 'gc-toolkit__converse-9',
         opened_at: '2026-08-26T07:00:00Z',
@@ -337,9 +336,8 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
         id: 'tk-vsit-parked',
         rig: 'gc-toolkit',
         subject: 'tk-parked',
-        title: 'visit: tk-parked',
+        title: 'the parked row',
         status: 'open',
-        outcome: '',
         outcome_reason: '',
         session: '',
         opened_at: '2026-08-26T07:05:00Z',
@@ -367,7 +365,7 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
         severity: 'NORMAL',
         section: 'active',
         held: true,
-        visit_state: 'engaged',
+        sitting_state: 'in_session',
         group_root: 'tk-fam',
         frontier: 'in flight',
         rank_score: 2_500_000,
@@ -379,7 +377,7 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
         severity: 'NORMAL',
         section: 'active',
         held: true,
-        visit_state: 'parked',
+        sitting_state: 'waiting',
         group_root: 'tk-fam',
         frontier: 'in flight',
         rank_score: 2_450_000,
@@ -391,7 +389,7 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
         severity: 'ELEVATED',
         section: 'gate',
         held: true,
-        visit_state: 'engaged',
+        sitting_state: 'in_session',
         group_root: 'tk-fam',
         frontier: 'PR #7',
         rank_score: 2_400_000,
@@ -425,7 +423,7 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
   render(<App />);
   await waitFor(() => expect(screen.getByText('engaged row')).toBeTruthy());
 
-  // Engaged: a visible chip, a real button announced as interactive, naming the
+  // In session: a visible chip, a real button announced as interactive, naming the
   // live state in a word — and NO native title tooltip.
   const engaged = rowFor('engaged row') as HTMLElement;
   const engagedChip = within(engaged).getByRole('button', { name: /in session/i });
@@ -433,26 +431,26 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
   expect(engagedChip.getAttribute('title')).toBeNull();
   // The details live in a real card, wired to the chip for assistive tech, naming
   // the sitting's headline, its state, and the session to attach to.
-  expect(engagedChip.getAttribute('aria-describedby')).toBe('visit-card-tk-engaged');
-  const engagedCard = document.getElementById('visit-card-tk-engaged') as HTMLElement;
+  expect(engagedChip.getAttribute('aria-describedby')).toBe('sitting-card-tk-engaged');
+  const engagedCard = document.getElementById('sitting-card-tk-engaged') as HTMLElement;
   expect(engagedCard.textContent).toMatch(/being worked right now/i);
   expect(engagedCard.textContent).toContain('what the engaged row is about');
   expect(engagedCard.textContent).toContain('gc-toolkit__converse-9');
 
-  // Parked: a different word and heading, told apart from engaged at a glance.
+  // Waiting: a different word and heading, told apart from in session at a glance.
   const parked = rowFor('parked row') as HTMLElement;
   const parkedChip = within(parked).getByRole('button', { name: /waiting/i });
   expect(parkedChip.textContent).toContain('waiting');
-  const parkedCard = document.getElementById('visit-card-tk-parked') as HTMLElement;
+  const parkedCard = document.getElementById('sitting-card-tk-parked') as HTMLElement;
   expect(parkedCard.textContent).toMatch(/waiting for you/i);
   expect(parkedCard.textContent).toContain('what the parked row is about');
 
-  // Held AND wants-person: the ● and the visit chip both render, not one merged glyph.
+  // Held AND wants-person: the ● and the sitting chip both render, not one merged glyph.
   const both = rowFor('held and gated') as HTMLElement;
   expect(both.textContent).toContain('●');
   expect(within(both).getByRole('button', { name: /in session/i })).toBeTruthy();
 
-  // A plain person's move, unheld: the ● leads and there is no visit chip.
+  // A plain person's move, unheld: the ● leads and there is no sitting chip.
   const wants = rowFor('wants a person') as HTMLElement;
   expect(wants.textContent).toContain('●');
   expect(within(wants).queryByRole('button', { name: /in session|waiting/i })).toBeNull();
@@ -460,7 +458,7 @@ it('marks a held row with a visible parked/engaged chip and reveals the sittings
 
 // The key states what the row markers and tints mean, so the board's glyphs and
 // colours are legible without hunting. It rides with the anchors table, naming
-// both visit states the marker distinguishes.
+// both states the sitting marker distinguishes.
 it('shows a key for the row markers and the state tints', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
@@ -468,9 +466,10 @@ it('shows a key for the row markers and the state tints', async () => {
   const key = anchors().querySelector('.legend') as HTMLElement;
   expect(key).not.toBeNull();
   expect(key.textContent).toContain('needs you');
-  expect(key.textContent).toContain('visit waiting for you');
-  expect(key.textContent).toContain('visit in session');
-  expect(key.textContent).toContain('a visit holds it');
+  expect(key.textContent).toContain('waiting for you');
+  expect(key.textContent).toContain('a sitting in session');
+  expect(key.textContent).toContain('a gate or a conversation holds it');
+  expect(key.textContent).not.toContain('visit');
 });
 
 // Within a family the members read in SECTION_ORDER — the most-pressing move
@@ -797,7 +796,7 @@ it('highlights needs-you rows in place without reordering the board', async () =
   expect(precedes(epic, review)).toBe(true);
 });
 
-// A held row — an open visit names the anchor — carries the row tint too, the
+// A held row — a gate or a conversation holds the bead — carries the row tint too, the
 // second of the two signals the highlight speaks.
 it('highlights a held row in place', async () => {
   serve([
@@ -816,6 +815,35 @@ it('highlights a held row in place', async () => {
 
   const row = rowFor(/a conversation is holding/) as HTMLElement;
   expect(row.className).toContain('row-held');
+});
+
+// A recommendation Accept is withheld on says why where the button would be —
+// the other gates to answer first — and a row whose gate a live sitting is
+// answering names that gate beside its needs, as the CLI board's NEEDS cell
+// does.
+it('names the gates that withhold Accept and the gates in session', async () => {
+  serve([
+    tile({
+      id: 'tk-rec',
+      kind: 'parked',
+      title: 'a recommendation behind another gate',
+      severity: 'NORMAL',
+      section: 'gate',
+      owed: true,
+      held: true,
+      sitting_state: 'in_session',
+      needs: '2× — Accept? · Rule on the finding',
+      accept_withheld: 'Rule on the finding',
+      gates_in_session: 'Rule on the finding',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a recommendation behind another gate/)).toBeTruthy());
+
+  const row = rowFor(/a recommendation behind another gate/) as HTMLElement;
+  expect(row.textContent).toContain('in session: Rule on the finding');
+  expect(row.textContent).toContain('accept waits on: Rule on the finding');
+  expect(within(row).queryByRole('button', { name: /accept/i })).toBeNull();
 });
 
 // The Accept affordance is the board's one row-level actuation: it renders only
@@ -1075,42 +1103,40 @@ it('keeps sittings out of the anchors table', async () => {
   expect(within(anchors()).queryByText(/what the canvas owes the operator/)).toBeNull();
 });
 
-it('shows running sittings and recently closed ones with their outcome', async () => {
+it('shows running sittings and recently closed ones with what they concluded', async () => {
   render(<App />);
   await waitFor(() => expect(region('converse sittings')).toBeTruthy());
 
   const section = region('converse sittings');
   expect(within(section).getByText(/1 running · 1 closed recently/)).toBeTruthy();
+  expect(within(section).queryByText('outcome')).toBeNull();
 
   const live = within(section).getByText('tk-vst01').closest('tr') as HTMLElement;
   expect(within(live).getByText('running')).toBeTruthy();
   expect(within(live).getByText('40m')).toBeTruthy();
-  expect(within(live).getByText('—')).toBeTruthy();
-  // No takeaway: the headline is the subject's title (the topic), not the visit
-  // bead's own generic title. The topic also labels the subject cell.
+  // No takeaway: the headline is the subject's title (the topic), not the
+  // conversation's own title. The topic also labels the subject cell.
   expect(within(live).getAllByText(/the attention-canvas epic topic/).length).toBeGreaterThan(0);
   expect(within(live).queryByText(/what the canvas owes the operator/)).toBeNull();
 
   const done = within(section).getByText('tk-vst02').closest('tr') as HTMLElement;
   expect(within(done).getByText('closed')).toBeTruthy();
-  expect(within(done).getByText('diagnosed')).toBeTruthy();
   // A takeaway wins the headline; the subject title labels the subject cell.
   expect(within(done).getByText(/the path was the launcher/)).toBeTruthy();
   expect(within(done).getByText('the raw-path launcher finding')).toBeTruthy();
 });
 
-it('shows a dedup close’s outcome reason as its headline when it left no takeaway', async () => {
-  const deduped: Board = {
+it('shows a closed conversation’s close reason as its headline when it left no takeaway', async () => {
+  const dismissed: Board = {
     ...BOARD,
     sittings: [
       {
         id: 'tk-vst10',
         rig: 'gc-toolkit',
         subject: 'tk-epic',
-        title: 'visit: tk-epic — the pool-offer line that says nothing',
+        title: 'operator pick from the board',
         status: 'closed',
-        outcome: 'moot',
-        outcome_reason: 'moot: premise died, subject already closed',
+        outcome_reason: 'dismissed by the operator: superseded by the new plan',
         session: 'gc-toolkit__converse-10',
         opened_at: '2026-08-21T18:34:00Z',
         closed_at: '2026-08-21T18:40:00Z',
@@ -1121,50 +1147,17 @@ it('shows a dedup close’s outcome reason as its headline when it left no takea
   };
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(deduped), { status: 200 })),
+    vi.fn(async () => new Response(JSON.stringify(dismissed), { status: 200 })),
   );
 
   render(<App />);
   await waitFor(() => expect(region('converse sittings')).toBeTruthy());
 
   const row = within(region('converse sittings')).getByText('tk-vst10').closest('tr') as HTMLElement;
-  expect(within(row).getByText('moot')).toBeTruthy();
-  // No takeaway: the headline is the outcome reason (why it closed), so the
-  // dedup close reads as a decision rather than falling back to the topic.
-  expect(within(row).getByText('moot: premise died, subject already closed')).toBeTruthy();
-  expect(within(row).queryByText(/the pool-offer line that says nothing/)).toBeNull();
-});
-
-it('shows the outcome on a running sitting a dismissal stamped but could not close', async () => {
-  const stuck: Board = {
-    ...BOARD,
-    sittings: [
-      {
-        id: 'tk-vst09',
-        rig: 'gc-toolkit',
-        subject: 'tk-epic',
-        title: 'visit: tk-epic — the operator ended it from the board',
-        status: 'in_progress',
-        outcome: 'dismissed',
-        outcome_reason: '',
-        session: 'gc-toolkit__converse-9',
-        opened_at: '2026-08-21T18:34:00Z',
-        takeaway: '',
-        subject_title: 'the attention-canvas epic topic',
-      },
-    ],
-  };
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => new Response(JSON.stringify(stuck), { status: 200 })),
-  );
-
-  render(<App />);
-  await waitFor(() => expect(region('converse sittings')).toBeTruthy());
-
-  const row = within(region('converse sittings')).getByText('tk-vst09').closest('tr') as HTMLElement;
-  expect(within(row).getByText('running')).toBeTruthy();
-  expect(within(row).getByText('dismissed')).toBeTruthy();
+  // No takeaway: the headline is the close reason (why it closed), so the
+  // dismissal reads as a decision rather than falling back to the topic.
+  expect(within(row).getByText('dismissed by the operator: superseded by the new plan')).toBeTruthy();
+  expect(within(row).queryByText(/operator pick from the board/)).toBeNull();
 });
 
 it('drills into a sitting by its subject', async () => {
@@ -1582,14 +1575,14 @@ const MULTI_RIG: Board = {
   ],
   sittings: [
     {
-      id: 'tk-vs-gct', rig: 'gc-toolkit', subject: 'tk-gct', title: 'visit: tk-gct',
-      status: 'closed', outcome: 'diagnosed', outcome_reason: '', session: 'gc-toolkit__converse-1',
+      id: 'tk-vs-gct', rig: 'gc-toolkit', subject: 'tk-gct', title: 'about tk-gct',
+      status: 'closed', outcome_reason: 'settled', session: 'gc-toolkit__converse-1',
       opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
       takeaway: '', subject_title: 'the gc-toolkit topic',
     },
     {
-      id: 'tk-vs-gcy', rig: 'gascity', subject: 'tk-gcy', title: 'visit: tk-gcy',
-      status: 'closed', outcome: 'diagnosed', outcome_reason: '', session: 'gascity__converse-1',
+      id: 'tk-vs-gcy', rig: 'gascity', subject: 'tk-gcy', title: 'about tk-gcy',
+      status: 'closed', outcome_reason: 'settled', session: 'gascity__converse-1',
       opened_at: '2026-09-01T10:00:00Z', closed_at: '2026-09-01T11:00:00Z',
       takeaway: '', subject_title: 'the gascity topic',
     },

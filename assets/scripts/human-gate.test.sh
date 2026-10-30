@@ -33,12 +33,19 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #     writer's gate under the same key on the beads the resolved gate blocks,
 #     and resolves STUB_CREATE_RACE's gate as that gate's duplicate, as the
 #     racing writer would once it saw the third gate.
+#   update <id> --description <d> — sets the bead's description; STUB_UPDATE_FAIL
+#     refuses it and writes nothing.
 #   show <id> --json — the bead's row; a bead it cannot find is an error object,
 #     exit 1. STUB_SHOW_FAIL=1 fails it with nothing on stdout, as a store that
 #     did not answer does, STUB_SHOW_RAW=<payload> answers it with that payload
 #     verbatim, and STUB_SHOW_RC=<n> exits n after the answer. None touches the
 #     other calls.
-# The store is a JSON array of beads; EDGES holds `<waiter>|blocks|<gate>` lines.
+#   dep add <issue> <depends-on> --type <t> — records the edge, for the hold
+#     skill's reply from a conversation onto its gate.
+#   list --id <id> --all --json — the bead's row with its outgoing edges as
+#     dependencies, the read-back the hold skill makes of that reply.
+# The store is a JSON array of beads; EDGES holds `<issue>|<type>|<depends-on>`
+# lines, a waiter's `<waiter>|blocks|<gate>` among them.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
@@ -125,8 +132,28 @@ Reason: $reason" \
       then .status = "closed" | .close_reason = $r | .closed_at = $at else . end)' "$STORE" | save
     printf '✓ Gate resolved: %s\n  Reason: %s\n' "$id" "$reason"
     exit 0 ;;
+  "dep add")
+    from="${3:-}"; to="${4:-}"; typ=blocks; shift 4 || true
+    while [ $# -gt 0 ]; do case "$1" in --type) shift; typ="${1:-}" ;; --type=*) typ="${1#--type=}" ;; esac; shift || true; done
+    { exists "$from" && exists "$to"; } || { echo "Error: issue not found: $from or $to" >&2; exit 1; }
+    printf '%s|%s|%s\n' "$from" "$typ" "$to" >> "$EDGES"
+    echo "✓ Added dependency: $from depends on $to ($typ)"
+    exit 0 ;;
 esac
 case "${1:-}" in
+  list)
+    id=""; prev=""; for a in "$@"; do [ "$prev" = "--id" ] && id="$a"; prev="$a"; done
+    deps=$(awk -F'|' -v b="$id" '$1 == b { printf "%s{\"issue_id\":\"%s\",\"depends_on_id\":\"%s\",\"type\":\"%s\"}", (n++ ? "," : ""), $1, $3, $2 }' "$EDGES")
+    jq -c --arg id "$id" --argjson d "[$deps]" '[ .[] | select(.id == $id) | . + {dependencies: $d} ]' "$STORE"
+    exit 0 ;;
+  update)
+    id="${2:-}"; shift 2
+    desc=""
+    while [ $# -gt 0 ]; do case "$1" in --description) shift; desc="${1:-}" ;; esac; shift || true; done
+    [ -n "${STUB_UPDATE_FAIL:-}" ] && { echo "Error: simulated update failure" >&2; exit 1; }
+    exists "$id" || { echo "Error: issue not found: $id" >&2; exit 1; }
+    jq -c --arg id "$id" --arg d "$desc" 'map(if .id == $id then .description = $d else . end)' "$STORE" | save
+    exit 0 ;;
   show)
     [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
     [ -n "${STUB_SHOW_RAW:-}" ] && { printf '%s\n' "$STUB_SHOW_RAW"; exit 0; }
@@ -161,7 +188,7 @@ reset() {
   printf '[%s]' "$beads" > "$STUB_STORE"
   printf '%s' "${2:-}" > "$STUB_EDGES"
   : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"; rm -f "$STUB_TMP/third-writer.done"
-  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_CREATE_RACE STUB_RESOLVE_NOOP STUB_RESOLVE_FAIL STUB_RESOLVE_RACE STUB_THIRD_WRITER STUB_SHOW_FAIL STUB_SHOW_RAW STUB_SHOW_RC 2>/dev/null || true
+  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_CREATE_RACE STUB_RESOLVE_NOOP STUB_RESOLVE_FAIL STUB_RESOLVE_RACE STUB_THIRD_WRITER STUB_SHOW_FAIL STUB_SHOW_RAW STUB_SHOW_RC STUB_UPDATE_FAIL 2>/dev/null || true
 }
 field()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 creates() { cat "$STUB_SEQ"; }
@@ -179,7 +206,8 @@ eq "$(field gate-1 await_type)" "human" "its await type is human"
 eq "$(field gate-1 await_id)" "polecat-blocked" "its await id is the situation key"
 has "$(cat "$STUB_EDGES")" "tk-w|blocks|gate-1" "it blocks the subject"
 eq "$(field gate-1 title)" "Blocked: the target branch is gone. Need: a new target." "its title is the message's first line"
-has "$(field gate-1 description)" "Need: a new target." "its description carries the message"
+eq "$(field gate-1 description)" "Blocked: the target branch is gone. Need: a new target." "its description is the message, with no head of bd's above it"
+has "$(calls)" "[update] [gate-1] [--description] [Blocked: the target branch is gone. Need: a new target.]" "…set by a write of its own after the create"
 has "$(calls)" "[gate] [create] [--type=human] [--blocks] [tk-w] [--await-id] [polecat-blocked]" "the create names the subject as its own word after --blocks"
 hasnt "$(calls)" "[--db]" "no --db pin: gc bd files the gate in the subject's own store"
 hasnt "$(calls)" "[--rig]" "no --rig either"
@@ -195,7 +223,8 @@ t=$(field gate-1 title)
 eq "$(printf '%s' "$t" | jq -Rr 'length')" "140" "an over-long first line is cut to 140 characters"
 has "$t" "…" "the cut is marked with an ellipsis"
 hasnt "$t" "second line" "only the first line becomes the title"
-has "$(field gate-1 description)" "second line" "the description keeps the whole message"
+eq "$(field gate-1 description)" "$long
+second line" "the description keeps the whole message, every line"
 
 echo "# an open human gate under the key already asks: nothing more is filed"
 reset "$(task tk-w),$(gate g-open polecat-blocked open)" "tk-w|blocks|g-open
@@ -391,6 +420,14 @@ reset "$(task tk-w)"
 err=$(STUB_CREATE_FAIL=1 "$SUT" --subject tk-w --key k --message m 2>&1 >/dev/null); rc=$?
 eq "$rc" 1 "exit 1"
 has "$err" "simulated refusal" "bd's own reason is reported"
+
+echo "# a description that does not take leaves the gate filed, and names the repair"
+reset "$(task tk-w)"
+out=$(STUB_UPDATE_FAIL=1 "$SUT" --subject tk-w --key k --message "Needs a ruling." 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "the filing still exits 0: the gate blocks the subject and asks"
+eq "$out" "gate-1" "…and its id is reported as asking"
+has "$(field gate-1 description)" "Ad-hoc gate blocking tk-w" "…its description still under bd's own head"
+has "$(cat "$TMP/err")" "repair: gc bd update gate-1 --description" "…and the warning names the write that repairs it"
 
 echo "# a gate that does not read back as blocking the subject is a failure"
 reset "$(task tk-w)"
@@ -653,6 +690,37 @@ STUB_BS_RC=1 "$HSUT/escalate.sh" --subject refinery --key k >/dev/null 2>&1
 eq "$?" 2 "a filing with no message goes to the helper, which refuses it as usage"
 eq "$(cat "$STUB_BS_LOG")" "" "  ... and bead-store.sh is asked about none of them"
 eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
+
+echo "# two conversations on one bead each hold with a gate of their own"
+# A converse sitting's hold files the gate its conversation owes through this
+# helper (skills/converse-hold/SKILL.md). The key names the conversation, so a
+# second conversation on the same bead files a gate of its own rather than
+# adopting the first one's, whose ruling would release the bead with the second
+# question still owed, and a resumed hold finds the gate it filed. The skill's
+# own block runs here against the real helper, its placeholders filled.
+HOLD_SKILL="$HERE/../../skills/converse-hold/SKILL.md"
+awk '/^```/ { if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 } else if ($0 ~ /^```bash/) inb = 1; next }
+     inb { buf = buf $0 "\n"; if (index($0, "human-gate.sh\" --subject")) hit = 1 }' "$HOLD_SKILL" \
+  | sed -e 's#<the bead that must wait>#tk-pr#' -e 's#<[^>]*>#x#g' > "$TMP/hold-block"
+if [ -s "$TMP/hold-block" ]; then ok "the hold skill's gate block is found"; else bad "the hold skill's gate block is found in $HOLD_SKILL"; fi
+hold() { (CONV="$HERE" CONVERSATION="$1" NEED="$2" bash "$TMP/hold-block" 2>"$TMP/err"); }
+reset "$(task tk-pr),$(task tk-ca),$(task tk-cb)"
+out=$(hold tk-ca "Keep the retry?"); rc=$?
+eq "$rc" 0 "the first conversation's hold exits 0"
+has "$out" "gate gate-1 holds what waits" "…filing a gate on the bead"
+out=$(hold tk-cb "Ship the docs first?"); rc=$?
+eq "$rc" 0 "the second conversation's hold exits 0"
+has "$out" "gate gate-2 holds what waits" "…filing a gate of its own rather than adopting the first one's"
+eq "$(creates)" 2 "two conversations hold with two gates"
+eq "$(field gate-1 await_id) $(field gate-2 await_id)" "conversation.tk-ca conversation.tk-cb" "each under a key that names its conversation"
+eq "$(field gate-2 title)" "Ship the docs first?" "the second gate asks the second question"
+has "$(cat "$STUB_EDGES")" "tk-pr|blocks|gate-2" "both gates block the bead, so its merge waits for both rulings"
+has "$(cat "$STUB_EDGES")" "tk-cb|replies-to|gate-2" "each conversation replies to its own gate"
+hasnt "$(cat "$STUB_EDGES")" "tk-cb|replies-to|gate-1" "…and not to the other conversation's"
+out=$(hold tk-ca "Keep the retry?"); rc=$?
+eq "$rc" 0 "a resumed hold exits 0"
+eq "$(creates)" 2 "…filing no second gate"
+has "$out" "gate gate-1 holds what waits" "…and finding the gate it filed"
 
 echo "# the deacon's filed gates reach its incident ledger"
 # The helper calls the ledger by sibling path, so it runs from a private copy

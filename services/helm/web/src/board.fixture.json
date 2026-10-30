@@ -11,7 +11,7 @@
       "owed": false,
       "weight": 14,
       "held": true,
-      "visit_state": "engaged",
+      "sitting_state": "in_session",
       "n_closed": 3,
       "m_total": 11,
       "open": 8,
@@ -67,7 +67,9 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "needs-review",
-      "recommendation": null
+      "recommendation": null,
+      "accept_withheld": "Which tile density should the canvas default to?",
+      "gates_in_session": "Which tile density should the canvas default to?"
     },
     {
       "id": "gt-1a2b3",
@@ -78,7 +80,7 @@
       "owed": false,
       "weight": 3,
       "held": false,
-      "visit_state": "",
+      "sitting_state": "",
       "n_closed": 2,
       "m_total": 2,
       "open": 0,
@@ -123,7 +125,9 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "needs-review",
-      "recommendation": null
+      "recommendation": null,
+      "accept_withheld": null,
+      "gates_in_session": null
     },
     {
       "id": "tk-01n5cc",
@@ -134,7 +138,7 @@
       "owed": true,
       "weight": 3,
       "held": false,
-      "visit_state": "",
+      "sitting_state": "",
       "n_closed": 0,
       "m_total": 0,
       "open": 0,
@@ -180,7 +184,9 @@
       "pr_branch_url": "",
       "pr_phase": "needs-attention",
       "phase": "needs-attention",
-      "recommendation": null
+      "recommendation": null,
+      "accept_withheld": null,
+      "gates_in_session": null
     },
     {
       "id": "tk-9tbbk",
@@ -191,7 +197,7 @@
       "owed": false,
       "weight": 1,
       "held": false,
-      "visit_state": "",
+      "sitting_state": "",
       "n_closed": 1,
       "m_total": 1,
       "open": 0,
@@ -237,7 +243,9 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "",
-      "recommendation": null
+      "recommendation": null,
+      "accept_withheld": null,
+      "gates_in_session": null
     }
   ],
   "sittings": [
@@ -245,9 +253,8 @@
       "id": "tk-vst01",
       "rig": "gc-toolkit",
       "subject": "tk-eemvf",
-      "title": "visit: tk-eemvf — tile density",
+      "title": "tile density",
       "status": "in_progress",
-      "outcome": "",
       "outcome_reason": "",
       "session": "gc-toolkit__converse-1",
       "opened_at": "2026-08-11T14:40:00Z",
@@ -258,10 +265,9 @@
       "id": "tk-vst02",
       "rig": "gascity",
       "subject": "gt-1a2b3",
-      "title": "visit: gt-1a2b3 — the convoy is complete",
+      "title": "the convoy is complete",
       "status": "closed",
-      "outcome": "diagnosed",
-      "outcome_reason": "",
+      "outcome_reason": "every tracked child has landed; graduate it",
       "session": "gascity__converse-2",
       "opened_at": "2026-08-11T09:12:00Z",
       "closed_at": "2026-08-11T09:48:00Z",

@@ -7,7 +7,8 @@ implementation beats scattered PRs. Slung `--on` a single subject (the
 initiative) from the recommend-to-Accept path, it creates the owned convoy, cuts
 its integration branch, files a design child whose doc lands on that branch, and
 arms an implementation child behind the design's approval. Design and
-implementation graduate to the default branch as one reviewed unit. Doctrine:
+implementation graduate to the default branch as one reviewed unit, and the
+subject closes once they land, so work queued behind it starts then. Doctrine:
 docs/design-convoy.md.
 
 The molecule writes no code and needs no worktree of its own; convoy-seed.sh
@@ -16,7 +17,8 @@ subject from the input convoy ({{convoy_id}}'s one tracked member) in its own
 shell, records its result on the subject so a resume is idempotent, and closes
 its own step bead through assets/scripts/step-close.sh — resolved by
 (gc.root_bead_id, gc.step_ref), never a GC_*BEAD_ID env var, which after a
-hook-claim names a different step.
+hook-claim names a different step. The last step releases the subject from the
+input convoy and hands its close to the owned convoy.
 
 Every PR this convoy produces, the design child's checkpoint PR included, merges
 only with a standing APPROVED review from an account other than the city's,
@@ -34,7 +36,7 @@ formula = "mol-design-convoy"
 formula_compiler = ">=2.0.0"
 
 [vars.design_gated]
-description = "true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. An Accept takes the default, because its sling passes no var. For all-in-one, the operator takes the recommendation to a sitting (Discuss) instead, and the sitting follows the work skill's steps for taking a recommendation, adding --var design_gated=false to the sling those steps run."
+description = "true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. An Accept from the board takes the default, because it passes no var. For all-in-one, the operator takes the recommendation to a sitting (Discuss) instead, and the sitting's sign-off takes it with --accept --var design_gated=false, which hands the var to Accept's sling."
 default = "true"
 
 [[steps]]
@@ -153,6 +155,23 @@ BRANCH=$(printf '%s' "$SEED_JSON" | tr -d '[:cntrl:]' | jq -r '.branch // empty'
 gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$CONVOY_ID" --set-metadata "gc.design_convoy_branch=$BRANCH"
 ```
 
+**Make the subject close when the convoy does.** The subject's work now lives
+in the owned convoy, and work queued behind the subject waits for that work to
+land. An `until` edge from the subject onto the convoy says so: once the convoy
+closes, which its graduation PR's merge does, the deferred-dispatch reconcile
+pass closes the subject and points `gc.superseded_by` at the convoy. As in the
+arm steps, the read-back decides, not the add's exit status: a resume meets the
+edge the first pass wrote, and an edge across two stores prints success and
+holds nothing. An edge that does not read back fails the step before anything
+is dispatched:
+```bash
+# >>> seed-convoy-until
+gc bd dep add "$SUBJECT" "$CONVOY_ID" --type=until || echo "dep add of the until edge from $SUBJECT onto convoy $CONVOY_ID returned non-zero (already there?); reading the edge back" >&2
+RESOLVED_BY=$(gc bd dep list "$SUBJECT" --direction=down -t until --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY_ID" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
+[ "${RESOLVED_BY:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no until edge onto convoy $CONVOY_ID after the add, so nothing would close it when the convoy lands; not dispatching" >&2; exit 1; }
+# <<< seed-convoy-until
+```
+
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -162,8 +181,8 @@ done
 ```
 
 **Exit criteria:** the owned convoy exists, its target is `integration/<convoy-id>`,
-that branch is on origin, the id is recorded on the subject, and this step is
-closed.
+that branch is on origin, the id is recorded on the subject, the subject's
+`until` edge onto the convoy reads back, and this step is closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -390,18 +409,75 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "drain"
-title = "Close the step chain and drain"
+title = "Hand the subject to its convoy and drain"
 needs = ["arm-implementation"]
 description = """
-The convoy is standing and its children are dispatched or armed. This molecule's
-work is done. It writes no card and holds nothing: the durable owned convoy lives
-on and graduates, and the input convoy was only this pour's handle on the
-subject.
+The convoy is standing and its children are dispatched or armed, so this pour's
+work on the subject is done. It writes no card. The durable owned convoy lives on
+and graduates, and the subject's close now belongs to it: the `until` edge
+seed-convoy wrote has the deferred-dispatch reconcile pass close the subject once
+the convoy closes.
+
+That pass never closes a bead carrying live work (`assets/scripts/live-work.sh`),
+and the sling left two marks of a pour on the subject: the stamp
+`gc.execution_routed_to`, and the `tracks` edge from the input convoy, which
+counts whatever that convoy's status. The input convoy was only this pour's
+handle on the subject, and nothing else removes either mark while the subject
+is open, so the hand-off releases both, then closes the input convoy, which
+tracks nothing once its edge is gone and so would never close by itself. An
+earlier pour over the subject can leave its own input convoy tracking it: a
+sling that failed closes that convoy and leaves the edge, and a cancelled run
+leaves both. The hand-off releases each earlier input convoy that no open
+workflow root names, closing it first when the subject is all it tracks, and
+leaves one that a live run may still use. It refuses to release a subject whose
+`until` edge does not read back, which would leave nothing to close it. A re-run
+finds the subject through this run's own edge, which goes last, so one that
+finds the input convoy tracking nothing only closes the convoy:
+```bash
+# >>> drain-hand-off
+INPUT_CONVOY="{{convoy_id}}"
+CONVOY_STATUS=$(gc convoy status "$INPUT_CONVOY" --json) || { echo "cannot read input convoy $INPUT_CONVOY; not handing the subject off" >&2; exit 1; }
+MEMBERS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | type) == "array" then (.children | length) else "unreadable" end' 2>/dev/null)
+case "$MEMBERS" in
+  0) SUBJECT="" ;;
+  1) SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r '.children[0].id // empty') ;;
+  *) echo "input convoy $INPUT_CONVOY reads ${MEMBERS:-no} members; not handing the subject off" >&2; exit 1 ;;
+esac
+if [ -n "$SUBJECT" ]; then
+  CONVOY_ID=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.design_convoy_id"] // empty')
+  RESOLVED_BY=$(gc bd dep list "$SUBJECT" --direction=down -t until --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY_ID" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
+  [ -n "$CONVOY_ID" ] && [ "${RESOLVED_BY:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no until edge onto its owned convoy '$CONVOY_ID', so nothing would close it; not handing it off" >&2; exit 1; }
+  gc bd update "$SUBJECT" --unset-metadata gc.execution_routed_to || { echo "could not clear gc.execution_routed_to on $SUBJECT; not handing it off" >&2; exit 1; }
+  EARLIER=$(gc bd dep list "$SUBJECT" --direction=up -t tracks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r -s --arg c "$INPUT_CONVOY" 'if length == 1 and (.[0] | type) == "array" then (.[0][] | select(.id != $c and .issue_type == "convoy" and ((.metadata["gc.synthetic"] // "") | tostring) == "true") | .id) else error("unreadable") end' 2>/dev/null) || { echo "cannot read the convoys tracking $SUBJECT; not handing it off" >&2; exit 1; }
+  for C in $(printf '%s' "$EARLIER") "$INPUT_CONVOY"; do
+    if [ "$C" != "$INPUT_CONVOY" ]; then
+      LIVE=$(gc bd list --metadata-field "gc.input_convoy_id=$C" --include-ephemeral --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r -s 'if length == 1 and (.[0] | type) == "array" then ([.[0][] | select(.status != "closed")] | length) else "unreadable" end' 2>/dev/null)
+      case "$LIVE" in
+        0) ;;
+        [1-9]*) echo "earlier input convoy $C is named by an open workflow root, so a run may still use it; leaving its edge, which keeps $SUBJECT open until that edge goes" >&2; continue ;;
+        *) echo "cannot read the workflow roots over earlier input convoy $C; not handing $SUBJECT off" >&2; exit 1 ;;
+      esac
+      ONLY=$(gc convoy status "$C" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg s "$SUBJECT" 'if (.children | type) == "array" then (.convoy.status != "closed" and ([.children[].id] == [$s])) else "unreadable" end' 2>/dev/null)
+      case "$ONLY" in
+        true) gc convoy close "$C" || { echo "could not close earlier input convoy $C" >&2; exit 1; } ;;
+        false) ;;
+        *) echo "cannot read earlier input convoy $C; not handing $SUBJECT off" >&2; exit 1 ;;
+      esac
+    fi
+    gc bd dep remove "$C" "$SUBJECT" || echo "dep remove of the tracks edge from $C to $SUBJECT returned non-zero (already gone?); reading the edge back" >&2
+    TRACKED=$(gc bd dep list "$SUBJECT" --direction=up -t tracks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$C" 'if type == "array" then ([.[] | select(.id == $c)] | length) else "unreadable" end' 2>/dev/null)
+    [ "$TRACKED" = "0" ] || { echo "convoy $C still reads as tracking $SUBJECT (${TRACKED:-unreadable}); not handing it off" >&2; exit 1; }
+  done
+fi
+CONVOY_STATE=$(gc bd show "$INPUT_CONVOY" --json | tr -d '[:cntrl:]' | jq -r '.[0].status // empty')
+[ "$CONVOY_STATE" = "closed" ] || gc convoy close "$INPUT_CONVOY" || { echo "could not close input convoy $INPUT_CONVOY" >&2; exit 1; }
+# <<< drain-hand-off
+```
 
 This is the terminal step, so close its own step bead (the earlier steps closed
 themselves in order) and drain. The control-dispatcher's `workflow-finalize`
 closes the `kind=workflow` root once every step is closed; never close the root,
-the subject, or any child yourself.
+the subject, the owned convoy, or any child yourself.
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
@@ -410,6 +486,8 @@ done
 gc runtime drain-ack
 ```
 
-**Exit criteria:** this step is closed and the session is drained.
+**Exit criteria:** the subject carries no `gc.execution_routed_to`, no input
+convoy tracks it unless an open workflow root names that convoy, this run's input
+convoy is closed, this step is closed, and the session is drained.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

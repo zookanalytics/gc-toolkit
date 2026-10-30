@@ -4,7 +4,7 @@ package server
 //
 // The subject here is the MAPPING, not the script: what the operator is told
 // for each way an open can end. gc-helm.sh's own behaviour is covered by
-// assets/scripts/gate-visit.test.sh; what could regress silently on this side
+// assets/scripts/gc-helm-open.test.sh; what could regress silently on this side
 // is an exit code losing its distinct message, an invalid id reaching the
 // subprocess, or a cross-site POST being served.
 
@@ -114,7 +114,7 @@ func decodeErr(t *testing.T, rr *httptest.ResponseRecorder) actuateErrorBody {
 	return got
 }
 
-// A new visit and an already-open one are both exit 0, and the operator must be
+// A new conversation and one already waiting are both exit 0, and the operator must be
 // able to tell them apart — clicking twice and reading "filed" both times would
 // misdescribe what the city did.
 func TestOpenDistinguishesFiledFromExisting(t *testing.T) {
@@ -122,19 +122,19 @@ func TestOpenDistinguishesFiledFromExisting(t *testing.T) {
 		name        string
 		stdout      string
 		wantOutcome string
-		wantVisit   string
+		wantConv    string
 	}{
 		{
 			name:        "filed",
-			stdout:      "gc-helm: visit tk-v1s1t filed on tk-abc12 — parked on the helm board (gc.routed_to=human); no session spawned.\n       Engage it when ready: gc-helm engage tk-v1s1t\n",
+			stdout:      "gc-helm: conversation tk-c0nv1 filed on tk-abc12 — waiting in the operator's queue; no session spawned.\n       Engage it when ready: gc-helm engage tk-abc12\n",
 			wantOutcome: "filed",
-			wantVisit:   "tk-v1s1t",
+			wantConv:    "tk-c0nv1",
 		},
 		{
 			name:        "already open",
-			stdout:      "gc-helm: visit tk-old99 is already open for tk-abc12 — parked on the helm board until an operator engages it.\n       Engage it when ready: gc-helm engage tk-old99\n",
+			stdout:      "gc-helm: conversation tk-old99 is already open for tk-abc12 — waiting in the operator's queue until an operator engages it.\n       Engage it when ready: gc-helm engage tk-abc12\n",
 			wantOutcome: "existing",
-			wantVisit:   "tk-old99",
+			wantConv:    "tk-old99",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -147,22 +147,22 @@ func TestOpenDistinguishesFiledFromExisting(t *testing.T) {
 			if got.Outcome != tc.wantOutcome {
 				t.Errorf("outcome = %q, want %q", got.Outcome, tc.wantOutcome)
 			}
-			if got.Visit != tc.wantVisit {
-				t.Errorf("visit = %q, want %q", got.Visit, tc.wantVisit)
+			if got.Conversation != tc.wantConv {
+				t.Errorf("conversation = %q, want %q", got.Conversation, tc.wantConv)
 			}
 			if got.Bead != "tk-abc12" {
 				t.Errorf("bead = %q, want tk-abc12", got.Bead)
 			}
 			// The script's own first sentence reaches the browser.
-			if !strings.Contains(got.Message, "visit "+tc.wantVisit) {
+			if !strings.Contains(got.Message, "conversation "+tc.wantConv) {
 				t.Errorf("message = %q, want it to carry the script's sentence", got.Message)
 			}
 		})
 	}
 }
 
-// An unrecognised success sentence must still read as success: the visit was
-// filed regardless of how the script phrased it.
+// An unrecognised success sentence must still read as success: the conversation
+// was filed regardless of how the script phrased it.
 func TestOpenUnparsedSuccessIsStillSuccess(t *testing.T) {
 	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: something new and unrecognised\n"}}
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
@@ -194,7 +194,7 @@ func TestOpenExitCodesMapDistinctly(t *testing.T) {
 		{
 			name:       "bead not found: wrong prefix",
 			exit:       4,
-			stderr:     "gc-helm: open: bead not found: 'zz-nope1' — its id prefix 'zz' matches no rig in 'gc rig list'. No visit filed.\n",
+			stderr:     "gc-helm: open: bead not found: 'zz-nope1' — its id prefix 'zz' matches no rig in 'gc rig list'. No conversation filed.\n",
 			wantStatus: http.StatusUnprocessableEntity,
 			wantReason: reasonVerbFailed,
 			wantMsg:    "its id prefix 'zz' matches no rig",
@@ -202,7 +202,7 @@ func TestOpenExitCodesMapDistinctly(t *testing.T) {
 		{
 			name:       "data plane down",
 			exit:       4,
-			stderr:     "gc-helm: open: could not verify 'tk-abc12' — 'gc bd show' did not answer (connection refused) (data plane down?). No visit filed.\n",
+			stderr:     "gc-helm: open: could not verify 'tk-abc12' — 'gc bd show' did not answer (connection refused) (data plane down?). No conversation filed.\n",
 			wantStatus: http.StatusUnprocessableEntity,
 			wantReason: reasonVerbFailed,
 			wantMsg:    "data plane down?",
@@ -314,16 +314,16 @@ func TestOpenToolFailures(t *testing.T) {
 
 // A timeout must NOT claim that nothing was filed (review of PR#421, P1). The
 // operator's next move depends on this sentence, and the sentence has to be
-// true: `gc-helm.sh open` creates the visit bead before it stamps the routing
-// metadata and adds the tracks edge, so a kill inside that window leaves a real
-// visit behind. Telling the operator nothing happened sends them to retry, and
-// the script's duplicate guard keys on exactly the fields that never landed —
-// so the retry files a second one.
+// true: `gc-helm.sh open` creates the conversation before it reads its edge and
+// its assignee back, so a kill inside that window leaves a real task behind.
+// Telling the operator nothing happened sends them to retry, and the script's
+// join keys on exactly the shape that never read back — so the retry files a
+// second one.
 func TestOpenTimeoutDoesNotClaimNothingWasFiled(t *testing.T) {
 	f := &fakeActuator{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
 	got := decodeErr(t, rr).Error
-	for _, forbidden := range []string{"no visit was filed", "nothing was filed"} {
+	for _, forbidden := range []string{"no conversation was filed", "nothing was filed"} {
 		if strings.Contains(strings.ToLower(got), forbidden) {
 			t.Errorf("error = %q, must not assert %q — a timeout cannot prove it", got, forbidden)
 		}
@@ -340,7 +340,7 @@ func TestOpenTimeoutDoesNotClaimNothingWasFiled(t *testing.T) {
 // validated and the per-bead gate is held, cancelling the request must no longer
 // reach the subprocess — only the opener's own timeout may stop it.
 func TestOpenSurvivesClientDisconnect(t *testing.T) {
-	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: open: filed visit tk-v1 on tk-abc12\n"}}
+	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: conversation tk-v1 filed on tk-abc12 — x.\n"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`).WithContext(ctx))
 	if rr.Code != http.StatusOK {
@@ -366,8 +366,8 @@ func TestOpenInvalidatesTheBoardCache(t *testing.T) {
 	for _, tc := range []struct {
 		name, stdout string
 	}{
-		{"filed", "gc-helm: open: filed visit tk-v1 on tk-abc12\n"},
-		{"existing", "gc-helm: open: visit tk-v1 is already open on tk-abc12\n"},
+		{"filed", "gc-helm: conversation tk-v1 filed on tk-abc12 — x.\n"},
+		{"existing", "gc-helm: conversation tk-v1 is already open for tk-abc12 — x.\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeActuator{res: ToolResult{Stdout: tc.stdout}}
@@ -463,7 +463,7 @@ func TestOpenRejectsBadBeadIDsWithoutExecuting(t *testing.T) {
 func TestOpenAcceptsRealBeadIDs(t *testing.T) {
 	for _, good := range []string{"tk-abc12", "tk-yc00g", "tk-eemvf.3", "sl-kg9z6.4.1", "su-ab9je", "gc2-x1y2"} {
 		t.Run(good, func(t *testing.T) {
-			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on " + good + " (pool p) — x.\n"}}
+			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: conversation tk-v filed on " + good + " — x.\n"}}
 			body, err := json.Marshal(actuateRequest{Bead: good})
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
@@ -480,7 +480,7 @@ func TestOpenAcceptsRealBeadIDs(t *testing.T) {
 }
 
 // CSRF. The operator's browser sits on the tailnet, so a page they visit must
-// not be able to file visits with their network position.
+// not be able to file conversations with their network position.
 func TestOpenRefusesCrossSiteWrites(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -496,7 +496,7 @@ func TestOpenRefusesCrossSiteWrites(t *testing.T) {
 		{"origin without fetch metadata", "", "https://evil.example", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"}}
+			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: conversation tk-v filed on tk-abc12 — x.\n"}}
 			r := httptest.NewRequest(http.MethodPost, "/helm/open", strings.NewReader(`{"bead":"tk-abc12"}`))
 			r.Header.Set("Content-Type", "application/json")
 			if tc.fetchSite != "" {
@@ -525,12 +525,13 @@ func TestOpenRefusesCrossSiteWrites(t *testing.T) {
 	}
 }
 
-// Double-click. cmd_open's one-visit-per-subject gate is read-then-create, so
-// two concurrent opens on one bead could each pass it and file two visits —
-// splitting the conversation the gate exists to keep whole.
+// Double-click. cmd_open's join of a conversation already waiting is
+// read-then-create, so two concurrent opens on one bead could each miss the
+// other and file two conversations — splitting the one the join exists to keep
+// whole.
 func TestOpenCollapsesConcurrentOpensOfTheSameBead(t *testing.T) {
 	f := &fakeActuator{
-		res:   ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"},
+		res:   ToolResult{Stdout: "gc-helm: conversation tk-v filed on tk-abc12 — x.\n"},
 		block: make(chan struct{}),
 	}
 	s := New(newFake(), time.Minute, WithActuator(f))
@@ -637,7 +638,7 @@ func TestOpenRouteBeatsTheSPACatchAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("web.NewHandler: %v", err)
 	}
-	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: visit tk-v filed on tk-abc12 (pool p) — x.\n"}}
+	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: conversation tk-v filed on tk-abc12 — x.\n"}}
 	s := New(newFake(), time.Minute, WithSPA(spa), WithActuator(f))
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))

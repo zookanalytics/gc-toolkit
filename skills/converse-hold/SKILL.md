@@ -1,86 +1,89 @@
 ---
 name: converse-hold
-description: Converse's demand-gate hold (safety-critical).
+description: Converse's hold, which records what the operator owes and gates what must wait for the answer (safety-critical).
 ---
 
 # Step 5 — Hold
 
-Stamp what you are waiting for, then post your framing. `$CONV`, `$VISIT`,
-and `$SUBJECT` are resolved in step 1's claim block.
+Record what you are waiting for, then post your framing. Each tool call
+starts a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT`
+literally, from what step 1 found, at the top of every call below.
 
-`converse-hold.sh` takes the one decision or input needed as its argument
-and `$VISIT` / `$SUBJECT` in its environment. It exits non-zero when the
-hold did not fully land, and then you must NOT frame:
+**A hold is the operator owing an answer later.** The conversation stays
+claimed and this session stays, so the sitting keeps its thread. The hold's
+record lands BEFORE the framing, because until it does nothing outside this
+pane knows the sitting is waiting, and a restart reads a sitting that never
+held. One sentence, at most 130 characters, says what the operator owes. The
+headline reads `holding — <your sentence>`, which the board shows as this
+sitting's headline, and the prefix spends part of the headline cap, so
+`gc-helm.sh takeaway` refuses a longer one. What will not fit goes in the
+notes.
+
+**1. Record the hold on the conversation and the subject.** The
+conversation's `holding:` line is the trace step 1's restart rule reads, so
+the framing waits until it reads back:
 ```bash
-if VISIT="$VISIT" SUBJECT="$SUBJECT" \
-     "$CONV/converse-hold.sh" "<the one decision or input needed, ≤130 chars>"; then
-  : # the hold is real and stamped — post the framing below
-else
-  # NOT a hold yet: nothing re-asks the subject. Do NOT post the framing.
-  # Raise the failure in the thread and do not describe the subject as held.
-  exit 1
-fi
+NEED="<the one decision or input needed, at most 130 characters>"
+gc bd update "$CONVERSATION" --append-notes "holding: $NEED" \
+  && gc bd show "$CONVERSATION" --json | jq -e --arg n "holding: $NEED" '(.[0].notes // "") | contains($n)' >/dev/null \
+  && gc bd update "$SUBJECT" --append-notes "Conversation $CONVERSATION holding: $NEED" \
+  && echo "the hold is recorded"
 ```
-**A hold IS a demand.** The operator owes an answer before the
-conversation can conclude, so the wait is a bead with a `blocks` edge,
-not a comment, and `converse-hold.sh` files it against the right bead for
-you. A conversation about a PR anchor gates the VISIT: the conversation
-cannot conclude until the operator answers, and the subject anchor keeps
-moving — a conversation does not freeze its subject's merge. Only a
-pre-PR (unanchored) subject takes the demand on itself, because its `held`
-marker needs that edge. A ruling files unassigned and routes to the
-operator's partition; pass `--assignee <who>` to the writer only when the
-demand is work a named person must perform, and that one is theirs to
-close, never yours. A resumed hold refreshes the demand this sitting
-filed rather than filing a second. The visit's `escalation_key` scopes the
-demand, so a sibling sitting with its own key on a shared subject keeps its
-own.
+No "the hold is recorded" line means it did not land: do NOT post the
+framing. Raise the failure in the thread, and do not describe the subject as
+held.
 
-**Stamp BEFORE you wait, not after.** The hold IS a demand: until the
-demand is filed nothing re-asks the question, so it lands before you hand
-control to the operator. Write the takeaway to state the decision needed
-when read cold off the board. The same step sets `gc.hold_demand` on this
-visit, the trace step 1's `action=hold` arm reads to tell a real hold
-from a claim that died before step 2.
-
-**To pause the merge, pass `--hold-merge` — by default a conversation does
-not.** The hold above leaves a PR free to land while you talk, which is the
-shepherd case a conversation opened to help a stuck PR wants. When the sitting
-instead decides the merge must wait on the operator — the PR should not land
-until this is settled — add the flag to the same call:
+**2. Gate what must wait for the answer.** The gates the conversation
+replies to stay open and owed: nothing is written to them, because the
+sitting never claimed them, and the sign-off answers them (step 7). When
+something must wait for this conversation's answer and no gate the
+conversation replies to holds that bead, file a human gate on the bead that
+must wait: the anchor when the merge must not land before the operator rules,
+or the one member of an epic whose work waits. A gate that another
+conversation or anyone else filed there asks another question, and its answer
+releases the bead whether or not yours is settled, so it never stands in for
+yours. Without that need, file nothing. A conversation does not freeze its
+subject, and a PR keeps moving while you talk, which is the shepherd case a
+conversation opened to help a stuck PR wants. The key names this
+conversation, `conversation.<its id>`, so a resumed hold finds the gate it
+filed instead of filing a second, and two conversations on one bead each hold
+with a gate of their own. Reply to the gate from the conversation and read
+the reply back, so a resumed or handed-off conversation knows the gate it owes
+without a search by key:
 ```bash
-if VISIT="$VISIT" SUBJECT="$SUBJECT" \
-     "$CONV/converse-hold.sh" --hold-merge "<the one decision or input needed, ≤130 chars>"; then
-  : # the hold is real and the merge is held — post the framing below
-else
-  # the conversation hold or the merge hold did not land — do NOT frame.
-  exit 1
-fi
+GATE=$("$CONV/human-gate.sh" --subject <the bead that must wait> --key "conversation.$CONVERSATION" --message "$NEED
+<what the operator owes, and what waits on it>") \
+  && gc bd dep add "$CONVERSATION" "$GATE" --type replies-to \
+  && gc bd list --id "$CONVERSATION" --all --json | jq -e --arg g "$GATE" 'any(.[0].dependencies[]?; .type == "replies-to" and .depends_on_id == $g)' >/dev/null \
+  && echo "gate $GATE holds what waits, and the conversation replies to it"
 ```
-It files a second demand on the anchor — the `blocks` edge the merge sweep
-already honors — and fails the hold closed if that demand does not land, so a
-framing never claims a merge hold it did not take. Omit the flag and the PR
-keeps moving. Either way the step-7 sign-off discharges whichever demands you
-filed.
+A gate that blocks a bead with open children pauses every part of it that has
+not started, so when only one member waits, gate that member. No closing
+line means the wait did not land, so the merge or the work it was to hold is
+NOT held: do NOT post the framing.
 
-**The takeaway is the sentence; `held` is the state.** Where `$SUBJECT`
-already carries an anchor state the held transition is skipped, and
-refused if attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
-enumerate anchors by that state, and `held` drops it from all three. It
-is the pre-PR hold; the explicit merge hold above is an edge on the
-anchor, not this state.
+**3. Write the headline, and the held state when a gate holds the subject.**
+The subject's headline says what the operator owes, and its wait flag says
+what holds the subject. Pass `--waiting-on` the gate that holds it, one the
+conversation replies to or the one step 2 filed on it. A pre-PR (unanchored)
+subject that gate blocks also moves to `held` while the operator owes the
+answer, so the anchor readers leave it alone, and the sign-off moves it back:
+```bash
+"$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <the gate that holds the subject> \
+  && if [ "$("$CONV/lifecycle.sh" state "$SUBJECT")" = unanchored ]; then "$CONV/lifecycle.sh" transition "$SUBJECT" --to held --route human; fi
+```
+When no gate holds the subject, write the headline alone, with `--no-wait` in
+place of `--waiting-on`, and leave the subject's state as it is: nothing waits
+on it but the conversation, which the board shows in session on the subject's
+row, and a held bead must carry a live edge (`doctor/check-wait-is-an-edge`).
+When the writer refuses the headline, the board cannot show the hold: do NOT
+post the framing. Fix what it names and re-run.
 
-A framing that asks for no decision still files one. What the
-operator owes then is the close-out itself, and the demand is what
-brings the subject back if the thread is lost before they take it. The
-gate is not about there being a question; it is about the subject not
-moving until a person acts.
+**The headline is the sentence; `held` is the state.** Where `$SUBJECT`
+already carries an anchor state the held transition is skipped, and refused if
+attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh` enumerate anchors by
+that state, and `held` drops it from all three.
 
-**One sentence, ≤130 characters.** The takeaway reads
-`holding — <your sentence>`, the board's NEEDS cell, and the prefix spends
-part of the headline cap. `converse-hold.sh` refuses a longer sentence
-before it writes anything and says how far to cut it. What will not fit
-goes in the notes.
 Never park a live conversation: the writer's `--release` clears the
 assignee and route, and the only place it belongs is a stand-down
 ruling, written as
@@ -110,16 +113,17 @@ Write the resolved path, not the variable. The leading `!` is what
 runs the rest of the line, so the operator ends the sitting by typing
 one thing into the same prompt they are already reading — and a path
 that means nothing there is a command that does not run.
-`dismiss` needs no bead-id: it infers this sitting's subject from the
+`dismiss` needs no id: it infers this sitting's conversation from the
 session it runs in, which is what lets the bare line stand and the
-same act sit behind a keystroke. The verb closes every open visit on
-the subject and stamps the outcome the board reads for a finished
+same act sit behind a keystroke. The verb closes the conversation with
+a reason that names the dismissal and answers no gate: every gate the
+conversation replies to stays open and owed, for its filer or the next
 sitting. It falls back to `--force` when the plain close is refused,
-which is what a hand-written `gc bd close <visit>` walks into: a held
-visit is assigned to the session holding it, and a session restarted
-mid-hold closes under a different identity string than the one on the
-bead. Then wait for operator input in this session.
+which is what a hand-written `gc bd close <conversation>` walks into: a
+held conversation is assigned to the sitting's alias, and bd closes an
+assigned bead only for its assignee. Then wait for operator input in this
+session.
 
 When the operator replies, record and sign off (steps 6–7, the
 `converse-settle` skill). If context runs low mid-hold before they do,
-take the `cut-short` path in the prompt's Rules.
+take the low-context path in the prompt's Rules.

@@ -64,7 +64,7 @@
 # --stand-down asks, before a reaction reads S, whether S takes a reaction from
 # R at all. Two markers on S say it does not. gc.reacted_by=R says R's own
 # write-back already landed, and gc.reaction_owned=1 says a live owner holds the
-# reaction (gc-helm.sh engage --new-subject, which filed S's one visit itself).
+# reaction (gc-helm.sh engage --new-subject, which filed S's one conversation itself).
 # On either marker this script closes R, writes nothing to S, and exits 0. On
 # neither it writes nothing and exits 3, and the reaction goes ahead. R is
 # closed in one place, close_reaction below, whether the reaction ends in an
@@ -180,8 +180,8 @@ Usage:
   recommendation is older than the newest first-reaction gate.
   --recommended-formula (recommend only, required) names the execution mol the
   recommendation runs; it stamps gc.recommended_formula on the subject, which
-  is what offers the operator Accept on the board. A ruling carries no
-  recommended action and rejects it.
+  with the first-reaction gate is what offers the operator Accept on the board.
+  A ruling carries no recommended action and rejects it.
 EOF
 }
 
@@ -669,7 +669,7 @@ fi
 
 # ── Route only where something can claim ─────────────────────────────
 # A route to a pool this city does not run — or one whose rig does not own this
-# bead's store — is worse than a visit: the bead is open, unassigned and offered
+# bead's store — is worse than a human gate: the bead is open, unassigned and offered
 # to nobody, and nothing says so. gc-proactive.sh `deliverable` answers exactly
 # this against the agent roster and, given the bead, against store ownership too
 # (a rig-scope pool only claims beads in its own store), for any rig-qualified

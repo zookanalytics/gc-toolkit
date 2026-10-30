@@ -144,16 +144,10 @@ reference to a dozen live beads.
 
 ## Who asks it
 
-- `escalate.sh` pins every read and write to its subject's store by path,
-  through `escalation-rig.sh --db`, so a visit lands in the store its subject
-  lives in, the city's included, wherever the caller sits and whichever pool it
-  routes to. A pool never selects the store, so one that does not read the
-  subject's store is refused. A subject it cannot place falls back to the
-  caller's `GC_RIG` store. Without
-  `GC_RIG`, what the lookup proved decides. A subject proven to name no bead,
-  or a wisp, is filed on the standing triage subject of the store the caller
-  sits in. A subject whose store could not be read may still be a real bead,
-  so it is refused.
+- `converse-signoff.sh` runs a ruling's rework or retirement in the rig that
+  holds the PR's anchor, which can be another rig than the conversation's, so
+  it resolves that rig and its checkout from the anchor's id and writes nothing
+  when either cannot be resolved.
 - `bead-rehome.sh` places both ends of a successor pointer, so
   `gc.superseded_by_store` names the store that actually holds the successor.
 - `mol-witness-patrol`'s cleanup step holds `git worktree remove` behind
@@ -178,7 +172,7 @@ dance by hand. It returns, and nothing outside this:
   merged_target) when the bead carries a merge_result; the first_reaction fields;
   gc.origin; and the distilled gc.takeaway headline with its settled flag.
 - **Context edges**, shown but never gating — the parent, the relates-to edges,
-  the tracked-by visits, and a count per class.
+  the beads that track it, its conversations among them, and a count per class.
 - **Store** — the store that answered, and the db it read.
 
 and, each behind an opt-in flag so a caller pays only for what it needs:
@@ -243,7 +237,7 @@ decision turns on, and does not replace it.
 
 A bead's own read carries its outbound edges — the parent link, the relates-to
 edges (either the `relates-to` or the older `related` spelling), and the
-`blocks`-deps. The tracked-by visits are an inbound `tracks` edge and the direct
+`blocks`-deps. The beads that track it are an inbound `tracks` edge and the direct
 children an inbound `parent-child` edge, each stored on the other bead, so each
 is read with one reverse query the subject's own row cannot answer.
 

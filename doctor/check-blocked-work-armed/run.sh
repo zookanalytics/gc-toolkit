@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
-# LIVE, unassigned bead that is plainly work (not a review, step, workflow-
-# topology, or demand bead, not a standing record, and not a merge anchor) and
+# LIVE, unassigned bead that is plainly work (not a review, step or workflow-
+# topology bead, not a standing record, and not a merge anchor) and
 # is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
 # dispatched once that edge clears: either `gc.routed_to` (a pool queue
 # consumes it, and bd's readiness gates the offer until the blocker closes) or
@@ -189,8 +189,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     }
     # The predicate, entirely on the listing's own fields: plainly work
-    # (unassigned; not review/standing/step/workflow-topology/demand; not a
-    # merge anchor; an allowlisted work issue_type), AND carrying no dispatch
+    # (unassigned; not review/standing/step/workflow-topology; not a merge
+    # anchor; an allowlisted work issue_type, which a gate is not), AND carrying no dispatch
     # path (has_dispatch_path: no route and no arm). A candidate that reads as
     # waiting for placement on this listing is marked in the fourth column:
     # `bd blocked` prints no parent, so whether the sitting placed it is settled
@@ -204,7 +204,6 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($b | is_standing_kind) | not)
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")
-        | select(($m["gc.demand_for"] // "") == "")
         | select(($m["merge_result"] // "") == "")
         | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
         | select(($b | has_dispatch_path) | not)

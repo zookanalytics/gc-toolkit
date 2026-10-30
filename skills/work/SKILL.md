@@ -93,7 +93,9 @@ carries the work:
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
   then send the subject: `gc sling <rig>/<pool> <subject> --on <formula>`. The
   sling clears that human route. `--route <rig>/<pool>` would route the
-  subject raw as well, a second dispatch.
+  subject raw as well, a second dispatch. When the formula is the one the
+  subject recommends, take the recommendation instead (below): `--accept` on
+  the same sign-off sends it, and you send nothing yourself.
 - **New work carries it, and the subject waits for it.** File the work, send
   it, and sign off with `--ruled yes --route human --waiting-on <the work>`.
   The board shows the subject as a ruling in flight until the work lands, then
@@ -109,24 +111,28 @@ carries the work:
 ## Take a recommendation
 
 A first reaction that cannot route a bead itself records the formula it
-recommends as `gc.recommended_formula`, and the operator decides. Take it only
-on the operator's go. The pool on that formula acts.
+recommends as `gc.recommended_formula` and puts it to the operator as a human
+gate on the bead under the key `first-reaction`, and the operator decides. Take
+it only on the operator's go. The pool on that formula acts.
 
-Release the wait that put it to the operator (in a sitting, the sign-off for a
-subject that is the work, above), send it on that formula, then record the
-dispatch in one update, which runs only once the sling succeeded:
+One writer takes a recommendation: `gc-helm.sh accept`, the board's Accept.
+Under the bead's acceptance lock it clears the recommendation's gate and
+nothing else, sends the formula titled with a token unique to that acceptance,
+and records the dispatch. It refuses while another human gate blocks the bead,
+because a worker builds nothing that still waits. Never send a recommended
+formula with a sling of your own. An Accept that stopped after its sling has
+already sent the work, and a second sling sends it again once that run has
+finished, while the writer finds the run by its token and only records it.
 
-```bash
-gc sling <rig>/<pool> <bead> --on <the recommended formula> \
-  && gc bd update <bead> --set-metadata gc.recommended_formula_dispatched=<the formula> --unset-metadata gc.recommended_formula
-```
-
-The marker records the dispatch, and the strip stops a later visit from
-offering Accept for work that already ran. Written over a failed sling, the
-marker would record work that never went. The board's Accept reads the marker
-as a dispatch already sent, so it would never send the work either. Outside a
-sitting, the board's Accept is the operator's own form of this act, and it
-refuses a visit that a sitting has engaged.
+- **Outside a sitting**, on the operator's go:
+  `"$(gc <binding> scripts-dir)/gc-helm.sh" accept <bead>`.
+- **In a sitting**, the sign-off takes it. The conversation replies to the
+  recommendation's gate, and `--accept` on the sign-off, or on the `--answer`
+  call of a turn that does not sign off, hands that gate to Accept's writer
+  once the ruling's other writes have landed, every other gate it answers
+  included (the converse-settle step). A var the operator settles for the
+  dispatch rides beside it as `--var <key>=<value>`; the formula's own
+  description names the vars it takes.
 
 ## Choose the formula
 
@@ -141,7 +147,7 @@ gc formula show <formula> --rig <rig>     # what one does, the variables that tu
 Weigh what done looks like for the work:
 
 1. **Nothing to build.** A judgment or a decision the operator owns has
-   nothing to dispatch. Ask for a visit (the waits skill).
+   nothing to dispatch. Ask the operator (the waits skill).
 2. **A change to a repository that lands as one pull request.** That is what
    a polecat pool's default formula builds, so send it with no `--on`.
 3. **Any other kind of done**, such as findings with no change, a design
@@ -169,19 +175,21 @@ The message is that work already sent should stop, or go somewhere else.
   `--route <rig>/<pool>`.
 - **Withdraw a recommendation** the bead should not take, while the bead stays
   open for discussion:
-  `SUBJECT=<bead> VISIT=<visit> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
-  It strips `gc.recommended_formula`, so the board stops offering Accept once
-  no sitting holds the visit. When the bead itself should go, close it instead.
+  `SUBJECT=<bead> CONVERSATION=<conversation> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
+  It strips `gc.recommended_formula`, so the board stops offering Accept. The
+  gate that put the recommendation to the operator stays open until it is
+  answered. When the bead itself should go, close it instead.
 
 A pull request in flight is retired, not stopped (the prs skill).
 
 ## Close a bead that needs no work
 
 The message is that nothing will be built for this bead. The writer closes it,
-and nothing downstream picks it up. In a sitting, close a subject only on the
-operator's agreement. The sitting's own open visit holds that close: the
-writer records the pointer and exits 5, and the same call closes the subject
-once the visit is closed.
+and nothing downstream picks it up. An open human gate that blocks the bead
+holds that close: the writer records the pointer and exits 5, and the same call
+closes the bead once each such gate is cleared. In a sitting, close a subject
+only on the operator's agreement, and run the writer after the sign-off, which
+answers the gates the ruling settles.
 
 Record the no-op, then close through the disposition writer, which runs only
 once the record landed:
@@ -192,7 +200,7 @@ gc bd update <bead> --set-metadata gc.work_outcome=no-op \
 ```
 
 Under `not-needed` the successor is the evidence that ruled the work out, such
-as the visit where it was decided. Under `duplicate`, `folded`, `re-homed` and
+as the conversation where it was decided. Under `duplicate`, `folded`, `re-homed` and
 `fixed-upstream` it is the bead that carries the work now. The writer stamps
 the pointer, reads it back and only then closes, so never close the bead by
 hand: a close that names no successor reads as a careless one. On a bead

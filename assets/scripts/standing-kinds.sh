@@ -15,8 +15,8 @@
 # dropped by every one of them at once, and standing-kinds.test.sh fails when a
 # reader stops sourcing this file or carries a list of its own.
 #
-# Usage follows the in-variable jq convention (visit-identity.sh): prepend the
-# defs to a jq program, e.g.
+# Usage follows the in-variable jq convention: prepend the defs to a jq
+# program, e.g.
 #   jq "$STANDING_KINDS_JQ"' map(select(is_standing_kind | not)) '
 # A program whose defs sit mid-body splices the variable in at that point
 # instead, closing and reopening its single quotes around it.

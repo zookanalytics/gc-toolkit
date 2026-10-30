@@ -38,6 +38,13 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
+# The predicate reads a human gate by bd-lib.sh's rule, so a reader sources
+# bd-lib.sh first, and the source fails without it.
+# shellcheck source=hold-lib.sh
+if ( unset HUMAN_GATE_JQ; . "$LIB" ) 2>/dev/null; then bad "(DEF) sourcing the file without bd-lib.sh's human gate rule fails"
+else ok "(DEF) sourcing the file without bd-lib.sh's human gate rule fails"; fi
+# shellcheck source=bd-lib.sh
+. "$HERE/bd-lib.sh" || { echo "FAIL - cannot source $HERE/bd-lib.sh" >&2; exit 1; }
 # shellcheck source=hold-lib.sh
 . "$LIB" || { echo "FAIL - cannot source $LIB" >&2; exit 1; }
 [ -n "${HOLD_JQ:-}" ] && ok "(DEF) sourcing the file exposes \$HOLD_JQ" || bad "(DEF) sourcing the file exposes \$HOLD_JQ"
@@ -101,6 +108,33 @@ nl='{"id":"nl-1","title":"x","status":"open","dependencies":[{"issue_id":"nl-1",
 printf '%s' '[{"id":"nl-0","title":"line one\u0009tabbed\nline two","status":"open"}]' > "$TMP/nl-store.json"
 STORE="$TMP/nl-store.json" walk nl-1 "$nl"
 eq "$(ask 'hold_summary($g[0])')" 'nl-0 "line one tabbed line two"' "(LABEL) a control character in a title prints as a space"
+
+echo "# what holds a bead bd reports ready"
+# bd counts a pinned blocker as none, so bd can report a bead ready while a
+# pinned human gate holds it. A reader that takes the readiness bd reports asks
+# hold_holds_ready, which keeps the holds of human gates alone: for every other
+# blocker the answer bd gives stands, an edge it cannot resolve included.
+ready_by() { ask '[ hold_holds_ready($g[0])[] | {by, on} ] | tojson'; }
+walk s-1
+eq "$(ready_by)" '[{"by":"gate-s","on":"s-1"}]' "(READY) a pinned human gate on the bead holds it though bd reports it ready"
+walk t-1
+eq "$(ready_by)" '[{"by":"gate-t","on":"epic-t"}]' "(READY) so does a pinned human gate on its ancestor"
+walk d-1
+eq "$(ready_by)" '[{"by":"gate-d","on":"d-1"}]' "(READY) an open human gate holds it as well"
+walk m-1
+eq "$(ready_by)" '[{"by":"gate-m","on":"epic-m"}]' "(READY) of a park and a human gate on one epic, the gate is the hold bd did not count"
+walk a-1
+eq "$(ready_by)" '[]' "(READY) a park is no hold beside a ready answer, since bd counted it"
+walk i-1
+eq "$(ready_by)" '[]' "(READY) nor is a blocker the store does not return, which bd resolves to none"
+walk u-1
+eq "$(ready_by)" '[]' "(READY) nor a pinned gate of another type"
+walk d-1
+eq "$(ask '[ hold_holds($g[0])[] | .human ] | tojson')" '[true]' "(READY) a hold by a human gate is marked human"
+walk e-1
+eq "$(ask '[ hold_holds($g[0])[] | .human ] | tojson')" '[false]' "(READY) a hold by any other blocker is not"
+walk i-1
+eq "$(ask '[ hold_holds($g[0])[] | .human ] | tojson')" '[false]' "(READY) nor is a blocker with no row, which nothing shows to be a gate"
 
 echo "# what puts a bead in flight"
 walk fl-1
@@ -172,7 +206,7 @@ done
 echo "# no private copies"
 # A copy is a jq def of one of the predicate's names. Specs and generated
 # renders are history and output, not readers.
-DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_is_demand_gate|hold_flight_why|hold_in_flight|hold_absent|hold_chain|hold_holds|hold_held|hold_released_at)[^[:alnum:]_]'
+DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_blocker_open|hold_flight_why|hold_in_flight|hold_absent|hold_chain|hold_holds|hold_held|hold_holds_ready|hold_released_at)[^[:alnum:]_]'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

@@ -173,7 +173,7 @@ Choose by what the learning *is*:
   is one dimension sharpened or added, never a checklist bolted on.
 - **`convention`** when the behavior must be carried *into* the turn by one
   role and no reviewer sees the moment it goes wrong — a claiming rule, a
-  handoff, an escalation choice.
+  handoff, the choice to ask a person.
 - **`exemplar`** when the lesson is a shape rather than a statement: two
   versions of the same artifact where the better one is obvious side by side
   and mushy in a sentence. Costs the most per read, so it earns its place
@@ -258,7 +258,7 @@ every agent capture as `self`, so an operator correction captured by the agent
 it corrected reads `self`. Before you treat a cluster as all-self, check each
 self observation's voice: a PR comment or review whose GitHub author is the
 operator (`gh api` on the provenance, `.user.login`), or the operator's own
-words quoted from a sitting or visit, is an operator correction.
+words quoted from a sitting, is an operator correction.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
 **blocked**, however many events it spans. Self-sourced clusters have been

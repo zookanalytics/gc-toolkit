@@ -32,17 +32,20 @@ const maxGatherFanout = 8
 // SupervisorSource reads bead state from the supervisor loopback HTTP
 // API. It satisfies [Source].
 //
-// It gathers the three TYPE-keyed anchor kinds and the two metadata-keyed ones
-// ([metadataAnchors]: `human` and `parked`). `GET /beads` takes no metadata
-// predicate, so that filter runs client-side over a paged scan of the city's
-// open beads — plus a `type=gate` page unioned in, since a human demand is now
-// a gate and only the API's own defaults decide whether the bare page carries
-// one (see [SupervisorSource.openBeads]).
+// It gathers the three TYPE-keyed anchor kinds, the metadata-keyed ones
+// ([metadataAnchors]), and the operator's side: human gates and conversations.
+// `GET /beads` takes no metadata predicate, so those filters run client-side
+// over a paged scan of the city's open beads — plus a `type=gate` page unioned
+// in, since a human gate is a gate and only the API's own defaults decide
+// whether the bare page carries one (see [SupervisorSource.openBeads]).
 //
 // A board served from this backend is NARROWER: no `updated_at` (so stale_days
-// is 0), no visits and so no sittings, no in-flight map, and no resolved
-// waiting edges — see [SupervisorSource.metadataAnchorFor]. See the backend
-// table in README.md.
+// is 0), no sittings card, no in-flight map, no resolved waiting edges — see
+// [SupervisorSource.metadataAnchorFor] — and only the conversations waiting in
+// the queue, because a held one is in_progress and the scan reads `open`. It
+// admits a gate as a human gate only when the payload names its await type,
+// which the API's bead does not carry today, so it folds no human gate yet.
+// See the backend table in README.md.
 type SupervisorSource struct {
 	baseURL string // e.g. http://127.0.0.1:8372
 	city    string // registered city name, e.g. "loomington"
@@ -172,13 +175,16 @@ func discoverCity() string {
 // fails the whole object, which inside a list envelope drops the entire PAGE.
 // [decodeMetadata] coerces instead.
 type apiBead struct {
-	ID          string          `json:"id"`
-	Title       string          `json:"title"`
-	Status      string          `json:"status"`
-	IssueType   string          `json:"issue_type"`
-	Priority    *int            `json:"priority"`
-	Parent      string          `json:"parent"` // convoy parent==null floating filter
-	Assignee    string          `json:"assignee"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	IssueType string `json:"issue_type"`
+	Priority  *int   `json:"priority"`
+	Parent    string `json:"parent"` // convoy parent==null floating filter
+	Assignee  string `json:"assignee"`
+	// AwaitType is a gate's await type. The API's bead omits it today, so it
+	// reads empty and no gate reads as a human gate on this backend.
+	AwaitType   string          `json:"await_type"`
 	Description string          `json:"description"`
 	Ephemeral   bool            `json:"ephemeral"`
 	Metadata    json.RawMessage `json:"metadata"`
@@ -319,16 +325,16 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 
 	// Session liveness, so a claimed child with a live owner reads as moving.
 	//
-	// The other two joins stay unbuilt. Both count in_progress as live
-	// ([liveStatuses]) — a HELD visit is a claimed one, and a live graph.v2
-	// root is claimed by definition — while GET /beads takes a single status
-	// per request and the scan behind the metadata kinds asks for `open`.
-	// Lifting either join onto that scan would drop exactly the rows that make
-	// it true. So on this backend a held anchor reads as unheld and a slung
-	// bead reads as stranded: the same shape of gap it already documents for
-	// updated_at, a narrower board rather than a wrong one. What it must not do
-	// is invert the liveness test, which is what leaving OwnerState empty would
-	// do.
+	// The in-flight join stays unbuilt, and so do the sittings. Both count
+	// in_progress as live ([liveStatuses]) — a live graph.v2 root is claimed by
+	// definition, and so is a conversation a sitting holds — while GET /beads
+	// takes a single status per request and the scan behind the metadata kinds
+	// asks for `open`. Lifting either onto that scan would drop exactly the rows
+	// that make it true. So on this backend a slung bead reads as stranded and
+	// a bead only a held conversation holds reads as unheld: the same shape of
+	// gap it already documents for updated_at, a narrower board rather than a
+	// wrong one. What it must not do is invert the liveness test, which is what
+	// leaving OwnerState empty would do.
 	owners := sessionStates(ctx, s.gc, g)
 
 	facts := board.Facts{OwnerState: owners}
@@ -553,9 +559,9 @@ var infraTypes = map[string]bool{
 
 // openBeads pages the whole city's open beads, GATES INCLUDED.
 //
-// The native human-demand state this backend must gather IS a gate —
-// issue_type=gate, gc.routed_to=human (assets/scripts/gc-helm.sh `demand`).
-// `bd list` hides issue_type=gate by default; the gascity API's list path
+// A question the operator owes is a human gate — issue_type=gate, await type
+// human (assets/scripts/human-gate.sh). `bd list` hides issue_type=gate by
+// default; the gascity API's list path
 // does NOT today (its bd-backed store passes --include-gates unconditionally,
 // internal/beads/bdstore.go listViaBDList), so the bare status=open page
 // already carries gates. Nothing in the API contract promises that, and a
@@ -638,8 +644,8 @@ func dedupeBeadsByID(pages ...[]apiBead) []apiBead {
 	return out
 }
 
-// gatherMetadataAnchors admits the two METADATA-keyed kinds from [openBeads]'
-// scan of the city's open beads.
+// gatherMetadataAnchors admits the METADATA-keyed kinds, the human gates and
+// the conversations from [openBeads]' scan of the city's open beads.
 //
 // The selector is [metadataAnchor.matches], shared with the beads backend so
 // the two cannot drift on which beads are anchors. A bead carrying BOTH markers
@@ -668,11 +674,35 @@ func (s *SupervisorSource) gatherMetadataAnchors(ctx context.Context, g *gatherS
 		}
 	}
 
+	// A gate's beads are the beads whose own `blocks` edges name it, read by
+	// inverting the scan's edges as the children are.
+	blockedBy := map[string][]string{}
 	for _, b := range all {
+		for _, d := range b.Deps {
+			if d.Type == "blocks" && d.DependsOnID != "" {
+				blockedBy[d.DependsOnID] = append(blockedBy[d.DependsOnID], b.ID)
+			}
+		}
+	}
+
+	for _, b := range all {
+		md := decodeMetadata(b.Metadata)
+		switch {
+		case b.IssueType == board.KindGate && b.AwaitType == "human":
+			a := s.metadataAnchorFor(g, b, md, board.KindGate, nil)
+			a.Subjects = uniqueStrings(blockedBy[b.ID])
+			g.anchors = append(g.anchors, a)
+			continue
+		case b.IssueType == "task" && conversationAssignee(b.Assignee, b.ID):
+			if subject, replies, ok := apiConversationEdges(b.Deps); ok {
+				a := s.metadataAnchorFor(g, b, md, board.KindConversation, nil)
+				a.Subjects, a.RepliesTo, a.Assignee = []string{subject}, replies, b.Assignee
+				g.anchors = append(g.anchors, a)
+			}
+		}
 		if !anchorCandidate(b) {
 			continue
 		}
-		md := decodeMetadata(b.Metadata)
 		for _, ma := range metadataAnchors {
 			if ma.matches(md) {
 				g.anchors = append(g.anchors, s.metadataAnchorFor(g, b, md, ma.kind, openChildren[b.ID]))
@@ -681,12 +711,31 @@ func (s *SupervisorSource) gatherMetadataAnchors(ctx context.Context, g *gatherS
 	}
 }
 
+// apiConversationEdges is [conversationEdges] over a scan row's own edges.
+func apiConversationEdges(deps []apiBeadDep) (subject string, replies []string, ok bool) {
+	var tracked []string
+	for _, d := range deps {
+		switch d.Type {
+		case "tracks":
+			tracked = append(tracked, d.DependsOnID)
+		case "replies-to":
+			replies = append(replies, d.DependsOnID)
+		}
+	}
+	if tracked = uniqueStrings(tracked); len(tracked) != 1 {
+		return "", nil, false
+	}
+	return tracked[0], uniqueStrings(replies), true
+}
+
 // anchorCandidate reports whether a bead may be admitted under a METADATA-keyed
 // kind. It is this backend's form of the beads gather's ExcludeTypes+SkipWisps
 // filter: a bead already admitted as an epic, decision or convoy must not be
 // re-admitted under a second kind, and infrastructure beads are not work.
 func anchorCandidate(b apiBead) bool {
-	if b.Ephemeral || infraTypes[b.IssueType] {
+	// A gate is never admitted by its metadata: a human gate's row is the gate
+	// kind, and any other gate is no row of the operator's.
+	if b.Ephemeral || infraTypes[b.IssueType] || b.IssueType == board.KindGate {
 		return false
 	}
 	for _, kind := range typedAnchorKinds {

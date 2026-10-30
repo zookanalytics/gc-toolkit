@@ -1,0 +1,466 @@
+#!/bin/sh
+# operator-intake.sh — the operator's intake: turn "I need an agent on topic X"
+# into a durable conversation in one command.
+# The argument (grammar and flags in usage()) is either a topic string, which
+# becomes a NEW subject bead, or a reference to an EXISTING one (a bead id, a
+# PR number or URL, or a superseded id) resolved through gc-helm to the live
+# bead that owns the work.
+# Owns everything upstream of the conversation (rig, subject bead, path
+# choice); filing the conversation lives ONCE in gc-helm.sh open, which this
+# calls. Two paths: PREFERRED files a first reaction (a framing card; a reaction
+# that puts the topic to the operator files a human gate, which reaches the
+# operator on the board); FALLBACK files a conversation in the operator's queue
+# directly — taken on --no-react, whenever `gc-proactive.sh deliverable`
+# answers no (divert-on-no is the contract — a reaction routed into a downed
+# pool waits invisibly; today's tool always says yes), and when the subject
+# already has an open first reaction or a live owner owns it (gc-helm react
+# exit 5), a live workflow already drives it (exit 6), or it is already routed
+# or armed (exit 7), so react is a no-op that files nothing: nothing would put
+# the topic to the operator, so this does.
+# Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
+# matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
+set -u
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+
+PROG="operator-intake"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
+PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# The one definition of whether a rig carries converse, shared with gc-helm.sh's
+# engage so this intake and that spawn read the capability the same way. Exposes
+# rig_carries_converse / converse_roster.
+# shellcheck source=converse-capability.sh
+. "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
+    || { printf '%s: cannot source converse-capability.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
+# The one reading of the liveness flags in `gc rig list --json`, shared with
+# gc-helm.sh's engage so this intake's note and that guard read them the same
+# way. Exposes RIG_PROJECTION_JQ, rig_suspended and city_controller_state.
+# shellcheck source=city-liveness.sh
+. "${GC_CITY_LIVENESS_LIB:-$SCRIPT_DIR/city-liveness.sh}" \
+    || { printf '%s: cannot source city-liveness.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
+
+# The default rig — deliberately NOT inferred from cwd: a wrong-but-FIXED
+# default is discoverable, a wrong-and-VARYING one is not.
+DEFAULT_RIG="${GC_VISIT_DEFAULT_RIG:-gc-toolkit}"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage:
+  operator-intake "<topic>" [--rig <rig>] [--no-react] [--type <t>] [--topic]
+  operator-intake <bead-id|pr-number|pr-url>  [--no-react]
+
+Opens a durable conversation in one step. A topic string becomes a subject
+bead; a bead id, a PR number or URL, or a superseded id resolves through
+gc-helm to the LIVE bead that owns the work and is used as the subject as-is.
+Either way the conversation waits in the operator's queue on the helm board;
+the operator draws it off the board and `gc-helm engage` spawns a converse
+sitting on demand.
+
+  --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
+                 override with GC_VISIT_DEFAULT_RIG). Refused with exit 2 for
+                 a bead id, a PR number, or a PR URL, because an existing
+                 bead's own rig is authoritative.
+  --no-react     Skip the proactive first reaction and file the conversation now.
+                 Faster and unconditional; you lose the framing card.
+  --type <t>     Subject bead type (default: task, or decision when the topic
+                 reads as a question). Refused with exit 2 for a bead id, a PR
+                 number, or a PR URL, because an existing bead keeps its type.
+  --topic        Treat the argument as a topic even if it looks like a bead id,
+                 a PR number, or a PR URL.
+  -h, --help     This help.
+
+Without --no-react the topic is handed to a proactive first reaction, which
+writes a framing card and, when it puts the topic back to you, files a human
+gate that reaches you on the board — but ONLY when that pool can actually run.
+When it cannot (auto-spawn disabled, or the city is at the session cap) this
+falls back to filing the conversation directly and says so.
+EOF
+}
+
+# die <message> [exit-code] — $1 only, never $* : the code is the SECOND
+# argument, and joining both into the message prints it as trailing noise.
+die()   { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
+note()  { printf '%s\n' "$*" >&2; }
+
+# ── The subject's title ──────────────────────────────────────────────
+# `bd create` refuses a title over 500 BYTES, and the popup invites a
+# paragraph. The topic lives verbatim in the BODY; the title is a
+# derived label, capped well under 500 in bytes (what ${#var} measures here).
+TITLE_MAX=200
+
+# derive_title <text> — one-line board label: whitespace collapsed, over-long
+# topics cut at a WORD boundary (an offset cut can slice a multi-byte char).
+# The body is a subshell under LC_ALL=C so that ${#var} counts bytes in every
+# shell. dash counts bytes in any locale, but bash, ksh and zsh count
+# characters under a UTF-8 locale, and /bin/sh is dash on Debian and bash on
+# macOS.
+derive_title() (
+    LC_ALL=C
+    _dt=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -s ' ')
+    _dt="${_dt# }"; _dt="${_dt% }"
+    [ "${#_dt}" -le "$TITLE_MAX" ] && { printf '%s' "$_dt"; return 0; }
+
+    # Drop trailing words until it fits, holding a byte back for the ellipsis.
+    while [ "${#_dt}" -gt "$((TITLE_MAX - 1))" ]; do
+        _dt_prev="$_dt"
+        _dt="${_dt% *}"
+        [ "$_dt" = "$_dt_prev" ] && break     # one unbroken token — no boundary to use
+    done
+    # One unbroken token (URL, hash, spaceless script): cut at the byte, then
+    # repair a trailing half-character.
+    if [ "${#_dt}" -gt "$((TITLE_MAX - 1))" ]; then
+        while [ "${#_dt}" -gt "$((TITLE_MAX - 1))" ]; do _dt="${_dt%?}"; done
+        # Keyed on OUTPUT: iconv emits the valid prefix even as it "fails".
+        _dt_utf8=$(printf '%s' "$_dt" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null)
+        [ -n "$_dt_utf8" ] && _dt="$_dt_utf8"
+    fi
+    printf '%s…' "${_dt% }"
+)
+
+# ── Argument parsing ─────────────────────────────────────────────────
+ARG=""; RIG=""; NO_REACT=""; SUBJ_TYPE=""; FORCE_TOPIC=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --rig=*)   RIG="${1#--rig=}"; shift ;;
+        --rig)     shift; [ $# -gt 0 ] || { echo "$PROG: --rig requires a value" >&2; exit 2; }
+                   RIG="$1"; shift ;;
+        --type=*)  SUBJ_TYPE="${1#--type=}"; shift ;;
+        --type)    shift; [ $# -gt 0 ] || { echo "$PROG: --type requires a value" >&2; exit 2; }
+                   SUBJ_TYPE="$1"; shift ;;
+        --no-react) NO_REACT=1; shift ;;
+        --topic)   FORCE_TOPIC=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        --)        shift; [ $# -gt 0 ] && { [ -z "$ARG" ] || { echo "$PROG: takes one topic or bead-id" >&2; exit 2; }; ARG="$1"; shift; } ;;
+        -*)        echo "$PROG: unknown flag '$1'" >&2; usage; exit 2 ;;
+        *)         [ -z "$ARG" ] || { echo "$PROG: takes one topic or bead-id (quote a multi-word topic)" >&2; exit 2; }
+                   ARG="$1"; shift ;;
+    esac
+done
+[ -n "$ARG" ] || { echo "$PROG: needs a topic string or a bead id" >&2; usage; exit 2; }
+
+[ -f "$HELM" ] || die "cannot find gc-helm.sh (looked at $HELM) — filing the conversation lives there" 3
+
+# ── Bead id or topic? Disambiguated by RIG PREFIX, not shape alone ────
+# prefix matches no rig → topic; matches and resolves → subject; matches but
+# does not resolve → gc-helm.sh's subject-exists gate exits 4 (a typo must
+# not become a topic bead titled "tk-abc12"). --topic forces the collision.
+looks_like_bead_id=""
+case "$ARG" in
+    *[!a-zA-Z0-9_-]*|-*) : ;;                       # whitespace/punctuation → a topic
+    *-*) [ -n "$FORCE_TOPIC" ] || looks_like_bead_id=1 ;;
+esac
+
+RIGS=""
+enumerate_rigs() {
+    [ -n "$RIGS" ] && return 0
+    # >>> rig-enumeration-taxonomy
+    # Mirrors gc-helm.sh's enumerate_rigs (per-cause sentences); no
+    # timeout arm because this script does not bound the call.
+    # The stderr capture outlives nothing: it is read and removed a few lines
+    # down, and the traps that cover the signal landing while `gc rig list`
+    # runs come off with it. A trap is process-global, so a helper that leaves
+    # one installed rewrites how every later line of every caller handles a
+    # signal — these live exactly as long as the file they remove.
+    _er_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-rig-enum.XXXXXX" 2>/dev/null || printf '')
+    _er_rc=0
+    if [ -n "$_er_errf" ]; then
+        trap 'rm -f "$_er_errf" 2>/dev/null' EXIT
+        trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+        rigs_raw=$(gc rig list --json 2>"$_er_errf") || _er_rc=$?
+        _er_why=$(tr '\n' ' ' < "$_er_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+        rm -f "$_er_errf" 2>/dev/null || true
+        trap - EXIT INT TERM HUP
+    else
+        rigs_raw=$(gc rig list --json 2>/dev/null) || _er_rc=$?
+        _er_why=""
+    fi
+    [ "$_er_rc" -eq 0 ] \
+        || die "could not enumerate rigs: 'gc rig list' exited ${_er_rc}${_er_why:+ — $_er_why}. That is the data plane, not this script — try 'gc doctor' and check Dolt. This command wrote nothing." 3
+    # jq -e separates the rest by exit status: 4 = no output at all,
+    # 5 = would not parse, 1 = parsed but not the {"rigs":[…]} contract.
+    _er_shape=0
+    printf '%s' "$rigs_raw" | jq -e 'type=="object" and (.rigs|type)=="array"' >/dev/null 2>&1 || _er_shape=$?
+    case "$_er_shape" in
+        0) : ;;
+        4) die "could not enumerate rigs: 'gc rig list --json' exited 0 but printed nothing. A silent empty answer usually means gc was killed or the city path is wrong — check GC_CITY and 'gc doctor'. This command wrote nothing." 3 ;;
+        5) die "could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." 3 ;;
+        *) die "could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem. This command wrote nothing." 3 ;;
+    esac
+    # The projection carries the flags the wait-note below reads from this same
+    # enumeration (city-liveness.sh says which, and why a rig row's running is
+    # not one). A `gc rig list` that omits a flag leaves it null, which the note
+    # treats as unknown and says nothing about.
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c "$RIG_PROJECTION_JQ" 2>/dev/null)
+    [ -n "$RIGS" ] || RIGS='[]'
+    [ "$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)" -gt 0 ] \
+        || die "no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." 3
+    # <<< rig-enumeration-taxonomy
+}
+
+# require_reaction_agent <rig> — refuse (die, nothing filed) when <rig> has no
+# reaction agent registered, so an operator topic filed there would park on the
+# board with no session able to engage it. Two agent kinds engage a topic: the
+# proactive first-reaction pool, and converse (gc-helm engage spawns it on
+# demand). Registration, not liveness, is the bar: a suspended or zero-cap agent
+# still engages once its rig resumes or its cap lifts, and the topic path below
+# deliberately files-and-waits into a suspended rig rather than refusing it. A
+# rig with neither agent registered — the running, agent-less city workspace
+# this backstops — is the one with no resume. An unreadable roster refuses
+# nothing; a dead zone is a positive finding only.
+require_reaction_agent() {
+    # Converse is one of the two reaction agents; its capability is the shared
+    # predicate (converse-capability.sh), so this intake and gc-helm engage read
+    # it the same way and cannot drift. Serviceable the moment it is registered.
+    if rig_carries_converse "$1"; then
+        return 0
+    fi
+    # The other reaction agent is the proactive first-reaction pool. Read the one
+    # roster converse_roster already fetched and validated well-formed (into
+    # $_CONVERSE_ROSTER), for it and for the alt-rig suggestion. Empty means
+    # unreadable or malformed — a degraded data plane, not a dead zone — so fail
+    # open (per the header) rather than strand a legitimate intake on a roster gc
+    # could not answer.
+    converse_roster
+    [ -n "${_CONVERSE_ROSTER:-}" ] || return 0
+    # Serviceable when a proactive pool is registered for the rig, in any cap or
+    # suspension state. (Converse was handled by the shared predicate above.)
+    if printf '%s' "$_CONVERSE_ROSTER" | jq -e --arg r "$1" \
+            '[ .agents[]? | (.qualified_name // "")
+               | select(. == ($r + "/gc-toolkit.proactive")) ] | length > 0' >/dev/null 2>&1; then
+        return 0
+    fi
+    _rra_alt=$(printf '%s' "$_CONVERSE_ROSTER" | jq -r '
+        [ .agents[]? | (.qualified_name // "")
+          | select(test("/gc-toolkit[.](proactive|converse)"))
+          | split("/")[0] ] | unique | join(", ")' 2>/dev/null || true)
+    die "rig '$1' has no reaction agent: neither a proactive pool nor a converse is registered there, so an operator topic filed into it would park on the board with no session able to engage it. Re-run against a rig that has one${_rra_alt:+ (e.g. $_rra_alt)}. Nothing filed." 3
+}
+
+# note_if_report_waits <rig> — say when what this files will wait for triage.
+# A suspended rig has its agents skipped by the reconciler, and while the city
+# controller is down the reconciler does not run at all, so on either nothing
+# triages the report yet. Neither refuses: `gc rig suspend` leaves the beads
+# store accessible, so the report is recorded now and triaged when the rig
+# resumes or the controller is back, and refusing would deny a rig paused on
+# purpose and filed into to process later. Every filing path says it, because a
+# topic and an existing subject wait the same way.
+#
+# A rig with no agents running gets no note, by design. It is idle, the
+# reconciler launches its triage like anywhere else, and a rig row's running
+# cannot tell an idle rig from one whose pool is dead (city-liveness.sh). A
+# reaction pool that cannot run at all, because it is unregistered, suspended
+# or capped at zero slots, is `gc-proactive.sh deliverable`'s no: the path
+# choice below diverts on it to a direct conversation and prints the reason.
+note_if_report_waits() {
+    if [ "$(rig_suspended "$1")" = "true" ]; then
+        note "$PROG: rig '$1' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $1)."
+        return 0
+    fi
+    city_controller_state
+    if [ "$CONTROLLER_RUNNING" = "false" ]; then
+        note "$PROG: the city controller did not answer ($CONTROLLER_SEEN) — the report is recorded now and triaged once it answers (gc status and gc supervisor status show why)."
+    fi
+}
+
+# derive_subject_rig <bead-id> — set prefix_hit, RIG_NAME and SUBJ_DB (the
+# .beads path, empty when the prefix matches no rig) from a bead id's rig
+# prefix. RIGS must already be populated by enumerate_rigs.
+derive_subject_rig() {
+    prefix_hit=$(printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
+        '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1)
+    RIG_NAME="$prefix_hit"
+    SUBJ_DB=$(printf '%s' "$RIGS" | jq -r --arg n "$prefix_hit" \
+        '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
+    [ -n "$SUBJ_DB" ] && SUBJ_DB="$SUBJ_DB/.beads"
+}
+
+if [ -n "$looks_like_bead_id" ]; then
+    enumerate_rigs
+    derive_subject_rig "$ARG"
+    [ -n "$prefix_hit" ] || looks_like_bead_id=""   # no such rig prefix → it is a topic
+fi
+
+# A bare PR number or a pull URL is a subject reference — the anchor recording
+# the PR — not a topic. The shape check above only recognizes rig-prefixed bead
+# ids, so without this a PR number falls to the topic path and mints a bead
+# titled with the number. --topic opts out.
+looks_like_pr_ref=""
+if [ -z "$FORCE_TOPIC" ] && [ -z "$looks_like_bead_id" ]; then
+    case "$ARG" in
+        http://*/pull/[0-9]* | https://*/pull/[0-9]*) looks_like_pr_ref=1 ;;
+        *[!0-9]*) : ;;
+        [0-9]*)   looks_like_pr_ref=1 ;;
+    esac
+fi
+
+# ── Resolve the subject ──────────────────────────────────────────────
+if [ -n "$looks_like_bead_id" ]; then
+    # An existing bead's own rig is authoritative; --rig/--type are refused
+    # rather than silently ignored.
+    [ -z "$RIG" ] || die "--rig does not apply to an existing bead ('$ARG' belongs to rig '$prefix_hit')" 2
+    [ -z "$SUBJ_TYPE" ] || die "--type does not apply to an existing bead ('$ARG' already has a type)" 2
+    # A settled (superseded) id redirects to its live successor before it is
+    # stamped as the subject: gc-helm's resolver follows gc.superseded_by, and a
+    # live id passes through unchanged. Recompute the rig from the successor.
+    if [ -z "$FORCE_TOPIC" ]; then
+        RESOLVED_SUBJECT_REF=$("$HELM" resolve "$ARG") || exit $?
+        if [ -n "$RESOLVED_SUBJECT_REF" ] && [ "$RESOLVED_SUBJECT_REF" != "$ARG" ]; then
+            note "$PROG: '$ARG' is superseded -> resolving to the live successor $RESOLVED_SUBJECT_REF"
+            ARG="$RESOLVED_SUBJECT_REF"
+            derive_subject_rig "$ARG"
+        fi
+    fi
+    SUBJECT="$ARG"
+    note "$PROG: subject $SUBJECT (existing bead, rig $RIG_NAME)"
+elif [ -n "$looks_like_pr_ref" ]; then
+    # A bare PR number or a pull URL names an existing anchor. gc-helm's
+    # resolver maps it to the bead that records the PR (pr_number/pr_url
+    # metadata) or fails closed when none or several do. Its rig is
+    # authoritative, so --rig/--type are refused as for any existing subject.
+    [ -z "$RIG" ] || die "--rig does not apply to a PR reference ('$ARG' resolves to an existing bead whose rig is authoritative)" 2
+    [ -z "$SUBJ_TYPE" ] || die "--type does not apply to a PR reference ('$ARG' resolves to an existing bead)" 2
+    SUBJECT=$("$HELM" resolve "$ARG") || exit $?
+    { [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$ARG" ]; } || die "'$ARG' looks like a PR reference but gc-helm resolved it to no live bead — pass the live bead id, or --topic to file this text as a topic. Nothing filed." 4
+    enumerate_rigs
+    derive_subject_rig "$SUBJECT"
+    note "$PROG: PR reference '$ARG' -> subject $SUBJECT (existing bead, rig $RIG_NAME)"
+else
+    # ── Create the subject bead from the topic string ────────────────
+    [ -n "$RIG" ] || RIG="$DEFAULT_RIG"
+    enumerate_rigs
+    RIG_PATH=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
+    [ -n "$RIG_PATH" ] || die "unknown rig '$RIG' (try one of: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null))" 2
+    [ -d "$RIG_PATH/.beads" ] || die "rig '$RIG' has no .beads ledger at $RIG_PATH/.beads" 3
+
+    # Refuse a dead-zone target before minting the subject bead, so nothing is
+    # filed where no agent could engage it.
+    require_reaction_agent "$RIG"
+
+    # A question is a decision, everything else a task; --type overrides.
+    if [ -z "$SUBJ_TYPE" ]; then
+        case "$ARG" in
+            *\?) SUBJ_TYPE="decision" ;;
+            *)   SUBJ_TYPE="task" ;;
+        esac
+    fi
+
+    # The topic lands verbatim in the BODY (read at claim time); the title is
+    # only a derived label.
+    SUBJ_BODY="$ARG
+
+---
+Operator-origin intake, filed by \`$PROG\` on $(date -u +%Y-%m-%dT%H:%M:%SZ).
+The text above is the whole of what was said at the keystroke — the seed of a
+conversation, not a specification. The title is a shortened label for the
+board; this body is the record. Ask before assuming scope."
+
+    SUBJ_TITLE=$(derive_title "$ARG")
+    # gc.origin=operator rides the create (see "Record the origin" below), so a
+    # minted subject never exists without the key a sweep selects it by.
+    SUBJ_RAW=$(gc bd create -t "$SUBJ_TYPE" --title "$SUBJ_TITLE" -d "$SUBJ_BODY" \
+        --metadata '{"gc.origin":"operator"}' --db "$RIG_PATH/.beads" --json 2>/dev/null)
+    SUBJ_RC=$?
+    SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
+    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+    if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
+        # A refused create STATES its reason in .error — surface it.
+        SUBJ_ERR=$(printf '%s' "$SUBJ_JSON" | jq -r '.error // .[0].error // empty' 2>/dev/null)
+        [ -n "$SUBJ_ERR" ] || SUBJ_ERR="bd create returned no id and no error (exit $SUBJ_RC)"
+        die "could not create the subject bead in rig '$RIG': $SUBJ_ERR — nothing filed" 4
+    fi
+    RIG_NAME="$RIG"
+    SUBJ_DB="$RIG_PATH/.beads"
+    note "$PROG: subject $SUBJECT created in rig $RIG_NAME ($SUBJ_TYPE)"
+fi
+
+# The topic path guarded before it minted the subject; the existing-bead and
+# PR-reference paths resolve a subject in another rig, so guard here before a
+# conversation is filed against a target that could never engage it.
+if [ -n "$looks_like_bead_id" ] || [ -n "$looks_like_pr_ref" ]; then
+    require_reaction_agent "$RIG_NAME"
+fi
+note_if_report_waits "$RIG_NAME"
+
+# ── Record the origin as a KEY, not only as prose ────────────────────
+# gc.origin=operator is the machine-readable fact ("operator commissioned
+# this") a sweep can select on where the body sentence cannot be (prose
+# drifts and gets quoted). BOTH intake paths carry it: the topic path files it
+# on the subject's create above, and an existing bead is stamped here. gc-helm.sh
+# open deliberately does not (a board pick is a glance, not a commission).
+# Only when absent, and never fatal: the deliverable is the conversation.
+ORIGIN_NOW=$(gc bd show "$SUBJECT" --json 2>/dev/null \
+    | scrub \
+    | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.origin"] // "") else "" end' 2>/dev/null)
+if [ -z "$ORIGIN_NOW" ]; then
+    # shellcheck disable=SC2086  # ${SUBJ_DB:+--db "$SUBJ_DB"} expands to 0 or 2 space-free fields
+    gc bd update "$SUBJECT" ${SUBJ_DB:+--db "$SUBJ_DB"} --set-metadata "gc.origin=operator" >/dev/null 2>&1 \
+        || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
+fi
+
+# ── Path selection: can a filed first reaction actually be picked up? ─
+# Delegated to gc-proactive.sh deliverable so this caller cannot drift from
+# the clamps (the tool + agents/proactive/agent.toml).
+REACT=""; REACT_WHY=""
+if [ -n "$NO_REACT" ]; then
+    REACT_WHY="--no-react: filing the conversation directly"
+elif [ ! -x "$PROACTIVE_TOOL" ]; then
+    REACT_WHY="no: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)"
+else
+    # Ask under the SUBJECT's rig (the pool and its clamps are rig-scoped;
+    # helm-svc has no GC_RIG of its own). Set for this ONE command,
+    # not exported: later gc calls resolve their own scope.
+    REACT_WHY="$(GC_RIG="${RIG_NAME:-}" "$PROACTIVE_TOOL" deliverable 2>/dev/null)" && REACT=1
+    [ -n "$REACT_WHY" ] || REACT_WHY="no: gc-proactive.sh deliverable gave no answer"
+fi
+
+# ── Open the conversation ────────────────────────────────────────────
+if [ -n "$REACT" ]; then
+    # The reaction owns putting the topic to the operator from here; a
+    # conversation filed now would put it twice.
+    if "$HELM" react "$SUBJECT" --reason "operator-origin intake: $ARG"; then
+        printf '%s: subject %s — first reaction filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+        printf '       The reaction writes a framing card, and when it puts the topic to you it files a human gate for you; nothing waits on you yet.\n'
+        printf '       Want the conversation now instead? Re-run with --no-react.\n'
+        exit 0
+    else
+        REACT_RC=$?
+    fi
+    # No reaction was dispatched, so nothing downstream will put the topic to
+    # the operator — fall through and file the conversation directly; a
+    # conversation beats a bead nobody is coming to. gc-helm react exit 5 is
+    # the already-reacting no-op (the guard
+    # filed nothing because a first reaction happens once at a time, or a live
+    # owner owns it), exit 6 the live-workflow no-op (the guard filed nothing
+    # because a reaction never races work in flight), and exit 7 the
+    # dispatch-path no-op (the guard filed nothing because the subject is already
+    # routed or armed), each distinct from a real failure to file: name the
+    # actual cause so the ask the converse session reads is accurate.
+    if [ "$REACT_RC" -eq 5 ]; then
+        note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the conversation directly"
+        REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
+    elif [ "$REACT_RC" -eq 6 ]; then
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the conversation directly"
+        REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
+    elif [ "$REACT_RC" -eq 7 ]; then
+        note "$PROG: subject $SUBJECT is already routed or armed — no reaction was filed; filing the conversation directly"
+        REACT_WHY="no: the subject is already routed or armed (a first reaction never second-guesses a dispatch already decided)"
+    else
+        note "$PROG: filing the first reaction FAILED — falling back to filing the conversation directly"
+        REACT_WHY="no: filing the first reaction failed"
+    fi
+fi
+
+# Direct path: gc-helm.sh open owns the gates; --reason/--body carry what
+# this sitting is actually for (read at claim time).
+"$HELM" open "$SUBJECT" \
+    --reason "operator-origin topic intake" \
+    --body "The operator opened this topic directly and no framing card was written ($REACT_WHY). Rebuild whatever context exists on the subject, prep, and hold for the operator. The subject's body is the seed of the conversation, not a specification — ask before assuming scope." \
+    || die "could not file the conversation on $SUBJECT (the subject bead exists; retry with: $HELM open $SUBJECT)" 4
+printf '%s: subject %s — conversation filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"

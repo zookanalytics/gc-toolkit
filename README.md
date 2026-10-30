@@ -14,7 +14,7 @@ The pack is its workflows. Every component belongs to one of six:
 | **work** | a filed bead becomes a pushed branch | `mol-polecat-work`, `lifecycle/lifecycle.toml`, `assets/scripts/lifecycle.sh` |
 | **review** | a gate verdict lands on the anchor | polecat pools (cadence-routed via `REVIEW_POOL`), `formulas/mol-review.toml`, `assets/scripts/signoff.sh` |
 | **merge** | gates green at the live head become a landed PR | `orders/refinery-reconcile.toml` + 5 arms ([docs/refinery-merge-cadence.md](docs/refinery-merge-cadence.md)) |
-| **visit** | a human decision is prepared, framed, and held for | `mol-visit`, converse, `assets/scripts/escalate.sh`, the helm board |
+| **visit** | a human decision is asked for on the bead that waits for it, and settled in a sitting | `assets/scripts/human-gate.sh`, `gc-helm engage`, converse, the helm board |
 | **feedback** | corrective lessons become standing pack behavior | feedback miner/distiller orders ([docs/feedback-learning.md](docs/feedback-learning.md)) |
 | **patrol** | drift between recorded and true state is repaired | witness / deacon patrols, `orders/liveness-sweep.toml`, `doctor/` |
 
@@ -30,7 +30,7 @@ All agents are native to this pack — no gastown import.
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
 | `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
-| `converse-opus`, `converse-fable`, `converse-codex` | conversation sitting | one per engaged visit: `gc-helm engage` opens it on a board visit, and it holds that subject's conversation |
+| `converse-opus`, `converse-fable`, `converse-codex` | conversation sitting | one per engaged conversation: `gc-helm engage` starts it on a conversation about a board row's bead, and it holds that conversation |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | always-on first-reaction pass (2-slot pool) |
 
@@ -84,17 +84,22 @@ render's byte and token counts.
 
 - [docs/foundation.md](docs/foundation.md) — beliefs and operating discipline (the charter)
 - [docs/architecture.md](docs/architecture.md) — how the workflows compose Gas City's primitives, and the consistency test for new work
+- [docs/warrants.md](docs/warrants.md) — the warrants in force: what the pack keeps because Gas City lacks the primitive, the upstream evidence and when it was verified, and the trigger that retires each
 - [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
 - [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, and when it closes
 - [docs/epic-stewardship.md](docs/epic-stewardship.md) — how an epic is held open until its hypothesis is ruled closed, and the Epic Checkpoint layer that is direction
 - [docs/steering.md](docs/steering.md) — how the operator steers the city's work: the intake rule that holds new work for placement, and the park, which holds work under a bead that has not started while work in flight finishes
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
-- [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
+- [docs/human-engagement.md](docs/human-engagement.md) — how the pack engages a person: the subject, its human gates and conversations, converse sittings, Accept and the helm boards
+- [docs/pack-authoring.md](docs/pack-authoring.md) — the pack's own conventions for its formulas, scripts, skills and agents on top of Gas City
+- [docs/gascity/](docs/gascity/README.md) — Gas City itself: the pages that state Gas City behavior only, cited and dated, and the index of canonical Gas City documentation
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 - [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends
 - [docs/review-correctness.md](docs/review-correctness.md) — what the gates run on each surface this repository ships and the defects a correctness review of it hunts there, appended to the review's dispatch note
+- [docs/review-arch.md](docs/review-arch.md) — the divergence lens the arch check applies on this rig: when it applies, its checks, Gas City's own documentation as the evidence, and where the pack's warrants live, appended to the review's dispatch note
+- [docs/review-triage.md](docs/review-triage.md) — the changes that make the arch check mandatory on this rig, appended to the triage review's dispatch note
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
 

@@ -17,8 +17,9 @@
 # both it and the merge stand on;
 # the terminal full-authorization re-read; the loud non-zero exit when the
 # record half fails after a merge; the cap that turns a record failing every
-# pass into one visit a person can claim; and the reads that fail closed when
-# they stop partway (a cut-short reviews or threads stream, a list or dep probe
+# pass into one human gate a person can clear; a human gate on the anchor, a
+# person's hold that records no machine state; and the reads that fail closed
+# when they stop partway (a cut-short reviews or threads stream, a list or dep probe
 # that exited non-zero after printing an array or printed unreadable bytes
 # after it); the hand-off from merge.sh to the binary, and the refusal when no
 # binary resolves; and the two rules the arm shares with the shell readers, each
@@ -90,9 +91,15 @@ prview() { # num state mergeState extra-json
     "$2" "$1" "$1" "$3" "$1" "$1" "${4:-}"
 }
 # A visit on <anchor>, tracking it via a tracks edge (wired in STUB_DEPS by the
-# caller). Its OPEN existence is the whole signal the finalize gate reads.
+# caller). A tracks edge blocks nothing, so it holds no merge.
 visit() { # id anchor [status]
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"visit: %s","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
+    "$1" "${3:-open}" "$2" "$2"
+}
+# A human gate a person owes, under situation key <key>. It holds the merge of
+# each bead it blocks, through the `blocks` edge the caller wires in STUB_DEPS.
+hgate() { # id key [status]
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"answer %s","issue_type":"gate","await_type":"human","await_id":"%s","metadata":{}}' \
     "$1" "${3:-open}" "$2" "$2"
 }
 # A non-city APPROVED review, given at the live head (sha-<num>) unless [oid]
@@ -324,21 +331,20 @@ approved 18
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M8" "a tracking_only pr_number reference does not hold"
 
-# A visit holds the merge through this probe and nothing else: a visit depends
-# on its subject, so a blocks edge back would be a cycle, and pr_number is what
-# is left to hold on.
-store "[$(anchor M9 19), $(rev M9), {\"id\":\"vis-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"19\",\"task_kind\":\"visit\",\"anchor_bead\":\"M9\"}}]"
+# A live bead stamped with the PR's number holds the merge through this probe
+# alone, with no edge onto the anchor.
+store "[$(anchor M9 19), $(rev M9), {\"id\":\"rw-p1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"19\",\"task_kind\":\"rework\",\"anchor_bead\":\"M9\"}}]"
 printf '%s' "$(prview 19 OPEN CLEAN)" > "$GH_DIR/pr_view_19.json"
 approved 19
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "unclosed rework/review bead vis-1" "an open visit stamped with the PR holds the merge"
+has "$out" "unclosed rework/review bead rw-p1" "an open bead stamped with the PR holds the merge"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 19" "…and nothing merged"
-store "[$(anchor M9b 20), $(rev M9b), {\"id\":\"vis-2\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"20\",\"task_kind\":\"visit\",\"anchor_bead\":\"M9b\"}}]"
+store "[$(anchor M9b 20), $(rev M9b), {\"id\":\"rw-p2\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"20\",\"task_kind\":\"rework\",\"anchor_bead\":\"M9b\"}}]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
 approved 20
 out=$("$SUT" 2>&1)
-has "$out" "merged + recorded M9b" "closing the visit is the release, and it performs"
+has "$out" "merged + recorded M9b" "closing the stamped bead is the release, and it performs"
 
 
 # A referencing bead is qualified by the repository ITS OWN pr_url names: bd
@@ -399,7 +405,7 @@ has "$out" "unclosed rework/review bead dep-fgn" "a dep-edge blocker holds whate
 
 fi # part gates
 
-# ==== part approval: must-fix findings, visits, the universal approval rule
+# ==== part approval: must-fix findings, human gates, the universal approval rule
 # and its veto, and the cause a BLOCKED or UNSTABLE PR is held for ====
 if part approval; then
 
@@ -426,33 +432,43 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded MF1" "every lane green and no open must-fix: the merge lands"
 : > "$STUB_DEPS"
 
-echo "# an OPEN visit on the anchor holds the merge (finalize gate), and the hold names it"
-# The visit tracks the anchor (non-blocking), so no earlier blocker probe sees it;
-# the finalize gate reads its open existence and holds THIS anchor's merge.
-store "[$(anchor MV1 47), $(rev MV1), $(visit vis-mv1 MV1)]"
-printf 'vis-mv1|tracks|MV1\n' > "$STUB_DEPS"
+echo "# an OPEN human gate on the anchor holds the merge, and the hold names it"
+# The gate blocks the anchor, so the blocker probe reads it and holds THIS
+# anchor's merge. It is a person's hold, so it records no machine state.
+store "[$(anchor MV1 47), $(rev MV1), $(hgate gate-mv1 pr-comments.47.x)]"
+printf 'gate-mv1|blocks|MV1\n' > "$STUB_DEPS"
 printf '%s' "$(prview 47 OPEN CLEAN)" > "$GH_DIR/pr_view_47.json"
 approved 47
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "held by open visit vis-mv1" "an open visit holds the merge, naming the visit"
-hasnt "$(cat "$STUB_GH_LOG")" "pr merge 47" "…and nothing merged under the open visit"
+has "$out" "held by open human gate gate-mv1" "an open human gate holds the merge, naming the gate"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 47" "…and nothing merged under the open gate"
 eq "$(bstatus MV1)" "open" "…and the anchor stays open"
+eq "$(meta MV1 pr.machine)" "<absent>" "…and the person's hold records no machine state"
 
-echo "# a CLOSED visit on the anchor does not hold the merge"
-store "[$(anchor MV2 48), $(rev MV2), $(visit vis-mv2 MV2 closed)]"
-printf 'vis-mv2|tracks|MV2\n' > "$STUB_DEPS"
+echo "# a CLOSED human gate on the anchor does not hold the merge"
+store "[$(anchor MV2 48), $(rev MV2), $(hgate gate-mv2 pr-comments.48.x closed)]"
+printf 'gate-mv2|blocks|MV2\n' > "$STUB_DEPS"
 printf '%s' "$(prview 48 OPEN CLEAN)" > "$GH_DIR/pr_view_48.json"
 approved 48
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "merged + recorded MV2" "a closed visit is no hold: the merge lands"
+has "$out" "merged + recorded MV2" "a cleared gate is no hold: the merge lands"
 : > "$STUB_DEPS"
 
-echo "# a visit filed mid-pass is caught by the terminal re-read (a visit does not move the head)"
-# The anchor validates clean, then an open visit is filed before the merge. It is
-# subject-local — no head move — so --match-head-commit cannot catch it; only the
-# terminal finalize-gate re-assert can. The store gains the visit on MV3's SECOND
+echo "# a tracks edge onto the anchor holds nothing (a visit or conversation about it)"
+store "[$(anchor MV4 46), $(rev MV4), $(visit vis-mv4 MV4)]"
+printf 'vis-mv4|tracks|MV4\n' > "$STUB_DEPS"
+printf '%s' "$(prview 46 OPEN CLEAN)" > "$GH_DIR/pr_view_46.json"
+approved 46
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded MV4" "a bead that tracks the anchor holds no merge"
+: > "$STUB_DEPS"
+
+echo "# a gate filed mid-pass is caught by the terminal re-read (a gate does not move the head)"
+# The anchor validates clean, then an open human gate is filed on it before the
+# merge. It moves no head, so --match-head-commit cannot catch it; only the
+# terminal finalize-gate re-assert can. The store gains the gate on MV3's SECOND
 # read (the terminal re-read), via the same STUB_SHOW_HOOK seam the other
 # terminal-re-read cases use.
 store "[$(anchor MV3 49), $(rev MV3)]"
@@ -466,15 +482,15 @@ cat > "$TMP/hook_mv3.sh" <<HOOK
 n=\$(cat "$MV3_HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$MV3_HOOK_COUNT"
 if [ "\$n" = 2 ]; then
   tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
-  jq -c '. + [{"id":"vis-mv3","status":"open","assignee":"","notes":"","title":"visit: MV3","issue_type":"task","metadata":{"task_kind":"visit","gc.continuation_group":"MV3"}}]' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
-  printf 'vis-mv3|tracks|MV3\n' >> "\$STUB_DEPS"
+  jq -c '. + [{"id":"gate-mv3","status":"open","assignee":"","notes":"","title":"answer late","issue_type":"gate","await_type":"human","await_id":"late","metadata":{}}]' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+  printf 'gate-mv3|blocks|MV3\n' >> "\$STUB_DEPS"
 fi
 HOOK
 chmod +x "$TMP/hook_mv3.sh"
 : > "$STUB_GH_LOG"
 out=$(STUB_SHOW_HOOK="$TMP/hook_mv3.sh" "$SUT" 2>&1)
-has "$out" "changed between validation and the merge" "the terminal re-read holds on a mid-pass visit"
-has "$out" "held by open visit vis-mv3" "…and names the mid-pass visit"
+has "$out" "changed between validation and the merge" "the terminal re-read holds on a mid-pass gate"
+has "$out" "held by open human gate gate-mv3" "…and names the mid-pass gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 49" "…and nothing merged"
 : > "$STUB_DEPS"
 
@@ -1308,9 +1324,20 @@ approved 85
 approved 86
 out=$("$SUT" 2>&1)
 eq "$(pinned V6)" "progressing@sha-85" "a pool-routed rework child is an actor that will act"
-# The demand bead that makes an anchor `asking` blocks it the same way and has
-# no automated actor behind it, so it must not read as the machine working.
-eq "$(machine V7)" "<absent>" "a demand bead blocking the anchor is not the machine progressing"
+# A blocker routed to a person has no automated actor behind it, so it must not
+# read as the machine working.
+eq "$(machine V7)" "<absent>" "a blocker routed to a person is not the machine progressing"
+
+echo "# a human gate blocking the anchor is that person's hold: no machine state"
+# A gate carries no route, so a reader that did not know its await type would
+# take it for an unrouted blocker no automated actor will clear.
+store "[$(anchor V7g 89), $(rev V7g), $(hgate gate-v7g pr-retargeted.89)]"
+printf 'gate-v7g|blocks|V7g\n' > "$STUB_DEPS"
+printf '%s' "$(prview 89 OPEN CLEAN)" > "$GH_DIR/pr_view_89.json"
+approved 89
+out=$("$SUT" 2>&1)
+has "$out" "held by open human gate gate-v7g" "the gate holds the merge"
+eq "$(machine V7g)" "<absent>" "…and records no machine state: neither progressing nor blocked"
 
 # A hold no automated actor will clear, and no review verdict is owed on, records
 # `blocked` with its cause — distinct from settled, so the board shows it as
@@ -1328,6 +1355,21 @@ approved 92
 out=$("$SUT" 2>&1)
 eq "$(pinned BK1)" "blocked@sha-92" "an unrouted blocker no automated actor will clear records blocked, not silence"
 has "$(reason BK1)" "rw-bk1" "…and the reason names the blocking bead"
+
+echo "# the blocked reason names the unrouted blocker, not the first holder of the merge"
+# A bead stamped with the PR's number holds the merge first, and an unrouted
+# blocker beside it is what records blocked, so the reason names the blocker.
+store "[$(anchor BK3 94), $(rev BK3),
+        {\"id\":\"rw-bk3a\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"94\",\"gc.routed_to\":\"human\"}},
+        {\"id\":\"rw-bk3b\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'rw-bk3b|blocks|BK3\n' > "$STUB_DEPS"
+printf '%s' "$(prview 94 OPEN CLEAN)" > "$GH_DIR/pr_view_94.json"
+approved 94
+out=$("$SUT" 2>&1)
+has "$out" "held by unclosed rework/review bead rw-bk3a" "the stamped bead is the first holder of the merge"
+eq "$(pinned BK3)" "blocked@sha-94" "the unrouted blocker beside it records blocked"
+has "$(reason BK3)" "rw-bk3b" "…and the reason names that blocker"
+hasnt "$(reason BK3)" "rw-bk3a" "…not the first holder"
 
 echo "# a BLOCKED PR held by an unresolved review thread records blocked with the cause"
 store "[$(anchor BK2 93), $(rev BK2)]"

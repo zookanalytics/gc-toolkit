@@ -215,45 +215,44 @@ eq "$(state "$MAP_CITYWISP" "gascity/")" "absent" \
    "(L) trailing-slash assignee -> absent (no empty-segment wildcard)"
 
 # --- Whole-bead classification: owners that are not assignees. ----------------
-# A workflow STEP bead carries no assignee at all — `gc bd list --json` omits the
-# key when it is empty — and names its owner in gc.session_id, which is what
-# gc.session_affinity=require pins it to; resolving it is what lets orphan
-# recovery see graph.v2 machinery, and resolving it WRONG strands the chain. A
-# workflow ROOT names only gc.session_name, but a root is not recoverable work:
-# topology-root-skip drops it before the lookup (case S), so its inherited slot
-# label can neither strand the chain nor yank the live successor holding the slot.
+# These cases run the owner filter and the lookup together over whole beads. A
+# bead can name its holder in a session field with no assignee beside it, and
+# the filter's precedence (session id, then assignee, then session name) picks
+# the field the lookup resolves. Resolving the wrong one strands a dead
+# session's bead or orphans a live one. A workflow ROOT names only
+# gc.session_name, but a root is not recoverable work: topology-root-skip drops
+# it before the lookup (case S).
 MAP_STEP='{"lx-3rk8v":"active","gc-toolkit--gc-toolkit__polecat-1-pool":"active"}'
 
-# (Q) The recovery case: the pinned session is gone from the map entirely.
+# (Q) The recovery case: the session gc.session_id names is gone from the map.
 eq "$(bead_state "$MAP_STEP" '{"id":"st1","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit__polecat-lx-7xcse","gc.session_affinity":"require"}}')" "absent" \
    "(Q) step bead, no assignee, DEAD gc.session_id -> absent (orphaned)"
 # (Q) The same shape on a live session must be left alone.
 eq "$(bead_state "$MAP_STEP" '{"id":"st2","metadata":{"gc.session_id":"lx-3rk8v","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "active" \
    "(Q) step bead, no assignee, LIVE gc.session_id -> active (not orphaned)"
-# (R) A dead id whose pool SLOT is live still reads dead. The slot name belongs
-#     to whoever holds the slot now; the id belongs to the session that will
-#     never return, and gc.session_affinity=require pins the bead to the id. This
-#     is why the owner precedence puts the id ahead of BOTH labels.
+# (R) A dead id beside a live session name still reads dead. A session name
+#     derived from an identity, such as a tmux_alias pool's runtime name, is
+#     carried again by whichever session holds that identity next; the id names
+#     only the session that will never return. This is why the owner precedence
+#     puts the id ahead of BOTH labels.
 eq "$(bead_state "$MAP_STEP" '{"id":"st3","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "absent" \
    "(R) dead session id outranks a live pool slot name -> still orphaned"
-# (R) The same, one level in: this is the shape a pool session leaves when it
-#     crashes mid-claim, before anything clears the bead. `assignee` is the SLOT,
-#     which the next occupant makes live again, so an assignee-first precedence
-#     reads the successor's life as the dead owner's and the bead is stranded
-#     in_progress forever — the very repeat-recovery engine this step exists to
-#     stop. Only the id remembers who died.
+# (R) The same, one level in: the assignee is the alias the dead session
+#     claimed under, which the next session given that alias carries again, as
+#     a named session's or a namepool member's is. An assignee-first precedence
+#     reads that later session's life as the dead owner's, and the bead is
+#     stranded in_progress forever. Only the id remembers who died.
 eq "$(bead_state "$MAP_STEP" '{"id":"st4","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "absent" \
-   "(R) dead session id outranks a LIVE slot assignee -> orphaned, not stranded"
+   "(R) dead session id outranks a LIVE alias assignee -> orphaned, not stranded"
 # (S) A workflow root is topology, not recoverable work — topology-root-skip
 #     drops it before the lookup, so it never resolves to a liveness state at
-#     all. That drop is the fix for the successor-inherited-slot-label bug: a
-#     root on a LIVE slot name no longer resolves active (which routed it to the
-#     warrant path and killed the successor now holding the slot), and a root on
-#     a dead per-instance name no longer resolves absent (which churned a
-#     salvage-refused notice on a bead that never had a worktree). Kind decides,
-#     not liveness: the same drop whether the slot label is live or dead.
+#     all. Its gc.session_name is a stamp the controller copies from its worked
+#     steps: resolved live it could send the root to the warrant path against a
+#     session doing other work, and resolved dead it would churn a
+#     salvage-refused notice on a bead that never had a worktree. Kind decides,
+#     not liveness: the same drop whether the name is live or dead.
 eq "$(bead_state "$MAP_STEP" '{"id":"rt1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "" \
-   "(S) workflow root on a LIVE slot name is dropped, never resolved (no warrant against the live successor)"
+   "(S) workflow root on a LIVE session name is dropped, never resolved (no warrant against a live session)"
 eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-lx-7xcse"}}')" "" \
    "(S) workflow root on a dead per-instance name is dropped too (kind decides, not liveness)"
 # (T) With no session id to be more specific than it, the assignee decides —

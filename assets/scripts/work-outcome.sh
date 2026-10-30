@@ -1,17 +1,16 @@
 #!/bin/sh
-# work-outcome.sh — the one gc.work_outcome stamp a converse visit gets before
-# it closes. Sourced, never executed, by every script that closes a visit:
-# visit-close.sh (the guarded close behind the sitting's own close,
-# converse-close-out.sh and pr-facts.sh's visit retires),
-# gc-helm.sh (dismiss), bead-rehome.sh (a visit origin) and converse-claim.sh
-# (the stranded close it finishes). A rule about this key changes here, once.
+# work-outcome.sh — the one gc.work_outcome stamp a conversation gets before it
+# closes. Sourced, never executed, by every script that closes one:
+# converse-signoff.sh (a sitting's sign-off), gc-helm.sh (dismiss) and
+# bead-rehome.sh (a visit origin it re-homes). A rule about this key changes
+# here, once.
 #
-# A visit is a plain task bead, so its close runs the runtime's work-record
-# gate, which wants gc.work_outcome, one of shipped | no-op | blocked |
-# abandoned. A visit ships no commit of its own: the work a sitting routes lands
-# on other beads, each with its own outcome. So no-op is the visit's honest
-# value. shipped would trip the gate's gc.work_commit and gc.work_branch checks
-# instead.
+# A conversation is a plain task bead, so its close runs the runtime's
+# work-record gate, which wants gc.work_outcome, one of shipped | no-op |
+# blocked | abandoned. A conversation ships no commit of its own: the work a
+# sitting routes lands on other beads, each with its own outcome. So no-op is
+# its honest value. shipped would trip the gate's gc.work_commit and
+# gc.work_branch checks instead.
 #
 # work_outcome_noop <bead> <bd-command>...
 #   Stamps gc.work_outcome=no-op on <bead>, unless the bead already records a
@@ -25,14 +24,14 @@
 #   exit 0 on a --set-metadata that wrote nothing, so the value is read back and
 #   the write repaired once. Nothing here gates the close, and the function
 #   always returns 0. By default the gate only warns, so a missing value costs
-#   the ledger one field, while a visit held open over it strands a sitting the
-#   board could otherwise report. Where GC_WORK_RECORD_ENFORCE makes the gate
+#   the ledger one field, while a conversation held open over it strands a
+#   sitting the board could otherwise report. Where GC_WORK_RECORD_ENFORCE makes the gate
 #   block such a close, each caller already reports a close that did not take.
 #   A bead that does not read is not written, because nothing proves its key
 #   empty.
 #
-# POSIX sh: gc-helm.sh and converse-claim.sh run under /bin/sh, so the helpers
-# keep their state in _wo-prefixed globals rather than `local`.
+# POSIX sh: gc-helm.sh runs under /bin/sh, so the helpers keep their state in
+# _wo-prefixed globals rather than `local`.
 #
 # `scrub` is a name resolved at call time, so the fenced copy below defines it
 # for these helpers. A sourcing script keeps its own `# >>> control-char-scrub`

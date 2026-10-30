@@ -7,7 +7,7 @@
 #            only a human's review verdict is left, or something only a human can
 #            clear blocks the merge. One value at a time, and pr-facts.sh's full
 #            pass recomputes it for each open PR its paced walk reaches, from the
-#            anchor's posture, holds, open visits, draft stage and rework children.
+#            anchor's posture, holds, open human gates, draft stage and rework children.
 #            It is workflow state, never an approval, and never asserts a PR may merge:
 #            machine-readiness rides pr.machine and the draft flag. The tri-state
 #            itself — the values, what each projects from, and their precedence —

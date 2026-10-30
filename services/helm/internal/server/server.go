@@ -200,7 +200,7 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 
 // invalidateBoard drops the cached board so the next read re-gathers.
 //
-// Written for POST /helm/open (review of PR#421, P2): a filed visit changes the
+// Written for POST /helm/open (review of PR#421, P2): a filed conversation changes the
 // `held` glyph and the frontier of the row it was filed on, and this service
 // serves s.cached until s.expiry. `gc-helm.sh open` busts its own on-disk cache,
 // which this binary never reads, so without this the operator can act on a row

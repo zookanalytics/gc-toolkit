@@ -26,15 +26,16 @@ max_active_sessions = 2
 
 # work_query = the running worker's discovery query: routed demand ranked by
 # board weight (oldest-first within a band), sliced to the worker's page. The
-# jq drops graph.v2 STRUCTURAL beads — topology ROOTS (gc.kind in
+# jq drops graph.v2 STRUCTURAL beads: topology ROOTS (gc.kind in
 # workflow/scope/spec) and formula STEP beads (gc.step_ref/gc.step_id/
-# gc.root_bead_id) — which gc hook --claim never offers as a subject; the
-# claimable unit is the routed reaction bead (a plain task), which survives the
-# filter. It reads the FULL routed set (--limit 0) and drops structural beads
-# BEFORE the 20-row slice, so a page filled by them cannot bury a claimable
-# reaction behind them — that would leave this query empty while scale_check,
-# which counts the same full filtered set, reads > 0, spawning a worker that
-# claims nothing and drains. Mirrors tools/gc-proactive.sh exclude_graph_structural.
+# gc.root_bead_id). tools/gc-proactive.sh exclude_graph_structural mirrors the
+# filter, and its comment says why each clause is there. The claimable unit is
+# the routed reaction bead (a plain task), which survives the filter. It reads
+# the FULL routed set (--limit 0) and drops structural beads BEFORE the 20-row
+# slice, so a page filled by them cannot bury a claimable reaction behind
+# them — that would leave this query empty while scale_check, which counts the
+# same full filtered set, reads > 0, spawning a worker that claims nothing and
+# drains.
 work_query = '''
 _='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (line 1 must stay a bare assignment).
 target="{{.Rig}}/gc-toolkit.proactive"
@@ -46,8 +47,8 @@ if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
 # form (0 = no demand = no spawn) so a spawn always finds work to claim. It
 # counts the SAME full filtered set (--limit 0, structural beads dropped) that
 # work_query board-ranks and slices, so scale_check > 0 holds exactly when
-# work_query can return a row: counting a structural bead gc hook --claim will
-# never offer would spawn a worker with nothing to claim — the churn this pool hit.
+# work_query can return a row: counting a bead work_query drops would spawn a
+# worker with nothing to claim.
 scale_check = '''
 _='' # env-prefix landing — same rationale as work_query's line 1.
 target="{{.Rig}}/gc-toolkit.proactive"

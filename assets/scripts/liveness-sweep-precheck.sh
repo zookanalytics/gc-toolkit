@@ -8,7 +8,7 @@
 # open PRs, convoy-worked beads, husk steps and pre-open gate verdicts. An
 # empty input drops nothing, so the local survivor set is a SUPERSET of the
 # sweep's true candidates and "zero new locally" proves "zero new really" for
-# the batch triage visit. Any unreadable probe, a missing subject, or its own
+# the batch human gate. Any unreadable probe, a missing subject, or its own
 # abort RUNS the pass: a probe that cannot be read excludes nothing. It also
 # sets the 6h cadence (a condition trigger has no
 # interval). The per-rig window is spent by whichever side ends the pass's
@@ -25,13 +25,14 @@
 set -uo pipefail
 
 # The classifier liveness-sweep.sh runs ($LIVENESS_CLASSIFY_JQ), and the shared
-# definitions it builds on: what subject a visit covers ($VISIT_IDENTITY_JQ,
-# which the live-visit guard reads as well), the standing kinds
+# definitions it builds on: a conversation's shape ($CONVERSATION_JQ) and the
+# human-gate rule over a listing (bd-lib.sh's $HUMAN_GATE_JQ), which the guard
+# on the subject reads as well through $LIVENESS_WAIT_JQ, the standing kinds
 # ($STANDING_KINDS_JQ), and a bead that waits for placement ($PLACEMENT_JQ,
 # which reads $DISPATCH_PATH_JQ).
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=visit-identity.sh
-. "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
+# shellcheck source=conversation.sh
+. "$HERE/conversation.sh" || { echo "liveness-sweep-precheck: cannot source conversation.sh from $HERE" >&2; exit 2; }
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "liveness-sweep-precheck: cannot source standing-kinds.sh from $HERE" >&2; exit 2; }
 # shellcheck source=dispatch-path.sh
@@ -207,8 +208,9 @@ READS_OK=1
 READ_FAIL=""
 LAST_READ_ERR=""
 bd_read "$READY" ready --unassigned --limit=0 --json || { READS_OK=0; READ_FAIL="ready: $LAST_READ_ERR"; }
-# --include-gates: a demand is a human gate (issue_type=gate), hidden from
-# `bd list` by default; the census must carry it so $demanded names its wait.
+# --include-gates: a human gate is a bead of type gate, hidden from `bd list` by
+# default; the census must carry the open ones, so that a bead one blocks reads
+# held by design and the guard sees a gate already on the subject.
 bd_read "$LIVE"  list --status=open,in_progress --include-gates --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }live: $LAST_READ_ERR"; }
 bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --include-gates --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }widen: $LAST_READ_ERR"; }
 if [ "$READS_OK" -eq 1 ]; then
@@ -223,9 +225,9 @@ if [ "$READS_OK" -eq 1 ]; then
     N_ALIVE=$(jq 'length' "$ALIVE" 2>/dev/null)
 fi
 
-# The standing subject (live-visit guard) and the sweep's state-file baseline.
+# The standing subject (the guard on it) and the sweep's state-file baseline.
 # Zero subjects, or more than one, runs the pass rather than guessing.
-SUBJECT=""; N_SUBJECTS=0; BASELINE=""; N_BASELINE=0; LIVE_VISIT=""
+SUBJECT=""; N_SUBJECTS=0; BASELINE=""; N_BASELINE=0; LIVE_WAIT=""
 if [ "$READS_OK" -eq 1 ]; then
     N_SUBJECTS=$(jq '[.[] | select((.metadata.task_kind // "") == "triage-subject")
                           | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | length' "$LIVE" 2>/dev/null)
@@ -235,24 +237,23 @@ if [ "$READS_OK" -eq 1 ]; then
                               | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | .[0].id // ""' "$LIVE" 2>/dev/null)
         BASELINE=$(cat "$BASELINE_FILE" 2>/dev/null || true)
         N_BASELINE=$(printf '%s' "$BASELINE" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')
-        # A visit names its subject by its shared identity (tracks edge,
-        # gc.continuation_group fallback — the stamp alone has landed empty,
-        # su-ab9je). visit_identity_subjects is visit-identity.sh.
-        LIVE_VISIT=$(jq -r --arg s "$SUBJECT" "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
-                                                    | visit_identity_subjects[]]
-                                               | (index($s) // "") | tostring' "$LIVE" 2>/dev/null)
+        # An open human gate on the subject, or a conversation about it: the
+        # sweep's own guard (human_side_on, liveness-classify.sh), over the
+        # same not-closed set it reads.
+        LIVE_WAIT=$(jq -r --arg s "$SUBJECT" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$ALIVE" 2>/dev/null)
     fi
 fi
 
-# Live sitting identities, for the classifier's holder-liveness gate on visits,
-# read the way liveness-sweep.sh reads them. A holder GONE from the session list
-# is dead, and so is one still listed in a terminal state (archived/closed,
-# helm's ownerLive dead states); one listed in any other state is live; an
-# UNCLAIMED visit has none and still covers.
+# Live sitting identities, for the classifier's holder-liveness gate on
+# conversations, read the way liveness-sweep.sh reads them. A holder GONE from
+# the session list is dead, and so is one still listed in a terminal state
+# (archived/closed, helm's ownerLive dead states); one listed in any other state
+# is live; a conversation in the queue of the operator needs no holder and
+# covers its subject.
 # Fail CLOSED here: on an unreadable list LIVENESS_KNOWN is false and the
-# classifier is told a claimed visit does not cover (unreadable_liveness_covers
-# false), so its subject is not excluded and the pass runs rather than risking
-# a skipped report.
+# classifier is told a held conversation does not cover
+# (unreadable_liveness_covers false), so its subject is not excluded and the
+# pass runs rather than risking a skipped report.
 LIVE_SESSIONS_JSON="[]"
 LIVENESS_KNOWN=false
 SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
@@ -277,7 +278,7 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
       --argjson unreadable_liveness_covers false \
       --argjson openprs '[]' --argjson worked '[]' --argjson husks '[]' \
       --argjson preopen_green '{}' \
-      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'
+      "$HUMAN_GATE_JQ$CONVERSATION_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'
       [ liveness_classify[] | select(.class == "unnamed") | .id ]' 2>/dev/null)
     if printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null 2>&1; then
         NEW_IDS=$(printf '%s' "$SURVIVORS" | jq -c --arg seen "$BASELINE" '
@@ -292,9 +293,9 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
 fi
 
 # The ONE place DECISION may become skip — it needs every positive fact at once.
-if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ]; then
+if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_WAIT" ]; then
     DECISION=skip
-    REASON="0 new local candidates (of $N_SURVIVORS still unnamed, $N_BASELINE already reported) and no live visit on $SUBJECT"
+    REASON="0 new local candidates (of $N_SURVIVORS still unnamed, $N_BASELINE already reported) and no human gate or conversation on $SUBJECT"
 elif [ "$READS_OK" -ne 1 ]; then
     REASON="a required bead read was UNREADABLE ($READ_FAIL) — an unreadable probe excludes nothing"
 elif [ "$N_SUBJECTS" = "0" ]; then
@@ -303,8 +304,8 @@ elif [ "$N_SUBJECTS" != "1" ]; then
     REASON="$N_SUBJECTS unnamed-waits triage subjects — cannot tell which baseline the agent pass would read"
 elif [ "$JQ_OK" -ne 1 ]; then
     REASON="the local classification did not produce a JSON array — treating that as unknown, never as empty"
-elif [ -n "$LIVE_VISIT" ]; then
-    REASON="a visit is already live on $SUBJECT; $N_NEW new local candidate(s) await it"
+elif [ -n "$LIVE_WAIT" ]; then
+    REASON="$LIVE_WAIT already waits on $SUBJECT; $N_NEW new local candidate(s) await it"
 else
     REASON="$N_NEW new local candidate(s) since the last reported pass"
 fi
@@ -317,8 +318,7 @@ else
     say "  reads: FAILED — $READ_FAIL"
 fi
 if [ -n "$SUBJECT" ]; then
-    if [ -n "$LIVE_VISIT" ]; then VISIT_WORD=yes; else VISIT_WORD=no; fi
-    say "  subject $SUBJECT · baseline $N_BASELINE id(s) · live visit: $VISIT_WORD"
+    say "  subject $SUBJECT · baseline $N_BASELINE id(s) · a person on it: ${LIVE_WAIT:-no}"
 fi
 if [ "$JQ_OK" -eq 1 ]; then
     say "  local survivors $N_SURVIVORS -> new $N_NEW"

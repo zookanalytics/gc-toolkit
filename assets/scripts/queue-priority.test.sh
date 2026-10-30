@@ -33,6 +33,12 @@
 #               epic queues at P0, then P1 once the epic moves to P2; under a P0
 #               epic a feature at -1 stays P0 and a task under it at +1 is P1; two
 #               parents follow the more urgent; a parked epic's members move too.
+#   (APPROVED)  PR-finishing work of an approved PR, its posture in the stored
+#               shape, settles at P0 with its workflow whatever its shift, while
+#               that of a PR that is not approved runs at its anchor's priority
+#               plus its shift; a move refuses a P-value on it and says the
+#               approval holds it at P0, writes a shift on it, and leaves it at
+#               P0 when its epic moves.
 #   (FIXTURE)   settle on every bead and the move on every bead that follows
 #               nothing leave priority-lib.fixture.json's store at the same
 #               priorities, the ones its cases name.
@@ -522,6 +528,43 @@ qp settle tk-f0 --print; eq "$OUT" "0" "(RULES) under a P0 epic, a feature at sh
 qp settle tk-t0 --print; eq "$OUT" "1" "(RULES) and a task under it at shift +1 queues at P1"
 qp settle tk-two --print; eq "$OUT" "2" "(RULES) a bead with two parents queues at the more urgent one's priority plus its shift"
 
+# PR-finishing work of an approved PR runs at P0 whatever its shift, and that of
+# any other PR at its anchor's priority plus its shift. tk-ap and tk-cm are
+# anchors under the P2 epic tk-e2, tk-ap approved and tk-cm holding an
+# unanswered comment, each posture in the shape pr-facts.sh stores it, so a rank
+# that compared the whole stored value with approved would put tk-ra at P1.
+reset_store
+add_beads '[
+ {"id":"tk-e2","status":"open","issue_type":"epic","priority":2,"metadata":{},"dependencies":[]},
+ {"id":"tk-ap","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request","pr_posture":"approved@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z","pr_head_oid":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"},
+  "dependencies":[{"issue_id":"tk-ap","depends_on_id":"tk-e2","type":"parent-child"}]},
+ {"id":"tk-ra","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-ap","task_kind":"rework","priority_shift":-1},"dependencies":[]},
+ {"id":"tk-cvra","status":"open","issue_type":"convoy","priority":2,"metadata":{"gc.synthetic":"true"},
+  "dependencies":[{"issue_id":"tk-cvra","depends_on_id":"tk-ra","type":"tracks"}]},
+ {"id":"tk-rra","status":"in_progress","issue_type":"task","priority":2,"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cvra"},"dependencies":[]},
+ {"id":"tk-sra","status":"open","issue_type":"task","priority":2,"metadata":{"gc.root_bead_id":"tk-rra","gc.step_ref":"mol-polecat-work.implement","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]},
+ {"id":"tk-cm","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request","pr_posture":"commented@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z"},
+  "dependencies":[{"issue_id":"tk-cm","depends_on_id":"tk-e2","type":"parent-child"}]},
+ {"id":"tk-rc","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-cm","task_kind":"rework","priority_shift":-1},"dependencies":[]}
+]'
+qp settle tk-ra
+eq "$RC" 0 "(APPROVED) settle of an approved PR's finishing work exits 0"
+has "$OUT" "settled tk-ra at P0: anchor tk-ap has an approved PR, shift -1 aside" "(APPROVED) it settles at P0, and the derivation says why"
+for b in tk-ra tk-cvra tk-rra tk-sra; do eq "$(prio "$b")" 0 "(APPROVED) $b, the work or its live workflow, is written P0"; done
+qp settle tk-rc --print
+eq "$OUT" "1" "(APPROVED) finishing work of a PR that is not approved, at shift -1 under a P2 epic, is P1"
+helm priority tk-ra P2
+eq "$RC" 2 "(APPROVED) a P-value on an approved PR's finishing work is refused, as on any bead that follows another"
+has "$ERR" "While the PR of tk-ap is approved, it runs at P0 whatever its shift." "(APPROVED) and the refusal says the approval holds it at P0"
+helm priority tk-ra --shift +2
+eq "$RC" 0 "(APPROVED) a shift on it exits 0"
+eq "$(meta tk-ra priority_shift)" "2" "(APPROVED) the shift is written, for when the PR is no longer approved"
+eq "$(prio tk-ra)" 0 "(APPROVED) and the work stays P0"
+helm priority tk-e2 P1
+eq "$(prio tk-ap)" 1 "(APPROVED) a move of the epic reaches the approved anchor"
+eq "$(prio tk-ra)" 0 "(APPROVED) and leaves its finishing work at P0"
+eq "$(prio tk-rc)" 0 "(APPROVED) while the other anchor's finishing work follows it, one level sooner"
+
 reset_store
 helm priority tk-w1 P3
 eq "$RC" 2 "(MOVE) a P-value on a member is refused (exit 2)"
@@ -626,8 +669,8 @@ eq "$(prio tk-w1)" 0 "(RULES) a parked epic's member takes the new priority whil
 eq "$(prio tk-s1a)" 0 "(RULES) and so does its workflow"
 eq "$(prio tk-w2)" 0 "(RULES) a member at shift -1 under a P0 epic stays at P0"
 
-# gc-helm.sh demand files its gate under the gated bead's parent, so the gate is
-# a member, and a move on that parent re-ranks it as settle computes it.
+# A gate filed under a parent, as a legacy demand gate is, is a member, and a
+# move on that parent re-ranks it as settle computes it.
 reset_store
 jq -c '. + [{"id":"tk-gd","status":"open","issue_type":"gate","priority":1,"metadata":{"gc.demand_for":"tk-w2"},
   "dependencies":[{"issue_id":"tk-gd","depends_on_id":"tk-e1","type":"parent-child"}]}]' \

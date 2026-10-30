@@ -88,15 +88,18 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 # priority (P3), so a board-weight rank must place it LAST — a plain
 # oldest-first sort would put it first. JSON order here is intentionally NOT
 # the expected ranked order, so a no-op (unranked) tool fails the assertions.
-# px-root is a graph.v2 topology ROOT (gc.kind=workflow): routed but never
-# claimable, so demand must DROP it. Its priority/age would rank it FIRST if it
-# leaked through, so the ranking assertions below double as an exclusion probe.
+# px-root is a graph.v2 topology ROOT (gc.kind=workflow, with no
+# gc.workflow_expanded stamp) routed to this pool, and demand must DROP it: the
+# filter matches gc.kind alone, like topology_kind in
+# assets/scripts/liveness-classify.sh, whose comment says where that differs
+# from Gas City's own check. Its priority/age would rank it FIRST if it leaked
+# through, so the ranking assertions below double as an exclusion probe.
 cat > "$FXDIR/ready.json" <<'JSON'
 [
   {"id":"px-old-lo","title":"oldest but low priority","priority":3,"created_at":"2026-01-01T00:00:00Z"},
   {"id":"px-new-hi","title":"newest, high priority","priority":1,"created_at":"2026-03-01T00:00:00Z"},
   {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"},
-  {"id":"px-root","title":"graph.v2 topology root — routed but NEVER claimable","priority":1,"created_at":"2026-01-15T00:00:00Z","metadata":{"gc.kind":"workflow"}},
+  {"id":"px-root","title":"graph.v2 topology root — routed but not a subject","priority":1,"created_at":"2026-01-15T00:00:00Z","metadata":{"gc.kind":"workflow"}},
   {"id":"px-step","title":"graph.v2 formula step — routed but not a subject","priority":1,"created_at":"2026-01-16T00:00:00Z","metadata":{"gc.step_ref":"mol-x.do","gc.root_bead_id":"px-root"}}
 ]
 JSON
@@ -134,10 +137,9 @@ eq "demand flows the routed beads (3 of 5: the topology root and step are droppe
    "$(unset GC_PROACTIVE_ENABLED GC_PROACTIVE_CITY_CAP; P demand | jq 'length')"
 eq "demand output is a valid JSON array (work_query contract)" "array" \
    "$(P demand | jq -r 'type')"
-# The never-claimable graph-structural beads must not be counted as demand —
-# counting one spawns a worker gc hook --claim will hand nothing (a root), or
-# reacts to a formula step as if it were a subject (the churn/step fix).
-absent "demand drops the never-claimable graph.v2 topology root" "px-root" "$(P demand)"
+# demand must not count the graph-structural beads; the comment on
+# exclude_graph_structural in tools/gc-proactive.sh says why.
+absent "demand drops the graph.v2 topology root"                 "px-root" "$(P demand)"
 absent "demand drops a graph.v2 formula step bead"               "px-step" "$(P demand)"
 # The retired clamps must be GONE from the tool, not merely defaulted open.
 absent "the tool no longer reads the enable gate"  "GC_PROACTIVE_ENABLED"  "$(cat "$PROACTIVE")"
@@ -156,8 +158,8 @@ eq "lower-priority bead ranks LAST despite being oldest"  "px-old-lo" \
    "$(printf '%s' "$RANK" | jq -r '.[2].id')"
 
 echo "── deliverable: will a slung reaction actually be PICKED UP? ──"
-# A real branch for its callers (assets/scripts/gc-visit-open.sh files a bare
-# visit on a no). The QUEUE is not what makes a sling vanish — a routed bead
+# A real branch for its callers (assets/scripts/operator-intake.sh files a
+# conversation on a no). The QUEUE is not what makes a sling vanish — a routed bead
 # waits at zero cost — so what the verb asks is whether this city's agent
 # roster carries a pool that can claim at all. NO is a positive finding: an
 # unreadable roster answers YES, because absence of evidence would otherwise
@@ -253,8 +255,8 @@ else
 fi
 eq "work_query: degrades to [] when gc fails (valid answer, not garbage)" "[]" "$wq_out"
 rm -rf "$POISON"
-# work_query must strip graph.v2 topology roots inline — the gc default query
-# does, and a custom query that omits it counts unclaimable roots as demand.
+# work_query must strip graph.v2 topology roots and step beads inline, as
+# exclude_graph_structural in tools/gc-proactive.sh does; its comment says why.
 has "work_query strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' \
     "$(extract_toml_block work_query)"
 has "work_query strips graph.v2 step beads too (gc.step_ref clause)" 'gc.step_ref' \
@@ -271,9 +273,8 @@ has "scale_check answers in COUNT form (0 fallback)" "printf '0'"           "$SC
 absent "scale_check carries no enable gate"         "GC_PROACTIVE_ENABLED"  "$SC_RAW"
 absent "scale_check carries no city-cap clamp"      "GC_PROACTIVE_CITY_CAP" "$SC_RAW"
 has "scale_check rig-qualifies the same route"      '{{.Rig}}/gc-toolkit.proactive' "$SC_RAW"
-# The spawn predicate MUST carry work_query's topology-root exclusion, or it
-# counts a root gc hook --claim never offers and spawns a worker with nothing
-# to claim — the churn this pool hit.
+# The spawn predicate MUST carry work_query's exclusions, or it counts a bead
+# work_query drops and spawns a worker with nothing to claim.
 has "scale_check strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' "$SC_RAW"
 has "scale_check strips graph.v2 step beads too (gc.step_ref clause)" 'gc.step_ref' "$SC_RAW"
 POISON="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
@@ -403,7 +404,7 @@ REACTED_OUT="$(P sling px-hasreaction --dry-run 2>&1 || true)"
 absent "a subject with an open reaction is NOT re-filed (no create emitted)" "gc bd create" "$REACTED_OUT"
 has    "…and the skip names the cause"                             "already has an open first reaction" "$REACTED_OUT"
 # The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so a
-# cross-process caller (gc-helm react, gc-visit-open) can tell it from a dispatch
+# cross-process caller (gc-helm react, operator-intake) can tell it from a dispatch
 # and file its own visit. In-process (cmd_scan --sling) the same skip stays a
 # return-0 no-op that does not spend the cap — proved by the sweep tests below.
 rec=0; P sling px-hasreaction --dry-run >/dev/null 2>&1 || rec=$?
@@ -605,11 +606,10 @@ has "…or files the missing one, deduped by cause"        "--blocker-key" "$D"
 # as ruling, but names the execution mol the operator Accepts — the flag ruling
 # rejects and recommend requires, so its presence discriminates the two exits.
 has "the recommend exit names the execution mol to Accept" "--recommended-formula" "$D"
-# The reaction produces the human gate and the sweep files its visit, so the
-# operator's escalation has one producer and one visit rule.
-has "the ruling and recommend exits file the gate through demand" '"$HELM" demand' "$D"
+# The reaction files the human gate itself, through the helper, and the board
+# is how that gate reaches the operator.
+has "the ruling and recommend exits file the gate through the helper" 'human-gate.sh' "$D"
 absent "…and file no visit inline"                       "# >>> gate-visit" "$D"
-has "…naming the sweep that files the gate's visit"      "gate-visit-sweep" "$D"
 # The close exit routes to the pool that validates and closes, never a close here.
 has "the close exit hands the bead to the validating closer" "mol-validate-close" "$D"
 has "the completion marker names the reaction bead"      "gc.reacted_by" "$D"
@@ -684,7 +684,7 @@ echo "── the live prose surfaces state the current contract ──"
 # form never matches.
 flat() { sed -e 's/^[[:space:]]*#[[:space:]]*//' "$1" | tr '\n' ' ' | tr -s ' '; }
 for surface in "agents/proactive/agent.toml" "tools/gc-proactive.sh" \
-               "agents/proactive/PROVENANCE.md" "docs/gascity-human-engagement.md"; do
+               "agents/proactive/PROVENANCE.md" "docs/human-engagement.md"; do
     S="$(flat "$ROOT/$surface")"
     absent "$surface does not call max_active_sessions the ONLY bound" \
            "the only throttle" "$(printf '%s' "$S" | tr 'A-Z' 'a-z')"

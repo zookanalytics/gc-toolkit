@@ -103,9 +103,9 @@
 #   started_at   a session picked the attempt up
 #   closed_at    the iteration's own work ended
 #   checked_at   this script ran
-#   session      the pool slot, and session_id the session inside it —
-#                consecutive attempts sharing a session_id were recycled, not
-#                respawned, so no spawn cost was paid between them
+#   session      the session's runtime name (gc.session_name), and session_id
+#                its bead id — consecutive attempts sharing a session_id were
+#                recycled, not respawned, so no spawn cost was paid between them
 #
 # `appended_at` to `started_at` is spawn, session boot and work discovery;
 # `started_at` to `closed_at` is the iteration's own work; `closed_at` to
