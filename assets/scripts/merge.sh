@@ -16,7 +16,7 @@
 # review bead is backed by an operator's GitHub approval on the PR, the shared
 # fallback); no unclosed rework/review child or open must-fix finding (metadata
 # keys naming this PR AND dependency edges, the finding held by its own blocks
-# edge; unreadable holds); no open visit on the anchor (finalize-gate.sh);
+# edge; unreadable holds); no open human gate blocking the anchor (finalize-gate.sh);
 # approval (a UNIVERSAL merge rule armed for every PR, not a check_set member —
 # satisfied only by a latest APPROVED from an account other than the city's,
 # given at any commit, because an approval stands across later pushes until it

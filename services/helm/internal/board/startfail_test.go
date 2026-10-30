@@ -6,35 +6,36 @@ import (
 	"testing"
 )
 
-// failedSitting is a visit whose sitting failed to start, as the gather leaves
-// it: still bound the way the failed start left it (in_progress under the
-// sitting's alias), with the reason Gas City recorded.
-func failedSitting(id, subject, reason string) Sitting {
-	return Sitting{ID: id, Subject: subject, Status: "in_progress",
-		Assignee: "gc-toolkit/gc-toolkit." + id, StartFailure: reason}
+// failedConversation is a conversation whose sitting failed to start, as the
+// gather leaves it: still held under the alias of the sitting that never
+// started.
+func failedConversation(id, subject, ask string) Anchor {
+	return conversationAnchor(id, subject, ask, sittingAlias(id))
 }
 
-// releasedFailedSitting is the same visit after the witness released the dead
-// binding: open and unbound, the failure still the last thing that happened.
-func releasedFailedSitting(id, subject, reason string) Sitting {
-	return Sitting{ID: id, Subject: subject, Status: "open", StartFailure: reason}
-}
-
-// TestStartFailedVisitReadsStartFailedWithItsReason: the held row reads the
-// failure, not "engaged" (which is what the stale binding alone would say). It
-// is owed, at least ELEVATED, and NEEDS leads with the reason ahead of the ask.
-func TestStartFailedVisitReadsStartFailedWithItsReason(t *testing.T) {
-	anchors := []Anchor{
-		visitAnchor("tk-vis", "tk-subj", "talk the plan over"),
-		heldSubject("tk-subj"),
+// failedStart is the facts that failed start leaves: Gas City lists the
+// session under the sitting's alias as failed-create, and the conversation's
+// record carries the reason Gas City recorded.
+func failedStart(id, subject, reason string) Facts {
+	return Facts{
+		OwnerState: map[string]string{sittingAlias(id): "failed-create"},
+		Sittings:   []Sitting{{ID: id, Subject: subject, Status: "in_progress", StartFailure: reason}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{
-		Visits:   map[string]bool{"tk-subj": true},
-		Sittings: []Sitting{failedSitting("tk-vis", "tk-subj", "setup timeout")},
-	})
-	subj := mustTile(t, b, "tk-subj")
-	if subj.VisitState != VisitStartFailed || subj.VisitStartFailure != "setup timeout" {
-		t.Errorf("state=%q reason=%q, want start-failed with the reason", subj.VisitState, subj.VisitStartFailure)
+}
+
+// TestStartFailedConversationReadsStartFailedWithItsReason: the held row reads
+// the failure, not "waiting" (which is what the dead binding alone would say).
+// It is owed, at least ELEVATED, and NEEDS leads with the reason ahead of the
+// ask.
+func TestStartFailedConversationReadsStartFailedWithItsReason(t *testing.T) {
+	anchors := []Anchor{
+		failedConversation("tk-conv", "tk-subj", "talk the plan over"),
+		epicSubject("tk-subj"),
+	}
+	facts := failedStart("tk-conv", "tk-subj", "setup timeout")
+	subj := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, facts), "tk-subj")
+	if subj.SittingState != SittingStartFailed || subj.SittingStartFailure != "setup timeout" {
+		t.Errorf("state=%q reason=%q, want start-failed with the reason", subj.SittingState, subj.SittingStartFailure)
 	}
 	if got, want := subj.Needs, "start failed (setup timeout): talk the plan over"; got != want {
 		t.Errorf("NEEDS = %q, want %q", got, want)
@@ -43,40 +44,32 @@ func TestStartFailedVisitReadsStartFailedWithItsReason(t *testing.T) {
 		t.Errorf("a failed start is the operator's move: owed=%v section=%q", subj.Owed, subj.Section)
 	}
 	if subj.Severity != SevElevated {
-		t.Errorf("a NORMAL row whose visit failed to start bands ELEVATED: %s", subj.Severity)
+		t.Errorf("a NORMAL row whose sitting failed to start bands ELEVATED: %s", subj.Severity)
 	}
 	if subj.RankScore != rankScore(SevElevated, subj.Weight, subj.StaleDays, 0) {
 		t.Errorf("rank_score follows the lifted band: %d", subj.RankScore)
 	}
-	if engagedVisit("tk-subj", b.Sittings) {
-		t.Error("a binding to a sitting that never started is not an engagement")
+	if indexHuman(anchors, facts).inSessionOn("tk-subj") {
+		t.Error("a binding to a sitting that never started is not a sitting in session")
 	}
 }
 
-// TestStartFailedOwnRowStaysInTheQueue: a visit whose subject has no row keeps
-// a row of its own. Once the witness re-parks it, its headline reads as a
-// ruling, which bands it LOW and drops it from the queue. A failed start keeps
-// it owed and ELEVATED all the same.
+// TestStartFailedOwnRowStaysInTheQueue: a conversation whose subject has no row
+// keeps a row of its own, which waits for the operator. A failed start marks
+// that row, keeps it owed, and lifts it to ELEVATED.
 func TestStartFailedOwnRowStaysInTheQueue(t *testing.T) {
-	reparked := visitAnchor("tk-vis", "tk-plain", "talk the plan over")
-	reparked.Takeaway = "Reclaimed from a gone sitting; re-parked for re-engagement."
-	reparked.Metadata["gc.takeaway"] = reparked.Takeaway
-
-	build := func(s Sitting) Tile {
-		b := BuildBoard([]Anchor{reparked}, fixtureNow, false, nil, Facts{Sittings: []Sitting{s}})
-		return mustTile(t, b, "tk-vis")
+	control := mustTile(t, BuildBoard([]Anchor{conversationAnchor("tk-conv", "tk-plain", "talk the plan over", assigneeHuman)},
+		fixtureNow, false, nil, Facts{}), "tk-conv")
+	if control.SittingState != SittingWaiting || !control.Owed {
+		t.Fatalf("fixture: a conversation's own row waits for the operator; got state=%q owed=%v", control.SittingState, control.Owed)
 	}
 
-	control := build(Sitting{ID: "tk-vis", Subject: "tk-plain", Status: "open"})
-	if control.Owed || control.Severity != SevLow {
-		t.Fatalf("fixture: a re-parked visit's own row reads ruled, LOW and not owed; got owed=%v %s", control.Owed, control.Severity)
+	row := mustTile(t, BuildBoard([]Anchor{failedConversation("tk-conv", "tk-plain", "talk the plan over")},
+		fixtureNow, false, nil, failedStart("tk-conv", "tk-plain", "startup timeout")), "tk-conv")
+	if row.SittingState != SittingStartFailed || row.SittingStartFailure != "startup timeout" {
+		t.Errorf("the conversation's own row reads start failed: state=%q reason=%q", row.SittingState, row.SittingStartFailure)
 	}
-
-	row := build(releasedFailedSitting("tk-vis", "tk-plain", "startup timeout"))
-	if row.VisitState != VisitStartFailed || row.VisitStartFailure != "startup timeout" {
-		t.Errorf("the visit's own row reads start failed: state=%q reason=%q", row.VisitState, row.VisitStartFailure)
-	}
-	if !row.Owed || row.Severity != SevElevated || row.Section != SectionGate {
+	if !row.Owed || row.Severity.rank() < SevElevated.rank() || row.Section != SectionGate {
 		t.Errorf("a failed start keeps the row in the queue: owed=%v %s section=%q", row.Owed, row.Severity, row.Section)
 	}
 	if !strings.HasPrefix(row.Needs, "start failed (startup timeout): ") {
@@ -87,19 +80,19 @@ func TestStartFailedOwnRowStaysInTheQueue(t *testing.T) {
 // TestStartFailedLeadsTheQueue: by age a failed start sorts at the tail, below
 // the head the picker offers. It leads the queue instead, and the cap keeps it.
 func TestStartFailedLeadsTheQueue(t *testing.T) {
-	anchors := []Anchor{visitAnchor("tk-vis", "tk-subj", "talk the plan over"), heldSubject("tk-subj")}
-	for i := 0; i < 50; i++ {
-		anchors = append(anchors, Anchor{
-			ID: fmt.Sprintf("tk-old%02d", i), Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
-			UpdatedAt: daysAgo(30 + i), Metadata: map[string]string{"gc.routed_to": "human"},
-		})
-	}
-	anchors[0].UpdatedAt = fixtureNow // the visit was filed just now
-	facts := func(s Sitting) Facts {
-		return Facts{Visits: map[string]bool{"tk-subj": true}, Sittings: []Sitting{s}}
+	build := func(conv Anchor, facts Facts) []Tile {
+		conv.UpdatedAt = fixtureNow // the conversation was filed just now
+		anchors := []Anchor{conv, epicSubject("tk-subj")}
+		for i := 0; i < 50; i++ {
+			anchors = append(anchors, Anchor{
+				ID: fmt.Sprintf("tk-old%02d", i), Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+				UpdatedAt: daysAgo(30 + i), Metadata: map[string]string{"gc.routed_to": "human"},
+			})
+		}
+		return OperatorQueue(BuildBoard(anchors, fixtureNow, false, nil, facts).Tiles)
 	}
 
-	queue := OperatorQueue(BuildBoard(anchors, fixtureNow, false, nil, facts(failedSitting("tk-vis", "tk-subj", "startup timeout"))).Tiles)
+	queue := build(failedConversation("tk-conv", "tk-subj", "talk the plan over"), failedStart("tk-conv", "tk-subj", "startup timeout"))
 	if queue[0].ID != "tk-subj" {
 		t.Errorf("the failed start leads the queue: got %s first", queue[0].ID)
 	}
@@ -107,67 +100,65 @@ func TestStartFailedLeadsTheQueue(t *testing.T) {
 		t.Errorf("the cap keeps the head: got %s first", capped[0].ID)
 	}
 
-	// The same row parked sorts by age, behind every row owed longer.
-	parked := OperatorQueue(BuildBoard(anchors, fixtureNow, false, nil, facts(Sitting{ID: "tk-vis", Subject: "tk-subj", Status: "open"})).Tiles)
-	if last := parked[len(parked)-1]; last.ID != "tk-subj" {
-		t.Errorf("control: a parked visit filed just now sorts last, got %s last", last.ID)
+	// The same row waiting sorts by age, behind every row owed longer.
+	waiting := build(conversationAnchor("tk-conv", "tk-subj", "talk the plan over", assigneeHuman), Facts{})
+	if last := waiting[len(waiting)-1]; last.ID != "tk-subj" {
+		t.Errorf("control: a conversation filed just now sorts last, got %s last", last.ID)
 	}
 }
 
-// TestStartFailedAcceptFollowsTheBinding: Accept is the rule gc-helm.sh accept
-// re-reads live, which counts every binding. While the failed start's binding
-// stands, accept refuses the visit as engaged, so the board offers no Accept;
-// once the witness releases it, the visit stands open and unbound and Accept is
-// offered. The row reads start failed throughout.
-func TestStartFailedAcceptFollowsTheBinding(t *testing.T) {
-	build := func(s Sitting) Tile {
-		b := BuildBoard(
-			[]Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")},
-			fixtureNow, false, nil,
-			Facts{Visits: map[string]bool{"tk-subj": true}, Sittings: []Sitting{s}},
-		)
-		return mustTile(t, b, "tk-subj")
-	}
-	bound := build(failedSitting("tk-vis", "tk-subj", "startup timeout"))
-	if bound.VisitState != VisitStartFailed || bound.Acceptable {
-		t.Errorf("bound: state=%q acceptable=%v, want start-failed and no Accept", bound.VisitState, bound.Acceptable)
-	}
-	released := build(releasedFailedSitting("tk-vis", "tk-subj", "startup timeout"))
-	if released.VisitState != VisitStartFailed || !released.Acceptable {
-		t.Errorf("released: state=%q acceptable=%v, want start-failed and Accept", released.VisitState, released.Acceptable)
+// TestStartFailedRowStillOffersAccept: a sitting never withholds Accept, so a
+// failed start does not either. The recommendation row reads start failed and
+// offers Accept, while the failed start's binding stands and once the
+// conversation is handed back to the operator's queue.
+func TestStartFailedRowStillOffersAccept(t *testing.T) {
+	rec := gateBlocker("tk-rec", firstReactionKey, "Accept mol-dispose-pr?")
+	for _, tc := range []struct{ name, assignee, status string }{
+		{"bound to the sitting that never started", sittingAlias("tk-conv"), "in_progress"},
+		{"handed back to the operator's queue", assigneeHuman, "open"},
+	} {
+		anchors := append([]Anchor{
+			recommendationSubject("tk-subj", "mol-dispose-pr", rec),
+			conversationAnchor("tk-conv", "tk-subj", rec.Title, tc.assignee, "tk-rec"),
+		}, gatesFor("tk-subj", rec)...)
+		facts := failedStart("tk-conv", "tk-subj", "startup timeout")
+		facts.Sittings[0].Status = tc.status
+		row := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, facts), "tk-subj")
+		if row.SittingState != SittingStartFailed || !row.Acceptable {
+			t.Errorf("%s: state=%q acceptable=%v, want start-failed and Accept", tc.name, row.SittingState, row.Acceptable)
+		}
 	}
 }
 
-// TestStartFailureOutranksALiveSitting: two visits on one subject are two
+// TestStartFailureOutranksALiveSitting: two conversations on one subject are two
 // conversations. A live sitting in one does not hide that the other's never
 // started.
 func TestStartFailureOutranksALiveSitting(t *testing.T) {
-	live := engagedSitting("tk-subj")
-	live.ID = "tk-vis1"
-	b := BuildBoard([]Anchor{heldSubject("tk-subj")}, fixtureNow, false, nil, Facts{
-		Visits:   map[string]bool{"tk-subj": true},
-		Sittings: []Sitting{live, failedSitting("tk-vis2", "tk-subj", "never started")},
-	})
-	if subj := mustTile(t, b, "tk-subj"); subj.VisitState != VisitStartFailed || subj.VisitStartFailure != "never started" {
-		t.Errorf("state=%q reason=%q, want the failure", subj.VisitState, subj.VisitStartFailure)
+	facts := failedStart("tk-conv2", "tk-subj", "never started")
+	facts.OwnerState[sittingAlias("tk-conv1")] = "active"
+	b := BuildBoard([]Anchor{
+		epicSubject("tk-subj"),
+		conversationAnchor("tk-conv1", "tk-subj", "talk the plan over", sittingAlias("tk-conv1")),
+		failedConversation("tk-conv2", "tk-subj", "settle the rework"),
+	}, fixtureNow, false, nil, facts)
+	if subj := mustTile(t, b, "tk-subj"); subj.SittingState != SittingStartFailed || subj.SittingStartFailure != "never started" {
+		t.Errorf("state=%q reason=%q, want the failure", subj.SittingState, subj.SittingStartFailure)
 	}
 }
 
 // TestClosedSubjectIsNeverMarked: a closed anchor is never owed, so its DONE row
-// is not marked. The fold leaves the open visit on a row of its own, and that
-// row carries the failure.
+// is not marked. The fold leaves the open conversation on a row of its own, and
+// that row carries the failure.
 func TestClosedSubjectIsNeverMarked(t *testing.T) {
-	closed := heldSubject("tk-subj")
+	closed := epicSubject("tk-subj")
 	closed.ClosedAt = daysAgo(1)
-	b := BuildBoard([]Anchor{visitAnchor("tk-vis", "tk-subj", "talk the plan over"), closed}, fixtureNow, false, nil, Facts{
-		Visits:   map[string]bool{"tk-subj": true},
-		Sittings: []Sitting{failedSitting("tk-vis", "tk-subj", "startup timeout")},
-	})
-	if subj := mustTile(t, b, "tk-subj"); subj.VisitState == VisitStartFailed || subj.Owed {
-		t.Errorf("a DONE row is never marked or owed: state=%q owed=%v", subj.VisitState, subj.Owed)
+	b := BuildBoard([]Anchor{failedConversation("tk-conv", "tk-subj", "talk the plan over"), closed}, fixtureNow, false, nil,
+		failedStart("tk-conv", "tk-subj", "startup timeout"))
+	if subj := mustTile(t, b, "tk-subj"); subj.SittingState == SittingStartFailed || subj.Owed {
+		t.Errorf("a DONE row is never marked or owed: state=%q owed=%v", subj.SittingState, subj.Owed)
 	}
-	if own := mustTile(t, b, "tk-vis"); own.VisitState != VisitStartFailed || !own.Owed {
-		t.Errorf("the visit's own row carries the failure: state=%q owed=%v", own.VisitState, own.Owed)
+	if own := mustTile(t, b, "tk-conv"); own.SittingState != SittingStartFailed || !own.Owed {
+		t.Errorf("the conversation's own row carries the failure: state=%q owed=%v", own.SittingState, own.Owed)
 	}
 }
 
@@ -178,21 +169,21 @@ func TestClosedSubjectIsNeverMarked(t *testing.T) {
 // the rows it used to share that sentence with still fold together.
 func TestStartFailedRowClustersOnWhatItReads(t *testing.T) {
 	ids := []string{"tk-a", "tk-b", "tk-c", "tk-d"}
-	facts := Facts{Visits: map[string]bool{}, Sittings: []Sitting{failedSitting("tk-va", "tk-a", "startup timeout")}}
+	facts := failedStart("tk-conv-a", "tk-a", "startup timeout")
 	var anchors []Anchor
 	for _, id := range ids {
-		anchors = append(anchors, heldSubject(id))
-		facts.Visits[id] = true
-		if id != "tk-a" {
-			facts.Sittings = append(facts.Sittings, Sitting{ID: "tk-v" + id[3:], Subject: id, Status: "open"})
+		conv := conversationAnchor("tk-conv-"+id[3:], id, "talk the plan over", assigneeHuman)
+		if id == "tk-a" {
+			conv = failedConversation("tk-conv-a", id, "talk the plan over")
 		}
+		anchors = append(anchors, epicSubject(id), conv)
 	}
 	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
 
 	failed := mustTile(t, b, "tk-a")
-	if failed.VisitState != VisitStartFailed || failed.ClusterKey != "" {
+	if failed.SittingState != SittingStartFailed || failed.ClusterKey != "" {
 		t.Errorf("the failed start stands on its own line: state=%q cluster_key=%q needs=%q",
-			failed.VisitState, failed.ClusterKey, failed.Needs)
+			failed.SittingState, failed.ClusterKey, failed.Needs)
 	}
 	for _, id := range ids[1:] {
 		if got := mustTile(t, b, id); got.ClusterKey == "" || got.ClusterKey != got.Needs {

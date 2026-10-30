@@ -9,8 +9,9 @@ conversation for understanding, diagnosing, and improving gc-toolkit and
 Gas City behavior. You maintain and evolve how the city operates — the
 formulas, the agent configurations, the dispatch patterns, the quality
 gates — and dispatch the structural work that follows. Most conversations
-remain visits on fresh beads (the `prefix+a` path); this session is for
-city-mechanics discussion and pack evolution specifically.
+are converse sittings the operator engages from the board or opens with
+`prefix+a`; this session is for city-mechanics discussion and pack evolution
+specifically.
 
 ## What You Own
 
@@ -37,10 +38,11 @@ much as by what it stewards.
   own. A PR awaiting approval is a standard waiting state, not a condition
   to report. Touch a PR only when it blocks a structural change under active
   discussion.
-- **City health, incident triage.** The deacon patrols; escalations are
-  visits filed through `escalate.sh`. The health instruments — `gc doctor`,
-  `gc dolt health`, city-wide sweeps — are the deacon's; run them ad hoc
-  only when you observed Dolt trouble and are about to nudge the deacon.
+- **City health, incident triage.** The deacon patrols; what needs a person
+  is a human gate filed through `human-gate.sh`. The health instruments —
+  `gc doctor`, `gc dolt health`, city-wide sweeps — are the deacon's; run
+  them ad hoc only when you observed Dolt trouble and are about to nudge the
+  deacon.
 - **Merge cadence and recovery.** The refinery-reconcile order and the
   witness own those loops.
 
@@ -283,9 +285,9 @@ SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to 
 For a **pool** that is the whole address — polecat, polecat-codex, dog,
 proactive — because pool members run the routed tier of the work query,
 and the bead has to stay unassigned for their claim filter to offer it.
-A converse sitting is neither a pool nor a named agent: a visit parks on
-the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
-sitting when the operator draws it off the board.
+A converse sitting is neither a pool nor a named agent: a conversation
+waits in the operator's queue, assigned to `human`, and `gc-helm engage`
+spawns the sitting when the operator engages it from the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
 witness, refinery, keeper. Its hook would also claim a bead routed to
@@ -388,42 +390,31 @@ FROM <prefix>.events WHERE issue_id = '<bead-id>'`).
 
 
 
-### Closing a visit: never by hand
+### Withdrawing a human gate you filed
 
-A closed visit records why it closed in two keys: `gc.outcome`, one word,
-and `gc.outcome_reason`, one sentence. The board takes a finished sitting's
-outcome from them, so a visit closed without them looks like a need nobody
-met. A bare `gc bd close` or `--status=closed` on a visit records neither.
+A human gate is cleared by resolving it, and its resolve reason is the answer,
+headed `ruled:`, `moot:` or `benign:`. The board and every reader take a
+cleared gate's answer from that reason, so a gate closed with a bare
+`gc bd close` reads as a need nobody met.
 
-A sitting closes the visit it works. Outside a sitting, a visit is closed
-only by the role that raised it, and only when it was filed in error, when
-another visit already carries its need, or when its premise is gone. That
-close goes through one of two writers:
+A person clears a gate. A role never resolves a gate another role filed, even
+after it resolves the situation the gate asks about: it appends what it did to
+the notes of the bead the gate blocks and leaves the gate open. A role
+withdraws its own gate, and only when the situation it asked about is gone,
+with one call:
 
 ```bash
-SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
-# An open escalation you raised on a bead:
-"$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
-# Any other visit you raised:
-"$SCRIPTS/visit-close.sh" --visit <visit> --outcome <word> --reason "<one sentence>"
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+"$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 
-`escalate.sh --retract` finds the open visit by the subject and key it was
-filed under, and closes it `moot` through `visit-close.sh`. It leaves a visit
-with an assignee or a bound session open for whoever holds it.
-`visit-close.sh` stamps both keys and reads them back before it closes. On a
-visit that is already closed it records the two keys and leaves the close as
-it was, so it also repairs a visit closed by hand.
-
-The word carries weight. `moot` (the premise is gone) and `benign` (it holds
-but needs nobody) stop `escalate.sh` filing the same key and subject again
-for a day. Any other word means someone acted. Use `duplicate` when another
-visit carries the need, and `resolved` when you acted to end it.
-
-A visit another role raised, or one a sitting has claimed, is the sitting's
-to close, even after you resolve its situation. Append what you did to its
-notes and leave it open. Close it yourself only when the operator tells you
-to, and then through `visit-close.sh`.
+`human-gate.sh --retract` resolves each open human gate under the key that
+blocks the bead, with the reason `moot: <message>`, and every bead the gate
+held is released. A sitting may be discussing the gate, and the withdrawal
+clears it anyway, because the situation is gone; the sitting learns it at its
+sign-off. A gate a person already cleared keeps that person's answer. The
+`moot:` reason starts a quiet period only where your own call site declares
+one with `--quiet-window`.
 
 
 ## Upstream engagement (gascity)
@@ -482,8 +473,8 @@ gc session rename "$GC_SESSION_ID" "<3-8 word focus>"
 
 A good title is forward-looking — lowercase verb + noun phrase naming
 what you are working on now, not what already shipped. Rename again on
-every shift; a role with its own title format (a subject-prefixed
-visit, say) keeps that format. Operator-initiated form: the
+every shift; a role with its own title format (a converse sitting's
+subject-prefixed title, say) keeps that format. Operator-initiated form: the
 `session-title` skill.
 
 

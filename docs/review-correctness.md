@@ -58,7 +58,7 @@ defect only on a line some test executes.
   `[ … ] && x=1` fails there.
 - **Unreadable is not empty.** A read whose emptiness decides anything checks
   its exit status, and an unreadable answer holds or fails closed
-  (`assets/scripts/deferred-dispatch.sh`, `assets/scripts/gate-visit-sweep.sh`).
+  (`assets/scripts/deferred-dispatch.sh`, `bd_list` in `assets/scripts/bd-lib.sh`).
   A `gc bd list … | jq …` without pipefail reads a store that did not answer as
   an empty list. `gc bd … --json` can carry a raw control byte inside a note,
   which makes jq refuse the whole payload, so store text goes through the
@@ -206,7 +206,7 @@ in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
   of the Dolt store the city's agents share, and a round trip per epic or
   convoy made under the board's lock serializes every board request behind one
   slow gather. `internal/source/beads_test.go` pins which reads take the lite
-  projection and that edges, visits and pull requests cost no read per row,
+  projection and that edges, conversations and pull requests cost no read per row,
   and `internal/server/server_test.go` pins that concurrent misses share one
   gather, run outside the board's lock. So a gather change is read for a new
   per-row call or a heavy column.

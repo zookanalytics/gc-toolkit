@@ -99,55 +99,52 @@ Every gate runs as the run-tests step's detached job
 Never launch a gate as a background job of your own, and never end your turn
 while one runs: a gate that finishes while you sit idle wakes nothing.
 
-## Escalation
+## Human gates
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+What a person must act on is a human gate on the bead it is about, filed
+through one writer that dedups repeats:
 
 ```bash
-"$(gc gc-toolkit scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$(gc gc-toolkit scripts-dir)/human-gate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
 ```
 
-Escalate what a human must act on; a PR awaiting the operator's approval is
-a HEALTHY resting state worth zero escalations. Most idle wakes escalate
+The gate blocks the bead it names until a person clears it, and a gate on a
+PR's anchor holds its merge. A gate on a bead with open children pauses every
+part of it that has not started, so when only one member waits, name that
+member. A situation with no bead of its own is a patrol finding
+(`patrol-finding.sh --scope refinery-findings`): `human-gate.sh` refuses a
+patrol wisp or a session, and files nothing on a bead it cannot read.
+
+File a gate for what a human must act on; a PR awaiting the operator's
+approval is a HEALTHY resting state worth zero gates. Most idle wakes file
 nothing — log the verdict line and move on.
 
 
-### Closing a visit: never by hand
+### Withdrawing a human gate you filed
 
-A closed visit records why it closed in two keys: `gc.outcome`, one word,
-and `gc.outcome_reason`, one sentence. The board takes a finished sitting's
-outcome from them, so a visit closed without them looks like a need nobody
-met. A bare `gc bd close` or `--status=closed` on a visit records neither.
+A human gate is cleared by resolving it, and its resolve reason is the answer,
+headed `ruled:`, `moot:` or `benign:`. The board and every reader take a
+cleared gate's answer from that reason, so a gate closed with a bare
+`gc bd close` reads as a need nobody met.
 
-A sitting closes the visit it works. Outside a sitting, a visit is closed
-only by the role that raised it, and only when it was filed in error, when
-another visit already carries its need, or when its premise is gone. That
-close goes through one of two writers:
+A person clears a gate. A role never resolves a gate another role filed, even
+after it resolves the situation the gate asks about: it appends what it did to
+the notes of the bead the gate blocks and leaves the gate open. A role
+withdraws its own gate, and only when the situation it asked about is gone,
+with one call:
 
 ```bash
-SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
-# An open escalation you raised on a bead:
-"$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
-# Any other visit you raised:
-"$SCRIPTS/visit-close.sh" --visit <visit> --outcome <word> --reason "<one sentence>"
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+"$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 
-`escalate.sh --retract` finds the open visit by the subject and key it was
-filed under, and closes it `moot` through `visit-close.sh`. It leaves a visit
-with an assignee or a bound session open for whoever holds it.
-`visit-close.sh` stamps both keys and reads them back before it closes. On a
-visit that is already closed it records the two keys and leaves the close as
-it was, so it also repairs a visit closed by hand.
-
-The word carries weight. `moot` (the premise is gone) and `benign` (it holds
-but needs nobody) stop `escalate.sh` filing the same key and subject again
-for a day. Any other word means someone acted. Use `duplicate` when another
-visit carries the need, and `resolved` when you acted to end it.
-
-A visit another role raised, or one a sitting has claimed, is the sitting's
-to close, even after you resolve its situation. Append what you did to its
-notes and leave it open. Close it yourself only when the operator tells you
-to, and then through `visit-close.sh`.
+`human-gate.sh --retract` resolves each open human gate under the key that
+blocks the bead, with the reason `moot: <message>`, and every bead the gate
+held is released. A sitting may be discussing the gate, and the withdrawal
+clears it anyway, because the situation is gone; the sitting learns it at its
+sign-off. A gate a person already cleared keeps that person's answer. The
+`moot:` reason starts a quiet period only where your own call site declares
+one with `--quiet-window`.
 
 
 
@@ -164,7 +161,8 @@ cannot be un-nudged: typing at a pending prompt types into the UI, not into
 you, so you stay parked until a human walks past your pane.
 
 **What to do instead — none of these block:**
-- **A decision you cannot make:** file a bead, or escalate (a visit).
+- **A decision you cannot make:** file a bead, or a human gate on the bead
+  that waits (`human-gate.sh`).
   Durable state outlives your session; a pending prompt does not.
 - **Something a person must see:** park the bead with `gc.routed_to=human`.
   They read it when they are there; you keep cycling.

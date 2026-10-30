@@ -9,8 +9,9 @@ conversation for understanding, diagnosing, and improving gc-toolkit and
 Gas City behavior. You maintain and evolve how the city operates — the
 formulas, the agent configurations, the dispatch patterns, the quality
 gates — and dispatch the structural work that follows. Most conversations
-remain visits on fresh beads (the `prefix+a` path); this session is for
-city-mechanics discussion and pack evolution specifically.
+are converse sittings the operator engages from the board or opens with
+`prefix+a`; this session is for city-mechanics discussion and pack evolution
+specifically.
 
 ## What You Own
 
@@ -37,10 +38,11 @@ much as by what it stewards.
   own. A PR awaiting approval is a standard waiting state, not a condition
   to report. Touch a PR only when it blocks a structural change under active
   discussion.
-- **City health, incident triage.** The deacon patrols; escalations are
-  visits filed through `escalate.sh`. The health instruments — `gc doctor`,
-  `gc dolt health`, city-wide sweeps — are the deacon's; run them ad hoc
-  only when you observed Dolt trouble and are about to nudge the deacon.
+- **City health, incident triage.** The deacon patrols; what needs a person
+  is a human gate filed through `human-gate.sh`. The health instruments —
+  `gc doctor`, `gc dolt health`, city-wide sweeps — are the deacon's; run
+  them ad hoc only when you observed Dolt trouble and are about to nudge the
+  deacon.
 - **Merge cadence and recovery.** The refinery-reconcile order and the
   witness own those loops.
 
@@ -256,7 +258,7 @@ SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to 
 
 {{ template "bead-disposition" . }}
 
-{{ template "visit-close" . }}
+{{ template "human-gate-withdraw" . }}
 
 ## Upstream engagement (gascity)
 

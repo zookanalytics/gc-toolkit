@@ -95,7 +95,7 @@ also keeps the bead out of the proactive scan. `tools/gc-proactive.sh scan`
 looks for raw input to react to, and it drops a bead that has a dispatch path.
 Otherwise a sweep that ran between a blocker closing and the next reconcile
 pass would sling a first reaction at a bead the arm is about to dispatch.
-`gc-helm.sh react` and `gc-visit-open.sh` skip the scan and name a bead to
+`gc-helm.sh react` and `operator-intake.sh` skip the scan and name a bead to
 `tools/gc-proactive.sh sling` directly, so the sling refuses a bead that has a
 dispatch path too, and a reaction they ask for cannot race the arm either.
 
@@ -203,9 +203,8 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   ready, and retires the notices no longer owed (see
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
-  ready, and also the ones bd keeps unready only through an ancestor that
-  waits on a demand gate, or through any held ancestor of a bead in flight
-  (see below) — stamping its own
+  ready, and also a bead in flight that bd keeps unready only through a held
+  ancestor (see below) — stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -237,14 +236,18 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
 
 The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
 defines it: an open `blocks` blocker on the bead or on one of its
-parent-child ancestors. A park and a prerequisite hold alike, so an armed
-member of a parked epic, or of an epic that waits on a task, is held at any
-depth under it, and so is a bead whose own blocker is still open. A demand
-gate on an ancestor does not count: it is the operator's pending decision
-(`gc.demand_for`), and waiting on that decision is not a hold. A demand gate
-on the bead itself does count. Where `bd` decides the same question, the
-definition follows it: a closed or pinned blocker holds nothing, and a closed
-or pinned ancestor ends the walk.
+parent-child ancestors. A park, a prerequisite and a human gate hold alike,
+so an armed member of a parked epic, of an epic that waits on a task, or of
+an epic that waits on a person's answer is held at any depth under it, and so
+is a bead whose own blocker is still open. A wait on an epic is a wait of the
+whole, which bd's cascade carries to every part that has not started, so a
+wait that belongs to one member goes on that member
+([component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law)).
+Where `bd` decides the same question, the definition follows it: a closed or
+pinned blocker holds nothing, and a closed or pinned ancestor ends the walk.
+A human gate is the one blocker read otherwise. It holds until a person
+resolves it, pinned included, by the pack's rule of which human gates still
+hold (`$HUMAN_GATE_JQ` in `assets/scripts/bd-lib.sh`).
 
 A read that fails fails the pass, so an unread hold never passes for none. A
 read that answers without an id it was asked for says this store holds no
@@ -253,10 +256,10 @@ hold down only from an ancestor row the store holds, so an ancestor with no
 row, or a blocker with no row on an ancestor, holds nothing, as it holds
 nothing in `bd list --ready`. A blocker with no row on the bead itself holds
 it, marked unread, because it is the bead's own sequencing and the walk
-cannot tell whether it is open. The walk runs only where bd keeps the bead
-out of `--ready`, though, and bd holds nothing on an edge it cannot resolve,
-so a bead bd has no other reason to hold is ready and the pass slings it, as
-`arm` warns when it records the arm. An ancestor past the walk's depth cap
+cannot tell whether it is open. That counts only where bd keeps the bead out
+of `--ready`, though. bd holds nothing on an edge it cannot resolve, so a
+bead bd has no other reason to hold is ready and the pass slings it, as `arm`
+warns when it records the arm. An ancestor past the walk's depth cap
 (`HOLD_MAX_DEPTH` in `hold-lib.sh`) is never read, and it holds the bead as
 unread.
 
@@ -268,15 +271,18 @@ work already begun therefore fires under a parked epic once its own blockers
 close, while the epic's members that have not started stay held, including
 the ones under a parent in flight.
 
-`bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
-parent-child edges, so an armed child of an epic that waits only on a demand
-gate never enters `--ready`, and neither does a bead in flight under a parked
-epic. The pass therefore asks hold-lib about every open armed bead bd keeps
-unready, and slings the ones nothing holds. The
-status gate still holds (a non-`open` bead is never dispatched), and an
-assignee still keeps the pass off the bead. The pass reads each generation
-of ancestors in one listing and their blockers in one more, so its cost does
-not grow with the number of armed beads under a held epic.
+`bd list --ready` stays the fast path, and the pass asks hold-lib about every
+open armed bead beside it. bd's `is_blocked` flag cascades down parent-child
+edges, so a bead in flight under a parked epic never enters `--ready`. For a
+bead bd keeps unready, every hold the walk finds counts, and the pass slings
+the ones nothing holds. For a bead bd reports ready, the answer bd gives
+stands for every blocker but a human gate, and only a human gate on the bead
+or on an ancestor holds it: bd counts a pinned blocker as none, and a pinned
+human gate still holds. The status gate still holds (a non-`open` bead is
+never dispatched), and an assignee still keeps the pass off the bead. The
+pass reads each generation of ancestors in one listing and their blockers in
+one more, so its cost does not grow with the number of armed beads under a
+held epic.
 
 A held arm keeps its record. Releasing the hold, by closing a park's gate or
 by the prerequisite landing, needs no re-arm: the first pass after it
@@ -348,10 +354,10 @@ the pass carries its own lock:
   `refinery-reconcile.sh` takes its pass lock through the same
   `take_pass_lock` and runs its arms through `pass_child`, under a state key
   of its own.
-- Every `gc`, `escalate.sh` and `bead-rehome.sh` call the pass makes runs
-  through `pass_child`, with the lock's descriptor closed. A process that a
-  `gc` call starts can outlive the pass: a store read can bring up a Dolt
-  server, and `gc` hands the descriptors it was given to what it starts. A
+- Every `gc`, `human-gate.sh`, `gc-helm.sh` and `bead-rehome.sh` call the pass
+  makes runs through `pass_child`, with the lock's descriptor closed. A process
+  that a `gc` call starts can outlive the pass: a store read can bring up a
+  Dolt server, and `gc` hands the descriptors it was given to what it starts. A
   process that kept the descriptor would hold the lock against every later
   pass. The subshell `pass_child` runs a call from holds the descriptor until
   the call exits, so a pass killed by itself leaves the lock held while the
@@ -381,7 +387,7 @@ budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
 0 = unpaced), and starts a notice or a sling only while at least
 `DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
 point it sends no notice, starts no sling and files no escalation, since
-`escalate.sh` is store work the timeout can cut short too. Each remaining
+`human-gate.sh` is store work the timeout can cut short too. Each remaining
 ready bead keeps its arm with no marker on it, this pass counts no attempt
 against it, and the next pass slings it. A notice it leaves keeps its record,
 and the next pass sends it. A capped bead stays capped and armed, and the next
@@ -548,7 +554,7 @@ retires an arm on any other closed bead. Until a pass finishes it, a bead in
 progress under the claim reads to the doctor check below as the bead the pass
 claimed.
 
-When the close is held, commonly by an open visit tracking the bead,
+When the close is held, commonly by an open human gate that blocks the bead,
 `bead-rehome` refuses the close rather than forcing it, after it has stamped
 the pointer. The pass gives the bead back without the pointer, and a later
 pass retries the disposal once the hold clears. A successor pointer on an open

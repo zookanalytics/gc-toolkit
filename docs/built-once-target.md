@@ -233,7 +233,6 @@ bd 1.3.2.
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 | `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
-| visits, `gate-visit-sweep` and the converse plumbing | native human gates, core's notify and renudge orders | tk-iirrmiw, tk-o6pd01i |
 
 ### Copied boilerplate
 
@@ -294,19 +293,14 @@ A restatement needs no trigger either, once the doctrine has its home.
 
 ## The deletion schedule
 
-Stages 1 to 3 run in the order below, and each of the page's own items starts
-when what it waits on lands. An armed bead is blocked by what it waits on and
+Stage 1, the native-gates convoy (tk-iirrmiw) and its cutover (tk-o6pd01i),
+has landed, and the baseline's re-measure for it is tk-1tfzr71.35. Stages 2
+and 3 run in the order below, and each of the page's own items starts when
+what it waits on lands. An armed bead is blocked by what it waits on and
 slings itself when that lands. A size is the lines of the whole files a
 bead's contract retires, with their tests, at the baseline, so a bead that also
 rewrites part of a file retires more than its size. A branch already in flight
 shows its measured net instead.
-
-### 1. Landing now
-
-| Bead | What it removes | Size | Waits on |
-|---|---|---|---|
-| tk-iirrmiw, the native-gates convoy | visits and their plumbing, onto native human gates | −2,326 net across its branches so far | review of unit C (tk-5u2xpan) |
-| tk-o6pd01i, the cutover (unit D) | `gate-visit-sweep`, `visit-identity.sh`, the gate pass of `notification-wisp-reap`; it adds a migration that its follow-up deletes | 597 | unit C landing |
 
 ### 2. Armed on the native-gates convoy landing
 

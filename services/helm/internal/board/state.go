@@ -25,11 +25,12 @@ const (
 	// open or at its pre-open gate. Its review and rework rounds are part of
 	// that, so a bead in review is not waiting its turn behind them.
 	stateInReview = "in review"
-	// stateInConversation: a live sitting holds a visit on the bead.
+	// stateInConversation: a live sitting holds a conversation on the bead.
 	stateInConversation = "in conversation"
-	// stateParked: a person holds the bead. It waits on an open gate a person
-	// releases or on a demand, it is routed to the operator, or a visit on it
-	// waits for someone to engage it.
+	// stateParked: the bead waits on a person. It waits on an open gate a
+	// person releases or on a demand, which holds its work, it is routed to the
+	// operator, or a conversation about it waits in the operator's queue, which
+	// holds nothing.
 	stateParked = "parked"
 	// stateQueued: the bead waits its turn. It waits on open work or on a gate
 	// the city resolves by itself, or it carries a pool route, an arm or an
@@ -63,6 +64,9 @@ type beadState struct {
 	// inherited says the state is the hold the bead's ancestors put on it
 	// ([underHold]), so waits and unread are theirs, not the bead's own.
 	inherited bool
+	// conversationOnly says a parked bead is parked by nothing but a
+	// conversation waiting in the operator's queue, so nothing holds its work.
+	conversationOnly bool
 }
 
 // stateInput is the part of a bead its state is read from. A child and an
@@ -116,12 +120,14 @@ func deriveState(in stateInput, f Facts) beadState {
 	if inReview(in.metadata) {
 		return beadState{kind: stateInReview}
 	}
-	if engagedVisit(in.id, f.Sittings) {
+	if f.human.inSessionOn(in.id) {
 		return beadState{kind: stateInConversation}
 	}
 	gates, work := splitWaits(in.blockers)
-	if len(gates) > 0 || in.metadata[mdRoutedTo] == routedHuman || f.Visits[in.id] {
-		return beadState{kind: stateParked, waits: gates}
+	routed := in.metadata[mdRoutedTo] == routedHuman
+	if len(gates) > 0 || routed || f.human.holds(in.id) {
+		talk := len(gates) == 0 && !routed && !f.human.holdsWork(in.id)
+		return beadState{kind: stateParked, waits: gates, conversationOnly: talk}
 	}
 	selfStart := poolRoute(in.metadata) || in.metadata[mdDispatchWhenReady] != "" ||
 		(in.assignee != "" && in.status != "in_progress")
@@ -429,11 +435,16 @@ func oldestFirst(bs []Blocker) []Blocker {
 // rowFrontier is a takeaway row's frontier phrase for its own state, counting
 // the open waits it has. A row its ancestors hold says so, and a queued row
 // that starts by itself says that. With no wait to count and no ancestor
-// holding it, a person holds a takeaway row only through a visit: a row routed
-// to the operator takes [frontier]'s human-gated phrases instead.
+// holding it, a takeaway row waits on a person through a human gate, which
+// holds its work, or through a conversation waiting in the operator's queue,
+// which holds nothing, and the phrase says which: a row routed to the operator
+// takes [frontier]'s human-gated phrases instead.
 func rowFrontier(s beadState, nOpen int) string {
 	if s.kind == stateParked && nOpen == 0 && !s.inherited {
-		return "held by an open visit"
+		if s.conversationOnly {
+			return "a conversation waits for you · the work is not held"
+		}
+		return "held by a human gate"
 	}
 	phrase := s.kind
 	if nOpen > 0 {
@@ -455,9 +466,8 @@ func rowFrontier(s beadState, nOpen int) string {
 // names the oldest of them, which the takeaway can only paraphrase as it stood
 // when the sitting ended. Those are its ancestors' waits when they hold it
 // ([underHold]). A row whose recorded waits have all landed carries a takeaway
-// written while they were open, so its live state answers instead. heldBy is
-// the open-visit phrase ([visitHold]), empty when no visit covers the row.
-func stateNeeds(s beadState, waiting, waitingOpen []string, heldBy string) string {
+// written while they were open, so its live state answers instead.
+func stateNeeds(s beadState, waiting, waitingOpen []string) string {
 	switch {
 	case s.kind == stateQueued && len(s.waits) > 0:
 		phrase := "queued behind " + waitsPhrase(s)
@@ -477,9 +487,6 @@ func stateNeeds(s beadState, waiting, waitingOpen []string, heldBy string) strin
 	case stateInFlight:
 		return "in flight"
 	case stateInConversation, stateParked:
-		if heldBy != "" {
-			return heldBy
-		}
 		return s.kind
 	case stateQueued:
 		if s.inherited {

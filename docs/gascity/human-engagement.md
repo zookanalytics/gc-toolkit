@@ -1,6 +1,6 @@
 ---
 name: Gas City and human engagement (platform facts)
-description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, and where a failed start is recorded — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
+description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, the primitives a conversation rides, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, and where a failed start is recorded — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
 ---
 
 # Gas City and human engagement
@@ -9,9 +9,9 @@ This page states Gas City behavior only: the primitives a human
 conversation can ride, and how a session and its pane end, where upstream's
 docs do not already say it. Each section names its evidence and the date it
 was read, and says where the city's gascity fork differs from upstream main.
-gc-toolkit's own model on top of these — subjects, visits, converse
-sittings, demands and the helm board — is
-[human-engagement.md](../human-engagement.md).
+gc-toolkit's own model on top of these — subjects, human gates,
+conversations and the converse sittings that hold them, and the helm board —
+is [human-engagement.md](../human-engagement.md).
 
 ## Scope
 
@@ -97,6 +97,88 @@ finding.)
 `PoolDemandServeRulesForQuery` (`internal/config/workquery.go`); bd 1.3.1's
 `evaluateGates` (`cmd/bd/gate.go`); read at upstream `1e05ae624` and the fork
 `a319c2fd6` on 2026-10-19.
+
+`bd gate create --type=human --blocks <bead>` adds one `blocks` dependency
+from the bead it names onto the gate, so that bead leaves `bd ready` until the
+gate closes, and it takes no assignee or metadata at create. Another bead that
+adds its own `blocks` edge onto the gate waits on it the same way.
+`bd gate resolve <gate> --reason` closes the gate with that close reason,
+skipping the close checks, so anyone may clear it. On a gate already closed it
+changes nothing, keeps the first reason, and still reports success with exit
+0, so a resolver learns it lost a race only by reading the gate back. It
+refuses a bead whose type is not `gate`. `bd ready` excludes gates, and a plain
+`bd list` hides them unless `--include-gates` or `--type gate` is given.
+`bd dep list <bead> --type blocks --json` lists what the bead waits on,
+closed blockers included, and each row carries the far bead's `issue_type`,
+`status`, `await_type`, `await_id`, `assignee`, `title` and `close_reason`; with
+`--direction=up` from a gate it lists the beads that wait on it.
+
+*Evidence:* bd 1.3.1 `cmd/bd/gate.go` (create 340-437, resolve 559-574),
+`internal/storage/issueops/close.go` 339-384, `cmd/bd/dep.go` 917-1052,
+`internal/storage/sqlbuild/ready.go` 16-22 and `internal/workapi/list.go`
+433-434; a live `gc bd dep list --type blocks --json` on 2026-10-22, whose row
+for a closed human gate carried its `close_reason`.
+
+## What a conversation rides
+
+A conversation is an ordinary task, and every fact it rests on is a bd or Gas
+City behavior that predates it.
+
+- **Its two edges hold nothing.** `bd create --deps "tracks:<bead>"` makes the
+  new task track the bead, and `tracks` never blocks, cascades nothing and is
+  outside the cycle check. `bd dep add <task> <gate> --type replies-to` is bd's
+  link for conversation threading, from the reply onto the original. It
+  affects no ready work and no close, and bd stores it with the reply, so an
+  edge onto a gate in another store keeps the gate's id. The task's own
+  `bd list --id <task> --json` row carries each edge's `type` and
+  `depends_on_id` whichever store holds the far bead, while `bd dep list` of
+  one bead leaves an edge whose far bead is in another store out of its JSON
+  and names it only on stderr. Nothing in Gas City outside its tests reads or
+  writes `replies-to`.
+- **The hook claim finds a task assigned to the session.** The default work
+  query's first tier finds the session's in-progress work, its second
+  (`bd ready --assignee`) its open assigned work, and its third offers routed
+  work, which is closed to a manual session whose alias is not its template's
+  name. `gc hook --claim` claims under the session's alias, which is also the
+  session's bd actor, and returns work it already holds in progress. The
+  assigned tiers read `bd list` and `bd ready`, which leave gates out. The
+  claim itself (`bd update --claim`) is a compare-and-swap that sets
+  `in_progress`, the assignee and a lease, is idempotent for its holder, and
+  refuses a bead another actor holds.
+- **A guarded update moves a task between holders.**
+  `bd update --if-assignee <holder>` applies only while the assignee still
+  reads `<holder>`, checked inside the update's transaction, and a mismatch
+  writes nothing and exits 13. An update that changes the holder, or moves the
+  bead out of `in_progress`, drops the claim's lease.
+  `gc bd release-if-current <id> <holder>` leaves the bead open and assigned to
+  nobody.
+- **An alias is a reservation.** `gc session new --alias <a>` reserves the
+  alias under a city-wide lock, and refuses it while another session that is
+  not closed holds it as its alias, its session name or its identity. A closed
+  session does not reserve its alias, and a new session under it starts a fresh
+  transcript and takes the in-progress work still assigned to the alias.
+  `gc session close` releases no claim held under the alias, and
+  `gc session list` leaves a closed session out whatever state it is asked for.
+- **A task in a person's queue starts nothing.** Assigned work wakes only the
+  session whose identity it carries, and an unassigned, unrouted bead wakes
+  nothing, so a task assigned to `human`, which no session carries, starts no
+  session. Core's orphan-sweep counts a bead `gc hook --claim` claimed in a
+  manual session as unverifiable and leaves it, and an agent's default
+  on_death runs for pool instances only.
+
+*Evidence:* bd 1.3.1 `internal/types/types.go` 1259-1395,
+`internal/storage/issueops/dependency_queries.go` 63-136 and 906-937,
+`cmd/bd/create_deps.go` 145-153, `cmd/bd/dep.go` 370-411 and 1032-1046,
+`internal/storage/issueops/claim.go` 91-352,
+`internal/storage/issueops/update_cas.go` 34-59 and
+`internal/storage/issueops/aggregate.go` 160-174; Gas City
+`internal/config/workquery.go` 528-613 and 780-793, `cmd/gc/cmd_hook_claim.go`
+502-512 and 797-910, `cmd/gc/cmd_session.go` 336-351 and 465-480,
+`internal/session/names.go` 288-327 and 630-702,
+`cmd/gc/build_desired_state.go` 1938-1950, `cmd/gc/assigned_work_scope.go`
+382-431, `internal/beads/bdstore_conditional_release.go` 78-110 and core's
+`orphan-sweep.sh`; read at upstream `1e05ae624` on 2026-10-20 and 2026-10-22
+(specs/tk-0ur8r9p/design.md, "The platform this rides", records each line).
 
 ## Where a question surfaces
 

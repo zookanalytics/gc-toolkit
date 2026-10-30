@@ -48,8 +48,9 @@ the script's start path opens a row's drill panel. The panel's own reads go to
 the supervisor and fail against a fixture, and the panel still offers its
 actions.
 
-Never point a capture at a running helm service. Its verbs file, dispatch and
-close visits in the live city, and a script that clicks one does that for real.
+Never point a capture at a running helm service. Its verbs file and close
+conversations, clear human gates and dispatch work in the live city, and a
+script that clicks one does that for real.
 The verdict says that the board shows fixture data.
 
 ## Reports a command prints

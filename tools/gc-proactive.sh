@@ -52,7 +52,7 @@ REACTION_KIND="first-reaction"
 # "live-workflow" when a live workflow already drives it. cmd_scan's --sling loop
 # reads it in-process to keep a skip from spending the cap; the `sling` CLI verb
 # in main() translates it to RC_ALREADY_REACTED, RC_DISPATCH_PATH or
-# RC_LIVE_WORKFLOW so a cross-process caller (gc-helm react, gc-visit-open) can
+# RC_LIVE_WORKFLOW so a cross-process caller (gc-helm react, operator-intake) can
 # tell the no-op from a dispatch, name its cause, and file its own visit rather
 # than wait for a reaction that is already in flight or never ran.
 SLING_SKIPPED=""
@@ -290,7 +290,7 @@ reaction_absent_guard() {
 # dispatch path (has_dispatch_path, assets/scripts/dispatch-path.sh): a route a
 # pool queue serves, or a deferred-dispatch arm. scan_precision_filter keeps
 # such a bead out of every sweep, and this guard holds the same line for a bead
-# named to the sling directly, the way gc-helm react and gc-visit-open name one.
+# named to the sling directly, the way gc-helm react and operator-intake name one.
 # Filing a reaction leaves the subject's route in place, so a routed subject
 # stays claimable for the whole reaction. The pool its route names can hand it
 # to a worker mid-reaction, and the disposition then acts on a bead that worker
@@ -470,7 +470,7 @@ EOF
 # NO is a positive finding only. A roster or rig list this cannot read answers
 # YES, because an unreadable one is not evidence of an absent or wrong-store
 # pool, and a false no silently retires the framing every caller diverts from
-# (assets/scripts/gc-visit-open.sh files a bare visit on a no).
+# (assets/scripts/operator-intake.sh files a conversation on a no).
 # ---------------------------------------------------------------------------
 cmd_deliverable() {
     local target bead roster verdict riglist bead_prefix target_rig target_prefix bead_rig
@@ -514,7 +514,7 @@ cmd_deliverable() {
         roster=""
         [ -f "$FIXTURE/agents.json" ] && roster="$(cat "$FIXTURE/agents.json")"
     elif command -v timeout >/dev/null 2>&1; then
-        # Bounded: gc-visit-open asks this question while an operator waits at
+        # Bounded: operator-intake asks this question while an operator waits at
         # a prompt, and a hung roster read must degrade to yes, not to a hang.
         roster="$(timeout "${GC_PROACTIVE_ROSTER_TIMEOUT:-15}" gc agent list --json 2>/dev/null || true)"
     else

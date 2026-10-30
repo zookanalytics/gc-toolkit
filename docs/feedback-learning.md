@@ -350,5 +350,5 @@ Recurrence after adoption is the pass's sharpest input: the rule was
 adopted and the feedback came back anyway. That argues for a different
 carrier or a mechanism, never for restating the same bullet more loudly.
 Evidence against an adopted rule never silently retires it — contradiction
-files a visit for the operator, who picks scope-narrowing, retirement, or
-dismissal.
+files a human gate on the rule's pattern bead for the operator, who picks
+scope-narrowing, retirement, or dismissal.

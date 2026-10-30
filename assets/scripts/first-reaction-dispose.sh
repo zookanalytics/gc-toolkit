@@ -30,11 +30,11 @@
 #               closes, and it closes only a pure wait (live-work.sh).
 #   close       there is nothing to do -> hand the bead to a validating-closer
 #               pool (mol-validate-close), which re-checks the call and closes
-#               the bead or escalates. A first reaction never closes a bead. Run
-#               from inside a live reaction workflow (--after-workflow), the
-#               closer is deferred until that workflow closes, so it is the
-#               bead's sole dispatch surface rather than a second one stacked on
-#               the reaction.
+#               the bead or asks the operator. A first reaction never closes a
+#               bead. Run from inside a live reaction workflow
+#               (--after-workflow), the closer is deferred until that workflow
+#               closes, so it is the bead's sole dispatch surface rather than a
+#               second one stacked on the reaction.
 #   ruling      only the operator can answer, and the reaction has no action to
 #               recommend -> a human gate on the subject, Discuss-only. A gate
 #               that carries a determinable action is the recommend exit.
@@ -48,10 +48,11 @@
 # (gc-helm.sh unplaced lists it). A named agent's own work (--assign,
 # --then-assign) is not pool work, so the rule does not read it.
 #
-# ruling and recommend file a native human gate (gc-helm.sh demand) that blocks
-# the subject: the gate is the escalation's state, and orders/gate-visit-sweep
-# files the visit that resolves it on its next pass. --visit holds the subject
-# on a visit the caller filed instead, and files no gate.
+# ruling and recommend file a native human gate through human-gate.sh, under the
+# key first-reaction, that blocks the subject: the subject waits for the
+# operator until the gate is cleared. On a subject with open children the gate
+# blocks the parent too, and its unstarted parts wait with it, because the
+# ruling or recommendation decides how the whole bead proceeds.
 #
 # The reaction is its own leased bead R, which tracks S. Pass --reaction-bead R:
 # this script performs the write-back to S, stamps gc.reacted_by=R on S as the
@@ -68,7 +69,7 @@
 # --stand-down asks, before a reaction reads S, whether S takes a reaction from
 # R at all. Two markers on S say it does not. gc.reacted_by=R says R's own
 # write-back already landed, and gc.reaction_owned=1 says a live owner holds the
-# reaction (gc-helm.sh engage --new-subject, which filed S's one visit itself).
+# reaction (gc-helm.sh engage --new-subject, which filed S's one conversation itself).
 # On either marker this script closes R, writes nothing to S, and exits 0. On
 # neither it writes nothing and exits 3, and the reaction goes ahead. R is
 # closed in one place, close_reaction below, whether the reaction ends in an
@@ -88,6 +89,7 @@ set -u
 PROG="first-reaction-dispose"
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$HERE/gc-helm.sh}"
+HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$HERE/human-gate.sh}"
 DEFERRED="${GC_DEFERRED_DISPATCH_TOOL:-$HERE/deferred-dispatch.sh}"
 PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
 
@@ -109,7 +111,7 @@ Usage:
   first-reaction-dispose.sh <bead> --disposition actionable --reason "<why>" --takeaway "<headline>"
                             [--route <rig>/<agent> [--emergency <check>] | --assign <named-agent>]
   first-reaction-dispose.sh <bead> --disposition recommend --reason "<why>" --takeaway "<recommendation; why discuss>"
-                            --recommended-formula <mol> [--visit <visit-bead-id>]
+                            --recommended-formula <mol>
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
                             [--then-route <rig>/<agent> [--emergency <check>] | --then-assign <named-agent>]
@@ -118,7 +120,6 @@ Usage:
   first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
                             [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
-                            [--visit <visit-bead-id>]
   first-reaction-dispose.sh <bead> --stand-down --reaction-bead <R>
   common: [--reaction-bead <R>] [--by <who>] [--db <path>] [--dry-run]
 
@@ -136,7 +137,7 @@ Usage:
   --route (actionable, close) defaults to ${GC_RIG}/gc-toolkit.polecat, and
   fails closed when the target cannot be rig-qualified. On close it is the
   validating-closer pool that runs mol-validate-close, which re-checks the
-  no-work conclusion and closes the bead or escalates.
+  no-work conclusion and closes the bead or asks the operator.
   --after-workflow (close) names the live workflow this close runs inside — a
   frozen mol-first-reaction molecule's own root. The closer is then DEFERRED,
   not slung now: the bead is held on that root and a deferred dispatch is
@@ -184,24 +185,23 @@ Usage:
   close, so a person closes this one once it lands (--disposition ruling asks
   them).
   ruling and recommend put the subject to the operator as a native human gate:
-  the script files it with gc-helm.sh demand under the topic first-reaction,
-  the takeaway as its question, and holds the subject on it. One open gate
-  stands per subject and topic, so a re-run refreshes the reaction's gate
-  rather than filing a second, and a demand a sitting already holds on the
-  subject is left alone. orders/gate-visit-sweep files the visit that resolves
-  the gate on its next pass (a 5-minute cooldown), so the subject waits up to
-  one pass with a gate and no visit.
-  --visit (ruling, recommend) holds the subject on a visit the caller already
-  filed instead, and files no gate.
+  the script files it with human-gate.sh under the key first-reaction, the
+  takeaway as its title, and the gate blocks the subject. One open gate stands
+  per subject and key, so a re-run of the same reaction finds the gate it
+  filed rather than filing a second, and an open first-reaction gate whose
+  title is not this takeaway, a superseded reaction's, is withdrawn first.
+  Each exit clears a recommendation already on the subject before it files its
+  gate, and recommend stamps its own only once the gate is filed, so no
+  recommendation is older than the newest first-reaction gate.
   --recommended-formula (recommend only, required) names the execution mol the
   recommendation runs; it stamps gc.recommended_formula on the subject, which
-  is what offers the operator Accept on the visit. A ruling carries no
-  recommended action and rejects it.
+  with the first-reaction gate is what offers the operator Accept on the board.
+  A ruling carries no recommended action and rejects it.
 EOF
 }
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
-ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
+ROUTE=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
 ASSIGN=""; THEN_ASSIGN=""; EMERGENCY=""; EMERGENCY_SET=""
 DB=""; DRY=""; AFTER_WORKFLOW=""; RECOMMENDED_FORMULA=""; REACTION_BEAD=""
 STAND_DOWN=""
@@ -239,8 +239,6 @@ while [ $# -gt 0 ]; do
         --blocker=*) BLOCKER_TITLE="${1#--blocker=}"; shift ;;
         --blocker-key)   shift; [ $# -gt 0 ] || usage_die "--blocker-key needs a value"; BLOCKER_KEY="$1"; shift ;;
         --blocker-key=*) BLOCKER_KEY="${1#--blocker-key=}"; shift ;;
-        --visit)    shift; [ $# -gt 0 ] || usage_die "--visit needs a bead id"; VISIT="$1"; shift ;;
-        --visit=*)  VISIT="${1#--visit=}"; shift ;;
         --after-workflow)   shift; [ $# -gt 0 ] || usage_die "--after-workflow needs a bead id"; AFTER_WORKFLOW="$1"; shift ;;
         --after-workflow=*) AFTER_WORKFLOW="${1#--after-workflow=}"; shift ;;
         --recommended-formula)   shift; [ $# -gt 0 ] || usage_die "--recommended-formula needs a mol name"; RECOMMENDED_FORMULA="$1"; shift ;;
@@ -298,8 +296,8 @@ same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
 
 case "$DISPOSITION" in
     actionable)
-        [ -z "$WAITING$BLOCKER_TITLE$UNTIL$VISIT$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
-            || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--until/--then-route/--then-assign/--visit/--after-workflow/--recommended-formula belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$UNTIL$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
+            || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--until/--then-route/--then-assign/--after-workflow/--recommended-formula belong to the other exits)"
         # A bead goes to a pool by gc.routed_to or to a named agent by assignee,
         # never both. The agent's hook offers the bead by its assignee whatever
         # the route, and a pool's claim and Gas City's pool demand count both
@@ -329,8 +327,8 @@ case "$DISPOSITION" in
         # until that root closes, so it is poured as the bead's sole dispatch
         # surface, never a second one stacked on the live reaction. A reaction
         # bead is not a workflow on the subject, so it slings the closer now.
-        [ -z "$WAITING$BLOCKER_TITLE$UNTIL$VISIT$THEN_ROUTE$ASSIGN$THEN_ASSIGN$RECOMMENDED_FORMULA$EMERGENCY" ] \
-            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--until/--then-route/--assign/--then-assign/--visit/--recommended-formula/--emergency belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$UNTIL$THEN_ROUTE$ASSIGN$THEN_ASSIGN$RECOMMENDED_FORMULA$EMERGENCY" ] \
+            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--until/--then-route/--assign/--then-assign/--recommended-formula/--emergency belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
@@ -345,7 +343,7 @@ case "$DISPOSITION" in
         fi
         ;;
     blocked)
-        [ -z "$ROUTE$ASSIGN$UNTIL$VISIT$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route/--then-assign (--route/--assign/--until/--visit/--after-workflow/--recommended-formula belong to the other exits)"
+        [ -z "$ROUTE$ASSIGN$UNTIL$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route/--then-assign (--route/--assign/--until/--after-workflow/--recommended-formula belong to the other exits)"
         [ -z "$THEN_ROUTE" ] || [ -z "$THEN_ASSIGN" ] \
             || usage_die "--then-route and --then-assign both name where $BEAD goes once its wait lifts; pass --then-route for a pool or --then-assign for a named agent, not both"
         [ -n "$WAITING" ] || [ -n "$BLOCKER_TITLE" ] \
@@ -360,7 +358,7 @@ case "$DISPOSITION" in
         for w in $WAITING; do
             [ "$w" != "$BEAD" ] || usage_die "--waiting-on $w is the bead itself"
             same_store "$w" "$BEAD" \
-                || usage_die "--waiting-on $w is in another store than $BEAD; a cross-store edge reports success and holds nothing. File a demand bead in ${BEAD%%-*}'s store naming $w in its body, and wait on that."
+                || usage_die "--waiting-on $w is in another store than $BEAD; a cross-store edge reports success and holds nothing. File a bead in ${BEAD%%-*}'s store that names $w in its body, and wait on that."
         done
         if [ -n "$THEN_ROUTE" ]; then
             case "$THEN_ROUTE" in */*) : ;; *) usage_die "--then-route '$THEN_ROUTE' is not rig-qualified (<rig>/<agent>)" ;; esac
@@ -383,8 +381,8 @@ case "$DISPOSITION" in
         # unassigned, no route, no arm, and no open blocks blocker of its own
         # (live-work.sh). So this exit takes no flag that would route, arm,
         # assign or hold the subject.
-        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA$EMERGENCY" ] \
-            || usage_die "until takes --until only (--route/--assign/--waiting-on/--blocker/--then-route/--then-assign/--visit/--after-workflow/--recommended-formula/--emergency belong to the other exits): the pass that closes $BEAD once its --until beads land leaves a routed, armed, assigned or blocked bead open"
+        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA$EMERGENCY" ] \
+            || usage_die "until takes --until only (--route/--assign/--waiting-on/--blocker/--then-route/--then-assign/--after-workflow/--recommended-formula/--emergency belong to the other exits): the pass that closes $BEAD once its --until beads land leaves a routed, armed, assigned or blocked bead open"
         [ -n "$UNTIL" ] \
             || usage_die "until needs --until <bead-id>: the bead whose landing ends this one's job, written as an until edge"
         for u in $UNTIL; do
@@ -394,23 +392,24 @@ case "$DISPOSITION" in
         done
         ;;
     recommend|ruling)
-        # Both put the subject to the operator and hold it there on a blocks
-        # edge: on the human gate this script files, or on the visit --visit
-        # names. They differ only in whether a recommended action rides along.
-        # recommend REQUIRES --recommended-formula (it is the disposition that
-        # stamps the key the board's Accept reads); ruling REJECTS it (the
-        # operator's judgment names no worker-runnable action, so the visit is
-        # Discuss-only).
+        # Both put the subject to the operator and hold it there on the human
+        # gate this script files, which blocks it. They differ only in whether
+        # a recommended action rides along. recommend REQUIRES
+        # --recommended-formula (it is the disposition that stamps the key the
+        # board's Accept reads); ruling REJECTS it (the operator's judgment
+        # names no worker-runnable action, so the gate is Discuss-only).
         [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$UNTIL$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$EMERGENCY" ] \
-            || usage_die "$DISPOSITION takes --visit (and --recommended-formula on recommend); --route/--assign/--waiting-on/--blocker/--until/--then-route/--then-assign/--after-workflow/--emergency belong to the other exits"
-        if [ -n "$VISIT" ]; then
-            [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
-            same_store "$VISIT" "$BEAD" \
-                || usage_die "--visit $VISIT is in another store than $BEAD; a blocks edge onto it reports success and holds nothing (component-model I1). File the visit in ${BEAD%%-*}'s store, then record it here."
-        fi
+            || usage_die "$DISPOSITION takes --recommended-formula on recommend and nothing else; --route/--assign/--waiting-on/--blocker/--until/--then-route/--then-assign/--after-workflow/--emergency belong to the other exits"
+        # The takeaway is the gate's title as well as the board headline, so its
+        # cap is checked before anything is filed, as gc-helm.sh takeaway
+        # checks it, in codepoints.
+        tlen=$(printf '%s' "$TAKEAWAY" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//' | jq -Rsr 'length' 2>/dev/null || true)
+        case "$tlen" in ''|*[!0-9]*) tlen=${#TAKEAWAY} ;; esac
+        [ "$tlen" -le 140 ] \
+            || usage_die "--takeaway is $tlen characters; the cap is 140, because it is the gate's title and the board headline. Nothing was written."
         if [ "$DISPOSITION" = recommend ]; then
             [ -n "$RECOMMENDED_FORMULA" ] \
-                || usage_die "recommend needs --recommended-formula <mol>: it is the action the operator Accepts from the visit. A visit with no recommended action is --disposition ruling."
+                || usage_die "recommend needs --recommended-formula <mol>: it is the action the operator Accepts. A gate with no recommended action is --disposition ruling."
             # Accept slings this exact mol name, so validate it resolves before
             # anything is written — the roster discipline --route/--then-route
             # already take. Unvalidated, a typo stamps a live
@@ -707,7 +706,7 @@ fi
 
 # ── Route only where something can claim ─────────────────────────────
 # A route to a pool this city does not run — or one whose rig does not own this
-# bead's store — is worse than a visit: the bead is open, unassigned and offered
+# bead's store — is worse than a human gate: the bead is open, unassigned and offered
 # to nobody, and nothing says so. gc-proactive.sh `deliverable` answers exactly
 # this against the agent roster and, given the bead, against store ownership too
 # (a rig-scope pool only claims beads in its own store), for any rig-qualified
@@ -776,11 +775,7 @@ if [ -n "$DRY" ]; then
                     else
                         printf 'would release %s to %s\n' "$BEAD" "$ROUTE"
                     fi ;;
-        recommend)  if [ -n "$VISIT" ]; then
-                        printf 'would record visit %s on %s recommending %s\n' "$VISIT" "$BEAD" "$RECOMMENDED_FORMULA"
-                    else
-                        printf 'would file a human gate on %s recommending %s and hold %s on it\n' "$BEAD" "$RECOMMENDED_FORMULA" "$BEAD"
-                    fi ;;
+        recommend)  printf 'would file a human gate on %s recommending %s and hold %s on it\n' "$BEAD" "$RECOMMENDED_FORMULA" "$BEAD" ;;
         blocked)    printf 'would wait %s on:%s%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" "${THEN_ASSIGN:+, assigned to $THEN_ASSIGN}"
                     [ -z "$THEN_ASSIGN" ] \
                         || printf 'would tell %s about %s once bd reports it ready, at once if it already does (deferred-dispatch.sh notify)\n' "$THEN_ASSIGN" "$BEAD"
@@ -796,11 +791,7 @@ if [ -n "$DRY" ]; then
                     else
                         printf 'would sling %s to validating closer %s (mol-validate-close)\n' "$BEAD" "$ROUTE"
                     fi ;;
-        ruling)     if [ -n "$VISIT" ]; then
-                        printf 'would record visit %s on %s\n' "$VISIT" "$BEAD"
-                    else
-                        printf 'would file a human gate on %s and hold %s on it\n' "$BEAD" "$BEAD"
-                    fi ;;
+        ruling)     printf 'would file a human gate on %s and hold %s on it\n' "$BEAD" "$BEAD" ;;
     esac
     [ -n "$REACTION_BEAD" ] && printf 'would close reaction bead %s\n' "$REACTION_BEAD"
     exit 0
@@ -839,15 +830,13 @@ $REASON" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id //
 fi
 
 # What the disposition names, for the line this script prints. A ruling or
-# recommend that files its own gate names it once the gate exists, below.
+# recommend names its gate once the gate exists, below.
 TARGET=""
 case "$DISPOSITION" in
     actionable) TARGET="${ASSIGN:-$ROUTE}" ;;
-    recommend)  TARGET="$VISIT" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
     until)      TARGET="$(printf '%s' "${UNTIL# }" | tr -s ' ' ',')" ;;
     close)      TARGET="$ROUTE" ;;
-    ruling)     TARGET="$VISIT" ;;
 esac
 if [ -n "$POOL_TARGET" ]; then
     case "$DISPOSITION:$ADMIT" in
@@ -858,70 +847,61 @@ if [ -n "$POOL_TARGET" ]; then
     esac
 fi
 
-# ── The recommendation, before the act ───────────────────────────────
-# A recommend disposition stamps gc.recommended_formula: it is the field that
-# turns a plain visit into a recommendation visit (the operator's Accept reads
-# it), so it lands before the gate that brings the visit. Any disposition that
-# names no recommendation clears a stale one a prior recommend left, so the
-# subject states the current recommendation and never a superseded one the
-# operator could still Accept. RECO_WANT is what gc.recommended_formula must
-# read back as after this write: the named mol on a recommend disposition, empty
-# (absent) when a disposition names none and clears a stale one. RECO_TOUCHED
-# marks that this write changed the key, so the read-back below runs only when it
-# did.
-RECO_WANT=""; RECO_TOUCHED=""
-if [ -n "$RECOMMENDED_FORMULA" ]; then
-    RECO_WANT="$RECOMMENDED_FORMULA"; RECO_TOUCHED=1
-    gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$RECOMMENDED_FORMULA" >/dev/null 2>&1 \
-        || die "could not stamp gc.recommended_formula on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
-elif [ -n "$(subject_meta gc.recommended_formula)" ]; then
-    RECO_TOUCHED=1
-    gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 \
-        || die "could not clear the stale gc.recommended_formula on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
-fi
-
-# ── The recommendation must be true before the act ───────────────────
+# ── The recommendation must be true when it is read ─────────────────
 # gc.recommended_formula is read as a NON-EMPTY value by every reader — the
 # board's Accept derivation (services/helm/internal/board/derive.go tests
 # `rf != ""`), gc-helm.sh accept, and converse-invalidate-recommendation.sh — so
-# a present-but-empty key is no live recommendation, and the stale-clear above
-# tests it the same non-empty way. An update can report success without proving
-# the key moved, and a silent drop is invisible until the operator meets the
-# wrong affordance — a dropped set files a recommendation visit that offers only
-# Discuss, a dropped stale-clear leaves a superseded Accept executable. So read
-# it back from a valid payload, retry the lone set/unset once, and refuse before
-# the act if it is still wrong — or if the subject cannot be read to prove the
-# key moved; nothing else has been written, so this command re-runs.
-if [ -n "$RECO_TOUCHED" ]; then
-    # Tag the read so an unreadable subject is never mistaken for a proven
-    # clear: "v:<value>" is a valid array payload (<value> empty = key absent),
-    # "u:" is a non-array, error object, empty, or unparseable read whose state
-    # is unknown. gc bd show answers an error OBJECT (not an array) for a subject
-    # it cannot resolve, and a bare "" would collapse that onto "key absent" and
-    # let a dropped stale-clear (RECO_WANT empty) satisfy the guard. So the guard
-    # compares against "v:$RECO_WANT"; a "u:" matches neither the set nor the
-    # clear, and the read-back fails closed.
-    reco_now() {
-        gc_bd show "$BEAD" --json 2>/dev/null | scrub \
-            | jq -r 'if (type == "array" and length > 0) then "v:" + (((.[0].metadata // {})["gc.recommended_formula"]) // "") else "u:" end' 2>/dev/null \
-            || printf 'u:'
-    }
-    RECO_OK="v:$RECO_WANT"
-    if [ "$(reco_now)" != "$RECO_OK" ]; then
-        if [ -n "$RECO_WANT" ]; then
-            gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$RECO_WANT" >/dev/null 2>&1 || true
+# a present-but-empty key is no live recommendation, and the clear below tests
+# it the same non-empty way. An update can report success without proving the
+# key moved, and a silent drop is invisible until the operator meets the wrong
+# affordance: a dropped set leaves a recommendation gate that offers only
+# Discuss, and a dropped clear leaves a superseded Accept executable. So
+# reco_ensure writes the key, reads it back from a valid payload, retries the
+# lone set or unset once, and fails the exit when it is still wrong, or when the
+# subject cannot be read to prove the key moved. The read is tagged so an
+# unreadable subject is never mistaken for a proven clear: "v:<value>" is a
+# valid array payload (<value> empty = key absent), and "u:" is a non-array,
+# error object, empty or unparseable read, whose state is unknown. gc bd show
+# answers an error OBJECT for a subject it cannot resolve, and a bare "" would
+# collapse that onto "key absent".
+reco_now() {
+    gc_bd show "$BEAD" --json 2>/dev/null | scrub \
+        | jq -r 'if (type == "array" and length > 0) then "v:" + (((.[0].metadata // {})["gc.recommended_formula"]) // "") else "u:" end' 2>/dev/null \
+        || printf 'u:'
+}
+reco_ensure() { # <formula, or empty to clear> <what has already landed, for the failure>
+    local want="$1" landed="$2" got
+    if [ -n "$want" ]; then
+        gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$want" >/dev/null 2>&1 || true
+    else
+        gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 || true
+    fi
+    if [ "$(reco_now)" != "v:$want" ]; then
+        if [ -n "$want" ]; then
+            gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$want" >/dev/null 2>&1 || true
         else
             gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 || true
         fi
     fi
-    RECO_GOT="$(reco_now)"
-    if [ "$RECO_GOT" != "$RECO_OK" ]; then
-        if [ -n "$RECO_WANT" ]; then
-            die "the recommendation did not land on $BEAD: gc.recommended_formula read back as '$RECO_GOT' (want 'v:$RECO_WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The operator's Accept reads this key, so the act is withheld rather than leave the operator a recommendation visit that offers only Discuss. Clear the cause and re-run this command."
-        else
-            die "the stale recommendation did not clear on $BEAD: gc.recommended_formula read back as '$RECO_GOT' (want 'v:' for a proven-absent key; a 'u:' means the subject could not be read, which is not proof it cleared). A disposition that recommends nothing must not leave a superseded Accept executable, so the act is withheld. Clear the cause and re-run this command."
-        fi
+    got="$(reco_now)"
+    [ "$got" = "v:$want" ] && return 0
+    if [ -n "$want" ]; then
+        die "the recommendation did not land on $BEAD: gc.recommended_formula read back as '$got' (want 'v:$want'; a 'u:' means the subject could not be read, which is not proof it landed). $landed The operator's Accept reads this key, so the exit stops here rather than leave a recommendation gate that offers only Discuss. Clear the cause and re-run this command."
     fi
+    die "the earlier recommendation did not clear on $BEAD: gc.recommended_formula read back as '$got' (want 'v:' for a proven-absent key; a 'u:' means the subject could not be read, which is not proof it cleared). $landed A disposition must not leave a superseded Accept executable, so the exit stops here. Clear the cause and re-run this command."
+}
+
+# ── A recommendation already on the subject is cleared, before the act ─────
+# The subject states the current recommendation and never a superseded one the
+# operator could still Accept. Every exit clears a recommendation an earlier
+# reaction left, and recommend stamps its own only once its gate is filed
+# (below), so no recommendation is ever older than the newest first-reaction
+# gate. That is how Accept finds the recommendation's gate once the gate is
+# closed, and an exit that stops part way never leaves its gate beside an older
+# recommendation, which Accept would sling in place of the one the gate asks
+# about.
+if [ -n "$(subject_meta gc.recommended_formula)" ]; then
+    reco_ensure "" "Nothing else was written."
 fi
 
 # ── The completion marker, last ──────────────────────────────────────
@@ -974,7 +954,7 @@ notify_assignee() { # <named-agent>
 # bead — a cheap model must not have the last word on a close — so the bead is
 # handed to a capable pool running mol-validate-close, which re-checks the
 # conclusion against live state and closes the bead only when it agrees,
-# escalating to a human or re-routing when it does not. mol-validate-close reads
+# asking the operator or re-routing when it does not. mol-validate-close reads
 # its subject as its input convoy's single tracked member, so the bead is claimed
 # there as the workflow's member, not via a raw pool route — a raw route runs
 # mol-polecat-work, which never closes a bead.
@@ -1030,7 +1010,7 @@ $REASON" >/dev/null 2>&1 \
             fi
         fi
     fi
-    # The board headline, for the moment the closer escalates back to a visit.
+    # The board headline, for the moment the closer puts the bead to the operator.
     "$HELM" takeaway "$BEAD" "$TAKEAWAY" --by "$BY" >/dev/null 2>&1 \
         || note "dispatched the closer for $BEAD but the board takeaway did not set; the closer holds the bead regardless"
     stamp_landed
@@ -1041,33 +1021,53 @@ fi
 
 # ── The ruling and recommend exits' human gate ───────────────────────
 # The next move is the operator's, and what a person owes is a native human gate
-# that blocks the subject (gc-helm.sh demand; docs/human-engagement.md).
-# The takeaway is its question, the same sentence the board shows on the
-# subject. demand keeps one open gate per gated bead and topic, and this gate is
-# filed under the topic first-reaction. So a re-run after a partial refreshes
-# the gate a prior run filed instead of filing a second, and a demand a converse
-# sitting already holds on the subject keeps its own question. With no topic,
-# demand matches on the subject alone: it would refresh a sitting's lone demand
-# in place and overwrite its question, and it would stop on a subject that
-# carries two.
-#
-# It is filed after the recommendation read-back above because the gate is what
-# brings the visit: orders/gate-visit-sweep files the visit that resolves it on
-# its next pass, and on a recommend that visit must offer Accept. Until the pass
-# runs, the subject waits on a gate with no visit.
+# that blocks the subject, filed through human-gate.sh under the key
+# first-reaction. Its title is the takeaway with its whitespace collapsed onto
+# one line, as gc-helm.sh takeaway stores it, so the gate says the sentence the
+# board shows on the subject. The helper titles a gate with its message's first
+# line, so that one line leads the message. The helper files nothing while an
+# open gate under the key blocks the subject, so a re-run of this reaction after
+# a partial finds the gate it filed. An open first-reaction gate asks this
+# reaction's question when its title or its description's first line is this
+# takeaway. The description holds the message whole, while the helper keeps a
+# title under 400 bytes, so a longer takeaway matches only by the description,
+# and a gate whose description does not lead with the takeaway matches by its
+# title. Any other open first-reaction gate asks a superseded reaction's
+# question, so it is withdrawn first, and the new gate carries this reaction's.
+# A reaction is an event of its own, so the call declares no quiet window. On a
+# subject with open children the gate blocks the parent, and its unstarted parts
+# wait with it.
 GATE=""
-if { [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; } && [ -z "$VISIT" ]; then
-    DEMAND_OUT=$("$HELM" demand "$BEAD" "$TAKEAWAY" --by "$BY" --topic first-reaction --body "Filed by a first reaction on $BEAD ($DISPOSITION), which waits on it.
+if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
+    [ -x "$HUMAN_GATE" ] \
+        || die "human-gate.sh not found beside this script ($HUMAN_GATE); no gate was filed on $BEAD. Restore it and re-run this command."
+    TITLE_WANT=$(printf '%s' "$TAKEAWAY" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')
+    FR_GATES=$(gc_bd dep list "$BEAD" --type blocks --json 2>/dev/null | scrub | jq -c 'if type == "array"
+        then [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human"
+                         and (.await_id // "") == "first-reaction" and (.status // "") != "closed") ]
+        else error("not an array") end' 2>/dev/null) \
+        || die "could not read the human gates of $BEAD, so whether a first-reaction gate already asks is unknown; nothing was filed. Clear the cause and re-run this command."
+    if printf '%s' "$FR_GATES" | jq -e --arg t "$TITLE_WANT" \
+        'any(.[]; (.title // "") != $t and ((.description // "") | tostring | split("\n")[0]) != $t)' >/dev/null 2>&1; then
+        "$HUMAN_GATE" --retract --subject "$BEAD" --key first-reaction \
+            --message "superseded by a newer first reaction on $BEAD, which asks: $TITLE_WANT" >/dev/null \
+            || die "could not withdraw the superseded first-reaction gate on $BEAD; nothing new was filed. Clear the cause and re-run this command."
+    fi
+    GATE=$("$HUMAN_GATE" --subject "$BEAD" --key first-reaction --message "$TITLE_WANT
+Filed by a first reaction on $BEAD ($DISPOSITION), which waits on it.
 
 $REASON
 
-The card in $BEAD's notes carries the evidence. Resolving this gate makes $BEAD ready.") \
-        || die "could not file the human gate on $BEAD (gc-helm.sh demand failed; its message above names what landed and what did not). Clear the cause and re-run this command."
-    GATE=$(printf '%s\n' "$DEMAND_OUT" | awk '/^demand /{print $2; exit}')
+The card in $BEAD's notes carries the evidence. Clearing this gate makes $BEAD ready.") \
+        || die "could not file the human gate on $BEAD (human-gate.sh failed; its message above names why). Clear the cause and re-run this command."
+    GATE=$(printf '%s\n' "$GATE" | tail -n 1)
     [ -n "$GATE" ] \
-        || die "gc-helm.sh demand named no gate for $BEAD (its output: ${DEMAND_OUT:-<empty>}). Re-run this command; demand refreshes a gate it already filed rather than filing a second."
+        || die "human-gate.sh named no gate for $BEAD. Re-run this command; the helper finds a gate it already filed rather than filing a second."
     TARGET="$GATE"
-    note "put $BEAD to the operator as the human gate $GATE; gate-visit-sweep files its visit on its next pass"
+    note "put $BEAD to the operator as the human gate $GATE"
+    if [ "$DISPOSITION" = "recommend" ]; then
+        reco_ensure "$RECOMMENDED_FORMULA" "The gate $GATE is filed."
+    fi
 fi
 
 # ── Intake's write, before the act ───────────────────────────────────
@@ -1131,14 +1131,12 @@ fi
 # after the release, holds nothing, and a --waiting-on blocks edge onto the same
 # bead would make bd refuse it. The release leaves the bead open, unassigned and
 # unrouted, the pure wait the deferred-dispatch pass closes. A recommend or a
-# ruling names its human gate as its wait, or the visit --visit named: the
-# subject is waiting on a person, and
-# that bead carries the wait, so --waiting-on records the blocks edge onto
-# it. On a gate that edge is the one gc-helm.sh demand already wrote, and
-# adding it again leaves it single. The release parks the subject and the edge
-# holds it, so it is not offered again until the gate resolves or the visit
-# closes, and the wait is a graph state doctor/check-wait-is-an-edge reads
-# rather than prose it reports.
+# ruling names its human gate as its wait: the subject is waiting on a person,
+# and the gate carries the wait, so --waiting-on records the blocks edge onto
+# it. That edge is the one the gate's create already wrote, and adding it again
+# leaves it single. The release parks the subject and the edge holds it, so it
+# is not offered again until the gate is cleared, and the wait is a graph state
+# doctor/check-wait-is-an-edge reads rather than prose it reports.
 #
 # A subject held for placement can carry the stamp a dead pour left
 # (gc.execution_routed_to), which the queue reads as a live pour. The release
@@ -1154,22 +1152,21 @@ case "$DISPOSITION" in
         for w in $WAITING; do set -- "$@" --waiting-on "$w"; done
         if [ -n "$THEN_ASSIGN" ]; then set -- "$@" --assign "$THEN_ASSIGN"; fi ;;
     until) set -- "$@" --no-wait ;;
-    recommend|ruling) set -- "$@" --waiting-on "${GATE:-$VISIT}" ;;
+    recommend|ruling) set -- "$@" --waiting-on "$GATE" ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. Clear the cause and re-run this command."
 
 # The edge is the hold. gc-helm.sh warns on a rejected edge and keeps going,
 # which is right for a headline but not for the exits that hold on one: a
-# blocked disposition waits on its blocker, a recommend or a ruling on its gate
-# or visit, and any whose edge never landed leaves the bead unheld with nothing
-# to say so.
+# blocked disposition waits on its blocker, a recommend or a ruling on its gate,
+# and any whose edge never landed leaves the bead unheld with nothing to say so.
 # A missing edge fails the whole exit before the landed proof is stamped, so the
 # reaction stops rather than recording done over a bead that is recorded as
 # waiting and is not held, and a re-run resumes it.
 HOLD_WAITS=""
 case "$DISPOSITION" in
     blocked)          HOLD_WAITS="$WAITING" ;;
-    recommend|ruling) HOLD_WAITS="${GATE:-$VISIT}" ;;
+    recommend|ruling) HOLD_WAITS="$GATE" ;;
 esac
 if [ -n "$HOLD_WAITS" ]; then
     HELD=$(gc_bd dep list "$BEAD" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[]?.id // empty) else empty end' 2>/dev/null || printf '')
