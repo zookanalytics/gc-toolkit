@@ -169,18 +169,26 @@ fi
 
 # The flags that read a value out of a file park a path, not the value, and
 # the path is gone by the time a human pastes the command. gh api's -F/--field
-# and --input read files too. gh takes a short flag's value attached (-Fpath),
-# so every -F spelling counts.
+# and --input read files too. gh takes a short flag's value attached (-Fpath)
+# and reads a single-dash word one short flag at a time (-cF path is -c -F
+# path), so a word whose letters reach an F counts as -F. That also takes a
+# value attached to a short flag that begins with F (-bFoo) for -F, so such a
+# value goes after a space.
 for a in "${CMD[@]}"; do
-  case "$VERB:$a" in
-    api:-F*|api:--field|api:--field=*)
-      warn "\`$a\` reads a value from a file after @, and fills {owner} and {repo} from the directory the command is pasted in. Pass each field inline as a string with -f."
+  f="$a"; CLUSTER=""
+  if [[ "$a" =~ ^-[[:alpha:]]*F ]]; then
+    f="-F"
+    case "$a" in -F*) : ;; *) CLUSTER=" gh reads \`$a\` one short flag at a time, so its F is -F. A value that begins with F goes after a space, not attached to its flag." ;; esac
+  fi
+  case "$VERB:$f" in
+    api:-F|api:--field|api:--field=*)
+      warn "\`$a\` reads a value from a file after @, and fills {owner} and {repo} from the directory the command is pasted in. Pass each field inline as a string with -f.$CLUSTER"
       exit 2 ;;
     api:--input|api:--input=*)
       warn "\`$a\` reads the request body from a file, and the file is gone when the command is pasted. Pass each field inline as a string with -f."
       exit 2 ;;
-    *:--body-file|*:-F*|*:--body-file=*)
-      warn "\`$a\` takes its value from a file, and the file is gone when the command is pasted. Inline the text (--body, or -f for a field)."
+    *:--body-file|*:-F|*:--body-file=*)
+      warn "\`$a\` takes its value from a file, and the file is gone when the command is pasted. Inline the text (--body, or -f for a field).$CLUSTER"
       exit 2 ;;
   esac
 done
@@ -211,6 +219,9 @@ if [ "$VERB" = "api" ]; then
   ENDPOINT=""; METHOD="POST"; API_HOST=""; FIELDS=(); WORDS=0
   for (( i = 1; i < ${#CMD[@]}; i++ )); do
     a="${CMD[$i]}"
+    # -i is gh api's one short flag that takes no value, so gh reads -iX POST
+    # as -i -X POST, and the flag after the i's is read here as it stands alone.
+    while [[ "$a" == -i?* ]]; do a="-${a#-i}"; done
     case "$a" in
       -X|--method)    METHOD="${CMD[$((i + 1))]:-}"; i=$((i + 1)) ;;
       --method=*)     METHOD="${a#--method=}" ;;
@@ -381,11 +392,13 @@ else
   SEND_LABEL="$VERB"
   CHANNEL="Public: everyone who can see $TARGET can read it once it is sent."
   if [ "$POLICY_SET" = 0 ]; then
-    OWNER_NAME="$TARGET"; case "$OWNER_NAME" in */*/*) OWNER_NAME="${OWNER_NAME#*/}" ;; esac
+    # A target on another GitHub host is read on that host.
+    OWNER_NAME="$TARGET"; HOST_ARG=""
+    case "$OWNER_NAME" in */*/*) HOST_ARG="--hostname ${OWNER_NAME%%/*} "; OWNER_NAME="${OWNER_NAME#*/}" ;; esac
     OWNER="${OWNER_NAME%%/*}"; NAME="${OWNER_NAME#*/}"
     warn "\`$VERB\` on $TARGET is public: once pasted, everyone who can see $TARGET can read it. Read $TARGET's security policy first, and pass what it says as --security-policy \"<where it is or that there is none, and why it lets this report be public>\"."
-    warn "  GitHub says whether $TARGET has one and where, its owner's default included: gh api graphql -f query='{repository(owner:\"$OWNER\",name:\"$NAME\"){isSecurityPolicyEnabled securityPolicyUrl}}'"
-    warn "  If it asks for this finding in private, park the private channel it names instead. GitHub's private vulnerability reporting is one wherever gh api repos/$OWNER/$NAME/private-vulnerability-reporting reads {\"enabled\":true}: gh api --method POST repos/$OWNER/$NAME/security-advisories/reports -f summary=<one line> -f description=<the report>"
+    warn "  GitHub says whether $TARGET has one and where, its owner's default included: gh api ${HOST_ARG}graphql -f query='{repository(owner:\"$OWNER\",name:\"$NAME\"){isSecurityPolicyEnabled securityPolicyUrl}}'"
+    warn "  If it asks for this finding in private, park the private channel it names instead. GitHub's private vulnerability reporting is one wherever gh api ${HOST_ARG}repos/$OWNER/$NAME/private-vulnerability-reporting reads {\"enabled\":true}: gh api ${HOST_ARG}--method POST repos/$OWNER/$NAME/security-advisories/reports -f summary=<one line> -f description=<the report>"
     warn "  A private channel gh cannot reach, such as an email address, is the operator's to use: ask through escalate.sh with the report in its message, and park nothing public."
     exit 2
   fi

@@ -225,6 +225,9 @@ has "$OUT" "gone when the command is pasted" "the refusal says why a file path c
 OUT=$("$SUT" --message "why" -- gh pr review 5 --repo a/b --comment -F/tmp/body.md 2>&1)
 eq "$?" "2" "a -F with its path attached is refused too"
 has "$OUT" "gone when the command is pasted" "the attached -F refusal says why"
+OUT=$("$SUT" --message "why" -- gh pr review 5 --repo a/b -cF /tmp/body.md 2>&1)
+eq "$?" "2" "a -F that ends a word of short flags is refused, since gh reads -cF as -c -F"
+has "$OUT" "one short flag at a time" "the refusal says how gh reads the word"
 
 OUT=$("$SUT" --message "why" -- "gh issue create --repo a/b --title T" 2>&1)
 eq "$?" "2" "a command quoted into one argument is refused"
@@ -449,6 +452,11 @@ has "$OUT" "repos/otherowner/widget/private-vulnerability-reporting" "the refusa
 has "$OUT" "gh api --method POST repos/otherowner/widget/security-advisories/reports" "the refusal names this target's private report"
 eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no human is asked to paste an unchecked public send"
 
+OUT=$("$UF" --message "why" -- gh issue create --repo ghe.example.com/otherowner/widget --title T --body B 2>&1)
+eq "$?" "2" "a public send to another GitHub host needs the reading too"
+has "$OUT" "gh api --hostname ghe.example.com graphql" "the policy lookup it names reads the target's own host"
+has "$OUT" "gh api --hostname ghe.example.com --method POST repos/otherowner/widget/security-advisories/reports" "the private report it names goes to that host"
+
 OUT=$("$UF" --message "why" --security-policy "  " -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
 eq "$?" "2" "a blank reading is no reading"
 OUT=$("$UF" --message "why" -- gh pr comment 7 --repo otherowner/widget --body B 2>&1)
@@ -505,6 +513,10 @@ reset_state
 "$UF" --message "why" -- gh api --hostname ghe.example.com repos/otherowner/widget/security-advisories/reports \
   -f summary=S -f description=D >/dev/null 2>&1
 eq "$(meta up-1 gh_target_repo)" "ghe.example.com/otherowner/widget" "a report sent to another GitHub host names that host in its target"
+# -i takes no value, so gh reads the flag after it in the same word as that flag.
+reset_state
+"$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -if summary=S -f description=D >/dev/null 2>&1
+eq "$?" "0" "a field written after -i in one word is read as gh reads it, and the report parks"
 
 reset_state
 "$UF" --message "why" --security-policy "SECURITY.md asks for a private advisory." \
@@ -536,6 +548,9 @@ has "$OUT" "more words after it" "the refusal names the extra word"
 OUT=$("$UF" --message "why" -- gh api --method GET repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D 2>&1)
 eq "$?" "2" "a report sent as GET is refused"
 has "$OUT" "is a POST" "the refusal says a report is a POST"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -iXGET -f summary=S -f description=D 2>&1)
+eq "$?" "2" "a GET written after -i in one word is refused, since gh reads -iXGET as -i -X GET"
+has "$OUT" "is a POST" "…for the method it sets"
 
 OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S 2>&1)
 eq "$?" "2" "a report with no description is refused"
@@ -549,6 +564,9 @@ eq "$?" "2" "-F on gh api is refused"
 has "$OUT" "fills {owner} and {repo}" "the refusal says what -F reads besides the text"
 OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D -Fextra=@/etc/hosts 2>&1)
 eq "$?" "2" "-F with its value attached is refused, so pasting reads no local file into the report"
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D -iFdescription=@/etc/hosts 2>&1)
+eq "$?" "2" "-F after -i in one word is refused, so pasting cannot swap a local file in for the description"
+has "$OUT" "one short flag at a time" "the refusal says how gh reads the word"
 OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S --field=description=@report.md 2>&1)
 eq "$?" "2" "--field on gh api is refused"
 OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports --input report.json 2>&1)

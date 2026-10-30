@@ -113,7 +113,9 @@ a person, somewhere else:
   time anyone pastes the command. `--body-file` and `-F` are refused in every
   spelling. So are `gh api`'s `--input`, which reads the whole request body
   from a file, and its `--field`, which also fills `{owner}` and `{repo}` from
-  the directory it runs in.
+  the directory it runs in. `gh` reads a single-dash word one short flag at a
+  time, so `-cF` is `-c -F` and is refused too. A value that begins with F
+  therefore goes after a space, not attached to its flag.
 - **One target, named once.** A command carrying two different repositories is
   refused rather than resolved by guessing, which is the one mistake that
   sends a report to the wrong project.
