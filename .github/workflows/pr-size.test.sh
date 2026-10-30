@@ -173,8 +173,12 @@ eq "$(calls | cut -d' ' -f1-3)" "api --paginate repos/o/r/issues/7/comments" \
 has "$OUT" "carries no tools/measure.sh, so it has no size to show" "…and its log says why"
 
 echo "# a size comment says so when the head moves to a merge base that carries no tool"
+# The base branch has moved on and carries the tool, and the head's merge base
+# with it does not.
+git checkout -q --detach "$OBASE" && mkdir -p tools && cp "$TOOL" tools/measure.sh && commit "the base branch gains the tool"
+OTIP=$(git rev-parse HEAD)
 EARLIER=$(page "$(jq -n --arg b "$BODY" '[{id: 22, user: {login: "github-actions[bot]"}, body: $b}]')" earlier.json)
-BASE=$OBASE run "$EARLIER" "$OHEAD" "$OLD"
+BASE=$OTIP run "$EARLIER" "$OHEAD" "$OLD"
 eq "$RC" 0 "it exits 0"
 eq "$(calls | sed -n '2p' | cut -d' ' -f1-4)" "api --method PATCH repos/o/r/issues/comments/22" \
   "it rewrites the comment the first case posted"
