@@ -20,8 +20,8 @@
 #   * the payload carries no session id or no readable task list.
 #   * the session has stopped MAX_RAPID times in a row within MIN_TURN seconds
 #     of a hand-back. A real cycle spends the formula's event_timeout (600s) in
-#     its inter-cycle wait, so those turns ran no cycle, and another hand-back
-#     would only loop. The hook resets the session instead: the fresh
+#     its inter-cycle wait, so none of those turns ran a full cycle, and another
+#     hand-back would only loop. The hook resets the session instead: the fresh
 #     conversation starts from the role's prompt, whose startup reconcile
 #     adopts the wisp the patrol left. While an operator is attached to the
 #     pane the reset waits, because it would end the conversation under them.
@@ -97,7 +97,7 @@ else
 fi
 
 if [ "$rapid" -ge "$MAX_RAPID" ]; then
-  WHY="$rapid turns in a row ended within ${MIN_TURN}s of a hand-back without a patrol cycle"
+  WHY="$rapid turns in a row ended within ${MIN_TURN}s of a hand-back without a full patrol cycle"
   # A reset ends the conversation, so it waits while an operator is attached to
   # watch or work the pane, and an attachment it cannot read counts as one, as
   # in cycle-recycle.sh. The turn ends and the state file keeps its count, so
@@ -149,9 +149,12 @@ fi
 printf '%s %s %s\n' "$SID" "$now" "$rapid" > "$STATE" 2>/dev/null \
   || echo "patrol-continue: could not write $STATE, so this hand-back is not counted" >&2
 
-REASON="Patrol continues: a $role turn does not end between cycles, so this one is handed back. If next-iteration has poured your next wisp, run the startup wisp reconcile from your prompt to adopt it, then work mol-$role-patrol from check-inbox. Otherwise finish the current cycle through next-iteration."
+# The hand-back names the inter-cycle wait because a session that skipped it
+# would otherwise go straight on to the next cycle, and the patrol would run at
+# the model's pace instead of the formula's.
+REASON="Patrol continues: a $role turn does not end between cycles, so this one is handed back. If next-iteration has poured your next wisp, finish its inter-cycle wait if you skipped it, then run the startup wisp reconcile from your prompt to adopt the wisp and work mol-$role-patrol from check-inbox. Otherwise finish the current cycle through next-iteration."
 if [ "$rapid" -gt 0 ]; then
-  REASON="$REASON The last hand-back ended within ${MIN_TURN}s with no cycle run; run the cycle's steps now."
+  REASON="$REASON The last hand-back ended within ${MIN_TURN}s, too soon for a cycle and its inter-cycle wait; run whichever of them has not run."
 fi
 jq -n --arg reason "$REASON" '{decision: "block", reason: $reason}'
 exit 0

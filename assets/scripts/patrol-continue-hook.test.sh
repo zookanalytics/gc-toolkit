@@ -120,6 +120,7 @@ for entry in "gc-toolkit.deacon deacon" "deacon deacon" "gc-toolkit/gc-toolkit.w
     has "$REASON" "next-iteration" "$agent: the reason names next-iteration"
     has "$REASON" "a $role turn" "$agent: the reason names the $role's turn"
     has "$REASON" "mol-$role-patrol from check-inbox" "$agent: the reason names the $role's patrol formula"
+    has "$REASON" "finish its inter-cycle wait if you skipped it" "$agent: the reason names the inter-cycle wait"
     case "$REASON" in
         *"mol-$other-patrol"*) bad "$agent: the reason names no other patrol" "mol-$other-patrol in: $REASON" ;;
         *) ok "$agent: the reason names no other patrol" ;;
@@ -152,7 +153,7 @@ now=$(date +%s)
 printf 's1 %s 0\n' "$now" > "$STATE"
 run_hook gc-toolkit.deacon "$(payload s1)"
 eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "a stop right after a hand-back is handed back again"
-has "$(printf '%s' "$OUT" | jq -r '.reason' 2>/dev/null)" "no cycle run" "the repeat hand-back says the last one ran no cycle"
+has "$(printf '%s' "$OUT" | jq -r '.reason' 2>/dev/null)" "too soon for a cycle and its inter-cycle wait" "the repeat hand-back says the last one was too short for a cycle and its wait"
 eq "$(cut -d' ' -f3 < "$STATE")" "1" "the rapid stop is counted"
 
 printf 's1 %s 1\n' "$now" > "$STATE"

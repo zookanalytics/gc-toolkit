@@ -79,10 +79,14 @@ At the end of every turn the hook, in order:
 5. **Hands the next cycle back** by printing
    `{"decision": "block", "reason": "<instruction>"}` on stdout. Claude Code
    feeds the reason to the model as Stop hook feedback and the turn goes on.
-   The instruction is to adopt the wisp next-iteration poured through the
+   The instruction is to finish next-iteration's inter-cycle wait if the
+   session skipped it, then adopt the wisp next-iteration poured through the
    startup reconcile and work the role's patrol formula (`mol-deacon-patrol`
-   or `mol-witness-patrol`) from check-inbox, or to finish the current cycle
-   when next-iteration has not run.
+   or `mol-witness-patrol`) from check-inbox. When next-iteration has not
+   run, the instruction is to finish the current cycle. The wait is named
+   because a session that skipped it would otherwise go straight on to the
+   next cycle, and the patrol would run at the model's pace instead of the
+   formula's.
 
 A payload with no session id, or with a task list that is not a list, lets
 the turn end, since nothing is known about the turn.
@@ -91,9 +95,11 @@ the turn end, since nothing is known about the turn.
 
 A real cycle spends the formula's `event_timeout` (600s) in its inter-cycle
 wait. A stop that comes within 300s of a hand-back is a rapid stop: that turn
-ran no cycle. The hook counts rapid stops in a row, per conversation, in one
-state file per session bead under `$TMPDIR`. A stop after a longer turn
-clears the count, and a new conversation starts it over. The 300s bound has
+did not run a full cycle and its wait. The hand-back after a rapid stop says
+so and asks for whichever of the two has not run. The hook counts rapid stops
+in a row, per conversation, in one state file per session bead under
+`$TMPDIR`. A stop after a longer turn clears the count, and a new conversation
+starts it over. The 300s bound has
 to stay under every `event_timeout` the deacon and the witness are poured
 with, or each real cycle would count as a rapid stop. So the hook's suite
 fails when either formula's default or the deacon's startup pour drops to it,
