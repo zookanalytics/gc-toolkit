@@ -68,7 +68,7 @@ eq "$RC" "2" "no argument is a usage error"
 # Each caller, as it was poured, runs from a private copy of the pack's scripts
 # whose human-gate.sh records what reached it.
 PACK="$TMP/pack"; mkdir -p "$PACK"
-cp "$SUT" "$HERE/bead-store.sh" "$HERE/escalate.sh" "$HERE/bd-lib.sh" "$PACK/"
+cp "$SUT" "$HERE/bead-store.sh" "$HERE/rig-map.sh" "$HERE/escalate.sh" "$HERE/bd-lib.sh" "$PACK/"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$PACK/human-gate.sh" <<'STUB'
 { printf 'GC_RIG=%s' "${GC_RIG:-}"; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'; } >> "${STUB_HG_LOG:?}"
 echo "gate-1"
