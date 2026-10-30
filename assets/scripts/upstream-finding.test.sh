@@ -211,6 +211,77 @@ eq "$?" "2" "a changed command under a reused key is refused"
 eq "$(count)" "1" "the divergent run files nothing"
 has "$OUT" "DIFFERENT command" "the refusal names the divergence"
 has "$OUT" "new --key" "the refusal says how to proceed"
+has "$OUT" "files nothing once it is closed" "the repair does not send the caller to a close that parks nothing"
+
+# ── a re-run with a different security-policy reading is a divergence ─────
+# The reading is the operator's evidence that the send may be public, and a
+# re-run rewrites neither the bead nor its visit, so a changed reading is
+# refused under the default key too, rather than reported as a refresh.
+reset_state
+"$UF" --message "why" --security-policy "No security policy." \
+  -- gh issue create --repo otherowner/widget --title T --body B >/dev/null 2>&1
+PARKED_DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
+: > "$STUB_ESC_LOG"
+OUT=$("$UF" --message "why" --security-policy "SECURITY.md asks for vulnerabilities in private." \
+  -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "2" "a re-run with a different reading is refused"
+eq "$(count)" "1" "the divergent run files nothing"
+has "$OUT" "DIFFERENT security-policy reading" "the refusal names the divergence"
+has "$OUT" "parked there: No security policy." "the refusal shows the reading the bead carries"
+has "$OUT" "yours:        SECURITY.md asks for vulnerabilities in private." "…beside the one the run brought"
+has "$OUT" "new --key" "the refusal's repair parks under a new key"
+hasnt "$OUT" "refreshed the ask" "the refusal does not report a refresh"
+eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no visit is refreshed with a reading the bead does not carry"
+eq "$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")" "$PARKED_DESC" "the bead's description is as it was parked"
+
+# The label and the paste line bound the parked reading, so a reading that
+# only begins or ends it is a different reading.
+OUT=$("$UF" --message "why" --security-policy "No security" -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "2" "a reading that only begins the parked one is refused"
+OUT=$("$UF" --message "why" --security-policy "policy." -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "2" "a reading that only ends the parked one is refused"
+
+OUT=$("$UF" --message "why, on a second pass" --security-policy "No security policy." \
+  -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "0" "a re-run with the same reading refreshes"
+has "$OUT" "refreshed the ask" "…and says so"
+
+reset_state
+READING=$'SECURITY.md covers the server only.\nThis is a typo in the client docs.\n'
+"$UF" --message "why" --security-policy "$READING" \
+  -- gh issue create --repo otherowner/widget --title T --body B >/dev/null 2>&1
+OUT=$("$UF" --message "why" --security-policy "$READING" \
+  -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "0" "a multi-line reading that ends in a newline matches itself on a re-run"
+
+# A send parked with no reading shows the operator none, so a reading given on
+# a re-run is not on it.
+reset_state
+"$UF" --message "why" --security-policy "No security policy." \
+  -- gh issue create --repo otherowner/widget --title T --body B >/dev/null 2>&1
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-upstream-finding-test.XXXXXX")
+jq -c 'map(if .id == "up-1" then .description |= sub("\nPublic: [^\n]*\nSecurity policy, as read before parking: [^\n]*\n"; "") else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+hasnt "$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")" "Security policy" "the bead now reads as a send parked with no reading"
+OUT=$("$UF" --message "why" --security-policy "No security policy." \
+  -- gh issue create --repo otherowner/widget --title T --body B 2>&1)
+eq "$?" "2" "a send parked with no reading is refused on a re-run that brings one"
+has "$OUT" "parked there: no reading" "the refusal says the bead carries none"
+
+# A private report needs no reading, so none on either run matches, and one
+# brought only by the re-run does not.
+reset_state
+"$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D >/dev/null 2>&1
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D 2>&1)
+eq "$?" "0" "a report re-run with no reading against one parked with none refreshes"
+OUT=$("$UF" --message "why" --security-policy "SECURITY.md asks for a private advisory." \
+  -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D 2>&1)
+eq "$?" "2" "a reading brought only by the re-run is refused on a report too"
+reset_state
+"$UF" --message "why" --security-policy "SECURITY.md asks for a private advisory." \
+  -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D >/dev/null 2>&1
+OUT=$("$UF" --message "why" -- gh api repos/otherowner/widget/security-advisories/reports -f summary=S -f description=D 2>&1)
+eq "$?" "2" "a report parked with a reading is refused on a re-run that brings none"
+has "$OUT" "yours:        no reading" "…which says the run brought none"
 
 # ── refusals that keep the parked command pasteable ───────────────────────
 reset_state
@@ -657,6 +728,41 @@ has "$(jq -r --arg id "$VISIT" '.[] | select(.id == $id) | .description' "$STUB_
   "$(meta up-1 gh_command)" "the visit a human reads carries the pasteable command"
 has "$(jq -r --arg id "$VISIT" '.[] | select(.id == $id) | .description' "$STUB_STORE")" \
   "Security policy, as read before parking: $POLICY_READ" "the visit a human reads carries the security-policy reading"
+
+# The real escalate.sh files nothing for a visit already open and leaves its
+# text as filed, so a re-run refreshes the ask only when the records already
+# show the reading it brings.
+real_rerun() {
+  GC_ESCALATE_TOOL="$HERE/escalate.sh" GC_RIG=testrig \
+    "$UF" --message "found while working a bead" --pool "testrig/gc-toolkit.converse" "$@" \
+    -- gh issue create --repo get-convex/agent --title "T" --body "B" 2>&1
+}
+visits() { jq '[.[] | select((.metadata.task_kind // "") == "visit")] | length' "$STUB_STORE"; }
+desc() { jq -r --arg id "$1" '.[] | select(.id == $id) | .description' "$STUB_STORE"; }
+VISIT_DESC=$(desc "$VISIT"); BEAD_DESC=$(desc up-1)
+OUT=$(real_rerun --security-policy "$POLICY_READ")
+eq "$?" "0" "against the real escalate.sh, an identical re-run exits 0"
+has "$OUT" "already open" "…finds its visit open"
+has "$OUT" "refreshed the ask" "…and refreshes the ask"
+OUT=$(real_rerun --security-policy "SECURITY.md asks for vulnerabilities in private.")
+eq "$?" "2" "against the real escalate.sh, a changed reading is refused rather than reported as a refresh"
+eq "$(visits)" "1" "…files no second visit"
+eq "$(desc "$VISIT")" "$VISIT_DESC" "…leaves the visit's description as it was filed"
+eq "$(desc up-1)" "$BEAD_DESC" "…and the bead's as it was parked"
+
+# A send and its visit filed with no reading, as the text the operator reads.
+reset_state
+real_rerun --security-policy "$POLICY_READ" >/dev/null
+VISIT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "visit")] | .[0].id // ""' "$STUB_STORE")
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-upstream-finding-test.XXXXXX")
+jq -c 'map(.description |= sub("\nPublic: [^\n]*\nSecurity policy, as read before parking: [^\n]*\n"; ""))' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+VISIT_DESC=$(desc "$VISIT"); BEAD_DESC=$(desc up-1)
+hasnt "$BEAD_DESC$VISIT_DESC" "Security policy" "the send and its visit now carry no reading"
+OUT=$(real_rerun --security-policy "$POLICY_READ")
+eq "$?" "2" "against the real escalate.sh, a send parked with no reading is refused on a re-run that brings one"
+has "$OUT" "parked there: no reading" "…which says the send carries none"
+eq "$(visits)" "1" "…files no second visit"
+eq "$(desc "$VISIT")$(desc up-1)" "$VISIT_DESC$BEAD_DESC" "…and leaves both descriptions as they were"
 
 eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh was never invoked by any case"
 

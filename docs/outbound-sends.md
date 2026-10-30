@@ -154,7 +154,13 @@ The ask itself is a visit, filed through
 [`escalate.sh`](../assets/scripts/escalate.sh), which owns the route and its
 own dedup. Answering is closing the bead — sent, or declined. A re-run against
 an open bead refreshes that one ask; a re-run against a closed one files
-nothing, because a settled question is not re-asked.
+nothing, because a settled question is not re-asked. A re-run changes neither
+the bead nor its visit, so one that brings a different security-policy reading,
+or a different command under a reused `--key`, is refused rather than reported
+as a refresh. A send parked with no reading differs from any reading given now.
+The refusal shows what is parked beside what the run brought, and its repair
+parks the new send under a new `--key`, closing the stale one with the reason
+when the new one replaces it.
 
 The keeper's fork workflow prepares its own `gh` commands inline, in
 `packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml`, where the PR

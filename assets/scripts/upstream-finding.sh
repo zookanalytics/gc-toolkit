@@ -17,7 +17,8 @@
 # This script contacts nothing. It runs no `gh`, and it is not a send path a
 # guard can be talked through.
 # Exit: 0 parked, already parked or already answered · 1 could not file or
-# verify · 2 usage, including a command this path cannot make pasteable.
+# verify · 2 usage, including a command this path cannot make pasteable, or a
+# re-run whose command or reading differs from the send its key already parked.
 set -uo pipefail
 
 PROG="upstream-finding"
@@ -54,7 +55,9 @@ usage: upstream-finding.sh --message <why this send is warranted>
              text the moment it is pasted, so every send but a private
              vulnerability report requires it
   --key      names the SITUATION: one bead per key, so a re-run of the same
-             finding refreshes rather than files again. [A-Za-z0-9._-] only.
+             finding refreshes rather than files again. A re-run with another
+             command or security-policy reading is refused: neither the bead
+             nor its visit changes in place. [A-Za-z0-9._-] only.
              Default: target repo, verb and a digest of the command
   --pool     converse pool the visit routes to; passed through to escalate.sh,
              which owns the default and the route check
@@ -383,8 +386,8 @@ fi
 # it is pasted, so it carries the preparer's reading of the target's security
 # policy, and the operator reads that beside the command. A private
 # vulnerability report needs none: it reaches the maintainers alone.
-POLICY_SET=0
-[ -n "$(printf '%s' "$POLICY" | tr -d '[:space:]')" ] && POLICY_SET=1
+POLICY_SET=0; READING=""
+[ -n "$(printf '%s' "$POLICY" | tr -d '[:space:]')" ] && { POLICY_SET=1; READING="$POLICY"; }
 if [ "$PRIVATE_REPORT" = 1 ]; then
   SEND_LABEL="private vulnerability report"
   CHANNEL="Private: the report goes to the maintainers of $TARGET, not to a public page."
@@ -403,8 +406,12 @@ else
     exit 2
   fi
 fi
+# A re-run reads the parked reading back from between these two labels, so the
+# bead's description and the visit are written with them.
+POLICY_LABEL="Security policy, as read before parking:"
+PASTE_LABEL="Paste this, unedited, to send it:"
 [ "$POLICY_SET" = 1 ] && CHANNEL="$CHANNEL
-Security policy, as read before parking: $POLICY"
+$POLICY_LABEL $POLICY"
 
 # A stable digest over the exact argv, NUL-joined so no argument boundary can
 # be forged by an argument's own bytes.
@@ -463,7 +470,10 @@ fi
 
 # A caller-supplied key claims "same situation", so a changed command under one
 # is a divergence, not a refresh: the bead a human is reading would keep the
-# command they were shown while the caller believes the new one is parked.
+# command they were shown while the caller believes the new one is parked. A
+# changed security-policy reading is a divergence under any key, because the
+# reading is the operator's evidence that the send may be public, and a re-run
+# rewrites neither the bead nor its visit.
 if [ -n "$EXISTING" ]; then
   EXISTING_SHOW=$(bd_json show "$EXISTING")
   # Only a bead that was actually read can be called divergent. A failed read
@@ -474,11 +484,28 @@ if [ -n "$EXISTING" ]; then
     exit 1
   fi
   EXISTING_CMD=$(printf '%s' "$EXISTING_SHOW" | jq -r '.[0].metadata.gh_command // ""' 2>/dev/null)
+  # The two labels bound the parked reading, so a reading that only begins or
+  # ends it does not match. A bead with no reading differs from any reading
+  # given now.
+  SAME_READING=$(printf '%s' "$EXISTING_SHOW" | jq -r --arg l "$POLICY_LABEL" --arg p "$PASTE_LABEL" --arg r "$READING" '
+    (.[0].description // "") as $d
+    | if $r == "" then ($d | contains("\n" + $l + " ") | not)
+      else ($d | contains("\n" + $l + " " + $r + "\n\n" + $p)) end' 2>/dev/null)
   if [ "$EXISTING_CMD" != "$PASTE" ]; then
     warn "$EXISTING already carries key '$KEY' with a DIFFERENT command, and a human may already be reading it — nothing parked."
     warn "  parked there: $EXISTING_CMD"
     warn "  yours:        $PASTE"
-    warn "  repair: re-run under a new --key, or close $EXISTING first."
+  elif [ "$SAME_READING" != "true" ]; then
+    PARKED_READING=$(printf '%s' "$EXISTING_SHOW" | jq -r --arg l "$POLICY_LABEL" --arg p "$PASTE_LABEL" '
+      (.[0].description // "") | split("\n" + $l + " ")
+      | if length < 2 then "" else (.[1] | split("\n\n" + $p) | .[0]) end' 2>/dev/null)
+    warn "$EXISTING already carries this send with a DIFFERENT security-policy reading, and a human may already be weighing it beside the command — nothing parked or refreshed."
+    warn "  parked there: ${PARKED_READING:-no reading}"
+    warn "  yours:        ${READING:-no reading}"
+    warn "  If yours says the same in other words, the ask stands as parked and nothing needs doing."
+  fi
+  if [ "$EXISTING_CMD" != "$PASTE" ] || [ "$SAME_READING" != "true" ]; then
+    warn "  repair: a re-run changes neither $EXISTING nor its visit, and its key files nothing once it is closed. Park yours under a new --key, and when yours replaces what $EXISTING shows, close $EXISTING with the reason."
     exit 2
   fi
 fi
@@ -495,7 +522,7 @@ Target repo: \`$TARGET\`$ORIGIN_NOTE
 
 $CHANNEL
 
-Paste this, unedited, to send it:
+$PASTE_LABEL
 
 \`\`\`bash
 $PASTE
@@ -530,7 +557,7 @@ $MESSAGE
 
 $CHANNEL
 
-Paste this, unedited, to send it:
+$PASTE_LABEL
 
 $PASTE
 
