@@ -916,6 +916,7 @@ case "$1 ${2:-}" in
       tk-live1)   jq -n '[{id:"tk-live1",  status:"open",   title:"a live bead"}]' ;;
       tk-prbead)  jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
       tk-prbead2) jq -n '[{id:"tk-prbead2",status:"open",   title:"another PR anchor"}]' ;;
+      tk-rework)  jq -n '[{id:"tk-rework", status:"open",   title:"a rework of a PR anchor"}]' ;;
       tk-defbead) jq -n '[{id:"tk-defbead",status:"deferred",title:"a deferred PR anchor"}]' ;;
       *)          printf '{"error":"no issues found"}\n'; exit 1 ;;
     esac ;;
@@ -1082,6 +1083,54 @@ eq "$RC" "4" "(RESOLVE-PR-AMBIGUOUS) an ambiguous PR number exits 4"
 grep -q 'ambiguous' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) says ambiguous" || bad "(RESOLVE-PR-AMBIGUOUS) message (err: $ERR)"
 grep -q 'tk-prbead2' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) names every candidate" || bad "(RESOLVE-PR-AMBIGUOUS) names candidates (err: $ERR)"
 
+# (RESOLVE-PR-REWORK) a rework records its anchor's PR too, and names the anchor
+# in anchor_bead, so the PR resolves to the anchor by number and by URL rather
+# than reading as two candidates. The live rows record pr_number both as a JSON
+# number and as a string, so the anchor and the rework here differ the same way.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"merge_result":"pull_request","pr_number":615,"pr_url":"https://github.com/o/r/pull/615"}},{"id":"tk-rework","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-prbead","pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+for REF in 615 'https://github.com/o/r/pull/615'; do
+    run_resolve "$REF"
+    eq "$RC" "0" "(RESOLVE-PR-REWORK) $REF, recorded by an anchor and its rework, resolves and files"
+    grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
+      && ok "(RESOLVE-PR-REWORK) $REF files on the anchor" \
+      || bad "(RESOLVE-PR-REWORK) $REF filed elsewhere (calls: $CALLS)"
+    grep -q -- '--deps tracks:tk-rework' <<< "$CALLS" \
+      && bad "(RESOLVE-PR-REWORK) $REF filed on the rework" \
+      || ok "(RESOLVE-PR-REWORK) $REF never files on the rework"
+    grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
+      && ok "(RESOLVE-PR-REWORK) $REF says which anchor it matched" \
+      || bad "(RESOLVE-PR-REWORK) $REF match not announced (err: $ERR)"
+done
+
+# (RESOLVE-PR-REWORK-REPOS) two anchors in different repos share #615, and each
+# has a rework recording it. The bare number names the two anchors and refuses;
+# the URL pins one repo and resolves to that repo's anchor.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r1/pull/615"}},{"id":"tk-rework","status":"open","metadata":{"anchor_bead":"tk-prbead","pr_number":"615","pr_url":"https://github.com/o/r1/pull/615"}},{"id":"tk-prbead2","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r2/pull/615"}},{"id":"tk-rework2","status":"open","metadata":{"anchor_bead":"tk-prbead2","pr_number":"615","pr_url":"https://github.com/o/r2/pull/615"}}]'
+run_resolve 615
+eq "$RC" "4" "(RESOLVE-PR-REWORK-REPOS) a bare number two anchors share exits 4"
+[ -z "$CALLS" ] && ok "(RESOLVE-PR-REWORK-REPOS) nothing filed" || bad "(RESOLVE-PR-REWORK-REPOS) filed something (calls: $CALLS)"
+grep -q 'ambiguous' <<< "$ERR" && grep -qw 'tk-prbead' <<< "$ERR" && grep -qw 'tk-prbead2' <<< "$ERR" \
+  && ok "(RESOLVE-PR-REWORK-REPOS) names both anchors as ambiguous" \
+  || bad "(RESOLVE-PR-REWORK-REPOS) message (err: $ERR)"
+grep -q 'tk-rework' <<< "$ERR" \
+  && bad "(RESOLVE-PR-REWORK-REPOS) a rework is named as a candidate of its own (err: $ERR)" \
+  || ok "(RESOLVE-PR-REWORK-REPOS) no rework is a candidate of its own"
+run_resolve 'https://github.com/o/r2/pull/615'
+eq "$RC" "0" "(RESOLVE-PR-REWORK-REPOS) the URL resolves the shared number"
+grep -q -- '--deps tracks:tk-prbead2' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-REWORK-REPOS) the URL files on its repo's anchor" \
+  || bad "(RESOLVE-PR-REWORK-REPOS) filed elsewhere (calls: $CALLS)"
+
+# (RESOLVE-PR-REWORK-ORPHAN) a live rework whose anchor_bead names no live bead
+# refuses, naming both, and never files on the rework in the anchor's place.
+FAKE_PR_ROWS='[{"id":"tk-rework","status":"open","metadata":{"anchor_bead":"tk-gone","pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+run_resolve 615
+eq "$RC" "4" "(RESOLVE-PR-REWORK-ORPHAN) a rework of an anchor that is not live exits 4"
+[ -z "$CALLS" ] && ok "(RESOLVE-PR-REWORK-ORPHAN) nothing filed" || bad "(RESOLVE-PR-REWORK-ORPHAN) filed something (calls: $CALLS)"
+grep -q 'tk-rework' <<< "$ERR" && grep -q 'tk-gone' <<< "$ERR" \
+  && ok "(RESOLVE-PR-REWORK-ORPHAN) names the rework and its anchor" \
+  || bad "(RESOLVE-PR-REWORK-ORPHAN) message (err: $ERR)"
+
 # (RESOLVE-PR-DEFERRED) a PR whose anchor sits in a NON-OPEN live state (deferred)
 # resolves too. The resolver's status set must be the pack's live-PR set
 # (open,in_progress,blocked,deferred,hooked,pinned), which pr-facts.sh defines
@@ -1111,8 +1160,9 @@ unset FAKE_PR_ROWS FAKE_DEFERRED_ROWS
 mkdir -p "$TMP/unread/rigA/.beads" "$TMP/unread/rigB/.beads" "$TMP/unread/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/unread/bin/gc" <<UNREADGC
 # rigA (prefix aa) is scanned first; its ledger read is controlled by \$RIGA_MODE:
-# fail = non-zero exit, badshape = rc 0 with a non-array answer, ok = an empty
-# array (readable, no PR rows). rigB (prefix tk) records PR #615. The PR search
+# fail = non-zero exit, badshape = rc 0 with a non-array answer, ok = \$RIGA_ROWS,
+# an empty array unless a case sets it (readable, no PR rows). rigB (prefix tk)
+# records PR #615. The PR search
 # carries the --db of the rig it scans, so the arms tell the ledgers apart by path.
 case "\$1 \${2:-}" in
   "rig list")
@@ -1122,7 +1172,7 @@ case "\$1 \${2:-}" in
       *"$TMP/unread/rigA/.beads"*)
         case "\${RIGA_MODE:-fail}" in
           badshape) printf '{"error":"dolt is wedged"}\n' ;;
-          ok)       printf '[]\n' ;;
+          ok)       printf '%s\n' "\${RIGA_ROWS:-[]}" ;;
           *)        echo "dolt: connection refused" >&2; exit 7 ;;
         esac ;;
       *"$TMP/unread/rigB/.beads"*) printf '%s' "\${FAKE_PR_ROWS:-[]}" ;;
@@ -1175,7 +1225,15 @@ eq "$OUT" "tk-prbead" "(RESOLVE-PR-UNREADABLE-CONTROL) a readable empty store do
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
   && ok "(RESOLVE-PR-UNREADABLE-CONTROL) announces the match found in the readable store" \
   || bad "(RESOLVE-PR-UNREADABLE-CONTROL) match not announced (err: $ERR)"
-unset FAKE_PR_ROWS
+
+# (RESOLVE-PR-REWORK-CROSS-STORE) the anchor a rework names is proved live
+# against every store the search read, not only the rework's own: rigA, read
+# first, holds the anchor, and rigB holds the rework, both recording #615.
+export RIGA_ROWS='[{"id":"aa-anchor","status":"open","metadata":{"pr_number":"615"}}]'
+FAKE_PR_ROWS='[{"id":"tk-rework","status":"open","metadata":{"anchor_bead":"aa-anchor","pr_number":"615"}}]'
+run_unread ok resolve
+eq "$RC $OUT" "0 aa-anchor" "(RESOLVE-PR-REWORK-CROSS-STORE) a rework resolves to its live anchor in another store"
+unset RIGA_ROWS FAKE_PR_ROWS
 
 # --- (RESOLVE-PR-NO-LEDGER) a listed rig with no .beads store fails CLOSED ------
 # Distinct from the non-zero-exit and non-array reads above: here the ledger is

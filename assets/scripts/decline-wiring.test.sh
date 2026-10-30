@@ -106,7 +106,8 @@ fi
 # the filing each await-ruling.sh call follows declares no --quiet-window, or is
 # bring-current-audit.sh's ask, which declares none itself
 # (bring-current-audit.test.sh holds it to that). The refinery's patrol is read
-# too: merge-push makes a convoy's rebuild child wait on a gate.
+# too: merge-push makes a convoy's rebuild child, and work whose zero-diff check
+# cannot run, wait on a gate.
 if TOML_PY="$(tomllib_python)"; then
   for f in mol-polecat-work mol-validate mol-rig-demo mol-refinery-patrol; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'

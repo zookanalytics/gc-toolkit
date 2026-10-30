@@ -109,14 +109,17 @@ GATE="$REPO/.git/gc-refinery-gate"
 # checks run instead of answering from them.
 fresh() { rm -rf "${REPO:?}/.git/gc-rig-checks"; }
 
-# The pack gc names, where the blocks find detached-job.sh and
+# The pack gc names, where the blocks find rig-root.sh, detached-job.sh and
 # refinery-workspace.sh. Each case's pack sits at <city>/rigs/gc-toolkit, the
-# way a city that clones the pack as a rig lays it out.
+# way a city that clones the pack as a rig lays it out. pack_city <dir> makes
+# one holding rig-root.sh alone, since every block resolves the rig through it
+# before it looks for anything else.
+pack_city() { mkdir -p "$1/rigs/gc-toolkit/assets/scripts"; cp "$HERE/rig-root.sh" "$1/rigs/gc-toolkit/assets/scripts/"; }
 CITY="$TMP/city"
-mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
+pack_city "$CITY"
 cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
 EMPTY_CITY="$TMP/empty-city"
-mkdir -p "$EMPTY_CITY"
+pack_city "$EMPTY_CITY"
 
 # A stub gc: the blocks call it to name the pack (STUB_PACK), to read the
 # check commands (STUB_SHOW, the
@@ -172,7 +175,7 @@ eq "$RC/$(field "$OUT" state)" 0/done "a wait on a finished gate reports done"
 case "$(cat "$STUB_GC_LOG")" in *"bd update"*) bad "a finished gate writes no note" "it wrote one" ;; *) ok "a finished gate writes no note" ;; esac
 # A launcher that reports the gate still running, as a wait does after --max.
 RUNNING_CITY="$TMP/running-city"
-mkdir -p "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts"
+pack_city "$RUNNING_CITY"
 cat > "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'state=running\npid=4242\nelapsed=600\nwaited=480\ndir=%s\n' "$2"
@@ -292,7 +295,7 @@ echo "── a gate that will not stop: nothing is rewritten under it, and the c
 # A launcher whose stop reports the gate still running, as detached-job.sh does
 # when the gate's process group survives TERM and KILL. It logs each call.
 STUCK_CITY="$TMP/stuck-city"
-mkdir -p "$STUCK_CITY/rigs/gc-toolkit/assets/scripts"
+pack_city "$STUCK_CITY"
 cat > "$STUCK_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$STUB_JOB_LOG"
@@ -315,7 +318,7 @@ eq "$(cat "$GATE/gate.sh" "$GATE"/checks/* | cksum)" "$GATE_SUM" "the old gate's
 
 echo "── no refinery-workspace.sh: the old checks stay, nothing runs, and the cycle drains ──"
 NOWS_CITY="$TMP/nows-city"
-mkdir -p "$NOWS_CITY/rigs/gc-toolkit/assets/scripts"
+pack_city "$NOWS_CITY"
 cp "$HERE/detached-job.sh" "$NOWS_CITY/rigs/gc-toolkit/assets/scripts/"
 : > "$GATE/checks/99-left-by-the-last-gate"
 checks 'touch "$RAN"' '' 'true' '' '' true

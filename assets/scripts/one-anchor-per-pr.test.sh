@@ -44,8 +44,9 @@ mkdir -p "$TMP/bin"
 # rows (open beads). A non-empty anchor_bead column lands in the row's
 # metadata, and a non-empty issue_type column is the row's issue_type, as a
 # convoy's row carries it. `gc bd update` and `gc bd close` append to $GCLOG
-# when it is set, and `gc runtime drain-ack` appends to $DRAINLOG. Everything
-# else exits 0 with no output.
+# when it is set, `gc runtime drain-ack` appends to $DRAINLOG, and
+# `gc gc-toolkit scripts-dir` names the pack $STUB_PACK. Everything else exits
+# 0 with no output.
 #
 # $FAKE_LIST_RC is the listing's exit status, and $FAKE_LIST_RAW, when set,
 # replaces the fixture's array with its own text, so a read can fail while it
@@ -69,6 +70,10 @@ mkdir -p "$TMP/bin"
 # falling back to id order against live beads. An empty timestamp column omits
 # the key entirely (exercises the last-resort `.id` tiebreak).
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
+  [ -n "${STUB_PACK:-}" ] || exit 1
+  printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+fi
 if [ "$1" = "bd" ] && { [ "$2" = "update" ] || [ "$2" = "close" ]; }; then
   [ -n "${GCLOG:-}" ] && printf '%s\n' "$*" >> "$GCLOG"
   # GCUPDRC drives a refused write. The stub models NO ownership check of its
@@ -462,8 +467,9 @@ grep -q 'merge_result=' <<< "$REWORK_ARM" \
 # --- Executable pin: the terminal arm never stamps an unaddressable PR. -------
 # An empty pr_url/pr_number on a pull_request anchor is skipped by merge.sh and
 # pr-facts.sh forever; the arm must fall back to pre_open_gate (pr-open.sh then
-# adopts the recorded PR and stamps real coordinates).
-TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-per-pr-terminal/{f=0} f' "$TOML")"
+# adopts the recorded PR and stamps real coordinates). The binding renders as
+# the patrol fills it in, gc-toolkit. here.
+TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-per-pr-terminal/{f=0} f' "$TOML" | sed 's|{{binding_prefix}}|gc-toolkit.|g')"
 [ -n "$TERMINAL" ] \
   && ok "(9a) terminal snippet extracted for execution" \
   || bad "(9a) terminal snippet extraction EMPTY"
@@ -508,8 +514,12 @@ exit "${LCRC:-0}"
 L
 chmod +x "$TMP/bin/lc-stub"
 # The block resolves the prep worktree's path from the rig root, which
-# GC_RIG_ROOT names here, so no run reads the roster.
+# GC_RIG_ROOT names here, so no run reads the roster. It resolves that root
+# through rig-root.sh, which it finds in the pack gc names.
 export GC_RIG_ROOT="$TMP/rig"
+mkdir -p "$TMP/pack/assets/scripts"
+cp "$HERE/rig-root.sh" "$TMP/pack/assets/scripts/"
+export STUB_PACK="$TMP/pack"
 printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
 run_terminal() { # <pre_open> <pr_url> <pr_number>
   : > "$LCLOG"
