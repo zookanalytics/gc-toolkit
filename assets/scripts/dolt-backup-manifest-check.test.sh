@@ -7,8 +7,8 @@
 #     "backups": {"dolt_freshness": "", "dolt_age_sec": 0, "dolt_stale": false}
 # so a TOTAL backup failure is indistinguishable from a fresh backup and the
 # threshold row could only ever fire on a PARTIAL one. Two full patrol rotations
-# logged "Dolt health: OK" through a real outage in which the lx ledger (HQ /
-# mail / sessions) had no restorable backup for ~40 h.
+# logged "Dolt health: OK" through a real outage in which the city's own ledger
+# (HQ / mail / sessions) had no restorable backup for ~40 h.
 #
 # The fix verifies the backup on disk instead: Dolt writes chunk `.darc` files
 # first and commits the `manifest` LAST, so a healthy database's newest file IS
@@ -176,7 +176,7 @@ mkdb healthy
 : > "$BACKUP_ROOT/healthy/aaaa.darc";  stamp healthy/aaaa.darc 2
 : > "$BACKUP_ROOT/healthy/manifest";   stamp healthy/manifest 1
 
-# uncommitted: chunks newer than the manifest — the lx outage shape
+# uncommitted: chunks newer than the manifest — the city ledger's outage shape
 mkdb uncommitted
 : > "$BACKUP_ROOT/uncommitted/manifest";  stamp uncommitted/manifest 40
 : > "$BACKUP_ROOT/uncommitted/bbbb.darc"; stamp uncommitted/bbbb.darc 1
@@ -218,9 +218,9 @@ mkdb inflight
 
 # inflight_stale: a chunk written RIGHT NOW, but the manifest is 40 h behind.
 # The grace window must NOT swallow this: no healthy in-flight run explains a
-# manifest two cadences old. This is the live lx shape — fresh chunks every
-# rotation, nothing ever committed — and it is the case the grace path could
-# most easily have re-hidden.
+# manifest two cadences old. This is the city ledger's live shape — fresh
+# chunks every rotation, nothing ever committed — and it is the case the grace
+# path could most easily have re-hidden.
 mkdb inflight_stale
 : > "$BACKUP_ROOT/inflight_stale/manifest"; stamp inflight_stale/manifest 40
 : > "$BACKUP_ROOT/inflight_stale/hhhh.darc"    # written now — no stamp
@@ -231,10 +231,10 @@ mkdb nomanifest_inflight
 
 # tie_chunk_first / tie_manifest_first: the manifest and the newest chunk share
 # an mtime SECOND. `stat -c %Y` / `-f %m` return whole seconds, so
-# sub-second ordering is invisible — the real lx case had the manifest 33 ms
-# NEWER than the last chunk and the check still saw a tie. Dolt commits the
-# manifest LAST, so a same-second tie means the commit landed in the same
-# second as the final chunk: a FAST, healthy sync. Both must read OK.
+# sub-second ordering is invisible — the city ledger's real case had the
+# manifest 33 ms NEWER than the last chunk and the check still saw a tie. Dolt
+# commits the manifest LAST, so a same-second tie means the commit landed in
+# the same second as the final chunk: a FAST, healthy sync. Both must read OK.
 #
 # Two fixtures, differing in creation order and chunk name, because the
 # pre-fix loop broke a tie by `find` traversal order — whichever file the

@@ -89,9 +89,9 @@ gate_says() {
 # nothing-to-salvage arm skips.
 fixture() {
   store '[
-    {"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"Implement the solution",
+    {"id":"tk-step","status":"in_progress","assignee":"hq-dead","title":"Implement the solution",
      "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead",
+                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-dead",
                  "gc.session_name":"polecat-2-pool","gc.session_affinity":"require",
                  "gc.continuation_group":"cg-1",
                  "gc.native_step_dependencies.v1":"[\"mol-polecat-work.preflight-tests\"]"}},
@@ -104,13 +104,13 @@ fixture() {
                  "review_branch":"polecat/tk-anc","review_base":"main",
                  "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
                  "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
-                 "gc.session_id":"lx-dead","gc.session_name":"polecat-5-pool"}},
-    {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
+                 "gc.session_id":"hq-dead","gc.session_name":"polecat-5-pool"}},
+    {"id":"tk-work","status":"in_progress","assignee":"hq-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
-                 "workflow_id":"tk-root","gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}},
-    {"id":"tk-bare","status":"in_progress","assignee":"lx-dead","title":"a pre-work source bead",
+                 "workflow_id":"tk-root","gc.session_id":"hq-dead","gc.session_name":"polecat-3-pool"}},
+    {"id":"tk-bare","status":"in_progress","assignee":"hq-dead","title":"a pre-work source bead",
      "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
-                 "gc.session_id":"lx-dead","gc.session_name":"polecat-4-pool"}}
+                 "gc.session_id":"hq-dead","gc.session_name":"polecat-4-pool"}}
   ]'
 }
 

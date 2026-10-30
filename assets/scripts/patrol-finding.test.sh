@@ -28,8 +28,8 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
 # ── gc stub ──────────────────────────────────────────────────────────
-# A JSON bead store with the create/list/show/update/dep surface the script
-# uses. --metadata rides the create, exactly as bd merges it, because the
+# A JSON bead store with the create/list/show/update/set-state/dep surface the
+# script uses. --metadata rides the create, exactly as bd merges it, because the
 # script's duplicate-recovery depends on the key being present on a bead whose
 # id the create did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
@@ -119,6 +119,9 @@ case "${1:-}" in
             jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
               'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
           esac ;;
+        --unset-metadata) shift; k="${1:-}"
+          jq -c --arg id "$id" --arg k "$k" \
+            'map(if .id == $id then .metadata |= del(.[$k]) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
         --append-notes) shift; note="${1:-}"
           jq -c --arg id "$id" --arg n "$note" \
             'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
@@ -131,6 +134,30 @@ case "${1:-}" in
       shift || true
     done
     mv "$tmp" "$STORE"; echo "updated $id" ;;
+  set-state)
+    # As bd's runSetState: a dimension already at the value writes nothing;
+    # otherwise one closed event bead under the subject records the change, and
+    # the dimension's label is swapped for the new one.
+    [ -n "${STUB_SET_STATE_FAIL:-}" ] && { echo "bd: set-state refused" >&2; exit 1; }
+    shift; id="${1:-}"; spec="${2:-}"; shift 2 || true
+    reason=""
+    while [ $# -gt 0 ]; do
+      case "$1" in --reason) shift; reason="${1:-}" ;; --reason=*) reason="${1#--reason=}" ;; esac
+      shift || true
+    done
+    dim="${spec%%=*}"; val="${spec#*=}"
+    old=$(jq -r --arg id "$id" --arg p "$dim:" \
+      '[.[] | select(.id == $id) | (.labels // [])[] | select(startswith($p))][0] // ""' "$STORE")
+    [ "$old" = "$dim:$val" ] && { echo "(no change: $dim already set to $val)"; exit 0; }
+    ev="evt-$(( $(jq '[.[] | select(.issue_type == "event")] | length' "$STORE") + 1 ))"
+    tmp=$(mktemp)
+    jq -c --arg id "$id" --arg ev "$ev" --arg dim "$dim" --arg val "$val" --arg old "$old" --arg r "$reason" \
+      'map(if .id == $id then .labels = ([(.labels // [])[] | select(. != $old)] + [$dim + ":" + $val]) else . end)
+       + [{"id":$ev,"status":"closed","issue_type":"event","priority":"4","metadata":{},"notes":"",
+           "title":("State change: " + $dim + " → " + $val),"description":$r}]' \
+      "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    printf '%s|parent-child|%s\n' "$ev" "$id" >> "$DEPS"
+    echo "Set $dim = $val on $id" ;;
   close)
     shift; id="${1:-}"
     tmp=$(mktemp)
@@ -177,12 +204,20 @@ reset() {
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"
   printf '0' > "$STUB_SEQ"
   export STUB_CREATE_FAIL="" STUB_UPD_FAIL="" STUB_LIST_FAIL="" STUB_LIST_FAIL_FIELD="" STUB_DROP_KEYS=""
-  export STUB_SHOW_FAIL=""
+  export STUB_SHOW_FAIL="" STUB_SET_STATE_FAIL=""
   export STUB_CREATE_NO_ID="" STUB_DELIVERABLE_RC=0 STUB_SLING_RC=0
   export GC_RIG="gc-toolkit"
 }
 
-beads()  { jq 'length' "$STUB_STORE"; }
+# beads counts what a run filed; bd's set-state audit events are read by events.
+beads()  { jq '[.[] | select(.issue_type != "event")] | length' "$STUB_STORE"; }
+# state <id> <dimension> — the value of a bd state label, or <none>.
+state()  { jq -r --arg id "$1" --arg d "$2:" '[.[] | select(.id==$id) | (.labels // [])[] | select(startswith($d)) | ltrimstr($d)][0] // "<none>"' "$STUB_STORE"; }
+# events <id> — the audit events set-state filed under a bead, oldest first.
+events() { jq -c --arg id "$1" --rawfile edges "$STUB_DEPS" '
+             [ $edges | split("\n")[] | select(endswith("|parent-child|" + $id)) | split("|")[0] ] as $ev
+             | [ .[] | select(.id as $x | $ev | any(. == $x)) | {title, description} ]' "$STUB_STORE"; }
+bstatus() { jq -r --arg id "$1" '(.[] | select(.id==$id) | .status) // ""' "$STUB_STORE"; }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id==$id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .notes) // ""' "$STUB_STORE"; }
 body()   { jq -r --arg id "$1" '(.[] | select(.id==$id) | .description) // ""' "$STUB_STORE"; }
@@ -825,6 +860,159 @@ eq "$HEAD" "$(printf '中%.0s' $(seq 1 200))…" "(head) and no character is spl
 "$SUT" --key doctor-wide --title t --message "$(printf 'line one\n\tline two\r\nline three')" >/dev/null 2>&1
 eq "$(notes fnd-1 | wc -l | tr -d ' ')" "2" "(head) a multi-line text is one note line"
 has "$(tail -n 1 <<< "$(notes fnd-1)")" "): line one line two line three" "(head) its whitespace squashed to single spaces"
+
+# ── 21. --cleared records that the situation ended ───────────────────
+# A caller that sees its situation end records it on the live bead as bd's
+# operational state: `bd set-state <bead> situation=cleared`, which files a
+# closed audit event under the bead and no finding. A later report that lands
+# on that bead sets situation=active the same way, before it counts the
+# occurrence.
+reset
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" 2>&1); RC=$?
+eq "$RC" "0" "(cleared/none) no live bead is nothing to record, and exits 0"
+eq "$(beads)" "0" "(cleared/none) it files nothing"
+has "$OUT" "no clear to record" "(cleared/none) says there was nothing to record"
+hasnt "$(cat "$STUB_GC_LOG")" "bd set-state" "(cleared/none) and sets no state"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "(cleared/none) and updates nothing"
+
+"$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" >/dev/null 2>&1
+DIGEST_1=$(meta fnd-1 'finding.digest')
+NOTES_1=$(notes fnd-1)
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" 2>&1); RC=$?
+eq "$RC" "0" "(cleared) exit 0"
+eq "$(beads)" "1" "(cleared) it files no second finding"
+has "$OUT" "fnd-1 holds [deacon-cold.dc] — recorded that it cleared (situation=cleared)" "(cleared) says where it recorded the clear"
+eq "$(state fnd-1 situation)" "cleared" "(cleared) the bead's situation state is cleared"
+has "$(cat "$STUB_GC_LOG")" "bd set-state fnd-1 situation=cleared --reason dc is patrolling again" "(cleared) set with bd set-state, the message as its reason"
+eq "$(events fnd-1 | jq -r 'map(.description) | join(",")')" "dc is patrolling again" "(cleared) one audit event under the bead carries the reason"
+eq "$(bstatus fnd-1)" "open" "(cleared) the bead stays open"
+eq "$(meta fnd-1 'finding.occurrences')" "1" "(cleared) a clear is not an occurrence"
+eq "$(meta fnd-1 'finding.digest')" "$DIGEST_1" "(cleared) and leaves the digest alone"
+eq "$(notes fnd-1)" "$NOTES_1" "(cleared) and the notes"
+eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(cleared) no reaction is slung for a clear"
+
+# The same report again: its text is unchanged, but the finding had cleared.
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" 2>&1); RC=$?
+eq "$RC" "0" "(cleared/return) exit 0"
+eq "$(beads)" "1" "(cleared/return) the return lands on the same bead"
+eq "$(state fnd-1 situation)" "active" "(cleared/return) its situation is active again"
+has "$(cat "$STUB_GC_LOG")" "bd set-state fnd-1 situation=active --reason reported again (occurrence 2)" "(cleared/return) set with bd set-state, naming the occurrence"
+eq "$(events fnd-1 | jq 'length')" "2" "(cleared/return) a second audit event records the return"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(cleared/return) the return is an occurrence"
+eq "$(notes fnd-1)" "$NOTES_1" "(cleared/return) its unchanged text adds no note"
+has "$OUT" "recorded occurrence 2, text unchanged; its situation had cleared and is active again" "(cleared/return) says what it recorded"
+SET_AT=$(grep -n 'bd set-state fnd-1 situation=active' "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
+UPD_AT=$(grep -n 'bd update fnd-1 --set-metadata finding.occurrences=2' "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
+if [ -n "$SET_AT" ] && [ -n "$UPD_AT" ] && [ "$SET_AT" -lt "$UPD_AT" ]; then
+  ok "(cleared/return) the state goes back to active before the occurrence is counted"
+else bad "(cleared/return) set-state at log line '${SET_AT}', the occurrence update at '${UPD_AT}'"; fi
+eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(cleared/return) the bead already reacted to keeps its one reaction"
+
+# Only the return changed the state: the next identical report sets none.
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" 2>&1)
+eq "$(grep -c 'bd set-state' "$STUB_GC_LOG")" "2" "(cleared/after) a report on an active bead sets no state"
+has "$OUT" "recorded occurrence 3, text unchanged" "(cleared/after) it counts the occurrence"
+hasnt "$OUT" "active again" "(cleared/after) and calls it no return"
+
+# A return with changed text notes the text as any recurrence does.
+"$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" >/dev/null 2>&1
+"$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T2" >/dev/null 2>&1
+eq "$(state fnd-1 situation)" "active" "(cleared/changed) its situation is active again"
+eq "$(events fnd-1 | jq 'length')" "4" "(cleared/changed) each clear and each return is one event"
+has "$(tail -n 1 <<< "$(notes fnd-1)")" "finding recurred with changed text (occurrence 4" "(cleared/changed) the changed text is noted as a recurrence's"
+has "$(tail -n 1 <<< "$(notes fnd-1)")" "dc cold since T2" "(cleared/changed) carrying the new text"
+if [ "$(meta fnd-1 'finding.digest')" != "$DIGEST_1" ]; then ok "(cleared/changed) the digest moves with the text"; else bad "(cleared/changed) the digest stayed $DIGEST_1"; fi
+
+# The return cannot be recorded: nothing is counted, so the retry records both.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+"$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" >/dev/null 2>&1
+export STUB_SET_STATE_FAIL=1
+OUT=$("$SUT" --key deacon-cold.dc --title t --message m 2>&1); RC=$?
+export STUB_SET_STATE_FAIL=""
+eq "$RC" "1" "(cleared/return-refused) a return that does not land exits 1"
+has "$OUT" "could not record on fnd-1 that [deacon-cold.dc] is active again" "(cleared/return-refused) and names the bead"
+eq "$(meta fnd-1 'finding.occurrences')" "1" "(cleared/return-refused) the occurrence is not counted"
+eq "$(state fnd-1 situation)" "cleared" "(cleared/return-refused) the state still reads cleared"
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1; RC=$?
+eq "$RC" "0" "(cleared/return-refused) the retry exits 0"
+eq "$(state fnd-1 situation)" "active" "(cleared/return-refused) and records the return"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(cleared/return-refused) and the occurrence, once"
+
+# The bead's row cannot be shown: its state still reads from the keyed listing.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+"$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" >/dev/null 2>&1
+export STUB_SHOW_FAIL=1
+OUT=$("$SUT" --key deacon-cold.dc --title t --message m 2>&1); RC=$?
+export STUB_SHOW_FAIL=""
+eq "$RC" "0" "(cleared/show-fails) a return whose show fails exits 0"
+eq "$(state fnd-1 situation)" "active" "(cleared/show-fails) and its situation is active again"
+has "$OUT" "its situation had cleared and is active again" "(cleared/show-fails) and says so"
+
+# --cleared needs no --title, but it needs a key and a message.
+"$SUT" --cleared --message m >/dev/null 2>&1; RC=$?
+eq "$RC" "2" "(cleared/usage) no key is a usage error"
+"$SUT" --key deacon-cold.dc --cleared >/dev/null 2>&1; RC=$?
+eq "$RC" "2" "(cleared/usage) no message is a usage error"
+
+# A closed bead is no live record, so a clear leaves it alone.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+gc bd close fnd-1 >/dev/null 2>&1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+eq "$RC" "0" "(cleared/closed) exit 0"
+has "$OUT" "no clear to record" "(cleared/closed) a closed bead holds nothing to clear"
+eq "$(state fnd-1 situation)" "<none>" "(cleared/closed) and takes no state"
+
+# The lookup cannot be read: nothing proves where the clear belongs.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+export STUB_LIST_FAIL=1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+export STUB_LIST_FAIL=""
+eq "$RC" "1" "(cleared/unreadable) a failed lookup exits 1"
+eq "$(state fnd-1 situation)" "<none>" "(cleared/unreadable) and sets no state"
+
+# The write is refused: exit 1, so the caller tries again.
+export STUB_SET_STATE_FAIL=1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+export STUB_SET_STATE_FAIL=""
+eq "$RC" "1" "(cleared/refused) a refused write exits 1"
+has "$OUT" "could not record on fnd-1" "(cleared/refused) and names the bead"
+
+# A held bead with nothing left to wait on is still the newest record.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+put_bead fix-1 open
+hold fnd-1 blocked fix-1
+gc bd close fix-1 >/dev/null 2>&1
+"$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" >/dev/null 2>&1
+eq "$(state fnd-1 situation)" "cleared" "(cleared/held) a held bead with nothing open takes the clear"
+eq "$(beads)" "2" "(cleared/held) and nothing is filed beside it"
+# A later report does not land on that bead. It files a new one beside it, and
+# the held bead keeps its state, because it has taken no report since.
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(cleared/held) a later report files a new bead naming the held one"
+eq "$(state fnd-2 situation)" "<none>" "(cleared/held) the new bead carries no state"
+eq "$(state fnd-1 situation)" "cleared" "(cleared/held) the held bead keeps its state"
+
+# Notes at the cap: a clear writes no note, so it lands all the same.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+set_notes fnd-1 "$(filler 65300)"
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+eq "$RC" "0" "(cleared/cap) exit 0"
+eq "$(state fnd-1 situation)" "cleared" "(cleared/cap) the state lands"
+eq "$(notes_bytes fnd-1)" "65300" "(cleared/cap) the notes are left as they are"
+
+# --dry-run writes nothing.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" --dry-run 2>&1)
+has "$OUT" "would record that [deacon-cold.dc] cleared" "(cleared/dry-run) says what it would record"
+eq "$(state fnd-1 situation)" "<none>" "(cleared/dry-run) and sets no state"
+hasnt "$(cat "$STUB_GC_LOG")" "bd set-state" "(cleared/dry-run) nor calls set-state"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

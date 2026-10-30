@@ -35,7 +35,7 @@ convoys:
 48 beads carried two to four of them. No convoy fed more than one root, and no
 bead had two live workflows, so these are not double pours. City-wide, the
 same rule found 522 convoys no live bead names (gascity 203, gc-toolkit 282,
-signal-loom 25, shutupandlisten 6, sprintshow 6) against 95 live ones.
+rig-a 25, rig-b 6, rig-c 6) against 95 live ones.
 
 `gc convoy list --json`, the measure the bead cites, did not finish within
 150s on 2026-10-04. Joining `gc bd list --type=convoy` to the beads carrying
@@ -161,16 +161,16 @@ finished workflow's convoy to stay open.
 
 The script ran with `--apply --db <rig>/.beads` once per store on
 2026-10-04, between 21:58Z and 22:26Z. Before each apply on gc-toolkit,
-gascity and signal-loom, the dry run's dead set matched an independent join
+gascity and rig-a, the dry run's dead set matched an independent join
 exactly.
 
 | Store | Closed | Workflow finished | Never named | Live, left open |
 |---|---|---|---|---|
 | gc-toolkit | 282 | 238 | 44 | 54 |
 | gascity | 204 | 181 | 23 | 42 |
-| signal-loom | 25 | 25 | 0 | 1 |
-| shutupandlisten | 6 | 6 | 0 | 0 |
-| sprintshow | 6 | 6 | 0 | 0 |
+| rig-a | 25 | 25 | 0 | 1 |
+| rig-b | 6 | 6 | 0 | 0 |
+| rig-c | 6 | 6 | 0 | 0 |
 
 No close was refused, and every close read back as closed. On gc-toolkit,
 the number of beads with more than one open wrapper fell from 48 to 3. A dry

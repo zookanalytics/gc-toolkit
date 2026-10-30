@@ -6,20 +6,24 @@
 #   - held: a status other than open, an assignee, a bound session;
 #   - dispatched: a pool route, a deferred-dispatch arm or its sling marker, a
 #     formula pour, a deferred route, a claim;
-#   - worked: a branch, a worktree, a commit, a review round, a landing target,
-#     a PR, a landing state, an outcome;
+#   - worked: a live run working it (assets/scripts/run-lib.sh), a branch, a
+#     worktree, a commit, a review round, a landing target, a PR, a landing
+#     state, an outcome;
 #   - owned by another closer: any task_kind (review, visit, rework, finding,
 #     validation, a standing record, ...), a molecule step or workflow root, a
 #     duplicate diagnosis, a successor pointer recorded by a disposition whose
 #     close has not landed, or an issue type that is not plain work (an epic
 #     closes on its own ruling, and a convoy, a gate or a decision is not work);
 #   - parked: a hold_reason or a rebase_hold, somebody's judgement in progress;
-#   - structural: a convoy tracks it or parents it (a pour, or a planned batch),
-#     or a child under it is still open.
+#   - structural: a convoy parents it (a planned batch), or a child under it
+#     is still open.
+# A convoy that tracks the bead is no mark of its own. A status grouping holds
+# nothing, and the input convoy of a run that has finished works nothing, so
+# what a pour leaves live is its run, until the run's root closes.
 # A bead with none of them is a pure wait, and only that may be disposed.
 # Every mark refuses on presence, so a mark a reader cannot read is a refusal:
 # an issue type outside the plain-work list refuses, and so does an unreadable
-# list of dependents.
+# list of dependents or of runs.
 #
 # Sourced (never executed) by until-resolved.sh, through which the until
 # consumer in deferred-dispatch.sh and doctor/check-until-resolved-owed decide.
@@ -82,19 +86,15 @@ LIVE_WORK_JQ='
   # One mark per edge that makes this bead live work, empty when none. Input:
   # the row `bd show --json` returns, whose .dependencies carry the issue_type
   # and status of each target. $up: what `bd dep list <id> --direction=up
-  # --json` returns, the beads that depend on this one. `bd show` leaves a convoy
-  # tracks edge out of its dependents, so they are read from $up, and anything
-  # but an array there is unreadable, which refuses. `bd show` also leaves out
-  # an edge whose target has no row in this store, so a parent in another store
-  # never reaches the convoy mark below, and the caller rules that out first:
-  # until-resolved.sh reads every edge of the bead from its `bd list` row.
+  # --json` returns, the beads that depend on this one, and anything but an
+  # array there is unreadable, which refuses. `bd show` leaves out an edge whose
+  # target has no row in this store, so a parent in another store never reaches
+  # the convoy mark below, and the caller rules that out first: until-resolved.sh
+  # reads every edge of the bead from its `bd list` row.
   def live_work_edge_reasons($up):
     if ($up | type) != "array" then ["dependents=unreadable"]
     else
       [ $up[] | objects
-          | select(((.issue_type // "") | tostring) == "convoy")
-          | "tracked by convoy " + ((.id // "?") | tostring) + " (" + ((.status // "?") | tostring) + ")" ]
-      + [ $up[] | objects
           | select(((.dependency_type // .type // "") | tostring) == "parent-child")
           | select(((.status // "") | tostring | ascii_downcase) != "closed")
           | "open child " + ((.id // "?") | tostring) ]
@@ -103,4 +103,18 @@ LIVE_WORK_JQ='
           | select(((.issue_type // "") | tostring) == "convoy")
           | "child of convoy " + ((.id // "?") | tostring) ]
     end;
+  # One mark per live run working this bead, empty when none. Input: the bead
+  # row. $runs: what the runs verb of run-lib.sh answers for the bead, or its
+  # map, in either case runs in its shape {root, convoy, bead, formula, live}. A
+  # run that works another bead, or has finished, is no mark, and anything but
+  # an array is unreadable, which refuses.
+  def live_work_run_reasons($runs):
+    ((.id // "") | tostring) as $id
+    | if ($runs | type) != "array" then ["runs=unreadable"]
+      else
+        [ $runs[] | objects
+            | select(.live == true and ((.bead // "") | tostring) == $id and $id != "")
+            | "worked by live run " + ((.root // "?") | tostring)
+              + (((.formula // "") | tostring) as $f | if $f == "" then "" else " (" + $f + ")" end) ]
+      end;
 '

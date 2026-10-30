@@ -4,24 +4,25 @@
 # A sitting is a manual converse-<model> session that `gc-helm engage` starts
 # under the alias of the conversation it holds: the conversation task's id, or
 # its `c-` fallback when the runtime refuses the bare id as an alias. Gas City
-# does not end a manual session when its work closes, and the sitting cannot
-# drain itself at its sign-off without destroying an attached operator's pane.
-# So the session outlives a conversation its sign-off or a dismiss closed, and
-# one a sitting cut short handed back to the operator's queue. This pass is the
-# close those endings assume (docs/warrants.md, Converse reap).
+# does not end a manual session when its work closes, so a sitting ends its own
+# session as soon as its conversation closes, and `gc-helm dismiss` stops the
+# session that held the conversation it closes. This pass is the backstop for a
+# session that outlives its conversation anyway: a stop that did not take, a
+# conversation some other path closed, or one a sitting cut short handed back
+# to the operator's queue (docs/warrants.md, Converse reap).
 #
 # A converse session is settled, and closed here, when the conversation its
 # alias names has closed, is gone, or is back in the operator's queue (assigned
-# to `human` and open). A conversation its sitting still holds is a live
-# sitting, and is kept.
+# to `human` and open), whether or not an operator is attached to it. Viewing a
+# sitting does not keep it open: a client attached to it exits when its session
+# ends, because each converse template sets detach-on-destroy on its own tmux
+# session. A conversation its sitting still holds is a live sitting, and is
+# kept.
 #
-# Two sessions are never closed. One an operator is ATTACHED to: the pack cannot
-# see a half-typed reply in the composer, and draining a pane with typed text is
-# the operator's hard no, so an attached sitting is left for its own sign-off or
-# a dismiss. And one younger than --min-age, the reap's own interval: engage
-# starts a session before it binds the conversation to it, so a session that
-# young holding the alias of a conversation still in the queue may be a sitting
-# about to take it.
+# One session is never closed: one younger than --min-age, the reap's own
+# interval. engage starts a session before it binds the conversation to it, so a
+# session that young holding the alias of a conversation still in the queue may
+# be a sitting about to take it.
 #
 # Fully mechanical: `gc session list` + one `gc bd show` per candidate session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
@@ -73,16 +74,15 @@ if ! printf '%s' "$sessions_json" | jq -e 'type=="object" and (.sessions|type=="
 fi
 
 # Candidate rows, one per line as <session-id>\t<conversation-id>: a converse
-# template, not already closed, NOT attached, older than --min-age, and carrying
-# an alias. engage qualifies the alias as <rig>/<binding>.<alias>, so the alias
-# is the final dot-segment, and a `c-` fallback names the id after its prefix. A
+# template, not already closed, older than --min-age, and carrying an alias.
+# engage qualifies the alias as <rig>/<binding>.<alias>, so the alias is the
+# final dot-segment, and a `c-` fallback names the id after its prefix. A
 # session with no alias was not engage-bound to a conversation and is none of
 # our business, and one whose creation time does not read cannot prove its age.
 candidates="$(printf '%s' "$sessions_json" | jq -r --argjson age "$MIN_AGE" '
     .sessions[]?
     | select(((.template // "") | test("converse")))
     | select((.closed // false) == false)
-    | select((.attached // false) == false)
     | select((.alias // "") != "")
     | select(((.created_at // "") | tostring | sub("\\.[0-9]+"; "") | fromdateiso8601?) as $t
              | $t != null and $t <= (now - $age))

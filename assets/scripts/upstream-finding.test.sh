@@ -172,7 +172,7 @@ flag is dropped. Repro: $(npm test) with sendSources: true.'
 
 # ── the happy path ────────────────────────────────────────────────────────
 reset_state
-OUT=$("$SUT" --message "Hit while working sl-kg9z6; the bug is in the pinned 0.7.1 runtime." \
+OUT=$("$SUT" --message "Hit while working ra-kg9z6; the bug is in the pinned 0.7.1 runtime." \
   -- gh issue create --repo get-convex/agent --title "sendSources cannot be enabled" --body "$BODY_TEXT" 2>&1)
 RC=$?
 eq "$RC" "0" "parking a finding exits 0"
@@ -481,7 +481,7 @@ eq "$(meta up-1 gh_verb)" "issue comment" "a comment verb is labelled as itself"
 
 # ── --pool is retired ─────────────────────────────────────────────────────
 reset_state
-"$SUT" --message "why" --pool "loomington/gc-toolkit.converse" \
+"$SUT" --message "why" --pool "mycity/gc-toolkit.converse" \
   -- gh issue create --repo a/b --title T --body B >/dev/null 2>&1
 eq "$?" "2" "--pool is refused: a gate is not routed"
 eq "$(count)" "0" "and nothing is parked"

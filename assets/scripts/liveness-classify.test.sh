@@ -137,6 +137,9 @@ done
 # gated: the sweep proved none of its gates green.
 eq "$(class_of "$(classify '[]' '[]' '[]' '{"n-preopen":false}' "$SITTING" true true)" n-preopen)" "unnamed" \
    "(EMPTY) a pre-open anchor the map does not name true stays an unnamed wait"
+# One the map names "unread", whose head the sweep could not read, is held.
+eq "$(class_of "$(classify '[]' '[]' '[]' '{"n-preopen":"unread"}' '["s-1"]' true true)" n-preopen)" "unread" \
+   "(DEF) a pre-open anchor whose head the sweep could not read is unread, a named class"
 
 echo "# an unreadable session list"
 eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '[]' false true)" n-subj)" "conversing" \

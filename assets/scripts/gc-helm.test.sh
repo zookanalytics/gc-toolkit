@@ -45,20 +45,20 @@ mkdir -p "$TMP/bin"
 #                            which the FOLDED section releases
 cat > "$TMP/steps.json" <<'JSON'
 [
-  {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-load","assignee":"gc-toolkit__polecat-hq-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"s-impl","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
-  {"id":"s-held","status":"blocked","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-PARKED","blocked_reason":"declined: premise falsified"}},
+  {"id":"s-held","status":"blocked","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-PARKED","blocked_reason":"declined: premise falsified"}},
   {"id":"s-final","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/core.control-dispatcher"}},
   {"id":"s-quiet","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.self-review","gc.root_bead_id":"root-PARKED"}},
   {"id":"s-nonmol","assignee":"someone","metadata":{"gc.step_ref":"mol-other-formula.step","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-noref","assignee":"someone-else","metadata":{"gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
-  {"id":"s-other","assignee":"gc-toolkit__polecat-lx-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
-  {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
-  {"id":"s-NOPIN","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-other","assignee":"gc-toolkit__polecat-hq-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-orphan","assignee":"gc-toolkit__polecat-hq-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-NOPIN","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"root-PARKED","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-OTHER","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-ORPHAN","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
-  {"id":"s-fold","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"s-fold","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-FOLD","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 ]
 JSON
@@ -91,9 +91,9 @@ S
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
-    # un-scoped bd calls for `tk-` ids; signal-loom's does, so an `sl-` id
+    # un-scoped bd calls for `tk-` ids; rig-a's does, so an `ra-` id
     # exercises the rig pin.
-    jq -n --arg sl "$FAKE_SL_PATH" \
+    jq -n --arg ra "$FAKE_RA_PATH" \
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
                {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
   "bd list")
@@ -254,15 +254,6 @@ case "$1 ${2:-}" in
     # the way the real `dep list` reports a bead it cannot resolve — a JSON
     # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
     if [ "${3:-}" = "list" ]; then
-      # reverse `tracks` (dep list <bead> --direction=up -t tracks): the convoys
-      # that TRACK this bead — how the release resolves the run beneath it
-      # from its anchor. Derived from FAKE_CONVOYS (convoy|anchor).
-      case "$*" in
-        *--direction=up*)
-          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$FAKE_CONVOYS" \
-            | jq -Rnc '[inputs | select(length > 0) | {id: .}]'
-          exit 0 ;;
-      esac
       case "${4:-}" in
         A-PROBEDEAD*) exit 1 ;;
         A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
@@ -291,6 +282,23 @@ export GC_RUN_CANCEL_TOOL="$TMP/bin/run-cancel-stub" FAKE_CANCELS="$TMP/cancels"
 : > "$TMP/cancels"
 
 export PATH="$TMP/bin:$PATH"
+# run-lib.sh's verbs answer from the fixture store that is current: the live
+# store while its section's gc stub is first on PATH, the main one otherwise.
+# Its rows, with a convoy row for each "convoy|anchor" line tracking that
+# anchor, are judged by run-lib.sh's own run_rows, at each call.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf '. %q || exit 1\n' "$HERE/run-lib.sh"; cat; } > "$TMP/bin/helm-runs" <<'RUNS'
+store="$FAKE_STEPS_JSON"; convoys="$FAKE_CONVOYS"
+if [ -n "${LIVE_STORE:-}" ] && [ "$(command -v gc)" = "${LIVE_STORE%/*}/bin/gc" ]; then
+  store="$LIVE_STORE"; convoys="$LIVE_CONVOYS"
+fi
+jq -c --rawfile c "$convoys" "$RUN_JQ"'
+  . + [ $c | split("\n")[] | select(length > 0) | split("|")
+        | {id: .[0], issue_type: "convoy", status: "open", dependencies: [{depends_on_id: .[1], type: "tracks"}]} ]
+  | run_rows' "$store"
+RUNS
+chmod +x "$TMP/bin/helm-runs"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_CMD="$TMP/bin/helm-runs" RUN_LIB_STUB_LOG="$TMP/run-lib.log"
+: > "$TMP/run-lib.log"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
@@ -332,7 +340,7 @@ J
 cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
 [{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
-export FAKE_SL_PATH="$TMP/signal-loom"
+export FAKE_RA_PATH="$TMP/rig-a"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 : > "$TMP/settled"; : > "$TMP/takeaway"
 # metadata.branch per bead, for the --waiting-on landed-rider skip. w-same,
@@ -362,7 +370,7 @@ unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
-: > "$FAKE_CONVOY_CALLS"; : > "$FAKE_CANCELS"
+: > "$TMP/run-lib.log"; : > "$FAKE_CANCELS"
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait 2>"$TMP/err" || true)"
 ERR="$(cat "$TMP/err")"
 UP="$TMP/updates"
@@ -431,14 +439,13 @@ grep -q 'ended run root-PARKED of A-PARKED' <<< "$OUT" \
   && ok "(REPORT) the run reports the run it ended" || bad "(REPORT) the ended run is unreported (out: $OUT)"
 
 # (BOUND) the resolution is keyed on the parked anchor, not the store: one
-# reverse-tracks lookup, then a convoy-status confirm for the ONE matched root,
-# NOT a status call per open root. Enumerating every root would confirm
-# convoy-PARKED, convoy-OTHER and convoy-FOLD; asserting only the matched
-# molecule's convoy is touched is what keeps the fan-out from coming back.
-eq "$(grep -c . "$FAKE_CONVOY_CALLS")" "1" \
-  "(BOUND) --release confirms only the matched molecule's convoy, not one per open root"
-eq "$(cat "$FAKE_CONVOY_CALLS")" "convoy-PARKED" \
-  "(BOUND) …and the one it confirms is the parked anchor's own convoy"
+# run-lib.sh runs read for the anchor, NOT a map of every run or a read per
+# open root, which would touch convoy-PARKED, convoy-OTHER and convoy-FOLD.
+eq "$(grep -c '^runs ' "$TMP/run-lib.log")" "1" \
+  "(BOUND) --release reads the runs of the anchor once"
+eq "$(cut -d' ' -f1,3 "$TMP/run-lib.log" | grep '^runs ')" "runs A-PARKED" \
+  "(BOUND) …keyed on the parked anchor itself"
+eq "$(grep -c '^map ' "$TMP/run-lib.log")" "0" "(BOUND) …and never maps every run in the store"
 
 # (CANCELFAIL) a run that does not end is not a release that landed: nothing
 # retries a cancel, so the verb exits 4 after every other write, names the run
@@ -456,6 +463,20 @@ grep -qE '^bd update A-PARKED .*--status=open' "$UP" \
   && ok "(CANCELFAIL) …and the release already written is kept" || bad "(CANCELFAIL) the release write was lost: $(cat "$UP")"
 grep -q 'takeaway set on' "$TMP/cfout" \
   && bad "(CANCELFAIL) the verb reported success" || ok "(CANCELFAIL) …and success is not reported"
+
+# (RUNSUNREAD) runs that cannot be read are not runs that ended: the verb exits
+# 4 after every other write, says what it could not read and how to end a run
+# by hand, and cancels nothing on a guess.
+: > "$UP"; : > "$FAKE_CANCELS"
+RURC=0
+RUN_LIB_STUB_FAIL="runs:A-PARKED" sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait \
+  >"$TMP/ruout" 2>"$TMP/ruerr" || RURC=$?
+eq "$RURC" "4" "(RUNSUNREAD) an unreadable read of the runs beneath the anchor is a verb failure"
+grep -q 'could not read the runs beneath A-PARKED' "$TMP/ruerr" \
+  && ok "(RUNSUNREAD) …which says what it could not read" || bad "(RUNSUNREAD) the failed read is unnamed (stderr: $(cat "$TMP/ruerr"))"
+eq "$(grep -c . "$FAKE_CANCELS")" "0" "(RUNSUNREAD) …and nothing is cancelled on a guess"
+grep -qE '^bd update A-PARKED .*--status=open' "$UP" \
+  && ok "(RUNSUNREAD) …and the release already written is kept" || bad "(RUNSUNREAD) the release write was lost: $(cat "$UP")"
 
 # (static) the release block writes no member: no update, close, or status write
 # beyond the bd list read filter.
@@ -1174,8 +1195,8 @@ grep -q 'takeaway set on' "$TMP/xout" \
 #   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
 #   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried
 #   (SNAMEDEAD/SIDDEAD)  a clear that will not land is a verb failure, writes kept
-SNAME="gc-toolkit__polecat-lx-gone"
-SID="lx-gone"
+SNAME="gc-toolkit__polecat-hq-gone"
+SID="hq-gone"
 
 # (SNAMEOK/SIDOK) both pins clear: the release's own unset is the only write for
 # each, and a read-back that finds them gone says nothing.
@@ -1466,7 +1487,7 @@ grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
   || bad "(DELEGFOLD) the run's end was lost: $(cat "$FAKE_CANCELS")"
 
 # ── takeaway --release --assign: release the bead TO a named agent ────────────
-# A named agent's hook matches the bead's assignee and never reads gc.routed_to,
+# The pack addresses a named agent by its assignee (docs/deferred-dispatch.md),
 # so work that is its own (a town-repo edit is mechanik's) is released to it as
 # its assignee, with no route. The stub reads a bead's assignee from the
 # assignees fixture, so a row there models an assignee that landed and its
@@ -1690,12 +1711,12 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
  {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-sample","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
  {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-sample.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-hq-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-hq-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
- {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
- {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
+ {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-hq-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
+ {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
 ]
 JSON
 printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
@@ -1746,9 +1767,6 @@ case "$1 ${2:-}" in
   "bd show")
     row=$(jq -c --arg i "$3" '[ .[] | select(.id == $i) ]' "$LIVE_STORE")
     [ "$row" != "[]" ] && printf '%s\n' "$row" || printf '[{"id":"%s","status":"open","metadata":{}}]\n' "$3" ;;
-  "convoy status")
-    a=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$LIVE_CONVOYS")
-    [ -n "$a" ] && jq -n --arg a "$a" '{children:[{id:$a}]}' || printf '{"children":[]}\n' ;;
   "bd update")
     printf 'update %s\n' "$*" >> "$LIVE_LOG"
     id="$3"; shift 3
@@ -1780,16 +1798,7 @@ case "$1 ${2:-}" in
     done ;;
   "bd dep")
     printf 'dep %s\n' "$*" >> "$LIVE_LOG"
-    # reverse `tracks`: the convoys tracking this bead, from LIVE_CONVOYS — the
-    # release resolves the run beneath it from its anchor this way.
-    if [ "${3:-}" = "list" ]; then
-      case "$*" in
-        *--direction=up*)
-          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$LIVE_CONVOYS" \
-            | jq -Rnc '[inputs | select(length > 0) | {id: .}]' ;;
-        *) printf '[]\n' ;;
-      esac
-    fi ;;
+    [ "${3:-}" = "list" ] && printf '[]\n' ;;
 esac
 exit 0
 GCL
@@ -1811,7 +1820,7 @@ live_store_intact() {
 SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
 SAVED_CANCEL_TOOL="$GC_RUN_CANCEL_TOOL"; unset GC_RUN_CANCEL_TOOL
 export GC_CITY_PATH="$LIVE/town" GC_HOME="$LIVE/gchome"; mkdir -p "$GC_HOME"
-RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
   sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
 live_store_intact   # the release writes landed, or this is disk pressure not a verdict
 
@@ -1833,7 +1842,7 @@ grep -q '/runs/root-LIVE/' "$LIVE_CURL_LOG" \
   && bad "(OWNRUN) the session's own run was cancelled" || ok "(OWNRUN) …and it is not cancelled"
 eq "$(field L-peer gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
    "(OWNRUN) a sibling step keeps its route; gascity, not the pack, owns its lifecycle"
-eq "$(field L-held assignee)" "gc-toolkit__polecat-lx-other" \
+eq "$(field L-held assignee)" "gc-toolkit__polecat-hq-other" \
    "(OWNRUN) …and a step another live session holds keeps its holder"
 eq "$(field root-LIVE gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
    "(OWNRUN) …and the root is not rewritten"
@@ -1846,7 +1855,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 # The proof the guard exists for: the terminal step is still CLOSABLE after the
 # release, by the same resolution the formula's terminal block uses.
 SCRC=0
-SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
   bash "$HERE/step-close.sh" --step mol-sample.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
 live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
@@ -1859,7 +1868,7 @@ eq "$(field L-live status)" "closed" \
 # This one proves what the store holds afterwards, which is the thing the bug
 # is about: a bead whose disposition landed must not come back as open work.
 FOLDRC=0
-FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
   sh "$SCRIPT" takeaway A-FOLD "superseded by A-CARRIER; the pour raced the fold" \
      --by proactive --release 2>"$LIVE/folderr")" || FOLDRC=$?
 FOLDERR="$(cat "$LIVE/folderr")"
@@ -1867,7 +1876,7 @@ live_store_intact   # the fold release's writes landed, or this is disk pressure
 eq "$FOLDRC" "0" "(FOLDSTORE) the release on a folded anchor succeeds"
 eq "$(field A-FOLD status)" "closed" \
    "(FOLDSTORE) the anchor is still CLOSED — its disposition was not resurrected"
-eq "$(field A-FOLD assignee)" "gc-toolkit__polecat-lx-old" \
+eq "$(field A-FOLD assignee)" "gc-toolkit__polecat-hq-old" \
    "(FOLDSTORE) …still assigned as it was closed"
 eq "$(field A-FOLD gc.routed_to)" "human" \
    "(FOLDSTORE) …and its route survives the release"
@@ -1885,7 +1894,7 @@ grep -q 'ended run root-FOLD of A-FOLD through gascity' <<< "$FOLDOUT" \
 FOLDW="$(grep -E '^update bd update (F-|root-FOLD)' "$LIVE_LOG" || true)"
 [ -z "$FOLDW" ] && ok "(FOLDSTORE) gc-helm.sh writes none of that run's beads; gascity's cancel closes them" \
   || bad "(FOLDSTORE) the release wrote the folded run's beads: $FOLDW"
-eq "$(field F-held assignee)" "gc-toolkit__polecat-lx-other" \
+eq "$(field F-held assignee)" "gc-toolkit__polecat-hq-other" \
    "(FOLDSTORE) …so a step another live session holds is not reassigned under it"
 grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
   && ok "(FOLDSTORE) …and the run names the disposition it kept" \
@@ -1921,9 +1930,9 @@ PATH="$SAVED_PATH"; export GC_RUN_CANCEL_TOOL="$SAVED_CANCEL_TOOL"; unset GC_CIT
 
 # ── the rig-enumeration helper restores the caller's trap table ──────────────
 # A trap is process-global: one installed inside a helper and left there
-# rewrites how every later line of the caller answers a signal, and outlives
-# the file it was installed to remove. The helper is lifted and run directly
-# — every real call site is a command substitution, whose subshell would hide
+# rewrites how every later line of the caller answers a signal. The helper is
+# lifted and run directly, with the real rig-map.sh it reads the map through —
+# every real call site is a command substitution, whose subshell would hide
 # the residue. Assert the table is unchanged across the call, not that it is
 # empty: a caller can inherit a disposition the helper never touches — a parent
 # that ignores SIGPIPE shows up as `trap -- '' SIGPIPE`, which bash reports and
@@ -1938,11 +1947,11 @@ exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
 # The probe sources city-liveness.sh ($2) first, for the projection the helper
-# runs, as the script does.
+# runs, as the script does, and finds rig-map.sh in $3, as the script finds it
+# beside itself.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
-PROG=probe; FIXTURE=""; RIGS=""; TIMEOUT_BIN=""
-with_timeout() { shift; "$@"; }
+PROG=probe; FIXTURE=""; RIGS=""; SCRIPT_DIR="$3"
 . "$2"
 . "$1"
 before="$(trap)"
@@ -1953,15 +1962,15 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" "$HERE" 2>&1 || true)"
 grep -q 'RIGS\[\[' <<< "$EOUT" \
-  && ok "(ENUM) the helper enumerated, so the temp-file path really ran" \
+  && ok "(ENUM) the helper enumerated, through rig-map.sh" \
   || bad "(ENUM) the helper did not enumerate (out: $EOUT)"
 grep -q 'TRAPDELTA\[\]' <<< "$EOUT" \
   && ok "(ENUM) …and left the caller's trap table as it found it" \
   || bad "(ENUM) the helper changed the caller's traps (out: $EOUT)"
-eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
-   "(ENUM) …and removed its stderr capture"
+eq "$(find "$ENUMTMP" -name 'gctk-rig-map.*' | wc -l | tr -d ' ')" "0" \
+   "(ENUM) …and rig-map.sh removed its stderr capture"
 
 echo ""
 echo "── react: an already-reacted skip is a distinct exit, not a silent dispatch ──"

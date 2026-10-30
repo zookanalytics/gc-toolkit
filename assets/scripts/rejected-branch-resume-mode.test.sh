@@ -87,13 +87,15 @@ VARS="$(grep -o '{{[^}]*}}' "$TMP/block.sh" | sort -u | tr '\n' ' ')"
 eq "$VARS" "" "every formula var in the block is rendered"
 bash -n "$TMP/block.sh" && ok "the block is valid bash" || bad "the block is valid bash" "bash -n failed"
 # The audit-entry block concludes a conflicted merge, and the stop-and-ask
-# block stops one to ask a person.
+# block stops one to ask a person. Each names the pack's binding through
+# {{binding_prefix}}, rendered as the pour renders it: gc-toolkit. here.
 for b in bring-current-audit-entry bring-current-unresolvable; do
-  awk -v m="$b" '$0 == "# >>> " m {f=1; next} $0 == "# <<< " m {f=0} f' "$TOML" > "$TMP/$b.sh"
+  awk -v m="$b" '$0 == "# >>> " m {f=1; next} $0 == "# <<< " m {f=0} f' "$TOML" \
+    | sed 's#{{binding_prefix}}#gc-toolkit.#g' > "$TMP/$b.sh"
   if [ -s "$TMP/$b.sh" ] && [ -z "$(grep -o '{{[^}]*}}' "$TMP/$b.sh")" ] && bash -n "$TMP/$b.sh"; then
-    ok "the $b block is extracted, needs no formula var, and is valid bash"
+    ok "the $b block is extracted, needs no formula var but the binding, and is valid bash"
   else
-    bad "the $b block is extracted, needs no formula var, and is valid bash"
+    bad "the $b block is extracted, needs no formula var but the binding, and is valid bash"
   fi
 done
 
@@ -116,6 +118,10 @@ SH
 cat > "$BIN/gc" <<'SH'
 #!/usr/bin/env bash
 printf 'gc %s\n' "$*" >> "$CALLS"
+if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
+  [ -n "${STUB_PACK:-}" ] || exit 1
+  printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 verb="${2:-}"; id="${3:-}"
 case "$verb" in
@@ -137,8 +143,8 @@ esac
 exit 0
 SH
 chmod +x "$BIN/git" "$BIN/gc"
-# The pack scripts the audit-entry and stop-and-ask blocks call, found through
-# GC_PACK_DIR. bring-current-audit.sh writes an entry (add) or a question (ask)
+# The pack scripts the audit-entry and stop-and-ask blocks call, in the pack the
+# gc stub names for `gc gc-toolkit scripts-dir`. bring-current-audit.sh writes an entry (add) or a question (ask)
 # to the bead through the gc stub and prints the bead's anchor (anchor), and
 # await-ruling.sh and run-cancel.sh record their calls.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
@@ -163,6 +169,9 @@ printf 'cancel %s\n' "$*" >> "$CALLS"
 SH
 chmod +x "$PACK/assets/scripts/bring-current-audit.sh" "$PACK/assets/scripts/await-ruling.sh" \
   "$PACK/assets/scripts/run-cancel.sh"
+# hand-back.sh is the pack's own script, run for real. A bead with no molecule
+# parks through it, and the stub applies its metadata edits.
+cp "$HERE/hand-back.sh" "$PACK/assets/scripts/hand-back.sh"; chmod +x "$PACK/assets/scripts/hand-back.sh"
 
 # --- Histories. -----------------------------------------------------------------
 # A bare origin whose main holds the merge base. polecat/w1 adds a file of its
@@ -211,13 +220,13 @@ run_block() {
 }
 # again <block-file> [<VAR=value>...] — a block run in $C against the store as
 # the last run left it, the way the bead's next step or next run reaches it.
-# The blocks look for the pack under GC_RIG_ROOT and GC_CITY_PATH after
-# GC_PACK_DIR, and in a city those lead to a real checkout, so both are unset and
-# only the stub pack can answer. Sets RC.
+# gc names the stub pack. GC_RIG_ROOT and GC_CITY_PATH are unset, since in a
+# city they lead to a real checkout, so a block that looked there instead would
+# find nothing. Sets RC.
 again() {
   local f="$1"; shift
   rm -f "$AT_MERGE"
-  ( cd "$C" && env -u GC_RIG_ROOT -u GC_CITY_PATH PATH="$BIN:$PATH" GC_PACK_DIR="$PACK" WORK_BEAD_ID=tk-w "$@" bash "$f" ) > "$TMP/out" 2>&1
+  ( cd "$C" && env -u GC_RIG_ROOT -u GC_CITY_PATH PATH="$BIN:$PATH" STUB_PACK="$PACK" WORK_BEAD_ID=tk-w "$@" bash "$f" ) > "$TMP/out" 2>&1
   RC=$?
 }
 # set_meta <key> <value> — what another writer put on the bead between runs.
@@ -363,9 +372,11 @@ eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "" "(13) git refuses to start a 
 eq "$(meta rejection_reason)" "$CONFLICTS" "(13) …and the rejection stays"
 
 echo "# a stop to ask a person leaves the rejection, so the next run merges again"
+# The bead is held in_progress under polecat, the session the stop runs as, so a
+# bead with no molecule is this session's to hand back.
 for how in molecule bare; do
   clone polecat/w2
-  run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')")"
+  run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')" | jq -c 'map(.status = "in_progress" | .assignee = "polecat")')"
   set_meta conflict_audit '[{"path":"resolved-before-the-stop.txt"}]'
   if [ "$how" = molecule ]; then
     again "$TMP/bring-current-unresolvable.sh" CLAIMED_STEP_BEAD_ID=tk-step
@@ -375,7 +386,7 @@ for how in molecule bare; do
     grep -q '^cancel .*--bead tk-step ' "$CALLS" && ok "(14) molecule: …and its run is cancelled" \
       || bad "(14) molecule: …and its run is cancelled"
   else
-    again "$TMP/bring-current-unresolvable.sh"
+    again "$TMP/bring-current-unresolvable.sh" GC_SESSION_ID=polecat GC_SESSION_NAME= GC_AGENT= GC_ALIAS=
     eq "$(meta gc.routed_to)" "human" "(14) bare: the bead parks to a person"
   fi
   eq "$RC" "0" "(14) $how: the stop-and-ask block exits 0"

@@ -105,9 +105,10 @@ fi
 # inside a quiet window the call declares, and the wait needs an open gate. So
 # the filing each await-ruling.sh call follows declares no --quiet-window, or is
 # bring-current-audit.sh's ask, which declares none itself
-# (bring-current-audit.test.sh holds it to that).
+# (bring-current-audit.test.sh holds it to that). The refinery's patrol is read
+# too: merge-push makes a convoy's rebuild child wait on a gate.
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-polecat-work mol-validate mol-rig-demo; do
+  for f in mol-polecat-work mol-validate mol-rig-demo mol-refinery-patrol; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
@@ -162,12 +163,13 @@ else
 fi
 
 # --- Fakes for the executed blocks. -------------------------------------------
-# gc: `runtime drain-ack` records DRAIN; `bd show` answers $FAKE_SHOW; every
-# other call exits 0. The pack stubs record their verb and argv and exit with a
+# gc: `runtime drain-ack` records DRAIN; `bd show` answers $FAKE_SHOW;
+# `gc-toolkit scripts-dir` names the pack, $STUB_PACK; every other call exits 0. The pack stubs record their verb and argv and exit with a
 # code the case controls.
 mkdir -p "$TMP/bin" "$TMP/pack/assets/scripts"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show") printf '%s\n' "${FAKE_SHOW:-[]}"; exit 0 ;;
 esac
@@ -181,14 +183,16 @@ for v in human-gate:GATE await-ruling:AWAIT run-cancel:CANCEL step-close:STEPCLO
     printf 'exit "${FAKE_%s_RC:-0}"\n' "$verb"; } > "$TMP/pack/assets/scripts/$name.sh"
 done
 chmod +x "$TMP/bin/gc" "$TMP/pack/assets/scripts/"*.sh
-export PATH="$TMP/bin:$PATH" GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" TMP_ARGS="$TMP/args"
+export PATH="$TMP/bin:$PATH" STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" TMP_ARGS="$TMP/args"
 mkdir -p "$TMP_ARGS"
 
+# A block comes out with {{binding_prefix}} rendered as the pour renders it:
+# the binding the city imports the pack under plus a dot, gc-toolkit. here.
 extract() { # <formula> <marker>
   awk -v m="$2" '
     $0 ~ ("# >>> " m "$") {f=1; next}
     $0 ~ ("# <<< " m "$") {f=0}
-    f' "$ROOT/formulas/$1.toml"
+    f' "$ROOT/formulas/$1.toml" | sed 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 # run <block-file> [VAR=value...] -> "<rc>|<ordered verb log>"
 run() {

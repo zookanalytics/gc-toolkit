@@ -36,19 +36,23 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 # The flag-flip pulls the lines between the markers (exclusive). If a marker is
 # removed or renamed, which is exactly what a wholesale reconciliation against
 # base does, extraction yields nothing and the checks below fail loudly.
+# A block comes out with {{binding_prefix}} rendered as the pour renders it:
+# the binding the city imports the pack under plus a dot, gc-toolkit. here.
 extract() {
   awk -v m="$1" '
     $0 ~ ("# >>> " m "$") {f=1; next}
     $0 ~ ("# <<< " m "$") {f=0}
-    f' "$TOML"
+    f' "$TOML" | sed 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 
 # --- Fakes shared by both arms. ----------------------------------------------
 # gc : `runtime drain-ack` records DRAIN so the ordered verb log is provable,
-#      and `bd show` answers the validation pass at $FAKE_PASS_STATUS.
+#      `bd show` answers the validation pass at $FAKE_PASS_STATUS, and
+#      `gc-toolkit scripts-dir` names the pack, $STUB_PACK.
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show") printf '[{"id":"%s","status":"%s"}]\n' "$3" "${FAKE_PASS_STATUS:-open}"; exit 0 ;;
 esac
@@ -57,8 +61,8 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# human-gate.sh, run-cancel.sh resolved out of $GC_PACK_DIR exactly as the arm
-# resolves them. Each records its verb into the ordered trace and its argv where
+# human-gate.sh, run-cancel.sh in the pack the fake gc names for
+# `gc gc-toolkit scripts-dir`, $STUB_PACK. Each records its verb into the ordered trace and its argv where
 # the assertions can read it, and returns a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
 cat > "$TMP/pack/assets/scripts/human-gate.sh" <<'GATE'
@@ -74,7 +78,7 @@ printf '%s\n' "$*" >> "${FAKE_CANCEL:-/dev/null}"
 exit "${FAKE_CANCEL_RC:-0}"
 CANCEL
 chmod +x "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/run-cancel.sh"
-export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
+export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 
 # run <arm.sh> <VALIDATION_PASS> <ANCHOR> returns "<rc>|<ordered verb log>"
 #   FAKE_*_RC control each stub's exit; FAKE_GATE/CANCEL capture argv.

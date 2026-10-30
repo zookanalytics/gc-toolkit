@@ -461,7 +461,7 @@ func TestOpenRejectsBadBeadIDsWithoutExecuting(t *testing.T) {
 // The ids the city actually mints must all be accepted — a boundary that
 // rejects real rows is as broken as one that admits flags.
 func TestOpenAcceptsRealBeadIDs(t *testing.T) {
-	for _, good := range []string{"tk-abc12", "tk-yc00g", "tk-eemvf.3", "sl-kg9z6.4.1", "su-ab9je", "gc2-x1y2"} {
+	for _, good := range []string{"tk-abc12", "tk-yc00g", "tk-eemvf.3", "ra-kg9z6.4.1", "rb-ab9je", "gc2-x1y2"} {
 		t.Run(good, func(t *testing.T) {
 			f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: conversation tk-v filed on " + good + " — x.\n"}}
 			body, err := json.Marshal(actuateRequest{Bead: good})

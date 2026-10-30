@@ -133,6 +133,24 @@ harness_init() {
   { _stub_shebang; printf 'exec %q "$@" --db %q\n' "$here/queue-priority.sh" "$TMP/qp-rig/.beads"; } > "$BIN/queue-priority"
   chmod +x "$BIN/queue-priority"
   export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
+  # run-lib.sh's verbs, answered from this store. A script under test sources
+  # run-lib.sh through GC_RUN_LIB, so it gets run-lib.stub.sh, which serves the
+  # runs $BIN/harness-runs prints at each call: the runs the store's roots and
+  # convoys make, each row carrying its edges from the dep rows, by run-lib.sh's
+  # own run_rows. A case's roots and convoys are the runs it reads, and no stub
+  # here answers the reads behind them.
+  { _stub_shebang; printf '. %q || exit 1\n' "$here/run-lib.sh"; cat <<'RUNS'
+# A dep row is "A|TYPE|B": A <TYPE>-edges B, an edge that sits on A for every
+# type but blocks.
+jq -c --rawfile d "$STUB_DEPS" "$RUN_JQ"'
+  [ $d | split("\n")[] | select(length > 0) | split("|") | select(.[1] != "blocks")
+    | {issue_id: .[0], depends_on_id: .[2], type: .[1]} ] as $e
+  | map(. as $r | .dependencies = ((.dependencies // []) + [ $e[] | select(.issue_id == (($r.id // "") | tostring)) ]))
+  | run_rows' "$STUB_STORE"
+RUNS
+  } > "$BIN/harness-runs"
+  chmod +x "$BIN/harness-runs"
+  export GC_RUN_LIB="$here/run-lib.stub.sh" RUN_LIB_STUB_CMD="$BIN/harness-runs" RUN_LIB_STUB_FAIL="" RUN_LIB_STUB_LOG=""
 }
 
 store() { printf '%s' "$1" > "$STUB_STORE"; }
@@ -177,13 +195,18 @@ mk_sut_dir() { # <dir> <file>...
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
   # hold-lib.sh, the one definition of a hold, which deferred-dispatch.sh
-  # sources, and priority-lib.sh, the priority function, whose reading of a PR's
-  # approval pr-facts.sh sources, are sourced by sibling path the same way.
+  # sources, priority-lib.sh, the priority function, whose reading of a PR's
+  # approval pr-facts.sh sources, git-lib.sh, the one read of a branch's head on
+  # origin, which gate-ensure.sh and signoff.sh source, and run-lib.sh, the one
+  # reader of a run's link to its bead, are sourced by sibling path the same
+  # way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
   [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
   [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
+  [ -f "$here/git-lib.sh" ] && cp "$here/git-lib.sh" "$d/"
+  [ -f "$here/run-lib.sh" ] && cp "$here/run-lib.sh" "$d/"
   return 0
 }
 
@@ -288,7 +311,13 @@ case "$sub" in
           else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
-  *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
+  *)
+    # `gc <binding> scripts-dir`: gc names the pack it loaded for the binding the
+    # city imports it under. A suite names that pack in STUB_PACK.
+    if [ "$sub" = gc-toolkit ] && [ "${1:-}" = scripts-dir ] && [ -n "${STUB_PACK:-}" ]; then
+      printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+    fi
+    echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 verb="${1:-}"; shift || true
 # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
@@ -672,11 +701,14 @@ case "$verb" in
               else                  { if (b == id) print a "|" ty "|" issue "|" dep }   # legacy: who names me
             }' "$D"
         done)
+        # The rows reach jq through a pipe. A long dependency list passes the
+        # 128 KiB Linux allows any one argument, and bash writes a large
+        # here-string to a temp file, which a suite's file-size limit refuses.
         if [ "${#qids[@]}" -gt 1 ] && [ "$dir" = "down" ]; then
-          jq -c --arg rows "$rows" '[ $rows | split("\n")[] | select(. != "") | split("|")
+          printf '%s' "$rows" | jq -c --rawfile rows /dev/stdin '[ $rows | split("\n")[] | select(. != "") | split("|")
             | {issue_id: .[2], depends_on_id: .[3], type: .[1]} ]' -n || exit $?
         else
-          jq -c --arg rows "$rows" '
+          printf '%s' "$rows" | jq -c --rawfile rows /dev/stdin '
             [ $rows | split("\n")[] | select(. != "") | split("|") | {id: .[0], t: .[1]} ] as $want
             | [ .[] | . as $b | $want[] | select(.id == $b.id) | ($b + {dependency_type: .t}) ]' "$S" || exit $?
         fi
@@ -1029,6 +1061,15 @@ case "$sub" in
         done < <(grep -lF -- "\"$1\"" "$G"/threads_*.json 2>/dev/null)
         return 1
       }
+      # GraphQL answers only the fields a query names, so a review thread's
+      # comment keeps its review's state, which a dismissal is read from, and its
+      # reactionGroups only for a query that asks for each. asked($q) trims a
+      # list of comments to what the query $q names.
+      ASKED_JQ='def asked($q):
+        ($q | test("pullRequestReview\\s*\\{[^}]*\\bstate\\b")) as $st
+        | ($q | test("\\breactionGroups\\b")) as $rx
+        | map(if $st or (.pullRequestReview | type) != "object" then . else .pullRequestReview |= del(.state) end
+              | if $rx then . else del(.reactionGroups) end);'
       case "$gqquery" in
         *pullRequests\(states:OPEN*)
           # merge.sh's visit-order read: every open PR, served as one page from
@@ -1101,13 +1142,19 @@ case "$sub" in
         *reviewThreads*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
-          # `first: 100` is a real cap, so a thread longer than a page comes back
-          # cut to one — which is the whole reason the caller tops such a thread
-          # up. A stub handing back the full list would make that read look
-          # unnecessary and hide the resolve it gets wrong.
-          jq -c '{data: {repository: {pullRequest: {
+          # A thread's comments come back cut to the window the query names, its
+          # oldest for `first: N` and its newest for `last: N`, as the API cuts
+          # them. So a thread longer than a window comes back holding exactly one,
+          # which is the whole reason a caller reads such a thread again to its
+          # end. A stub handing back the full list would make that read look
+          # unnecessary and hide the answer it gets wrong.
+          jq -c --arg q "$gqquery" "$ASKED_JQ"'
+            (($q | capture("comments\\((?<end>first|last):(?<n>[0-9]+)")) // {end: "first", n: "100"}) as $w
+            | ($w.n | tonumber) as $n
+            | {data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
-                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])
+                  | if $w.end == "last" then .[-$n:] else .[0:$n] end | asked($q)) ]}}}}}' "$f"
           # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
           # hands back when a later page came back garbled.
           [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"
@@ -1119,9 +1166,9 @@ case "$sub" in
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           # The caller pages this one to exhaustion, so it answers with the whole
           # thread — the state the real API reaches after following its cursor.
-          jq -c --arg t "$tid" '{data: {node: {comments: {
+          jq -c --arg t "$tid" --arg q "$gqquery" "$ASKED_JQ"'{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
-              nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+              nodes: ([ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ] | asked($q))}}}}' "$f"
           exit 0 ;;
         *commits\(first:100,after:*)
           # The PR's commits, which a fix's answer cites. Served from the PR
@@ -1350,7 +1397,9 @@ case "$sub" in
     if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi ;;
   label)
     # The repo's label set, so `pr edit --add-label` can refuse one that was
-    # never created. `list` serves it (honouring -q); `create` appends if absent.
+    # never created. `list` serves it (honouring -q); `create` appends if absent;
+    # `edit` rewrites a label's description, refusing one that does not exist,
+    # as real gh does. Each keeps the description it was given.
     v="${1:-}"; shift || true
     LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
     case "$v" in
@@ -1358,12 +1407,21 @@ case "$sub" in
         lq=""
         while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; lq="${1:-}" ;; esac; shift || true; done
         if [ -n "$lq" ]; then jq -r "$lq" "$LBLS"; else cat "$LBLS"; fi ;;
-      create)
+      create|edit)
         name="${1:-}"; shift || true
-        [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
-        if ! jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
+        desc=""
+        while [ $# -gt 0 ]; do case "$1" in --description) shift; desc="${1:-}" ;; esac; shift || true; done
+        if [ "$v" = create ]; then
+          [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 && exit 0
           t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
-          jq --arg n "$name" '. + [{name: $n}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+          jq --arg n "$name" --arg d "$desc" '. + [{name: $n, description: $d}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+        else
+          [ "${STUB_LABEL_EDIT_RC:-0}" = "0" ] || exit "${STUB_LABEL_EDIT_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 \
+            || { echo "gh: label '$name' not found" >&2; exit 1; }
+          t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
+          jq --arg n "$name" --arg d "$desc" 'map(if .name == $n then .description = $d else . end)' "$LBLS" > "$t" && mv "$t" "$LBLS"
         fi
         exit 0 ;;
       *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;
@@ -1384,6 +1442,14 @@ case "$*" in
   # no repository under it and therefore no committed artifact to keep current.
   *"rev-parse --show-toplevel"*) printf '%s\n' "${STUB_TOPLEVEL:-}" ;;
   *"rev-parse --verify --quiet"*) printf '%s\n' "${STUB_FETCHED_HEAD:-}" ;;
+  # A rig's not-for-review.toml as its default branch carries it, served from
+  # the directory -C names: a test declares by writing the file there, and with
+  # no file there the branch carries none.
+  *"cat-file blob "*":not-for-review.toml"*)
+    dir=""; prev=""
+    for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done
+    [ -n "$dir" ] && [ -f "$dir/not-for-review.toml" ] || exit 128
+    exec cat "$dir/not-for-review.toml" ;;
   *"fetch "*) exit "${STUB_FETCH_RC:-0}" ;;
   *"ls-remote"*)
     # STUB_LS_REMOTE names a file of branch names, one per line, served in

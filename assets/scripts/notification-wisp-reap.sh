@@ -42,10 +42,10 @@ command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 1; }
 
 GC="${NOTIFICATION_WISP_REAP_GC:-gc}"
 
-# Resolve the city (HQ) store unless one was named. `gc rig list` reports the
+# Resolve the city (HQ) store unless one was named. The rig map reports the
 # city path directly; its `.beads` dir is the store the notices live in.
 if [ -z "$CITY_DB" ]; then
-    rigs_json="$("$GC" rig list --json 2>/dev/null)" || rigs_json=""
+    rigs_json="$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rig-map.sh")" || rigs_json=""
     CITY_DB="$(printf '%s' "$rigs_json" | jq -r '(.city_path // "") | if . == "" then empty else . + "/.beads" end' 2>/dev/null)"
 fi
 [ -n "$CITY_DB" ] || { echo "$PROG: could not resolve the city store (pass --db <path>/.beads) — reaping nothing" >&2; exit 1; }

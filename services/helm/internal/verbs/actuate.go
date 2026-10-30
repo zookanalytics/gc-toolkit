@@ -29,8 +29,8 @@ import (
 
 // DefaultTimeout bounds one gc-helm.sh write-verb run.
 //
-// Generous on purpose. No verb is one command: open enumerates rigs (itself
-// bounded at 30s by default, GC_HELM_RIG_TIMEOUT), reads the subject, scans the
+// Generous on purpose. No verb is one command: open enumerates rigs (through
+// rig-map.sh, bounded by GC_RIG_LIST_TIMEOUT), reads the subject, scans the
 // bead's conversations for one waiting in the queue, then creates a task and
 // files its edge; accept reads the bead's gates, resolves one, reads it back
 // and slings; engage spawns a converse session. Each of those is a `gc`/`bd` call against Dolt, and under

@@ -37,18 +37,18 @@ tk-jd4b8. Each reproduces on its own.
 
 ## Capture
 
-Town store (`/home/zook/loomington/.beads`), against `gc-toolkit.deacon` live
+Town store (`/home/zook/mycity/.beads`), against `gc-toolkit.deacon` live
 and patrolling. Sampled every 2s.
 
 Transition across the burn/claim boundary — the old wisp disappears and the
 new one appears already `open`:
 
 ```
-04:55:37Z  corrected=[{"id":"lx-wisp-ej2g","status":"in_progress","updated_at":"04:50:47Z"}]  shipped=[{"id":"lx-wisp-ej2g","status":"in_progress"}]
-04:55:41Z  corrected=[{"id":"lx-wisp-17k3","status":"open",       "updated_at":"04:55:37Z"}]  shipped=[]
+04:55:37Z  corrected=[{"id":"hq-wisp-ej2g","status":"in_progress","updated_at":"04:50:47Z"}]  shipped=[{"id":"hq-wisp-ej2g","status":"in_progress"}]
+04:55:41Z  corrected=[{"id":"hq-wisp-17k3","status":"open",       "updated_at":"04:55:37Z"}]  shipped=[]
 ```
 
-At `04:55:41Z` the deacon held `lx-wisp-17k3`, poured 4 seconds earlier and
+At `04:55:41Z` the deacon held `hq-wisp-17k3`, poured 4 seconds earlier and
 assigned to it. The shipped probe saw nothing.
 
 All four sites corrected by this bead were then sampled together at
@@ -57,13 +57,13 @@ All four sites corrected by this bead were then sampled together at
 | Fragment site | Query form | Result |
 |---|---|---|
 | `:40` Step 2 wisp freshness | shipped (`--status=in_progress`) | `[]` |
-| `:40` Step 2 wisp freshness | corrected (filter dropped) | `lx-wisp-17k3` `status=open` |
+| `:40` Step 2 wisp freshness | corrected (filter dropped) | `hq-wisp-17k3` `status=open` |
 | `:46` Step 2 broad plate read | shipped | `[]` |
-| `:46` Step 2 broad plate read | corrected | `lx-wisp-17k3` `status=open` |
+| `:46` Step 2 broad plate read | corrected | `hq-wisp-17k3` `status=open` |
 | `:66` quick-ref, check deacon work | shipped | `[]` |
-| `:66` quick-ref, check deacon work | corrected | `lx-wisp-17k3` `status=open` |
+| `:66` quick-ref, check deacon work | corrected | `hq-wisp-17k3` `status=open` |
 | `:67` quick-ref, patrol wisp (`--title`) | shipped | `[]` |
-| `:67` quick-ref, patrol wisp (`--title`) | corrected | `lx-wisp-17k3` `status=open` |
+| `:67` quick-ref, patrol wisp (`--title`) | corrected | `hq-wisp-17k3` `status=open` |
 
 Every site false-empties on the status axis alone, and every site is
 non-empty once the filter is dropped. The assignee axis is clean throughout —
@@ -71,7 +71,7 @@ the wisp carried `assignee=gc-toolkit.deacon` the whole time, so nothing here
 overlaps tk-9m8k7.
 
 An earlier sample from the mayor's dispatch note (`04:42:45Z`,
-`lx-wisp-7tz4`, `status=open`, assigned) shows the same window on a previous
+`hq-wisp-7tz4`, `status=open`, assigned) shows the same window on a previous
 cycle, so this is the normal shape of a patrol handoff and not a one-off.
 
 ## Why dropping the filter is safe

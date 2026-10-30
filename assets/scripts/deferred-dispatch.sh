@@ -687,10 +687,8 @@ cmd_notify() {
         echo "$PROG: $bead is closed, so no notice is owed"
         return 0
     fi
-    # A named session's hook finds its work by assignee alone, so a notice for
-    # anyone else would name a bead the agent is never offered.
     if [ "$assignee" != "$agent" ]; then
-        echo "$PROG: notify: $bead is not assigned to $agent${assignee:+ (its assignee is $assignee)}, so $agent's hook would never offer it. Assign it first: gc bd update $bead --assignee $agent" >&2
+        echo "$PROG: notify: $bead is not assigned to $agent${assignee:+ (its assignee is $assignee)}, and a notice is owed only for an assignment. Assign it first: gc bd update $bead --assignee $agent" >&2
         return 1
     fi
     if [ "$status" = "in_progress" ]; then
@@ -1057,7 +1055,7 @@ until_store_ref() {
     local want rigs name path
     want="$(cd "$BD_DB" 2>/dev/null && pwd -P)" || return 1
     [ -n "$want" ] || return 1
-    rigs="$(pass_child gc rig list --json 2>/dev/null)" || return 1
+    rigs="$(pass_child "$SCRIPTS_DIR/rig-map.sh")" || return 1
     while IFS=$'\t' read -r name path; do
         [ -n "$name" ] && [ -n "$path" ] || continue
         if [ "$(cd "$path/.beads" 2>/dev/null && pwd -P)" = "$want" ]; then

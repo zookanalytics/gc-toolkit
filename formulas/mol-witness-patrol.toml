@@ -123,9 +123,7 @@ mail lands on it as an occurrence. If it reports a different situation, re-run
 the block with DISTINCT=1, which passes --distinct:
 ```bash
 # >>> notice-finding
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
 # peek leaves the mail unread. The control-byte strip keeps a raw byte from
 # failing the parse; the body's escaped newlines survive it.
 MAIL_JSON=""
@@ -283,16 +281,19 @@ jq -c '[ .[]
 # A file that is not a JSON array is a failed listing, not a rig with no
 # candidates.
 if jq -e 'type == "array"' "$CANDIDATES" >/dev/null 2>&1; then
-  jq -r '.[] | .id + " " + .owner' "$CANDIDATES"
+  jq -r '.[] | .id + " " + .owner + " " + .owner + ":" + (.status // "") + ":" + (.assignee // "")' "$CANDIDATES"
 else
   echo "witness: the candidate listing did not parse; no orphan recovery this cycle" >&2
 fi
 rm -f "$CANDIDATES"
 # <<< candidate-pipeline
 ```
-The block prints one row per candidate, `<bead> <owner>`. The bead id is the
-`<bead>` the parts below act on, and the owner is the loop's `OWNER`. No rows
-means no candidates. A `did not parse` line means the listing itself failed,
+The block prints one row per candidate, `<bead> <owner> <claim>`. The bead id
+is the `<bead>` the parts below act on, and the owner is the loop's `OWNER`.
+`<claim>` is the loop's `CLAIM`: the owner, status and assignee the listing
+read, joined by colons, with nothing after the last colon for a bead that has
+no assignee. Part 5 hands `CLAIM` to the disposal as the claim this cycle
+judged. No rows means no candidates. A `did not parse` line means the listing itself failed,
 which is not a rig with nothing to recover: no candidate set exists this cycle,
 and orphan recovery stays blind until the listing reads again. Skip the rest of
 this step and file it
@@ -473,10 +474,13 @@ Classify by the dead states: `archived`, `closed`, `failed-create`, and
 work, but only after BOTH the exact lookup and the normalizing retry.
 Never classify on the exact lookup alone: a rig-qualified assignee whose
 session registered the bare alias resolves `absent` there while its owner
-is active. A `failed-create` session is a create that rolled back. gascity
-does not close its row while work is still assigned to it, so recovering
-that work is what lets the row close. Every other state is owned, and its
-bead is not orphaned. `active` and `awake` are live, and a live owner whose
+is active. A `failed-create` session is a create that rolled back. The
+rollback closes its row in the same write and frees none of the work
+assigned to it, so its owner then reads `absent`. A row whose close did not
+land stays open in `failed-create`. Both are dead states, so the work
+assigned to either is recovered here, whatever becomes of the row.
+Every other state is owned, and its bead is not orphaned. `active` and
+`awake` are live, and a live owner whose
 bead shows no progress is the warrant path below, not a punt. The rest,
 among them `start-pending`, `creating`, `asleep`, `suspended`, `draining`,
 and `quarantined`, mean the controller or the operator still owns the
@@ -500,9 +504,7 @@ loop's OWNER to a live session id — the target dance-probe.sh and `gc session
 kill` require — and refuses to file a warrant no dog can execute:
 ```bash
 # >>> warrant-file
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/file-warrant.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/file-warrant.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] || SCRIPTS=""
 DOG=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}dog") || true
 if [ -z "$DOG" ]; then
   echo "no live dog identity resolves from '{{binding_prefix}}dog'; a warrant nothing claims leaves the session wedged and still reports success, so file a human gate on the bead instead of the warrant." >&2
@@ -532,9 +534,7 @@ BEAD_JSON=$(gc bd show <bead> --json)
 WORKTREE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.work_dir // empty')
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 STORE_REF=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata["gc.root_store_ref"] // empty')
-BC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/branch-context.sh" ] && { BC="$c/assets/scripts/branch-context.sh"; break; }
-done
+BC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/branch-context.sh" && [ -x "$BC" ] || BC=""
 eval "$("$BC" resolve --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH")"
 # sets RIG_ROOT, OWNER_REPO, OWNING_ORIGIN_URL, REPO_CTX, BRANCH_ON_ORIGIN
 ```
@@ -690,9 +690,7 @@ bead:
 
 ```bash
 # >>> owning-store-guard
-BS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/bead-store.sh" ] && { BS="$c/assets/scripts/bead-store.sh"; break; }
-done
+BS="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/bead-store.sh" && [ -x "$BS" ] || BS=""
 OWNED=0
 if [ -z "$BS" ]; then
   echo "witness: bead-store.sh not found — the store owning <bead> is unproven; REFUSING to remove $WORKTREE" >&2
@@ -736,22 +734,25 @@ still runs either way: a bead whose store cannot be named is exactly the bead a
 person needs to see, and leaving it owned hides it.
 
 Then hand the bead to `orphan-dispose.sh`, which picks the disposal from what
-the bead IS:
+the bead IS. Hand it the claim this cycle judged as well, the `CLAIM` from the
+bead's row, as the row printed it. The disposal releases only that claim. A
+bead that names another owner, status or assignee when the disposal reads it,
+or that another writer takes or settles before the release lands, is skipped as
+that writer left it, and the next cycle judges it again:
 
 ```bash
-OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/orphan-dispose.sh" ] && { OD="$c/assets/scripts/orphan-dispose.sh"; break; }
-done
+OD="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/orphan-dispose.sh" && [ -x "$OD" ] || OD=""
 DISPOSE_RESULT=""; DISPOSE_RC=0
 if [ -z "$OD" ]; then
   echo "orphan-dispose.sh not found — NOT disposing of <bead>; it stays owned and returns next cycle" >&2
 else
   # Capture the disposal's own verdict: it decides whether this bead was RETURNED
-  # to the pool (result=disposed) or left untouched (result=skipped — a root, or a
-  # source already in a downstream court). `|| DISPOSE_RC=$?` keeps a non-zero exit
-  # (3 partial, 1 failed) from killing the step under set -e; the JSON is printed
-  # before either exit, so DISPOSE_RESULT still reads.
-  DISPOSE_JSON=$("$OD" <bead> --owner "$OWNER" --apply --json) || DISPOSE_RC=$?
+  # to the pool (result=disposed) or not (result=skipped — a root, a source
+  # already in a downstream court, or a bead whose claim changed after the
+  # listing). `|| DISPOSE_RC=$?` keeps a non-zero exit (3 partial, 1 failed) from
+  # killing the step under set -e; the JSON is printed before either exit, so
+  # DISPOSE_RESULT still reads.
+  DISPOSE_JSON=$("$OD" <bead> --claim "$CLAIM" --apply --json) || DISPOSE_RC=$?
   printf '%s\n' "$DISPOSE_JSON"
   DISPOSE_RESULT=$(printf '%s' "$DISPOSE_JSON" | jq -r '.result // ""')
 fi
@@ -793,18 +794,19 @@ half-released, and it needs a finding
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
 
-A disposal that SKIPPED changed nothing — a workflow root, or a source whose work
-already reached a downstream court — so it is not a recovery and must not be
-recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
+A disposal that SKIPPED returned nothing to the pool — a workflow root, a source
+whose work already reached a downstream court, or a bead whose claim changed
+after the listing — so it is not a recovery and must not be recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
 signal a RATE for work that was never re-dispatched, the moot escalation this
 whole filter exists to stop. Gate the record on the disposal's own verdict:
 ```bash
 # >>> recovery-stamp-gate
 # STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
 # (result=disposed: a released step, or a delegated source or review). Every other
-# verdict — skipped (a root, or a source already in a downstream court), partial,
-# failed, or an unread empty — returned nothing to the pool, so no recovery is
-# stamped and no crash-loop rate is read.
+# verdict — skipped (a root, a source already in a downstream court, or a bead
+# whose claim changed after the listing), partial, failed, or an unread empty —
+# returned nothing to the pool, so no recovery is stamped and no crash-loop rate
+# is read.
 case "${DISPOSE_RESULT:-}" in
   disposed) STAMP_RECOVERY=1 ;;
   *)        STAMP_RECOVERY=0 ;;
@@ -894,14 +896,13 @@ interval and a rebase task once the fix pool claims it, so their count is
 transient churn rather than a health signal, and a nudge asserting a count goes
 stale the moment the queue drains. What a human must see is one bead that has
 sat untouched far past that turnover, which the session is failing to advance.
-File a human gate on only that.
+File a human gate on only that. A bead something holds is waiting, not stuck: a
+landing bead sits in the queue from the moment its integration effort is stood
+up, and find-work leaves it until the effort's beads and its summary task close.
 ```bash
 # >>> refinery-stuck-handoff
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/human-gate.sh" ] && [ -x "$c/assets/scripts/patrol-finding.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-: "${SCRIPTS:?human-gate.sh, patrol-finding.sh and resolve-route.sh not found in the pack}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
+: "${SCRIPTS:?human-gate.sh, patrol-finding.sh, resolve-route.sh, bd-lib.sh and hold-lib.sh not found in the pack}"
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an
 # address no agent holds as a valid empty array, which reads exactly like a
@@ -932,7 +933,29 @@ fi
 # carries one and belongs to the cadence, and is unassigned anyway) that has sat
 # past the bound. A listing that is not an array yields nothing (STUCK_N empty),
 # which the unreadable arm below catches and reports.
-STUCK=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) | {id, updated_at} ] else empty end' 2>/dev/null) || STUCK=""
+PAST=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) ] else empty end' 2>/dev/null) || PAST=""
+# A bead something holds, by hold-lib.sh's definition, is waiting, not stuck,
+# so it files nothing. The rest are aged from the later of their last write and
+# the close that released their last hold: a landing bead whose summary task has
+# just closed was last written when its effort was stood up. A bead held only by
+# a blocker the store does not return stays: find-work never takes it, and
+# nothing releases it until that blocker reads back or the edge goes. A walk
+# that cannot read leaves STUCK_N empty under HOLD_RC.
+HOLD_RC=0
+STUCK="$PAST"
+cr_hold_read() { gc bd list --all --include-gates --include-infra --include-templates --id="$1" --json --limit=0; }
+if [ -n "$PAST" ] && [ "$PAST" != "[]" ]; then
+  JUDGED=""
+  if . "$SCRIPTS/bd-lib.sh" && . "$SCRIPTS/hold-lib.sh"; then
+    JUDGED=$(printf '%s' "$PAST" | hold_annotate cr_hold_read) || JUDGED=""
+  fi
+  if [ -n "$JUDGED" ]; then
+    STUCK=$(printf '%s' "$JUDGED" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" '[ .[] | select(.hold.state != "held") | ([.updated_at, .hold.released_at] | map(fromdateiso8601? // empty) | max) as $since | select($now - $since > $max) | {id, since: ($since | todate), why: (if .hold.state == "unread" then .hold.why else "" end)} ]' 2>/dev/null) || STUCK=""
+  else
+    STUCK=""
+    HOLD_RC=1
+  fi
+fi
 STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty end' 2>/dev/null) || STUCK_N=""
 case "${STUCK_N:-}" in
   ''|*[!0-9]*) STUCK_N="" ;;
@@ -945,6 +968,12 @@ if [ -z "$REFINERY" ]; then
   # this patrol's run is a wisp, so it is a patrol finding, not a human gate.
   echo "check-refinery: no live refinery identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery'; read no queue and withdrew nothing; reporting the blind monitor" >&2
   "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key witness-refinery-queue-unroutable --title "check-refinery cannot resolve the refinery address for rig ${GC_RIG:-<unset>}" --message "check-refinery cannot resolve the refinery address it builds for rig ${GC_RIG:-<unset>} to a live agent identity, so it read no queue. A listing at an address no agent holds returns an empty array that looks like a clean queue, so the stuck-handoff monitor is blind until the address resolves. Compare the binding_prefix this witness patrol was poured with against the refinery identity in gc agent list." || echo "check-refinery: refinery address unroutable AND the finding was not filed" >&2
+elif [ "$HOLD_RC" -ne 0 ]; then
+  # The queue read, but what holds the handoffs past the bound did not, so a
+  # handoff waiting on its blockers cannot be told from a stuck one. That is the
+  # blind monitor too, reported under the same key as an unreadable queue.
+  echo "check-refinery: could not read what holds the handoffs past the stuck bound; reporting the blind monitor" >&2
+  "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key witness-refinery-queue-unreadable --title "check-refinery cannot read what holds the refinery handoffs" --message "check-refinery read the refinery queue but not what holds the handoffs that have sat past the stuck bound (the hold-lib.sh walk over their blockers failed), so it cannot tell a handoff waiting on its blockers from a stuck one. The stuck-handoff monitor is blind until those reads answer. Inspect the store's health." || echo "check-refinery: hold walk unreadable AND the finding was not filed" >&2
 elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # Genuinely unreadable: bd failed, or the listing is not a JSON array even
   # after the control-byte strip. A silent stderr log here was the defect this
@@ -960,8 +989,10 @@ else
   # A stuck handoff is still stuck on the next pass, which detects it again, so
   # the call declares a quiet window: a person's moot or benign answer stands
   # for a day.
-  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.updated_at // "unknown")' | while read -r SID SWHEN; do
-    "$SCRIPTS/human-gate.sh" --subject "$SID" --key witness-refinery-queue --quiet-window 86400 --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." >/dev/null || echo "check-refinery: the human gate was not filed for $SID" >&2
+  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.since // "unknown") + " " + (.why // "")' | while read -r SID SWHEN SWHY; do
+    SNOTE=""
+    [ -z "$SWHY" ] || SNOTE=" It waits on $SWHY, a blocker this store does not return, so find-work leaves it: restore that bead or remove the edge."
+    "$SCRIPTS/human-gate.sh" --subject "$SID" --key witness-refinery-queue --quiet-window 86400 --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session.$SNOTE" >/dev/null || echo "check-refinery: the human gate was not filed for $SID" >&2
   done
 fi
 # A handoff that has left the refinery queue is no longer sitting unprepared, so
@@ -994,7 +1025,8 @@ fi
 # gate on the handoff open, and the line that reports it names what kept them.
 #
 # The candidate pass runs only after a queue read that parsed as an array
-# ($STUCK_N set), at an address the roster verified (resolve-route.sh exit 0).
+# ($STUCK_N set, which a failed hold walk leaves empty too), at an address the
+# roster verified (resolve-route.sh exit 0).
 # A failed queue read leaves every gate as it is until a later cycle reads the
 # queue, and so does an unreadable roster (exit 3): the address is then the
 # rendered name echoed back unproven, and the role each candidate is compared
@@ -1073,22 +1105,24 @@ fi
 # <<< refinery-stuck-handoff
 ```
 One human-gate.sh call per stuck bead: the gate blocks that handoff, and the
-helper files nothing while an open gate under the key already blocks it, so
-each stuck bead gets its own gate and a churning queue files none. A stuck bead
+helper files nothing while an open gate under the key already blocks it, so each
+stuck bead gets its own gate and a churning queue files none. A stuck bead
 reaches a human through a gate on the bead rather than a nudge whose count goes
-stale. A queue that will not parse even after the control-byte strip is
-reported once under its own key as a patrol finding, so a blinded monitor is
-surfaced rather than silently trusted. A refinery address that resolves to no
-live agent is blind the same way and is reported under a key of its own,
+stale. A queue that will not parse even after the control-byte strip is reported
+once under its own key as a patrol finding, and so is a queue whose holds cannot
+be read, so a blinded monitor is surfaced rather than silently trusted. A held
+bead files nothing, and a wait is aged from the close that released its last
+hold when that is later than its last write. A refinery address that resolves to
+no live agent is blind the same way and is reported under a key of its own,
 without reading a queue. The counterpart withdrawal closes the loop. A handoff
-an open gate under the key blocks, which a queue read at the refinery's
-verified address no longer carries, is read by id, and its gates are withdrawn
-through human-gate.sh --retract only when that read shows the handoff closed,
-prepared, or assigned away from the refinery, and shows the same for every
-other bead those gates block. A listing that omits a handoff still sitting with
-the refinery withdraws nothing, a handoff that cannot be read keeps its gate,
-and a gate shared with a handoff still in the queue stays open for both. Close
-this step and continue to next-iteration."""
+an open gate under the key blocks, which a queue read at the refinery's verified
+address no longer carries, is read by id, and its gates are withdrawn through
+human-gate.sh --retract only when that read shows the handoff closed, prepared,
+or assigned away from the refinery, and shows the same for every other bead
+those gates block. A listing that omits a handoff still sitting with the
+refinery withdraws nothing, a handoff that cannot be read keeps its gate, and a
+gate shared with a handoff still in the queue stays open for both. Close this
+step and continue to next-iteration."""
 
 [[steps]]
 id = "next-iteration"

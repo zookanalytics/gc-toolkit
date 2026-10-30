@@ -94,9 +94,7 @@ description = """
 ## 1. Prime and home-rig gate
 
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 gc prime
 gc bd prime
 REPO="$(git rev-parse --show-toplevel)"
@@ -126,9 +124,7 @@ an unreadable listing for ANY store sets `DISTILL_RUN=aborted`, closes this
 step `--outcome fail`, and files nothing — never judge on partial data.
 
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 # Rig set: a poured {{rig_list}} wins; else enumerate. `gc rig list --json`
 # returns an OBJECT ({"rigs":[...]}), and the HQ entry is addressable only by
 # PATH (`--rig <city>` fails) — so carry name + path per line.
@@ -271,9 +267,7 @@ truth; never restate it in parallel prose.
 ## 0. Carry the run disposition
 
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — nothing to judge here."
@@ -365,9 +359,7 @@ Inventory = every adopted entry across every carrier, read from origin/main.
 seeded placeholders); do not re-derive the same anchor grep here:
 ```bash
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
-RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO"; do
-  [ -x "$c/assets/scripts/learning-recurrence.sh" ] && { RECUR="$c/assets/scripts/learning-recurrence.sh"; break; }
-done
+RECUR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/learning-recurrence.sh" && [ -x "$RECUR" ] || RECUR=""
 if [ -n "$RECUR" ]; then
   "$RECUR" --inventory --repo "$REPO" --ref origin/main
   # Both calls read origin/main: the working tree of a pack checkout can be
@@ -433,9 +425,7 @@ one; it never blocks.
 ## 0. Carry the run disposition
 
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — no bead filed, no observation stamped."
@@ -540,9 +530,7 @@ A contested rule is a human gate on its pattern bead under the key
 `distiller-contention`: the pattern's rule waits on the operator's ruling, and
 the helper files nothing while that gate is open.
 ```bash
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/human-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$PATTERN" --key distiller-contention \
   --message "Contested rule: <rule summary>
 <the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" >/dev/null \
@@ -552,17 +540,13 @@ done
 ## 4. Summarize and drain
 
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
 echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held/surfaced H, G human gate(s), discarded D, stamped S observation(s)."
 # The loop's success metric, in the run log where the run that moved it is
 # visible. It also runs standalone, which is how the metric is read while
 # this order is disabled.
 REPO="${REPO:-$(git rev-parse --show-toplevel 2>/dev/null)}"
-RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO"; do
-  [ -x "$c/assets/scripts/learning-recurrence.sh" ] && { RECUR="$c/assets/scripts/learning-recurrence.sh"; break; }
-done
+RECUR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/learning-recurrence.sh" && [ -x "$RECUR" ] || RECUR=""
 if [ -n "$RECUR" ]; then
   # --ref origin/main for the same reason the retirement pass passes it: the
   # working tree can be stale or carry this run's own unmerged proposals.

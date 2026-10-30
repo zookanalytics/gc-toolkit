@@ -34,15 +34,17 @@
 #                             the operator's queue covers either way.
 #   $openprs $worked $husks $preopen_green
 #                             the reads beyond the bead set: open PR urls,
-#                             convoy-worked bead ids, husk step ids, and the
-#                             pre_open_gate anchors whose every pre-open gate
-#                             derives green, as an {anchor-id: true} map the
-#                             sweep builds through lane-state.sh. Each arm that
-#                             reads one drops only the beads its input names,
-#                             so an empty input drops nothing. That is what
-#                             lets the precheck pass them empty and keep a
-#                             survivor set that contains the sweep's
-#                             candidates.
+#                             the ids of the beads live runs work, husk step
+#                             ids, and the pre_open_gate anchors whose every
+#                             pre-open gate derives green, as an {anchor-id:
+#                             true} map the sweep builds through
+#                             lane-state.sh, in which an anchor whose head the
+#                             sweep could not read is "unread" instead. Each
+#                             arm that reads one drops only the beads its
+#                             input names, so an empty input drops nothing.
+#                             That is what lets the precheck pass them empty
+#                             and keep a survivor set that contains the
+#                             sweep's candidates.
 #
 # Every drop is a NAMED class. Structural edges fold in from $alive: a parent
 # is gated iff a not-closed child names it (the child holds the edge), and an
@@ -114,6 +116,10 @@ LIVENESS_CLASSIFY_JQ='
   # absent from the map.
   def pre_open_all_green:
     ($preopen_green[(.id // "")] // false) == true;
+  # A pre_open_gate anchor whose head the sweep could not read this pass, so
+  # whether it waits only on pr-open.sh is unknown, and the sweep holds it.
+  def pre_open_unread:
+    ($preopen_green[(.id // "")] // false) == "unread";
   # A conversation that covers its subject. One in the queue of the operator
   # (`human`) covers it: a person is already asked, as human_side_on below and
   # the board read it. One a sitting holds covers it while that sitting
@@ -157,6 +163,7 @@ LIVENESS_CLASSIFY_JQ='
                  and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
                 then "gated"
            elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_all_green) then "gated"
+           elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_unread) then "unread"
            elif (($gatedparents | index($b.id)) != null) then "gated"
            elif ([ .dependencies[]? | select((.type // "") == "tracks")
                    | select(($aliveset[(.depends_on_id // "")] // false)) ] | length > 0) then "gated"

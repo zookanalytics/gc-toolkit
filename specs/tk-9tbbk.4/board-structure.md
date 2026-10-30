@@ -93,12 +93,12 @@ left alone (already capped and recency-ordered).
 ## Cross-rig beads stay
 
 The board is the cross-rig human-attention surface by design (its own header and
-README say so), so cross-rig beads remain on it — a signal-loom decision and a
+README say so), so cross-rig beads remain on it — a rig-a decision and a
 gc-toolkit decision are both `gate` rows, distinguished by the rig column, which
 is the right axis. No rig-based filter was added: which rigs belong on the
 operator's board is a policy the operator sets, not a structural fix, and the
 attention-type bands plus the rig column already organise the interleaving the
-brief raised. If the operator wants product-strategy beads (signal-loom
+brief raised. If the operator wants product-strategy beads (rig-a
 monetization/brand) scoped out, that is a follow-up policy toggle, not a change
 to this structure.
 

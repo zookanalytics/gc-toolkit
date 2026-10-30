@@ -39,7 +39,8 @@ turn at all. **If there is important information you want to communicate to
 the operator — a live decision, a routing answer, anything they need to read
 or may want to respond to, anything past "settled and done" — do not sign off
 this turn.** Post the hand-back in the shape the prompt's Definitions define
-(**The hand-back**), leave the conversation OPEN, and wait for operator input
+(**The hand-back**), recorded on the conversation first by the block below the
+sign-off's shape, leave the conversation OPEN, and wait for operator input
 the way a held sitting does; signing off now would close the conversation
 under a message they have not read. A gate the operator has already ruled on
 is still answered now, through the sign-off's `--answer` (step 8), so a
@@ -201,10 +202,15 @@ with its recommendation.>
 ```
 A converse is about its one subject; name another bead only where the
 conversation's substance genuinely leads there, and then as a plain
-sentence. The sign-off already closed the conversation, so nothing is said
-after this message, and you do not drain: `converse-reap` ends the session
-once nobody is attached.
-
+sentence. Record it on the conversation just before you post it (the
+prompt's **Record each hand-back on the conversation, then post it**):
+```bash
+"$CONV/gc-helm.sh" handback "$CONVERSATION" <<'HANDBACK'
+<the sign-off as you post it>
+HANDBACK
+```
+The sign-off already closed the conversation, so nothing is said after this
+message.
 **If this sitting ROUTED work, file and send it, then pass
 `--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
 `work` skill says which bead carries the work and how to choose its formula.
@@ -269,4 +275,9 @@ to. The sign-off is owed to a sitting that was **held**; one closed before any
 framing was posted (step 2's `moot` or `benign`) asked the operator nothing,
 so closing it silently is the contract.
 
-Then go to step 8 (the `converse-continue` skill).
+Then drain: a closed conversation ends this session (the prompt's **How this
+thread ends**). Run `gc runtime drain-ack` once the sign-off has closed the
+conversation and its message is posted, and run nothing after it. A sign-off
+that stopped short leaves the conversation open and the sitting not over:
+repair what `converse-signoff.sh` printed, or raise it in the thread, and do
+not drain.

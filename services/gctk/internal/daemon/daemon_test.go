@@ -82,14 +82,14 @@ func TestCity(t *testing.T) {
 
 	t.Run("basename when city.toml declares no workspace name", func(t *testing.T) {
 		clearCityEnv(t)
-		dir := filepath.Join(t.TempDir(), "loomington")
+		dir := filepath.Join(t.TempDir(), "mycity")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv("GC_CITY_PATH", dir)
 		got, ok := City()
-		if !ok || got != "loomington" {
-			t.Fatalf("City() = (%q, %v), want (loomington, true)", got, ok)
+		if !ok || got != "mycity" {
+			t.Fatalf("City() = (%q, %v), want (mycity, true)", got, ok)
 		}
 	})
 

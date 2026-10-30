@@ -186,7 +186,7 @@ esac
 RIGS_JSON=""
 rigs_json() {
     [ -n "$RIGS_JSON" ] && { printf '%s' "$RIGS_JSON"; return 0; }
-    RIGS_JSON=$(gc rig list --json 2>/dev/null || true)
+    RIGS_JSON=$("$HERE/rig-map.sh" || true)
     printf '%s' "$RIGS_JSON"
 }
 

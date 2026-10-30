@@ -1,61 +1,85 @@
 // Package prstatus is a PR anchor's status: vocabulary — the one dimension that
-// names where a PR stands. It has two halves. The live tri-state — working,
-// needs-review, needs-attention — names what stands between an open PR and
-// landing, and [Derive] computes it from the facts the city records about the
-// anchor. The terminal states — merged, closed — name how a resolved PR ended.
-// They are stamped by the helm board off the anchor's close and its
-// merge_result, not returned by [Derive]: a resolved anchor freezes its live
-// facts at their last pre-merge values (a merged PR keeps posture=approved,
-// merge_state=CLEAN, and is never restamped), so the facts [Derive] reads carry
-// no merged-or-closed signal.
+// names where a PR stands. It has two halves. The live states — working,
+// merging, needs-review, needs-attention — say whose move it is on an open PR,
+// and [Derive] computes them from the facts the city records about the anchor.
+// The terminal states — merged, closed — name how a resolved PR ended. They are
+// stamped by the helm board off the anchor's close and its merge_result, not
+// returned by [Derive]: a resolved anchor freezes its live facts at their last
+// pre-merge values (a merged PR keeps posture=approved and is never restamped),
+// so the facts [Derive] reads carry no merged-or-closed signal.
 //
-// The `status:` PR label writer (assets/scripts/pr-status-label.sh) computes the
-// live tri-state through `gctk pr-status`, and the package is exported — not
-// internal — so the helm board (services/helm) derives the same per-bead state
-// from the same code rather than its own. One code path, so a bead's board
-// liveness and its PR label cannot disagree. The label path reconciles only open
-// PRs, so it never reaches for the terminal states; the board, which alone shows
-// a resolved row, is their only consumer.
+// Beside the one status value, [Held] names what holds an open PR that the city
+// will not clear on its own: an open human gate on the PR, review feedback the
+// city has not answered or a review thread the merge waits on, or a blocker no
+// automated actor will clear.
+// Each is a value of the `held:` label family, and more than one can stand.
+// Each names something a person has to act on, so [Derive] reads needs-attention
+// while any stands.
+//
+// The PR label writer (assets/scripts/pr-status-label.sh) computes the status
+// and the held values through `gctk pr-status`, and the package is exported —
+// not internal — so the helm board (services/helm) derives the same per-bead
+// state from the same code rather than its own. One code path, so a bead's
+// board liveness and its PR labels cannot disagree. The label writer takes both
+// label families off a PR that merged or closed, where GitHub's own state takes
+// over, so it never reaches for the terminal states; the board, which alone
+// shows a resolved row, is their only consumer.
 //
 // The rule is Derive's; gathering the facts is the caller's. The label path
 // reads them by shelling out to `gc bd`; a caller that already holds the bead,
 // such as the board through the beads library, hands Derive the same raw
-// metadata instead. Derive itself does no I/O.
+// metadata instead. Derive itself does no I/O. What the two gatherers read
+// about the anchor's work is fixed here, so they read the same beads: the
+// in-flight set over [InFlightStatuses], and the members of it [IsWork]
+// accepts.
 //
 // Derive reads only state the city records: the anchor's holds
-// (merge_hold/rebase_hold), whether an open human gate blocks it, the pr-facts.sh
-// posture and merge state, the draft-stage markers pr-open.sh records
-// (opened_as_draft, draft_readied), and the anchor's in-flight set — any live
-// bead carrying anchor_bead, the same membership test pr-facts.sh applies in
-// its own arms. It does not consult GitHub's review posture directly — the
-// working -> needs-review flip rests on that live work, which closes as it
+// (merge_hold/rebase_hold), whether an open human gate blocks it, whether a
+// blocker it waits on is a person's, the pr-facts.sh posture, the merge
+// cadence's machine verdict and its blocked cause, the merge cadence's count of
+// review threads waiting on the city's answer, the draft-stage markers
+// pr-open.sh records (opened_as_draft, draft_readied), and the anchor's
+// in-flight set — any live bead carrying anchor_bead, the same membership test
+// pr-facts.sh applies in its own arms. It does not read GitHub's merge state:
+// GitHub reports BLOCKED for a required check still running as it does for a
+// wedge, and the merge pass, which reads the branch's rules, is what tells the
+// two apart. It does not consult GitHub's review posture directly — the working
+// -> needs-review flip rests on that live work, which closes as it
 // hands back, so a sticky changes_requested never traps the value in working
-// after the set empties. Nor does it read GitHub's draft flag: a draft the
-// city opened is known by its markers, and a draft someone else made reads
-// like any other PR.
+// after the set empties. Nor does it read GitHub's draft flag: a draft the city
+// opened is known by its markers, and a draft someone else made reads like any
+// other PR.
 package prstatus
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // State is a PR anchor's status value: the live, mutually-exclusive `status:`
-// label group (working, needs-review, needs-attention) plus the board-only
-// terminal states (merged, closed) a resolved anchor shows.
+// label group (working, merging, needs-review, needs-attention) plus the
+// board-only terminal states (merged, closed) a resolved anchor shows.
 type State string
 
 const (
-	// Working: only the city has work left before the PR lands — live work is
-	// anchored to it (a rework or fix child, a validation pass, a review, a
-	// finding), a draft the city opened still waits on the checks that flip it
-	// ready, or an approved PR is merging. No human input is needed.
+	// Working: an unapproved PR the city is changing. Live work is anchored to
+	// it (a rework or fix child, a validation pass, a review, a finding), or a
+	// draft the city opened still waits on the checks that flip it ready. No
+	// human input is needed.
 	Working State = "working"
-	// NeedsReview: the only thing left before the PR lands is a human's review
-	// verdict on its settled head.
+	// Merging: an approved PR with no known blocker. The city has it and
+	// believes its next state is merged: required checks may still be running,
+	// a merge-in rework or other city work may be in flight, or it waits for the
+	// merge pass.
+	Merging State = "merging"
+	// NeedsReview: an unapproved PR with nothing in flight and nothing holding
+	// it. The only thing left before it lands is a human's review verdict on its
+	// settled head.
 	NeedsReview State = "needs-review"
-	// NeedsAttention: something only a human can clear blocks the merge — a
-	// merge or rebase hold, an open human gate that blocks the anchor, or an
-	// approved PR wedged at merge state BLOCKED with no rework in flight. Any hold
-	// only a human can release is one of these inputs, whatever work is in flight
-	// beside it.
+	// NeedsAttention: a blocker stands that the city will not clear on its own:
+	// a merge or rebase hold, anything [Held] names, a blocked verdict the merge
+	// pass recorded at the current head, or a recorded value the derivation has
+	// no word for.
 	NeedsAttention State = "needs-attention"
 
 	// Merged and Closed are terminal: the PR round-trip has ended, so nothing
@@ -67,10 +91,48 @@ const (
 	Closed State = "closed"
 )
 
+// The blocked causes: the value pr.machine_cause carries beside a blocked
+// machine verdict, declared as [machine_axis] causes in lifecycle/lifecycle.toml.
+// gctk merge writes them, and the status: label and the helm board read them
+// here rather than parsing the pr.machine_reason sentence.
+const (
+	CauseReviewThreads = "review-threads" // a required review thread is unresolved
+	CauseCheckFailed   = "check-failed"   // a required check failed at the head
+	CauseConflict      = "conflict"       // the branch conflicts and its merge-in is deferred
+	CauseBehind        = "behind"         // the base moved ahead and nothing brings the branch current
+	CauseBlocker       = "blocker"        // a live blocker no automated actor holds
+	CauseRule          = "rule"           // a branch rule the merge pass cannot name
+)
+
+// Hold is a held: value, one thing that holds an open PR which the city will
+// not clear on its own. Each value is a `held:` label of its own, beside the one
+// status value, so more than one can stand at once.
+type Hold string
+
+const (
+	// HeldGate: an open human gate blocks the anchor ([Facts.OpenHumanGate]).
+	// Only a person clears it.
+	HeldGate Hold = "gate"
+	// HeldReview: review feedback holds the PR and nothing in flight acts on it,
+	// so answering or resolving it falls to a person. It stands for either of two
+	// facts. One is feedback the city has not answered, on any base, approved or
+	// not: the merge pass counted a review thread whose newest feedback no
+	// answer of the city's follows ([Facts.PRUnansweredThreads]), by the rule
+	// [unansweredFeedback] states. The other is the merge pass's blocked verdict
+	// with cause review-threads, as [Blocked] counts it: an unresolved thread on
+	// a base that requires resolution, answered or not.
+	HeldReview Hold = "review"
+	// HeldBlocked: a live blocker holds the PR that no automated actor will
+	// clear. It is the merge pass's blocked verdict with cause blocker, as
+	// [Blocked] counts it, or a live blocker a person owes: one routed to a
+	// person, or a decision. A blocker the city is landing is neither.
+	HeldBlocked Hold = "blocked"
+)
+
 // Facts is the state the city records about the anchor, as stored. Each string
 // field carries the raw metadata value; Derive splits the dated posture and
-// merge state and applies the truthiness rule, so both consumers pass what the
-// bead holds and read it identically.
+// machine verdict and applies the truthiness rule, so both consumers pass what
+// the bead holds and read it identically.
 type Facts struct {
 	// MergeHold is metadata.merge_hold: any truthy value is an operator freeze or
 	// other merge hold.
@@ -87,12 +149,32 @@ type Facts struct {
 	// rebase_hold do, whatever work is in flight. A conversation about the anchor
 	// tracks it and blocks nothing, so it sets nothing here.
 	OpenHumanGate bool
-	// PRPosture is metadata.pr_posture, stored value@oid@instant; only the value
-	// before the first '@' is read.
+	// PersonBlocker is whether a live blocker the anchor waits on, a bead its
+	// blocks edge names that has not closed, is a person's to clear: one routed
+	// to a person (gc.routed_to=human), or a decision. No automated actor will
+	// clear it, so it holds the PR.
+	PersonBlocker bool
+	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
+	// read before the first '@', and the oid after it is the head the posture
+	// was read at, the current head as far as the city knows.
 	PRPosture string
-	// PRMergeState is metadata.pr_merge_state, stored value@oid; only the value
-	// before the first '@' is read.
-	PRMergeState string
+	// PRMachine is metadata.pr.machine, stored value@oid@instant: what the merge
+	// cadence can do with the anchor on its next pass (progressing, settled or
+	// blocked). Only blocked moves the state, by the rule [Blocked] states.
+	PRMachine string
+	// PRMachineCause is metadata.pr.machine_cause, one of the Cause values,
+	// recorded beside a blocked verdict and read only while the verdict is
+	// blocked.
+	PRMachineCause string
+	// PRUnansweredThreads is metadata.pr.unanswered_threads, stored count@oid:
+	// how many of the PR's review threads the merge pass found waiting on the
+	// city's answer at the head oid names. A thread waits when it is unresolved
+	// and the newest of its posts that asks or answers is feedback
+	// (gc_thread_awaits_answer in assets/scripts/pr-post.sh), so a thread the
+	// city answered and left open for the reviewer does not. A post not for
+	// review, one the city marked handled with its THUMBS_UP, or one a
+	// dismissal retired, neither asks nor answers.
+	PRUnansweredThreads string
 	// OpenedAsDraft is metadata.opened_as_draft: the head oid pr-open.sh opened
 	// or adopted the PR as a draft at, recorded only on a draft whose ready flip
 	// the refinery owns.
@@ -101,44 +183,178 @@ type Facts struct {
 	// draft ready at, either the head it flipped it at or the head it found it
 	// already ready at.
 	DraftReadied string
-	// InFlightCount is the size of the anchor's in-flight set: every live bead
-	// carrying anchor_bead, any task_kind, over the live statuses pr-facts.sh
-	// counts (a rework or fix child, a validation pass, a review, a finding).
-	// Non-zero means the city is acting on the PR.
+	// InFlightCount is the size of the anchor's in-flight set: every bead
+	// carrying anchor_bead, any task_kind, at one of [InFlightStatuses] (a
+	// rework or fix child, a validation pass, a review, a finding). Non-zero
+	// means the city is acting on the PR.
 	InFlightCount int
 }
 
+// InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
+// its anchor's in-flight set, whatever its task_kind: bd-lib.sh's anchor
+// statuses (_BD_ANCHOR_STATUSES) less closed. `gctk pr-status derive` reads the
+// set over them for the PR labels, and the helm board's beads source reads it
+// over them for the board.
+var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}
+
+// IsWork reports whether a member of the anchor's in-flight set, read by its
+// task_kind and its lowercase status, is the PR's own work in flight: a review
+// or rework child, open or in_progress. Those are the children the helm board
+// gathers as rows of their own.
+func IsWork(taskKind, status string) bool {
+	switch taskKind {
+	case "review", "rework":
+	default:
+		return false
+	}
+	return status == "open" || status == "in_progress"
+}
+
 // Derive returns the state the anchor projects. Precedence:
-// needs-attention > working > needs-review. The order follows from what each
-// value says stands between the PR and landing: a block only a human can clear
-// holds the PR whatever work is in flight beside it, live city work comes before
-// the review verdict it leads to, and the verdict is what remains when neither
-// stands.
+// needs-attention > merging > working > needs-review. A blocker the city will
+// not clear holds the PR whatever else stands. An approved PR with nothing
+// blocking it is the city's to land, whatever work is in flight on the way.
+// Live city work on an unapproved PR comes before the review verdict it leads
+// to, and the verdict is what remains when neither stands.
 func Derive(f Facts) State {
-	posture := before(f.PRPosture, "@")
-	mstate := before(f.PRMergeState, "@")
+	posture, _ := splitDated(f.PRPosture)
+	machine, _ := splitDated(f.PRMachine)
+	threads, _ := splitDated(f.PRUnansweredThreads)
 
-	// needs-attention: something only a human can clear blocks the merge.
-	if isSet(f.MergeHold) || isSet(f.RebaseHold) || f.OpenHumanGate {
+	// needs-attention: a blocker the city will not clear on its own. A hold
+	// stands, or something [Held] names, each a thing a person has to act on.
+	if isSet(f.MergeHold) || isSet(f.RebaseHold) || len(Held(f)) > 0 {
 		return NeedsAttention
 	}
-	if posture == "approved" && mstate == "BLOCKED" && f.InFlightCount == 0 {
+	// A recorded posture, verdict or thread count outside the vocabulary its
+	// writer declares is a state the derivation cannot name. [Blocked] reads a
+	// blocked verdict's cause the same way.
+	if !knownPosture(posture) || !knownMachine(machine) || !knownCount(threads) {
+		return NeedsAttention
+	}
+	// The merge pass's blocked verdict, while it holds the PR.
+	if Blocked(f) {
 		return NeedsAttention
 	}
 
-	// working: only the city has work left.
-	if f.InFlightCount > 0 {
-		return Working
-	}
-	if inDraftStage(f.OpenedAsDraft, f.DraftReadied) {
-		return Working
-	}
+	// merging: approved, and nothing known blocks the merge.
 	if posture == "approved" {
+		return Merging
+	}
+
+	// working: the city is changing an unapproved PR.
+	if f.InFlightCount > 0 || inDraftStage(f.OpenedAsDraft, f.DraftReadied) {
 		return Working
 	}
 
 	// needs-review: only a human's verdict on the settled head is left.
 	return NeedsReview
+}
+
+// Blocked reports whether the merge pass's blocked verdict holds the PR, the
+// rule by which [Derive] reads that verdict as needs-attention. The helm board
+// reads a blocked verdict by it too, for a row's owed bit and needs phrase, so
+// its queue and its chip read the verdict the same way.
+//
+// A verdict whose cause is outside the vocabulary is one the derivation cannot
+// name, so it holds the PR wherever it was recorded, whatever is in flight. Any
+// other verdict counts at the head the posture was read at, since a verdict at
+// another head was reached about a different commit. The pass records most
+// causes only with nothing in flight, so live work that arrives afterwards is
+// the city acting on the cause, and the next pass replaces the verdict. The
+// blocker cause is the exception: the pass records it only once no automated
+// actor holds any live blocker (assets/scripts/blocker-holder.sh), and the
+// blocker itself is often in the in-flight set, such as a must-fix finding
+// nothing answers.
+func Blocked(f Facts) bool {
+	_, postureHead := splitDated(f.PRPosture)
+	machine, machineHead := splitDated(f.PRMachine)
+	if machine != "blocked" {
+		return false
+	}
+	if !knownCause(f.PRMachineCause) {
+		return true
+	}
+	return (postureHead == "" || machineHead == postureHead) &&
+		(f.InFlightCount == 0 || f.PRMachineCause == CauseBlocker)
+}
+
+// Held returns what holds the PR, in the order gate, review, blocked, and
+// nothing when the PR is not held. A value stands only while its condition
+// does, so the first derivation after the condition clears leaves it out. The
+// merge freeze and the rebase hold are not among them: they read needs-attention
+// in [Derive] with no held value of their own.
+func Held(f Facts) []Hold {
+	var held []Hold
+	if f.OpenHumanGate {
+		held = append(held, HeldGate)
+	}
+	blocked := Blocked(f)
+	if (blocked && f.PRMachineCause == CauseReviewThreads) || unansweredFeedback(f) {
+		held = append(held, HeldReview)
+	}
+	if (blocked && f.PRMachineCause == CauseBlocker) || f.PersonBlocker {
+		held = append(held, HeldBlocked)
+	}
+	return held
+}
+
+// unansweredFeedback reports whether review feedback the city has not answered
+// holds the PR ([HeldReview]): the merge pass counted a thread waiting on the
+// city's answer at the head the posture was read at, nothing is in flight on
+// the anchor, and no feedback waits for pr-facts.sh to route it, which a
+// commented posture says. Work in flight is the city answering, and a
+// commented posture is feedback it has not routed yet, so neither is a
+// person's to clear. A count read at another head was read about another
+// commit, and the merge pass counts again on its next visit.
+func unansweredFeedback(f Facts) bool {
+	posture, postureHead := splitDated(f.PRPosture)
+	count, head := splitDated(f.PRUnansweredThreads)
+	if n, err := strconv.Atoi(count); err != nil || n < 1 {
+		return false
+	}
+	return (postureHead == "" || head == postureHead) && f.InFlightCount == 0 && posture != "commented"
+}
+
+// knownPosture is the posture vocabulary pr-facts.sh records ([posture]
+// postures in lifecycle/lifecycle.toml), plus no posture recorded yet.
+func knownPosture(v string) bool {
+	switch v {
+	case "", "approved", "changes_requested", "commented", "review_required", "none":
+		return true
+	}
+	return false
+}
+
+// knownMachine is the machine vocabulary ([machine_axis] machines), plus no
+// verdict recorded yet.
+func knownMachine(v string) bool {
+	switch v {
+	case "", "progressing", "settled", "blocked":
+		return true
+	}
+	return false
+}
+
+// knownCause is the blocked cause vocabulary, plus a blocked verdict recorded
+// without one.
+func knownCause(v string) bool {
+	switch v {
+	case "", CauseReviewThreads, CauseCheckFailed, CauseConflict, CauseBehind, CauseBlocker, CauseRule:
+		return true
+	}
+	return false
+}
+
+// knownCount is a thread count as gctk merge records it, digits alone, plus no
+// count recorded yet.
+func knownCount(v string) bool {
+	for _, c := range v {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // isSet is the truthiness rule pr-facts.sh, pr-open.sh and pr-status-label.sh
@@ -162,8 +378,18 @@ func inDraftStage(openedAsDraft, draftReadied string) bool {
 	return openedAsDraft != "" && draftReadied == ""
 }
 
+// splitDated splits a dated value, value@oid@instant, into its value and its
+// oid. A bare value with no '@' reads whole with no oid.
+func splitDated(s string) (value, oid string) {
+	value = before(s, "@")
+	if len(value) < len(s) {
+		oid = before(s[len(value)+1:], "@")
+	}
+	return value, oid
+}
+
 // before returns the part of s before the first sep, or all of s when sep is
-// absent — the split("@")[0] the dated posture and merge-state values need.
+// absent — the split("@")[0] the dated posture and machine values need.
 func before(s, sep string) string {
 	if i := strings.Index(s, sep); i >= 0 {
 		return s[:i]

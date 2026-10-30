@@ -139,7 +139,7 @@ REMOTE_HEAD="$(git -C "$TMP/remote.git" rev-parse main)"
 mkdir -p "$TMP/bin"
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"alpha","path":"$TMP/alpha"},
   {"name":"beta","path":"$TMP/beta"}
 ]}
@@ -220,7 +220,7 @@ eq "$(git -C "$TMP/beta"  rev-parse HEAD)" "$BETA_DIVERGED" "diverged rig is not
 grep -q c3-local < <(git -C "$TMP/beta" log --oneline) && ok "diverged rig keeps local commit" || bad "diverged rig keeps local commit"
 eq "$(open_count beta)"  "1" "diverged rig files exactly one reconcile bead"
 eq "$(open_count alpha)" "0" "advanced rig files no reconcile bead"
-eq "$(open_count loomington)" "0" "HQ root is excluded (not reconciled)"
+eq "$(open_count mycity)" "0" "HQ root is excluded (not reconciled)"
 
 # The divergence is put to a person through human-gate.sh, on the reconcile bead
 # as subject; an advanced or HQ rig files nothing.
@@ -297,7 +297,7 @@ git -C "$TMP/delta.src" push -q "$TMP/delta.git" main
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"gamma","path":"$TMP/gamma"},
   {"name":"delta","path":"$TMP/delta"}
 ]}
@@ -347,7 +347,7 @@ echo local-wip > "$TMP/epsilon/f.txt"                            # dirty; differ
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"epsilon","path":"$TMP/epsilon"}
 ]}
 JSON
@@ -376,7 +376,7 @@ echo H2 > "$TMP/zeta/hook.txt"                                   # dirty vs HEAD
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"zeta","path":"$TMP/zeta"}
 ]}
 JSON
@@ -406,7 +406,7 @@ git -C "$TMP/eta.src" push -qf "$TMP/eta.git" main
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"eta","path":"$TMP/eta"}
 ]}
 JSON
@@ -432,7 +432,7 @@ git -C "$TMP/theta.src" push -qf "$TMP/theta.git" main
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"theta","path":"$TMP/theta"}
 ]}
 JSON
@@ -469,7 +469,7 @@ echo i2 > "$TMP/iota/f.txt"                                     # worktree: rest
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"iota","path":"$TMP/iota"}
 ]}
 JSON
@@ -496,7 +496,7 @@ KAPPA_PARKED="$(git -C "$TMP/kappa" rev-parse HEAD)"
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"kappa","path":"$TMP/kappa"}
 ]}
 JSON
@@ -522,7 +522,7 @@ LAMBDA_REMOTE="$(git -C "$TMP/lambda.git" rev-parse main)"
 
 cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
-  {"name":"loomington","path":"$TMP/hqrepo","hq":true},
+  {"name":"mycity","path":"$TMP/hqrepo","hq":true},
   {"name":"lambda","path":"$TMP/lambda"}
 ]}
 JSON
@@ -550,7 +550,7 @@ eq "$(open_count lambda)" "0" "a successful retract finally closes the subject"
 
 rigs_json() { # names... -> the rig list holds the HQ root plus these rigs
   local n
-  { printf '{"rigs":[\n  {"name":"loomington","path":"%s","hq":true}' "$TMP/hqrepo"
+  { printf '{"rigs":[\n  {"name":"mycity","path":"%s","hq":true}' "$TMP/hqrepo"
     for n in "$@"; do printf ',\n  {"name":"%s","path":"%s"}' "$n" "$TMP/$n"; done
     printf '\n]}\n'; } > "$TMP/rigs.json"
 }

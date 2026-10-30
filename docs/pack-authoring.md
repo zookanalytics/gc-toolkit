@@ -1,6 +1,6 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, how a landed pack change is confirmed live, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a landed pack change is confirmed live, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
@@ -15,10 +15,10 @@ convention rests on one of them, it links there.
 
 **Mandate.** The conventions gc-toolkit's own formulas, scripts, skills and
 agents follow where Gas City leaves the choice to the pack: how a step closes
-and how a run declines, how step text and skills reach a pack script, how a
-landed pack change is confirmed live, the names the pack's artifacts carry,
-where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves
-an owner or an address.
+and how a run declines, how step text and skills reach a pack script, why each
+shell block in step text makes one call, how a landed pack change is confirmed
+live, the names the pack's artifacts carry, where a rig-scoped agent runs, the
+patrol-wisp cycle, and how a scan resolves an owner or an address.
 
 **Boundaries.** What Gas City itself does when a formula runs or a pack loads
 is [gascity/packs.md](gascity/packs.md); agent variants, identity and session
@@ -80,7 +80,7 @@ leaves the step claimed by this session, and the step goes back to the pool
 only once the session ends, so the next worker retries it.
 
 A molecule keeps the step text it was poured with, while the scripts that text
-calls are read from the rig checkout when the step runs. So a pack script that
+calls are read from the installed pack when the step runs. So a pack script that
 open step text names stays callable under that name until no open step bead
 names it. Step text from an earlier version of these formulas requires
 `assets/scripts/molecule-hold.sh` to exist before it resolves the pack's
@@ -90,37 +90,87 @@ cancel like any other.
 
 ## Step text and skills reach pack scripts at runtime
 
-A formula step body gets no template pass, and the variables that name the
-pack's own directory are not exported to agent sessions
+Pack text that runs a pack script asks gc where the pack is. An agent session
+carries no variable that names the pack's own directory, and a formula step
+body gets no template pass
 ([gascity/packs.md](gascity/packs.md#a-formula-body-gets-no-template-pass)).
-So step text resolves a pack script at shell runtime through the variables a
-session does carry:
+`commands/scripts-dir/run.sh` is the pack command `scripts-dir`, which prints
+the scripts directory of the pack gc loaded. gc registers a pack command under
+its import binding and under no other name
+([pack spec](https://docs.gascity.com/reference/specs/pack-spec), §1.2.12),
+and runs it with `GC_PACK_DIR` set to that pack. So a city that imports the
+pack as `[imports.gc-toolkit]` runs `gc gc-toolkit scripts-dir`, one that
+imports it as `[imports.kit]` runs `gc kit scripts-dir`, and the answer is the
+pack's own copy whether the city imports it from a directory or from a URL.
+It is never a checkout the caller stands in. gc registers the command only for
+an import in the city root `pack.toml`, not for a rig's import, so a city
+imports the pack there as well as in its rigs
+([install.md](install.md#the-city-level-import)).
+
+Each kind of pack text names the binding the way its rendering allows:
+
+- **A formula step** is poured with `binding_prefix`, the binding plus a dot.
+  `gc sling` adds it to every pour, and a formula that names it declares it
+  with the default `gc-toolkit.`, which an order's pour takes
+  ([gascity/packs.md](gascity/packs.md#a-formula-body-gets-no-template-pass)).
+  The step drops the dot: `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"`.
+- **A prompt or template fragment** is rendered with the binding:
+  `"$(gc {{ .BindingName }} scripts-dir)/foo.sh"`.
+- **A skill** is not rendered, so its examples write
+  `"$(gc <binding> scripts-dir)/foo.sh"`, and the agent fills in the binding
+  gc puts in front of the skill's own name (`gc-toolkit.work`), which
+  `gc skill list` prints as the skill's FROM.
+- **A pack script** is already the copy gc loaded. It runs a sibling from its
+  own directory, and reaches `tools/` two levels above it.
+
+A call that runs one script once is written inline, as above. Text that calls
+several scripts, or that must stop before it acts when one is missing,
+resolves the directory once, probes what it needs, and empties the variable
+when gc or a probe fails, so the guard after it stops the text:
 
 ```bash
-"$GC_RIG_ROOT/assets/scripts/foo.sh"               # owning rig only (repo == pack)
-"$GC_CITY_PATH/rigs/<pack>/assets/scripts/foo.sh"  # also resolves for importer rigs
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
+: "${SCRIPTS:?escalate.sh not found in the pack}"
 ```
 
-`$GC_RIG_ROOT` points at the agent's own rig checkout, so it finds the script
-only for the **owning** rig; the `$GC_CITY_PATH/rigs/<pack>/…` form is the
-portable one, because every agent shares `$GC_CITY_PATH` (the city root) and the
-script lives in the owning pack's tree under it.
+An empty or wrong binding fails loud: gc answers `unknown command`, and the
+text stops on its guard or on the missing path. It never falls back to another
+directory. No pack text finds the pack through `$GC_RIG_ROOT`,
+`git rev-parse --show-toplevel` or `$GC_CITY_PATH/rigs/<pack>`. The first two
+name whatever the caller stands in, and the third names the pack only in a
+city that clones it as a rig. `assets/scripts/pack-self-location.test.sh`
+holds the pack to this.
 
-An agent's own shell, where a skill's examples run, has no template pass
-either, and no variable set in one tool call survives into the next. It asks
-gc for the pack instead: `commands/scripts-dir/run.sh` is the pack command
-`scripts-dir`, which prints the scripts directory of the pack gc loaded. gc
-registers a pack command under its import binding and under no other name
-([pack spec](https://docs.gascity.com/reference/specs/pack-spec), §1.2.12),
-so a city that imports the pack as `[imports.gc-toolkit]` runs
-`gc gc-toolkit scripts-dir`, and one that imports it as `[imports.kit]` runs
-`gc kit scripts-dir`. A skill is not rendered, so its text cannot carry the
-binding. Its examples write `"$(gc <binding> scripts-dir)/foo.sh"`, and the
-agent fills in the binding gc puts in front of the skill's own name
-(`gc-toolkit.work`), which `gc skill list` prints as the skill's FROM. The
-call then runs the pack's own copy wherever the city imports the pack from,
-and never a checkout the agent is standing in. The ask-for-work skills
-(`work`, `waits`, `records`, `prs`) call every writer this way.
+## Step text calls a tested script
+
+Step text holds no procedure. Each shell block in a formula step makes one
+call, to a tested pack script reached as the section above shows or to one
+command such as `gc`, and anything two steps need is one script. No shell block
+in step text is shellchecked, and a block runs in a test only where a suite
+extracts it, while a script carries a test of its own. So the procedure lives
+in the script, and the step passes the call its own facts as arguments.
+Existing step text changes at its own rewrite.
+
+A block does more than make one call when it holds control flow (`if`, `elif`,
+`else`, `case`, `for`, `select`, `while`, `until`, a function definition, `&&`
+or `||`) or more than one command. A sequence and a pipeline are more than one
+command, and so is a command substitution that holds more than one. A
+substitution that holds a single command is an argument of the command around
+it. A here-document's body is data when any part of its delimiter is quoted.
+Otherwise the shell expands the body, and a substitution in it counts as one
+in an argument does.
+
+`tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
+files a change names. It reads every TOML string in a formula as Python's
+`tomllib` decodes it, so it needs a Python 3.11 or newer on PATH. It judges
+only what a change adds. It weighs each step by
+the commands and the control flow of the procedures its blocks hold, and fails
+a step the change makes heavier in either count. A new step fails when it holds
+a procedure at all. A block the change leaves alone, or moves without editing
+it, weighs nothing, so a step that only gains single calls passes, and so does
+one that trades a procedure for a call. `tools/lint-step-text.in-flight` names
+the branches whose formula changes were built before the rule, and a step made
+heavier only by lines one of them adds draws a warning instead of a failure.
 
 ## A landed pack change is confirmed on the deployed checkout
 
@@ -358,7 +408,7 @@ matches and a live owner resolves to **absent**:
 
 ```
 assignee "gascity/gc-toolkit.gc-z0vi2" -> absent
-alias    "gc-toolkit.gc-z0vi2"         -> active  (session s-lx-wisp-q5qbl)
+alias    "gc-toolkit.gc-z0vi2"         -> active  (session s-hq-wisp-q5qbl)
 ```
 
 Nothing downstream catches it: "absent after exact lookup" classifies as

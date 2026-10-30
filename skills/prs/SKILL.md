@@ -70,10 +70,9 @@ everything the PR needs from it before it is sent to the polecat pool:
   its own rig's store, and `gc sling` refuses a bead filed in another rig's
   store.
 - `branch`, `existing_pr` and `target` are the PR's, so the polecat commits
-  onto the PR's branch and the PR gains the commits. `target` is the PR's base,
-  which for a PR under an owned convoy is `integration/<convoy-id>`, not the
-  default branch. The refinery blocks a supplement whose `target` is not the
-  PR's base.
+  onto the PR's branch and the PR gains the commits. `target` is the PR's base:
+  the integration branch for a stage's PR, and the default branch for a landing
+  bead's. The refinery blocks a supplement whose `target` is not the PR's base.
 - `anchor_bead` makes it a child of the anchor, joined to it by
   `related:<anchor>`, and `blocks:<anchor>` makes the anchor wait on it, so
   the PR does not merge before the supplement lands.

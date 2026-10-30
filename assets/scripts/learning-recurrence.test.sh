@@ -3,6 +3,9 @@
 # feedback-learning loop's recurrence metric. Stubbed gc; no live city, Dolt,
 # or network. Fixture timestamps are computed from `now` so the windows stay
 # meaningful whenever the suite runs.
+# It also holds the review rubric this checkout ships: every anchor in the
+# correctness method's rubric ledger names a dimension of its What to check list,
+# the method itself carries no anchor, and the inventory reads them all.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -365,6 +368,39 @@ has "$R" "skills/review-correctness/rubric-ledger.md	tk-rubref" "--ref reads the
 OUT=$("$SUT" --window-days 0 --repo "$REPO" 2>&1); eq "$?" "2" "--window-days 0 is rejected"
 OUT=$("$SUT" --window-days x --repo "$REPO" 2>&1); eq "$?" "2" "a non-numeric window is rejected"
 OUT=$("$SUT" --nope --repo "$REPO" 2>&1); eq "$?" "2" "an unknown flag is rejected"
+
+echo "# the shipped review rubric: its anchors sit in the ledger beside the correctness method"
+# The reviewer reads the whole method file, comments included, so no anchor, nor
+# any other HTML comment, sits in it. Each anchor's ledger line names the What to
+# check dimension it amends, and the inventory reads every one.
+ROOT="$(cd "$HERE/../.." && pwd)"
+METHOD_REL="skills/review-correctness/SKILL.md"
+METHOD="$ROOT/$METHOD_REL"
+LEDGER_REL="$(dirname "$METHOD_REL")/rubric-ledger.md"
+LEDGER="$ROOT/$LEDGER_REL"
+[ -r "$LEDGER" ] && ok "the review-rubric ledger ships beside the correctness method" || bad "$LEDGER_REL is missing"
+if grep -qF '<!--' "$METHOD"; then bad "the correctness method carries an HTML comment, which reaches the reviewer"
+else ok "the correctness method carries no HTML comment, so no anchor reaches the reviewer"; fi
+awk '/^### What to check/ {f = 1; next} /^##/ {f = 0} f && /^- \*\*/ {sub(/^- \*\*/, ""); sub(/\*\*.*/, ""); print}' "$METHOD" > "$TMP/dimensions"
+[ -s "$TMP/dimensions" ] && ok "the What to check list's dimensions are read" || bad "no dimension found in the What to check list"
+grep -E '<!-- [^>]*adopted:[0-9]{4}-[0-9]{2}-[0-9]{2}[^>]*-->' "$LEDGER" > "$TMP/ledger-lines" || true
+ANCHORS=$(grep -c . "$TMP/ledger-lines" || true)
+UNKNOWN=$(sed 's/.*--> *//' "$TMP/ledger-lines" | grep -vxF -f "$TMP/dimensions" | head -n1 || true)
+eq "$UNKNOWN" "" "every ledger line names a dimension of the What to check list"
+# The dimension each of these anchors amends: each is held to that dimension,
+# not to any.
+while read -r rule dim; do
+  got=$(grep -F -- "<!-- rule:$rule " "$LEDGER" | sed 's/.*--> *//')
+  eq "$got" "$dim" "$rule's ledger line names $dim, the dimension it amends"
+done <<'MAP'
+tk-wamr3 Comments
+tk-v32d2u Comments
+tk-0rhvews Testing
+tk-prvea Cross-file trace
+tk-gz2vhjc Scope claims
+MAP
+INV=$(bash "$SUT" --inventory --repo "$ROOT" | grep -c "^$LEDGER_REL	" || true)
+eq "$INV" "$ANCHORS" "the inventory reads every anchor in the ledger"
 
 echo
 echo "learning-recurrence.test.sh: $PASS passed, $FAIL failed"

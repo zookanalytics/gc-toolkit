@@ -1,9 +1,16 @@
 ---
 name: Close the asleep pool session beads that hold a slot with no runtime and no work — tk-kwhll1p
-description: Why a pool session killed out of band holds its pool slot forever, what the pack can see of it, and the pool-slot-reap order that closes such beads. The design record for the pool-slot-reap order.
+description: Why a pool session killed out of band held its pool slot forever, what the pack could see of it, and the pool-slot-reap order that closed such beads. The design record for the pool-slot-reap order, which tk-1tfzr71.7 retired.
 ---
 
 # Close the asleep pool session beads that hold a slot with no runtime and no work
+
+> **RETIRED (tk-1tfzr71.7).** The order, script and test this record designed
+> are deleted, because Gas City's controller now frees a killed pool seat
+> itself.
+> [specs/tk-1tfzr71.7/pool-slot-reap-rederived.md](../tk-1tfzr71.7/pool-slot-reap-rederived.md)
+> re-derives the gap against Gas City as it is now, and records what the
+> order's own record showed and the shapes it leaves to Gas City.
 
 Bead: `tk-kwhll1p`. Deliverable: `orders/pool-slot-reap.toml` +
 `assets/scripts/pool-slot-reap.sh` (+ its co-located test), the component-index
@@ -54,24 +61,24 @@ them.
 
 ## Live cases
 
-- **`lx-wisp-25frc`**, gc-toolkit polecat slot 2. Killed at 2026-10-05T06:37:20Z
+- **`hq-wisp-25frc`**, gc-toolkit polecat slot 2. Killed at 2026-10-05T06:37:20Z
   in a batch of thirteen, holding no work. The pool (cap 4) ran at most 3 until a
   hand-run `gc session close` closed the bead at 14:14Z, with no close reason.
 - **Three gc-toolkit polecat beads on `sleep_reason=config-drift`**,
   2026-10-04 18:30-20:59Z. The undesired sweep closed them at 20:56Z.
-- **`lx-wisp-hwfu2`**, the gascity rig's polecat pool, a canonical singleton
+- **`hq-wisp-hwfu2`**, the gascity rig's polecat pool, a canonical singleton
   (cap 1). Asleep on `sleep_reason=idle` since 2026-10-03T01:24:12Z, with an
   explicit wake request from 2026-10-04T02:33Z that nothing served. No open or
   in_progress bead in any store is assigned to its id, session name or alias.
   The supervisor log carries more than 5,000 `canonical pool
-  template "gascity/gc-toolkit.polecat" is held by session lx-wisp-hwfu2` lines,
+  template "gascity/gc-toolkit.polecat" is held by session hq-wisp-hwfu2` lines,
   still printing on 2026-10-06. A dry run of the reaper against the live city
   names it as the one bead it would close. Its reason is on the freeable list, so a predicate
   keyed on the reason alone would not catch it. Core closed it on 2026-10-08,
   when the city first started on a new host: `reapPreBootSessionBeads`
   (`cmd/gc/session_beads.go`) closes a bead last started before the host booted,
   and it runs only while the runtime server is entirely absent. The supervisor
-  log reads `reaped pre-boot session bead lx-wisp-hwfu2 ... — runtime server
+  log reads `reaped pre-boot session bead hq-wisp-hwfu2 ... — runtime server
   absent`. That path does not reach a ghost on a running host.
 
 ## What the pack can see
@@ -163,7 +170,7 @@ runtime the controller could see for that long.
    anything it finds keeps the bead.
 
 The sleep reason is not part of the predicate beyond the holds in step 3. The
-killed case motivated it, but `lx-wisp-hwfu2` shows a freeable reason can hold a
+killed case motivated it, but `hq-wisp-hwfu2` shows a freeable reason can hold a
 slot just as long. The grace window is what separates a bead core is about to
 free from one it has left behind.
 
@@ -285,5 +292,5 @@ bead that reads open for the next pass.
 
 The bead prefers a pack-side remedy to a core patch. The core change that closes
 the killed case is adding `SleepReasonKilled` to both freeable predicates in
-`cmd/gc/session_state_helpers.go`. It would not reach `lx-wisp-hwfu2`, whose
+`cmd/gc/session_state_helpers.go`. It would not reach `hq-wisp-hwfu2`, whose
 reason is already freeable.

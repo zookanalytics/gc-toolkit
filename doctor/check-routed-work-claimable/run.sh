@@ -165,7 +165,9 @@ fi
 
 # The rig and order registries are read in the background while the agent
 # roster is read here.
-read_to "$WORK/rigs.json" gc rig list --json </dev/null >/dev/null 2>&1 & rigs_pid=$!
+# rig-map.sh reads the rig map, and names on stderr why it did not.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+read_to "$WORK/rigs.json" "$RIG_MAP" </dev/null >/dev/null 2>&1 & rigs_pid=$!
 read_to "$WORK/orders.json" gc order list --json </dev/null >/dev/null 2>&1 & orders_pid=$!
 
 read_to "$WORK/agents.json" gc agent list --json; agents_rc=$?; agents_err=$(err_of "$WORK/agents.json")
@@ -186,7 +188,7 @@ scopes=$(jq -r '.rigs[]? | select((.path // "") != "")
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether routed/assigned work is claimable (I3)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
-    [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
+    [ -n "$rigs_err" ] && detail "$rigs_err"
     exit 1
 fi
 # Rig name -> store path, so arm 4 can reach a molecule root's store from its

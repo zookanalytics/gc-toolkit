@@ -9,13 +9,18 @@
 #             pointer among them, a non-open status, an assignee, and a type
 #             outside the allowlist, a missing one included; a blank value, a
 #             pointer's store alone and an unknown key are no mark
-#   (EDGES)   live_work_edge_reasons names a convoy that tracks the bead,
-#             whatever its status, an open child, and a convoy parent; a closed
-#             child and a bead waiting on this one are no mark; an unreadable
-#             list of dependents refuses
+#   (EDGES)   live_work_edge_reasons names an open child and a convoy parent;
+#             a convoy that tracks the bead, open or closed, a closed child and
+#             a bead waiting on this one are no mark; an unreadable list of
+#             dependents refuses
+#   (RUNS)    live_work_run_reasons names each live run that works the bead,
+#             from the runs verb's answer or the map; a finished run, a run of
+#             another bead and a run that names no bead are no mark; unreadable
+#             runs refuse; and a bead a closed convoy tracks, with no live run,
+#             is not live work
 #   (READERS) until-resolved.sh, through which the until consumer and its
 #             doctor mirror decide, sources this file, applies $LIVE_WORK_JQ
-#             and asks both predicates
+#             and asks every predicate
 #   (NO-COPY) no other file in the pack defines these defs
 # A reader with a private copy drifts silently: it keeps the marks it copied and
 # misses every mark added later. The behavioral half lives beside the reader
@@ -96,9 +101,9 @@ echo "# the edges"
 edges() { printf '%s' "$1" | jq -c --argjson up "$2" "$LIVE_WORK_JQ"'live_work_edge_reasons($up)' 2>/dev/null; }
 eq "$(edges '{"id":"a","dependencies":null}' '[]')" "[]" "(EDGES) no edges, no mark"
 eq "$(edges '{"id":"a"}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]')" \
-   '["tracked by convoy c-1 (open)"]' "(EDGES) an open convoy tracking it marks live work"
+   "[]" "(EDGES) an open convoy tracking it is no mark: a status grouping holds nothing"
 eq "$(edges '{"id":"a"}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"closed"}]')" \
-   '["tracked by convoy c-1 (closed)"]' "(EDGES) a closed convoy tracking it marks live work (a pour once ran over it)"
+   "[]" "(EDGES) a closed convoy tracking it is no mark"
 eq "$(edges '{"id":"a"}' '[{"id":"k-1","dependency_type":"parent-child","issue_type":"task","status":"open"}]')" \
    '["open child k-1"]' "(EDGES) an open child marks live work"
 eq "$(edges '{"id":"a"}' '[{"id":"k-1","dependency_type":"parent-child","issue_type":"task","status":"closed"}]')" \
@@ -112,6 +117,30 @@ eq "$(edges '{"id":"a","dependencies":[{"id":"e-1","dependency_type":"parent-chi
 for up in '{"error":"no issue found"}' 'null' '"x"'; do
     eq "$(edges '{"id":"a"}' "$up")" '["dependents=unreadable"]' "(EDGES) dependents read as $up refuse"
 done
+
+echo "# the runs"
+runs() { printf '%s' "$1" | jq -c --argjson runs "$2" "$LIVE_WORK_JQ"'live_work_run_reasons($runs)' 2>/dev/null; }
+eq "$(runs '{"id":"a"}' '[]')" "[]" "(RUNS) no run, no mark"
+eq "$(runs '{"id":"a"}' '[{"root":"r-1","convoy":"c-1","bead":"a","formula":"mol-polecat-work","live":true}]')" \
+   '["worked by live run r-1 (mol-polecat-work)"]' "(RUNS) a live run working it marks live work, naming its root and formula"
+eq "$(runs '{"id":"a"}' '[{"root":"m-1","convoy":"","bead":"a","formula":"","live":true}]')" \
+   '["worked by live run m-1"]' "(RUNS) a run that records no formula is named by its root"
+eq "$(runs '{"id":"a"}' '[{"root":"r-0","convoy":"c-0","bead":"a","formula":"mol-review","live":false},{"root":"r-1","convoy":"c-1","bead":"a","formula":"mol-polecat-work","live":true}]' | jq -r 'length')" \
+   "1" "(RUNS) of a live run and a finished one, only the live run marks"
+eq "$(runs '{"id":"a"}' '[{"root":"r-0","convoy":"c-0","bead":"a","formula":"mol-review","live":false}]')" \
+   "[]" "(RUNS) a finished run is no mark"
+eq "$(runs '{"id":"a"}' '[{"root":"r-2","convoy":"c-2","bead":"b","formula":"mol-polecat-work","live":true},{"root":"r-3","convoy":"c-3","bead":"","formula":"mol-review","live":true}]')" \
+   "[]" "(RUNS) a map's runs of another bead, or of no bead, are no mark"
+for r in '{"error":"no issue found"}' 'null' '"x"'; do
+    eq "$(runs '{"id":"a"}' "$r")" '["runs=unreadable"]' "(RUNS) runs read as $r refuse"
+done
+# The case the change exists for: a pour once ran over the bead, its convoy is
+# closed, and no run works it now.
+BEAD='{"id":"a","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":[]}'
+UP='[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"closed"}]'
+RUNS='[{"root":"r-0","convoy":"c-1","bead":"a","formula":"mol-polecat-work","live":false}]'
+eq "$(printf '%s' "$BEAD" | jq -c --argjson up "$UP" --argjson runs "$RUNS" "$LIVE_WORK_JQ"'live_work_reasons + live_work_edge_reasons($up) + live_work_run_reasons($runs)' 2>/dev/null)" \
+   "[]" "(RUNS) a bead a closed convoy tracks, with no live run, is not live work"
 
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the definition in prose
@@ -133,11 +162,14 @@ for r in $READERS; do
     grep -q 'live_work_edge_reasons' <<< "$code" \
         && ok "(READERS) $r asks live_work_edge_reasons" \
         || bad "(READERS) $r asks live_work_edge_reasons"
+    grep -q 'live_work_run_reasons' <<< "$code" \
+        && ok "(READERS) $r asks live_work_run_reasons" \
+        || bad "(READERS) $r asks live_work_run_reasons"
 done
 
 echo "# no private copies"
 # Specs and generated renders are history and output, not readers.
-DEF_RE='def[[:space:]]+(live_work_keys|live_work_plain_types|live_work_reasons|live_work_edge_reasons)'
+DEF_RE='def[[:space:]]+(live_work_keys|live_work_plain_types|live_work_reasons|live_work_edge_reasons|live_work_run_reasons)'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

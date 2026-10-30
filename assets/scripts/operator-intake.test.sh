@@ -103,7 +103,7 @@ case "$1 ${2:-}" in
           --arg hrun "${HQ_RUNNING-}" \
           --arg gsusp "${GASCITY_SUSPENDED-}" --arg grun "${GASCITY_RUNNING-}" \
           --arg tsusp "${GCTK_SUSPENDED-}"    --arg trun "${GCTK_RUNNING-}" \
-      '{rigs:[({name:"loomington", path:$c, prefix:"lx", hq:true}
+      '{rigs:[({name:"mycity", path:$c, prefix:"hq", hq:true}
                + (if $hrun  != "" then {running:   ($hrun =="true")} else {} end)),
               ({name:"gc-toolkit", path:$t, prefix:"tk", hq:false}
                + (if $tsusp != "" then {suspended: ($tsusp=="true")} else {} end)
@@ -351,7 +351,7 @@ eq "$RC" "2" "(RIG) an unknown rig is a usage error"
 eq "$CALLS" "" "(RIG) an unknown rig creates nothing and files nothing"
 has "$ERR" "unknown rig" "(RIG) the error names the problem"
 # die() takes the exit code as its SECOND argument; a $*-joined message printed
-# it as trailing noise ("… shutupandlisten) 2"). Caught live, not by the
+# it as trailing noise ("… rig-b) 2"). Caught live, not by the
 # substring assertion above — so assert the whole line, not a fragment.
 [[ "$ERR" =~ \)$ ]] && ok "(RIG) the exit code does not leak into the message" \
     || bad "(RIG) the exit code leaks into the message (got: $ERR)"
@@ -768,19 +768,18 @@ run no "topic one" "topic two"
 eq "$RC" "2" "(FAILCLOSE) two positionals are a usage error (quote the topic)"
 eq "$CALLS" "" "(FAILCLOSE) and create nothing"
 
-# --- (RIGWHY) this script's own enumerate_rigs names WHICH failure it hit -----
-# The same defect as gc-helm.sh's, in this script's hand-rolled
-# copy — and worse here, because it piped `gc rig list` STRAIGHT into jq. A
-# pipeline reports the LAST command's status, so gc's exit code was discarded
-# structurally, not just by a `|| true`, and its stderr went to /dev/null. A
-# wedged data plane, unparseable output and a city that genuinely has no rigs
-# all produced one sentence and exit 3.
+# --- (RIGWHY) this script's enumerate_rigs names WHICH failure it hit --------
+# enumerate_rigs reads the rig map through rig-map.sh, which names on stderr why
+# a listing did not read: a non-zero gc exit with gc's own stderr, an empty
+# answer, output that is not JSON, or JSON with no '.rigs' array. A city that
+# answered with no rigs is this script's own sentence. Every case exits 3 having
+# filed nothing.
 #
 # This matters here specifically because the topic path shells out to
 # `gc-helm.sh open`: if the two front doors disagree about why a city has no
 # rigs, the operator gets a different story depending on which one they hit.
-# There is no timeout arm — unlike gc-helm.sh this script does not bound the
-# call, so there is no kill to report.
+# The bound and its timeout reason are rig-map.sh's, and rig-map.test.sh
+# covers them.
 mkdir -p "$TMP/rigbin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rigbin/gc" <<'RIGSTUB'
 if [ "$1 ${2:-}" = "rig list" ]; then
@@ -823,33 +822,29 @@ saysv rigless  "no rigs in this city"         "a genuinely rigless city is repor
 
 : > "$TMP/rigmsgs"
 for m in exitfail empty notjson shape rigless; do
-    rigwhy "$m"; printf '%s\n' "$RIGWHY_ERR" >> "$TMP/rigmsgs"
+    rigwhy "$m"; printf '%s\n' "$(printf '%s' "$RIGWHY_ERR" | tr '\n' ' ')" >> "$TMP/rigmsgs"
 done
 eq "$(sort -u "$TMP/rigmsgs" | wc -l | tr -d ' ')" "5" \
    "(RIGWHY-DISTINCT) five causes produce five different sentences"
 
-# Guard the evidence itself: if the pipeline form comes back, gc's status is
-# structurally unavailable again and every message above degrades to one.
-# Match "gc rig list" and a jq pipe on the SAME code line, with the redirect
-# that sits between them left unspecified — the old form was
-# `gc rig list --json 2>/dev/null | jq`, so requiring the two to be adjacent
-# missed it and this guard passed against the very code it exists to catch.
-# Comment lines are excluded so the prose above cannot satisfy it either.
-grep -q . < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/&&/gc rig list/&&/\|[[:space:]]*jq/' "$SCRIPT") \
-  && bad "(RIGWHY-EVIDENCE) the pipe-into-jq form is back — gc's exit status is discarded" \
-  || ok "(RIGWHY-EVIDENCE) gc is run on its own, so its exit status survives"
+# MUTATION CHECK (static): enumerate_rigs keeps the read's exit status. Match
+# the ASSIGNMENT line only, bounded to the function body: a check anchored on a
+# comment passes whatever the code does.
+grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw=\$\(/' "$SCRIPT") \
+  && bad "(RIGWHY-EVIDENCE) '|| true' is back — the exit status is discarded again" \
+  || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
 
 # --- (RIGWHY-TRAPS) enumerate_rigs restores the caller's trap table ----------
 # A trap is process-global: one installed inside a helper and left there
 # rewrites how every later line of the caller answers a signal, and outlives
-# the file it was installed to remove. gc-helm.sh's enumerate_rigs scopes and
-# clears the same EXIT/INT/TERM/HUP traps; this asserts the sibling here does
-# too. The helper is lifted and run directly — every real call site is a
-# command substitution whose subshell would hide the residue. Assert the table
-# is unchanged across the call, not that it is empty: a caller can inherit a
-# disposition the helper never touches — a parent that ignores SIGPIPE shows up
-# as `trap -- '' SIGPIPE` — and the invariant is that the helper leaves the
-# table exactly as it found it.
+# the file it was installed to remove. enumerate_rigs reads the map through
+# rig-map.sh, as gc-helm.sh's does, and this asserts it leaves the table alone.
+# The helper is lifted and run directly, with the real rig-map.sh — every real
+# call site is a command substitution whose subshell would hide the residue.
+# Assert the table is unchanged across the call, not that it is empty: a caller
+# can inherit a disposition the helper never touches — a parent that ignores
+# SIGPIPE shows up as `trap -- '' SIGPIPE` — and the invariant is that the
+# helper leaves the table exactly as it found it.
 ENUM="$TMP/enum-helper.sh"
 sed -n '/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
 mkdir -p "$TMP/enumbin"
@@ -859,10 +854,11 @@ exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
 # The probe sources city-liveness.sh ($2) first, for the projection the helper
-# runs, as the script does.
+# runs, as the script does, and finds rig-map.sh in $3, as the script finds it
+# beside itself.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
-PROG=probe; RIGS=""
+PROG=probe; RIGS=""; SCRIPT_DIR="$3"
 die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
 . "$2"
 . "$1"
@@ -874,11 +870,11 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
-has "$EOUT" "RIGS[["  "(RIGWHY-TRAPS) the helper enumerated, so the temp-file path really ran"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" "$HERE" 2>&1 || true)"
+has "$EOUT" "RIGS[["  "(RIGWHY-TRAPS) the helper enumerated, through rig-map.sh"
 has "$EOUT" "TRAPDELTA[]" "(RIGWHY-TRAPS) …and left the caller's trap table as it found it"
-eq  "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
-    "(RIGWHY-TRAPS) …and removed its stderr capture"
+eq  "$(find "$ENUMTMP" -name 'gctk-rig-map.*' | wc -l | tr -d ' ')" "0" \
+    "(RIGWHY-TRAPS) …and rig-map.sh removed its stderr capture"
 
 # --- (HELP/SYNTAX) ------------------------------------------------------------
 run yes --help

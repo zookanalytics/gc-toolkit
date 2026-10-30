@@ -366,8 +366,9 @@ th {
 /*
  * The PR phase chip: a merge anchor's PR status. On a live row the status: value
  * says who must act next, colored so the answer reads at a glance —
- * needs-attention loudest, working quietest. On a closed row it names how the PR
- * resolved — merged or closed — in a calm terminal color, since nobody acts on it.
+ * needs-attention loudest, working quietest, merging in green since the city is
+ * landing it. On a closed row it names how the PR resolved — merged or closed —
+ * in a calm terminal color, since nobody acts on it.
  */
 .pr-phase {
   font-size: 0.8125rem;
@@ -388,12 +389,29 @@ th {
   opacity: 0.7;
 }
 
+.pr-phase--merging {
+  color: #1a7f37;
+}
+
 .pr-phase--merged {
   color: #8250df;
 }
 
 .pr-phase--closed {
   color: #6e7781;
+}
+
+/*
+ * The PR held chips: what holds a live PR that the city will not clear on its
+ * own, one per held: label. Each is a person's to act on, so it reads in the
+ * needs-attention colour, set bold, beside the phase chip it explains.
+ */
+.pr-held {
+  font-size: 0.8125rem;
+  margin-right: 0.4em;
+  white-space: nowrap;
+  color: #b3261e;
+  font-weight: 600;
 }
 
 /*

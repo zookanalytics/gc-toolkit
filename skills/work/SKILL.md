@@ -82,9 +82,12 @@ the target's `default_sling_formula`, which for a polecat pool is
   blocker closes, and it ends the run on a bead that carries a `merge_result`,
   `held` included, as finished. Release the wait (the waits skill), then send.
 - **A named agent takes an assignee.** The mechanik, deacon, witness,
-  refinery and keeper never claim a pool's route. Send one of them a bead with
+  refinery and keeper are named agents, and the assignee is what the
+  controller and the pack's notice read to give one a turn
+  (docs/deferred-dispatch.md). Send one of them a bead with
   `gc bd update <bead> --assignee <qualified-name>`, the name `gc agent list`
-  prints.
+  prints, then tell it with
+  `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`.
 
 In a sitting, the sign-off's `--route` says where the subject itself goes once
 its wait is released (the converse-settle step), so first decide which bead
@@ -172,7 +175,8 @@ The message is that work already sent should stop, or go somewhere else.
 - **Send it elsewhere.** The same release names where it goes, in one write:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For a named agent, pass `--assign <named-agent>` in place of
-  `--route <rig>/<pool>`.
+  `--route <rig>/<pool>`, then tell it with
+  `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <named-agent>`.
 - **Withdraw a recommendation** the bead should not take, while the bead stays
   open for discussion:
   `SUBJECT=<bead> CONVERSATION=<conversation> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.

@@ -151,6 +151,8 @@ esac
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$_bd_lib_dir/run-lib.sh}" || { echo "cannot source run-lib.sh beside this script" >&2; exit 1; }
 
 # Identities this session may appear under as an assignee, first spelling wins.
 IDENTITIES=$(printf '%s\n%s\n%s\n' \
@@ -167,7 +169,7 @@ NAME_THE_MOLECULE="Pass --root <the gc.root_bead_id on the step bead this shell 
 
 # Does <id> verify as this session's bead for this step? Echoes its status on a
 # match. `index` is exact element equality — `inside`/`contains` match
-# substrings, which would let session lx-zzk own lx-zzk9's bead. A known
+# substrings, which would let session hq-zzk own hq-zzk9's bead. A known
 # molecule gates every answer below it: one assignee covers every molecule a
 # pool agent ever ran, so a matching assignee corroborates the candidate and
 # never outranks its root. An unassigned candidate inside the molecule is ours
@@ -232,21 +234,17 @@ holds_in() { # <rows json>
   ' >/dev/null 2>&1
 }
 
-# The live workflow root poured over --convoy, empty unless exactly one answers.
-# A root carries gc.kind=workflow or gc.formula_contract=graph.v2, gascity's own
-# test for one. Where several live roots share the convoy, the one of this
-# step's formula is taken if it stands alone.
+# The live workflow root poured over --convoy, empty unless exactly one answers,
+# as run-lib.sh reads the runs poured over an input convoy. Where several live
+# roots share the convoy, the one of this step's formula is taken if it stands
+# alone. A read that fails is no answer, so the molecule is derived instead.
+store_read() { gc bd "$@"; }
 convoy_root() {
-  bd_json list --metadata-field "gc.input_convoy_id=$CONVOY" --status=open,in_progress,blocked --limit=0 \
-    | jq -r --arg f "$FORMULA" '
-        if type == "array" then
-          [ .[] | select(((.metadata["gc.kind"] // "") | tostring | ascii_downcase) == "workflow"
-                         or ((.metadata["gc.formula_contract"] // "") | tostring | ascii_downcase) == "graph.v2") ] as $roots
-          | (if ($roots | length) == 1 then $roots
-             else [ $roots[] | select((.metadata["gc.formula_name"] // "") == $f) ] end) as $pick
-          | if ($pick | length) == 1 then ($pick[0].id // empty) else empty end
-        else empty end
-      ' 2>/dev/null
+  run_lib subject store_read "$CONVOY" 2>/dev/null | jq -r --arg f "$FORMULA" '
+    [ .[] | select(.live) ] as $roots
+    | (if ($roots | length) == 1 then $roots else [ $roots[] | select(.formula == $f) ] end) as $pick
+    | if ($pick | length) == 1 then $pick[0].root else empty end
+  ' 2>/dev/null
 }
 
 # gc.root_bead_id of <id>, empty when the bead is unreadable or carries none.

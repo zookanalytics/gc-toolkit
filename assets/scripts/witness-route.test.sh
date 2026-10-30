@@ -43,10 +43,13 @@ BUG="$(extract bug-file)"
 [ -n "$BUG" ] && ok "bug-file block extracted" || bad "bug-file block EMPTY — markers missing from $TOML"
 
 echo "# the warrant writes no address of its own, and the bug writes none at all"
-# Inside a block, {{binding_prefix}} belongs in exactly two places: an argument
-# to the resolver, and a diagnostic naming what failed to resolve. Anywhere
-# else it is a rendered address on its way to a stamp.
-stray() { printf '%s\n' "$1" | grep -n '{{binding_prefix}}' \
+# Inside a block, {{binding_prefix}} belongs in exactly three places: the
+# binding a block asks gc for the pack's scripts under, an argument to the
+# resolver, and a diagnostic naming what failed to resolve. Anywhere else it is
+# a rendered address on its way to a stamp.
+PACK_CALL="\$(b='{{binding_prefix}}'; gc \"\${b%.}\" scripts-dir)"
+unpack() { awk -v c="$PACK_CALL" '{ while ((i = index($0, c)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(c)); print }'; }
+stray() { printf '%s\n' "$1" | unpack | grep -n '{{binding_prefix}}' \
   | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true; }
 has "$WARRANT" 'resolve-route.sh' "warrant-file resolves its address"
 eq "$(stray "$WARRANT")" "" "warrant-file renders no address it does not resolve"
@@ -59,15 +62,15 @@ hasnt "$BUG" 'resolve-route.sh' "bug-file asks the resolver for no pool"
 echo "# no step anywhere in the formula builds an address it does not resolve"
 # The same rule holds for every step, the stamps above and the refinery queue
 # read alike: a query by an address no agent holds returns a valid empty array.
-# Outside the resolver and a diagnostic, the token appears only where a pour
-# forwards the variable to the next patrol wisp.
-FORMULA_STRAY=$(grep -n '{{binding_prefix}}' "$TOML" \
+# Outside the pack lookup, the resolver and a diagnostic, the token appears only
+# where a pour forwards the variable to the next patrol wisp.
+FORMULA_STRAY=$(unpack < "$TOML" | grep -n '{{binding_prefix}}' \
   | sed "s/--var binding_prefix='{{binding_prefix}}'//g" \
   | grep '{{binding_prefix}}' | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true)
 eq "$FORMULA_STRAY" "" "every {{binding_prefix}} in the formula is resolved, a diagnostic, or forwarded to the next pour"
 
-# The rig root the blocks probe first, holding a copy of the real resolver so
-# $SCRIPTS resolution is exercised without reaching the live tree.
+# The pack gc names for `gc gc-toolkit scripts-dir`, holding a copy of the real
+# resolver so $SCRIPTS resolution is exercised without reaching the live tree.
 RIGROOT="$TMP/rig"; mkdir -p "$RIGROOT/assets/scripts"
 cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/file-warrant.sh" "$RIGROOT/assets/scripts/"
 chmod +x "$RIGROOT/assets/scripts/resolve-route.sh" "$RIGROOT/assets/scripts/file-warrant.sh"
@@ -77,6 +80,9 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 set -u
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 case "${1:-} ${2:-}" in
+  "gc-toolkit scripts-dir")
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "agent list")
     [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_AGENTS:-}" ;;
@@ -96,13 +102,13 @@ exit 1
 STUB
 chmod +x "$BIN/gc" "$BIN/git"
 export PATH="$BIN:$PATH"
-export GC_RIG_ROOT="$RIGROOT" GC_RIG=gc-toolkit
+export STUB_PACK="$RIGROOT" GC_RIG_ROOT="" GC_RIG=gc-toolkit
 export STUB_GC_LOG="$TMP/gc.log"
 # The roster file-warrant.sh resolves the wedged OWNER against. The witness owner
 # is a /-bearing agent address (an assignee); its session id is what the warrant
 # must carry, since dance-probe.sh refuses the slash form.
 export STUB_SESSIONS='{"sessions":[
-  {"id":"lx-wisp-conv2","alias":"gc-toolkit/gc-toolkit.converse-2","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","state":"active"},
+  {"id":"hq-wisp-conv2","alias":"gc-toolkit/gc-toolkit.converse-2","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","state":"active"},
   {"id":"sess-1","alias":"gc-toolkit/gc-toolkit.thing","session_name":"s-sess-1","state":"active"}]}'
 
 # run <rendered-block-file> <prelude> -> transcript in OUT, gc calls in LOG
@@ -127,7 +133,7 @@ export STUB_OPEN='[]'
 run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" 'bd create' "a wedged session with no open warrant files one"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "routed at the city-scoped dog, unqualified"
-has "$LOG" '"warrant.target":"lx-wisp-conv2"' "the /-bearing owner is resolved to its session id"
+has "$LOG" '"warrant.target":"hq-wisp-conv2"' "the /-bearing owner is resolved to its session id"
 hasnt "$LOG" '"warrant.target":"gc-toolkit/gc-toolkit.converse-2"' "the agent address never lands as a target dance-probe.sh would refuse"
 has "$LOG" '"warrant.reason":"No progress on tk-a for 6h"' "and the reason as given"
 

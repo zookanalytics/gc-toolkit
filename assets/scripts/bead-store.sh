@@ -117,19 +117,12 @@ SUFFIX="${BEAD#*-}"
   exit "$UNPLACED"
 }
 
-RIGS=$(bounded gc rig list --json 2>/dev/null | scrub)
-# Empty means UNREADABLE as often as it means "no such prefix", and the two
-# have different repairs, so they are reported apart.
-if [ -z "$RIGS" ]; then
-  echo "$PROG: could not read \`gc rig list --json\` — the store for $BEAD is unproven, so nothing may be concluded about it" >&2
-  exit 3
-fi
-
-# A payload that is not a rig list at all would leave every prefix unmatched
-# and read as "no rig carries it", which is a fact about the rigs rather than
-# about the answer. Establish that it IS one before drawing anything from it.
-printf '%s' "$RIGS" | jq -e '(.rigs | type) == "array"' >/dev/null 2>&1 || {
-  echo "$PROG: \`gc rig list --json\` did not answer with a rig list — the store for $BEAD is unproven, so nothing may be concluded about it" >&2
+# A roster that did not read, or is not a rig list, would leave every prefix
+# unmatched and read as "no rig carries it", which is a fact about the rigs
+# rather than about the answer and has a different repair. rig-map.sh refuses
+# both and names why.
+RIGS=$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rig-map.sh") || {
+  echo "$PROG: could not read the rig map, so the store for $BEAD is unproven and nothing may be concluded about it" >&2
   exit 3
 }
 

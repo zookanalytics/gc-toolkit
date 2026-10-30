@@ -179,8 +179,8 @@ func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 	}
 
 	// A codex polecat is claiming the review: the city's move, not a stall.
-	liveAnchor := preOpenGateAnchor("tk-gate", 5, nil, review("gc-toolkit__polecat-codex-lx-live"))
-	live := BuildBoard([]Anchor{liveAnchor}, fixtureNow, false, nil, liveOwners("gc-toolkit__polecat-codex-lx-live"))
+	liveAnchor := preOpenGateAnchor("tk-gate", 5, nil, review("gc-toolkit__polecat-codex-hq-live"))
+	live := BuildBoard([]Anchor{liveAnchor}, fixtureNow, false, nil, liveOwners("gc-toolkit__polecat-codex-hq-live"))
 	lt := mustTile(t, live, "tk-gate")
 	if lt.PRMachine != MachineProgressing {
 		t.Fatalf("a pool-routed review reads progressing, got %q", lt.PRMachine)
@@ -194,9 +194,9 @@ func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 
 	// The same anchor and the same routed review, but the session has drained —
 	// no pool is draining the queue, so nothing is moving it.
-	deadAnchor := preOpenGateAnchor("tk-gate", 5, nil, review("gc-toolkit__polecat-codex-lx-gone"))
+	deadAnchor := preOpenGateAnchor("tk-gate", 5, nil, review("gc-toolkit__polecat-codex-hq-gone"))
 	dead := BuildBoard([]Anchor{deadAnchor}, fixtureNow, false, nil,
-		Facts{OwnerState: map[string]string{"gc-toolkit__polecat-codex-lx-gone": "archived"}})
+		Facts{OwnerState: map[string]string{"gc-toolkit__polecat-codex-hq-gone": "archived"}})
 	dt := mustTile(t, dead, "tk-gate")
 	if dt.PRMachine != MachineProgressing {
 		t.Fatalf("routed-ness still reads progressing, got %q", dt.PRMachine)
@@ -441,8 +441,8 @@ func TestPreOpenCheckLiveReviewNotRouted(t *testing.T) {
 	review := Blocker{ID: "tk-rev", Title: "Review branch polecat/tk-live -> main (correctness): fix the thing", Status: "open"}
 	a := preOpenGateAnchor("tk-live", 5, nil, review)
 	f := Facts{
-		Inflight:   map[string][]string{"tk-rev": {"gc-toolkit__polecat-codex-lx-run"}},
-		OwnerState: map[string]string{"gc-toolkit__polecat-codex-lx-run": "active"},
+		Inflight:   map[string][]string{"tk-rev": {"gc-toolkit__polecat-codex-hq-run"}},
+		OwnerState: map[string]string{"gc-toolkit__polecat-codex-hq-run": "active"},
 	}
 	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, f), "tk-live")
 

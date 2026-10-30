@@ -10,8 +10,8 @@ board, not a second implementation of it". The change itself is in
 `services/helm/`; this file is the evidence and the judgement calls, which do
 not belong in a bead comment.
 
-Measured 2026-08-22 on the `loomington` city — 8 CPU, 30G RAM, 5 bead stores
-(`lx` HQ, `tk`, `sl`, `gc`, `su`), 55 anchors.
+Measured 2026-08-22 on the `mycity` city — 8 CPU, 30G RAM, 5 bead stores
+(`hq` HQ, `tk`, `ra`, `gc`, `rb`), 55 anchors.
 
 ## What was compared
 
@@ -98,7 +98,7 @@ decision, and each is commented at its site.
    matches a bare `-abc` — so every hyphenated word in an anchor's prose becomes
    a phantom cross-rig reference and inflates the weight lane. The Go
    `crossRigRefs` returns no refs for an empty prefix set. This did not show in
-   the comparison because loomington has five prefixes.
+   the comparison because mycity has five prefixes.
 
 3. **The weight lane cap.** `rankScore` caps weight at 999 so it cannot bleed
    into the severity lane; gc-helm.sh does not cap. Unreachable in practice (it
@@ -109,7 +109,7 @@ decision, and each is commented at its site.
 Both surfaced while proving parity, and both were gaps in the DASHBOARD:
 
 - **The HQ bead store was never gathered.** `gc rig list` reports the city root
-  itself as a rig (`"hq": true`, prefix `lx`) and gc-helm.sh gathers it, but
+  itself as a rig (`"hq": true`, prefix `hq`) and gc-helm.sh gathers it, but
   `BeadsSource.rigs()` scanned only `<city>/rigs/*/.beads`. Three
   `gc.routed_to=human` beads — city-scope work provably waiting on the operator,
   which is the highest-value row this board has — were invisible on the

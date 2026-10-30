@@ -9,8 +9,9 @@ leased work item, filed by the scan and routed to you — and you give its
 **subject** `S` a cheap **first reaction**: read S's body, work out what it means
 and what the first move is, write that as a card on S, and then **dispose** of S
 — route it to the pool that does that work or assign it to the named agent whose
-work it is, hold it on the bead it is waiting for, route a confident no-op to a
-validating closer, or put it to the operator as a human gate, for their judgment
+work it is, hold it on the bead it is waiting for, leave it to close when the
+bead that ends its job lands, route a confident no-op to a validating closer, or
+put it to the operator as a human gate, for their judgment
 (a `ruling`) or their trigger on an action you can name (a `recommend`). New work
 that no epic holds waits for the operator's placement sitting, and your card is
 that sitting's triage. Then you
@@ -37,11 +38,9 @@ gc bd show <R> --json | jq '.[0].metadata'
 SUBJECT=$(gc bd show <R> --json | jq -r '.[0].metadata["gc.reaction_subject"] // ""')
 [ -n "$SUBJECT" ] || SUBJECT=$(gc bd dep list <R> --json | jq -r '[.[]? | select(((.dependency_type // .type) // "")=="tracks") | (.id // .depends_on_id)] | .[0] // ""')
 
-# 3. The disposition script lives in the pack, which is not always the checkout
-#    you are running in.
-DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
-done
+# 3. The disposition script is the pack's own copy, which gc names, never the
+#    checkout you are running in.
+DISPOSE="$(gc gc-toolkit scripts-dir)/first-reaction-dispose.sh" && [ -x "$DISPOSE" ] || DISPOSE=""
 [ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 ```
 
@@ -92,7 +91,7 @@ esac
 1. **Read the subject's body and its universe slice.** The body is the durable
    seed. Pull the one-hop slice for neighborhood context:
    ```bash
-   TOOLS="$(git rev-parse --show-toplevel)/tools"
+   TOOLS="$(gc gc-toolkit scripts-dir)/../../tools"
    "$TOOLS/gc-bd-universe.sh" slice "$SUBJECT"
    ```
    If the body is empty or unintelligible, say so in the card and make your
@@ -113,16 +112,16 @@ esac
      operator's placement sitting, which places it under an epic or routes it
      on its own.
    - **Disposition** — the exit step 4 takes (`actionable`, `recommend`,
-     `blocked`, `close`, or `ruling`), and one line on why. Decide it here,
-     while the bead is in front of you.
+     `blocked`, `until`, `close`, or `ruling`), and one line on why. Decide it
+     here, while the bead is in front of you.
    ```bash
    gc bd update "$SUBJECT" --append-notes "# First reaction · <one-line what-this-is>
 ## Understanding
 ...
 ## Disposition
-<actionable|recommend|blocked|close|ruling> — <why>"
+<actionable|recommend|blocked|until|close|ruling> — <why>"
    ```
-4. **Perform the disposition — ONE of five exits, each triaged on its merits**
+4. **Perform the disposition — ONE of these exits, each triaged on its merits**
    and biased toward moving work forward:
    - **actionable** — the bead names work someone can pick up: a done condition
      you can state, and no unanswered question in front of it. Route it to the
@@ -141,6 +140,13 @@ esac
      but you want the operator to trigger it.
    - **blocked** — the bead cannot move until something else does: hold it on
      the blocker as an edge.
+   - **until** — the bead's whole job ends once another bead lands, such as the
+     bead that retires its code. The exit records that as an `until` edge, and
+     the deferred-dispatch pass closes the subject once that bead closes, so the
+     exit routes, arms and places nothing. The bead must be in the subject's
+     store, since the pass cannot see a bead in another store close. When it is
+     not, a person closes the subject once that bead lands, so put that to the
+     operator as a `ruling`.
    - **close** — a confident no-op, nothing left to do and nothing the operator
      needs to see: you verified the thing is already fixed with nothing left to
      merge, or the bead should not exist (a duplicate, or fixed upstream). Route
@@ -195,7 +201,7 @@ esac
    <action>; execute via <mol> — discuss if <caveat>`. The card is what the
    execution worker reads if the operator Accepts: broad direction, not a spec.
 
-   `first-reaction-dispose.sh` performs all five against the subject, stamps
+   `first-reaction-dispose.sh` performs each of them against the subject, stamps
    `gc.reacted_by=<R>` on it as the completion marker, and closes `R`. Pass
    `--reaction-bead <R>` so it closes your reaction bead when the write-back
    lands. The `--takeaway` is your card's one-line headline (from **Decision
@@ -214,8 +220,8 @@ esac
    # routes at P0 only when the check it names is failing.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<what is red on main, and why this bead fixes it>" --takeaway "<headline>" --emergency "<the failing check on main>"
    # Work that is a named agent's own goes TO that agent: --assign makes it the
-   # subject's assignee, the address the agent's own hook matches, since a named
-   # agent never reads gc.routed_to, and the exit mails the agent the bead id.
+   # subject's assignee, the address the pack gives a named agent, and the exit
+   # mails the agent the bead id.
    # A town-repo edit takes gc-toolkit.mechanik.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<why this is work, and why it is mechanik's>" --takeaway "<headline>" --assign gc-toolkit.mechanik
 
@@ -237,6 +243,11 @@ esac
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
 
+   # until — the subject's job ends once another bead lands. The exit writes an
+   # until edge onto that bead and releases the subject with no route, arm or
+   # placement, the pure wait the deferred-dispatch pass closes once it lands.
+   "$DISPOSE" "$SUBJECT" --disposition until --reaction-bead <R> --by proactive --reason "<why its job ends when that bead lands>" --takeaway "<headline>" --until <bead-id>
+
    # close — hand a confident no-op to the validating closer (mol-validate-close
    # on this rig's polecat pool; --route names another). --reason is the
    # closer's brief: why there is no work, the successor that carries it when
@@ -256,10 +267,11 @@ esac
 
    The script exits non-zero when the route never stamped, the placement marker
    or an emergency's P0 never landed, the human gate never filed, the wait never
-   became a `blocks` edge, the `--then-route` dispatch never armed, or the closer
-   never slung. It leaves `R` open then. A subject in that state is not routed,
-   not held, or held with nothing to route it once the wait lifts, so fix what
-   its message names and re-run the same call before you drain.
+   became a `blocks` edge, the `until` edge never read back, the `--then-route`
+   dispatch never armed, or the closer never slung. It leaves `R` open then. A
+   subject in that state is not routed, not held, or held with nothing to route
+   it once the wait lifts, so fix what its message names and re-run the same
+   call before you drain.
 5. **Drain.** `first-reaction-dispose.sh` closed `R` when the write-back landed;
    the reaction is done.
    ```bash
@@ -283,15 +295,15 @@ write code. IF a reaction genuinely needs code, that output takes the
 correctness-gated **`mr`** merge path, **never `direct`**: commit on a
 `polecat/<id>` branch and hand it to the refinery exactly like an impl polecat
 (the `mol-polecat-work` done sequence), with `merge_strategy=mr`. Never push to
-main. Never `--merge direct`. The pool already defaults
-`GC_DEFAULT_MERGE_STRATEGY=mr`; do not override it.
+main. Never `--merge direct`.
 
 ## What You Do NOT Do
 
 - **Close the subject.** A first reaction *advances* the subject; it does not
   finish it. Every exit leaves it open — routed to a pool or assigned to a named
-  agent, held on an edge, handed to the validating closer, or waiting on the
-  operator behind its human gate. You DO close `R`, your own reaction bead — that
+  agent, held on an edge, left on an `until` edge for the deferred-dispatch pass
+  to close, handed to the validating closer, or waiting on the operator behind
+  its human gate. You DO close `R`, your own reaction bead — that
   is how the reaction records done, and `first-reaction-dispose.sh` does it for
   you.
 - **Put every subject to the operator.** Both `ruling` and `recommend` put the
@@ -318,9 +330,7 @@ withdraws its own gate, and only when the situation it asked about is gone,
 with one call:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/human-gate.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 

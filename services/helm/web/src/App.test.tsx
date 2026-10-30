@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App, resolveDrillTarget } from './App';
@@ -67,6 +69,8 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     recommendation: null,
     accept_withheld: null,
     gates_in_session: null,
+    sitting_start_failure: '',
+    pr_held: null,
     ...over,
   };
 }
@@ -196,7 +200,7 @@ const BOARD: Board = {
       waiting_on: ['tk-hgmob'],
       waiting_on_open: [],
       disposition_due: true,
-      frontier: 'parked · blocker landed',
+      frontier: 'blocker landed',
       needs: 'blocker landed — dispose or resume',
       rank_score: 2_002_001,
     }),
@@ -1315,6 +1319,27 @@ it('shows the PR phase beside the row', async () => {
   expect(within(row as HTMLElement).getByText('needs-review')).toBeTruthy();
 });
 
+// An approved PR the city is landing reads merging, in its own color, so it no
+// longer shares the working chip with a PR the city is still changing. The chip
+// builds its class from any phase it is given, so the color is pinned on the
+// stylesheet, read from disk because the suite loads no CSS: without a rule of
+// its own, a merging chip renders in the chip's plain text color.
+it('shows merging on the chip of a PR the city is landing', async () => {
+  servePRUnder('tk-root', prTile({
+    id: 'tk-mg',
+    title: 'an approved row being landed',
+    pr_phase: 'merging',
+  }));
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/an approved row being landed/)).toBeTruthy());
+
+  const row = rowFor(/an approved row being landed/);
+  const chip = within(row as HTMLElement).getByText('merging');
+  expect(chip.className).toBe('pr-phase pr-phase--merging');
+  const styles = readFileSync(join(import.meta.dirname, 'styles.css'), 'utf8');
+  expect(styles).toMatch(/\.pr-phase--merging\s*\{[^}]*\bcolor:\s*#[0-9a-fA-F]{3,8}\s*;/);
+});
+
 // A resolved PR names its terminal state on the same chip, so a done row says how
 // its PR ended — merged or closed — rather than freezing on its last live phase.
 it('shows a resolved PR state on the chip', async () => {
@@ -1329,6 +1354,39 @@ it('shows a resolved PR state on the chip', async () => {
   const row = rowFor(/a row whose PR has merged/);
   const chip = within(row as HTMLElement).getByText('merged');
   expect(chip.className).toContain('pr-phase--merged');
+});
+
+// What holds a PR rides its row as one chip per held: label, read off the wire
+// in its order, each with hover text saying what it asks of the operator, in a
+// colour of its own pinned on the stylesheet. A PR nothing holds carries none.
+it('shows what holds a PR beside its phase, one chip per held value', async () => {
+  serve([
+    tile({ id: 'tk-root', kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
+    {
+      ...prTile({ id: 'tk-held', title: 'a pull request a gate and a blocker hold', pr_phase: 'needs-attention', pr_held: ['gate', 'blocked'] }),
+      group_root: 'tk-root',
+    },
+    {
+      ...prTile({ id: 'tk-free', title: 'a pull request nothing holds', pr_phase: 'merging', pr_held: null }),
+      group_root: 'tk-root',
+    },
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('a pull request a gate and a blocker hold')).toBeTruthy());
+
+  const held = rowFor('a pull request a gate and a blocker hold') as HTMLElement;
+  const chips = Array.from(held.querySelectorAll('.pr-held')).map((c) => c.textContent);
+  expect(chips).toEqual(['held: gate', 'held: blocked']);
+  expect(within(held).getByText('held: gate').getAttribute('title')).toMatch(/^held: gate: \S/);
+  expect(within(held).getByText('held: blocked').className).toBe('pr-held pr-held--blocked');
+
+  const free = rowFor('a pull request nothing holds') as HTMLElement;
+  expect(free.querySelectorAll('.pr-held')).toHaveLength(0);
+
+  const styles = readFileSync(join(import.meta.dirname, 'styles.css'), 'utf8');
+  expect(styles).toMatch(/\.pr-held\s*\{[^}]*\bcolor:\s*#[0-9a-fA-F]{3,8}\s*;/);
+  const key = anchors().querySelector('.legend') as HTMLElement;
+  expect(key.textContent).toContain('what holds a PR: gate = an open human gate on the PR');
 });
 
 // The conversation axis is how the board shows which pull requests carry the
@@ -1568,7 +1626,7 @@ const MULTI_RIG: Board = {
   generated_at: '2026-09-01T12:00:00Z',
   total: 2,
   partial: true,
-  partial_errors: ['rig shutupandlisten: context canceled'],
+  partial_errors: ['rig rig-b: context canceled'],
   tiles: [
     tile({ id: 'tk-gct', kind: 'epic', title: 'the gc-toolkit family', severity: 'NORMAL', section: 'active', rig: 'gc-toolkit' }),
     tile({ id: 'tk-gcy', kind: 'epic', title: 'the gascity family', severity: 'NORMAL', section: 'active', rig: 'gascity' }),

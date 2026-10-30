@@ -23,7 +23,7 @@ description: Implementation spec for the three pieces that realize P3 and the ba
 > needing a "what comes next?" exploration). The per-pass filing cap is
 > superseded by a per-visit listing cap.
 
-> **Recurrence addendum (2026-08-10, operator decision — visit su-aib6):**
+> **Recurrence addendum (2026-08-10, operator decision — visit rb-aib6):**
 > §3's ripeness pre-check is superseded in the implementation. The machine
 > hint alone is not ripeness: the check is the hint **and** a set-delta
 > against the candidate set the last filed visit was built from
@@ -182,7 +182,7 @@ formula implemented only the first clause, under the name
   pushed, codex-green and parked on an OPEN pull request awaiting a
   human approval has no open blocker and no bd-level gate, so
   `gc bd ready` returns it and it classified as *unnamed* — the defect
-  class. Measured on signal-loom (sweep of 2026-08-09T23:55Z): six of
+  class. Measured on rig-a (sweep of 2026-08-09T23:55Z): six of
   the ten unnamed waits were PR-parked, so 60% of that sitting was one
   condition the classifier could not see, and nothing about those beads
   could change until a human acted. The marker is
@@ -297,9 +297,9 @@ already having. Three corrections, shipped in
   so when its anchor lands the whole step chain stays open, stays ready,
   and arrives as unnamed waits on every subsequent pass. The classifier
   read each step's own edges and never asked whether the workflow it
-  belongs to had finished. Measured on shutupandlisten 2026-08-13:
-  sixteen step beads across two dead roots (su-zu1j, anchor su-uzy9.4, PR
-  #57 merged; su-vc8n, anchor su-uzy9.5, PR #58 merged), every one of them
+  belongs to had finished. Measured on rig-b 2026-08-13:
+  sixteen step beads across two dead roots (rb-zu1j, anchor rb-uzy9.4, PR
+  #57 merged; rb-vc8n, anchor rb-uzy9.5, PR #58 merged), every one of them
   nominated, none of them work anybody could do — routing such a bead
   re-implements landed work on a branch whose PR already merged. The new
   `landed-husks` block resolves root → input convoy → anchor once per
@@ -331,8 +331,8 @@ already having. Three corrections, shipped in
 - **An agenda a sitting already dispositioned is not re-filed.** The
   step-3 skip deliberately does not advance `sweep.reported`, and a
   baseline can be lost or reset, so the same NEW set can come round again
-  after a sitting has worked it — su-qoma was a verbatim re-file of
-  su-7j8b, closed two days earlier with `gc.outcome=dispositioned`. The
+  after a sitting has worked it — rb-qoma was a verbatim re-file of
+  rb-7j8b, closed two days earlier with `gc.outcome=dispositioned`. The
   guard compares the id SET rather than the title, which is a pair of
   counts that collide by accident, and fires only on
   `gc.outcome=dispositioned`: a visit closed `cut-short` ran out of time

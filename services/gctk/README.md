@@ -15,13 +15,13 @@ supervisor's API (`internal/gcbd`).
 |---|---|---|
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares | `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
-| `pr-status` | a PR's status tri-state (working, needs-review or needs-attention), the one derivation the `status:` label and the helm board share | `internal/cli/prstatus.go`, `prstatus` |
+| `pr-status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share | `internal/cli/prstatus.go`, `prstatus` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
 
 Logic gctk does not hold runs as shell scripts. Among them are the rest of the
-merge cadence (`gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
-`signoff`) and `refinery-reconcile.sh`, the driver that runs the cadence's arms.
+merge cadence (`gate-ensure`, `pr-open`, `pr-facts`, `signoff`) and
+`refinery-reconcile.sh`, the driver that runs the cadence's arms.
 `specs/2026-08-review-gates/gctk-promotion.md` records how the merge cadence
 moves into gctk.
 
@@ -40,10 +40,10 @@ one and a refused merge pass as `merge rc=1`, and retries both on its next
 pass. A fresh city has no binary until that order's first build, and a city
 whose build failed keeps serving the last good binary.
 
-`assets/scripts/pr-status-label.sh` writes the `status:` label in shell and
-takes the value from `gctk pr-status derive`. It resolves the binary the same
-way, and when there is none, or the binary is too old to carry `pr-status`, it
-leaves the label unchanged.
+`assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
+shell and takes their values from `gctk pr-status derive`. It resolves the
+binary the same way, and when there is none, or the binary is too old to carry
+`pr-status` or its `--json`, it leaves the labels unchanged.
 
 ## rig
 
@@ -62,10 +62,11 @@ from the rig's formula vars: `mol-polecat-work`'s workspace-setup, its
 preflight-tests at the base commit and its self-review, the refinery's
 run-tests at the merged head, and the correctness review when the pinned
 commit has no record to read. `assets/scripts/self-review-check.sh`, the
-self-review's exit condition, and the correctness review read the records with
-`--check`. Each caller finds the binary by one line, the `gctk-bin` block,
-which takes `$GCTK_BIN` or else the city's build and calls no `gc`, because
-`self-review-check.sh` runs where `gc` can fail.
+self-review's exit condition, and `assets/scripts/review-evidence.sh`, which
+every review's gather runs, read the records with `--check`. Each caller finds
+the binary by one line, the `gctk-bin` block, which takes `$GCTK_BIN` or else
+the city's build and calls no `gc`, because `self-review-check.sh` runs where
+`gc` can fail.
 
 The records live under the rig clone's git common directory, which every
 worktree of the clone shares and which outlives any one of them:

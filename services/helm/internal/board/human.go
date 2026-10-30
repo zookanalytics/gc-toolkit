@@ -27,10 +27,15 @@ const (
 	KindConversation = "conversation"
 )
 
-// The two states a held row can be in, carried on [Tile.SittingState].
+// The states a held row can be in, carried on [Tile.SittingState].
+// SittingStartFailed is a row a conversation on which last spawned a sitting
+// that failed to start, with no sitting spawned for it since. A row nothing
+// holds carries the empty string, except a conversation's own row whose
+// sitting failed to start ([classifySittings]).
 const (
-	SittingInSession = "in_session"
-	SittingWaiting   = "waiting"
+	SittingInSession   = "in_session"
+	SittingWaiting     = "waiting"
+	SittingStartFailed = "start-failed"
 )
 
 const (
@@ -266,18 +271,85 @@ func (ix humanIndex) inSessionOn(id string) bool {
 	return slices.ContainsFunc(ix.convs[id], func(c string) bool { return ix.live[c] })
 }
 
-// classifySittings stamps [Tile.SittingState] on every held row: in session
-// when a live sitting is on it ([humanIndex.inSessionOn]), and waiting on any
-// other held row, which waits for the operator. It runs after the fold, where
-// Held is final.
+// classifySittings stamps [Tile.SittingState] on every held row: start failed
+// when the sitting last spawned for a conversation on the row failed to start
+// ([humanIndex.startFailure]), in session when a live sitting is on it
+// ([humanIndex.inSessionOn]), and waiting on any other held row, which waits
+// for the operator. It runs after the fold, where Held is final, and before
+// [tagClusters], which keys on the section a failed start rewrites.
+//
+// A failed start outranks a live sitting on the same row. Each conversation on
+// a bead is a conversation of its own, and the failure is the one state on the
+// row nothing else would tell the operator about. A closed row is never marked,
+// because a closed anchor is never owed. A conversation whose subject has no
+// live row keeps a row of its own, so that row carries the failure instead.
 func classifySittings(tiles []Tile, f Facts) {
+	failed := startFailures(f.Sittings)
 	for i := range tiles {
-		if !tiles[i].Held {
+		t := &tiles[i]
+		live := t.ClosedAt.IsZero()
+		if !t.Held {
+			if reason := failed[t.ID]; reason != "" && live {
+				markStartFailed(t, reason)
+			}
 			continue
 		}
-		tiles[i].SittingState = SittingWaiting
-		if f.human.inSessionOn(tiles[i].ID) {
-			tiles[i].SittingState = SittingInSession
+		if reason := f.human.startFailure(t.ID, failed); reason != "" && live {
+			markStartFailed(t, reason)
+			continue
+		}
+		t.SittingState = SittingWaiting
+		if f.human.inSessionOn(t.ID) {
+			t.SittingState = SittingInSession
 		}
 	}
+}
+
+// startFailures maps each open conversation whose last sitting failed to start
+// ([Sitting.StartFailure]) to the reason.
+func startFailures(sittings []Sitting) map[string]string {
+	out := map[string]string{}
+	for _, s := range sittings {
+		if s.Status != "closed" && s.StartFailure != "" {
+			out[s.ID] = s.StartFailure
+		}
+	}
+	return out
+}
+
+// startFailure returns why the sitting last spawned for a conversation on the
+// row id failed to start: the row's own conversation, or one that tracks its
+// bead. It is "" when none of them records a failed start.
+func (ix humanIndex) startFailure(id string, failed map[string]string) string {
+	if reason := failed[id]; reason != "" {
+		return reason
+	}
+	for _, c := range ix.convs[id] {
+		if reason := failed[c]; reason != "" {
+			return reason
+		}
+	}
+	return ""
+}
+
+// markStartFailed puts a row whose conversation's sitting failed to start in
+// front of the operator, the one person who can engage the conversation again.
+// The state and its reason ride the wire, and NEEDS leads with the failure, so
+// every surface that prints the row says so. The row is owed and banded at
+// least ELEVATED, whatever its own markers made of it. [owedFirst] puts the
+// row at the head of the queue.
+func markStartFailed(t *Tile, reason string) {
+	t.SittingState = SittingStartFailed
+	t.SittingStartFailure = reason
+	t.Owed = true
+	if t.Severity.rank() < SevElevated.rank() {
+		t.Severity = SevElevated
+		t.RankScore = rankScore(t.Severity, t.Weight, t.StaleDays, 0)
+	}
+	needs := "start failed (" + reason + ")"
+	if t.Needs != "" {
+		needs += ": " + t.Needs
+	}
+	t.Needs = needs
+	t.Section = classifySection(*t)
 }

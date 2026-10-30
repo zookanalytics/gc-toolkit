@@ -117,7 +117,7 @@ eq "$(ids "$FIX")" "n1,p1,v1" \
 # name all read as assigned; only emptiness drops a bead.
 FIX2='[
   {"id":"a","assignee":"gascity/gc-toolkit.gc-z0vi2","metadata":{}},
-  {"id":"b","assignee":"gc-toolkit__polecat-lx-fjnq1","metadata":{}},
+  {"id":"b","assignee":"gc-toolkit__polecat-hq-fjnq1","metadata":{}},
   {"id":"c","assignee":"","metadata":{"task_kind":"visit"}}
 ]'
 eq "$(ids "$FIX2")" "a,b" \
@@ -131,7 +131,7 @@ eq "$(ids '[]')" "" "empty listing yields empty result"
 # s2  workflow ROOT bead: no assignee, owner in gc.session_name only
 # s3  workflow machinery naming no session at all -> DROP (nothing to resolve)
 FIX3='[
-  {"id":"s1","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit__polecat-lx-7xcse","gc.session_affinity":"require"}},
+  {"id":"s1","metadata":{"gc.session_id":"hq-7xcse","gc.session_name":"gc-toolkit__polecat-hq-7xcse","gc.session_affinity":"require"}},
   {"id":"s2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}},
   {"id":"s3","metadata":{"gc.kind":"workflow","gc.root_bead_id":"tk-root"}}
 ]'
@@ -139,7 +139,7 @@ eq "$(assignee_only_ids "$FIX3")" "" \
    "(premise) an assignee-only predicate sees neither the step nor the root here"
 eq "$(ids "$FIX3")" "s1,s2" \
    "keeps a step owned via gc.session_id and a root owned via gc.session_name; drops the ownerless s3"
-eq "$(owners "$FIX3")" "s1=lx-7xcse,s2=gc-toolkit--gc-toolkit__polecat-1-pool" \
+eq "$(owners "$FIX3")" "s1=hq-7xcse,s2=gc-toolkit--gc-toolkit__polecat-1-pool" \
    "stamps .owner from whichever signal the bead carries"
 
 # The composed candidate set the loop actually reads: host-bead-skip resolves the
@@ -157,12 +157,12 @@ eq "$(candidate_ids "$FIX3")" "s1" \
 # session name both name a live identity, and only the id remembers who actually
 # died.
 FIX4='[
-  {"id":"a1","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}},
-  {"id":"a2","assignee":"","metadata":{"gc.session_id":"lx-dead","gc.session_name":"slot-1"}},
+  {"id":"a1","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"hq-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}},
+  {"id":"a2","assignee":"","metadata":{"gc.session_id":"hq-dead","gc.session_name":"slot-1"}},
   {"id":"a3","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_name":"slot-1"}},
   {"id":"a4","assignee":"","metadata":{"gc.session_name":"slot-1"}}
 ]'
-eq "$(owners "$FIX4")" "a1=lx-dead,a2=lx-dead,a3=gc-toolkit/gc-toolkit.furiosa,a4=slot-1" \
+eq "$(owners "$FIX4")" "a1=hq-dead,a2=hq-dead,a3=gc-toolkit/gc-toolkit.furiosa,a4=slot-1" \
    "owner precedence: gc.session_id, then assignee, then gc.session_name"
 
 # Degenerate metadata must neither error nor invent an owner. A bead with every
@@ -171,7 +171,7 @@ FIX5='[
   {"id":"m1","assignee":"","metadata":null},
   {"id":"m2","assignee":""},
   {"id":"m3","metadata":{"gc.session_id":"","gc.session_name":""}},
-  {"id":"m4","metadata":{"gc.session_id":"lx-live"}}
+  {"id":"m4","metadata":{"gc.session_id":"hq-live"}}
 ]'
 eq "$(ids "$FIX5")" "m4" \
    "null metadata, absent metadata and empty session keys yield no owner"

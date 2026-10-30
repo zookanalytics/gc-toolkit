@@ -7,7 +7,8 @@
 # sitting holds on the bead, or the conversation an id names, with a reason
 # that names the dismissal. It answers nothing: every human gate the
 # conversation replies to stays open and owed, and it writes nothing to the
-# bead. converse-reap closes the session once nobody is attached.
+# bead. It then stops the converse session that held each conversation it
+# closed, with `gc runtime drain-ack`.
 #
 # Covered:
 #   (SITTING, WHY, FORCE) the live sitting's conversation is closed over its
@@ -26,6 +27,12 @@
 #             not answer, and an id that does not resolve all fail the run
 #   (RIG)     the lookup reads the bead's own rig store
 #   (INFER*)  with no bead named, the conversation this session holds
+#   (STOP-*)  the session that held a closed conversation is stopped after the
+#             close: acked as an operator from outside the sitting, by its own
+#             ack from inside it, as an operator under --operator, and never
+#             when the holder is no converse sitting or a stop fails the run
+#   (KEY)     prefix+X runs the real dismiss, which stops the sitting with one
+#             operator ack Gas City takes
 #   (ARGS)    an unknown flag is a usage error
 #
 # Runs the REAL gc-helm.sh (as `sh`, as shipped) with a stubbed `gc` on PATH
@@ -56,7 +63,8 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/sl/.beads"
 # store each tracks lookup and each listing read is appended to $READS.
 # Hooks: DEP_DOWN fails every `bd dep list`, LIST_DOWN every `bd list`,
 # SESSIONS_DOWN `gc session list`; STUCK=<id> refuses every close of that
-# bead; WORK_REFUSE refuses a gc.work_outcome write.
+# bead; WORK_REFUSE refuses a gc.work_outcome write. `runtime drain-ack` logs
+# to $DRAINS.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
 row() { cat "$B/$1.json" 2>/dev/null; }
@@ -93,6 +101,35 @@ case "$1 ${2:-}" in
         done | jq -sc '.' ;;
       *) log "$*" ;;
     esac ;;
+  "runtime drain-ack")
+    # The stop dismiss sends the session that held a conversation. The log line
+    # names the caller's own session id and how many closes had landed, so a
+    # test can tell a self-ack from an operator ack and the stop from the close
+    # it follows. FAKE_DRAIN_RC fails it.
+    #
+    # Gas City's incarnation rules (cmd/gc/cmd_runtime_drain.go), which refuse
+    # with nothing acknowledged: an --operator ack names its target, and is
+    # refused when the caller's GC_SESSION_ID or GC_INSTANCE_TOKEN names that
+    # session, under either reconciler. Under v2 (FAKE_DRAIN_V2) a self-ack
+    # must carry the token on its own session's row. FAKE_SESSION_TOKENS holds
+    # the rows' tokens as <session-id>=<token> words. A refusal ends its log
+    # line with "| refused" and exits 1.
+    shift 2
+    tok_of() { local w; for w in ${FAKE_SESSION_TOKENS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return 0; }; done; }
+    refused=""
+    if [ "${1:-}" = "--operator" ]; then
+      if [ -z "${2:-}" ] || [ "${GC_SESSION_ID:-}" = "$2" ] \
+         || { [ -n "${GC_INSTANCE_TOKEN:-}" ] && [ "$GC_INSTANCE_TOKEN" = "$(tok_of "$2")" ]; }; then
+        refused=1
+      fi
+    elif [ -n "${FAKE_DRAIN_V2:-}" ]; then
+      own=$(tok_of "${GC_SESSION_ID:-${GC_SESSION_NAME:-}}")
+      if [ -z "${GC_INSTANCE_TOKEN:-}" ] || [ "$GC_INSTANCE_TOKEN" != "$own" ]; then refused=1; fi
+    fi
+    printf 'drain-ack %s | self=%s | closes=%s%s\n' "$*" "${GC_SESSION_ID:-}" \
+        "$(grep -c '^bd close' "$CALLS" 2>/dev/null || echo 0)" "${refused:+ | refused}" >> "${DRAINS:-/dev/null}"
+    [ -z "$refused" ] || { echo "gc runtime drain-ack: refused by the incarnation rules; nothing acknowledged" >&2; exit 1; }
+    exit "${FAKE_DRAIN_RC:-0}" ;;
   "bd gate")
     log "$*" ;;
   "bd close")
@@ -288,6 +325,122 @@ sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit
 GC_SESSION_ID=gc-60 GC_ALIAS=gc-toolkit/gc-toolkit.sl-conv run_dismiss
 has "$(grep '^list' "$READS")" "$TMP/sl/.beads" "(INFER-RIG) the current-sitting lookup is pinned at the session's own rig"
 eq "$(field sl-conv status)" "closed" "(INFER-RIG) …and finds the conversation there"
+
+echo "# dismiss stops the session that held the conversation it closed"
+# A sitting must not outlive its conversation, and a session viewed in a tab is
+# not kept up by the viewing. The stop is `gc runtime drain-ack`, so the
+# controller ends the session outside the verb's process: the holder the verb
+# runs in acks itself, after every close; any other holder is acked as an
+# operator. Only a live converse session counts as a holder, and a stop that
+# fails leaves the dismiss standing and names converse-reap.
+export DRAINS="$TMP/drains"
+drains() { cat "$DRAINS"; }
+fresh; : > "$DRAINS"; run_dismiss tk-subj
+eq "$RC" 0 "(STOP-OTHER) a dismiss from outside the sitting exits 0"
+eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" \
+   "(STOP-OTHER) …and acks the holding session as an operator, once, after the conversation's close"
+has "$OUT" "stopped session gc-50, which held the sitting" "(STOP-OTHER) …and says which session it stopped"
+fresh; : > "$DRAINS"; GC_SESSION_ID=gc-50 run_dismiss tk-subj
+eq "$RC" 0 "(STOP-OWN) a dismiss typed into the sitting exits 0"
+eq "$(drains)" "drain-ack  | self=gc-50 | closes=2" "(STOP-OWN) …and the sitting acks its own session, after the conversation's close"
+has "$OUT" "ending this session (gc-50), which held the sitting" "(STOP-OWN) …saying so before it does"
+fresh; : > "$DRAINS"; FAKE_DRAIN_RC=1 run_dismiss tk-subj
+eq "$RC" 0 "(STOP-FAIL) a stop that fails leaves the dismiss standing"
+has "$ERR" "could not stop session gc-50, which held the sitting; converse-reap closes it on its next pass, because its conversation is closed" \
+    "(STOP-FAIL) …and names converse-reap as what closes the session"
+# A holder that runs another template is no sitting, so the close stops nothing.
+fresh; : > "$DRAINS"
+sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.polecat","state":"active","closed":false,"rig":"gc-toolkit"}]'
+jq '.assignee = "human" | .status = "open"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"
+jq '.assignee = "gc-toolkit/gc-toolkit.tk-conv"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"
+run_dismiss tk-conv
+eq "$(field tk-conv status)" "closed" "(STOP-CONVERSE) a conversation held under a session that is no converse sitting closes"
+eq "$(drains)" "" "(STOP-CONVERSE) …and stops nothing"
+# A conversation waiting in the queue is held by nobody.
+fresh; : > "$DRAINS"; jq '.assignee = "human" | .status = "open"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"
+run_dismiss tk-conv
+eq "$(field tk-conv status)" "closed" "(STOP-NOHOLDER) a conversation in the queue closes by its id"
+eq "$(drains)" "" "(STOP-NOHOLDER) …and, held by nobody, stops nothing"
+# The claim stamps the holder's id on the conversation, so the gc.session_id
+# pin finds a holder whose name the assignee does not carry.
+fresh; : > "$DRAINS"
+jq '.metadata["gc.session_id"] = "gc-81" | .metadata["gc.session_name"] = "s-gc-81"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"
+sessions '[{"id":"gc-81","session_name":"s-gc-81","alias":"gc-toolkit/gc-toolkit.tk-conv-other","template":"gc-toolkit/gc-toolkit.converse-fable","state":"active","closed":false,"rig":"gc-toolkit"}]'
+run_dismiss tk-conv
+case "$(drains)" in
+  "drain-ack --operator gc-81 "*) ok "(STOP-PIN) the conversation's gc.session_id names the holder to stop" ;;
+  *) bad "(STOP-PIN) the pinned holder was not stopped (drains: $(drains); out: $OUT $ERR)" ;;
+esac
+
+# From here on the stub knows the sittings' tokens, so its drain-ack applies
+# every incarnation rule. A sitting's tmux environment carries its session id
+# and token, and a run-shell job inherits that environment, so a caller outside
+# the sitting can carry both.
+export FAKE_SESSION_TOKENS="gc-50=tok-50 gc-51=tok-51"
+fresh; : > "$DRAINS"; FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-50 GC_INSTANCE_TOKEN=tok-50 run_dismiss tk-subj
+eq "$(drains)" "drain-ack  | self=gc-50 | closes=2" \
+   "(STOP-OWN-V2) a dismiss in the sitting acks its own session with its own token, which v2 takes"
+# --operator: the caller runs under the sitting's identity and token, as the
+# prefix+X job does, and is still outside it. The stop is an operator ack run
+# with neither, which Gas City takes under either reconciler, and nothing acks
+# itself.
+for _mode in legacy v2; do
+    _v2=""; [ "$_mode" = v2 ] && _v2=1
+    fresh; : > "$DRAINS"
+    FAKE_DRAIN_V2="$_v2" GC_SESSION_ID=gc-50 GC_SESSION_NAME=s-gc-50 GC_INSTANCE_TOKEN=tok-50 run_dismiss --operator tk-subj
+    eq "$RC" "0" "(STOP-OPERATOR) [$_mode] dismiss --operator under the sitting's identity exits 0"
+    eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" \
+       "(STOP-OPERATOR) [$_mode] …and acks the sitting as an operator, with no session identity or token, which Gas City takes"
+    has "$OUT" "stopped session gc-50" "(STOP-OPERATOR) [$_mode] …and says which session it stopped"
+    hasnt "$OUT" "ending this session" "(STOP-OPERATOR) [$_mode] …and never takes the sitting for its own session"
+done
+# Another sitting dismissing this one's bead acks it as an operator too, and its
+# own identity never reaches that ack.
+fresh; : > "$DRAINS"; FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-51 GC_INSTANCE_TOKEN=tok-51 run_dismiss tk-subj
+eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" \
+   "(STOP-OTHER-V2) a dismiss from another sitting acks the holder as an operator, without its own identity"
+
+# prefix+X through the real dismiss. tmux-dismiss-sitting.sh runs THIS dismiss
+# under the sitting's identity, so dismiss infers the conversation, and its job
+# inherits the pressed sitting's tmux environment. Its stop must still be an
+# operator ack Gas City takes: under v2 with the inherited token, under v2 when
+# the job inherited none, and under legacy. A self-ack fails the second, and an
+# operator ack that kept the sitting's session id fails all three.
+mkdir -p "$TMP/keybin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/keybin/tmux" <<'TMUXSTUB'
+# display-message -p answers the format it is asked for; any other
+# display-message is a message to the operator, logged to FAKE_KEY_SAID.
+if [ "$1" = display-message ]; then
+    for a in "$@"; do
+        if [ "$a" = "-p" ]; then
+            case "${!#}" in
+                '#{client_tty}')     printf '/dev/pts/7\n' ;;
+                '#{client_session}') printf 's-gc-50\n' ;;
+            esac
+            exit 0
+        fi
+    done
+    printf '%s\n' "${!#}" >> "$FAKE_KEY_SAID"
+fi
+exit 0
+TMUXSTUB
+chmod +x "$TMP/keybin/tmux"
+KEY_CFG="$(cd "$HERE/../.." && pwd)"
+export FAKE_KEY_SAID="$TMP/key-said"
+for _mode in v2-inherited v2-bare legacy-inherited; do
+    _v2=""; case "$_mode" in v2-*) _v2=1 ;; esac
+    _tok=tok-50; [ "$_mode" = v2-bare ] && _tok=""
+    fresh; : > "$DRAINS"; : > "$FAKE_KEY_SAID"
+    KRC=0; KOUT="$(PATH="$TMP/keybin:$PATH" FAKE_DRAIN_V2="$_v2" \
+        GC_SESSION_ID=gc-50 GC_SESSION_NAME=s-gc-50 GC_INSTANCE_TOKEN="$_tok" \
+        sh "$HERE/tmux-dismiss-sitting.sh" "$KEY_CFG" 2>/dev/null)" || KRC=$?
+    eq "$KRC/$KOUT" "0/" "(KEY) [$_mode] prefix+X exits 0 with nothing on stdout"
+    eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" \
+       "(KEY) [$_mode] …and the real dismiss stops the sitting with one operator ack that Gas City takes"
+    has "$(cat "$FAKE_KEY_SAID")" "the sitting on tk-subj is over (conversation tk-conv closed), and its session is ending" \
+        "(KEY) [$_mode] …and tells the operator the sitting is over"
+done
+unset DRAINS FAKE_SESSION_TOKENS FAKE_KEY_SAID
 
 echo "# argument checks"
 fresh; run_dismiss tk-subj --nope

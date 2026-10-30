@@ -41,7 +41,8 @@ import (
 // jq's tostring. Status is a pointer because jq's `.status // "open"` tells a
 // null or absent status from an empty string, so the decode has to keep that
 // distinction too. Dependencies keeps its JSON shape as well, so a row shape no
-// reader expects still decodes the bead. IssueType, AwaitType and AwaitID are
+// reader expects still decodes the bead, and so does IssueType, which
+// IssueTypeString reads as jq's tostring. IssueType, AwaitType and AwaitID are
 // the fields that make a bead a human gate (IsHumanGate); `gc bd dep list`
 // carries them on each far bead's row, and bd leaves a field out of a row when
 // its value is empty.
@@ -52,7 +53,7 @@ type Bead struct {
 	Notes        any            `json:"notes"`
 	Metadata     map[string]any `json:"metadata"`
 	Dependencies any            `json:"dependencies"`
-	IssueType    string         `json:"issue_type"`
+	IssueType    any            `json:"issue_type"`
 	AwaitType    string         `json:"await_type"`
 	AwaitID      string         `json:"await_id"`
 }
@@ -108,7 +109,7 @@ func (b *Bead) Meta(key string) string {
 // bead's `blocks` blockers keeps these rows to find the bead's human gates, the
 // one reader rule bd_human_gates applies in assets/scripts/bd-lib.sh.
 func (b *Bead) IsHumanGate() bool {
-	return b != nil && b.IssueType == "gate" && b.AwaitType == "human"
+	return b != nil && b.IssueTypeString() == "gate" && b.AwaitType == "human"
 }
 
 // AssigneeString returns `.assignee // "" | tostring`.
@@ -116,6 +117,9 @@ func (b *Bead) AssigneeString() string { return jqString(b.Assignee) }
 
 // NotesString returns `.notes // "" | tostring`.
 func (b *Bead) NotesString() string { return jqString(b.Notes) }
+
+// IssueTypeString returns `.issue_type // "" | tostring`.
+func (b *Bead) IssueTypeString() string { return jqString(b.IssueType) }
 
 // StatusLower returns `.status // "" | tostring | ascii_downcase`.
 func (b *Bead) StatusLower() string { return b.StatusLowerOr("") }

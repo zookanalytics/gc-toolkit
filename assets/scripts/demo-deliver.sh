@@ -90,7 +90,7 @@ scrub() { tr -d '\000-\037'; }
 # uses. The origin is pinned on every gh write below.
 REPO_DIR=""
 if [ -n "$SUBJECT" ] && command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-  REPO_DIR=$(gc rig list --json 2>/dev/null | scrub \
+  REPO_DIR=$("$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/rig-map.sh" \
     | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .path' 2>/dev/null | head -n1)
 fi
 { [ -n "$REPO_DIR" ] && [ -d "$REPO_DIR" ]; } || REPO_DIR="${GC_RIG_ROOT:-}"

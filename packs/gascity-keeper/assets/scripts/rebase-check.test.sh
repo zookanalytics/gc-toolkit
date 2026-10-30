@@ -25,12 +25,14 @@
 # attempt so a retried exec records once, refuse an array it cannot read back,
 # and never move the verdict.
 #
-# EXECUTES the real shipped script against stub `bd` / `gc` binaries and a real
-# temporary git repo. No live city, Dolt, network, or worktrees.
+# EXECUTES the real shipped script against stub `bd` / `gc` binaries, the
+# run-lib.sh stub (the run of the root each case names), and a real temporary
+# git repo. No live city, Dolt, network, or worktrees.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/rebase-check.sh"
+RUN_LIB_STUB="$(cd "$HERE/../../../../assets/scripts" && pwd)/run-lib.stub.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-rebase-check-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # Host signing of commits and tags must not make this suite need a signing agent.
@@ -49,35 +51,13 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 mkdir -p "$TMP/bin"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
-# bd show <id> --json | bd dep tree <id> --json | bd list … --json | bd update <id> …
+# bd show <id> --json | bd list … --json | bd update <id> …
 . "$STATE"
 case "$1" in
-dep)
-  # bd dep tree <convoy> --json — the convoy plus its direct members, in the
-  # shape the real command emits (depth 0 for the convoy itself, depth 1 with
-  # parent_id set for each tracked member).
-  if [ "$2" = "tree" ]; then
-    [ "$DEP_TREE_FAILS" = "1" ] && { echo "stub: dep tree unavailable" >&2; exit 1; }
-    printf '[{"id":"%s","depth":0,"parent_id":"","issue_type":"convoy"}' "$CONVOY_ID"
-    i=1
-    while [ "$i" -le "$CONVOY_MEMBERS" ]; do
-      if [ "$i" = "1" ]; then
-        member="$ISSUE_ID"
-      else
-        member="$ISSUE_ID-extra$i"
-      fi
-      printf ',{"id":"%s","depth":1,"parent_id":"%s","issue_type":"task"}' "$member" "$CONVOY_ID"
-      i=$((i + 1))
-    done
-    printf ']'
-    exit 0
-  fi
-  exit 1
-  ;;
 show)
   case "$2" in
   "$ROOT_ID")
-    printf '[{"id":"%s","metadata":{"gc.input_convoy_id":"%s"' "$ROOT_ID" "$CONVOY_ID"
+    printf '[{"id":"%s","metadata":{"gc.kind":"workflow"' "$ROOT_ID"
     [ -n "$MD_ROOT_ISSUE" ] && printf ',"gc.var.issue":"%s"' "$MD_ROOT_ISSUE"
     printf '}}]'
     ;;
@@ -211,13 +191,14 @@ write_state() {
   # MD_ROOT_ISSUE defaults to the convoy's member, mirroring a real molecule
   # root (verified on gc-wjkmo: gc.var.issue == the single member gc-c05nr).
   local issue_id="${ISSUE_ID-gc-issue}"
+  # The run of the root, as run-lib.sh would name it: by default it works the
+  # case's issue, and RUN_BEAD="" is a run that names no bead.
+  jq -nc --arg root "${ROOT_ID-wisp-1}" --arg bead "${RUN_BEAD-$issue_id}" \
+    '[{root: $root, convoy: "convoy-1", bead: $bead, formula: "mol-upstream-gc-rebase", live: true}]' > "$TMP/runs.json"
   cat > "$STATE" <<EOF
 ROOT_ID="${ROOT_ID-wisp-1}"
-CONVOY_ID="${CONVOY_ID-convoy-1}"
-CONVOY_MEMBERS="${CONVOY_MEMBERS-1}"
 ISSUE_ID="$issue_id"
 MD_ROOT_ISSUE="${MD_ROOT_ISSUE-$issue_id}"
-DEP_TREE_FAILS="${DEP_TREE_FAILS-0}"
 GC_COLD="${GC_COLD-0}"
 MD_WORK_DIR="${MD_WORK_DIR-$WT}"
 MD_ONTO="${MD_ONTO-$UPSTREAM_SHA}"
@@ -236,7 +217,7 @@ IT_STARTED="${IT_STARTED-2026-07-22T19:03:00Z}"
 IT_CLAIMED="${IT_CLAIMED-}"
 IT_CLOSED="${IT_CLOSED-2026-07-22T19:11:00Z}"
 IT_SESSION="${IT_SESSION-gascity--gascity__polecat-1-pool}"
-IT_SESSION_ID="${IT_SESSION_ID-lx-iter1}"
+IT_SESSION_ID="${IT_SESSION_ID-hq-iter1}"
 UPDATE_FAILS="${UPDATE_FAILS-0}"
 EOF
 }
@@ -249,6 +230,8 @@ run_case() {
   local desc="$1" want="$2"
   : > "$CALLS"
   ( cd "$TMP" && GC_WISP_ID="${ROOT_ID-wisp-1}" GC_BEAD_ID=iter-1 \
+      GC_RUN_LIB="$RUN_LIB_STUB" RUN_LIB_STUB_RUNS="$TMP/runs.json" \
+      RUN_LIB_STUB_FAIL="${RUN_FAILS:+subject}" \
       GC_ITERATION="${ITERATION-1}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
   local got=$?
   if [ "$got" = "$want" ]; then
@@ -279,10 +262,10 @@ assert_out() {
 }
 
 reset_env() {
-  unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_WORK_DIR MD_ONTO MD_GATE
+  unset ROOT_ID RUN_BEAD RUN_FAILS ISSUE_ID MD_WORK_DIR MD_ONTO MD_GATE
   unset MD_KEEPER MD_NOTIFY MD_ABORTED_AT MD_BACKUP MD_MAX_ATTEMPTS MD_SUBJECT_MAX MD_QUESTIONS
   unset MD_TIMINGS MD_TIMINGS_RAW IT_CREATED IT_STARTED IT_CLAIMED IT_CLOSED IT_SESSION IT_SESSION_ID
-  unset UPDATE_FAILS ITERATION MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
+  unset UPDATE_FAILS ITERATION MD_ROOT_ISSUE GC_COLD
 }
 
 # --- 1. happy path -----------------------------------------------------------
@@ -333,13 +316,16 @@ run_case "FAIL when the recorded work_dir is missing from disk" 1
 reset_env; MD_WORK_DIR="$TMP"; write_state
 run_case "FAIL when the recorded work_dir is not a git worktree" 1
 
-reset_env; CONVOY_MEMBERS=0; write_state
-run_case "FAIL when the convoy does not have exactly one tracked member" 1
+# run-lib.sh names no bead for a run whose convoy tracks no bead.
+reset_env; RUN_BEAD=""; write_state
+run_case "FAIL when the run names no bead, as for a convoy with no tracked member" 1
+assert_out "names the run it could not use" "works no single bead"
 
 # A convoy that gained a second member is just as malformed as an empty one:
-# there is then no single work bead whose gate this script could certify.
-reset_env; CONVOY_MEMBERS=2; write_state
-run_case "FAIL when the convoy has more than one tracked member" 1
+# there is then no single work bead whose gate this script could certify, and
+# run-lib.sh names none.
+reset_env; RUN_BEAD=""; write_state
+run_case "FAIL when the run names no bead, as for a convoy with more than one tracked member" 1
 
 # --- 8. HEAD exactly at the upstream tip (empty kept set) --------------------
 # A rebase that drops every divergent commit is legitimate: --is-ancestor is
@@ -417,7 +403,7 @@ run_case "FAIL is preserved when the handback write is refused" 1
 
 # Failing before the work bead is resolved leaves nothing to stamp — the loop
 # still reports FAIL rather than erroring out mid-handback.
-reset_env; CONVOY_MEMBERS=0; ITERATION=25; write_state
+reset_env; RUN_BEAD=""; ITERATION=25; write_state
 run_case "FAIL on the last attempt before the work bead resolves" 1
 refute_call "no handback without a resolved work bead" "bd update"
 
@@ -447,18 +433,20 @@ run_case "FAIL on the last attempt with a cold import cache" 1
 assert_call "exhaustion handback still fires when gc is unusable" "aborted_at=rebase-loop-exhausted"
 assert_call "cold-cache handback still routes to the keeper" "--assignee gascity/gascity-keeper.keeper"
 
-# Fallback: membership unreadable (bd hiccup, not a malformed convoy) falls back
-# to the work bead id the root carries.
-reset_env; DEP_TREE_FAILS=1; write_state
-run_case "PASS via the root's gc.var.issue when convoy membership is unreadable" 0
+# Fallback: a run that cannot be read (bd hiccup, not a malformed convoy) falls
+# back to the work bead id the root carries.
+reset_env; RUN_FAILS=1; write_state
+run_case "PASS via the root's gc.var.issue when the run is unreadable" 0
+assert_out "warns that membership went unverified" "membership unverified"
 
-reset_env; DEP_TREE_FAILS=1; MD_ROOT_ISSUE=""; write_state
-run_case "FAIL when membership is unreadable and the root has no gc.var.issue" 1
+reset_env; RUN_FAILS=1; MD_ROOT_ISSUE=""; write_state
+run_case "FAIL when the run is unreadable and the root has no gc.var.issue" 1
 
 # Cross-check: two readable sources that disagree mean the molecule is wired
 # wrong. Certifying a gate against the wrong bead is the false pass this whole
-# script exists to prevent, so it must refuse rather than pick a side.
-reset_env; MD_ROOT_ISSUE="gc-some-other-bead"; write_state
+# script exists to prevent, so run-lib.sh names no bead and the check refuses
+# rather than pick a side.
+reset_env; MD_ROOT_ISSUE="gc-some-other-bead"; RUN_BEAD=""; write_state
 run_case "FAIL when the root's gc.var.issue disagrees with convoy membership" 1
 
 # A root with no gc.var.issue at all (older molecule) still resolves from
@@ -482,7 +470,7 @@ assert_call "the entry carries when work began"      '"started_at":"2026-07-22T1
 assert_call "the entry carries when work ended"      '"closed_at":"2026-07-22T19:11:00Z"'
 assert_call "the entry carries when the check ran"   '"checked_at":"20'
 assert_call "the entry names the session"            '"session":"gascity--gascity__polecat-1-pool"'
-assert_call "the entry names the session id"         '"session_id":"lx-iter1"'
+assert_call "the entry names the session id"         '"session_id":"hq-iter1"'
 assert_call "a green gate records verdict=pass"      '"verdict":"pass"'
 
 # Repeated "error" is a wedged loop; repeated "incomplete" is a loop making
@@ -546,7 +534,7 @@ run_case "PASS records the timing with a cold import cache" 0
 assert_call "timing is recorded when gc is unusable" '"attempt":3'
 
 # Nothing to attach the measurement to: no work bead, no record, no error.
-reset_env; ITERATION=3; CONVOY_MEMBERS=0; write_state
+reset_env; ITERATION=3; RUN_BEAD=""; write_state
 run_case "FAIL before the work bead resolves" 1
 refute_call "no timing without a resolved work bead" "iteration_timings="
 

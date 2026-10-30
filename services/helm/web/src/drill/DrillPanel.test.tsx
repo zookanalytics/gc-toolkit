@@ -9,7 +9,7 @@ import type { SupervisorOrigin } from './origin';
 // the browser must be able to reach from a device that is not the city host.
 const ORIGIN: SupervisorOrigin = {
   baseUrl: 'https://gc-host.tail1234.ts.net',
-  city: 'loomington',
+  city: 'mycity',
 };
 const BEAD_ID = 'tk-eemvf.3';
 
@@ -21,18 +21,18 @@ const BEAD = {
   priority: 1,
   created_at: '2026-08-11T06:52:14Z',
   updated_at: '2026-08-11T15:00:00Z',
-  assignee: 'gc-toolkit__polecat-lx-8y6j',
+  assignee: 'gc-toolkit__polecat-hq-8y6j',
   labels: ['helm'],
   description: 'Execute from the plan.',
 };
 
 const SESSION = {
-  id: 'lx-8y6j',
+  id: 'hq-8y6j',
   title: 'gc-toolkit/gc-toolkit.nux',
   alias: 'gc-toolkit/gc-toolkit.nux',
   state: 'active',
   provider: 'claude',
-  session_name: 'gc-toolkit__polecat-lx-8y6j',
+  session_name: 'gc-toolkit__polecat-hq-8y6j',
   template: 'gc-toolkit/gc-toolkit.polecat',
   created_at: '2026-08-11T15:06:00Z',
   running: true,
@@ -77,8 +77,8 @@ function routeFetch(input: Request | string | URL): Response {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   requested.push(url);
   const { pathname } = new URL(url);
-  if (pathname === `/v0/city/loomington/bead/${BEAD_ID}`) return jsonResponse(BEAD);
-  if (pathname === '/v0/city/loomington/sessions') {
+  if (pathname === `/v0/city/mycity/bead/${BEAD_ID}`) return jsonResponse(BEAD);
+  if (pathname === '/v0/city/mycity/sessions') {
     if (sessionItems === null) {
       return new Response(JSON.stringify({ title: 'sessions unavailable' }), {
         status: 503,
@@ -87,10 +87,10 @@ function routeFetch(input: Request | string | URL): Response {
     }
     return jsonResponse({ items: sessionItems, total: sessionItems.length, ...sessionsEnvelope });
   }
-  if (pathname === `/v0/city/loomington/session/${SESSION.id}`) {
+  if (pathname === `/v0/city/mycity/session/${SESSION.id}`) {
     return jsonResponse({ ...SESSION, last_output: sessionPeek });
   }
-  if (pathname === '/v0/city/loomington/events') {
+  if (pathname === '/v0/city/mycity/events') {
     return jsonResponse({ items: historyEvents, total: historyEvents.length, ...eventsEnvelope });
   }
   return new Response(JSON.stringify({ title: 'not found' }), {
@@ -161,7 +161,7 @@ describe('DrillPanel', () => {
     expect(await screen.findByText('helm web (U8): drill-in plane')).toBeTruthy();
     // The bead's own state, and the session working it, with its peeked output —
     // the "dive in and read the latest" the tile is opened for.
-    await waitFor(() => expect(screen.getByText(/gc-toolkit__polecat-lx-8y6j/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/gc-toolkit__polecat-hq-8y6j/)).toBeTruthy());
     await waitFor(() => expect(screen.getByText(/running go test/)).toBeTruthy());
   });
 
@@ -175,14 +175,14 @@ describe('DrillPanel', () => {
 
     expect(requested.length).toBeGreaterThan(0);
     for (const url of requested) {
-      expect(url.startsWith('https://gc-host.tail1234.ts.net/v0/city/loomington/')).toBe(true);
+      expect(url.startsWith('https://gc-host.tail1234.ts.net/v0/city/mycity/')).toBe(true);
     }
     expect(requested).toContain(
-      `https://gc-host.tail1234.ts.net/v0/city/loomington/bead/${BEAD_ID}`,
+      `https://gc-host.tail1234.ts.net/v0/city/mycity/bead/${BEAD_ID}`,
     );
     await waitFor(() => expect(FakeEventSource.latest).not.toBeNull());
     expect(FakeEventSource.latest?.url).toBe(
-      'https://gc-host.tail1234.ts.net/v0/city/loomington/events/stream',
+      'https://gc-host.tail1234.ts.net/v0/city/mycity/events/stream',
     );
   });
 
@@ -297,7 +297,7 @@ describe('DrillPanel', () => {
   it('still names the session working the anchor when the list is otherwise partial', async () => {
     // A match settles the question whatever else went missing, so this must not
     // over-correct into refusing to answer when it actually knows.
-    sessionsEnvelope = { partial: true, partial_errors: ['rig signal-loom: context canceled'] };
+    sessionsEnvelope = { partial: true, partial_errors: ['rig rig-a: context canceled'] };
     renderPanel();
 
     await waitFor(() => expect(screen.getByText(/gc-toolkit\/gc-toolkit\.nux/)).toBeTruthy());
@@ -305,7 +305,7 @@ describe('DrillPanel', () => {
   });
 
   it('says the recent log was incomplete rather than showing a bare empty history', async () => {
-    eventsEnvelope = { partial: true, partial_errors: ['rig shutupandlisten: context canceled'] };
+    eventsEnvelope = { partial: true, partial_errors: ['rig rig-b: context canceled'] };
     renderPanel();
 
     expect(await screen.findByText(/came back partial/)).toBeTruthy();
@@ -400,7 +400,7 @@ describe('DrillPanel', () => {
     historyEvents = [event({ seq: 90, type: 'bead.updated', subject: BEAD_ID })];
     const { rerender } = renderPanel();
     await screen.findByText('helm web (U8): drill-in plane');
-    await waitFor(() => expect(screen.getByText(/gc-toolkit__polecat-lx-8y6j/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/gc-toolkit__polecat-hq-8y6j/)).toBeTruthy());
     await waitFor(() => expect(screen.getByText('bead.updated')).toBeTruthy());
 
     // Open a second tile whose bead read fails (404). Synchronously — while B is
@@ -411,7 +411,7 @@ describe('DrillPanel', () => {
       </DrillProvider>,
     );
     expect(screen.queryByText('helm web (U8): drill-in plane')).toBeNull();
-    expect(screen.queryByText(/gc-toolkit__polecat-lx-8y6j/)).toBeNull();
+    expect(screen.queryByText(/gc-toolkit__polecat-hq-8y6j/)).toBeNull();
     expect(screen.queryByText('bead.updated')).toBeNull();
 
     // And once B's read has failed, the alert stands over an empty panel — the

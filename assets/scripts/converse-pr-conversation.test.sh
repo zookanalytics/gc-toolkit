@@ -34,6 +34,10 @@ TMPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-pr-conversation-test.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; FIXDIR="$TMPD/fix"; RIGROOT="$TMPD/rig"; CITY="$TMPD/city"; BARE="$TMPD/bare"
 mkdir -p "$BIN" "$FIXDIR" "$RIGROOT/tools" "$CITY" "$BARE"
+# The script reaches the universe tool in the copy of the pack it runs from,
+# under tools/ two levels above assets/scripts. PACK carries the tool and
+# NOTOOL does not; the rig root and the city carry one each, so a script that
+# looked there instead would find it.
 
 echo "── the script is present and runnable ──"
 if [ -x "$SUT" ]; then ok "converse-pr-conversation.sh is present and executable"
@@ -56,44 +60,48 @@ cat >"$RIGROOT/tools/gc-bd-universe.sh" <<'STUB'
 printf 'universe invoked with: %s\n' "$*"
 STUB
 chmod +x "$RIGROOT/tools/gc-bd-universe.sh"
+PACK="$TMPD/pack"; NOTOOL="$TMPD/notool"
+mkdir -p "$PACK/assets/scripts" "$PACK/tools" "$NOTOOL/assets/scripts" "$CITY/rigs/gc-toolkit/tools"
+cp "$SUT" "$PACK/assets/scripts/"; cp "$SUT" "$NOTOOL/assets/scripts/"
+cp "$RIGROOT/tools/gc-bd-universe.sh" "$PACK/tools/"; cp "$RIGROOT/tools/gc-bd-universe.sh" "$CITY/rigs/gc-toolkit/tools/"
 
-# run <subject-json> <rig-root> — execute the script from a cwd that is not a
-# git checkout, so the candidate search is decided by the roots under test.
+# run <subject-json> <pack> — execute the script from <pack>'s assets/scripts,
+# from a cwd that is not a git checkout.
 run() {
     printf '%s' "$1" > "$FIXDIR/subject.json"
-    ( cd "$BARE" && SUBJECT=tk-sub FIXDIR="$FIXDIR" GC_RIG_ROOT="$2" GC_CITY_PATH="$CITY" \
-        PATH="$BIN:$PATH" bash "$SUT" 2>&1 )
+    ( cd "$BARE" && SUBJECT=tk-sub FIXDIR="$FIXDIR" GC_RIG_ROOT="$RIGROOT" GC_CITY_PATH="$CITY" \
+        PATH="$BIN:$PATH" bash "$2/assets/scripts/converse-pr-conversation.sh" 2>&1 )
 }
 
 echo "── a subject carrying a PR gets its conversation fetched ──"
-out="$(run '[{"metadata":{"pr_number":475,"branch":"polecat/x"}}]' "$RIGROOT")"
+out="$(run '[{"metadata":{"pr_number":475,"branch":"polecat/x"}}]' "$PACK")"
 has "pr_number: the universe tool is invoked" "universe invoked with:" "$out"
 has "pr_number: the fetch names the subject and the conversation tier" \
     "fetch tk-sub conversation" "$out"
 
-out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475"}}]' "$RIGROOT")"
+out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475"}}]' "$PACK")"
 has "pr_url alone also triggers the fetch" "fetch tk-sub conversation" "$out"
 
 echo "── a subject with no PR fetches nothing ──"
-out="$(run '[{"metadata":{"branch":"polecat/x"}}]' "$RIGROOT")"
+out="$(run '[{"metadata":{"branch":"polecat/x"}}]' "$PACK")"
 is "no PR reference: nothing is invoked" "$out" ""
 
-echo "── no tool on any candidate root is LOUD, not silent ──"
-# GC_RIG_ROOT is the rig that IMPORTED the agent, which need not carry
-# gc-toolkit's tools at all. Reading nothing must not read as reading zero.
+echo "── no tool in the pack is LOUD, not silent ──"
+# A pack copy without the tool reads nothing, though the rig root and the city
+# hold one. Reading nothing must not read as reading zero.
 if [ -n "$(cd "$BARE" && git rev-parse --show-toplevel 2>/dev/null)" ]; then
     printf '  SKIP  no-tool case (the temp dir is inside a git checkout)\n'
 else
-    out="$(run '[{"metadata":{"pr_number":475}}]' "$TMPD/nowhere")"
+    out="$(run '[{"metadata":{"pr_number":475}}]' "$NOTOOL")"
     has "no tool: says the conversation is unread" "UNREAD" "$out"
     has "no tool: hands over the paginate slurp, not a plain .[]?" "jq -s '[.[][]?]'" "$out"
     has "no tool: names the PR number it could not read" "475" "$out"
 
-    out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475#discussion_r1"}}]' "$TMPD/nowhere")"
+    out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475#discussion_r1"}}]' "$NOTOOL")"
     has "no tool: a fragment on the pull URL still yields a bare number" "gh pr view 475 --json" "$out"
     hasnt "no tool: the fragment does not ride into the command" "475#discussion_r1" "$out"
 
-    out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475?w=1"}}]' "$TMPD/nowhere")"
+    out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475?w=1"}}]' "$NOTOOL")"
     has "no tool: a query string on the pull URL still yields a bare number" "pulls/475/comments" "$out"
     hasnt "no tool: the query string does not ride into the command" "475?w=1" "$out"
 fi

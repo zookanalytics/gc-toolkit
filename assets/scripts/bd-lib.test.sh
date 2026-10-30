@@ -673,7 +673,7 @@ store '[
   {"id":"tk-o1","status":"open","assignee":"","title":"Review branch b -> main (triage): t","notes":"","metadata":{}},
   {"id":"tk-o2","status":"open","assignee":"","title":"Review branch b -> main (triage): t","notes":"","metadata":{"task_kind":"review","anchor_bead":""}},
   {"id":"tk-w1","status":"open","assignee":"","title":"Review branch b -> main (triage): t","notes":"","metadata":{"task_kind":"review","anchor_bead":"tk-anc"}},
-  {"id":"tk-h1","status":"open","assignee":"lx-1","title":"Review branch b -> main (triage): t","notes":"","metadata":{}},
+  {"id":"tk-h1","status":"open","assignee":"hq-1","title":"Review branch b -> main (triage): t","notes":"","metadata":{}},
   {"id":"tk-r1","status":"open","assignee":"","title":"Review branch b -> main (triage): t","notes":"","metadata":{"gc.routed_to":"pool"}},
   {"id":"tk-p1","status":"open","assignee":"","title":"Review branch b -> main (triage): t","notes":"","metadata":{"gc.execution_routed_to":"pool"}},
   {"id":"tk-i1","status":"in_progress","assignee":"","title":"Review branch b -> main (triage): t","notes":"","metadata":{}},

@@ -9,9 +9,12 @@
 # return cannot reach the check here either. It also hides ephemeral wisps
 # unless the call passes --include-infra. That is stricter than bd, which lists
 # them for an explicit --type molecule too, and it holds the wisp probe to the
-# patrol formula's own wisp lookup, --type molecule --include-infra. The last
-# section pins the queue probe to the filters find-work-select uses, so the
-# queue this check ages stays the queue the patrol takes from.
+# patrol formula's own wisp lookup, --type molecule --include-infra. A bead
+# something holds (hold-lib.sh) is not queue, because find-work leaves it, and a
+# wait is aged from the close that released its last hold when that is later
+# than its last write. The last section pins the queue probe to the filters
+# find-work-select uses, so the queue this check ages stays the queue the patrol
+# takes from.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -44,6 +47,15 @@ wisp() { jq -nc --arg id "$1" --arg a "$2" --arg u "$(ago "$3")" --arg s "${4:-i
         --arg t "${5:-mol-refinery-patrol}" '
     {id: $id, title: $t, status: $s, issue_type: "molecule", ephemeral: true, assignee: $a,
      created_at: $u, updated_at: $u, metadata: {}}'; }
+# blocked <row> <blocker-id>...: the row with a blocks edge onto each blocker,
+# in the shape bd list prints an edge.
+blocked() { local row="$1"; shift
+    printf '%s' "$row" | jq -c --args '.dependencies = [ $ARGS.positional[] as $b | {issue_id: .id, depends_on_id: $b, type: "blocks"} ]' "$@"; }
+# blocker <id> <status> [closed-age-seconds] [issue_type]: a bead an edge points at.
+blocker() { jq -nc --arg id "$1" --arg s "$2" --arg c "${3:+$(ago "$3")}" --arg ty "${4:-task}" '
+    {id: $id, title: ("blocker " + $id), status: $s, issue_type: $ty, assignee: "",
+     created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", metadata: {}}
+    + (if $c == "" then {} else {closed_at: $c} end)'; }
 # store <rig> [row...]: the whole store for one rig.
 store() { local rig="$1"; shift
     if [ "$#" -eq 0 ]; then printf '[]' > "$STORES/$rig.json"
@@ -65,7 +77,7 @@ case "${1:-} ${2:-}" in
     rc="${STATUS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$STATUS_JSON" ;;
   "bd list")
     shift 2
-    db=""; assignee=""; status=""; type=""; xtype=""; key=""; infra=0; prev=""
+    db=""; assignee=""; status=""; type=""; xtype=""; key=""; ids=""; infra=0; all=0; prev=""
     for a in "$@"; do
       case "$prev" in
         --db) db="$a" ;;
@@ -74,19 +86,25 @@ case "${1:-} ${2:-}" in
         --type) type="$a" ;;
         --exclude-type) xtype="$a" ;;
         --has-metadata-key) key="$a" ;;
+        --id) ids="$a" ;;
       esac
       [ "$a" = "--include-infra" ] && infra=1
+      [ "$a" = "--all" ] && all=1
       prev="$a"
     done
     rig=$(basename "$(dirname "$db")")
     [ "$rig" = "${BD_FAIL_STORE:-}" ] && exit 3
     [ -n "$type" ] && [ "$rig" = "${BD_WISP_FAIL_STORE:-}" ] && exit 3
+    [ -n "$ids" ] && [ "$rig" = "${BD_ID_FAIL_STORE:-}" ] && exit 3
     f="$STORES/$rig.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
     jq -c --arg a "$assignee" --arg s "$status" --arg t "$type" --arg x "$xtype" \
-          --arg k "$key" --argjson infra "$infra" '
+          --arg k "$key" --arg ids "$ids" --argjson infra "$infra" --argjson all "$all" '
       ($s | split(",") | map(select(. != ""))) as $S
-      | [.[] | select($a == "" or .assignee == $a)
-             | select(if ($S | length) > 0 then (.status as $st | $S | index($st)) != null
+      | ($ids | split(",") | map(select(. != ""))) as $I
+      | [.[] | select(($I | length) == 0 or (.id as $i | $I | index($i)) != null)
+             | select($a == "" or .assignee == $a)
+             | select(if $all == 1 then true
+                      elif ($S | length) > 0 then (.status as $st | $S | index($st)) != null
                       else .status != "closed" end)
              | select($t == "" or .issue_type == $t)
              | select($x == "" or .issue_type != $x)
@@ -158,7 +176,7 @@ has "$OUT" "$A: find-work queue empty" "so the stale wisp rests beside an empty 
 
 echo "── 7. only this refinery's patrol wisps date its patrol ──"
 store alpha "$(work tk-old "$A" 5430)" "$(wisp tk-wisp-stale "$A" 4230)" \
-    "$(wisp tk-wisp-foreign lx-wisp-abc 90)" "$(wisp tk-wisp-other "$A" 90 in_progress mol-other-loop)"
+    "$(wisp tk-wisp-foreign hq-wisp-abc 90)" "$(wisp tk-wisp-other "$A" 90 in_progress mol-other-loop)"
 run
 eq "$RC" "2" "a fresh wisp assigned elsewhere, or titled for another formula, is not movement"
 has "$OUT" "its patrol wisp tk-wisp-stale (in_progress) last moved 70m ago" "the stale patrol wisp is the one judged"
@@ -209,9 +227,55 @@ others=$(grep -vE '^(--city [^ ]+ )?(status --json|bd list )' "$CALLS" || true)
 eq "$others" "" "every call the check made was a status read or a bd list"
 hasnt "$(cat "$CALLS")" "$TMP/cold/.beads" "a suspended rig's store is never queried"
 
-echo "── 13. the queue is find-work's queue ──"
+echo "── 13. a bead something holds is not queue ──"
+# A landing bead assigned when its effort was stood up, waiting on an effort
+# bead and its summary task, beside a patrol wisp that has rested past the bound.
+LANDING=$(blocked "$(work tk-land "$A" 5430 "" integration/tk-land)" tk-e1 tk-sum)
+store alpha "$LANDING" "$(blocker tk-e1 open)" "$(blocker tk-sum open)" "$(wisp tk-wisp-stale "$A" 4230)"
+run
+eq "$RC" "0" "a queue holding only a held landing bead, beside a wisp rested past the bound, is idle"
+has "$OUT" "$A: nothing in its find-work queue is free to take, so a resting patrol is idle" "the idle refinery says nothing is free to take"
+has "$OUT" "$A: find-work leaves its held bead(s) until their blockers close: tk-land waits on tk-e1 \"blocker tk-e1\" (+1 more)" \
+    "the held bead is a note naming what holds it"
+hasnt "$OUT" "STALLED" "a held landing bead is no stall"
+store alpha "$LANDING" "$(blocker tk-e1 open)" "$(blocker tk-sum open)" "$(work tk-old "$A" 5430)" "$(wisp tk-wisp-stale "$A" 4230)"
+run
+eq "$RC" "2" "an unheld handoff in the same state still reads as stalled"
+has "$OUT" "$A: STALLED. 1 bead(s) wait in its find-work queue, the oldest (tk-old) for 90m" "the stall counts the unheld handoff alone"
+# Every blocker closed, the summary task 10 minutes ago: the bead waits from that
+# close, not from when its effort was stood up.
+store alpha "$LANDING" "$(blocker tk-e1 closed 7230)" "$(blocker tk-sum closed 630)" "$(wisp tk-wisp-stale "$A" 4230)"
+run
+eq "$RC" "0" "a landing bead released 10m ago, last written 90m ago, is inside the bound"
+has "$OUT" "$A: 1 bead(s) wait in its find-work queue, the oldest (tk-land) for 10m, inside the 60m bound" \
+    "its wait is aged from the close that released it"
+# A park on the epic holds none of the queue: a bead with a branch is in flight.
+EPIC=$(jq -nc '{id: "tk-epic", title: "the epic", status: "open", issue_type: "epic", assignee: "", metadata: {},
+    dependencies: [{issue_id: "tk-epic", depends_on_id: "tk-park", type: "blocks"}]}')
+UNDER=$(work tk-under "$A" 5430 | jq -c '.dependencies = [{issue_id: "tk-under", depends_on_id: "tk-epic", type: "parent-child"}]')
+store alpha "$UNDER" "$EPIC" "$(blocker tk-park open "" gate)" "$(wisp tk-wisp-stale "$A" 4230)"
+run
+eq "$RC" "2" "a handoff under a parked epic is queue, so its rested patrol is stalled"
+has "$OUT" "$A: STALLED. 1 bead(s) wait in its find-work queue, the oldest (tk-under)" "the park on its epic holds none of it"
+store alpha "$(blocked "$(work tk-ghosted "$A" 5430)" tk-ghost)" "$(wisp tk-wisp-stale "$A" 4230)"
+run
+eq "$RC" "1" "a bead held only by a blocker the store does not return warns"
+has "$OUT" "$A: find-work will not take bead(s) held only by a blocker the store does not return, until that blocker reads back or the edge goes: tk-ghosted waits on tk-ghost (unreadable)" \
+    "the warning names the bead and the blocker"
+hasnt "$OUT" "STALLED" "and it is no stall, since find-work never takes it"
+store alpha "$LANDING" "$(blocker tk-e1 open)" "$(blocker tk-sum open)" "$(wisp tk-wisp-stale "$A" 4230)"
+run BD_ID_FAIL_STORE=alpha
+eq "$RC" "1" "a hold walk that cannot read warns"
+has "$OUT" "$A: could not read what holds the beads in its find-work queue in $TMP/alpha/.beads, so this refinery was NOT checked" \
+    "naming the refinery it could not check"
+has "$OUT" "$B: find-work queue empty" "while the other refinery is still read"
+store alpha "$(work tk-old "$A" 5430)" "$(wisp tk-wisp-stale "$A" 4230)"
+run BD_ID_FAIL_STORE=alpha
+eq "$RC" "2" "a queue whose beads carry no blocker needs no hold read"
+
+echo "── 14. the queue is find-work's queue ──"
 FW_BLOCK=$(sed -n '/# >>> find-work-select/,/# <<< find-work-select/p' "$REPO/formulas/mol-refinery-patrol.toml")
-FW_FLAGS=$(printf '%s\n' "$FW_BLOCK" | grep 'gc bd list' | grep -oE -- '--[a-z-]+=[^ ]+' \
+FW_FLAGS=$(printf '%s\n' "$FW_BLOCK" | grep 'gc bd list' | grep -- '--assignee=' | grep -oE -- '--[a-z-]+=[^ ]+' \
     | grep -vE -- '^--(rig|assignee|limit)=' || true)
 eq "$(printf '%s\n' "$FW_FLAGS" | grep -c -- '^--')" "3" "find-work-select filters on three flags besides rig, assignee and limit"
 # Flag-value pairs of the check's queue probe, one per line.
@@ -227,6 +291,8 @@ for f in $FW_FLAGS; do
 done
 has "$FW_BLOCK" 'select((.metadata.merge_result // "") == "")' "find-work drops a bead carrying merge_result"
 has "$(cat "$CHECK")" 'select(((.metadata.merge_result // "") | tostring) == "")' "and so does the check"
+has "$FW_BLOCK" 'hold_annotate' "find-work leaves a bead hold-lib.sh says is held"
+has "$(cat "$CHECK")" 'hold_annotate' "and so does the check"
 
 echo
 echo "── $PASS passed, $FAIL failed ──"

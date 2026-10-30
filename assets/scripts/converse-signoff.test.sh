@@ -70,8 +70,9 @@
 #             and one without --accept, or not <key>=<value>, is refused
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
-# file-backed store, and stub pack scripts at $GC_RIG_ROOT, from a cwd outside
-# any checkout so no real pack script is reached. Whether a gate still holds the
+# file-backed store, linked into a stub pack beside the libraries it sources and
+# stub pack scripts, from a cwd outside any checkout. The sign-off finds every
+# script it runs beside itself, so no real pack script is reached. Whether a gate still holds the
 # anchor's merge is read by the REAL finalize-gate.sh over the same store, and
 # the rig of a PR the ruling acts on by the REAL bead-store.sh over the stub's
 # rig list: rig-a carries the prefix tk and rig-b the prefix rb.
@@ -252,8 +253,13 @@ cat > "$S/pr-sitting-comment.sh" <<'P'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
 P
-ln -s "$HERE/bead-store.sh" "$S/bead-store.sh"
 chmod +x "$S"/*.sh
+# Linked after the chmod, which would otherwise follow each link and change the
+# mode of the pack's own file.
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh bead-store.sh rig-map.sh; do
+    ln -s "$HERE/$_lib" "$S/$_lib"
+done
+SCRIPT="$S/converse-signoff.sh"
 
 mkdir -p "$TMP/rig-a" "$TMP/rig-b"
 RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"

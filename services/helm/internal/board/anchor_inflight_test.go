@@ -14,8 +14,8 @@ import "testing"
 // with any idle child, band HIGH/stranded and ask for an assignment it already
 // has: a healthy in-flight anchor reported as the alarm case.
 func TestAnchorOwnWorkflowCounts(t *testing.T) {
-	live := liveOwners("gc-toolkit__polecat-lx-1")
-	live.Inflight = map[string][]string{"tk-work": {"gc-toolkit__polecat-lx-1"}}
+	live := liveOwners("gc-toolkit__polecat-hq-1")
+	live.Inflight = map[string][]string{"tk-work": {"gc-toolkit__polecat-hq-1"}}
 
 	t.Run("childless work bead reads in flight, not invisible", func(t *testing.T) {
 		anchors := []Anchor{{ID: "tk-work", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)}}
@@ -54,7 +54,7 @@ func TestAnchorOwnWorkflowCounts(t *testing.T) {
 		anchors := []Anchor{{ID: "tk-work", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "c1", Status: "open"},
 		}}}
-		dead := Facts{Inflight: live.Inflight, OwnerState: map[string]string{"gc-toolkit__polecat-lx-1": "archived"}}
+		dead := Facts{Inflight: live.Inflight, OwnerState: map[string]string{"gc-toolkit__polecat-hq-1": "archived"}}
 		tl := BuildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]
 		if tl.InProgressLive != 0 || !tl.Stranded {
 			t.Errorf("a drained molecule over the anchor stops counting and strands: in_progress_live=%d stranded=%v", tl.InProgressLive, tl.Stranded)

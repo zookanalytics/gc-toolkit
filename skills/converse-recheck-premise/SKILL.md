@@ -91,8 +91,9 @@ STATE=$("$CONV/lifecycle.sh" state "$SUBJECT") \
   && { "$CONV/pr-sitting-comment.sh" close --sitting "$CONVERSATION" --subject "$SUBJECT" --outcome "$KIND" --summary "$WHY" || true; } \
   && echo "closed $CONVERSATION as $KIND"
 ```
-When it prints its `closed` line, go to step 8. **Post nothing** — no framing,
-no sign-off, not even "this turned out to be fine".
+When it prints its `closed` line, drain (the prompt's **How this thread
+ends**). **Post nothing** — no framing, no sign-off, not even "this turned out
+to be fine".
 
 No `closed` line means the close stopped short: the subject's state or its
 gates did not read, or a write did not read back. The conversation stays open

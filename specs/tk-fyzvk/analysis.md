@@ -22,7 +22,7 @@ follow-up bead.
 | gastown deacon formula / prompt | gascity examples/gastown pack | `rigs/gascity/examples/gastown/packs/gastown/{formulas/mol-deacon-patrol.toml,agents/deacon/prompt.template.md}` @ `429427df` | 2026-05-08 |
 | cycle-recycle template fragment | gc-toolkit pack | `rigs/gc-toolkit/template-fragments/cycle-recycle.template.md` @ `8412dca8` | 2026-05-08 |
 | propulsion template fragment | gc-toolkit pack | `rigs/gc-toolkit/template-fragments/propulsion.template.md` @ `8412dca8` | 2026-05-08 |
-| Deacon startup-adopt advice (auto-memory) | overseer (zook) memory | `~/.claude/projects/-home-zook-loomington/memory/feedback_deacon_pickup_open_wisps.md` (not in git) | 2026-05-08 |
+| Deacon startup-adopt advice (auto-memory) | overseer (zook) memory | `~/.claude/projects/-home-zook-mycity/memory/feedback_deacon_pickup_open_wisps.md` (not in git) | 2026-05-08 |
 | Observed instances | live bd ledger | `tk-mpnnc`, `tk-i1t2u` (gc-toolkit), `gc-8zdml1` (gascity) | 2026-05-08 |
 | Live deployed gascity refinery formula | gascity rig | `rigs/gascity/.beads/formulas/mol-refinery-patrol.toml` (v4 — same as gc-toolkit, not v3) | 2026-05-08 |
 

@@ -88,6 +88,32 @@ GO_MACHINES=$(sed -n 's/^[[:space:]]*Machine[A-Za-z]*[[:space:]]*=[[:space:]]*"\
   "$ROOT/services/helm/internal/board/derive.go" | tr '\n' ' ' | sed 's/ *$//')
 eq "$GO_MACHINES" "$TOML_MACHINES" "machine axis values match lifecycle.toml"
 
+# The blocked causes are declared here and mirrored as Go constants in the shared
+# prstatus package, which gctk merge writes them from and the status: label and
+# the board read them through. A cause added on one side only is a value its
+# readers were never told about.
+TOML_CAUSES=$(sed -n 's/^causes = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
+[ -n "$TOML_CAUSES" ] && ok "blocked causes declared in lifecycle.toml" || bad "causes = [...] missing from lifecycle.toml"
+GO_CAUSES=$(sed -n 's/^[[:space:]]*Cause[A-Z][A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "$ROOT/services/gctk/prstatus/prstatus.go" | tr '\n' ' ' | sed 's/ *$//')
+eq "$GO_CAUSES" "$TOML_CAUSES" "blocked cause values match lifecycle.toml"
+
+# prstatus.Derive reads a recorded posture, machine verdict or cause outside the
+# vocabulary as a state it cannot name, needs-attention, so the values each of
+# its known* switches accepts must be the ones declared here. A value declared
+# here and missing there would put every PR that carries it at needs-attention.
+go_known() { # <func>: the values its switch accepts, sorted, "" dropped
+  sed -n "/^func $1(/,/^}/p" "$ROOT/services/gctk/prstatus/prstatus.go" \
+    | sed -n 's/^[[:space:]]*case \(.*\):$/\1/p' | tr ',' '\n' | tr -d '" \t' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'
+}
+sorted_words() { tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'; }
+TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sorted_words)
+[ -n "$TOML_POSTURES" ] && ok "postures declared in lifecycle.toml" || bad "postures = [...] missing from lifecycle.toml"
+eq "$(go_known knownPosture)" "$TOML_POSTURES" "prstatus knows exactly the postures lifecycle.toml declares"
+eq "$(go_known knownMachine)" "$(printf '%s' "$TOML_MACHINES" | sorted_words)" "prstatus knows exactly the machine values lifecycle.toml declares"
+eq "$(go_known knownCause)" "$(sed -n 's/^[[:space:]]*\(Cause[A-Z][A-Za-z]*\)[[:space:]]*=.*/\1/p' \
+  "$ROOT/services/gctk/prstatus/prstatus.go" | sorted_words)" "prstatus knows every blocked cause it declares"
+
 # --- state verb ----------------------------------------------------------------
 echo "# state"
 store '[{"id":"b-1","status":"open","assignee":"","notes":"","metadata":{}},
@@ -546,7 +572,7 @@ eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assign
 # route, and the runtime's stale orphan-recovery pin. So the clear rides the same
 # atomic update as the unassign.
 echo "# unassigning clears the executor identity"
-store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-dead","gc.session_name":"rig--rig__polecat-1-pool","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"hq-dead","gc.session_name":"rig--rig__polecat-1-pool","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition x-1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
 eq "$rc" 0 "the rejection repool's shape exits 0"
@@ -560,7 +586,7 @@ has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_name" "gc
 
 # The detached auto-clear reaches the same arm: no --assignee is passed, the
 # handoff assignee is cleared without the caller asking, and the pins follow it.
-store '[{"id":"x-2","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"gc.session_id":"lx-dead2","gc.session_name":"rig--rig__polecat-2-pool"}}]'
+store '[{"id":"x-2","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"gc.session_id":"hq-dead2","gc.session_name":"rig--rig__polecat-2-pool"}}]'
 out="$("$SUT" transition x-2 --to pre_open_gate --set check_set=codex 2>&1)"; rc=$?
 eq "$rc" 0 "entry to pre_open_gate exits 0"
 eq "$(bassignee x-2)" "" "the detached clear cleared the assignee"
@@ -570,21 +596,21 @@ eq "$(meta x-2 'gc.session_name')" "<absent>" "…and gc.session_name"
 # The pins are the assignee's: a live claim keeps them. On an in_progress bead
 # the assignee clear is refused (bd's anti-steal guard), so no --assignee reaches
 # bd, the arm never fires, and the identity stays with the session that holds it.
-store '[{"id":"x-3","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-live","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+store '[{"id":"x-3","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"hq-live","gc.session_name":"rig--rig__polecat-1-pool"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition x-3 --to pull_request --expect pull_request --route "" --set pr_number=9 2>&1)"; rc=$?
 eq "$rc" 0 "a transition on an in_progress anchor still lands"
-eq "$(meta x-3 'gc.session_id')" "lx-live" "a live claim keeps gc.session_id"
+eq "$(meta x-3 'gc.session_id')" "hq-live" "a live claim keeps gc.session_id"
 eq "$(meta x-3 'gc.session_name')" "rig--rig__polecat-1-pool" "a live claim keeps gc.session_name"
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when the assignee is not cleared"
 
 # An explicit new assignee wins over the clear, and its identity is not stripped:
 # the field is the assignee's, and this names one.
-store '[{"id":"x-4","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate","gc.session_id":"lx-keep","gc.session_name":"rig--rig__polecat-3-pool"}}]'
+store '[{"id":"x-4","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate","gc.session_id":"hq-keep","gc.session_name":"rig--rig__polecat-3-pool"}}]'
 : > "$STUB_GC_LOG"
 "$SUT" transition x-4 --to pull_request --assignee "rig/mechanik" >/dev/null 2>&1
 eq "$(bassignee x-4)" "rig/mechanik" "an explicit --assignee wins over the declared clear"
-eq "$(meta x-4 'gc.session_id')" "lx-keep" "a named assignee keeps gc.session_id"
+eq "$(meta x-4 'gc.session_id')" "hq-keep" "a named assignee keeps gc.session_id"
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when an assignee is named"
 
 store '[{"id":"h-7","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'

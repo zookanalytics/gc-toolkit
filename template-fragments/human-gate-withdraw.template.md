@@ -13,9 +13,7 @@ withdraws its own gate, and only when the situation it asked about is gone,
 with one call:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/human-gate.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc {{ .BindingName }} scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 

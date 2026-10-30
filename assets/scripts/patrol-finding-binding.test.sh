@@ -37,10 +37,14 @@ scope_of() { # agent name -> declared scope, empty when the agent is not shipped
   sed -n 's/^scope[[:space:]]*=[[:space:]]*"\([a-z]*\)".*/\1/p' "$toml" | head -n 1
 }
 
-# Only runnable invocations: a call through $SCRIPTS, or the bare name with
-# its flags. A path test (`[ -x .../patrol-finding.sh ]`) and a prose mention
-# that names no flags are neither.
-invocations() { grep -n -E "\\\$SCRIPTS/patrol-finding\\.sh|(^|[^-/[:alnum:]])patrol-finding\\.sh[[:space:]]+--" "$1"; }
+# Only runnable invocations: a call through $SCRIPTS or straight through the
+# directory `gc <binding> scripts-dir` prints, or the bare name with its flags.
+# A path test (`[ -x "$SCRIPTS/patrol-finding.sh" ]`) is dropped before the match,
+# and a prose mention that names no flags is neither.
+invocations() {
+  sed -E 's/\[ -[xfr] "[^"]*" \]//g' "$1" \
+    | grep -n -E "(\\\$SCRIPTS|scripts-dir\\))/patrol-finding\\.sh|(^|[^-/[:alnum:]])patrol-finding\\.sh[[:space:]]+--"
+}
 # GC_RIG= or --rig binds the writer.
 bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--rig[[:space:]]+[A-Za-z0-9._-]'; }
 

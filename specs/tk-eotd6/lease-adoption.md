@@ -82,7 +82,7 @@ not possible, and no gc-toolkit change can make it possible.
 ## A pool claim cannot heartbeat itself
 
 The assignee `gc hook --claim` records depends on the session. For a pool
-worker it is the session **id** — `lx-ojs28` for the session that wrote this
+worker it is the session **id** — `hq-ojs28` for the session that wrote this
 record — while `BEADS_ACTOR` in that same session is the session **name**,
 `gc-toolkit--gc-toolkit__polecat-1-pool`. `bd heartbeat` is owner-only and
 matches the actor against the assignee under `actorMatches`
@@ -92,9 +92,9 @@ name are distinct identities, not two spellings of one, so it refuses:
 
 ```
 $ gc bd heartbeat tk-eotd6
-Error: heartbeat tk-eotd6: issue already claimed by lx-ojs28
+Error: heartbeat tk-eotd6: issue already claimed by hq-ojs28
 
-$ BEADS_ACTOR=lx-ojs28 gc bd heartbeat tk-eotd6
+$ BEADS_ACTOR=hq-ojs28 gc bd heartbeat tk-eotd6
 ✓ Heartbeat tk-eotd6 (lease refreshed)     # 08:00:10Z -> 08:05:09Z
 ```
 

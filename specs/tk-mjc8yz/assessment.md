@@ -121,7 +121,7 @@ appends the ruling to the subject's notes. There is no branch anywhere in
 `converse-signoff.sh` that mints a rework child or wires a `blocks` edge against
 a published PR. When the ruling's consequence is that an open PR is now stale,
 the ruling is authenticated and undeliverable — the evidence in tk-bq9ua is a
-signal-loom bead that carried two operator rulings in its notes for seventeen
+rig-a bead that carried two operator rulings in its notes for seventeen
 hours while its PR read review-ready.
 
 The canonical rework path is review-driven and cannot be borrowed as-is.

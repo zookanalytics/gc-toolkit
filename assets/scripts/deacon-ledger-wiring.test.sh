@@ -45,8 +45,9 @@ CATEGORIES=$(sed -n 's/^CATEGORIES="\(.*\)"$/\1/p' "$LEDGER")
   && ok "the accepted category set is readable from gc-deacon-ledger.sh: $CATEGORIES" \
   || bad "no CATEGORIES= line in gc-deacon-ledger.sh — this file cannot check the callers"
 
-# Every `append <category>` any caller writes.
-appends_in() { grep -oE '\$LEDGER(_SH)?" append [a-z]+' "$1" | awk '{print $NF}'; }
+# Every `append <category>` any caller writes, through a resolved $LEDGER or
+# straight through the path gc names.
+appends_in() { grep -oE '(\$LEDGER(_SH)?|gc-deacon-ledger\.sh)" append [a-z]+' "$1" | awk '{print $NF}'; }
 
 echo
 echo "# the append sites are where a non-routine action happens"
@@ -107,30 +108,44 @@ grep -q 'LEDGER_ROLE" = deacon' "$GATE" \
 echo
 echo "# the path a city-scoped agent calls actually resolves"
 grep -Eq '^scope[[:space:]]*=[[:space:]]*"city"' "$AGENT" \
-  && ok "the deacon is city-scoped, so GC_RIG_ROOT is unset and the resolver's last candidate is the load-bearing one" \
+  && ok "the deacon is city-scoped, so no rig root names the pack and only gc can" \
   || bad "agents/deacon/agent.toml no longer declares scope = \"city\" — re-derive what these resolvers must find"
 
-# Run the shipped resolver against a fixture city laid out the way a rig is,
-# from a directory that is NOT a git repository, so only the city-path
-# candidate can answer — which is the deacon's real situation.
-FIX="$TMP/city"
-mkdir -p "$FIX/rigs/gc-toolkit/assets/scripts"
+# gc names the pack for `gc gc-toolkit scripts-dir`, the binding this city
+# imports the pack under. A fixture city also holds a copy of the script under
+# rigs/gc-toolkit, where the deacon's old lookup found it, so a resolver that
+# still looked there would answer with that copy instead.
+PACK="$TMP/pack"; FIX="$TMP/city"
+mkdir -p "$PACK/assets/scripts" "$FIX/rigs/gc-toolkit/assets/scripts" "$TMP/bin"
+cp "$LEDGER" "$PACK/assets/scripts/"
 cp "$LEDGER" "$FIX/rigs/gc-toolkit/assets/scripts/"
-RESOLVERS=$(grep -cE '^[[:space:]]*LEDGER=""; for c in ' "$TOML")
+cat > "$TMP/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ] && [ -n "${STUB_PACK:-}" ] || { echo "gc: unknown command \"${1:-}\"" >&2; exit 1; }
+printf '%s/assets/scripts\n' "$STUB_PACK"
+STUB
+chmod +x "$TMP/bin/gc"
+# resolve <file> [STUB_PACK]: $LEDGER after the file runs from a directory that
+# is not a git repository, with the city path set and no rig root.
+resolve() {
+  (cd "$TMP" && env -u GC_RIG_ROOT PATH="$TMP/bin:$PATH" GC_CITY_PATH="$FIX" STUB_PACK="${2-$PACK}" \
+     bash -c "set -u; . '$1'; printf '%s' \"\$LEDGER\"" 2>/dev/null)
+}
+RESOLVER_RE='^[[:space:]]*LEDGER="\$\(b='"'"'\{\{binding_prefix\}\}'"'"'; gc "\$\{b%\.\}" scripts-dir\)/gc-deacon-ledger\.sh" && \[ -x "\$LEDGER" \] \|\| LEDGER=""$'
+RESOLVERS=$(grep -cE "$RESOLVER_RE" "$TOML")
 [ "$RESOLVERS" -ge 4 ] \
   && ok "each append site carries its own resolver ($RESOLVERS found; steps are separate shells)" \
   || bad "only $RESOLVERS resolvers in the formula, but each step runs in its own shell"
-# Dedupe in place, never by sorting: these three lines only run in the order
-# they are written. Leading indentation differs where a resolver sits inside a
-# conditional, and stripping it changes nothing about what the block does.
+# Leading indentation differs where a resolver sits inside a conditional, and
+# stripping it changes nothing about what the line does.
 BLOCK="$TMP/resolver.sh"
-grep -A2 -E '^[[:space:]]*LEDGER=""; for c in ' "$TOML" | grep -v '^--$' \
-  | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' > "$BLOCK"
-UNIQUE=$(grep -c '^LEDGER=""' "$BLOCK")
-eq "$UNIQUE" "1" "every resolver in the formula is the same three lines"
-GOT=$(cd "$TMP" && env -u GC_RIG_ROOT GC_CITY_PATH="$FIX" bash -c "set -u; . '$BLOCK'; printf '%s' \"\$LEDGER\"" 2>/dev/null)
-eq "$GOT" "$FIX/rigs/gc-toolkit/assets/scripts/gc-deacon-ledger.sh" \
-  "the formula's resolver finds the script from the city path alone"
+grep -E "$RESOLVER_RE" "$TOML" | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' \
+  | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$BLOCK"
+eq "$(grep -c . "$BLOCK")" "1" "every resolver in the formula is the same line"
+eq "$(resolve "$BLOCK")" "$PACK/assets/scripts/gc-deacon-ledger.sh" \
+  "the formula's resolver finds the script in the pack gc names"
+eq "$(resolve "$BLOCK" "$TMP/no-pack")" "" \
+  "a pack without the script resolves nothing, though the city path holds a copy"
 
 grep -q 'show --since' "$PROMPT" \
   && ok "the deacon reads the ledger at startup, which is what survives a recycle" \
@@ -143,20 +158,19 @@ grep -q 'show --since' "$PROMPT" \
 grep -q 'append boot' "$PROMPT" \
   && ok "the prompt can record a restart that recovered state" \
   || bad "the prompt never appends a boot entry, so a recovery-on-restart leaves no record"
-if grep -qE '^"\$LEDGER" append boot' "$PROMPT"; then
+if grep -qE '^"[^"]*(LEDGER|gc-deacon-ledger\.sh)" append boot' "$PROMPT"; then
   bad "the boot append is a bare top-level line, so it runs on every restart — that is one ledger entry per recycle, the noise a signal-only ledger excludes"
 else
   ok "the boot append is guarded, so a routine recycle records nothing"
 fi
-PBLOCK="$TMP/prompt-resolver.sh"
-awk '/^LEDGER=""$/{f=1} f{print} /^done$/{if (f) exit}' "$PROMPT" > "$PBLOCK"
-if [ -s "$PBLOCK" ]; then
-  GOT=$(cd "$TMP" && env -u GC_RIG_ROOT GC_CITY_PATH="$FIX" bash -c "set -u; . '$PBLOCK'; printf '%s' \"\$LEDGER\"" 2>/dev/null)
-  eq "$GOT" "$FIX/rigs/gc-toolkit/assets/scripts/gc-deacon-ledger.sh" \
-    "the prompt's startup resolver finds the same script"
-else
-  bad "no resolver loop in the deacon prompt to execute"
-fi
+# Every ledger call the prompt makes names the path gc prints for the binding
+# the prompt is rendered with; rendered for this city, it is the pack's own.
+PCALLS=$(grep -oE '"\$\(gc [^)]*\)/gc-deacon-ledger\.sh"' "$PROMPT" | sort -u)
+eq "$(printf '%s\n' "$PCALLS" | grep -c .)" "1" "the prompt calls the ledger through one form"
+eq "$PCALLS" '"$(gc {{ .BindingName }} scripts-dir)/gc-deacon-ledger.sh"' "the prompt's ledger calls name the binding it is rendered with"
+printf 'LEDGER=%s\n' "$(printf '%s' "$PCALLS" | sed 's|{{ .BindingName }}|gc-toolkit|g')" > "$TMP/prompt-resolver.sh"
+eq "$(resolve "$TMP/prompt-resolver.sh")" "$PACK/assets/scripts/gc-deacon-ledger.sh" \
+  "the prompt's startup call reaches the same script"
 
 echo
 echo "deacon-ledger-wiring.test.sh: $PASS passed, $FAIL failed"

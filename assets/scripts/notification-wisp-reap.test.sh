@@ -6,8 +6,9 @@
 #
 # Runs the REAL notification-wisp-reap.sh with a stubbed `gc`
 # (NOTIFICATION_WISP_REAP_GC) — no live city or store. The stub answers `bd list`
-# from a fixture of open city-store wisps and `rig list` from a city_path env,
-# and records every `bd close` to $CALLS. core mails these notices assigned to
+# from a fixture of open city-store wisps and `rig list` from a city_path env
+# (read through rig-map.sh, which finds the stub first on PATH), and records
+# every `bd close` to $CALLS. core mails these notices assigned to
 # "human" (fixture field), and the store refuses a close by any other actor
 # without --force, so the stub models that guard: a human-assigned notice is
 # recorded as closed only when the call passes --force.
@@ -118,7 +119,7 @@ eq "$CALLED" "" "DRYRUN: closes nothing"
 
 # --- RIG LIST resolution (no --db) --------------------------------------------
 : > "$CALLS"
-OUT="$(RIG_CITY_PATH="$TMP/city" bash "$SUT" 2>/dev/null)"; RC=$?
+OUT="$(RIG_CITY_PATH="$TMP/city" PATH="$TMP/bin:$PATH" bash "$SUT" 2>/dev/null)"; RC=$?
 eq "$RC" "0" "RIGLIST: resolves the city store from gc rig list and runs"
 has "$OUT" "closed 2 duplicate escalation notices" "RIGLIST: same classification via resolved store"
 

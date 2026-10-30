@@ -59,9 +59,7 @@ target="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.target"] /
 reason="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.reason"] // empty')"
 requester="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.requester"] // "deacon"')"
 requester_endpoint="${requester%/}/"
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/dance-probe.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/dance-probe.sh" ] || SCRIPTS=""
 # A human gate this dance files lands in the warrant's own store, because
 # `gc bd` runs a gate create in the store of the bead it blocks, so no call
 # below derives a store. The malformed-warrant report is filed after the warrant
@@ -144,9 +142,7 @@ warrant:
 
 ```bash
 warrant_id="$(gc hook current --id-only)" || exit 1
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/human-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "$SCRIPTS/human-gate.sh" --subject "$warrant_id" --key "wedged-$target" --message "Shutdown dance for $target: three silent interrogations but gc session kill failed. Warrant $warrant_id left open; a human owns this session now." \
   || echo "dog: no human gate could be filed on $warrant_id; the open warrant is the only signal" >&2
 gc runtime drain-ack

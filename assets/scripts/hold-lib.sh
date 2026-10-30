@@ -41,10 +41,14 @@
 #
 # Readers: deferred-dispatch.sh slings an armed bead only when nothing holds it,
 # and its `list` and pass log name the blocker that does.
-# doctor/check-armed-dispatch-owed counts no held arm as owed. hold-lib.test.sh
-# fails when a reader stops sourcing this file or defines the predicate itself,
-# and it runs the predicate over hold-lib.fixture.json, the cases a copy of it
-# in another language must agree with.
+# doctor/check-armed-dispatch-owed counts no held arm as owed. The refinery's
+# find-work (mol-refinery-patrol.toml) takes no bead something holds, the
+# witness's check-refinery (mol-witness-patrol.toml) counts no held bead as a
+# stuck handoff, and doctor/check-refinery-patrol-live ages no held bead as
+# queue. hold-lib.test.sh fails when a reader stops sourcing this file or
+# defines the predicate itself, and it runs the predicate over
+# hold-lib.fixture.json, the cases a copy of it in another language must agree
+# with.
 #
 # A caller sources bd-lib.sh first, for the human gate rule the defs build on,
 # then this file, both from beside itself:
@@ -56,7 +60,9 @@
 # in-variable jq convention does (dispatch-path.sh):
 #   hold_graph <reader> <seed-file> <graph-file>
 #   jq -r --slurpfile g <graph-file> "$HOLD_JQ"' .[] | hold_summary($g[0]) ' <seed-file>
-# A program built in a double-quoted string expands the variable in place.
+# A program built in a double-quoted string expands the variable in place. A
+# caller with no scratch directory of its own, such as a formula step, which
+# may not remove files, pipes its listing through hold_annotate instead.
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -233,4 +239,36 @@ hold_graph_read() {
         | reduce ($want | split(",")[] | select(length > 0)) as $w (.; if has($w) then . else .[$w] = null end)' 2>/dev/null)" || return 1
     [ -n "$next" ] || return 1
     printf '%s\n' "$next" > "$out"
+}
+
+# hold_annotate <reader> — what holds each bead of a listing. stdin is a JSON
+# array of beads in the shape `bd list --json` prints, each with its own
+# `dependencies`. <reader> is hold_graph's. stdout is the same beads as one
+# JSON array, each with a `hold` object added:
+#   state        "free" when nothing holds the bead, "held" when a blocker the
+#                walk read holds it, and "unread" when only blockers the store
+#                did not return do
+#   why          hold_summary, "" when the bead is free
+#   released_at  hold_released_at, null when no hold on it has released
+# The walk's files live in a scratch directory of its own, removed when it
+# returns, with a file in it held open, because the host's scratch reaper
+# removes any gctk-* tree that no process holds open. Returns non-zero and
+# prints nothing when stdin is not a JSON array, the directory cannot be made,
+# or a read fails, and the caller then treats every bead as unread, never as
+# free.
+hold_annotate() {
+    local reader="$1"
+    (
+        dir="$(mktemp -d "${TMPDIR:-/tmp}/gctk-hold.XXXXXX" 2>/dev/null)" || exit 1
+        trap 'rm -rf "$dir"' EXIT
+        { exec 9>"$dir/.hold"; } 2>/dev/null
+        scrub > "$dir/seed.json" || exit 1
+        jq -e 'type == "array"' "$dir/seed.json" >/dev/null 2>&1 || exit 1
+        hold_graph "$reader" "$dir/seed.json" "$dir/graph.json" || exit 1
+        jq -c --slurpfile g "$dir/graph.json" "$HOLD_JQ"'
+            [ .[] | objects | . + { hold: (hold_holds($g[0]) as $h | {
+                state: (if any($h[]; .unread | not) then "held" elif ($h | length) > 0 then "unread" else "free" end),
+                why: hold_summary($g[0]),
+                released_at: hold_released_at($g[0]) }) } ]' "$dir/seed.json" 2>/dev/null
+    )
 }

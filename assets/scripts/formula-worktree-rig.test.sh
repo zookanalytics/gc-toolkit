@@ -4,10 +4,14 @@
 #
 # A static guard scans formulas/ and packs/*/formulas/ and fails on any bare
 # `git worktree add`, so a new site cannot land without -C. The worktree blocks
-# of mol-review, mol-upstream-gc-sync and mol-refinery-patrol are extracted
-# verbatim and run from a WRONG cwd against real git repos: each must act on the
-# rig GC_RIG_ROOT names, or the roster entry for GC_RIG, and fail closed when
-# neither resolves. A control runs a bare add from the same cwd and proves cwd
+# of mol-review, mol-upstream-gc-sync and mol-refinery-patrol are extracted and
+# run from a WRONG cwd against real git repos, mol-review's filled in with a
+# review's values as a pour fills them: each must act on the rig GC_RIG_ROOT
+# names, or the roster entry for GC_RIG, and fail closed when neither resolves.
+# mol-review's gather also prints the reviewed commit's guidance for the
+# review's check alone and what gctk rig recorded there, read in the review's
+# worktree, and load-dispatch's refusal of a short record names the
+# missing key and leaves the route empty. A control runs a bare add from the same cwd and proves cwd
 # steers it, so "landed in the rig, not cwd" is a real discrimination. No live
 # city, store, or network.
 #
@@ -50,10 +54,12 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
-# rig list answers the roster file and bd show the bead file; every other call
+# rig list answers the roster file, bd show the bead file, and
+# `gc gc-toolkit scripts-dir` the pack $STUB_PACK names; every other call
 # is logged and succeeds, and a bd update also writes its --set-metadata and
 # --unset-metadata to the bead file.
 case "$1 $2" in
+  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
   *)
@@ -80,7 +86,18 @@ cat > "$BIN/lifecycle" <<'LC'
 echo "$*" >> "$FAKE_LC_LOG"
 echo "${GC_RIG_ROOT:-<unset>}" >> "$FAKE_LC_LOG.root"
 LC
-chmod +x "$BIN/gc" "$BIN/lifecycle"
+# gctk answers the gather's record reads: a fail of the tests, a pass of lint
+# and nothing for typecheck, logging each call and the directory it ran in.
+cat > "$TMP/gctk" <<'GCTK'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$*" "$(pwd -P)" >> "$GCTK_LOG"
+case "$2" in
+  test) echo '{"check":"test","result":"fail","scope":"affected","exit_code":1,"command":"t"}'; exit 1 ;;
+  lint) echo '{"check":"lint","result":"pass","exit_code":0,"command":"l"}'; exit 0 ;;
+  *) exit 3 ;;
+esac
+GCTK
+chmod +x "$BIN/gc" "$BIN/lifecycle" "$TMP/gctk"
 export PATH="$BIN:$PATH"
 export FAKE_ROSTER="$TMP/roster.json"
 
@@ -88,6 +105,7 @@ extract() { awk -v m="$2" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$
 
 # block <toml> <marker> <out>: the marked block, with formula placeholders
 # rendered as the materializer renders them, written to <out>.
+# delete_merged_branches takes the patrol's default, true.
 block() {
   local body
   body="$(extract "$1" "$2")"
@@ -97,7 +115,7 @@ block() {
     return 0
   fi
   ok "$2: block extracted between markers"
-  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g' > "$3"
+  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g; s|{{delete_merged_branches}}|true|g; s|{{binding_prefix}}|gc-toolkit.|g' > "$3"
   case "$(cat "$3")" in
     *'{{'*) bad "$2: no unrendered formula placeholder left" ;;
     *)      ok "$2: no unrendered formula placeholder left" ;;
@@ -194,42 +212,68 @@ eq "$(registered "$C/cwd" "$C/wt-bare")" yes "control: the bare add registered i
 eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reached the rig, whatever GC_RIG_ROOT says"
 
 # --- 3. mol-review: the review's worktree. -------------------------------------
-# The worktree lives in the review's workspace, made by review-workspace.sh add
-# and removed by the verdict step's remove line.
-echo "── mol-review: review-workspace-add and review-workspace-remove ──"
-block "$REVIEW_TOML" review-workspace-add "$TMP/review.sh"
-# The pack-script locator's show-toplevel candidate is the block's one bare git
-# call. It picks where review-workspace.sh is read from, never the repository
-# the worktree is made in.
-eq "$(bare_git "$TMP/review.sh")" "rev-parse " "review: the only git call without -C is the pack-script locator's"
-block "$REVIEW_TOML" review-workspace-remove "$TMP/review-rm.sh"
-cat "$TMP/review.sh" - > "$TMP/review-probe.sh" <<'PROBE'
-printf '%s\n' "$REVIEW_WT" > "$PROBE/wt"
+# load-dispatch's gather makes the worktree in the review's workspace through
+# review-workspace.sh add, and the verdict step's remove line removes it. The
+# pour fills in the values a review is told, so each case renders the block
+# with its own commit, for a pre-open review of polecat/x onto main.
+echo "── mol-review: review-gather and review-workspace-remove ──"
+review_render() { # <text> <check> <oid>
+  printf '%s\n' "$1" | sed -e 's|{{review_bead}}|rb|g' -e "s|{{reviewed_oid}}|$3|g" -e 's|{{review_base}}|main|g' \
+    -e 's|{{review_branch}}|polecat/x|g' -e 's|{{anchor_bead}}|tk-anc|g' -e "s|{{check}}|$2|g" -e 's|{{review_pr_url}}||g' \
+    -e 's|{{binding_prefix}}|gc-toolkit.|g'
+}
+GATHER="$(extract "$REVIEW_TOML" review-gather)"
+[ -n "$GATHER" ] && ok "review-gather: block extracted between markers" || bad "review-gather: block extracted between markers" "markers missing from formulas/mol-review.toml"
+review_render "$GATHER" correctness 0123456789abcdef0123456789abcdef01234567 > "$TMP/review-render.sh"
+case "$(cat "$TMP/review-render.sh")" in
+  *'{{'*) bad "review-gather: no unrendered formula placeholder left once a review's values fill it" ;;
+  *)      ok "review-gather: no unrendered formula placeholder left once a review's values fill it" ;;
+esac
+if bash -n "$TMP/review-render.sh" 2>/dev/null; then ok "review-gather: block is valid bash"; else bad "review-gather: block is valid bash"; fi
+# The block asks gc for the pack's scripts, so every git call it makes names
+# the repository it acts on.
+eq "$(bare_git "$TMP/review-render.sh")" "" "review: every git call in the block names its repo with -C"
+extract "$REVIEW_TOML" review-workspace-remove > "$TMP/review-rm.tmpl"
+[ -s "$TMP/review-rm.tmpl" ] && ok "review-workspace-remove: block extracted between markers" \
+  || bad "review-workspace-remove: block extracted between markers" "markers missing from formulas/mol-review.toml"
+PROBE_TAIL='printf "%s\n" "$WT" > "$PROBE/wt"
 pwd -P > "$PROBE/pwd"
-git -C "$REVIEW_WT" rev-parse HEAD > "$PROBE/head"
-git -C "$PROBE_RIG" worktree list --porcelain | sed -n 's/^worktree //p' > "$PROBE/rig"
-git -C "$PROBE_CWD" worktree list --porcelain | sed -n 's/^worktree //p' > "$PROBE/cwd"
-PROBE
+git -C "$WT" rev-parse HEAD > "$PROBE/head"
+git -C "$PROBE_RIG" worktree list --porcelain | sed -n "s/^worktree //p" > "$PROBE/rig"
+git -C "$PROBE_CWD" worktree list --porcelain | sed -n "s/^worktree //p" > "$PROBE/cwd"'
+printf '[{"id":"tk-anc","title":"the change under review"}]\n' > "$TMP/anchor.json"
 
-# GC_PACK_DIR names this checkout, so the block runs the review-workspace.sh
-# under test.
-review_case() { # <mode>; sets RC, OID, D
-  local d="$TMP/review-$1" rc=0
+# gc names this checkout as the pack, so the block runs the review-workspace.sh and
+# review-checks.sh under test. The rig's origin carries the reviewed commit as
+# both main and polecat/x, which the block fetches before it makes the worktree.
+review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
+  local d="$TMP/review-$1${2:+-$2}" rc=0
   mkdir -p "$d/probe" "$d/tmp"
-  git init -q -b main "$d/rig"; OID=$(commit "$d/rig" "reviewed head ($1)")
+  git init -q -b main "$d/rig"
+  if [ -n "${3:-}" ]; then
+    mkdir -p "$d/rig/docs"; printf 'GUIDANCE FOR TRIAGE: never add demo here\n' > "$d/rig/docs/$3"
+    git -C "$d/rig" add "docs/$3"
+  fi
+  OID=$(commit "$d/rig" "reviewed head ($1)")
+  git init -q --bare "$d/origin.git"
+  git -C "$d/rig" push -q "$d/origin.git" "$OID:refs/heads/main" "$OID:refs/heads/polecat/x"
+  git -C "$d/rig" remote add origin "$d/origin.git"
   # The cwd repo is a clone, so it holds the reviewed commit too: an add that
   # follows cwd succeeds there instead of failing for want of the commit.
   git clone -q "$d/rig" "$d/cwd"; commit "$d/cwd" "cwd repo moves on ($1)" >/dev/null
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" REVIEW_BEAD=rb REVIEWED_OID="$OID" \
-      PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$TMP/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
+  { review_render "$GATHER" "${2:-correctness}" "$OID"; printf '%s\n' "$PROBE_TAIL"; } > "$d/review-probe.sh"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" STUB_PACK="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" \
+      GCTK_BIN="$TMP/gctk" GCTK_LOG="$d/gctk.log" \
+      PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$d/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
 # review_remove: the verdict step's remove line, run from the same foreign cwd.
 review_remove() {
-  ( cd "$D/cwd" && TMPDIR="$D/tmp" REVIEW_BEAD=rb SC="$ROOT/assets/scripts/step-close.sh" \
-      bash "$TMP/review-rm.sh" ) >>"$D/out" 2>&1 || true
+  review_render "$(cat "$TMP/review-rm.tmpl")" correctness "$OID" > "$D/review-rm.sh"
+  ( cd "$D/cwd" && TMPDIR="$D/tmp" SC="$ROOT/assets/scripts/step-close.sh" \
+      bash "$D/review-rm.sh" ) >>"$D/out" 2>&1 || true
 }
 
 for mode in env roster; do
@@ -240,6 +284,15 @@ for mode in env roster; do
   eq "$(in_paths "$(cat "$D/probe/cwd" 2>/dev/null || true)" "$WT")" no  "review/$mode: the worktree is NOT registered in the cwd repo"
   eq "$(cat "$D/probe/head" 2>/dev/null || true)" "$OID" "review/$mode: the worktree is checked out at the reviewed OID"
   eq "$(cat "$D/probe/pwd" 2>/dev/null || true)" "${WT:-/nonexistent}" "review/$mode: the block leaves the shell in the review worktree"
+  grep -qF "== The review's worktree: $WT" "$D/out" && ok "review/$mode: the block prints the worktree's path" \
+    || bad "review/$mode: the block prints the worktree's path" "$(tr '\n' '|' < "$D/out")"
+  grep -qF "the change under review" "$D/out" && ok "review/$mode: the block prints the anchor" \
+    || bad "review/$mode: the block prints the anchor" "$(tr '\n' '|' < "$D/out")"
+  grep -qxF "== What gctk rig recorded at $OID" "$D/out" && grep -qxF "test: fail, scope affected, exit 1, command: t" "$D/out" \
+    && grep -qxF "lint: pass, exit 0, command: l" "$D/out" \
+    && ok "review/$mode: the block prints what gctk rig recorded at the reviewed commit" \
+    || bad "review/$mode: the block prints what gctk rig recorded at the reviewed commit" "$(tr '\n' '|' < "$D/out")"
+  eq "$(cut -d'|' -f2 "$D/gctk.log" 2>/dev/null | sort -u)" "${WT:-/nonexistent}" "review/$mode: the records are read in the review's worktree"
   review_remove
   eq "$(registered "$D/rig" "$WT")" no "review/$mode: the verdict step's remove unregisters the worktree from the rig"
   if [ -n "$WT" ] && [ ! -e "$WT" ]; then ok "review/$mode: the verdict step's remove deletes the worktree directory"
@@ -251,6 +304,47 @@ review_case nomatch
 eq "$(wt_paths "$D/rig" | count)" 1 "review/nomatch: nothing registered in the rig repo"
 eq "$(wt_paths "$D/cwd" | count)" 1 "review/nomatch: nothing registered in the cwd repo"
 eq "$(ls -A "$D/tmp" | count)" 0 "review/nomatch: refused before creating the review workspace"
+
+# A rig's guidance for a check is the reviewed commit's docs/review-<check>.md,
+# which the gather prints for that check's review alone.
+review_case env triage review-triage.md
+eq "$RC" 0 "review/guidance: a triage review's gather runs"
+grep -qF "GUIDANCE FOR TRIAGE: never add demo here" "$D/out" && ok "review/guidance: the reviewed commit's docs/review-triage.md reaches the triage review" \
+  || bad "review/guidance: the reviewed commit's docs/review-triage.md reaches the triage review" "$(tr '\n' '|' < "$D/out")"
+review_case env correctness review-triage.md
+grep -qF "GUIDANCE FOR TRIAGE" "$D/out" && bad "review/guidance: a correctness review at the same commit is not shown triage's guidance" \
+  || ok "review/guidance: a correctness review at the same commit is not shown triage's guidance"
+
+# load-dispatch's refusal: a review whose record lacks a value every review
+# needs reviews nothing. The block names the missing key in the review's notes
+# and exits non-zero, and nothing restores a route, because the next claim
+# would meet the same gap. It runs as the pour renders it, from the parsed
+# formula, with reviewed_oid given empty.
+python3 - "$REVIEW_TOML" > "$TMP/refusal.tmpl" <<'PY'
+import sys, tomllib, re
+for step in tomllib.load(open(sys.argv[1], 'rb'))['steps']:
+    if step['id'] == 'load-dispatch':
+        print(re.findall(r'```bash\n(.*?)```', step['description'], re.S)[0], end='')
+PY
+case "$(cat "$TMP/refusal.tmpl")" in
+  *'# >>> review-record-check'*) ok "refusal: load-dispatch's first block is the record check" ;;
+  *) bad "refusal: load-dispatch's first block is the record check" "$(head -3 "$TMP/refusal.tmpl")" ;;
+esac
+D="$TMP/refusal"; mkdir -p "$D"
+review_render "$(cat "$TMP/refusal.tmpl")" correctness "" > "$D/refusal.sh"
+rc=0
+( FAKE_LOG="$D/gc.log" bash "$D/refusal.sh" ) >"$D/out" 2>&1 || rc=$?
+[ "$rc" -ne 0 ] && ok "refusal: an empty reviewed_oid reviews nothing (the block exits non-zero)" || bad "refusal: an empty reviewed_oid reviews nothing" "rc=$rc"
+grep -qF "lacks reviewed_oid" "$D/out" && ok "refusal: it names the missing key" || bad "refusal: it names the missing key" "$(tr '\n' '|' < "$D/out")"
+grep -q '^bd update rb --append-notes .*lacks reviewed_oid' "$D/gc.log" && ok "refusal: …in the review's notes" \
+  || bad "refusal: …in the review's notes" "$(tr '\n' '|' < "$D/gc.log" 2>/dev/null)"
+if grep -q 'gc.routed_to' "$D/gc.log"; then bad "refusal: it leaves the route empty" "$(grep 'gc.routed_to' "$D/gc.log")"
+else ok "refusal: it leaves the route empty"; fi
+review_render "$(cat "$TMP/refusal.tmpl")" correctness 0123456789abcdef0123456789abcdef01234567 > "$D/whole.sh"
+rc=0
+( FAKE_LOG="$D/gc-whole.log" bash "$D/whole.sh" ) >"$D/out-whole" 2>&1 || rc=$?
+eq "$rc" 0 "refusal: a whole record passes the check"
+if grep -q -- '--append-notes' "$D/gc-whole.log" 2>/dev/null; then bad "refusal: …writing nothing on the review"; else ok "refusal: …writing nothing on the review"; fi
 
 # --- 4. mol-upstream-gc-sync: the read-only survey worktree. -------------------
 echo "── mol-upstream-gc-sync: upstream-sync-worktree-add ──"
@@ -331,12 +425,11 @@ printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/m
 # The pack, where the prep block finds detached-job.sh to stop a gate left
 # running in the prep worktree and refinery-workspace.sh to stage it, and the
 # direct-merge block finds direct-merge-push.sh, beside the bd-lib.sh it
-# sources and a lifecycle.sh that logs. It is named by path, so the cwd plays
-# no part.
-PACK_CITY="$TMP/pack-city"
-mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
-cp "$BIN/lifecycle" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/lifecycle.sh"
+# sources and a lifecycle.sh that logs. gc names it, so the cwd plays no part.
+PACK="$TMP/pack"
+mkdir -p "$PACK/assets/scripts"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$PACK/assets/scripts/"
+cp "$BIN/lifecycle" "$PACK/assets/scripts/lifecycle.sh"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
   mkdir -p "$d"
@@ -347,7 +440,7 @@ prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   git -C "$d/seed" push -q "$d/origin.git" polecat/wb
   STALE=$(git -C "$d/rig" rev-parse origin/polecat/wb)
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" GC_CITY_PATH="$PACK_CITY" WORK=wb TARGET_BRANCH_DEFAULT=main \
+  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" STUB_PACK="$PACK" WORK=wb TARGET_BRANCH_DEFAULT=main \
       FAKE_META="$TMP/meta.json" FAKE_LOG="$d/gc.log" bash "$TMP/prep.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
@@ -373,7 +466,7 @@ grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
 echo "── mol-refinery-patrol: direct-merge-push ──"
 block "$PATROL_TOML" direct-merge-push "$TMP/merge.sh"
 # The block runs direct-merge-push.sh, which makes the landing's git calls.
-eq "$(bare_git "$TMP/merge.sh")" "rev-parse " "direct-merge: the only git call without -C is the pack-script locator's"
+eq "$(bare_git "$TMP/merge.sh")" "" "direct-merge: every git call in the block names its repo with -C"
 eq "$(bare_git "$HERE/direct-merge-push.sh")" "" "direct-merge: every git call in direct-merge-push.sh names its repo with -C"
 
 # bead_file <dir>: the work bead direct-merge-push.sh stamps before its push.
@@ -384,11 +477,11 @@ merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge $1"
   bead_file "$d"
-  # The rebase step leaves the prepared head staged here, detached.
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  # The rebase step leaves the prepared head staged here for wb, detached.
+  "$PACK/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   pick "$1" "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
+      STUB_PACK="$PACK" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -407,6 +500,8 @@ for mode in env roster; do
   # The transition checks the landing in the checkout GC_RIG_ROOT names, so it
   # gets the rig this block resolved, from the roster too.
   eq "$(cat "$D/lc.log.root" 2>/dev/null || true)" "$D/rig" "direct-merge/$mode: the transition runs with GC_RIG_ROOT naming the rig the block resolved"
+  eq "$(git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb || echo deleted)" deleted \
+    "direct-merge/$mode: the merged branch is deleted from the rig's origin"
   eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: no worktree is added for the landing; the rig and its prep worktree remain"
   eq "$(wt_paths "$D/cwd" | count)" 1 "direct-merge/$mode: no worktree is left registered in the cwd repo"
   eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: nothing is left under TMPDIR"
@@ -432,13 +527,13 @@ protected_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge protected"
   bead_file "$d"
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$PACK/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' \
     > "$d/origin.git/hooks/pre-receive"
   chmod +x "$d/origin.git/hooks/pre-receive"
   pick env "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+      STUB_PACK="$PACK" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -455,6 +550,9 @@ for errexit in off on; do
     && bad "direct-merge/protected, errexit $errexit: the refinery does not drain" \
     || ok "direct-merge/protected, errexit $errexit: the refinery does not drain"
   eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "direct-merge/protected, errexit $errexit: nothing landed on the rig's origin"
+  git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb >/dev/null \
+    && ok "direct-merge/protected, errexit $errexit: the branch stays on origin for the PR" \
+    || bad "direct-merge/protected, errexit $errexit: the branch stays on origin for the PR"
   [ ! -s "$D/lc.log" ] && ok "direct-merge/protected, errexit $errexit: no lifecycle transition" \
     || bad "direct-merge/protected, errexit $errexit: no lifecycle transition"
 done
@@ -468,13 +566,13 @@ moved_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge moved"
   bead_file "$d"
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$PACK/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   git -C "$d/seed" checkout -q main
   MOVED=$(commit "$d/seed" "landed while the gate ran")
   git -C "$d/seed" push -q "$d/origin.git" main
   pick env "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+      STUB_PACK="$PACK" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -493,6 +591,9 @@ for errexit in off on; do
     && bad "direct-merge/moved, errexit $errexit: the refinery does not drain" \
     || ok "direct-merge/moved, errexit $errexit: the refinery does not drain"
   eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "direct-merge/moved, errexit $errexit: origin/main is untouched"
+  git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb >/dev/null \
+    && ok "direct-merge/moved, errexit $errexit: the branch stays on origin for the next patrol" \
+    || bad "direct-merge/moved, errexit $errexit: the branch stays on origin for the next patrol"
   [ ! -s "$D/lc.log" ] && ok "direct-merge/moved, errexit $errexit: no lifecycle transition" \
     || bad "direct-merge/moved, errexit $errexit: no lifecycle transition"
 done

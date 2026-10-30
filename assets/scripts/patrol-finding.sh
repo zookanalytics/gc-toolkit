@@ -11,25 +11,34 @@
 # exact-match dedup cannot see it. A NEW bead that shares its key or its subject
 # with a live finding in its scope is therefore refused, and those findings are
 # listed for the caller to compare. --distinct files it anyway.
+# A caller that sees the situation end passes --cleared. That sets the live
+# bead's situation state to cleared with `bd set-state`, which records the
+# change as a closed event bead under it and files no finding. A later report
+# that lands on that bead sets the state back to active the same way.
 #   patrol-finding.sh --key <situation-key> --title <one line> --message <text>
 #                     [--about <bead-id>] [--scope <slug>] [--type <t>]
 #                     [--priority <n>] [--rig <rig>] [--distinct]
 #                     [--no-react] [--dry-run]
+#   patrol-finding.sh --key <situation-key> --cleared --message <text>
+#                     [--about <bead-id>] [--scope <slug>] [--rig <rig>]
+#                     [--dry-run]
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml,
 # formulas/mol-refinery-patrol.toml, formulas/mol-dog-shutdown-dance.toml,
 # mol-polecat-work's refusals of a work bead it cannot read, the refinery
 # reconcile's assets/scripts/merge-tail-report.sh and
 # assets/scripts/pr-facts.sh, assets/scripts/rejection-repool.sh for a handoff
 # it cannot read, the hand-off at assets/scripts/escalate.sh for a call about
-# a wisp, a session or a subject that names no bead, and the feedback miner's
-# assets/scripts/feedback-miner.sh.
+# a wisp, a session or a subject that names no bead, the feedback miner's
+# assets/scripts/feedback-miner.sh, and the boot-health order's
+# assets/scripts/boot-health.sh.
 # Filing a finding asks no person anything. A finding needing the operator's
 # judgment gets there through the reaction's `ruling` or `recommend`
 # disposition, which files a human gate on the finding through
 # assets/scripts/human-gate.sh. A patrol files a human gate directly only for an
 # emergency about a bead that cannot wait for a disposition. A situation with no
 # bead of its own comes here, because the helper refuses a patrol wisp.
-# Exit: 0 filed or already tracked · 1 could not file/verify · 2 usage ·
+# Exit: 0 filed, already tracked, or its clear recorded (or no live bead to
+#       record it on) · 1 could not file/verify · 2 usage ·
 #       3 refused: a live finding in the scope shares the key or the subject
 set -uo pipefail
 
@@ -96,12 +105,18 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               gc-toolkit). It also rig-qualifies the proactive pool
   --no-react  file the bead and stop. It keeps gc.proactive=1, so the next
               `gc-proactive.sh scan --sling` sweep reacts to it
+  --cleared   the situation has ended. Set situation=cleared, with --message
+              as the reason, on the bead a recurrence would land on, or else
+              on one held at blocked with nothing left to wait on, and file no
+              finding. With no live bead there is nothing to record, and the
+              exit is 0. --title is not needed. A later report that lands on
+              that bead sets situation=active
   --dry-run   print what would be filed and exit
 U
 }
 
 KEY=""; CHECK=""; TITLE=""; MESSAGE=""; ABOUT=""; SCOPE=""; TYPE="bug"
-PRIORITY=""; RIG_ARG=""; DISTINCT=""; NO_REACT=""; DRY=""
+PRIORITY=""; RIG_ARG=""; DISTINCT=""; NO_REACT=""; CLEARED=""; DRY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)      KEY="${2:-}";      shift 2 || { usage; exit 2; } ;;
@@ -115,6 +130,7 @@ while [ $# -gt 0 ]; do
     --rig)      RIG_ARG="${2:-}";  shift 2 || { usage; exit 2; } ;;
     --distinct) DISTINCT=1; shift ;;
     --no-react) NO_REACT=1; shift ;;
+    --cleared)  CLEARED=1; shift ;;
     -n|--dry-run) DRY=1; shift ;;
     -h|--help)  usage; exit 2 ;;
     *) warn "unknown argument '$1'"; usage; exit 2 ;;
@@ -132,8 +148,8 @@ if [ -n "$CHECK" ]; then
   fi
   KEY="doctor-${CHECK##*:}"
 fi
-if [ -z "$KEY" ] || [ -z "$TITLE" ] || [ -z "$MESSAGE" ]; then
-  warn "--key (or --check) and --title and --message are all required"; usage; exit 2
+if [ -z "$KEY" ] || [ -z "$MESSAGE" ] || { [ -z "$TITLE" ] && [ -z "$CLEARED" ]; }; then
+  warn "--key (or --check) and --message are required, and so is --title unless --cleared is given"; usage; exit 2
 fi
 # A '=' or metacharacter in the key breaks the exact-match dedup read.
 case "$KEY" in
@@ -324,8 +340,12 @@ DEDUP_SCOPE="[$KEY]${ABOUT:+ on $ABOUT}"
 if [ -n "$DRY" ]; then
   printf 'key=%s scope=%s rig=%s type=%s%s%s\n' \
     "$KEY" "$SCOPE_LABEL" "${GC_RIG:-}" "$TYPE" "${ABOUT:+ about=$ABOUT}" "${DISTINCT:+ distinct}"
-  printf 'title=%s\n' "$TITLE"
-  printf 'would file (or update) one bead for %s\n' "$DEDUP_SCOPE"
+  if [ -n "$CLEARED" ]; then
+    printf 'would record that %s cleared, on its live bead if one holds it\n' "$DEDUP_SCOPE"
+  else
+    printf 'title=%s\n' "$TITLE"
+    printf 'would file (or update) one bead for %s\n' "$DEDUP_SCOPE"
+  fi
   exit 0
 fi
 
@@ -346,7 +366,11 @@ fi
 # bead: first one not held at blocked, then a held one still waiting on an open
 # blocker.
 if ! LIVE=$(rows_by_key "$LIVE_STATUSES"); then
-  warn "dedup lookup failed (list exited non-zero, or its output was not a JSON array) for $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot create a duplicate of a bead that may already be live. Re-run when the store is readable."
+  if [ -n "$CLEARED" ]; then
+    warn "lookup failed (list exited non-zero, or its output was not a JSON array) for $DEDUP_SCOPE — recording no clear, because nothing shows which bead holds the finding. Re-run when the store is readable."
+  else
+    warn "dedup lookup failed (list exited non-zero, or its output was not a JSON array) for $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot create a duplicate of a bead that may already be live. Re-run when the store is readable."
+  fi
   exit 1
 fi
 EXISTING=$(printf '%s' "$LIVE" | jq -r '[.[] | select(.status != "blocked")][0].id // empty' 2>/dev/null)
@@ -372,12 +396,52 @@ if [ -z "$EXISTING" ]; then
     [ -n "$HELD" ] || { HELD="$id"; HELD_ON="$on"; }
   done <<< "$HELD_ROWS"
 fi
+
+# ── The situation has ended ──────────────────────────────────────────
+# --cleared lands on the bead a recurrence would land on. When there is none,
+# it lands on a held bead with nothing left to wait on: a recurrence files a new
+# bead beside that one, but it is still the newest record of the situation. A
+# situation that no live bead holds has no record to end, so nothing is written.
+# The end is bd's operational state, set with `bd set-state`: the
+# situation:<value> label is what a reader checks (`bd state <bead> situation`),
+# and each change files bd's closed audit event under the bead, with --message
+# as its reason. The bead's status stays as it is, because the work a finding
+# asks for is not done when its situation ends. A clear of a bead already at
+# cleared writes nothing.
+if [ -n "$CLEARED" ]; then
+  TARGET="${EXISTING:-$HELD}"
+  if [ -z "$TARGET" ]; then
+    echo "$PROG: no live bead holds $DEDUP_SCOPE, so there is no clear to record"
+    exit 0
+  fi
+  if gc bd set-state "$TARGET" situation=cleared --reason "$MESSAGE" >/dev/null 2>&1; then
+    echo "$PROG: $TARGET holds $DEDUP_SCOPE — recorded that it cleared (situation=cleared)"
+    exit 0
+  fi
+  warn "could not record on $TARGET that $DEDUP_SCOPE cleared"
+  exit 1
+fi
+
 if [ -n "$EXISTING" ]; then
   ROW=$(bd_json show "$EXISTING")
   SEEN=$(printf '%s' "$ROW" | jq -r '.[0].metadata["finding.occurrences"] // "1"' 2>/dev/null)
   case "$SEEN" in ''|*[!0-9]*) SEEN=1 ;; esac
   SEEN=$(( SEEN + 1 ))
   WAS=$(printf '%s' "$ROW" | jq -r '.[0].metadata["finding.digest"] // ""' 2>/dev/null)
+  # A report on a bead whose situation cleared is its return. The state is read
+  # from the bead's row in the keyed listing, which the lookup above proved
+  # readable, so a show that fails cannot hide a clear. It goes back to active
+  # before the occurrence is counted, so a return that does not land counts
+  # nothing, and the caller's retry still reads it cleared.
+  SITUATION=$(printf '%s' "$LIVE" | jq -r --arg id "$EXISTING" '[.[] | select(.id == $id) | (.labels // [])[]? | strings | select(startswith("situation:"))][0] // "" | ltrimstr("situation:")' 2>/dev/null)
+  RETURNED=""
+  if [ "$SITUATION" = cleared ]; then
+    if ! gc bd set-state "$EXISTING" situation=active --reason "reported again (occurrence $SEEN)" >/dev/null 2>&1; then
+      warn "could not record on $EXISTING that $DEDUP_SCOPE is active again after it cleared, so the recurrence is not counted either; the finding is still tracked there"
+      exit 1
+    fi
+    RETURNED="; its situation had cleared and is active again"
+  fi
 
   set -- --set-metadata "finding.occurrences=$SEEN" \
          --set-metadata "finding.last_seen=$(now_utc)"
@@ -412,10 +476,10 @@ if [ -n "$EXISTING" ]; then
   fi
   if gc bd update "$EXISTING" "$@" >/dev/null 2>&1; then
     case "$NOTED" in
-      line)   echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN and a one-line note of the changed text" ;;
-      cap)    echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the notes are at their $NOTES_CAP-byte cap" ;;
-      unread) echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the bead's notes could not be read" ;;
-      *)      echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN, text unchanged" ;;
+      line)   echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN and a one-line note of the changed text$RETURNED" ;;
+      cap)    echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the notes are at their $NOTES_CAP-byte cap$RETURNED" ;;
+      unread) echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the bead's notes could not be read$RETURNED" ;;
+      *)      echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN, text unchanged$RETURNED" ;;
     esac
     exit 0
   fi

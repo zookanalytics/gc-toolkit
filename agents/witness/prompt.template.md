@@ -115,11 +115,7 @@ it: routed to a pool, held on an edge, or put to the operator as a human gate
 on the finding.
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
+"$(gc {{ .BindingName }} scripts-dir)/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
 `--about` names the bead the finding is about, and the dedup matches on it
@@ -142,8 +138,8 @@ take yourself.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — goes straight to a human
-gate on the bead it is about, through `"$SCRIPTS/human-gate.sh" --subject
-<bead> --key <situation-key> --message "<what is wrong + recommendation>"`.
+gate on the bead it is about, through `"$(gc {{ .BindingName }} scripts-dir)/human-gate.sh"
+--subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"`.
 The gate lands in the store of the bead it names and blocks that bead, so the
 bead leaves the pool's offer until a person clears the gate. A gate on a bead
 with open children pauses every part of it that has not started, so when only

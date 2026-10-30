@@ -27,8 +27,8 @@
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
-#             unattached at the bound, one that ends first is reported, and
-#             --no-attach does not wait
+#             unattached at the bound, which exits 4, one that ends first is
+#             reported, and --no-attach does not wait
 #   (LEFT)    a conversation whose sitting's session closed is resumed under
 #             the same alias, with no bind needed
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
@@ -53,7 +53,27 @@
 #             waits for the holder's bind; two engages of one conversation spawn
 #             once and bind once
 #   (ALIAS-RETRY) an id the runtime refuses as an alias is retried under c-
-#   (ATTACH, START-*, NOATTACH-*) the attach waits until the sitting reads active
+#   (ATTACH, START-*, NOATTACH-*) the attach waits until the sitting reads
+#             active, because an attach that reaches a sitting the reconciler
+#             has not started launches it without its prompt. It waits however
+#             long the start takes (START-LONG, minutes on a fake clock), and
+#             says so when the wait opens, when the state changes, and every
+#             30s (START-PROGRESS). One that ends first exits 4 at once, early
+#             or late; a sitting not yet listed, or a listing that fails, is
+#             waited through. A sitting still unstarted at
+#             GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
+#             (START-BACKSTOP), is left unattached and exits 4, with the attach
+#             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
+#             conversation bound and the sitting open, and prints the attach,
+#             after kicking a codex sitting (INTERRUPT-KICK); a hang-up or a
+#             TERM stops it the same way (INTERRUPT-HUP, INTERRUPT-TERM).
+#   (ENDED*, DETACHED, UNREAD, ATTACH-FAIL-*) once the attach returns, the
+#             conversation says what the tab prints: a closed conversation
+#             prints how it closed and the last hand-back recorded on it, its
+#             control bytes dropped; a conversation still open prints the
+#             re-attach command; an unreadable one says the ending is unknown;
+#             and a failed attach on a closed conversation reports the ending
+#             rather than an attach to retry
 #   (SUSPENDED, CTRL-*) a suspended rig or a down controller refuses first
 #   (IA-*)    the interactive prompts: subject, conversation or starter, model,
 #             skill
@@ -120,10 +140,15 @@ conv_row() {
   _title="an earlier concern"; [ "$1" = tk-conv2 ] && _title="a second concern"
   _also=""
   if [ "$1" = tk-two ]; then _created="2026-09-01T00:00:00Z"; _title="a task about two beads"; _also="tk-elsewhere"; fi
+  # $ST/<id>.meta (a JSON object) and $ST/<id>.reason seed the metadata and
+  # the close reason a closed sitting leaves, such as its hand-back.
+  _meta=$(cat "$ST/$1.meta" 2>/dev/null || true); [ -n "$_meta" ] || _meta='{}'
   jq -n --arg c "$1" --arg a "$(asg_of "$1")" --arg st "$(stat_of "$1")" --arg s "$(subj_of "$1")" \
-        --arg t "$_title" --arg cr "$_created" --arg shape "$2" --arg x "$_also" --argjson r "${_reps:-[]}" '
+        --arg t "$_title" --arg cr "$_created" --arg shape "$2" --arg x "$_also" --argjson r "${_reps:-[]}" \
+        --argjson md "$_meta" --arg why "$(cat "$ST/$1.reason" 2>/dev/null || true)" '
     ([$s] + (if $x == "" then [] else [$x] end)) as $tracked
-    | {id:$c, issue_type:"task", status:$st, assignee:$a, title:$t, created_at:$cr}
+    | {id:$c, issue_type:"task", status:$st, assignee:$a, title:$t, created_at:$cr, metadata:$md}
+    + (if $why == "" then {} else {close_reason:$why} end)
     + (if $shape == "show"
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
@@ -139,7 +164,7 @@ case "$1 ${2:-}" in
     jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" --arg hq "${HQ_RUNNING-}" \
           --arg nohq "${NO_HQ_ROW-}" \
       '{rigs:[ (if $nohq != "" then empty
-                else {name:"loomington", path:"/nonexistent-city", prefix:"lx", hq:true}
+                else {name:"mycity", path:"/nonexistent-city", prefix:"hq", hq:true}
                      + (if $hq   != "" then {running:   ($hq   == "true")} else {} end) end),
                ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk", hq:false}
                + (if $susp != "" then {suspended: ($susp == "true")} else {} end)
@@ -221,6 +246,7 @@ case "$1 ${2:-}" in
     id="$3"
     case "$id" in
       tk-conv|tk-conv2|tk-new)
+        [ -f "$ST/$id.unread" ] && { echo "bd show: data plane down" >&2; exit 1; }
         # Once a spawn is refused at the alias ($ALIAS_REFUSED exists), the
         # refused engage polls the conversation. The change it waits for lands
         # on the $AFTER_REFUSAL_READS-th read: a concurrent engage's bind
@@ -368,7 +394,14 @@ case "$1 ${2:-}" in
           + (if $amb != "" then ["contributing.review-arch"] else [] end)
           | map({name:., source:(split(".")[0]), path:("/skills/" + . + "/SKILL.md")}))}' ;;
   "session attach")
-    printf 'session attach %s\n' "$*" >> "$CALLS" ;;
+    # The attach returns when the tab's client exits. $ATTACH_ENDS is tk-conv's
+    # status by then: closed for a sitting that ended under the tab,
+    # in_progress for one the operator detached from. $ATTACH_UNREADABLE makes
+    # every later read of tk-conv fail, and $ATTACH_FAIL fails the attach itself.
+    printf 'session attach %s\n' "$*" >> "$CALLS"
+    [ -n "${ATTACH_ENDS:-}" ] && printf '%s' "$ATTACH_ENDS" > "$ST/tk-conv.status"
+    [ -n "${ATTACH_UNREADABLE:-}" ] && : > "$ST/tk-conv.unread"
+    [ -n "${ATTACH_FAIL:-}" ] && { echo "gc session attach: session not found" >&2; exit 1; } ;;
   "session close")
     printf 'session close %s\n' "$*" >> "$CALLS"
     [ -n "${CLOSE_STICKS:-}" ] || { awk -v s="$3" '$1 != s' "$ST/live" > "$ST/live.tmp" 2>/dev/null; mv "$ST/live.tmp" "$ST/live" 2>/dev/null || true; } ;;
@@ -441,10 +474,36 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+# --- clock stubs --------------------------------------------------------------
+# engage's start wait reads the time with `date +%s` and sleeps a second between
+# listings. With $FAKE_CLOCK naming a file, `date +%s` prints the epoch second
+# the file holds, and a whole-second `sleep N` returns at once and moves that
+# clock N times ${FAKE_CLOCK_SCALE:-1} seconds on, so a case can wait minutes in
+# a few listings. Without it, and for every other argument, both are the real
+# commands.
+REAL_DATE=$(command -v date); REAL_SLEEP=$(command -v sleep)
+cat > "$TMP/bin/date" <<EOF
+#!/bin/sh
+if [ -n "\${FAKE_CLOCK:-}" ] && [ "\$*" = "+%s" ]; then cat "\$FAKE_CLOCK"; exit 0; fi
+exec "$REAL_DATE" "\$@"
+EOF
+cat > "$TMP/bin/sleep" <<EOF
+#!/bin/sh
+[ -n "\${FAKE_CLOCK:-}" ] || exec "$REAL_SLEEP" "\$@"
+case "\${1:-}" in ''|*[!0-9]*) exec "$REAL_SLEEP" "\$@" ;; esac
+echo \$(( \$(cat "\$FAKE_CLOCK") + \$1 * \${FAKE_CLOCK_SCALE:-1} )) > "\$FAKE_CLOCK"
+EOF
+chmod +x "$TMP/bin/date" "$TMP/bin/sleep"
+# reps <token> <n> — the token n times over, for a START_STATES walk.
+reps() { _r=""; _n=0; while [ "$_n" -lt "$2" ]; do _r="$_r $1"; _n=$((_n + 1)); done; printf '%s' "$_r"; }
+
 export PATH="$TMP/bin:$PATH"
 export CALLS="$TMP/calls" STATE_DIR="$TMP/state" ALIAS_REFUSED="$TMP/alias-refused"
 export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
 unset GC_HELM_FIXTURE || true
+# The START-BACKSTOP case reads the default bound, and only a case's own prefix
+# runs the clock stubs fake or picks the signal an interrupted case sends.
+unset GC_HELM_ENGAGE_WAIT_TIMEOUT FAKE_CLOCK FAKE_CLOCK_SCALE INTERRUPT_SIG || true
 export TMPDIR="$TMP"
 
 # A fixture agents dir, so the converse-<model> list engage globs is hermetic —
@@ -478,7 +537,8 @@ export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 reset() {
     : > "$CALLS"; : > "$SPAWNED"; : > "$POLLS"; : > "$TMP/psc.log"
     rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
-    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name spawned-alias -o -name tracks-reads -o -name live-polls \) -delete
+    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name '*.meta' -o -name '*.reason' -o -name '*.unread' -o -name spawned-alias -o -name tracks-reads -o -name live-polls \) -delete
+    printf '1700000000' > "$TMP/clock"
     : > "$STATE_DIR/replies"; : > "$STATE_DIR/live"
     for _l in ${LIVE_SITTINGS:-}; do printf '%s %s\n' "${_l%%=*}" "${_l#*=}" >> "$STATE_DIR/live"; done
     return 0
@@ -495,6 +555,40 @@ run_engage() {
     OUT="$(sh "$SCRIPT" engage "$@" </dev/null 2>"$TMP/err")"; RC=$?
     set -e
     OUT="$OUT$(cat "$TMP/err")"
+    CALLED="$(cat "$CALLS")"
+}
+
+# polls_read — how many listings the start wait has made, 0 before the first.
+polls_read() { _p=$(cat "$POLLS" 2>/dev/null || true); printf '%s' "${_p:-0}"; }
+
+# run_engage_interrupted <bead> [extra-args...] — run_engage, with a Ctrl-C sent
+# once the start wait has read the sitting twice: SIGINT, or the signal
+# $INTERRUPT_SIG names. Job control puts engage in a process group of its own,
+# as a terminal puts its foreground job, and the signal goes to that whole
+# group, as a terminal's Ctrl-C does. A shell that starts with a signal ignored
+# cannot trap it, and a suite started in the background by a shell without job
+# control inherits SIGINT ignored, so perl puts the default back for each
+# signal a case sends before engage starts. The case's own bound turns a signal
+# that never lands into a failure within a minute, not a hang.
+run_engage_interrupted() {
+    set +e
+    set -m
+    if command -v perl >/dev/null 2>&1; then
+        GC_HELM_ENGAGE_WAIT_TIMEOUT=60 perl -e '$SIG{$_} = "DEFAULT" for qw(INT TERM HUP); exec @ARGV or die "exec: $!\n"' \
+            sh "$SCRIPT" engage "$@" </dev/null >"$TMP/out" 2>"$TMP/err" &
+    else
+        GC_HELM_ENGAGE_WAIT_TIMEOUT=60 sh "$SCRIPT" engage "$@" </dev/null >"$TMP/out" 2>"$TMP/err" &
+    fi
+    _eng_pid=$!
+    set +m
+    _w=0
+    while [ "$(polls_read)" -lt 2 ] && [ "$_w" -lt 1200 ] && kill -0 "$_eng_pid" 2>/dev/null; do
+        sleep 0.05; _w=$((_w + 1))
+    done
+    kill -"${INTERRUPT_SIG:-INT}" -- "-$_eng_pid" 2>/dev/null
+    wait "$_eng_pid"; RC=$?
+    set -e
+    OUT="$(cat "$TMP/out")$(cat "$TMP/err")"
     CALLED="$(cat "$CALLS")"
 }
 
@@ -523,7 +617,14 @@ reset; run_engage tk-conv --no-attach
 eq "$RC" 0 "(CONVID) engaging a queued conversation exits 0"
 has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(CONVID) spawns converse-opus --alias <conversation> --no-attach"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(BIND) the conversation is assigned to the sitting's qualified alias, the actor its claim runs as"
-has "$CALLED" "bd update tk-conv --if-assignee human --if-status open --assignee gc-toolkit/gc-toolkit.tk-conv" "(BIND) …guarded on the holder and the status engage read, the operator's queue and open"
+has "$CALLED" "bd update tk-conv --if-assignee human --if-status open --unset-metadata gc.session_id --unset-metadata gc.session_name --assignee gc-toolkit/gc-toolkit.tk-conv" "(BIND) …guarded on the holder and the status engage read, the operator's queue and open"
+# Orphan recovery resolves a bead's owner from gc.session_id ahead of its
+# assignee, so a pin an earlier sitting left beside the fresh binding would have
+# it find that sitting dead and take the conversation from the fresh one. The
+# bind drops both pins in the same guarded write.
+bind_write=$(printf '%s\n' "$CALLED" | grep -- '--assignee gc-toolkit/gc-toolkit.tk-conv' || true)
+has "$bind_write" "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
+    "(BIND-PINS) …and drops any session pin an earlier sitting left, in the same write"
 has "$(cat "$TMP/psc.log")" "engage --sitting tk-conv --subject tk-subj" "(CONVID-PRCOMMENT) engage posts the open reminder on the bead the conversation tracks"
 hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its prompt and is not kicked"
 hasnt "$OUT" "took the conversation" "(CONVID) an explicit conversation id is not reported as one engage chose"
@@ -605,7 +706,7 @@ hasnt "$CALLED" "session attach" "(LIVE) --no-attach attaches nothing"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj
 has "$CALLED" "session attach gc-50" "(LIVE-ATTACH) the default attaches the operator to the live sitting"
-hasnt "$OUT" "waiting up to" "(LIVE-ATTACH) …a started one at once, with no wait announced"
+hasnt "$OUT" "waiting for the reconciler" "(LIVE-ATTACH) …a started one at once, with no wait announced"
 
 echo "# a live sitting engage reuses is attached only once the reconciler has started it"
 # A sitting is live from the spawn that created it, so one an earlier
@@ -615,7 +716,7 @@ echo "# a live sitting engage reuses is attached only once the reconciler has st
 # attach does.
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 GC_HELM_ENGAGE_WAIT_TIMEOUT=2 LIVE_STATES="start-pending" run_engage tk-subj
-eq "$RC" 0 "(REUSE-PENDING) reusing a live sitting that does not start within the wait exits 0"
+eq "$RC" 4 "(REUSE-PENDING) reusing a live sitting that does not start within the wait exits 4: the engage put no sitting in front of the operator"
 hasnt "$CALLED" "session attach" "(REUSE-PENDING) …and is NOT attached, since the attach would launch it without its prompt"
 hasnt "$CALLED" "session new" "(REUSE-PENDING) …spawning no second sitting"
 has "$OUT" "has not started s-gc-50 after 2s" "(REUSE-PENDING) …saying the reconciler has not started it"
@@ -628,7 +729,7 @@ has "$OUT" "creating" "(REUSE-CREATING) …naming the state it last read"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 LIVE_STATES="start-pending start-pending start-pending start-pending start-pending active" run_engage tk-subj
 eq "$RC" 0 "(REUSE-WAIT) reusing a live sitting that starts during the wait exits 0"
-has "$OUT" "waiting up to" "(REUSE-WAIT) …announcing the wait"
+has "$OUT" "waiting for the reconciler to start s-gc-50" "(REUSE-WAIT) …announcing the wait"
 last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
 attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
 if [ -n "$last_poll" ] && [ -n "$attach_line" ] && [ "$last_poll" -lt "$attach_line" ]; then
@@ -645,7 +746,7 @@ has "$OUT" "gc-helm engage tk-subj" "(REUSE-ENDED) …and pointing at the engage
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending" run_engage tk-subj --no-attach
 eq "$RC" 0 "(REUSE-NOATTACH) --no-attach on a reused unstarted sitting exits 0"
-hasnt "$OUT" "waiting up to" "(REUSE-NOATTACH) …without waiting, since it attaches nothing"
+hasnt "$OUT" "waiting for the reconciler" "(REUSE-NOATTACH) …without waiting, since it attaches nothing"
 hasnt "$CALLED" "session attach" "(REUSE-NOATTACH) …and attaches nothing"
 
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
@@ -816,7 +917,7 @@ hasnt "$CALLED" "session nudge" "(DISMISSED-LEFT) …which is never kicked"
 reset; held tk-conv gc-toolkit/gc-toolkit.c-tk-conv
 run_engage tk-subj --no-attach
 eq "$RC" 0 "(LEFT-REBIND) a conversation left under its c- alias, resumed under its bare id, exits 0"
-has "$CALLED" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.c-tk-conv --if-status in_progress --assignee gc-toolkit/gc-toolkit.tk-conv" "(LEFT-REBIND) …binding it guarded on the alias and the status its sitting left"
+has "$CALLED" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.c-tk-conv --if-status in_progress --unset-metadata gc.session_id --unset-metadata gc.session_name --assignee gc-toolkit/gc-toolkit.tk-conv" "(LEFT-REBIND) …binding it guarded on the alias and the status its sitting left"
 reset; held tk-conv gc-toolkit/gc-toolkit.c-tk-conv
 DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --no-attach
 eq "$RC" 4 "(DISMISSED-LEFT-REBIND) that conversation dismissed during the spawn exits 4"
@@ -1027,7 +1128,7 @@ echo "# the attach waits for the reconciler to start the sitting"
 # only once it reads active, never while it is start-pending or creating.
 run_fresh tk-conv
 eq "$(cat "$POLLS")" 1 "(START-ACTIVE) a sitting already started is read once"
-hasnt "$OUT" "waiting up to" "(START-ACTIVE) …and attached with no wait announced"
+hasnt "$OUT" "waiting for the reconciler" "(START-ACTIVE) …and attached with no wait announced"
 
 START_STATES="start-pending creating active" run_fresh tk-conv
 eq "$RC" 0 "(START-WAIT) an engage whose sitting starts on the third listing exits 0"
@@ -1039,11 +1140,36 @@ if [ -n "$last_poll" ] && [ -n "$attach_line" ] && [ "$last_poll" -lt "$attach_l
 else
   bad "(START-WAIT) expected the last listing (line ${last_poll:-none}) before the attach (line ${attach_line:-none})"
 fi
-has "$OUT" "waiting up to 120s for the reconciler to start s-gc-77" \
-    "(START-WAIT) …telling the operator what it waits on, and for how long"
+has "$OUT" "waiting for the reconciler to start s-gc-77 (it is start-pending), then attaching; Ctrl-C stops the wait and leaves it starting" \
+    "(START-WAIT) …telling the operator what it waits on, and that Ctrl-C leaves it starting"
+
+# A start on a busy controller can take minutes, so nothing short of the
+# backstop ends the wait. On the fake clock the listings are ten seconds apart,
+# so the fifteenth reads the sitting 140s after the wait opened.
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=10 START_STATES="$(reps start-pending 14) active" run_fresh tk-conv
+eq "$RC" 0 "(START-LONG) a sitting still start-pending after two minutes is waited on"
+eq "$(cat "$POLLS")" 15 "(START-LONG) …read until it reads active, 140s in"
+has "$CALLED" "session attach gc-77" "(START-LONG) …and attached then"
+hasnt "$OUT" "has not started" "(START-LONG) …with no give-up"
+has "$OUT" "still waiting after 2m00s: s-gc-77 is start-pending" \
+    "(START-LONG) …reporting the time waited as it passes two minutes"
+
+# The wait reports itself: a line when it opens, one when the state changes,
+# and one every 30s. A listing that did not read is no change of state, and
+# neither is the same state read again after it.
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=10 START_STATES="start-pending start-pending creating broken creating active" run_fresh tk-conv
+eq "$RC" 0 "(START-PROGRESS) an engage whose sitting goes start-pending, creating, active exits 0"
+has "$OUT" "waiting for the reconciler to start s-gc-77 (it is start-pending)" \
+    "(START-PROGRESS) the wait opens with the state it read"
+has "$OUT" "s-gc-77 is now creating, after 20s" "(START-PROGRESS) …prints a line when the state changes"
+eq "$(printf '%s\n' "$OUT" | grep -c 'is now' || true)" 1 \
+    "(START-PROGRESS) …and only then: neither a listing that did not read nor the same state read again prints one"
+has "$OUT" "still waiting after 30s: s-gc-77 could not be read from 'gc session list'" \
+    "(START-PROGRESS) …and a line every 30s with the time waited and what the last listing read"
+has "$CALLED" "session attach gc-77" "(START-PROGRESS) …then attaches"
 
 GC_HELM_ENGAGE_WAIT_TIMEOUT=2 START_STATES="start-pending" run_fresh tk-conv
-eq "$RC" 0 "(START-TIMEOUT) a sitting still unstarted at the bound exits 0: the conversation is bound and the sitting may yet start"
+eq "$RC" 4 "(START-TIMEOUT) a sitting still unstarted at the GC_HELM_ENGAGE_WAIT_TIMEOUT bound exits 4: the engage put no sitting in front of the operator"
 hasnt "$CALLED" "session attach" "(START-TIMEOUT) …and is NOT attached, since the attach would launch it without its prompt"
 polls=$(cat "$POLLS")
 if [ "${polls:-0}" -ge 2 ]; then
@@ -1053,7 +1179,23 @@ else
 fi
 has "$OUT" "the reconciler has not started s-gc-77 after 2s" "(START-TIMEOUT) …saying the reconciler has not started it"
 has "$OUT" "start-pending" "(START-TIMEOUT) …naming the state it last read"
-has "$OUT" "gc session attach gc-77" "(START-TIMEOUT) …and giving the attach to run once it is up"
+has "$OUT" "Attach once it reads active there: gc session attach gc-77" "(START-TIMEOUT) …and giving the attach to run once it is up"
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-TIMEOUT) …leaving the conversation bound to the sitting"
+
+# The bound is a backstop set above the controller's own limits: 15 minutes
+# unless GC_HELM_ENGAGE_WAIT_TIMEOUT says otherwise. On the fake clock the
+# listings are a minute apart, at minutes 0 through 15.
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=60 START_STATES="start-pending" run_fresh tk-conv
+eq "$RC" 4 "(START-BACKSTOP) a sitting that never leaves start-pending exits 4 at the default bound"
+eq "$(cat "$POLLS")" 16 "(START-BACKSTOP) …which is 15 minutes"
+has "$OUT" "the reconciler has not started s-gc-77 after 15m00s" "(START-BACKSTOP) …naming the wait in minutes"
+hasnt "$CALLED" "session attach" "(START-BACKSTOP) …without attaching"
+
+FAKE_CLOCK="$TMP/clock" FAKE_CLOCK_SCALE=10 START_STATES="$(reps start-pending 14) gone" run_fresh tk-conv
+eq "$RC" 4 "(START-ENDED-LATE) a sitting that ends after a wait of minutes exits 4"
+eq "$(cat "$POLLS")" 15 "(START-ENDED-LATE) …at the first listing it is gone from"
+has "$OUT" "ended before the reconciler started it (its state in 'gc session list': gone)" "(START-ENDED-LATE) …saying the sitting ended"
+hasnt "$CALLED" "session attach" "(START-ENDED-LATE) …without attaching"
 
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_fresh tk-conv
 eq "$RC" 4 "(START-CLOSED) a sitting listed and then gone from the list (closed, read from the store) exits 4"
@@ -1087,7 +1229,7 @@ GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_fresh tk-conv --
 eq "$RC" 0 "(NOATTACH-NOWAIT) --no-attach on an unstarted sitting exits 0"
 polls=$(cat "$POLLS")
 eq "${polls:-0}" 0 "(NOATTACH-NOWAIT) …without reading the sitting's state"
-hasnt "$OUT" "waiting up to" "(NOATTACH-NOWAIT) …or announcing a wait"
+hasnt "$OUT" "waiting for the reconciler" "(NOATTACH-NOWAIT) …or announcing a wait"
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_fresh tk-conv --model codex --no-attach
 has "$CALLED" "session nudge gc-77" "(NOATTACH-KICK) a codex sitting on --no-attach is kicked without a start wait"
 
@@ -1107,6 +1249,33 @@ has "$CALLED" "session nudge gc-77" "(TIMEOUT-KICK) a codex sitting unstarted at
 hasnt "$CALLED" "session attach" "(TIMEOUT-KICK) …but not attached"
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_fresh tk-conv --model codex
 hasnt "$CALLED" "session nudge" "(CLOSED-NOKICK) a codex sitting that ended before it started is not kicked"
+
+echo "# Ctrl-C during the wait stops the wait and leaves the sitting starting"
+# The operator who stops waiting keeps the engage: the conversation stays
+# bound, the sitting is neither closed nor attached, and engage says how to
+# reach it once it is up.
+reset; START_STATES="start-pending" run_engage_interrupted tk-conv
+eq "$RC" 130 "(START-INTERRUPT) Ctrl-C during the wait exits 130"
+has "$OUT" "stopped waiting after" "(START-INTERRUPT) …saying the wait stopped"
+has "$OUT" "Conversation tk-conv stays held by s-gc-77, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach gc-77" \
+    "(START-INTERRUPT) …and printing the attach to run once the sitting is up"
+hasnt "$CALLED" "session attach" "(START-INTERRUPT) …without attaching"
+hasnt "$CALLED" "session close" "(START-INTERRUPT) …or closing the sitting"
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-INTERRUPT) …and the conversation still bound to it"
+hasnt "$CALLED" "session nudge" "(START-INTERRUPT) …and an opus sitting is not kicked"
+reset; START_STATES="start-pending" run_engage_interrupted tk-conv --model codex
+eq "$RC" 130 "(INTERRUPT-KICK) Ctrl-C during a codex sitting's wait exits 130"
+has "$CALLED" "session nudge gc-77" "(INTERRUPT-KICK) …after kicking the sitting, so it begins once it starts"
+# A terminal that goes away under the wait, and a TERM, stop it the same way.
+reset; INTERRUPT_SIG=HUP START_STATES="start-pending" run_engage_interrupted tk-conv --model codex
+eq "$RC" 129 "(INTERRUPT-HUP) a hang-up during a codex sitting's wait exits 129"
+has "$OUT" "stopped waiting after" "(INTERRUPT-HUP) …through the same stop as Ctrl-C"
+has "$CALLED" "session nudge gc-77" "(INTERRUPT-HUP) …kicking the sitting, so it begins once it starts"
+hasnt "$CALLED" "session close" "(INTERRUPT-HUP) …and leaving it open"
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(INTERRUPT-HUP) …with the conversation still bound to it"
+reset; INTERRUPT_SIG=TERM START_STATES="start-pending" run_engage_interrupted tk-conv
+eq "$RC" 143 "(INTERRUPT-TERM) a TERM during the wait exits 143"
+has "$OUT" "stopped waiting after" "(INTERRUPT-TERM) …through the same stop as Ctrl-C"
 
 echo "# a suspended subject rig is refused before anything spawns"
 # engage spawns a sitting the reconciler must sustain; on a suspended rig the
@@ -1573,6 +1742,73 @@ eq "$RC" 0 "(IA-SKILL-FLAG) --skill on a TTY exits 0 with only the model asked"
 hasnt "$OUT" "starts a new one" "(IA-SKILL-FLAG) …no conversation/starter prompt"
 hasnt "$OUT" "Skill — Enter" "(IA-SKILL-FLAG) …and no skill prompt, the flag answered it"
 has "$CALLED" "--title review-arch lens" "(IA-SKILL-FLAG) …filing the new conversation with the lens"
+
+echo "# after the attach returns, the tab says how the sitting it showed ended"
+# The attach returns once the tab's tmux client exits. A closed conversation is
+# a sitting that ended under the tab, and the tab prints how it closed and the
+# last hand-back it recorded; a conversation still open is one the operator
+# detached from, and the tab prints how to re-attach.
+HB_TEXT='tk-subj — the board redesign
+
+Settled: the new layout is on for the operator, and the rest wait a week.'
+HB_META=$(jq -nc --arg t "$HB_TEXT" '{"gc.handback":$t,"gc.handback_at":"2026-10-26T12:00:00Z"}')
+# ended_with <close-reason> <metadata> — seed what tk-conv carries once its
+# sitting has closed it.
+ended_with() { printf '%s' "$1" > "$STATE_DIR/tk-conv.reason"; printf '%s' "$2" > "$STATE_DIR/tk-conv.meta"; }
+reset; ended_with "settled the rollout" "$HB_META"
+ATTACH_ENDS=closed run_engage tk-conv
+eq "$RC" 0 "(ENDED) a sitting that ended under the tab exits 0"
+has "$OUT" "The sitting on tk-subj has ended: conversation tk-conv closed (settled the rollout)." \
+    "(ENDED) the tab says the sitting ended, and how its conversation closed"
+has "$OUT" "Its last hand-back, recorded 2026-10-26T12:00:00Z:" "(ENDED) …then introduces the last hand-back"
+has "$OUT" "$HB_TEXT" "(ENDED) …and prints the hand-back whole"
+hasnt "$OUT" "Re-attach" "(ENDED) …offering no re-attach to a sitting that is gone"
+
+reset; ended_with "settled" "$(jq -nc --arg t "$(printf 'tk-subj — label\n\nred\033[31m text\rover')" '{"gc.handback":$t}')"
+ATTACH_ENDS=closed run_engage tk-conv
+case "$OUT" in
+  *"$(printf '\033')"*|*"$(printf '\r')"*) bad "(ENDED-CTRL) control bytes in a recorded hand-back are not printed to the terminal" ;;
+  *) ok "(ENDED-CTRL) control bytes in a recorded hand-back are not printed to the terminal" ;;
+esac
+has "$OUT" "red[31m textover" "(ENDED-CTRL) …while its text is"
+
+reset; ended_with "dismissed by the operator" '{}'
+ATTACH_ENDS=closed run_engage tk-conv
+has "$OUT" "conversation tk-conv closed (dismissed by the operator)." "(ENDED-NONE) a sitting that recorded no hand-back still says how it ended"
+has "$OUT" "It recorded no hand-back." "(ENDED-NONE) …and that it left none"
+
+reset; ended_with "" "$HB_META"
+ATTACH_ENDS=in_progress run_engage tk-conv
+eq "$RC" 0 "(DETACHED) a tab the operator detached exits 0"
+has "$OUT" "The sitting on tk-subj is still open (conversation tk-conv). Re-attach: gc session attach gc-77" \
+    "(DETACHED) a conversation still open says the sitting is still going, with the re-attach command"
+hasnt "$OUT" "$HB_TEXT" "(DETACHED) …and prints no hand-back as if it had ended"
+
+reset; ATTACH_ENDS=in_progress ATTACH_UNREADABLE=1 run_engage tk-conv
+has "$OUT" "Could not read conversation tk-conv, so whether its sitting has ended is unknown" \
+    "(UNREAD) a conversation that does not read back is reported as unknown, not as ended or open"
+
+reset; ended_with "settled the rollout" "$HB_META"
+ATTACH_FAIL=1 ATTACH_ENDS=closed run_engage tk-conv
+has "$OUT" "The sitting on tk-subj has ended" "(ATTACH-FAIL-ENDED) an attach that failed because the sitting already ended reports the ending"
+hasnt "$OUT" "could not attach" "(ATTACH-FAIL-ENDED) …instead of an attach to retry"
+
+reset; ATTACH_FAIL=1 ATTACH_ENDS=in_progress run_engage tk-conv
+has "$OUT" "could not attach to gc-77 — attach when ready: gc session attach gc-77" \
+    "(ATTACH-FAIL-OPEN) an attach that failed on a sitting still going says so, as before"
+
+reset; ended_with "settled the rollout" "$HB_META"
+ATTACH_ENDS=closed run_engage tk-conv --no-attach
+hasnt "$OUT" "has ended" "(NOATTACH-REPORT) --no-attach attaches nothing, so it reports no ending"
+
+export LIVE_SITTINGS="gc-50=gc-toolkit/gc-toolkit.tk-conv"
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv; ended_with "settled the rollout" "$HB_META"
+ATTACH_ENDS=closed run_engage tk-subj
+has "$CALLED" "session attach gc-50" "(LIVE-ENDED) a tab attached to the live sitting it reused"
+has "$OUT" "The sitting on tk-subj has ended: conversation tk-conv closed (settled the rollout)." \
+    "(LIVE-ENDED) …reports its ending the same way"
+unset LIVE_SITTINGS
+reset
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"

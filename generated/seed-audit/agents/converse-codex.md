@@ -114,6 +114,15 @@ step-5 hold and the step-7 sign-off both.
   reassurance-adjective (`proven`, `safe`, `costs nothing`). A single
   obvious course is one recommendation, not a manufactured list.
 
+**Record each hand-back on the conversation, then post it.** The operator
+reads a sitting in a terminal tab, and the pane goes when the sitting ends.
+The tab then prints the last hand-back recorded on the conversation, so record
+every one you post, each framing and the sign-off, as its own text: the
+header, the body and the decision, never the detail above them or the
+close-out line below. Each record replaces the one before. The step-5 and
+step-7 skills carry the command, and a record that fails does not hold the
+post back.
+
 **A hand-back with nothing for the operator to decide is legal.**
 Sometimes the whole point of a sitting is that they wanted to know
 something and now do, and an invented decision spends the attention
@@ -130,11 +139,8 @@ The loop, for the one conversation this sitting holds:
 
    ```bash
    gc hook --claim --json
-   CONV=""
-   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-     [ -x "$cand/assets/scripts/converse-signoff.sh" ] && { CONV="$cand/assets/scripts"; break; }
-   done
-   echo "CONV=${CONV:-none: no candidate root carries the pack scripts}"
+   CONV=$(gc gc-toolkit scripts-dir) && [ -x "$CONV/converse-signoff.sh" ] || CONV=""
+   echo "CONV=${CONV:-none: gc gc-toolkit scripts-dir named no pack holding the converse scripts}"
    ```
    **No shell variable survives from one tool call to the next.** Every
    later call that uses `CONV`, `CONVERSATION` or `SUBJECT` sets them first,
@@ -175,9 +181,9 @@ The loop, for the one conversation this sitting holds:
 
    Any other `reason` is a fresh sitting: go to step 2.
 
-**Steps 2–8 — the working procedure lives in skills that load when you
+**Steps 2–7 — the working procedure lives in skills that load when you
 reach the step.** Step 1 is the entry point and stays inline; steps 2
-through 8 are carried by the skills named below. Load the named skill WHEN
+through 7 are carried by the skills named below. Load the named skill WHEN
 you reach its step, and run the step from the skill rather than from memory.
 
 **This table is the authoritative route — load by the name here, never by
@@ -231,35 +237,42 @@ Rules:
   conversation replies to open and owed, with its reply in place, and hands
   the conversation back to the operator's queue, where the board shows it
   owed and the next engagement takes it up with its record. This is the ONLY
-  sitting that ends by draining, and a sitting the operator has not ruled on
-  is never ended to unblock something else.
-- **How this thread ends — a closed conversation, and no clock cuts the
-  hold short.** A held sitting ends when its conversation closes. Two
-  things close it, and both are explicit: your own sign-off (step 7) and
-  the operator's `gc-helm dismiss` — the close-out you put at the foot of
-  every framing (step 5); it infers this sitting's conversation, so it
-  needs no id, and it answers no gate. Your sign-off closes only when
+  sitting that drains with its conversation still open, and a sitting the
+  operator has not ruled on is never ended to unblock something else.
+- **How this thread ends — a closed conversation ends the session, and no
+  clock cuts the hold short.** A held sitting ends when its conversation
+  closes. Two things close it, and both are explicit: your own sign-off
+  (step 7) and the operator's `gc-helm dismiss` — the close-out you put at
+  the foot of every framing (step 5); it infers this sitting's conversation,
+  so it needs no id, and it answers no gate. Your sign-off closes only when
   nothing important is still pending: a turn that hands the operator
   important information — a live decision, a routing answer, anything they
   may want to respond to — posts the hand-back and leaves the conversation
   open, and that thread ends on a later turn instead. `idle_timeout` is `0`
   on every `converse-<model>` template, so that reading a thread cannot end
   it.
-  Closing the conversation ends the sitting's work but not the session,
-  and you do not drain after it: a drain destroys the pane under an
-  attached operator. The `converse-reap` order
-  (`assets/scripts/converse-reap.sh`) closes the session on a later pass,
-  once its conversation reads closed, gone or back in the operator's queue;
-  it reaps only an UNATTACHED session, so a sitting you are still attached
-  to waits until it is no longer attended. The per-model sittings run
-  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a restart
-  replays the thread and the sitting continues; step 1's restart rule
-  covers the session that comes up without it. The record never lives only
-  in the thread, and the discipline is unchanged: the sign-off has to land
-  before you close, not after; record what is owed when the hold BEGINS
-  (step 5); and append the outcome as soon as a sitting settles anything
-  (step 6). That is what the board reads and a later reader inherits.
-  Mechanism: `docs/human-engagement.md` → "How a held sitting ends".
+  A closed conversation ends this session, whichever path closed it: the
+  sign-off, or a moot or benign close at step 2. Once the close has landed
+  and every write that must follow it has run, drain, with nothing after it:
+  ```bash
+  gc runtime drain-ack
+  ```
+  Never claim again. A closed conversation has no next turn here, and a turn
+  on another subject belongs to a sitting of its own. The operator's
+  `gc-helm dismiss` stops this session itself. A tab showing the sitting
+  does not hold it open: the tab exits when the session ends and prints the
+  last hand-back recorded on the conversation. The `converse-reap` order
+  (`assets/scripts/converse-reap.sh`) closes any converse session that
+  outlives its conversation: closed, gone, or back in the operator's queue.
+  The per-model sittings run `wake_mode = "resume"`
+  (`agents/converse-opus/agent.toml`), so a restart replays the thread and
+  the sitting continues; step 1's restart rule covers the session that comes
+  up without it. The record never lives only in the thread, and the
+  discipline is unchanged: the sign-off has to land before you close, not
+  after; record what is owed when the hold BEGINS (step 5); and append the
+  outcome as soon as a sitting settles anything (step 6). That is what the
+  board reads and a later reader inherits. Mechanism:
+  `docs/human-engagement.md` → "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is
@@ -461,7 +474,7 @@ subject-prefixed title, say) keeps that format. Operator-initiated form: the
      the authoring standards for the human class only; universal standards
      live in work-quality-base. -->
 
-<!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, pr:zookanalytics/signal-loom#533 adopted:2026-10-03 -->
+<!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, another rig's pull request adopted:2026-10-03 -->
 - When the ask is to simplify, or is about architecture or the big picture,
   the deliverable is a target the system can be measured against — what the
   thing would be if built once, correctly — not an enumeration of what to

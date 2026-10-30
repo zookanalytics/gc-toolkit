@@ -16,6 +16,20 @@
 #   finding.disposition  unvalidated | must-fix | deferred | declined | needs-you
 #                        | restates
 #   finding.source       machine:<lane> | human:<login>
+#   finding.severity     the grade the reviewer's method gave it, P0, P1 or P2;
+#                        absent from a finding no method graded. A P2 is ruled
+#                        must-fix or declined and never deferred
+#   finding.category     the part of the reviewer's method that found it
+#   finding.failure_scenario
+#                        the input or state that triggers it, then the wrong
+#                        output that follows
+#   finding.verification on a P0 or P1, CONFIRMED with the evidence, or
+#                        PLAUSIBLE with why the trigger is realistic
+#                        These four are the finding contract. upsert stamps them
+#                        at the first raise, in the description as well, and
+#                        keeps them out of finding.key: a scenario reworded on
+#                        each round would otherwise key a twin of every re-raised
+#                        objection. A re-raise keeps the first raise's record
 #   finding.comment_id   the GitHub comment databaseId that raised it (stamped by
 #                        pr-facts.sh for a human finding): an inline comment, whose
 #                        thread the write-back posts an owed reply into, a review
@@ -134,6 +148,7 @@
 # Verbs:
 #   finding.sh key           --lane L --locus LOC --message MSG
 #   finding.sh upsert        --anchor A --lane L --locus LOC --message MSG [--source S] [--fix-unit FU]
+#                            [--severity G] [--category C] [--failure-scenario T] [--verification T]
 #   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT] [--fix-pool POOL]
 #                              [--visit G] [--unrelated-visit G1,G2,...] [--label L] [--answer TEXT]
 #   finding.sh answer        --finding F --answer TEXT [--flag]
@@ -161,9 +176,9 @@
 # resolves a green lane's still-unvalidated findings as moot; shed-orphaned
 # resolves them when the anchor closes before a pass revisits it).
 # Exit 0 on success; a read verb exits 1 when its predicate is false, 2 when the
-# store would not read. set-disposition exits 1 on a usage error, 2 when a read or
-# write fails, and 3 when an open human gate already carries the finding's
-# question.
+# store would not read. set-disposition exits 1 on a usage error, a deferral of a
+# P2 among them, 2 when a read or write fails, and 3 when an open human gate
+# already carries the finding's question.
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -186,6 +201,7 @@ usage() {
 usage:
   finding.sh key --lane <lane> --locus <locus> --message <msg>
   finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>] [--fix-unit <id>]
+                    [--severity P0|P1|P2] [--category <c>] [--failure-scenario <text>] [--verification <text>]
   finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you|restates [--reason <r>] [--reply <text>] [--fix-pool <pool>]
                              [--visit <gate-id>] [--unrelated-visit <gate-id,...>] [--label <label>] [--answer <sentence>]
   finding.sh answer --finding <id> --answer <sentence> [--flag]
@@ -512,6 +528,7 @@ readopt_fix_unit() { # <finding> <fix-unit>
 
 cmd_upsert() {
   local anchor="" lane="" locus="" msg="" source="" fix_unit=""
+  local severity="" category="" scenario="" verification=""
   while [ $# -gt 0 ]; do case "$1" in
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --lane) lane="${2:-}"; shift 2 || { usage; exit 1; } ;;
@@ -519,10 +536,15 @@ cmd_upsert() {
     --message) msg="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --source) source="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --fix-unit) fix_unit="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --severity) severity="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --category) category="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --failure-scenario) scenario="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --verification) verification="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] && [ -n "$lane" ] && [ -n "$locus" ] && [ -n "$msg" ] \
     || { warn "upsert needs --anchor, --lane, --locus, --message"; exit 1; }
+  case "$severity" in ''|P0|P1|P2) ;; *) warn "upsert --severity must be P0, P1 or P2 (got '$severity')"; exit 1 ;; esac
   [ -n "$source" ] || source="machine:$lane"
   local key existing
   key=$(compute_key "$lane" "$locus" "$msg")
@@ -538,10 +560,18 @@ cmd_upsert() {
     return 0
   fi
   # The title carries the human-readable objection; the locus and full message
-  # live in the description. The key, not the title, is the dedup handle.
-  local title desc meta id
+  # live in the description. The key, not the title, is the dedup handle. The
+  # finding contract follows the message, ahead of the line naming who raised
+  # it, so a reader that takes the objection as everything between the locus
+  # line and that line carries the contract with it.
+  local title desc meta id contract=""
   title="finding[$lane]: $(printf '%s' "$msg" | tr '\n' ' ' | cut -c1-120)"
-  desc=$(printf 'Locus: %s\n\n%s\n\nRaised by %s reviewing anchor %s.' "$locus" "$msg" "$source" "$anchor")
+  [ -z "$severity" ] || contract+="Severity: $severity"$'\n'
+  [ -z "$category" ] || contract+="Category: $category"$'\n'
+  [ -z "$scenario" ] || contract+="Failure scenario: $scenario"$'\n'
+  [ -z "$verification" ] || contract+="Verification: $verification"$'\n'
+  [ -z "$contract" ] || contract+=$'\n'
+  desc=$(printf 'Locus: %s\n\n%s\n\n%sRaised by %s reviewing anchor %s.' "$locus" "$msg" "$contract" "$source" "$anchor")
   # The identity rides the create, one insert, so a finding bead exists fully
   # stamped or not at all, and so does its edge onto the anchor
   # (bd_create_child), which the anchor's closed-children read follows. A bead
@@ -550,9 +580,13 @@ cmd_upsert() {
   # misses it and files a stamped twin. The fix unit rides it too, so no ruling
   # can find the finding without its record.
   meta=$(jq -nc --arg ab "$anchor" --arg ln "$lane" --arg k "$key" --arg src "$source" --arg fu "$fix_unit" \
+    --arg sev "$severity" --arg cat "$category" --arg sc "$scenario" --arg ver "$verification" \
     '{task_kind: "finding", anchor_bead: $ab, "finding.lane": $ln, "finding.key": $k,
       "finding.disposition": "unvalidated", "finding.source": $src}
-     + (if $fu == "" then {} else {"finding.fix_unit": $fu} end)' 2>/dev/null)
+     + (if $fu == "" then {} else {"finding.fix_unit": $fu} end)
+     + ({"finding.severity": $sev, "finding.category": $cat,
+         "finding.failure_scenario": $sc, "finding.verification": $ver}
+        | with_entries(select(.value != "")))' 2>/dev/null)
   [ -n "$meta" ] || { warn "could not build finding metadata for key $key on $anchor; nothing filed"; exit 2; }
   id=$(bd_create_child "$anchor" "$title" -t task -d "$desc" --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   # A new finding changes this anchor's findings list; drop the per-pass bd_list
@@ -599,6 +633,18 @@ cmd_set_disposition() {
     || { warn "set-disposition needs --finding, --anchor, --disposition"; exit 1; }
   if [ -n "$visit" ] && [ "$disp" != needs-you ]; then
     warn "--visit names the open human gate a needs-you ruling defers to; it does not apply to --disposition $disp"; exit 1
+  fi
+  # A deferral reads the finding's grade first, and a P2's is refused before
+  # anything is written.
+  if [ "$disp" = deferred ]; then
+    local grow
+    grow=$(bd_json show "$finding")
+    printf '%s' "$grow" | jq -e --arg id "$finding" 'type == "array" and (.[0].id // "") == $id' >/dev/null 2>&1 \
+      || { warn "could not read finding $finding to check its grade; nothing ruled"; exit 2; }
+    if [ "$(printf '%s' "$grow" | jq -r '(.[0].metadata["finding.severity"] // "") | tostring' 2>/dev/null)" = P2 ]; then
+      warn "$finding is a P2, which is ruled must-fix when its fix is low-risk and net-positive and declined when it is risky or marginal, never deferred: a follow-up PR for a minor improvement costs the operator an approval. Nothing ruled"
+      exit 1
+    fi
   fi
   # The words the review's living answer shows for this point ride the write
   # that commits the ruling, and that write clears each one the ruling does not

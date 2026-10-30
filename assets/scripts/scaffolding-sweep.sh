@@ -12,14 +12,14 @@
 # the cadence closes this scaffolding once the subject stops moving
 # (close-answered keys on a fix LANDING, not on a disposal).
 #
-# Callers: refinery-reconcile.sh, as arm 10, over every disposed anchor; and
+# Callers: refinery-reconcile.sh, as arm 9, over every disposed anchor; and
 # pr-facts.sh's disposition arm, with --anchor <id>, over the one anchor whose
 # terminal close it is about to take. That arm runs it before bead-rehome.sh
 # closes the anchor, so the close is not refused for scaffolding this sweep
 # would retire anyway, and both callers retire exactly the same set.
 #
 # What this does NOT touch:
-#   - task_kind=review — review-sweep.sh (arm 9) owns a review with no surface.
+#   - task_kind=review — review-sweep.sh (arm 8) owns a review with no surface.
 #   - task_kind=visit, a human gate, a conversation — the human side. A disposed
 #     PR does not moot why it closed or what comes next, and finalize-gate.sh
 #     holds the anchor's own close while a human gate on it is open. All of them
@@ -230,7 +230,7 @@ carry_forward() {
 # field would shift every field after it. Reworks come first, then findings,
 # then validation passes: a fix unit blocks the findings it answers, so closing
 # it first means a finding's close is not refused this pass by a rework still
-# open. task_kind=review is left to arm 9 and task_kind=visit to the human side,
+# open. task_kind=review is left to arm 8 and task_kind=visit to the human side,
 # so neither is read here. An unreadable enumeration fails loudly rather than
 # reporting a false empty, because "could not tell" is never "none".
 US=$(printf '\037')

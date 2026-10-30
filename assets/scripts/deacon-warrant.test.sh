@@ -32,7 +32,7 @@ extract() { awk -v n="$1" '
 # which is the deacon's documented, correct input.
 render() { printf '%s\n' "$1" \
   | sed 's|{{binding_prefix}}|gc-toolkit.|g' \
-  | sed 's|<session>|lx-wisp-dq|g' \
+  | sed 's|<session>|hq-wisp-dq|g' \
   | sed 's|<rig>/<role>|gc-toolkit/gc-toolkit.deacon|g' \
   | sed 's|<what is stale and for how long>|wisp stale 30m|g'; }
 
@@ -40,7 +40,8 @@ WARRANT="$(extract warrant-file)"
 [ -n "$WARRANT" ] && ok "warrant-file block extracted" || bad "warrant-file block EMPTY — markers missing from $TOML"
 has "$WARRANT" 'file-warrant.sh' "the block delegates to the shared filer"
 
-# SUT scripts dir: the real filer beside a ledger stub that logs its argv.
+# SUT scripts dir, the pack gc names for `gc gc-toolkit scripts-dir`: the real
+# filer beside a ledger stub that logs its argv.
 RIGROOT="$TMP/rig"; mkdir -p "$RIGROOT/assets/scripts"
 cp "$ROOT/assets/scripts/file-warrant.sh" "$RIGROOT/assets/scripts/"
 chmod +x "$RIGROOT/assets/scripts/file-warrant.sh"
@@ -60,6 +61,9 @@ printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 STORE="${STUB_STORE:?}"; [ -s "$STORE" ] || echo '[]' > "$STORE"
 sub="${1:-}"; verb="${2:-}"
 case "$sub $verb" in
+  "gc-toolkit scripts-dir")
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "session list")
     [ -n "${STUB_SESSIONS_FAIL:-}" ] && { echo "gc: session list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_SESSIONS:-{\"sessions\":[]}}" ;;
@@ -96,8 +100,8 @@ esac
 STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
-export GC_RIG_ROOT="$RIGROOT" GC_RIG=gc-toolkit
-export STUB_SESSIONS='{"sessions":[{"id":"lx-wisp-dq","alias":"gc-toolkit/gc-toolkit.deacon","session_name":"gc-toolkit--gc-toolkit__deacon","state":"active"}]}'
+export STUB_PACK="$RIGROOT" GC_RIG_ROOT="" GC_RIG=gc-toolkit
+export STUB_SESSIONS='{"sessions":[{"id":"hq-wisp-dq","alias":"gc-toolkit/gc-toolkit.deacon","session_name":"gc-toolkit--gc-toolkit__deacon","state":"active"}]}'
 
 render "$WARRANT" > "$TMP/warrant.sh"
 bash -n "$TMP/warrant.sh" && ok "rendered deacon warrant block is valid bash" || bad "deacon warrant block failed bash -n"
@@ -119,7 +123,7 @@ echo "# a fresh filing: the warrant the deacon files is unchanged, and it is led
 reset
 run
 has "$LOG" 'bd create' "a warrant is filed"
-eq "$(mget 'warrant.target')" "lx-wisp-dq" "warrant.target is the session id, as the deacon's correct pattern always had it"
+eq "$(mget 'warrant.target')" "hq-wisp-dq" "warrant.target is the session id, as the deacon's correct pattern always had it"
 has "$LOG" 'Stuck: gc-toolkit/gc-toolkit.deacon' "the role is what the title names"
 eq "$(mget 'warrant.requester')" "deacon" "requester is deacon"
 eq "$(mget 'gc.routed_to')" "gc-toolkit.dog" "routed at the dog, binding_prefix rendered"
@@ -127,7 +131,7 @@ has "$LEDGER" 'append warrant' "the fresh filing is ledgered"
 has "$LEDGER" 'bead:tk-w1' "with the filed warrant id"
 
 echo "# a repeat for the same session is not re-ledgered (ledger the filing, not the skip)"
-# the store still holds tk-w1 for lx-wisp-dq from the previous run
+# the store still holds tk-w1 for hq-wisp-dq from the previous run
 run
 hasnt "$LOG" 'bd create' "no second warrant is filed"
 eq "$LEDGER" "" "and the skip writes no ledger line"

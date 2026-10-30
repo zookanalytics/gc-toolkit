@@ -34,11 +34,7 @@ the incident ledger, so read it before you patrol — it is the substitute for
 the transcript you no longer have:
 
 ```bash
-LEDGER=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-done
-"$LEDGER" show --since 48h
+"$(gc gc-toolkit scripts-dir)/gc-deacon-ledger.sh" show --since 48h
 ```
 
 An open human gate named there is already asked; do not re-file it. A cleanup
@@ -61,10 +57,13 @@ same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
 # session and the deacon's assignee carries no rig segment, so the rig filter
 # the per-rig witness and refinery apply would never match the deacon's own
 # wisp. The query stays assignee-blind so an orphan left by an interrupted
-# pour is still collected.
+# pour is still collected. Each query and the pour below name the city store
+# with --city: the shell keeps the directory it last changed to, and from a rig
+# checkout a bare `gc bd list` answers from that rig's store, finds no wisp,
+# and the pour then lands one there, where no later reconcile looks.
 WISP_ROWS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
+  gc bd list --city="$GC_CITY_PATH" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
+  gc bd list --city="$GC_CITY_PATH" --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
 )
 # Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
 # awaiting burn beside the fresh successor it poured, the successor is always
@@ -76,7 +75,7 @@ WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
 for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
-  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='gc-toolkit.' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-deacon-patrol --city="$GC_CITY_PATH" --root-only --var binding_prefix='gc-toolkit.' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
   POURED=1
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
@@ -90,11 +89,7 @@ BOOT=""
 [ "${BURNED:-0}" -gt 0 ] && BOOT="burned $BURNED stale patrol wisp(s)"
 [ -n "${POURED:-}" ] && BOOT="${BOOT:+$BOOT; }poured a fresh wisp (none recoverable)"
 if [ -n "$BOOT" ]; then
-  LEDGER=""
-  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-  done
-  "$LEDGER" append boot "$BOOT ($GC_SESSION_NAME)" -
+  "$(gc gc-toolkit scripts-dir)/gc-deacon-ledger.sh" append boot "$BOOT ($GC_SESSION_NAME)" -
 fi
 ```
 
@@ -103,7 +98,9 @@ exit a wisp from an intermediate step: continue, or jump to next-iteration,
 which pours and ASSIGNS the next wisp before burning this one — a failed
 assign rolls the pour back and keeps the current wisp. Do NOT enter a
 "standing by" idle state between cycles; after next-iteration, run
-`gc hook`.
+`gc hook`. A turn you end anyway comes back as Stop hook feedback from the
+patrol-continue hook, which hands you the next cycle; run it
+(docs/patrol-continue.md).
 
 ## Findings
 
@@ -113,11 +110,7 @@ it: routed to a pool, held on an edge, or put to the operator as a human gate
 on the finding.
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-GC_RIG="${GC_RIG:-gc-toolkit}" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
+GC_RIG="${GC_RIG:-gc-toolkit}" "$(gc gc-toolkit scripts-dir)/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
 ```
 
 You are city-scoped, so `GC_RIG` arrives unset. It selects the store the
@@ -138,7 +131,8 @@ crash, data loss, corruption, a security problem — still goes straight to a
 human gate on the bead it is about:
 
 ```bash
-"$SCRIPTS/human-gate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
+SCRIPTS=$(gc gc-toolkit scripts-dir) \
+  && "$SCRIPTS/human-gate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
 ```
 
 The gate lands in the store of the bead it names and blocks that bead, so the
@@ -164,9 +158,7 @@ withdraws its own gate, and only when the situation it asked about is gone,
 with one call:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/human-gate.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
-done
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 

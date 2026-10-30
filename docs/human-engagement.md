@@ -121,8 +121,9 @@ the seam the pack builds at each.
 - **A sitting is the worker contract with its close replaced by a hold.**
   Upstream's `gc-role-worker` contract is claim, execute, close. A sitting
   claims its conversation, holds it `in_progress` while the operator thinks,
-  records the answer to the subject, and closes only the conversation. A
-  session holds one conversation, so a sitting never claims across subjects,
+  records the answer to the subject, closes only the conversation, and then
+  drains: a closed conversation ends its session. A session holds one
+  conversation, so a sitting never claims across subjects,
   and the contract's continue-or-drain clause
   ([gascity/human-engagement.md](gascity/human-engagement.md#the-gc-roles-worker-contract))
   has nothing to choose between. The roles pack's planning roles
@@ -284,7 +285,7 @@ intake.
 
 **Two paths, and the choice is not a preference.** The preferred path files a
 first reaction at the subject. The reaction triages it and takes one of its
-five dispositions. On the two that put the subject to the operator, a ruling or
+dispositions. On the two that put the subject to the operator, a ruling or
 a recommend, it files a human gate on the subject under the key
 `first-reaction`, which reaches the operator on the board. A ruling is
 Discuss-only. A recommend also records the formula it recommends as
@@ -503,17 +504,26 @@ that names the dismissal, and it answers nothing: every gate the conversation
 replies to stays open and owed, for its filer or the next sitting. With no
 argument it infers the current sitting from the session it runs in. The close
 falls back to `--force` when bd refuses an operator closing a conversation its
-sitting holds. On a bead with no live sitting it writes nothing and says so.
-`prefix+X` runs the same dismiss from the keyboard after a y/n confirm
-(`assets/scripts/tmux-dismiss-sitting.sh`), under the pane's own session.
+sitting holds. It then stops the converse session that held each conversation
+it closed, with `gc runtime drain-ack`: the session it runs in acks itself,
+last, and any other is acked as an operator. On a bead with no live sitting it
+writes nothing and says so. `prefix+X` runs the same dismiss from the keyboard
+after a y/n confirm (`assets/scripts/tmux-dismiss-sitting.sh`), under the
+pane's own session. It passes `--operator`, because the keystroke comes from
+outside the sitting, and dismiss stops the session with an operator ack. That
+ack runs with no session identity or incarnation token: the key's job
+inherits the sitting's tmux environment, and Gas City refuses an operator ack
+whose caller names the session it stops.
 
-**converse-reap ends the session.** Gas City does not end a manual session
-when its work closes, and a sitting cannot drain itself at its sign-off without
-destroying an attached operator's pane. So the `converse-reap` order
-(`assets/scripts/converse-reap.sh`, every five minutes) closes an unattached
-converse session whose conversation has closed, is gone, or is back in the
-operator's queue, once the session is older than the reap's interval, which
-keeps it off a session engage has started and not yet bound. It reads the
+**A sitting ends its own session.** Gas City does not end a manual session
+when its work closes, so once a sitting's conversation has closed, or its
+sign-off has handed the conversation back, its last act is
+`gc runtime drain-ack`. The `converse-reap` order
+(`assets/scripts/converse-reap.sh`, every five minutes) is the backstop: it
+closes any converse session whose conversation has closed, is gone, or is back
+in the operator's queue, attached or not, once the session is older than the
+reap's interval, which keeps it off a session engage has started and not yet
+bound. It reads the
 conversation's id from the session's alias and strips the `c-` prefix. Its
 warrant, with the trigger that retires it, is in [warrants.md](warrants.md).
 
@@ -647,19 +657,49 @@ idle timeout is at or below zero with its idle tracker
 held sitting therefore ends when its conversation closes: the sitting's
 sign-off, or the operator's `gc-helm dismiss`. The sign-off is terminal, so
 converse takes it only when nothing important is still pending. Closing the
-conversation ends the sitting's work but not the session, and `converse-reap`
-closes the session once nobody is attached. A sitting whose conversation is
-still open, because the operator walked away before any sign-off, keeps its
-session running indefinitely.
+conversation ends the session too, whichever path closes it. The sitting's own
+last act is `gc runtime drain-ack`, after the sign-off or a moot or benign
+close, and it never claims again: a closed conversation has no next turn in
+that session. `gc-helm dismiss` closes the conversation and then stops the
+session that held it, also through `drain-ack`, so the controller ends the
+session outside the verb's process; a dismiss typed into the sitting's own
+pane acks its own session last. The pack's `converse-reap` order
+(`assets/scripts/converse-reap.sh`) is the backstop: it closes any converse
+session whose conversation reads closed, gone or back in the operator's
+queue, whether or not anyone is attached. Viewing a sitting does not hold it
+open (*How a pane dies when no sitting is live*, below). A sitting whose
+conversation is still open, because the operator walked away before any
+sign-off, keeps its session running indefinitely.
+
+A conversation can also outlive its sitting: the sitting's create fails after
+`gc-helm engage` bound the conversation to it, or its session is closed while
+the conversation is still open. The conversation keeps the alias of a sitting
+whose session has ended. The board reads it as waiting for the operator,
+because no live sitting holds it, and `gc-helm engage` takes it up again:
+under the same alias, or bound to a fresh sitting's with a write guarded on the
+holder it read, which also drops the session pins the gone sitting's claim
+left.
+
+A conversation whose sitting failed to start reads `start failed` on the
+board instead, with the reason Gas City recorded: a startup timeout, a setup
+timeout, a provider error such as a quota exceeded, the start's error, or
+never started when Gas City recorded no cause
+([gascity/human-engagement.md](gascity/human-engagement.md#a-failed-start-is-recorded-on-the-session-bead-and-in-a-startup-health-episode)).
+The board reads that record itself, so the mark shows as soon as the failure
+is recorded, and it stays until the conversation is engaged again or closed.
+The row leads the operator's queue, so the tmux picker offers it
+(services/helm/README.md, "A sitting that failed to start").
 
 Two endings the idle setting does not own:
 
-- **A settled sitting is collected by the pack's reap, not by a runtime
-  clock.** A sitting is a manual session, which Gas City keeps desired for as
-  long as it is neither closed nor drained
+- **A settled sitting ends itself, not by a runtime clock.** A sitting is a
+  manual session, which Gas City keeps desired for as long as it is neither
+  closed nor drained
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
   so the `no-wake-reason` drain that collects an ended pool session never
-  reaches it.
+  reaches it. Its own `drain-ack` ends it, `gc-helm dismiss` stops it, and
+  `converse-reap` above closes one that outlives its conversation anyway. See
+  *How a pane dies when no sitting is live*, below.
 - **No max-age restart reaches a sitting.** No `converse-<model>` template
   sets `max_session_age`, and an unset age is off. Gas City's max-age restart
   defers while the session holds open assigned work and has no attachment
@@ -743,39 +783,57 @@ a longer clock, and why no converse template sets `max_session_age`.
 
 ## How a pane dies when no sitting is live
 
-Once a sitting ends — the conversation closed or handed back, the sign-off
-posted — the session still has a live pane, and the thread the operator is
-reading is still on screen. No runtime clock takes that pane: Gas City keeps a
-manual session desired for as long as it is neither closed nor drained and its
-template is still configured, so the `no-wake-reason` drain never begins for a
+The section above answers "what ends a **held** sitting". Once a sitting
+ends, its session goes with it, and with the session its pane.
+
+**The sitting ends its own session.** A sitting is a manual session, and Gas
+City keeps a manual session desired for as long as it is neither closed nor
+drained and its template is still configured, so the `no-wake-reason` drain,
+which begins when a live session has no wake reason left, never begins for a
 sitting
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
 Nothing idle-sleeps one either: that takes a `[chat_sessions] idle_timeout` or
-a `[session_sleep]` policy, and this city sets neither.
+a `[session_sleep]` policy, and this city sets neither. So a sitting ends its
+own session: once its conversation has closed and every write that must
+follow the close has run, its last act is `gc runtime drain-ack`, and the
+controller stops the session. `gc-helm dismiss` stops the session that held
+the conversation it closes the same way. The `converse-reap` order
+(`orders/converse-reap.toml`, a five-minute cooldown) runs
+`assets/scripts/converse-reap.sh`, which closes any converse session whose
+conversation reads closed, gone or back in the operator's queue with
+`gc session close`, attached or not: the backstop for a session that outlives
+its conversation.
 
-**What takes the pane is the pack's own reap.** `converse-reap.sh` closes every
-converse session whose conversation reads closed, gone or back in the queue,
-unless the session is attached. Do not read a still-present pane as evidence
-that the system knows you are there. The session's manual origin is what holds
-the pane up, and a settled conversation plus one unattached pass of the reap is
-what ends it. Neither the operator's attention nor anything they have typed is
-an input to either.
+**Viewing a sitting does not hold it open.** The city's tmux server carries
+several clients at once: the operator's main connection, and a terminal tab
+on each sitting the operator opened with `gc-helm engage`. The server's
+global `detach-on-destroy` is off, which moves every client of a destroyed
+session to the most recently active other session. Each `converse-<model>`
+template sets the option on for its own session (`session_live` in its
+`agent.toml`), so a plain client on a sitting exits when the sitting's
+session ends, and tmux shows `[exited]`. A client attached with
+`-f no-detach-on-destroy`, as the operator's main connection is, and every
+client on any other session still move on. `gc-helm engage` runs its attach
+as a child, so when the tab's client exits it reads the conversation. A
+closed conversation prints how it closed and the last hand-back the sitting
+recorded on it (`gc-helm handback`, which the sitting runs before each
+framing and its sign-off); a conversation still open prints the command that
+re-attaches. Claude draws in tmux's alternate screen with no history, so
+nothing of the pane survives to recover, and the record on the conversation
+is what the tab prints.
 
 Three things about that path are worth knowing before trusting a pane:
 
-- **Nothing is typed into the pane; the pane is taken whole.** The reap's
-  close is `gc session close`, and Gas City's stop kills the tmux session and
-  then signals the pane's captured process tree, with no Ctrl-C keystroke
-  injected into the pane first
+- **Nothing is typed into the pane; the pane is taken whole.** Gas City's
+  stop kills the tmux session and then signals the pane's captured process
+  tree, with no Ctrl-C keystroke injected into the pane first
   ([gascity/human-engagement.md](gascity/human-engagement.md#stopping-a-session-destroys-its-pane)).
-  A draft is still sitting in the pane, intact, until the pass that closes it,
-  and then the pane is gone.
-- **Attachment protects, but only the pane on screen.** The reap skips an
-  attached session, because attachment is the only signal the pack has that
-  someone is at a pane. This city runs one tmux client switched between
-  per-agent sessions, so at most one session reports `session_attached=1` at a
-  time and every other live pane reads as unattached. A settled sitting the
-  operator switched away from mid-draft is closed on the next pass.
+  So a reply typed into the composer but not submitted when the sitting ends
+  goes with the pane.
+- **A restart ends the tab too.** A restart destroys the session's tmux
+  session and starts a fresh one, so a plain client on the sitting exits as
+  it does at the end. The conversation still reads open, so the tab prints
+  the re-attach command, and `wake_mode = "resume"` brings the thread back.
 - **A pool session ends differently, and a sitting is outside it.** A pool
   session left with no wake reason is drained as `no-wake-reason` about a
   minute after its last wake reason goes, and the reconciler acknowledges that
@@ -783,17 +841,20 @@ Three things about that path are worth knowing before trusting a pane:
   `"drain acknowledged by agent"` even when the agent never ran
   `gc runtime drain-ack`
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-pool-session-with-no-wake-reason-is-drained)).
-  A sitting's teardown is the reap's `gc session close`, never this drain.
+  A sitting's stop event reads the same, and there it is the sitting's own
+  `drain-ack`.
 
-*Seam:* the decision to end a settled sitting is pack-owned, but the pack
-cannot read a pane's typed input, so the reap has nothing to check a draft
-against, and attachment is its only proxy. The input read is upstream work:
-buffered-input detection over `tmux capture-pane` exists as a library
-primitive, and making it a hard refusal of teardown is filed upstream. The
-operator's standing ruling is that draining a session with typed text is a hard
-no. Until the reap can read typed input, the attachment check is all that
-enforces it, so treat "the sitting ended" as the start of a countdown on that
-pane, ending at the next unattached reap pass.
+**What the design holds to.** A sitting ends its session as soon as its
+conversation closes, whichever path closes it, and nothing holds a session
+open because someone is viewing it. Nothing copies the pane, and no pane,
+live or dead, stays on screen after its session ends, so what a tab prints is
+the record on the conversation.
+
+**What follows for the pack.** The record has to be written before the pane
+matters: what is owed recorded at hold time, the outcome appended as soon as
+a sitting settles anything, each hand-back recorded on the conversation as it
+is posted, and the sign-off posted at close. What it does not protect is the
+operator's *own* unsent words.
 
 ## Watch items — moving now, re-verify before building on them
 

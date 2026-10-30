@@ -23,8 +23,8 @@
 # that a thought is never lost). Esc cannot be recovered: gum never emits an
 # unsubmitted buffer, so every cancel says that it discarded. Drafts live
 # outside /tmp by default and are reaped after GC_VISIT_DRAFT_KEEP_DAYS.
-# The slow intake half is backgrounded; a status-line indicator carries the
-# in-flight state and display-message carries the outcome.
+# The slow intake half is backgrounded; display-message carries its in-flight
+# notice and then its outcome.
 set -eu
 
 CONFIGDIR="${1:?missing config-dir}"
@@ -84,13 +84,8 @@ sq() {
 CLIENT=$(gcmux display-message -p '#{client_tty}' 2>/dev/null || true)
 SESSION=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 [ -n "$SESSION" ] || SESSION=$(gcmux display-message -p '#{session_name}' 2>/dev/null || true)
-AGENT=""
 CONTEXT_RIG=""
 if [ -n "$SESSION" ]; then
-    # gascity names tmux sessions `<rig>__<agent>`, so the suffix is the
-    # fallback when the session environment carries no GC_AGENT.
-    AGENT=$(gcmux show-environment -t "$SESSION" GC_AGENT 2>/dev/null | sed -n 's/^GC_AGENT=//p')
-    [ -n "$AGENT" ] || AGENT=$(printf '%s' "$SESSION" | sed 's/.*__//')
     # The board context: the rig of the pane the key was pressed in, used as the
     # default report target below. Prefer the session environment's GC_RIG; fall
     # back to the `<rig>__<agent>` session-name prefix. Empty on a pane that
@@ -102,16 +97,22 @@ if [ -n "$SESSION" ]; then
         esac
     fi
 fi
-# Indicator slot contract: gc-toolkit-status-line.sh renders
-# /tmp/gc-status-<slug>.indicator verbatim.
-INDICATOR=""
-[ -n "$AGENT" ] && INDICATOR="/tmp/gc-status-$(printf '%s' "$AGENT" | sed 's|[./]|-|g').indicator"
 
 # say <duration-ms> <message> — the operator's only feedback channel.
 say() {
     _d="$1"; shift
     # shellcheck disable=SC2086 # ${CLIENT:+…} deliberately expands to 0 or 2 words
     gcmux display-message ${CLIENT:+-c "$CLIENT"} -d "$_d" "$*" 2>/dev/null || true
+}
+
+# notice <message> — the same channel, for a state still in flight. It shows
+# until the next message replaces it or a key press clears it (-d 0). -C keeps
+# the pane drawing under it, which tmux otherwise stops while a message shows.
+# tmux added -C in 3.6, and an older tmux refuses the flag, so there a press
+# reports only its outcome.
+notice() {
+    # shellcheck disable=SC2086 # ${CLIENT:+…} deliberately expands to 0 or 2 words
+    gcmux display-message ${CLIENT:+-c "$CLIENT"} -C -d 0 "$*" 2>/dev/null || true
 }
 
 # 2. Check both dependencies BEFORE the popup.
@@ -138,14 +139,15 @@ fi
 # empty `gc rig list` skips the chooser and lets the intake apply its own
 # default; an Esc cancels the whole press, and nothing is typed yet to keep.
 #
-# The rig set comes from `gc rig list --json`, whose cost is the per-rig
+# The rig set comes from rig-map.sh, whose cost is `gc rig list`'s per-rig
 # liveness probe. It runs in the foreground before the message popup and outside
-# the intake timeout below, so it is BOUNDED — a `gc rig list` wedged against a
+# the intake timeout below. rig-map.sh BOUNDS it, so a listing wedged against a
 # dead data plane falls to an empty list (chooser skipped) rather than stranding
-# the operator at a rig-less prompt — and CACHED, so a burst of presses opens the
-# picker without re-paying the probe. Only a valid, non-empty rig set is cached;
-# a wedged or empty answer is never stored as the answer. The temp write uses
-# $$ (not mktemp) so a concurrent press never reads a half-written cache.
+# the operator at a rig-less prompt. The read is also CACHED, so a burst of
+# presses opens the picker without re-paying the probe. Only a valid, non-empty
+# rig set is cached; a wedged or empty answer is never stored as the answer. The
+# temp write uses $$ (not mktemp) so a concurrent press never reads a
+# half-written cache.
 RIG_LIST_JSON=""
 RIG_CACHE_FILE="$DRAFT_DIR/rig-list.cache"
 mkdir -p "$DRAFT_DIR" 2>/dev/null || true
@@ -154,11 +156,7 @@ if [ "$RIG_CACHE_TTL" -gt 0 ] && [ -f "$RIG_CACHE_FILE" ] \
     RIG_LIST_JSON=$(cat "$RIG_CACHE_FILE" 2>/dev/null || true)
 fi
 if [ -z "$RIG_LIST_JSON" ]; then
-    if command -v timeout >/dev/null 2>&1; then
-        RIG_LIST_JSON=$(timeout "$INTAKE_TIMEOUT" gc rig list --json 2>/dev/null || true)
-    else
-        RIG_LIST_JSON=$(gc rig list --json 2>/dev/null || true)
-    fi
+    RIG_LIST_JSON=$("$CONFIGDIR/assets/scripts/rig-map.sh" 2>/dev/null || true)
     if [ "$RIG_CACHE_TTL" -gt 0 ] \
        && printf '%s' "$RIG_LIST_JSON" | jq -e '(.rigs | length) > 0' >/dev/null 2>&1; then
         if printf '%s' "$RIG_LIST_JSON" > "$RIG_CACHE_FILE.$$" 2>/dev/null; then
@@ -337,23 +335,19 @@ case "$TOPIC" in
         fi ;;
 esac
 
-# 7. Background the slow half (seconds, up to GC_HELM_RIG_TIMEOUT). stdout/
+# 7. Background the slow half (seconds, up to GC_RIG_LIST_TIMEOUT). stdout/
 #    stderr closed so run-shell sees EOF at once (it waits on pipes, not the
 #    process tree). Only this half may remove the draft — the parent exits
 #    immediately.
 (
     # Reset the parent's draft trap explicitly (a draft removed by the
-    # wrong handler is the bug), then arm the indicator's own.
+    # wrong handler is the bug).
     trap - INT TERM HUP
-    # Cleared on every exit path.
-    if [ -n "$INDICATOR" ]; then
-        trap 'rm -f "$INDICATOR"' EXIT INT TERM HUP
-        echo "[opening conversation...]" > "$INDICATOR" 2>/dev/null || true
-    fi
+    notice "gc intake: filing…"
 
     # `--` (a message may begin with "-"); NOT --topic (a bare bead id from
     # this key is a real request). Bounded: a hang against a wedged data
-    # plane would leave the indicator lit and no message at all.
+    # plane would otherwise report no outcome at all.
     # ${CHOSEN_RIG:+--rig "$CHOSEN_RIG"} passes the chosen rig only when one was
     # picked; empty leaves the intake on its own default. A rig name is a bare
     # identifier, so the unquoted expansion splits into exactly `--rig <name>`.

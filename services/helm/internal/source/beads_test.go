@@ -77,6 +77,10 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	//                            an anchor's live children the way bd-lib.sh
 	//                            does. The set is spelled out here, not read from
 	//                            the source, so the fake pins it to bd-lib.sh's.
+	//   Statuses=the same live set, keyed on anchor_bead's presence
+	//                            the IN-FLIGHT read (readInFlight), a live merge
+	//                            anchor's in-flight set as `gctk pr-status
+	//                            derive` reads it.
 	//   ExcludeStatus=[closed], keyed on issue_type=gate
 	//                            the live HUMAN GATE read, which reads every gate
 	//                            that still holds the way bd-lib.sh's
@@ -85,6 +89,7 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	// Anything else — no scope at all, or a widened one — is refused, so the
 	// filter stays load-bearing rather than decorative.
 	reviewRead := len(filter.MetadataFields) == 1 && filter.MetadataFields["task_kind"] == "review"
+	inFlightRead := len(filter.MetadataFields) == 0 && filter.HasMetadataKey == "anchor_bead"
 	gateRead := filter.IssueType != nil && *filter.IssueType == beads.IssueType("gate")
 	switch {
 	case len(filter.ExcludeStatus) > 0:
@@ -97,9 +102,9 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 			return nil, errors.New("a closed-bead query must bound its window with ClosedAfter")
 		}
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
-	case filter.Status == nil && reviewRead && slices.Equal(filter.Statuses, []beads.Status{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}):
+	case filter.Status == nil && (reviewRead || inFlightRead) && slices.Equal(filter.Statuses, []beads.Status{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}):
 	default:
-		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows), the live review read or the live gate read")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows), the live review or in-flight read, or the live gate read")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -183,10 +188,14 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 	return out, nil
 }
 
-// matching applies the status and closed-window predicates the library applies
-// in SQL. Without it the fake would hand an open-conversation query the closed
-// ones too: the two sitting passes could not be told apart, and the done pass would
-// re-return every OPEN anchor as a closed one.
+// matching applies the status, closed-window, created-window and metadata
+// predicates the library applies in SQL. Without it the fake would hand an
+// open-conversation query the closed ones too: the two sitting passes could not
+// be told apart, and the done pass would re-return every OPEN anchor as a
+// closed one. The created window and the metadata equality are what the
+// failed-start read selects on (a type-keyed query, which searchByMetadata does
+// not reach), so a fake that skipped them would let that read ask the wrong
+// question and still find its session.
 func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*beads.Issue {
 	var out []*beads.Issue
 	for _, iss := range in {
@@ -202,9 +211,29 @@ func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*bea
 		if filter.ClosedAfter != nil && (iss.ClosedAt == nil || !iss.ClosedAt.After(*filter.ClosedAfter)) {
 			continue
 		}
+		if filter.CreatedAfter != nil && !iss.CreatedAt.After(*filter.CreatedAfter) {
+			continue
+		}
+		if !metadataMatches(iss, filter.MetadataFields) {
+			continue
+		}
 		out = append(out, iss)
 	}
 	return out
+}
+
+// metadataMatches is IssueFilter.MetadataFields: every key equal, AND semantics.
+func metadataMatches(iss *beads.Issue, want map[string]string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	md := decodeMetadata(iss.Metadata)
+	for k, v := range want {
+		if got, ok := md[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
 }
 
 // searchByMetadata models the library's metadata predicates over the fixtures:
@@ -378,6 +407,11 @@ func withDepType(c *beads.IssueWithDependencyMetadata, t string) *beads.IssueWit
 	return c
 }
 
+func withIssueType(c *beads.IssueWithDependencyMetadata, t string) *beads.IssueWithDependencyMetadata {
+	c.IssueType = beads.IssueType(t)
+	return c
+}
+
 // withLabels stamps labels on an issue fixture. A convoy's ownership is read
 // from its own "owned" label — the same label gascity keys the `gc convoy
 // list` owned flag on.
@@ -466,6 +500,10 @@ func populatedStore() *fakeStore {
 				withDepType(child("tk-p1", "open", testNow, ""), "parent-child"),
 				withDepType(child("tk-p2", "closed", testNow.Add(-24*time.Hour), ""), "parent-child"),
 				withDepType(child("tk-conv", "open", testNow, ""), "tracks"),
+				// The closed event `bd set-state` files under the bead whose
+				// state it changed, on a parent-child edge: an audit record,
+				// not a child.
+				withDepType(withIssueType(child("tk-p-state", "closed", testNow, ""), "event"), "parent-child"),
 			},
 		},
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
@@ -726,7 +764,7 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 	}
 	gotKids := []string{parked.Children[0].ID, parked.Children[1].ID}
 	if gotKids[0] != "tk-p1" || gotKids[1] != "tk-p2" {
-		t.Errorf("children: got %v, want [tk-p1 tk-p2] — the tracks edge is membership, not a child", gotKids)
+		t.Errorf("children: got %v, want [tk-p1 tk-p2] — the tracks edge is membership, and a bd audit event is a record, not a child", gotKids)
 	}
 	if parked.Children[0].Status != "open" || parked.Children[1].Status != "closed" {
 		t.Errorf("children are read at ALL statuses so n_closed is real: %+v", parked.Children)
@@ -963,8 +1001,8 @@ func TestClosedPassReadsLiteLivePassReadsFull(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	store := &fakeStore{issues: map[string][]*beads.Issue{
 		"epic": {
-			withDesc(issue("tk-live", "live epic", "epic", 2, testNow.Add(-time.Hour), ""), "blocks sl-aa111 downstream"),
-			withDesc(closedIssue("tk-done", "done epic", "epic", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), ""), "closed once sl-bb222 landed"),
+			withDesc(issue("tk-live", "live epic", "epic", 2, testNow.Add(-time.Hour), ""), "blocks ra-aa111 downstream"),
+			withDesc(closedIssue("tk-done", "done epic", "epic", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), ""), "closed once ra-bb222 landed"),
 		},
 	}}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store})
@@ -1155,12 +1193,84 @@ func TestEdgeReadsAreBatchedNotPerAnchor(t *testing.T) {
 			"dependents %d vs %d, dependencies %d vs %d (3 vs 60 anchors per kind)",
 			small.depnN, large.depnN, small.depyN, large.depyN)
 	}
-	// The fixed count is one batch per direction per gather pass. The open pass
-	// gathers every anchor; the closed pass finds none here, so it reads no edges
-	// at all — hence exactly one of each.
-	if large.depnN != 1 || large.depyN != 1 {
-		t.Errorf("expected one batched read per direction, got dependents=%d dependencies=%d",
+	// The fixed count is one batch per direction per gather pass, plus one more
+	// outbound batch for the waits of the open children those anchors roll up.
+	// The open pass gathers every anchor; the closed pass finds none here, so it
+	// reads no edges at all — hence one inbound read and two outbound ones.
+	if large.depnN != 1 || large.depyN != 2 {
+		t.Errorf("expected one inbound read and two outbound ones, got dependents=%d dependencies=%d",
 			large.depnN, large.depyN)
+	}
+}
+
+// TestOpenChildrenCarryTheirWaits: an open child of a live anchor carries its
+// own `blocks` waits, hydrated with the fields the board classifies it by, so
+// the roll-up can tell a child waiting its turn from one nothing will start,
+// and a gate the city resolves by itself from one a person must release. A
+// closed child reads none, and a failed read degrades to no waits with a
+// partial note rather than costing the anchor its row.
+func TestOpenChildrenCarryTheirWaits(t *testing.T) {
+	build := func() *fakeStore {
+		gate := issue("tk-gate", "parked until the design is signed", "gate", 2, testNow, "")
+		gate.AwaitType = "human"
+		sibling := child("tk-ep.1", "open", testNow, `{"merge_result":"pull_request"}`)
+		armed := child("tk-ep.2", "open", testNow, `{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"}`)
+		held := child("tk-ep.3", "open", testNow, "")
+		done := child("tk-ep.4", "closed", testNow, "")
+		return &fakeStore{
+			issues: map[string][]*beads.Issue{
+				"epic": {issue("tk-ep", "an epic", "epic", 2, testNow, "")},
+				"gate": {gate},
+			},
+			depsUp: map[string][]*beads.IssueWithDependencyMetadata{"tk-ep": {
+				withDepType(sibling, "parent-child"), withDepType(armed, "parent-child"),
+				withDepType(held, "parent-child"), withDepType(done, "parent-child"),
+			}},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+				"tk-ep.2": {withDepType(child("tk-ep.1", "open", testNow, `{"merge_result":"pull_request"}`), "blocks")},
+				"tk-ep.3": {withDepType(&beads.IssueWithDependencyMetadata{Issue: *gate}, "blocks")},
+				"tk-ep.4": {withDepType(child("tk-ep.1", "open", testNow, ""), "blocks")},
+			},
+		}
+	}
+
+	res := gatherOneStore(t, build())
+	j, ok := findAnchor(res, "tk-ep")
+	if !ok {
+		t.Fatal("the epic is missing")
+	}
+	waits := map[string][]board.Blocker{}
+	for _, c := range res.Anchors[j].Children {
+		waits[c.ID] = c.Blockers
+	}
+	if got := waits["tk-ep.2"]; len(got) != 1 || got[0].ID != "tk-ep.1" || got[0].Status != "open" {
+		t.Errorf("the armed child waits on its open sibling: %+v", got)
+	}
+	if got := waits["tk-ep.3"]; len(got) != 1 || got[0].IssueType != "gate" || got[0].AwaitType != "human" ||
+		got[0].Title != "parked until the design is signed" {
+		t.Errorf("the held child's gate is hydrated with its type, what it awaits, and its title: %+v", got)
+	}
+	if len(waits["tk-ep.1"]) != 0 || len(waits["tk-ep.4"]) != 0 {
+		t.Errorf("a child with no wait, and a closed child, carry none: %+v / %+v", waits["tk-ep.1"], waits["tk-ep.4"])
+	}
+
+	failing := build()
+	failing.failDeps = map[string]error{"tk-ep.2": errors.New("dolt timeout")}
+	res = gatherOneStore(t, failing)
+	j, ok = findAnchor(res, "tk-ep")
+	if !ok {
+		t.Fatal("a failed child-waits read must not cost the epic its row")
+	}
+	if len(res.Anchors[j].Children) != 4 {
+		t.Errorf("the children survive a failed waits read: %+v", res.Anchors[j].Children)
+	}
+	for _, c := range res.Anchors[j].Children {
+		if len(c.Blockers) != 0 {
+			t.Errorf("%s: a failed read invents no waits: %+v", c.ID, c.Blockers)
+		}
+	}
+	if !res.Partial {
+		t.Error("a failed child-waits read is noted partial")
 	}
 }
 
@@ -1202,7 +1312,7 @@ func TestBeadsGatherMetadataKindsDegradeIndependently(t *testing.T) {
 // TestBeadsGatherDegradesPerRig mirrors SupervisorSource's contract: one rig
 // failing must not lose the others, and it must be recorded as partial.
 func TestBeadsGatherDegradesPerRig(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	broken := &fakeStore{
 		failType: map[string]error{
 			"epic":     errors.New("dolt timeout"),
@@ -1215,8 +1325,8 @@ func TestBeadsGatherDegradesPerRig(t *testing.T) {
 		},
 	}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
-		"gc-toolkit":  populatedStore(),
-		"signal-loom": broken,
+		"gc-toolkit": populatedStore(),
+		"rig-a":      broken,
 	})
 
 	res, err := src.Gather(context.Background())
@@ -1302,7 +1412,7 @@ func TestBeadsGatherErrorsOnTotalOutage(t *testing.T) {
 // TestBeadsCheckAndRigDiscovery covers the startup probe and the on-disk
 // enumeration, including a rig directory with no bead store.
 func TestBeadsCheckAndRigDiscovery(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": ""})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": ""})
 	if err := os.MkdirAll(filepath.Join(root, "rigs", "not-a-rig"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1318,7 +1428,7 @@ func TestBeadsCheckAndRigDiscovery(t *testing.T) {
 	if len(rigs) != 2 {
 		t.Fatalf("want 2 rigs with bead stores, got %d: %+v", len(rigs), rigs)
 	}
-	// Sorted by name, so gc-toolkit precedes signal-loom deterministically.
+	// Sorted by name, so gc-toolkit precedes rig-a deterministically.
 	if rigs[0].name != "gc-toolkit" || rigs[0].prefix != "tk" {
 		t.Errorf("first rig: %+v", rigs[0])
 	}
@@ -1562,7 +1672,7 @@ func TestReadIssuePrefix(t *testing.T) {
 	}
 	cases := []struct{ name, body, want string }{
 		{"underscore.yaml", "dolt.mode: server\nissue_prefix: tk\n", "tk"},
-		{"hyphen.yaml", "issue-prefix: sl\n", "sl"},
+		{"hyphen.yaml", "issue-prefix: ra\n", "ra"},
 		{"quoted.yaml", `issue_prefix: "gc"` + "\n", "gc"},
 		{"absent.yaml", "dolt.mode: server\n", ""},
 	}
@@ -1585,16 +1695,16 @@ func joinStore() *fakeStore {
 	st := populatedStore()
 	st.issues["task"] = append(st.issues["task"],
 		issue("tk-root1", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-hq-live"}`),
 		// A root with NO session of its own: the name has to come off its steps.
 		issue("tk-root2", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv2"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv2"}`),
 		issue("tk-step2", "implement", "task", 2, testNow,
-			`{"gc.root_bead_id":"tk-root2","gc.session_name":"gc-toolkit__polecat-lx-steps"}`),
+			`{"gc.root_bead_id":"tk-root2","gc.session_name":"gc-toolkit__polecat-hq-steps"}`),
 		// A HUSK: an open root whose session is long gone. Joining on root
 		// existence alone would flip it to "in flight".
 		issue("tk-root3", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-lx-dead"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-hq-dead"}`),
 	)
 	// Each input convoy tracks its one work bead. resolveInflight reads the
 	// member from this `tracks` edge in-process, so the fixture carries the
@@ -1608,9 +1718,9 @@ func joinStore() *fakeStore {
 func liveGC() *fakeGC {
 	return &fakeGC{
 		sessions: map[string]string{
-			"gc-toolkit__polecat-lx-live":  "active",
-			"gc-toolkit__polecat-lx-steps": "active",
-			"gc-toolkit__polecat-lx-dead":  "archived",
+			"gc-toolkit__polecat-hq-live":  "active",
+			"gc-toolkit__polecat-hq-steps": "active",
+			"gc-toolkit__polecat-hq-dead":  "archived",
 		},
 	}
 }
@@ -1631,7 +1741,7 @@ func TestGatherJoinsInflight(t *testing.T) {
 	if got := res.Facts.Inflight["tk-work1"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
 		t.Errorf("root with its own session_name resolves: got %v", got)
 	}
-	if got := res.Facts.Inflight["tk-work2"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-steps" {
+	if got := res.Facts.Inflight["tk-work2"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-hq-steps" {
 		t.Errorf("root without a session_name falls back to its steps: got %v", got)
 	}
 	if got, ok := res.Facts.Inflight["tk-work3"]; ok {
@@ -1643,7 +1753,7 @@ func TestGatherJoinsInflight(t *testing.T) {
 	if calls := gc.externalCalls(); calls != 1 {
 		t.Errorf("gather spent %d subprocesses, want 1 (session list; membership and ownership are in-process)", calls)
 	}
-	if res.Facts.OwnerState["gc-toolkit__polecat-lx-live"] != "active" {
+	if res.Facts.OwnerState["gc-toolkit__polecat-hq-live"] != "active" {
 		t.Errorf("session states carried: %v", res.Facts.OwnerState)
 	}
 }
@@ -1660,7 +1770,7 @@ func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
 		issue("tk-slung", "Land the slung fix", "task", 2, testNow,
 			`{"merge_result":"pre_open_gate","branch":"polecat/tk-slung"}`),
 		issue("tk-root9", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-hq-live"}`),
 	)
 	// An idle child, so a tile that missed the anchor's own molecule would band
 	// stranded rather than merely read zero.
@@ -1675,7 +1785,7 @@ func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	if got := res.Facts.Inflight["tk-slung"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+	if got := res.Facts.Inflight["tk-slung"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-hq-live" {
 		t.Fatalf("the join is keyed by the convoy's member, here the anchor's own bead: got %v", res.Facts.Inflight)
 	}
 
@@ -1694,19 +1804,19 @@ func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
 // TestGatherCarriesPrefixesAndDescription pins the two anchor-side inputs the
 // cross-rig scan needs: every rig's prefix/name, and the anchor's prose.
 func TestGatherCarriesPrefixesAndDescription(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
-		"gc-toolkit": populatedStore(), "signal-loom": {},
+		"gc-toolkit": populatedStore(), "rig-a": {},
 	})
 	res, err := src.Gather(context.Background())
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	if !slices.Equal(res.Facts.Prefixes, []string{"sl", "tk"}) {
-		t.Errorf("prefixes = %v, want [sl tk]", res.Facts.Prefixes)
+	if !slices.Equal(res.Facts.Prefixes, []string{"ra", "tk"}) {
+		t.Errorf("prefixes = %v, want [ra tk]", res.Facts.Prefixes)
 	}
-	if !slices.Equal(res.Facts.RigNames, []string{"gc-toolkit", "signal-loom"}) {
-		t.Errorf("rig names = %v, want [gc-toolkit signal-loom]", res.Facts.RigNames)
+	if !slices.Equal(res.Facts.RigNames, []string{"gc-toolkit", "rig-a"}) {
+		t.Errorf("rig names = %v, want [gc-toolkit rig-a]", res.Facts.RigNames)
 	}
 	i, ok := findAnchor(res, "tk-epic")
 	if !ok {
@@ -1843,7 +1953,7 @@ func TestHQBeadStoreIsGathered(t *testing.T) {
 	if err := os.MkdirAll(hq, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hq, "config.yaml"), []byte("issue_prefix: lx\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(hq, "config.yaml"), []byte("issue_prefix: hq\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1862,7 +1972,7 @@ func TestHQBeadStoreIsGathered(t *testing.T) {
 	if !slices.Contains(names, filepath.Base(root)) {
 		t.Errorf("the HQ store must be gathered as a rig: got %v", names)
 	}
-	if !slices.Contains(prefixes, "lx") {
+	if !slices.Contains(prefixes, "hq") {
 		t.Errorf("the HQ prefix must reach Facts.Prefixes (it scopes the cross-rig scan): got %v", prefixes)
 	}
 	if !slices.Contains(names, "gc-toolkit") {
@@ -1890,7 +2000,7 @@ func TestCityWithoutHQStoreStillWorks(t *testing.T) {
 // backend usable — while every store OPEN fails, which is where Gather would
 // have died. Probe asks the question Check cannot.
 func TestBeadsProbeVersusCheck(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	skew := errors.New("schema version mismatch: database is at v65, binary knows up to v61")
 
 	var tried []string
@@ -1916,7 +2026,7 @@ func TestBeadsProbeVersusCheck(t *testing.T) {
 	if !strings.Contains(err.Error(), "v65") || !strings.Contains(err.Error(), "gc-toolkit") {
 		t.Errorf("Probe must name the rig and the underlying failure, got: %v", err)
 	}
-	if !slices.Equal(tried, []string{"gc-toolkit", "signal-loom"}) {
+	if !slices.Equal(tried, []string{"gc-toolkit", "rig-a"}) {
 		t.Errorf("Probe must try every rig before giving up, tried %v", tried)
 	}
 }
@@ -1925,7 +2035,7 @@ func TestBeadsProbeVersusCheck(t *testing.T) {
 // Gather's. Gather returns a board as long as ONE rig could be read, so a Probe
 // that demanded all of them would refuse a backend that serves fine.
 func TestBeadsProbeSucceedsOnOneReadableRig(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	var tried []string
 	src := NewBeadsSource(
 		WithCityPath(root),
@@ -1943,8 +2053,8 @@ func TestBeadsProbeSucceedsOnOneReadableRig(t *testing.T) {
 		t.Fatalf("one readable rig must satisfy Probe: %v", err)
 	}
 	// Rigs are walked in sorted order and Probe stops at the first success, so
-	// it must not have looked past signal-loom.
-	if !slices.Equal(tried, []string{"gc-toolkit", "signal-loom"}) {
+	// it must not have looked past rig-a.
+	if !slices.Equal(tried, []string{"gc-toolkit", "rig-a"}) {
 		t.Errorf("Probe must stop at the first readable rig, tried %v", tried)
 	}
 
@@ -2576,17 +2686,17 @@ func TestDoneWindowUsesOneClockAcrossRigs(t *testing.T) {
 				testNow.Add(-23*time.Hour), testNow.Add(-23*time.Hour), "")},
 		}}
 	}
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
-		"gc-toolkit":  boundary("tk"),
-		"signal-loom": boundary("sl"),
+		"gc-toolkit": boundary("tk"),
+		"rig-a":      boundary("ra"),
 	}, withClock(advancingClock(testNow, 2*time.Hour)))
 
 	res, err := src.Gather(context.Background())
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	for _, id := range []string{"tk-edge", "sl-edge"} {
+	for _, id := range []string{"tk-edge", "ra-edge"} {
 		if _, ok := findAnchor(res, id); !ok {
 			t.Errorf("%s closed inside the window at the pass clock and must be gathered; a per-rig clock read ages it out", id)
 		}
@@ -2656,6 +2766,8 @@ func mergeStore() *fakeStore {
 					`{"merge_result":"pre_open_gate","branch":"polecat/tk-pre","gc.routed_to":"human","pr.machine":"progressing@aaaa@2026-08-28T04:05:06Z"}`),
 				issue("tk-open", "an ordinary open PR", "task", 2, testNow,
 					`{"merge_result":"pull_request","pr_number":"512","branch":"polecat/tk-open"}`),
+				issue("tk-talked", "an open PR a sitting talked about", "task", 2, testNow,
+					`{"merge_result":"pull_request","pr_number":"513","branch":"polecat/tk-talked","gc.takeaway":"ruled; in rework"}`),
 				issue("tk-quiet", "no merge_result at all", "task", 2, testNow, `{"branch":"polecat/tk-quiet"}`),
 			},
 		},
@@ -2939,6 +3051,12 @@ func TestMergeAnchorsAreGathered(t *testing.T) {
 	if got := kinds["tk-open"]; len(got) != 1 || got[0] != "merge" {
 		t.Errorf("tk-open kinds = %v, want [merge] — a detached anchor has no route to gather it", got)
 	}
+	// A pull request a sitting talked about carries a takeaway too and gathers
+	// twice. `merge` comes FIRST, so the dedup leaves the pull request's row: the
+	// takeaway does not make it a parked bead.
+	if got := kinds["tk-talked"]; len(got) != 2 || got[0] != "merge" || got[1] != "parked" {
+		t.Errorf("tk-talked kinds = %v, want [merge parked] in that order", got)
+	}
 	if got := kinds["tk-quiet"]; got != nil {
 		t.Errorf("a bead with no merge_result is not a merge anchor: %v", got)
 	}
@@ -3005,6 +3123,100 @@ func TestMergeAnchorUnreadableEdgesStayUnknown(t *testing.T) {
 	}
 	if !res.Partial {
 		t.Error("the gather is degraded and the board has to say so out loud")
+	}
+}
+
+// TestMergeAnchorInFlightSetIsGathered: each live merge anchor carries its
+// in-flight set, the beads `gctk pr-status derive` counts for the PR labels:
+// every bead naming it in anchor_bead, any task_kind, at a live status. One read
+// serves the pass, in the live pass only. So a PR whose merge pass recorded a
+// thread verdict reads merging with nothing held on the board, as it does on its
+// labels, while a validation pass the board shows no row for is in flight. A
+// read that fails is noted partial, and the board then counts the review row it
+// gathered.
+func TestMergeAnchorInFlightSetIsGathered(t *testing.T) {
+	at := testNow.Add(-time.Hour).Format(time.RFC3339)
+	threads := `{"merge_result":"pull_request","pr_number":"9","pr_posture":"approved@abc@` + at +
+		`","pr.machine":"blocked@abc@` + at + `","pr.machine_cause":"review-threads"}`
+	doneAt := testNow.Add(-time.Hour)
+	done := issue("tk-done", "a landed PR", "task", 2, testNow, `{"merge_result":"merged"}`)
+	done.Status, done.ClosedAt = beads.StatusClosed, &doneAt
+	store := func(children ...*beads.Issue) *fakeStore {
+		return &fakeStore{issues: map[string][]*beads.Issue{"task": append([]*beads.Issue{
+			issue("tk-pr", "an open PR", "task", 2, testNow, threads),
+			issue("tk-gate", "a pre-open anchor", "task", 2, testNow, `{"merge_result":"pre_open_gate"}`),
+			done,
+		}, children...)}}
+	}
+	validation := reviewFixture("va-1", beads.StatusOpen, `{"task_kind":"validation","anchor_bead":"tk-pr"}`)
+	children := []*beads.Issue{
+		validation,
+		reviewFixture("fi-1", beads.StatusBlocked, `{"task_kind":"finding","anchor_bead":"tk-pr"}`),
+		reviewFixture("rw-closed", beads.StatusClosed, `{"task_kind":"rework","anchor_bead":"tk-pr"}`),
+		reviewFixture("rv-gate", beads.StatusInProgress, `{"task_kind":"review","anchor_bead":"tk-gate"}`),
+		reviewFixture("fi-gone", beads.StatusOpen, `{"task_kind":"finding","anchor_bead":"tk-done"}`),
+	}
+	inFlight := func(a board.Anchor) []string {
+		var ids []string
+		for _, c := range a.InFlight {
+			ids = append(ids, c.ID+"/"+c.Status+"/"+c.Metadata["task_kind"])
+		}
+		slices.Sort(ids)
+		return ids
+	}
+	pr := func(t *testing.T, b board.Board) board.Tile {
+		t.Helper()
+		i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == "tk-pr" })
+		if i < 0 {
+			t.Fatal("the PR anchor has no tile")
+		}
+		return b.Tiles[i]
+	}
+
+	st := store(children...)
+	res, anchor := gatherPreOpen(t, st, "tk-pr")
+	if got, want := inFlight(anchor), []string{"fi-1/blocked/finding", "va-1/open/validation"}; !slices.Equal(got, want) {
+		t.Errorf("tk-pr in flight = %v, want %v: every live bead naming it, whatever its kind, and no closed one", got, want)
+	}
+	if i, ok := findAnchor(res, "tk-gate"); !ok || !slices.Equal(inFlight(res.Anchors[i]), []string{"rv-gate/in_progress/review"}) {
+		t.Errorf("tk-gate in flight = %v, want its in_progress review", inFlight(res.Anchors[i]))
+	}
+	if i, ok := findAnchor(res, "tk-done"); !ok || res.Anchors[i].InFlight != nil {
+		t.Errorf("a closed merge anchor gathers no in-flight set (found=%v)", ok)
+	}
+	var reads []beads.IssueFilter
+	for _, c := range st.calls {
+		if c.HasMetadataKey == "anchor_bead" {
+			reads = append(reads, c)
+		}
+	}
+	if len(reads) != 1 {
+		t.Fatalf("in-flight reads = %d, want one for the pass whatever the number of anchors", len(reads))
+	}
+	if r := reads[0]; !slices.Equal(r.Statuses, anchorChildLiveStatuses) || !r.SkipWisps || !r.Lite {
+		t.Errorf("the in-flight read must scope to the live statuses, skip wisps and read lite: %+v", r)
+	}
+	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != board.PhaseMerging || tile.PRHeld != nil {
+		t.Errorf("a thread verdict beside a validation pass in flight: pr_phase=%q pr_held=%v, want merging and none", tile.PRPhase, tile.PRHeld)
+	}
+
+	// The twin with nothing in flight: the verdict holds the PR.
+	res, _ = gatherPreOpen(t, store(), "tk-pr")
+	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != board.PhaseNeedsAttention || !slices.Equal(tile.PRHeld, []string{"review"}) {
+		t.Errorf("a thread verdict with nothing in flight: pr_phase=%q pr_held=%v, want needs-attention and [review]", tile.PRPhase, tile.PRHeld)
+	}
+
+	failing := store(reviewFixture("rv-1", beads.StatusOpen, `{"task_kind":"review","anchor_bead":"tk-pr"}`))
+	failing.failMeta = map[string]error{"anchor_bead": errors.New("in-flight unreadable")}
+	res, anchor = gatherPreOpen(t, failing, "tk-pr")
+	if anchor.InFlight != nil {
+		t.Errorf("a failed read gathers nothing: %v", inFlight(anchor))
+	}
+	if want := "in-flight@gc-toolkit: in-flight unreadable"; !res.Partial || !slices.Contains(res.PartialErrors, want) {
+		t.Errorf("partial=%v errors=%v, want %q among them", res.Partial, res.PartialErrors, want)
+	}
+	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != board.PhaseMerging || tile.PRHeld != nil {
+		t.Errorf("with the read failed, the review row still counts: pr_phase=%q pr_held=%v, want merging and none", tile.PRPhase, tile.PRHeld)
 	}
 }
 

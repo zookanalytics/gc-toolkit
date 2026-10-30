@@ -2,7 +2,7 @@ Formula: mol-deacon-patrol
 Description: Deacon patrol loop — city infrastructure health. Poured as a root-only wisp
 on startup (the agent prompt's startup reconcile adopts before it pours):
 
-  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}'
+  gc bd mol wisp mol-deacon-patrol --city="$GC_CITY_PATH" --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: mail, orphan-process cleanup, Dolt health,

@@ -80,7 +80,7 @@ gcmux bind-key A new-window "$(sq "$CONFIGDIR/assets/scripts/tmux-new-subject.sh
 # dismiss`. Capital X, the sibling of tmux's own prefix+x: that key asks before
 # killing the pane, this one asks before ending the sitting the pane holds.
 # confirm-before guards against a stray key, because a dismissed sitting's
-# session is closed once the operator leaves it. The script refuses any pane
+# session ends at once. The script refuses any pane
 # that is not a converse sitting and never types into the pane. See
 # tmux-dismiss-sitting.sh.
 #

@@ -124,7 +124,7 @@ const (
 //
 // Shaped to the ids the city actually mints — a lowercase alphanumeric rig
 // prefix, a hyphen, an alphanumeric body, and optional dotted numeric suffixes
-// for split beads (tk-yc00g, tk-eemvf.3, sl-kg9z6.4.1). The load-bearing
+// for split beads (tk-yc00g, tk-eemvf.3, tk-eemvf.3.1). The load-bearing
 // property is the anchored leading LETTER: it is what makes "-x" and "--reason"
 // unrepresentable, so a crafted id cannot reach a verb's flag loop as a flag.
 var beadIDRE = regexp.MustCompile(`^[a-z][a-z0-9]*-[a-z0-9]+(?:\.[0-9]+)*$`)

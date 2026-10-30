@@ -14,14 +14,16 @@
 # what polecats actually execute. Hermetic: no live city, no Dolt, no network.
 # `gc` is stubbed by pointing HOME at a sandbox — the hook prepends
 # "$HOME/go/bin" to PATH itself, so a stub placed there wins over the real gc.
+# run-lib.sh is stubbed through GC_RUN_LIB, so the run a root names comes from
+# runs.json rather than from reads of its convoy.
 #
 # The test lives under assets/scripts/ rather than beside the hook because
 # everything under overlays/work-context/.claude/ is STAGED into every polecat's
 # work dir at session start; a test file there would ship to production sessions.
 #
 # Covered:
-#   (1)  claim of a formula step -> resolves step->root->convoy->work bead and
-#        injects that bead's description
+#   (1)  claim of a formula step -> resolves step->root->the bead the root's run
+#        works (run-lib.sh, stubbed) and injects that bead's description
 #   (2)  emitted stdout is one valid JSON object with hookEventName=PostToolUse
 #   (3)  tool_response as a Bash OBJECT ({stdout:...}) still yields the bead id.
 #        This is the REAL payload shape: jq's tojson re-escapes the JSON the
@@ -31,7 +33,8 @@
 #   (5)  second claim in the same session -> silent (no duplicate injection)
 #   (6)  a DIFFERENT work bead in the same session -> injects again
 #   (7)  non-claim Bash command -> silent (the common path)
-#   (8)  claimed bead with no gc.root_bead_id -> treated as the work bead itself
+#   (8)  claimed bead with no gc.root_bead_id -> treated as the work bead itself,
+#        and so is a step whose run names no bead, or cannot be read
 #   (9)  empty description -> silent (no empty banner)
 #   (10) over-long description -> truncated with a pointer, and the WHOLE payload
 #        is bounded. `cut -c` caps per LINE, so a multi-line description would
@@ -66,13 +69,12 @@ SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gctk-work-context-hook-test.XXXXXX")"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 # --- gc stub -------------------------------------------------------------
-# Serves fixtures from $GCSTUB_DIR: bead-<id>.json, convoy-<id>.json.
+# Serves fixtures from $GCSTUB_DIR: bead-<id>.json.
 mkdir -p "$SANDBOX/home/go/bin" "$SANDBOX/fixtures" "$SANDBOX/tmp"
 cat > "$SANDBOX/home/go/bin/gc" <<'STUB'
 #!/bin/sh
 case "$1 $2" in
     "bd show")     f="$GCSTUB_DIR/bead-$3.json";   [ -f "$f" ] && cat "$f" || echo '[]' ;;
-    "convoy status") f="$GCSTUB_DIR/convoy-$3.json"; [ -f "$f" ] && cat "$f" || echo '{}' ;;
     *) exit 1 ;;
 esac
 STUB
@@ -83,11 +85,12 @@ bead() { # bead <id> <json>
     printf '%s' "$2" > "$FX/bead-$1.json"
 }
 
-# A claimed formula step -> its workflow root -> the root's input convoy -> the
-# single tracked member, which is the work bead.
-bead tk-step1 '[{"id":"tk-step1","title":"Load context","metadata":{"gc.root_bead_id":"tk-root"}}]'
-bead tk-root  '[{"id":"tk-root","title":"mol-polecat-work","metadata":{"gc.input_convoy_id":"tk-convoy"}}]'
-printf '%s' '{"children":[{"id":"tk-work"}]}' > "$FX/convoy-tk-convoy.json"
+# A claimed formula step -> its workflow root -> the bead that run works.
+# tk-step2's root is a run that names no bead.
+bead tk-step1 '[{"id":"tk-step1","title":"Load context","description":"STEP-MARKER","metadata":{"gc.root_bead_id":"tk-root"}}]'
+bead tk-step2 '[{"id":"tk-step2","title":"Load context","description":"STEP2-MARKER","metadata":{"gc.root_bead_id":"tk-root2"}}]'
+printf '%s' '[{"root":"tk-root","convoy":"tk-convoy","bead":"tk-work","formula":"mol-polecat-work","live":true},
+              {"root":"tk-root2","convoy":"tk-convoy2","bead":"","formula":"mol-polecat-work","live":true}]' > "$FX/runs.json"
 bead tk-work  '[{"id":"tk-work","title":"Real bead title","description":"## Problem\nSPEC-MARKER-BODY\n\n## Asked-for fix\ndo the thing"}]'
 
 # A bead claimed outside any formula: no gc.root_bead_id.
@@ -119,6 +122,8 @@ run_hook() { # run_hook <payload> [env assignments...]
         PATH="/usr/bin:/bin" \
         TMPDIR="$SANDBOX/tmp" \
         GCSTUB_DIR="$FX" \
+        GC_RUN_LIB="$HERE/run-lib.stub.sh" \
+        RUN_LIB_STUB_RUNS="$FX/runs.json" \
         GC_PROVIDER="claude" \
         GC_TEMPLATE="gc-toolkit/gc-toolkit.polecat" \
         "$@" \
@@ -187,6 +192,21 @@ case "$(printf '%s' "$out4" | jq -r '.hookSpecificOutput.additionalContext // ""
     *SOLO-MARKER*) ok "non-formula claim: uses the claimed bead itself" ;;
     *) bad "non-formula claim: uses the claimed bead itself" "got: ${out4:0:200}" ;;
 esac
+
+# (8b) a step whose run names no bead, or whose run cannot be read, is the
+# work bead itself: the hook injects the step's own description rather than
+# guessing at another bead.
+out4b="$(run_hook "$(claim_payload s2b '{"bead_id":"tk-step2"}')")"
+case "$(printf '%s' "$out4b" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+    *STEP2-MARKER*) ok "a run that names no bead: uses the claimed step itself" ;;
+    *) bad "a run that names no bead: uses the claimed step itself" "got: ${out4b:0:200}" ;;
+esac
+out4c="$(run_hook "$(claim_payload s2c '{"bead_id":"tk-step1"}')" RUN_LIB_STUB_FAIL="subject")"
+case "$(printf '%s' "$out4c" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+    *STEP-MARKER*) ok "a run that cannot be read: uses the claimed step itself" ;;
+    *) bad "a run that cannot be read: uses the claimed step itself" "got: ${out4c:0:200}" ;;
+esac
+[ "$RUN_RC" -eq 0 ] && ok "a run that cannot be read: exit 0" || bad "a run that cannot be read: exit 0" "rc=$RUN_RC"
 
 # (9) empty description -> silent.
 out5="$(run_hook "$(claim_payload s3 '{"bead_id":"tk-bare"}')")"

@@ -74,6 +74,16 @@ in every other agent's list.
 > `agents/<agent>/skills/<name>/SKILL.md`; verify the loader discovers it
 > before relying on it.
 
+**Name a pack skill by its catalog name.** A skill or formula that sends an
+agent to another pack skill writes the skill's catalog name,
+`gc-toolkit.<name>`, never its path, `skills/<name>/SKILL.md`. The agent's
+catalog links each name into the installed pack, the copy of gc-toolkit the
+city imports. A path resolves against whatever tree the agent stands in. In
+another rig it names nothing, and in a gc-toolkit worktree it opens that
+tree's copy, such as a branch under review. A path that names a file to edit
+stays a path, as when the feedback distiller names the files its proposals
+change.
+
 ## Directory layout
 
 ```
@@ -161,6 +171,8 @@ genuinely-runnable-outside subset: no `gc` CLI, no `$GC_*`, no beads.
   `compatibility` is recommended, not required.
 - Portable skills contain no reference to `gc `, `$GC_`, beads, or fragments
   anywhere in the body or `scripts/`.
+- No skill or formula names a pack skill to load by its path.
+  `assets/scripts/skill-needs.test.sh` fails on one that does.
 - Every skill in `marketplace.json` declares portable `compatibility`.
   (Vacuous until the manifest exists.)
 - Inside Gas City, `gc skill list` shows the skill where expected and

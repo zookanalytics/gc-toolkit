@@ -2,10 +2,10 @@
 # Hermetic test for converse-reap.sh.
 #
 # converse-reap ends a converse sitting once its conversation is over: a sitting
-# is a manual session under the alias of the conversation it holds, Gas City
-# does not end a manual session when its work closes, and a sign-off, a dismiss
-# or a hand-back to the operator's queue leaves the session live until this pass
-# closes it.
+# is a manual session under the alias of the conversation it holds, and Gas City
+# does not end a manual session when its work closes, so a session that outlives
+# its conversation (a stop that did not take, a conversation another path
+# closed, or a hand-back to the operator's queue) runs until this pass closes it.
 #
 # Runs the REAL converse-reap.sh with a stubbed `gc` (CONVERSE_REAP_GC) — no live
 # city, sessions, or store. The stub answers `session list` from a fixture file,
@@ -20,8 +20,10 @@
 #   (OBJ)     the closed conversation is recognised whether bd answers with an
 #             array or the single object it returns for one id
 #   (HELD)    a session whose conversation its sitting still holds is kept
-#   (ATTACHED) a session an operator is attached to is NEVER closed, even with a
-#             closed conversation — the typed-text hard-no
+#   (ATTACHED) a session an operator is attached to is closed once its
+#             conversation reads closed, because viewing a sitting does not keep
+#             it open, and is kept while its sitting still holds the
+#             conversation
 #   (YOUNG)   a session younger than --min-age is never closed, so a sitting
 #             engage has started and not yet bound keeps its alias
 #   (NOAGE)   a session whose creation time does not read is left alone
@@ -127,6 +129,7 @@ build_world() {
   conv     tk-held   in_progress gc-toolkit/gc-toolkit.tk-held
   conv_obj tk-obj    closed      gc-toolkit/gc-toolkit.tk-obj
   conv     tk-attn   closed      gc-toolkit/gc-toolkit.tk-attn
+  conv     tk-attnheld in_progress gc-toolkit/gc-toolkit.tk-attnheld
   conv     tk-cfall  closed      gc-toolkit/gc-toolkit.c-tk-cfall
   conv     tk-young  open        human
   conv     tk-noage  closed      gc-toolkit/gc-toolkit.tk-noage
@@ -143,6 +146,7 @@ build_world() {
     printf ','; sess s-cfall  gc-toolkit/gc-toolkit.c-tk-cfall asleep false false
     printf ','; sess s-young  gc-toolkit/gc-toolkit.tk-young  creating false false gc-toolkit/gc-toolkit.converse-opus "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf ','; sess s-noage  gc-toolkit/gc-toolkit.tk-noage  asleep false false gc-toolkit/gc-toolkit.converse-opus none
+    printf ','; sess s-attnheld gc-toolkit/gc-toolkit.tk-attnheld active true false
     printf ','; sess s-task   gc-toolkit/gc-toolkit.tk-task   asleep false false
     printf ','; sess s-noalias null                           asleep false false
     printf ','; sess s-badalias gc-toolkit/gc-toolkit.nodash  asleep false false
@@ -164,7 +168,8 @@ has "$CLOSED" "close s-queued"  "QUEUED: a session whose conversation is back in
 has "$CLOSED" "close s-cfall"   "C-ALIAS: the c- fallback alias names its conversation after the prefix"
 has "$CLOSED" "close s-obj"     "OBJ: a closed conversation answered as a bare object is recognised"
 hasnt "$CLOSED" "close s-held"  "HELD: a sitting still holding its conversation is kept"
-hasnt "$CLOSED" "close s-attn"  "ATTACHED: an attached session is never closed, even with a closed conversation"
+has "$CLOSED" "close s-attn"    "ATTACHED: an attached session is closed once its conversation reads closed"
+hasnt "$CLOSED" "close s-attnheld" "ATTACHED: an attached session whose sitting still holds its conversation is kept"
 hasnt "$CLOSED" "close s-young" "YOUNG: a session younger than --min-age is never closed"
 hasnt "$CLOSED" "close s-noage" "NOAGE: a session whose age does not read is left alone"
 hasnt "$CLOSED" "close s-task"  "NONCONV: an alias resolving to a bead that is no conversation is left alone"
@@ -173,8 +178,8 @@ hasnt "$CLOSED" "close s-badalias" "BADALIAS: a non-bead-id alias tail is left a
 hasnt "$CLOSED" "close s-notconv" "NONCONVERSE: a non-converse session is ignored"
 hasnt "$CLOSED" "close s-alreadyclosed" "ALREADYCLOSED: an already-closed session is not a candidate"
 
-has "$OUT" "closed 5 settled converse sittings" "COUNTS: five sittings reaped"
-has "$OUT" "kept 1 held"    "COUNTS: one live sitting kept"
+has "$OUT" "closed 6 settled converse sittings" "COUNTS: six sittings reaped"
+has "$OUT" "kept 2 held"    "COUNTS: two live sittings kept"
 has "$OUT" "skipped 2"      "COUNTS: the non-conversation and bad-alias candidates are skipped"
 
 # --- dry-run ------------------------------------------------------------------
@@ -183,7 +188,7 @@ OUT="$(bash "$SUT" --dry-run 2>&1)"; RC=$?
 CLOSED="$(cat "$CALLS" 2>/dev/null)"
 eq "$RC" "0" "DRYRUN: exits 0"
 eq "$CLOSED" "" "DRYRUN: closes nothing"
-has "$OUT" "would close 5 settled converse sittings" "DRYRUN: reports the plan count"
+has "$OUT" "would close 6 settled converse sittings" "DRYRUN: reports the plan count"
 has "$OUT" "s-closed (conversation tk-closed closed)" "DRYRUN: names a closed conversation's sitting in the plan"
 has "$OUT" "s-gone (conversation tk-gone gone)" "DRYRUN: names a gone conversation's sitting in the plan"
 has "$OUT" "s-queued (conversation tk-queued queued)" "DRYRUN: names a queued conversation's sitting in the plan"
@@ -220,7 +225,7 @@ has "$CF_ERR" "could not close settled sitting s-closed" "CLOSEFAIL: the failure
 has "$CLOSED" "close s-gone" "CLOSEFAIL: a failed close does not stop the pass"
 hasnt "$CF_OUT" "s-closed (conversation tk-closed closed)" "CLOSEFAIL: the failed sitting is NOT listed among the reaped"
 has "$CF_OUT" "s-gone (conversation tk-gone gone)" "CLOSEFAIL: a sitting that did close IS listed"
-has "$CF_OUT" "closed 4 settled" "CLOSEFAIL: only the four that closed are counted reaped"
+has "$CF_OUT" "closed 5 settled" "CLOSEFAIL: only the five that closed are counted reaped"
 has "$CF_OUT" "skipped 3" "CLOSEFAIL: the failed close is counted skipped, with the non-conversation and bad-alias"
 
 # --- a conversation read that fails with a NON not-found error is skipped -----

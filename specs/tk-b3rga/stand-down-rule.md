@@ -63,7 +63,7 @@ keeps the **higher band**. So the louder derivation of a bead always wins,
 and any rule that *quiets* the `human` row is undone by its `parked` twin.
 Concretely: the twin of an answered human bead whose waits have landed is
 exactly the `disposition_due` shape, which bands ELEVATED. `tk-j5wrs` and
-`sl-kg9z6.1.2` are both this shape.
+`ra-kg9z6.1.2` are both this shape.
 
 So "human-gated" is defined as kind `decision`, kind `human`, **or** the
 `gc.routed_to=human` marker on the anchor — the third clause is what lets
@@ -118,7 +118,7 @@ still do not pay the read: they are banded by a child roll-up that already
 reports whether their work is moving.
 
 The clause is not hypothetical. The edges are real — `tk-lpf9g` →
-`tk-vvnkj` (closed), `sl-kg9z6.1.2` → seven closed blockers — and a live
+`tk-vvnkj` (closed), `ra-kg9z6.1.2` → seven closed blockers — and a live
 negative control turned up during implementation: `tk-hs2e8`, a decision
 answered "NO" at 16:28Z on 2026-08-23 with `tk-jsyci7` routed and still
 open. It stays ELEVATED, which is correct.
@@ -170,7 +170,7 @@ fails the source-level assertion.
 
 ## Measurements
 
-Paired control on the live loomington board, `board --json --limit=0
+Paired control on the live mycity board, `board --json --limit=0
 --refresh` from the HEAD script and from the patched script, both
 returning the same 63 anchors:
 
@@ -182,8 +182,8 @@ returning the same 63 anchors:
 | LOW | 23 | 30 |
 
 **Exactly seven rows changed band, and they are the seven the acceptance
-criterion names** — `sl-kg9z6.4.1`, `tk-lpf9g`, `tk-63qgj`, `tk-0tln5`,
-`tk-z130v`, `tk-j5wrs`, `sl-kg9z6.1.2` — all ELEVATED → LOW. No row moved
+criterion names** — `ra-kg9z6.4.1`, `tk-lpf9g`, `tk-63qgj`, `tk-0tln5`,
+`tk-z130v`, `tk-j5wrs`, `ra-kg9z6.1.2` — all ELEVATED → LOW. No row moved
 UP. No `parked` row changed at all.
 
 An earlier pair, taken minutes before, showed `tk-hs2e8` standing down as

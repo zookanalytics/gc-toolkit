@@ -66,7 +66,7 @@
 # it ROUTED work into, --no-wait when it settled the subject and nothing is
 # waiting, and NEITHER where the subject is parked for a person. The scripts it
 # runs (converse-rework.sh, gc-helm.sh, lifecycle.sh, pr-sitting-comment.sh) are
-# SEARCHED for on the candidate roots, in the one order pack_script holds.
+# its siblings in the pack's assets/scripts, found through pack_script.
 #
 # Usage:
 #   converse-signoff.sh --conversation <task> --outcome "<headline, ≤140 chars>" \
@@ -203,16 +203,12 @@ show_row() {
     | jq -ce --arg id "$1" 'if type == "array" then (.[0] | select((.id // "") == $id)) else error("unread") end' 2>/dev/null
 }
 
-# pack_script <name> — the first candidate root's assets/scripts/<name>: the rig
-# root, then the git checkout of the working directory, then the city's
-# gc-toolkit rig. Every script this sign-off runs is found through it, so they
-# share one search order. Non-zero, printing nothing, when no root carries it.
+# pack_script <name> — <name> beside this script, in the copy of the pack that
+# is running. Every script this sign-off runs is found through it. Non-zero,
+# printing nothing, when the pack does not carry it.
 pack_script() {
-  local cand
-  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$cand/assets/scripts/$1" ] && { printf '%s' "$cand/assets/scripts/$1"; return 0; }
-  done
-  return 1
+  [ -x "$HERE/$1" ] || return 1
+  printf '%s' "$HERE/$1"
 }
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -461,7 +457,7 @@ TARGET_RIG=""
 TARGET_PATH=""
 if [ -n "$PR_TARGET" ] && [ -z "$TARGET_CLOSED" ]; then
   BS=$(pack_script bead-store.sh) \
-    || stopped "no bead-store.sh on any candidate root, so the rig that holds $PR_TARGET, where its --$PR_ANSWER acts, could not be resolved; nothing was written"
+    || stopped "no bead-store.sh beside $0, so the rig that holds $PR_TARGET, where its --$PR_ANSWER acts, could not be resolved; nothing was written"
   TARGET_RIG=$("$BS" "$PR_TARGET" 2>/dev/null) && TARGET_PATH=$("$BS" --path "$PR_TARGET" 2>/dev/null) && [ -d "$TARGET_PATH" ] \
     || stopped "the rig that holds $PR_TARGET could not be resolved from its id ('bead-store.sh $PR_TARGET' says why), and its --$PR_ANSWER acts in that rig's store, pool and checkout; nothing was written"
 fi
@@ -535,7 +531,7 @@ if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
   SUBJECT_STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
   [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether it reads held; nothing was written"
 fi
-HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh on any candidate root, so the subject's headline cannot be written; nothing was written"
+HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
 # take_recommendation — step 5: hand the recommendation's gate to gc-helm.sh
 # accept, the writer the board's Accept runs, and read back what it left. Accept
@@ -610,7 +606,7 @@ case "$ACTING" in
   rework)
     CR=$(pack_script converse-rework.sh)
     if [ -z "$CR" ]; then
-      PR_OUT="no converse-rework.sh on any candidate root"
+      PR_OUT="no converse-rework.sh beside $0"
     elif PR_OUT=$(in_target_rig "$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" 2>&1); then
       echo "$PR_OUT"
       CONSEQUENCE="filed ruling-driven rework on $PR_TARGET"
@@ -624,7 +620,7 @@ case "$ACTING" in
   retire)
     PD=$(pack_script pr-dispose.sh)
     if [ -z "$PD" ]; then
-      PR_OUT="no pr-dispose.sh on any candidate root"
+      PR_OUT="no pr-dispose.sh beside $0"
     elif PR_OUT=$(in_target_rig "$PD" --anchor "$PR_TARGET" --successor "$SUCCESSOR" --kind "$RETIRE_KIND" --note "$RULING" 2>&1); then
       echo "$PR_OUT"
       CONSEQUENCE="retired the PR of $PR_TARGET ($RETIRE_KIND, successor $SUCCESSOR)"

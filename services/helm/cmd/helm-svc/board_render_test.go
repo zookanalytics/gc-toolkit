@@ -442,6 +442,65 @@ func TestRenderShowsWherePRConversationsStand(t *testing.T) {
 	}
 }
 
+// What holds a pull request rides its row as its held: labels read, between
+// the needs and the conversation: on the row's own line, and beside a folded
+// member's title, since a fold shares only the needs sentence. A PR nothing
+// holds carries no note, and the legend says what each value means.
+func TestRenderShowsWhatHoldsAPR(t *testing.T) {
+	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
+	pr := func(id string, held []string, rank int) board.Tile {
+		return board.Tile{
+			ID: id, Rig: "gc-toolkit", Kind: "merge", Title: "pull request " + id,
+			Severity: board.SevElevated, Section: board.SectionReview, Owed: true,
+			Frontier: "PR #9", Needs: "in the merge cadence", PRMachine: board.MachineProgressing,
+			PRConversation: board.ConversationQuiet, PRHeld: held, GroupRoot: id, RankScore: rank,
+		}
+	}
+	tiles := []board.Tile{
+		pr("tk-two", []string{"gate", "blocked"}, 2_000_002),
+		pr("tk-free", nil, 2_000_001),
+	}
+	var queue strings.Builder
+	renderQueue(&queue, board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}, tiles, now, 1)
+	out := queue.String()
+	lines := strings.Split(out, "\n")
+	lineFor := func(id string) string {
+		for _, line := range lines {
+			if strings.Contains(line, id) {
+				return line
+			}
+		}
+		t.Fatalf("no row for %s in:\n%s", id, out)
+		return ""
+	}
+	if want := "in the merge cadence · held: gate, blocked · conversation quiet"; !strings.HasSuffix(strings.TrimRight(lineFor("tk-two"), " "), want) {
+		t.Errorf("a held PR's row must end %q; got %q", want, lineFor("tk-two"))
+	}
+	if strings.Contains(lineFor("tk-free"), "held:") {
+		t.Errorf("a PR nothing holds carries no held note; got %q", lineFor("tk-free"))
+	}
+	if !strings.Contains(out, "names what holds it, its held: labels: gate=") {
+		t.Errorf("the legend explains the held note; got:\n%s", out)
+	}
+
+	var folded []board.Tile
+	for i, held := range [][]string{{"review"}, nil} {
+		f := pr(fmt.Sprintf("tk-fold%d", i), held, 1_000_000-i)
+		f.ClusterKey = f.Needs
+		folded = append(folded, f)
+	}
+	folded = append(folded, pr("tk-fold2", nil, 999_998))
+	folded[2].ClusterKey = folded[2].Needs
+	var fold strings.Builder
+	renderQueue(&fold, board.Board{GeneratedAt: now, Total: len(folded), Tiles: folded}, folded, now, 1)
+	if want := "pull request tk-fold0 · held: review · conversation quiet"; !strings.Contains(fold.String(), want) {
+		t.Errorf("a folded member keeps what holds it beside its title, %q; got:\n%s", want, fold.String())
+	}
+	if want := "pull request tk-fold1 · conversation quiet"; !strings.Contains(fold.String(), want) {
+		t.Errorf("a folded member nothing holds carries no held note, %q; got:\n%s", want, fold.String())
+	}
+}
+
 func firstLines(s string, n int) string {
 	lines := strings.SplitN(s, "\n", n+1)
 	if len(lines) > n {

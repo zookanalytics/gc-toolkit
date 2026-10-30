@@ -18,8 +18,9 @@ The drain-ack tells the controller this session is done.
 This formula shells out to `gc dolt-cleanup --json`, parses the
 `gc.dolt.cleanup.v1` envelope, and emits one summary line per stage
 to `gc events` so operators skimming a long scrollback can spot
-trends. The full JSON report is appended to the work bead so a
-follow-up reader can `bd show <id>` to see details.
+trends. The full JSON report is recorded in the work bead's metadata
+(`gc.dolt_cleanup.scan_report`, `gc.dolt_cleanup.apply_report`) so a
+follow-up reader can `gc bd show <id>` to see details.
 
 ## Dog Contract
 

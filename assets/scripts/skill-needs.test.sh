@@ -26,7 +26,10 @@
 # skill names one. It pins that command and checks it against the real gc
 # under a renamed import. It pins that the converse steps and the mechanik give
 # the exact command for each act they name while the skills explain the act
-# once, with one fragment pointing both prompts at the skills. It pins the prs
+# once, with one fragment pointing both prompts at the skills. It pins that the
+# dispatch fragment the mechanik and the keeper compose calls deferred-dispatch.sh
+# and gc-bd-watch.sh the work skill's way, so both renders reach the pack's own
+# copies. It pins the prs
 # skill's supplement command: filed in the PR's rig, holding the anchor's merge,
 # and slung only once that hold reads back, with the mechanik's copy the same
 # command. It pins that a formula's own description, not a doc, says which work
@@ -37,13 +40,17 @@
 # re-check's moot or benign close under stubs, and fails unless the close
 # releases a held subject that no open human gate still holds, leaves one that
 # a gate holds, and closes the conversation only once every read and write
-# before it has answered.
+# before it has answered. It pins that every skill and formula names a
+# pack skill to load by its catalog name, never by its path, so an agent in any
+# tree loads the installed pack's copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
 # that runs the real gc, the one GC_BIN names, points it at a scratch city that
 # is never started, where gc reads the config, lists skills and runs the pack
 # command. With no GC_BIN, as in CI, that case prints SKIP.
+#
+# run-tests-scope: tree
 
 set -u
 
@@ -178,6 +185,105 @@ done
 bound=$(grep -lE 'gc gc-toolkit [a-z]' "$SKILLS"/*/SKILL.md 2>/dev/null | sed "s#^$SKILLS/##" | tr '\n' ' ')
 [ -z "$bound" ] && ok "no pack skill writes a binding into a gc command" \
     || bad "no pack skill writes a binding into a gc command" "found in: $bound"
+
+echo "── a skill or formula names a pack skill to load by its catalog name, never its path ──"
+# An agent's skill catalog links each pack skill, under its catalog name
+# gc-toolkit.<name>, into the installed pack. A path to the skill,
+# skills/<name>/SKILL.md or skills/<name>, resolves against whatever tree the
+# agent stands in: in another rig it names nothing, and in a gc-toolkit
+# worktree it opens that tree's copy, such as a branch under review. A path
+# that goes on into a skill's directory names a file there, not the skill.
+#
+# A path that names a file to edit stays a path. The feedback distiller's
+# formula and its rubric name the skills its proposals change, which the
+# polecat that builds a proposal edits in its own checkout, and the formula
+# reads the rubric from origin/main as a git object. EDIT_TARGETS holds each of
+# those files with each skill it names that way, and nothing else is exempt.
+EDIT_TARGETS="formulas/mol-feedback-distiller.toml:learning-distill
+formulas/mol-feedback-distiller.toml:review-correctness
+skills/learning-distill/SKILL.md:learning-distill
+skills/learning-distill/SKILL.md:review-correctness"
+# skill_paths <root> — each path to a pack skill in the text of <root>'s skills
+# and formulas, as "<file>:<line>: <path>", leaving out EDIT_TARGETS.
+skill_paths() {
+    (
+        cd "$1" || exit 1
+        names=""
+        for f in skills/*/SKILL.md; do
+            [ -r "$f" ] && names="$names $(basename "$(dirname "$f")")"
+        done
+        files=()
+        while IFS= read -r f; do files+=("$f"); done < <(
+            { find skills -type f; ls formulas/*.toml 2>/dev/null; } | LC_ALL=C sort
+        )
+        [ "${#files[@]}" -gt 0 ] || exit 0
+        LC_ALL=C awk -v names="$names" -v targets="$(printf '%s' "$EDIT_TARGETS" | tr '\n' ' ')" '
+            BEGIN {
+                n = split(names, a, " ")
+                for (i = 1; i <= n; i++) skill[a[i]] = 1
+                n = split(targets, a, " ")
+                for (i = 1; i <= n; i++) { split(a[i], p, ":"); target[p[1], p[2]] = 1 }
+            }
+            {
+                rest = $0 " "
+                while (match(rest, /skills\/[a-z0-9][a-z0-9-]*/)) {
+                    name = substr(rest, RSTART + 7, RLENGTH - 7)
+                    rest = substr(rest, RSTART + RLENGTH)
+                    path = ""
+                    if (rest ~ /^\/SKILL\.md/) path = "skills/" name "/SKILL.md"
+                    else if (rest !~ /^\/?([A-Za-z0-9_-]|\.[A-Za-z0-9])/) path = "skills/" name
+                    if (path != "" && (name in skill) && !((FILENAME, name) in target))
+                        printf "%s:%d: %s\n", FILENAME, FNR, path
+                }
+            }
+        ' "${files[@]}"
+    )
+}
+hits=$(skill_paths "$ROOT")
+if [ -z "$hits" ]; then
+    ok "no pack skill or formula names a pack skill to load by its path"
+else
+    bad "no pack skill or formula names a pack skill to load by its path" \
+        "name each one gc-toolkit.<name>; a file a proposal edits is an EDIT_TARGETS entry:"
+    printf '%s\n' "$hits" | sed 's/^/          /'
+fi
+FX="$TMP/skill-paths"
+mkdir -p "$FX/formulas" "$FX/skills/a" "$FX/skills/b" "$FX/skills/learning-distill" "$FX/skills/review-correctness"
+: >"$FX/skills/b/SKILL.md"
+: >"$FX/skills/review-correctness/SKILL.md"
+cat >"$FX/skills/a/SKILL.md" <<'MD'
+Write the script by following `skills/b/SKILL.md`.
+Deliver it the way the method in skills/b says.
+Load `gc-toolkit.b` before you judge.
+Its anchor goes in skills/b/ledger.md, and a check's method in skills/review-<check>/.
+MD
+cat >"$FX/formulas/mol-x.toml" <<'TOML'
+description = "A bead whose work becomes the script, generated by following skills/b/SKILL.md."
+TOML
+cat >"$FX/formulas/mol-feedback-distiller.toml" <<'TOML'
+RUBRIC_PATH="skills/learning-distill/SKILL.md"
+- review-rubric -> skills/review-correctness/SKILL.md, What to check
+Write each proposal the way skills/b/SKILL.md says.
+TOML
+cat >"$FX/skills/learning-distill/SKILL.md" <<'MD'
+or a change to the correctness method itself (`skills/review-correctness/SKILL.md`)
+a proposal against `skills/learning-distill/SKILL.md` rides the same pipeline
+MD
+got=$(skill_paths "$FX")
+hit() { printf '%s\n' "$got" | grep -qxF -- "$1"; }
+seen="got: $(printf '%s' "$got" | tr '\n' ';')"
+hit 'skills/a/SKILL.md:1: skills/b/SKILL.md' && hit 'skills/a/SKILL.md:2: skills/b' \
+    && ok "a skill that names a pack skill by its path fails, as skills/<name>/SKILL.md and as skills/<name>" \
+    || bad "a skill that names a pack skill by its path fails, as skills/<name>/SKILL.md and as skills/<name>" "$seen"
+hit 'formulas/mol-x.toml:1: skills/b/SKILL.md' && ok "a formula that names a pack skill by its path fails" \
+    || bad "a formula that names a pack skill by its path fails" "$seen"
+! printf '%s\n' "$got" | grep -qE '^(skills/learning-distill/SKILL\.md|formulas/mol-feedback-distiller\.toml:[12]):' \
+    && hit 'formulas/mol-feedback-distiller.toml:3: skills/b/SKILL.md' \
+    && ok "the distiller's edit targets pass, and its path to a skill it does not edit fails" \
+    || bad "the distiller's edit targets pass, and its path to a skill it does not edit fails" "$seen"
+! printf '%s\n' "$got" | grep -qE '^skills/a/SKILL\.md:[34]:' \
+    && ok "a catalog name, a file in a skill's directory and a path to no pack skill pass" \
+    || bad "a catalog name, a file in a skill's directory and a path to no pack skill pass" "$seen"
 
 echo "── gc <binding> scripts-dir prints the scripts of the pack gc loaded ──"
 CMD="$ROOT/commands/scripts-dir/run.sh"
@@ -395,7 +501,7 @@ have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
 have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
 have "…reads the hold back from the anchor in the same rig" '&& gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json' "$PRS_SKILL"
 have "…and slings only after that read" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
-have "…whose target is the PR's base, an integration branch under an owned convoy" 'integration/<convoy-id>' "$PRS_SKILL"
+have "…whose target is the PR's base, the integration branch for a stage's PR" "the integration branch for a stage's PR" "$PRS_SKILL"
 have "…one at a time on a branch" 'Send one supplement at a time' "$PRS_SKILL"
 # fenced_block <file> <marker> — the fenced bash block that holds <marker>, with
 # the fence's own indent taken off each of its lines.
@@ -435,6 +541,43 @@ for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' 'GC_CITY_PATH'; do
     grep -qF -- "$probe" "$DISPOSITION" && found="$found [$probe]"
 done
 [ -z "$found" ] && ok "…and looks for it in no checkout" || bad "…and looks for it in no checkout" "found:$found"
+# The dispatch fragment renders into the mechanik's prompt and into the
+# keeper's. The keeper comes from the gascity-keeper sub-pack, and a pack path
+# rendered for it names that sub-pack, which holds none of the scripts the
+# fragment calls. So the fragment calls each of them the work skill's way, and
+# each render's calls resolve through the pack command to the pack's own copy.
+DISPATCH="$REPO/template-fragments/watch-dispatched-work.template.md"
+DD_CALL='"$(gc <binding> scripts-dir)/deferred-dispatch.sh"'
+WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
+have "the dispatch fragment gives the work skill's notice call" "$DD_CALL notify <bead> --agent <qualified-name>" "$DISPATCH"
+have "…the call the work skill gives" "$DD_CALL notify <bead> --agent <qualified-name>" "$WORK_SKILL"
+have "…and runs its watch through the pack command" "command: '$WATCH_CALL <bead>'" "$DISPATCH"
+for render in "$REPO/generated/seed-audit/agents/mechanik.md" "$REPO/generated/seed-audit/agents/keeper.md"; do
+    agent=$(basename "$render" .md)
+    verbs=$(grep -oF -- "$DD_CALL notify
+$DD_CALL arm" "$render" | sed 's/.* //' | sort -u | tr '\n' ' ')
+    [ "$verbs" = "arm notify " ] && ok "$agent's render gives the notice and the arm as calls through the pack command" \
+        || bad "$agent's render gives the notice and the arm as calls through the pack command" "found: '$verbs'"
+    have "…and the watch" "command: '$WATCH_CALL <bead>'" "$render"
+    # Prose names a script by its bare name in backticks. Every other mention
+    # is a call, and goes through the pack command.
+    for script in deferred-dispatch.sh gc-bd-watch.sh; do
+        call="\"\$(gc <binding> scripts-dir)/$script\""
+        named=$(grep -oF -- "$script" "$render" | wc -l | tr -d ' ')
+        prose=$(grep -oF -- "\`$script\`" "$render" | wc -l | tr -d ' ')
+        via=$(grep -oF -- "$call" "$render" | wc -l | tr -d ' ')
+        [ "$via" -gt 0 ] && [ "$named" = "$((via + prose))" ] && ok "…and names $script no other way ($via calls)" \
+            || bad "…and names $script no other way" "$via of its $((named - prose)) calls go through the pack command"
+    done
+done
+for script in deferred-dispatch.sh gc-bd-watch.sh; do
+    call="\"\$(gc <binding> scripts-dir)/$script\""
+    printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"
+    got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" bash "$TMP/fragment-call-$script" 2>/dev/null)
+    [ "$got" = "$ROOT/assets/scripts/$script" ] && [ -x "$got" ] \
+        && ok "with the city's binding filled in, the fragment's call resolves to the pack's own $script" \
+        || bad "with the city's binding filled in, the fragment's call resolves to the pack's own $script" "resolved '$got'"
+done
 
 echo "── a step that depends on the one before it runs only once that one succeeded ──"
 # An example that records an outcome and then closes, files a bead and then
