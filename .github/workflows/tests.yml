@@ -13,10 +13,12 @@ name: tests
 # state; it is only a CI-cost lever here.
 # The suite is hermetic: each test stubs gc/bd and works in its own temp dir,
 # so a runner needs no gc binary and no running city. It needs bash 5, git,
-# jq 1.8 or later, timeout(1), flock(1), a Python with tomllib, and the Go
-# toolchain the setup-go step installs for the gctk builds that several suites
-# make. The Linux job installs its jq and takes the rest from ubuntu-latest;
-# the macOS job installs what its image lacks.
+# jq 1.8 or later, timeout(1), flock(1), a Python with tomllib, a Ruby with
+# Psych, and the Go toolchain the setup-go step installs for the gctk builds
+# that several suites make. Psych is the YAML parser Ruby ships, and
+# action-pins.test.sh reads the workflows with it. The Linux job installs its
+# jq and takes the rest from ubuntu-latest; the macOS job installs what its
+# image lacks.
 # Main's ruleset names the checks that gate a merge by job id, so renaming a
 # job, or giving it a name: or a matrix, changes the check a merge waits on.
 
@@ -48,14 +50,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # lifecycle.sh execs gctk and has no other implementation, so every
       # suite whose scripts reach it builds services/gctk from source, and so
       # does pr-status-label.test.sh; the rest of the suite is shell-only.
       # go.mod names the toolchain version. gctk is stdlib-only (no go.sum), so
       # module caching has nothing to cache.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: services/gctk/go.mod
           cache: false
@@ -96,10 +98,10 @@ jobs:
     # ubuntu's, so its limit is higher.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The same gctk toolchain as test.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: services/gctk/go.mod
           cache: false
