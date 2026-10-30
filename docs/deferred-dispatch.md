@@ -239,6 +239,14 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   the held one dispatches when its hold releases, the stranded one never
   dispatches at all.
 
+A converse sitting's hold leaves an arm in place, and the sitting's ruling
+decides what the arm does next. A ruled sign-off releases an armed held
+subject to its arm: the release leaves the bead with no route, as it was
+before the hold, and the pass sends it once nothing holds it. The sign-off
+refuses a pool route for an armed subject, because that pool would claim the
+bead beside the arm's sling. A ruling that sends the subject any other way
+disarms it before the sign-off.
+
 The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
 defines it: an open `blocks` blocker on the bead or on one of its
 parent-child ancestors. A park and a prerequisite hold alike, so an armed

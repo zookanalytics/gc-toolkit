@@ -77,6 +77,11 @@ the target's `default_sling_formula`, which for a polecat pool is
   which a sitting's sign-off `--route <pool>` also writes when it releases a
   held subject, has the pool claim the bead itself. Send it one way. Both start
   two workers on one branch.
+  An arm (`deferred-dispatch.sh arm`) is a sling the deferred-dispatch pass
+  makes once nothing holds the bead, and it outlives a sitting's hold. A ruled
+  sign-off releases an armed subject to its arm with no route, and refuses a
+  pool route beside it. Send such a subject nothing more, or disarm it first
+  (`deferred-dispatch.sh disarm <bead>`) to send it another way.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`,
