@@ -245,11 +245,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    path included, stops every open step that names it once that copy takes the
    merge. `script-callers.sh --check-merge` reads the same two fetched commits
    and takes the files under `assets/scripts/` the change removes that the base
-   still carries, tests aside. A formula at the base or at the head that still
-   names one pours runs that call it until the merge reaches the city, so no
-   wait clears it: the arm holds the merge and files one visit per PR under
-   `script-callers-merge-gate.<n>`. The way out is to keep a file at the path, a
-   hand-off to what replaces the script, and remove it in a later change. Open
+   still carries, tests aside. A formula that still names one keeps pouring
+   runs that call it, so no wait clears it. That is a formula at the base, at
+   the head, or at the rig checkout's HEAD, which the city pours its runs from
+   until the checkout is fast-forwarded. The arm then holds the merge and files
+   one visit per PR under `script-callers-merge-gate.<n>`. The way out is to
+   keep a file at the path, a hand-off to what replaces the script, and remove
+   it in a later change. Open
    steps in any store of the city that call a removed script hold the merge
    until their runs end, and the arm records the anchor as `progressing`, since
    those runs end with no one acting. A check that cannot read a revision, the

@@ -8,9 +8,10 @@
 #   - --check-merge takes the files the change removes from assets/scripts/,
 #     a rename's old path included, that the base still carries, and leaves
 #     tests out;
-#   - a removed script that a formula at the base or at the head still names,
-#     a sub-pack's formula included, exits 1 before any store is read, since
-#     no wait clears it;
+#   - a removed script that a formula at the base, at the head or at the
+#     checkout's HEAD still names, a sub-pack's formula included, exits 1
+#     before any store is read, since no wait clears it, and a checkout at the
+#     base is read once;
 #   - a removed script that only open steps call exits 3, and one nothing
 #     calls exits 0;
 #   - it exits 2 when it decides nothing: a usage error, a revision or
@@ -238,6 +239,20 @@ has "$(cat "$STUB_GC_LOG")" "--desc-contains old-tool.sh" "...asking the stores 
 run --root "$REPO" --check-merge main rename
 eq "$rc" "3" "a rename removes the old path"
 has "$out" "(assets/scripts/old-tool.sh)" "...which is the path the callers lose"
+
+# The city pours from the checkout it imports the pack from, which reaches the
+# base only when it is fast-forwarded.
+G checkout -q --detach main~1
+: > "$STUB_GC_LOG"
+run --root "$REPO" --check-merge main delete
+eq "$rc" "1" "a formula the checkout's HEAD still carries counts, though the base and the head stopped naming it"
+has "$out" "assets/scripts/old-tool.sh: the merge removes it, and formulas/mol-b.toml at the checkout's HEAD (" \
+  "...naming the checkout's HEAD"
+eq "$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0" "...before any store is read"
+run --root "$REPO" --check-merge main~1 same-change
+has "$(printf '%s\n' "$out" | head -1)" "1 formula file(s) name a script the merge removes." \
+  "a checkout at the base is read once, as the base"
+G checkout -q main
 
 callers_off
 run --root "$REPO" --check-merge main delete

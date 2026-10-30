@@ -31,13 +31,14 @@
 # render made stale at the MERGE RESULT (the tree `git merge-tree` writes is
 # re-rendered, so a render the merge would leave stale holds and escalates
 # rather than landing); no file under assets/scripts/ the merge removes while a
-# formula at the base or head still names it (held and escalated) or an open
-# step in any store of the city calls it (held until those runs end), which
-# script-callers.sh --check-merge answers. The FULL anchor-local authorization
-# set is re-read immediately before the merge; any mismatch holds. `gh pr merge
-# --squash --match-head-commit`, then ONE lifecycle transition --to merged
-# --close. A failed record exits non-zero loudly and the anchor is recovered by
-# the already-merged arm above on a later pass — that arm is here, and not left
+# formula at the base, the head or the rig checkout's HEAD still names it (held
+# and escalated) or an open step in any store of the city calls it (held until
+# those runs end), which script-callers.sh --check-merge answers. The FULL
+# anchor-local authorization set is re-read immediately before the merge; any
+# mismatch holds. `gh pr merge --squash --match-head-commit`, then ONE
+# lifecycle transition --to merged --close. A failed record exits non-zero
+# loudly and the anchor is recovered by the already-merged arm above on a later
+# pass — that arm is here, and not left
 # to pr-facts.sh alone, because the arms are ordered and a killed pass loses
 # the later ones. A record that keeps failing is bounded rather than retried
 # forever: record-failure-cap.sh counts the failures on the anchor and

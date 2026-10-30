@@ -10,8 +10,8 @@
 #                  the rig whose store holds it.
 #   --check-merge  the files under assets/scripts/ that merging <head> into
 #                  <base> removes, tests aside, and for each the formulas at
-#                  <base> or at <head> that still name it and the open steps
-#                  that call it.
+#                  <base>, at <head> or at the checkout's HEAD that still name
+#                  it and the open steps that call it.
 #   --root <dir>   the repository <base> and <head> are read in, the current
 #                  directory's by default.
 #
@@ -24,6 +24,12 @@
 # later change removes it. A script that only open steps call is clear to
 # remove once their runs end.
 #
+# The checkout's HEAD counts because a city that imports the pack from a
+# checkout pours its runs from the formulas there, and the checkout reaches
+# the base only when it is fast-forwarded. gctk merge runs in the rig checkout
+# this pack is imported from, so a formula the base has stopped naming still
+# pours runs that call the script until that checkout moves.
+#
 # A text names a script when it holds the file name with no letter, digit,
 # dot, dash or underscore on either side. A step is a bead carrying
 # gc.step_ref, in any status but closed. The stores are those of every rig
@@ -34,10 +40,11 @@
 # request's merge on every exit but 0, and anyone about to remove a script.
 #
 # Exit: 0 no open step calls the scripts, or the merge removes no script that a
-#       formula names or an open step calls · 1 a formula at <base> or <head>
-#       names a script the merge removes · 2 usage, or a revision, the rig list
-#       or a store could not be read, so nothing was decided · 3 open steps
-#       call the scripts, or a script the merge removes
+#       formula names or an open step calls · 1 a formula at <base>, at <head>
+#       or at the checkout's HEAD names a script the merge removes · 2 usage, or
+#       a revision, the checkout's HEAD, the rig list or a store could not be
+#       read, so nothing was decided · 3 open steps call the scripts, or a
+#       script the merge removes
 set -uo pipefail
 
 PROG="script-callers"
@@ -126,9 +133,9 @@ if [ -z "$CHECK_MERGE" ]; then
 fi
 
 git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || fail "not a git repository: $ROOT"
-for rev in "$MERGE_BASE" "$MERGE_HEAD"; do
-  git -C "$ROOT" rev-parse --verify --quiet "$rev^{commit}" >/dev/null || fail "'$rev' names no commit in $ROOT; fetch it first"
-done
+BASE_OID=$(git -C "$ROOT" rev-parse --verify --quiet "$MERGE_BASE^{commit}") || fail "'$MERGE_BASE' names no commit in $ROOT; fetch it first"
+HEAD_OID=$(git -C "$ROOT" rev-parse --verify --quiet "$MERGE_HEAD^{commit}") || fail "'$MERGE_HEAD' names no commit in $ROOT; fetch it first"
+CHECKOUT_OID=$(git -C "$ROOT" rev-parse --verify --quiet "HEAD^{commit}") || fail "the checkout in $ROOT has no HEAD commit"
 # The change's own deletions, from where it left <base>, that <base> still
 # carries. A rename deletes the old path.
 REMOVED=$(git -C "$ROOT" diff --name-only --no-renames --diff-filter=D "$MERGE_BASE...$MERGE_HEAD" -- assets/scripts) \
@@ -159,14 +166,20 @@ named_in() {
   done <<< "$out"
 }
 
+SIDES=(base head)
+[ "$CHECKOUT_OID" = "$BASE_OID" ] || [ "$CHECKOUT_OID" = "$HEAD_OID" ] || SIDES+=(checkout)
 NAMED=0; NAMED_LINES=""
 for i in "${!PATHS[@]}"; do
-  for side in base head; do
-    if [ "$side" = base ]; then rev="$MERGE_BASE"; else rev="$MERGE_HEAD"; fi
+  for side in "${SIDES[@]}"; do
+    case "$side" in
+      base) rev="$MERGE_BASE"; where="the base ($MERGE_BASE)" ;;
+      head) rev="$MERGE_HEAD"; where="the head ($MERGE_HEAD)" ;;
+      checkout) rev="$CHECKOUT_OID"; where="the checkout's HEAD (${CHECKOUT_OID:0:12})" ;;
+    esac
     files=$(named_in "$rev" "${NAMES[$i]}") || exit 2
     [ -n "$files" ] || continue
     while IFS= read -r f; do
-      NAMED_LINES="$NAMED_LINES${PATHS[$i]}: the merge removes it, and $f at the $side ($rev) still names it"$'\n'
+      NAMED_LINES="$NAMED_LINES${PATHS[$i]}: the merge removes it, and $f at $where still names it"$'\n'
       NAMED=$((NAMED + 1))
     done <<< "$files"
   done
