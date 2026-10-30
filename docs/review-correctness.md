@@ -1,6 +1,6 @@
 ---
 name: The correctness check on gc-toolkit
-description: The method extension the correctness check appends on gc-toolkit reviews. For each surface the repository ships, its bash and jq scripts, the shell blocks in its formulas and skills, its Go services and the helm web app, it names what the gates run and the defects a review there hunts.
+description: The method extension the correctness check appends on gc-toolkit reviews. It makes a rule only gc-toolkit holds a finding wherever a change writes one into the pack content every rig runs. For each surface the repository ships, its bash and jq scripts, the shell blocks in its formulas and skills, its Go services and the helm web app, it names what the gates run and the defects a review there hunts.
 ---
 
 # The correctness check on gc-toolkit
@@ -19,7 +19,9 @@ repository's gates catch.
 
 **Boundaries.** The method, its grades and the verdict are pack content, in
 `skills/review-correctness/SKILL.md`. The rule a lint detector enforces is
-stated in its header under `tools/lint-learned.d/`.
+stated in its header under `tools/lint-learned.d/`. `AGENTS.md` and
+[architecture.md](architecture.md#what-the-pack-supplies-and-what-a-rig-supplies)
+state where a rule that binds only gc-toolkit's own repository lives.
 
 ## Where the gates run
 
@@ -36,6 +38,55 @@ declares.
 - CI runs the whole `*.test.sh` suite on Linux and on macOS
   (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
   merge waits on the checks main's ruleset requires.
+
+## Pack content every rig runs
+
+gc-toolkit is the pack every rig in the city runs, and also a rig of its own.
+Pack content is what the installed pack runs or loads, which every rig shares,
+such as its skills, formulas, agent prompts and template fragments, its
+scripts, orders, doctor checks and hooks, its services,
+`lifecycle/lifecycle.toml` and the rows of `review-checks.toml`. Its
+directories include `skills/`, `formulas/`, `agents/`, `template-fragments/`,
+`assets/scripts/`, `orders/`, `doctor/`, `overlays/` and `services/`, and a
+file outside them is pack content when pack content runs it, as pack scripts
+run `tools/gc-proactive.sh`. A skill's description and a formula's step prose
+are pack content as much as a script is. `review-checks.toml` is both the
+pack's check index and gc-toolkit's own, so a row changed there changes that
+check for every rig.
+
+A rule that binds only work on gc-toolkit's own repository stays out of pack
+content
+([architecture.md](architecture.md#what-the-pack-supplies-and-what-a-rig-supplies)).
+No gate looks for one. A lint for the repository's name cannot be the guard,
+because such a rule can be worded for any repository and name none.
+
+- **A rule only gc-toolkit holds is a finding.** The test is whether a rig
+  other than gc-toolkit would hold its own changes to the rule. A rule fails it
+  when it rests on a doc, a plan or a convention only gc-toolkit keeps, such as
+  its component model, its deletion plan or the size line on its pull
+  requests. It fails just as surely when its wording fits any repository while
+  the discipline it states is one only gc-toolkit keeps. Text that names the
+  pack only to reach the pack's own scripts or skills states no such rule.
+- **The finding names every line that carries the rule.** A change can write
+  one rule into several pack files at once, such as a skill's body and its
+  description, or a check's method and its purpose in `review-checks.toml`. A
+  clause the change adds to a description or a purpose to announce the rule
+  carries the rule, even when the clause read alone states a general
+  principle. Each of those lines is a locus of the same finding.
+- **The failure is in another rig.** An agent at work for another rig follows
+  the rule as written. It holds that rig's change to gc-toolkit's rule, looks
+  for a gc-toolkit doc the rig does not keep, or adds gc-toolkit's output to the
+  rig's pull request. That is an instruction that does the wrong thing when it
+  is followed as written, so the finding blocks. It also makes false
+  architecture.md's statement that such a rule is never written into the pack
+  content every rig runs.
+- **The fix moves the rule.** It goes where `AGENTS.md` sends a rule for
+  gc-toolkit's own repository. Guidance to one review check goes into
+  gc-toolkit's `docs/review-<check>.md`, and a check only gc-toolkit runs goes
+  under `tools/lint-learned.d/` or `.github/workflows/`. Making the rule apply
+  only where a rig's own extension opts in still leaves its text in every
+  rig's copy, so that is no fix. The pack file keeps text that holds for every
+  rig, and the finding names where the rule goes.
 
 ## Bash and jq scripts
 

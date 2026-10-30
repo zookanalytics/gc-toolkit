@@ -1,13 +1,13 @@
 # gc-toolkit
 
 This repository is the pack every rig in the city runs, and it is also a rig of
-its own. The skills, formulas, agent prompts and template fragments it ships run
-in every rig
+its own. What it ships as the pack, such as its skills, formulas, scripts, agent
+prompts and template fragments, runs in every rig
 ([architecture.md](docs/architecture.md#what-the-pack-supplies-and-what-a-rig-supplies)),
-so a rule that binds only work on this repository never goes into them. It goes
-here when every session working on the repository needs it, and otherwise into
-the doc or the check that owns it. Every session that works in a gc-toolkit
-worktree loads this file.
+so a rule that binds only work on this repository is never written there. The
+rule goes here when every session working on the repository needs it, and
+otherwise into the doc or the check that owns it. Every session that works in a
+gc-toolkit worktree loads this file.
 
 ## Code the deletion plan retires gets no new work
 
