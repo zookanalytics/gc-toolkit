@@ -12,3 +12,4 @@ reviewer reads the whole method file and an HTML comment is noise in it.
     <!-- rule:tk-0rhvews src:pr:#964:comment:4171895604, pr:#1117:comment:4198995344 (operator feedback) adopted:2026-10-07 --> Testing
     <!-- rule:tk-prvea src:pr:#1045:comment:4212283737, pr:#1075:comment:4211952314, pr:#1067:review:5423601195 (operator feedback) adopted:2026-10-08 --> Cross-file trace
     <!-- rule:tk-gz2vhjc src:pr:#1298:comment:4355436962, bead:tk-0252t8u (operator feedback) adopted:2026-10-26 --> Scope claims
+    <!-- rule:tk-po3br6 src:pr:#1225:comment:4255130671, pr:zookanalytics/gascity#231:comment:4240281464 (operator feedback), bead:tk-j5weba, bead:tk-0fkq5gi adopted:2026-10-30 --> Readiness

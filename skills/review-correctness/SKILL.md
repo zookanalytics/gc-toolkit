@@ -140,7 +140,11 @@ that names its cause.
   check runs each new case against the pre-change code, and confirms that a
   failure-path case's stub can produce the failure it names.
 - **Readiness** — back-compat and migration, fail-closed where fail-closed
-  was intended, docs the change just made false.
+  was intended, docs the change just made false. A fallback the diff adds is a
+  finding when nothing reports that it ran or that its answer was wrong. Bound
+  the cases it covers, or drop it for a cost that shows, such as a refusal or
+  a one-time duplicate, and keep it only for input nothing bounded can
+  express, reporting each time it runs.
 - **Comments** — a comment carries the code's non-obvious why. Narration of
   the change, the bead, or the design doc belongs in the commit message
   instead. Prose duplicated across files, or restating a comment a few lines
