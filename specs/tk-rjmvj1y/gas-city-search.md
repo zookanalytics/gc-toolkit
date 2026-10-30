@@ -12,14 +12,14 @@ as switching the API off. The arch check asks what Gas City already ships for
 that ([review-arch.md](../../docs/review-arch.md#the-checks), check 1).
 
 Gas City reads `GC_NO_API` in each gc process, and no flag or setting it ships
-fixes the route of one command, so the pack sets the variable on each call. Gas
+keeps one command's read local, so the pack sets the variable on each call. Gas
 City hands a rig's own lint rules to the rig through the rig's `lint_command`,
 and the detector runs inside that seam. Gas City's own checkers are `gc lint`,
 whose checks are fixed Go code that no pack adds to, and `gc doctor`, which runs
 a pack's checks against the pack the city has already loaded. Neither refuses a
-change before it lands. Gas City's repositories hold rules about the commands
-their files run as checks each repository owns, and the detector is one more
-such check.
+change that adds a call without the setting before the change lands. Gas City's
+repositories hold rules about the commands their files run as checks each
+repository owns, and the detector is one more such check.
 
 ## The surface and the need
 
@@ -74,7 +74,10 @@ on the live sites, docs.gascity.com and beads.gascity.com.
 - The [CLI reference](https://docs.gascity.com/reference/cli#gc-session-list)
   gives `gc session list` the flags `--json`, `--state` and `--template`, and
   gc's global flags are `--city`, `--rig`, `--context`, `--city-url` and
-  `--city-name`. None of them chooses where the rows come from.
+  `--city-name`. None of them keeps the rows local. `--context` and
+  `--city-url` name a remote city, and `routeReadCmd` then reads that city's API
+  with no local fallback. gc refuses `GC_NO_API` beside a remote city
+  (`guardNoAPI`).
 - The command takes its client from `localWhenSupervisorHostedAPIClient`
   (package main, `sessionListAPIClient`), which #8331 set (`320b482fc`,
   2026-10-28). That function's comment gives the reason: the local rows "carry
@@ -82,14 +85,18 @@ on the live sites, docs.gascity.com and beads.gascity.com.
   the summary), which the API's session rows do not". The local row,
   `sessionListJSONRow`, has `provider`, `rig`, `agent_name`, `session_key` and
   `closed`. The API path's row, package api's `SessionView`, has none of them.
-- That route renders locally for a supervisor-hosted city only once gc has
-  learned that the city is one. `routeAPIClient` asks `probeControllerIdentity`,
-  which sends the controller its identify command with 500 ms to dial, 500 ms to
-  write and 2 s to read, and falls back to `controllerAlive`'s ping with the same
-  timeouts. When neither answers in time, the probe reports no controller, and
-  `routeAPIClient` returns the supervisor-managed client, so a city the
-  supervisor runs gets the supervisor API's rows. A controller slowed by load can
-  miss both, and that is the case the rule exists for.
+- That route renders locally for a supervisor-hosted city only while the city's
+  controller answers gc. `routeAPIClient` asks `probeControllerIdentity`, which
+  sends the controller its identify command with 500 ms to dial, 500 ms to write
+  and 2 s to read, and falls back to `controllerAlive`'s ping with the same
+  timeouts. An identify reply tells gc that the supervisor hosts the city, and
+  the command renders locally. A ping reply alone leaves the hosting mode
+  unknown, and `routeAPIClient` then tries only the city's own `[api]` port, so a
+  city that sets none renders locally as well. When neither answers in time, the
+  probe reports no controller, and `routeAPIClient` returns the
+  supervisor-managed client, so a city the supervisor runs gets the supervisor
+  API's rows. A controller slowed by load can miss both, and that is the case
+  the rule exists for.
 - `routeAPIClient` returns no client on any route while `GC_NO_API` is 1, true or
   yes (`classifyGCNoAPI`), so the command renders locally whatever the controller
   does. The CLI reference documents the variable only under
@@ -104,14 +111,16 @@ to every managed session"), `Agent`, `AgentOverride`, `AgentPatch`,
 [`OrderOverride`](https://docs.gascity.com/reference/config#orderoverride)
 ("exported into an exec order's child process"). `GC_NO_API` set in any of them
 reaches every gc command that process runs, and `routeAPIClient` then sends none
-of them to the API. Gas City sends `gc status`, `gc ready` and `gc maintenance`
-to the supervisor on purpose (`supervisorFallthroughAPIClient`). That function's
-comment puts `gc status`'s local fallback, which re-opens the local store and
-rescans event archives, at about 9.5 s of CPU against about 0.35 s for the
-supervisor's cached answer.
+of the commands it routes to the API. Gas City sends `gc status`, `gc ready` and
+`gc maintenance` to the supervisor on purpose (`supervisorFallthroughAPIClient`).
+That function's comment puts `gc status`'s local fallback, which re-opens the
+local store and rescans event archives, at about 9.5 s of CPU against about
+0.35 s for the supervisor's cached answer.
 [`APIConfig`](https://docs.gascity.com/reference/config#apiconfig)'s `port` does
-not reach this route either: `apiClient`'s comment says the supervisor ignores a
-hosted city's `[api]` port and serves the city on its own.
+not keep the read local either. When both probes miss, `routeAPIClient` returns
+the supervisor-managed client without reading the port, and `apiClient`'s
+comment says the supervisor ignores a hosted city's `[api]` port and serves the
+city on its own.
 
 **No pack Gas City bundles or publishes keeps the read local.** In `core`,
 `orphan-sweep.sh`, `nudge-on-route.sh` and `cascade-nudge-on-blocker-close.sh`
@@ -119,8 +128,9 @@ run `gc session list --json` with no `GC_NO_API`. At the packs repository's main
 gastown's `witness-heartbeat-check.sh`, `mol-shutdown-dance` and
 `mol-witness-patrol`, oversight-rig's `nudge-project-leads.sh` and the
 repository's `scripts/gascity_pack_inference_gate.py` run it the same way.
-Neither the repository nor the bundled `gastown` and `gascity` copies name
-`GC_NO_API` anywhere.
+Gastown's and oversight-rig's agent prompts and core's `gc-city` skill give
+agents the bare command. None of `core`, the packs repository and the bundled
+`gastown` and `gascity` copies names `GC_NO_API` anywhere.
 
 So the variable on each call is the narrowest control Gas City offers, and
 nothing Gas City ships keeps a new call carrying it.
