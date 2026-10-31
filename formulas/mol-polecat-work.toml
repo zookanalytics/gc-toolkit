@@ -1659,12 +1659,14 @@ does not do, and only you know what the branch turned out to be. Set
 section: the type, then the words, with no bead id, because the PR title adds it.
 `git log --format=%s origin/<target>..HEAD` lists the subjects you committed. A
 title with no type takes one from the bead's kind, which reads `chore:` on a
-task. Set it empty only when the title already opens with the type that fits and
-still names what the branch does:
+task.
 
 ```bash
 ANCHOR_TITLE="<type>: <what the branch does>"
 ```
+
+Set it empty only when the title already opens with the type that fits and still
+names what the branch does.
 
 The handoff below writes it onto the anchor, never onto the PR. The merge
 cadence composes the PR title from the anchor, so a title typed into the PR
