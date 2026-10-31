@@ -25,7 +25,7 @@ in every run.
 | A, bring-current task | Prerequisite landed, merge undone, dependent armed on its close, all spelled out | keep open 3 of 3 | keep open 3 of 3 |
 | B, town-repo edit | Edit unmade, waits on a pull request | keep open 3 of 3 | keep open 3 of 3 |
 | G, A as a hook line | A title and `ready`, with no edge named | keep open 3 of 3 | keep open 3 of 3 |
-| H, B as a hook line | A title and `blocked by`, with no edge named | keep open 3 of 3 | keep open 3 of 3 |
+| H, B as a hook line | A title and `blocked by` an id, with no pull request named | keep open 3 of 3 | keep open 3 of 3 |
 | C, the correction's incident | P1, fixes live, kept so the next session sees it | close 3 of 3 | close 3 of 3 |
 | D, someone else's work | Cause found in a pack script, fix unwritten | close 3 of 3 | close 3 of 3 |
 | F, a watcher | A reminder to look at an order's log in a week | close 3 of 3 | close 3 of 3 |
