@@ -437,7 +437,7 @@ for f in "$PROMPT" "$SETTLE"; do
 done
 # The roles that route work point at the four skills through one fragment, so
 # the pointer is written once: each prompt includes it and keeps no copy of its
-# own. The skill descriptions every agent sees say what each skill covers, so
+# own. The skill descriptions every agent sees say when to load each skill, so
 # no prompt restates that, and no prompt singles out one formula.
 ASK="$REPO/template-fragments/ask-for-work.template.md"
 tr '\n' ' ' <"$ASK" >"$TMP/ask-joined"

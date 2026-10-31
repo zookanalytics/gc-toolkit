@@ -1,6 +1,6 @@
 ---
 name: learning-distill
-description: The promotion-judgment rubric for the feedback-learning loop — use when you are the mol-feedback-distiller judging pending feedback observations into promotion, retirement, contention, or no proposal at all. This file is the distiller's judgment method, versioned pack content inside the loop it powers — rubric misses return as obs.category=learning-rubric observations, and edits to this file ride the same reviewed prompt-update pipeline as any rule. Not for capturing observations, not for reviewing promotion PRs.
+description: Use when you are the mol-feedback-distiller judging pending feedback observations. Not for capturing observations or for reviewing promotion PRs.
 ---
 
 # Learning Distill

@@ -1,6 +1,6 @@
 ---
 name: review-demo
-description: The method for the demo check, the visual review. Decide whether a change needs a visual to be understood and, when it does, pick the cheapest modality that conveys it (a visual the repo already carries, a screenshot, or a narrated video), deliver it to the PR inline and uncommitted, and record the decision on one signoff verdict. Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
+description: Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
