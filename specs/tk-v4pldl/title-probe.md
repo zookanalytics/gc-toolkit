@@ -105,8 +105,9 @@ table above.
 
 **What it did to a real name.** #1362's diff doubles every `#` so that text in a
 tmux menu cannot run as a shell command. With "name what changes rather than how"
-as a clause and no example, 8 of 9 titles named the escaping. With one contrasting
-example added to the section, 9 of 9 named what changes, as in `security(visit):
+as a clause and no example, 6 of 9 titles named the escaping on the first wording
+and 8 of 9 on the second. With one contrasting example added to the section, 9 of 9
+named what changes, as in `security(visit):
 stop tmux pickers running commands from menu text`. Reading the other cases side by
 side, their titles stayed as good. The second arm's and the rig's types did not
 move, and in this repository's arm #1344 went from `feat` to `build` in all three
