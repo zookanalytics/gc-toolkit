@@ -102,6 +102,16 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   waiting. An untracked spec dump, or a fix that defers to nothing, is the
   anti-pattern. The discipline is the tracked deferral, not a ban on specs.
 
+<!-- rule:tk-qenzk6e src:bead:tk-qjc4uaa, bead:tk-cxtkwyw, pr:#1008:comment:5983192498, visit:tk-z9vxelu, visit:tk-9adohq9 (operator feedback) adopted:2026-10-31 -->
+- Before you add or keep a compatibility, legacy or transitional path, such
+  as a fallback, a lenient mode, old logic kept beside its replacement, or a
+  bridge's behavior preserved in the code that replaces it, name the caller
+  or stored data that depends on it, check that its case occurs, and read
+  what that caller does when the strict form refuses it. When nothing
+  depends on it, build only the end state, and when a real case does, file
+  the bead that removes the path in the same change, blocked by what retires
+  the case and armed to dispatch when it lands.
+
 
 ## Execute immediately
 
