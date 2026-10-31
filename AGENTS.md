@@ -21,3 +21,26 @@ own waits on that retirement: give it an `until` edge to the retiring bead (the
 nowhere. A first reaction does that through its `until` exit. A problem that
 hurts the operator now gets the smallest stopgap that stops the harm, and no new
 test suite.
+
+## A change that adds operational surface shows its Gas City search
+
+This applies to a change that adds
+[operational surface](docs/review-arch.md#when-the-lens-applies), such as a
+script, a service or one of its commands, an order, a cluster of formula steps,
+a metadata key, a bead kind or a lifecycle state. It also applies to a change
+that grows existing surface with a new verb, mode or key, such as a script's new
+flag, a new key in its output or a new diagnostic in a doctor check. Tests,
+prompts, skills and a formula's prose are not surface.
+
+Before building the surface, look for the Gas City or bd primitive that covers
+the need, and compose that primitive when one does. When none does, name the
+primitive you searched for and say why it does not cover the need, in the change
+itself: in a commit message, in a spec such as
+`specs/<bead-id>/gas-city-search.md`, or in a warrant the change adds. Cite it
+by upstream page, or by symbol at a named upstream commit. A fork of Gas City
+and the pack's own pages about Gas City are not evidence, and a commit body that
+only explains the design shows no search.
+
+The arch check's divergence lens sends back a change without this record.
+[review-arch.md](docs/review-arch.md) holds its method, the evidence it accepts
+and its other checks.
