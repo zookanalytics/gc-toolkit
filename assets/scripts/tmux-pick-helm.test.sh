@@ -37,11 +37,11 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (unexpectedly got: $1)" ;; *) ok "$3" ;; 
 
 # --- fixture ------------------------------------------------------------------
 CASE=0
-fixture() { # -> ROOT STATE STUBS TMUXLOG; BOARD_RC/BOARD_OUT/BOARD_ERR drive the stub
+fixture() { # -> ROOT STATE STUBS TMUXLOG MENUARGV; BOARD_RC/BOARD_OUT/BOARD_ERR drive the stub
     CASE=$((CASE + 1))
     local base="$TMP/case$CASE"
     ROOT="$base/scripts"; STATE="$base/state"; STUBS="$base/stubs"
-    TMUXLOG="$base/tmux-calls"; ARGVLOG="$base/helm-svc-argv"
+    TMUXLOG="$base/tmux-calls"; ARGVLOG="$base/helm-svc-argv"; MENUARGV="$base/menu-argv"
     mkdir -p "$ROOT" "$STATE/bin" "$STUBS"
     cp "$PICK" "$ROOT/tmux-pick-helm.sh"
     # The picker refuses to run at all without its sibling opener.
@@ -49,9 +49,12 @@ fixture() { # -> ROOT STATE STUBS TMUXLOG; BOARD_RC/BOARD_OUT/BOARD_ERR drive th
     chmod +x "$ROOT/gc-helm.sh"
 
     # Stub tmux: one line per subcommand, with the arguments, so a case can
-    # assert on which surface the operator was shown.
+    # assert on which surface the operator was shown. A display-menu call is
+    # also kept one argument at a time, NUL-terminated, so a case can read each
+    # item name whole.
     { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$STUBS/tmux" <<'STUB'
 printf '%s\n' "$*" >> "$STUB_TMUX_LOG"
+if [ "${1:-}" = display-menu ]; then printf '%s\0' "$@" > "$STUB_MENU_ARGV"; fi
 STUB
     chmod +x "$STUBS/tmux"
 
@@ -68,7 +71,7 @@ STUB
 
 run_pick() { # [script args] -> RC, tmux calls in $CALLS, helm-svc argv in $ARGV
     set +e
-    STUB_TMUX_LOG="$TMUXLOG" STUB_BOARD_ARGV="$ARGVLOG" \
+    STUB_TMUX_LOG="$TMUXLOG" STUB_MENU_ARGV="$MENUARGV" STUB_BOARD_ARGV="$ARGVLOG" \
     STUB_BOARD_RC="${BOARD_RC:-0}" STUB_BOARD_OUT="${BOARD_OUT:-}" \
     STUB_BOARD_ERR="${BOARD_ERR:-}" \
     GC_SERVICE_STATE_ROOT="${STATE_OVERRIDE-$STATE}" \
@@ -78,6 +81,42 @@ run_pick() { # [script args] -> RC, tmux calls in $CALLS, helm-svc argv in $ARGV
     set -e
     CALLS="$(cat "$TMUXLOG" 2>/dev/null || true)"
     ARGV="$(cat "$ARGVLOG" 2>/dev/null || true)"
+}
+
+# menu_names — each item name the case's display-menu call carried, one per
+# line. The picker appends name, key and command triples after `--`.
+menu_names() {
+    local arg i=0 seen=""
+    [ -f "$MENUARGV" ] || return 0
+    while IFS= read -r -d '' arg; do
+        if [ -z "$seen" ]; then
+            [ "$arg" != "--" ] || seen=1
+            continue
+        fi
+        [ $((i % 3)) -ne 0 ] || printf '%s\n' "$arg"
+        i=$((i + 1))
+    done < "$MENUARGV"
+}
+
+# menu_title — the -T title the case's display-menu call carried.
+menu_title() {
+    local arg prev=""
+    [ -f "$MENUARGV" ] || return 0
+    while IFS= read -r -d '' arg; do
+        if [ "$prev" = "-T" ]; then printf '%s\n' "$arg"; return 0; fi
+        prev=$arg
+    done < "$MENUARGV"
+}
+
+# no_lone_hash <lines> <message> — every # in every line is doubled. tmux reads
+# a # standing alone as the start of a format.
+no_lone_hash() {
+    local line rest
+    while IFS= read -r line; do
+        rest=${line//\#\#/}
+        case "$rest" in *'#'*) bad "$2 (a lone # in: $line)"; return 0 ;; esac
+    done <<< "$1"
+    ok "$2"
 }
 
 # ==============================================================================
@@ -268,6 +307,33 @@ run_pick --all
 has "$CALLS" "✗ ELEVATED tk-fail1" "(ALL-FAILED) the overview marks it the same way"
 
 # ==============================================================================
+# A ROW'S TEXT SHOWS AS WRITTEN, AND NOTHING IN IT RUNS
+# ==============================================================================
+# tmux expands a display-menu item name and its -T title as formats, where
+# #(...) runs a shell command, #{...} expands and #[...] restyles. A row's title,
+# frontier and needs are text other components write, so every # in them
+# reaches tmux doubled, which tmux shows as one #. Each menu shows two of the
+# three cells, so each menu gets its own case.
+HASHED='[{"id":"tk-hash1","rig":"gc-toolkit","severity":"ELEVATED","title":"#(echo t) #{host} #[fg=red]title","frontier":"#(echo f) #{host} #[bg=red]front","needs":"#(echo n) #{host} #[reverse]needs","held":true}]'
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$HASHED"
+run_pick
+NAMES="$(menu_names)"
+has "$NAMES" "##(echo n) ##{host} ##[reverse]needs" "(HASH) the queue row's demand reaches tmux with every # doubled"
+has "$NAMES" "##(echo t) ##{host} ##[fg=red]title" "(HASH) and so does its title"
+no_lone_hash "$NAMES" "(HASH) no item name carries a # that tmux would expand"
+no_lone_hash "$(menu_title)" "(HASH) nor does the menu title"
+
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$HASHED"
+run_pick --all
+NAMES="$(menu_names)"
+has "$NAMES" "##(echo t) ##{host} ##[fg=red]title" "(ALL-HASH) the overview row's title reaches tmux with every # doubled"
+has "$NAMES" "##(echo f) ##{host} ##[bg=red]front" "(ALL-HASH) and so does its frontier"
+no_lone_hash "$NAMES" "(ALL-HASH) no item name carries a # that tmux would expand"
+no_lone_hash "$(menu_title)" "(ALL-HASH) nor does the menu title"
+
+# ==============================================================================
 # STATIC GUARD — the shape of the original defect must not come back
 # ==============================================================================
 # Anchored on the INVOCATION: the header quotes the same command, and a guard
@@ -279,6 +345,36 @@ hasnt "$BOARDLINE" "2>/dev/null" \
     "(STATIC) the board's stderr is captured, never discarded"
 hasnt "$BOARDLINE" "printf '[]'" \
     "(STATIC) a failed board is never substituted with an empty one"
+
+# Every item name the picker appends, and every -T title, is a literal or goes
+# through menu_text whole. A label built from a row's cells and appended any
+# other way reaches tmux's format expansion as written.
+menu_escape_findings() { # <script> -> each line that skips the escape
+    awk '
+        /^[[:space:]]*#/ { next }
+        /set -- "\$@" / {
+            rest = $0
+            sub(/.*set -- "\$@" /, "", rest)
+            if (rest ~ /^"\$\(menu_text "\$[A-Za-z_][A-Za-z0-9_]*"\)"/) next
+            if (rest ~ /^"[^"$`\\]*"/) next
+            print FNR ": " $0
+            next
+        }
+        /display-menu/ && $0 !~ /display-menu -T "\$\(menu_text "\$[A-Za-z_][A-Za-z0-9_]*"\)"/ {
+            print FNR ": " $0
+        }' "$1"
+}
+eq "$(menu_escape_findings "$PICK")" "" \
+    "(STATIC) every menu item name and title goes through menu_text"
+[ "$(grep -c -F 'set -- "$@" "$(menu_text "' "$PICK" || true)" -ge 1 ] \
+    && ok "(STATIC) the guard reads the picker's item appends" \
+    || bad "(STATIC) no menu_text item append found in $PICK"
+sed -e 's/"$(menu_text "$label")"/"$label"/' "$PICK" > "$TMP/unescaped-pick.sh"
+has "$(menu_escape_findings "$TMP/unescaped-pick.sh")" 'set -- "$@" "$label"' \
+    "(STATIC) the guard names a label appended without the escape"
+sed -e 's/-T "$(menu_text "$MENU_TITLE")"/-T "$MENU_TITLE"/' "$PICK" > "$TMP/unescaped-title.sh"
+has "$(menu_escape_findings "$TMP/unescaped-title.sh")" 'display-menu -T "$MENU_TITLE"' \
+    "(STATIC) and a title handed over without it"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
