@@ -286,10 +286,16 @@ not take:
   the bead. The step records the exit and hands the bead back after the script
   returns, and the hand-back (`assets/scripts/hand-back.sh`) is guarded on what
   the bead showed, so a close that lands first makes it refuse. It fails need 4.
+- bd's `until` dependency type marks a bead "active until" its target closes,
+  and it does not hold the bead out of Gas City's readiness. Neither bd, Gas
+  City nor a published pack acts on the edge. The pack's own deferred-dispatch
+  pass closes a bead once its `until` targets have closed, through
+  `bead-rehome.sh`, with no check of a record and with the target as the bead's
+  successor. It fails needs 2 and 3.
 - A `gc session wait` on the run's root would leave the pour to this run's pool
-  session, which would have to wake after its terminal step and sling the closer
-  from a reminder. The deferred-dispatch pass needs no session to outlive the
-  run.
+  session, which would have to wake after its terminal step and sling the
+  closer from a reminder. The deferred-dispatch pass needs no session to outlive
+  the run.
 - A human gate or the `human` label is the bead's other option, a demand that
   only a person's judgment satisfies. A finished record needs a check, not that
   judgment, so the change asks a person only when the check fails.
