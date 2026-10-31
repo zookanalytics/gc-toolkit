@@ -11,7 +11,8 @@
 # engine's floor, finds the engine, provisions its browser and runs its CLI,
 # and demo-engine-lib.test.sh checks that through this script. Every case runs
 # under `env -i` with a PATH of a coreutils symlink farm and stubs for node,
-# npm, gc and gh, so nothing reaches the network, a browser, or a city. The
+# npm, gc, gh and sandbox-exec, so nothing reaches the network, a browser, or a
+# city. demo-engine-lib.test.sh checks the sandbox the engine runs in. The
 # node stub hands the engine checkout's CLI to an engine stub, and otherwise
 # stands in for the renderer: it logs its argv, keeps a copy of the file it was
 # handed, and leaves a page at --output. The engine stub keeps the script and
@@ -46,18 +47,19 @@ trap 'rm -rf "$TMPD"' EXIT
 
 # Only the tools the script calls. env -i keeps everything else off PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk cp git; do
+for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk cp git env readlink; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
 
 # Stubs. node answers --version with $NODE_VERSION, hands the checkout's CLI to
-# $ENGINE_STUB, answers the free-port pick (-e) with $FREE_PORT, runs the real
-# renderer or pick under $REAL_NODE when that is set, and otherwise stands in
-# for the renderer, failing on $RENDER_RC; npm records what
+# $ENGINE_STUB, answers the free-port pick (-e) with $FREE_PORT and the check
+# of a port (-e with the port) with a server there when it is $PORT_ANSWERS,
+# runs the real renderer, pick or check under $REAL_NODE when that is set, and
+# otherwise stands in for the renderer, failing on $RENDER_RC; npm records what
 # it runs and where; gc lists the sprintshow rig at $SS_RIG; gh stands in for
 # GitHub's markdown renderer, answering with the file $GH_HTML when that is
-# set. Each logs to $CALLLOG.
+# set. Each logs to $CALLLOG. sandbox-exec runs the engine it is handed.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
 BIN="$TMPD/bin"; mkdir -p "$BIN"
 ln -s "$JQ" "$BIN/jq"
@@ -66,7 +68,11 @@ cat >"$BIN/node" <<'NODE'
 if [ "${1:-}" = "--version" ]; then echo "${NODE_VERSION:-v24.0.0}"; exit 0; fi
 printf 'node' >>"${CALLLOG:?}"; printf ' [%s]' "$@" >>"$CALLLOG"; printf '\n' >>"$CALLLOG"
 case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
-if [ "${1:-}" = "-e" ]; then [ -z "${REAL_NODE:-}" ] || exec "$REAL_NODE" "$@"; printf '%s' "${FREE_PORT-50123}"; exit 0; fi
+if [ "${1:-}" = "-e" ]; then
+  [ -z "${REAL_NODE:-}" ] || exec "$REAL_NODE" "$@"
+  if [ $# -ge 3 ]; then [ "$3" != "${PORT_ANSWERS:-}" ] || exit 3; exit 0; fi
+  printf '%s' "${FREE_PORT-50123}"; exit 0
+fi
 [ -z "${REAL_NODE:-}" ] || exec "$REAL_NODE" "$@"
 o=""; prev=""
 for a in "$@"; do
@@ -97,7 +103,13 @@ if [ -n "${GH_HTML:-}" ]; then cat "$GH_HTML"; exit 0; fi
 [ -n "${GH_EMPTY:-}" ] || printf '<p dir="auto"><strong>Approve.</strong></p>\n<details>\n<summary>trail</summary>\n<p dir="auto">x</p>\n</details>\n'
 exit 0
 GH
-chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh
+cat >"$BIN/sandbox-exec" <<'SBX'
+#!/usr/bin/env bash
+[ "${1:-}" = "-p" ] && [ $# -ge 3 ] || { echo "sandbox-exec stub: expected -p <profile> <command...>" >&2; exit 64; }
+shift 2
+exec "$@"
+SBX
+chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh "$BIN"/sandbox-exec
 
 # The engine's CLI. help lists the screenshot command unless $ENGINE_OLD is set,
 # and its terminal scripts unless $ENGINE_OLD or $ENGINE_NO_TERMINAL is, and
@@ -328,9 +340,13 @@ echo "# page: --serve with --cwd, and --base-url, are forwarded"
 out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 0 "a --serve capture exits 0"
 has "[--serve] [npm run dev] [--port] [5175] [--cwd] [$APP]" "$(calls)" "the dev-server command, its port and its directory reach the engine"
-out="$(run -- page --script "$SCRIPT" --base-url http://localhost:3000 --output "$OUT")"; rc=$?
+out="$(run -- page --script "$SCRIPT" --base-url https://preview.example.com --output "$OUT")"; rc=$?
 eq "$rc" 0 "a --base-url capture exits 0"
-has "[--base-url] [http://localhost:3000]" "$(calls)" "the base URL reaches the engine"
+has "[--base-url] [https://preview.example.com]" "$(calls)" "the base URL reaches the engine"
+out="$(run -- page --script "$SCRIPT" --base-url http://localhost:3000 --output "$OUT")"; rc=$?
+eq "$rc" 1 "a --base-url on this host exits 1"
+has "names a server on this host" "$out" "it says a server here runs outside the sandbox"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
 
 echo "# page: a --serve command is told its port as PORT, and --port 0 picks a free one"
 out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?

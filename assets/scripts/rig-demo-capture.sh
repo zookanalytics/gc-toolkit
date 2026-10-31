@@ -17,13 +17,19 @@
 # Playwright headlessly): the only path available to a pool session, which
 # carries no browser MCP.
 #
-# It FAILS CLOSED. A missing engine, a browser that cannot be installed, a
-# script the linter rejects, a capture that errors, or an output file that never
-# appears all exit 1, because a capture that quietly produces nothing is the
-# silent non-delivery the rig-demo mol exists to prevent. A clip in which a step
-# failed its proof is a different result: the engine exits non-zero for it too,
-# but the clip shows what failed, so it exits 3 and names the clip and the
-# working files the engine kept.
+# The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
+# city cannot be reached, so a --serve command or a page that reads the city's
+# stores or its API fails there, and the clip shows the app on fixture data, or
+# shows the failure, and never live state.
+#
+# It FAILS CLOSED. A host with no sandbox, a capture the sandbox refuses, a
+# missing engine, a browser that cannot be installed, a script the linter
+# rejects, a capture that errors, or an output file that never appears all exit
+# 1, because a capture that quietly produces nothing is the silent non-delivery
+# the rig-demo mol exists to prevent. A clip in which a step failed its proof is
+# a different result: the engine exits non-zero for it too, but the clip shows
+# what failed, so it exits 3 and names the clip and the working files the engine
+# kept.
 #
 # Usage:
 #   rig-demo-capture.sh --script <demo.md> --output <file.mp4> \
@@ -34,12 +40,15 @@
 #                demo clip is an artifact, delivered to a PR, never committed.
 #   --serve-dir  serve a static directory with the engine's built-in server.
 #   --serve      spawn a dev-server command, wait for it, then tear it down.
-#   --base-url   drive a server that is already running.
+#   --base-url   drive a deployed preview. A URL on this host is refused,
+#                because a server already running here runs outside the
+#                sandbox.
 #                Exactly one of --serve-dir / --serve / --base-url is required;
 #                it is how this rig's app is reached, the one rig-specific input.
 #   --port       port for --serve (default 5173) or --serve-dir (default: a free
-#                port the system assigns).
-#   --cwd        working directory for the --serve command.
+#                port). A port that a server already answers on is refused.
+#   --cwd        working directory for the --serve command, and the directory a
+#                relative --serve-dir resolves against.
 #   --mode       walkthrough (default, one continuous take) | proof (one checked
 #                screenshot per step).
 #   --no-narrate force a silent clip even when OPENAI_API_KEY is set.
@@ -51,8 +60,9 @@
 # The last line says whether the clip is narrated or silent.
 #
 # $SPRINTSHOW_BIN, when set and executable, overrides engine resolution and is
-# invoked in its place — the seam the hermetic test drives with a stub engine,
-# and an escape hatch for a caller that has already resolved the engine.
+# invoked in its place, inside the same sandbox — the seam the hermetic test
+# drives with a stub engine, and an escape hatch for a caller that has already
+# resolved the engine.
 #
 # Exit: 0 captured and every step's proof held (output exists and is non-empty),
 # 3 captured but at least one step failed its proof, 2 bad arguments, 1 anything
@@ -76,7 +86,7 @@ while [ $# -gt 0 ]; do
     --serve)      shift; [ $# -gt 0 ] || { echo "$PROG: --serve needs a value" >&2; exit 2; }; SERVE_CMD="$1" ;;
     --base-url)   shift; [ $# -gt 0 ] || { echo "$PROG: --base-url needs a value" >&2; exit 2; }; BASE_URL="$1" ;;
     --port)       shift; [ $# -gt 0 ] || { echo "$PROG: --port needs a value" >&2; exit 2; }; PORT="$1" ;;
-    --cwd)        shift; [ $# -gt 0 ] || { echo "$PROG: --cwd needs a value" >&2; exit 2; }; SERVE_CWD="$1" ;;
+    --cwd)        shift; [ -n "${1:-}" ] || { echo "$PROG: --cwd needs a value" >&2; exit 2; }; SERVE_CWD="$1" ;;
     --mode)       shift; [ $# -gt 0 ] || { echo "$PROG: --mode needs a value" >&2; exit 2; }; MODE="$1" ;;
     --music)      shift; [ $# -gt 0 ] || { echo "$PROG: --music needs a value" >&2; exit 2; }; MUSIC="$1" ;;
     --no-narrate) NO_NARRATE=1 ;;
@@ -112,6 +122,7 @@ fi
 abspath() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$(pwd)" "$1" ;; esac; }
 SCRIPT=$(abspath "$SCRIPT")
 OUTPUT=$(abspath "$OUTPUT")
+case "$SERVE_DIR" in ''|/*) ;; *) [ -z "$SERVE_CWD" ] || SERVE_DIR="$SERVE_CWD/$SERVE_DIR" ;; esac
 [ -z "$SERVE_DIR" ] || SERVE_DIR=$(abspath "$SERVE_DIR")
 [ -z "$MUSIC" ] || MUSIC=$(abspath "$MUSIC")
 
@@ -120,19 +131,20 @@ OUT_DIR=$(dirname "$OUTPUT")
 mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'" >&2; exit 1; }
 
 # --- the engine ------------------------------------------------------------
-# demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI.
-# What only a clip needs stays here: ffmpeg to assemble it, which is a host
-# ffmpeg when there is one and otherwise a checkout's ffmpeg-static binary,
-# fetched on first use. $SPRINTSHOW_BIN overrides all of it.
+# demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI
+# in its sandbox. What only a clip needs stays here: ffmpeg to assemble it,
+# which is a host ffmpeg when there is one and otherwise a checkout's
+# ffmpeg-static binary, fetched on first use. $SPRINTSHOW_BIN overrides the
+# engine, and runs in the same sandbox.
 if [ -n "${SPRINTSHOW_BIN:-}" ] && [ -x "${SPRINTSHOW_BIN}" ]; then
-  sprintshow() { "$SPRINTSHOW_BIN" "$@"; }
+  DEMO_ENGINE_BIN="$SPRINTSHOW_BIN"
 else
   demo_engine_resolve || exit 1
   if [ -n "$DEMO_ENGINE_DIR" ]; then
     command -v ffmpeg >/dev/null 2>&1 || [ -x "$DEMO_ENGINE_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$DEMO_ENGINE_DIR" && npm run provision:ffmpeg ) >&2 || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }
   fi
-  sprintshow() { demo_engine_cli "$@"; }
 fi
+sprintshow() { demo_engine_cli "$@"; }
 
 # --- lint before capturing ----------------------------------------------
 # The linter reads the script exactly as the driver will; a script that lints
