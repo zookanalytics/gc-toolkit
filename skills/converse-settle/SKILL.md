@@ -84,11 +84,12 @@ person must perform is assigned, and the discharge leaves it alone —
 that one is theirs to close.
 
 **On `--ruled yes`, the `--route` follows which bead carries the work** (the
-`work` skill says why). An armed subject keeps its arm through the hold, and
-the sign-off releases it to that arm with no route. When the ruling sends the
-subject as it was armed, send it nothing more. When it does not, disarm the
-subject before the sign-off: `"$CONV/deferred-dispatch.sh" disarm "$SUBJECT"`.
-The cases:
+`work` skill says why). An armed subject keeps its arm through a hold and never
+reads `held`, so the sign-off releases nothing and writes no route, whatever
+`--route` says, and the gate's resolution lets the arm send it. When the ruling
+sends the subject as it was armed, send it nothing more. When it sends it some
+other way, or not at all, disarm it before the sign-off:
+`"$CONV/deferred-dispatch.sh" disarm "$SUBJECT"`. The cases:
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
 - **New work carries it.** File and send that work (below), then sign off

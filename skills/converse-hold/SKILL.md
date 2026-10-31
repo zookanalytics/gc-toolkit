@@ -68,7 +68,9 @@ already carries an anchor state the held transition is skipped, and
 refused if attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
 enumerate anchors by that state, and `held` drops it from all three. It
 is the pre-PR hold; the explicit merge hold above is an edge on the
-anchor, not this state.
+anchor, not this state. A subject armed for deferred dispatch skips the
+transition too: its gate holds it, and its arm sends it once the ruling
+resolves that gate.
 
 A framing that asks for no decision still files one. What the
 operator owes then is the close-out itself, and the demand is what
