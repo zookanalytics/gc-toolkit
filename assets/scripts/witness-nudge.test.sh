@@ -75,11 +75,11 @@ count() { if [ -z "$1" ]; then echo 0; else printf '%s\n' "$1" | wc -l | tr -d '
 W=gc-toolkit/gc-toolkit.witness
 
 echo "--- a quiet witness is nudged once, typed live, by id"
-export STUB_LIST; STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 900)" "")")
+export STUB_LIST; STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 900)" "")")
 run
 eq "$RC" 0 "a quiet witness's pass exits 0"
 eq "$(count "$NUDGES")" 1 "one nudge"
-has "$NUDGES" "session nudge --delivery immediate lx-1 " "the nudge is typed live and names the session id"
+has "$NUDGES" "session nudge --delivery immediate hq-1 " "the nudge is typed live and names the session id"
 has "$NUDGES" "quiet for 15 minutes" "the nudge says how long the pane has been quiet"
 has "$NUDGES" "startup wisp reconcile" "the nudge asks for the startup reconcile"
 has "$NUDGES" "mol-witness-patrol from check-inbox" "the nudge names the patrol and where to start it"
@@ -89,58 +89,58 @@ has "$(cat "$LIST_LOG")" "GC_NO_API=1 " "the list reads the local path"
 has "$(cat "$LIST_LOG")" "session list --json" "the list asks for JSON"
 
 echo "--- what leaves a witness alone"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 0)" "")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 0)" "")"); run
 eq "$(count "$NUDGES")" 0 "a pane that just printed is working"
 eq "$RC" 0 "a working pane is a clean pass"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 659)" "")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 659)" "")"); run
 eq "$(count "$NUDGES")" 0 "a pane quiet for under the bound is left alone"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 660)" "")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 660)" "")"); run
 eq "$(count "$NUDGES")" 1 "a pane quiet for exactly the bound is nudged"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 7200)" "$(iso 300)")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 7200)" "$(iso 300)")"); run
 eq "$(count "$NUDGES")" 0 "a recent nudge restarts the quiet clock"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 7200)" "$(iso 3600)")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 7200)" "$(iso 3600)")"); run
 eq "$(count "$NUDGES")" 1 "an old nudge does not hold a quiet pane"
 has "$NUDGES" "quiet for 60 minutes" "the quiet clock runs from the newer of the two times"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active true "$(iso 7200)" "")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active true "$(iso 7200)" "")"); run
 eq "$(count "$NUDGES")" 0 "an attached operator can prompt the session themselves"
 STUB_LIST=$(list_of "$(row --delivery "$W" active false "$(iso 7200)" "")"); run
 eq "$(count "$NUDGES")" 0 "an id that would reach gc as a flag is not nudged"
 for st in asleep drained suspended creating start-pending; do
-  STUB_LIST=$(list_of "$(row lx-1 "$W" "$st" false "$(iso 7200)" "")"); run
+  STUB_LIST=$(list_of "$(row hq-1 "$W" "$st" false "$(iso 7200)" "")"); run
   eq "$(count "$NUDGES")" 0 "a witness in state $st is the controller's"
 done
 for t in gc-toolkit/gc-toolkit.refinery gc-toolkit.deacon gc-toolkit.mechanik gc-toolkit/gc-toolkit.polecat gc-toolkit/gc-toolkit.notwitness gc-toolkit/gc-toolkit.witness-helper; do
-  STUB_LIST=$(list_of "$(row lx-1 "$t" active false "$(iso 7200)" "")"); run
+  STUB_LIST=$(list_of "$(row hq-1 "$t" active false "$(iso 7200)" "")"); run
   eq "$(count "$NUDGES")" 0 "template $t is no witness"
 done
 
 echo "--- template shapes that are a witness"
 for t in witness gc-toolkit.witness rig/witness rig/binding.witness; do
-  STUB_LIST=$(list_of "$(row lx-1 "$t" active false "$(iso 7200)" "")"); run
+  STUB_LIST=$(list_of "$(row hq-1 "$t" active false "$(iso 7200)" "")"); run
   eq "$(count "$NUDGES")" 1 "template $t is a witness"
 done
 
 echo "--- time formats"
 for zone in Z -06:00 +05:30; do
-  STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 7200 "$zone")" "")"); run
+  STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 7200 "$zone")" "")"); run
   has "$NUDGES" "quiet for 120 minutes" "a quiet pane reads right at offset $zone"
-  STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 60 "$zone")" "")"); run
+  STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 60 "$zone")" "")"); run
   eq "$(count "$NUDGES")" 0 "a working pane reads right at offset $zone"
 done
 FRACTIONAL=$(iso 7200 | sed 's/Z$/.074123Z/')
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$FRACTIONAL" "")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$FRACTIONAL" "")"); run
 has "$NUDGES" "quiet for 120 minutes" "fractional seconds parse"
 
 echo "--- a row whose time cannot be read"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "0001-01-01T00:00:00Z" "")" "$(row lx-2 "rig/gc-toolkit.witness" active false "$(iso 900)" "")"); run
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "0001-01-01T00:00:00Z" "")" "$(row hq-2 "rig/gc-toolkit.witness" active false "$(iso 900)" "")"); run
 eq "$RC" 1 "an unset time fails the pass"
-has "$ERR" "lx-1" "stderr names the unreadable row"
+has "$ERR" "hq-1" "stderr names the unreadable row"
 eq "$(count "$NUDGES")" 1 "the other witness is still nudged"
-has "$NUDGES" "lx-2" "and that is the readable one"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "yesterday" "")"); run
+has "$NUDGES" "hq-2" "and that is the readable one"
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "yesterday" "")"); run
 eq "$RC" 1 "an unparseable time fails the pass"
 eq "$(count "$NUDGES")" 0 "and nudges nothing for that row"
-STUB_LIST=$(jq -cn --arg t "$W" '{sessions: [{id: "lx-1", template: $t, state: "active", attached: false}]}'); run
+STUB_LIST=$(jq -cn --arg t "$W" '{sessions: [{id: "hq-1", template: $t, state: "active", attached: false}]}'); run
 eq "$RC" 1 "a list with no last_active fails the pass"
 eq "$(count "$NUDGES")" 0 "and nudges nothing, since nothing was measured"
 
@@ -160,20 +160,20 @@ has "$OUT" "0 checked, 0 nudged" "and the summary says so"
 
 echo "--- several witnesses"
 STUB_LIST=$(list_of \
-  "$(row lx-1 "a/gc-toolkit.witness" active false "$(iso 900)" "")" \
-  "$(row lx-2 "b/gc-toolkit.witness" active false "$(iso 0)" "")" \
-  "$(row lx-3 "c/gc-toolkit.witness" active false "$(iso 900)" "")"); run
+  "$(row hq-1 "a/gc-toolkit.witness" active false "$(iso 900)" "")" \
+  "$(row hq-2 "b/gc-toolkit.witness" active false "$(iso 0)" "")" \
+  "$(row hq-3 "c/gc-toolkit.witness" active false "$(iso 900)" "")"); run
 eq "$(count "$NUDGES")" 2 "each quiet witness gets its own nudge"
-hasnt "$NUDGES" "lx-2" "a working witness among them is left alone"
+hasnt "$NUDGES" "hq-2" "a working witness among them is left alone"
 has "$OUT" "3 checked, 2 nudged" "the summary counts all three"
-export STUB_NUDGE_FAIL_ID=lx-1; run; unset STUB_NUDGE_FAIL_ID
+export STUB_NUDGE_FAIL_ID=hq-1; run; unset STUB_NUDGE_FAIL_ID
 eq "$RC" 1 "a failed nudge fails the pass"
-has "$ERR" "lx-1" "stderr names the session whose nudge failed"
+has "$ERR" "hq-1" "stderr names the session whose nudge failed"
 eq "$(count "$NUDGES")" 2 "a failed nudge does not stop the next witness's"
 has "$OUT" "3 checked, 1 nudged" "the summary counts only the accepted nudge"
 
 echo "--- the quiet bound"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 120)" "")")
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 120)" "")")
 export WITNESS_NUDGE_QUIET_SECS=60; run
 eq "$(count "$NUDGES")" 1 "the bound can be set in the order's environment"
 for bad_value in '' abc 10m 0 -5; do
