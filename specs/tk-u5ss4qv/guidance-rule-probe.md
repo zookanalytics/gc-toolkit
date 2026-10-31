@@ -12,9 +12,9 @@ weigh: `AGENTS.md` sends a rule that binds only gc-toolkit's own work to "the do
 or the check that owns it", and the entry says "never in a docs page".
 
 The filed text catches a docs-page rubric, a command replaced by a pointer, and a
-choice with no listing command, all of which the old text approved. It does not
-catch either case the operator objected to as a favored option or a number. It
-moves authors only when nothing pushes against the command.
+choice with no listing command. No run flagged any of those under the old text.
+It does not catch either case the operator objected to as a favored option or a
+number. It moves authors only when nothing pushes against the command.
 
 ## What reviewers did
 
@@ -31,7 +31,7 @@ the problem, and none did. It approved R1, R2, R3 and R9 outright in every run.
 | R4, a line count standing in for scope | #944, comment 4167767108 | 0 of 3 | 0 of 3 on the number; 3 of 3 call the page guidance in a docs page |
 | R9, a bullet that names one formula among the routes | the bullet #936 added | 0 of 3 | 0 of 3 on the favored option; 3 of 3 on the missing command for its stamp |
 | R5, a rig's guidance page, which a review formula prints | `docs/review-demo.md` as #1266 added it | 0 of 3 | 0 of 6 on its location; 6 of 6 on a missing command |
-| R6, a convention for authoring skills | `docs/skills.md` lines this effort adds | 0 of 3 | 2 of 3 on its location |
+| R6, a convention for authoring skills | `docs/skills.md` lines this effort adds, at 2a3bd983b | 0 of 3 | 2 of 3 on its location |
 | R7, control: a table of facts | `docs/state-machine.md` as b3034bf9e changed it | 0 of 3 | 0 of 3 |
 
 Other entries block R4, R5, R7 and R8 on both texts, for counted sets, em dashes
@@ -43,8 +43,8 @@ R5 first looked like the conflict: the pack's own review formula prints that pag
 to the reviewer. No run called its location a violation, with or without a line
 quoting `review-checks.toml` on what the page is (three runs each, R5 and R5b).
 
-R3's three runs say the entry lets a skill carry the guidance. R2's approving runs
-say the same, which reads a pointer to a skill as meeting "give the exact command
+R3's three runs say the entry lets a skill carry the guidance. R2's approving run
+says the same, which reads a pointer to a skill as meeting "give the exact command
 to run there". The operator's comment on that hunk says it does not: "This should
 have an example or exact command to run."
 
@@ -93,11 +93,13 @@ The wordings, none of which is on the branch:
 
 The `AGENTS.md` sentence holds R6 without touching any prompt. One R6 run under the
 filed text cleared the lines by citing `AGENTS.md` as it stands, so that file is
-already what a reviewer weighs. Under the new sentence, two R1 runs say the
-allowance does not apply, because that rubric routes work in every rig. The
-sentence in the entry passes R6 too, but R2 fell to 3 of 9. No approving run cites
-the sentence, so nothing here says why, and nine runs a side is a caution rather
-than a measurement.
+already what a reviewer weighs. Under the new sentence, all three R1 runs say the
+allowance does not apply, because that rubric is routing guidance for every rig.
+R2 reads 6 of 9 under that sentence and 3 of 9 under the sentence in the entry,
+which passes R6 too. Every approving R2 run under either sentence says the step's
+pointer to a skill meets the entry, the reason R2's one approving filed run gives,
+and none cites the sentence. So nothing here says why the counts differ, and nine
+runs a side is a caution rather than a measurement.
 
 ## Method
 
@@ -107,12 +109,12 @@ empty directory, with the case on stdin and `GC_*` and `BEADS_*` unset. The 144
 calls cost $5.03.
 
 A reviewer arm held a role line, the whole of `AGENTS.md`, the Work-quality
-standards dimension cut from `skills/review-correctness/SKILL.md`, the four
-work-quality fragments and the exemplar corpus, then asked for each violation with
-the entry's words and a closing verdict line. The old arm took its fragment from
-the commit before the entry, and the filed arm from the commit that adds it. An
-author arm held a role line, `AGENTS.md` and the same files, and asked for the
-text to commit.
+standards dimension cut from `skills/review-correctness/SKILL.md`, the work-quality
+fragments (base, human, polecats, system) and the exemplar corpus, then asked for
+each violation with the entry's words and a closing verdict line. The old arm took
+its fragment from the commit before the entry, and the filed arm from the commit
+that adds it. An author arm held a role line, `AGENTS.md` and the same files, and
+asked for the text to commit.
 
 A reviewer case held the change's stated purpose and a real diff. R1, R2 and R3
 are the hunk the comment sits on, from the PR's own commit. R4's commit is gone, so
