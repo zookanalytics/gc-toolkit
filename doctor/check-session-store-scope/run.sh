@@ -4,7 +4,12 @@
 #
 #   PANE PROCESS — what the running agent actually has. A pane process carries
 #   the session env plus whatever the tmux server's global environment showed
-#   through, so it is the only place a leak is observable at all.
+#   through, so it is the only place a leak is observable at all. Linux exposes
+#   it as $PROC/<pid>/environ, and a host with no proc filesystem, such as macOS,
+#   prints it through `ps -E`. macOS hides the environment of its own binaries,
+#   /bin/zsh and /bin/sleep among them, so a pane running one is a note on that
+#   session. When no pane can be read at all, this arm has judged nothing, so
+#   the check warns once and cannot pass.
 #   SESSION ENV — what the NEXT process in that pane will get. `respawn-pane`
 #   takes no env argument, so that process comes up with the store-scope values
 #   the session env itself sets, plus any key the server's global holds that the
@@ -38,6 +43,7 @@ set -u
 
 city="${GC_CITY_PATH:-${GC_CITY:-}}"
 PROC="${GC_DOCTOR_PROC_ROOT:-/proc}"
+pane_reader="$PROC"; [ -d "$PROC" ] || pane_reader="ps -E"
 
 errors=(); warnings=(); notes=()
 sessions_checked=0; panes_read=0
@@ -77,8 +83,10 @@ budget_init
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 gcmux() { run_bounded tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
-# env_val <key> <env-text> — the value of key, empty when absent or removed.
-env_val() { printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1; }
+# env_val <key> <env-text> — the value of key, empty when absent or removed. A
+# value is any bytes, and BSD sed stops at one its locale cannot decode, which
+# would read every key after it as absent.
+env_val() { printf '%s\n' "$2" | LC_ALL=C sed -n "s/^$1=//p" | head -1; }
 # env_removed <key> <env-text> — true when tmux reports the key marked removed.
 env_removed() { printf '%s\n' "$2" | grep -qx -- "-$1"; }
 # rig_named_by <path> — the rig a path under <city>/rigs/ belongs to, else empty.
@@ -87,6 +95,41 @@ rig_named_by() {
         "$city"/rigs/*) local rest="${1#"$city"/rigs/}"; printf '%s' "${rest%%/*}" ;;
         *) : ;;
     esac
+}
+
+# pane_env <pid> — the environment <pid> was started with, one KEY=value per line
+# and empty when it cannot be read. Exit 124 is the check budget, which refused
+# the read or cut it short, so this process was NOT read.
+#
+# `ps -E` prints the command line and then the environment, joined by spaces, and
+# marks neither end. The command line is read on its own and cut off the front,
+# because an agent's arguments carry its prompt, and a KEY=value written in that
+# text is not its environment. The cut goes by length, because removing a prefix
+# by pattern takes bash seconds on a prompt of 50 KB. What remains must open with
+# an entry, or ps showed no environment. An entry then starts at a space followed
+# by a name and `=`, so a value holding a space stays whole. ps gives no way to
+# tell a value from the next entry, so a value holding " NAME=" reads as two
+# entries, and an entry whose name is not an identifier, such as an exported shell
+# function's, reads as part of the value before it. A store key is misread when
+# its own value holds such a word, when another variable's value spells out that
+# key's assignment, or when such an entry follows it.
+pane_env() {
+    local pid="$1" cmd full rest rc
+    [ -n "$pid" ] || return 0
+    if [ "$pane_reader" = "$PROC" ]; then
+        [ -r "$PROC/$pid/environ" ] && tr '\0' '\n' < "$PROC/$pid/environ" 2>/dev/null
+        return 0
+    fi
+    cmd=$(run_bounded ps -ww -o command= -p "$pid" 2>/dev/null); rc=$?
+    [ "$rc" -ne 124 ] || return 124
+    [ "$rc" -eq 0 ] || return 0
+    full=$(run_bounded ps -E -ww -o command= -p "$pid" 2>/dev/null); rc=$?
+    [ "$rc" -ne 124 ] || return 124
+    [ "$rc" -eq 0 ] || return 0
+    case "$full" in "$cmd "*) rest="${full:${#cmd}+1}" ;; *) return 0 ;; esac
+    case "${rest%%=*}" in ''|"$rest"|[!A-Za-z_]*|*[!A-Za-z0-9_]*) return 0 ;; esac
+    printf '%s\n' "$rest" | LC_ALL=C sed -E 's/ ([A-Za-z_][A-Za-z0-9_]*=)/\
+\1/g'
 }
 
 if ! command -v tmux >/dev/null 2>&1; then
@@ -150,6 +193,12 @@ else
         fi
     }
 
+    # scan_cut <session> — the warning for a read run_bounded refused with 124.
+    scan_cut() {
+        warnings+=("store-scope scan hit the check budget before reading $1 (rc=124) — that session and any listed after it are UNVERIFIED. Not a benign skip: a still-listed session left unread can be resolving the wrong store, the exact symptom this check exists for. Raise the check budget (\`gc doctor --check-timeout\`, or GC_DOCTOR_CHECK_TIMEOUT).")
+    }
+
+    pane_unread=()
     TAB=$(printf '\t')
     while IFS= read -r row; do
         [ -n "$row" ] || continue
@@ -167,7 +216,7 @@ else
         senv=$(gcmux show-environment -t "$sess" 2>/dev/null); senv_rc=$?
         if [ "$senv_rc" -ne 0 ]; then
             if [ "$senv_rc" -eq 124 ]; then
-                warnings+=("store-scope scan hit the check budget before reading $sess (rc=124) — that session and any listed after it are UNVERIFIED. Not a benign skip: a still-listed session left unread can be resolving the wrong store, the exact symptom this check exists for. Raise the check budget (\`gc doctor --check-timeout\`, or GC_DOCTOR_CHECK_TIMEOUT).")
+                scan_cut "$sess"
                 break
             fi
             continue
@@ -201,12 +250,13 @@ else
             sessions_checked=$((sessions_checked + 1))
 
             # --- Arm 1: the running process agrees with the session's own scope
-            penv=""
-            if [ -n "$pane_pid" ] && [ -r "$PROC/$pane_pid/environ" ]; then
-                penv=$(tr '\0' '\n' < "$PROC/$pane_pid/environ" 2>/dev/null)
+            penv=$(pane_env "$pane_pid"); penv_rc=$?
+            if [ "$penv_rc" -eq 124 ]; then
+                scan_cut "$sess"
+                break
             fi
             if [ -z "$penv" ]; then
-                notes+=("$sess: pane process environment unreadable (pane_pid=${pane_pid:-none}, $PROC) — what this agent actually holds was not read")
+                pane_unread+=("$sess: pane process environment unreadable (pane_pid=${pane_pid:-none}, $pane_reader) — what this agent actually holds was not read")
             else
                 panes_read=$((panes_read + 1))
                 while IFS="$TAB" read -r kind key val named; do
@@ -259,6 +309,17 @@ else
             warnings+=("$sess is $scope_desc and its session environment neither sets nor removes $key, while the tmux server's global environment holds $key=$gval — \`respawn-pane\` takes no env argument, so the next process in this pane inherits it. Clear it on the server (\`tmux set-environment -gu $key\`) and restart the session.")
         done
     done <<< "$sessions"
+
+    # An unread pane among read ones is that session's own note: it may have just
+    # ended, or run a binary that hides its environment. With none read, the
+    # running-process arm has judged nothing, and one line says so for the run.
+    if [ "${#pane_unread[@]}" -ne 0 ]; then
+        if [ "$panes_read" -eq 0 ]; then
+            warnings+=("no agent session's running process could be read (${#pane_unread[@]} tried, through $pane_reader), so what these agents actually hold is UNVERIFIED. Not a benign skip: the session environment says what the next process in a pane gets, so a store leak that lives only in a running agent goes unreported.")
+        else
+            notes+=("${pane_unread[@]}")
+        fi
+    fi
 fi
 
 if [ "${#errors[@]}" -ne 0 ]; then
