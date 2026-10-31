@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # doctor/check-demo-toolchain — the demo:capture toolchain is resolvable.
-# A narrated demo needs Node to run the SprintShow engine, ffmpeg to assemble,
-# and OPENAI_API_KEY to voice the steps at capture time. Delivering the clip
+# Every capture needs sandbox-exec, the sandbox demo-engine-lib.sh runs the
+# engine in, where the live city cannot be reached. A narrated demo needs Node
+# to run the SprintShow engine, ffmpeg to assemble, and OPENAI_API_KEY to voice
+# the steps at capture time. Delivering the clip
 # inline to its PR also needs gh >= 2.99.0 for 'gh pr comment --attach'. This
 # check reports which of them are in place, as a readiness heads-up rather than
-# an invariant. Every gap is a WARNING: a missing ffmpeg fails the capture until
+# an invariant. Every gap is a WARNING: a missing sandbox-exec stops every
+# capture on this host, a missing ffmpeg fails the capture until
 # provisioned, a missing key downgrades it to the documented silent+captioned
 # result, and a missing or too-old gh means a produced clip cannot be delivered
 # inline, but none is a structural defect. It also reports whether
@@ -21,6 +24,10 @@ set -u
 
 warnings=(); notes=()
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
+
+# --- sandbox-exec: the sandbox every capture runs in --------------------
+command -v sandbox-exec >/dev/null 2>&1 \
+    || warnings+=("sandbox-exec not found — every capture runs inside its sandbox, where the live city cannot be reached, so no capture runs on this host. macOS ships it.")
 
 # --- Node >= 22.18 (the engine's floor) ----------------------------------
 node_ok=""
@@ -137,6 +144,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: demo:capture toolchain ready — Node $node_ok, ffmpeg ($ffmpeg_ok), OPENAI_API_KEY ($key_ok), gh $gh_ok, $vercel_key ($vercel_state)"
+echo "OK: demo:capture toolchain ready — sandbox-exec, Node $node_ok, ffmpeg ($ffmpeg_ok), OPENAI_API_KEY ($key_ok), gh $gh_ok, $vercel_key ($vercel_state)"
 detail ${notes[@]+"${notes[@]}"}
 exit 0
