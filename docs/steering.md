@@ -76,6 +76,11 @@ Each writer that files or disposes new work follows the rule.
   marked `placement=pending` and routed to no pool
   (`formulas/mol-feedback-distiller.toml`, the file-and-dispatch step). The
   operator still reviews each one at its PR once a polecat builds it.
+- **The store-only exit** of `mol-polecat-work`
+  (`assets/scripts/store-only-exit.sh`). When the run's record finishes its work
+  bead, it arms the bead's validating closer, whether or not the rule admits
+  the bead. Like the first reaction's close exit, it keeps that closer because
+  a close shrinks the queue.
 
 No held bead is ever readable without its marker. The witness and the
 distiller write it in the create, and the first reaction writes it and reads
