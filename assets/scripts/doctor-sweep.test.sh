@@ -38,6 +38,11 @@ if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
   [ -n "${STUB_PACK:-}" ] || exit 1
   printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
 fi
+# The rig map behind backup-alarm-scope.sh is no sweep either.
+if [ "${1:-} ${2:-}" = "rig list" ]; then
+  [ -n "${STUB_RIG_LIST:-}" ] || exit 1
+  printf '%s' "$STUB_RIG_LIST"; exit 0
+fi
 printf '%s\n' "$*" >> "${STUB_LOG:?}"
 [ "${1:-}" = "doctor" ] || exit 0
 [ -n "${STUB_CHECK:-}" ] && "$STUB_CHECK" &
@@ -358,6 +363,38 @@ export STUB_PAYLOAD="$TMP/ctrl.json"
 run; await_run; run
 has "$OUT" "state=complete" "a control byte in one message is scrubbed, not read as schema drift"
 eq "$(field "$OUT" checks)" "3" "  ... and the scrubbed payload still counts"
+
+# A suspended rig's stale backup reaches the patrol as no finding. The narrowing
+# itself is pinned in dolt-backup-manifest-check.test.sh, beside the alarm it
+# shares backup-alarm-scope.sh with; these cases pin where the sweep calls it.
+new_state suspended
+: > "$STUB_LOG"
+cat > "$TMP/suspended.json" <<'JSON'
+{"results":[
+  {"name":"bd-backup-freshness","status":"warning","severity":"advisory",
+   "message":"scope rigs/paused: dolt backup: last sync was 30h0m0s ago (> 24h0m0s)"},
+  {"name":"fork-rate","status":"warning","severity":"advisory","message":"high fork rate"}]}
+JSON
+export STUB_PAYLOAD="$TMP/suspended.json"
+export STUB_RIG_LIST='{"city_path":"/city","rigs":[{"name":"paused","path":"/city/rigs/paused","suspended":true}]}'
+run; await_run
+run --status
+eq "$(field "$OUT" findings)" "2" "--status reports the sweep as it ran, and writes nothing"
+run
+has "$OUT" "state=complete" "a sweep that names a suspended rig's stale backup still completes"
+eq "$(field "$OUT" findings)" "1" "  ... and counts no finding for that backup"
+eq "$(jq -r '[.results[] | select(.status != "ok") | .name] | join(",")' "$(field "$OUT" payload)")" "fork-rate" \
+  "  ... and the patrol's filter finds only the other check"
+
+new_state rigmapdown
+: > "$STUB_LOG"
+export STUB_RIG_LIST=""
+run; await_run; run
+has "$OUT" "state=complete" "a rig map that does not read still completes the sweep"
+eq "$(field "$OUT" findings)" "2" "  ... and the backup finding stands"
+has "$ERR" "keeps every scope it names" "  ... and says why"
+unset STUB_RIG_LIST
+
 export STUB_PAYLOAD="$TMP/payload.json" STUB_RC=1
 
 # --- a sweep that dies without an rc is not left in flight forever ----------

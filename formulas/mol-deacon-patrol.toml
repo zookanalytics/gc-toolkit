@@ -108,7 +108,9 @@ below: a backup is restorable only up to its committed manifest (Dolt
 writes chunks first, manifest LAST, so a healthy dir's newest file IS the
 manifest and an equal-second tie resolves TO it); the scan is driven by the
 live `databases[].name` list, never a walk of the backup dirs (a database
-with no dir at all is invisible to a walk); missing/empty roots are
+with no dir at all is invisible to a walk), less a database that belongs only
+to a suspended rig, whose backup Gas City's `mol-dog-backup` order skips by
+design; missing/empty roots are
 FLAG-ROOT findings naming every affected database; an in-flight sync gets a
 bounded RECHECK grace that a stale manifest bypasses; and an unreadable
 directory is UNPROVEN, never clean.
@@ -117,10 +119,11 @@ directory is UNPROVEN, never clean.
 # >>> backup-manifest-check
 BACKUP_ROOT="${GC_CITY_PATH:-$GC_CITY}/.dolt-backup"
 # Expected databases come from the Step 1 health report: reuse $HEALTH_JSON
-# if you still have it, otherwise probe again. Lazy by design — set
-# EXPECTED_DBS to run this snippet against a fixture (the test does) and
-# neither the probe nor jq is invoked.
-: "${EXPECTED_DBS:=$(printf '%s' "${HEALTH_JSON:-$(gc dolt health --json)}" | jq -r '.databases[].name')}"
+# if you still have it, otherwise probe again. The script leaves out a database
+# that belongs only to a suspended rig. Lazy by design — set EXPECTED_DBS to run
+# this snippet against a fixture (the test does) and neither the probe nor jq is
+# invoked.
+: "${EXPECTED_DBS:=$("$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/backup-alarm-scope.sh" databases "${HEALTH_JSON:-}")}"
 # In-flight grace: mid-sync the newest file IS a chunk, because the manifest
 # is committed last. Only call that a failure once the writes have stopped
 # advancing for GRACE_SEC — or once the manifest is already stale, which no
@@ -227,20 +230,21 @@ else
     done < "$DB_LIST"
     for d in "$BACKUP_ROOT"/*/; do
         [ -d "$d" ] || continue
-        extra="${d%/}"; extra="${extra##*/}"
+        extra=$(basename "$d")
         case " $DB_NAMES " in
             *" $extra "*) ;;
-            *) echo "INFO $extra: backup dir with no live database (advisory)" ;;
+            *) echo "INFO $extra: backup dir outside the scan: no live database, or its rig is suspended (advisory)" ;;
         esac
     done
 fi
 # <<< backup-manifest-check
 ```
 
-"Healthy" requires an explicit `OK` for EVERY database in `databases[]` —
+"Healthy" requires an explicit `OK` for EVERY database the block scans —
 no FLAG, no FLAG-ROOT, no outstanding RECHECK (re-run the block; a RECHECK
 whose cause is an unreadable directory never clears by waiting — fix the
-read or treat as FLAG).
+read or treat as FLAG). A suspended rig's database gets no verdict, and its
+backup dir gets the advisory `INFO` line.
 
 **3. React.** File each finding through the one writer, carrying the
 verdict line VERBATIM (each is a complete one-line reason; do not
@@ -332,7 +336,9 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
   seconds ago. Say so, file nothing for it, and close the step.
 - `complete`: the payload is the file named by `payload=`. Filter it below.
   `finished_at=` is the second the sweep finished and `age=` is how many
-  seconds ago that was, never more than one `doctor_interval`.
+  seconds ago that was, never more than one `doctor_interval`. The script has
+  already taken each suspended rig's scope out of a `bd-backup-freshness`
+  result, which reads `ok` when no other scope is left.
 - `failed`, `exceeded` or `blocked`: a FAILED scan. File it as a finding with
   the recipe below — `--key doctor-sweep-failed`, the whole `state=` block as
   the message. `failed` and `exceeded` carry `elapsed=`, and `exceeded` names
