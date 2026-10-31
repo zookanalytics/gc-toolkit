@@ -43,6 +43,11 @@ gets the one worktree. A worktree found at another commit is rebuilt at the one
 asked for. The directory is mode 0700. A name that another user or a symlink
 already holds is refused rather than used, because `/tmp` is shared.
 
+`mol-rig-demo` takes a workspace too, named for its demo-request bead, for the
+worktree its app runs from, because a capture's sandbox refuses a rig's own
+checkout (`assets/scripts/demo-engine-lib.sh`). It only adds one, and the hourly
+reap removes it once the mol closes that bead.
+
 ## When it is removed
 
 - **At the verdict step.** mol-review's `verdict-and-drain` and the quorum's
