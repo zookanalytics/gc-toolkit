@@ -89,26 +89,45 @@ the exact command to run.
 
 **The hand-back — the shape every framing wears.** A **hand-back** is a
 wrap-up the operator can act on from its last several lines alone. Detail
-and evidence come first, for the reader who wants them: the observations
+and evidence sit above it, for the reader who wants them: the observations
 that matter, a few sentences each, with reference material on the bead
 rather than in the message. Then, as the last word, the hand-back itself.
 Every converse message that returns a decision wears this shape — the
 step-5 hold and the step-7 sign-off both.
 
-- **Header** — one line naming the subject:
+A hand-back names its subject by what it is to the operator: a PR, or a
+decision about one, by the PR's number and what it does for them, a report
+by who filed it and what it found, an ask of the operator's own by that ask
+in their words rather than anything proposed from it, and anything else by
+its kind and who filed it.
+
+- **Header** — one line naming the subject that way:
   `<subject-id> — <short human label>`, a plain phrase rather than the
-  raw bead title. One subject, never a list of ids.
-- **Body** — two to four plain sentences at executive altitude: what
-  this is about, what was done or what is needed, and the consequence
-  or trade-off that tips it. The why and the stakes, never the
-  mechanics; no other bead ids, no script or formula names.
+  raw bead title. One subject, never a list of ids. The label stays the
+  same on every hand-back in a sitting, so the state goes in the body.
+- **Body** — two to four plain sentences at executive altitude. It opens
+  with what the subject is, what state it is in and why it reached the
+  operator now, before any mechanism, and a report with no PR involved
+  says so. A later hand-back in the sitting, the sign-off included, opens
+  with where the subject stands now. Then what was done or what is needed,
+  and the consequence or trade-off that tips it. The why and the stakes,
+  never the mechanics; no other bead ids, no script or formula names.
 - **Decision, when one is open** — lead with the recommendation,
   stated so it can be accepted without reading further. Give options
-  only when they are real: one sentence each carrying its actual
-  consequence — the upside AND the true downside — with the
-  recommended one flagged. The rationale is that consequence, never a
-  reassurance-adjective (`proven`, `safe`, `costs nothing`). A single
-  obvious course is one recommendation, not a manufactured list.
+  only when they are real: one sentence each saying what it does rather
+  than what it avoids and carrying its actual consequence — the upside
+  AND the true downside — with the recommended one flagged. An option
+  that accepts a known defect names what the defect breaks and where. The
+  rationale is that consequence, never a reassurance-adjective (`proven`,
+  `safe`, `costs nothing`). A single obvious course is one recommendation,
+  not a manufactured list.
+
+A message with detail above its hand-back opens the way the body does, so
+a reader starting at the top knows what the detail is about. The whole
+message uses the operator's words: name a thing as they see it on the
+board, the PR or the CLI. Pipeline vocabulary (moot, twin, fold, retract,
+park) and names learned from code stay out, or say what they mean where
+they are used.
 
 **Record each hand-back on the visit, then post it.** The operator reads a
 sitting in a terminal tab, and the pane goes when the sitting ends. The tab
