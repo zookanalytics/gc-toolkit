@@ -77,14 +77,14 @@ is `active`, has nobody attached, and whose pane has printed nothing and taken
 no nudge for 660s. A nudge is its only action: it resets no session, reads no
 bead, keeps no state and files nothing.
 
-- **What counts as quiet.** `last_active` is the pane's last output, less gc's
-  own keystrokes. A working pane animates a spinner, so a witness in a long tool
-  call or its inter-cycle wait reads as busy, and it is left alone. The bound
-  sits over the formula's 600s `event_timeout`, so a witness that moved that wait
-  to the background is not nudged out of it, and the script's suite fails when
-  the default drops to it. A pane that takes a nudge and does nothing gets another
-  one after the bound, not one per pass, because `last_nudge_delivered_at` counts
-  as well.
+- **What counts as quiet.** `last_active` is the last time tmux saw the pane move,
+  by its output or by the echo of anything typed into it. A working pane animates a
+  spinner, so a witness in a long tool call or its inter-cycle wait reads as busy,
+  and it is left alone. The bound sits over the formula's 600s `event_timeout`, so
+  a witness that moved that wait to the background is not nudged out of it, and the
+  script's suite fails when the default drops to it. A pane that takes a nudge and
+  does nothing gets another one after the bound, not one per pass, because
+  `last_nudge_delivered_at` counts as well.
 - **The pace.** A witness that goes on to its next wisp in the same turn is never
   nudged. One that ends its turn waits out the bound and the next pass, which is
   up to about 16 minutes at the declared interval, and then takes one cycle.
@@ -93,14 +93,19 @@ bead, keeps no state and files nothing.
   same quiet clock.
 - **An outage.** When the session list cannot be read, the pass exits 1 and nudges
   nothing, and the next pass tries again. A witness spends nothing while the store
-  is down, and its patrol resumes on the first pass after the store returns.
+  is down, and its patrol resumes on the first pass after the store returns. When
+  the session list still answers and only the witness's own store is down, the
+  nudge goes out and buys a short failing pass, at the order's pace.
 - **Delivery.** The nudge goes with `--delivery immediate`, because the default
-  `wait-idle` gives live delivery only to a provider named exactly `claude`, and a
-  patrol can run on a variant of it. The pane is quiet, so nothing is typed into a
-  running turn. A turn that starts in the moment between the read and the nudge
-  takes the text as its next prompt. A session waiting on a permission prompt or a
-  question refuses the nudge, so nothing piles up behind it, and the pass exits 1
-  until the prompt is answered.
+  `wait-idle` queues what it cannot deliver now, a queued nudge stamps no delivery,
+  and each later pass would stack another on top of it. The pane is quiet, so
+  nothing is typed into a running turn. A turn that starts in the moment between
+  the read and the nudge takes the text as its next prompt. A session waiting on a
+  permission prompt refuses the nudge, so nothing piles up behind it, and the pass
+  exits 1 until the prompt is answered. A Gas City build that reads an
+  `AskUserQuestion` dialog refuses there too. On one that does not, the nudge's
+  Enter selects the dialog's focused option, and the witness's prompt forbids that
+  dialog.
 
 ## What the deacon's hook does
 

@@ -77,8 +77,8 @@ while IFS=$'\t' read -r id alias last_active last_nudge; do
   quiet=$((NOW - last))
   [ "$quiet" -ge "$QUIET_SECS" ] || continue
   MSG="Your pane has been quiet for $((quiet / 60)) minutes, so no patrol cycle is running. Run the startup wisp reconcile from your prompt to adopt your patrol wisp, then work mol-witness-patrol from check-inbox."
-  # --delivery immediate: the default wait-idle delivers live only to a provider
-  # named exactly claude, and a patrol can run on a variant of it.
+  # --delivery immediate: the default wait-idle queues what it cannot deliver now,
+  # a queued nudge stamps no delivery, and each later pass would stack another.
   if gc session nudge --delivery immediate "$id" "$MSG" >/dev/null </dev/null; then
     nudged=$((nudged + 1))
     echo "witness-nudge: nudged $alias ($id), quiet for ${quiet}s"

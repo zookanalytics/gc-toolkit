@@ -80,8 +80,10 @@ the second shape would not.
 ([SessionConfig](https://docs.gascity.com/reference/config#sessionconfig))
 restart a desired, alive session whose provider-reported activity is older than
 the setting (package main, `sessionProgressStalled` and
-`sessionClaimHolderStalled`). The tmux provider reads the pane's window activity
-less gc's own keystrokes (package tmux, `Provider.GetLastActivity`). The block
+`sessionClaimHolderStalled`). The tmux provider reads the pane's window activity,
+less the keystrokes that same process typed (package tmux,
+`Provider.GetLastActivity`, `discountedActivity`), so the controller discounts its
+own nudges and a separate `gc session list` process discounts nothing. The block
 has no exemption for mode `always`, so on the legacy reconciler the pair would
 restart an idle witness whether or not it holds a claim. This is the nearest
 thing Gas City ships, and it does not serve:
@@ -252,15 +254,28 @@ loaded host the dispatch budget can stretch a 5m order past fifteen minutes
 failure was days. The hook is faster at the boundary, and the measured harm does
 not need that speed.
 
-**A nudge arriving mid-cycle.** `--delivery` defaults to `wait-idle`, which gives
-live delivery only to a provider named exactly `claude` (package worker,
-`nudgeWaitIdle`), and witnesses here run on a variant of it. So the script sends
-`--delivery immediate`, as `quota-park-nudge.sh` does. A working pane animates a
-spinner and reads as busy, so the gate keeps the nudge away from a running turn.
-When a turn starts between the read and the nudge, Claude Code takes the typed text
-as its next prompt. `refuseOrQueueNudgeBehindPendingInteraction` refuses an immediate
-nudge to a session at a permission prompt or a question, so nothing queues behind it
-and the pass exits 1 until the prompt is answered.
+**A nudge arriving mid-cycle.** `--delivery` defaults to `wait-idle`. For a
+Claude-family session it delivers live when the pane reads idle, and a wrapped
+provider such as this city's `claude-watch` counts, because
+`workerHandleForNudgeTarget` hands the worker the provider's family. Otherwise it
+queues: behind a pending prompt, for a pane it reads as busy, or when no idle
+boundary comes within 30 seconds (package main, `deliverSessionNudgeLegacy`; package
+worker, `nudgeWaitIdle`). A queued nudge stamps no `last_nudge_delivered_at`, so an
+order that keeps no state would queue another on each pass, and the session would
+take them all at once. So the script sends `--delivery immediate`, as
+`quota-park-nudge.sh` does. A working pane animates a spinner and reads as busy, so
+the gate keeps the nudge away from a running turn. When a turn starts between the
+read and the nudge, Claude Code takes the typed text as its next prompt.
+
+`refuseOrQueueNudgeBehindPendingInteraction` refuses an immediate nudge to a session
+at a permission prompt, so nothing queues behind it and the pass exits 1 until the
+prompt is answered. Upstream main refuses at an `AskUserQuestion` dialog too
+(`parseAskUserQuestion`), and its comment says why: "the nudge's Enter would select
+that option". The installed build reads permission prompts only, so until this city
+syncs, a nudge would answer such a dialog. The witness's prompt forbids that dialog,
+and the retained witness transcripts hold one such call, on 2026-10-04. An immediate
+nudge still queues when the agent is down in its pane, which lasts until the
+controller restarts it, or when a Codex turn would be interrupted by its submit keys.
 
 **An attached operator.** The session list carries `attached`, and such a session
 is skipped.
@@ -269,16 +284,21 @@ is skipped.
 and the order's `idempotent = true` keeps a contended store from skipping a pass
 that could still run. Witness cycles could not make progress in that outage anyway,
 so waiting spends nothing, and the first pass after it ends gets each witness going.
+When the session list still answers and only the witness's own store is down, the
+nudge goes out and buys a short failing pass, at the order's pace.
 
 **What the order costs.** It takes one read of the session list per pass (about a
 second on 2026-10-31) and one tracking wisp per run. It gives no report: a witness
 whose pane keeps printing while its patrol stands still gets no nudge, and nothing
-reports it. tk-1tfzr71.18 owns that report. A nudge buys one pass, and three hand
-nudges on 2026-10-30 each reached an idle witness and bought a pass of 11 to 42
-seconds, so the nudge text names the formula and where to start it. The comment on
-`orders/boot-health.toml` calls delivery to a fresh-wake singleton unreliable. All
-three of those nudges landed, so that comment does not hold here, and the bead that
-retires that order carries the point.
+reports it. tk-1tfzr71.18 owns that report. A nudge buys one pass. Three hand nudges
+on 2026-10-30, sent with the default delivery and carrying the instruction this
+order's nudge carries, each reached an idle witness and bought a pass of 11 to 42
+seconds. Each pass adopted its wisp and read its inbox, orphans and refinery queue,
+and two of them poured the next wisp. `--delivery immediate` is the form
+`quota-park-nudge.sh` sends, and it reached witnesses on 2026-10-26 and 2026-10-27.
+The comment on `orders/boot-health.toml` calls delivery to a fresh-wake singleton
+unreliable. All of those nudges landed, so that comment does not hold here, and the
+bead that retires that order carries the point.
 
 **The decision.** The order meets every item in the need, reaches the cold cases
 the hook cannot, and needs no loop guard. The hook's own account of itself had grown
