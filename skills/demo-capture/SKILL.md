@@ -21,9 +21,12 @@ The pack's `demo-engine-lib.sh` resolves the engine, and the pack's own
 captures source it too. It uses the local `sprintshow` rig checkout when the
 city has one and the published npm package otherwise. It holds Node to the
 engine's floor of 22.18, installs a checkout's dependencies on first use, and
-provisions the browser. Source it from the pack gc loaded and resolve the
-engine once. A video also needs ffmpeg, which the library leaves to the
-capture that assembles one:
+provisions the browser. It runs the engine inside a sandbox from which the
+live city cannot be reached, so a server the capture starts and a page it loads
+read none of the city's stores, configuration or API; the library's header says
+what the sandbox denies and what it refuses. Source it from the pack gc loaded
+and resolve the engine once. A video also needs ffmpeg, which the library
+leaves to the capture that assembles one:
 
 ```bash
 . "$(gc <binding> scripts-dir)/demo-engine-lib.sh" && demo_engine_resolve && {
@@ -39,8 +42,10 @@ capture that assembles one:
 front of this skill's name: `gc-toolkit` in `gc-toolkit.demo-capture`.
 `gc skill list` prints it in this skill's FROM column.
 
-`demo_engine_cli <command> <arguments...>` runs the engine's CLI in the current
-directory, so relative demo-script and `--serve-dir` paths resolve as written.
+`demo_engine_cli <command> <arguments...>` runs the engine's CLI inside the
+sandbox, in the current directory, so relative demo-script and `--serve-dir`
+paths resolve as written. An app that reads the city fails there, so point the
+capture at an app that serves fixture data.
 Each tool call starts a fresh shell, which has neither the library nor the
 engine it chose. So each engine command below runs after sourcing the library
 again and calling `demo_engine_find`, which finds the same engine and installs
@@ -68,7 +73,7 @@ assemble the MP4:
 ```bash
 demo_engine_cli run demo.md --serve-dir ./public          # serve a static directory
 demo_engine_cli run demo.md --serve "npm run dev" --port 5173   # spin up a dev server, tear it down
-demo_engine_cli run demo.md --base-url http://localhost:3000    # drive a server already running
+demo_engine_cli run demo.md --base-url https://<preview-host>   # drive a deployed preview
 ```
 
 Two capture modes come from one script:
@@ -105,7 +110,9 @@ scenario into a script (a ready one, or one written from a bead with
 closes the bead it was poured on. `gc formula show mol-rig-demo` prints the
 pour line and every input. A pour must set exactly one app target
 (`serve_dir`, `serve_cmd`, or `base_url`), because nothing in the toolkit maps
-a rig to its app. The `demo` review check makes the call inside the review
+a rig to its app. The sandbox refuses a rig's own checkout, so the app runs from
+a detached worktree of it at its HEAD, which holds only what the rig commits.
+The `demo` review check makes the call inside the review
 instead of pouring the mol (`gc-toolkit.review-demo`).
 
 ## Capture — you drive over Playwright MCP
@@ -115,7 +122,9 @@ When the session is demo-gated and carries the `playwright` MCP server (the
 browser itself: screenshot each
 step into a captures directory with a `manifest.json`, then hand the frames to
 the engine to assemble. This is the Gas City path, where the agent already
-holds the browser.
+holds the browser. That browser is the session's own, outside the sandbox the
+engine runs in, so it reaches whatever the session reaches, the live city
+included. Point it only at an app that serves fixture data.
 
 ```bash
 demo_engine_cli assemble .captures/agent-run -o demos/board.mp4
