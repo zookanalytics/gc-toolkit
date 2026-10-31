@@ -103,6 +103,8 @@ eq "$(count "$NUDGES")" 1 "an old nudge does not hold a quiet pane"
 has "$NUDGES" "quiet for 60 minutes" "the quiet clock runs from the newer of the two times"
 STUB_LIST=$(list_of "$(row lx-1 "$W" active true "$(iso 7200)" "")"); run
 eq "$(count "$NUDGES")" 0 "an attached operator can prompt the session themselves"
+STUB_LIST=$(list_of "$(row --delivery "$W" active false "$(iso 7200)" "")"); run
+eq "$(count "$NUDGES")" 0 "an id that would reach gc as a flag is not nudged"
 for st in asleep drained suspended creating start-pending; do
   STUB_LIST=$(list_of "$(row lx-1 "$W" "$st" false "$(iso 7200)" "")"); run
   eq "$(count "$NUDGES")" 0 "a witness in state $st is the controller's"
