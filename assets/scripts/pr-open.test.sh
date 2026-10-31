@@ -522,11 +522,12 @@ out=$("$SUT" 2>&1)
 has "$out" "opened PR#95" "a closed must-fix finding no longer holds the publish"
 eq "$(meta MF2 merge_result)" "pull_request" "…and the anchor publishes"
 
-echo "# the opened title carries a conventional-commit type from the bead kind"
-# A conventional-commit PR-title check requires a leading type token. The type
-# is derived from the bead's issue_type, unless the title already opens with a
-# recognized one — then it is kept, never double-prefixed. The bead id suffix
-# survives in every case.
+echo "# the opened title carries the author's type, and the bead kind only fills an untyped title"
+# A conventional-commit PR-title check requires a leading type token. The author
+# writes it on the anchor's title, so a title that opens with a recognized type is
+# kept, whatever the bead's kind, and is never double-prefixed. A title with none
+# takes a last-resort type from the bead's issue_type. The bead id suffix survives
+# in every case.
 tanchor() { # id issue_type title  — a green pre_open_gate anchor + its head
   # The anchor plus the closed approve bead that greens its correctness lane, emitted
   # as two array elements (the store composes them with commas).
@@ -540,7 +541,10 @@ store "[$(tanchor ttbug  bug     'Reject a moved head'),
         $(tanchor ttdoc  docs    'Document the merge cadence'),
         $(tanchor ttfeat feature 'Support integration branches'),
         $(tanchor ttpfx  task    'fix(pr-open): keep the bead id in the title'),
-        $(tanchor ttbare ''      'Tidy the enumerate step')]"
+        $(tanchor ttbare ''      'Tidy the enumerate step'),
+        $(tanchor ttref  task    'refactor: split the reconcile loop'),
+        $(tanchor tttest bug     'test: cover the moved head'),
+        $(tanchor ttci   task    'ci: pin the actions')]"
 # STUB_PR_CREATE_URL empty: create logs its args (the --title among them) and
 # returns nothing, so the pass stops before the readback. The title is read
 # from the logged create, where gh's arg log space-joins argv — so a title is
@@ -549,15 +553,42 @@ export STUB_PR_CREATE_URL=""
 : > "$STUB_GH_LOG"
 "$SUT" >/dev/null 2>&1
 tlog=$(cat "$STUB_GH_LOG")
-has "$tlog" "--title fix: Reject a moved head (ttbug) --body-file"            "bug maps to fix"
-has "$tlog" "--title chore: Reshape the reconcile loop (tttask) --body-file"  "task maps to chore"
-has "$tlog" "--title docs: Document the merge cadence (ttdoc) --body-file"    "docs maps to docs"
-has "$tlog" "--title feat: Support integration branches (ttfeat) --body-file" "feature maps to feat"
+has "$tlog" "--title fix: Reject a moved head (ttbug) --body-file"            "an untyped bug title takes fix"
+has "$tlog" "--title chore: Reshape the reconcile loop (tttask) --body-file"  "an untyped task title takes chore, the last resort"
+has "$tlog" "--title docs: Document the merge cadence (ttdoc) --body-file"    "an untyped docs title takes docs"
+has "$tlog" "--title feat: Support integration branches (ttfeat) --body-file" "an untyped feature title takes feat"
 has "$tlog" "--title fix(pr-open): keep the bead id in the title (ttpfx) --body-file" \
     "an existing conventional prefix is kept, not double-prefixed"
 hasnt "$tlog" "chore: fix(pr-open):" "…and no derived type is prepended to it"
 has "$tlog" "--title chore: Tidy the enumerate step (ttbare) --body-file" \
     "a bead with no issue_type falls back to chore"
+has "$tlog" "--title refactor: split the reconcile loop (ttref) --body-file" \
+    "a task whose author typed refactor stays refactor, not chore"
+has "$tlog" "--title test: cover the moved head (tttest) --body-file" \
+    "a bug whose author typed test stays test, not fix"
+has "$tlog" "--title ci: pin the actions (ttci) --body-file" \
+    "an author's ci type is recognized, not double-prefixed"
+hasnt "$tlog" "chore: ci:" "…and no derived type is prepended to it"
+
+echo "# every type the doctrine's Subject lines table offers is one the composer keeps"
+# An author who follows the table must never read `chore: <type>: ...`, which is
+# what a type the composer does not recognize composes to.
+DOCTRINE="$HERE/../../template-fragments/polecat-doctrine.template.md"
+doctrine_types=$(awk -F'`' '/^## Subject lines$/ { on = 1; next } /^## / { on = 0 } on && /^\| `/ { print $2 }' "$DOCTRINE")
+has "$doctrine_types" "fix" "the table is read: it offers fix"
+has "$doctrine_types" "chore" "…and chore"
+while IFS= read -r dtype; do
+  eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype: name the change" task)" \
+     "$dtype: name the change" "the composer keeps the doctrine's $dtype"
+done <<<"$doctrine_types"
+has "$(cat "$HERE/../../formulas/mol-polecat-work.toml")" "Subject lines section" \
+    "mol-polecat-work names the section the doctrine carries"
+# The rule reaches a title only through submit's 4c, and a title with no type
+# composes from the bead's kind with nothing failing, so this pins the line 4c has
+# the author fill in.
+step4c_sets=$(grep -F 'ANCHOR_TITLE=' "$HERE/../../formulas/mol-polecat-work.toml" || true)
+has "$step4c_sets" 'ANCHOR_TITLE="<type>: ' "submit's 4c has the author write the title with its type"
+hasnt "$step4c_sets" 'ANCHOR_TITLE=""' "…and offers no empty title as the line to run"
 
 echo "# a title the create opened with is one pr-stack keeps"
 # Once a PR is open, pr-stack.sh composes its title from the anchor and edits a PR
@@ -576,7 +607,7 @@ while IFS=$'\t' read -r tid ttitle; do
     '{number: $n, state: "OPEN", headRefName: $b, headRefOid: "sha-agree", title: $t, body: ""}' \
     > "$GH_DIR/pr_view_$anum.json"
 done < <(sed -n 's/.* --head polecat\/\([^ ]*\) --title \(.*\) --body-file .*/\1\t\2/p' <<<"$tlog")
-eq "$agree_n" "6" "every create's title was read off its logged create"
+eq "$agree_n" "9" "every create's title was read off its logged create"
 : > "$STUB_GH_LOG"
 aout=$("$SD/pr-stack.sh" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "--title" "pr-stack finds every created title current and retitles none"
