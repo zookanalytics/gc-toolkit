@@ -57,9 +57,8 @@ overlay_dir = "overlays/work-context"
 # Deterministic context recycle for the long-running patrol roles: a Claude
 # Stop hook recycles the session past a 200K input-token threshold
 # (docs/cycle-recycle.md). Gates itself to witness | deacon | refinery. The
-# same overlay carries the patrol-continue Stop hook, which hands the deacon and
-# the witness back a turn that ends between patrol cycles
-# (docs/patrol-continue.md).
+# same overlay carries the deacon's patrol-continue Stop hook, which hands back
+# a turn that ends between patrol cycles (docs/patrol-continue.md).
 [[patches.agent]]
 name = "refinery"
 overlay_dir = "overlays/cycle-recycle"
