@@ -720,10 +720,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    checks rather than repeating arm 3's pre-open sign-off line.
 
    The title: arm 3 writes it once, at create, composed from the anchor's title
-   (a conventional-commit type, the title, then the bead id), and the squash
-   merge takes its commit subject from it. A rework that retitles the anchor
-   would otherwise merge under the superseded name. For a `pull_request` anchor
-   this arm composes the title the same way and edits the PR when its words
+   and then the bead id, and the squash merge takes its commit subject from it.
+   The author writes the conventional-commit type on the anchor's title at
+   submit; a title that reaches the composer with none takes one from the bead's
+   kind, because a PR-title check needs some type. A rework that retitles the
+   anchor would otherwise merge under the superseded name. For a `pull_request`
+   anchor this arm composes the title the same way and edits the PR when its words
    differ; whitespace alone is never a difference. The anchor owns the title, so
    a retitle is made on the anchor: a title edited on the PR alone is composed
    back on the next pass. A stacked bead never renames the PR, because the title

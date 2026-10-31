@@ -961,7 +961,8 @@ BODY
 )"
 ```
 
-Commit types: feat, fix, refactor, perf, test, docs, chore
+Your prompt's Subject lines section says how to pick the type and word the
+subject.
 
 **Examples of strong subjects + bodies:**
 - `fix(session): preserve lifecycle metadata during crash adoption (ga-xxxx)`
@@ -1643,23 +1644,26 @@ merge-push in `mol-refinery-patrol` runs, so the summary goes to the bead the
 refinery anchors. An unreadable probe resolves to empty, so the summary falls
 back to the dispatch text and nothing is stranded.
 
-**4c. Check the anchor's title.** The PR's title is composed from the anchor's
-title: `pr-open.sh` writes it at create, `pr-stack.sh` keeps an open PR's title
-equal to it, and the squash merge takes its commit subject from it. Like the
-summary, it names the branch, not this pass. A rework that changed what the
-branch does, or fresh work that ended narrower or broader than what was filed,
-leaves a title naming work the branch does not do. Read it:
+**4c. Name the branch on the anchor's title.** The PR's title is composed from
+the anchor's title: `pr-open.sh` writes it at create, `pr-stack.sh` keeps an open
+PR's title equal to it, and the squash merge takes its commit subject from it.
+Like the summary, it names the branch, not this pass. Read it:
 
 ```bash
 gc bd show "${GATING_ANCHOR:-$WORK_BEAD_ID}" --json | jq -r '.[0].title // empty'
 ```
 
-When it no longer names what the branch does, set `ANCHOR_TITLE` to one line of
-plain words that does. Leave out the conventional-commit type and the bead id:
-the PR title adds both. When the title still fits, leave it empty:
+A title was filed before the work, so it can name a symptom or work the branch
+does not do, and only you know what the branch turned out to be. Set
+`ANCHOR_TITLE` to the branch's subject line, by your prompt's Subject lines
+section: the type, then the words, with no bead id, because the PR title adds it.
+`git log --format=%s origin/<target>..HEAD` lists the subjects you committed. A
+title with no type takes one from the bead's kind, which reads `chore:` on a
+task. Set it empty only when the title already opens with the type that fits and
+still names what the branch does:
 
 ```bash
-ANCHOR_TITLE=""
+ANCHOR_TITLE="<type>: <what the branch does>"
 ```
 
 The handoff below writes it onto the anchor, never onto the PR. The merge

@@ -26,12 +26,12 @@
 # anchor's title, and the squash commit takes its subject from it, so a PR whose
 # anchor a rework retitled would otherwise merge under the superseded name. For a
 # pull_request anchor this arm composes the title exactly as the create does
-# (cc_title's conventional-commit type, the anchor's title, then the bead id) and
-# edits the PR when its words differ. Whitespace alone is never a difference, so a
-# title stored with other spacing is not rewritten every pass. The anchor owns the
-# title: a title edited on the PR alone is composed back from the anchor on the
-# next pass, so a retitle is made on the anchor. The title is an edit of its own,
-# so one that fails never holds back a body refresh, nor the other way round.
+# (cc_title over the anchor's title, then the bead id) and edits the PR when its
+# words differ. Whitespace alone is never a difference, so a title stored with
+# other spacing is not rewritten every pass. The anchor owns the title: a title
+# edited on the PR alone is composed back from the anchor on the next pass, so a
+# retitle is made on the anchor. The title is an edit of its own, so one that
+# fails never holds back a body refresh, nor the other way round.
 # For each open anchor (a bead carrying merge_result) that records a pr_number:
 # read the branch's bead ledger, three code-written facts unioned —
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
