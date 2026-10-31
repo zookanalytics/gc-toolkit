@@ -257,7 +257,13 @@ every agent capture as `self`, so an operator correction captured by the agent
 it corrected reads `self`. Before you treat a cluster as all-self, check each
 self observation's voice: a PR comment or review whose GitHub author is the
 operator (`gh api` on the provenance, `.user.login`), or the operator's own
-words quoted from a sitting or visit, is an operator correction.
+words in a session the operator attends, such as the converse sitting on a
+visit or mechanik, is an operator correction. Find a quoted turn in that
+session's transcript (`gc session logs <session>`, or the codex rollout under
+`~/.codex/sessions`), and rule out text the city sends as a user turn,
+whatever the capture calls it: a configured nudge, a reminder, hook output, or
+another agent's `gc session nudge`. A pool session has no one at its terminal
+by design, so count no quote from one as the operator's voice.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
 **blocked**, however many events it spans. Self-sourced clusters have been
