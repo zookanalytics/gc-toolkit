@@ -118,8 +118,8 @@ that does not import the pack itself.
   execs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
   `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
-  `boot-health`, `quota-park-nudge`, `gctk-build`, `helm-build`, and the
-  feedback miner/distiller.
+  `boot-health`, `quota-park-nudge`, `witness-nudge`, `gctk-build`, `helm-build`,
+  and the feedback miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
 - **Doctor checks** — the structural checks verified below.

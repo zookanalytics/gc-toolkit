@@ -5,7 +5,7 @@
 # The deacon's patrol is a loop of mol-deacon-patrol wisps, one cycle each, and
 # the loop lives in the conversation: next-iteration pours the next wisp and
 # the session goes on to it. The model ends its turn after a cycle anyway, and
-# nothing gives an ended turn another one: the deacon is a named session in
+# Gas City gives an ended turn no other one: the deacon is a named session in
 # mode "always", which no idle timeout stops, and its configured nudge is
 # delivered once per session. So at every turn boundary this hook blocks the
 # stop and hands the next cycle back (docs/patrol-continue.md).
