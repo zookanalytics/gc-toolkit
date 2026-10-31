@@ -129,6 +129,7 @@ formulas/mol-dog-shutdown-dance.toml	tk-1tfzr71.18
 orders/boot-health.toml	tk-1tfzr71.18
 orders/pin-keepalive.toml	tk-1tfzr71.18
 orders/quota-park-nudge.toml	tk-1tfzr71.18
+assets/scripts/backup-alarm-scope.sh	tk-1tfzr71.19
 assets/scripts/doctor-sweep.sh	tk-1tfzr71.19
 assets/scripts/doctor-sweep.test.sh	tk-1tfzr71.19
 assets/scripts/gc-deacon-ledger.sh	tk-1tfzr71.19

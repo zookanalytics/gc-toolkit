@@ -727,23 +727,216 @@ EMPTY_ROOT="$TMP/empty"
 mkdir -p "$EMPTY_ROOT/.dolt-backup"
 root_case "empty backup root" "$EMPTY_ROOT"
 
+# --- The stub gc behind the un-overridden default path ------------------------
+# It answers each thing the snippet and backup-alarm-scope.sh ask of gc from what
+# the case set, and logs every call. Paths are baked in at write time.
+GC_LOG="$TMP/gc.log"
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gc" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$GC_LOG"
+case "\$*" in
+    *" scripts-dir") printf '%s\n' "$HERE" ;;
+    "dolt health --json") printf '%s' "\${STUB_HEALTH:-}" ;;
+    "rig list --json") [ -n "\${STUB_RIGS:-}" ] || exit 1; printf '%s' "\$STUB_RIGS" ;;
+esac
+EOF
+chmod +x "$TMP/bin/gc"
+
 # --- No database list -------------------------------------------------------
 # If the health report yields no databases, nothing is verified. That is a
-# terminal finding too — an empty loop must never read as "all clean". Stub
-# `gc` so the snippet's default EXPECTED_DBS resolution runs hermetically; this
-# also exercises the un-overridden default path.
-if command -v jq >/dev/null 2>&1; then
-    mkdir -p "$TMP/bin"
-    printf '%s\n' '#!/bin/sh' 'echo "{\"databases\":[]}"' > "$TMP/bin/gc"
-    chmod +x "$TMP/bin/gc"
-    NODB="$(PATH="$TMP/bin:$PATH" GC_CITY_PATH="$TMP" GC_CITY="$TMP" bash "$TMP/check.sh" 2>&1)"
-    if grep -q '^FLAG-ROOT:' <<< "$NODB"; then
-        ok "empty database list -> FLAG-ROOT ($(printf '%s\n' "$NODB" | head -1))"
+# terminal finding too — an empty loop must never read as "all clean". The stub
+# gc runs the snippet's default EXPECTED_DBS resolution hermetically; this also
+# exercises the un-overridden default path.
+for no_dbs in '{"databases":[]}' 'not json' ''; do
+    NODB="$(STUB_HEALTH="$no_dbs" PATH="$TMP/bin:$PATH" GC_CITY_PATH="$TMP" GC_CITY="$TMP" bash "$TMP/check.sh" 2>&1)"
+    if grep -q '^FLAG-ROOT: health report listed no databases' <<< "$NODB"; then
+        ok "health report '$no_dbs' -> FLAG-ROOT ($(grep '^FLAG-ROOT:' <<< "$NODB" | head -1))"
     else
-        bad "empty database list did not produce FLAG-ROOT; got: $NODB"
+        bad "health report '$no_dbs' did not produce the no-database FLAG-ROOT; got: $NODB"
     fi
+done
+
+# --- A suspended rig's database is left out of the scan ----------------------
+# Gas City's backup order skips a suspended rig's store, so its manifest ages by
+# design. What a suspended rig shares with a running one is still backed up and
+# still judged, and so is anything no suspended rig can be shown to hold.
+SCOPE_SH="$HERE/backup-alarm-scope.sh"
+CITY_FIX="$TMP/city"
+mkdir -p "$CITY_FIX/.beads" "$CITY_FIX/.dolt-backup"
+printf '{"dolt_database":"hq"}\n' > "$CITY_FIX/.beads/metadata.json"
+mk_rig_store() { # <rig> <database>
+    mkdir -p "$CITY_FIX/rigs/$1/.beads"
+    printf '{"dolt_database":"%s"}\n' "$2" > "$CITY_FIX/rigs/$1/.beads/metadata.json"
+}
+mk_manifest() { # <database> <hours old>
+    mkdir -p "$CITY_FIX/.dolt-backup/$1"
+    : > "$CITY_FIX/.dolt-backup/$1/manifest"
+    touch -t "$(age "$2")" "$CITY_FIX/.dolt-backup/$1/manifest"
+}
+mk_rig_store live live;              mk_manifest hq 1;        mk_manifest live 1
+mk_rig_store livestale livestale;    mk_manifest livestale 40
+mk_rig_store paused paused;          mk_manifest paused 40
+mk_rig_store pausedshare shared;     mk_rig_store liveshare shared; mk_manifest shared 40
+mkdir -p "$CITY_FIX/rigs/pausednometa";                       mk_manifest nometa 40
+mk_rig_store pausednew pausednew
+FIX_RIGS="$(jq -nc --arg c "$CITY_FIX" '{city_path: $c, rigs: [
+    {name: "city", path: $c, hq: true, suspended: false},
+    {name: "live", path: ($c + "/rigs/live"), suspended: false},
+    {name: "livestale", path: ($c + "/rigs/livestale"), suspended: false},
+    {name: "paused", path: ($c + "/rigs/paused"), suspended: true},
+    {name: "pausedshare", path: ($c + "/rigs/pausedshare"), suspended: true},
+    {name: "liveshare", path: ($c + "/rigs/liveshare"), suspended: false},
+    {name: "pausednometa", path: ($c + "/rigs/pausednometa"), suspended: true},
+    {name: "pausednew", path: ($c + "/rigs/pausednew"), suspended: true}]}')"
+FIX_HEALTH='{"databases":[{"name":"hq"},{"name":"live"},{"name":"livestale"},{"name":"paused"},{"name":"shared"},{"name":"nometa"},{"name":"pausednew"}]}'
+scope_run() { # <shell...> -- runs the shipped snippet on the fixture city
+    STUB_HEALTH="$FIX_HEALTH" STUB_RIGS="${STUB_RIGS-$FIX_RIGS}" PATH="$TMP/bin:$PATH" \
+        GC_CITY_PATH="$CITY_FIX" GC_CITY="$CITY_FIX" "$@" "$TMP/check.sh" 2>&1
+}
+scope_has() { # <output> <line prefix> <label>
+    if grep -q "^$2" <<< "$1"; then ok "$3"; else bad "$3 (no '$2' line in: $1)"; fi
+}
+scope_hasnt() { # <output> <line prefix> <label>
+    if grep -q "^$2" <<< "$1"; then bad "$3 (found '$2' in: $1)"; else ok "$3"; fi
+}
+
+SCOPE_OUT="$(scope_run bash)"
+scope_has   "$SCOPE_OUT" "OK hq:"           "the city's own database is still scanned"
+scope_has   "$SCOPE_OUT" "OK live:"         "a running rig's fresh backup still reads OK"
+scope_has   "$SCOPE_OUT" "FLAG livestale:"  "a running rig's stale backup still flags"
+scope_hasnt "$SCOPE_OUT" "FLAG paused:"     "a suspended rig's stale backup does not flag"
+scope_hasnt "$SCOPE_OUT" "OK paused:"       "  ... and gets no verdict it did not earn"
+scope_has   "$SCOPE_OUT" "INFO paused: backup dir outside the scan" "  ... only the advisory line"
+scope_has   "$SCOPE_OUT" "FLAG shared:"     "a store a running rig also names still flags"
+scope_has   "$SCOPE_OUT" "FLAG nometa:"     "a database no rig is shown to hold still flags"
+scope_hasnt "$SCOPE_OUT" "FLAG pausednew:"  "a suspended rig's store with no backup dir does not flag either"
+SCOPE_STRICT="$(scope_run bash -euo pipefail)"
+if [ "$SCOPE_STRICT" = "$SCOPE_OUT" ]; then
+    ok "the same verdicts under a strict shell"
 else
-    echo "skip - empty-database-list case (jq not installed)"
+    bad "a strict shell changed the verdicts: $SCOPE_STRICT"
+fi
+
+# Only a rig map that reads can leave a database out. One that does not read
+# must leave the alarm flagging, and say why.
+for bad_rigs in '' 'not json' '{"rigs":"none"}'; do
+    SCOPE_DOWN="$(STUB_RIGS="$bad_rigs" scope_run bash)"
+    scope_has "$SCOPE_DOWN" "FLAG paused:" "rig map '$bad_rigs': a suspended rig's stale backup still flags"
+    scope_has "$SCOPE_DOWN" "backup-alarm-scope: the rig map did not read" "  ... and it says why"
+done
+
+# A report the patrol already holds is used, and nothing asks for another.
+: > "$GC_LOG"
+SCOPE_HELD="$(HEALTH_JSON="$FIX_HEALTH" scope_run bash)"
+scope_hasnt "$SCOPE_HELD" "FLAG paused:" "a held health report leaves the suspended rig's database out too"
+if grep -q 'dolt health' "$GC_LOG"; then
+    bad "a held health report was probed again: $(cat "$GC_LOG")"
+else
+    ok "  ... without probing the data plane again"
+fi
+
+# The block reads an empty list as the FLAG-ROOT above. The script's own answer
+# is what a reader of the deacon's output has to go on.
+SCOPE_RC=0
+SCOPE_NODB="$(PATH="$TMP/bin:$PATH" "$SCOPE_SH" databases '{"databases":[]}' 2>"$TMP/scope.err")" || SCOPE_RC=$?
+if [ "$SCOPE_RC" -eq 1 ] && [ -z "$SCOPE_NODB" ] && grep -q 'listed no databases' "$TMP/scope.err"; then
+    ok "a health report with no database prints nothing, exits 1 and says so"
+else
+    bad "a health report with no database: rc=$SCOPE_RC stdout='$SCOPE_NODB' stderr='$(cat "$TMP/scope.err")'"
+fi
+
+# --- A suspended rig's scope in the doctor's freshness finding ---------------
+# The finding joins one clause per scope. backup-alarm-scope.sh takes out a
+# suspended rig's clause, and with none left the result reads ok, which is what
+# the patrol's filter skips. Nothing else in the payload moves.
+OUTSIDE="$TMP/outside/pausedfar"
+PAYLOAD_RIGS="$(jq -nc --arg c "$CITY_FIX" --arg o "$OUTSIDE" '{city_path: $c, rigs: [
+    {name: "live", path: ($c + "/rigs/live"), suspended: false},
+    {name: "paused-two", path: ($c + "/rigs/paused-two"), suspended: false},
+    {name: "paused", path: ($c + "/rigs/paused"), suspended: true},
+    {name: "pausedfar", path: $o, suspended: true}]}')"
+STALE="dolt backup: last sync was 30h0m0s ago (> 24h0m0s) — backup pipeline may be disabled or broken"
+PAYLOAD_FILE="$TMP/payload.json"
+write_payload() { # <message> [<check name>] [<status>]
+    jq -n --arg m "$1" --arg n "${2:-bd-backup-freshness}" --arg s "${3:-warning}" '{passed: 1, results: [
+        {name: "city-structure", status: "ok", severity: "advisory", message: "OK"},
+        {name: $n, status: $s, severity: "advisory", message: $m, fix_hint: "sync it"}]}' > "$PAYLOAD_FILE"
+}
+narrow() { # sets NARROW_RC and NARROW_ERR
+    NARROW_RC=0
+    NARROW_ERR="$(STUB_RIGS="${STUB_RIGS-$PAYLOAD_RIGS}" PATH="$TMP/bin:$PATH" "$SCOPE_SH" payload "$PAYLOAD_FILE" 2>&1)" || NARROW_RC=$?
+}
+result_field() { jq -r --arg f "$1" '.results[1][$f] // "<absent>"' "$PAYLOAD_FILE"; }
+same() { # <got> <want> <label>
+    if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
+}
+
+write_payload "scope rigs/live: $STALE; scope rigs/paused: $STALE"
+narrow
+same "$NARROW_RC" 0 "a finding naming a running and a suspended scope is narrowed"
+same "$(result_field message)" "scope rigs/live: $STALE" "  ... to the running rig's clause"
+same "$(result_field status)" "warning" "  ... and stays a finding"
+same "$(result_field fix_hint)" "sync it" "  ... with its fix hint"
+same "$(jq -c '.results[0]' "$PAYLOAD_FILE")" '{"name":"city-structure","status":"ok","severity":"advisory","message":"OK"}' \
+    "  ... and the next check is untouched"
+
+write_payload "scope rigs/paused: $STALE; scope $OUTSIDE: $STALE"
+narrow
+same "$(result_field status)" "ok" "a finding naming only suspended scopes reads ok, one outside the city included"
+same "$(result_field fix_hint)" "<absent>" "  ... and carries no fix hint"
+same "$(jq -r '[.results[] | select(.status != "ok")] | length' "$PAYLOAD_FILE")" 0 "  ... so the patrol's filter finds nothing to file"
+
+write_payload "scope rigs/paused-two: $STALE"
+narrow
+same "$(result_field message)" "scope rigs/paused-two: $STALE" "a running rig whose name extends a suspended one's keeps its clause"
+
+write_payload "city: read backup_state.json: a; b; scope rigs/paused: read dolt-backup-state.json: c; d; scope rigs/live: $STALE"
+narrow
+same "$(result_field message)" "city: read backup_state.json: a; b; scope rigs/live: $STALE" \
+    "the city's clause stays, and a clause goes with the semicolons in its own text"
+
+write_payload "scope rigs/paused: $STALE" "bd-backup-state"
+BEFORE="$(cat "$PAYLOAD_FILE")"; : > "$GC_LOG"
+narrow
+same "$(cat "$PAYLOAD_FILE")" "$BEFORE" "a sweep without this finding is left as it is"
+same "$(grep -c 'rig list' "$GC_LOG" || true)" 0 "  ... and pays for no rig listing"
+
+write_payload "scope rigs/paused: $STALE"
+jq '.results += [{name: "bd-backup-state", status: "warning", severity: "advisory", message: "scope rigs/paused: quarantined"}]' \
+    "$PAYLOAD_FILE" > "$PAYLOAD_FILE.next"
+mv "$PAYLOAD_FILE.next" "$PAYLOAD_FILE"
+narrow
+same "$(jq -c '.results[2] | [.status, .message]' "$PAYLOAD_FILE")" '["warning","scope rigs/paused: quarantined"]' \
+    "another check that names a suspended scope keeps its finding"
+
+write_payload "scope rigs/paused: $STALE"
+BEFORE="$(cat "$PAYLOAD_FILE")"
+STUB_RIGS="" narrow
+same "$NARROW_RC" 1 "a rig map that does not read exits non-zero"
+same "$(cat "$PAYLOAD_FILE")" "$BEFORE" "  ... and the payload keeps the finding, byte for byte"
+if grep -qF 'keeps every scope it names' <<< "$NARROW_ERR"; then
+    ok "  ... and says why"
+else
+    bad "the narrowing did not say why: $NARROW_ERR"
+fi
+
+# A narrowed copy that cannot take the payload's place changes nothing either,
+# and leaves nothing beside it.
+mkdir -p "$TMP/nomv"
+printf '%s\n' '#!/bin/sh' 'exit 1' > "$TMP/nomv/mv"
+chmod +x "$TMP/nomv/mv"
+write_payload "scope rigs/paused: $STALE"
+BEFORE="$(cat "$PAYLOAD_FILE")"
+NOMV_RC=0
+NOMV_ERR="$(STUB_RIGS="$PAYLOAD_RIGS" PATH="$TMP/nomv:$TMP/bin:$PATH" "$SCOPE_SH" payload "$PAYLOAD_FILE" 2>&1)" || NOMV_RC=$?
+same "$NOMV_RC" 1 "a narrowed copy that cannot be moved into place exits non-zero"
+same "$(cat "$PAYLOAD_FILE")" "$BEFORE" "  ... and the payload keeps the finding"
+same "$(find "$TMP" -maxdepth 1 -name 'payload.json.*' | wc -l | tr -d ' ')" 0 "  ... and no scratch file stays beside it"
+if grep -qF 'could not narrow' <<< "$NOMV_ERR"; then
+    ok "  ... and says why"
+else
+    bad "the failed move did not say why: $NOMV_ERR"
 fi
 
 echo

@@ -334,6 +334,10 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
       exit 0
     fi
 
+    # A suspended rig's backup ages by design, so it is no finding. A payload
+    # this cannot narrow stays whole, and the finding stands.
+    [ "$MODE" = "status" ] || "$(dirname "${BASH_SOURCE[0]}")/backup-alarm-scope.sh" payload "$PAYLOAD"
+
     # Indexes `.results` as the array the guard proved it is, so an array
     # holding something other than check results fails the filters rather than
     # counting nothing. An empty TSV is that failure: a real sweep, even one
