@@ -53,6 +53,10 @@
 #               a capture's own server answers it on each of a run of free
 #               ports, which opens neither another loopback service nor a Unix
 #               socket
+#   (SHELLS)    under zsh and macOS's bash 3.2, the shells an agent can source
+#               the library in, the skill's resolve block runs, and an engine
+#               call hands the engine the arguments and the profile this suite's
+#               bash does and drops the variables that point at the city
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
@@ -715,6 +719,36 @@ engine lint demo.md" "(demo-capture skill) on the checkout's CLI, with nothing i
 skill_run "$TMPD/skill-call.sh"
 eq "$(calls)" "npx --yes @zookanalytics/sprintshow lint demo.md
 engine lint demo.md" "(demo-capture skill) and on the published package when there is no checkout"
+
+echo "# SHELLS: the library runs in the agent's own shell, which can be zsh or macOS's bash 3.2, and does there what it does under this suite's bash"
+# A block run as skill_run runs one, through the shell named, in the city's
+# environment. The engine call names a server and a port, so what the shell does
+# with the arguments reaches the engine and the profile.
+skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --serve-dir app --port 5199 -o clip.mp4#' >"$TMPD/skill-serve.sh"
+shell_run() {
+  local sh="$1" blk="$2"
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      ENGINE_STUB="$ENGINE_STUB" PACK_SCRIPTS="$HERE" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
+      "${CITY_ENV[@]}" "$sh" "$blk" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+shell_run bash "$TMPD/skill-serve.sh"
+eq "$RC" 0 "(shells) this suite's bash runs the engine call"
+has "node [$ENGINE/src/cli.ts] [run] [demo.md] [--serve-dir] [app] [--port] [5199] [-o] [clip.mp4]" "$(calls)" "(shells) and the engine gets its arguments"
+has '(allow network-outbound (remote ip "localhost:5199"))' "$(profile)" "(shells) and the profile opens the port they name"
+SERVE_CALLS="$(calls)"; SERVE_PROFILE="$(profile)"
+for sh in /bin/zsh /bin/bash; do
+  if [ ! -x "$sh" ]; then echo "# SHELLS: $sh SKIPPED (not on this host)"; continue; fi
+  shell_run "$sh" "$TMPD/skill-resolve.sh"
+  eq "$RC" 0 "(shells) $sh runs the resolve block"
+  has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(shells) $sh chooses the local engine"
+  shell_run "$sh" "$TMPD/skill-serve.sh"
+  eq "$RC" 0 "(shells) $sh runs the engine call"
+  eq "$(calls)" "$SERVE_CALLS" "(shells) $sh hands the engine the same arguments"
+  eq "$(profile)" "$SERVE_PROFILE" "(shells) $sh builds the same profile"
+  eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(shells) $sh drops the variables that point at the city"
+done
 
 echo "# NO-COPY: no other script, and no skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 # One grep finds the files that name a step anywhere; only those are read again

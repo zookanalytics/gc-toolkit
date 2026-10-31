@@ -102,7 +102,10 @@
 #   demo_engine_resolve || exit 1
 #   demo_engine_cli <command> <arguments...>
 # An agent's shell has no script beside it, so the skill sources this file from
-# the pack gc loaded, as "$(gc <binding> scripts-dir)/demo-engine-lib.sh".
+# the pack gc loaded, as "$(gc <binding> scripts-dir)/demo-engine-lib.sh". That
+# shell can be zsh or macOS's bash 3.2, so this file keeps to what each of them
+# runs: zsh ties a variable named argv to the positional parameters, and bash 3.2
+# cannot parse a case pattern with no opening parenthesis inside $(...).
 
 DEMO_ENGINE_PACKAGE=@zookanalytics/sprintshow
 
@@ -351,7 +354,7 @@ _demo_engine_city() {
   _DEMO_ENGINE_RIGS=""
   if [ -n "${DEMO_ENGINE_RIG_MAP:-}" ]; then
     _DEMO_ENGINE_RIGS=$(printf '%s' "$DEMO_ENGINE_RIG_MAP" | jq -r '.rigs[]? | objects | .path // empty' 2>/dev/null \
-      | while IFS= read -r p; do case "$p" in /*) _demo_engine_canon "$p" ;; esac; done)
+      | while IFS= read -r p; do case "$p" in (/*) _demo_engine_canon "$p" ;; esac; done)
   fi
   _DEMO_ENGINE_PLACES=$(_demo_engine_city_places "$_DEMO_ENGINE_RIGS")
 }
@@ -400,9 +403,9 @@ demo_engine_cli() {
   local NL='
 ' pos="" port="" open="" base="" serve="" serve_dir="" cand="" files="" places=""
   local rw="" ro="" p d reach kind engine="" profile v
-  local -a argv unsets
+  local -a args unsets
   _demo_engine_sandbox_ok || return 1
-  argv=("$@")
+  args=("$@")
   [ $# -eq 0 ] || shift
 
   # What the run reads and writes, and the server it starts, as the engine's own
@@ -436,7 +439,7 @@ demo_engine_cli() {
   if [ -n "$serve$serve_dir" ]; then
     if [ -z "$port" ] && [ -z "$serve" ]; then
       open=$(demo_engine_free_port) || { _demo_engine_say "could not find a free port for the --serve-dir server"; return 1; }
-      argv+=(--port "$open")
+      args+=(--port "$open")
     else
       open="${port:-5173}"
       case "$open" in
@@ -530,5 +533,5 @@ EOF
   else
     set -- npx --yes "$DEMO_ENGINE_PACKAGE"
   fi
-  env ${unsets[@]+"${unsets[@]}"} sandbox-exec -p "$profile" "$@" ${argv[@]+"${argv[@]}"}
+  env ${unsets[@]+"${unsets[@]}"} sandbox-exec -p "$profile" "$@" ${args[@]+"${args[@]}"}
 }
