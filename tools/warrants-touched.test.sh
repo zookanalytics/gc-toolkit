@@ -278,6 +278,19 @@ has '    changes rootfile.toml' "an uncommitted deletion at the top of the repos
 done_case
 
 branch
+git -C "$REPO" rm -q rootfile.toml; commit root-delete-before-base
+DELETER="case-$CASE"
+git -C "$REPO" checkout -q -b case-base-moved main
+git -C "$REPO" rm -q rootfile.toml; commit root-delete-on-base
+git -C "$REPO" update-ref refs/remotes/origin/main HEAD
+git -C "$REPO" checkout -q "$DELETER"
+run
+eq "$rc" 1 "a file the branch deleted and the base's tip has dropped since exits 1"
+has '    changes rootfile.toml' "it names the file, which the merge base holds and the base's tip does not"
+done_case
+git -C "$REPO" update-ref refs/remotes/origin/main main
+
+branch
 cat >> "$REPO/docs/warrants.md" <<'PAGE'
 
 ## Root warrant
@@ -321,6 +334,33 @@ run
 has '    changes staged.toml' "a file only staged at the top of the repository is a path"
 run --covers
 root_row 'Staged warrant' staged.toml && ok "--covers marks that entry a path, not none" || bad "--covers does not: $(cat "$TMP/out")"
+done_case
+
+branch
+mkdir "$REPO/stageddir"; printf 'new\n' > "$REPO/stageddir/file"
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Staged directory warrant
+
+- **Covers.** `stageddir`.
+- **Verified.** 2026-03-15.
+PAGE
+git -C "$REPO" add stageddir
+run
+has '    changes stageddir' "a directory only staged at the top of the repository is a path"
+done_case
+
+branch
+printf 'new\n' > "$REPO/untracked.toml"
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Untracked warrant
+
+- **Covers.** `untracked.toml`.
+- **Verified.** 2026-03-16.
+PAGE
+run --covers
+grep -qxF "$(printf 'Untracked warrant\tnone\t-\t-')" "$TMP/out" && ok "a file git does not track is no path, since no diff names it" || bad "--covers reads it as one: $(cat "$TMP/out")"
 done_case
 
 branch
