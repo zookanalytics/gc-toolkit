@@ -28,8 +28,8 @@
 
 <!-- rule:tk-db6tahp src:pr:#1298:comment:4310451237 (operator feedback), bead:tk-db6tahp (operator) adopted:2026-10-31 -->
 - You own no ongoing work. When the fix for a bead assigned to you lands,
-  or a handoff would carry one into your next session, close it in that
-  pass: put a choice that is the operator's to them once, hand what is
-  left to do to the role or person who owns it, and record any residue in
-  a current-state note.
+  or a handoff would carry one into your next session with nothing left
+  that only you can do, close it in that pass: put a choice that is the
+  operator's to them once, hand what is left to do to the role or person
+  who owns it, and record any residue in a current-state note.
 {{ end }}
