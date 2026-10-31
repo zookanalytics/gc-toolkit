@@ -28,7 +28,8 @@
 # anchor readers drop it while a person owes an answer. To pause the merge of an
 # anchored subject a sitting passes --hold-merge, the opt-in that files a second
 # demand on the anchor — the blocks edge the merge sweep already honors; by
-# default it does not.
+# default it does not. An armed unanchored subject takes no transition, because
+# its gate holds it and `held` would cost it the arm.
 #
 # Every write lands on the subject or the visit. The writers (gc-helm.sh,
 # lifecycle.sh) are this script's siblings in the copy of the pack that is
@@ -204,6 +205,18 @@ LC=""
 [ -x "$HERE/lifecycle.sh" ] && LC="$HERE/lifecycle.sh"
 STATE=""
 [ -n "$LC" ] && STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
+# `held` writes a merge_result, and deferred-dispatch.sh retires an arm on any
+# merge_result. A subject that cannot be read stops the hold here, because `held`
+# written over an arm it could not see is what costs the bead its dispatch.
+ARM=""
+if [ "$STATE" = "unanchored" ]; then
+  if ! S=$(show_one "$SUBJECT"); then
+    echo "SUBJECT UNREADABLE: $SUBJECT could not be read, so this hold cannot tell whether it carries a dispatch arm, and this run wrote nothing. Do NOT post the framing."
+    echo "Re-run this block once the store answers. If the subject cannot be read, that failure is what the operator needs to hear: raise it in the thread, and do not describe the subject as held."
+    exit 1
+  fi
+  ARM=$(printf '%s' "$S" | jq -r '.[0].metadata["gc.dispatch_when_ready"] // ""')
+fi
 # Gate the VISIT only when $SUBJECT is PROVABLY anchored — a readable PR-anchor
 # state (on the merge track, or already merged), where a demand on the subject
 # would freeze a live merge or land on a closed bead. Every other state gates
@@ -313,6 +326,8 @@ if [ -n "$HOLD_MERGE" ] && [ "$GATED" = "$VISIT" ]; then
 fi
 # <<< hold-merge-opt-in
 if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER (lifecycle.sh) beside $0 — the demand gates the subject and keeps it blocked, but no 'held' lifecycle marker is recorded"
+elif [ "$STATE" = "unanchored" ] && [ -n "$ARM" ]; then
+  echo "$SUBJECT keeps its dispatch arm to $ARM and does not move to held: the demand holds it, and the arm sends it once the ruling resolves the demand and nothing else holds it."
 elif [ "$STATE" = "unanchored" ]; then
   "$LC" transition "$GATED" --to held --route human \
     || echo "HELD TRANSITION FAILED on $GATED — the hold is prose-only; re-run it before you wait"
