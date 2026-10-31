@@ -22,10 +22,11 @@ already ships for each verb
 ([review-arch.md](../../docs/review-arch.md#the-checks), check 1).
 
 Gas City ships no primitive that covers either verb. Nothing it ships lists the
-databases the backup order leaves cold, or ties a database to a rig outside its
-own scripts. Its doctor leaves suspended rigs out of `rig:<name>:dolt-backup`
-and its proxied backup coverage check, but `bd-backup-freshness` takes every
-rig. That choice is in Go, where no flag or config table reaches it.
+databases the backup order leaves cold. One command, `gc dolt-cleanup --json`,
+ties a database to a rig, from the same file the verb reads and not on every
+city. Its doctor leaves suspended rigs out of `rig:<name>:dolt-backup` and its
+proxied backup coverage check, but `bd-backup-freshness` takes every rig. That
+choice is in Go, where no flag or config table reaches it.
 
 So the script composes the reads Gas City does ship. It reads `gc rig list
 --json`'s `suspended` field, as the backup order does. It reads a scope's
@@ -51,25 +52,29 @@ health` and `gc doctor`. What it adds is the exception itself.
 
 Each source was read on 2026-10-31 (UTC). Everything below is read from source
 at these commits, or from the live documentation, and none of it was run against
-an upstream build. The one thing run is named where it appears.
+an upstream build. What was run on the city's build or on the verb is named where
+it appears.
 
 - Gas City (`gastownhall/gascity`) at main `d1a150cac8f8`: the documentation
   named below, the `core` pack, the `dolt` pack it bundles (its source sits under
   `examples/bd/dolt`), package `doctor`, and the source of `gc doctor`, `gc rig
-  list` and the order-tracking watchdog. `suspend` was searched over the dolt
-  pack, package `doctor`, the core pack and `docs/`, and each hit that concerns
-  a store or a backup was read.
+  list`, `gc dolt-cleanup` and the order-tracking watchdog. `suspend` was searched
+  over the dolt pack, package `doctor`, the core pack, `docs/` and `engdocs/`, and
+  each hit that concerns a store or a backup was read. The JSON fields that hold
+  a database name were listed across `cmd/gc` and `internal/api`.
 - bd (`gastownhall/beads`) at main `4a92834d575f`: the `bd backup` commands, and
   `suspend` over its documentation.
 - The packs Gas City publishes (`gastownhall/gascity-packs`) at main
   `0b0d96250f66`, and at the commits Gas City's `public_packs.go` pins:
-  `cb6a612882b8` for Gas Town and `5bf643ca55bd` for the build pack. The whole
+  `cb6a612882b8` for Gas Town and `5bf643ca55bd` for the `gascity` pack. The whole
   repository was searched for `bd-backup-freshness`, `BulkDeleteSafe` and
   `dolt_stale`, and its scripts and toml for a `suspended` read, at each of
   those commits. It was searched for `backup` and `gc doctor` at main, with Gas
   Town's `gc doctor` hits read at its pin too.
 - Upstream's issues and pull requests, for `bd-backup-freshness` and for
-  suspended rigs with backups. None reports this mismatch.
+  suspended rigs with backups. None reports this mismatch. The nearest is the
+  open gastownhall/gascity#6930, which stops `mol-dog-doctor` and `gc dolt health`
+  flagging an idle database's backup.
 
 ### The city's build is not this evidence
 
@@ -105,13 +110,14 @@ else reads it. The order syncs each database once, through the first running
 scope that names it (`VISITED_DBS`), which is why a database a running rig
 shares stays judged here.
 
-The verb reads the same `suspended` field through `rig-map.sh`, the pack's one
+The verb reads the same `suspended` field through `rig-map.sh`, the pack's shared
 read of `gc rig list --json`, so the alarm and the order cannot disagree about
 which rigs are out. Each core pack script that needs the answer reads the field
 in its own jq: `core_rig_names` in `scope_bd.sh`, `orphan-sweep.sh`,
 `cross-rig-deps.sh`, `cascade-nudge-on-blocker-close.sh`,
 `notify-on-human-gate-creation.sh` and `renudge-stale-human-gates.sh`. Those are
-private scripts of the core pack, and no `gc` verb answers the question.
+private scripts of the core pack, and `gc rig list` has no flag that filters on
+the field.
 
 **`gc dolt health --json` lists every database.** `.databases[]` comes from the
 data directory, or from `SHOW DATABASES` on an external endpoint.
@@ -136,9 +142,10 @@ store going stale later sends nothing new. It could not replace the deacon's
 check today, and the deletion plan moves patrol onto the dolt pack's orders, so
 this is what the replacing member will meet.
 
-**No read names a rig's database, so the verb reads the file.** A `gc rig list
---json` row (`RigListItem` in `cmd/gc/cmd_rig.go`) carries name, path, prefix,
-`hq`, `suspended`, `running`, `beads` and sling targets, with no database
+**One command names a rig's database, and the verb reads the file that command
+reads.** A `gc rig list --json` row (`RigListItem` in `cmd/gc/cmd_rig.go`) carries
+name, path, prefix, default branch, `hq`, `suspended`, `running`, `beads` and
+sling targets, with no database
 ([gc rig list](https://docs.gascity.com/reference/cli#gc-rig-list)). `gc rig
 status`'s `RigStatusRig` and the API's `rigResponse` carry none either. The
 backup order asks bd (`scope_database`, `gc bd --rig <rig> sql "SELECT
@@ -147,16 +154,37 @@ rig. `beadsScopeSuspension`'s doc comment in `cmd/gc/beads_scope_suspension.go`
 says the same: "gc does not touch a suspended scope's bd-owned store, because
 any bd read restarts its proxy and Dolt."
 
-Gas City's reads that avoid bd take the name from the scope's
-`.beads/metadata.json`: `ReadDoltDatabase` in package `contract`,
-`scopeDoltDatabaseName` in package `doctor`, and `metadata_db` in the `health`
-command. The join the verb makes is the `health` command's own shape too:
-`metadata_files` takes each path from `gc rig list --json` and reads
-`<path>/.beads/metadata.json`, and the verb's jq is `metadata_db`'s as written,
-`.dolt_database // empty`. So the file and the key are Gas City's, and the pack
-reads them directly because no command hands them over. A rig whose file does
-not read, or names no database, adds no name to either list, so its database
-stays judged and a moved key flags instead of going quiet.
+`gc dolt-cleanup --json` does name them. Its `rigs_protected` rows
+(`CleanupRigProtection` in `cmd/gc/cmd_dolt_cleanup.go`) pair `rig` with `db` for
+each configured rig, suspended ones included, and the command's
+[page](https://docs.gascity.com/reference/cli#gc-dolt-cleanup) calls its JSON
+schema stable. Of the JSON fields in `cmd/gc` and `internal/api` that hold a
+database name, it is the only one that ties the name to a rig. The command is a
+dry run by default, and `gc dolt health` already calls it for orphans. On the
+city's build it took under a second at load 25, and its rows matched the file
+read for every rig, so cost is not why the verb leaves it:
+
+- The rows are not there on every city. On a city whose Dolt server bd owns, the
+  command returns a typed skip with no rows (`newProxiedScopeCleanupSkipReport`),
+  so the verb would leave nothing out there.
+- A row is not always a name. A rig whose file does not read still gets a row,
+  with the rig's own name in `db` as a report label and the error in
+  `force_blockers` (`rigProtections`), so a reader has to join the two.
+- The rows come from the same file (`resolveRigDoltDatabase`). A swap adds a
+  command and a join, learns no new fact, and is new work in code the deletion
+  plan retires.
+
+Gas City's other reads that avoid bd take the name from that file too:
+`ReadDoltDatabase` in package `contract`, `scopeDoltDatabaseName` in package
+`doctor`, and `metadata_db` in the `health` command. The join the verb makes is
+the `health` command's own shape: `metadata_files` takes each path from `gc rig
+list --json` and reads `<path>/.beads/metadata.json`, and the verb's jq is
+`metadata_db`'s as written, `.dolt_database // empty`. So the file and the key
+are Gas City's. A rig whose file does not read, or names no database, adds no
+name to either list, so its database stays judged and a moved key flags instead
+of going quiet. The exception is a database a suspended rig also names: with the
+running rig's name missing, that shared store leaves the scan unflagged. That was
+tried on the verb with a stub rig list.
 
 A positive list, the databases running scopes name, would be a shorter read. It
 would also drop a database no rig names from the scan without saying so, so the
@@ -209,32 +237,41 @@ and joins them into one `Message` with `"; "`, and each opens with
 and the pack now depends on upstream wording that Gas City does not promise.
 
 What a wording change does was tried on the verb on 2026-10-31, with a stub rig
-list and messages rewritten by hand:
+list and messages rewritten by hand. A piece that opens neither way joins the
+clause before it. A clause with no `scope <path>:` names no scope and stays, and
+a clause naming a suspended scope goes with whatever joined it.
 
-- **A changed label keeps the finding.** A piece that opens neither way joins
-  the clause before it, and a clause with no `scope <path>:` names no scope, so
-  nothing is left out. A different label word, no label, a label with no colon
-  and a preface before the first label each left the whole message standing.
+- **Every label changing at once keeps the finding.** A different label word, no
+  label and a label with no colon each left the whole message standing, because
+  no clause then names a suspended rig's path. A preface before the first label
+  kept every running clause.
+- **One label changing can lose a clause.** `bdBackupScopeLabel` writes `city`
+  and `scope <path>` in separate returns, so one can change alone. A relabelled
+  clause that sorts after a suspended scope's joins it and goes with it:
+  `scope rigs/paused: ...; workspace: ...` read `ok`. One that sorts before it
+  stays.
 - **A changed separator can lose a running rig's part of it.** The whole message
   then reads as one clause, named for its first scope. If a suspended scope sorts
   first, the result reads `ok` and a running rig's clause goes with it. If a
   running scope sorts first, the whole message stands, suspended clause included.
 
-The second case is the one place the script's rule that an alarm which cannot
-tell still flags does not hold. The deacon's manifest check still judges that
-running rig's database, at 12 hours against this check's 24, and parses no
-message, so its stale backup is still flagged. What goes quiet is the doctor's
-finding about it. A guard would be new work in code the deletion plan retires,
-so this change names the case and leaves it.
+In the last two cases, and for the shared store above, the script's rule that an
+alarm which cannot tell still flags does not hold. In the wording cases the
+deacon's manifest check still judges the lost scope's database, at 12 hours
+against this check's 24, and parses no message, so its stale backup is still
+flagged. What goes quiet is the doctor's finding about it. A guard would be new
+work in code the deletion plan retires, so this change names these cases and
+leaves them.
 
 **The native ways to make the check pass do not fit.** A scope with no backup
 state returns no finding (`scanBackupFreshness`), so deleting a suspended rig's
-state files would pass it. That writes into a scope Gas City leaves cold, throws
-away the pointer to its last recovery point, and has nothing to run it when a
-rig is suspended. A sync also clears it, and is what the operator called ideal,
-but the order does not run for a suspended rig: `GC_BACKUP_DATABASES` narrows
-among the scopes it already chose, and the ruling accepted the skip. A sync by
-hand holds only until that backup next ages past the limit.
+backup registration and state files would pass it. That writes into a scope Gas
+City leaves cold, throws away the pointer to its last recovery point, and has
+nothing to run it when a rig is suspended. A sync also clears it, and is what the
+operator called ideal, but the order does not run for a suspended rig:
+`GC_BACKUP_DATABASES` narrows among the scopes it already chose, and the ruling
+accepted the skip. A sync by hand holds only until that backup next ages past the
+limit.
 
 **`BulkDeleteSafe` shares the scan.** `runOrderTrackingRetentionWatchdog` in
 `cmd/gc/city_runtime.go` skips its bulk delete when this function reports a
@@ -302,7 +339,9 @@ say nothing writes to a suspended store. The
 [gc rig suspend](https://docs.gascity.com/reference/cli#gc-rig-suspend) page
 says "The rig's beads database remains accessible." The commit that made
 suspension quiescent (`a563b7eca8bb`) notes that a rig on the city's proxy root
-is not stopped on its own. The pull request reports a suspended store taking a
+is not stopped on its own. Gas City's design page on suspension,
+`engdocs/design/beads-proxied-local-default.md`, says "Deliberate touches still
+reach a suspended rig." The pull request reports a suspended store taking a
 write after its last backup. What the filter rests on is the operator's
 acceptance, and the pull request names its cost: writes to such a store have
 neither a backup nor an alarm.
@@ -331,7 +370,12 @@ exception. Moving the manifest check onto the dolt pack's orders meets
 - `gc dolt health --json` leaving out a suspended rig's database, or tying a
   database to its rig, removes or shortens the `databases` verb.
 - `gc rig list --json` naming each rig's database removes the `dolt_database`
-  read.
+  read. So does `gc dolt-cleanup --json` printing its rows on a city whose Dolt
+  server bd owns and giving a rig whose file does not read no row.
+- Gas City judging an idle database's backup by its newest commit, as
+  gastownhall/gascity#6930 proposes for `mol-dog-doctor` and `gc dolt health`,
+  stops a suspended store with no commit since its backup from holding that
+  order's advisory on. It leaves `bd-backup-freshness` as it is.
 - A `gc doctor` flag or `[doctor]` key that exempts scopes from a check replaces
   the `payload` verb with that setting.
 - The backup order syncing suspended rigs removes the whole exception, since
