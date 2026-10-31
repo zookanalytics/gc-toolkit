@@ -1810,6 +1810,20 @@ SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r 
 run_so STUB_STATE=unanchored
 if grep -q 'lc transition' "$SOLOG"; then bad "a subject not held is not transitioned" "found a transition on an unanchored subject"; else ok "a subject not held is not transitioned"; fi
 
+echo "── a ruling on an armed unanchored subject releases nothing and writes no route ──"
+# A sitting's hold leaves an armed subject unanchored, so nothing is released,
+# whatever --route says, and resolving the gate is what lets the arm send it.
+ARMED_ROW='[{"id":"item-x","metadata":{"gc.takeaway":"prior","gc.dispatch_when_ready":"rig/pool"}}]'
+for armed_route in human gc-toolkit/gc-toolkit.polecat; do
+    SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --no-wait --ruling r --route "$armed_route")
+    run_so STUB_STATE=unanchored SO_UNLISTED="$ARMED_ROW"
+    eq "$SO_RC" "0" "--route $armed_route: the armed subject's sign-off exits 0"
+    have "…and resolves the gate as on any ruling" 'bd gate resolve d-x --reason r' "$SOGC"
+    lacks "…and runs no transition" 'lc transition' "$SOLOG" "found a transition on an armed unanchored subject"
+    lacks "…and writes no route" 'gc.routed_to' "$SOGC" "the sign-off wrote a route beside the arm"
+    lacks "…and leaves the arm's keys alone" 'dispatch_when_ready' "$SOGC" "the sign-off wrote the arm"
+done
+
 echo "── gate resolve falls back to close for a pre-gate demand ──"
 SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling "the ruling" --route human)
 run_so SO_GATE_RC=1

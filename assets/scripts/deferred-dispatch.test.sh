@@ -1378,6 +1378,33 @@ eq "$(slings)" "0" "a malformed arg list does not produce a sling"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a malformed arg list leaves the record for a human"
 has "$out" "malformed" "the malformed record is reported"
 
+# A converse sitting's hold leaves an armed pre-PR bead unanchored, behind the
+# demand gate it files on the bead, so the pass reads no merge_result and no
+# route. The arm stays unslung beside the open demand. Once the ruling resolves
+# the demand it fires as soon as the bead's own prerequisite lands.
+A_ON='"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"'
+echo "# an arm behind a sitting's demand gate fires once the gate and its prerequisite are gone"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A_ON"'},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"},{"id":"dg","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","title":"Land b-0","assignee":"","metadata":{},"notes":""},
+ {"id":"dg","status":"open","issue_type":"gate","title":"Build b-1 now?","assignee":"","metadata":{"gc.demand_for":"b-1"},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass over an arm behind a demand gate and a prerequisite is clean"
+eq "$(slings)" "0" "the arm stays unslung beside the open demand"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record"
+has "$out" "1 held" "the summary counts it as held"
+gc bd close dg --reason "build it" >/dev/null
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "a resolved demand leaves the arm held by its own prerequisite"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record while the prerequisite is open"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by b-0 "Land b-0"]' "list names the prerequisite once the demand has closed"
+jq -c 'map(if .id == "b-0" then .status = "closed" elif .id == "b-1" then ._ready = true else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass that fires the arm is clean"
+eq "$(slings)" "1" "the arm fires once the demand and the prerequisite are gone"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1 --on mol-polecat-work" "it sends the bead to the armed target by the armed method"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the fired arm is retired"
+
 # --- RECONCILE: the until resolved-by consumer -------------------------------
 # An `until` dep means "X resolves me": when X closes the bead is DISPOSED, not
 # re-triaged. The same pass disposes every open, unassigned bead whose own
