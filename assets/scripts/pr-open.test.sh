@@ -583,6 +583,12 @@ while IFS= read -r dtype; do
 done <<<"$doctrine_types"
 has "$(cat "$HERE/../../formulas/mol-polecat-work.toml")" "Subject lines section" \
     "mol-polecat-work names the section the doctrine carries"
+# The rule reaches a title only through submit's 4c, and a title with no type
+# composes from the bead's kind with nothing failing, so this pins the line 4c has
+# the author fill in.
+step4c_sets=$(grep -F 'ANCHOR_TITLE=' "$HERE/../../formulas/mol-polecat-work.toml" || true)
+has "$step4c_sets" 'ANCHOR_TITLE="<type>: ' "submit's 4c has the author write the title with its type"
+hasnt "$step4c_sets" 'ANCHOR_TITLE=""' "…and offers no empty title as the line to run"
 
 echo "# a title the create opened with is one pr-stack keeps"
 # Once a PR is open, pr-stack.sh composes its title from the anchor and edits a PR
