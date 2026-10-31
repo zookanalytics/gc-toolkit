@@ -583,8 +583,12 @@ while IFS= read -r dtype; do
   eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype(api): name the change" task)" \
      "$dtype(api): name the change" "…and that type with a scope"
 done <<<"$doctrine_types"
-has "$(awk '/^## Subject lines$/ { on = 1; next } /^## / { on = 0 } on' "$DOCTRINE")" \
-    "**The scope says where in the system" "the section has the author decide the scope"
+subject_lines=$(awk '/^## Subject lines$/ { on = 1; next } /^## / { on = 0 } on' "$DOCTRINE" | tr '\n' ' ')
+has "$subject_lines" "**The scope says where in the system" "the section has the author decide the scope"
+has "$subject_lines" "never coin a name of your own" "…and coin no scope where the rig names none"
+has "$subject_lines" "**The words name what changes rather than how**" "…has the words name what changes rather than how"
+has "$subject_lines" "at most 72 characters with the type and scope" "…counts the type and scope in the limit"
+has "$subject_lines" "its rules come first" "…and puts a rig's own commit rules first"
 has "$(cat "$HERE/../../formulas/mol-polecat-work.toml")" "Subject lines section" \
     "mol-polecat-work names the section the doctrine carries"
 # The rule reaches a title only through submit's 4c, and a title with no type
