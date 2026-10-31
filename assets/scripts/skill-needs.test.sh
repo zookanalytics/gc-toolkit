@@ -17,7 +17,9 @@
 # words are dropped and word endings stripped, and weights each word by how few
 # descriptions carry it, so a word most descriptions use decides little. It is
 # a floor, not a model of the agent: a description that fails it lacks the words
-# a real need used, and one that passes still has to read well.
+# a real need used, and one that passes still has to read well. A description
+# that carries more than the load decision fails on its own: over the character
+# limit, with a contents list opening on "Covers", or with a step number.
 #
 # The same file pins the skills' shape: each names its neighbors, keeps
 # converse's vocabulary out of its description, and calls every writer as the
@@ -110,8 +112,6 @@ for s in $BLOCKS; do
     compat=$(frontmatter "$f" compatibility)
     [ "$name" = "$s" ] && ok "$s: name equals its directory" || bad "$s: name equals its directory" "got '$name'"
     [ -n "$desc" ] && ok "$s: has a description" || bad "$s: has a description"
-    [ "${#desc}" -le 1024 ] && ok "$s: description fits the 1024-character limit" \
-        || bad "$s: description fits the 1024-character limit" "${#desc} characters"
     [ -n "$compat" ] && ok "$s: declares its compatibility" || bad "$s: declares its compatibility"
     # Every agent reads these descriptions, so they speak in the words any role
     # uses, and say which neighbor to load instead.
@@ -127,6 +127,31 @@ for s in $BLOCKS; do
     done
     [ -n "$named" ] && ok "$s: description names a neighbor to use instead ($named )" \
         || bad "$s: description names a neighbor to use instead" "no 'use <work|waits|records|prs>' in: $desc"
+done
+
+echo "── every description carries only what decides whether to load the skill ──"
+# Every agent holds every description in context in every session, so a
+# description says when to load the skill and the body carries the rest
+# (docs/skills.md, Frontmatter). The needs below hold a description to the words
+# a real need used. These checks hold back what no need asks for: a list of the
+# skill's contents, and a step number that goes stale when the steps move. The
+# limit sits a little above the longest description the needs justify, because
+# the cost is the length, however the text is worded.
+DESCRIPTION_LIMIT=650
+for f in "$SKILLS"/*/SKILL.md; do
+    [ -r "$f" ] || continue
+    s=$(basename "$(dirname "$f")")
+    desc=$(frontmatter "$f" description)
+    [ "${#desc}" -le "$DESCRIPTION_LIMIT" ] && ok "$s: description fits the $DESCRIPTION_LIMIT-character limit" \
+        || bad "$s: description fits the $DESCRIPTION_LIMIT-character limit" "${#desc} characters; what goes beyond the load decision belongs in the body"
+    case "$desc" in
+        Covers\ * | *". Covers "*) bad "$s: description lists no contents" "$desc" ;;
+        *) ok "$s: description lists no contents" ;;
+    esac
+    case "$(printf '%s' "$desc" | tr '[:upper:]' '[:lower:]')" in
+        *"step "[0-9]* | *"steps "[0-9]*) bad "$s: description carries no step number" "$desc" ;;
+        *) ok "$s: description carries no step number" ;;
+    esac
 done
 
 echo "── each building-block skill calls the pack's own writers, never a checkout's ──"
