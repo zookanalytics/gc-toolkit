@@ -209,8 +209,10 @@ if [ "$TARGETS" -ne 1 ]; then
   exit 1
 fi
 # >>> rig-demo-app-root
+# A worktree that cannot be made leaves APP_ROOT empty. The capture refuses an
+# empty --cwd, so this failure reaches the capture block's visit and cancel.
 APP_ROOT=""
-[ -n "$BASE_URL" ] || APP_ROOT=$("$SCRIPTS/review-workspace.sh" add --review-bead "$REQUEST_BEAD" --oid HEAD --repo "${RIG_PATH:?{{rig_name}} is not in gc rig list}") || exit 1
+[ -n "$BASE_URL" ] || APP_ROOT=$("$SCRIPTS/review-workspace.sh" add --review-bead "$REQUEST_BEAD" --oid HEAD --repo "${RIG_PATH:?{{rig_name}} is not in gc rig list}") || APP_ROOT=""
 # <<< rig-demo-app-root
 ```
 
@@ -238,7 +240,7 @@ fi
 CAPTURE_RC=0
 "$SCRIPTS/rig-demo-capture.sh" "$@" || CAPTURE_RC=$?
 if [ "$CAPTURE_RC" -ne 0 ]; then
-  WHY="the engine or the app produced no MP4; a human must check the app target and the demo toolchain (doctor/check-demo-toolchain)"
+  WHY="the engine or the app produced no MP4, or no worktree of {{rig_name}} could be made for the app to run from; a human must check the app target, that gc rig list names the rig, and the demo toolchain (doctor/check-demo-toolchain)"
   [ "$CAPTURE_RC" -eq 3 ] && WHY="the clip at $OUT recorded at least one step failing its proof; a human must judge from it whether the app or the script is wrong"
   DECLINE=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$DECLINE/run-cancel.sh" ] && [ -x "$DECLINE/escalate.sh" ] || DECLINE=""
   : "${DECLINE:?run-cancel.sh and escalate.sh not found in the pack}"

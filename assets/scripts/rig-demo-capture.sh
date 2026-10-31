@@ -86,7 +86,7 @@ while [ $# -gt 0 ]; do
     --serve)      shift; [ $# -gt 0 ] || { echo "$PROG: --serve needs a value" >&2; exit 2; }; SERVE_CMD="$1" ;;
     --base-url)   shift; [ $# -gt 0 ] || { echo "$PROG: --base-url needs a value" >&2; exit 2; }; BASE_URL="$1" ;;
     --port)       shift; [ $# -gt 0 ] || { echo "$PROG: --port needs a value" >&2; exit 2; }; PORT="$1" ;;
-    --cwd)        shift; [ $# -gt 0 ] || { echo "$PROG: --cwd needs a value" >&2; exit 2; }; SERVE_CWD="$1" ;;
+    --cwd)        shift; [ -n "${1:-}" ] || { echo "$PROG: --cwd needs a value" >&2; exit 2; }; SERVE_CWD="$1" ;;
     --mode)       shift; [ $# -gt 0 ] || { echo "$PROG: --mode needs a value" >&2; exit 2; }; MODE="$1" ;;
     --music)      shift; [ $# -gt 0 ] || { echo "$PROG: --music needs a value" >&2; exit 2; }; MUSIC="$1" ;;
     --no-narrate) NO_NARRATE=1 ;;

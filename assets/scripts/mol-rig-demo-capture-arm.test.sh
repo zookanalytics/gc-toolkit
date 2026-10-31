@@ -254,9 +254,17 @@ for MODE in strict plain; do
   has "$(cat "$TMP/engine.argv")" "--base-url https://preview.example.com" "$MODE: the engine drives the preview"
   [ ! -e "$WS/gc-review-tk-req" ] && ok "$MODE: and no workspace is made" || bad "$MODE: and no workspace is made"
 
-  echo "# $MODE shell: a rig the city does not list stops before anything runs"
-  eq "$(pour "$MODE" "site" "" "" "")" "1|" "$MODE: exit 1, with no capture and nothing recorded"
+  echo "# $MODE shell: a rig the city does not list files the capture's visit and cancels the run"
+  eq "$(pour "$MODE" "site" "" "" "")" "1|UPDATE;ESCALATE;CANCEL;DRAIN;" "$MODE: it escalates, cancels the run, drains, and exits 1"
   has "$(cat "$TMP/out")" "demo-rig is not in gc rig list" "$MODE: it names the rig"
+  has "$(cat "$TMP/escalate.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the visit is filed on the request bead"
+  has "$(cat "$TMP/escalate.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
+  eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
+
+  echo "# $MODE shell: a checkout no worktree can be made from does the same"
+  eq "$(pour "$MODE" "" "npm run dev" "" "$TMP/cwd")" "1|UPDATE;ESCALATE;CANCEL;DRAIN;" "$MODE: it escalates, cancels the run, drains, and exits 1"
+  has "$(cat "$TMP/out")" "HEAD is not a commit in $TMP/cwd" "$MODE: it names the checkout"
+  has "$(cat "$TMP/escalate.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
   eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
 done
 

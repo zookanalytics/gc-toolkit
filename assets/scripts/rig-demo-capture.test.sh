@@ -145,6 +145,12 @@ RL="$(cat "$RUNLOG")"
 has "--serve-dir $SERVE_DIR" "$RL" "it is served from the directory --cwd names"
 hasnt "--cwd" "$RL" "and the engine, which spawns no command, is given no --cwd"
 
+echo "# an empty --cwd -> exit 2, so an app never runs from the caller's directory instead"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "")"; rc=$?
+ok "an empty cwd exits 2" "[ '$rc' = 2 ]"
+has "--cwd needs a value" "$out" "it says --cwd needs a value"
+ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
+
 echo "# no sandbox -> exit 1, and the engine never runs"
 out="$(RUN_PATH="" run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
 ok "a host without sandbox-exec exits 1" "[ '$rc' = 1 ]"
