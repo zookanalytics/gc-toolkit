@@ -54,14 +54,15 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298, bead:tk-0c9csp8, bead:tk-ab9p1pk (operator) adopted:2026-08-26 updated:2026-10-15 -->
 - A rename, a re-framing, a rendering change, a sweep that closes state
-  which should not exist, or one more guard for each newly found bypass is
-  not a fix for the thing that produced the symptom. Take a report at the
+  which should not exist, an alert that fires once something has waited
+  past a set time, or one more guard for each newly found bypass is not a
+  fix for the thing that produced the symptom. Take a report at the
   severity it was filed, find what allowed it to happen, and prefer a design
   in which it cannot happen again over a patch for the instance. When a
-  sweep or a guard must still ship, the change names the cause it leaves in
-  place and why that cause cannot be fixed where it arises.
+  sweep, a timer or a guard must still ship, the change names the cause it
+  leaves in place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
@@ -122,6 +123,15 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   depends on it, build only the end state, and when a real case does, file
   the bead that removes the path in the same change, blocked by what retires
   the case and armed to dispatch when it lands.
+
+<!-- rule:tk-clpl8jv src:pr:#1298:comment:4310526242, pr:#1298:comment:4310543583, pr:#1220:comment:4243955265, pr:#1262:comment:4286336787, pr:#1277:comment:4303601800 (operator feedback), visit:tk-ilmnzqh (operator ruling) adopted:2026-10-31 -->
+- Before a change adds machinery, such as a script, a client for a
+  service, a wrapper, a state or a sweep, find what the platform it builds
+  on, the service's own SDK or an established library already provides for
+  the job, cite it, and write code only for the gap it leaves. A design that
+  needs the platform changed, or a state that only this repository can
+  interpret, is a sign it uses the platform wrongly, so look for the fitting
+  use before proposing either.
 
 
 ## Execute immediately
