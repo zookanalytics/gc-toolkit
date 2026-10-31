@@ -17,8 +17,9 @@ It does not catch either case the operator objected to as a favored option or a
 number. It moves authors only when nothing pushes against the command.
 
 On codex, which runs the reviews, the filed text also blocks rules only this
-repository binds, in every run, until `AGENTS.md` says a docs page is a right
-place for them. That paragraph leaves the rubric and the pointer blocked.
+repository binds, in every run whose stated purpose does not say a formula prints
+the page. Once `AGENTS.md` says a docs page is a right place for them, no run
+blocks them on where they live, and the rubric and the pointer stay blocked.
 
 ## What reviewers did
 
@@ -126,8 +127,8 @@ where the guidance lives, except R2's, which count the missing command.
 
 The paragraph holds R6 and R10 and leaves R1 and R2 blocked. All three R1 runs
 under it say it does not reach a rubric that routes work in every rig. R2 stays at
-3 of 3, where Claude's count went from 8 of 9 to 6 of 9. No codex run under the old
-or the filed text cites `AGENTS.md`.
+3 of 3, where Claude's count went from 8 of 9 to 6 of 9 under the same words as a
+clause. No codex run under the old or the filed text cites `AGENTS.md`.
 
 R10 and R10b show the same diff, and only the purpose line differs. R10b's says the
 page is gc-toolkit's own guidance, which the review formula prints to the reviewer,
@@ -140,11 +141,12 @@ paragraph. Under the filed text R10 reads 0 of 3 there, and all three runs cite
 `AGENTS.md` as it stands. So the providers differ on these lines with no paragraph,
 3 of 3 against 0 of 3, and agree once it is there.
 
-Other entries also block, and the cells leave them out. R5 draws a counted set and
-a missing command in every run of both arms. A claim the diff cannot show draws two
-old R6 runs and one R6 run with the paragraph, on what its test suite checks, and
-all three old R10 runs and one R10 run with the paragraph, on "the list its author
-saw at self-review".
+Other findings also block, and the cells leave them out. R5 draws a counted set in
+every run of both arms, and in every one of them a missing command under this entry,
+which the paragraph does not touch. A claim the diff cannot show draws two old R6
+runs and one R6 run with the paragraph, on what its test suite checks, and all three
+old R10 runs and one R10 run with the paragraph, on "the list its author saw at
+self-review".
 
 The arm and the purpose lines are rebuilt from the Method section, because the
 first run's scratch is gone, so these cells and the tables above come from different
@@ -191,5 +193,11 @@ author runs A2 to A5.
 - Three runs a cell is thin. R2 went from 3 of 3 to 8 of 9 when widened.
 - A purpose line moved R10 on codex, so a real review of such a page can read
   either way. No run here shows which.
+- These arms carry `AGENTS.md` whole, and a real review session gets it from the
+  pool slot it starts in. One codex slot sits on a checkout with no such file. Over
+  the three days to 2026-10-31, read from the session rollouts, 49 sessions there
+  named `mol-review` or `signoff.sh`: 32 opened `AGENTS.md` themselves and 17 never
+  held its text. The other slot's 70 such sessions carried it as project
+  instructions.
 - The correctness check reads the fragments from the installed pack, so it holds
   the effort's own PR to the entry only once the entry is installed.
