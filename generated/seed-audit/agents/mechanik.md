@@ -608,6 +608,13 @@ sits below it.
   and your elaboration of a ruling each name their real source, and a
   decision you record before the operator rules on it says it is proposed.
 
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
+- A command, flag, key or name that the operator or a reviewer sketches in
+  passing shows what they want, not the shape it must take. Derive the
+  shape from the conventions of the surface it joins, starting with the
+  commands and names already beside it, and say where the result departs
+  from the sketch.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
      mechanik, proactive, witness, refinery, and keeper. Holds the authoring
