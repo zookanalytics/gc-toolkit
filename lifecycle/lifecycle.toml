@@ -1078,8 +1078,9 @@ keys = [
 # records each result against the commit it ran at. The loop's exit condition,
 # assets/scripts/self-review-check.sh, converges only when the records of the
 # runs the step declares pass at the worktree's live HEAD on a clean tree, and
-# setup and build, as the step declares them, passed there. Every key here sits
-# on the work bead.
+# setup and build, as the step declares them, passed there. For a check the step
+# declares no command for, whatever run the iteration made in its place answers.
+# Every key here sits on the work bead.
 keys = [
   "self_review_passed_sha", "self_review_setup_build", "aborted_at",
   "self_review_loop_attempts",
@@ -1095,14 +1096,15 @@ keys = [
 # self_review_setup_build — what setup and build, the declared checks `gctk
 #   rig` records nothing for, did at the commit an iteration ran them at. One
 #   JSON object stored as a string: commit, the full sha; setup and build, each
-#   pass, fail, or none for a check the rig declares no command for; and
-#   setup_command and build_command, the commands they ran. The self-review
-#   step writes it after its checks, and only on a tree with no uncommitted
-#   change, because a build over such changes says nothing about HEAD.
-#   self-review-check.sh converges the loop only when it names the live HEAD
-#   and the commands the step declares, with neither one failed, or with a fail
-#   a rig_check_pre_existing value holds this very note for. Each run of the
-#   step rewrites it. Absent means no run noted them. Never cleared.
+#   pass, fail, or none for a check that ran no command; and setup_command and
+#   build_command, the commands they ran. The self-review step writes it after
+#   its checks, and only on a tree with no uncommitted change, because a build
+#   over such changes says nothing about HEAD. self-review-check.sh converges
+#   the loop only when it names the live HEAD and each command the step
+#   declares, a command the step does not declare having nothing to match, with
+#   neither one failed, or with a fail a rig_check_pre_existing value holds this
+#   very note for. Each run of the step rewrites it. Absent means no run noted
+#   them. Never cleared.
 # aborted_at — `self-review-exhausted`, stamped by self-review-check.sh on the
 #   budget's last failing attempt. The same update reopens the work bead, clears
 #   its route and session pins, reassigns it to the witness derived from its
