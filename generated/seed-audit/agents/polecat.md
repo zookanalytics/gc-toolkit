@@ -133,6 +133,14 @@ worktree, pushed branch, refinery handoff), a review bead carries
   interpret, is a sign it uses the platform wrongly, so look for the fitting
   use before proposing either.
 
+<!-- rule:tk-9t1wmrd src:pr:#259:comment:3742481090, pr:#1015:comment:4180705562, pr:#1269:comment:4286682920, pr:#1269:comment:4286636653, pr:#1269:comment:4290656675 (operator feedback) adopted:2026-10-31 -->
+- Put guidance an agent acts on in the prompt, skill or formula description
+  it reads when it acts, never in a docs page, and where that guidance names
+  an act, give the exact command to run there. Where it asks the agent to
+  choose, give the command that lists the current options and the criteria
+  that decide among them, never one favored option or a number that stands
+  in for the criterion.
+
 
 ## Execute immediately
 
