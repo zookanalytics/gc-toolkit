@@ -6,10 +6,11 @@
 #   the session env plus whatever the tmux server's global environment showed
 #   through, so it is the only place a leak is observable at all. Linux exposes
 #   it as $PROC/<pid>/environ, and a host with no proc filesystem, such as macOS,
-#   prints it through `ps -E`. macOS hides the environment of its own binaries,
-#   /bin/zsh and /bin/sleep among them, so a pane running one is a note on that
-#   session. When no pane can be read at all, this arm has judged nothing, so
-#   the check warns once and cannot pass.
+#   reads it from the kernel's kern.procargs2 record. Both keep each entry whole.
+#   macOS hides the environment of its own binaries, /bin/zsh and /bin/sleep
+#   among them, so a pane running one is a note on that session. When no pane can
+#   be read at all, this arm has judged nothing, so the check warns once and
+#   cannot pass.
 #   SESSION ENV — what the NEXT process in that pane will get. `respawn-pane`
 #   takes no env argument, so that process comes up with the store-scope values
 #   the session env itself sets, plus any key the server's global holds that the
@@ -43,7 +44,7 @@ set -u
 
 city="${GC_CITY_PATH:-${GC_CITY:-}}"
 PROC="${GC_DOCTOR_PROC_ROOT:-/proc}"
-pane_reader="$PROC"; [ -d "$PROC" ] || pane_reader="ps -E"
+pane_reader="$PROC"; [ -d "$PROC" ] || pane_reader="kern.procargs2 via perl"
 
 errors=(); warnings=(); notes=()
 sessions_checked=0; panes_read=0
@@ -97,39 +98,48 @@ rig_named_by() {
     esac
 }
 
+# env_lines — the NUL-separated environment on stdin, one KEY=value per line. A
+# newline in a value turns into a space, so a value cannot start a line that reads
+# as an entry of its own.
+env_lines() { LC_ALL=C tr '\n\0' ' \n'; }
+
+# Perl's read of kern.procargs2, for the pid it is given. The kernel's record holds
+# the argument count, the executable's path and its padding, the arguments, the
+# environment, an empty string and then strings of Apple's own, each string ending
+# in NUL. This prints the environment the way /proc/<pid>/environ holds it, and
+# nothing at all when the record cannot be read or shows none. The `sysctl` command
+# cannot read this node, and perl ships with macOS and can. Call 202 is __sysctl on
+# Darwin and another call elsewhere, so the program stops anywhere else. The kernel
+# names the size first, because a shorter buffer cuts the record short and one past
+# kern.argmax is refused.
+PROCARGS2_READ='
+$^O eq "darwin" or exit 1;
+my $mib = pack("i3", 1, 49, $ARGV[0] + 0);    # CTL_KERN, KERN_PROCARGS2, the pid
+my $size = pack("Q", 0);
+syscall(202, $mib, 3, 0, $size, 0, 0) == 0 or exit 1;
+my $record = "\0" x unpack("Q", $size);
+syscall(202, $mib, 3, $record, $size, 0, 0) == 0 or exit 1;
+my $argc = unpack("i", $record);
+my @strings = split(/\0/, substr($record, 4));
+my $i = 1;
+$i++ while $i < @strings && $strings[$i] eq "";
+$i += $argc;
+print $strings[$i++], "\0" while $i < @strings && $strings[$i] ne "";
+'
+
 # pane_env <pid> — the environment <pid> was started with, one KEY=value per line
 # and empty when it cannot be read. Exit 124 is the check budget, which refused
 # the read or cut it short, so this process was NOT read.
-#
-# `ps -E` prints the command line and then the environment, joined by spaces, and
-# marks neither end. The command line is read on its own and cut off the front,
-# because an agent's arguments carry its prompt, and a KEY=value written in that
-# text is not its environment. The cut goes by length, because removing a prefix
-# by pattern takes bash seconds on a prompt of 50 KB. What remains must open with
-# an entry, or ps showed no environment. An entry then starts at a space followed
-# by a name and `=`, so a value holding a space stays whole. ps gives no way to
-# tell a value from the next entry, so a value holding " NAME=" reads as two
-# entries, and an entry whose name is not an identifier, such as an exported shell
-# function's, reads as part of the value before it. A store key is misread when
-# its own value holds such a word, when another variable's value spells out that
-# key's assignment, or when such an entry follows it.
 pane_env() {
-    local pid="$1" cmd full rest rc
+    local pid="$1"
     [ -n "$pid" ] || return 0
     if [ "$pane_reader" = "$PROC" ]; then
-        [ -r "$PROC/$pid/environ" ] && tr '\0' '\n' < "$PROC/$pid/environ" 2>/dev/null
+        [ -r "$PROC/$pid/environ" ] && env_lines < "$PROC/$pid/environ" 2>/dev/null
         return 0
     fi
-    cmd=$(run_bounded ps -ww -o command= -p "$pid" 2>/dev/null); rc=$?
-    [ "$rc" -ne 124 ] || return 124
-    [ "$rc" -eq 0 ] || return 0
-    full=$(run_bounded ps -E -ww -o command= -p "$pid" 2>/dev/null); rc=$?
-    [ "$rc" -ne 124 ] || return 124
-    [ "$rc" -eq 0 ] || return 0
-    case "$full" in "$cmd "*) rest="${full:${#cmd}+1}" ;; *) return 0 ;; esac
-    case "${rest%%=*}" in ''|"$rest"|[!A-Za-z_]*|*[!A-Za-z0-9_]*) return 0 ;; esac
-    printf '%s\n' "$rest" | LC_ALL=C sed -E 's/ ([A-Za-z_][A-Za-z0-9_]*=)/\
-\1/g'
+    run_bounded perl -e "$PROCARGS2_READ" "$pid" 2>/dev/null | env_lines
+    [ "${PIPESTATUS[0]}" -ne 124 ] || return 124
+    return 0
 }
 
 if ! command -v tmux >/dev/null 2>&1; then
