@@ -1141,9 +1141,8 @@ fi
 # rather than prose it reports.
 #
 # A subject held for placement can carry the stamp a dead pour left
-# (gc.execution_routed_to), which the queue reads as a live pour. The release
-# clears it and fails when it survives on a held bead, so this exit stops before
-# its landed proof rather than record a hold the sitting cannot see.
+# (gc.execution_routed_to). The release clears it, and the sitting's queue lists
+# the bead whether or not the clear lands, because the queue reads live runs.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable)

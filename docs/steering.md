@@ -81,12 +81,6 @@ No held bead is ever readable without its marker. The witness and the
 distiller write it in the create, and the first reaction writes it and reads
 it back before the release.
 
-A first reaction's subject can still carry `gc.execution_routed_to`, the stamp
-a pour leaves, after the pour's workflow has ended. The queue reads that stamp
-as a live pour, so the release that holds the bead clears it. When the stamp
-survives on a held bead, `gc-helm.sh takeaway` fails the release, and the first
-reaction stops without recording its disposition, so a re-run finishes the hold.
-
 ## The emergency check
 
 The first reaction claims an emergency with `--emergency <check>`, on the
@@ -114,8 +108,9 @@ not.
 
 `gc-helm.sh unplaced` lists the queue. It reads every rig store the city has,
 skips a suspended rig's store and says so, and orders the beads by priority,
-then age. It writes nothing. When a store does not answer, it names that store
-and exits 4 after printing the rest. A skipped rig leaves the exit at 0,
+then age. It writes nothing. When a store does not answer, for its marked beads
+or for its live runs, it names that store and exits 4 after printing the rest. A
+skipped rig leaves the exit at 0,
 because a suspended rig is the operator's choice. `--json` prints one object
 for a caller: the queue as `beads`, the suspended rigs it skipped as `skipped`,
 and the rigs whose store did not answer as `unread`, so a caller can tell a
@@ -123,8 +118,15 @@ partial queue from the whole one.
 
 `assets/scripts/placement.sh` is the one definition of a bead in the queue: it
 carries `placement=pending`, and nothing has placed it since. A parent, a route,
-an arm, an assignee or a live pour each places a bead, whether or not the marker
-was cleared. The same definition serves the queue's other readers:
+an arm, an assignee, a landing state (`merge_result`) or a live run each places a
+bead, whether or not the marker was cleared.
+
+A run places a bead only while it is live, which the store's runs show
+(`assets/scripts/run-lib.sh`). The `gc.execution_routed_to` stamp a pour leaves
+outlives the run, so it places nothing. A bead whose run has ended, with nothing
+else placing it, is back in the queue.
+
+The same definition serves the queue's other readers:
 
 - the liveness sweep names such a bead's wait, so it does not report the bead as
   an unnamed wait;
@@ -148,9 +150,12 @@ For each bead in the queue, the sitting does one of three things.
   no parent.
 - **Close it**, when the work is not wanted.
 
-A placed bead leaves the queue as soon as it has a parent or a route. Clearing
-the marker (`gc bd update <bead> --unset-metadata placement`) keeps the bead's
-record honest, and nothing waits on it.
+A placed bead leaves the queue as soon as it has a parent or a route. The sling
+pours a workflow, whose live run keeps the bead out of the queue once the pour
+has retired the route, until the work reaches a landing state or the refinery.
+Clearing the marker (`gc bd update <bead> --unset-metadata placement`) keeps the
+bead's record honest, and nothing waits on it. A bead with its marker cleared
+does not come back to the queue if its run ends early.
 
 ## A park
 
