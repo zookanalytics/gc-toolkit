@@ -1,6 +1,6 @@
 ---
 name: demo:capture
-description: Records a narrated, captioned MP4 demo of a rig's app with the SprintShow engine — a demo-script drives the browser, each step is proof-checked against the live DOM, and ffmpeg assembles the clip
+description: Use when you need to record a narrated, captioned video demo (an MP4) of a rig's app from a demo script.
 ---
 
 # Demo Capture (SprintShow engine)

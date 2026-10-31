@@ -1,6 +1,6 @@
 ---
 name: records
-description: Use when you need to write down what was decided, what happened, or what a bead needs, so whoever reads it next inherits it. Covers recording an outcome or a finding by appending to a bead's notes, summing up long notes under a Current state heading, and setting the one-line headline the board shows for a bead (its takeaway). To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
+description: Use when you need to write down what was decided, what happened, or what a bead needs, such as an outcome or a finding in its notes, a Current state summary of long notes, or the headline the board shows for it (its takeaway). To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
