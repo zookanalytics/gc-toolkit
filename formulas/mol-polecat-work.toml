@@ -966,10 +966,10 @@ Your prompt's Subject lines section says how to pick the type and scope and word
 the subject.
 
 **Examples of strong subjects + bodies:**
-- `fix(session): preserve lifecycle metadata during crash adoption (ga-xxxx)`
+- `fix: preserve lifecycle metadata during crash adoption (ga-xxxx)`
   body: explains the stale session projection, the resume path that
   lost metadata, the projection update, and the focused adoption test
-- `perf(events): batch typed payload registration lookups (ga-xxxx)`
+- `perf: batch typed payload registration lookups (ga-xxxx)`
   body: cites the event fan-out profile, names the registry call site
   that drove the regression, and notes why the cache stays read-only
 
