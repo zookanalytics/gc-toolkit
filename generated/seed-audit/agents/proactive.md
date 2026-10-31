@@ -430,6 +430,14 @@ to, and then through `visit-close.sh`.
   surfaces the bead in gc hook and bd ready as live demand; a blocked-by
   edge excludes it until the blocker lands, then self-clears.
 
+<!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
+- Give as the operator's only what they said: a ruling, approval, practice,
+  reason or expectation you attribute to them quotes or cites where they
+  said it, and reaches no further than those words and the case they
+  answered. Your own inference, a prior session's note, a template's text
+  and your elaboration of a ruling each name their real source, and a
+  decision you record before the operator rules on it says it is proposed.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
      mechanik, proactive, witness, refinery, and keeper. Holds the authoring
