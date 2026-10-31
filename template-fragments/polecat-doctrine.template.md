@@ -173,9 +173,9 @@ anchor's readers read, and to your claimed bead everything else.
 
 ## Subject lines
 
-A commit subject and a PR title are one kind of line: `<type>: <what the change
-does>`. The squash merge makes the PR title the commit subject on the target, so
-that line is the change's name in the history.
+A commit subject and a PR title are one kind of line: `<type>(<scope>): <what
+changes>`. The squash merge makes the PR title the commit subject on the target,
+so that line is the change's name in the history.
 
 **The type says what the diff does**, never what kind of bead asked for it. A
 task can be a `fix`, and a bug's branch can be only a `test`. A title for a whole
@@ -198,15 +198,19 @@ prompt, a formula step or a skill is behavior: changing what an agent does is a
 | `revert` | undoes an earlier commit |
 | `chore` | is upkeep no other row describes |
 
-**The words name the change**, as an imperative phrase that starts in lowercase,
-at most 72 characters with the type: `fix: keep an open PR's title current after
-a rework`. The symptom, the reason and the detail go in the body and in
-`pr_summary`. A bead's title is a label filed before the work, so reuse its words
-only where they name what the diff does.
+**The scope says where in the system the change sits**, and it is yours to decide,
+as the type is. Where the rig's rules name scopes, use the one the change is
+mostly about, as in `fix(api): ...`. With no list, or for a change that spans the
+whole system, write none, as in `fix: ...`.
 
-A scope is optional, as in `fix(pr-open): ...`, and a `!` before the colon marks
-a change that breaks a caller. Where a rig sets its own commit rules, its rules
-come first.
+**The words name what changes rather than how**, as an imperative phrase that
+starts in lowercase, at most 72 characters with the type and scope: `fix: keep an
+open PR's title current after a rework`. The symptom, the reason and the detail
+go in the body and in `pr_summary`. A bead's title is a label filed before the
+work, so reuse its words only where they name what the diff does.
+
+A `!` before the colon marks a change that breaks a caller. Where a rig sets its
+own commit rules, its rules come first.
 
 ## Beads: what you close and what you never close
 

@@ -580,14 +580,18 @@ has "$doctrine_types" "chore" "…and chore"
 while IFS= read -r dtype; do
   eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype: name the change" task)" \
      "$dtype: name the change" "the composer keeps the doctrine's $dtype"
+  eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype(api): name the change" task)" \
+     "$dtype(api): name the change" "…and that type with a scope"
 done <<<"$doctrine_types"
+has "$(awk '/^## Subject lines$/ { on = 1; next } /^## / { on = 0 } on' "$DOCTRINE")" \
+    "**The scope says where in the system" "the section has the author decide the scope"
 has "$(cat "$HERE/../../formulas/mol-polecat-work.toml")" "Subject lines section" \
     "mol-polecat-work names the section the doctrine carries"
 # The rule reaches a title only through submit's 4c, and a title with no type
 # composes from the bead's kind with nothing failing, so this pins the line 4c has
 # the author fill in.
 step4c_sets=$(grep -F 'ANCHOR_TITLE=' "$HERE/../../formulas/mol-polecat-work.toml" || true)
-has "$step4c_sets" 'ANCHOR_TITLE="<type>: ' "submit's 4c has the author write the title with its type"
+has "$step4c_sets" 'ANCHOR_TITLE="<type>(<scope>): ' "submit's 4c has the author write the title with its type and scope"
 hasnt "$step4c_sets" 'ANCHOR_TITLE=""' "…and offers no empty title as the line to run"
 
 echo "# a title the create opened with is one pr-stack keeps"

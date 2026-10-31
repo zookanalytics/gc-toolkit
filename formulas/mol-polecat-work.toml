@@ -962,8 +962,8 @@ BODY
 )"
 ```
 
-Your prompt's Subject lines section says how to pick the type and word the
-subject.
+Your prompt's Subject lines section says how to pick the type and scope and word
+the subject.
 
 **Examples of strong subjects + bodies:**
 - `fix(session): preserve lifecycle metadata during crash adoption (ga-xxxx)`
@@ -1689,17 +1689,18 @@ gc bd show "${GATING_ANCHOR:-$WORK_BEAD_ID}" --json | jq -r '.[0].title // empty
 A title was filed before the work, so it can name a symptom or work the branch
 does not do, and only you know what the branch turned out to be. Set
 `ANCHOR_TITLE` to the branch's subject line, by your prompt's Subject lines
-section: the type, then the words, with no bead id, because the PR title adds it.
+section: the type, the scope if it has one, then the words, with no bead id,
+because the PR title adds it.
 `git log --format=%s origin/<target>..HEAD` lists the subjects you committed. A
 title with no type takes one from the bead's kind, which reads `chore:` on a
 task.
 
 ```bash
-ANCHOR_TITLE="<type>: <what the branch does>"
+ANCHOR_TITLE="<type>(<scope>): <what the branch does>"
 ```
 
-Set it empty only when the title already opens with the type that fits and still
-names what the branch does.
+Set it empty only when the title already opens with the type and scope that fit
+and still names what the branch does.
 
 The handoff below writes it onto the anchor, never onto the PR. The merge
 cadence composes the PR title from the anchor, so a title typed into the PR
