@@ -41,6 +41,10 @@ PATH="$TMP/bin:$PATH"
 export LIST_LOG="$TMP/list.log" NUDGE_LOG="$TMP/nudge.log"
 
 NOW=$(date +%s)
+# The script's clock stands at NOW, so a case one second from the bound stays there
+# however long the suite takes to reach it.
+printf '#!/bin/sh\necho %s\n' "$NOW" > "$TMP/bin/date"
+chmod +x "$TMP/bin/date"
 # iso <seconds ago> [offset]: an RFC3339 time that long ago, at that UTC offset.
 iso() {
   local shift_secs=0 zone="${2:-Z}"
@@ -90,8 +94,8 @@ eq "$(count "$NUDGES")" 0 "a pane that just printed is working"
 eq "$RC" 0 "a working pane is a clean pass"
 STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 659)" "")"); run
 eq "$(count "$NUDGES")" 0 "a pane quiet for under the bound is left alone"
-STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 661)" "")"); run
-eq "$(count "$NUDGES")" 1 "a pane quiet for just over the bound is nudged"
+STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 660)" "")"); run
+eq "$(count "$NUDGES")" 1 "a pane quiet for exactly the bound is nudged"
 STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 7200)" "$(iso 300)")"); run
 eq "$(count "$NUDGES")" 0 "a recent nudge restarts the quiet clock"
 STUB_LIST=$(list_of "$(row lx-1 "$W" active false "$(iso 7200)" "$(iso 3600)")"); run
