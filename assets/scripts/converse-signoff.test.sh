@@ -1474,18 +1474,16 @@ case "${2:-}" in
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
             # SO_MERGE_RESULT puts the subject in a lifecycle state (pull_request
             # is an open PR); SO_SUBJECT_UNREADABLE makes it a read that fails.
-            # SO_SUBJECT_META is a metadata object the subject carries as well.
             *)   row=$(rows | jq -c --arg id "$id" --argjson un "${SO_UNLISTED:-[]}" \
                      '[(.[]?, $un[]) | select(.id == $id)] | .[0] // empty')
-                 sm="${SO_SUBJECT_META:-}"; [ -n "$sm" ] || sm='{}'
                  if [ -n "$row" ]; then
                      st=""; [ -e "$SOST/$id.closed" ] && st=closed
                      printf '%s' "$row" | jq -c --arg st "$st" '[if $st == "" then . else .status = $st end]'
                  elif [ -n "${SO_SUBJECT_UNREADABLE:-}" ]; then echo '{"error":"no issues found"}'
-                 elif [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "$id" --arg mr "${SO_MERGE_RESULT:-}" --argjson sm "$sm" \
-                    '[{id:$id,metadata:({"gc.takeaway":"prior"}+(if $mr=="" then {} else {merge_result:$mr} end)+$sm)}]'
-                 else jq -nc --arg id "$id" --arg mr "${SO_MERGE_RESULT:-}" --argjson sm "$sm" \
-                    '[{id:$id,metadata:((if $mr=="" then {} else {merge_result:$mr} end)+$sm)}]'; fi ;;
+                 elif [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "$id" --arg mr "${SO_MERGE_RESULT:-}" \
+                    '[{id:$id,metadata:({"gc.takeaway":"prior"}+(if $mr=="" then {} else {merge_result:$mr} end))}]'
+                 else jq -nc --arg id "$id" --arg mr "${SO_MERGE_RESULT:-}" \
+                    '[{id:$id,metadata:(if $mr=="" then {} else {merge_result:$mr} end)}]'; fi ;;
         esac ;;
     list)
         # SO_LIST_RC fails the listing outright. SO_LIST_RAW is printed instead at
@@ -1592,56 +1590,6 @@ have "…and stamps the ruling onto the demand's board sentence through the take
 if grep -q 'gc.takeaway_settled' "$SOGC"; then bad "…and never hand-stamps the settled mark" "gc.takeaway_settled reached a direct bd update; the verb's --no-wait is its only writer"; else ok "…and never hand-stamps the settled mark, so the verb stays its only writer"; fi
 have "…and releases the held subject back to the pool it named" \
      'lc transition item-x --to unanchored --route gc-toolkit/gc-toolkit.polecat' "$SOLOG"
-
-echo "── --ruled yes on an armed held subject: released to its arm, with no route ──"
-# deferred-dispatch.sh keeps an arm through a sitting's hold and sends the bead
-# once the release clears `held`. A route written beside the arm is a second
-# dispatch (a pool) or a park its arm overrides (human), so the release leaves
-# an armed subject with no route, and a pool route is refused before any write.
-ARMED='{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"}'
-SOARGS=(--visit v-x --subject item-x --outcome "settled — build it" --ruled yes --no-wait --ruling "build it" --route human)
-run_so SO_SUBJECT_META="$ARMED"
-eq "$SO_RC" "0" "the discharge exits 0 on an armed held subject"
-have "…resolves the demand gate as on any ruling" 'bd gate resolve d-x --reason build it' "$SOGC"
-if grep -qx 'lc transition item-x --to unanchored --route ' "$SOLOG"; then
-    ok "…and releases the subject with an empty route, so its arm sends it"
-else
-    bad "…and releases the subject with an empty route, so its arm sends it" "release calls: $(grep 'lc transition' "$SOLOG" | tr '\n' '|')"
-fi
-lacks "…and never parks it on the human route its arm would override" \
-      'lc transition item-x --to unanchored --route human' "$SOLOG" \
-      "the release wrote gc.routed_to=human beside the arm"
-case "$SO_OUT" in
-    *"Released item-x to its arm: deferred-dispatch.sh sends it to gc-toolkit/gc-toolkit.polecat once nothing holds it"*)
-        ok "…and tells the sitting the arm sends it, so it sends nothing more" ;;
-    *) bad "…and tells the sitting the arm sends it, so it sends nothing more" "$SO_OUT" ;;
-esac
-case "$SO_OUT" in
-    *"If the ruling does not send it that way, disarm it: deferred-dispatch.sh disarm item-x"*)
-        ok "…and names the disarm for a ruling that sends it another way" ;;
-    *) bad "…and names the disarm for a ruling that sends it another way" "$SO_OUT" ;;
-esac
-have "…and the PR close text names the arm the ruling released it to" \
-     'gc.pr_visit_actions=ruling: build it (released to its arm for gc-toolkit/gc-toolkit.polecat)' "$SOGC"
-
-SOARGS=(--visit v-x --subject item-x --outcome "settled — build it" --ruled yes --no-wait --ruling "build it" --route "gc-toolkit/gc-toolkit.polecat")
-run_so SO_SUBJECT_META="$ARMED"
-eq "$SO_RC" "2" "a pool route for an armed held subject is refused"
-no_writes "…before any write, so the hold still stands"
-case "$SO_OUT" in
-    *"Re-run with --route human to release it to its arm"*) ok "…and the refusal names the route that releases it to its arm" ;;
-    *) bad "…and the refusal names the route that releases it to its arm" "$SO_OUT" ;;
-esac
-
-SOARGS=(--visit v-x --subject item-x --outcome "settled" --ruled yes --no-wait --ruling "build it" --route "gc-toolkit/gc-toolkit.polecat")
-run_so SO_SUBJECT_META="$ARMED" STUB_STATE=unanchored
-eq "$SO_RC" "0" "an armed subject a sitting never held takes the pool route, since nothing is released"
-lacks "…and no release runs" 'lc transition' "$SOLOG" "a subject that does not read held was transitioned"
-
-SOARGS=(--visit v-x --subject item-x --outcome "settled" --ruled yes --no-wait --ruling "build it" --route human --no-rework)
-run_so SO_SHOW_FAIL=item-x
-eq "$SO_RC" "1" "a held subject whose arm cannot be read stops the sign-off"
-no_writes "…before any write, since an unread subject may be armed"
 
 echo "── --ruled no: re-state the demand, leave the subject held ──"
 SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")

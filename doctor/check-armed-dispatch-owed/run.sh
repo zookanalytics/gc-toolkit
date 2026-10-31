@@ -266,14 +266,12 @@ scan_store() {
     fi
     # Classify every armed bead from this one listing. A stranded arm (armed at a
     # non-open status) is a finding on its own; the exemptions — closed, delivered
-    # or held by a converse sitting (any merge_result, held included, since
-    # reconcile slings neither), mid-dispatch (a slung marker), capped (the
-    # reconcile pass has already escalated it), assigned (reconcile will not sling
-    # over a holder) — need no further read. deferred-dispatch.sh's `list`
-    # classifies CAPPED ahead of stranded and dispatchable, so the cap test
-    # precedes the status test here too. Only an open, unassigned, live arm is
-    # a CANDIDATE whose blockers, on it and on its ancestors, decide whether a
-    # dispatch is owed.
+    # (merge_result), mid-dispatch (a slung marker), capped (the reconcile pass has
+    # already escalated it), assigned (reconcile will not sling over a holder) —
+    # need no further read. deferred-dispatch.sh's `list` classifies CAPPED ahead
+    # of stranded and dispatchable, so the cap test precedes the status test here
+    # too. Only an open, unassigned, live arm is a CANDIDATE whose blockers, on
+    # it and on its ancestors, decide whether a dispatch is owed.
     classified=$(jq -r \
         --arg slung "$K_SLUNG" --arg armed_at "$K_ARMED_AT" --arg fails "$K_FAILS" \
         --argjson cap "$MAX_SLING_FAILURES" '

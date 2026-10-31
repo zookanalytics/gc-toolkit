@@ -24,8 +24,7 @@
 #
 # Every store read the discharge depends on runs before the first write and
 # fails closed: the visit, the open demands, the demand the visit's
-# gc.hold_demand names, on a ruling the subject's lifecycle state, and on a
-# ruling that releases a held subject whether that subject is armed. A read
+# gc.hold_demand names, and on a ruling the subject's lifecycle state. A read
 # that fails is not an empty answer. Taken as one, a failed demand listing finds
 # no demand, the discharge skips a gate that still blocks, and the sitting signs
 # off while the hold stands. For the same reason a demand counts as discharged
@@ -57,13 +56,6 @@
 #     is refused, with nothing written, when it gives neither. The filing runs
 #     before every other write, and when it does not land nothing else is
 #     written.
-#   --route on a ruling that releases a held subject armed by
-#     deferred-dispatch.sh: the arm is the subject's dispatch, and it outlives
-#     the hold. --route human releases the subject with no route, and the
-#     reconcile pass sends it once nothing holds it. A pool route is refused,
-#     with nothing written, because that pool would claim the subject beside the
-#     arm's sling. A subject disarmed before the sign-off is released to the
-#     route --route names, as any unarmed subject is.
 # Exit: 0 the trace is written and the hold discharged — the sign-off may
 #   proceed, once any write it reports as failed is repaired; 1 it stopped
 #   short because a read failed, --rework did not file, a demand did not close,
@@ -71,8 +63,8 @@
 #   back as this sign-off left it —
 #   do NOT post the sign-off or close the visit; repair what it names and re-run,
 #   which repeats every write it made safely; 2 refused before any write: usage,
-#   no subject resolves, a ruled sign-off on an open PR that answered neither
-#   --rework nor --no-rework, or a pool route for an armed held subject.
+#   no subject resolves, or a ruled sign-off on an open PR that answered neither
+#   --rework nor --no-rework.
 set -u
 
 # >>> control-char-scrub
@@ -270,21 +262,6 @@ if [ "$RULED" = yes ] && [ -n "$LC" ]; then
   SUBJECT_STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
   [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether to release it from held; nothing was written"
 fi
-# An armed subject (deferred-dispatch.sh) keeps its arm through the hold, and
-# the reconcile pass sends it once the release clears `held` and nothing else
-# holds it. So the release leaves it as an arm needs it, with no route. A pool
-# route would have that pool claim it beside the arm's sling, and the park route
-# would show a bead waiting on a person while its arm sends it. A read that
-# fails stops the sign-off, since it cannot tell an armed subject from one that
-# is not.
-ARMED_FOR=""
-if [ "$SUBJECT_STATE" = "held" ]; then
-  SUBJECT_JSON=$(show_one "$SUBJECT") \
-    || stopped "$SUBJECT could not be read to tell whether deferred-dispatch.sh armed it, so its release cannot choose a route; nothing was written"
-  ARMED_FOR=$(printf '%s' "$SUBJECT_JSON" | jq -r '(.[0].metadata["gc.dispatch_when_ready"] // "") | tostring')
-  [ -z "$ARMED_FOR" ] || [ "$ROUTE" = human ] \
-    || die "$SUBJECT is armed to dispatch to $ARMED_FOR once nothing holds it, and --route $ROUTE would have that pool claim it as well, a second dispatch; nothing was written. Re-run with --route human to release it to its arm, or disarm it first (deferred-dispatch.sh disarm $SUBJECT) to route it yourself"
-fi
 # A ruling can make an already-published PR stale: it changes what the branch
 # must contain, while the PR still reads review-ready against a head that
 # predates it. --rework turns that ruling into the rework demand a review verdict
@@ -477,18 +454,10 @@ fi
 # this sitting's outcome rather than to the state read off the subject. Erring
 # toward the hold leaves a bead visibly routed to a person; erring the other
 # way restores the untraceable wait this state exists to end. The state was read
-# before the first write; nothing this sign-off writes changes it. An armed
-# subject is released with no route, to its arm (read with the state).
-RELEASED_TO="$ROUTE"
-[ -z "$ARMED_FOR" ] || RELEASED_TO="its arm for $ARMED_FOR"
+# before the first write; nothing this sign-off writes changes it.
 if [ "$RULED" = yes ] && [ "$SUBJECT_STATE" = "held" ]; then
-  RELEASE_ROUTE="$ROUTE"
-  [ -z "$ARMED_FOR" ] || RELEASE_ROUTE=""
-  if "$LC" transition "$SUBJECT" --to unanchored --route "$RELEASE_ROUTE"; then
-    [ -z "$ARMED_FOR" ] || echo "Released $SUBJECT to its arm: deferred-dispatch.sh sends it to $ARMED_FOR once nothing holds it, so send it nothing more. If the ruling does not send it that way, disarm it: deferred-dispatch.sh disarm $SUBJECT"
-  else
-    echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"
-  fi
+  "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
+    || echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"
 fi
 
 # Stash what the visit's PR-reminder close will say, for the writer that runs
@@ -510,7 +479,7 @@ done
 SIGNOFF_ACTIONS=""
 [ -n "$routed" ] && SIGNOFF_ACTIONS="routed work to $routed"
 if [ "$RULED" = yes ]; then
-  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }ruling: $RULING (released to $RELEASED_TO)"
+  SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }ruling: $RULING (released to $ROUTE)"
   [ -n "$REWORK_FILED" ] && SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS}; filed ruling-driven rework on $SUBJECT"
   [ "$REWORK" = no ] && SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS}; ruling leaves the branch of $SUBJECT as it stands"
 elif [ -n "$STILL_OWED" ]; then

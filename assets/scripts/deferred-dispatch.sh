@@ -16,11 +16,8 @@
 # gate, or a re-dispatch of work in flight under a parked epic, never enters
 # `bd --ready`. A held arm stays intact and fires once its hold releases. Status
 # still gates: a non-open status is set deliberately, and a bead at one is never
-# dispatched. A converse sitting's hold gates too: a bead at merge_result=held
-# waits on the operator's ruling and delivers nothing, so it keeps its arm, and
-# the arm fires once the sign-off releases the hold and nothing else holds the
-# bead. `list` answers "what dispatches are owed?", naming the blocker that
-# holds each held arm; `disarm` withdraws one.
+# dispatched. `list` answers "what dispatches are owed?", naming the blocker
+# that holds each held arm; `disarm` withdraws one.
 #
 # The same pass also runs the resolved-by consumer: a bead carrying an `until`
 # dep ("X resolves me", distinct from `blocks`'s "X must land before me") is
@@ -107,16 +104,6 @@ K_REASON="gc.dispatch_when_ready_reason"
 K_SLUNG="gc.dispatch_when_ready_slung"
 SLUNG_TRYING="slinging@"   # value prefix: sling attempt in flight, not proven
 SLUNG_DONE="slung@"        # value prefix: sling returned success, arm may retire
-
-# The merge_result a converse sitting's hold writes (lifecycle/lifecycle.toml,
-# [states.held]). Every other merge_result is the merge path's record of a branch
-# handed to the refinery, so the work an arm would pour was delivered. This one
-# marks a bead that never reached the refinery, waiting on the operator's
-# ruling, and the sign-off that releases the hold clears it. A run poured at it
-# would also be refused: mol-polecat-work's load-context cancels a run at a bead
-# that carries any merge_result. So an arm on a held bead neither retires nor
-# slings, and waits for the release.
-MR_HELD="held"
 
 # A notice owed to the named agent a bead is assigned to. Like K_TARGET it is
 # index and payload: its presence is the record, and its value is the agent the
@@ -291,9 +278,7 @@ Verbs:
              that agent. Then it slings every armed bead nothing holds, and
              retires the arm on every armed bead that closed or that another
              path already delivered (a merge_result stamp), keeping it on a
-             bead closed under the claim whose close no pass has checked and
-             on a bead a converse sitting holds (merge_result=held), whose arm
-             fires once the sign-off releases it.
+             bead closed under the claim whose close no pass has checked.
              Because each sling mints an input convoy, it stops re-slinging
              and escalates a bead whose dispatch has failed to finalize
              MAX_SLING_FAILURES times rather than leak a convoy per pass.
@@ -876,7 +861,6 @@ cmd_list() {
         if [ "$status" = "closed" ] && [ "$claimed" = 1 ]; then state="CLOSED under the until consumer's claim, its close not yet checked (the arm stays until the next pass checks it, and fires if that check reopens the bead)"
         elif [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
         elif [ "$claimed" = 1 ]; then state="HELD by the until consumer's claim (the next pass gives it back, and the arm fires once it is open)"
-        elif [ "$mr" = "$MR_HELD" ]; then state="HELD by a converse sitting — merge_result=$MR_HELD (the arm fires once the sign-off releases it and nothing else holds it)"
         elif [ -n "$mr" ]; then state="DELIVERED — merge_result=$mr (arm retires next pass, no sling)"
         elif [ -n "$slung" ]; then
             case "$slung" in
@@ -1560,14 +1544,6 @@ reconcile_dispatch() {
                 ;;
         esac
 
-        # A converse sitting holds the bead (MR_HELD), which delivers nothing:
-        # the arm waits, intact and unslung, for the sign-off that releases the
-        # hold, and fires once nothing else holds the bead.
-        merge_result="$(meta_of "$json" merge_result)"
-        if [ "$merge_result" = "$MR_HELD" ]; then
-            held=$((held + 1)); continue
-        fi
-
         # Already delivered: the bead carries a refinery delivery stamp (an open
         # PR, the pre-open gate, a merge), so the work this arm would pour has
         # already been produced by another path since the arm was recorded.
@@ -1575,6 +1551,7 @@ reconcile_dispatch() {
         # it every pass — the common cause of a sling that never finalizes on an
         # already-delivered bead. Retire the arm the way a proven slung@ marker
         # does; there is no dispatch to lose, only one to stop repeating.
+        merge_result="$(meta_of "$json" merge_result)"
         if [ -n "$merge_result" ]; then
             if [ "$DRY_RUN" = 1 ]; then
                 echo "$PROG: DRY-RUN would retire arm on already-delivered $id (merge_result=$merge_result)"
