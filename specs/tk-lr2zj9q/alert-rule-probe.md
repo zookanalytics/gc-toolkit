@@ -22,14 +22,24 @@ change the call when the remedy is a repair to an alert that already exists.
 
 ## Method
 
-Each arm's system prompt held the same short role line, the operator-profile
-entry on one-minute decisions, and the whole "Standards for what you produce"
-section of `template-fragments/work-quality-base.template.md`, without its
-closing template marker. The old arm's copy came from `HEAD~1` of the rule's
-commit and the new arm's from that commit. The third arm, the variant, is the
-new arm with one clause added to the list, in the words of the pattern's Gate 2
-sentence: "a change to such an alert's threshold or mute,". The variant is not
-in the fragment.
+Each arm's system prompt held the same opening and the whole "Standards for what
+you produce" section of `template-fragments/work-quality-base.template.md`,
+without its closing template marker. The opening is a role line and the first
+sentence of the operator-profile entry on one-minute decisions:
+
+> You work visits: filed requests, each asking for a bounded sitting of a dialogue
+> with the operator about one subject. The operator will read what you write and
+> decide from it.
+>
+> - State an operator-facing decision, brief, or sign-off so it is answerable in
+>   about a minute: lead with the plain-language stake and what each option costs,
+>   keep it to one screen, and let the operator accept or reject without looking
+>   anything up.
+
+The old arm's copy came from `HEAD~1` of the rule's commit and the new arm's from
+that commit. The third arm, the variant, is the new arm with one clause added to
+the list, in the words of the pattern's Gate 2 sentence: "a change to such an
+alert's threshold or mute,". The variant is not in the fragment.
 
 The user message was the same in every arm for a given case. It opened "Facts
 you have established on this visit:", held the case's facts, and closed "Write
@@ -44,8 +54,9 @@ what you recommend to the operator and what each option costs."
   architecture".
 - **Case B** is what sitting tk-0c9csp8 gave the operator at
   2026-10-10T03:52Z, from "**Where the number came from.**" up to "**What the
-  alarm should be.**", with one opening line saying the operator asked whether
-  the 2-day window is arbitrary. The sitting recommended a follow-up "that times
+  alarm should be.**", with one sentence ahead of the message's opening saying
+  the operator asked whether the stale-PR alarm's 2-day window is arbitrary. The
+  sitting recommended a follow-up "that times
   the city's own recorded state and sets the window from measured turnaround".
   The operator answered "I thought you were going to suggest completely removing
   the check and the fix to the check."
@@ -143,10 +154,13 @@ probe gives no reason to prefer them over the filed text.
 
 All nine runs land the fix in review and replace the clock in a follow-up, and
 none recommends a better number. All nine mention retiring the alarm, and none
-recommends retiring it now. The arms show no difference. Every old run already
-turns down a new number here, though the real sitting proposed a new window. The
-cut takes out that sitting's own redesign paragraph, so this case is kinder to
-the old text than the sitting was.
+recommends retiring it now. The arms make the same recommendation. New 3 comes
+closest to the operator's point, with a section headed "Why retire it in the
+follow-up", though it still says the follow-up must first settle whether anything
+else would catch a stalled PR. Every old run already turns down a new number here,
+though the real sitting proposed a new window. The cut takes out that sitting's
+own redesign paragraph, so this case is kinder to the old text than the sitting
+was.
 
 - **old 1.** "land #1150 once its wording rework passes, and replace the 2-day
   clock in a separate follow-up".
