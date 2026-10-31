@@ -148,6 +148,13 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   that decide among them, never one favored option or a number that stands
   in for the criterion.
 
+<!-- rule:tk-karx6a2 src:visit:tk-weluos5 (operator ruling) adopted:2026-10-31 -->
+- Before you give something a name, such as a set, a route, a command or
+  a state, ask what the word already tells a reader: a rank, a reach wider
+  than the thing, or the meaning another system in use gives the same
+  word. When the thing does not share that meaning, choose a word for what
+  it is, and leave a general name to the thing built to fill it.
+
 
 ## Execute immediately
 
