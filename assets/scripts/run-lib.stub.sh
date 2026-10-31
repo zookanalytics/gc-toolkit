@@ -10,7 +10,7 @@
 # included. Each verb answers from it the way run-lib.sh answers from a store:
 #   runs <reader> <bead>   the runs whose bead is <bead>
 #   subject <reader> <id>  the runs whose root or input convoy is <id>
-#   map <reader> [all]     the live runs, or every run with `all`
+#   map <reader>           the live runs
 # An unset name, or a file that does not exist, is a store with no runs.
 # RUN_LIB_STUB_CMD, when set, names a command that prints that array instead,
 # run at each call with the call's verb, reader and argument, for a suite whose
@@ -46,7 +46,7 @@ run_lib() {
     fi
     case "$verb" in
         runs|subject) [ -n "$arg" ] || { echo "run_lib $verb: no bead given" >&2; return 2; } ;;
-        map) case "$arg" in ''|all) ;; *) echo "run_lib map: unknown scope '$arg'" >&2; return 2 ;; esac ;;
+        map) [ -z "$arg" ] || { echo "run_lib map: unexpected argument '$arg'" >&2; return 2; } ;;
         *) echo "run_lib: unknown verb '$verb'" >&2; return 2 ;;
     esac
     for f in ${RUN_LIB_STUB_FAIL:-}; do
@@ -60,7 +60,6 @@ run_lib() {
     printf '%s' "$runs" | jq -c --arg v "$verb" --arg a "$arg" '
         if $v == "runs" then map(select(.bead == $a))
         elif $v == "subject" then map(select(.root == $a or .convoy == $a))
-        elif $a == "all" then .
         else map(select(.live)) end
         | sort_by(.root)'
 }
