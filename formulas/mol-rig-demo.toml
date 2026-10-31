@@ -210,7 +210,7 @@ if [ "$TARGETS" -ne 1 ]; then
 fi
 # >>> rig-demo-app-root
 # A worktree that cannot be made leaves APP_ROOT empty. The capture refuses an
-# empty --cwd, so this failure reaches the capture block's visit and cancel.
+# empty --cwd, so this failure reaches the capture block's gate and cancel.
 APP_ROOT=""
 [ -n "$BASE_URL" ] || APP_ROOT=$("$SCRIPTS/review-workspace.sh" add --review-bead "$REQUEST_BEAD" --oid HEAD --repo "${RIG_PATH:?{{rig_name}} is not in gc rig list}") || APP_ROOT=""
 # <<< rig-demo-app-root
