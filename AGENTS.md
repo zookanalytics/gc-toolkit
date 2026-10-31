@@ -9,6 +9,9 @@ here when every session working on the repository needs it, and otherwise into
 the doc or the check that owns it. Every session that works in a gc-toolkit
 worktree loads this file.
 
+A docs page is a right place for such a rule, even though the polecats' standard
+keeps other guidance for an agent out of docs pages.
+
 ## Code the deletion plan retires gets no new work
 
 The plan is the deletion schedule in

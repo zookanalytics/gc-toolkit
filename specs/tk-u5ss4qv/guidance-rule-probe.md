@@ -80,16 +80,20 @@ which counts findings that call the page guidance in a docs page.
 | A sentence in the entry | 0 of 3 | 3 of 3 | 3 of 9 | 3 of 3 | 3 of 3 |
 | A clause for a page a formula prints | 1 of 3 | 3 of 3 | not run | not run | not run |
 
-The wordings, none of which is on the branch:
+The wordings:
 
 - In `AGENTS.md`, after "the doc or the check that owns it": ", and a docs page is
   a right place for such a rule even though the polecats' standard keeps other
-  guidance for an agent out of docs pages".
+  guidance for an agent out of docs pages". The branch carries these words as a
+  paragraph of their own after the file's opening paragraph, which keeps its
+  merge with #1365's rewrite of that paragraph clean.
 - In the entry, at its end: "A repository's own conventions for changing it are
-  not this guidance, and stay in the doc or check that owns them."
+  not this guidance, and stay in the doc or check that owns them." It is not on
+  the branch.
 - In the entry, for "never in a docs page": "or in a page a formula prints to it
-  at that moment, never in a docs page it is left to open". It solves a problem
-  R5 shows reviewers do not have, so it is not offered.
+  at that moment, never in a docs page it is left to open". It is not on the
+  branch. It solves a problem R5 shows reviewers do not have, so it is not
+  offered.
 
 The `AGENTS.md` sentence holds R6 without touching any prompt. One R6 run under the
 filed text cleared the lines by citing `AGENTS.md` as it stands, so that file is
