@@ -109,7 +109,12 @@ The list sees what Covers names. A warrant whose Covers leaves out part of its
 surface leaves that part off the list, as gh write containment's did for the
 guard's wiring until this change named it. The suite reads the real page and fails
 on an entry naming nothing the list reads, or a path, block, table or name the tree
-no longer carries.
+no longer carries. A path git ignores, such as a city's runtime directory under
+`.gc/`, is in no tree and changes on no branch, so the suite does not ask for it. Two
+branches in flight name one, `integration/tk-iirrmiw` and
+`integration/tk-ssm8qns.1`. On 2026-10-31 every branch in flight that edits the page
+passes these checks at its merge with this one, reading that branch's page where the
+two conflict.
 
 `tools/lint.sh` measures from `origin/main`, because that is what the rig's
 `lint_command` names. On a member of an effort's branch the list therefore also

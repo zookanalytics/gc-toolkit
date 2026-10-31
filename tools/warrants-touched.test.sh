@@ -576,39 +576,68 @@ has '- Path warrant: Verified 2026-01-02, not updated on this branch' "a path tw
 has '- Shared warrant: Verified 2026-03-04, added on this branch' "and the second"
 done_case
 
-# --- The real page: every entry reads, and what it names is there. ------------
+# --- What each entry names is there. ------------------------------------------
 # A Covers line the list cannot read leaves its warrant silently off every list,
-# and a covered file renamed without its entry does the same.
+# and a covered file renamed without its entry does the same. A path git ignores,
+# such as a city's runtime directory, is in no tree and changes on no branch.
+page_problems() {  # $1 = repository: prints each Covers term its page cannot rest on
+  local repo=$1 rows entry kind term home
+  rows=$(cd "$repo" && bash "$SUT" --covers) || { echo "the page does not parse"; return; }
+  while IFS=$'\t' read -r entry kind term home; do
+    case "$kind" in
+      path)
+        [ -e "$repo/$term" ] || git -C "$repo" check-ignore -q -- "$term" \
+          || echo "$entry: $term is not in the tree" ;;
+      name)
+        git -C "$repo" grep -q -F -e "$term" -- . ':(exclude)docs/warrants.md' \
+          || echo "$entry: $term is nowhere in the tree" ;;
+      block)
+        grep -q -x -e "[[:space:]]*# >>> $term" "$repo/$home" 2>/dev/null \
+          || echo "$entry: $home carries no block $term" ;;
+      table)
+        grep -q -x -F -e "$term" "$repo/$home" 2>/dev/null \
+          || echo "$entry: $home carries no table $term" ;;
+      *)
+        echo "$entry: its Covers line names nothing the list reads" ;;
+    esac
+  done < <(printf '%s\n' "$rows")
+}
+
+echo "── what each entry names ──"
+branch
+printf '.gc/\n' > "$REPO/.gitignore"
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Runtime warrant
+
+- **Covers.** `scripts/other.sh`, and the files under the city's `.gc/runtime/x`.
+- **Verified.** 2026-03-05.
+
+## Gone warrant
+
+- **Covers.** `scripts/gone.sh`, and the `[no.table]` table of `lifecycle.toml`.
+- **Verified.** 2026-03-06.
+
+## Plain warrant
+
+- **Covers.** Something in plain words.
+- **Verified.** 2026-03-07.
+PAGE
+commit terms
+eq "$(page_problems "$REPO")" "$(printf '%s\n' \
+  'Key warrant: alpha_key is nowhere in the tree' \
+  'Key warrant: beta.key is nowhere in the tree' \
+  'Key warrant: gamma-key is nowhere in the tree' \
+  'Key warrant: state-file is nowhere in the tree' \
+  'Stale part warrant: scripts/ghost.sh carries no block ghost-block' \
+  'Gone warrant: scripts/gone.sh is not in the tree' \
+  'Gone warrant: lifecycle.toml carries no table [no.table]' \
+  'Plain warrant: its Covers line names nothing the list reads')" \
+  "it names each term the tree does not carry, and no path git ignores"
+done_case
+
 echo "── the real page ──"
-PAGE_REPO="$REAL_ROOT"
-if rows=$(cd "$PAGE_REPO" && bash "$SUT" --covers); then ok "the real page parses"; else bad "the real page does not parse"; fi
-[ -n "$rows" ] && ok "the real page holds entries" || bad "the real page holds no entry"
-while IFS=$'\t' read -r entry kind term home; do
-  case "$kind" in
-    path)
-      [ -e "$PAGE_REPO/$term" ] && ok "$entry: $term is in the tree" || bad "$entry: $term is not in the tree" ;;
-    name)
-      if git -C "$PAGE_REPO" grep -q -F -e "$term" -- . ':(exclude)docs/warrants.md'; then
-        ok "$entry: $term is in the tree"
-      else
-        bad "$entry: $term is nowhere in the tree"
-      fi ;;
-    block)
-      if grep -q -x -e "[[:space:]]*# >>> $term" "$PAGE_REPO/$home" 2>/dev/null; then
-        ok "$entry: $home carries the block $term"
-      else
-        bad "$entry: $home carries no block $term"
-      fi ;;
-    table)
-      if grep -q -x -F -e "$term" "$PAGE_REPO/$home" 2>/dev/null; then
-        ok "$entry: $home carries the table $term"
-      else
-        bad "$entry: $home carries no table $term"
-      fi ;;
-    *)
-      bad "$entry: its Covers line names nothing the list reads" ;;
-  esac
-done < <(printf '%s\n' "$rows")
+eq "$(page_problems "$REAL_ROOT")" "" "every entry on the real page reads, and the tree carries what it names"
 
 echo
 echo "warrants-touched.test.sh: $PASS passed, $FAIL failed"

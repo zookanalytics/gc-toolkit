@@ -133,6 +133,6 @@ time a Gas City state changes.
 
 [warrants.md](warrants.md) records the warrants in force, the paths and keys
 each one covers, and how an entry is kept true.
-`tools/warrants-touched.sh --base origin/<base>` lists the warrants a branch
-touches, the list its author saw at self-review. It is built from the Covers
-lines, so check 4 still judges the diff against them.
+`tools/warrants-touched.sh --base origin/<base>`, run in the review's worktree,
+lists the warrants a branch touches, the list its author saw at self-review. It
+is built from the Covers lines, so check 4 still judges the diff against them.
