@@ -49,8 +49,9 @@
 # work-tree-holder.sh takes the bead each claimed step's run works when it asks
 # whether a live session is working a tree. gate-ensure.sh takes the runs
 # poured over a review, live or not, to judge whether a pour still drives it.
-# gc-helm.sh ends the live runs beneath an anchor it releases, and its park
-# survey applies run_rows to the listing it reads to find a bead's workflows.
+# gc-helm.sh ends the live runs beneath an anchor it releases, its park survey
+# applies run_rows to the listing it reads to find a bead's workflows, and its
+# unplaced verb takes the map, so a bead a live run works is not in the queue.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
 # their convoys, roots and steps, and priority-lib.sh follows a root to the
 # convoy it names and a convoy to the bead it tracks through run_convoy and

@@ -4,9 +4,12 @@
 #   (DEF)     sourcing the file exposes $PLACEMENT_JQ, and the marker value is
 #             the one intake writes
 #   (PRED)    awaiting_placement is true for a marked bead nothing has placed,
-#             blocked or not, and false for a missing or other marker and for
-#             each shape that places a bead: a parent in either form bd prints,
-#             a route, an arm, an assignee, a live pour
+#             blocked or not, and whatever pour stamp it carries, and false for a
+#             missing or other marker and for each shape its row shows placing a
+#             bead: a parent in either form bd prints, a route, an arm, an
+#             assignee, a landing state
+#   (LIVE)    awaiting_placement($worked) is false for a bead a live run works
+#             and otherwise answers as the bare form does
 #   (READERS) every reader of the queue sources this file and applies
 #             $PLACEMENT_JQ, and asks awaiting_placement where it judges a bead
 #   (NO-COPY) no other file in the pack defines the predicate or tests the
@@ -49,6 +52,8 @@ eq "$(pred '{"metadata":{"placement":"pending"},"dependencies":[{"depends_on_id"
    "true" "(PRED) …and still waits when it also waits on a blocker"
 eq "$(pred '{"metadata":{"placement":"pending","gc.routed_to":"  "}}')" \
    "true" "(PRED) …and a blank route places nothing"
+eq "$(pred '{"metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}')" \
+   "true" "(PRED) …and the stamp a pour leaves places nothing, since it outlives the run"
 for case in '{}' '{"metadata":null}' '{"metadata":{}}' \
             '{"metadata":{"placement":"placed"}}' \
             '{"metadata":{"placement":"pending"},"parent":"tk-epic"}' \
@@ -57,9 +62,20 @@ for case in '{}' '{"metadata":null}' '{"metadata":{}}' \
             '{"metadata":{"placement":"pending","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}' \
             '{"metadata":{"placement":"pending","gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"}}' \
             '{"metadata":{"placement":"pending"},"assignee":"gc-toolkit.mechanik"}' \
-            '{"metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}'; do
+            '{"metadata":{"placement":"pending","merge_result":"pull_request"}}'; do
     eq "$(pred "$case")" "false" "(PRED) $case does not wait for placement"
 done
+
+echo "# the predicate, given the beads live runs work"
+live() { printf '%s' "$1" | jq -r --argjson worked "$2" "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'awaiting_placement($worked)' 2>/dev/null; }
+STAMPED='{"id":"tk-held","metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}'
+eq "$(live "$STAMPED" '["tk-other"]')" "true" "(LIVE) a stamped bead no live run works waits for placement"
+eq "$(live "$STAMPED" '[]')" "true" "(LIVE) …and with no live run in the store"
+eq "$(live "$STAMPED" '["tk-other","tk-held"]')" "false" "(LIVE) a bead a live run works does not"
+eq "$(live '{"id":"tk-held","metadata":{"placement":"pending"}}' '["tk-held"]')" "false" "(LIVE) …with or without a stamp"
+eq "$(live '{"id":"tk-held","metadata":{"placement":"pending"},"assignee":"gc-toolkit.mechanik"}' '[]')" "false" \
+   "(LIVE) the shapes its row shows still place it"
+eq "$(live '{"id":"tk-held","metadata":{}}' '[]')" "false" "(LIVE) an unmarked bead does not wait"
 
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the definition in prose

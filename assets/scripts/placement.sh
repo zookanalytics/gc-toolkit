@@ -5,8 +5,21 @@
 # feedback distiller's beads mark such a bead placement=pending and leave it
 # unrouted. It waits until the sitting places it under an epic or routes it on
 # its own. A bead with a parent is placed, and so is one with a dispatch path
-# (dispatch-path.sh), an assignee, or a live pour (gc.execution_routed_to), so
-# any of those ends the wait whether or not the marker was cleared.
+# (dispatch-path.sh), an assignee, a landing state (merge_result, which rests
+# with no route and no assignee while the merge cadence or a person drives it),
+# or a live run (run-lib.sh), so any of those ends the wait whether or not the
+# marker was cleared.
+#
+# A run places a bead only while it is live. A pour retires the bead's route and
+# stamps gc.execution_routed_to, and that stamp outlives the run, so it places
+# nothing: a bead whose run has ended, with nothing else placing it, waits for
+# the sitting again. The bead a run works is open, unassigned and unrouted, so
+# its row cannot show the run. awaiting_placement($worked) takes the ids of the
+# beads the store's live runs work (run-lib.sh's map), and gc-helm.sh unplaced
+# asks that form. Bare awaiting_placement judges the row alone, for a reader that
+# settles a live run itself: the liveness classifier and the doctor check read
+# the same map first, the claim-time re-check reads the stamp first, and the
+# proactive scan drops such a bead with or without the run.
 #
 # Sourced (never executed) by the readers that ask whether a bead is in the
 # sitting's queue: gc-helm.sh unplaced, which lists the queue; the liveness
@@ -30,8 +43,8 @@
 PLACEMENT_JQ='
   # The marker value intake writes on a bead it holds for placement.
   def placement_pending: "pending";
-  # True when this bead waits for the placement sitting: it carries the marker,
-  # and nothing has placed it since.
+  # True when this bead carries the marker, and nothing its row shows has placed
+  # it since.
   def awaiting_placement:
     (.metadata // {}) as $m
     | ((($m.placement // "") | tostring) == placement_pending)
@@ -39,5 +52,10 @@ PLACEMENT_JQ='
       and ([ .dependencies[]? | select(((.dependency_type // .type) // "") == "parent-child") ] | length) == 0
       and (has_dispatch_path | not)
       and ((.assignee // "") == "")
-      and (($m["gc.execution_routed_to"] // "") == "");
+      and (($m.merge_result // "") == "");
+  # True when this bead waits for the placement sitting: awaiting_placement, and
+  # no live run works it. $worked: the ids of the beads live runs work.
+  def awaiting_placement($worked):
+    awaiting_placement
+    and (((.id // "") | tostring) as $id | ($worked | index($id)) == null);
 '

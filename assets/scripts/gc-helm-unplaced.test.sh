@@ -4,11 +4,15 @@
 # nothing has placed since.
 #
 # Covered:
-#   (QUEUE)    a marked bead with no parent, route, arm, assignee or live pour is
-#              listed, from every rig store that answers
+#   (QUEUE)    a marked bead with no parent, route, arm, assignee, landing state
+#              or live run is listed, from every rig store that answers
 #   (PLACED)   a parent (either shape bd shows), a route, an arm, an assignee or
-#              a live pour takes a bead out of the queue, marker or not, and a
-#              bead whose marker is not pending is never listed
+#              a landing state takes a bead out of the queue, marker or not, and
+#              a bead whose marker is not pending is never listed
+#   (RUNS)     a bead a live run works is not listed, whatever it carries, and a
+#              bead whose pour's workflow has ended is, though its stamp stands;
+#              the runs are read from the store being judged, and only when a
+#              bead's own row leaves it waiting
 #   (BLOCKED)  a bead that also waits on a blocker is still in the queue
 #   (ORDER)    rows come priority first, then oldest
 #   (TEXT)     the plain form counts the rows and shows each takeaway under its
@@ -19,7 +23,8 @@
 #              stderr and in --json's skipped, with the run still exiting 0
 #   (PARTIAL)  a store that does not answer, or whose read fails after printing
 #              rows, is named, on stderr and in --json's unread, and fails the
-#              run with 4 after the rows that were read
+#              run with 4 after the rows that were read; so is a store whose runs
+#              cannot be read while a bead there may wait
 #   (ARGS)     an unknown argument is refused
 # Driven over a stubbed `gc` on PATH: no live city, Dolt or network.
 set -u
@@ -38,8 +43,9 @@ hasnot() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; es
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 [ -f "$SCRIPT" ] && ok "gc-helm.sh present" || bad "gc-helm.sh missing at $SCRIPT"
 
-# Three rig stores and one rig with no store. cold is suspended.
-for r in alpha beta cold; do mkdir -p "$TMP/$r/.beads"; done
+# Four rig stores and one rig with no store. cold is suspended, and each of
+# gamma's marked beads is placed.
+for r in alpha beta cold gamma; do mkdir -p "$TMP/$r/.beads"; done
 mkdir -p "$TMP/nostore"
 
 # alpha's rows: one of each placed shape beside the beads still waiting.
@@ -51,10 +57,34 @@ cat > "$TMP/alpha.json" <<'JSON'
   {"id":"tk-a4","title":"routed by hand","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-11T01:00:00Z","metadata":{"placement":"pending","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"tk-a5","title":"armed by hand","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-11T01:00:00Z","metadata":{"placement":"pending","gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"tk-a6","title":"assigned by hand","issue_type":"task","priority":2,"status":"in_progress","assignee":"gc-toolkit.mechanik","created_at":"2026-10-11T01:00:00Z","metadata":{"placement":"pending"}},
-  {"id":"tk-a7","title":"slung by hand","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-11T01:00:00Z","metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"tk-a7","title":"slung by hand, its run live","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-11T01:00:00Z","metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"tk-a8","title":"a marker that is not pending","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-11T01:00:00Z","metadata":{"placement":"placed"}},
   {"id":"tk-a9","title":"prompt-update: add a rule","issue_type":"task","priority":1,"status":"open","created_at":"2026-10-12T09:00:00Z","metadata":{"placement":"pending","task_kind":"prompt-update"}},
-  {"id":"tk-a10","title":"waits on a migration and on placement","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-12T10:00:00Z","dependencies":[{"issue_id":"tk-a10","depends_on_id":"tk-mig","type":"blocks"}],"metadata":{"placement":"pending"}}
+  {"id":"tk-a10","title":"waits on a migration and on placement","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-12T10:00:00Z","dependencies":[{"issue_id":"tk-a10","depends_on_id":"tk-mig","type":"blocks"}],"metadata":{"placement":"pending"}},
+  {"id":"tk-a11","title":"slung by hand, its workflow ended","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-12T11:00:00Z","metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"tk-a12","title":"slung by hand, now a PR","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-12T12:00:00Z","metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat","merge_result":"pull_request","pr_number":"7"}},
+  {"id":"tk-a13","title":"a run works it, and it carries no stamp","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-12T13:00:00Z","metadata":{"placement":"pending"}}
+]
+JSON
+# The workflows alpha's store holds: one over tk-a7 and one over tk-a13, each a
+# root that names its input convoy and a convoy that tracks the bead. The store
+# lists no root of tk-a11's workflow, because a plain listing leaves out a closed
+# bead.
+cat > "$TMP/alpha.roots.json" <<'JSON'
+[
+  {"id":"tk-r7","issue_type":"task","status":"open","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"tk-c7"}},
+  {"id":"tk-r13","issue_type":"task","status":"in_progress","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"tk-c13"}}
+]
+JSON
+cat > "$TMP/alpha.convoys.json" <<'JSON'
+[
+  {"id":"tk-c7","issue_type":"convoy","status":"open","dependencies":[{"issue_id":"tk-c7","depends_on_id":"tk-a7","type":"tracks"}]},
+  {"id":"tk-c13","issue_type":"convoy","status":"open","dependencies":[{"issue_id":"tk-c13","depends_on_id":"tk-a13","type":"tracks"}]}
+]
+JSON
+cat > "$TMP/gamma.json" <<'JSON'
+[
+  {"id":"rg-g1","title":"placed by its parent field","issue_type":"task","priority":2,"status":"open","created_at":"2026-10-11T01:00:00Z","parent":"rg-epic","metadata":{"placement":"pending"}}
 ]
 JSON
 cat > "$TMP/beta.json" <<'JSON'
@@ -77,11 +107,24 @@ case "${1:-} ${2:-}" in
       {name:"gc-toolkit", path:($t + "/alpha"), prefix:"tk", hq:false, suspended:false},
       {name:"rig-a", path:($t + "/beta"), prefix:"ra", hq:false, suspended:false},
       {name:"rig-b", path:($t + "/cold"), prefix:"rb", hq:false, suspended:true},
+      {name:"rig-g", path:($t + "/gamma"), prefix:"rg", hq:false, suspended:false},
       {name:"nostore", path:($t + "/nostore"), prefix:"ns", hq:false, suspended:false}]}' ;;
   "bd list")
     db=""; prev=""
     for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
     rig=$(basename "$(dirname "$db")")
+    # run-lib.sh's map reads the roots, then the convoys they name. A file that
+    # is absent is a store with none.
+    case " $* " in
+      *" --has-metadata-key "*|*" --id "*)
+        case " ${FAKE_RUNS_DOWN:-} " in *" $rig "*) exit 1 ;; esac
+        case " $* " in
+          *" gc.input_convoy_id "*) cat "$FAKE_TMP/$rig.roots.json" 2>/dev/null || printf '[]\n' ;;
+          *" --id "*) cat "$FAKE_TMP/$rig.convoys.json" 2>/dev/null || printf '[]\n' ;;
+          *) printf '[]\n' ;;
+        esac
+        exit 0 ;;
+    esac
     case " ${FAKE_DOWN:-} " in *" $rig "*) exit 1 ;; esac
     if [ -n "${FAKE_EMPTY:-}" ]; then printf '[]\n'; else cat "$FAKE_TMP/$rig.json"; fi
     case " ${FAKE_FAIL_AFTER:-} " in *" $rig "*) exit 1 ;; esac ;;
@@ -99,12 +142,15 @@ eq "$RC" "0" "(QUEUE) unplaced --json succeeds"
 printf '%s' "$OUT" | jq -e 'type == "object" and (.beads | type) == "array" and (.skipped | type) == "array" and (.unread | type) == "array"' >/dev/null 2>&1 \
     && ok "(QUEUE) …and prints one JSON object: beads, skipped and unread" || bad "(QUEUE) …and prints one JSON object: beads, skipped and unread ($OUT)"
 IDS=$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)
-eq "$IDS" "tk-a9 ra-b1 tk-a1 tk-a10" "(ORDER) the waiting beads, priority first and then oldest, from every store that answers"
+eq "$IDS" "tk-a9 ra-b1 tk-a1 tk-a10 tk-a11" "(ORDER) the waiting beads, priority first and then oldest, from every store that answers"
 for id in tk-a2 tk-a3; do hasnot " $IDS " " $id " "(PLACED) $id has a parent, so it is placed"; done
 hasnot " $IDS " " tk-a4 " "(PLACED) a route places a bead"
 hasnot " $IDS " " tk-a5 " "(PLACED) an arm places a bead"
 hasnot " $IDS " " tk-a6 " "(PLACED) an assignee places a bead"
-hasnot " $IDS " " tk-a7 " "(PLACED) a live pour places a bead"
+hasnot " $IDS " " tk-a12 " "(PLACED) a landing state places a bead, though its pour's stamp stands and no run works it"
+hasnot " $IDS " " tk-a7 " "(RUNS) a bead a live run works is not listed"
+hasnot " $IDS " " tk-a13 " "(RUNS) …and a live run places a bead that carries no stamp"
+has " $IDS " " tk-a11 " "(RUNS) a bead whose pour's workflow has ended is listed, though its stamp stands"
 hasnot " $IDS " " tk-a8 " "(PLACED) a marker that is not pending is not in the queue"
 has " $IDS " " tk-a10 " "(BLOCKED) a bead that also waits on a blocker is in the queue"
 eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "ra-b1") | .rig' 2>/dev/null)" "rig-a" "(QUEUE) each row names its rig"
@@ -124,11 +170,15 @@ has "$ERR" "rig rig-b is suspended" "(COLD) …and the skip is named"
 eq "$(printf '%s' "$OUT" | jq -c '.skipped' 2>/dev/null)" '["rig-b"]' "(COLD) …and a --json caller reads it in skipped"
 eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '[]' "(COLD) …while unread stays empty, because every store it read answered"
 hasnot "$CALLS" "$TMP/nostore" "(READ) a rig with no store is not asked"
+runs_read() { printf '%s\n' "$CALLS" | grep -F -- '--has-metadata-key gc.input_convoy_id' | grep -F -- "--db $TMP/$1/.beads"; }
+[ -n "$(runs_read alpha)" ] && ok "(RUNS) a store's runs are read from that store" || bad "(RUNS) alpha's runs were not read from alpha's store ($CALLS)"
+[ -n "$(runs_read beta)" ] && ok "(RUNS) …each store's own" || bad "(RUNS) beta's runs were not read from beta's store ($CALLS)"
+[ -z "$(runs_read gamma)" ] && ok "(RUNS) …and not where every marked bead's own row places it" || bad "(RUNS) gamma's runs were read with nothing to judge ($CALLS)"
 
 echo "# the plain form"
 run
 eq "$RC" "0" "(TEXT) unplaced succeeds"
-has "$OUT" "unplaced: 4 bead(s) wait for placement" "(TEXT) it counts the queue"
+has "$OUT" "unplaced: 5 bead(s) wait for placement" "(TEXT) it counts the queue"
 has "$OUT" "tk-a1	P2	bug	gc-toolkit	2026-10-11	doc-filing lint fails on main" "(TEXT) …lists each bead on a line"
 has "$OUT" "	ready to build once placed" "(TEXT) …with its takeaway beneath it"
 FAKE_EMPTY=1 run
@@ -140,13 +190,20 @@ FAKE_DOWN=beta run --json
 eq "$RC" "4" "(PARTIAL) a store that does not answer fails the run"
 has "$ERR" "rig-a" "(PARTIAL) …naming the rig"
 has "$ERR" "this list is partial" "(PARTIAL) …and saying the list is partial"
-eq "$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)" "tk-a9 tk-a1 tk-a10" "(PARTIAL) …after printing the rows it could read"
+eq "$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)" "tk-a9 tk-a1 tk-a10 tk-a11" "(PARTIAL) …after printing the rows it could read"
 eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '["rig-a"]' "(PARTIAL) …and a --json caller reads the rig in unread"
 has "$ERR" "this list is partial; unread: rig-a" "(PARTIAL) …and stderr names it too"
 FAKE_FAIL_AFTER=beta run --json
 eq "$RC" "4" "(PARTIAL) a read that prints its rows and then fails has not answered"
 has "$ERR" "rig-a" "(PARTIAL) …so its rig is named"
 hasnot "$OUT" "ra-b1" "(PARTIAL) …and the rows it printed are not listed as the store's answer"
+FAKE_RUNS_DOWN=alpha run --json
+eq "$RC" "4" "(PARTIAL) a store whose live runs cannot be read fails the run"
+has "$ERR" "the live runs of rig gc-toolkit could not be read" "(PARTIAL) …naming the rig and the read"
+eq "$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)" "ra-b1" "(PARTIAL) …with none of its beads listed, and the other stores' rows printed"
+eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '["gc-toolkit"]' "(PARTIAL) …and a --json caller reads the rig in unread"
+FAKE_RUNS_DOWN=gamma run --json
+eq "$RC" "0" "(PARTIAL) runs that cannot be read are no failure where no marked bead's own row leaves it waiting"
 
 echo "# arguments"
 run --nope

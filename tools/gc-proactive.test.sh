@@ -51,8 +51,7 @@
 # sitting's next move, and the witness and the distiller file theirs with no
 # takeaway, so the marker is all that sets them apart from raw input:
 #   (PLACEMENT-DROP)  scan_precision_filter drops a bead in the placement queue
-#   (PLACEMENT-KEEP)  …while a raw input, and a marked bead something placed
-#                     since, stay candidates
+#   (PLACEMENT-KEEP)  …while a raw input stays a candidate
 #   (PLACEMENT-SWEEP) a scan --sling sweep reacts to raw input and never to a
 #                     bead in the queue
 # A failed read is not an empty ready set, and a page the filter cannot build is
@@ -355,10 +354,10 @@ hasnt "$OUT" "tk-step-finalize" "(STEP-SWEEP) …nor at the control step"
 # --- a bead in the placement queue is not a scan candidate -------------------
 # tk-held-bug is the bug the witness's bug-file block files, and tk-held-proposal
 # a prompt-update the feedback distiller files: each is marked placement=pending
-# in its create, unrouted, and carries no takeaway. tk-placed-pour carries the
-# marker too, but a pour has placed it since (gc.execution_routed_to), so it is
-# not in the queue. Each passes every other clause, so placement.sh's
-# awaiting_placement is all that sets the first two apart from tk-raw.
+# in its create, unrouted, and carries no takeaway. tk-held-ended carries the
+# marker and the stamp of a pour whose workflow has ended, and that stamp places
+# nothing, so the bead is back in the queue. Each passes every other clause, so
+# placement.sh's awaiting_placement is all that sets the three apart from tk-raw.
 cat > "$TMP/scan.json" <<'JSON'
 [
   {"id":"tk-raw", "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
@@ -366,7 +365,7 @@ cat > "$TMP/scan.json" <<'JSON'
    "metadata":{"placement":"pending"}},
   {"id":"tk-held-proposal", "issue_type":"task", "description":"a rule the distiller proposes", "title":"prompt update",
    "metadata":{"placement":"pending","task_kind":"prompt-update","target":"main","merge_strategy":"mr"}},
-  {"id":"tk-placed-pour", "issue_type":"task", "description":"a held bead a pour placed since", "title":"placed by a pour",
+  {"id":"tk-held-ended", "issue_type":"task", "description":"a held bead whose pour has ended", "title":"held, its pour ended",
    "metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 ]
 JSON
@@ -374,9 +373,9 @@ JSON
 echo "# scan_precision_filter drops a bead in the placement queue, keeps raw input"
 IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
 has "$IDS" "tk-raw" "(PLACEMENT-KEEP) a raw input beside the held beads is still a candidate"
-has "$IDS" "tk-placed-pour" "(PLACEMENT-KEEP) …and so is a marked bead something has placed since"
 hasnt "$IDS" "tk-held-bug" "(PLACEMENT-DROP) a bug the witness holds for placement is not a scan candidate"
 hasnt "$IDS" "tk-held-proposal" "(PLACEMENT-DROP) …nor a proposal the distiller holds for placement"
+hasnt "$IDS" "tk-held-ended" "(PLACEMENT-DROP) …nor a held bead whose pour has ended, its stamp still on it"
 
 # The store holds every bead the scan read, so the sling's subject gate finds
 # each one the sweep reaches.
@@ -390,6 +389,7 @@ eq "$RC" 0 "(PLACEMENT-SWEEP) the sweep exits 0"
 has "$OUT" "would file a reaction bead tracking tk-raw" "(PLACEMENT-SWEEP) the sweep files a first reaction at the raw input"
 hasnt "$OUT" "tk-held-bug" "(PLACEMENT-SWEEP) …and none at the witness's held bug"
 hasnt "$OUT" "tk-held-proposal" "(PLACEMENT-SWEEP) …nor at the distiller's held proposal"
+hasnt "$OUT" "tk-held-ended" "(PLACEMENT-SWEEP) …nor at a held bead whose pour has ended"
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route

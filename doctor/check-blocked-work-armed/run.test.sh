@@ -232,6 +232,15 @@ eq "$RC" "1" "a bead placed under an epic is flagged even with its marker left b
 has "$OUT" "deferred-dispatch.sh arm a-1" "…placed by .parent, it draws the arm remedy"
 has "$OUT" "deferred-dispatch.sh arm a-2" "…placed by a parent-child dependency, so does it"
 clear_stores
+# The stamp a pour leaves outlives its run and places nothing, so a marked bead
+# whose run has ended waits for the sitting again and owes no arm, stamp or not.
+bended() { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","blocked_by":["x-0"],"metadata":{"placement":"pending","gc.execution_routed_to":"alpha/pack.polecat"}}' "$1"; }
+blocked_store alpha "$(bended a-1)"
+marked_store  alpha "$(bended a-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a blocked marked bead whose pour has ended is not flagged"
+hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy, because the sitting routes it"
+clear_stores
 # When the marked beads cannot be read, a marked candidate is unverifiable: it
 # may still wait for the sitting, so it is warned and NOT flagged.
 blocked_store alpha "$(bmeta a-1 placement pending)"

@@ -1406,9 +1406,9 @@ keys = ["placement"]
 #   liveness-classify.sh and liveness-recheck.sh give the bead, the exemption
 #   doctor/check-blocked-work-armed reads, and the beads the proactive scan
 #   (tools/gc-proactive.sh) files no first reaction for. A parent, a route, an
-#   arm, an assignee or a live pour places a bead whatever the marker says, so a
-#   marker left on a placed bead names no wait. Absent means intake never held
-#   the bead. No pack writer clears it. A string.
+#   arm, an assignee, a landing state or a live run places a bead whatever the
+#   marker says, so a marker left on a placed bead names no wait. Absent means
+#   intake never held the bead. No pack writer clears it. A string.
 
 [metadata.priority]
 # The priority flow (docs/steering.md): a bead's priority is the priority of the
