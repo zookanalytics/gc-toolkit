@@ -47,6 +47,18 @@ sq() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+# menu_text <text> — $1 with every # doubled, so a display-menu item name or -T
+# title shows it as written. tmux expands both as formats, where #(...) runs a
+# shell command, #{...} expands and #[...] restyles, and a row's cells are text
+# other components write: bead titles, takeaways, asks, and the error Gas City
+# recorded for a failed start. A run of two or more # can show shorter than
+# written, and still nothing in it expands. LC_ALL=C keeps sed byte-wise: under
+# a UTF-8 locale BSD sed prints nothing for a line holding an invalid byte, and
+# an empty name is a separator that shifts every argument after it.
+menu_text() {
+    printf '%s' "$1" | LC_ALL=C sed 's/#/##/g'
+}
+
 SCRIPT="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 ATTN="$(dirname "$SCRIPT")/gc-helm.sh"
 [ -x "$ATTN" ] || { gcmux display-message -d 4000 "Helm: gc-helm.sh not found"; exit 0; }
@@ -159,10 +171,10 @@ while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
     else
         key=""
     fi
-    set -- "$@" "$label" "$key" "$cmd"
+    set -- "$@" "$(menu_text "$label")" "$key" "$cmd"
     i=$((i + 1))
 done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-gcmux display-menu -T "$MENU_TITLE" -x C -y C -- "$@"
+gcmux display-menu -T "$(menu_text "$MENU_TITLE")" -x C -y C -- "$@"
