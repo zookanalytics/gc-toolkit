@@ -5,14 +5,20 @@ it concludes there is nothing to do it routes the bead here, and this workflow,
 run by a capable pool, re-checks that conclusion against live state and closes
 the bead when it holds or escalates to the operator when it does not.
 
+A polecat's store-only exit routes a work bead here the same way when the
+record its run wrote finishes the bead, such as a live check whose every check
+passed. A polecat never closes its own work bead, so this check stands between
+that record and the close, which records the bead as done.
+
 ## The contract
 
 1. **The subject arrives as the input convoy's single tracked member.** Each
    step re-derives it in its own shell (`gc convoy status {{convoy_id}}`), the
    way every graph.v2 worker does.
-2. **Validate before you close.** The reaction's close brief is its claim, not
-   a verdict — re-derive it. Read the bead's universe and confirm the thing it
-   says is already fixed is fixed, or that the bead names nothing left to do. A
+2. **Validate before you close.** A close brief is its writer's claim, not a
+   verdict — re-derive it. Read the bead's universe and confirm what the brief
+   says: the thing it says is already fixed is fixed, the bead names nothing
+   left to do, or the record a store-only exit names finishes the bead. A
    close is only as good as the check behind it.
 3. **Close only when fully confident; otherwise escalate.** Confident that there
    is nothing to do: close the subject with `gc.work_outcome=no-op` and a note
@@ -31,6 +37,6 @@ Variables:
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
 
 Steps (3):
-  ├── mol-validate-close.load-context: Read the subject and the reaction's close brief
+  ├── mol-validate-close.load-context: Read the subject and its close brief
   ├── mol-validate-close.validate-and-resolve: Validate the no-work conclusion, then close or escalate [needs: mol-validate-close.load-context]
   └── mol-validate-close.workflow-finalize: Finalize workflow [needs: mol-validate-close.validate-and-resolve]

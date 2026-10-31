@@ -1,6 +1,6 @@
 ---
 name: review-demo
-description: The method for the demo check, the visual review. Decide whether a change needs a visual to be understood and, when it does, pick the cheapest modality that conveys it (a visual the repo already carries, a screenshot, or a narrated video), deliver it to the PR inline and uncommitted, and record the decision on one signoff verdict. Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
+description: Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -86,6 +86,18 @@ claim-lease keepalive the review formula names, from the review workspace, the
 directory that holds `<worktree>`, so the engine's working files stay out of
 the reviewed tree.
 
+Every capture runs inside a sandbox from which the live city cannot be reached
+(`demo-engine-lib.sh`). The engine, the command a terminal capture types, the
+server a capture starts and the page it loads can read none of the city's
+stores, configuration or API, and get none of the variables that point at it.
+A command or page that reads the city fails there. So a capture shows the
+reviewed commit on fixture data that stands in for live data: a fixture the
+rig's guidance names, or one the reviewed commit's own tests build. A visual
+that only live state could produce is no capture, and the verdict says so, as
+for any visual that cannot be produced here. The sandbox is macOS's
+`sandbox-exec`, and a host without it runs no capture;
+`doctor/check-demo-toolchain` reports whether this one has it.
+
 Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
 --subject <anchor_bead>` resolves the PR from the anchor and attaches the file
 to it in a comment, inline and uncommitted. It refuses a PR outside the rig's
@@ -102,13 +114,21 @@ reports whether the `gh` it needs is present.
   The app target is the draft's preview, `--base-url <url>`, where one
   deploys. Otherwise serve the reviewed worktree, so the clip shows the
   reviewed commit: `--serve-dir <worktree>/<dir>` for a static build, or
-  `--serve "<command>" --cwd <worktree>` for a dev server. Exit 0 is a clip
+  `--serve "<command>" --cwd <worktree>` for a dev server. A `--base-url` on
+  this host is refused, because a server already running here runs outside
+  the sandbox. Exit 0 is a clip
   in which every step's proof held, exit 3 is a clip in which at least one
   step failed its proof, and exit 1 is no clip. The last line names the clip
   and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
   session. Without it the clip is silent and captioned, and it still shows the
   change. `doctor/check-demo-toolchain` reports which parts of the capture
   toolchain resolve in this session.
+
+  A video's `--serve` command chooses its own port, because the SprintShow
+  engine sets no `$PORT` for it. The engine waits for the command on the port
+  `--port` names, or on 5173 when none is named, and it refuses `--port 0`. So
+  `--port` names the port the command binds, and two captures side by side each
+  need a different port.
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 
   ```bash
@@ -145,8 +165,11 @@ reports whether the `gh` it needs is present.
   For a page, write the script as you would for a video
   (`gc-toolkit.gc-demo-script`). Its steps drive the app to the state, the
   capture is the state the last step leaves, and the app target is the one a
-  video takes. A `--serve` command given `--port` finds that port in `$PORT`,
-  and `--port 0` picks a free one, so two captures never share a server.
+  video takes. `demo-screenshot.sh` adds what the engine lacks for a `--serve`
+  command. It puts the port `--port` names in the command's `$PORT`, and it
+  turns `--port 0` into a free port first, so two screenshots side by side each
+  get a server of their own. With no `--port`, the command gets no `$PORT` and
+  the engine waits on 5173, as for a video.
   `--selector <css>` captures one element instead of the viewport, and
   `--full-page` captures the whole page. For a terminal, the engine types the
   command at a bash prompt in a terminal of its own, whose shell starts in
@@ -156,11 +179,14 @@ reports whether the `gh` it needs is present.
   capture, and one that pages a long output in a terminal, such as `git log`,
   waits in its pager, so run it with the pager off (`git --no-pager log`). The
   capture is as tall as the session, so bound a long output with the command's
-  own limit. Run only a command that reads, because one that files, routes or
-  closes anything does it in the live city. `--text <file>` shows output
-  captured earlier, which the terminal prints with `cat`. For markdown, write
-  the markdown the reviewed commit composes to the
-  file. GitHub's own markdown renderer turns it into HTML in the context of the
+  own limit. The command runs inside the sandbox, so one that reads or writes
+  the city fails, and the capture shows the failure; run it on fixture data, as
+  the rig's guidance says. `--text <file>` shows output captured earlier, which
+  the terminal prints with `cat`. For markdown, write the markdown the reviewed
+  commit composes to the file. `--text` and markdown draw a file as it is, and
+  the sandbox cannot see how the file was made, so write to it only what the
+  reviewed commit produced on fixture data, never output read from the live
+  city. GitHub's own markdown renderer turns it into HTML in the context of the
   rig's origin, so the capture shows it as the PR would. github.com's page
   script finishes some blocks after that renderer returns, such as a mermaid
   diagram or math, and the capture has no such script. So markdown holding one
@@ -203,8 +229,9 @@ name the visual as the evidence. A change that fails is that finding, and the
 clip or the screenshot is its evidence to deliver.
 
 A capture that cannot run for a reason outside the change is not a finding. The
-capture toolchain may not resolve, the rig may have no app to serve, or no
-preview may deploy. Each of those is the note below, and it never blocks.
+capture toolchain may not resolve, the rig may have no app to serve, no preview
+may deploy, or the surface may show only what live state produces. Each of
+those is the note below, and it never blocks.
 
 ## The verdict
 
@@ -242,8 +269,8 @@ from: the reviewed commit, and any fixture that stands in for live data.
   `--visual-fallback-from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
   say that a visual is warranted and what stopped it: a surface none of these
-  captures renders, a capture toolchain that does not resolve, or no running app
-  to capture.
+  captures renders, a surface only live state produces, a capture toolchain that
+  does not resolve, or no running app to capture.
   This never blocks. A rework child cannot build the city's capture capability,
   and a red lane would keep the PR in draft, away from the human who would judge
   it.

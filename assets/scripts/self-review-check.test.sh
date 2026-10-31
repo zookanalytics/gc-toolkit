@@ -139,9 +139,9 @@ echo base > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm base
 echo more > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm work
 HEAD_SHA=$(git -C "$WT" rev-parse HEAD)
 OLD_SHA=$(git -C "$WT" rev-parse HEAD~1)
-# The step's note of setup and build at <commit>: setup <s>, build <b>, and the
-# build command [bc], default make.
-noted() { jq -nc --arg c "$1" --arg s "$2" --arg b "$3" --arg bc "${4:-make}" '{commit: $c, setup: $s, build: $b, setup_command: "", build_command: $bc}'; }
+# The step's note of setup and build at <commit>: setup <s>, build <b>, the
+# build command [bc], default make, and the setup command [sc], default none.
+noted() { jq -nc --arg c "$1" --arg s "$2" --arg b "$3" --arg bc "${4-make}" --arg sc "${5-}" '{commit: $c, setup: $s, build: $b, setup_command: $sc, build_command: $bc}'; }
 # Unless a case says otherwise, setup and build passed at HEAD.
 SB_GREEN=$(noted "$HEAD_SHA" none pass)
 # A second worktree of the same clone, at HEAD~1, and a third at HEAD: records
@@ -380,6 +380,48 @@ MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
 run_case "FAIL when setup failed too and only the build is marked" 1
 assert_out "names the unmarked setup" "not green at $HEAD_SHA: setup"
 
+# A command the step does not declare has none to match, so the iteration may
+# run the repo's own in its place, and the note's outcome for it answers, as any
+# run's record does for such a check.
+OWN_SETUP='pnpm install --frozen-lockfile'; OWN_BUILD='pnpm build'
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "PASS on the note of the repo's own setup and build when the step declares neither" 0
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "PASS on a note of none and no commands when the step declares neither" 0
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$OLD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the repo's own setup and build were noted at another commit" 1
+assert_out "…counting them as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+# Its outcome counts whichever way it went.
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass fail "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the repo's own build failed at HEAD" 1
+assert_out "…naming that build" "not green at $HEAD_SHA: build"
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" fail pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the repo's own setup failed at HEAD" 1
+assert_out "…naming that setup" "not green at $HEAD_SHA: setup"
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass fail "$OWN_BUILD" "$OWN_SETUP")
+MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
+run_case "PASS when a pre-existing mark holds the note of the repo's own failed build" 0
+assert_out "…naming its tracker" "build: the fail at $HEAD_SHA is pre-existing, tracked by tk-b1"
+# Each command is judged by itself, so the one the step does declare still has
+# to match.
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass make "$OWN_SETUP"); write_state; green
+run_case "PASS on the repo's own setup beside the declared build" 0
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the build is not the declared one, though the step declares no setup" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "PASS on the repo's own build beside the declared setup" 0
+reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" 'npm ci'); write_state; green
+run_case "FAIL when the setup is not the declared one, though the step declares no build" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+# A note that names no command says the declared one never ran.
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "FAIL when the note ran no build, though the step declares one" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "FAIL when the note ran no setup, though the step declares one" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+
 # --- 3d4. the step's own block, rendered as a pour renders it -------------------
 # The self-review step's check block, rendered with the case's commands, runs in
 # the fixture worktree against the gctk built from this checkout. The root stub
@@ -426,6 +468,15 @@ for sh in $SHELLS; do
   reset_env; MD_SETUP_BUILD=""; VAR_BUILD=true; write_state
   run_checks "$sh"
   run_case "$sh: PASS after the step's own block ran a build that passes" 0
+  # On a root stamped with neither command, the iteration gives the block the
+  # repo's own, and its note names them.
+  reset_env; MD_SETUP_BUILD=""; VAR_BUILD=""; write_state
+  VAR_SETUP=true VAR_BUILD=true run_checks "$sh"
+  run_case "$sh: PASS after the block ran the repo's own setup and build where the step declares neither" 0
+  # shellcheck disable=SC1090  # the generated state file the stubs read
+  BLOCK_NOTE=$(MD_SETUP_BUILD=""; . "$STATE"; printf '%s' "$MD_SETUP_BUILD")
+  eq "$(printf '%s' "$BLOCK_NOTE" | jq -r '[.commit, .setup, .build, .setup_command, .build_command] | join(" ")')" "$HEAD_SHA pass pass true true" \
+    "$sh: …with a note that names them"
   # What setup and build leave that git does not ignore is put back, so the
   # checks after them run, and the block notes them, in one run of the block.
   reset_env; MD_SETUP_BUILD=""; VAR_SETUP='printf rewritten > f'; VAR_BUILD='printf out > dist.txt'; write_state

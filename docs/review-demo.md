@@ -1,13 +1,13 @@
 ---
 name: The demo check on gc-toolkit
-description: The guidance the demo check reads on gc-toolkit reviews, which the review formula prints from the reviewed commit. It names this rig's visual surfaces, one per kind of screenshot, and how to capture each from the reviewed commit without writing to the live city.
+description: The guidance the demo check reads on gc-toolkit reviews, which the review formula prints from the reviewed commit. It names this rig's visual surfaces, one per kind of screenshot, and how to capture each from the reviewed commit on fixture data, since a capture cannot reach the live city.
 ---
 
 # The demo check on gc-toolkit
 
 gc-toolkit shows a person three kinds of surface, and `demo-screenshot.sh` has a
-kind for each. Capture each one from the reviewed commit, and never through a
-path that writes to the live city.
+kind for each. Every capture runs where the live city cannot be reached, so
+capture each one from the reviewed commit on fixture data.
 
 ## Scope
 
@@ -31,8 +31,9 @@ keepalive, as every capture runs, with the pack's `demo-screenshot.sh`:
 The board shows `services/helm/web/src/board.fixture.json`, the contract sample,
 which carries every key of the board contract. To show another board, write it
 in the shape `services/helm/web/src/contract.ts` names and add
-`--board $PWD/<file>` to the command. `--port 0` gives the command a free port
-of its own, so two captures never share a server. On a cold Go build cache the
+`--board $PWD/<file>` to the command. `demo-screenshot.sh` turns `--port 0` into
+a free port and hands it to the command as `$PORT`, where `helm-fixture` reads
+it, so two captures each get a server of their own. On a cold Go build cache the
 first run compiles Go's HTTP stack and can take most of the 30 s the engine
 waits for the command. When the engine reports that the command did not answer
 in time, capture again, because what the first run compiled stays cached.
@@ -48,22 +49,27 @@ the script's start path opens a row's drill panel. The panel's own reads go to
 the supervisor and fail against a fixture, and the panel still offers its
 actions.
 
-Never point a capture at a running helm service. Its verbs file, dispatch and
-close visits in the live city, and a script that clicks one does that for real.
-The verdict says that the board shows fixture data.
+A running helm service is out of a capture's reach, because a capture refuses a
+`--base-url` on this host, and its verbs file, dispatch and close visits in the
+live city. The verdict says that the board shows fixture data.
 
 ## Reports a command prints
 
 Run the reviewed commit's script from the reviewed worktree, for example
 `terminal --command "assets/scripts/gc-helm.sh unplaced" --cwd <worktree>`.
-These scripts read the live city, so capture only a verb that only reads, such
-as `gc-helm.sh unplaced` or `deferred-dispatch.sh list`.
+These scripts read the city through `gc`, which a capture cannot reach, so give
+the command fixture data: put a `gc` stub first on its PATH that answers from
+fixture JSON, as the script's own test suite does
+(`assets/scripts/gc-helm-unplaced.test.sh` builds one for `gc-helm.sh
+unplaced`). Keep the stub and its JSON in the review workspace beside the PNG.
+The verdict says the report shows fixture data.
 
 ## Markdown the city posts
 
 Pack scripts compose the city's comments and PR bodies, so render what the
 reviewed commit composes. A composer that prints, such as
-`bring-current-audit.sh render --as comment`, can run from the reviewed
-worktree. A composer that posts, such as `signoff.sh`, writes to GitHub when it
-runs, so never run it on a live bead. Build its markdown with `gh` stubbed, as
-its test suite does.
+`bring-current-audit.sh render --as comment`, reads its bead from the city's
+store, so run it with `gc` stubbed on fixture data, as for a report. A composer
+that posts, such as `signoff.sh`, writes to GitHub when it runs, so never run
+it on a live bead. Build its markdown with `gh` stubbed, as its test suite
+does.
