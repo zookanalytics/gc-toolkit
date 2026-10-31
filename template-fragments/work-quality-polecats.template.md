@@ -26,4 +26,13 @@
   depends on it, build only the end state, and when a real case does, file
   the bead that removes the path in the same change, blocked by what retires
   the case and armed to dispatch when it lands.
+
+<!-- rule:tk-clpl8jv src:pr:#1298:comment:4310526242, pr:#1298:comment:4310543583, pr:#1220:comment:4243955265, pr:#1262:comment:4286336787, pr:#1277:comment:4303601800 (operator feedback), visit:tk-ilmnzqh (operator ruling) adopted:2026-10-31 -->
+- Before a change adds machinery, such as a script, a client for a
+  service, a wrapper, a state or a sweep, find what the platform it builds
+  on, the service's own SDK or an established library already provides for
+  the job, cite it, and write code only for the gap it leaves. A design that
+  needs the platform changed, or a state that only this repository can
+  interpret, is a sign it uses the platform wrongly, so look for the fitting
+  use before proposing either.
 {{ end }}
