@@ -28,7 +28,9 @@
 # skill names one. It pins that command and checks it against the real gc
 # under a renamed import. It pins that the converse steps and the mechanik give
 # the exact command for each act they name while the skills explain the act
-# once, with one fragment pointing both prompts at the skills. It pins that the
+# once, with one fragment pointing both prompts at the skills. It pins how the
+# prompt's hand-back definition has a framing name its subject, and that the
+# hold skill points at it. It pins that the
 # dispatch fragment the mechanik and the keeper compose calls deferred-dispatch.sh
 # and gc-bd-watch.sh the work skill's way, so both renders reach the pack's own
 # copies. It pins the prs
@@ -480,6 +482,33 @@ lacks "the converse prompt does not single out a design-convoy" 'design-convoy i
     "choosing a formula is the work skill's option"
 lacks "the prompt no longer carries the design-convoy questions" 'design-convoy-routing' "$PROMPT" \
     "choosing the formula is the work skill's option"
+# Every converse framing is composed from the prompt's hand-back definition, so
+# the definition says how a framing places its subject and the step skills point
+# at it. These read the prompt with its whitespace squeezed, so a re-wrap keeps
+# them.
+PROMPT_JOINED="$TMP/prompt-squeezed"
+tr -s '[:space:]' ' ' <"$PROMPT" >"$PROMPT_JOINED"
+have "a hand-back names its subject by what it is to the operator" \
+    'names its subject by what it is to the operator' "$PROMPT_JOINED"
+have "a PR, or a decision about one, is named by the PR's number and what it does" \
+    "by the PR's number and what it does for them" "$PROMPT_JOINED"
+have "a report is named by who filed it and what it found" \
+    'by who filed it and what it found' "$PROMPT_JOINED"
+have "the operator's own ask stands in their words, ahead of what was proposed from it" \
+    'in their words rather than anything proposed from it' "$PROMPT_JOINED"
+have "the body opens on the subject, its state and why it reached the operator, before any mechanism" \
+    'why it reached the operator now, before any mechanism' "$PROMPT_JOINED"
+have "a report with no PR involved says so" 'a report with no PR involved says so' "$PROMPT_JOINED"
+have "a message with detail opens the way the body does" \
+    'A message with detail above its hand-back opens the way the body does' "$PROMPT_JOINED"
+have "the message keeps pipeline vocabulary out or says what it means" \
+    'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
+have "an option says what it does rather than what it avoids" \
+    'saying what it does rather than what it avoids' "$PROMPT_JOINED"
+have "an option that accepts a known defect names what it breaks" \
+    'names what the defect breaks and where' "$PROMPT_JOINED"
+lacks "the hold skill points at the shape and keeps no copy of its order" 'detail and evidence' \
+    "$SKILLS/converse-hold/SKILL.md" "the prompt's definition is the one place a framing's order is stated"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
 lacks "the work skill's formula choice carries no one formula's variables" 'design_gated' "$WORK_SKILL" \
     "a formula's own description says when it fits and how to tune it"
