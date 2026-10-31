@@ -89,8 +89,7 @@ the anchor AND cancels the run beneath it through gascity, and `--no-wait`
 records that the ruling ended the wait rather than moving it.
 
 Then post the framing as a **hand-back** in the shape the prompt's
-Definitions define (**The hand-back**): detail and evidence first, the
-hand-back itself as the last word, and — since a decision is open here —
+Definitions define (**The hand-back**). Since a decision is open here,
 lead its close with the recommendation. Every framing that returns a
 decision wears that shape; this hold and the step-7 sign-off both.
 Record the hand-back on the visit just before you post it (**Record each

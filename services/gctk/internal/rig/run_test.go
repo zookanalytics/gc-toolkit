@@ -153,6 +153,14 @@ func TestRunWithNoTimeoutWaits(t *testing.T) {
 	}
 }
 
+// untilStopped keeps a command running until a stop reaches its shell. Each
+// sleep is short because a stop can land just as the shell starts the next one.
+// That sleep can miss the SIGTERM and stays in the group until it ends, so a
+// long one would hold the stop open until the SIGKILL at the grace deadline. The
+// loop ends after 30 seconds, so a build that never delivers the stop fails its
+// test rather than hanging it.
+const untilStopped = `while [ "$SECONDS" -lt 30 ]; do sleep 0.05 & wait $!; done`
+
 // A SIGTERM to this process during the run reaches the command's group and
 // returns Interrupted. The test's own Notify keeps a build without the relay
 // from killing the test binary: such a build fails the assertions instead.
@@ -175,7 +183,7 @@ func TestRunRelaysSIGTERMToTheCommandsGroup(t *testing.T) {
 		}
 	}()
 	var out bytes.Buffer
-	o := Run(dir, `trap 'touch got-term; exit 143' TERM; echo $$ > ready; sleep 30 & wait $!`, time.Minute, &out, &out)
+	o := Run(dir, `trap 'touch got-term; exit 143' TERM; echo $$ > ready; `+untilStopped, time.Minute, &out, &out)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
 	}
@@ -193,7 +201,10 @@ func TestRunRelaysSIGTERMToTheCommandsGroup(t *testing.T) {
 
 // sigtermWhenReady sends this process SIGTERM once the command has written
 // path. The caller's own Notify keeps a build without the relay from killing
-// the test binary.
+// the test binary. The command writes path from its own shell, with `: > path`.
+// A child such as touch can still be running when the file appears, and bash
+// reports a foreground child that SIGTERM kills on stderr, which breaks a test
+// of the command's exact output.
 func sigtermWhenReady(path string) {
 	go func() {
 		deadline := time.Now().Add(10 * time.Second)
@@ -218,7 +229,7 @@ func TestRunReturnsFromARelayedSignalOnceTheCommandHasStopped(t *testing.T) {
 	dir := t.TempDir()
 	sigtermWhenReady(filepath.Join(dir, "ready"))
 	var out bytes.Buffer
-	o := Run(dir, `trap 'sleep 0.5; echo stopped; exit 143' TERM; touch ready; sleep 30 & wait $!`, time.Minute, &out, &out)
+	o := Run(dir, `trap 'sleep 0.5; echo stopped; exit 143' TERM; : > ready; `+untilStopped, time.Minute, &out, &out)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
 	}
@@ -361,7 +372,7 @@ func TestRunStopWaitsForAChildThatIsStillStopping(t *testing.T) {
 	sigtermWhenReady(filepath.Join(dir, "ready"))
 	f := outputFile(t)
 	start := time.Now()
-	o := Run(dir, `bash -c 'trap "sleep 0.5; touch stopped; exit 0" TERM; touch ready; sleep 30 & wait $!' & wait`, time.Minute, f, f)
+	o := Run(dir, `bash -c 'trap "sleep 0.5; touch stopped; exit 0" TERM; : > ready; `+untilStopped+`' & wait`, time.Minute, f, f)
 	elapsed := time.Since(start)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
@@ -405,7 +416,7 @@ func TestRunStopWaitsForTheCommandsOutputToBeDelivered(t *testing.T) {
 	dir := t.TempDir()
 	sigtermWhenReady(filepath.Join(dir, "ready"))
 	w := &slowWriter{delay: 500 * time.Millisecond}
-	o := Run(dir, `trap 'echo stopped; exit 143' TERM; touch ready; sleep 30 & wait $!`, time.Minute, w, w)
+	o := Run(dir, `trap 'echo stopped; exit 143' TERM; : > ready; `+untilStopped, time.Minute, w, w)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
 	}
