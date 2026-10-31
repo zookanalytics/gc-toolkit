@@ -6,9 +6,10 @@
 # record at its HEAD of the run the step declares for each of the rig's recorded
 # checks (test, lint and typecheck), and the work bead notes that setup and
 # build, as the step declares them, passed at that HEAD, a fail of any of them
-# passing only by the work bead's pre-existing mark for it. Every
-# other state, including any internal error in this script, exits non-zero so
-# the loop spawns the next iteration. Fail-closed is deliberate: a false pass
+# passing only by the work bead's pre-existing mark for it. For a check the step
+# declares no command for, whatever run the iteration made in its place answers.
+# Every other state, including any internal error in this script, exits non-zero
+# so the loop spawns the next iteration. Fail-closed is deliberate: a false pass
 # hands an unverified diff to the refinery, which is the red handoff this loop
 # exists to stop.
 #
@@ -400,15 +401,17 @@ done
 # --- 6. setup and build must have passed at THIS HEAD ------------------------
 # gctk rig records nothing for them, so the iteration notes on the work bead's
 # self_review_setup_build what they did at the HEAD of the clean tree it ran
-# them in, and the commands they ran: pass, fail, or none for a check the rig
-# declares no command for. A note counts only while its commands are the ones
-# the step declares, as a record does above. A fail holds the loop even when
-# every record above passes, unless a pre-existing mark holds that very note.
+# them in, and the commands they ran: pass, fail, or none for a check that ran
+# no command. A note's commands count as a record's command does above. One the
+# step declares must match, and one it does not has no command to match, so the
+# note's outcome for the repo's own setup or build answers for it. A fail holds
+# the loop even when every record above passes, unless a pre-existing mark holds
+# that very note.
 NOTE=$(printf '%s' "$ISSUE_JSON" | jq -c --arg c "$HEAD_SHA" '
 	.[0].metadata.self_review_setup_build // empty
 	| (if type == "string" then (fromjson? // empty) else . end)
 	| select(type == "object" and .commit == $c)' 2>/dev/null)
-if [ -n "$NOTE" ] && ! printf '%s' "$NOTE" | jq -e --arg s "$SETUP_RUN" --arg b "$BUILD_RUN" '(.setup_command // "") == $s and (.build_command // "") == $b' >/dev/null 2>&1; then
+if [ -n "$NOTE" ] && ! printf '%s' "$NOTE" | jq -e --arg s "$SETUP_RUN" --arg b "$BUILD_RUN" '($s == "" or (.setup_command // "") == $s) and ($b == "" or (.build_command // "") == $b)' >/dev/null 2>&1; then
 	note "setup and build: $(printf '%s' "$NOTE" | jq -r --arg s "$SETUP_RUN" --arg b "$BUILD_RUN" '"the note at \(.commit) is of setup \(.setup_command // "" | @json) and build \(.build_command // "" | @json), not of the declared setup \($s | @json) and build \($b | @json), so it answers nothing here"' 2>/dev/null)"
 	NOTE=""
 fi

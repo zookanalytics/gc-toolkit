@@ -26,8 +26,22 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 ## An entry
 
-- **Covers.** The paths and keys the warrant justifies. A change finds the
-  warrants it touches by searching this page for the paths in its diff.
+- **Covers.** The paths and keys the warrant justifies.
+  `tools/warrants-touched.sh` builds the list of warrants a branch touches from
+  this line, and reads these forms:
+  - A path in backticks from the top of the repository, or a link to a page in
+    `docs/`. A change to the file, or to anything under a directory, touches the
+    warrant.
+  - A name in backticks followed by `key`, `keys`, `name`, `names` or `file`,
+    and each name listed before it. A changed line that names it whole touches
+    the warrant, in any file other than a markdown file, a test or `specs/`.
+  - The `x` block of a path, a `# >>> x` fence in that file, or the `[x]` table
+    of a TOML file. A change inside it touches the warrant, and a change
+    elsewhere in the file does not.
+
+  A file named for another part of it, such as a verb or a function, is listed
+  on any change to it, and is touched only when the change reaches that part.
+  The list prints the Covers line, so the author can read which part it names.
 - **Stands in for.** The primitive Gas City does not ship.
 - **Evidence.** Where upstream shows the primitive missing: a page of Gas City's
   or bd's documentation, or a symbol and file at a named upstream commit. Never
@@ -43,7 +57,11 @@ shares only the word ([authority-map.md](authority-map.md)).
 - A change that touches a covered path re-verifies the entry against Gas City's
   current upstream documentation and updates Verified. When the trigger has
   fired, the change files the move onto the primitive instead of building
-  further on the noun.
+  further on the noun. `tools/lint.sh` prints the list at the polecat's
+  self-review, with each entry's Verified date and whether the branch has
+  updated it, and `tools/warrants-touched.sh --base origin/<base>` prints it at
+  any time. The list judges nothing, and the arch check judges the
+  re-verification.
 - A change that retires a noun removes its entry.
 
 ## Dolt reclaim
@@ -100,7 +118,10 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 - **Covers.** `assets/scripts/gh-origin-guard.sh`,
   `assets/scripts/gh-origin-guard-codex.sh`, `overlays/gh-origin-guard/`,
-  [gh-origin-guard.md](gh-origin-guard.md).
+  [gh-origin-guard.md](gh-origin-guard.md), and the guard's wiring, which
+  carries the `gh-origin-guard` or `gh-origin-guard-codex` name: the overlay
+  stanzas in pack.toml, the hook in the work-context and cycle-recycle overlays,
+  and each Codex agent's `pre_start`.
 - **Stands in for.** Scoping an agent's outbound writes to the repositories its
   rig owns.
 - **Evidence.**
