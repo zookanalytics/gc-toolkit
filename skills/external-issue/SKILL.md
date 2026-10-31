@@ -92,7 +92,7 @@ ask on that bead:
 
 ```bash
 "$(gc <binding> scripts-dir)/escalate.sh" --subject <that bead> --key report-owed \
-  --message "<the channel the policy names, and the report to send there. Closing <that bead> answers this, sent or declined>"
+  --message "<the channel the policy names, and the report to send there>. Closing <that bead> answers this, sent or declined."
 ```
 
 ## Then carry on

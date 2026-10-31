@@ -42,7 +42,9 @@
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
 # a blocker in another store, and fails if the arm runs. It pins that every
 # skill and formula names a pack skill to load by its catalog name, never by
-# its path, so an agent in any tree loads the installed pack's copy.
+# its path, so an agent in any tree loads the installed pack's copy. It pins that
+# a problem in software the rig does not own goes through the external-issue
+# skill, which alone holds that path's commands.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
@@ -168,7 +170,7 @@ echo "── each building-block skill calls the pack's own writers, never a che
 # since each call starts a fresh shell.
 ROOT="$(cd "$REPO" && pwd)"
 RESOLVE='"$(gc <binding> scripts-dir)/'
-for s in $BLOCKS; do
+for s in $BLOCKS external-issue; do
     f="$SKILLS/$s/SKILL.md"
     [ -r "$f" ] || continue
     found=""
@@ -609,6 +611,37 @@ for script in deferred-dispatch.sh gc-bd-watch.sh; do
     [ "$got" = "$ROOT/assets/scripts/$script" ] && [ -x "$got" ] \
         && ok "with the city's binding filled in, the fragment's call resolves to the pack's own $script" \
         || bad "with the city's binding filled in, the fragment's call resolves to the pack's own $script" "resolved '$got'"
+done
+
+echo "── a problem in software the rig does not own goes through one skill ──"
+# It arises rarely, so its procedure is a skill the situation loads rather than a
+# section every polecat run carries, and each command is stated there once. The
+# origin guard and upstream-finding.sh's refusals stay the hard stops, so a run
+# that never loads the skill is still stopped. The description is the only
+# trigger, and specs/tk-nadehdk/skill-trigger-probe.md proves it fires.
+EXTERNAL="$SKILLS/external-issue/SKILL.md"
+OUTBOUND="$REPO/docs/outbound-sends.md"
+ext_desc=$(frontmatter "$EXTERNAL" description)
+[ "$(frontmatter "$EXTERNAL" name)" = external-issue ] && ok "external-issue: name equals its directory" \
+    || bad "external-issue: name equals its directory"
+[ -n "$(frontmatter "$EXTERNAL" compatibility)" ] && ok "external-issue: declares its compatibility" \
+    || bad "external-issue: declares its compatibility"
+case "$ext_desc" in
+    *"bug, gap or vulnerability in software this rig does not own"*"gh write to such a repository was refused"*)
+        ok "external-issue: the description names both occasions" ;;
+    *) bad "external-issue: the description names both occasions" "$ext_desc" ;;
+esac
+for f in "$REPO/template-fragments/polecat-doctrine.template.md" "$REPO/agents/polecat/prompt.template.md" "$REPO/agents/polecat-codex/prompt.template.md"; do
+    lacks "$(basename "$f"): leaves the send's commands to the skill" 'upstream-finding.sh' "$f" \
+        "this runs on every polecat turn and applies rarely, so it lives in the skill"
+done
+have "the outbound-sends doc links the skill" '../skills/external-issue/SKILL.md' "$OUTBOUND"
+fences=$(grep -c '^ *```' "$OUTBOUND")
+[ "$fences" = 0 ] && ok "the outbound-sends doc holds no command block: each command lives in the skill" \
+    || bad "the outbound-sends doc holds no command block: each command lives in the skill" "$fences fence lines"
+for probe in 'upstream-finding.sh" \' 'isSecurityPolicyEnabled securityPolicyUrl' '/private-vulnerability-reporting' 'security-advisories/reports' 'escalate.sh" --subject'; do
+    have "the skill gives the command: $probe" "$probe" "$EXTERNAL"
+    lacks "…and the doc does not" "$probe" "$OUTBOUND" "each command lives only in the skill"
 done
 
 echo "── a step that depends on the one before it runs only once that one succeeded ──"

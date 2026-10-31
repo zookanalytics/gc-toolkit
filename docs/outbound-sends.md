@@ -1,6 +1,6 @@
 ---
 name: Outbound sends
-description: Writing to a GitHub repository the rig does not own is the operator's send, not an agent's. How an agent preserves such a finding — a bead carrying the ready-to-paste command, and a visit that asks a human — how the target's security policy decides between a public send and a private vulnerability report, and what the path refuses so the parked command still works when it is pasted.
+description: Use when you need to know why a write to a repository the rig does not own is the operator's send, where that line sits, what parking such a send refuses, or what the operator receives. To act on a finding, load the gc-toolkit.external-issue skill.
 ---
 
 # Outbound sends
@@ -14,17 +14,24 @@ Stopping is not dropping. The finding is worth keeping whether or not it is
 ever sent, so it lands as a bead carrying the exact command a human can paste,
 and a visit asks for the send.
 
+An agent acts on this through the
+[`gc-toolkit.external-issue`](../skills/external-issue/SKILL.md) skill, which
+holds every command. It loads when an agent has found a problem in software its
+rig does not own, or when such a `gh` write was refused.
+
 ## Scope
 
-**Mandate.** What an agent does with a write aimed outside the rig's own
-repository: where the finding lands, whether its text may be public, what makes
-the parked command pasteable, and how a human is asked.
+**Mandate.** Why a write aimed outside the rig's own repository is the
+operator's: where the line sits, where the finding lands, what decides whether
+its text may be public, what makes the parked command pasteable, and how a human
+is asked.
 
 **Boundaries.** This covers GitHub writes issued through `gh`. It does not
 speak for our own repository — a send to the rig's origin is ordinary work,
-and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). Who may
-act on what is [authority-map.md](authority-map.md); how a visit reaches a
-person is [human-engagement.md](human-engagement.md).
+and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). The
+commands an agent runs are the skill's. Who may act on what is
+[authority-map.md](authority-map.md); how a visit reaches a person is
+[human-engagement.md](human-engagement.md).
 
 ## The boundary is the rig's own origin
 
@@ -40,20 +47,12 @@ create` to.
 ## Preparing a send
 
 [`assets/scripts/upstream-finding.sh`](../assets/scripts/upstream-finding.sh)
-takes the command the agent wanted to run and parks it:
-
-```bash
-assets/scripts/upstream-finding.sh \
-  --message "Hit while working <bead>; the bug is in the pinned <dep> runtime." \
-  --security-policy "<owner>/<name> has no security policy, and this is a rendering bug." \
-  -- gh issue create --repo <owner>/<name> --title "<title>" --body "<body>"
-```
-
-Everything after `--` is the command, verbatim; the script runs no `gh` and
-reaches no network. `--message` is separate from the `gh` body on purpose: the
-body is written for the upstream maintainer, and the operator is deciding
-something else — whether this is worth another project's attention — so they
-need what was found, where it was hit, and why it earns the send.
+takes the command the agent wanted to run and parks it. Everything after `--` is
+the command, verbatim; the script runs no `gh` and reaches no network.
+`--message` is separate from the `gh` body on purpose: the body is written for
+the upstream maintainer, and the operator is deciding something else — whether
+this is worth another project's attention — so they need what was found, where
+it was hit, and why it earns the send.
 
 ## Public or private
 
@@ -61,41 +60,27 @@ A parked send is pasted as it stands, so whether its text may be public is
 settled before it is parked. An issue, a PR or a comment is public the moment
 it is pasted, so the script parks one only with `--security-policy`: the
 target's security policy as the preparer read it, and why it lets this report
-be public. GitHub says whether a repository has a policy, its owner's default
-included, and where it is:
-
-```bash
-gh api graphql -f query='{repository(owner:"<owner>",name:"<name>"){isSecurityPolicyEnabled securityPolicyUrl}}'
-```
-
-The reading rides the bead and the visit beside the command, so the operator
-weighs it before pasting. A public send without one is refused, and the refusal
-names the commands below for its target.
+be public. The reading rides the bead and the visit beside the command, so the
+operator weighs it before pasting. A public send without one is refused, and the
+refusal prints how to read that target's policy.
 
 When the policy asks for a finding like this one to be reported privately, the
 parked send is the private channel the policy names. GitHub's private
-vulnerability reporting is one, where the repository enables it, which
-`gh api repos/<owner>/<name>/private-vulnerability-reporting` reports as
-`{"enabled":true}`. The report goes to the repository's maintainers, not to a
-public page, and parks as a `gh api` call:
+vulnerability reporting is one, where the repository enables it. The report goes
+to the repository's maintainers, not to a public page, so it needs no
+`--security-policy`, and a reading given with it is recorded the same way. `gh
+api` has no `--repo`, so the report names its repository in the endpoint path,
+and literally: a `{owner}` or `{repo}` placeholder fills in from the directory
+the command is pasted in. GitHub requires the `summary` and `description` fields,
+so a report without either is refused, as is a method other than POST. The
+private report is the one `gh api` write the path parks.
 
-```bash
-assets/scripts/upstream-finding.sh \
-  --message "<what was found, where it was hit, why it earns the send>" \
-  -- gh api --method POST repos/<owner>/<name>/security-advisories/reports \
-       -f summary="<one line>" -f description="<the report>"
-```
-
-It needs no `--security-policy`, and a reading given with it is recorded the
-same way. `gh api` has no `--repo`, so the report names its repository in the
-endpoint path, and literally: a `{owner}` or `{repo}` placeholder fills in from
-the directory the command is pasted in. GitHub requires the `summary` and
-`description` fields, so a report without either is refused, as is a method
-other than POST. The private report is the one `gh api` write the path parks.
-
-A private channel `gh` cannot reach, such as an email address, is the
-operator's to use. Ask through [`escalate.sh`](../assets/scripts/escalate.sh)
-with the report in the message, and park nothing public.
+A private channel `gh` cannot reach, such as an email address, is the operator's
+to use, so it reaches them as a question through
+[`escalate.sh`](../assets/scripts/escalate.sh), with the report in the message
+and nothing public parked. That question sits on a bead of its own, because an
+open visit holds its subject's merge and the agent's work does not wait on the
+send.
 
 ## What keeps the command pasteable
 

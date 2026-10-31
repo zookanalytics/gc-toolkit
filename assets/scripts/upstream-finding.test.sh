@@ -796,6 +796,32 @@ has "$OUT" "parked there: no reading" "…which says the send carries none"
 eq "$(visits)" "1" "…files no second visit"
 eq "$(desc "$VISIT")$(desc up-1)" "$VISIT_DESC$BEAD_DESC" "…and leaves both descriptions as they were"
 
+# ── the skill's examples park as written ─────────────────────────────────────
+# Agents take these commands from the gc-toolkit.external-issue skill, so each of
+# its parks runs through this script with only its placeholders filled.
+SKILL_DOC="$HERE/../../skills/external-issue/SKILL.md"
+skill_example() { # skill_example <text the block holds> — the block, filled, as a script
+  awk -v m="$1" '
+    /^```bash$/ { f = 1; b = ""; next }
+    /^```$/ { if (f && index(b, m)) { printf "%s", b; exit } f = 0; next }
+    f { b = b $0 "\n" }
+  ' "$SKILL_DOC" \
+    | sed -e 's#"$(gc <binding> scripts-dir)/upstream-finding.sh"#"$UF"#' \
+          -e 's#<owner>#otherowner#g' -e 's#<name>#widget#g' -e 's#<[^>]*>#x#g'
+}
+for example in "gh issue create" "security-advisories/reports"; do
+  reset_state
+  skill_example "$example" > "$TMP/example.sh"
+  grep -q '"$UF"' "$TMP/example.sh" || bad "the skill's example with '$example' calls this script"
+  OUT=$(UF="$UF" bash "$TMP/example.sh" 2>&1)
+  eq "$?" "0" "the skill's example with '$example' parks"
+  eq "$(meta up-1 gh_target_repo)" "otherowner/widget" "…on the repository it names"
+  case "$example" in
+    "gh issue create") has "$(desc up-1)" "Security policy, as read before parking: x" "…with the reading beside the command" ;;
+    *) has "$(desc up-1)" "Private: the report goes to the maintainers" "…as a private report" ;;
+  esac
+done
+
 eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh was never invoked by any case"
 
 echo

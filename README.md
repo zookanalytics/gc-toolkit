@@ -103,7 +103,7 @@ render's byte and token counts.
 - [docs/review-arch.md](docs/review-arch.md) — the divergence lens the arch check applies on this rig: when it applies, its checks, Gas City's own documentation as the evidence, and where the pack's warrants live, which the review formula prints for each arch review at the commit it reviews
 - [docs/review-triage.md](docs/review-triage.md) — the changes that make the arch check mandatory on this rig, which the review formula prints for each triage review at the commit it reviews
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
-- [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
+- [docs/outbound-sends.md](docs/outbound-sends.md) — why a GitHub write to a repo the rig does not own is the operator's send, what parking one refuses, and what the operator gets; the commands are the `gc-toolkit.external-issue` skill
 - [docs/not-for-review.md](docs/not-for-review.md) — the pull-request comments the city never reads as review feedback: the no-review mark, and the third-party markers a rig declares
 - [docs/built-once-target.md](docs/built-once-target.md) — the shape the pack would have if built once and where its weight is, subsystem by subsystem beside its measured size, the removals in the order they land, and the rules every change follows
 

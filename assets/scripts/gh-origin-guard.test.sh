@@ -895,6 +895,19 @@ case "$ALL_REFUSALS" in
     *) ok "no refusal sends an agent to a bead" ;;
 esac
 
+# The skill the refusals name has to work from where they send an agent. Each
+# command it gives, its placeholders filled for a repository that is not ours,
+# passes the guard: the policy lookups are reads, and a parked send runs no gh.
+SKILL_DOC="$HERE/../../skills/external-issue/SKILL.md"
+SKILL_BLOCKS=0
+while IFS= read -r -d '' block; do
+    SKILL_BLOCKS=$((SKILL_BLOCKS + 1))
+    filled=$(printf '%s' "$block" | sed -e 's#<owner>#get-convex#g' -e 's#<name>#agent#g' -e 's#<binding>#kit#g' -e 's#<that bead>#hq-1#g' -e 's#<[^>]*>#x#g')
+    allowed "the skill's command block $SKILL_BLOCKS passes the guard" "$RIG" "$filled"
+done < <(awk '/^```bash$/ { f = 1; b = ""; next } /^```$/ { if (f) printf "%s%c", b, 0; f = 0; next } f { b = b $0 "\n" }' "$SKILL_DOC")
+[ "$SKILL_BLOCKS" -ge 4 ] && ok "the skill's command blocks were read ($SKILL_BLOCKS)" \
+    || bad "the skill's command blocks were read" "$SKILL_BLOCKS blocks in $SKILL_DOC"
+
 # A body carrying quotes and newlines must not produce invalid JSON.
 TRICKY="$(run "$RIG" 'gh issue create --repo get-convex/agent --body "he said \"no\"
 and left"')"
