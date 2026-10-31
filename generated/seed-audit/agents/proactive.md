@@ -362,14 +362,17 @@ to, and then through `visit-close.sh`.
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y, bead:tk-rfh8xu0 (operator) adopted:2026-08-26 updated:2026-10-31 -->
 - State an operator-facing decision, brief, or sign-off so it is
   answerable in about a minute: lead with the plain-language stake and
   what each option costs, keep it to one screen, and let the operator
-  accept or reject without looking anything up. An identifier — a bead
-  id, title, path, or queue pointer — is a parenthetical reference for
-  looking something up or cross-referencing it. It carries no weight on
-  its own and is never the noun that carries the decision's meaning.
+  accept or reject without looking anything up. An option's cost is what
+  its end state ships and what it asks of the operator; redoing unmerged
+  work, such as a rework or another review round, is not one. An
+  identifier — a bead id, title, path, or queue pointer — is a
+  parenthetical reference for looking something up or cross-referencing
+  it. It carries no weight on its own and is never the noun that carries
+  the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -396,14 +399,15 @@ to, and then through `visit-close.sh`.
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298, bead:tk-0c9csp8, bead:tk-ab9p1pk (operator) adopted:2026-08-26 updated:2026-10-15 -->
 - A rename, a re-framing, a rendering change, a sweep that closes state
-  which should not exist, or one more guard for each newly found bypass is
-  not a fix for the thing that produced the symptom. Take a report at the
+  which should not exist, an alert that fires once something has waited
+  past a set time, or one more guard for each newly found bypass is not a
+  fix for the thing that produced the symptom. Take a report at the
   severity it was filed, find what allowed it to happen, and prefer a design
   in which it cannot happen again over a patch for the instance. When a
-  sweep or a guard must still ship, the change names the cause it leaves in
-  place and why that cause cannot be fixed where it arises.
+  sweep, a timer or a guard must still ship, the change names the cause it
+  leaves in place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
@@ -429,6 +433,21 @@ to, and then through `visit-close.sh`.
   note or a manual sling a later session must run. A gc.hold note still
   surfaces the bead in gc hook and bd ready as live demand; a blocked-by
   edge excludes it until the blocker lands, then self-clears.
+
+<!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
+- Give as the operator's only what they said: a ruling, approval, practice,
+  reason or expectation you attribute to them quotes or cites where they
+  said it, and reaches no further than those words and the case they
+  answered. Your own inference, a prior session's note, a template's text
+  and your elaboration of a ruling each name their real source, and a
+  decision you record before the operator rules on it says it is proposed.
+
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
+- A command, flag, key or name that the operator or a reviewer sketches in
+  passing shows what they want, not the shape it must take. Derive the
+  shape from the conventions of the surface it joins, starting with the
+  commands and names already beside it, and say where the result departs
+  from the sketch.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,

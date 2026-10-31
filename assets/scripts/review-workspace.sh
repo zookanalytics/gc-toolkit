@@ -49,8 +49,8 @@
 #       left the workspace behind, or reap could not read the city's rigs ·
 #       2 usage.
 # Callers: formulas/mol-review.toml and mol-review-quorum-signoff.toml (add,
-# remove); orders/review-workspace-reap.toml (reap). See
-# docs/review-workspace.md.
+# remove); formulas/mol-rig-demo.toml (add); orders/review-workspace-reap.toml
+# (reap). See docs/review-workspace.md.
 set -uo pipefail
 
 PROG="${0##*/}"

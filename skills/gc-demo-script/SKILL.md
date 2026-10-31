@@ -1,6 +1,6 @@
 ---
 name: gc-demo-script
-description: Generates a demo:capture-format script from a closed Gas City work bead by reading the bead tree, git commits, and PR diff
+description: Use when you need to generate a demo:capture script from a closed Gas City work bead.
 ---
 
 # GC Demo Script — Gas City Bead to Demo Script
