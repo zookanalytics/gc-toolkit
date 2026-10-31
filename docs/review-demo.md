@@ -31,8 +31,9 @@ keepalive, as every capture runs, with the pack's `demo-screenshot.sh`:
 The board shows `services/helm/web/src/board.fixture.json`, the contract sample,
 which carries every key of the board contract. To show another board, write it
 in the shape `services/helm/web/src/contract.ts` names and add
-`--board $PWD/<file>` to the command. `--port 0` gives the command a free port
-of its own, so two captures never share a server. On a cold Go build cache the
+`--board $PWD/<file>` to the command. `demo-screenshot.sh` turns `--port 0` into
+a free port and hands it to the command as `$PORT`, where `helm-fixture` reads
+it, so two captures each get a server of their own. On a cold Go build cache the
 first run compiles Go's HTTP stack and can take most of the 30 s the engine
 waits for the command. When the engine reports that the command did not answer
 in time, capture again, because what the first run compiled stays cached.
