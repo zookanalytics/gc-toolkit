@@ -98,7 +98,9 @@ bead, keeps no state and files nothing.
   `wait-idle` gives live delivery only to a provider named exactly `claude`, and a
   patrol can run on a variant of it. The pane is quiet, so nothing is typed into a
   running turn. A turn that starts in the moment between the read and the nudge
-  takes the text as its next prompt.
+  takes the text as its next prompt. A session waiting on a permission prompt or a
+  question refuses the nudge, so nothing piles up behind it, and the pass exits 1
+  until the prompt is answered.
 
 ## What the deacon's hook does
 

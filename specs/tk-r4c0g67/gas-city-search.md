@@ -258,7 +258,9 @@ live delivery only to a provider named exactly `claude` (package worker,
 `--delivery immediate`, as `quota-park-nudge.sh` does. A working pane animates a
 spinner and reads as busy, so the gate keeps the nudge away from a running turn.
 When a turn starts between the read and the nudge, Claude Code takes the typed text
-as its next prompt.
+as its next prompt. `refuseOrQueueNudgeBehindPendingInteraction` refuses an immediate
+nudge to a session at a permission prompt or a question, so nothing queues behind it
+and the pass exits 1 until the prompt is answered.
 
 **An attached operator.** The session list carries `attached`, and such a session
 is skipped.
