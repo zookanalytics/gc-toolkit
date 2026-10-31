@@ -11,8 +11,8 @@ description. So a polecat given the new prompt was put in front of a bug in a
 dependency, and each run records whether it loaded the skill.
 
 It did, in every run, so the description needed no tightening and the doctrine
-keeps no line naming the skill. The description is the ruling's wording, unchanged
-across every batch:
+keeps no line naming the skill. The description is the wording of the sitting's
+work order (tk-brqtqcs), unchanged across every batch:
 
 > Use when you have identified a bug, gap or vulnerability in software this rig
 > does not own, or when a gh write to such a repository was refused.
@@ -57,7 +57,7 @@ So the move loses nothing on a bug or a vulnerability.
 
 ### A gap is where the new text goes further
 
-The ruling's description names a gap, and on `dep-gap` that changes what runs do
+The work order's description names a gap, and on `dep-gap` that changes what runs do
 with a missing option, here one a one-line workaround already covers. A run that
 planned a send drafted a public feature request. Its lookups were refused, so none
 reached the park, and the count is of runs whose closing words carry that plan.
@@ -74,7 +74,7 @@ phrase, and on that copy `dep-bug` and `dep-vuln` still loaded it in 3 of 3 each
 Its runs load the skill and then decide: "a missing option is a feature gap, not a
 bug or vulnerability". Each parked send costs the operator an ask, so the word
 trades those asks for missing features nobody reports. The description keeps it,
-because the ruling names it.
+because the work order names it.
 
 ### What a run does once the skill is loaded
 
