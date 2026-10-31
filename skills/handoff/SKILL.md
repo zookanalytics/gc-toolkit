@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Use when the operator explicitly asks to handoff, reset, wrap up, recycle a session, get fresh context, or restart a coordination agent (mechanik, deacon, witness). Do not invoke from internal judgment that a handoff would be useful — propose it in conversation and let the operator decide.
+description: Use when the operator explicitly asks to hand off, reset, wrap up, recycle a session, get fresh context, or restart a coordination agent (mechanik, deacon, witness). Not on your own judgment that a handoff would be useful.
 ---
 
 # Handoff

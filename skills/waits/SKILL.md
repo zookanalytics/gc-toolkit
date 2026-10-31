@@ -1,6 +1,6 @@
 ---
 name: waits
-description: Use when something must not go yet because it has to wait for other work to land, or for a person to decide or act. Covers making a bead wait on another (blocked by, depends on, after that lands), having a bead close by itself when the work that resolves it lands, instead of coming back to triage (an until edge, for a bead that is done or moot once that lands), asking a person for an answer, an approval, an action or a conversation (filing a human gate and wiring the bead that waits to it, a blocker only a person can clear, its resolution), having work start by itself once its wait clears (arming a deferred dispatch), and releasing a wait (resolving a gate, removing an edge, disarming). To send work that is free to go, use work; to hold a pull request's merge, use prs.
+description: Use when something must not go yet because it has to wait for other work to land, or for a person to decide or act, such as making a bead wait on another (blocked by, depends on), a bead that is done or moot once that work lands instead of coming back to triage (an until edge), asking a person for an answer, an approval, an action or a conversation (filing a human gate and wiring the bead that waits to it, a blocker only a person can clear, its resolution), arming a deferred dispatch so work starts once its wait clears, or removing an edge or disarming. To send work that is free to go, use work; to hold a pull request's merge, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 

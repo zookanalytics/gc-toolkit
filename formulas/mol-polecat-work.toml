@@ -8,7 +8,8 @@ Contract (self-cleaning model): receive work -> follow steps in order ->
 push branch, hand the bead to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
-bead and names the disposition for whoever owns the close.
+bead and names the disposition for whoever owns the close. A bead its record
+finishes goes to its validating closer, mol-validate-close.
 NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
@@ -1277,8 +1278,10 @@ work.
 Take this arm only when the run produced no commit, and name what it did
 produce in `STORE_ONLY_RECORD` (the bead ids this run created or routed).
 Empty means this is not that case and the run falls through to the branch
-gate. The block refuses the arm when a diff exists, so a run that merely
-forgot to commit cannot park itself as store work.
+gate. `assets/scripts/store-only-exit.sh` refuses the arm when the run has work
+to land, a commit ahead of the base, an uncommitted change or the branch on
+origin, so a run that merely forgot to commit cannot park itself as store work.
+Its refusal writes nothing.
 
 The release is the one the halt arm writes: open, unassigned, route cleared,
 and the claim's session pins `gc.session_id` and `gc.session_name` removed.
@@ -1314,20 +1317,16 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 # >>> submit-store-only-exit
 STORE_ONLY_RECORD=""
+# The close brief, written only when the record finishes the bead; the quoted
+# heredoc keeps it verbatim.
+STORE_ONLY_DONE=$(cat <<'BRIEF'
+
+BRIEF
+)
 if [ -n "$STORE_ONLY_RECORD" ]; then
-  AHEAD=$(git rev-list --count "origin/{{base_branch}}..HEAD" 2>/dev/null || echo 0)
-  DIRTY=$(git status --porcelain 2>/dev/null || true)
-  PUSHED=$(git ls-remote origin "refs/heads/polecat/$WORK_BEAD_ID" 2>/dev/null || true)
-  if [ "${AHEAD:-0}" != "0" ] || [ -n "$DIRTY" ] || [ -n "$PUSHED" ]; then
-    echo "STORE-ONLY EXIT REFUSED: this run has work to land"
-    echo "  commits ahead of origin/{{base_branch}}: ${AHEAD:-0}"
-    echo "  uncommitted changes: ${DIRTY:+yes}"
-    echo "  branch already on origin: ${PUSHED:+polecat/$WORK_BEAD_ID}"
-    echo "Land it the normal way: branch gate, target resolve, refinery handoff."
-    echo "If none of it is yours, you are in the shared rig checkout rather than a per-bead worktree: mail the witness that fact instead of releasing the bead."
-    gc runtime drain-ack
-    exit 1
-  fi
+  # >>> submit-store-only-check
+  "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/store-only-exit.sh" --bead "$WORK_BEAD_ID" --base {{base_branch}} --convoy {{convoy_id}} --done "$STORE_ONLY_DONE" || { gc runtime drain-ack; exit 1; }
+  # <<< submit-store-only-check
   gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
   # >>> submit-store-only-hand-back
   HB="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/hand-back.sh" && [ -x "$HB" ] || HB=""
@@ -1347,7 +1346,7 @@ fi
 # <<< submit-store-only-exit
 ```
 
-**What closes the bead is not yours either way**, and which note you leave is
+**What closes the bead is never yours**, and which note you leave is
 the difference between a bead someone can dispose of and one that just sits:
 
 - The work MOVED to another store. The close verb is
@@ -1359,6 +1358,16 @@ the difference between a bead someone can dispose of and one that just sits:
 - The bead legitimately stays open pending something else — a ruling, a
   cadence, a person. Open and unrouted IS the resting state and no close verb
   is owed. Say in the note what would close it.
+- The record FINISHES the bead: a live verification whose every check passed,
+  or any record that meets what the bead's description asks for. Nothing else
+  would close it, so left open it reads as work not yet done. Write the close
+  brief between the `BRIEF` lines: what the record shows, why that meets what
+  the bead asks for, and anything that argues for keeping it open.
+  `store-only-exit.sh` appends it to the bead's notes, holds the bead on this
+  run's root, and arms `mol-validate-close` on the pool this run executes on.
+  Once this run ends, that validating closer re-checks the record against live
+  state, then closes the bead as done, or asks the operator when the record
+  does not hold. The note says its validating closer closes it.
 
 **1. Branch-shape gate (fails closed).** The refinery merges the branch in
 `metadata.branch`; pushing from any other branch strands the bead. The
@@ -1577,13 +1586,32 @@ blocks the anchor, so nothing lands on a round nobody accounted for.
 as the PR's `## Summary`, and falls back to the anchor's description — the
 dispatch text, written before the diff existed and addressed to you, not to a
 reviewer. You are the only actor that has read the diff, so say what changed
-and why, for a reviewer who was not in the originating conversation:
+and why, for a reviewer who was not in the originating conversation.
+
+The operator accepts or rejects a PR from its summary, so the summary opens
+with a brief they can answer in about a minute, in plain words, with any
+identifier in parentheses. It says what approving changes and what that
+costs, and names anything approving sets in motion or has to wait for, such as
+a build that starts on merge or a branch that must not deploy before another
+lands. A branch that asks the operator to decide something more, such as a
+design doc's decision for them or a call the branch made for them that costs
+something either way, opens on that decision: the stake, every option and
+what it costs, which option the branch takes, and what happens if they do not
+decide. Leave out what does not apply, so a small change's brief can be a
+sentence or two.
+
+The account of the diff follows the brief. Anything that would take the open
+text past one screen goes in a collapsed section, opened on one line as
+`<details><summary>what it holds</summary>`, because `pr-stack.sh` reads the
+published summary only up to a bare `<details>` line.
 
 ```bash
 PR_SUMMARY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-polecat-work.XXXXXX")
 cat > "$PR_SUMMARY_FILE" <<'PRSUMMARY'
-<the behavior before, the behavior now, and the shape of the change — a short
-paragraph or a few bullets of markdown>
+<the brief>
+
+<the account of the diff: the behavior before, the behavior now, and the shape
+of the change, in a short paragraph or a few bullets of markdown>
 PRSUMMARY
 wc -c "$PR_SUMMARY_FILE"
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/rig-mentions.sh" ] || SCRIPTS=""
@@ -1591,13 +1619,18 @@ SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/rig
 ```
 
 Quote the delimiter as written: an unquoted `<<PRSUMMARY` runs any backticks
-in your prose. Leaving the file empty carries no summary and the PR body
-falls back to the dispatch text. Rewrite the file to fix each mention of
-another rig the last command lists.
+in your prose. Leaving the file empty writes no summary: one already on the
+anchor stands, and with none the PR body falls back to the dispatch text.
+Rewrite the file to fix each mention of another rig the last command lists.
 
 What the summary describes is the BRANCH, not this pass. On a rework or
 rebase child the PR body publishes the whole branch, so an account of only
-the fix you just made describes something no reviewer is looking at.
+the fix you just made describes something no reviewer is looking at. Every
+stamp owes the same brief, a restamp as much as the first composition, and a
+summary an earlier step stamped stands only if it opens this way. Rewrite the
+brief to the branch's current state instead of extending it, put a new
+qualification of its headline beside the headline, and put the round's
+mechanics in the account.
 
 **4b. Resolve the bead the summary belongs on.** `pr-open.sh` publishes
 `pr_summary` off the anchor row it enumerates: the open bead that carries a

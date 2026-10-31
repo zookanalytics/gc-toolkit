@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent (a sibling of the bead that waits on it, or a member of the epic it is part of), sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
+description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for, such as filing new work or a follow-up in the right rig and under the right parent or epic, routing, slinging or dispatching a bead to a pool on a formula, releasing a held bead, assigning it to an agent, choosing a formula or taking a recommended formula, stopping or redirecting work in flight, or closing or retiring a duplicate or a bead that needs no work. Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 

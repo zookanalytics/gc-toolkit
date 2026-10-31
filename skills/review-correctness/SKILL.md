@@ -1,6 +1,6 @@
 ---
 name: review-correctness
-description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, hunt with the What to check list's named angles and work the rest of the list, sweep once more with fresh eyes for what the hunt missed, give every finding its failure scenario and the angle, dimension or sweep that found it, grade it P0, P1 or P2, check each blocking one in a context that did not raise it and drop the ones that check refutes, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
+description: Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 

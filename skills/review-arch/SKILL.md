@@ -1,6 +1,6 @@
 ---
 name: review-arch
-description: The method for the arch check — the Architect, steward and gatekeeper of the repo's high-level architecture. Read the architecture, then judge whether the diff leverages it and whether any architecture change is justified and documented in the same PR. Use when you hold a review bead whose check is arch, or when asked whether a change fits the architecture.
+description: Use when you hold a review bead whose check is arch, or when asked whether a change fits the architecture.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 

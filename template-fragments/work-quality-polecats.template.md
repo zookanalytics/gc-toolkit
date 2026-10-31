@@ -16,4 +16,38 @@
   bead owns the work that will build it and the change names the cost of
   waiting. An untracked spec dump, or a fix that defers to nothing, is the
   anti-pattern. The discipline is the tracked deferral, not a ban on specs.
+
+<!-- rule:tk-qenzk6e src:bead:tk-qjc4uaa, bead:tk-cxtkwyw, pr:#1008:comment:5983192498, visit:tk-z9vxelu, visit:tk-9adohq9 (operator feedback) adopted:2026-10-31 -->
+- Before you add or keep a compatibility, legacy or transitional path, such
+  as a fallback, a lenient mode, old logic kept beside its replacement, or a
+  bridge's behavior preserved in the code that replaces it, name the caller
+  or stored data that depends on it, check that its case occurs, and read
+  what that caller does when the strict form refuses it. When nothing
+  depends on it, build only the end state, and when a real case does, file
+  the bead that removes the path in the same change, blocked by what retires
+  the case and armed to dispatch when it lands.
+
+<!-- rule:tk-clpl8jv src:pr:#1298:comment:4310526242, pr:#1298:comment:4310543583, pr:#1220:comment:4243955265, pr:#1262:comment:4286336787, pr:#1277:comment:4303601800 (operator feedback), visit:tk-ilmnzqh (operator ruling) adopted:2026-10-31 -->
+- Before a change adds machinery, such as a script, a client for a
+  service, a wrapper, a state or a sweep, find what the platform it builds
+  on, the service's own SDK or an established library already provides for
+  the job, cite it, and write code only for the gap it leaves. A design that
+  needs the platform changed, or a state that only this repository can
+  interpret, is a sign it uses the platform wrongly, so look for the fitting
+  use before proposing either.
+
+<!-- rule:tk-9t1wmrd src:pr:#259:comment:3742481090, pr:#1015:comment:4180705562, pr:#1269:comment:4286682920, pr:#1269:comment:4286636653, pr:#1269:comment:4290656675 (operator feedback) adopted:2026-10-31 -->
+- Put guidance an agent acts on in the prompt, skill or formula description
+  it reads when it acts, never in a docs page, and where that guidance names
+  an act, give the exact command to run there. Where it asks the agent to
+  choose, give the command that lists the current options and the criteria
+  that decide among them, never one favored option or a number that stands
+  in for the criterion.
+
+<!-- rule:tk-karx6a2 src:visit:tk-weluos5 (operator ruling) adopted:2026-10-31 -->
+- Before you give something a name, such as a set, a route, a command or
+  a state, ask what the word already tells a reader: a rank, a reach wider
+  than the thing, or the meaning another system in use gives the same
+  word. When the thing does not share that meaning, choose a word for what
+  it is, and leave a general name to the thing built to fill it.
 {{ end }}

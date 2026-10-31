@@ -1,6 +1,6 @@
 ---
 name: learning-distill
-description: The promotion-judgment rubric for the feedback-learning loop — use when you are the mol-feedback-distiller judging pending feedback observations into promotion, retirement, contention, or no proposal at all. This file is the distiller's judgment method, versioned pack content inside the loop it powers — rubric misses return as obs.category=learning-rubric observations, and edits to this file ride the same reviewed prompt-update pipeline as any rule. Not for capturing observations, not for reviewing promotion PRs.
+description: Use when you are the mol-feedback-distiller judging pending feedback observations. Not for capturing observations or for reviewing promotion PRs.
 ---
 
 # Learning Distill
@@ -258,7 +258,13 @@ every agent capture as `self`, so an operator correction captured by the agent
 it corrected reads `self`. Before you treat a cluster as all-self, check each
 self observation's voice: a PR comment or review whose GitHub author is the
 operator (`gh api` on the provenance, `.user.login`), or the operator's own
-words quoted from a sitting, is an operator correction.
+words in a session the operator attends, such as a converse sitting or
+mechanik, is an operator correction. Find a quoted turn in that
+session's transcript (`gc session logs <session>`, or the codex rollout under
+`~/.codex/sessions`), and rule out text the city sends as a user turn,
+whatever the capture calls it: a configured nudge, a reminder, hook output, or
+another agent's `gc session nudge`. A pool session has no one at its terminal
+by design, so count no quote from one as the operator's voice.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
 **blocked**, however many events it spans. Self-sourced clusters have been

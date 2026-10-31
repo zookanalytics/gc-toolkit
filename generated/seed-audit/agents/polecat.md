@@ -17,14 +17,17 @@ worktree, pushed branch, refinery handoff), a review bead carries
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y, bead:tk-rfh8xu0 (operator) adopted:2026-08-26 updated:2026-10-31 -->
 - State an operator-facing decision, brief, or sign-off so it is
   answerable in about a minute: lead with the plain-language stake and
   what each option costs, keep it to one screen, and let the operator
-  accept or reject without looking anything up. An identifier — a bead
-  id, title, path, or queue pointer — is a parenthetical reference for
-  looking something up or cross-referencing it. It carries no weight on
-  its own and is never the noun that carries the decision's meaning.
+  accept or reject without looking anything up. An option's cost is what
+  its end state ships and what it asks of the operator; redoing unmerged
+  work, such as a rework or another review round, is not one. An
+  identifier — a bead id, title, path, or queue pointer — is a
+  parenthetical reference for looking something up or cross-referencing
+  it. It carries no weight on its own and is never the noun that carries
+  the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -51,14 +54,15 @@ worktree, pushed branch, refinery handoff), a review bead carries
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298, bead:tk-0c9csp8, bead:tk-ab9p1pk (operator) adopted:2026-08-26 updated:2026-10-15 -->
 - A rename, a re-framing, a rendering change, a sweep that closes state
-  which should not exist, or one more guard for each newly found bypass is
-  not a fix for the thing that produced the symptom. Take a report at the
+  which should not exist, an alert that fires once something has waited
+  past a set time, or one more guard for each newly found bypass is not a
+  fix for the thing that produced the symptom. Take a report at the
   severity it was filed, find what allowed it to happen, and prefer a design
   in which it cannot happen again over a patch for the instance. When a
-  sweep or a guard must still ship, the change names the cause it leaves in
-  place and why that cause cannot be fixed where it arises.
+  sweep, a timer or a guard must still ship, the change names the cause it
+  leaves in place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
@@ -85,6 +89,21 @@ worktree, pushed branch, refinery handoff), a review bead carries
   surfaces the bead in gc hook and bd ready as live demand; a blocked-by
   edge excludes it until the blocker lands, then self-clears.
 
+<!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
+- Give as the operator's only what they said: a ruling, approval, practice,
+  reason or expectation you attribute to them quotes or cites where they
+  said it, and reaches no further than those words and the case they
+  answered. Your own inference, a prior session's note, a template's text
+  and your elaboration of a ruling each name their real source, and a
+  decision you record before the operator rules on it says it is proposed.
+
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
+- A command, flag, key or name that the operator or a reviewer sketches in
+  passing shows what they want, not the shape it must take. Derive the
+  shape from the conventions of the surface it joins, starting with the
+  commands and names already beside it, and say where the result departs
+  from the sketch.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by polecat and polecat-codex (via the
      polecat-doctrine fragment). Holds the authoring standards for the polecat
@@ -101,6 +120,40 @@ worktree, pushed branch, refinery handoff), a review bead carries
   bead owns the work that will build it and the change names the cost of
   waiting. An untracked spec dump, or a fix that defers to nothing, is the
   anti-pattern. The discipline is the tracked deferral, not a ban on specs.
+
+<!-- rule:tk-qenzk6e src:bead:tk-qjc4uaa, bead:tk-cxtkwyw, pr:#1008:comment:5983192498, visit:tk-z9vxelu, visit:tk-9adohq9 (operator feedback) adopted:2026-10-31 -->
+- Before you add or keep a compatibility, legacy or transitional path, such
+  as a fallback, a lenient mode, old logic kept beside its replacement, or a
+  bridge's behavior preserved in the code that replaces it, name the caller
+  or stored data that depends on it, check that its case occurs, and read
+  what that caller does when the strict form refuses it. When nothing
+  depends on it, build only the end state, and when a real case does, file
+  the bead that removes the path in the same change, blocked by what retires
+  the case and armed to dispatch when it lands.
+
+<!-- rule:tk-clpl8jv src:pr:#1298:comment:4310526242, pr:#1298:comment:4310543583, pr:#1220:comment:4243955265, pr:#1262:comment:4286336787, pr:#1277:comment:4303601800 (operator feedback), visit:tk-ilmnzqh (operator ruling) adopted:2026-10-31 -->
+- Before a change adds machinery, such as a script, a client for a
+  service, a wrapper, a state or a sweep, find what the platform it builds
+  on, the service's own SDK or an established library already provides for
+  the job, cite it, and write code only for the gap it leaves. A design that
+  needs the platform changed, or a state that only this repository can
+  interpret, is a sign it uses the platform wrongly, so look for the fitting
+  use before proposing either.
+
+<!-- rule:tk-9t1wmrd src:pr:#259:comment:3742481090, pr:#1015:comment:4180705562, pr:#1269:comment:4286682920, pr:#1269:comment:4286636653, pr:#1269:comment:4290656675 (operator feedback) adopted:2026-10-31 -->
+- Put guidance an agent acts on in the prompt, skill or formula description
+  it reads when it acts, never in a docs page, and where that guidance names
+  an act, give the exact command to run there. Where it asks the agent to
+  choose, give the command that lists the current options and the criteria
+  that decide among them, never one favored option or a number that stands
+  in for the criterion.
+
+<!-- rule:tk-karx6a2 src:visit:tk-weluos5 (operator ruling) adopted:2026-10-31 -->
+- Before you give something a name, such as a set, a route, a command or
+  a state, ask what the word already tells a reader: a rank, a reach wider
+  than the thing, or the meaning another system in use gives the same
+  word. When the thing does not share that meaning, choose a word for what
+  it is, and leave a general name to the thing built to fill it.
 
 
 ## Execute immediately
@@ -483,6 +536,20 @@ narrow `gc bd list` rather than writing `--all` to a file.
 
 
 ## Feedback observations
+
+Where feedback can come from depends on whether a person attends your
+session. A pool session, such as a polecat, has no one at its terminal by
+design, so every turn in its own terminal is the city's text: a configured
+nudge such as the wake nudge, a reminder, hook output, or another agent's
+`gc session nudge`. Such a turn is never an operator correction, even when
+it arrives as a user message and reads like one, so it files no
+observation. A pool session captures only from durable sources: a PR
+review or comment, a rework's rejection reason, and a bead's notes. A PR
+review or comment is the operator's only when the operator's own GitHub
+account posted it. A session the operator attends, such as a converse
+sitting on a visit or mechanik, captures from those sources and from the
+operator's own turns. Text the city sends into that session is still the
+city's.
 
 When a turn brings you corrective feedback about *standing* agent
 behavior — a PR review comment, an operator correction, a rework whose

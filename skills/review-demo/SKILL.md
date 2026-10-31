@@ -1,6 +1,6 @@
 ---
 name: review-demo
-description: The method for the demo check, the visual review. Decide whether a change needs a visual to be understood and, when it does, pick the cheapest modality that conveys it (a visual the repo already carries, a screenshot, or a narrated video), deliver it to the PR inline and uncommitted, and record the decision on one signoff verdict. Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
+description: Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -109,6 +109,12 @@ reports whether the `gh` it needs is present.
   session. Without it the clip is silent and captioned, and it still shows the
   change. `doctor/check-demo-toolchain` reports which parts of the capture
   toolchain resolve in this session.
+
+  A video's `--serve` command chooses its own port, because the SprintShow
+  engine sets no `$PORT` for it. The engine waits for the command on the port
+  `--port` names, or on 5173 when none is named, and it refuses `--port 0`. So
+  `--port` names the port the command binds, and two captures side by side each
+  need a different port.
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 
   ```bash
@@ -145,8 +151,11 @@ reports whether the `gh` it needs is present.
   For a page, write the script as you would for a video
   (`gc-toolkit.gc-demo-script`). Its steps drive the app to the state, the
   capture is the state the last step leaves, and the app target is the one a
-  video takes. A `--serve` command given `--port` finds that port in `$PORT`,
-  and `--port 0` picks a free one, so two captures never share a server.
+  video takes. `demo-screenshot.sh` adds what the engine lacks for a `--serve`
+  command. It puts the port `--port` names in the command's `$PORT`, and it
+  turns `--port 0` into a free port first, so two screenshots side by side each
+  get a server of their own. With no `--port`, the command gets no `$PORT` and
+  the engine waits on 5173, as for a video.
   `--selector <css>` captures one element instead of the viewport, and
   `--full-page` captures the whole page. For a terminal, the engine types the
   command at a bash prompt in a terminal of its own, whose shell starts in
