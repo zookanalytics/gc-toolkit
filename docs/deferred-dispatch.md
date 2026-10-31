@@ -246,6 +246,14 @@ on the bead itself does count. Where `bd` decides the same question, the
 definition follows it: a closed or pinned blocker holds nothing, and a closed
 or pinned ancestor ends the walk.
 
+A converse sitting's hold on an armed pre-PR subject is such a demand gate. The
+subject keeps its arm and never reads `held`, whose `merge_result` the pass would
+read as work already delivered, so the sign-off releases nothing and writes no
+route, whatever `--route` says, and the gate's resolution lets the arm send it
+once nothing else holds it. A ruling that sends the subject as it was armed sends
+it nothing more. A ruling that sends it some other way, or not at all, disarms it
+before the sign-off.
+
 A read that fails fails the pass, so an unread hold never passes for none. A
 read that answers without an id it was asked for says this store holds no
 such bead: a bead in another store, or one deleted. bd's cascade passes a

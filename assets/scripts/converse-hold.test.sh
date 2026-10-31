@@ -6,10 +6,11 @@
 # PR anchor, subject otherwise, so the hold marker sits beside its edge) and its
 # gate, the demand gate, the gc.hold_demand stamp-and-readback gate, the
 # --hold-merge opt-in (a second demand on the anchor, failing closed), and the
-# held lifecycle transition. The gates fail CLOSED: unless the visit is read,
-# the headline and the demand land and the stamp reads back off the visit, the
-# script exits non-zero and the caller must not post the framing. This suite
-# drives the shipped script against stubs whose visit read, takeaway, demand,
+# held lifecycle transition, which an armed unanchored subject skips. The gates
+# fail CLOSED: unless the visit and an unanchored subject are read, the headline
+# and the demand land and the stamp reads back off the visit, the script exits
+# non-zero and the caller must not post the framing. This suite drives the
+# shipped script against stubs whose visit read, subject read, takeaway, demand,
 # stamp, gate-visit and merge-demand outcomes are dialed independently. The
 # stub writer enforces the shipped gc-helm.sh's cap, and the shipped writer's
 # own length gate is run on the budget's boundary. A positive control proves the
@@ -68,10 +69,12 @@ esac
 PREFIX="holding — "
 BUDGET=$((CAP - $(printf '%s' "$PREFIX" | jq -Rsr 'length')))
 
-# A stub gc serving the two reads/one write the script makes: `bd show` returns
+# A stub gc serving the reads and the writes the script makes: `bd show` returns
 # the visit with whatever the stamp has persisted, plus the metadata object
 # STUB_VISIT_META carries, or STUB_SHOW_OUT in its place when that is set
-# (empty for no answer at all), and exits STUB_SHOW_RC. Its
+# (empty for no answer at all), and exits STUB_SHOW_RC. Any other id is the
+# subject, whose row carries STUB_SUBJECT_META, or STUB_SUBJECT_OUT in its place
+# when that is set, and exits STUB_SUBJECT_RC. Its
 # first STUB_SHOW_FAILS reads answer nothing and exit 1, a store that recovers
 # between the hold's reads. `bd update` persists the stamped id unless
 # STAMP_PERSIST=0, overridable by STAMP_VALUE for the landed-wrong case, and
@@ -85,6 +88,15 @@ case "${2:-}" in
             n=0; [ -r "$PERSIST.reads" ] && n="$(cat "$PERSIST.reads")"
             printf '%s' "$((n + 1))" >"$PERSIST.reads"
             [ "$n" -lt "$STUB_SHOW_FAILS" ] && exit 1
+        fi
+        if [ "${3:-}" != "v-x" ]; then
+            if [ -n "${STUB_SUBJECT_OUT+x}" ]; then
+                printf '%s' "$STUB_SUBJECT_OUT"
+            else
+                sm="${STUB_SUBJECT_META:-}"; [ -n "$sm" ] || sm='{}'
+                jq -nc --arg id "${3:-}" --argjson sm "$sm" '[{id:$id, metadata:$sm}]'
+            fi
+            exit "${STUB_SUBJECT_RC:-0}"
         fi
         if [ -n "${STUB_SHOW_OUT+x}" ]; then
             printf '%s' "$STUB_SHOW_OUT"
@@ -378,6 +390,59 @@ run STUB_STATE=held
 hasnt "a non-unanchored state is not transitioned to held" "lc transition" "$(calls)"
 has "a pre-PR off-ramp (held) is not a PR anchor, so it fails closed to the SUBJECT" "demand item-x" "$(calls)"
 hasnt "…so the demand never gates the visit" "demand v-x" "$(calls)"
+
+echo "── an armed unanchored subject keeps its arm: its gate holds it, and it stays unanchored ──"
+# `held` writes a merge_result and a route, and the deferred-dispatch pass retires
+# an arm on any merge_result, so a transition here costs the bead its dispatch.
+ARMED='{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"}'
+run STUB_SUBJECT_META="$ARMED"
+is "an armed unanchored subject holds" "$(verdict)" "held"
+has "the headline lands on it as on any pre-PR subject" "helm[RIG] takeaway item-x holding — need X --by converse" "$(calls)"
+has "the demand files on it, so its edge blocks it" "helm[RIG] demand item-x need X --by converse" "$(calls)"
+is "the stamp persisted the demand id on the visit" "$(cat "$PERSIST" 2>/dev/null)" "d-x"
+hasnt "no transition runs" "lc transition" "$(calls)"
+hasnt "no route is written" "routed_to" "$(calls)"
+hasnt "…and the arm's keys are untouched" "dispatch_when_ready" "$(calls)"
+has "…and it says the arm stays and the gate holds the bead" "item-x keeps its dispatch arm to rig/pool and does not move to held" "$OUT"
+run_hold_merge STUB_SUBJECT_META="$ARMED"
+hasnt "--hold-merge changes nothing: an armed subject still takes no transition" "lc transition" "$(calls)"
+is "…and still files exactly one demand" "$(calls | grep -c 'demand item-x')" "1"
+# An arm is the non-empty value; anything else is an unarmed bead, which holds as it always has.
+run STUB_SUBJECT_META='{"gc.dispatch_when_ready":""}'
+has "a blank arm is no arm, so the subject moves to held" "lc transition item-x --to held --route human" "$(calls)"
+run STUB_SUBJECT_META='{"gc.dispatch_when_ready_args":"[]"}'
+has "arm arguments with no target are no arm" "lc transition item-x --to held --route human" "$(calls)"
+run SUBJECT= STUB_TRACKS=item-t STUB_SUBJECT_META="$ARMED"
+hasnt "a subject recovered from the visit is read for its arm too" "lc transition" "$(calls)"
+has "…and its demand gates it" "helm[RIG] demand item-t need X --by converse" "$(calls)"
+
+echo "── a subject whose arm cannot be read stops the hold before any write ──"
+# `held` written over an arm the hold could not see is the failure this read
+# exists to prevent, so a failed read is never taken for an unarmed subject.
+run STUB_SUBJECT_RC=1 STUB_SUBJECT_OUT=
+is "a subject read that fails refuses the hold (exit 1)" "$RC" "1"
+has "…and says the subject could not be read" "SUBJECT UNREADABLE: item-x could not be read" "$OUT"
+is "…and writes nothing at all" "$(calls)" ""
+is "…so no hold_demand is stamped" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
+run STUB_SUBJECT_RC=1 STUB_SUBJECT_OUT="$(jq -nc --arg id item-x --argjson m "$ARMED" '[{id:$id, metadata:$m}]')"
+is "a read that exits non-zero refuses even when it printed the row (the exit is the signal)" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SUBJECT_OUT="Error: search count issues: invalid connection"
+is "a zero-exit read whose answer does not parse refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SUBJECT_OUT='[{"id":"other","metadata":{}}]'
+is "a read that answers with another bead's row refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SUBJECT_RC=1 STUB_SUBJECT_OUT='{"error":"no issues found matching the provided IDs"}'
+is "a subject the store says does not exist refuses the hold" "$RC" "1"
+is "…before any write" "$(calls)" ""
+# Only the transition asks about the arm, so a state that takes none reads nothing
+# of the subject and a subject read that would fail cannot stop that hold.
+run STUB_STATE=pull_request STUB_SUBJECT_RC=1 STUB_SUBJECT_OUT=
+is "an anchored subject is not read for an arm, so its hold proceeds" "$(verdict)" "held"
+run STUB_STATE_RC=2 STUB_SUBJECT_RC=1 STUB_SUBJECT_OUT=
+is "nor is a subject whose state could not be read, which takes no transition" "$(verdict)" "held"
+hasnt "…so it still takes none" "lc transition" "$(calls)"
 
 echo "── an anchored subject: the conversation demand gates the VISIT, not the subject ──"
 # A conversation about a PR anchor must not freeze the merge (operator ruling):
