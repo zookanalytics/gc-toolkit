@@ -37,14 +37,14 @@
 # skill's supplement command: filed in the PR's rig, holding the anchor's merge,
 # and slung only once that hold reads back, with the mechanik's copy the same
 # command. It pins that a formula's own description, not a doc, says which work
-# the formula fits. It runs each example whose second step depends on its first
+# the formula fits. It pins that a problem in software the rig does not own goes
+# through the external-issue skill, which alone holds that path's commands.
+# It runs each example whose second step depends on its first
 # under a gc that refuses the first step, and fails if anything after it runs.
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
 # a blocker in another store, and fails if the arm runs. It pins that every
 # skill and formula names a pack skill to load by its catalog name, never by
-# its path, so an agent in any tree loads the installed pack's copy. It pins that
-# a problem in software the rig does not own goes through the external-issue
-# skill, which alone holds that path's commands.
+# its path, so an agent in any tree loads the installed pack's copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
