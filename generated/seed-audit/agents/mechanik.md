@@ -639,6 +639,20 @@ narrow `gc bd list` rather than writing `--all` to a file.
 
 ## Feedback observations
 
+Where feedback can come from depends on whether a person attends your
+session. A pool session, such as a polecat, has no one at its terminal by
+design, so every turn in its own terminal is the city's text: a configured
+nudge such as the wake nudge, a reminder, hook output, or another agent's
+`gc session nudge`. Such a turn is never an operator correction, even when
+it arrives as a user message and reads like one, so it files no
+observation. A pool session captures only from durable sources: a PR
+review or comment, a rework's rejection reason, and a bead's notes. A PR
+review or comment is the operator's only when the operator's own GitHub
+account posted it. A session the operator attends, such as a converse
+sitting on a visit or mechanik, captures from those sources and from the
+operator's own turns. Text the city sends into that session is still the
+city's.
+
 When a turn brings you corrective feedback about *standing* agent
 behavior — a PR review comment, an operator correction, a rework whose
 cause was a habit rather than a one-off — do two things, in order: fix
