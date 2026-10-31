@@ -59,8 +59,8 @@
 #   SUBJECT      its continuation group, which the hold writes to (environment);
 #                when empty, the subject the visit records (its tracks edge,
 #                else its gc.continuation_group stamp)
-# Exit: 0 the hold is real and stamped — post the framing; 1 the visit could not
-# be read or a gate failed — do NOT post the framing, raise the failure in the
+# Exit: 0 the hold is real and stamped — post the framing; 1 a read of the visit
+# or subject or a gate failed — do NOT post the framing, raise the failure in the
 # thread; 2 usage, a decision too long for the headline, or no writer or subject
 # to write to — nothing was written, do NOT post the framing.
 set -u
