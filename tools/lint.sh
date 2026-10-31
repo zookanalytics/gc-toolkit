@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # lint.sh — the rig's one lint entry point: shell static analysis, step text,
-# go vet and gofmt.
+# go vet and gofmt, and the list of the warrants a branch touches.
 #
-# Wired as the refinery's lint_command, it runs on every merge. It runs these
-# linters, each at the scope a merge gate can enforce given the tree's current
-# finding-debt:
+# Wired as the rig's lint_command, it runs at the polecat's self-review and on
+# every merge. It runs these linters, each at the scope a merge gate can enforce
+# given the tree's current finding-debt:
 #
 #   SHELL — shellcheck, through assets/scripts/shellcheck-run.sh, the one
 #   fail-closed runner (host shellcheck at warning severity; exit 3 when none is
@@ -38,6 +38,12 @@
 #   rewrite and still exits 0, so the listing is the finding. lint.sh only
 #   lists; it never rewrites a file.
 #
+#   WARRANTS — tools/warrants-touched.sh prints the docs/warrants.md entries the
+#   branch touches, with their Verified dates, so the author re-verifies them
+#   before the arch review reads them. It is the one part that judges nothing: a
+#   touched warrant fails no lint, because the arch review judges the
+#   re-verification. It reads the branch from git, so it takes no FILE.
+#
 # Fail-closed throughout: a linter that cannot run — no shellcheck, no go, no
 # gofmt — is a finding, never a silent pass, the same contract shellcheck-run.sh
 # enforces.
@@ -47,7 +53,7 @@
 #             shell shebang (sh, bash, dash, ksh) — are shellchecked, the
 #             formulas among them have their step text checked, and the rest
 #             drop out. With no shell file or formula given neither is linted,
-#             and go vet and gofmt still run.
+#             and go vet, gofmt and the warrant list still run.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
@@ -84,6 +90,11 @@ fi
 STEP_TEXT_LINT="$ROOT/tools/lint-step-text.sh"
 if [ ! -x "$STEP_TEXT_LINT" ]; then
   echo "$PROG: step-text lint missing or not executable: $STEP_TEXT_LINT" >&2
+  exit 2
+fi
+WARRANTS_TOUCHED="$ROOT/tools/warrants-touched.sh"
+if [ ! -x "$WARRANTS_TOUCHED" ]; then
+  echo "$PROG: warrant list missing or not executable: $WARRANTS_TOUCHED" >&2
   exit 2
 fi
 
@@ -227,6 +238,22 @@ else
     fail=1
   elif [ "$rc" -eq 0 ]; then
     summary+=("gofmt: ${#go_files[@]} Go file(s) clean")
+  fi
+fi
+
+# ── Warrants: the entries this branch touches ───────────────────────────────
+# Its exit 1 is a list for the author, which fails nothing. Its exit 2 says it
+# could not read the page or the change, which fails closed like a linter that
+# could not run.
+if "$WARRANTS_TOUCHED"; then
+  summary+=("warrants: none touched")
+else
+  rc=$?
+  if [ "$rc" -eq 1 ]; then
+    summary+=("warrants: touched, listed above")
+  else
+    fail=1
+    summary+=("warrants: FAIL — warrants-touched.sh could not run (exit $rc); fail-closed, treated as a finding")
   fi
 fi
 

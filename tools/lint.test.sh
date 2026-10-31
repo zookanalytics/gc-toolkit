@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Hermetic test for lint.sh — the rig's shell, step text, go vet and gofmt lint
-# entry point.
+# entry point, which also prints the warrants a branch touches.
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
 # a go module is silently skipped, a Go file gofmt would rewrite passes, or go
-# vet on macOS is not pointed at the icu4c headers services/helm's cgo needs.
+# vet on macOS is not pointed at the icu4c headers services/helm's cgo needs, or
+# a warrant list that could not run reads as nothing touched, or one that ran
+# fails the lint or goes unprinted.
 #
-# Hermetic: a throwaway git repo holds a stub shellcheck-run.sh and a stub
-# lint-step-text.sh whose exit codes the test sets, and a tracked go.mod, and
-# lint.sh runs with PATH pointing at a
+# Hermetic: a throwaway git repo holds a stub shellcheck-run.sh, a stub
+# lint-step-text.sh and a stub warrants-touched.sh whose exit codes the test
+# sets, and a tracked go.mod, and lint.sh runs with PATH pointing at a
 # stub bin — so whether shellcheck, go and gofmt "ran" and what they returned
 # is the test's to decide. No real shellcheck or go toolchain is required. The
 # host is stubbed the same way: a stub uname names it and a stub brew answers
@@ -69,6 +71,21 @@ EOF
   chmod +x "$STEP"
 }
 make_step_text 0
+
+# Stub warrant list (tools/warrants-touched.sh): prints a line the test looks for
+# and exits the code the test asks for. tools/warrants-touched.test.sh holds the
+# real list to its page.
+WARRANTS="$REPO/tools/warrants-touched.sh"
+make_warrants() {  # $1 = exit code
+  mkdir -p "$REPO/tools"
+  cat > "$WARRANTS" <<EOF
+#!/bin/sh
+echo "stub-warrants ran:\$*:"
+exit $1
+EOF
+  chmod +x "$WARRANTS"
+}
+make_warrants 0
 
 # --- Stub bin: only the externals lint.sh reaches for. -----------------------
 # lint.sh needs git, basename and dirname; go and gofmt are stubbed so their
@@ -340,6 +357,42 @@ if ( cd "$REPO" && PATH="$STUB" "$BASH_BIN" "$TMP/lone/tools/lint.sh" subject.sh
 grep -q 'cannot source assets/scripts/icu4c-cgo.sh' "$TMP/err" \
   && ok "helper missing: error names the helper" \
   || bad "helper missing: error is silent about icu4c-cgo.sh"
+
+# --- V: the warrant list prints, and only a list that could not run fails. ---
+make_wrapper 0; make_go 0; make_gofmt 0; make_step_text 0; make_warrants 0
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "warrants none: exit 0" || bad "warrants none: expected 0, got $rc"
+grep -q 'warrants: none touched' "$TMP/out" && ok "warrants none: summary says so" \
+  || bad "warrants none: summary is silent: $(cat "$TMP/out")"
+grep -qx 'stub-warrants ran::' "$TMP/out" \
+  && ok "warrants: the list reads the branch from git, handed no file" \
+  || bad "warrants: the list did not run bare: $(cat "$TMP/out")"
+
+make_warrants 1
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "warrants listed: a list fails no lint" || bad "warrants listed: expected 0, got $rc"
+grep -q 'stub-warrants ran' "$TMP/out" && ok "warrants listed: the list reaches lint's output" \
+  || bad "warrants listed: the list is not in lint's output: $(cat "$TMP/out")"
+grep -q 'warrants: touched, listed above' "$TMP/out" && ok "warrants listed: summary points at it" \
+  || bad "warrants listed: summary is silent: $(cat "$TMP/out")"
+[ "$(grep -n 'stub-warrants ran' "$TMP/out" | cut -d: -f1)" -lt "$(grep -n '^lint: summary' "$TMP/out" | cut -d: -f1)" ] \
+  && ok "warrants listed: the list prints before the summary that points at it" \
+  || bad "warrants listed: the summary comes first: $(cat "$TMP/out")"
+
+make_warrants 2
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "warrants could not run: exit 1 (fail-closed)" || bad "warrants could not run: expected 1, got $rc"
+grep -q 'warrants-touched.sh could not run (exit 2)' "$TMP/out" \
+  && ok "warrants could not run: report names it" \
+  || bad "warrants could not run: report is silent: $(cat "$TMP/out")"
+
+rm -f "$WARRANTS"
+run_sut subject.sh
+[ "$rc" -eq 2 ] && ok "warrant list missing: structural error (exit 2)" || bad "warrant list missing: expected 2, got $rc"
+grep -q 'warrant list missing' "$TMP/err" \
+  && ok "warrant list missing: error names it" \
+  || bad "warrant list missing: error is silent about it"
+make_warrants 0
 
 # --- W: the step-text lint gets every file, and its verdict is the gate's. ---
 # It picks the formulas out itself, so lint.sh hands it the whole list.

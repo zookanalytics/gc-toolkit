@@ -26,7 +26,8 @@ Add `arch` when the diff does any of these:
   [review-arch.md](review-arch.md#when-the-lens-applies) lists.
 - It grows existing operational surface with a new verb, mode or key.
 - It touches a path or key that an entry in [warrants.md](warrants.md) covers.
-  Search that page for the paths in the diff.
+  `tools/warrants-touched.sh --base origin/<the review's base>` lists those
+  entries.
 
 Tests and the fixtures they use are not operational surface, so a diff that
 only adds or changes tests does not make `arch` mandatory.
