@@ -7,10 +7,10 @@
 #   through, so it is the only place a leak is observable at all. Linux exposes
 #   it as $PROC/<pid>/environ, and a host with no proc filesystem, such as macOS,
 #   reads it from the kernel's kern.procargs2 record. Both keep each entry whole.
-#   macOS hides the environment of its own binaries, /bin/zsh and /bin/sleep
-#   among them, so a pane running one is a note on that session. When no pane can
-#   be read at all, this arm has judged nothing, so the check warns once and
-#   cannot pass.
+#   With System Integrity Protection on, macOS hides the environment of its own
+#   binaries, /bin/zsh and /bin/sleep among them, so a pane running one is a note
+#   on that session. When no pane can be read at all, this arm has judged nothing,
+#   so the check warns once and cannot pass.
 #   SESSION ENV — what the NEXT process in that pane will get. `respawn-pane`
 #   takes no env argument, so that process comes up with the store-scope values
 #   the session env itself sets, plus any key the server's global holds that the
@@ -45,6 +45,7 @@ set -u
 city="${GC_CITY_PATH:-${GC_CITY:-}}"
 PROC="${GC_DOCTOR_PROC_ROOT:-/proc}"
 pane_reader="$PROC"; [ -d "$PROC" ] || pane_reader="kern.procargs2 via perl"
+PERL="${GC_DOCTOR_PERL:-/usr/bin/perl}"
 
 errors=(); warnings=(); notes=()
 sessions_checked=0; panes_read=0
@@ -105,19 +106,27 @@ env_lines() { LC_ALL=C tr '\n\0' ' \n'; }
 
 # Perl's read of kern.procargs2, for the pid it is given. The kernel's record holds
 # the argument count, the executable's path and its padding, the arguments, the
-# environment, an empty string and then strings of Apple's own, each string ending
-# in NUL. This prints the environment the way /proc/<pid>/environ holds it, and
-# nothing at all when the record cannot be read or shows none. The `sysctl` command
-# cannot read this node, and perl ships with macOS and can. Call 202 is __sysctl on
-# Darwin and another call elsewhere, so the program stops anywhere else. The kernel
-# names the size first, because a shorter buffer cuts the record short and one past
-# kern.argmax is refused.
+# environment and then strings of Apple's own, each string ending in NUL. This prints
+# the environment the way /proc/<pid>/environ holds it, and nothing at all when the
+# record cannot be read or shows none. The `sysctl` command cannot read this node.
+# The perl that ships with macOS can, so the check names its path: Homebrew's is built
+# without syscall, and it comes first on PATH where it is installed. Call 202 is
+# __sysctl on Darwin and another call elsewhere, so the program stops anywhere else.
+# The kernel names the size first, because a shorter buffer cuts the record short and
+# one past kern.argmax is refused.
 #
 # The record sits in the process's own memory, and only the argument count says
 # where the environment starts. A process that overwrites its arguments with a short
 # title leaves empty strings there, which read as no environment. One whose title
 # fills their whole space leaves fewer strings than the count, so the walk skips
 # entries and can miss a store key.
+#
+# Nothing marks where the environment ends. The first of Apple's strings are zeroed
+# once a process has started, which leaves the empty string the walk stops at, so an
+# empty string handed to a process as an entry stops it too, ahead of any store key
+# after it. In a process's first moments, an environment ending on an 8-byte boundary
+# runs straight into Apple's strings. They then read as extra entries, and their
+# names, such as ptr_munge, are not store keys, so no judgment changes.
 PROCARGS2_READ='
 $^O eq "darwin" or exit 1;
 my $mib = pack("i3", 1, 49, $ARGV[0] + 0);    # CTL_KERN, KERN_PROCARGS2, the pid
@@ -143,7 +152,7 @@ pane_env() {
         [ -r "$PROC/$pid/environ" ] && env_lines < "$PROC/$pid/environ" 2>/dev/null
         return 0
     fi
-    run_bounded perl -e "$PROCARGS2_READ" "$pid" 2>/dev/null | env_lines
+    run_bounded "$PERL" -e "$PROCARGS2_READ" "$pid" 2>/dev/null | env_lines
     [ "${PIPESTATUS[0]}" -ne 124 ] || return 124
     return 0
 }

@@ -40,7 +40,7 @@ esac
 TMUX
 chmod +x "$TMP/bin/tmux"
 
-# Kept apart from the tmux stub, so section 19 can run the real perl beside it.
+# GC_DOCTOR_PERL hands the check this in place of the perl macOS ships.
 mkdir -p "$TMP/kernbin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/kernbin/perl" <<'PERL'
 # `perl -e <program> <pid>` prints the pid's environment, each entry ending in NUL,
@@ -82,8 +82,8 @@ run() {
 }
 # A host with no proc filesystem: the proc root is missing, and perl answers.
 run_kern() {
-    PATH="$TMP/kernbin:$TMP/bin:$PATH" STUB_DIR="$TMP" GC_DOCTOR_PROC_ROOT="$TMP/no-proc" \
-        GC_CITY_PATH="$CITY" GC_CITY="" bash "$CHECK" 2>&1
+    PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" GC_DOCTOR_PROC_ROOT="$TMP/no-proc" \
+        GC_DOCTOR_PERL="$TMP/kernbin/perl" GC_CITY_PATH="$CITY" GC_CITY="" bash "$CHECK" 2>&1
 }
 
 # A healthy pair: one city-scoped agent, one scoped to rig "alpha".
@@ -770,9 +770,9 @@ hasnt "$OUT" "OK:" "a budget-truncated read cannot reach the OK line"
 hasnt "$OUT" "pane process environment unreadable" "a budget cut is not reported as an unreadable pane"
 
 # --- 19. the real reader against a real process -------------------------------
-# Every case above stands in for the platform. Here the proc root is the default
-# and perl is the real one, so each platform runs the read it uses in production:
-# /proc on Linux, kern.procargs2 on macOS. The process is `timeout` because macOS
+# Every case above stands in for the platform. Here the proc root and the perl are
+# the defaults, so each platform runs the read it uses in production: /proc on
+# Linux, kern.procargs2 on macOS. The process is `timeout` because macOS
 # hides the environment of its own binaries, and there this one comes from
 # Homebrew's coreutils. It holds its whole environment from env -i, and its argument
 # spells out a store key, which the kernel's record holds beside the environment.
@@ -793,7 +793,7 @@ start_real_process() {
 }
 stop_real_process() { kill "$REAL_PID" 2>/dev/null; wait "$REAL_PID" 2>/dev/null; }
 run_real() {
-    env -u GC_DOCTOR_PROC_ROOT PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" \
+    env -u GC_DOCTOR_PROC_ROOT -u GC_DOCTOR_PERL PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" \
         GC_CITY_PATH="$CITY" GC_CITY="" bash "$CHECK" 2>&1
 }
 real_session() {
@@ -874,7 +874,10 @@ else
     bad "the real process started (an empty environment)"
 fi
 stop_real_process
-if [ "$(uname -s)" = Darwin ]; then
+# macOS hides this environment only while System Integrity Protection is on. With it
+# off, as runs on GitHub's macOS runners report, /bin/sleep reads like any other process.
+sip_on() { case "$(csrutil status 2>/dev/null)" in *"status: enabled"*) return 0 ;; *) return 1 ;; esac; }
+if sip_on; then
     env -i GC_AGENT=alpha/city.witness GC_RIG=beta /bin/sleep 60 </dev/null >/dev/null 2>&1 &
     REAL_PID=$!
     if wait_real_process "/bin/sleep 60"; then
@@ -891,17 +894,33 @@ fi
 # The call is Darwin's, so the read stops before it anywhere else. A perl told it
 # runs elsewhere shows that on any host, with the proc root missing so it is asked.
 mkdir -p "$TMP/offbin"
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'exec %q -e %q "$@"\n' "$(command -v perl)" 'BEGIN { $^O = "linux" }'; } > "$TMP/offbin/perl"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'exec /usr/bin/perl -e %q "$@"\n' 'BEGIN { $^O = "linux" }'; } > "$TMP/offbin/perl"
 chmod +x "$TMP/offbin/perl"
 if start_real_process GC_AGENT=alpha/city.witness GC_ALIAS=alpha/city.witness "GC_CITY_PATH=$CITY" GC_RIG=beta; then
     real_session
-    OUT=$(PATH="$TMP/offbin:$TMP/bin:$PATH" STUB_DIR="$TMP" GC_DOCTOR_PROC_ROOT="$TMP/no-proc" \
+    OUT=$(PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" GC_DOCTOR_PROC_ROOT="$TMP/no-proc" GC_DOCTOR_PERL="$TMP/offbin/perl" \
         GC_CITY_PATH="$CITY" GC_CITY="" bash "$CHECK" 2>&1); RC=$?
     eq "$RC" "1" "off Darwin the read stops before its call, so the arm reads blind, a WARNING"
     has "$OUT" "no agent session's running process could be read (1 tried, through kern.procargs2 via perl)" "the warning names the reader that stopped"
     hasnt "$OUT" "running process holds GC_RIG=beta" "no environment was read off Darwin"
 else
     bad "the real process started (off Darwin)"
+fi
+stop_real_process
+
+# --- 19e. the read does not take whichever perl PATH finds ----------------------
+# Homebrew's perl 5.44 has no syscall, and it comes first on PATH where it is installed,
+# as GitHub's macOS image installs it. This one stands in by failing the way that one does.
+mkdir -p "$TMP/nosyscall"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'exit 255\n'; } > "$TMP/nosyscall/perl"
+chmod +x "$TMP/nosyscall/perl"
+if start_real_process GC_AGENT=alpha/city.witness GC_ALIAS=alpha/city.witness "GC_CITY_PATH=$CITY" GC_RIG=beta; then
+    real_session
+    OUT=$(PATH="$TMP/nosyscall:$PATH" run_real); RC=$?
+    eq "$RC" "2" "a perl first on PATH that cannot make the call leaves the read working"
+    has "$OUT" "running process holds GC_RIG=beta" "the real process is judged past that perl"
+else
+    bad "the real process started (a perl first on PATH)"
 fi
 stop_real_process
 
