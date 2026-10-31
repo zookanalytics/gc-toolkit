@@ -201,7 +201,7 @@ prompt, a formula step or a skill is behavior: changing what an agent does is a
 **The scope says where in the system the change sits**, and it is yours to decide,
 as the type is. Where the rig's rules name scopes, use the one the change is
 mostly about, as in `fix(api): ...`. With no list, or for a change that spans the
-whole system, write none, as in `fix: ...`.
+whole system, write none, as in `fix: ...`, and never coin a name of your own.
 
 **The words name what changes rather than how**, as an imperative phrase that
 starts in lowercase, at most 72 characters with the type and scope: `fix: keep an
