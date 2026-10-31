@@ -1,0 +1,17 @@
+# witness-nudge — give a witness whose pane has gone quiet its next patrol turn.
+# The witness's patrol loop lives in its conversation, so a turn that ends leaves
+# the session idle at its prompt, and the controller reads it as healthy. Every
+# 5m, city-wide: read the session list once, and nudge each witness whose pane has
+# printed nothing, and which has had no nudge, for longer than one inter-cycle
+# wait. `timeout` is under the interval, so a pass ends before the next one
+# starts. `idempotent` keeps a contended store from skipping the order: a repeat
+# nudges nothing, because the first nudge restarts the quiet clock.
+# See docs/patrol-continue.md.
+[order]
+description = "Nudge a witness whose pane has gone quiet, so its patrol takes its next turn"
+trigger = "cooldown"
+interval = "5m"
+exec = "$PACK_DIR/assets/scripts/witness-nudge.sh"
+scope = "city"
+timeout = "240s"
+idempotent = true
