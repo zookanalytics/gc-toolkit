@@ -85,6 +85,51 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
   drops its observe-only note.
 
+## Suspended store backup
+
+- **Covers.** `assets/scripts/suspended-store-backup.sh`,
+  `orders/suspended-store-backup.toml`.
+- **Stands in for.** A scheduled backup of a suspended rig's store that inherits
+  the city's endpoint, which Gas City's `mol-dog-backup` order would run if its
+  rig filter read the endpoint origin as well as the suspension.
+- **Evidence.** In `gastownhall/gascity`:
+  - `mol-dog-backup.sh` in the dolt pack it bundles
+    (`examples/bd/dolt/assets/scripts/`) keeps only the rigs whose `suspended` is
+    false. Its comment gives two reasons: a bd call restarts a suspended scope's
+    retired proxy and Dolt, and nothing writes to the scope. An `inherited_city`
+    rig has no rig-local Dolt (`docs/runbooks/managed-city-endpoints.md`), and the
+    design page says a rig sharing the city's proxy root is not stopped on its
+    own and that deliberate touches still reach a suspended rig
+    (`engdocs/design/beads-proxied-local-default.md`, "Suspension is quiescence").
+  - Nothing changes that filter from outside the script. `GC_BACKUP_DATABASES`
+    narrows among the scopes the order already chose. An `OrderOverride` sets an
+    order's scheduling fields and exec env, not its exec
+    (`docs/reference/config.md`). A city's local order of the same name replaces
+    the pack's entirely (`docs/tutorials/07-orders.md`, "Order layering"), which
+    would carry a copy of the whole backup.
+  - A rig-scoped order cannot do it, because the controller skips an order that
+    targets a suspended rig (`orderRigSuspended` in `cmd/gc/order_dispatch.go`).
+  - `gc dolt sync` pushes committed branches to a database's remotes, not to its
+    backup (the dolt pack's `commands/sync/run.sh`). The supervisor's store
+    maintenance snapshots only the city's store, and its backup runner is not
+    wired (`engdocs/contributors/dolt-maintenance.md`).
+  - A search of its issues and pull requests finds no report of a suspended rig's
+    store going without a backup. No pack in `gastownhall/gascity-packs` runs a
+    backup of its own: its one mention of `mol-dog-backup` is Gas Town's patrol
+    reporting that the order may have failed.
+
+  In `gastownhall/beads`, auto-backup stays off on a shared server, and its
+  documentation says to run `bd backup` explicitly there
+  (`docs/cli-reference/backup.md`), which this pass does. Only `bd backup sync`
+  writes `.beads/dolt-backup-state.json` (`updateDoltBackupState` in
+  `cmd/bd/backup_dolt.go`), the file Gas City's `scanDoltBackupFreshness` and
+  `BulkDeleteSafe` judge (`internal/doctor/checks_bd_backup_freshness.go`).
+- **Verified.** 2026-10-31, at `gastownhall/gascity` main 6f5e14c2f,
+  `gastownhall/gascity-packs` main 0b0d96250 and `gastownhall/beads` main
+  6ebaacba8.
+- **Retires when.** `mol-dog-backup` backs up a suspended rig whose store inherits
+  the city's endpoint.
+
 ## Priority following
 
 - **Covers.** `assets/scripts/queue-priority.sh`,

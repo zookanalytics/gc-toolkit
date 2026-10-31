@@ -1,0 +1,22 @@
+# suspended-store-backup — back up the suspended rigs' stores that still take
+# writes, on mol-dog-backup's cadence. mol-dog-backup skips every suspended rig,
+# though one whose store inherits the city's endpoint keeps taking writes on the
+# city's Dolt server. The script's head says which stores a pass covers and why.
+#
+# City scope is forced, not preferred: the controller dispatches no order that
+# targets a suspended rig, and these are the rigs the pass serves.
+#
+# No `idempotent` key, because the pass writes. Idempotence lets the dispatcher
+# fire past a timed-out open-work gate, which is the moment a second pass is most
+# likely to overlap the first.
+#
+# The 3600s timeout sits above the script's own bounds: its wait for
+# mol-dog-backup's lock (1860s, past that order's 1800s timeout) and one bounded
+# sync per store. The hard kill lands mid-sync only if many stores hang.
+[order]
+description = "Back up each suspended rig's store that inherits the city's Dolt endpoint, which mol-dog-backup skips though it still takes writes"
+trigger = "cooldown"
+interval = "6h"
+exec = "$PACK_DIR/assets/scripts/suspended-store-backup.sh"
+timeout = "3600s"
+scope = "city"

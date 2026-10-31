@@ -158,8 +158,8 @@ compaction, spawn-storm detection, convoy backstop and branch pruning, the
 controller's closed-bead worktree reaper, and the dolt pack's orders. The
 pack's patrols carry only judgment: the witness's HELP-mail triage, salvage and
 watch on the refinery's queue, and the deacon running `gc doctor` from an
-order. Patrol owns the warranted Dolt reclaim and the scratch reapers that no
-native reaper covers.
+order. Patrol owns the warranted Dolt reclaim and suspended-store backup, and the
+scratch reapers that no native reaper covers.
 
 The trade: the liveness census stops filing visits, the incident ledger moves
 onto events and bead notes, and the dog's due process moves to the
