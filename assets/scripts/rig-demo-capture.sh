@@ -47,7 +47,8 @@
 #                it is how this rig's app is reached, the one rig-specific input.
 #   --port       port for --serve (default 5173) or --serve-dir (default: a free
 #                port). A port that a server already answers on is refused.
-#   --cwd        working directory for the --serve command.
+#   --cwd        working directory for the --serve command, and the directory a
+#                relative --serve-dir resolves against.
 #   --mode       walkthrough (default, one continuous take) | proof (one checked
 #                screenshot per step).
 #   --no-narrate force a silent clip even when OPENAI_API_KEY is set.
@@ -121,6 +122,7 @@ fi
 abspath() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$(pwd)" "$1" ;; esac; }
 SCRIPT=$(abspath "$SCRIPT")
 OUTPUT=$(abspath "$OUTPUT")
+case "$SERVE_DIR" in ''|/*) ;; *) [ -z "$SERVE_CWD" ] || SERVE_DIR="$SERVE_CWD/$SERVE_DIR" ;; esac
 [ -z "$SERVE_DIR" ] || SERVE_DIR=$(abspath "$SERVE_DIR")
 [ -z "$MUSIC" ] || MUSIC=$(abspath "$MUSIC")
 

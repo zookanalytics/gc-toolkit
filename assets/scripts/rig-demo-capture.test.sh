@@ -138,6 +138,13 @@ has "sandbox-exec $STUB lint $SCRIPT" "$(cat "$SANDBOX_LOG")" "the stand-in engi
 has "sandbox-exec $STUB run $SCRIPT" "$(cat "$SANDBOX_LOG")" "and captures inside it"
 has "--port 50123" "$RL" "a --serve-dir is given the free port the sandbox opens"
 
+echo "# a relative --serve-dir resolves against --cwd, and --cwd goes no further"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir app --cwd "$TMPD")"; rc=$?
+ok "a relative serve-dir with a cwd exits 0" "[ '$rc' = 0 ]"
+RL="$(cat "$RUNLOG")"
+has "--serve-dir $SERVE_DIR" "$RL" "it is served from the directory --cwd names"
+hasnt "--cwd" "$RL" "and the engine, which spawns no command, is given no --cwd"
+
 echo "# no sandbox -> exit 1, and the engine never runs"
 out="$(RUN_PATH="" run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
 ok "a host without sandbox-exec exits 1" "[ '$rc' = 1 ]"

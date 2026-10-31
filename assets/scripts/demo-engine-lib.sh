@@ -38,7 +38,7 @@
 #     Dolt server and the session server do not answer.
 #   - signals to any process outside the sandbox.
 # The CLI also runs without the environment variables that point a command at
-# the city: GC_*, BEADS_*, BD_*, DOLT_*, TMUX and TMUX_PANE.
+# the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and TMUX_PANE.
 #
 # Inside the city's directories the run reads and writes only what the engine's
 # own arguments name: its working directory, the output's directory, --cwd,
@@ -365,7 +365,7 @@ EOF
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     if _demo_engine_under "$p" "$top"; then
-      _demo_engine_say "$top holds $p, where the live city keeps its state, so a capture cannot read or write it; run the capture from, and give it, directories that hold none of the city's"
+      _demo_engine_say "$top holds $p, where the live city keeps its state, so a capture cannot read or write it; capture from a rig worktree, or from a directory that holds none of the city's"
       return 1
     fi
     if [ -z "$common" ] && _demo_engine_under "$top" "$p"; then
@@ -495,16 +495,18 @@ EOF
   done <<EOF
 $(_demo_engine_city_stores "$places")
 EOF
-  profile="$profile$NL(deny network-outbound (remote ip \"localhost:*\"))"
-  [ -z "$open" ] || profile="$profile$NL(allow network-outbound (remote ip \"localhost:$open\"))"
+  # The Unix socket rules come first. Written after a loopback port's allow, the
+  # deny on Unix sockets takes that allow back for most ports, over IPv4 and IPv6.
   profile="$profile$NL(deny network-outbound (remote unix-socket))"
   profile="$profile$NL(allow network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\")))"
+  profile="$profile$NL(deny network-outbound (remote ip \"localhost:*\"))"
+  [ -z "$open" ] || profile="$profile$NL(allow network-outbound (remote ip \"localhost:$open\"))"
   profile="$profile$NL(deny signal)$NL(allow signal (target same-sandbox))"
 
   unsets=()
   while IFS= read -r v; do
     [ -z "$v" ] || unsets+=(-u "$v")
-  done < <(env | sed -n -E 's/^((GC|BEADS|BD|DOLT)_[A-Za-z0-9_]*|TMUX|TMUX_PANE)=.*/\1/p')
+  done < <(env | sed -n -E 's/^((GC|GT|BEADS|BD|DOLT)_[A-Za-z0-9_]*|TMUX|TMUX_PANE)=.*/\1/p')
   if [ -n "${DEMO_ENGINE_BIN:-}" ]; then
     set -- "$DEMO_ENGINE_BIN"
   elif [ -n "${DEMO_ENGINE_DIR:-}" ]; then

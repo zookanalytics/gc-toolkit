@@ -49,7 +49,10 @@
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
-#               them, though the same command run outside the sandbox does
+#               them, though the same command run outside the sandbox does; and
+#               a capture's own server answers it on each of a run of free
+#               ports, which opens neither another loopback service nor a Unix
+#               socket
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
@@ -80,8 +83,8 @@ hasnt() { case "$2" in *"$1"*) printf 'FAIL - %s\n     unwanted substring: %s\n 
 eq()    { if [ "$1" = "$2" ]; then printf 'ok   - %s\n' "$3"; else printf 'FAIL - %s\n     want: %s\n     got:  %s\n' "$3" "$2" "$1"; FAIL=1; fi; }
 
 TMPD="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/demo-engine-lib-test.XXXXXX")" && pwd -P)"
-API_PID=""
-trap '[ -z "$API_PID" ] || kill "$API_PID" 2>/dev/null; rm -rf "$TMPD"' EXIT
+API_PID=""; API_SOCK=""
+trap '[ -z "$API_PID" ] || kill "$API_PID" 2>/dev/null; rm -rf "$TMPD" ${API_SOCK:+"$API_SOCK"}' EXIT
 
 # Only the tools the two captures call. env -i keeps everything else off PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
@@ -386,9 +389,9 @@ printf 'SECRET-OUTSIDE-RIG-STORE\n' >"$OUTRIG/.beads/issues.jsonl"
 printf '# SECRET-GC-HOME\n[[cities]]\n  path = "%s"\n  name = "fixture"\n' "$CITY" >"$GCH/cities.toml"
 RIGS_JSON=$(jq -nc --arg a "$RIGA" --arg o "$OUTRIG" --arg e "$ENGINE" \
   '{rigs: [{name: "alpha", path: $a}, {name: "outside", path: $o}, {name: "sprintshow", path: $e}]}')
-CITY_ENV=(GC_HOME="$GCH" GC_CITY_PATH="$CITY" GC_RIG_ROOT="$RIGA" BEADS_DIR="$RIGA/.beads"
+CITY_ENV=(GC_HOME="$GCH" GC_CITY_PATH="$CITY" GC_RIG_ROOT="$RIGA" GT_ROOT="$CITY" BEADS_DIR="$RIGA/.beads"
   BD_ROUTING_MODE=direct DOLT_PORT=3307 TMUX=/tmp/tmux-0/default RIGS_JSON="$RIGS_JSON")
-git -C "$RIGA" init -q && git -C "$RIGA" -c user.name=fixture -c user.email=fixture@example.com commit -q --allow-empty -m init \
+git -C "$RIGA" init -q && git -C "$RIGA" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q --allow-empty -m init \
   || { echo "test setup: cannot make the rig's git repository" >&2; exit 2; }
 RWT="$CITY/.gc/worktrees/alpha/wt"; mkdir -p "$(dirname "$RWT")"
 git -C "$RIGA" worktree add -q --detach "$RWT" HEAD >/dev/null 2>&1 || { echo "test setup: cannot add the rig's worktree" >&2; exit 2; }
@@ -411,9 +414,11 @@ for cap in video screenshot; do
   has "--port 50123" "$(calls)" "($cap) and the engine serves on that port"
   has "(deny network-outbound (remote unix-socket))" "$(profile)" "($cap) it denies Unix sockets"
   has "(allow network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\")))" "$(profile)" "($cap) but the system resolver's"
+  U=$(profile_line "(deny network-outbound (remote unix-socket))"); L=$(profile_line "(allow network-outbound (remote ip \"localhost:50123\"))")
+  ok "($cap) the Unix socket rules come before the loopback port's allow, which a later deny on Unix sockets takes back (lines $U, $L)" "[ '$U' -gt 0 ] && [ '$L' -gt '$U' ]"
   has "(deny signal)" "$(profile)" "($cap) it denies signals"
   has "(allow signal (target same-sandbox))" "$(profile)" "($cap) but to its own processes"
-  for v in GC_HOME GC_CITY_PATH GC_RIG_ROOT BEADS_DIR BD_ROUTING_MODE DOLT_PORT TMUX; do
+  for v in GC_HOME GC_CITY_PATH GC_RIG_ROOT GT_ROOT BEADS_DIR BD_ROUTING_MODE DOLT_PORT TMUX; do
     hasnt "$v=" "$(cat "$SANDBOX_ENV")" "($cap) $v does not reach the engine"
   done
   has "CALLLOG=" "$(cat "$SANDBOX_ENV")" "($cap) the rest of the environment does"
@@ -441,6 +446,11 @@ for cap in video screenshot; do
   capture "$cap" FROM="$CITY/.gc/notes" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
   eq "$RC" 1 "($cap) a working directory in the city's, in no rig worktree, exits 1"
   has "$CITY/.gc/notes lies in $CITY" "$(err)" "($cap) it says the directory lies in the city's"
+  not_captured "$cap"
+  capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) a rig's own checkout, which holds its store, exits 1"
+  has "$RIGA holds " "$(err)" "($cap) it names the checkout"
+  has "capture from a rig worktree" "$(err)" "($cap) and says where a capture can run instead"
   not_captured "$cap"
   capture "$cap" FROM="$RWT" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
   eq "$RC" 0 "($cap) a rig worktree in the city's directory captures"
@@ -496,10 +506,13 @@ ENGINE
   chmod +x "$EXEC_STUB"
   REALSBX="$TMPD/bin-realsandbox"; mkdir -p "$REALSBX"; ln -s /usr/bin/sandbox-exec "$REALSBX/sandbox-exec"
   # A service on the loopback interface stands in for the supervisor's API and
-  # the Dolt server, when the host has a node to run it.
+  # the Dolt server, and one on a Unix socket for the session server, when the
+  # host has a node to run them. A Unix socket's path has a short limit, so it
+  # sits directly under /tmp.
   APIPORT=""; REAL_NODE="$(command -v node || true)"
   if [ -n "$REAL_NODE" ]; then
-    "$REAL_NODE" -e 'const s = require("net").createServer((c) => c.end("SECRET-API\n")); s.listen(0, "127.0.0.1", () => require("fs").writeFileSync(process.argv[1], String(s.address().port)));' "$TMPD/api.port" &
+    API_SOCK="$(mktemp -u /tmp/demo-engine-lib-test.XXXXXX)"
+    "$REAL_NODE" -e 'const net = require("net"); net.createServer((c) => c.end("SECRET-SOCKET\n")).listen(process.argv[2]); const s = net.createServer((c) => c.end("SECRET-API\n")); s.listen(0, "127.0.0.1", () => require("fs").writeFileSync(process.argv[1], String(s.address().port)));' "$TMPD/api.port" "$API_SOCK" &
     API_PID=$!
     for _ in $(seq 1 100); do [ -s "$TMPD/api.port" ] && break; sleep 0.1; done
     APIPORT="$(cat "$TMPD/api.port" 2>/dev/null)"
@@ -509,7 +522,7 @@ ENGINE
   # The command reads each place the city keeps state in, lists its rigs, asks
   # the loopback service, prints every variable that points at the city, and
   # reads the fixture beside it.
-  PROBE="cat '$CITY/city.toml' '$CITY/.beads/issues.jsonl' '$RIGA/.beads/issues.jsonl' '$OUTRIG/.beads/issues.jsonl' '$GCH/cities.toml'; echo rigs: '$CITY'/rigs/*; ${APIPORT:+(exec 3<>/dev/tcp/127.0.0.1/$APIPORT && cat <&3);} env | awk '/^(GC|BEADS|BD|DOLT)_/ || /^TMUX=/ { print \"CITY-VARIABLE \" \$0 }'; cat fixture.txt"
+  PROBE="cat '$CITY/city.toml' '$CITY/.beads/issues.jsonl' '$RIGA/.beads/issues.jsonl' '$OUTRIG/.beads/issues.jsonl' '$GCH/cities.toml'; echo rigs: '$CITY'/rigs/*; ${APIPORT:+(exec 3<>/dev/tcp/127.0.0.1/$APIPORT && cat <&3);} env | awk '/^(GC|GT|BEADS|BD|DOLT)_/ || /^TMUX=/ { print \"CITY-VARIABLE \" \$0 }'; cat fixture.txt"
   CMD_OUT="$TMPD/command.out"; : >"$CMD_OUT"
   out=$( cd "$WORK" && env -i PATH="$REALSBX:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$EXEC_STUB" CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${CITY_ENV[@]}" \
@@ -528,6 +541,62 @@ ENGINE
   for secret in SECRET-CITY-CONFIG SECRET-CITY-STORE SECRET-RIG-STORE SECRET-OUTSIDE-RIG-STORE SECRET-GC-HOME "rigs: $CITY/rigs/alpha" "CITY-VARIABLE GC_CITY_PATH=" ${APIPORT:+SECRET-API}; do
     has "$secret" "$outside" "(ISOLATION) outside the sandbox the same command reaches ${secret//"$TMPD"\//}"
   done
+
+  # A capture's own server answers it, and opening its port opens nothing else.
+  # This runs on several free ports, because a profile with its network rules in
+  # the wrong order answers on some ports and refuses others.
+  if [ -n "$APIPORT" ]; then
+    SERVE_STUB="$TMPD/engine-serve"
+    cat >"$SERVE_STUB" <<'ENGINE'
+#!/usr/bin/env bash
+case "${1:-}" in
+  help) printf 'Usage:\n  sprintshow screenshot <demo.md> -o <file.png> [options]\n'; exit 0 ;;
+  screenshot) ;;
+  *) exit 97 ;;
+esac
+o=""; port=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; [ "$prev" = "--port" ] && port="$a"; prev="$a"; done
+"${REAL_NODE:?}" "${KNOCK:?}" "$port" "${APIPORT:?}" "${API_SOCK:?}" >"${CMD_OUT:?}" 2>&1
+printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00' >"$o"
+printf '\n✅ screenshot → %s\n' "$o"
+ENGINE
+    chmod +x "$SERVE_STUB"
+    KNOCK="$TMPD/knock.js"
+    cat >"$KNOCK" <<'JS'
+const net = require("net");
+const [port, other, sock] = process.argv.slice(2);
+const knock = (to) => new Promise((done) => {
+  const s = net.connect(to);
+  s.setTimeout(3000, () => { s.destroy(); done("timeout"); });
+  s.once("connect", () => { s.destroy(); done("reached"); });
+  s.once("error", (e) => done(e.code));
+});
+net.createServer((c) => c.end()).listen(Number(port), async () => {
+  console.log("own-v4", await knock({ host: "127.0.0.1", port: Number(port) }));
+  console.log("own-v6", await knock({ host: "::1", port: Number(port) }));
+  console.log("other", await knock({ host: "127.0.0.1", port: Number(other) }));
+  console.log("socket", await knock({ path: sock }));
+  process.exit(0);
+});
+JS
+    for _ in 1 2 3 4 5 6 7 8; do
+      port=$("$REAL_NODE" -e 'const s = require("net").createServer(); s.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port)); s.close(); });')
+      : >"$CMD_OUT"
+      out=$( cd "$WORK" && env -i PATH="$REALSBX:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+          ENGINE_STUB="$SERVE_STUB" REAL_NODE="$REAL_NODE" KNOCK="$KNOCK" APIPORT="$APIPORT" API_SOCK="$API_SOCK" \
+          CMD_OUT="$CMD_OUT" FREE_PORT="$port" SS_RIG="$ENGINE" "${CITY_ENV[@]}" \
+          bash "$SHOT" page --script "$SCRIPT" --serve-dir "$WORK/app" --output "$WORK/own.png" 2>&1 ); rc=$?
+      inside="$(cat "$CMD_OUT")"
+      eq "$rc" 0 "(ISOLATION) a capture given port $port runs"
+      has "own-v4 reached" "$inside" "(ISOLATION) its own server answers on port $port"
+      hasnt "own-v6 EPERM" "$inside" "(ISOLATION) and is not refused over IPv6"
+      hasnt "other reached" "$inside" "(ISOLATION) and no other loopback service answers"
+      hasnt "socket reached" "$inside" "(ISOLATION) and no Unix socket does"
+    done
+    outside=$("$REAL_NODE" "$KNOCK" "$port" "$APIPORT" "$API_SOCK" 2>&1)
+    has "other reached" "$outside" "(ISOLATION) outside the sandbox the loopback service answers"
+    has "socket reached" "$outside" "(ISOLATION) and so does the Unix socket"
+  fi
 fi
 
 echo "# READERS: each capture sources the library, runs the engine through it, and runs none of its steps itself"
