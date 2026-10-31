@@ -22,8 +22,10 @@ repository's security policy, asks whether a finding belongs in private, or
 files a private vulnerability report. The one published pack that files issues
 to another project's repository files them in public and asks no such question,
 although the repository it files to asks for vulnerabilities in private. The
-change adds no pack noun, and it touches no path or key that a warrant in
-[warrants.md](../../docs/warrants.md) covers.
+change adds no pack noun. Its one touch of what a warrant in
+[warrants.md](../../docs/warrants.md) covers is the origin guard's refusals, which
+name the skill the guidance moved to, and the gh write containment warrant is
+re-verified in the commit that makes it.
 
 ## The need
 
