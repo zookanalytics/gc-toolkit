@@ -1,6 +1,6 @@
 ---
 name: The correctness check on gc-toolkit
-description: The method extension the correctness check appends on gc-toolkit reviews. It makes a rule only gc-toolkit holds a finding wherever a change writes one into the pack content every rig runs. For each surface the repository ships, its bash and jq scripts, the shell blocks in its formulas and skills, its Go services and the helm web app, it names what the gates run and the defects a review there hunts.
+description: Use when you run the correctness check on a gc-toolkit change, when you want to know what that check will look for in your own change, or when you have a defect class particular to gc-toolkit to add to it.
 ---
 
 # The correctness check on gc-toolkit

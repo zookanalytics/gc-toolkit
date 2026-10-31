@@ -1,6 +1,6 @@
 ---
-name: The pack-content section applied blind to #1303's reviewed head
-description: Record of the check behind tk-yt6pmyv's done criterion, that a correctness review of #1303's reviewed head e81c447b4, run with gc-toolkit's extension section on the pack content every rig runs, returns the gc-toolkit-only lines #1303 wrote into skills/review-arch/SKILL.md and the arch row of review-checks.toml as a finding. Four fresh reviewers judged the same diff, one with the extension as main has it and three with the section, as first written and after each of two amendments. Read it for the method, the four verdicts, what each amendment answered, and the boundary rule every reviewer already held in its context.
+name: "The pack-content section applied blind to #1303's reviewed head"
+description: "Use when you want the evidence that the pack-content section of gc-toolkit's correctness extension catches what #1303 wrote into pack content, or when you change that section and need to repeat the blind check on #1303's reviewed head."
 ---
 
 # The pack-content section applied blind to #1303's reviewed head
@@ -128,7 +128,7 @@ the suite's pins.
   only for the move, and still passed the summary clauses. After the
   amendment on announcing clauses, n2 named every line #1303 wrote into the
   two files and asked for the fix #1303's rework made.
-- The done criterion holds for the text this branch lands. n2 returned the
+- The done criterion holds for the section this branch lands. n2 returned the
   gc-toolkit-only lines in `skills/review-arch/SKILL.md` and the arch row of
   `review-checks.toml` as one P1 finding. The same-setup baseline, k3, did not
   return the description or the arch row, and did not ask for the move. The
@@ -147,3 +147,7 @@ the suite's pins.
   session's project instructions.
 - Each review took about 20 to 23 minutes and between 280k and 305k
   subagent tokens.
+- After these runs, the operator's review had the description of
+  `docs/review-correctness.md` rewritten, removing a clause n2 read at
+  c462a4893, and the section n2 rested its P1 on did not change, so the check
+  was not run again.
