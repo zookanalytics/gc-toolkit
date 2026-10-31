@@ -28,11 +28,11 @@
 # live city cannot be reached. A read of the city fails there, and a capture
 # shows the reviewed commit on fixture data or shows the failure, never live
 # state. The sandbox denies:
-#   - the contents of the city's directories: gc's home, each city its
-#     cities.toml lists, the city, rig and store this session's environment
-#     names, and each rig checkout in the city's rig map. A directory's listing
-#     and a file's contents are denied, and their metadata is not, because node
-#     resolves a path by reading the metadata of each directory above it.
+#   - the contents of the city's directories: gc's home, each city `gc cities`
+#     lists there, the city, rig and store this session's environment names, and
+#     each rig checkout in the city's rig map. A directory's listing and a file's
+#     contents are denied, and their metadata is not, because node resolves a
+#     path by reading the metadata of each directory above it.
 #   - every loopback port but the one the capture's own server listens on, and
 #     every Unix socket but the system resolver's, so the supervisor's API, the
 #     Dolt server and the session server do not answer.
@@ -50,6 +50,8 @@
 # The run is refused before the engine starts when:
 #   - a directory it would read and write holds one of the city's directories,
 #     or lies inside one in no rig's worktree;
+#   - gc's home holds a city registry that `gc cities` does not read, because
+#     then the cities to deny are unknown;
 #   - a city is known and its rig map does not read, because then the rig
 #     checkouts to deny are unknown;
 #   - a server already answers on the --serve or --serve-dir port, because the
@@ -256,18 +258,29 @@ _demo_engine_under() {
   return 1
 }
 
-# _demo_engine_cities: each city path gc's home lists in cities.toml, one per
-# line.
+# _demo_engine_cities: reads into _DEMO_ENGINE_CITIES each city path `gc cities`
+# lists, one per line, for the gc home the environment names and for the user's
+# own. A home with no registry lists none. Returns 1, having said why, when gc
+# does not read a registry, because the cities to deny are then unknown.
 _demo_engine_cities() {
-  local h
+  local h out paths NL='
+'
+  _DEMO_ENGINE_CITIES=""
   for h in "${GC_HOME:-}" "${HOME:+$HOME/.gc}"; do
     [ -n "$h" ] && [ -f "$h/cities.toml" ] || continue
-    sed -n 's/^[[:space:]]*path[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$h/cities.toml"
+    if command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+      && out=$(GC_HOME="$h" gc cities --json) \
+      && paths=$(printf '%s' "$out" | jq -er '.cities | map(.path) | join("\n")'); then
+      _DEMO_ENGINE_CITIES="$_DEMO_ENGINE_CITIES$NL$paths"
+    else
+      _demo_engine_say "gc did not read the city registry in $h, so the cities to keep out of the capture's reach are unknown"
+      return 1
+    fi
   done
 }
 
-# _demo_engine_city_known: true when gc's home lists a city that exists, or the
-# environment names one.
+# _demo_engine_city_known: after _demo_engine_cities, true when gc's home lists a
+# city that exists, or the environment names one.
 _demo_engine_city_known() {
   local p
   while IFS= read -r p; do
@@ -275,14 +288,15 @@ _demo_engine_city_known() {
   done <<EOF
 ${GC_CITY_PATH:-}
 ${GC_CITY:-}
-$(_demo_engine_cities)
+${_DEMO_ENGINE_CITIES:-}
 EOF
   return 1
 }
 
-# _demo_engine_city_places <rigs>: each directory that holds the live city's
-# state, one canonical path per line: gc's home, each city it lists, the city,
-# rig and store the environment names, and each rig checkout in <rigs>.
+# _demo_engine_city_places <rigs>: after _demo_engine_cities, each directory that
+# holds the live city's state, one canonical path per line: gc's home, each city
+# it lists, the city, rig and store the environment names, and each rig checkout
+# in <rigs>.
 _demo_engine_city_places() {
   local p
   while IFS= read -r p; do
@@ -296,7 +310,7 @@ ${GC_RIG_ROOT:-}
 ${GC_BEADS_SCOPE_ROOT:-}
 ${BEADS_DIR:-}
 ${GC_CITY_RUNTIME_DIR:-}
-$(_demo_engine_cities)
+${_DEMO_ENGINE_CITIES:-}
 $1
 EOF
 }
@@ -324,10 +338,12 @@ EOF
 # _demo_engine_city: reads where the live city keeps its state into
 # _DEMO_ENGINE_RIGS, each rig checkout its rig map lists, and
 # _DEMO_ENGINE_PLACES, each of its directories, one canonical path per line.
-# Returns 1, having said why, when a city is known and its rig map does not
-# read, because the rig checkouts to deny are then unknown.
+# Returns 1, having said why, when gc does not read a city registry, or when a
+# city is known and its rig map does not read, because the cities or the rig
+# checkouts to deny are then unknown.
 _demo_engine_city() {
   local p
+  _demo_engine_cities || return 1
   if _demo_engine_city_known && ! _demo_engine_rig_map; then
     _demo_engine_say "the city's rig map did not read, so the rig checkouts to keep out of the capture's reach are unknown; $DEMO_ENGINE_LIB_DIR/rig-map.sh says why"
     return 1

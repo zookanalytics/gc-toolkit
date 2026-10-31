@@ -100,8 +100,10 @@ done
 # installer prints, to the stdout it was given, and fails on NPM_INSTALL_RC or
 # INSTALL_RC. npx hands the published engine's CLI to $ENGINE_STUB. gc lists
 # the sprintshow rig at $SS_RIG beside another rig, or prints $RIGS_JSON, or
-# fails on GC_RC, and answers the pack command `gc gc-toolkit scripts-dir` with
-# $PACK_SCRIPTS. ffmpeg is the host's, so the video fetches none. sandbox-exec
+# fails on GC_RC, lists the cities in $GC_HOME's registry the way `gc cities
+# --json` prints them, or fails on CITIES_RC, and answers the pack command
+# `gc gc-toolkit scripts-dir` with $PACK_SCRIPTS. ffmpeg is the host's, so the
+# video fetches none. sandbox-exec
 # keeps the profile in $SANDBOX_PROFILE and the engine's environment in
 # $SANDBOX_ENV, then runs the engine.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
@@ -143,6 +145,12 @@ echo "npx stub: unexpected call: $*" >&2; exit 97
 NPX
 cat >"$BIN/gc" <<'GC'
 #!/usr/bin/env bash
+if [ "${1:-} ${2:-}" = "cities --json" ]; then
+  if [ "${CITIES_RC:-0}" != 0 ]; then echo 'gc cities: parsing registry: toml: expected a value' >&2; exit "$CITIES_RC"; fi
+  sed -n 's/^ *path = "\(.*\)"$/\1/p' "${GC_HOME:?}/cities.toml" \
+    | jq -Rnc --arg r "$GC_HOME/cities.toml" '{cities: [inputs | {name: "fixture", path: .}], ok: true, registry_path: $r, schema_version: "1"}'
+  exit 0
+fi
 if [ "${1:-} ${2:-}" = "rig list" ]; then
   if [ "${GC_RC:-0}" != 0 ]; then echo 'gc: the city did not answer' >&2; exit "$GC_RC"; fi
   if [ -n "${RIGS_JSON:-}" ]; then printf '%s\n' "$RIGS_JSON"; exit 0; fi
@@ -171,6 +179,8 @@ NOFFMPEG="$TMPD/bin-noffmpeg"; mkdir -p "$NOFFMPEG"
 for s in jq node npx npm gc sandbox-exec; do ln -s "$BIN/$s" "$NOFFMPEG/$s"; done
 NOSBX="$TMPD/bin-nosandbox"; mkdir -p "$NOSBX"
 for s in jq node npx npm gc ffmpeg; do ln -s "$BIN/$s" "$NOSBX/$s"; done
+NOGC="$TMPD/bin-nogc"; mkdir -p "$NOGC"
+for s in jq node npx npm ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOGC/$s"; done
 
 # The engine's CLI: help lists its commands, lint passes, run writes the clip
 # and the engine's closing report, and screenshot writes the PNG.
@@ -387,6 +397,8 @@ printf 'SECRET-CITY-STORE\n' >"$CITY/.beads/issues.jsonl"
 printf 'SECRET-RIG-STORE\n' >"$RIGA/.beads/issues.jsonl"
 printf 'SECRET-OUTSIDE-RIG-STORE\n' >"$OUTRIG/.beads/issues.jsonl"
 printf '# SECRET-GC-HOME\n[[cities]]\n  path = "%s"\n  name = "fixture"\n' "$CITY" >"$GCH/cities.toml"
+USERHOME="$TMPD/user-home"; USERCITY="$TMPD/user-city"; mkdir -p "$USERHOME/.gc" "$USERCITY"
+printf '[[cities]]\n  path = "%s"\n  name = "fixture"\n' "$USERCITY" >"$USERHOME/.gc/cities.toml"
 RIGS_JSON=$(jq -nc --arg a "$RIGA" --arg o "$OUTRIG" --arg e "$ENGINE" \
   '{rigs: [{name: "alpha", path: $a}, {name: "outside", path: $o}, {name: "sprintshow", path: $e}]}')
 CITY_ENV=(GC_HOME="$GCH" GC_CITY_PATH="$CITY" GC_RIG_ROOT="$RIGA" GT_ROOT="$CITY" BEADS_DIR="$RIGA/.beads"
@@ -437,6 +449,30 @@ for cap in video screenshot; do
   not_captured "$cap"
   capture "$cap" SS_RIG="$ENGINE" GC_RC=1
   eq "$RC" 0 "($cap) with no city known, an unread rig map leaves nothing unknown"
+
+  echo "# ($cap) REGISTRY: gc's own read of its registry names the cities to deny, in the home the environment names and the user's own"
+  capture "$cap" SS_RIG="$ENGINE" GC_HOME="$GCH"
+  eq "$RC" 0 "($cap) a city only the registry names captures"
+  has "(deny file-read-data file-write* (subpath \"$CITY\"))" "$(profile)" "($cap) and that city is denied"
+  capture "$cap" SS_RIG="$ENGINE" GC_HOME="$GCH" HOME="$USERHOME"
+  eq "$RC" 0 "($cap) with a registry in each home, it captures"
+  has "(deny file-read-data file-write* (subpath \"$CITY\"))" "$(profile)" "($cap) the city GC_HOME's registry lists is denied"
+  has "(deny file-read-data file-write* (subpath \"$USERCITY\"))" "$(profile)" "($cap) and so is the one the user's own registry lists"
+  capture "$cap" SS_RIG="$ENGINE" GC_RC=1 GC_HOME="$GCH"
+  eq "$RC" 1 "($cap) a city only the registry names is known, so an unread rig map exits 1"
+  has "the city's rig map did not read" "$(err)" "($cap) it says the rig checkouts are unknown"
+  not_captured "$cap"
+  capture "$cap" SS_RIG="$ENGINE" GC_HOME="$GCH" CITIES_RC=1
+  eq "$RC" 1 "($cap) a registry gc does not read exits 1"
+  has "gc did not read the city registry in $GCH" "$(err)" "($cap) it names the home"
+  has "gc cities: parsing registry" "$(err)" "($cap) and passes on gc's reason"
+  not_captured "$cap"
+  STUB_PATH="$NOGC" capture "$cap" SS_RIG="$ENGINE" GC_HOME="$GCH"
+  eq "$RC" 1 "($cap) a registry with no gc to read it exits 1"
+  has "gc did not read the city registry in $GCH" "$(err)" "($cap) it says so"
+  not_captured "$cap"
+  capture "$cap" SS_RIG="$ENGINE" CITIES_RC=1
+  eq "$RC" 0 "($cap) a home with no registry asks gc for nothing"
 
   echo "# ($cap) CITY: a working directory that holds the city's, or lies in it outside any rig worktree, stops the capture"
   capture "$cap" FROM="$TMPD" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
