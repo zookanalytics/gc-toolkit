@@ -69,7 +69,7 @@ description = "Dev-server command the engine spawns, waits for, and tears down (
 default = ""
 
 [vars.base_url]
-description = "URL of a server already running, driven as-is. One of serve_dir / serve_cmd / base_url."
+description = "URL of a deployed preview, driven as-is. A URL on this host is refused, because a server already running here runs outside the capture's sandbox. One of serve_dir / serve_cmd / base_url."
 default = ""
 
 [vars.serve_port]

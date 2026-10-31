@@ -50,8 +50,7 @@ actions.
 
 A running helm service is out of a capture's reach, because a capture refuses a
 `--base-url` on this host, and its verbs file, dispatch and close visits in the
-live city.
-The verdict says that the board shows fixture data.
+live city. The verdict says that the board shows fixture data.
 
 ## Reports a command prints
 
@@ -69,6 +68,7 @@ The verdict says the report shows fixture data.
 Pack scripts compose the city's comments and PR bodies, so render what the
 reviewed commit composes. A composer that prints, such as
 `bring-current-audit.sh render --as comment`, reads its bead from the city's
-store, so run it with `gc` stubbed on fixture data, as for a report. A composer that posts, such as `signoff.sh`, writes to GitHub when it
-runs, so never run it on a live bead. Build its markdown with `gh` stubbed, as
-its test suite does.
+store, so run it with `gc` stubbed on fixture data, as for a report. A composer
+that posts, such as `signoff.sh`, writes to GitHub when it runs, so never run
+it on a live bead. Build its markdown with `gh` stubbed, as its test suite
+does.

@@ -46,7 +46,7 @@ Required vars:
   {{rig_name}}: Rig whose app is demoed. Resolved to a checkout path via `gc rig list`; also the default root for a relative serve_dir.
 
 Optional vars:
-  {{base_url}}: URL of a server already running, driven as-is. One of serve_dir / serve_cmd / base_url. (default=)
+  {{base_url}}: URL of a deployed preview, driven as-is. A URL on this host is refused, because a server already running here runs outside the capture's sandbox. One of serve_dir / serve_cmd / base_url. (default=)
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{capture_mode}}: walkthrough (default, one continuous recorded take) or proof (one checked screenshot per step). (default=walkthrough)
   {{deliver_pr}}: PR number or URL to deliver the clip to, when no deliver_subject names one. Optional. (default=)

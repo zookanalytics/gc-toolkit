@@ -387,7 +387,7 @@ printf '# SECRET-GC-HOME\n[[cities]]\n  path = "%s"\n  name = "fixture"\n' "$CIT
 RIGS_JSON=$(jq -nc --arg a "$RIGA" --arg o "$OUTRIG" --arg e "$ENGINE" \
   '{rigs: [{name: "alpha", path: $a}, {name: "outside", path: $o}, {name: "sprintshow", path: $e}]}')
 CITY_ENV=(GC_HOME="$GCH" GC_CITY_PATH="$CITY" GC_RIG_ROOT="$RIGA" BEADS_DIR="$RIGA/.beads"
-  BD_ROUTING_MODE=direct DOLT_PORT=3307 TMUX=/tmp/tmux-0/default,1,0 RIGS_JSON="$RIGS_JSON")
+  BD_ROUTING_MODE=direct DOLT_PORT=3307 TMUX=/tmp/tmux-0/default RIGS_JSON="$RIGS_JSON")
 git -C "$RIGA" init -q && git -C "$RIGA" -c user.name=fixture -c user.email=fixture@example.com commit -q --allow-empty -m init \
   || { echo "test setup: cannot make the rig's git repository" >&2; exit 2; }
 RWT="$CITY/.gc/worktrees/alpha/wt"; mkdir -p "$(dirname "$RWT")"
