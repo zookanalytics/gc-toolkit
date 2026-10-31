@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the store-only exit's validating closer
-description: The search the arch check asks for before mol-polecat-work's store-only exit hands a work bead its run's record finishes to a validating closer, through assets/scripts/store-only-exit.sh --done. What Gas City, the packs it bundles and publishes, and bd ship for closing a work bead whose run ends with no commit, read at named upstream commits; why none of it covers the hand-off; and which native pieces the hand-off composes. Read it when checking whether the pack still needs the --done hand-off, or whether Gas City now closes such a bead itself.
+description: The arch check asks a change that adds pack surface to show why Gas City does not already cover it. Read this when checking whether the pack still needs assets/scripts/store-only-exit.sh --done, or whether Gas City now closes a bead whose run ends with no commit.
 ---
 
 # Gas City search for the store-only exit's validating closer
@@ -82,11 +82,11 @@ Each was read on 2026-10-30 (UTC):
   pins its public packs to: `gastown` at `cb6a612882b8` and `gascity` at
   `5bf643ca55bd` (package config, `PublicGastownPackVersion` and
   `PublicGascityPackVersion`). Every pack was searched for each command that
-  closes a bead (`bd close`, `--status=closed`), and each hit was read for the
-  bead it closes and the evidence behind the close. The `gastown` polecat and
-  refinery formulas were read for a run with no commit, the `gascity` pack's
-  `do-work` and `implementation-base` formulas for their close step, and every
-  formula for `[steps.on_complete]`.
+  closes a bead (`bd close`, `--status=closed`, and the Go and Python that build
+  one), and each hit was read for the bead it closes and the evidence behind the
+  close. The `gastown` polecat and refinery formulas were read for a run with
+  no commit, the `gascity` pack's `do-work` and `implementation-base` formulas
+  for their close step, and every formula for `[steps.on_complete]`.
 - bd at main `f7b94653eb89`: its `human` command and its gates.
 
 Each passage quoted below from Gas City's and bd's documentation was also found
@@ -129,21 +129,26 @@ file is written. Among the published packs, `pr-pipeline` and `contributing-to-g
 close their run's root with the path of the report it wrote, `github` and
 `discord` close the issue bead they were given, and `gastown`'s crew and dog
 prompts, `mol-digest-generate` and `mol-review-leg` close the work they were
-assigned. Each close rests on the word of the run that makes it.
+assigned. Each close rests on the word of the run that makes it. The Go and
+Python services in `github`, `discord` and `slack-full` close only an intake
+message or a failed dispatch.
 
 **A polecat's work bead closes when its branch lands, and a run with no commit
 goes to a person.** `gastown`'s refinery closes a work bead when it merges the
-bead's branch, or finds the branch already merged. In the pinned `gastown`, a
-branch with no change against its base reaches the refinery, whose
-`halt_false_completion` blocks the bead, routes it to `human`, records
-`merge_result=refused_false_completion`, and nudges the mayor and the witness.
-At the packs repository's main, `mol-polecat-work` stops such a run before the
-push: its content gate records `halt_reason=no_commits`, leaves the bead open,
-unassigned and unrouted, and nudges the mayor and the witness. It tells the
-polecat that a run whose honest answer is that no code change is warranted "is
-a legitimate outcome — but it is reported, not handed off." Either way the
-bead closes only when the person or coordinator the nudge reaches closes it.
-That is the release the store-only exit made before this change.
+bead's branch, or finds the branch already merged, and its witness closes an
+orphaned one whose branch is already on main. At the packs repository's main,
+its `pr-merge-reconcile` command also closes one whose pull request has merged.
+In the pinned `gastown`, a branch with no change against its base reaches the
+refinery, whose `halt_false_completion` blocks the bead, routes it to `human`,
+records `merge_result=refused_false_completion`, and nudges the mayor and the
+witness. At the packs repository's main, `mol-polecat-work` stops such a run
+before the push: its content gate records `halt_reason=no_commits`, leaves the
+bead open, unassigned and unrouted, and nudges the mayor and the witness. It
+tells the polecat that a run whose honest answer is that no code change is
+warranted "is a legitimate outcome — but it is reported, not handed off."
+Either way the bead closes only when the person or coordinator the nudge
+reaches closes it. That is the release the store-only exit made before this
+change.
 
 **The build pack closes its anchor in a verifier step of every run.** The
 `gascity` pack's `do-work` and `implementation-base` formulas end in a
@@ -188,9 +193,11 @@ targeting the same bead are legitimate concurrent work" (package sling,
 **Nothing pours a formula when a blocker closes.** The `core` pack's
 `cascade-nudge-on-blocker-close` order nudges the assignee of each dependent of
 a closed blocker, or its `gc.routed_to` target when it has no assignee. A bead
-the store-only exit releases has neither, and a nudge pours nothing. An order
-with `trigger = "event"` and `on = "bead.closed"` "fires whenever the named
-event appears on the bus"
+the store-only exit releases has neither, and a nudge pours nothing.
+[`gc session wait`](https://docs.gascity.com/reference/cli#gc-session-wait)
+wakes a session when the beads it watches close, with a reminder, and it pours
+nothing either. An order with `trigger = "event"` and `on = "bead.closed"`
+"fires whenever the named event appears on the bus"
 ([Tutorial 07 - Orders](https://docs.gascity.com/tutorials/07-orders#trigger-types)),
 and the order supplies what it runs. Gas City's readiness holds a bead behind
 an open `blocks` blocker (package beads, `IsReadyBlockingDependencyType`).
@@ -204,10 +211,11 @@ stamp back here". The claimed step names its run's root in `gc.root_bead_id`.
 **A person's decision has native forms.** A bd gate blocks "dependent work
 until an external condition is met"
 ([Dependencies and Gates](https://beads.gascity.com/core-concepts/dependencies#gates)),
-and a human gate is one only a person resolves. The `core` pack's
-`notify-on-human-gate-creation` order mails and nudges a human gate's addressee
-when the gate is created, and `renudge-stale-human-gates` does it again for a
-gate left open. bd's `human` label marks a bead waiting on a person:
+and a `human` gate waits on manual approval. The `core` pack's
+`notify-on-human-gate-creation` order mails a human gate's addressee when the
+gate is created, and nudges one that is a session, and
+`renudge-stale-human-gates` does it again for a gate left open. bd's `human`
+label marks a bead waiting on a person:
 [`bd human list`](https://beads.gascity.com/cli-reference/human) lists
 "human-needed beads", and Gas City's pool dispatch skips a bead that carries
 the label (package beadmeta, `HumanLabel`; package config,
@@ -278,6 +286,10 @@ not take:
   the bead. The step records the exit and hands the bead back after the script
   returns, and the hand-back (`assets/scripts/hand-back.sh`) is guarded on what
   the bead showed, so a close that lands first makes it refuse. It fails need 4.
+- A `gc session wait` on the run's root would leave the pour to this run's pool
+  session, which would have to wake after its terminal step and sling the closer
+  from a reminder. The deferred-dispatch pass needs no session to outlive the
+  run.
 - A human gate or the `human` label is the bead's other option, a demand that
   only a person's judgment satisfies. A finished record needs a check, not that
   judgment, so the change asks a person only when the check fails.
