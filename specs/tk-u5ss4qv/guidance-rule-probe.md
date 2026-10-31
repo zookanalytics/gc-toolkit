@@ -16,6 +16,10 @@ choice with no listing command. No run flagged any of those under the old text.
 It does not catch either case the operator objected to as a favored option or a
 number. It moves authors only when nothing pushes against the command.
 
+On codex, which runs the reviews, the filed text also blocks rules only this
+repository binds, in every run, until `AGENTS.md` says a docs page is a right
+place for them. That paragraph leaves the rubric and the pointer blocked.
+
 ## What reviewers did
 
 Each cell counts the runs with a blocking finding on what the new entry covers.
@@ -105,6 +109,56 @@ pointer to a skill meets the entry, the reason R2's one approving filed run give
 and none cites the sentence. So nothing here says why the counts differ, and nine
 runs a side is a caution rather than a measurement.
 
+## On codex
+
+Every routed review runs on codex, and the tables above ran on Claude. These cells
+run the reviewer arm on codex. Each counts the runs with a blocking finding on
+where the guidance lives, except R2's, which count the missing command.
+
+| Case | Old text | Filed text | With the `AGENTS.md` paragraph |
+|---|---|---|---|
+| R1, a routing rubric moved into a docs page | 0 of 3 | 3 of 3 | 3 of 3 |
+| R2, an exact command replaced by a pointer to a skill | 0 of 3 | 3 of 3 | 3 of 3 |
+| R6, a convention for authoring skills | 0 of 3 | 3 of 3 | 0 of 3 |
+| R10, this effort's lines in `docs/review-arch.md` and `docs/review-triage.md` | 0 of 3 | 3 of 3 | 0 of 3 |
+| R10b, those lines, with a purpose line saying the review formula prints the page | not run | 0 of 3 | 0 of 3 |
+| R5, a rig's guidance page, with that purpose line | not run | 0 of 3 | 0 of 3 |
+
+The paragraph holds R6 and R10 and leaves R1 and R2 blocked. All three R1 runs
+under it say it does not reach a rubric that routes work in every rig. R2 stays at
+3 of 3, where Claude's count went from 8 of 9 to 6 of 9. No codex run under the old
+or the filed text cites `AGENTS.md`.
+
+R10 and R10b show the same diff, and only the purpose line differs. R10b's says the
+page is gc-toolkit's own guidance, which the review formula prints to the reviewer,
+and that takes the filed text from 3 of 3 to 0 of 3. One of those three runs gives
+that as its reason, and the other two give none. R5's purpose line says the same,
+so R5 does not show what a page with no such line draws on codex.
+
+On Claude, on these arms, R1 reads 3 of 3, R6 0 of 3 and R10 0 of 3 with the
+paragraph. Under the filed text R10 reads 0 of 3 there, and all three runs cite
+`AGENTS.md` as it stands. So the providers differ on these lines with no paragraph,
+3 of 3 against 0 of 3, and agree once it is there.
+
+Other entries also block, and the cells leave them out. R5 draws a counted set and
+a missing command in every run of both arms. A claim the diff cannot show draws two
+old R6 runs and one R6 run with the paragraph, on what its test suite checks, and
+all three old R10 runs and one R10 run with the paragraph, on "the list its author
+saw at self-review".
+
+The arm and the purpose lines are rebuilt from the Method section, because the
+first run's scratch is gone, so these cells and the tables above come from different
+arms. The fragments are at c83311fa1. The old arm is that arm with this entry's
+anchor and text taken out, and the paragraph arm adds the paragraph `AGENTS.md`
+carries. R10 is `git diff origin/main...c83311fa1` on the two pages. Every codex call
+was `codex exec --ephemeral --skip-git-repo-check --ignore-rules -s read-only -C
+<empty directory> -m gpt-6.1-sol -c 'model_reasoning_effort="medium"' -c
+developer_instructions=<arm> --json`, with the case on stdin and `OPENAI_API_KEY`,
+`GH_TOKEN`, `GITHUB_TOKEN`, `GC_*` and `BEADS_*` unset. The 48 calls read 952k input
+tokens, 622k of them cached. The 12 Claude calls use the Method section's command
+and cost $0.68. I read the codex outputs whole, and each Claude output to the
+sentence where it clears or blocks the lines.
+
 ## Method
 
 Every call was `claude -p --model claude-opus-5-5 --tools "" --max-turns 1
@@ -135,5 +189,7 @@ author runs A2 to A5.
 - A real author has a far longer prompt, tools and the file's context, so the
   author half shows a direction only.
 - Three runs a cell is thin. R2 went from 3 of 3 to 8 of 9 when widened.
+- A purpose line moved R10 on codex, so a real review of such a page can read
+  either way. No run here shows which.
 - The correctness check reads the fragments from the installed pack, so it holds
   the effort's own PR to the entry only once the entry is installed.
