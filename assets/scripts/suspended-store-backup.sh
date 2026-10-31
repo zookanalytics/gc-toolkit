@@ -71,8 +71,10 @@ command -v flock >/dev/null 2>&1 || {
     exit 1
 }
 
-# The endpoint origin as Gas City reads it from a scope's config: the first
-# top-level gc.endpoint_origin line with a value.
+# The endpoint origin in the form gc writes it: the first top-level
+# gc.endpoint_origin line with a value. Gas City's own read also takes a quoted or
+# nested spelling, which reads here as another origin, so that store is left alone
+# and the alarms keep flagging it.
 endpoint_origin() {
     awk '/^gc\.endpoint_origin[[:space:]]*:/ {
         v = $0

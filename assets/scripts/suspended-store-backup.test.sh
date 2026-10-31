@@ -60,7 +60,16 @@ case "$*" in
         echo "backup sync failed: disk full" >&2
         exit 3
         ;;
+      fail-multibyte)
+        printf '\342\200\224%.0s' $(seq 1 120) >&2
+        echo "reason after a multibyte run" >&2
+        exit 3
+        ;;
       hang) exec sleep 30 ;;
+      hang-ignoring-term)
+        trap '' TERM
+        sleep 120
+        ;;
       hang-child)
         sleep 30 >/dev/null 2>&1 &
         echo "$!" > "$STUB_DIR/child.pid"
@@ -106,6 +115,7 @@ rig rig-f true false '# gc.endpoint_origin: explicit\ngc.endpoint_origin:   inhe
 rig rig-g true false 'gc:\n  gc.endpoint_origin: inherited_city\n' yes
 rig rig-h true false 'gc.endpoint_origin: "inherited_city"\n' yes
 rig rig-i true false 'gc.endpoint_origin:\ngc.endpoint_origin: inherited_city\n' yes
+rig rig-j true false 'gc:\n  endpoint_origin: inherited_city\n' yes
 list_rigs
 run
 eq "$RC" 0 "a pass whose syncs all succeed exits 0"
@@ -115,8 +125,9 @@ eq "$(sed -n 1p "$STUB_DIR/gc.log")" "--city $CITY rig list --json" "the rig lis
 has "$OUT" "rig-c: left alone, its endpoint origin is explicit" "a suspended rig with another origin is left alone, and the pass says why"
 has "$OUT" "rig-d: left alone, it has no registered backup destination" "so is a store with no registered destination"
 has "$OUT" "rig-e: left alone, its endpoint origin is not recorded" "and one whose config does not read"
-has "$OUT" "rig-g: left alone" "an indented key is not the top-level line Gas City reads"
-has "$OUT" 'rig-h: left alone, its endpoint origin is "inherited_city"' "and Gas City does not read a quoted value as an origin"
+has "$OUT" "rig-g: left alone" "an indented key is not the line gc writes"
+has "$OUT" 'rig-h: left alone, its endpoint origin is "inherited_city"' "nor is a quoted value, though Gas City's own read takes one"
+has "$OUT" "rig-j: left alone" "nor is the nested spelling, which it also takes"
 hasnt "$OUT" "rig-b" "a running rig is mol-dog-backup's, and goes unmentioned"
 hasnt "$OUT" "town" "so does the city's own row, whatever it reports"
 has "$OUT" "synced 3 of 3" "the summary counts what it covered"
@@ -174,6 +185,16 @@ list_rigs
 OUT="$(env PATH="$TMP/flockshim:$TMP/bin:$PATH" GC_CITY_PATH="$CITY" GC_DOLT_BACKUP_LOCK_FILE="$LOCK" GC_SUSPENDED_BACKUP_LOCK_WAIT=30 "$SUT" 2>&1)"; RC=$?
 eq "$RC" 0 "a pass under the logging flock runs"
 eq "$(tr '\n' '|' < "$STUB_DIR/flock.log")" "-w 30 9 free|-u 9|-w 30 9 free|-u 9|" "each store takes the lock and gives it back, and the next finds it free"
+
+echo "# a failed sync gives the lock back too"
+reset
+rig rig-a true false "$INHERITS" yes
+rig rig-f true false "$INHERITS" yes
+list_rigs
+echo fail > "$STUB_DIR/sync.rig-a"
+OUT="$(env PATH="$TMP/flockshim:$TMP/bin:$PATH" GC_CITY_PATH="$CITY" GC_DOLT_BACKUP_LOCK_FILE="$LOCK" GC_SUSPENDED_BACKUP_LOCK_WAIT=30 "$SUT" 2>&1)"; RC=$?
+eq "$RC" 1 "a pass under the logging flock fails on that sync"
+eq "$(tr '\n' '|' < "$STUB_DIR/flock.log")" "-w 30 9 free|-u 9|-w 30 9 free|-u 9|" "and the failed store's lock is released like any other"
 
 echo "# the wait outlasts a run that holds the lock"
 reset
@@ -235,6 +256,25 @@ hasnt "$LAST" "answering from the rig store" "and only the end of what it printe
 eq "$(printf '%s\n' "$OUT" | grep -c 'rig-a: backup sync exited 3')" "1" "named once"
 [ "${#LAST}" -le 400 ] && ok "a line short enough for that tail" || bad "a line short enough for that tail (${#LAST} chars)"
 
+echo "# a failure's reason survives a cut through a multibyte character"
+reset
+rig rig-a true false "$INHERITS" yes
+list_rigs
+echo fail-multibyte > "$STUB_DIR/sync.rig-a"
+run LC_ALL=en_US.UTF-8
+eq "$RC" 1 "a pass with a failed sync exits 1"
+has "$(printf '%s\n' "$OUT" | tail -n 1)" "reason after a multibyte run" "and still names the reason"
+
+echo "# a pass leaves no scratch file behind"
+reset
+rig rig-a true false "$INHERITS" yes
+list_rigs
+echo fail > "$STUB_DIR/sync.rig-a"
+mkdir -p "$TMP/run-tmp"
+run TMPDIR="$TMP/run-tmp"
+eq "$RC" 1 "a pass whose output it had to keep exits as it should"
+eq "$(ls -A "$TMP/run-tmp")" "" "and its temp dir is empty afterwards"
+
 echo "# a sync that hangs is bounded, and the remaining rigs still get their turn"
 reset
 rig rig-a true false "$INHERITS" yes
@@ -245,6 +285,20 @@ run GC_DOLT_BACKUP_SYNC_TIMEOUT_SECS=1
 eq "$RC" 1 "a pass with a hung sync exits 1"
 eq "$(synced)" "rig-a rig-f" "the next store still syncs"
 has "$OUT" "rig-a: backup sync timed out after 1s" "the hang is named as one"
+
+echo "# a sync that ignores the bound's TERM is killed, so it cannot hold up the rest"
+reset
+rig rig-a true false "$INHERITS" yes
+rig rig-f true false "$INHERITS" yes
+list_rigs
+echo hang-ignoring-term > "$STUB_DIR/sync.rig-a"
+STARTED=$SECONDS
+run GC_DOLT_BACKUP_SYNC_TIMEOUT_SECS=1
+TOOK=$((SECONDS - STARTED))
+eq "$RC" 1 "a pass with such a sync exits 1"
+eq "$(synced)" "rig-a rig-f" "the next store still syncs"
+has "$OUT" "rig-a: backup sync timed out after 1s" "the kill reads as the timeout it is"
+[ "$TOOK" -lt 100 ] && ok "and the pass did not wait the sync out" || bad "and the pass did not wait the sync out (${TOOK}s)"
 
 echo "# the bound reaches the bd that gc bd runs as a child"
 reset
