@@ -178,9 +178,24 @@ for m in file-design-create file-design-wait file-implementation-create file-imp
   fi
 done
 
+# in_shell <shell> <script>: runs the script the way every case does. zsh runs
+# with -f, because a plain zsh runs its home's .zshenv before the script, and a
+# .zshenv that puts Homebrew first on PATH sets the real git ahead of the stubs.
+in_shell() { if [ "$1" = zsh ]; then zsh -f "$2"; else "$1" "$2"; fi; }
+
 SHELLS=(bash)
 if command -v zsh >/dev/null 2>&1; then
   SHELLS+=(zsh)
+  # This .zshenv stops any zsh that reads it, so a case that starts a plain zsh
+  # fails in every home, not only in a home whose own .zshenv gets in the way.
+  mkdir -p "$TMP/zdot"
+  printf 'exit 7\n' > "$TMP/zdot/.zshenv"
+  export ZDOTDIR="$TMP/zdot"
+  printf ':\n' > "$TMP/noop.sh"
+  RC=0; zsh "$TMP/noop.sh" || RC=$?
+  eq "$RC" "7" "(premise) a plain zsh runs the .zshenv before its script"
+  RC=0; in_shell zsh "$TMP/noop.sh" || RC=$?
+  eq "$RC" "0" "the zsh every case runs reads no startup file"
 else
   echo "note - zsh not present; executing under bash only"
 fi
@@ -198,7 +213,7 @@ resolve() {
     printf '%s\n' "${RESOLVE//\{\{design_gated\}\}/$val}"
     printf 'printf "%%s\\n" "$DESIGN_GATED"\n'
   } > "$TMP/resolve.sh"
-  "$sh" "$TMP/resolve.sh" 2> "$TMP/resolve.err"
+  in_shell "$sh" "$TMP/resolve.sh" 2> "$TMP/resolve.err"
 }
 
 for sh in "${SHELLS[@]}"; do
@@ -425,7 +440,7 @@ run_block() {
 run_file() {
   : > "$GC_LOG"; rm -f "$TMP/past.flag"
   RC=0
-  PATH="$TMP/bin:$PATH" "$1" "$TMP/block.sh" >"$TMP/block.out" 2>"$TMP/block.err" || RC=$?
+  PATH="$TMP/bin:$PATH" in_shell "$1" "$TMP/block.sh" >"$TMP/block.out" 2>"$TMP/block.err" || RC=$?
 }
 logged()     { grep -qF -- "$1" "$GC_LOG"; }
 not_logged() { ! grep -qF -- "$1" "$GC_LOG"; }
