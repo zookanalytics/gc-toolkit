@@ -8,7 +8,8 @@ Contract (self-cleaning model): receive work -> follow steps in order ->
 push branch, hand the bead to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
-bead and names the disposition for whoever owns the close.
+bead and names the disposition for whoever owns the close. A bead its record
+finishes goes to its validating closer, mol-validate-close.
 NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
@@ -1266,8 +1267,10 @@ work.
 Take this arm only when the run produced no commit, and name what it did
 produce in `STORE_ONLY_RECORD` (the bead ids this run created or routed).
 Empty means this is not that case and the run falls through to the branch
-gate. The block refuses the arm when a diff exists, so a run that merely
-forgot to commit cannot park itself as store work.
+gate. `assets/scripts/store-only-exit.sh` refuses the arm when the run has work
+to land, a commit ahead of the base, an uncommitted change or the branch on
+origin, so a run that merely forgot to commit cannot park itself as store work.
+Its refusal writes nothing.
 
 The release is the one the halt arm writes: open, unassigned, route cleared,
 and the claim's session pins `gc.session_id` and `gc.session_name` removed.
@@ -1303,20 +1306,16 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 # >>> submit-store-only-exit
 STORE_ONLY_RECORD=""
+# The close brief, written only when the record finishes the bead; the quoted
+# heredoc keeps it verbatim.
+STORE_ONLY_DONE=$(cat <<'BRIEF'
+
+BRIEF
+)
 if [ -n "$STORE_ONLY_RECORD" ]; then
-  AHEAD=$(git rev-list --count "origin/{{base_branch}}..HEAD" 2>/dev/null || echo 0)
-  DIRTY=$(git status --porcelain 2>/dev/null || true)
-  PUSHED=$(git ls-remote origin "refs/heads/polecat/$WORK_BEAD_ID" 2>/dev/null || true)
-  if [ "${AHEAD:-0}" != "0" ] || [ -n "$DIRTY" ] || [ -n "$PUSHED" ]; then
-    echo "STORE-ONLY EXIT REFUSED: this run has work to land"
-    echo "  commits ahead of origin/{{base_branch}}: ${AHEAD:-0}"
-    echo "  uncommitted changes: ${DIRTY:+yes}"
-    echo "  branch already on origin: ${PUSHED:+polecat/$WORK_BEAD_ID}"
-    echo "Land it the normal way: branch gate, target resolve, refinery handoff."
-    echo "If none of it is yours, you are in the shared rig checkout rather than a per-bead worktree: mail the witness that fact instead of releasing the bead."
-    gc runtime drain-ack
-    exit 1
-  fi
+  # >>> submit-store-only-check
+  "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/store-only-exit.sh" --bead "$WORK_BEAD_ID" --base {{base_branch}} --convoy {{convoy_id}} --done "$STORE_ONLY_DONE" || { gc runtime drain-ack; exit 1; }
+  # <<< submit-store-only-check
   gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
   # >>> submit-store-only-hand-back
   HB="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/hand-back.sh" && [ -x "$HB" ] || HB=""
@@ -1336,7 +1335,7 @@ fi
 # <<< submit-store-only-exit
 ```
 
-**What closes the bead is not yours either way**, and which note you leave is
+**What closes the bead is never yours**, and which note you leave is
 the difference between a bead someone can dispose of and one that just sits:
 
 - The work MOVED to another store. The close verb is
@@ -1348,6 +1347,16 @@ the difference between a bead someone can dispose of and one that just sits:
 - The bead legitimately stays open pending something else — a ruling, a
   cadence, a person. Open and unrouted IS the resting state and no close verb
   is owed. Say in the note what would close it.
+- The record FINISHES the bead: a live verification whose every check passed,
+  or any record that meets what the bead's description asks for. Nothing else
+  would close it, so left open it reads as work not yet done. Write the close
+  brief between the `BRIEF` lines: what the record shows, why that meets what
+  the bead asks for, and anything that argues for keeping it open.
+  `store-only-exit.sh` appends it to the bead's notes, holds the bead on this
+  run's root, and arms `mol-validate-close` on the pool this run executes on.
+  Once this run ends, that validating closer re-checks the record against live
+  state, then closes the bead as done, or asks the operator when the record
+  does not hold. The note says its validating closer closes it.
 
 **1. Branch-shape gate (fails closed).** The refinery merges the branch in
 `metadata.branch`; pushing from any other branch strands the bead. The
