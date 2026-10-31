@@ -249,6 +249,134 @@ run
 has '    changes scripts/alpha.sh' "deleting a covered path touches it"
 done_case
 
+# A name with no slash is a path only by being at the top of the repository, so
+# these read the end of the change that still holds it.
+root_row() {  # $1 = entry, $2 = term: is it a path in what --covers printed?
+  grep -qxF "$(printf '%s\tpath\t%s\t-' "$1" "$2")" "$TMP/out"
+}
+
+branch
+git -C "$REPO" rm -q rootfile.toml; commit root-delete
+run
+eq "$rc" 1 "deleting a covered file at the top of the repository exits 1"
+has '    changes rootfile.toml' "it names the file, which only the merge base still holds"
+run --covers
+root_row 'Path warrant' rootfile.toml && ok "--covers reads the deleted file as a path" || bad "--covers does not: $(cat "$TMP/out")"
+done_case
+
+branch
+git -C "$REPO" mv rootfile.toml moved.toml; commit root-rename
+run
+eq "$rc" 1 "renaming a covered file at the top of the repository exits 1"
+has '    changes rootfile.toml' "a rename counts under the name it left"
+done_case
+
+branch
+git -C "$REPO" rm -q rootfile.toml
+run
+has '    changes rootfile.toml' "an uncommitted deletion at the top of the repository counts"
+done_case
+
+branch
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Root warrant
+
+- **Covers.** `notes.txt`.
+- **Verified.** 2026-03-10.
+PAGE
+git -C "$REPO" rm -q notes.txt; commit root-only
+run
+eq "$rc" 1 "an entry naming only a deleted file at the top of the repository exits 1"
+has '- Root warrant: Verified 2026-03-10, added on this branch' "it lists that entry"
+has '    changes notes.txt' "it names the file"
+run --covers
+root_row 'Root warrant' notes.txt && ok "--covers marks that entry a path, not none" || bad "--covers does not: $(cat "$TMP/out")"
+done_case
+
+branch
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Root directory warrant
+
+- **Covers.** `format`.
+- **Verified.** 2026-03-11.
+PAGE
+git -C "$REPO" rm -q -r format; commit root-dir
+run
+has '    changes format' "deleting all of a covered directory at the top of the repository touches it"
+done_case
+
+branch
+printf 'new\n' > "$REPO/staged.toml"
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Staged warrant
+
+- **Covers.** `staged.toml`.
+- **Verified.** 2026-03-12.
+PAGE
+git -C "$REPO" add staged.toml
+run
+has '    changes staged.toml' "a file only staged at the top of the repository is a path"
+run --covers
+root_row 'Staged warrant' staged.toml && ok "--covers marks that entry a path, not none" || bad "--covers does not: $(cat "$TMP/out")"
+done_case
+
+branch
+git -C "$REPO" rm -q lifecycle.toml; commit root-table-home
+run
+has '    changes the table [axis] of lifecycle.toml' "deleting a covered table's file at the top of the repository lists the table's change"
+hasnt 'a changed line names [axis]' "and does not read the table as a bare name"
+run --covers
+grep -qxF "$(printf 'Part warrant\ttable\t[axis]\tlifecycle.toml')" "$TMP/out" && ok "--covers keeps the table's home" || bad "--covers does not: $(cat "$TMP/out")"
+done_case
+
+branch
+cat > "$REPO/rootflow.toml" <<'TOML'
+# >>> root-block
+inside
+# <<< root-block
+TOML
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Root part warrant
+
+- **Covers.** The `root-block` block of `rootflow.toml`.
+- **Verified.** 2026-03-14.
+PAGE
+commit root-block-home
+git -C "$REPO" update-ref refs/remotes/origin/main HEAD
+git -C "$REPO" checkout -q -b case-root-block-delete
+git -C "$REPO" rm -q rootflow.toml; commit root-block-delete
+run
+eq "$rc" 1 "deleting a covered block's file at the top of the repository exits 1"
+has '    changes the block root-block of rootflow.toml' "it lists the block's change"
+run --covers
+grep -qxF "$(printf 'Root part warrant\tblock\troot-block\trootflow.toml')" "$TMP/out" && ok "--covers keeps the block's home, not none" || bad "--covers does not: $(cat "$TMP/out")"
+done_case
+git -C "$REPO" update-ref refs/remotes/origin/main main
+
+branch
+printf 'new\n' > "$REPO/café.toml"
+cat >> "$REPO/docs/warrants.md" <<'PAGE'
+
+## Accent warrant
+
+- **Covers.** `café.toml`.
+- **Verified.** 2026-03-13.
+PAGE
+commit root-accent
+run
+has '    changes café.toml' "a name git would quote is a path at the top of the index"
+git -C "$REPO" update-ref refs/remotes/origin/main HEAD
+git -C "$REPO" checkout -q -b case-root-accent-delete
+git -C "$REPO" rm -q café.toml; commit root-accent-delete
+run
+has '    changes café.toml' "and at the top of the merge base"
+done_case
+git -C "$REPO" update-ref refs/remotes/origin/main main
+
 branch
 printf 'edit\n' >> "$REPO/format/example.sh"; printf 'edit\n' >> "$REPO/scripts/decoy.sh"; commit decoys
 run
@@ -530,7 +658,25 @@ git -C "$REPO" checkout -q --orphan case-unrelated
 git -C "$REPO" commit -qm unrelated
 run
 eq "$rc" 2 "a HEAD sharing no history with the base exits 2"
+run --covers
+eq "$rc" 0 "--covers runs on that HEAD too, since it reads no change"
 done_case
+
+REAL_GIT=$(command -v git)
+mkdir -p "$TMP/failing-git"
+cat > "$TMP/failing-git/git" <<STUB
+#!/usr/bin/env bash
+case " \$* " in *" \$FAIL_VERB "*) echo "git: \$FAIL_VERB failed" >&2; exit 128 ;; esac
+exec "$REAL_GIT" "\$@"
+STUB
+chmod +x "$TMP/failing-git/git"
+for verb in ls-files ls-tree; do
+  for flag in "" --covers; do
+    rc=0; ( cd "$REPO" && FAIL_VERB="$verb" PATH="$TMP/failing-git:$PATH" bash "$SUT" ${flag:+"$flag"} ) >"$TMP/out" 2>"$TMP/err" || rc=$?
+    eq "$rc" 2 "git $verb failing exits 2${flag:+ under $flag}, since every word at the top of the repository would read as no path"
+    grep -q 'which words are paths is unknown' "$TMP/err" && ok "it says why" || bad "it does not say why: $(cat "$TMP/err")"
+  done
+done
 
 # --- What each entry's Covers line names. -------------------------------------
 echo "── --covers ──"
@@ -552,6 +698,11 @@ eq "$(cat "$TMP/out")" "$(printf '%s\n' \
   $'Part warrant\ttable\t[meta.other]\tlifecycle.toml' \
   $'Stale part warrant\tblock\tghost-block\tscripts/ghost.sh' \
   $'Verb warrant\tpath\tscripts/tool.sh\t-')" "each entry's terms, with a path named only as a home dropped"
+
+COVERS_WITH_BASE=$(cat "$TMP/out")
+run --covers --base origin/no-such
+eq "$rc" 0 "--covers runs where the base is not fetched, as in a shallow checkout"
+eq "$(cat "$TMP/out")" "$COVERS_WITH_BASE" "and reads the same terms from the index alone"
 
 branch
 cat >> "$REPO/docs/warrants.md" <<'PAGE'

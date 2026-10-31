@@ -11,11 +11,13 @@
 #
 # The change runs from the merge base of BASE and HEAD to the working tree, the
 # change `git diff --name-only BASE...HEAD` names for the rig's lint_command,
-# and a renamed file counts under both its paths. A name is edited in code or
-# config, so a changed line in a markdown file, a test or specs/ does not touch
-# one, and Covers names a page it covers as a path. A named block or table that
-# its file does not carry on either side counts the whole file, so a stale name
-# lists too much rather than nothing.
+# and a renamed file counts under both its paths. A backticked word with no slash
+# is a path when the top of the repository holds it at either end of the change,
+# so deleting or renaming away a file named that way still touches its warrant. A
+# name is edited in code or config, so a changed line in a markdown file, a test
+# or specs/ does not touch one, and Covers names a page it covers as a path. A
+# named block or table that its file does not carry on either side counts the
+# whole file, so a stale name lists too much rather than nothing.
 #
 # The list is advice. It fails nothing, because the arch review judges each
 # re-verification. Callers: tools/lint.sh, which is how the list reaches the
@@ -26,10 +28,12 @@
 #   --covers    print what each entry's Covers line names, and read no change:
 #               entry, kind, term and home file, tab-separated. A kind is path,
 #               name, block or table, and `none` marks an entry naming nothing.
+#               A BASE it cannot read stops nothing here.
 #
 # Exit: 0 no warrant touched · 1 warrants listed · 2 it could not operate (not a
-#       repository, a BASE git cannot read, or a page it cannot read or that
-#       holds no entry), so nothing was checked
+#       repository, a BASE git cannot read, a page it cannot read or that holds
+#       no entry, or a listing of the top of the repository that failed), so
+#       nothing was checked
 set -uo pipefail
 
 PROG=warrants-touched
@@ -57,6 +61,28 @@ done
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || fail "not inside a git repository"
 cd "$ROOT" || fail "cannot enter the repository root $ROOT"
 [ -r "$PAGE" ] || fail "cannot read $PAGE"
+
+# ── The ends of the change ───────────────────────────────────────────────────
+# --covers reads no change, and CI's shallow checkout holds no base, so a base it
+# cannot read leaves the index to say what is at the top of the repository.
+MERGE_BASE=""
+BASE_PROBLEM=""
+if ! BASE_OID=$(git rev-parse -q --verify "$BASE^{commit}"); then
+  BASE_PROBLEM="cannot read base revision '$BASE', so the change is unknown"
+elif ! MERGE_BASE=$(git merge-base "$BASE_OID" HEAD); then
+  BASE_PROBLEM="HEAD shares no history with '$BASE'"
+fi
+[ -z "$BASE_PROBLEM" ] || [ "$COVERS_ONLY" = 1 ] || fail "$BASE_PROBLEM"
+
+# A file a branch deleted or renamed away is at the top of the merge base alone,
+# and one it has only staged is at the top of the index alone.
+ROOT_NAMES=$(git -c core.quotePath=false ls-files | awk -F/ '!seen[$1]++ { print $1 }') \
+  || fail "cannot list the files git tracks, so which words are paths is unknown"
+if [ -n "$MERGE_BASE" ]; then
+  BASE_ROOT_NAMES=$(git -c core.quotePath=false ls-tree --name-only "$MERGE_BASE") \
+    || fail "cannot list the top of $MERGE_BASE, so which words are paths is unknown"
+  ROOT_NAMES="$ROOT_NAMES"$'\n'"$BASE_ROOT_NAMES"
+fi
 
 # ── The page ─────────────────────────────────────────────────────────────────
 # Prints one E row per entry (entry, Verified date, Verified text, Covers text)
@@ -172,7 +198,6 @@ parse_page() {
   ROOT_NAMES="$ROOT_NAMES" PAGE_DIR="${PAGE%/*}" awk "$PARSE_AWK"
 }
 
-ROOT_NAMES=$(git ls-tree --name-only HEAD 2>/dev/null)
 ROWS=$(parse_page < "$PAGE") || fail "cannot parse $PAGE"
 case "$ROWS" in
   E*) ;;
@@ -191,9 +216,6 @@ if [ "$COVERS_ONLY" = 1 ]; then
 fi
 
 # ── The change ───────────────────────────────────────────────────────────────
-BASE_OID=$(git rev-parse -q --verify "$BASE^{commit}") \
-  || fail "cannot read base revision '$BASE', so the change is unknown"
-MERGE_BASE=$(git merge-base "$BASE_OID" HEAD) || fail "HEAD shares no history with '$BASE'"
 CHANGED=$(git -c core.quotePath=false diff --no-renames --name-only "$MERGE_BASE" --) \
   || fail "cannot list the files changed since $MERGE_BASE"
 
