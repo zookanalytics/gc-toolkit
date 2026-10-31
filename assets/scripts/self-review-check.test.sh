@@ -414,6 +414,13 @@ run_case "PASS on the repo's own build beside the declared setup" 0
 reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" 'npm ci'); write_state; green
 run_case "FAIL when the setup is not the declared one, though the step declares no build" 1
 assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+# A note that names no command says the declared one never ran.
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "FAIL when the note ran no build, though the step declares one" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "FAIL when the note ran no setup, though the step declares one" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
 
 # --- 3d4. the step's own block, rendered as a pour renders it -------------------
 # The self-review step's check block, rendered with the case's commands, runs in
