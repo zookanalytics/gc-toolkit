@@ -356,9 +356,10 @@ whole system, write none, as in `fix: ...`, and never coin a name of your own.
 
 **The words name what changes rather than how**, as an imperative phrase that
 starts in lowercase, at most 72 characters with the type and scope: `fix: keep an
-open PR's title current after a rework`. The symptom, the reason and the detail
-go in the body and in `pr_summary`. A bead's title is a label filed before the
-work, so reuse its words only where they name what the diff does.
+open PR's title current after a rework`, not `fix: re-read the title in pr-stack's
+loop`. The symptom, the reason and the detail go in the body and in `pr_summary`.
+A bead's title is a label filed before the work, so reuse its words only where
+they name what the diff does.
 
 A `!` before the colon marks a change that breaks a caller. Where a rig sets its
 own commit rules, its rules come first.
