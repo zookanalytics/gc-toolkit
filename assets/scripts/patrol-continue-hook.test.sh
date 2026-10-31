@@ -7,9 +7,10 @@
 # a background task runs, or on a payload it cannot read. After MAX_RAPID stops
 # in a row that each came within MIN_TURN seconds of a hand-back, it resets the
 # session instead, unless an operator is attached or, for the deacon, its
-# recovery line does not reach the incident ledger. Every path exits 0, so the
-# exit code tells nothing apart; this test reads stdout, the state file and the
-# calls the hook makes.
+# recovery line does not reach the incident ledger. A reset that fails or
+# outlasts its bound hands the turn back. Every path exits 0, so the exit code
+# tells nothing apart; this test reads stdout, the state file and the calls the
+# hook makes.
 #
 # It runs the SHIPPED script, never a copy. gc and tmux are stubbed by pointing
 # HOME at the sandbox: the hook prepends "$HOME/go/bin" to PATH itself, so a
@@ -60,6 +61,17 @@ printf '%s\n' "${TMUX_ATTACHED:-0}"
 STUB
 chmod +x "$SANDBOX/home/go/bin/tmux"
 
+# The timeout stub logs its bound and runs the command, or exits TIMEOUT_STUB_RC
+# as a command that outlasted its bound does.
+cat > "$SANDBOX/home/go/bin/timeout" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$1" >> "$TIMEOUT_LOG"
+[ "${TIMEOUT_STUB_RC:-0}" = 0 ] || exit "$TIMEOUT_STUB_RC"
+shift
+exec "$@"
+STUB
+chmod +x "$SANDBOX/home/go/bin/timeout"
+
 # The ledger stub sits where the hook looks for gc-deacon-ledger.sh. It logs
 # every call and exits LEDGER_STUB_RC, as the real script exits 1 when its
 # append does not land.
@@ -80,11 +92,11 @@ mkdir -p "$STATE_DIR"
 # $RC. Extra arguments are added to the environment.
 run_hook() {
     local agent="$1" payload="$2"; shift 2
-    : > "$SANDBOX/gc.log"; : > "$SANDBOX/ledger.log"; : > "$SANDBOX/tmux.log"
+    : > "$SANDBOX/gc.log"; : > "$SANDBOX/ledger.log"; : > "$SANDBOX/tmux.log"; : > "$SANDBOX/timeout.log"
     printf '%s' "$payload" | env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin:$(dirname "$(command -v jq)")" \
         TMPDIR="$STATE_DIR" GC_AGENT="$agent" GC_ALIAS="gc-toolkit.deacon" \
         GC_SESSION_ID="hq-sess" GC_SESSION_NAME="gc-toolkit__deacon" GC_CITY_PATH="$CITY" \
-        GC_LOG="$SANDBOX/gc.log" LEDGER_LOG="$SANDBOX/ledger.log" TMUX_LOG="$SANDBOX/tmux.log" "$@" \
+        GC_LOG="$SANDBOX/gc.log" LEDGER_LOG="$SANDBOX/ledger.log" TMUX_LOG="$SANDBOX/tmux.log" TIMEOUT_LOG="$SANDBOX/timeout.log" "$@" \
         sh "$HOOK" > "$SANDBOX/out" 2> "$SANDBOX/err"
     RC=$?
     OUT="$(cat "$SANDBOX/out")"
@@ -191,8 +203,55 @@ eq "$(cat "$SANDBOX/gc.log")" "session reset hq-other" "with no alias the reset 
 
 printf 's1 %s 2\n' "$now" > "$STATE"
 run_hook gc-toolkit.deacon "$(payload s1)" GC_STUB_RC=1
-eq "$OUT|$RC" "|0" "a failed reset still exits 0 with no output"
+eq "$RC" "0" "a failed reset still exits 0"
+eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "a failed reset hands the turn back"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason' 2>/dev/null)"
+has "$REASON" "could not reset the session" "the hand-back says the reset failed"
+has "$REASON" "run the inter-cycle wait before you retry" "the hand-back paces a session whose bead commands are failing"
 has "$ERR" "gc session reset gc-toolkit.deacon failed" "a failed reset is reported on stderr"
+eq "$(cut -d' ' -f1,3 < "$STATE")" "s1 0" "a failed reset starts the count over"
+[ "$(cut -d' ' -f2 < "$STATE")" -gt 0 ] && ok "a failed reset records its hand-back, so the next stop is counted" || bad "a failed reset records its hand-back, so the next stop is counted" "state: $(cat "$STATE")"
+
+printf 's1 %s 2\n' "$now" > "$STATE"
+run_hook gc-toolkit.deacon "$(payload s1)" TIMEOUT_STUB_RC=124
+eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "a reset that outlasts its bound hands the turn back"
+RESET_BOUND_SET=$(sed -n 's/^RESET_BOUND=\([0-9][0-9]*\).*/\1/p' "$HOOK")
+eq "$(cat "$SANDBOX/timeout.log")" "$RESET_BOUND_SET" "the reset runs under the hook's bound"
+
+printf 's1 %s 2\n' "$now" > "$STATE_DIR/gc-patrol-continue.s1"
+run_hook gc-toolkit.deacon "$(payload s1)" GC_ALIAS= GC_SESSION_ID=
+eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "a session nothing names is handed back"
+eq "$(cat "$SANDBOX/gc.log")" "" "a session nothing names resets nothing"
+has "$ERR" "nothing to reset" "a session nothing names is reported on stderr"
+
+# With no timeout on PATH the reset runs unbounded, and the hook's own timeout
+# in the overlay's settings is then its only bound.
+BARE="$SANDBOX/bare"
+mkdir -p "$BARE/go/bin" "$BARE/bin"
+cp "$SANDBOX/home/go/bin/gc" "$BARE/go/bin/gc"
+for tool in sh cat date jq; do ln -s "$(type -P "$tool")" "$BARE/bin/$tool"; done
+printf 's1 %s 2\n' "$now" > "$STATE"
+run_hook gc-toolkit.deacon "$(payload s1)" HOME="$BARE" PATH="$BARE/bin"
+eq "$(cat "$SANDBOX/gc.log")" "session reset gc-toolkit.deacon" "with no timeout on PATH the reset still runs"
+eq "$(cat "$SANDBOX/timeout.log")" "" "with no timeout on PATH nothing bounds the reset"
+
+echo "== an outage that fails every reset never ends the turn =="
+# A store outage fails each cycle quickly, and the reset needs the same store.
+# Each stop here comes right after the last hand-back, and the hook writes the
+# time itself. Nothing else would give an ended turn another one.
+WSTATE="$STATE_DIR/gc-patrol-continue.hq-witness"
+WITNESS_ENV=(GC_ALIAS=rig-a/gc-toolkit.witness GC_SESSION_ID=hq-witness GC_SESSION_NAME=rig-a--gc-toolkit__witness)
+rm -f "$WSTATE"
+BLOCKS=0; RESETS=""
+for stop in 1 2 3 4 5 6 7 8; do
+    run_hook rig-a/gc-toolkit.witness "$(payload s1)" "${WITNESS_ENV[@]}" GC_STUB_RC=1
+    [ "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" = block ] && BLOCKS=$((BLOCKS + 1))
+    [ -s "$SANDBOX/gc.log" ] && RESETS="$RESETS $stop"
+done
+eq "$BLOCKS" "8" "every stop of a witness in an outage is handed back"
+eq "$RESETS" " 4 7" "the reset is tried after each run of three rapid stops"
+has "$(printf '%s' "$OUT" | jq -r '.reason' 2>/dev/null)" "mol-witness-patrol from check-inbox" "the outage's hand-back names the witness's patrol"
+eq "$(cat "$SANDBOX/ledger.log")" "" "a witness's failed reset writes no ledger line"
 
 echo "== an attached operator holds the reset =="
 IN_TMUX="TMUX=$SANDBOX/tmux-socket,1,0"
@@ -238,8 +297,6 @@ eq "$(cat "$STATE")" "s1 $now 2" "no ledger script: the state file keeps its cou
 has "$ERR" "gc-deacon-ledger.sh not found" "a missing ledger script is reported on stderr"
 
 echo "== the witness's reset writes no ledger line =="
-WSTATE="$STATE_DIR/gc-patrol-continue.hq-witness"
-WITNESS_ENV=(GC_ALIAS=rig-a/gc-toolkit.witness GC_SESSION_ID=hq-witness GC_SESSION_NAME=rig-a--gc-toolkit__witness)
 printf 's1 %s 1\n' "$now" > "$WSTATE"
 run_hook rig-a/gc-toolkit.witness "$(payload s1)" "${WITNESS_ENV[@]}"
 eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "a witness's second rapid stop is still handed back"
@@ -297,6 +354,13 @@ eq "$(printf '%s\n' "$STOP_CMDS" | grep -c 'patrol-continue\.sh')" "1" "one Stop
 eq "$(printf '%s\n' "$STOP_CMDS" | grep -c 'cycle-recycle\.sh')" "1" "the cycle-recycle Stop command is still there"
 eq "$(printf '%s\n' "$STOP_CMDS" | grep 'patrol-continue\.sh' | grep -cE '<[[:space:]]*/dev/null|0<')" "0" "the hook's stdin is not redirected away (the payload arrives on it)"
 has "$(printf '%s\n' "$STOP_CMDS" | grep 'patrol-continue\.sh')" '/.claude/hooks/patrol-continue.sh' "the command runs the copy staged into the agent's work dir"
+# The harness ends the turn when it kills the hook, so the reset has to give up
+# first for its failure to reach the hand-back.
+HOOK_TIMEOUT="$(jq -r '[.hooks.Stop[]?.hooks[]? | select((.command // "") | contains("patrol-continue.sh")) | .timeout // empty] | first // empty' "$SETTINGS" 2>/dev/null)"
+case "$RESET_BOUND_SET|$HOOK_TIMEOUT" in
+    *[!0-9\|]* | \|* | *\|) bad "the reset's bound and the hook's timeout are read" "got '$RESET_BOUND_SET' and '$HOOK_TIMEOUT'" ;;
+    *) if [ "$RESET_BOUND_SET" -lt "$HOOK_TIMEOUT" ]; then ok "the reset's bound is under the hook's timeout"; else bad "the reset's bound is under the hook's timeout" "RESET_BOUND $RESET_BOUND_SET, timeout $HOOK_TIMEOUT"; fi ;;
+esac
 
 echo
 echo "patrol-continue-hook: $PASS passed, $FAIL failed"

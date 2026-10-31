@@ -26,7 +26,9 @@
 #     adopts the wisp the patrol left. While an operator is attached to the
 #     pane the reset waits, because it would end the conversation under them.
 #     The deacon's reset also goes ahead only once the hook has written its
-#     recovery line to the incident ledger.
+#     recovery line to the incident ledger. A reset that fails or outlasts
+#     RESET_BOUND hands the turn back after all, because no other turn is
+#     coming.
 #
 # Invariants:
 #   * ALWAYS exit 0. A block rides the JSON decision on stdout, never the exit
@@ -42,6 +44,18 @@ export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
 
 MIN_TURN=300  # seconds: half the 600s inter-cycle wait every real cycle spends
 MAX_RAPID=3   # consecutive stops within MIN_TURN of a hand-back before the reset
+RESET_BOUND=90  # seconds: inside the 120s the overlay's settings give this hook
+
+# reset_session <target> — gc session reset, bounded where timeout exists. The
+# harness ends the turn when it kills this hook, so a reset that hangs has to
+# give up first.
+reset_session() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$RESET_BOUND" gc session reset "$1" >&2
+  else
+    gc session reset "$1" >&2
+  fi
+}
 
 # --- 1. Self-gate: the deacon and the witness --------------------------------
 AGENT="${GC_AGENT:-}"
@@ -83,7 +97,7 @@ esac
 # the count over.
 STATE="${TMPDIR:-/tmp}/gc-patrol-continue.${GC_SESSION_ID:-$SID}"
 now=$(date +%s)
-prev_sid=""; prev_at=0; rapid=0
+prev_sid=""; prev_at=0; rapid=0; reset_failed=""
 if [ -r "$STATE" ]; then
   read -r prev_sid prev_at rapid < "$STATE" || true
 fi
@@ -139,11 +153,17 @@ if [ "$rapid" -ge "$MAX_RAPID" ]; then
   echo "patrol-continue: $WHY; resetting the session" >&2
   RESET_TARGET="${GC_ALIAS:-${GC_SESSION_ID:-}}"
   if [ -z "$RESET_TARGET" ]; then
-    echo "patrol-continue: neither GC_ALIAS nor GC_SESSION_ID names this session; nothing to reset" >&2
-  elif ! gc session reset "$RESET_TARGET" >&2; then
-    echo "patrol-continue: gc session reset $RESET_TARGET failed; the turn ends" >&2
+    echo "patrol-continue: neither GC_ALIAS nor GC_SESSION_ID names this session, so there is nothing to reset; handing the turn back" >&2
+  elif reset_session "$RESET_TARGET"; then
+    exit 0
+  else
+    echo "patrol-continue: gc session reset $RESET_TARGET failed or outlasted ${RESET_BOUND}s; handing the turn back" >&2
   fi
-  exit 0
+  # The reset needs the bead store and the controller, so an outage takes it
+  # away while the patrol's cycles are failing fast. A turn that ended here would
+  # get no other, so it goes back, and the next run of rapid stops tries again.
+  reset_failed=1
+  rapid=0
 fi
 
 printf '%s %s %s\n' "$SID" "$now" "$rapid" > "$STATE" 2>/dev/null \
@@ -155,6 +175,9 @@ printf '%s %s %s\n' "$SID" "$now" "$rapid" > "$STATE" 2>/dev/null \
 REASON="Patrol continues: a $role turn does not end between cycles, so this one is handed back. If next-iteration has poured your next wisp, finish its inter-cycle wait if you skipped it, then run the startup wisp reconcile from your prompt to adopt the wisp and work mol-$role-patrol from check-inbox. Otherwise finish the current cycle through next-iteration."
 if [ "$rapid" -gt 0 ]; then
   REASON="$REASON The last hand-back ended within ${MIN_TURN}s, too soon for a cycle and its inter-cycle wait; run whichever of them has not run."
+fi
+if [ -n "$reset_failed" ]; then
+  REASON="$REASON This hook could not reset the session, so the bead store or the controller may be down. If your bead commands are failing, run the inter-cycle wait before you retry the cycle."
 fi
 jq -n --arg reason "$REASON" '{decision: "block", reason: $reason}'
 exit 0

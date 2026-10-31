@@ -99,18 +99,28 @@ did not run a full cycle and its wait. The hand-back after a rapid stop says
 so and asks for whichever of the two has not run. The hook counts rapid stops
 in a row, per conversation, in one state file per session bead under
 `$TMPDIR`. A stop after a longer turn clears the count, and a new conversation
-starts it over. The 300s bound has
-to stay under every `event_timeout` the deacon and the witness are poured
-with, or each real cycle would count as a rapid stop. So the hook's suite
-fails when either formula's default or the deacon's startup pour drops to it,
-and when a witness pour starts passing an `event_timeout` of its own.
+starts it over. The 300s bound has to stay under every `event_timeout` the
+deacon and the witness are poured with, or each real cycle would count as a
+rapid stop. So the hook's suite fails when either formula's default or the
+deacon's startup pour drops to it, and when a witness pour starts passing an
+`event_timeout` of its own.
 
 After three rapid stops in a row the hook stops handing back. Another
 hand-back would only loop, so it resets the session instead
 (`gc session reset`, by the session's alias or id). The fresh conversation
 starts from the role's prompt, and its startup reconcile adopts the wisp the
-patrol left. A reset that fails lets the turn end. boot-health then reports
-the cold deacon, and a witness stays idle until something prompts it.
+patrol left.
+
+`gc session reset` reads and writes the session's bead and signals the
+controller, so an outage can take it away while the patrol's cycles are failing
+fast. A reset that fails, or that has not finished within 90s, leaves a session
+with no other turn coming. The hook hands the turn back and starts the count
+over, and the next three rapid stops try the reset again. That hand-back says
+the reset failed and asks a session whose bead commands are failing to run the
+inter-cycle wait before it retries. A session that does keeps the patrol's pace
+through the outage. The 90s bound sits inside the 120s the overlay's
+`settings.json` gives this hook, because the harness ends the turn when it
+kills the hook. It holds only where `timeout` is on the session's `PATH`.
 
 The reset waits while an operator is attached to the session's pane, because
 it would end the conversation under them. An attachment the hook cannot read
@@ -133,7 +143,8 @@ Claude Code has its own bound: it overrides a hook that blocks the turn from
 ending nine times in a row with no tool call in between, and ends the turn.
 A cycle runs tools, so the bound never meets a working patrol. The guard
 acts first, so a looping conversation is replaced rather than left to end
-idle.
+idle. While the reset is failing nothing replaces it, so a conversation that
+runs no tool for nine hand-backs in a row does end idle.
 
 ## With cycle-recycle
 
