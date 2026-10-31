@@ -112,6 +112,12 @@ env_lines() { LC_ALL=C tr '\n\0' ' \n'; }
 # Darwin and another call elsewhere, so the program stops anywhere else. The kernel
 # names the size first, because a shorter buffer cuts the record short and one past
 # kern.argmax is refused.
+#
+# The record sits in the process's own memory, and only the argument count says
+# where the environment starts. A process that overwrites its arguments with a short
+# title leaves empty strings there, which read as no environment. One whose title
+# fills their whole space leaves fewer strings than the count, so the walk skips
+# entries and can miss a store key.
 PROCARGS2_READ='
 $^O eq "darwin" or exit 1;
 my $mib = pack("i3", 1, 49, $ARGV[0] + 0);    # CTL_KERN, KERN_PROCARGS2, the pid
