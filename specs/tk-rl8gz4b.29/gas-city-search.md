@@ -50,6 +50,10 @@ and `gc beads list` was run against it, to know the design works here.
 - What it lacks beside the verb it replaces: its rows carry no priority, and
   `renderBeadsListFromAPI` prints the API's rows without its `partial_errors`, so a
   store that fails drops out with no notice. The design accepts both and says why.
+- `--format=json` has two shapes. `writeBeadsJSONWithCache` wraps the API's rows as
+  `{"beads": [...], "_cache_age_s": n}`, and `doBeadsListFallback`'s `writeBeadsJSON`
+  prints a bare array, so a reader takes both. The installed build answered with the
+  array here.
 - [`gc ready`](https://docs.gascity.com/reference/cli#gc-ready) federates too, but it
   answers ready work only and has no label selector, and a held bead with a blocker
   must still be listed. `gc bd list` reads one store.
@@ -73,8 +77,9 @@ and `gc beads list` was run against it, to know the design works here.
 - Issue 6069 in Gas City's tracker (open, P1) reports the first check as a bug, on the
   grounds that hold and route are orthogonal, and an open PR, 6071, retires its rewrite.
 - The installed build carries the check. So the design takes one known warning, tells
-  the deacon's step so, and lets `place` clear any route a `--fix` wrote. It ends when
-  that fix reaches the fork.
+  the deacon's step so, and lets `place` clear any route a `--fix` wrote. It clears it
+  before it dispatches, since the pack's arm refuses a routed bead and a plain route's
+  sling writes its own. It ends when that fix reaches the fork.
 
 ## Lifting a hold
 
@@ -128,6 +133,13 @@ and `gc beads list` was run against it, to know the design works here.
   `on_demand` reserves the identity and materializes it "when work or an explicit
   reference requires it". *Session Model Unification* lists direct session targeting
   among the causes. `wake_mode = "fresh"` starts a new provider session on each wake.
+- A detach does not stop such a session. `computeAwakeSetKeyed` in package main keeps a
+  running on-demand session awake under the reason `on-demand:running`, and its comment
+  says it drains "via idle_timeout, not demand absence". `buildIdleTracker` registers
+  `idle_timeout` for a named session that is not `always`. The five-minute
+  `defaultOnDemandIdleTimeout` runs off `detached_at`, which `reconcileDetachedAtInfo`
+  writes only under a sleep policy, and this city sets none. So a sitting ends at
+  `gc runtime drain-ack` or at `idle_timeout`.
 
 ## Paths that would reach the seat
 
@@ -142,14 +154,26 @@ and `gc beads list` was run against it, to know the design works here.
 - Gas Town's witness, deacon, refinery and polecat all address `mayor/`. Its deacon uses
   [`gc mail send --dedup`](https://docs.gascity.com/reference/cli#gc-mail-send), so mail
   does dedup now, and the wiring suites' comment that it does not is stale.
+- A nudge wakes the seat. `resolveNudgeTargetInStore` materializes a named session, and
+  `shouldQueueManagedNudgeWake` queues the text and asks for a wake when it is not
+  running. `gc mail send --notify` takes the same path through `newMailNudgeFunc`. Mail
+  without `--notify` requests no turn, as that command's help says.
 
 ## Refusing a sling
 
-**Gas City ships the seam.** [`sling_query`](https://docs.gascity.com/reference/config#agent)
-is "the command template to route a bead to this session config". `cliBeadRouter.Route` in
-package main runs a custom one and returns its error. Whether the `--on` path reaches that
-call was read in part only, so unit 3 proves it live. If it does not, the check's first arm
-covers that path.
+**Gas City ships the seam, and it covers a plain route only.**
+[`sling_query`](https://docs.gascity.com/reference/config#agent) is "the command template to
+route a bead to this session config".
+
+- `cliBeadRouter.Route` in package main runs a custom one and returns its error. Package
+  sling's `finalizeInStore` is what calls it for one bead.
+- `doStartGraphWorkflow`'s comment says "Graph launches never pass through finalize()", so a
+  graph.v2 formula never reaches the query, by `--on` or by a default formula.
+- `ApplyAgentDefaults` gives `[agent_defaults] default_sling_formula` to any agent whose own
+  field is nil, and this city sets `mol-polecat-work` there. `EffectiveDefaultSlingFormula`
+  returns an agent's explicit empty string, so `default_sling_formula = ""` sends a plain
+  `gc sling` to the query.
+- Nothing refuses `gc sling --on` with a graph.v2 formula, so the check's first arm covers it.
 
 ## Noticing a run that ended with its bead open
 
@@ -175,6 +199,9 @@ covers that path.
   Neither reads who a seat receives from.
 - Mail and assignment have no refusal: `gc mail send` delivers to any resolved identity,
   and `bd update --assignee` writes any value. So this has to be observed after the fact.
+  A delivered nudge leaves no record to observe.
+- `gc mail send` gives a caller with no session identity the sender `human`, as an exec order
+  has, so the check cannot read that sender as the operator.
 - A doctor check reports only once the pack has landed. The design takes that, since the
   new paths it looks for are mostly hand-made and live.
 
@@ -193,4 +220,6 @@ The answer changes if one of these ships. None had fired at the commits above.
 - Issue 6069 lands: the known warning and the deacon's sentence go.
 - `gc beads list` prints priority and partial errors: the two gaps above close.
 - `gc mail` or a config field can scope who may mail a session: one arm of the check goes.
+- A graph.v2 pour runs `sling_query`, or an agent can refuse a pour: `--on` is refused at the
+  caller, and the seat's empty default formula may go.
 - `gc convoy stranded` tells a live run from an ended one: tk-1tfzr71.19's need is covered.
