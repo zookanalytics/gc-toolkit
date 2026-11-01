@@ -331,7 +331,7 @@ read. The pour came a median 602 seconds after the wait began (580 at the 10th
 percentile, 642 at the 90th), and its sessions started a median 903 seconds apart, on a
 longer pass. No witness has run this step, so its pace and whether its model takes the
 wait are what only a live run can show. Under the old step, 39 of the 369 restarted
-witnesses since the build issued no wait the census could read. A witness that skips
+sessions since the build issued no wait the census could read. A witness that skips
 the wait under this step costs one short cycle, not a stall.
 
 [The ending probe](ending-probe.md) runs the step on the witness's model against a

@@ -88,7 +88,7 @@ how the candidates compare, and the measurements behind the numbers below.
    seconds into that wait. While the session holds its current wisp in progress the
    restart holds off, so a wait before the pour runs to its end. Gas Town's step has
    no wait, because it credits an idle policy that Gas City refuses on an always-on
-   session, so there the passes run back to back.
+   session, so nothing there spaces its passes.
 2. **It pours and assigns the next wisp and burns the current one.** A guard that
    fires leaves the current wisp in place and ends the turn, and the order gives that
    session its next try.

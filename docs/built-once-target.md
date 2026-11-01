@@ -170,8 +170,7 @@ reason and what ends it:
 
 - **The spacing.** Its `next-iteration` waits `event_timeout` before it pours.
   Gas Town's credits an idle policy that Gas City refuses on always-on sessions,
-  so there the passes run back to back. This ends if Gas City paces these
-  sessions.
+  so nothing there spaces its passes. This ends if Gas City paces these sessions.
 - **Reading our anchors, PR states and visits.** Our pipeline writes them. This
   ends as tk-1tfzr71.12, .20 and .22 land.
 - **Findings and visits in place of mayor mail.** This ends when the mayor design
