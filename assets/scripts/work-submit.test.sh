@@ -524,6 +524,14 @@ eq "$(meta halt_reason)" "auto_push_false" "(37) the halt is recorded"
 eq "$(field status) $(field assignee)" "open " "(37) the claim is released"
 eq "$(closed_step)" "in_progress" "(37) no step is written"
 eq "$(tail -n 1 "$LOG")" "drain" "(37) and the drain is last"
+# A call interrupted after the release leaves a bead with no holder, which is no
+# other session's claim.
+: > "$LOG"
+direct
+eq "$RC" 0 "(37b) the call again, with the claim already released: exits 0: $OUT"
+eq "$(field status) $(field assignee)" "open " "(37b) the bead stays released"
+eq "$(pushed)" 0 "(37b) still nothing is pushed"
+eq "$(tail -n 1 "$LOG")" "drain" "(37b) and the drain is last"
 
 prepare DETACHED "$FRESH"; hold tk-w sess-me
 submit HOOK_CURRENT=tk-w -- --store-only "tk-z" --notes "what closes this" --bead tk-w --base main

@@ -232,6 +232,30 @@ for sh in "${SHELLS[@]}"; do
   has "$(cat "$LOG")" "<build><--command><$QUOTED>" "$sh self-review: build too"
   has "$(cat "$LOG")" "<test><--scope><affected><--command><$MULTI><--publish-bead><tk-w>" "$sh self-review: and the affected subset"
   eq "$(grep -c 'set-metadata self_review_setup_build=' "$LOG" | tr -d ' ')" 1 "$sh self-review: the block notes setup and build once"
+
+  # Each slot of each call, alone, with a command that a slip in that slot would
+  # change: an unquoted delimiter runs its substitutions, and a var of the wrong
+  # name leaves the check undeclared. "-" is a check that publishes nothing.
+  while read -r mode var check publishes; do
+    printf -v "V_$var" '%s' "$HEREDOC"
+    run_call "$sh" "$mode"
+    unset "V_$var"
+    want="$check<--command><$HEREDOC>"
+    [ "$publishes" = - ] || want="$want<--publish-bead><tk-w>"
+    eq "$RC" 0 "$sh $mode $var: the rendered call exits 0"
+    has "$(cat "$LOG")" "$want" "$sh $mode $var: this slot alone hands its command over whole"
+  done <<'SLOTS'
+setup SETUP <setup> -
+preflight TYPECHECK <typecheck> -
+preflight LINT <lint> -
+preflight TEST <test><--scope><full> -
+self-review SETUP <setup> -
+self-review TYPECHECK <typecheck> publishes
+self-review LINT <lint> publishes
+self-review BUILD <build> -
+self-review AFFECTED <test><--scope><affected> publishes
+self-review TEST <test><--scope><full> publishes
+SLOTS
 done
 
 echo "# usage"
