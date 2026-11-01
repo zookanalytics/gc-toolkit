@@ -54,7 +54,7 @@ TMP="$(cd "$TMP" && pwd -P)"
 # The pack's content: every directory whose files an agent, an order or a
 # pack command runs or reads. Suites are left out, since a fixture may lay out
 # a city on purpose.
-DIRS="formulas agents skills template-fragments assets/scripts doctor tools lifecycle orders commands"
+DIRS="formulas agents skills template-fragments assets/scripts doctor tools lifecycle orders commands packs/gascity-keeper"
 ( cd "$ROOT" && for d in $DIRS; do [ -d "$d" ] && find "$d" -type f; done ) \
   | grep -v -E '\.test\.sh$|/lint-learned\.d/' | LC_ALL=C sort > "$TMP/files"
 scanned=$(grep -c . "$TMP/files" || true)
@@ -96,7 +96,7 @@ scan "no loop tries GC_PACK_DIR or rigs/gc-toolkit as a candidate" \
   'for c in "${GC_PACK_DIR:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do' 'for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do'
 scan "no text an agent session runs reads GC_PACK_DIR, which gc sets only for orders and pack commands" \
   '\$\{?GC_PACK_DIR' '[ -x "${GC_PACK_DIR:-}/assets/scripts/human-gate.sh" ]' "$RESOLVED" \
-  '^(formulas|agents|skills|template-fragments)/'
+  '^(packs/gascity-keeper/)?(formulas|agents|skills|template-fragments)/'
 
 # A loop over any candidate list that probes for a pack file is the same guess
 # whatever its candidates are named.
@@ -121,7 +121,7 @@ else bad "no loop probes candidate directories for a pack file" "$(printf '%s\n'
 echo "── 2. each kind of text names the binding its rendering carries ──"
 FORMULA_FORM="\$(b='{{binding_prefix}}'; gc \"\${b%.}\" scripts-dir)"
 calls=0; wrong=""
-for f in "$ROOT"/formulas/*.toml; do
+for f in "$ROOT"/formulas/*.toml "$ROOT"/packs/gascity-keeper/formulas/*.toml; do
   while IFS= read -r line; do
     calls=$((calls + 1))
     case "$line" in
@@ -137,7 +137,7 @@ done
 # A formula that names the var declares it with a default, which an order's
 # pour takes (formula-binding-prefix-default.test.sh holds the default).
 undeclared=""
-for f in "$ROOT"/formulas/*.toml; do
+for f in "$ROOT"/formulas/*.toml "$ROOT"/packs/gascity-keeper/formulas/*.toml; do
   grep -qF "$FORMULA_FORM" "$f" || continue
   grep -Eq '^\[vars\.binding_prefix\][[:blank:]]*$' "$f" || undeclared="$undeclared ${f##*/}"
 done
@@ -146,7 +146,7 @@ done
 
 wrong=""
 while IFS= read -r f; do
-  case "$f" in agents/*.template.md|template-fragments/*.template.md) ;; *) continue ;; esac
+  case "$f" in agents/*.template.md|template-fragments/*.template.md|packs/gascity-keeper/*.template.md) ;; *) continue ;; esac
   while IFS= read -r hit; do
     case "$hit" in
       *'gc {{ .BindingName }} scripts-dir'*|*'gc <binding> scripts-dir'*) ;;
@@ -162,6 +162,13 @@ wrong=$(grep '^skills/' "$TMP/files" | while IFS= read -r f; do
 done)
 [ -z "$wrong" ] && ok "every skill call writes <binding> for the agent to fill in" \
   || bad "every skill call writes <binding> for the agent to fill in" "$(printf '%s\n' "$wrong" | head -10)"
+
+# The gascity-keeper sub-pack's formulas run on gc-toolkit's polecats, so a step
+# reaches the sub-pack's own script under the pack gc names.
+PROBE_LINE=$(grep -h -m1 '^PROBE=' "$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml")
+PROBE_PATH=${PROBE_LINE#*scripts-dir)}; PROBE_PATH=${PROBE_PATH%%\"*}
+[ -x "$ROOT/assets/scripts$PROBE_PATH" ] && ok "a keeper step's path to its own script names a file under the pack" \
+  || bad "a keeper step's path to its own script names a file under the pack" "assets/scripts$PROBE_PATH"
 
 echo "── 3. a formula's resolver takes the directory gc names, and nothing else ──"
 # The lines under test are the formulas' own: one that resolves the directory
@@ -273,6 +280,8 @@ else
   else
     bad "the poured step finds the pack's scripts in the fetched copy, and sources its bd-lib.sh from there" "got '$GOT'"
   fi
+  [ -x "$KIT$PROBE_PATH" ] && ok "a keeper step's path to its own script names a file in the fetched copy" \
+    || bad "a keeper step's path to its own script names a file in the fetched copy" "$KIT$PROBE_PATH"
   # gc registers a pack's commands only for a city-level import, so a city
   # that imports the pack only in a rig has no gc kit scripts-dir.
   if IN_CITY="$RIG_ONLY" in_city gc import install >"$TMP/install-rig-only.out" 2>&1; then

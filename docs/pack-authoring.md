@@ -114,6 +114,9 @@ Each kind of pack text names the binding the way its rendering allows:
   with the default `gc-toolkit.`, which an order's pour takes
   ([gascity/packs.md](gascity/packs.md#a-formula-body-gets-no-template-pass)).
   The step drops the dot: `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"`.
+  The gascity-keeper sub-pack's formulas run on this pack's polecats, so they
+  are poured with this pack's binding and write the same line. A keeper script
+  sits under the same directory, at `../../packs/gascity-keeper/assets/scripts`.
 - **A prompt or template fragment** is rendered with the binding:
   `"$(gc {{ .BindingName }} scripts-dir)/foo.sh"`.
 - **A skill** is not rendered, so its examples write

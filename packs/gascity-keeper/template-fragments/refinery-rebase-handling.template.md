@@ -268,7 +268,7 @@ gc session nudge "$KEEPER_TARGET" "rebase race loss on $WORK: origin/main advanc
 
 # Secondary signal: one open human gate per bead and situation key. The race
 # loss is an event of this run, so the call declares no quiet window.
-"$PACK_DIR/assets/scripts/human-gate.sh" --subject "$WORK" --key rebase-race-loss \
+"$(gc {{ .BindingName }} scripts-dir)/human-gate.sh" --subject "$WORK" --key rebase-race-loss \
   --message "Rebase race loss on $WORK: origin/main advanced after the rebase polecat finished ($BRANCH no longer landable as-is). Routed to the keeper (assignee=$KEEPER_TARGET, aborted_at=refinery-race-loss) for the operator decision; clear this gate with it. Backup ref: $BACKUP_REF" || true
 ```
 

@@ -78,6 +78,7 @@ is the durable holder.
 
 Variables:
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)
+  {{binding_prefix}}: The binding the city imports gc-toolkit under, with its trailing dot. This sub-pack's formulas run on gc-toolkit's polecats, so gc sling pours them with that binding, and a step drops the dot to call the pack's scripts as gc <binding> scripts-dir prints them. (default=gc-toolkit.)
   {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{check_command}}: Post-rebase quality gate command. The default `make check` in gascity is fmt-check + lint + vet + test — the authoritative safety net for the kept set, since conflict resolutions are committed by `git rebase --continue` without the pre-commit hook. Operators can scope down (e.g. --var check_command='make test'); the default is intentionally the full gate. (default=make check)
   {{escalation_target}}: Mail recipient for help and escalation mail. Defaults to the reserved `human`

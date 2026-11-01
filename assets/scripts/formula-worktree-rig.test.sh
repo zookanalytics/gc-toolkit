@@ -351,7 +351,7 @@ echo "── mol-upstream-gc-sync: upstream-sync-worktree-add ──"
 block "$SYNC_TOML" upstream-sync-worktree-add "$TMP/sync.sh"
 eq "$(bare_git "$TMP/sync.sh")" "" "sync: every git call in the block names its repo with -C"
 
-# GC_PACK_DIR names this checkout, so the block runs the rig-root.sh under test.
+# The stub gc names this checkout as the pack, so the block runs the rig-root.sh under test.
 sync_case() { # <mode>; sets RC, D, NEW, STALE
   local d="$TMP/sync-$1" rc=0
   mkdir -p "$d"
@@ -372,7 +372,7 @@ sync_case() { # <mode>; sets RC, D, NEW, STALE
   git -C "$d/cwd" remote add origin "$d/foreign.git"
   git -C "$d/cwd" push -q origin main
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORKTREE_PATH="$d/wt" bash "$TMP/sync.sh" ) >"$d/out" 2>&1 || rc=$?
+  ( cd "$d/cwd" && STUB_PACK="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORKTREE_PATH="$d/wt" bash "$TMP/sync.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 

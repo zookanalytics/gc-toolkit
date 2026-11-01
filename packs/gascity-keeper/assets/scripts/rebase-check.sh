@@ -388,15 +388,9 @@ fi
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null)
 [ -n "$ROOT_JSON" ] || fail "could not read root bead $ROOT"
-RUN_LIB="${GC_RUN_LIB:-}"
-if [ -z "$RUN_LIB" ]; then
-	for c in "$(cd "$(dirname "$0")" && pwd)/../../../../assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-		[ -f "$c/run-lib.sh" ] && { RUN_LIB="$c/run-lib.sh"; break; }
-	done
-fi
-[ -n "$RUN_LIB" ] || fail "gc-toolkit's run-lib.sh was not found beside this sub-pack or in the city's gc-toolkit rig"
+RUN_LIB="${GC_RUN_LIB:-$(cd "$(dirname "$0")" && pwd)/../../../../assets/scripts/run-lib.sh}"
 # shellcheck source=../../../../assets/scripts/run-lib.sh
-. "$RUN_LIB" || fail "cannot source $RUN_LIB"
+. "$RUN_LIB" || fail "cannot source gc-toolkit's run-lib.sh at $RUN_LIB"
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 rebase_bd() { bd "$@"; }
 if RUN_JSON=$(run_lib subject rebase_bd "$ROOT"); then
