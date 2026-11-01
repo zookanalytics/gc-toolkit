@@ -1408,7 +1408,7 @@ it('shows what holds a PR beside its phase, one chip per held value', async () =
   const styles = readFileSync(join(import.meta.dirname, 'styles.css'), 'utf8');
   expect(styles).toMatch(/\.pr-held\s*\{[^}]*\bcolor:\s*#[0-9a-fA-F]{3,8}\s*;/);
   const key = anchors().querySelector('.legend') as HTMLElement;
-  expect(key.textContent).toContain('what holds a PR: gate = an open human gate on the PR');
+  expect(key.textContent).toContain('what holds a PR: gate = an open human gate on the PR or on a bead it waits on');
 });
 
 // The conversation axis is how the board shows which pull requests carry the

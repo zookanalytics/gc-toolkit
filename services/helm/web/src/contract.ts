@@ -68,7 +68,7 @@ export interface Tile {
   /** Rank proxy: subtree size + priority weight + capped cross-rig refs. */
   weight: number;
   /**
-   * The operator's side has this bead: an open human gate blocks it, an
+   * The operator's side has this bead: an open human gate holds it, an
    * acceptance an earlier Accept left unfinished keeps it, or an open
    * conversation tracks it. Only the first two hold its work (`work_held`); a
    * conversation blocks nothing.
@@ -209,7 +209,7 @@ export interface Tile {
   /**
    * Where the exchange with the operator stands: `'quiet'`, `'outstanding'`,
    * `'answered'`, `'asking'`, or `'unknown'`. `'asking'` is an open human gate
-   * on the anchor;
+   * that holds the anchor;
    * `'quiet'`, `'outstanding'` and `'answered'` are read off the position the
    * merge cadence records against the acknowledgement watermarks and the routing
    * disposition — `'answered'` once the routed fix unit closes (a rework child
