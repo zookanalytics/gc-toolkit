@@ -271,10 +271,13 @@ fi
 
 # The edge already keeps the bead out of `bd ready`, so releasing its claim
 # offers it to no pool. The unclaim is a compare-and-swap on the assignee read
-# above, so a claim that changed hands since is left alone.
+# above, so a claim that changed hands since is left alone. The assignee is
+# attached to its flag: gc bd picks the store from the bead ids among a command's
+# arguments, and a session id is a real bead in the city store, which does not
+# hold a rig's work bead. An attached value is never read as one of those ids.
 case "$RELEASE" in
   unclaim)
-    if ! gc bd unclaim "$WORK" --if-assignee "$ASSIGNEE" </dev/null >/dev/null 2>&1; then
+    if ! gc bd unclaim "$WORK" --if-assignee="$ASSIGNEE" </dev/null >/dev/null 2>&1; then
       echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (bd refused it, or the claim changed hands); it waits on gate $GATE unarmed" >&2
       exit 1
     fi ;;
