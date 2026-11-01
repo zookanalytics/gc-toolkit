@@ -69,6 +69,7 @@ case "$verb" in
     jq -c --arg id "$id" '[.[] | select(.id == $id)]' "$STORE" ;;
   list)
     [ -z "${LIST_DOWN:-}" ] || exit 1
+    [ -z "${LIST_NOT_ARRAY:-}" ] || { printf '{"error":"the store said no"}\n'; exit 0; }
     field=""; shift 2
     while [ $# -gt 0 ]; do case "$1" in --metadata-field) field="$2"; shift 2 ;; *) shift ;; esac; done
     jq -c --arg b "${field#branch=}" '[.[] | select((.metadata.branch // "") == $b)]' "$STORE" ;;
@@ -375,6 +376,11 @@ fresh_run "$(jq -nc --arg d "$TREE" '[{id: "tk-w", status: "open", assignee: "",
 eq "$RC" "0" "(21) a re-entry exits 0"
 eq "$(last_line)" "$TREE" "(21) it reuses the recorded tree"
 
+# Reached when a run stopped between recording its tree and recording its branch.
+fresh_run "$(jq -nc --arg d "$TREE" '[{id: "tk-w", status: "open", assignee: "", metadata: {work_dir: $d}}]')" LIST_DOWN=1
+eq "$RC" "0" "(21b) a recorded tree with no branch yet: the store is not asked who else is on a branch"
+eq "$(last_line)" "$TREE" "(21b) and the tree is reused"
+
 "$REAL_GIT" -C "$RIG" worktree remove --force "$TREE"
 GONE="$TMP/gone-tree"
 fresh_run "$(jq -nc --arg d "$GONE" '[{id: "tk-w", status: "open", assignee: "", metadata: {work_dir: $d}}]')" GC_DIR="$TMP/slot2"
@@ -464,6 +470,10 @@ setup_run "$SIB_BEADS" LIST_DOWN=1
 eq "$RC" "1" "(41c) a list of the branch's beads that fails: stops"
 eq "$(grep -cE '^(await|gate|cancel) ' "$CALLS")" "0" "(41c) it takes the tree for no bead's and asks nobody"
 grep -qx 'drain' "$CALLS" && ok "(41c) the step goes back to the pool" || bad "(41c) the step goes back to the pool"
+setup_run "$SIB_BEADS" LIST_NOT_ARRAY=1
+eq "$RC" "1" "(41d) a list that answers with no array: stops"
+eq "$(grep -cE '^(await|gate|cancel) ' "$CALLS")" "0" "(41d) it takes the tree for no bead's and asks nobody"
+grep -qx 'drain' "$CALLS" && ok "(41d) the step goes back to the pool" || bad "(41d) the step goes back to the pool"
 setup_run "$(bead polecat/w1)"
 eq "$RC" "1" "(42) a tree no bead records: stops"
 grep -q '^gate --subject tk-w --key polecat-duplicate-dispatch ' "$CALLS" && ok "(42) a person looks at the tree" || bad "(42) a person looks at the tree"
@@ -498,6 +508,14 @@ eq "$RC" "1" "(46) a sibling adopted an anchor's tree, and the anchor lists firs
 grep -q '^await tk-w --blocked-by tk-sib ' "$CALLS" && ok "(46) the work waits on the sibling in flight, not on the anchor" || bad "(46) the work waits on the sibling in flight, not on the anchor" "$(grep -E '^(await|gate)' "$CALLS")"
 eq "$(meta work_dir)" "$C" "(46) nothing adopts the tree"
 
+echo "# a record names the tree however its path reached it, while git prints the real path"
+ln -s "$PEER" "$TMP/peer-link"
+LINKED="$(jq -nc --arg d "$C" --arg l "$TMP/peer-link" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d}},
+  {id: "tk-sib", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $l}}]')"
+setup_run "$LINKED"
+eq "$RC" "1" "(46b) a sibling that records the tree through a symlink: stops"
+grep -q '^await tk-w --blocked-by tk-sib ' "$CALLS" && ok "(46b) the work waits on it" || bad "(46b) the work waits on it" "$(grep -E '^(await|gate)' "$CALLS")"
+
 echo "# a claim a listed session holds is in flight too"
 printf '[]' > "$RUNS"
 CLAIMED="$(jq -nc --arg d "$C" --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d}},
@@ -514,6 +532,8 @@ setup_run "$(printf '%s' "$CLAIMED" | jq -c 'map(if .id == "tk-sib" then .assign
 eq "$RC" "0" "(48b) a claim this session holds is no sibling to wait on"
 setup_run "$(printf '%s' "$CLAIMED" | jq -c 'map(if .id == "tk-sib" then .status = "open" else . end)')" SESSIONS_JSON='{"sessions":[{"session_name":"hq-peer"}]}'
 eq "$RC" "0" "(48c) a bead open under a live name is handed off, not in flight"
+setup_run "$(printf '%s' "$CLAIMED" | jq -c 'map(if .id == "tk-sib" then .assignee = "" else . end)')" SESSIONS_JSON='{"sessions":[{"session_name":"hq-peer"}]}'
+eq "$RC" "0" "(48d) in_progress with no assignee: no session holds it, whoever is listed"
 
 echo "# a tree this bead recorded is read before it is reused, since no checkout refuses it"
 REUSED="$(jq -nc --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $p}},
