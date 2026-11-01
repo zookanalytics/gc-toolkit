@@ -1591,13 +1591,14 @@ eq "$(pinned BKa)" "progressing@sha-182" "a blocker with an armed dispatch recor
 eq "$(cause BKa)" "<absent>" "…and is not called a blocker no one will claim"
 
 echo "# a gate on one stuck blocker leaves the other stuck"
-store "[$(anchor BKm 180), $(rev BKm), $(printf "$BARE_ROW" rw-bkm1), $(printf "$BARE_ROW" rw-bkm2), $(printf "$GATE_ROW" g-bkm)]"
-printf 'rw-bkm1|blocks|BKm\nrw-bkm2|blocks|BKm\ng-bkm|blocks|rw-bkm1\n' > "$STUB_DEPS"
+store "[$(anchor BKm 180), $(rev BKm), $(printf "$BARE_ROW" rw-bkm1), $(printf "$BARE_ROW" rw-bkm2), $(printf "$BARE_ROW" rw-bkm3), $(printf "$GATE_ROW" g-bkm)]"
+printf 'rw-bkm1|blocks|BKm\nrw-bkm2|blocks|BKm\nrw-bkm3|blocks|BKm\ng-bkm|blocks|rw-bkm1\n' > "$STUB_DEPS"
 printf '%s' "$(prview 180 OPEN CLEAN)" > "$GH_DIR/pr_view_180.json"
 approved 180
 "$SUT" >/dev/null 2>&1
 eq "$(cause BKm)" "blocker" "the ungated blocker records blocked"
-has "$(reason BKm)" "rw-bkm2" "…and the reason names it"
+has "$(reason BKm)" "rw-bkm2" "…and the reason names the first of them"
+hasnt "$(reason BKm)" "rw-bkm3" "…and no other"
 hasnt "$(reason BKm)" "rw-bkm1" "…not the one a person holds"
 
 echo "# a walk that does not read records no verdict"

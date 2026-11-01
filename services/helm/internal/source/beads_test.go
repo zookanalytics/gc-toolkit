@@ -26,6 +26,7 @@ type fakeStore struct {
 	failType map[string]error                                // issue type -> forced SearchIssues error
 	failMeta map[string]error                                // metadata key -> forced SearchIssues error
 	failDeps map[string]error                                // issue id -> forced dependency error
+	failIDs  map[string]error                                // issue id -> forced error from an ID search naming it
 	kv       map[string]string                               // config table: `bd kv` keys, "kv."-prefixed
 	failKV   error                                           // forced GetConfig error
 	closed   bool
@@ -156,6 +157,9 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 	}
 	want := map[string]bool{}
 	for _, id := range filter.IDs {
+		if err, bad := f.failIDs[id]; bad {
+			return nil, err
+		}
 		want[id] = true
 	}
 	found := map[string]bool{}
@@ -3245,6 +3249,42 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 		}
 	})
 
+	t.Run("a far bead that does not hydrate notes partial, as a failed edge read does", func(t *testing.T) {
+		st := store(map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}})
+		st.failIDs = map[string]error{"tk-g": errors.New("dolt timeout")}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if len(anchor.HoldingGates) != 0 {
+			t.Errorf("holding gates = %v, want none from a walk that failed", holdingGateIDs(anchor))
+		}
+		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "holding-gates@") }) {
+			t.Errorf("partial=%v errors=%v, want the walk's failure noted", res.Partial, res.PartialErrors)
+		}
+	})
+
+	t.Run("a gate reached for one anchor holds only the anchor its blocks edge reaches", func(t *testing.T) {
+		// One walk serves both anchors, so tk-g's row is read for tk-pr2, and only
+		// the edge's type says tk-pr does not wait on it.
+		st := &fakeStore{
+			issues: map[string][]*beads.Issue{"task": {pr(), issue("tk-pr2", "another PR", "task", 2, testNow, prMeta)}},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+				"tk-pr":  {{Issue: *gate("tk-g"), DependencyType: "related"}},
+				"tk-pr2": {blocksEdge(gate("tk-g"))},
+			},
+		}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if got := holdingGateIDs(anchor); len(got) != 0 {
+			t.Errorf("tk-pr's holding gates = %v, want none: it only relates to the gate", got)
+		}
+		i, ok := findAnchor(res, "tk-pr2")
+		if !ok {
+			t.Fatal("anchor tk-pr2 is missing")
+		}
+		if got := holdingGateIDs(res.Anchors[i]); !slices.Equal(got, []string{"tk-g"}) {
+			t.Errorf("tk-pr2's holding gates = %v, want the gate its edge reaches", got)
+		}
+	})
+
 	t.Run("the walk reads per level, not per anchor", func(t *testing.T) {
 		reads := func(prs int) int {
 			edges := map[string][]*beads.IssueWithDependencyMetadata{"tk-rw": {blocksEdge(gate("tk-g"))}}
@@ -3276,6 +3316,9 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 		landed := count(map[string][]*beads.IssueWithDependencyMetadata{"tk-pr": {blocksEdge(closed(rework()))}})
 		if bare != landed {
 			t.Errorf("%d outbound reads with no blocker, %d with a closed one: neither has anything to walk", bare, landed)
+		}
+		if bare != 1 {
+			t.Errorf("%d outbound reads, want the pass's own: the walk starts from the anchor edges it already read", bare)
 		}
 	})
 }
