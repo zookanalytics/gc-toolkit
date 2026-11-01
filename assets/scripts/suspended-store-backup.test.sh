@@ -138,11 +138,12 @@ rig rig-nested true false 'gc:\n  endpoint_origin: inherited_city\n  endpoint_st
 rig rig-wide true false 'issue_prefix: x\ngc:\n    endpoint_status: verified\n    endpoint_origin: inherited_city\ndolt:\n    host: h\n' yes
 rig rig-nq true false "gc:\n  endpoint_origin: 'inherited_city' # a note\n" yes
 rig rig-nc true false 'gc: # a section\n  endpoint_origin: inherited_city\n' yes
-rig rig-nb true false 'gc:\n\n# a comment\n  # another\n  endpoint_origin: inherited_city\n' yes
+rig rig-nb true false 'gc:\n\n# a comment\n    # another\n  endpoint_origin: inherited_city\n' yes
 rig rig-ncrlf true false 'gc:\r\n  endpoint_origin: inherited_city\r\n' yes
 rig rig-deep true false 'gc:\n  sub:\n    endpoint_origin: explicit\n  endpoint_origin: inherited_city\n' yes
 rig rig-flat true false 'gc:\n  endpoint_origin: explicit\ngc.endpoint_origin: inherited_city\n' yes
 rig rig-first true false 'gc:\n  endpoint_origin: inherited_city\n  endpoint_origin: explicit\n' yes
+rig rig-str true false 'note: "gc.endpoint_origin: explicit"\ngc.endpoint_origin: inherited_city\n' yes
 rig rig-qx true false 'gc.endpoint_origin: "explicit"\n' yes
 rig rig-nx true false 'gc:\n  endpoint_origin: explicit\n' yes
 rig rig-fx true false 'gc:\n  endpoint_origin: inherited_city\ngc.endpoint_origin: explicit\n' yes
@@ -163,8 +164,8 @@ rig rig-flow true false 'gc: {endpoint_origin: inherited_city}\n' yes
 list_rigs
 run
 eq "$RC" 0 "a pass over every spelling exits 0"
-eq "$(synced)" "rig-dq rig-sq rig-cm rig-crlf rig-nested rig-wide rig-nq rig-nc rig-nb rig-ncrlf rig-deep rig-flat rig-first" "a quoted value, a comment, CRLF, the nested spelling and the flat one over a nested explicit all read as inheriting"
-has "$OUT" "synced 13 of 13" "and the summary counts them"
+eq "$(synced)" "rig-dq rig-sq rig-cm rig-crlf rig-nested rig-wide rig-nq rig-nc rig-nb rig-ncrlf rig-deep rig-flat rig-first rig-str" "a quoted value, a comment, CRLF, the nested spelling and the flat one over a nested explicit all read as inheriting, past a value that quotes the key"
+has "$OUT" "synced 14 of 14" "and the summary counts them"
 has "$OUT" "rig-qx: left alone, its endpoint origin is explicit" "a quoted other origin is still another origin, named without its quotes"
 has "$OUT" "rig-nx: left alone, its endpoint origin is explicit" "so is a nested one"
 has "$OUT" "rig-fx: left alone, its endpoint origin is explicit" "the flat spelling wins over a nested inherited_city"
@@ -197,6 +198,7 @@ else
   run
   eq "$(synced)" "rig-f" "the store is not synced, and the next one still is"
   has "$OUT" "rig-a: left alone, its endpoint origin is not recorded" "and the reader's complaint is not taken for an origin"
+  has "$OUT" "rig-a/.beads/config.yaml" "but it reaches the output, the one line that says the file did not read"
 fi
 
 echo "# a pass with nothing to cover"

@@ -75,8 +75,9 @@ command -v flock >/dev/null 2>&1 || {
 # gc-beads-bd.sh, so the pass reads the endpoint origin as Gas City's packs do. Each
 # of those packs carries its own copy because they ship independently, and so does
 # this one. A spelling only Gas City's Go reader takes, such as a flow mapping,
-# reads here as no origin, so that store is left alone and the alarms keep flagging
-# it.
+# reads here as no origin or another one, so that store is left alone and the
+# alarms keep flagging it. A spelling only this reader takes, such as a quoted
+# value in a file that does not parse, gets one try at a sync.
 #
 # beads_config_value <config.yaml> <section.field> prints a two-part dotted
 # bd config key's value in either spelling bd reads: the flat top-level

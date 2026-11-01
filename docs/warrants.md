@@ -117,16 +117,19 @@ shares only the word ([authority-map.md](authority-map.md)).
     store going without a backup. No pack in `gastownhall/gascity-packs` runs a
     backup of its own: its one mention of `mol-dog-backup` is Gas Town's patrol
     reporting that the order may have failed.
-  - No command reports a rig's endpoint origin. `gc rig list --json` and
+  - No command gives a read of a rig's endpoint origin. `gc rig list --json` and
     `gc rig status --json` leave it out (`RigListItem` in `cmd/gc/cmd_rig.go`,
-    `RigStatusRig` in `cmd/gc/cmd_status.go`). `gc rig set-endpoint --dry-run`
-    prints it only as preview text, and its `--json` form has no field for it
-    (`printRigEndpointDryRun` in `cmd/gc/cmd_rig_endpoint.go`, `rigEndpointJSON`
-    in `cmd/gc/management_json.go`). So the script carries a copy of
-    `beads_config_value` from the bd pack
+    `RigStatusRig` in `cmd/gc/cmd_status.go`). A writer's dry run prints it only
+    as preview text: `gc rig set-endpoint --dry-run`, whose `--json` form has no
+    field for it (`printRigEndpointDryRun` in `cmd/gc/cmd_rig_endpoint.go`,
+    `rigEndpointJSON` in `cmd/gc/management_json.go`), and the `use-managed` and
+    `use-external` verbs of `gc beads city` (`printCityEndpointDryRun` in
+    `cmd/gc/cmd_beads_city.go`). A doctor warning about a split store names it in
+    passing (`activeBDStore` in `internal/doctor/checks.go`). So the script
+    carries a copy of `beads_config_value` from the bd pack
     (`examples/bd/assets/scripts/gc-beads-bd.sh`). The dolt pack and
     `schemas/wisps-composite-index/common.sh` carry the same function because
-    they ship independently, and a test holds those three equal
+    they ship independently, and a test holds the copies equal
     (`cmd/gc/gc_beads_bd_config_value_test.go`). That test does not reach this
     copy.
 
