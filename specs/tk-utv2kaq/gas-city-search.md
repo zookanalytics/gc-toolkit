@@ -74,11 +74,11 @@ this change does not touch that choice.
 latter.
 
 **Asking what a close would answer before it writes.** `bd close` (package `main`,
-`closeCmd`) has no dry run. Its flags are `--force`, `--reason`, `--reason-file`,
-`--continue`, `--no-auto`, `--suggest-next`, `--claim-next`, `--session` and
-`--if-revision`, and the refusals `closeDirectCheckOne` applies are bd's own
-(`storeissueops.CheckClosable`, `checkGateSatisfaction`), so none of them reads what
-the pack asks of a close. The clause in question is the pack's: `epic_hypothesis`
+`closeCmd`) has no dry run. Its flags are `--force`, `--reason` with its hidden
+aliases, `--reason-file`, `--continue`, `--no-auto`, `--suggest-next`, `--claim-next`,
+`--session` and `--if-revision`, and the refusals `closeDirectCheckOne` applies are
+bd's own (`storeissueops.CheckClosable`, `checkGateSatisfaction`), so none of them
+reads what the pack asks of a close. The clause in question is the pack's: `epic_hypothesis`
 and `epic_ruling` are the pack's keys, which neither bd nor Gas City names at those
 commits, and bead-rehome.sh's pointer is what the clause takes as an epic's terminal
 reason. So asking about the bead as the close will leave it is a reading on the
