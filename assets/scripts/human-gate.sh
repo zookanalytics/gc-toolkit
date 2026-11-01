@@ -84,7 +84,9 @@ usage: human-gate.sh --subject <bead-id> --key <situation-key> --message <text>
 U
 }
 
-warn() { echo "$PROG: $*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 SUBJECT=""; KEY=""; MESSAGE=""; QUIET_WINDOW=""; RETRACT=0
 while [ $# -gt 0 ]; do
@@ -126,10 +128,6 @@ case "$SUBJECT" in
     warn "'$SUBJECT' names a patrol wisp or a session, not a bead that can wait for a person. Nothing was filed or resolved. A situation with no bead of its own is a patrol finding: file it with patrol-finding.sh --key $KEY --title <one line> --message <text>, and its first reaction files a human gate on the finding when a person must answer."
     exit 2 ;;
 esac
-
-_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # Every decision below reads this one read (bd_human_gates), closed gates
 # included, and tells the open ones by open_human_gate.

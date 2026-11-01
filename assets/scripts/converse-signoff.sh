@@ -182,7 +182,13 @@ LEAVE=()
 ANSWER_GATES=()
 UNDONE="NOT SIGNED OFF — do NOT post the sign-off."
 
-die() { echo "converse-signoff: $1" >&2; exit 2; }
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# The one read of a bead's human gates, the read gc-helm.sh accept makes, and
+# the rule of which of them still hold it. Exposes bd_human_gates and
+# $HUMAN_GATE_JQ, and the die this script reports through.
+# shellcheck source=bd-lib.sh
+. "$HERE/bd-lib.sh" || { echo "converse-signoff: cannot source bd-lib.sh from $HERE" >&2; exit 2; }
+DIE_STATUS=2
 # stopped <why> — refuse the sign-off (exit 1). Whatever ran before it is a write
 # a re-run repeats safely.
 stopped() {
@@ -211,7 +217,6 @@ pack_script() {
   printf '%s' "$HERE/$1"
 }
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
 # The one definition of a conversation's shape. Exposes $CONVERSATION_JQ.
 # shellcheck source=conversation.sh
 . "$HERE/conversation.sh" || die "cannot source conversation.sh from $HERE"
@@ -219,11 +224,6 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # with gc-helm.sh dismiss. Exposes work_outcome_noop.
 # shellcheck source=work-outcome.sh
 . "$HERE/work-outcome.sh" || die "cannot source work-outcome.sh from $HERE"
-# The one read of a bead's human gates, the read gc-helm.sh accept makes, and
-# the rule of which of them still hold it. Exposes bd_human_gates and
-# $HUMAN_GATE_JQ.
-# shellcheck source=bd-lib.sh
-. "$HERE/bd-lib.sh" || die "cannot source bd-lib.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -101,7 +101,9 @@ PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 4; }
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 4; }
+DIE_STATUS=4
 usage_die() { printf '%s: %s\n' "$PROG" "$*" >&2; usage; exit 2; }
 note() { printf '%s: %s\n' "$PROG" "$*" >&2; }
 

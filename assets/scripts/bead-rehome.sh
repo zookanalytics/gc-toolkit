@@ -147,8 +147,6 @@ U
     exit "${1:-1}"
 }
 
-die() { echo "bead-rehome: $1" >&2; exit "${2:-1}"; }
-
 while [ $# -gt 0 ]; do
     case "$1" in
         --origin)           ORIGIN="${2:-}"; shift 2 ;;

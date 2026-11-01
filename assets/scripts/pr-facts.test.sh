@@ -128,6 +128,8 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
+# A case that wraps review-checks.sh runs the real one from $TMP, beside this.
+mkdir -p "$TMP"; cp "$HERE/bd-lib.sh" "$TMP/bd-lib.sh"
 mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
 # lane-state.sh's contract, answered from the environment: every lane derives
 # green unless STUB_LANE_UNGREEN names "<anchor>:<lane>" (or the bare anchor,

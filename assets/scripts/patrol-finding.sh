@@ -62,7 +62,9 @@ TITLE_MAX=200
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-warn() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 usage() {
@@ -241,10 +243,6 @@ note_head() {
 
 # byte_len <text> -> its length in bytes, whatever the locale.
 byte_len() { printf '%s' "$1" | wc -c | tr -d ' '; }
-
-_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # Every status a finding's bead can hold and still be its live record; only
 # `closed` ends one. One comma list, because a repeated --status flag keeps only
