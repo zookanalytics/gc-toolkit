@@ -353,7 +353,9 @@ machines = ["progressing", "settled", "blocked"]
 #   behind            the base moved ahead (BEHIND), and nothing brings the
 #                     branch current
 #   blocker           a live blocker holds it, and no automated actor holds any
-#                     of its live blockers (assets/scripts/blocker-holder.sh)
+#                     of its live blockers (assets/scripts/blocker-holder.sh); or
+#                     it removes a pack script open steps call, and a person's
+#                     gate parks one of their runs (assets/scripts/script-callers.sh)
 #   rule              branch protection holds it by a rule the merge pass
 #                     cannot name
 causes = ["review-threads", "check-failed", "conflict", "behind", "blocker", "rule"]

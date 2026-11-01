@@ -870,7 +870,10 @@ func (m *merger) handle(row *gcbd.Bead) {
 	// end, with nothing on the PR to change. Every lane is green there and the PR
 	// waits on this pass, which is settled. gate-ensure.sh reaches the same verdict
 	// later in the pass, so any other one here would alternate with it for as long
-	// as the hold stands.
+	// as the hold stands. A run a person's gate parks ends only when that person
+	// acts, so one parked caller reads blocked and its reason names the gate.
+	// gate-ensure.sh leaves that verdict standing while no actor holds a blocker of
+	// the anchor, and the next pass here replaces it once no run is parked.
 	if checkCallers {
 		scOut, scRC := runCombined("bash", callers, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
 		switch scRC {
@@ -890,6 +893,13 @@ func (m *merger) handle(row *gcbd.Bead) {
 		case 4:
 			m.recordMachine(id, "settled", headOid, aroute)
 			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script only the rig checkout's HEAD still names; merge held until the checkout takes '%s' (anchor %s)\n", mergeProg, num, base, id)
+			m.printIndented(scOut, 12)
+			m.held++
+			return
+		case 5:
+			reason, _, _ := strings.Cut(scOut, "\n")
+			m.recordBlocked(id, headOid, aroute, prstatus.CauseBlocker, reason)
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script steps of a parked run still call; merge held until a person releases the gate or cancels the run (anchor %s)\n", mergeProg, num, id)
 			m.printIndented(scOut, 12)
 			m.held++
 			return

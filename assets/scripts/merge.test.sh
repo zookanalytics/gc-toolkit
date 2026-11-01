@@ -1498,6 +1498,24 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no human gate, since nothing on the PR has to change"
 has "$(meta C3 pr.machine)" "settled@sha-93" "…and the machine axis reads settled: every lane is green and the PR waits on this pass"
 
+# One caller in a run a person's gate parks ends only when that person acts.
+store "[$(anchor C3a 93), $(rev C3a)]"
+export STUB_CALLERS_RC=5
+STUB_CALLERS_OUT="$(printf '%s\n%s' "2 open step(s) call a script the merge removes (assets/scripts/x.sh), and 1 of them sit in runs a person's gate parks (g-1). Release each gate or cancel each parked run, and the merge goes on." "x.sh: step s1 (mol-a.load, open, unassigned) in run r1, store of rig w, parked behind g-1")"
+export STUB_CALLERS_OUT
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"; : > "$REPOOL_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#93 removes a pack script steps of a parked run still call; merge held until a person releases the gate or cancels the run" \
+  "a removed script a parked run calls holds"
+has "$out" "x.sh: step s1 (mol-a.load, open, unassigned) in run r1, store of rig w, parked behind g-1" "…quoting the callers"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+has "$(meta C3a pr.machine)" "blocked@sha-93" "…and the machine axis reads blocked, since no automated actor ends the wait"
+eq "$(meta C3a pr.machine_cause)" "blocker" "…its cause the blocker no actor holds"
+has "$(meta C3a pr.machine_reason)" "a person's gate parks (g-1). Release each gate or cancel each parked run" "…its reason naming the gate and what ends the wait"
+hasnt "$(meta C3a pr.machine_reason)" "x.sh: step s1" "…in one sentence, leaving the list of callers to the log"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no gate of its own, since the person is already asked"
+eq "$(wc -c < "$REPOOL_LOG" | tr -d ' ')" "0" "…and no rework"
+
 store "[$(anchor C4 94), $(rev C4)]"
 printf '%s' "$(prview 94 OPEN CLEAN)" > "$GH_DIR/pr_view_94.json"
 approved 94
@@ -2054,6 +2072,45 @@ eq "$(machine CH1)" "$held_verdict" "gate-ensure.sh reaches the same verdict, in
 out=$("$SUT" 2>&1)
 eq "$(machine CH1)" "$held_verdict" "…and the next merge pass leaves it as it stands"
 eq "$("$GCTK_BIN" pr-status derive --anchor CH1)" "merging" "…so the PR reads merging while the hold stands"
+export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
+rm -f "$SD/script-callers.sh" "$SD/gate-ensure.sh"
+
+echo "# through both writers, a merge held behind a parked run stays blocked until no run is parked"
+# Only a person ends this wait, so the PR reads needs-attention across every pass
+# and every writer of the verdict. Once no caller is parked the merge pass clears
+# the verdict itself, because a run that has gone back to moving asks nobody.
+cp "$HERE/gate-ensure.sh" "$SD/gate-ensure.sh"; chmod +x "$SD/gate-ensure.sh"
+callers_stub() { # rc line
+  printf '#!/usr/bin/env bash\necho "%s"\nexit %s\n' "$2" "$1" > "$SD/script-callers.sh"
+  chmod +x "$SD/script-callers.sh"
+}
+callers_stub 5 "1 open step(s) call a script the merge removes (assets/scripts/x.sh), and 1 of them sit in runs a person's gate parks (g-1). Release each gate or cancel each parked run, and the merge goes on."
+STUB_FETCHED_HEAD=$(cr_head 182)
+export STUB_TOPLEVEL="$TMP/repo" STUB_FETCHED_HEAD
+store "[$(cr_anchor CP1 182 check-failed), $(rev CP1)]"
+: > "$STUB_DEPS"; : > "$STUB_ESC_LOG"
+cr_view 182 CLEAN "[]"
+out=$("$SUT" 2>&1)
+has "$out" "PR#182 removes a pack script steps of a parked run still call; merge held" "test premise: the merge pass holds"
+eq "$(pinned CP1) $(cause CP1)" "blocked@$(cr_head 182) blocker" "a merge held behind a parked run records blocked, cause blocker"
+has "$(reason CP1)" "a person's gate parks (g-1)" "…naming the gate"
+held_verdict=$(machine CP1)
+out=$("$SD/gate-ensure.sh" --default correctness --review-pool rig/gc-toolkit.polecat-codex --fix-pool rig/gc-toolkit.polecat 2>&1); rc=$?
+eq "$rc" 0 "test premise: gate-ensure.sh's pass exits 0"
+eq "$(machine CP1) $(cause CP1)" "$held_verdict blocker" "gate-ensure.sh leaves the verdict standing, instant and all"
+has "$(reason CP1)" "a person's gate parks (g-1)" "…and its reason"
+out=$("$SUT" 2>&1)
+eq "$(machine CP1)" "$held_verdict" "…and the next merge pass leaves it as it stands"
+eq "$("$GCTK_BIN" pr-status derive --anchor CP1)" "needs-attention" "…so the PR reads needs-attention while the hold stands"
+has "$("$GCTK_BIN" pr-status derive --anchor CP1 --json)" '"held":["blocked"]' "…and held: blocked"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…asking no person a second time"
+callers_stub 3 "1 open step(s) call a script the merge removes (assets/scripts/x.sh)."
+out=$("$SUT" 2>&1)
+eq "$(pinned CP1) $(cause CP1) $(reason CP1)" "settled@$(cr_head 182) <absent> <absent>" "once no caller is parked, the merge pass clears the verdict, its cause and its reason"
+eq "$("$GCTK_BIN" pr-status derive --anchor CP1)" "merging" "…so the PR reads merging while those runs end"
+callers_stub 0 "the merge removes assets/scripts/x.sh; no formula names them and no open step calls them"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded CP1" "…and once they have ended, the PR lands"
 export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
 rm -f "$SD/script-callers.sh" "$SD/gate-ensure.sh"
 

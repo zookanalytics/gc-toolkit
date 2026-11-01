@@ -6,8 +6,8 @@
 #
 #   <script>...    each open step whose text names one of the scripts, given by
 #                  file name (foo.sh), one line per step: the script, the step
-#                  with its step ref, status and assignee, the run's root, and
-#                  the rig whose store holds it.
+#                  with its step ref, status and assignee, the run's root, the
+#                  rig whose store holds it, and any gate that parks its run.
 #   --check-merge  the pack scripts that merging <head> into <base> removes,
 #                  and for each the formulas at <base>, at <head> or, failing
 #                  those, at the checkout's HEAD that still name it and the open
@@ -32,6 +32,13 @@
 # clears it, so when only the checkout names the script the merge waits for it,
 # and nothing on the change has to move.
 #
+# A run is parked when one of its open steps is blocked by a gate a person holds.
+# The edge sits on one step and its later steps wait on the step before them, so
+# a run is judged whole, and it ends only once a person releases the gate or
+# cancels the run. A gate a person holds is any gate the city does not close by
+# itself: a human gate, and a park, which carries no await type. A timer gate and
+# a gate on a GitHub run or pull request close on their own (core's gate-sweep).
+#
 # A text names a script when it holds the file name with no letter, digit,
 # dot, dash or underscore on either side. A step is a bead carrying
 # gc.step_ref, in any status but closed. The stores are those of every rig
@@ -49,8 +56,9 @@
 #       names a script the merge removes · 2 usage, or a revision, the checkout's
 #       HEAD, the rig list, a store or a loop's input could not be read, so
 #       nothing was decided · 3 open steps call the scripts, or a script the
-#       merge removes · 4 only the checkout's HEAD names a script the merge
-#       removes
+#       merge removes, and none of their runs is parked · 4 only the checkout's
+#       HEAD names a script the merge removes · 5 as 3, and at least one of their
+#       runs is parked
 set -uo pipefail
 
 PROG="script-callers"
@@ -120,14 +128,40 @@ loop_input() {
   LOOP_LINES=$(( ${#newlines} + 1 ))
 }
 
+# store_parks <rig> <path> <rows> — the store's parked runs, as one JSON object
+# from a run's root, or a step's id where it names none, to the gates that hold
+# it. <rows> are the store's open steps, whose edges a list row carries. A store
+# whose gates cannot be read ends the script with exit 2, through its caller.
+store_parks() {
+  local gates parks
+  gates=$(bd_list --db "$2/.beads" --type gate --include-gates --status "$LIVE_STATUSES") \
+    || fail "cannot read the gates in the store of rig '$1' ($2/.beads)"
+  parks=$(printf '%s\n%s' "$3" "$gates" | jq -cn '
+    input as $rows | input as $gates
+    | [ $gates[] | ((.await_type // "") | tostring) as $await
+        | select(($await == "timer" or ($await | startswith("gh:run")) or ($await | startswith("gh:pr"))) | not)
+        | .id ] as $held
+    | reduce ($rows[] | (.metadata["gc.root_bead_id"] // .id) as $run
+              | (.dependencies // [])[]
+              | select(.type == "blocks")
+              | .depends_on_id as $gate
+              | select($held | index($gate))
+              | {run: $run, gate: $gate}) as $edge
+        ({}; .[$edge.run] = (((.[$edge.run] // []) + [$edge.gate]) | unique))') \
+    || fail "cannot read the gates in the store of rig '$1' ($2/.beads)"
+  printf '%s' "$parks"
+}
+
 # callers <script>... — collect each open step that names one of the scripts,
 # in every store of the city, one line per step in CALLER_LINES, and count them
 # in NCALLERS. Each store is read once, so the cost does not grow with the
-# scripts asked about. A rig list or a store that cannot be read ends the script
+# scripts asked about. A store that holds a caller has its gates read once too:
+# NPARKED counts the callers in a parked run, and PARKED_GATES names what parks
+# them, space-separated. A rig list or a store that cannot be read ends the script
 # with exit 2.
-NCALLERS=0; CALLER_LINES=""
+NCALLERS=0; CALLER_LINES=""; NPARKED=0; PARKED_GATES=""
 callers() {
-  local rigs rig path name rows lines newlines read_lines=0
+  local rigs rig path name rows hits parks parked gate lines newlines read_lines=0
   rigs=$("$HERE/rig-map.sh" | jq -r '.rigs[] | [.name, .path] | @tsv') \
     || fail "cannot read the city's rigs (gc rig list --json)"
   [ -n "$rigs" ] || fail "the city lists no rig, so no store was read"
@@ -136,15 +170,32 @@ callers() {
     read_lines=$((read_lines + 1))
     rows=$(bd_list --db "$path/.beads" --has-metadata-key gc.step_ref --status "$LIVE_STATUSES") \
       || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
+    parks=""
     for name in "$@"; do
-      lines=$(printf '%s' "$rows" | jq -r --arg s "$name" --arg re "$(name_re "$name")" --arg rig "$rig" '
-        .[] | select((.description // "") | test($re))
-        | "\($s): step \(.id) (\(.metadata["gc.step_ref"] // "?"), \(.status), \(.assignee // "" | if . == "" then "unassigned" else . end)) in run \(.metadata["gc.root_bead_id"] // "?"), store of rig \($rig)"') \
+      hits=$(printf '%s' "$rows" | jq -c --arg re "$(name_re "$name")" '
+        [ .[] | select((.description // "") | test($re))
+          | { id, status, assignee: (.assignee // ""), ref: (.metadata["gc.step_ref"] // "?"),
+              root: (.metadata["gc.root_bead_id"] // "?"), run: (.metadata["gc.root_bead_id"] // .id) } ]') \
         || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
-      [ -n "$lines" ] || continue
+      [ "$hits" != "[]" ] || continue
+      [ -n "$parks" ] || parks=$(store_parks "$rig" "$path" "$rows") || exit 2
+      lines=$(printf '%s' "$hits" | jq -r --arg s "$name" --arg rig "$rig" --argjson parks "$parks" '
+        .[] | "\($s): step \(.id) (\(.ref), \(.status), \(if .assignee == "" then "unassigned" else .assignee end)) in run \(.root), store of rig \($rig)"
+              + (if $parks[.run] then ", parked behind " + ($parks[.run] | join(", ")) else "" end)') \
+        || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
+      parked=$(printf '%s' "$hits" | jq -r --argjson parks "$parks" '
+        [ .[] | $parks[.run] // empty ] | "\(length) \(map(.[]) | unique | join(" "))"') \
+        || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
       CALLER_LINES="$CALLER_LINES$lines"$'\n'
       newlines=${lines//[!$'\n']/}
       NCALLERS=$((NCALLERS + ${#newlines} + 1))
+      NPARKED=$((NPARKED + ${parked%% *}))
+      for gate in ${parked#* }; do
+        case " $PARKED_GATES " in
+          *" $gate "*) ;;
+          *) PARKED_GATES="$PARKED_GATES${PARKED_GATES:+ }$gate" ;;
+        esac
+      done
     done
   done < "$LOOP_FILE"
   [ "$read_lines" -eq "$LOOP_LINES" ] || fail "read $read_lines of the $LOOP_LINES rigs the city lists"
@@ -152,6 +203,11 @@ callers() {
 
 if [ -z "$CHECK_MERGE" ]; then
   callers "${SCRIPTS[@]}"
+  if [ "$NPARKED" -gt 0 ]; then
+    echo "$NCALLERS open step(s) call ${SCRIPTS[*]}, and $NPARKED of them sit in runs a person's gate parks (${PARKED_GATES// /, })"
+    printf '%s' "$CALLER_LINES"
+    exit 5
+  fi
   if [ "$NCALLERS" -gt 0 ]; then
     echo "$NCALLERS open step(s) call ${SCRIPTS[*]}"
     printf '%s' "$CALLER_LINES"
@@ -243,6 +299,11 @@ if [ "$CHECKOUT_OID" != "$BASE_OID" ] && [ "$CHECKOUT_OID" != "$HEAD_OID" ]; the
 fi
 
 callers "${NAMES[@]}"
+if [ "$NPARKED" -gt 0 ]; then
+  echo "$NCALLERS open step(s) call a script the merge removes (${PATHS[*]}), and $NPARKED of them sit in runs a person's gate parks (${PARKED_GATES// /, }). Release each gate or cancel each parked run, and the merge goes on."
+  printf '%s' "$CALLER_LINES"
+  exit 5
+fi
 if [ "$NCALLERS" -gt 0 ]; then
   echo "$NCALLERS open step(s) call a script the merge removes (${PATHS[*]}). The merge waits for their runs to end, unless the change keeps a file at each path."
   printf '%s' "$CALLER_LINES"

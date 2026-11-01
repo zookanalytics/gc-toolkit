@@ -16,11 +16,17 @@
 #     is read once;
 #   - a removed script that only open steps call exits 3, and one nothing
 #     calls exits 0;
+#   - one caller in a run parked behind a gate a person holds, a human gate or a
+#     park with no await type, exits 5 and names the gate, whichever step of the
+#     run the edge sits on; a timer or GitHub gate, a closed gate or a blocker
+#     that is no gate parks nothing, and only a store holding a caller has its
+#     gates read;
 #   - a repository is read from its top, so a directory below it gets the same
 #     answers;
 #   - it exits 2 when it decides nothing: a usage error, a revision or
 #     repository it cannot read, a list of deletions or formulas git cannot give,
-#     no rig list, or a store that does not answer or holds a row it cannot read;
+#     no rig list, or a store that does not answer, including about its gates,
+#     or holds a row it cannot read;
 #   - it exits 2 when a loop could not read its whole list: the temp file cannot
 #     be created or written, or the loop read fewer lines than the list holds.
 #     No failure of a list or a count under a loop reads as an all-clear.
@@ -63,18 +69,28 @@ if [ "${1:-}" = rig ] && [ "${2:-}" = list ]; then
 fi
 if [ "${1:-}" = bd ] && [ "${2:-}" = list ]; then
   shift 2
-  db=""; statuses=""; key=""
+  db=""; statuses=""; key=""; type=""; gates_shown=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --db) db="$2"; shift 2 ;;
       --status) statuses="$2"; shift 2 ;;
       --has-metadata-key) key="$2"; shift 2 ;;
+      --type) type="$2"; shift 2 ;;
+      --include-gates) gates_shown=1; shift ;;
       *) shift ;;
     esac
   done
   [ "$db" != "${STUB_BD_FAIL_DB:-}" ] || { echo "Error: database unavailable" >&2; exit 1; }
   [ -f "$db/steps.json" ] || { echo "Error: no database at $db" >&2; exit 1; }
   echo "gc bd: answering from the rig \"workshop\" store"
+  # bd list hides gates unless it is told to show them.
+  if [ "$type" = gate ]; then
+    [ -n "$gates_shown" ] || { echo '[]'; exit 0; }
+    [ "$db" != "${STUB_GATES_FAIL_DB:-}" ] || { echo "Error: gates unavailable" >&2; exit 1; }
+    [ -f "$db/gates.json" ] || { echo '[]'; exit 0; }
+    jq -c --arg s "$statuses" '[.[] | select(.status as $st | ($s | split(",")) | index($st))]' "$db/gates.json"
+    exit 0
+  fi
   jq -c --arg s "$statuses" --arg k "$key" '[.[]
     | select(.status as $st | ($s | split(",")) | index($st))
     | select($k == "" or (.metadata | has($k)))]' "$db/steps.json"
@@ -115,6 +131,28 @@ callers_off() {
   local s
   for s in harbor workshop lantern; do printf '[]' > "$STORES/$s/.beads/steps.json"; done
 }
+gate() { # id status [await_type] — bd leaves an empty await type out of the row
+  jq -nc --arg id "$1" --arg st "$2" --arg a "${3:-}" \
+    '{id: $id, status: $st, issue_type: "gate", title: "t", metadata: {}} + (if $a == "" then {} else {await_type: $a} end)'
+}
+gates_off() {
+  local s
+  for s in harbor workshop lantern; do rm -f "$STORES/$s/.beads/gates.json"; done
+}
+# The workshop's two runs: ws-r1, whose first step waits on <blocker> and whose
+# second waits on the first, and ws-r2, which nothing holds. Each step names the
+# script, and the edges are in the raw shape a list row carries.
+parked_on() { # blocker
+  local name='old-tool.sh'
+  jq -nc --arg b "$1" --arg d "\"\$SCRIPTS/$name\"" '[
+    {id: "ws-a", status: "open", assignee: "", description: $d, metadata: {"gc.step_ref": "mol-a.load", "gc.root_bead_id": "ws-r1"},
+     dependencies: [{issue_id: "ws-a", depends_on_id: $b, type: "blocks"}, {issue_id: "ws-a", depends_on_id: "ws-r1", type: "tracks"}]},
+    {id: "ws-b", status: "open", assignee: "", description: $d, metadata: {"gc.step_ref": "mol-a.submit", "gc.root_bead_id": "ws-r1"},
+     dependencies: [{issue_id: "ws-b", depends_on_id: "ws-a", type: "blocks"}]},
+    {id: "ws-c", status: "open", assignee: "", description: $d, metadata: {"gc.step_ref": "mol-a.load", "gc.root_bead_id": "ws-r2"},
+     dependencies: []}
+  ]' > "$STORES/workshop/.beads/steps.json"
+}
 run() { out=$("$SUT" "$@" 2>&1); rc=$?; }
 
 echo "# census"
@@ -142,7 +180,8 @@ eq "$rc" "3" "steps that call either of two scripts exit 3"
 eq "$(printf '%s\n' "$out" | head -1)" "4 open step(s) call old-tool.sh sub-tool.sh" "...counting the steps of both"
 has "$out" "sub-tool.sh: step hb-s1 (mol-k.probe, open, unassigned) in run hb-r1, store of rig harbor" "...listing the second script's caller"
 has "$out" "old-tool.sh: step ws-s1 (mol-a.load, open, unassigned) in run ws-r1, store of rig workshop" "...and the first's"
-eq "$(grep -c '^bd list ' "$STUB_GC_LOG")" "3" "...reading each of the three stores once, however many scripts are asked about"
+eq "$(grep -c '^bd list .*--has-metadata-key gc.step_ref' "$STUB_GC_LOG")" "3" "...reading each of the three stores' steps once, however many scripts are asked about"
+eq "$(grep -c -e '--type gate' "$STUB_GC_LOG")" "3" "...and each store's gates once, each holding a caller"
 
 callers_off
 run old-tool.sh keep.sh
@@ -181,6 +220,98 @@ run old-tool.sh
 eq "$rc" "2" "a rig the list gives no path for decides nothing, since its store was not read"
 callers_on
 cp "$TMP/rigs.keep" "$STUB_RIGS"
+
+echo "# a run a person's gate parks"
+gates_off; callers_off
+printf '[%s]' "$(gate ws-g open)" > "$STORES/workshop/.beads/gates.json"
+parked_on ws-g
+: > "$STUB_GC_LOG"
+run old-tool.sh
+eq "$rc" "5" "a caller in a run a park holds exits 5, a park carrying no await type"
+eq "$(printf '%s\n' "$out" | head -1)" "3 open step(s) call old-tool.sh, and 2 of them sit in runs a person's gate parks (ws-g)" \
+  "...counting the parked ones, naming the gate"
+has "$out" "old-tool.sh: step ws-a (mol-a.load, open, unassigned) in run ws-r1, store of rig workshop, parked behind ws-g" \
+  "...marking the step the edge sits on"
+has "$out" "old-tool.sh: step ws-b (mol-a.submit, open, unassigned) in run ws-r1, store of rig workshop, parked behind ws-g" \
+  "...and a later step of that run, which waits only on the step before it"
+has "$out" "old-tool.sh: step ws-c (mol-a.load, open, unassigned) in run ws-r2, store of rig workshop" "...and listing the run nothing parks"
+hasnt "$out" "in run ws-r2, store of rig workshop, parked" "...unmarked"
+eq "$(grep -c -e '--type gate --include-gates' "$STUB_GC_LOG")" "1" "only the store holding a caller has its gates read"
+has "$(cat "$STUB_GC_LOG")" "bd list --db $STORES/workshop/.beads --type gate --include-gates --status open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json" \
+  "...pinned by --db, in every status but closed"
+
+printf '[%s]' "$(gate ws-g open human)" > "$STORES/workshop/.beads/gates.json"
+run old-tool.sh
+eq "$rc" "5" "a human gate parks a run"
+printf '[%s]' "$(gate ws-g open bead)" > "$STORES/workshop/.beads/gates.json"
+run old-tool.sh
+eq "$rc" "5" "...and so does a gate of a type the city's sweep does not close"
+
+for await in timer gh:run gh:pr; do
+  printf '[%s]' "$(gate ws-g open "$await")" > "$STORES/workshop/.beads/gates.json"
+  run old-tool.sh
+  eq "$rc" "3" "a $await gate closes on its own and parks nothing"
+  hasnt "$out" "parked behind" "...and no step is marked"
+done
+
+printf '[%s]' "$(gate ws-g closed human)" > "$STORES/workshop/.beads/gates.json"
+run old-tool.sh
+eq "$rc" "3" "a closed gate parks nothing"
+rm -f "$STORES/workshop/.beads/gates.json"
+parked_on ws-task
+run old-tool.sh
+eq "$rc" "3" "a blocker that is no gate parks nothing, since its work can end on its own"
+
+printf '[%s,%s]' "$(gate ws-g open)" "$(gate ws-h open human)" > "$STORES/workshop/.beads/gates.json"
+jq -c 'map(if .id == "ws-c" then .dependencies = [{issue_id: "ws-c", depends_on_id: "ws-h", type: "blocks"}] elif .id == "ws-a" then .dependencies[0].depends_on_id = "ws-g" else . end)' \
+  "$STORES/workshop/.beads/steps.json" > "$TMP/two-gates.json"
+cp "$TMP/two-gates.json" "$STORES/workshop/.beads/steps.json"
+run old-tool.sh keep.sh
+eq "$(printf '%s\n' "$out" | head -1)" "3 open step(s) call old-tool.sh keep.sh, and 3 of them sit in runs a person's gate parks (ws-g, ws-h)" \
+  "two gates parking two runs are both named"
+printf '[%s]' "$(gate lantern-g open)" > "$STORES/lantern/.beads/gates.json"
+jq -nc '[{id: "ln-a", status: "open", assignee: "", description: "old-tool.sh", metadata: {"gc.step_ref": "mol-b.load", "gc.root_bead_id": "ln-r1"},
+          dependencies: [{issue_id: "ln-a", depends_on_id: "lantern-g", type: "blocks"}]}]' > "$STORES/lantern/.beads/steps.json"
+run old-tool.sh
+has "$(printf '%s\n' "$out" | head -1)" "(ws-g, ws-h, lantern-g)" "...and so are gates in other stores, each once"
+jq -nc '[{id: "ln-a", status: "open", assignee: "", description: "old-tool.sh keep.sh", metadata: {"gc.step_ref": "mol-b.load", "gc.root_bead_id": "ln-r1"},
+          dependencies: [{issue_id: "ln-a", depends_on_id: "lantern-g", type: "blocks"}]}]' > "$STORES/lantern/.beads/steps.json"
+: > "$STUB_GC_LOG"
+run old-tool.sh keep.sh
+eq "$(printf '%s\n' "$out" | head -1)" "5 open step(s) call old-tool.sh keep.sh, and 5 of them sit in runs a person's gate parks (ws-g, ws-h, lantern-g)" \
+  "...once each though two scripts' callers wait on it"
+eq "$(grep -c -e "--db $STORES/lantern/.beads --type gate" "$STUB_GC_LOG")" "1" "...and a store holding callers of two scripts has its gates read once"
+gates_off
+
+# A step with no run of its own is judged by its own edge.
+printf '[%s]' "$(gate ws-g open)" > "$STORES/workshop/.beads/gates.json"
+jq -nc '[{id: "ws-x", status: "open", assignee: "", description: "old-tool.sh", metadata: {"gc.step_ref": "mol-a.load"},
+          dependencies: [{issue_id: "ws-x", depends_on_id: "ws-g", type: "blocks"}]}]' > "$STORES/workshop/.beads/steps.json"
+callers_off_but_workshop() { printf '[]' > "$STORES/harbor/.beads/steps.json"; printf '[]' > "$STORES/lantern/.beads/steps.json"; }
+callers_off_but_workshop
+run old-tool.sh
+eq "$rc" "5" "a step that names no run is parked by its own edge"
+has "$out" "step ws-x (mol-a.load, open, unassigned) in run ?, store of rig workshop, parked behind ws-g" "...and says it names no run"
+
+parked_on ws-g
+export STUB_GATES_FAIL_DB="$STORES/workshop/.beads"
+run old-tool.sh
+eq "$rc" "2" "a store whose gates cannot be read decides nothing"
+has "$out" "cannot read the gates in the store of rig 'workshop' ($STORES/workshop/.beads); nothing was decided" "...and names the store"
+hasnt "$out" "open step(s) call" "...with no count that reads as an answer"
+printf '[]' > "$STORES/workshop/.beads/steps.json"
+run old-tool.sh
+eq "$rc" "0" "a store holding no caller is not asked about its gates, so its failure holds nothing"
+unset STUB_GATES_FAIL_DB
+
+printf '[{"id":"ws-g","status":"open","await_type":7}]' > "$STORES/workshop/.beads/gates.json"
+parked_on ws-g
+jq -c 'map(.dependencies = 7)' "$STORES/workshop/.beads/steps.json" > "$TMP/bad-edges.json"
+cp "$TMP/bad-edges.json" "$STORES/workshop/.beads/steps.json"
+run old-tool.sh
+eq "$rc" "2" "a step's edges it cannot read decide nothing"
+has "$out" "cannot read the gates in the store of rig 'workshop'" "...and name the store"
+gates_off; callers_on
 
 echo "# usage"
 run; eq "$rc" "2" "no script and no --check-merge is a usage error"
@@ -284,6 +415,17 @@ run --root "$REPO" --check-merge main delete
 eq "$rc" "3" "removing a script only open steps call exits 3"
 has "$out" "old-tool.sh: step ws-s1 (mol-a.load, open, unassigned) in run ws-r1, store of rig workshop" "...listing each caller"
 has "$(printf '%s\n' "$out" | head -1)" "3 open step(s) call a script the merge removes (assets/scripts/old-tool.sh)" "...under a headline with the count"
+
+# One parked caller among moving ones is a person's to end.
+printf '[%s]' "$(gate ws-g open)" > "$STORES/workshop/.beads/gates.json"
+parked_on ws-g
+run --root "$REPO" --check-merge main delete
+eq "$rc" "5" "removing a script a parked run calls exits 5, though other callers are moving"
+first=$(printf '%s\n' "$out" | head -1)
+has "$first" "(assets/scripts/old-tool.sh), and 2 of them sit in runs a person's gate parks (ws-g)." "...naming the gate on the first line, which the merge's reason keeps"
+has "$first" "Release each gate or cancel each parked run, and the merge goes on." "...and what ends the wait"
+has "$out" "in run ws-r1, store of rig workshop, parked behind ws-g" "...listing each caller"
+gates_off; callers_on
 
 run --root "$REPO" --check-merge main rename
 eq "$rc" "3" "a rename removes the old path"

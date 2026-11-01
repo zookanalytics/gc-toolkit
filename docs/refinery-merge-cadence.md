@@ -275,16 +275,25 @@ the cadence — the arms run whether or not any refinery session is awake.
 
    Open steps in any store of the city that call a removed script hold the merge
    until their runs end. Nothing on the PR has to change for that, so the arm
-   files no gate. It records `settled`, the verdict
+   files no gate. While those runs are moving it records `settled`, the verdict
    `gate-ensure.sh` reaches for the same green anchor later in the pass, so the
    two do not alternate: the board reads "green — waiting on the merge pass" and
-   the PR `status: merging`. A run parked behind a person's gate ends only once
-   that gate is released or the run is cancelled, and the merge waits that long
-   with nothing on the board to say so. Each pass's log counts the calling steps
-   and names the first of them, and `script-callers.sh <script>` lists each with
-   its run and the rig whose store holds it. A check that cannot read a revision,
-   the rig list, a store or the temp file behind one of its loops holds the merge
-   for the pass.
+   the PR `status: merging`.
+
+   A run a person's gate parks ends only once that gate is released or the run is
+   cancelled, so one parked caller makes the verdict `blocked`, cause `blocker`,
+   with a reason that names the gate and what ends the wait. The PR reads
+   `status: needs-attention` and `held: blocked`, and the board's row gives the
+   reason. `gate-ensure.sh` leaves that verdict standing, and the next pass that
+   finds no parked caller replaces it. A run is parked when one of its open steps
+   is blocked by a gate the city does not close by itself: a human gate or a
+   park, and not a timer gate or a gate on a GitHub run or pull request.
+
+   Each pass's log counts the calling steps and names the first of them, and
+   `script-callers.sh <script>` lists each with its run, any gate that parks it
+   and the rig whose store holds it. A check that cannot read a revision, the rig
+   list, a store, a store's gates or the temp file behind one of its loops holds
+   the merge for the pass.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of
