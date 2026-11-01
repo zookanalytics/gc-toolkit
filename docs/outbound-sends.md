@@ -1,6 +1,6 @@
 ---
 name: Outbound sends
-description: Writing to a GitHub repository the rig does not own is the operator's send, not an agent's. How an agent preserves such a finding — a bead carrying the ready-to-paste command, and a human gate on it that asks a human — and what the path refuses so the parked command still works when it is pasted.
+description: Use when you need to know why a write to a repository the rig does not own is the operator's send, where that line sits, what parking such a send refuses, or what the operator receives. To act on a finding, load the gc-toolkit.external-issue skill.
 ---
 
 # Outbound sends
@@ -14,17 +14,24 @@ Stopping is not dropping. The finding is worth keeping whether or not it is
 ever sent, so it lands as a bead carrying the exact command a human can paste,
 and a human gate on that bead asks for the send.
 
+An agent acts on this through the
+[`gc-toolkit.external-issue`](../skills/external-issue/SKILL.md) skill, which
+holds every command. It loads when an agent has found a problem in software its
+rig does not own, or when such a `gh` write was refused.
+
 ## Scope
 
-**Mandate.** What an agent does with a write aimed outside the rig's own
-repository: where the finding lands, what makes the parked command pasteable,
-and how a human is asked.
+**Mandate.** Why a write aimed outside the rig's own repository is the
+operator's: where the line sits, where the finding lands, what decides whether
+its text may be public, what makes the parked command pasteable, and how a human
+is asked.
 
 **Boundaries.** This covers GitHub writes issued through `gh`. It does not
 speak for our own repository — a send to the rig's origin is ordinary work,
-and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). Who may
-act on what is [authority-map.md](authority-map.md); how a human gate reaches
-a person is [human-engagement.md](human-engagement.md).
+and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). The
+commands an agent runs are the skill's. Who may act on what is
+[authority-map.md](authority-map.md); how a human gate reaches a person is
+[human-engagement.md](human-engagement.md).
 
 ## The boundary is the rig's own origin
 
@@ -40,30 +47,59 @@ create` to.
 ## Preparing a send
 
 [`assets/scripts/upstream-finding.sh`](../assets/scripts/upstream-finding.sh)
-takes the command the agent wanted to run and parks it:
+takes the command the agent wanted to run and parks it. Everything after `--` is
+the command, verbatim; the script runs no `gh` and reaches no network.
+`--message` is separate from the `gh` body on purpose: the body is written for
+the upstream maintainer, and the operator is deciding something else — whether
+this is worth another project's attention — so they need what was found, where
+it was hit, and why it earns the send.
 
-```bash
-assets/scripts/upstream-finding.sh \
-  --message "Hit while working <bead>; the bug is in the pinned <dep> runtime." \
-  -- gh issue create --repo <owner>/<name> --title "<title>" --body "<body>"
-```
+## Public or private
 
-Everything after `--` is the command, verbatim; the script runs no `gh` and
-reaches no network. `--message` is separate from the `gh` body on purpose: the
-body is written for the upstream maintainer, and the operator is deciding
-something else — whether this is worth another project's attention — so they
-need what was found, where it was hit, and why it earns the send.
+A parked send is pasted as it stands, so whether its text may be public is
+settled before it is parked. An issue, a PR or a comment is public the moment
+it is pasted, so the script parks one only with `--security-policy`: the
+target's security policy as the preparer read it, and why it lets this report
+be public. The reading rides the bead and its human gate beside the command, so
+the operator weighs it before pasting. A public send without one is refused, and
+the refusal prints how to read that target's policy.
 
-Four refusals keep the parked command honest, because it is pasted later, by
+When the policy asks for a finding like this one to be reported privately, the
+parked send is the private channel the policy names. GitHub's private
+vulnerability reporting is one, where the repository enables it. The report goes
+to the repository's maintainers, not to a public page, so it needs no
+`--security-policy`, and a reading given with it is recorded the same way. `gh
+api` has no `--repo`, so the report names its repository in the endpoint path,
+and literally: a `{owner}` or `{repo}` placeholder fills in from the directory
+the command is pasted in. GitHub requires the `summary` and `description` fields,
+so a report without either is refused, as is a method other than POST. The
+private report is the one `gh api` write the path parks.
+
+A private channel `gh` cannot reach, such as an email address, is the operator's
+to use, so it reaches them as a human gate, with the report in its message and
+nothing public parked. That gate sits on a bead of its own. On the agent's work
+bead it would take the bead out of the pool's offer, hold its merge and refuse
+its close, and that work does not wait on the send.
+
+## What keeps the command pasteable
+
+These refusals keep the parked command honest, because it is pasted later, by
 a person, somewhere else:
 
-- **No `--repo`, no parking.** `gh` resolves an implicit repository against
-  the current directory, and the operator's directory is not the agent's. A
-  `--repo` present but naming no repository — a following flag taken as its
-  value, or a bare word that is not `owner/name` — is refused the same way,
-  because `gh` cannot resolve that either.
-- **No `--body-file`.** A path is not a body; the file is gone by the time
-  anyone pastes the command.
+- **No named repository, no parking.** `gh` resolves an implicit repository
+  against the current directory, and the operator's directory is not the
+  agent's. A command names its target with `--repo`, and a private report in
+  its endpoint path. A `--repo` present but naming no repository — a following
+  flag taken as its value, or a bare word that is not `owner/name` — is refused
+  the same way, because `gh` cannot resolve that either. So is a `--repo` on
+  `gh api`, which has no such flag.
+- **No value read from a file.** A path is not a body; the file is gone by the
+  time anyone pastes the command. `--body-file` and `-F` are refused in every
+  spelling. So are `gh api`'s `--input`, which reads the whole request body
+  from a file, and its `--field`, which also fills `{owner}` and `{repo}` from
+  the directory it runs in. `gh` reads a single-dash word one short flag at a
+  time, so `-cF` is `-c -F` and is refused too. A value that begins with F
+  therefore goes after a space, not attached to its flag.
 - **One target, named once.** A command carrying two different repositories is
   refused rather than resolved by guessing, which is the one mistake that
   sends a report to the wrong project.
@@ -73,6 +109,12 @@ a person, somewhere else:
   prompt, so a parked command missing it would wait instead of carrying the
   prepared text. A flag whose value is the next flag counts as missing: `gh`
   takes that flag as the value and prompts anyway.
+- **Each report field once.** `gh` builds a private report from its `-f`
+  fields before it sends anything, and refuses the whole command over a field
+  it cannot place: the same name given twice, a field nested under a name that
+  already holds a value, or a name with no `=` after it, apart from a `name[]`
+  that sends an empty array. Each of those is refused. A `name[]=<value>`
+  field adds to an array, so it may repeat.
 
 The command is quoted with `printf %q`, which collapses a multi-line body to
 one pasteable line, and the script then re-splits what it quoted and requires
@@ -91,8 +133,12 @@ command in metadata:
 | `task_kind` | `upstream-send` |
 | `gh_command` | the pasteable command, quoted and round-trip verified |
 | `gh_target_repo` | the repository the command writes to |
-| `gh_verb` | the `gh` verb, for the board label |
+| `gh_verb` | the `gh` verb, for the board label (`api` for a private report) |
 | `upstream_send_key` | the situation key that keeps one ask from becoming three |
+
+The description says whether the send is public or a private report, and
+carries the security-policy reading when one was given. The gate's message says
+both beside the command.
 
 The ask itself is a human gate on that bead, filed through
 [`human-gate.sh`](../assets/scripts/human-gate.sh) under the key
@@ -100,7 +146,13 @@ The ask itself is a human gate on that bead, filed through
 the operator's action, so the gate blocks the bead until they clear it, sent
 or declined. A re-run against an open bead refreshes that one ask; a re-run
 against a closed one files nothing, because a settled question is not
-re-asked.
+re-asked. A re-run changes neither the bead nor its gate, so one that brings a
+different security-policy reading, or a different command under a reused
+`--key`, is refused rather than reported as a refresh. A send parked with no
+reading differs from any reading given now. The refusal shows what is parked
+beside what the run brought, and its repair parks the new send under a new
+`--key`. When the new send replaces the stale one, the repair withdraws the
+stale send's gate, which blocks its close, and closes it with the reason.
 
 The keeper's fork workflow prepares its own `gh` commands inline, in
 `packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml`, where the PR
@@ -113,4 +165,7 @@ working something else.
 It does not send, and it is not a send path a guard can be talked through: it
 never invokes `gh`. It does not judge whether the finding deserves an upstream
 report — that judgment is the operator's, and the bead exists so they can make
-it. And it is scoped to `gh`: other outbound writes are not covered here.
+it. It does not read the target's security policy either. It contacts nothing,
+so the preparer reads the policy, and the script holds a public send until that
+reading is on it. And it is scoped to `gh`: other outbound writes are not
+covered here.

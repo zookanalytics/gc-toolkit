@@ -858,12 +858,55 @@ echo "  -- refusal shape"
 REFUSAL="$(run "$RIG" "gh issue create --repo get-convex/agent --title 'x'")"
 printf '%s' "$REFUSAL" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null 2>&1 \
     && ok "names the PreToolUse event" || bad "names the PreToolUse event" "$REFUSAL"
-printf '%s' "$REFUSAL" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("tk-k80q5m")' >/dev/null 2>&1 \
+printf '%s' "$REFUSAL" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("load the skill gc-toolkit\\.external-issue")' >/dev/null 2>&1 \
     && ok "points at the prepare-only path" || bad "points at the prepare-only path" "$REFUSAL"
 printf '%s' "$REFUSAL" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("get-convex/agent")' >/dev/null 2>&1 \
     && ok "names the repository it refused" || bad "names the repository it refused" "$REFUSAL"
 printf '%s' "$REFUSAL" | jq -e ".hookSpecificOutput.permissionDecisionReason | test(\"$OWN\")" >/dev/null 2>&1 \
     && ok "names the origin it allows" || bad "names the origin it allows" "$REFUSAL"
+
+# Each refusal that sends the write somewhere else names the skill by its catalog
+# name, and the skill is one this pack ships, so renaming or removing it fails
+# here instead of leaving a refusal that points at nothing.
+SKILL_NAME="gc-toolkit.external-issue"
+[ -f "$HERE/../../skills/${SKILL_NAME#gc-toolkit.}/SKILL.md" ] \
+    && ok "the skill the refusals name ships in this pack" \
+    || bad "the skill the refusals name ships in this pack" "no skills/${SKILL_NAME#gc-toolkit.}/SKILL.md"
+names_skill() { # names_skill <label> <hook output>
+    case "$(printf '%s' "$2" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null)" in
+        *"$SKILL_NAME"*) ok "$1" ;;
+        *) bad "$1" "${2:-<empty>}" ;;
+    esac
+}
+names_skill "a repository not ours: the refusal names the skill" "$REFUSAL"
+names_skill "no target resolved: the refusal names the skill" \
+    "$(run "$SANDBOX/plain" "gh issue create --title x --body y")"
+names_skill "an api endpoint with no target: the refusal names the skill" \
+    "$(run "$SANDBOX/plain" "gh api --method POST repos/{owner}/{repo}/issues -f title=x")"
+GC_RIG_ROOT="$SANDBOX/plain"; export GC_RIG_ROOT
+names_skill "no repository of our own: the refusal names the skill" \
+    "$(run "$SANDBOX/third" "gh issue create --repo get-convex/agent --title x --body y")"
+GC_RIG_ROOT="$RIG"; export GC_RIG_ROOT
+names_skill "an unknown Codex directory: the refusal names the skill" \
+    "$(run_codex "$RIG" "gh issue create --title x --body y" call_nested "$TX")"
+ALL_REFUSALS="$REFUSAL$(run "$SANDBOX/plain" "gh issue create --title x --body y")$(run_codex "$RIG" "gh issue create --title x --body y" call_nested "$TX")"
+case "$ALL_REFUSALS" in
+    *[Bb]ead*) bad "no refusal sends an agent to a bead" "$ALL_REFUSALS" ;;
+    *) ok "no refusal sends an agent to a bead" ;;
+esac
+
+# The skill the refusals name has to work from where they send an agent. Each
+# command it gives, its placeholders filled for a repository that is not ours,
+# passes the guard: the policy lookups are reads, and a parked send runs no gh.
+SKILL_DOC="$HERE/../../skills/external-issue/SKILL.md"
+SKILL_BLOCKS=0
+while IFS= read -r -d '' block; do
+    SKILL_BLOCKS=$((SKILL_BLOCKS + 1))
+    filled=$(printf '%s' "$block" | sed -e 's#<owner>#get-convex#g' -e 's#<name>#agent#g' -e 's#<binding>#kit#g' -e 's#<that bead>#hq-1#g' -e 's#<[^>]*>#x#g')
+    allowed "the skill's command block $SKILL_BLOCKS passes the guard" "$RIG" "$filled"
+done < <(awk '/^```bash$/ { f = 1; b = ""; next } /^```$/ { if (f) printf "%s%c", b, 0; f = 0; next } f { b = b $0 "\n" }' "$SKILL_DOC")
+[ "$SKILL_BLOCKS" -ge 4 ] && ok "the skill's command blocks were read ($SKILL_BLOCKS)" \
+    || bad "the skill's command blocks were read" "$SKILL_BLOCKS blocks in $SKILL_DOC"
 
 # A body carrying quotes and newlines must not produce invalid JSON.
 TRICKY="$(run "$RIG" 'gh issue create --repo get-convex/agent --body "he said \"no\"

@@ -23,8 +23,9 @@ which writes it refuses, how it resolves a write's target and the repositories
 a session owns, the mark it requires on a post, and how it is wired to every
 claude-provider agent.
 
-**Boundaries.** What an agent does with a write the guard refuses is
-[outbound-sends.md](outbound-sends.md). Posts made from inside the pack's
+**Boundaries.** What an agent does with a write the guard refuses is the
+[`gc-toolkit.external-issue`](../skills/external-issue/SKILL.md) skill, and why
+is [outbound-sends.md](outbound-sends.md). Posts made from inside the pack's
 scripts are held to the mark by `tools/lint-learned.d/pr-post-bypass.sh`, not
 by this hook, and how the city tells its own posts from feedback is
 [state-machine.md](state-machine.md#operator-feedback).
@@ -47,9 +48,9 @@ and the rest reach any repository normally, so research on an upstream project
 keeps working.
 
 A refusal names the repository it stopped, names the repositories the session
-may write to, and points at the prepare-a-command path so the agent learns the
-route instead of only meeting a wall. When `gh` picked that repository from the
-working directory's remotes, the refusal also says how it picks.
+may write to, and names the `gc-toolkit.external-issue` skill so the agent learns
+the route instead of only meeting a wall. When `gh` picked that repository from
+the working directory's remotes, the refusal also says how it picks.
 
 On a repository the session does own, a post is held to one more rule, below.
 

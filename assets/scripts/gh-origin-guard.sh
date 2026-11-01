@@ -36,9 +36,10 @@
 
 set -u
 
-# The bead tracking the prepare-a-command-instead-of-sending-it path, named in
-# the refusal so a blocked agent is told what to do rather than only stopped.
-PREPARE_PATH_BEAD="tk-k80q5m"
+# The pack skill that prepares a command instead of sending it, named in a
+# refusal by its catalog name so a blocked agent is told what to do rather than
+# only stopped.
+PREPARE_PATH_SKILL="gc-toolkit.external-issue"
 
 # --- output --------------------------------------------------------------
 
@@ -1121,8 +1122,7 @@ whether ${TARGET:-that repository} is one of ours. A write that cannot be shown
 to land on a repository we own is treated as landing on someone else's.
 
 Run it from a checkout whose \`origin\` remote is the rig's repository, or hand
-the operator the exact command to send. Bead $PREPARE_PATH_BEAD carries the
-prepare-a-command path."
+the operator the exact command to send. The skill $PREPARE_PATH_SKILL says how."
 fi
 
 if [ -z "${TARGET:-}" ] && [ -n "$CALL_DIR_UNKNOWN" ]; then
@@ -1135,8 +1135,8 @@ code-mode tool, or the \`workdir\` it names does not exist. The repositories
 this session may write to are: $OWNED.
 
 Name the repository explicitly, with \`--repo\` or in the \`gh api\` endpoint, if
-the write belongs to one of those. Bead $PREPARE_PATH_BEAD carries the path for
-a write that belongs somewhere else."
+the write belongs to one of those. The skill $PREPARE_PATH_SKILL covers a write
+that belongs somewhere else."
 fi
 
 if [ -z "${TARGET:-}" ] && [ "$NOUN" = "api" ]; then
@@ -1149,7 +1149,7 @@ working directory's remotes do not settle which repository gh would fill it
 from. The repositories this session may write to are: $OWNED.
 
 Name the repository in the endpoint (\`repos/OWNER/REPO/...\`), or hand the
-operator the exact command. Bead $PREPARE_PATH_BEAD carries that path."
+operator the exact command. The skill $PREPARE_PATH_SKILL says how."
 fi
 
 if [ -z "${TARGET:-}" ]; then
@@ -1160,8 +1160,7 @@ the working directory's remotes do not settle which repository gh would write
 to. The repositories this session may write to are: $OWNED.
 
 Name the repository explicitly with \`--repo\` if the write belongs to one of
-those. Bead $PREPARE_PATH_BEAD carries the path for a write that belongs
-somewhere else."
+those. The skill $PREPARE_PATH_SKILL covers a write that belongs somewhere else."
 fi
 
 WD_NOTE=""
@@ -1180,9 +1179,9 @@ Opening an issue or a PR, or leaving a comment, on anyone else's repository
 spends their attention, and the operator holds that decision — an agent does not
 make it on their behalf.
 
-Instead of sending: prepare the exact command and file it for the operator to
-run, which is the path bead $PREPARE_PATH_BEAD carries. If the operator has
-already approved this specific send, they run it themselves.
+Instead of sending: load the skill $PREPARE_PATH_SKILL, which prepares the
+exact command and files it for the operator to run. If the operator has already
+approved this specific send, they run it themselves.
 
 Reads are unaffected: \`gh issue view\`, \`gh pr view\`, \`gh search\` and the
 rest reach $TARGET normally."
