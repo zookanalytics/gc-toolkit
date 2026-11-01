@@ -113,7 +113,11 @@ first would send the work, and bd refuses to close a bead an open gate blocks,
 so it removes the arm, ends the run beneath the bead, answers the gate and closes
 the bead, in that order. The pass reads the arm once more just before it slings,
 so a pass already running cannot send the work past that disarm: a pass that read
-the gate open holds the bead, and one that read it closed reads the arm gone.
+the gate open holds the bead, and one that read it closed reads the arm gone. A
+gate that also holds another open bead takes no answer, because an answer releases
+everything it blocks. With `--successor` naming the evidence, the bead leaves that
+gate after its arm and route are gone. Removing that edge first would send the work,
+as any release of an armed bead does.
 
 ## Work assigned to a named agent owes a notice
 

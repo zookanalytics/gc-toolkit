@@ -172,7 +172,11 @@ limits arming too (the work skill).
   with the gate's `await_id` as the key. It removes the arm, ends the run beneath
   the bead, answers the gate with the ruling and closes the bead. Never answer
   the gate first and close afterwards: an armed bead is sent as soon as its gate
-  clears, and bd refuses to close a bead an open gate blocks. It refuses, writing
+  clears, and bd refuses to close a bead an open gate blocks. A gate that also
+  holds another open bead takes no answer here, so pass
+  `--successor <the bead that records the ruling>`: this bead leaves the gate, and
+  the gate goes on asking about the other one. Never remove that edge yourself
+  first, because an armed bead off its gate is sent too. It refuses, writing
   nothing, an open PR (retire it, the prs skill) and a bead anything else holds.
 - **An arm no longer wanted:** `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 - **A park** (`gc-helm.sh park`) is released by closing its gate,

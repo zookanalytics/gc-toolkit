@@ -36,6 +36,14 @@ with: gc bd gate resolve". This covers the answer, and stand-down.sh calls it. I
 does not cover the "no": a `blocks` edge clears on any close, so the bead a gate
 blocks becomes ready whatever the reason says.
 
+**A "no" for one of the beads a gate holds.** `gateResolveCmd` takes a gate and a
+reason and closes the gate, so it has no form that answers for one blocked bead. `bd
+dep remove` (package `main`, `depRemoveCmd`) takes one bead off one blocker, and
+stand-down.sh calls it for a gate that also holds another open bead, after the arm
+and the route are gone. Run alone it is a release like any other, so the order is
+the part the script holds. It adds no flag: `--successor` already names evidence
+other than the gate, and a gate that stays open needs exactly that.
+
 **An edge that holds after a "no".** bd's `conditional-blocks` (package `types`,
 `DepConditionalBlocks`, "B runs only if A fails") reads the close reason for
 failure words (`FailureCloseKeywords`). It releases on a failure, which is the

@@ -17,22 +17,25 @@
 #      pins through gc-helm.sh takeaway --release --no-wait, so nothing is still
 #      building the work and no pool is offered it when the gate clears.
 #   3. It answers each gate under the key with the ruling, and reads each back.
-#      The bead is ready from here on, with nothing left to send it.
+#      An answer releases every bead a gate blocks, so a gate that also holds
+#      another open bead takes none: this bead leaves it, and it goes on asking
+#      about the rest. Either way the bead is ready from here on, with nothing
+#      left to send it, which is why this comes after the arm and the route.
 #   4. It hands the close to bead-rehome.sh, the writer of a close that is not a
 #      landing, as not-needed. The bead's branch ends with the close, as any
 #      disposition's does.
 #
 # The evidence the pointer names is the gate that carries the ruling, unless
-# --successor names other evidence, such as a sitting's conversation.
+# --successor names other evidence, such as a sitting's conversation. A gate this
+# bead leaves carries no ruling, so it cannot be the evidence.
 #
 # Nothing is written, and the exit is 1, for a bead whose close this cannot
 # carry out:
 #   * an open PR, which the prs skill retires, because the PR has to close before
 #     an answer releases its merge;
-#   * a gate under the key that also holds another open bead, because its answer
-#     would release that bead too. Answer it where that is given knowingly, in a
-#     sitting, or take this bead off the gate with `gc bd dep remove` and name the
-#     evidence with --successor;
+#   * a gate under the key that also holds another open bead, with that gate as
+#     the only evidence. --successor names other evidence and lets this bead leave
+#     it, and an answer once this bead has closed releases the rest;
 #   * anything bead-rehome.sh --check refuses: another open human gate, a gate
 #     assigned to a person, another live blocker, an open child, a claim, or a
 #     pointer to other evidence.
@@ -66,7 +69,8 @@ usage: stand-down.sh <work-bead> --key <situation-key> --ruling <why>
   --key         the situation key of the human gate the ruling answers (required)
   --ruling      the ruling, one sentence: the answer on the gate and the note on
                 the close (required)
-  --successor   the evidence the close points at; default the gate under the key
+  --successor   the evidence the close points at; default the gate under the key,
+                which a gate that also holds another open bead cannot be
   --dry-run     resolve and report; write nothing
 
 exit: 0 the bead is closed · 1 it is not · 2 usage
@@ -132,7 +136,9 @@ GATES=$(bd_human_gates "$WORK") || refuse "could not read the human gates of $WO
 OPEN_GATES=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY") \
   || refuse "could not read the human gates of $WORK."
 
-# An answer releases every bead the gate blocks.
+# An answer releases every bead the gate blocks, so a gate that holds another open
+# bead is one this bead leaves.
+SHARED=""; SHARED_WHY=""
 for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   WAITERS=$(bd_json dep list "$gate" --direction=up --type blocks)
   printf '%s' "$WAITERS" | jq -e 'type == "array"' >/dev/null 2>&1 \
@@ -141,8 +147,10 @@ for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
     [ .[] | select((.id // "") != $w)
           | select(((.status // "open") | tostring | ascii_downcase) != "closed")
           | .id ] | join(" ")' 2>/dev/null)
-  [ -z "$OTHERS" ] \
-    || refuse "gate $gate also holds $OTHERS, and an answer here would release it. Answer it in a sitting, or take $WORK off it with: gc bd dep remove $WORK $gate, and name the evidence with --successor."
+  if [ -n "$OTHERS" ]; then
+    SHARED="$SHARED $gate"
+    SHARED_WHY="${SHARED_WHY:+$SHARED_WHY; }gate $gate also holds $OTHERS"
+  fi
 done
 
 # The evidence: what the caller names, then a pointer an earlier run stamped, then
@@ -154,6 +162,10 @@ done
   '[ .[] | select(((.await_id // "") | tostring) == $k) ] | last | .id // empty' 2>/dev/null)
 [ -n "$SUCCESSOR" ] \
   || refuse "no human gate under $KEY blocks $WORK, so nothing carries the ruling. Name the gate's own key, which its await_id holds, or name the evidence with --successor."
+case " $SHARED " in
+  *" $SUCCESSOR "*)
+    refuse "$SHARED_WHY, and an answer here would release it, so that gate stays open and cannot carry this ruling. Name the evidence with --successor, and $WORK alone stands down and leaves the gate. To release the rest too, answer the gate once $WORK has closed." ;;
+esac
 
 "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --except-key "$KEY" --check >/dev/null \
   || refuse "$WORK cannot close: bead-rehome.sh refused it, as printed above."
@@ -164,7 +176,7 @@ case "$RULING" in
 esac
 
 if [ "$DRY_RUN" = 1 ]; then
-  echo "$PROG: DRY RUN: $WORK would lose its arm and its run, each open gate under $KEY would resolve with \"$ANSWER\", and $WORK would close as not needed, per $SUCCESSOR"
+  echo "$PROG: DRY RUN: $WORK would lose its arm and its run, each open gate under $KEY would resolve with \"$ANSWER\"${SHARED:+ apart from any it would leave open ($SHARED_WHY)}, and $WORK would close as not needed, per $SUCCESSOR"
   exit 0
 fi
 
@@ -182,6 +194,14 @@ bd_json show "$WORK" | jq -e 'type == "array" and length > 0 and ((.[0].metadata
   || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, so no gate was answered."
 
 for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
+  case " $SHARED " in
+    *" $gate "*)
+      gc bd dep remove "$WORK" "$gate" >/dev/null 2>&1 || true
+      bd_human_gates "$WORK" | jq -e --arg g "$gate" 'all(.[]; (.id // "") != $g)' >/dev/null 2>&1 \
+        || stopped "the arm on $WORK is gone and its run has ended, but it did not leave gate $gate, so nothing closed."
+      echo "$PROG: $WORK left gate $gate, which stays open: $SHARED_WHY"
+      continue ;;
+  esac
   gc bd gate resolve "$gate" --reason "$ANSWER" >/dev/null 2>&1 || true
   BACK=$(bd_json show "$gate")
   [ "$(printf '%s' "$BACK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ] \

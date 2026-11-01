@@ -645,8 +645,8 @@ as a hold unless its writer stamped that key beside it.
   run beneath it is cancelled through gascity's run cancel. An anchor already
   closed takes the cancel without the park, and `--route` is refused there.
   `assets/scripts/stand-down.sh` runs this write for work a human gate holds, after
-  it removes the arm that would re-sling the work, and goes on to answer the gate
-  and close the bead.
+  it removes the arm that would re-sling the work, and goes on to answer the gate,
+  or to leave one that also holds another open bead, and close the bead.
 
 Everywhere else a takeaway carries its wait as an edge: `--waiting-on` for
 work a pool owes, a human gate for what a person owes. A headline written with
