@@ -48,9 +48,11 @@
 # sign-off writes is one. So each open PR the ruling leaves standing with no such
 # review is named as still needing it: in the headline step 2 writes, which step
 # 6's close reason and step 7's reminder repeat, and in a line the sitting relays
-# to the operator with the PR's link. This is read before the first write. A PR
-# whose reviews do not read counts as needing one, because a needless ask costs a
-# glance at GitHub and a missed one leaves the PR sitting unmerged.
+# to the operator with the PR's link. This is read before the first write, and
+# each call gives up after 20 seconds, so a stalled connection cannot hold the
+# ruling's writes to the store. A PR whose reviews do not read counts as needing
+# one, because a needless ask costs a glance at GitHub and a missed one leaves the
+# PR sitting unmerged.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 5 when it takes the recommendation,
@@ -239,6 +241,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # $REVIEW_VERDICT_DEF.
 # shellcheck source=review-verdict.sh
 . "$HERE/review-verdict.sh" || die "cannot source review-verdict.sh from $HERE"
+# How the pack reads the host and repository of a PR's url. Exposes pr_coords.
+# shellcheck source=review-dismissal.sh
+. "$HERE/review-dismissal.sh" || die "cannot source review-dismissal.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -548,17 +553,26 @@ if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
 fi
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
+# gh_bounded <args...> — gh, stopped after 20 seconds where the host has a timeout
+# tool. A call stopped that way exits non-zero, as one that failed does.
+gh_bounded() {
+  local t
+  for t in timeout gtimeout; do
+    command -v "$t" >/dev/null 2>&1 || continue
+    "$t" -k 5 20 gh "$@" </dev/null
+    return
+  done
+  gh "$@" </dev/null
+}
 # pr_approval <pr-url> <pr-number> <bring_current_lifted_at> — prints `approved`
 # when the rule the merge lands on finds an approval standing and no veto, and
 # `owed` when it does not. Non-zero, printing nothing, when the reviews do not
 # read.
 pr_approval() {
-  local host repo self reviews
-  host=$(printf '%s' "$1" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9].*#\1#p')
-  repo=$(printf '%s' "$1" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9].*#\1#p')
-  [ -n "$host" ] && [ -n "$repo" ] && [ -n "$2" ] || return 1
-  self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null) && [ -n "$self" ] || return 1
-  reviews=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$2/reviews?per_page=100" --jq '.[]' 2>/dev/null) || return 1
+  local self reviews
+  pr_coords "$1" "$2" || return 1
+  self=$(gh_bounded api --hostname "$PR_HOST" user --jq '.login' 2>/dev/null) && [ -n "$self" ] || return 1
+  reviews=$(gh_bounded api --hostname "$PR_HOST" --paginate "repos/$PR_REPO/pulls/$2/reviews?per_page=100" --jq '.[]' 2>/dev/null) || return 1
   printf '%s' "$reviews" | scrub | jq -sr --arg self "$self" --arg lifted "$3" "$REVIEW_VERDICT_DEF"'
     review_verdict($self; $lifted) | if .approver != "" and .veto == "" then "approved" else "owed" end' 2>/dev/null
 }

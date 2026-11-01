@@ -795,7 +795,7 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/rig/assets/scripts/pr-sitting-com
 chmod +x "$TMP/rig/assets/scripts/"*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh bead-store.sh rig-map.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh; do
     ln -s "$HERE/$_lib" "$TMP/rig/assets/scripts/$_lib"
 done
 SIGNOFF="$TMP/rig/assets/scripts/converse-signoff.sh"

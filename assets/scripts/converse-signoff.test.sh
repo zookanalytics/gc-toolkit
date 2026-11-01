@@ -103,7 +103,8 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # [{type, on}] on the bead the edge starts from. Every write is appended to
 # $CALLS. A guarded update whose --if-assignee or --if-status misses exits 13
 # and writes nothing, as bd does. Hooks: LIST_DOWN fails `bd list`;
-# SHOW_DOWN=<id> fails `bd show` of that bead; DEP_UP_DOWN=<gate> fails the
+# SHOW_DOWN=<id> fails `bd show` of that bead; SHOW_DOWN_SECOND=<id> answers the
+# first `bd show` of that bead and fails the next; DEP_UP_DOWN=<gate> fails the
 # listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
 # resolve change nothing; CLOSE_STUCK=<id> makes its close change nothing;
 # EARLIER_ANSWER=<reason> closes the gate with that reason inside the resolve
@@ -122,6 +123,10 @@ case "$1 ${2:-}" in
                                                     {name: "rig-b", prefix: "rb", path: $b, hq: false}]}' ;;
   "bd show")
     [ -n "${SHOW_DOWN:-}" ] && [ "$3" = "$SHOW_DOWN" ] && { echo "bd show: data plane down" >&2; exit 1; }
+    if [ -n "${SHOW_DOWN_SECOND:-}" ] && [ "$3" = "$SHOW_DOWN_SECOND" ]; then
+        [ -f "$STORE/shown-$3" ] && { echo "bd show: data plane down" >&2; exit 1; }
+        : > "$STORE/shown-$3"
+    fi
     if [ -f "$B/$3.json" ]; then jq -c -n --argjson r "$(show_row "$3")" '[$r]'
     else printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; fi ;;
   "bd list")
@@ -194,19 +199,44 @@ chmod +x "$TMP/bin/gc"
 # `api ... user` names the city's login, and a PR's reviews come from
 # $STORE/reviews-<n>.json, one value per line as --jq '.[]' prints them. Every
 # call is logged to $GH_CALLS with how many writes came before it. GH_DOWN fails
-# every call.
+# every call, GH_USER_DOWN=<code> makes the login read exit with that code and
+# print nothing, and GH_REVIEWS_DOWN fails the review list alone.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
 printf 'writes=%s %s\n' "$(grep -c -v '^lifecycle state' "$CALLS" 2>/dev/null)" "$*" >> "$GH_CALLS"
 [ -n "${GH_DOWN:-}" ] && { echo "gh: network down" >&2; exit 1; }
 case "$*" in
-  *" user "*) echo city-bot ;;
+  *" user "*)
+    [ -n "${GH_USER_DOWN:-}" ] && exit "$GH_USER_DOWN"
+    echo city-bot ;;
   *"/pulls/"*"/reviews"*)
+    [ -n "${GH_REVIEWS_DOWN:-}" ] && { echo "gh: HTTP 502" >&2; exit 1; }
     _n=$(printf '%s' "$*" | sed -n 's#.*/pulls/\([0-9][0-9]*\)/reviews.*#\1#p')
     [ -f "$STORE/reviews-$_n.json" ] && jq -c '.[]' "$STORE/reviews-$_n.json" ;;
 esac
 exit 0
 GH
 chmod +x "$TMP/bin/gh"
+
+# --- timeout stub -------------------------------------------------------------
+# Runs what it is given, so a suite never waits on a real bound. GH_STALL=<text>
+# stands for a connection that never answers the gh call whose arguments hold
+# <text>: under the bound it runs out of time, as timeout reports it, and with no
+# bound it answers as usual, which is how (APPROVE-STALL) tells the two apart.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/timeout" <<'T'
+while :; do
+  case "${1:-}" in
+    --foreground) shift ;;
+    -k) shift 2 ;;
+    *) break ;;
+  esac
+done
+shift
+if [ "${1:-}" = gh ] && [ -n "${GH_STALL:-}" ]; then
+  case "$*" in *"$GH_STALL"*) exit 124 ;; esac
+fi
+exec "$@"
+T
+chmod +x "$TMP/bin/timeout"
 
 # --- stub pack scripts at the rig root the sign-off searches first ------------
 # gc-helm.sh's accept leaves the store as Accept's writer would, per
@@ -278,7 +308,7 @@ P
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh bead-store.sh rig-map.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh; do
     ln -s "$HERE/$_lib" "$S/$_lib"
 done
 SCRIPT="$S/converse-signoff.sh"
@@ -1061,6 +1091,40 @@ eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approv
 has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-UNREAD) …and the sitting is told they did not read"
 has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-UNREAD) …with the PR's link"
 eq "$(field tk-conv status)" "closed" "(APPROVE-UNREAD) …and the conversation closes"
+open_pr; pr_at tk-anc 77; review 77 city-bot APPROVED 2026-10-20T00:00:00Z
+GH_USER_DOWN=1 run_signoff "${STAND[@]}"
+has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-UNREAD) with no login to set aside, the city's own approval cannot pass for one"
+open_pr; pr_at tk-anc 77; review 77 city-bot APPROVED 2026-10-20T00:00:00Z
+GH_USER_DOWN=0 run_signoff "${STAND[@]}"
+has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-UNREAD) …and an empty login is none"
+open_pr; pr_at tk-anc 77
+GH_REVIEWS_DOWN=1 run_signoff "${STAND[@]}"
+has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-UNREAD) a review list that does not read is not an empty one"
+
+for _stalled in " user " "/reviews"; do
+    open_pr; pr_at tk-anc 77
+    GH_STALL="$_stalled" run_signoff "${STAND[@]}"
+    eq "$RC" 0 "(APPROVE-STALL) a '$_stalled' read that runs out of time does not stop the sign-off"
+    has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-STALL) …and reads as reviews that did not read"
+    eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-STALL) …so the PR counts as needing one"
+    eq "$(field tk-rev status)" "closed" "(APPROVE-STALL) …and the ruling answers the gate"
+done
+
+open_pr; pr_at tk-anc 77
+SHOW_DOWN_SECOND=tk-anc run_signoff "${STAND[@]}"
+eq "$RC" 1 "(APPROVE-ROW-UNREAD) a PR left standing whose row does not read stops the sign-off"
+has "$OUT" "NOT SIGNED OFF" "(APPROVE-ROW-UNREAD) …saying not to post the sign-off"
+eq "$(writes)" 0 "(APPROVE-ROW-UNREAD) …and writes nothing"
+
+open_pr; setm tk-anc pr_number 77; setm tk-anc pr_url "https://github.com/acme/widgets/pull/78"; review 78 operator APPROVED 2026-10-20T00:00:00Z
+run_signoff "${STAND[@]}"
+has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-MISMATCH) a url naming another PR than the anchor's number does not vouch for it"
+eq "$(cat "$GH_CALLS")" "" "(APPROVE-MISMATCH) …and reads nothing from GitHub"
+
+open_pr; setm tk-anc pr_number 80; setm tk-anc pr_url "https://ghe.acme.test/acme/widgets/pull/80"
+run_signoff "${STAND[@]}"
+has "$(cat "$GH_CALLS")" "--hostname ghe.acme.test user" "(APPROVE-HOST) the login is read on the host the PR's url names"
+has "$(cat "$GH_CALLS")" "--hostname ghe.acme.test --paginate repos/acme/widgets/pulls/80/reviews" "(APPROVE-HOST) …and the reviews there, across every page"
 
 open_pr; setm tk-anc pr_url "https://github.com/acme/widgets/pull/78"; review 78 operator APPROVED 2026-10-20T00:00:00Z
 run_signoff "${STAND[@]}"

@@ -496,9 +496,10 @@ first write, through `review-verdict.sh`, and the headline ends by saying that
 PR still needs the operator's Approve on GitHub. The conversation's close reason
 and the PR reminder repeat the headline, and the board shows it as the row's
 NEEDS. The sign-off also prints a line with the PR's link, which the sitting
-tells the operator. A PR whose reviews do not read counts as needing one. The
-headline is a sentence written at the sign-off, so it keeps saying so after the
-operator approves, until the PR merges or another headline replaces it.
+tells the operator. A PR whose reviews do not read, because a call fails or
+stalls past its bound, counts as needing one. The headline is a sentence
+written at the sign-off, so it keeps saying so after the operator approves,
+until the PR merges or another headline replaces it.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
