@@ -154,6 +154,31 @@ convoy: {"status":"closed","armed":"","route":"","pointer":"pb-2y5","outcome":"n
 tracked: {"status":"open", ...}
 ```
 
+## An epic that carries a hypothesis
+
+The finalize gate holds such an epic until it is ruled close, unless it carries a
+disposition, and the close stamps that before it runs the gate. So the gate refuses
+the epic as it stands and passes it read as the close will leave it. The stand-down
+closes the epic with no `epic_ruling`, the sign-off goes as in any sitting, and the
+doctor's I15 reads the disposition as the epic's terminal reason. An open child and
+another open gate still refuse, each with the epic's row unchanged. This section is
+from a later run the same day, with `451687e63` as the base:
+
+```
+held: epic pb-hye carries a hypothesis but no valid epic_ruling (found '<none>') ...
+the gate as it stands: rc=1
+the gate read as the close will leave it: rc=0
+stand-down: answered gate pb-gpb: ruled: the operator ruled this epic out
+stand-down: pb-hye closed as not needed, per pb-ifh; nothing re-slings it
+gate pb-gpb was already cleared before this sign-off: "ruled: the operator ruled this epic out". That answer stands.
+SIGNED OFF conversation pb-ifh on pb-hye (settled)
+epic: {"status":"closed","armed":"","route":"","pointer":"pb-ifh","outcome":"no-op", ...}; ruling: "none"
+slings by the next pass: 0
+OK: every closed epic that carries a hypothesis was ruled closed with its outcome, or carries an explicit disposition
+an epic with an open child: rc=1; store unchanged
+an epic under another open gate: rc=1; store unchanged
+```
+
 ## What the first run found
 
 The first run of this proof found a defect in the first draft, which handed the

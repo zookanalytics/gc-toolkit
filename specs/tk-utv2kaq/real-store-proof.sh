@@ -77,7 +77,7 @@ until gc bd create "warm-up" -t task --json >/dev/null 2>&1; do
 done
 echo "bd: $(gc bd version 2>/dev/null | head -1)"
 
-mk() { gc bd create "$1" -t task --json 2>>"$W/mk.err" | jq -r 'if type == "array" then .[0].id else .id end'; }
+mk() { gc bd create "$1" -t "${2:-task}" --json 2>>"$W/mk.err" | jq -r 'if type == "array" then .[0].id else .id end'; }
 row() {
   gc bd show "$1" --json 2>/dev/null | jq -c '.[0] | {status, assignee: (.assignee // ""), close_reason: (.close_reason // ""),
     armed: (.metadata["gc.dispatch_when_ready"] // ""), route: (.metadata["gc.routed_to"] // ""),
@@ -86,8 +86,8 @@ row() {
 gate_of() { gc bd dep list "$1" --type blocks --json 2>/dev/null | jq -r --arg k "$2" '[ .[] | select((.await_id // "") == $k) ] | .[0].id // empty'; }
 pass() { DEFERRED_DISPATCH_STATE_DIR="$W/state" "${1:-$SCRIPTS}/deferred-dispatch.sh" reconcile --db "$DB" 2>&1 | grep -v '^deferred-dispatch: until' | tail -3 | cut -c1-170; }
 slings() { wc -l < "$PROBE_LOG" | tr -d ' '; }
-waiting() { # <title> <key> -> a work bead a real gate blocks, armed to re-sling, as a declined run leaves it
-  local b; b=$(mk "$1")
+waiting() { # <title> <key> [<type>] -> a work bead a real gate blocks, armed to re-sling, as a declined run leaves it
+  local b; b=$(mk "$1" "${3:-task}")
   gc bd update "$b" --set-metadata gc.execution_routed_to=probe/probe.polecat >/dev/null
   "$SCRIPTS/human-gate.sh" --subject "$b" --key "$2" --message "$1: does this go on?" >/dev/null || { echo "gate not filed on $b" >&2; return 1; }
   GC_DEFERRED_DISPATCH_TOOL="$SCRIPTS/deferred-dispatch.sh" "$SCRIPTS/await-ruling.sh" "$b" --key "$2" --formula mol-polecat-work >/dev/null || { echo "wait not recorded on $b" >&2; return 1; }
@@ -229,5 +229,20 @@ TR=$(mk "a bead the convoy tracks"); gc bd dep add "$CV" "$TR" -t tracks >/dev/n
 "$SCRIPTS/lifecycle.sh" transition "$CV" --to blocked --assignee "" --route human --set "blocked_reason=the check could not run" --takeaway "the check could not run" 2>&1 | cut -c1-170
 "$SCRIPTS/stand-down.sh" "$CV" --key refinery-zero-diff-check-failed --ruling "drop the graduation" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "rc=${PIPESTATUS[0]}"
 echo "convoy: $(row "$CV")"; echo "tracked: $(row "$TR")"
+
+say "An epic that carries a hypothesis and no ruling: the gate holds it as it stands, and the stand-down closes it on a disposition"
+EP=$(waiting "stewarded epic" polecat-ep epic); GEP=$(gate_of "$EP" polecat-ep)
+gc bd update "$EP" --set-metadata epic_hypothesis="the hypothesis" >/dev/null
+"$SCRIPTS/finalize-gate.sh" check "$EP" --except-key polecat-ep | cut -c1-120; echo "the gate as it stands: rc=${PIPESTATUS[0]}"
+"$SCRIPTS/finalize-gate.sh" check "$EP" --except-key polecat-ep --as-disposed; echo "the gate read as the close will leave it: rc=$?"
+VE=$(gc bd create "Discuss: $EP" -t task --assignee human --metadata '{"task_kind":"visit"}' --json 2>>"$W/mk.err" | jq -r 'if type == "array" then .[0].id else .id end')
+gc bd dep add "$VE" "$EP" -t tracks >/dev/null 2>&1; gc bd dep add "$VE" "$GEP" -t replies-to >/dev/null 2>&1
+"$SCRIPTS/stand-down.sh" "$EP" --key polecat-ep --ruling "the operator ruled this epic out" --successor "$VE" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "stand-down: rc=${PIPESTATUS[0]}"
+"$SCRIPTS/converse-signoff.sh" --conversation "$VE" --outcome "Ruled out: nothing builds this" --ruled yes --ruling "the operator ruled this epic out" --route human --no-wait 2>&1 | cut -c1-170; echo "sign-off: rc=${PIPESTATUS[0]}"
+echo "epic: $(row "$EP"); ruling: $(gc bd show "$EP" --json | jq -c '.[0].metadata.epic_ruling // "none"')"; echo "gate: $(gc bd show "$GEP" --json | jq -c '.[0] | {status, close_reason}')"; echo "conversation: $(gc bd show "$VE" --json | jq -c '.[0] | {status}')"
+before=$(slings); pass "$SCRIPTS" | tail -1; echo "slings by the next pass: $(($(slings) - before))"
+"$SCRIPTS/../../doctor/check-epic-closed-implies-ruled/run.sh" 2>&1 | head -3 | cut -c1-170; echo "I15: rc=${PIPESTATUS[0]}"
+EK=$(waiting "epic with a unit" polecat-ek epic); gc bd update "$EK" --set-metadata epic_hypothesis="the hypothesis" >/dev/null; gc bd create "a unit" -t task --parent "$EK" --json >/dev/null 2>&1; try "an epic with an open child" "$EK" --key polecat-ek --ruling x
+EH=$(waiting "epic with two gates" polecat-eh epic); gc bd update "$EH" --set-metadata epic_hypothesis="the hypothesis" >/dev/null; "$SCRIPTS/human-gate.sh" --subject "$EH" --key other-question --message "another question" >/dev/null; try "an epic under another open gate" "$EH" --key polecat-eh --ruling x
 
 printf '\n## What the shim was asked that it does not serve\n'; sort -u "$PROBE_LOG.unsupported"
