@@ -493,15 +493,24 @@ from an account other than the city's (the merge condition in
 [state-machine.md](state-machine.md)), and nothing the sign-off writes is one.
 So each open PR a ruling leaves standing with no such review is read before the
 first write, through `review-verdict.sh`, and the headline ends by saying that
-PR still needs the operator's Approve on GitHub. The conversation's close reason
-and the PR reminder repeat the headline, and the board shows it as the row's
-NEEDS. The sign-off also prints a line with the PR's link, which the sitting
-tells the operator: as the one thing left when nothing else stands before the
-merge, and otherwise after whatever the ruling leaves holding the PR. A PR whose
-reviews do not read, because a call fails or stalls past its bound, counts as
-needing one, and its line says it may. The headline is a sentence written at the
-sign-off, so it keeps saying so after the operator approves, until the PR merges
-or another headline replaces it.
+PR still needs the operator's Approve on GitHub. Several are counted, so the
+words take the same room whatever their number, and the PR reminder's actions
+name each. The conversation's close reason and the PR reminder repeat the
+headline, and the board shows it as the row's NEEDS. The sign-off also prints a
+line with the PR's link, which the sitting tells the operator: as the one thing
+left when nothing else stands before the merge, and otherwise after whatever the
+ruling leaves holding the PR. A PR whose reviews do not read, because a call
+fails or stalls past its bound, or the host has no timeout tool to bound it,
+counts as needing one, and its line says it may. The headline is a sentence
+written at the sign-off, so it keeps saying so after the operator approves, until
+the PR merges or another headline replaces it.
+
+A standing request for changes holds the merge whatever approval stands beside
+it. When an approval does stand, no Approve is owed, so the headline stays as the
+sitting gave it, and the line names the account whose request holds the merge and
+says what clears it: that account approves, or the request is dismissed. When
+none stands, the line says the PR needs the Approve and names that account too,
+because the operator's Approve replaces only the operator's own request.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in

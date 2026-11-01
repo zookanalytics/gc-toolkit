@@ -17,6 +17,12 @@ that lacks it nothing merges and no armed dispatch fires. Linux distributions
 ship it in util-linux; on macOS, run `brew install flock`.
 `check-cadence-live` reports it missing (see [Verification](#5-verification)).
 
+A sitting's sign-off reads a PR's reviews from GitHub under `timeout` or
+`gtimeout`. On a host with neither it makes no call, so it says of every PR a
+ruling leaves standing, an approved one included, that its reviews could not be
+read. Linux distributions ship `timeout` in coreutils; on macOS, run
+`brew install coreutils`.
+
 Covered here:
 
 1. [Importing gc-toolkit](#1-importing-gc-toolkit)

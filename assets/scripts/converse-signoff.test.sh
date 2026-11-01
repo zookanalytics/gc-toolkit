@@ -68,10 +68,14 @@
 #             Accept does not complete stops the sign-off, and an answer that
 #             reached the gate first stands; each --var reaches Accept's writer,
 #             and one without --accept, or not <key>=<value>, is refused
-#   (APPROVE*) a PR a ruling leaves standing with no approval that would land it
-#             is named in the headline, the close reason and the reminder, and
-#             printed with its link, read before the first write through the
-#             rule the merge lands on; a PR the ruling reworks or retires is not
+#   (APPROVE*) a PR a ruling leaves standing with no approval is named in the
+#             headline, the close reason and the reminder, and printed with its
+#             link, read before the first write through the rule the merge lands
+#             on; several are counted in the headline and named in the reminder's
+#             actions, so it stays under the real cap; an approval beside a request
+#             for changes asks for no Approve and names who holds the merge; a host
+#             with no timeout tool makes no GitHub call; a PR the ruling reworks or
+#             retires is not named
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, linked into a stub pack beside the libraries it sources and
@@ -1049,6 +1053,8 @@ eq "$(field tk-conv close_reason)" "design approved; PR #77 still needs your App
 has "$(grep '^pr-sitting-comment' "$CALLS")" "--summary design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-OWED) …and so does the PR reminder"
 has "$OUT" "this ruling does not count as one" "(APPROVE-OWED) the sitting is told the ruling is not the approval"
 has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-OWED) …with the PR's link"
+hasnt "$OUT" "request for changes" "(APPROVE-OWED) …and with no request for changes standing, names none"
+hasnt "$(grep '^pr-sitting-comment' "$CALLS")" "still need your Approve" "(APPROVE-OWED) the headline names one PR, so the reminder's actions do not repeat it"
 case "$OUT" in
   *"SIGNED OFF"*"PR #77 still needs the operator's Approve"*) ok "(APPROVE-OWED) …as the last thing it reads" ;;
   *) bad "(APPROVE-OWED) the tell does not follow SIGNED OFF: $OUT" ;;
@@ -1073,9 +1079,41 @@ open_pr; pr_at tk-anc 77; review 77 city-bot APPROVED 2026-10-20T00:00:00Z
 run_signoff "${STAND[@]}"
 said "(APPROVE-CITY) the city's own approval counts for nothing:" owed
 
+open_pr; pr_at tk-anc 77; review 77 operator APPROVED 2026-10-20T00:00:00Z
+run_signoff "${STAND[@]}"
+APPROVED_WRITES=$(cat "$CALLS")
+# vetoed <label> <login> — what a sign-off on PR #77 wrote and printed when an
+# approval stands beside <login>'s request for changes.
+vetoed() {
+    eq "$RC" 0 "$1 a ruling that leaves an approval beside a request for changes signs off"
+    eq "$(meta tk-anc gc.takeaway)" "design approved" "$1 no Approve is owed, so the headline stays as given"
+    eq "$(field tk-conv close_reason)" "design approved" "$1 …and so does the close reason"
+    hasnt "$(grep '^pr-sitting-comment' "$CALLS")" "Approve" "$1 …and the PR reminder"
+    hasnt "$OUT" "Approve" "$1 …and the sitting is told to ask for none"
+    has "$OUT" "An approval stands on PR #77, and a request for changes from $2 holds its merge until $2 approves or the request is dismissed. This ruling does neither." "$1 …but names whose request holds the merge and what clears it"
+    has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "$1 …with the PR's link"
+    eq "$(field tk-rev status)" "closed" "$1 the ruling still answers the gate"
+    eq "$(cat "$CALLS")" "$APPROVED_WRITES" "$1 …writing what a sign-off on an approved PR writes"
+}
 open_pr; pr_at tk-anc 77; review 77 operator APPROVED 2026-10-20T00:00:00Z; review 77 other CHANGES_REQUESTED 2026-10-21T00:00:00Z
 run_signoff "${STAND[@]}"
-said "(APPROVE-VETO) a standing request for changes holds the merge:" owed
+vetoed "(APPROVE-VETO)" other
+open_pr; pr_at tk-anc 77; review 77 operator CHANGES_REQUESTED 2026-10-20T00:00:00Z; review 77 other APPROVED 2026-10-21T00:00:00Z
+run_signoff "${STAND[@]}"
+vetoed "(APPROVE-VETO-MIRROR) the same when the request is the operator's and the approval another account's:" operator
+
+open_pr; pr_at tk-anc 77; review 77 other CHANGES_REQUESTED 2026-10-21T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-VETO-OWED) a request for changes with no approval beside it:" owed
+has "$OUT" "A request for changes from other also stands: the operator's Approve replaces it only if other is their own account, and otherwise it holds the merge until other approves or the request is dismissed." "(APPROVE-VETO-OWED) …and the sitting is told whose it is and what clears it"
+open_pr; pr_at tk-anc 77; setm tk-anc bring_current_lifted_at 2026-10-21T00:00:00Z; review 77 operator APPROVED 2026-10-20T00:00:00Z; review 77 other CHANGES_REQUESTED 2026-10-20T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-VETO-OWED) an approval the lift line set aside leaves none beside the request:" owed
+has "$OUT" "A request for changes from other also stands" "(APPROVE-VETO-OWED) …which is named"
+open_pr; pr_at tk-anc 77; review 77 other CHANGES_REQUESTED 2026-10-20T00:00:00Z; review 77 other APPROVED 2026-10-21T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-VETO-REPLACED) a request its own author's later approval replaced holds nothing:" landed
+hasnt "$OUT" "request for changes" "(APPROVE-VETO-REPLACED) …and is not named"
 
 open_pr; pr_at tk-anc 77; setm tk-anc bring_current_lifted_at 2026-10-21T00:00:00Z; review 77 operator APPROVED 2026-10-20T00:00:00Z
 run_signoff "${STAND[@]}"
@@ -1109,6 +1147,27 @@ for _stalled in " user " "/reviews"; do
     eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-STALL) …so the PR counts as needing one"
     eq "$(field tk-rev status)" "closed" "(APPROVE-STALL) …and the ruling answers the gate"
 done
+
+# A host with no timeout tool: PATH holds only links to what the sign-off and its
+# stubs run, and neither timeout nor gtimeout among them.
+mkdir -p "$TMP/no-timeout"
+for _t in basename bash cat cut date dirname env grep head jq mkdir mktemp mv rm sed sort tail tr; do
+    command -v "$_t" >/dev/null 2>&1 && ln -sf "$(command -v "$_t")" "$TMP/no-timeout/$_t"
+done
+ln -sf "$TMP/bin/gc" "$TMP/no-timeout/gc"
+ln -sf "$TMP/bin/gh" "$TMP/no-timeout/gh"
+open_pr; pr_at tk-anc 77; review 77 operator APPROVED 2026-10-20T00:00:00Z
+PATH="$TMP/no-timeout" run_signoff "${STAND[@]}"
+eq "$RC" 0 "(APPROVE-NO-TIMEOUT) a host with no timeout tool still signs off"
+eq "$(cat "$GH_CALLS")" "" "(APPROVE-NO-TIMEOUT) …making no GitHub call it could not bound"
+has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-NO-TIMEOUT) …so the PR reads as one whose reviews did not read, an approved one included"
+eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-NO-TIMEOUT) …and counts as needing one"
+eq "$(field tk-rev status)" "closed" "(APPROVE-NO-TIMEOUT) …and the ruling answers the gate"
+eq "$(field tk-conv status)" "closed" "(APPROVE-NO-TIMEOUT) …and the conversation closes"
+ln -sf "$TMP/bin/timeout" "$TMP/no-timeout/gtimeout"
+open_pr; pr_at tk-anc 77; review 77 operator APPROVED 2026-10-20T00:00:00Z
+PATH="$TMP/no-timeout" run_signoff "${STAND[@]}"
+said "(APPROVE-GTIMEOUT) a host with gtimeout alone reads through it:" landed
 
 open_pr; pr_at tk-anc 77
 SHOW_DOWN_SECOND=tk-anc run_signoff "${STAND[@]}"
@@ -1166,15 +1225,59 @@ eq "$(meta tk-mem gc.takeaway)" "" "(APPROVE-EPIC) …and the member carries no 
 
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78
 run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
-eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #77, PR #78 still need your Approve on GitHub" "(APPROVE-TWO) two PRs left standing are both named"
+eq "$(meta tk-anc gc.takeaway)" "the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) two PRs left standing are counted in the headline"
+eq "$(field tk-conv close_reason)" "the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) …and the close reason"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--summary the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) …and the PR reminder's summary"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "PR #77, PR #78 still need your Approve on GitHub" "(APPROVE-TWO) …and its actions name them"
 has "$OUT" "PR #77 still needs the operator's Approve review" "(APPROVE-TWO) …and the sitting is told of the first"
+has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-TWO) …with its link"
 has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …and of the second"
+has "$OUT" "link it: https://github.com/acme/widgets/pull/78" "(APPROVE-TWO) …with its link"
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78; review 77 operator APPROVED 2026-10-20T00:00:00Z
 run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
 eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) only the one with no approval is named"
+hasnt "$(grep '^pr-sitting-comment' "$CALLS")" "still need your Approve" "(APPROVE-TWO) …and the reminder's actions do not repeat it"
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78
 run_signoff --conversation tk-conv --outcome "fix the retry" "${RULED[@]}" --rework --pr-anchor tk-anc
 eq "$(meta tk-anc gc.takeaway)" "fix the retry; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) a PR reworked beside one left standing is not named"
+shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78; review 77 operator APPROVED 2026-10-20T00:00:00Z; review 77 other CHANGES_REQUESTED 2026-10-21T00:00:00Z
+run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
+eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) an approval beside a request for changes is not counted as owing one"
+has "$OUT" "a request for changes from other holds its merge" "(APPROVE-TWO) …and its line still prints"
+has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …beside the other PR's"
+
+# many_prs <count> — a gate that releases the subject's PR and others up to
+# <count>, numbered from #1000 in the order the sign-off finds them.
+many_prs() {
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request; pr_at tk-anc 1000
+    gate tk-sg approach; edge tk-anc blocks tk-sg
+    conv tk-conv tk-anc; edge tk-conv replies-to tk-sg
+    _i=1
+    while [ "$_i" -lt "$1" ]; do
+        _b=$(printf 'tk-pr%02d' "$_i")
+        bead "$_b"; setm "$_b" merge_result pull_request; pr_at "$_b" "$((1000 + _i))"; edge "$_b" blocks tk-sg
+        _i=$((_i + 1))
+    done
+}
+# under_cap <label> <text> — within the cap gc-helm.sh takeaway refuses past. The
+# suite stubs that writer, so the number is read from the real one.
+TAKEAWAY_CAP=$(sed -n 's/^TAKEAWAY_MAX=\([0-9][0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)
+under_cap() { [ "${#2}" -le "${TAKEAWAY_CAP:?}" ] && ok "$1" || bad "$1 (${#2} chars, the cap is $TAKEAWAY_CAP: $2)"; }
+many_prs 12
+run_signoff --conversation tk-conv --outcome x "${RULED[@]}" --no-rework
+eq "$RC" 0 "(APPROVE-MANY) a ruling that leaves twelve unapproved PRs standing signs off"
+eq "$(meta tk-anc gc.takeaway)" "x; 12 PRs still need your Approve on GitHub" "(APPROVE-MANY) …counting them in the headline"
+under_cap "(APPROVE-MANY) …which stays under gc-helm.sh's cap" "$(meta tk-anc gc.takeaway)"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "PR #1000, PR #1001, PR #1002, PR #1003, PR #1004, PR #1005, PR #1006, PR #1007, PR #1008, PR #1009, PR #1010, PR #1011 still need your Approve on GitHub" "(APPROVE-MANY) …and the reminder's actions name each"
+has "$OUT" "PR #1000 still needs the operator's Approve review" "(APPROVE-MANY) the sitting is told of the first"
+has "$OUT" "PR #1011 still needs the operator's Approve review" "(APPROVE-MANY) …and of the last"
+has "$OUT" "link it: https://github.com/acme/widgets/pull/1011" "(APPROVE-MANY) …with its link"
+eq "$(field tk-sg status)" "closed" "(APPROVE-MANY) …and the ruling answers the gate"
+many_prs 12
+_FILL=$(printf 'o%.0s' $(seq 1 90))
+run_signoff --conversation tk-conv --outcome "$_FILL" "${RULED[@]}" --no-rework
+eq "$RC" 0 "(APPROVE-MANY) a shorter --outcome makes room whatever the count"
+under_cap "(APPROVE-MANY) …and a 90-character one stays under the cap" "$(meta tk-anc gc.takeaway)"
 
 open_pr; pr_at tk-anc 77
 TAKEAWAY_FAIL=1 run_signoff "${STAND[@]}"

@@ -9,8 +9,8 @@
 # approved PR), bring-current-guard.sh (an approval the ruling on a
 # bring-current round lifts is dismissed), approval-withdraw.sh (a validator
 # ruling that a fresh whole-diff review is warranted withdraws it) and
-# converse-signoff.sh (a ruling that leaves a PR standing with no approval says
-# the PR still needs one). One
+# converse-signoff.sh (a ruling that leaves a PR standing says when the PR still
+# needs an approval or a request for changes holds it). One
 # definition, no copies: review-verdict.test.sh fails when a reader stops
 # sourcing this file or carries a rule of its own. gctk merge (services/gctk/internal/cli/merge.go,
 # reviewVerdict) states the same rule natively for the universal approval merge
