@@ -37,7 +37,8 @@
 #       gc.work_outcome=no-op still lands before the close;
 #   (u) an already-closed visit missing its work outcome is repaired with it;
 #   (x) an open human gate on the origin holds the close at the finalize gate;
-#   (y) --except-key reaches that gate, and nothing is excepted without it;
+#   (y) --except-key reaches that gate, and nothing is excepted without it, and
+#       --check under it reads what would hold the close, writing nothing;
 #   (z) an already-closed visit that records an outcome is repaired with
 #       gc.work_outcome=no-op, and its outcome is left as it was;
 #   (aa) a store that refuses gc.work_outcome still re-homes and closes the
@@ -1248,6 +1249,60 @@ rc=0; run --origin al-retry5 --successor bt-retry5 --kind not-needed --except-ke
 eq "$rc" 5 "an open child holds the retry"
 eq "$(field alpha status al-g5)" open "…the retry's own gate stays open"
 has "$(cat "$TMP/err")" "open child al-kid5" "…and the refusal names the child"
+# --check with --except-key reads all of that and writes nothing.
+check_held() { # <label> <origin> <text the refusal names> [env assignments...]
+  local label="$1" origin="$2" text="$3" before after
+  shift 3
+  before=$(cat "$TMP/rigs/alpha/.beads/$origin")
+  rc=0; env "$@" "$SCRIPT" --origin "$origin" --successor bt-check --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
+  after=$(cat "$TMP/rigs/alpha/.beads/$origin")
+  eq "$rc" 1 "--check: $label refuses"
+  has "$(cat "$TMP/err")" "$text" "--check: $label is named"
+  eq "$after" "$before" "--check: $label writes nothing"
+}
+mkbead beta open bt-check
+mkbead alpha open al-check1
+hgate al-cg1 pr-dispose-failed.9
+printf 'dep.al-cg1=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check1"
+rc=0; "$SCRIPT" --origin al-check1 --successor bt-check --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
+eq "$rc" 0 "--check: its own gates under the key leave the close eligible"
+eq "$(field alpha status al-cg1)" open "--check: …and stay open"
+eq "$(field alpha m.gc.superseded_by al-check1)" "" "--check: …and nothing is stamped"
+mkbead alpha open al-check2
+hgate al-cg2 another-question
+printf 'dep.al-cg2=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check2"
+check_held "a gate under another key" al-check2 "al-cg2"
+mkbead alpha open al-check3
+hgate al-cg3 pr-dispose-failed.9 operator
+printf 'dep.al-cg3=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check3"
+check_held "a gate a person is assigned" al-check3 "al-cg3"
+mkbead alpha open al-check4
+mkbead alpha open al-cw4
+printf 'dep.al-cw4=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check4"
+check_held "another live blocker" al-check4 "al-cw4"
+mkbead alpha open al-check5
+mkbead alpha in_progress al-ckid5
+printf 'parent=al-check5\n' >> "$TMP/rigs/alpha/.beads/al-ckid5"
+check_held "an open child" al-check5 "al-ckid5"
+mkbead alpha open al-check6
+printf 'assignee=someone-else\n' >> "$TMP/rigs/alpha/.beads/al-check6"
+check_held "an assignee bd would refuse the close for" al-check6 "someone-else"
+mkbead alpha open al-check7
+check_held "a blocker read that fails" al-check7 "did not read" FAKE_BD_DEP_LIST_FAIL=1
+check_held "a child read that fails" al-check7 "did not read" FAKE_BD_LIST_PARENT_FAIL=1
+# The close drops a wait edge onto its successor before it reads what holds it, so
+# --check does not hold it on that edge.
+mkbead alpha open al-check8
+printf 'dep.bt-check=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check8"
+rc=0; "$SCRIPT" --origin al-check8 --successor bt-check --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
+eq "$rc" 0 "--check: a wait edge onto the successor holds nothing"
+# Without the key, --check judges the evidence alone, as it always has.
+mkbead alpha open al-check9
+hgate al-cg9 another-question
+printf 'dep.al-cg9=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check9"
+rc=0; "$SCRIPT" --origin al-check9 --successor bt-check --kind not-needed --check >"$TMP/out" 2>"$TMP/err" || rc=$?
+eq "$rc" 0 "--check: with no --except-key it reads no holds"
+
 # A read that fails proves nothing about what holds the close.
 mkbead alpha open al-retry6
 mkbead beta  open bt-retry6

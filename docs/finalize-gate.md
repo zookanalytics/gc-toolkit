@@ -110,7 +110,9 @@ below exists to see a gate filed after the first check.
   so a hold leaves an open, pointed, findable bead — the same shape a refused
   close leaves. The release is to clear the gate, then re-run.
   `bead-rehome.sh --except-key <situation-key>` hands the key to the gate's
-  exception, and `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
+  exception, and with `--check` it reads the gate and what else would hold the
+  close, writing nothing, which is how `stand-down.sh` stops before its first
+  write. `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
   it retries a pre-recorded PR-close disposition. The retry then closes in three
   steps:
   1. It reads what would hold the close: the gate, and the bead's live blockers
