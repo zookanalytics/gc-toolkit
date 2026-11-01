@@ -226,7 +226,13 @@ fi
 hasnt "$STEP" "gc formula show" "next-iteration does not send the session back through the formula"
 marks=$(printf '%s\n' "$STEP" | grep -E 'gc bd update [^;|&]*--status' || true)
 eq "$marks" "" "next-iteration marks no wisp's status"
-has "$(cat "$ROOT/agents/witness/prompt.template.md")" "A pass ends at next-iteration" "the witness's prompt says where a pass ends"
+has "$STEP" "Never mark the next wisp in progress" "next-iteration tells the session not to mark its next wisp"
+has "$STEP" "A wait after the pour" "next-iteration says why the wait comes first"
+has "$STEP" "Then stop at once" "next-iteration stops at the idle line"
+has "$STEP" "Leave this wisp in place and end the turn" "a fired guard keeps this wisp and ends the turn"
+PROMPT=$(cat "$ROOT/agents/witness/prompt.template.md")
+has "$PROMPT" "A pass ends at next-iteration" "the witness's prompt says where a pass ends"
+has "$PROMPT" "Never mark your next wisp in progress" "the witness's prompt tells the session not to mark its next wisp"
 
 echo
 echo "witness-nudge.test: $PASS passed, $FAIL failed"
