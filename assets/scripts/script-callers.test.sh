@@ -15,7 +15,10 @@
 #   - a removed script that only open steps call exits 3, and one nothing
 #     calls exits 0;
 #   - it exits 2 when it decides nothing: a usage error, a revision or
-#     repository it cannot read, no rig list, or a store that does not answer.
+#     repository it cannot read, no rig list, or a store that does not answer;
+#   - it exits 2 when a loop could not read its whole list: the temp file cannot
+#     be created or written, or the loop read fewer lines than the list holds.
+#     No failure of a list or a count under a loop reads as an all-clear.
 # Runs against a fake gc that serves the rig list and each store's steps from
 # JSON files, with real git. No live city.
 set -uo pipefail
@@ -216,6 +219,14 @@ G checkout -q main; G checkout -q -b sub-named
 G rm -q packs/sub/assets/scripts/sub-tool.sh
 put packs/sub/formulas/mol-t.toml 'run = "$PACK/assets/scripts/sub-tool.sh"'
 G add -A; G commit -qm sub-named
+# More than 64 KiB of removed paths, the size at which bash backs a here-string
+# with a temp file. All but one are tests, so the census asks about one script.
+G checkout -q main; G checkout -q -b long-base
+LONG_NAME=$(printf '%0220d' 0)
+for i in $(seq 1 300); do : > "$REPO/assets/scripts/$i-$LONG_NAME.test.sh"; done
+G add -A; G commit -qm long-base
+G checkout -q -b long-delete
+G rm -q 'assets/scripts/*0.test.sh' assets/scripts/old-tool.sh; G commit -qm long-delete
 G checkout -q main
 
 callers_on; : > "$STUB_GC_LOG"
@@ -306,6 +317,119 @@ eq "$rc" "2" "a revision the repository lacks decides nothing"
 has "$out" "'no-such-branch' names no commit" "...and says which"
 run --root "$TMP/not-a-repo" --check-merge main delete
 eq "$rc" "2" "a directory that is not a repository decides nothing"
+
+echo "# a loop that could not read its whole list"
+SCRATCH="$TMP/scratch"; mkdir -p "$SCRATCH"
+# Writes to a regular file fail, and pipes and the captured output still work.
+limited() { out=$( (ulimit -f 0; trap '' XFSZ; TMPDIR="$SCRATCH" "$@") 2>&1); rc=$?; }
+# One command the script reaches through PATH replaced for one run.
+run_with() { local dir=$1; shift; out=$(PATH="$dir:$PATH" "$SUT" "$@" 2>&1); rc=$?; }
+first_line() { printf '%s\n' "$out" | head -1; }
+
+# More than 64 KiB in one rig's row. The callers are in the rigs after it.
+PAD=$(printf '%070000d' 0)
+printf '{"rigs":[{"name":"harbor-%s","path":"%s"},{"name":"workshop","path":"%s"},{"name":"lantern","path":"%s"}]}' \
+  "$PAD" "$STORES/harbor" "$STORES/workshop" "$STORES/lantern" > "$STUB_RIGS"
+callers_on
+run old-tool.sh
+eq "$rc" "3" "a long rig list is read whole"
+has "$out" "old-tool.sh: step ln-s1 (mol-b.check, blocked, unassigned) in run ln-r1, store of rig lantern" "...to its last rig"
+limited "$SUT" old-tool.sh
+eq "$rc" "2" "a rig list that cannot be written to its temp file decides nothing"
+has "$out" "cannot write a loop's input" "...and says so"
+hasnt "$out" "no open step calls" "...with no all-clear"
+cp "$TMP/rigs.keep" "$STUB_RIGS"
+
+# The system bash backs a here-string of any size with a file on macOS.
+run_system_bash() { out=$(/bin/bash "$SUT" "$@" 2>&1); rc=$?; }
+run_system_bash old-tool.sh
+eq "$rc" "3" "the system bash reads the rig list whole"
+limited /bin/bash "$SUT" old-tool.sh
+eq "$rc" "2" "...and decides nothing when the short rig list cannot be written"
+hasnt "$out" "no open step calls" "...with no all-clear"
+
+run --root "$REPO" --check-merge long-base long-delete
+eq "$rc" "3" "a long list of removed paths is read whole"
+has "$(first_line)" "a script the merge removes (assets/scripts/old-tool.sh)" "...finding the one script among the tests"
+limited "$SUT" --root "$REPO" --check-merge long-base long-delete
+eq "$rc" "2" "a list of removed paths that cannot be written to its temp file decides nothing"
+has "$out" "cannot write a loop's input" "...and says so"
+hasnt "$out" "removes no pack script" "...with no all-clear"
+
+NO_MKTEMP="$TMP/no-mktemp"; mkdir -p "$NO_MKTEMP"
+printf '#!/usr/bin/env bash\necho "mktemp: No space left on device" >&2\nexit 1\n' > "$NO_MKTEMP/mktemp"
+chmod +x "$NO_MKTEMP/mktemp"
+run_with "$NO_MKTEMP" old-tool.sh
+eq "$rc" "2" "a temp file that cannot be created decides nothing"
+has "$out" "cannot create a temp file" "...and says so"
+run_with "$NO_MKTEMP" --root "$REPO" --check-merge main delete
+eq "$rc" "2" "...for a removed script too"
+has "$out" "cannot create a temp file" "...and says so"
+run_with "$NO_MKTEMP" --root "$REPO" --check-merge main edit-only
+eq "$rc" "0" "a change that removes nothing has no list to write, so it still passes"
+
+# A read that ends its loop stands in for lines lost under it. The script's Nth
+# read gets nothing, and every other read, a stub's too, is bash's.
+run_losing_read() {
+  local n=$1; shift
+  out=$(
+    read() {
+      case "$0" in
+        */script-callers.sh)
+          _sc_reads=$((${_sc_reads:-0} + 1))
+          [ "$_sc_reads" -ne "$SC_LOSE_READ" ] || return 1 ;;
+      esac
+      builtin read "$@"
+    }
+    export -f read
+    SC_LOSE_READ="$n" "$SUT" "$@" 2>&1
+  ); rc=$?
+}
+callers_off
+run_losing_read 1 old-tool.sh
+eq "$rc" "2" "a census that read none of the rigs decides nothing"
+has "$out" "read 0 of the 3 rigs the city lists" "...and says so"
+callers_on
+run_losing_read 2 old-tool.sh
+eq "$rc" "2" "a census that stopped short of the rigs holding the callers decides nothing"
+has "$out" "read 1 of the 3 rigs the city lists" "...and says so"
+run_losing_read 1 --root "$REPO" --check-merge main delete
+eq "$rc" "2" "a loop that read none of the removed paths decides nothing"
+has "$out" "read 0 of the 1 paths 'delete' removes" "...and says so"
+callers_off
+run_losing_read 3 --root "$REPO" --check-merge main head-names
+eq "$rc" "2" "a loop that read none of the formulas naming a removed script decides nothing"
+has "$out" "read 0 of the 1 files at 'head-names' that name old-tool.sh" "...and says so"
+run_losing_read 3 --root "$REPO" --check-merge main delete
+eq "$rc" "2" "a loop that read none of the rigs for a removed script decides nothing"
+has "$out" "read 0 of the 3 rigs the city lists" "...and says so"
+
+GIT_FAILS="$TMP/git-fails"; mkdir -p "$GIT_FAILS"
+REAL_GIT=$(command -v git)
+cat > "$GIT_FAILS/git" <<STUB
+#!/usr/bin/env bash
+case " \$* " in *" ls-tree "*|*" cat-file "*) echo "fatal: bad object" >&2; exit 128 ;; esac
+exec "$REAL_GIT" "\$@"
+STUB
+chmod +x "$GIT_FAILS/git"
+run_with "$GIT_FAILS" --root "$REPO" --check-merge main delete
+eq "$rc" "2" "a read of whether the base carries a removed path that fails decides nothing"
+has "$out" "cannot read 'assets/scripts/old-tool.sh' at 'main'" "...and says so"
+
+NO_WC="$TMP/no-wc"; mkdir -p "$NO_WC"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$NO_WC/wc"; chmod +x "$NO_WC/wc"
+callers_on
+run_with "$NO_WC" --root "$REPO" --check-merge main delete
+eq "$rc" "3" "counting the callers takes no command whose failure could leave the count at zero"
+has "$(first_line)" "3 open step(s) call a script the merge removes" "...so the count stands"
+
+TMPDIR="$SCRATCH" "$SUT" old-tool.sh >/dev/null 2>&1
+TMPDIR="$SCRATCH" "$SUT" --root "$REPO" --check-merge main delete >/dev/null 2>&1
+TMPDIR="$SCRATCH" "$SUT" --root "$REPO" --check-merge main head-names >/dev/null 2>&1
+callers_off
+TMPDIR="$SCRATCH" "$SUT" --root "$REPO" --check-merge main delete >/dev/null 2>&1
+eq "$(ls -A "$SCRATCH")" "" "no temp file stays behind, whatever the answer"
+eq "$(grep -c '<<<' "$SUT")" "0" "no loop reads a here-string, which can fail with nothing to check"
 
 echo "---"
 echo "script-callers.test: $PASS passed, $FAIL failed"

@@ -45,9 +45,9 @@
 # Exit: 0 no open step calls the scripts, or the merge removes no script that a
 #       formula names or an open step calls · 1 a formula at <base>, at <head>
 #       or at the checkout's HEAD names a script the merge removes · 2 usage, or
-#       a revision, the checkout's HEAD, the rig list or a store could not be
-#       read, so nothing was decided · 3 open steps call the scripts, or a
-#       script the merge removes
+#       a revision, the checkout's HEAD, the rig list, a store or a loop's input
+#       could not be read, so nothing was decided · 3 open steps call the
+#       scripts, or a script the merge removes
 set -uo pipefail
 
 PROG="script-callers"
@@ -99,6 +99,24 @@ name_re() {
   printf '(^|[^%s])%s([^%s]|$)' "$NAME_CHARS" "$(printf '%s' "$1" | sed 's/\./\\./g')" "$NAME_CHARS"
 }
 
+# A loop that falls through answers for every line of its list, so it must have
+# read every line. bash backs a large here-string with a temp file it creates
+# silently, and a loop whose redirection fails runs zero times. So each list goes
+# through a checked temp file, and a loop that read fewer lines than the list
+# holds decides nothing. The loops do not nest, so they share one file.
+LOOP_FILE=""; LOOP_LINES=0
+trap '[ -z "$LOOP_FILE" ] || rm -f "$LOOP_FILE"' EXIT
+
+# loop_input <list> — write a list that is not empty to LOOP_FILE for the next
+# loop to read, and count its lines in LOOP_LINES.
+loop_input() {
+  local newlines=${1//[!$'\n']/}
+  [ -n "$LOOP_FILE" ] || LOOP_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-script-callers.XXXXXX") \
+    || fail "cannot create a temp file for a loop's input"
+  printf '%s\n' "$1" > "$LOOP_FILE" || fail "cannot write a loop's input to $LOOP_FILE"
+  LOOP_LINES=$(( ${#newlines} + 1 ))
+}
+
 # callers <script>... — collect each open step that names one of the scripts,
 # in every store of the city, one line per step in CALLER_LINES, and count them
 # in NCALLERS. Each store is read once, so the cost does not grow with the
@@ -106,11 +124,13 @@ name_re() {
 # with exit 2.
 NCALLERS=0; CALLER_LINES=""
 callers() {
-  local rigs rig path name rows lines
+  local rigs rig path name rows lines newlines read_lines=0
   rigs=$("$HERE/rig-map.sh" | jq -r '.rigs[] | [.name, .path] | @tsv') \
     || fail "cannot read the city's rigs (gc rig list --json)"
   [ -n "$rigs" ] || fail "the city lists no rig, so no store was read"
+  loop_input "$rigs"
   while IFS=$'\t' read -r rig path; do
+    read_lines=$((read_lines + 1))
     rows=$(bd_list --db "$path/.beads" --has-metadata-key gc.step_ref --status "$LIVE_STATUSES") \
       || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
     for name in "$@"; do
@@ -120,9 +140,11 @@ callers() {
         || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
       [ -n "$lines" ] || continue
       CALLER_LINES="$CALLER_LINES$lines"$'\n'
-      NCALLERS=$((NCALLERS + $(printf '%s\n' "$lines" | wc -l)))
+      newlines=${lines//[!$'\n']/}
+      NCALLERS=$((NCALLERS + ${#newlines} + 1))
     done
-  done <<< "$rigs"
+  done < "$LOOP_FILE"
+  [ "$read_lines" -eq "$LOOP_LINES" ] || fail "read $read_lines of the $LOOP_LINES rigs the city lists"
 }
 
 if [ -z "$CHECK_MERGE" ]; then
@@ -145,35 +167,52 @@ CHECKOUT_OID=$(git -C "$ROOT" rev-parse --verify --quiet "HEAD^{commit}") || fai
 REMOVED=$(git -C "$ROOT" diff --name-only --no-renames --diff-filter=D "$MERGE_BASE...$MERGE_HEAD" -- assets/scripts packs) \
   || fail "cannot list what '$MERGE_HEAD' removes from '$MERGE_BASE'"
 PATHS=(); NAMES=(); NREMOVED=0
-while IFS= read -r p; do
-  case "$p" in assets/scripts/*|packs/*/assets/scripts/*) ;; *) continue ;; esac
-  case "$p" in *.test.sh|*/testdata/*) continue ;; esac
-  git -C "$ROOT" cat-file -e "$MERGE_BASE:$p" 2>/dev/null || continue
-  PATHS+=("$p"); NAMES+=("${p##*/}"); NREMOVED=$((NREMOVED + 1))
-done <<< "$REMOVED"
+if [ -n "$REMOVED" ]; then
+  loop_input "$REMOVED"
+  read_lines=0
+  while IFS= read -r p; do
+    read_lines=$((read_lines + 1))
+    case "$p" in assets/scripts/*|packs/*/assets/scripts/*) ;; *) continue ;; esac
+    case "$p" in *.test.sh|*/testdata/*) continue ;; esac
+    carried=$(git -C "$ROOT" ls-tree --full-tree "$MERGE_BASE" -- "$p") \
+      || fail "cannot read '$p' at '$MERGE_BASE'"
+    [ -n "$carried" ] || continue
+    PATHS+=("$p"); NAMES+=("${p##*/}"); NREMOVED=$((NREMOVED + 1))
+  done < "$LOOP_FILE"
+  [ "$read_lines" -eq "$LOOP_LINES" ] || fail "read $read_lines of the $LOOP_LINES paths '$MERGE_HEAD' removes"
+fi
 if [ "$NREMOVED" -eq 0 ]; then
   echo "the merge removes no pack script"
   exit 0
 fi
 
-# named_in <rev> <script> — the formula files at <rev> that name the script.
+# named_in <rev> <where> <path> <script> — add each formula file at <rev> that
+# names the script at <path> to NAMED_LINES, and count them in NAMED. <where>
+# says which side of the merge <rev> is.
+NAMED=0; NAMED_LINES=""
 named_in() {
-  local out rc line
-  out=$(git -C "$ROOT" grep -I -l -E -e "$(name_re "$2")" "$1" -- formulas packs 2>/dev/null); rc=$?
+  local out rc line read_lines=0
+  out=$(git -C "$ROOT" grep -I -l -E -e "$(name_re "$4")" "$1" -- formulas packs 2>/dev/null); rc=$?
   case "$rc" in
     0) ;;
     1) return 0 ;;
     *) fail "cannot read the formulas at '$1'" ;;
   esac
+  loop_input "$out"
   while IFS= read -r line; do
+    read_lines=$((read_lines + 1))
     line="${line#"$1":}"
-    case "$line" in formulas/*|packs/*/formulas/*) printf '%s\n' "$line" ;; esac
-  done <<< "$out"
+    case "$line" in
+      formulas/*|packs/*/formulas/*)
+        NAMED_LINES="$NAMED_LINES$3: the merge removes it, and $line at $2 still names it"$'\n'
+        NAMED=$((NAMED + 1)) ;;
+    esac
+  done < "$LOOP_FILE"
+  [ "$read_lines" -eq "$LOOP_LINES" ] || fail "read $read_lines of the $LOOP_LINES files at '$1' that name $4"
 }
 
 SIDES=(base head)
 [ "$CHECKOUT_OID" = "$BASE_OID" ] || [ "$CHECKOUT_OID" = "$HEAD_OID" ] || SIDES+=(checkout)
-NAMED=0; NAMED_LINES=""
 for i in "${!PATHS[@]}"; do
   for side in "${SIDES[@]}"; do
     case "$side" in
@@ -181,12 +220,7 @@ for i in "${!PATHS[@]}"; do
       head) rev="$MERGE_HEAD"; where="the head ($MERGE_HEAD)" ;;
       checkout) rev="$CHECKOUT_OID"; where="the checkout's HEAD (${CHECKOUT_OID:0:12})" ;;
     esac
-    files=$(named_in "$rev" "${NAMES[$i]}") || exit 2
-    [ -n "$files" ] || continue
-    while IFS= read -r f; do
-      NAMED_LINES="$NAMED_LINES${PATHS[$i]}: the merge removes it, and $f at $where still names it"$'\n'
-      NAMED=$((NAMED + 1))
-    done <<< "$files"
+    named_in "$rev" "$where" "${PATHS[$i]}" "${NAMES[$i]}"
   done
 done
 if [ "$NAMED" -gt 0 ]; then

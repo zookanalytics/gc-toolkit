@@ -268,7 +268,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    with nothing on the board to say so. Each pass's log counts the calling steps
    and names the first of them, and `script-callers.sh <script>` lists each with
    its run and the rig whose store holds it. A check that cannot read a revision,
-   the rig list or a store holds the merge for the pass.
+   the rig list, a store or the temp file behind one of its loops holds the merge
+   for the pass.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of
