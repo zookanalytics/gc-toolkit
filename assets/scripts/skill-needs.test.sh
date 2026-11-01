@@ -64,6 +64,7 @@ SKILLS="$REPO/skills"
 PROMPT="$REPO/agents/_converse/prompt.template.md"
 SETTLE="$REPO/skills/converse-settle/SKILL.md"
 CONTINUE="$REPO/skills/converse-continue/SKILL.md"
+ITERATE="$REPO/skills/converse-iterate-document/SKILL.md"
 MECHANIK="$REPO/agents/mechanik/prompt.template.md"
 WORK_SKILL="$REPO/skills/work/SKILL.md"
 PRS_SKILL="$REPO/skills/prs/SKILL.md"
@@ -645,16 +646,18 @@ CH="$TMP/chain"
 mkdir -p "$CH/bin" "$CH/pack/assets/scripts"
 cat >"$CH/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-# Logs each call, and refuses the one numbered CHAIN_FAIL_AT. It answers
+# Logs each call on one line, and refuses the one numbered CHAIN_FAIL_AT. It answers
 # scripts-dir under any binding, prints an id for a create, and applies an
 # update's --set-metadata and --unset-metadata to a store of one file per key.
+# An --append-notes adds to one notes file that a show reads back, unless
+# CHAIN_NOTES_LOST is set, when it exits 0 and nothing lands.
 # A dep add records its edge as a "<waiting> <blocker>" line that a dep list
 # reads back and a dep remove deletes, in the one store a --rig names or not.
 # With CHAIN_CROSS_STORE set, a dep add answers as bd does for a blocker in
 # another store: it prints success and exits 0, and no edge reads back.
 n=$(( $(cat "$CHAIN_DIR/count" 2>/dev/null || echo 0) + 1 ))
 echo "$n" >"$CHAIN_DIR/count"
-printf 'gc %s\n' "$*" >>"$CHAIN_DIR/log"
+{ printf 'gc %s' "$*" | tr '\n' ' '; echo; } >>"$CHAIN_DIR/log"
 if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "gc: refused" >&2; exit 1; fi
 [ "${2:-}" = scripts-dir ] && { printf '%s\n' "$CHAIN_DIR/pack/assets/scripts"; exit 0; }
 [ "${1:-} ${2:-}" = "bd --rig" ] && set -- bd "${@:4}"
@@ -666,9 +669,11 @@ case "$1 ${2:-}" in
             case "$1" in
                 --set-metadata) printf '%s' "${2#*=}" >"$CHAIN_DIR/store/${2%%=*}"; shift 2 ;;
                 --unset-metadata) rm -f "$CHAIN_DIR/store/$2"; shift 2 ;;
+                --append-notes) [ -n "${CHAIN_NOTES_LOST:-}" ] || printf '%s\n' "$2" >>"$CHAIN_DIR/notes"; shift 2 ;;
                 *) shift ;;
             esac
         done ;;
+    "bd show") jq -n --rawfile n "$CHAIN_DIR/notes" '[{notes: $n}]' ;;
     "bd dep")
         case "${3:-}" in
             add)
@@ -712,6 +717,7 @@ run_chain() {
     mkdir -p "$CH/store"
     : >"$CH/log"
     : >"$CH/edges"
+    : >"$CH/notes"
     (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_AT="${3:-}" \
         CHAIN_CROSS_STORE="${4:-}" CONV="$CH/pack/assets/scripts" SUBJECT=tk-x CONVERSATION=tk-v \
         PATH="$CH/bin:$PATH" $1 "$2" </dev/null >/dev/null 2>&1)
@@ -748,6 +754,7 @@ disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outc
 converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
 converse-settle: arming a follow-up|$SETTLE|gc bd --rig <rig> dep add <follow-up> <blocker>
 converse-settle: arming a follow-up on a human gate|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
+converse-iterate-document: writing the scaffold|$ITERATE|--append-notes "## Current state (\$TODAY)
 SPECS
 # The arm runs only once the follow-up's own store reads the edge back. A dep add
 # onto a bead in another store prints success and exits 0 but holds nothing, so
@@ -775,6 +782,39 @@ for sh_ in $shells; do
         ok "($sh_) converse-settle: a gate that did not land arms nothing"
     else
         bad "($sh_) converse-settle: a gate that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+done
+echo "── a sitting iterating on a document writes one scaffold and names it in the ruling ──"
+have "the step table sends a sitting iterating on a document to its skill" '**Steps 5–8, when the operator is iterating on a document**' "$PROMPT"
+have "…by name" '`converse-iterate-document` |' "$PROMPT"
+have "the ruling line names the block the worker starts from" 'to the scaffold in the notes of <bead>, the block headed ## Current state (<date>)' "$ITERATE"
+have "…and the sign-off files the rework" '--route human --no-wait --rework' "$ITERATE"
+have "every section of the document gets a verb" 'keep, cut, rewrite or add' "$ITERATE"
+fenced_block "$ITERATE" '--append-notes "## Current state ($TODAY)' | fill_block >"$CH/block"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    rc=$(run_chain "$run" "$CH/block")
+    if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Current state \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$' \
+        && grep -qxF 'Where a file'"'"'s text and this block disagree, this block wins.' "$CH/notes" \
+        && grep -qF 'goes to the operator through a human gate. Never decide it.' "$CH/notes" \
+        && grep -qxF 'Open questions: none' "$CH/notes"; then
+        ok "($sh_) converse-iterate-document: the block lands dated, carrying the worker's rules and no open question"
+    else
+        bad "($sh_) converse-iterate-document: the block lands dated, carrying the worker's rules and no open question" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    sed 's/^x$/the `echo ran` and $HOME stay as written/' "$CH/block" >"$CH/literal-block"
+    rc=$(run_chain "$run" "$CH/literal-block")
+    if [ "$rc" -eq 0 ] && grep -qxF 'the `echo ran` and $HOME stay as written' "$CH/notes"; then
+        ok "($sh_) converse-iterate-document: what the block quotes stays as written"
+    else
+        bad "($sh_) converse-iterate-document: what the block quotes stays as written" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    rc=$(CHAIN_NOTES_LOST=1 run_chain "$run" "$CH/block")
+    if [ "$rc" -ne 0 ]; then
+        ok "($sh_) converse-iterate-document: a block that does not read back is not reported as written"
+    else
+        bad "($sh_) converse-iterate-document: a block that does not read back is not reported as written" "exit $rc"
     fi
 done
 echo "── a moot or benign close releases a subject a cut-short hold left at held ──"
@@ -894,6 +934,10 @@ NEEDS
 grep -E '^\| \*\*Steps? ' "$PROMPT" | grep -oE '`converse-[a-z-]+`' | tr -d '`' | sort -u >"$TMP/by-name"
 [ -s "$TMP/by-name" ] && ok "the step table names the skills it loads by name ($(tr '\n' ' ' <"$TMP/by-name"))" \
     || bad "the step table names the skills it loads by name" "no \`converse-…\` names in $PROMPT"
+while read -r s; do
+    [ -r "$SKILLS/$s/SKILL.md" ] && ok "$s: the skill the step table names exists" \
+        || bad "$s: the skill the step table names exists" "no $SKILLS/$s/SKILL.md"
+done <"$TMP/by-name"
 
 awk -F '\t' -v byname="$TMP/by-name" '
     BEGIN {
