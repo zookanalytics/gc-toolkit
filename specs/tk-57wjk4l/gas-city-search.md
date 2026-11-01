@@ -45,8 +45,8 @@ The change adds:
   open steps in moving runs call it, the arm records the existing `pr.machine`
   value `settled`. When a person's gate or a suspended rig parks a calling run,
   it records the existing value `blocked` with the existing cause `blocker`, whose
-  definition
-  widens to cover a blocker that holds the merge through a run. It files no gate.
+  definition widens to cover a blocker that holds the merge through a run. It
+  files no gate.
 
 It adds no metadata key, bead kind, lifecycle state or cause.
 

@@ -290,8 +290,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    standing, and the next pass that finds no parked caller replaces it. A run is
    parked when one of its open steps is blocked by a gate the city does not close
    by itself: a human gate or a park, and not a timer gate or a gate on a GitHub
-   run or pull request. That person releases the gate or cancels the run. A run
-   is parked too when its rig is suspended, since nothing works it until a person
+   run or pull request. A person releases the gate or cancels the run. A run is
+   parked too when its rig is suspended, since nothing works it until a person
    resumes the rig or cancels the run.
 
    Each pass's log counts the calling steps and names the first of them, and
