@@ -4656,15 +4656,9 @@ cmd_engage() {
     # Leave a reminder on the subject's PR that this sitting engaged, if it has
     # a PR. Best effort: pr-sitting-comment.sh self-silences when the subject
     # has no PR or gh is absent, and its failure must not fail an engage that
-    # already bound its conversation. (The reason is passed conditionally
-    # because /bin/sh word-splits ${x:+...}, which would break a multi-word
-    # reason.)
+    # already bound its conversation.
     if [ -x "$SITTING_COMMENT_TOOL" ]; then
-        if [ -n "$engage_reason" ]; then
-            "$SITTING_COMMENT_TOOL" engage --sitting "$CONV" --subject "$bead" --reason "$engage_reason" || true
-        else
-            "$SITTING_COMMENT_TOOL" engage --sitting "$CONV" --subject "$bead" || true
-        fi
+        "$SITTING_COMMENT_TOOL" engage --sitting "$CONV" --subject "$bead" || true
     fi
 
     # Human summary on stdout; id-heavy provenance on a single always-on [debug]

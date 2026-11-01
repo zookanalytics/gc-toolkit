@@ -12,23 +12,23 @@
 # the comment lands.
 #
 # Usage:
-#   pr-sitting-comment.sh engage --sitting <task> --subject <id> [--reason <text>]
+#   pr-sitting-comment.sh engage --sitting <task> --subject <id>
 #   pr-sitting-comment.sh close  --sitting <task> --subject <id> \
 #       [--outcome <word>] [--summary <text>] [--actions <text>]
 #
 #   engage: upsert the marked comment into its "open" shape.
 #   close:  edit the marked comment into its "ended" shape. UPDATE-ONLY — a
 #           conversation no sitting engaged has no comment, and close leaves the
-#           PR alone. The reason is preserved from the comment engage wrote, so
-#           close takes no --reason. Its callers run it once their own write
-#           reads back: the sign-off once the conversation is closed or handed
-#           back to the operator's queue, and dismiss once it is closed.
+#           PR alone. Its callers run it once their own write reads back: the
+#           sign-off once the conversation is closed or handed back to the
+#           operator's queue, and dismiss once it is closed.
 set -u
 
 PROG=pr-sitting-comment
+HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The single writer of the city's PR posts: the reminder is posted and edited
 # through it so every shape of it carries the city's mark.
-PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
+PR_POST="$HERE/pr-post.sh"
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -39,23 +39,21 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 # The gh REST payloads escape newlines as \n and need no scrub, and the comment
 # body must keep its newlines, so it is read UNSCRUBBED below.
-# One line, trimmed: each comment field is a single line, which keeps the
-# read-back of a preserved field (the reason, on close) exact.
+# One line, trimmed: each comment field is a single line.
 oneline() { printf '%s' "${1:-}" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/^ *//; s/ *$//'; }
 
 MODE="${1:-}"
 case "$MODE" in engage|close) shift ;; *) echo "$PROG: first argument must be 'engage' or 'close'" >&2; exit 2 ;; esac
 
-SITTING=""; SUBJECT=""; REASON=""; OUTCOME=""; SUMMARY=""; ACTIONS=""
+SITTING=""; SUBJECT=""; OUTCOME=""; SUMMARY=""; ACTIONS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --sitting)  shift; [ $# -gt 0 ] || { echo "$PROG: --sitting needs a value" >&2; exit 2; }; SITTING="$1" ;;
     --subject)  shift; [ $# -gt 0 ] || { echo "$PROG: --subject needs a value" >&2; exit 2; }; SUBJECT="$1" ;;
-    --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: --reason needs a value" >&2; exit 2; }; REASON="$1" ;;
     --outcome)  shift; [ $# -gt 0 ] || { echo "$PROG: --outcome needs a value" >&2; exit 2; }; OUTCOME="$1" ;;
     --summary)  shift; [ $# -gt 0 ] || { echo "$PROG: --summary needs a value" >&2; exit 2; }; SUMMARY="$1" ;;
     --actions)  shift; [ $# -gt 0 ] || { echo "$PROG: --actions needs a value" >&2; exit 2; }; ACTIONS="$1" ;;
-    -h|--help)  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "$PROG: unknown flag '$1'" >&2; exit 2 ;;
     *)  echo "$PROG: unexpected argument '$1'" >&2; exit 2 ;;
   esac
@@ -77,7 +75,8 @@ command -v jq >/dev/null 2>&1 || exit 0
 # rig map maps the subject's id prefix to its repo path; cwd is the fallback for
 # a caller that already runs inside the subject's rig (the converse sign-off).
 ORIGIN_HOST=""; ORIGIN_REPO=""; ORIGIN_REPO_Q=""
-REPO_DIR=$("$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/rig-map.sh" \
+RIG_MAP=$("$HERE/rig-map.sh")
+REPO_DIR=$(printf '%s' "$RIG_MAP" \
   | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .path' 2>/dev/null | head -n1)
 if [ -n "$REPO_DIR" ] && [ -d "$REPO_DIR" ]; then
   u=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null | tr -d '[:space:]')
@@ -131,23 +130,45 @@ if [ -z "$COMMENTS" ]; then
   exit 0
 fi
 MATCH=$(printf '%s' "$COMMENTS" | jq -c --arg m "$MARKER" '[ .[]? | select(((.body // "") | tostring) | contains($m)) ] | first // empty' 2>/dev/null || true)
-COMMENT_ID=""; COMMENT_BODY=""
+COMMENT_ID=""
 if [ -n "$MATCH" ]; then
   COMMENT_ID=$(printf '%s' "$MATCH" | jq -r '.id // ""' 2>/dev/null || true)
-  COMMENT_BODY=$(printf '%s' "$MATCH" | jq -r '.body // ""' 2>/dev/null || true)
 fi
 
-REASON=$(oneline "$REASON")
 OUTCOME=$(oneline "$OUTCOME")
 SUMMARY=$(oneline "$SUMMARY")
 ACTIONS=$(oneline "$ACTIONS")
+
+# A PR comment can be public and it stays, and no person reads this one before it
+# posts. So it carries the ids and the state, and never the reason engage was
+# given: those are the words typed to open a private conversation, cut short to
+# fit a title, and a name misspelled or cut off there passes any check by name.
+# What a sitting wrote for the record goes on field by field, each printed here
+# only once rig-mentions.sh clears it. A field the check lists, or cannot answer
+# for, is left out, and the comment still says the sitting ended. The check judges
+# for the subject's rig, whose PR this is, from the listing read above, so a close
+# costs no second read of a listing that can take many seconds.
+cleared() { # <field> <text>
+  [ -n "$2" ] || return 0
+  local rc=0
+  "$HERE/rig-mentions.sh" --rig "$RIG_NAME" --rig-map <(printf '%s' "$RIG_MAP") \
+    --file <(printf '%s\n' "$2") >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) printf '%s' "$2" ;;
+    1) echo "$PROG: left the $1 off the reminder on PR#$PR: it names another rig" >&2 ;;
+    *) echo "$PROG: left the $1 off the reminder on PR#$PR: rig-mentions.sh could not answer (exit $rc)" >&2 ;;
+  esac
+}
 
 if [ "$MODE" = close ]; then
   # UPDATE-ONLY: a conversation no sitting engaged has no comment, and its close
   # leaves the PR alone.
   [ -n "$COMMENT_ID" ] || exit 0
-  # Preserve the reason the engage wrote — one line, so this read-back is exact.
-  REASON=$(printf '%s' "$COMMENT_BODY" | sed -n 's/^- Reason: //p' | head -1)
+  RIG_NAME=$(printf '%s' "$RIG_MAP" \
+    | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .name' 2>/dev/null | head -n1)
+  OUTCOME=$(cleared outcome "$OUTCOME")
+  SUMMARY=$(cleared summary "$SUMMARY")
+  ACTIONS=$(cleared actions "$ACTIONS")
 fi
 
 # Compose the body. Both shapes carry the marker so the next call finds it.
@@ -162,7 +183,6 @@ else
   fi
 fi
 BODY="$BODY- Subject: $SUBJECT"$'\n'
-[ -n "$REASON" ]  && BODY="$BODY- Reason: $REASON"$'\n'
 if [ "$MODE" = close ]; then
   [ -n "$SUMMARY" ] && BODY="$BODY- Summary: $SUMMARY"$'\n'
   [ -n "$ACTIONS" ] && BODY="$BODY- Actions Taken: $ACTIONS"$'\n'

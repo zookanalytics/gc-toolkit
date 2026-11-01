@@ -678,6 +678,9 @@ unset HAVE_CONV
 echo "# --reason files a fresh conversation for a distinct concern, even when one waits"
 reset; run_engage tk-subj --reason "a distinct concern" --no-attach
 eq "$RC" 0 "(REASON-NEW) engaging a bead with a conversation WITH --reason exits 0"
+has "$(cat "$TMP/psc.log")" "engage --sitting tk-new --subject tk-subj" "(REASON-PRCOMMENT) the PR reminder is posted for the new conversation"
+hasnt "$(cat "$TMP/psc.log")" "a distinct concern" "(REASON-PRCOMMENT) …and the words that opened it never reach the PR"
+hasnt "$(cat "$TMP/psc.log")" "--reason" "(REASON-PRCOMMENT) …because the reminder is handed no reason at all"
 has "$CALLED" "bd create" "(REASON-NEW) …a NEW conversation is filed"
 has "$CALLED" "--title a distinct concern" "(REASON-NEW) …titled with the reason"
 has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and asking it"

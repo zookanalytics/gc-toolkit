@@ -9,7 +9,8 @@
 # which own those harnesses.
 #
 # Hermetic: stubs gc, gh and the sign-off's other pack scripts; the candidate
-# root carries the real pr-sitting-comment.sh and pr-post.sh. No city, no network.
+# root carries the real pr-sitting-comment.sh, pr-post.sh and rig-mentions.sh, so
+# what the sign-off hands the reminder meets the real check. No city, no network.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +24,7 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s\n       %s\n' "$1" "${2:-}"; }
 has() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1" "missing '$3' in: $2" ;; esac; }
+hasnt() { case "$2" in *"$3"*) bad "$1" "found '$3' in: $2" ;; *) ok "$1" ;; esac; }
 
 TMPD="$(mktemp -d "${TMPDIR:-/tmp}/pr-sitting-comment-wiring.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
@@ -33,11 +35,11 @@ REPO="$TMPD/repo"; mkdir -p "$REPO"
 git -C "$REPO" init -q
 git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 
-# The candidate root the sign-off searches first: the real reminder and the
-# poster it calls, and stubs for the headline writer and lifecycle.sh.
+# The candidate root the sign-off searches first: the real reminder, the poster
+# and the rig-mention check it calls, and stubs for the headline writer and
+# lifecycle.sh.
 SR="$TMPD/rig/assets/scripts"; mkdir -p "$SR"
-ln -s "$REMINDER" "$SR/pr-sitting-comment.sh"
-ln -s "$HERE/pr-post.sh" "$SR/pr-post.sh"
+for f in pr-sitting-comment.sh pr-post.sh rig-map.sh rig-mentions.sh bd-lib.sh; do ln -s "$HERE/$f" "$SR/$f"; done
 cat > "$SR/gc-helm.sh" <<'H'
 #!/usr/bin/env bash
 [ "$1" = takeaway ] && gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null
@@ -56,7 +58,7 @@ B="$STORE/b"
 row() { cat "$B/$1.json" 2>/dev/null; }
 put() { cat > "$B/$1.json.tmp" && mv "$B/$1.json.tmp" "$B/$1.json"; }
 case "$1 ${2:-}" in
-  "rig list") jq -n --arg p "$REPO" '{rigs:[{name:"gc-toolkit", prefix:"tk", path:$p}]}' ;;
+  "rig list") jq -n --arg p "$REPO" '{rigs:[{name:"gc-toolkit", prefix:"tk", path:$p}, {name:"rig-b", prefix:"rb", path:"/nonexistent/rig-b"}]}' ;;
   "bd show")
     [ -f "$B/$3.json" ] || { printf '{"error":"no issues found"}\n'; exit 1; }
     row "$3" | jq -c '[. + {dependencies: [ .deps[] | {id: .on, dependency_type: .type} ]} | del(.deps)]' ;;
@@ -129,7 +131,7 @@ fixture() {
   jq -n '{id:"tk-subj", issue_type:"task", status:"open", assignee:"", metadata:{pr_number:"41", pr_url:"https://github.com/acme/widgets/pull/41"}, deps:[{type:"blocks", on:"tk-gate"}]}' > "$STORE/b/tk-subj.json"
   jq -n '{id:"tk-gate", issue_type:"gate", await_type:"human", await_id:"review-needs-you.tk-f", status:"open", assignee:"", metadata:{}, deps:[]}' > "$STORE/b/tk-gate.json"
   jq -n '{id:"tk-conv", issue_type:"task", status:"in_progress", assignee:"gc-toolkit/gc-toolkit.tk-conv", metadata:{}, deps:[{type:"tracks", on:"tk-subj"}, {type:"replies-to", on:"tk-gate"}]}' > "$STORE/b/tk-conv.json"
-  ( cd "$TMPD/cwd" && bash "$REMINDER" engage --sitting tk-conv --subject tk-subj --reason "the review finding" ) >/dev/null 2>&1
+  ( cd "$TMPD/cwd" && bash "$REMINDER" engage --sitting tk-conv --subject tk-subj ) >/dev/null 2>&1
 }
 
 echo "── a ruled sign-off edits the reminder to say the sitting ended, with its summary and actions ──"
@@ -142,8 +144,17 @@ has "the same comment now says the sitting ended, settled" "$BODY" "Sitting on t
 has "the headline is its summary" "$BODY" "Summary: we fix the retry first"
 has "the ruling is among its actions" "$BODY" "ruling: fix the retry (released to human)"
 has "…as is the gate it resolved" "$BODY" "resolved gate tk-gate"
-has "the reason engage wrote is kept" "$BODY" "Reason: the review finding"
 [ "$(jq 'length' "$STATE")" = 1 ] && ok "still one comment on the thread" || bad "still one comment on the thread" "$(cat "$STATE")"
+
+echo "── what the sign-off hands the reminder meets the real rig-mention check ──"
+fixture
+( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "the same defect on rig-b" \
+    --ruled yes --ruling "fix the retry" --route human --no-wait ) >/dev/null 2>&1
+BODY="$(jq -r '.[0].body // ""' "$STATE")"
+has "the comment still says the sitting ended, settled" "$BODY" "Sitting on tk-conv — ended (settled)"
+hasnt "a summary naming another rig is left out" "$BODY" "Summary:"
+hasnt "…so the rig never reaches the PR" "$BODY" "rig-b"
+has "the actions it clears stay" "$BODY" "ruling: fix the retry (released to human)"
 
 echo "── a cut-short sign-off edits it to say the conversation was handed back ──"
 fixture
