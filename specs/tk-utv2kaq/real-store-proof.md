@@ -90,20 +90,46 @@ SIGNED OFF conversation pb-wys on pb-jxa (settled)
 ## Refusals
 
 Each of these exits 1 with the bead's row unchanged: a key no gate carries, another
-open gate, another live blocker, an open child, a gate that also holds another bead,
-an open PR, a gate a person is assigned, and a claim.
+open gate, another live blocker, an open child, a gate that also holds another bead
+with nothing else named as the evidence, an open PR, a gate a person is assigned, and
+a claim.
 
-## Two more shapes
+## A gate that also holds another bead
 
-The refusal of a shared gate names a way on: take this bead off the gate and name
-the evidence. That stops this bead and leaves the gate asking about the other one:
+An answer would release the other bead, so this bead leaves the gate instead. Taken
+off by hand with its arm standing, it is sent by the next pass:
 
 ```
-stand-down: pb-j3o closed as not needed, per pb-u2z; nothing re-slings it
-work: {"status":"closed","armed":"","route":"","pointer":"pb-u2z","outcome":"no-op", ...}
+slings by that pass: 1: sling probe/probe.polecat pb-03d --on mol-polecat-work
+```
+
+With the evidence named, the command takes it off once the arm and the route are
+gone. A pass run right behind that write sends nothing, the gate stays open and
+still holds the other bead, and an answer once this bead has closed sends only the
+other bead:
+
+```
+stand-down: pb-zyv left gate pb-8pt, which stays open: gate pb-8pt also holds pb-8mb
+stand-down: pb-zyv closed as not needed, per pb-q0y; nothing re-slings it
+the pass behind the edge: deferred-dispatch: 0 dispatched, ...
+work: {"status":"closed","armed":"","route":"","pointer":"pb-q0y","outcome":"no-op", ...}
 gate: {"status":"open"}
-other bead: {"status":"open", ...}
+other bead: {"status":"open","armed":"probe/probe.polecat", ...}
+an answer once the work has closed, then a pass: slings 1: sling probe/probe.polecat pb-8mb
 ```
+
+A sitting always names its conversation as the evidence, so it goes the same way, and
+`--leave` on the sign-off keeps the gate for the other bead:
+
+```
+stand-down: pb-ok6 left gate pb-4pq, which stays open: gate pb-4pq also holds pb-j6u
+gate pb-4pq stays open and owed: the ruling leaves it, and this conversation's reply stays on it
+SIGNED OFF conversation pb-51i on pb-ok6 (settled)
+work: {"status":"closed","armed":"","route":"","pointer":"pb-51i","outcome":"no-op", ...}
+gate: {"status":"open"}
+```
+
+## A graduated convoy
 
 A graduated convoy the refinery parked `blocked` stands down the same way, as its
 gate's message says, and the bead it tracks stays open:

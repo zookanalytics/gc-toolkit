@@ -20,9 +20,10 @@ export TMPDIR="$W/tmp" PROBE_STORE="$STORE" PROBE_LOG="$W/sling.log" GCTK_BIN="$
 : > "$PROBE_LOG"; : > "$PROBE_LOG.unsupported"
 
 # gc over the scratch store: `gc bd` is bd, `gc rig list` names the one rig, and
-# `gc sling` records the send. PROBE_FAIL refuses the one gc bd verb it names, and
+# `gc sling` records the send. PROBE_FAIL refuses the one gc bd verb it names,
 # PROBE_LAND_AT names the listing at which PROBE_LAND runs, once: a write that
-# lands while a pass is between its reads.
+# lands while a pass is between its reads, and PROBE_AFTER names the write after
+# which PROBE_AFTER_RUN runs: a pass that comes right behind that write.
 cat > "$W/bin/gc" <<'SHIM'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -37,6 +38,15 @@ case "${1:-}" in
         *"$PROBE_LAND_AT"*)
           : > "$PROBE_LOG.landed"
           env -u PROBE_LAND_AT -u PROBE_LAND bash -c "$PROBE_LAND" >&2 ;;
+      esac
+    fi
+    if [ -n "${PROBE_AFTER:-}" ]; then
+      case " $* " in
+        *"$PROBE_AFTER"*)
+          # raw-bd: this shim is the scratch store's gc bd
+          bd "$@"; rc=$?
+          env -u PROBE_AFTER -u PROBE_AFTER_RUN bash -c "$PROBE_AFTER_RUN" >&2
+          exit "$rc" ;;
       esac
     fi
     # raw-bd: this shim is the scratch store's gc bd
@@ -158,17 +168,40 @@ G=$(waiting "wrong key" polecat-g); try "a key no gate carries" "$G" --key nobod
 H=$(waiting "two gates" polecat-h); "$SCRIPTS/human-gate.sh" --subject "$H" --key other-question --message "another question" >/dev/null; try "another open gate" "$H" --key polecat-h --ruling x
 I=$(waiting "real blocker" polecat-i); J=$(mk "prerequisite"); gc bd dep add "$I" "$J" -t blocks >/dev/null 2>&1; try "another live blocker" "$I" --key polecat-i --ruling x
 K=$(waiting "parent" polecat-k); gc bd create "child" -t task --parent "$K" --json >/dev/null 2>&1; try "an open child" "$K" --key polecat-k --ruling x
-L=$(waiting "shared" polecat-l); GL=$(gate_of "$L" polecat-l); M=$(mk "other bead the gate holds"); gc bd dep add "$M" "$GL" -t blocks >/dev/null 2>&1; try "a gate that holds another bead" "$L" --key polecat-l --ruling x
+L=$(waiting "shared" polecat-l); GL=$(gate_of "$L" polecat-l); M=$(mk "other bead the gate holds"); gc bd dep add "$M" "$GL" -t blocks >/dev/null 2>&1; try "a gate that holds another bead, with nothing else as the evidence" "$L" --key polecat-l --ruling x
 N=$(waiting "PR" polecat-n); gc bd update "$N" --set-metadata merge_result=pull_request >/dev/null; try "an open PR" "$N" --key polecat-n --ruling x
 O=$(waiting "assigned person" polecat-o); GO=$(gate_of "$O" polecat-o); gc bd update "$GO" --assignee someone >/dev/null; try "a gate a person is assigned" "$O" --key polecat-o --ruling x
 Q=$(waiting "claimed" polecat-q); gc bd update "$Q" --assignee someone --status in_progress >/dev/null; try "a claim" "$Q" --key polecat-q --ruling x
 
-say "A gate that holds another bead: the way on its refusal names"
-L2=$(waiting "shared, way on" polecat-l2); GL2=$(gate_of "$L2" polecat-l2); M2=$(mk "the other bead"); gc bd dep add "$M2" "$GL2" -t blocks >/dev/null 2>&1
+say "A gate that holds another bead, taken off it by hand with the arm standing: the next pass sends the work"
+L3=$(waiting "shared, by hand" polecat-l3); GL3=$(gate_of "$L3" polecat-l3); M3=$(mk "the other bead"); gc bd dep add "$M3" "$GL3" -t blocks >/dev/null 2>&1
+gc bd dep remove "$L3" "$GL3" >/dev/null 2>&1
+before=$(slings); pass "$SCRIPTS" | tail -1
+echo "slings by that pass: $(($(slings) - before)): $(tail -1 "$PROBE_LOG")"
+
+say "A gate that holds another bead, with the evidence named: this bead leaves it, and a pass right behind that write sends nothing"
+L2=$(waiting "shared, evidence named" polecat-l2); GL2=$(gate_of "$L2" polecat-l2); M2=$(mk "the other bead"); gc bd dep add "$M2" "$GL2" -t blocks >/dev/null 2>&1
+"$SCRIPTS/deferred-dispatch.sh" arm "$M2" --target probe/probe.polecat --reason "waits on the gate" >/dev/null 2>&1
 EV=$(mk "evidence")
-gc bd dep remove "$L2" "$GL2" >/dev/null 2>&1
-"$SCRIPTS/stand-down.sh" "$L2" --key polecat-l2 --ruling "only this bead stops" --successor "$EV" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "rc=${PIPESTATUS[0]}"
+before=$(slings)
+PROBE_AFTER="dep remove $L2" PROBE_AFTER_RUN="DEFERRED_DISPATCH_STATE_DIR='$W/state' '$SCRIPTS/deferred-dispatch.sh' reconcile --db '$DB' > '$W/pass-behind.log' 2>&1" \
+  "$SCRIPTS/stand-down.sh" "$L2" --key polecat-l2 --ruling "only this bead stops" --successor "$EV" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "rc=${PIPESTATUS[0]}"
+echo "the pass behind the edge: $(grep -v '^deferred-dispatch: until' "$W/pass-behind.log" | tail -1 | cut -c1-170)"
+echo "slings by that pass and the stand-down: $(($(slings) - before))"
 echo "work: $(row "$L2")"; echo "gate: $(gc bd show "$GL2" --json | jq -c '.[0] | {status}')"; echo "other bead: $(row "$M2")"
+before=$(slings); pass "$SCRIPTS" | tail -1; echo "slings by the next pass: $(($(slings) - before))"
+gc bd gate resolve "$GL2" --reason "ruled: the other bead goes on" >/dev/null 2>&1
+before=$(slings); pass "$SCRIPTS" | tail -1
+echo "an answer once the work has closed, then a pass: slings $(($(slings) - before)): $(tail -1 "$PROBE_LOG")"
+
+say "The same gate in a sitting: stand down, then a sign-off that leaves the gate to the other bead"
+S=$(waiting "sitting, shared gate" polecat-s); GS=$(gate_of "$S" polecat-s); M4=$(mk "the other bead"); gc bd dep add "$M4" "$GS" -t blocks >/dev/null 2>&1
+VS=$(gc bd create "Discuss: $S" -t task --assignee human --metadata '{"task_kind":"visit"}' --json 2>>"$W/mk.err" | jq -r 'if type == "array" then .[0].id else .id end')
+gc bd dep add "$VS" "$S" -t tracks >/dev/null 2>&1; gc bd dep add "$VS" "$GS" -t replies-to >/dev/null 2>&1
+"$SCRIPTS/stand-down.sh" "$S" --key polecat-s --ruling "the operator ruled this out" --successor "$VS" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "stand-down: rc=${PIPESTATUS[0]}"
+"$SCRIPTS/converse-signoff.sh" --conversation "$VS" --outcome "Ruled out: nothing builds this" --ruled yes --ruling "the operator ruled this out" --route human --no-wait --leave "$GS" 2>&1 | cut -c1-170; echo "sign-off: rc=${PIPESTATUS[0]}"
+echo "work: $(row "$S")"; echo "gate: $(gc bd show "$GS" --json | jq -c '.[0] | {status}')"; echo "other bead: $(row "$M4")"; echo "conversation: $(gc bd show "$VS" --json | jq -c '.[0] | {status}')"
+before=$(slings); pass "$SCRIPTS" | tail -1; echo "slings by the next pass: $(($(slings) - before))"
 
 say "A graduated convoy the refinery parked, whose gate's message names the stand-down"
 CV=$(gc bd create "a graduated convoy" -t convoy --json 2>>"$W/mk.err" | jq -r 'if type == "array" then .[0].id else .id end')
