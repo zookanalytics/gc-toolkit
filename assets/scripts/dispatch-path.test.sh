@@ -71,7 +71,8 @@ echo "# every reader sources the one definition"
 # but no longer calls it still fails.
 READERS="tools/gc-proactive.sh
 doctor/check-blocked-work-armed/run.sh
-doctor/check-step-terminal/run.sh"
+doctor/check-step-terminal/run.sh
+assets/scripts/stand-down.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

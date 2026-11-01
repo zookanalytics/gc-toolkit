@@ -13,7 +13,9 @@
 # check-blocked-work-armed, which flags blocked work that has none, and
 # check-step-terminal, which counts a step as offerable only when it has one.
 # placement.sh's awaiting_placement asks it too, so every reader of the
-# placement queue sources this file beside that one. One definition, no copies:
+# placement queue sources this file beside that one. stand-down.sh asks it after
+# a release, because the bead is about to go ready and must have none. One
+# definition, no copies:
 # a key added here is read by every one of them at once, and
 # dispatch-path.test.sh fails when a reader stops sourcing this file or tests
 # the keys itself.

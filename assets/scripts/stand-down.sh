@@ -14,8 +14,10 @@
 #      disarm, and reads the arm back. The reconcile pass reads an arm again just
 #      before it slings, so a pass that reads the gate closed reads the arm gone.
 #   2. It ends the run beneath the bead and clears the bead's route and session
-#      pins through gc-helm.sh takeaway --release --no-wait, so nothing is still
-#      building the work and no pool is offered it when the gate clears.
+#      pins through gc-helm.sh takeaway --release --no-wait, and reads back that
+#      the bead has no dispatch path, because a bare release reads back no route.
+#      So nothing is still building the work and no pool is offered it once it is
+#      ready.
 #   3. It answers each gate under the key with the ruling, and reads each back.
 #      An answer releases every bead a gate blocks, so a gate that also holds
 #      another open bead takes none: this bead leaves it, and it goes on asking
@@ -115,6 +117,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-outcome.sh
 . "$SCRIPT_DIR/work-outcome.sh" || { echo "$PROG: cannot source work-outcome.sh beside this script" >&2; exit 1; }
+# shellcheck source=dispatch-path.sh
+. "$SCRIPT_DIR/dispatch-path.sh" || { echo "$PROG: cannot source dispatch-path.sh beside this script" >&2; exit 1; }
 DEFERRED="$SCRIPT_DIR/deferred-dispatch.sh"
 HELM="$SCRIPT_DIR/gc-helm.sh"
 REHOME="$SCRIPT_DIR/bead-rehome.sh"
@@ -192,6 +196,8 @@ bd_json show "$WORK" | jq -e 'type == "array" and length > 0 and ((.[0].metadata
 
 "$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
   || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, so no gate was answered."
+bd_json show "$WORK" | jq -e "$DISPATCH_PATH_JQ"'type == "array" and length > 0 and (.[0] | has_dispatch_path | not)' >/dev/null 2>&1 \
+  || stopped "the arm on $WORK is gone and its run has ended, but it does not read back unrouted, so no gate was answered and it left none."
 
 for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   case " $SHARED " in
@@ -217,7 +223,7 @@ done
 work_outcome_noop "$WORK" gc bd
 
 "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING" \
-  || stopped "the arm on $WORK is gone, its run has ended and its gates are answered, but it did not close: bead-rehome.sh said why, above."
+  || stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
 
 [ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ] \
   || stopped "$WORK does not read back closed."

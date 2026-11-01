@@ -69,9 +69,9 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
 # lands between two of a script's reads. STUB_PASS_AFTER_WRITES runs a reconcile
 # pass after each write the stand-down makes. STUB_SHOW_FAILS_AFTER is text: once a
 # bd call carrying it has run, every show fails, and STUB_DEPS_FAIL_AFTER is the same
-# for every dep list. STUB_KEEP_KEY names a key an unset leaves in place with exit 0,
-# a write that reports success and half lands, STUB_KEEP_EDGE has a dep remove do the
-# same, and STUB_CLOSE_NOOP has a close exit 0 and write nothing.
+# for every dep list. STUB_KEEP_KEY names a key a set or an unset leaves in place with
+# exit 0, a write that reports success and half lands, STUB_KEEP_EDGE has a dep remove
+# do the same, and STUB_CLOSE_NOOP has a close exit 0 and write nothing.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"
@@ -160,7 +160,7 @@ case "$verb" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --db) shift ;;
-        --set-metadata) shift; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
+        --set-metadata) shift; k="${1:-}"; [ "${k%%=*}" = "${STUB_KEEP_KEY:-}" ] && { shift; continue; }; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
         --unset-metadata) shift; [ "${1:-}" = "${STUB_KEEP_KEY:-}" ] && { shift; continue; }; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
         --append-notes) shift; args+=("${1:-}"); prog="$prog | .notes = ((.notes // \"\") + \"\n\" + \$ARGS.positional[$((${#args[@]} - 1))])" ;;
         --status=*) args+=("${1#--status=}"); prog="$prog | .status = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
@@ -407,6 +407,17 @@ fresh
 STUB_SHOW_FAILS_AFTER="--unset-metadata gc.dispatch_when_ready " run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 1 "an arm whose removal does not read at all stops the stand-down"
 eq "$(field tk-g status)" open "…with the gate unanswered"
+fresh; patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
+STUB_KEEP_KEY="gc.routed_to" run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 1 "a release that reports success and leaves the route stops the stand-down"
+has "$OUT" "does not read back unrouted" "…and says why"
+has "$OUT" "Re-run this command" "…and names the way on"
+eq "$(field tk-g status)" open "…with the gate unanswered"
+eq "$(field tk-w status)" open "…and the work open"
+run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 0 "a re-run once the route clears stands it down"
+eq "$(meta tk-w gc.routed_to)" "" "…with no route left"
+eq "$(field tk-w status)" closed "…and closes it"
 fresh
 STUB_CLOSE_NOOP=1 run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 1 "a close that reports success and does not land is no stand-down"
@@ -552,8 +563,18 @@ has "$OUT" "did not leave gate tk-g" "…and it says so"
 eq "$(field tk-w status)" open "…with the work open"
 
 shared
+patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
+STUB_KEEP_KEY="gc.routed_to" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 1 "a release that leaves the route stops the stand-down before the bead leaves a shared gate"
+has "$OUT" "does not read back unrouted" "…and says why"
+eq "$(line_of "dep remove tk-w")" "" "…with no removal tried"
+eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.id == "tk-g")] | length' "$STUB_STORE")" 1 "…and the bead still on the gate"
+
+shared
 STUB_FAIL="close tk-w" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 1 "a close refused after the edge went stops"
+has "$OUT" "no gate under polecat-x holds it" "…and it says what stands"
+hasnt "$OUT" "answered" "…and calls no gate answered, since the bead left this one"
 run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 0 "a re-run with no --successor closes"
 eq "$(meta tk-w gc.superseded_by)" tk-conv "…keeping the evidence the first run named"
@@ -567,6 +588,17 @@ eq "$RC" 0 "a twin gate that holds only this bead carries the ruling for the one
 eq "$(field tk-g close_reason)" "ruled: stop" "…with the ruling as its answer"
 eq "$(meta tk-w gc.superseded_by)" tk-g "…and the pointer naming it"
 eq "$(field tk-g2 status)" open "…and the shared twin stays open"
+eq "$(field tk-w status)" closed "…and the work closes"
+
+shared
+patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-x","title":"a twin","metadata":{},"created_at":"2026-11-01T00:00:01Z"},
+            {"id":"tk-o2","status":"open","assignee":"","issue_type":"task","title":"a second bead","metadata":{},"_deps":[{"id":"tk-g2","dependency_type":"blocks"}]}]
+  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 0 "two gates under the key that each hold another bead: the bead leaves both"
+eq "$(field tk-g status)" open "…with the first open"
+eq "$(field tk-g2 status)" open "…and the second open"
+eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.dependency_type == "blocks")] | length' "$STUB_STORE")" 0 "…and on neither"
 eq "$(field tk-w status)" closed "…and the work closes"
 
 shared
