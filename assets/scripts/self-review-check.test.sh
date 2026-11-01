@@ -111,6 +111,11 @@ if [ "$1" = "session" ] && [ "$2" = "nudge" ]; then
   printf 'gc session nudge %s\n' "$3" >> "$CALLS"
   exit 0
 fi
+# The step's check call reads the work bead's tree from what the bd stub serves.
+if [ "$1" = "bd" ] && [ "$2" = "show" ]; then
+  shift
+  exec bd "$@"
+fi
 # The self-review step's note of setup and build lands in the state the bd stub
 # serves, so the exit condition reads what the step wrote.
 if [ "$1" = "bd" ] && [ "$2" = "update" ]; then

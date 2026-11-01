@@ -41,8 +41,8 @@ Hard rules, in force for every step:
   because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: each step closes its own bead through
-assets/scripts/claim-close.sh. No shell variable survives from one block to the next, so each block
-names the values it uses. A review held with no poured workflow follows these
+assets/scripts/claim-close.sh. No shell variable survives from one block to the
+next, so each block names the values it uses. A review held with no poured workflow follows these
 steps as its description says.
 """
 formula = "mol-review"
@@ -175,7 +175,20 @@ echo "== The review's worktree: $WT"
 # <<< review-gather
 ```
 A block that exits non-zero here, other than the refusal in part 1, ends the
-run as the verdict step's failure arm does.
+run and returns the review to the pool, because the next claim may get through.
+Record what failed, then cancel, since closing this step would advance the graph
+into `review` with nothing gathered. The cancel can interrupt this call:
+```bash
+gc bd update "{{review_bead}}" --append-notes "mol-review could not gather what the review reads: <what failed>"
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" --step mol-review.load-dispatch --reason "the gather failed: <what failed>"
+```
+Only once the run has ended, restore the bead's route, so the run and the route
+never offer the review together, and drain:
+```bash
+POOL=$(gc bd show "{{review_bead}}" --json | jq -r '.[0].metadata.review_pool // empty')
+[ -n "$POOL" ] && gc bd update "{{review_bead}}" --set-metadata gc.routed_to="$POOL"
+gc runtime drain-ack
+```
 
 **3. Close this step bead so the graph advances.** Non-terminal step, no
 drain: the same session then takes `review` with `gc hook --claim --json`.

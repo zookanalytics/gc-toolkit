@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# rig-checks — run a rig's declared checks through `gctk rig`, in the current
-# directory, for one of mol-polecat-work's steps.
+# rig-checks — run a rig's declared checks through `gctk rig` for one of
+# mol-polecat-work's steps. setup and preflight run in the current directory, and
+# self-review in the tree its work bead records.
 #
 #   rig-checks.sh setup <<'CHECKS'
 #   setup=<command>
@@ -34,8 +35,13 @@
 # Every declared check runs whatever the one before it answered, so the caller
 # sees all of them at once.
 #
+# A shell that did not keep its directory starts in the session's home, and a pass
+# recorded at that commit is no pass at the work's HEAD. So self-review enters the
+# tree first, and a tree it cannot name runs nothing.
+#
 # exit: 0 every check passed · 1 a check failed · 4 a check could not say, which
-# `gctk rig`'s line explains, and which outranks a fail · 2 usage
+# `gctk rig`'s line explains, and which outranks a fail, or self-review could not
+# name its tree · 2 usage
 set -uo pipefail
 
 PROG="rig-checks"
@@ -47,7 +53,8 @@ usage: rig-checks.sh setup|preflight <<'CHECKS'
        <check>=<command>, one per line, on stdin
        CHECKS
 
-exit: 0 every check passed · 1 a check failed · 4 a check could not say · 2 usage
+exit: 0 every check passed · 1 a check failed · 4 a check could not say, or
+      self-review could not name its tree · 2 usage
 USAGE
 }
 
@@ -89,6 +96,20 @@ done
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=work-lib.sh
+. "$SCRIPT_DIR/work-lib.sh"
+
+enter_work_tree() {
+  local dir
+  work_read "$BEAD" || { echo "$PROG: could not read $BEAD, so the tree its checks run in is unknown, and no check ran" >&2; exit 4; }
+  dir=$(work_meta work_dir)
+  if [ -z "$dir" ] || ! cd "$dir" 2>/dev/null; then
+    echo "$PROG: the work_dir $BEAD records is missing (${dir:-none recorded}), and no check ran" >&2
+    exit 4
+  fi
+}
+
 WORST=0
 tally() { # <the exit a check answered>
   case "$1" in
@@ -110,6 +131,7 @@ case "$MODE" in
     [ -z "$LINT_CMD" ] || check lint --command "$LINT_CMD"
     [ -z "$TEST_CMD" ] || check test --scope full --command "$TEST_CMD" ;;
   self-review)
+    enter_work_tree
     PUB=(--publish-bead "$BEAD")
     SETUP=none
     if [ -n "$SETUP_CMD" ]; then

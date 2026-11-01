@@ -37,6 +37,7 @@ cat > "$TMP/gctk" <<'GCTK'
 #!/usr/bin/env bash
 shift
 check="$1"
+[ -z "${PWD_LOG:-}" ] || pwd -P >> "$PWD_LOG"
 for a in "$@"; do printf '<%s>' "$a"; done >> "$LOG"
 printf '\n' >> "$LOG"
 rc="RC_$check"
@@ -45,11 +46,16 @@ GCTK
 chmod +x "$TMP/gctk"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+if [ "$1 $2" = "bd show" ]; then
+  [ -z "${GC_SHOW_DOWN:-}" ] || exit 1
+  jq -nc --arg id "$3" --arg d "${WORK_DIR-$T}" '[{id: $id, metadata: ({work_dir: $d} | with_entries(select(.value != "")))}]'
+  exit 0
+fi
 printf 'GC %s\n' "$*" >> "$LOG"
 exit "${GC_UPDATE_RC:-0}"
 GC
 chmod +x "$TMP/bin/gc"
-export PATH="$TMP/bin:$PATH" GCTK_BIN="$TMP/gctk" LOG="$TMP/log"
+export PATH="$TMP/bin:$PATH" GCTK_BIN="$TMP/gctk" LOG="$TMP/log" T WORK_READ_WAIT=0
 
 run() { # <mode args...> with the checks on stdin
   : > "$LOG"
@@ -133,6 +139,39 @@ rm -f "$T/wip.txt"
 GC_UPDATE_RC=1 run self-review --bead tk-w <<<"$ALL"
 eq "$RC" 1 "a note that does not land exits 1"
 has "$OUT" "did not land on tk-w" "and says so"
+
+echo "# self-review runs in the tree the work bead records"
+REAL_T=$(cd "$T" && pwd -P)
+: > "$LOG"; : > "$TMP/pwd"
+OUT=$(cd "$TMP" && PWD_LOG="$TMP/pwd" "$SCRIPT" self-review --bead tk-w <<<"$ALL" 2>&1); RC=$?
+eq "$RC" 0 "from a directory that is no repository: exits 0"
+eq "$(sort -u "$TMP/pwd")" "$REAL_T" "every check runs in the recorded tree"
+eq "$(grep -c . "$TMP/pwd")" 5 "all five checks run there"
+NOTE=$(sed -n 's/^GC bd update tk-w --set-metadata self_review_setup_build=//p' "$LOG")
+eq "$(jq -r '.commit' <<<"$NOTE")" "$(git -C "$T" rev-parse HEAD)" "and the note names that tree's HEAD"
+
+: > "$LOG"
+OUT=$(cd "$TMP" && WORK_DIR="" "$SCRIPT" self-review --bead tk-w <<<"$ALL" 2>&1); RC=$?
+eq "$RC" 4 "no work_dir recorded: could not say"
+has "$OUT" "none recorded" "and says so"
+eq "$(cat "$LOG")" "" "and runs nothing"
+
+: > "$LOG"
+OUT=$(cd "$TMP" && WORK_DIR="$TMP/gone" "$SCRIPT" self-review --bead tk-w <<<"$ALL" 2>&1); RC=$?
+eq "$RC" 4 "a work_dir no longer on disk: could not say"
+has "$OUT" "$TMP/gone" "and names it"
+eq "$(cat "$LOG")" "" "and runs nothing"
+
+: > "$LOG"
+OUT=$(cd "$TMP" && GC_SHOW_DOWN=1 "$SCRIPT" self-review --bead tk-w <<<"$ALL" 2>&1); RC=$?
+eq "$RC" 4 "a store that does not answer: could not say"
+has "$OUT" "could not read tk-w" "and says so"
+eq "$(cat "$LOG")" "" "and runs nothing"
+
+: > "$LOG"
+OUT=$(cd "$T" && GC_SHOW_DOWN=1 "$SCRIPT" preflight <<<"$THREE" 2>&1); RC=$?
+eq "$RC" 0 "preflight reads no bead"
+eq "$(grep -c . "$LOG")" 3 "and runs where it was called"
 
 echo "# usage"
 run <<<''; eq "$RC" 2 "no mode: usage error"

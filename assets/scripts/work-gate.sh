@@ -92,9 +92,10 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 DISPATCHED_BY="${CONVOY:+Convoy $CONVOY}"
 DISPATCHED_BY="${DISPATCHED_BY:-A direct route}"
+SELF="${GC_SESSION_NAME:-${GC_SESSION_ID:-this session}}"
 
 note() { # <label> <what was found>
-  gc bd update "$WORK_ID" --append-notes "$1: $GC_SESSION_NAME found $WORK_ID $2." </dev/null >/dev/null 2>&1 \
+  gc bd update "$WORK_ID" --append-notes "$1: $SELF found $WORK_ID $2." </dev/null >/dev/null 2>&1 \
     || echo "$PROG: The refusal note did not land on $WORK_ID; the cancel reason on this step still records it." >&2
 }
 
@@ -117,7 +118,7 @@ case $? in
     note "Unreadable work bead; run cancelled for a person" "$WHY"
     if ! "$SCRIPT_DIR/patrol-finding.sh" --scope polecat-findings --key "polecat-unreadable-work.$WORK_ID" \
         --title "Work bead $WORK_ID could not be read at load-context" \
-        --message "Could not read work bead $WORK_ID at load-context (the store has no such bead), so nothing proves it is safe to build. $DISPATCHED_BY dispatched it to $GC_SESSION_NAME. Its run is cancelled and no workspace was touched. Check that the bead exists and its store answers, then re-sling it."; then
+        --message "Could not read work bead $WORK_ID at load-context (the store has no such bead), so nothing proves it is safe to build. $DISPATCHED_BY dispatched it to $SELF. Its run is cancelled and no workspace was touched. Check that the bead exists and its store answers, then re-sling it."; then
       echo "$PROG: patrol-finding.sh recorded no finding; NOT cancelling or draining, so the next worker retries." >&2
       exit 1
     fi
@@ -170,7 +171,7 @@ case "$STATUS" in
     note "Parked work bead; run cancelled for a person" "$WHY"
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "parked work bead: $WORK_ID $WHY" \
       --subject "$WORK_ID" --key polecat-parked-work \
-      --message "Work bead $WORK_ID is $STATUS, and ${DISPATCHED_BY#A } reached $GC_SESSION_NAME with it. A parked bead is not built, so its run is cancelled and no workspace was touched. Nothing re-slings it when it is released: once it is ready to build, re-sling it with gc sling <pool> $WORK_ID --on $FORMULA."
+      --message "Work bead $WORK_ID is $STATUS. $DISPATCHED_BY reached $SELF with it. A parked bead is not built, so its run is cancelled and no workspace was touched. Nothing re-slings it when it is released: once it is ready to build, re-sling it with gc sling <pool> $WORK_ID --on $FORMULA."
     exit 1 ;;
 esac
 
@@ -179,9 +180,9 @@ esac
 # and the others hold the bead out of bd ready the same way.
 OPEN_BLOCKERS=$(printf '%s' "$WORK_ROW" | jq -r '[.[0].dependencies[]? | select((.dependency_type == "blocks") and (.status != "closed")) | .id] | join(" ")')
 if [ -n "$OPEN_BLOCKERS" ]; then
-  gc bd update "$WORK_ID" --append-notes "bd-ready guard: refused to build $WORK_ID at load-context; open blocks-blocker(s): $OPEN_BLOCKERS. Run cancelled; a re-sling is armed to fire once the blocker(s) close." </dev/null >/dev/null 2>&1 \
-    || echo "$PROG: The refusal note did not land on $WORK_ID; the cancel reason on this step still records it." >&2
   if "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --blocked-by "${OPEN_BLOCKERS%% *}" --formula "$FORMULA"; then
+    gc bd update "$WORK_ID" --append-notes "bd-ready guard: refused to build $WORK_ID at load-context; open blocks-blocker(s): $OPEN_BLOCKERS. Run cancelled; a re-sling is armed to fire once the blocker(s) close." </dev/null >/dev/null 2>&1 \
+      || echo "$PROG: The refusal note did not land on $WORK_ID; the cancel reason on this step still records it." >&2
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID has open blocks-blocker(s) $OPEN_BLOCKERS; a re-sling is armed for when they close"
   else
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID has open blocks-blocker(s) $OPEN_BLOCKERS" \
@@ -238,5 +239,5 @@ WHY="possibly in flight in another session's tree: ${TREE_FINDING:-work-holder.s
 note "$DUPLICATE_NOTE" "$WHY"
 "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "duplicate dispatch: $WORK_ID $WHY" \
   --subject "$WORK_ID" --key polecat-duplicate-dispatch --formula "$FORMULA" \
-  --message "Possible duplicate dispatch on $WORK_ID: it is $WHY. $DISPATCHED_BY dispatched it to $GC_SESSION_NAME. Its run is cancelled and no workspace was touched. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead. The next run builds only if no live run holds the tree."
+  --message "Possible duplicate dispatch on $WORK_ID: it is $WHY. $DISPATCHED_BY dispatched it to $SELF. Its run is cancelled and no workspace was touched. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead. The next run builds only if no live run holds the tree."
 exit 1

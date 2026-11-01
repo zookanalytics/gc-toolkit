@@ -43,8 +43,9 @@ Hard rules, in force for every step:
 
 Mechanics the steps are written around: the validation-pass bead arrives as the
 input convoy (each step re-derives VALIDATION_PASS in its own shell), and each
-step closes its own bead through assets/scripts/claim-close.sh. The terminal step closes the validation-pass bead
-itself, the validator's own working bead that no other writer disposes of.
+step closes its own bead through assets/scripts/claim-close.sh. The terminal step
+closes the validation-pass bead itself, the validator's own working bead that no
+other writer disposes of.
 
 
 Variables:

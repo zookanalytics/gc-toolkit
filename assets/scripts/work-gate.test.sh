@@ -290,7 +290,7 @@ eq "$(FAKE_CANCEL_RC=1 FAKE_TREE_RC=2 FAKE_TREE_OUT="$UNDECIDED" run "$(row '{"s
 
 # --- 7. Waiting. -----------------------------------------------------------------
 BLOCKED="$(row '{"status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool"},"dependencies":[{"id":"tk-blocker","dependency_type":"blocks","status":"open"},{"id":"tk-b2","dependency_type":"blocks","status":"in_progress"},{"id":"tk-done","dependency_type":"blocks","status":"closed"},{"id":"tk-rel","dependency_type":"related","status":"open"}]}')"
-eq "$(run "$BLOCKED")" "1|UPDATE;AWAIT;CANCEL;DRAIN;" "an open blocker: notes, waits on it, cancels, drains"
+eq "$(run "$BLOCKED")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" "an open blocker: waits on it, notes the arm, cancels, drains"
 eq "$(cat "$TMP/await")" "tk-work --blocked-by tk-blocker --formula mol-polecat-work" "an open blocker: the wait names the first blocker and the formula"
 has "$(cat "$TMP/update")" "open blocks-blocker(s): tk-blocker tk-b2" "an open blocker: the note names only the open blocks edges"
 has "$(cat "$TMP/cancel")" "open blocks-blocker(s) tk-blocker tk-b2" "an open blocker: the reason names them"
@@ -298,11 +298,11 @@ eq "$(cat "$TMP/gate")" "" "an open blocker: nothing asked when the arm lands"
 eq "$(cat "$TMP/tree-args")" "" "an open blocker: the tree check does not run, so a blocked rework never meets its sibling's tree"
 eq "$(run "$(row '{"status":"open","metadata":{},"dependencies":[{"id":"tk-x","dependency_type":"blocks","status":"closed"}]}')")" "0|" "a blocker that is closed: passes"
 eq "$(run "$(row '{"status":"open","metadata":{},"dependencies":[{"id":"tk-x","dependency_type":"related","status":"open"}]}')")" "0|" "an open dep that is not blocks: passes"
-eq "$(FAKE_AWAIT_RC=1 run "$BLOCKED")" "1|UPDATE;AWAIT;GATE;CANCEL;DRAIN;" "the wait does not land: a gate asks for the re-sling, then cancels"
+eq "$(FAKE_AWAIT_RC=1 run "$BLOCKED")" "1|AWAIT;GATE;CANCEL;DRAIN;" "the wait does not land: no note claims an arm, a gate asks for the re-sling, then cancels"
 has "$(cat "$TMP/gate")" "--subject tk-work --key polecat-blocked-work" "the fallback gate has its own key"
 has "$(cat "$TMP/gate")" "re-sling this work once the blocker(s) close" "the fallback gate says what to do"
-eq "$(FAKE_AWAIT_RC=1 FAKE_GATE_RC=1 run "$BLOCKED")" "1|UPDATE;AWAIT;GATE;" "neither the wait nor the gate lands: no cancel, no drain"
-eq "$(FAKE_CANCEL_RC=1 run "$BLOCKED")" "1|UPDATE;AWAIT;CANCEL;" "the wait landed and the cancel did not: no drain"
+eq "$(FAKE_AWAIT_RC=1 FAKE_GATE_RC=1 run "$BLOCKED")" "1|AWAIT;GATE;" "neither the wait nor the gate lands: no cancel, no drain"
+eq "$(FAKE_CANCEL_RC=1 run "$BLOCKED")" "1|AWAIT;UPDATE;CANCEL;" "the wait landed and the cancel did not: no drain"
 
 # A sibling holds the tree: different work, so this bead waits on it.
 SIBLING_ROWS='[{"id":"tk-work","metadata":{"branch":"polecat/tk-anchor"}},{"id":"tk-anchor","metadata":{"branch":"polecat/tk-anchor","work_holder":"hq-gone"}},{"id":"tk-mine","metadata":{"branch":"polecat/tk-anchor","work_holder":"sess-me"}},{"id":"tk-sib","metadata":{"branch":"polecat/tk-anchor","work_holder":"hq-peer","work_dir":"/w/p/worktrees/tk-sib"}}]'

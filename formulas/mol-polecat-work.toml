@@ -360,8 +360,10 @@ withdrawn, so the call cancels the run and exits non-zero: stop there.
 ```bash
 cd "<the path it printed>"
 ```
-A requirement in the notes that the branch does not answer is a defect for this
-step: fix it, commit, and run the checks again.
+A shell that does not keep its directory between calls needs that `cd` at the
+head of each call below that reads the tree. A requirement in the notes that the
+branch does not answer is a defect for this step: fix it, commit, and run the
+checks again.
 
 **2. Review the diff:**
 ```bash
@@ -379,9 +381,10 @@ lists. Fix what you find. On a retry, the previous attempt's
 failure reproduces in the checks below: run them and read the failure rather
 than re-deriving from scratch.
 
-**3. Run the declared checks through the gate**, in the worktree. test, lint and
-typecheck record their result against HEAD through `gctk rig` and publish it to
-the work bead's `rig_check.<check>`; a check the rig declares no command for
+**3. Run the declared checks through the gate.** The call enters the worktree the
+work bead records. test, lint and typecheck record their result against HEAD
+through `gctk rig` and publish it to the work bead's `rig_check.<check>`; a check
+the rig declares no command for
 records a pass that ran nothing. setup and build record nothing, so on a clean
 tree the call notes their outcome at HEAD on the work bead
 (`self_review_setup_build`). A run already recorded at HEAD answers from its
@@ -398,7 +401,8 @@ test={{test_command}}
 CHECKS
 ```
 It exits 0 when every check passes and 1 when one fails. Fix a failure your diff
-introduced, commit, and run the checks again. A fail answered from its record
+introduced, commit, and run the checks again. Exit 4 with no check run means it
+could not name the worktree, and it says why. A fail answered from its record
 prints no output; `gctk rig <check> --command '<command>' --force` runs it again
 to show what failed. Exit 4 says nothing about the code, and `gctk rig`'s line
 names why, such as untracked files a run left, or a crash; a repeat at one commit

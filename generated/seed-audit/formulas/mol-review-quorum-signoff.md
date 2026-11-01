@@ -30,7 +30,8 @@ from the lane step bead's gc.output_json.
 
 Each step closes its own bead through assets/scripts/claim-close.sh. The lanes
 run in separate pool sessions and each closes its own lane step; the synthesis
-is the terminal step. No shell variable survives from one block to the next, so each block names the values it uses.
+is the terminal step. No shell variable survives from one block to the next, so
+each block names the values it uses.
 
 
 Required vars:
