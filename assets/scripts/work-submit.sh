@@ -39,8 +39,7 @@
 # The bead is unrouted in between, so no pool is offered it. A refused write stops
 # the chain and the run ends on a gate. The session pins go in the first write
 # because the witness ranks them ahead of the assignee, so a pin left behind names
-# a drained session and reads as an orphan. metadata.work_holder goes with them,
-# because this run is done with the tree.
+# a drained session and reads as an orphan.
 #
 # The local branch is released last, after every durable write, because releasing
 # it destroys the shape the branch gate reads. A session that dies before that
@@ -203,7 +202,7 @@ if [ -n "$STORE_ONLY" ]; then
   "$SCRIPT_DIR/store-only-exit.sh" --bead "$WORK_ID" --base "$BASE" ${CONVOY:+--convoy "$CONVOY"} --done "$DONE_BRIEF" \
     || { gc runtime drain-ack; exit 1; }
   gc bd update "$WORK_ID" --set-metadata halt_reason=store_only --append-notes "Store-only exit: filed $STORE_ONLY. $NOTES" </dev/null >/dev/null || exit 1
-  "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to="" --unset-metadata work_holder || exit 1
+  "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to="" || exit 1
   close_step
   gc runtime drain-ack
   exit 0
@@ -310,7 +309,7 @@ fi
 if [ "$(printf '%s' "$WORK_ROW" | jq -r '.[0].metadata | if has("auto_push") then (.auto_push | tostring) else "" end')" = false ]; then
   echo "auto_push=false: halting at branch-ready (no push, no refinery handoff)"
   gc bd update "$WORK_ID" --set-metadata "branch=$CURRENT_BRANCH" --set-metadata "target=$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)" </dev/null >/dev/null || exit 1
-  "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to="" --unset-metadata work_holder || exit 1
+  "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to="" || exit 1
   close_step
   gc runtime drain-ack
   exit 0
@@ -366,7 +365,7 @@ fi
 
 PR_SUMMARY=""
 if [ -s "${SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$SUMMARY_FILE"); fi
-HANDOFF_META=(--set-metadata "target=$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --unset-metadata work_holder)
+HANDOFF_META=(--set-metadata "target=$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
 [ -n "$METADATA_BRANCH" ] || HANDOFF_META+=(--set-metadata "branch=$CURRENT_BRANCH")
 if [ -n "$PR_SUMMARY" ]; then
   if [ -n "$ANCHOR" ]; then

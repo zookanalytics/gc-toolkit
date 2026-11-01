@@ -100,9 +100,7 @@ unblock, and close on an `until` edge.
 
 The trade: `implement` is core's, so a pack refinement of it goes in the polecat
 doctrine or waits for upstream. A step inherited from core declares no
-continuation group, so a session may take `implement` fresh. The tree check in
-load-context is the fork's `work-holder.sh` and not upstream's, so until upstream
-takes it that check keeps a fork commit.
+continuation group, so a session may take `implement` fresh.
 
 ### Review
 

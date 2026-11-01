@@ -47,7 +47,8 @@
 # run works, and self-review-check.sh and gascity-keeper's rebase-check.sh take
 # the bead their check loop's run works, which is the bead they certify.
 # work-tree-holder.sh takes the bead each claimed step's run works when it asks
-# whether a live session is working a tree, and work-setup.sh takes the runs that
+# whether a live session is working a tree, work-gate.sh takes the runs that work its
+# bead, to refuse a second run of its formula, and work-setup.sh takes the runs that
 # work a bead whose tree holds a branch, to tell a sibling from a tree left behind.
 # gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
 # gc-helm.sh ends the live runs beneath an anchor it releases, and its park

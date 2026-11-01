@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 # work-enter — a step of mol-polecat-work that a session claims part way through
-# a run enters the run's worktree, recorded on the work bead, as the session that
-# now holds it.
+# a run enters the run's worktree, recorded on the work bead.
 #
 #   work-enter.sh --convoy <id>|--bead <id> --step <ref>
 #
 # A session does not inherit the tree the last step ran in. A work bead closed
 # while its run was mid-flight was withdrawn by whoever closed it, and Gas City's
 # autoclose leaves a run with open steps alone, so this ends the run rather than
-# let it go on. Otherwise it checks out the recorded branch and records this
-# session as metadata.work_holder, so a later dispatch reads this session as the
-# one in the tree. A self-review iteration also records the work bead as the
-# root's gc.var.issue, which self-review-check.sh takes when the store is too
-# degraded to read the run.
+# let it go on. Otherwise it checks out the recorded branch. A self-review
+# iteration also records the work bead as the root's gc.var.issue, which
+# self-review-check.sh takes when the store is too degraded to read the run.
 #
 # It prints the bead's notes, because a coordinator may have appended a
 # correction since the claim's read, and then the worktree's path as the last
@@ -92,8 +89,6 @@ BRANCH=$(work_meta branch)
 if [ -n "$BRANCH" ] && [ "$(git branch --show-current 2>/dev/null)" != "$BRANCH" ]; then
   git checkout "$BRANCH" >&2 || echo "$PROG: could not check out $BRANCH in $WORKTREE; the step's checks stop on the branch it is on" >&2
 fi
-gc bd update "$WORK_ID" --set-metadata "work_holder=${GC_SESSION_ID:-}" </dev/null >/dev/null \
-  || echo "$PROG: NOTE: $WORK_ID does not record this session as work_holder" >&2
 
 case "$STEP" in
   self-review)

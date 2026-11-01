@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# work-gate — whether this run of mol-polecat-work may build its work bead, and
-# with that answer, taking the work.
+# work-gate — whether this run of mol-polecat-work may build its work bead.
 #
 #   work-gate.sh --convoy <id> [--step <ref>] [--formula <f>]
 #   work-gate.sh --bead <id>   [--step <ref>] [--formula <f>]
@@ -9,19 +8,16 @@
 # route left on the bead. When both fire, two workers set up the same branch and
 # one silently destroys the other's commits. So before the workspace is touched,
 # the bead must be readable, not parked, not in flight under another live owner
-# or in another live session's tree, not waiting on a blocker, and not finished.
+# or in another live run, not waiting on a blocker, and not finished.
 #
 # Every refusal ends the run through decline.sh, and they split by whether a
 # person has a decision to make:
 #   * nobody decides when the bead is finished (closed, handed off, or carrying
 #     a merge_result) or another live run is building this same bead;
-#   * nobody decides when the bead waits on open blockers, or a sibling on its
-#     branch holds the tree. A sibling is different work that the other run is
-#     not building, so this run must not simply end: the bead waits on it through
-#     a blocks edge and an armed re-sling, as it waits on any blocker;
-#   * a person decides when the bead is parked (nothing re-slings it when it is
-#     released) or a tree no check could rule out. Clearing the second gate
-#     re-slings the work;
+#   * nobody decides when the bead waits on open blockers: it waits through a
+#     blocks edge and an armed re-sling;
+#   * a person decides when the bead is parked, because nothing re-slings it when
+#     it is released;
 #   * a bead the store does not have cannot be blocked, so it files a patrol
 #     finding that names it.
 # A store that does not answer is none of these: the step goes back to the pool.
@@ -32,12 +28,16 @@
 # be read proves nobody gone.
 #
 # This workflow never claims its work bead, so the assignee cannot show a run in
-# flight. Core's work-holder.sh, reached through `gc core scripts-dir`, reads the
-# record each run keeps (metadata.work_holder beside metadata.work_dir), and its
-# --claim takes the work in the step that judged it free: one compare-and-set, so
-# of two dispatches that read the work free, the second finds the first one's
-# record. Blockers are read first, because a bead that must wait has no business
-# taking the work or meeting a sibling's tree.
+# flight. The run's root does (run-lib.sh), and `gc sling` judges the same record
+# when it refuses a second live run of one formula on a bead under its per-bead
+# launch lock. What can still reach this gate beside a live run is a forced
+# relaunch and a claimant with no poured workflow. Of the live runs of this formula
+# on the bead the oldest builds it and the others refuse, a rule both dispatches
+# reach alike from the same rows, with nothing written. A claimant with no run of
+# its own refuses any of them. Another formula's run is no duplicate, as it is none
+# to `gc sling`. A sibling on the branch is met at workspace-setup's checkout, which
+# no two runs can race past. Blockers are read first, because a bead that must wait
+# has no business meeting another run.
 #
 # exit: 0 this run builds the bead · 1 it does not, and decline.sh or the step's
 # retry has what follows · 2 usage
@@ -89,6 +89,8 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-lib.sh
 . "$SCRIPT_DIR/work-lib.sh"
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
 
 DISPATCHED_BY="${CONVOY:+Convoy $CONVOY}"
 DISPATCHED_BY="${DISPATCHED_BY:-A direct route}"
@@ -192,52 +194,19 @@ if [ -n "$OPEN_BLOCKERS" ]; then
   exit 1
 fi
 
-WORK_DIR=$(work_meta work_dir)
-HOLDER=$(work_meta work_holder)
-BRANCH=$(work_meta branch)
-TREE_RC=0
-if CORE_SCRIPTS=$(gc core scripts-dir </dev/null 2>/dev/null) && [ -x "$CORE_SCRIPTS/work-holder.sh" ]; then
-  TREE_FINDING=$("$CORE_SCRIPTS/work-holder.sh" --claim --bead "$WORK_ID" --work-dir "$WORK_DIR" --holder "$HOLDER" --branch "$BRANCH") || TREE_RC=$?
-else
-  TREE_RC=2
-  TREE_FINDING="core's work-holder.sh could not be run, because gc core scripts-dir did not name a directory holding it, so a session holding the work's tree cannot be ruled out"
+store_read() { gc bd "$@"; }
+RUNS=$(run_lib runs store_read "$WORK_ID") || work_outage "could not read the runs that work $WORK_ID"
+LIVE=$(printf '%s' "$RUNS" | jq -c --arg f "$FORMULA" '[.[] | select(.live and .formula == $f)]')
+OTHERS=$(printf '%s' "$LIVE" | jq -r --arg mine "$CONVOY" '[.[] | select($mine == "" or .convoy != $mine) | .root] | join(", ")')
+[ -n "$OTHERS" ] || exit 0
+
+if [ -n "$CONVOY" ]; then
+  # A root's created_at has one form and a second's resolution, so its id breaks a
+  # tie, and a root the store does not return cannot be the oldest.
+  OLDEST=$(bd_json list --id "$(printf '%s' "$LIVE" | jq -r 'map(.root) | join(",")')" --all --include-ephemeral --limit 0 \
+    | jq -r 'sort_by([.created_at, .id]) | .[0].id // empty' 2>/dev/null)
+  [ -n "$OLDEST" ] || work_outage "could not read the age of the runs that work $WORK_ID"
+  MINE=$(printf '%s' "$LIVE" | jq -r --arg mine "$CONVOY" '[.[] | select(.convoy == $mine) | .root] | .[0] // empty')
+  [ "$OLDEST" != "$MINE" ] || exit 0
 fi
-
-case "$TREE_RC" in
-  0)
-    [ -z "$TREE_FINDING" ] || echo "$TREE_FINDING"
-    exit 0 ;;
-  1)
-    # A live session holds the work. On this bead's own record that is another
-    # run of this work. On a sibling's record it is different work on the branch.
-    if work_read "$WORK_ID"; then HOLDER=$(work_meta work_holder); fi
-    if [ -n "$HOLDER" ] && ! work_is_self "$HOLDER"; then
-      refuse "$DUPLICATE_NOTE" "duplicate dispatch" "in flight in another session's tree: $TREE_FINDING"
-    fi
-    SIBLING=""
-    if [ -n "$BRANCH" ]; then
-      while IFS="$(printf '\t')" read -r ROW_ID ROW_HOLDER; do
-        [ -n "$ROW_ID" ] && [ -n "$ROW_HOLDER" ] && ! work_is_self "$ROW_HOLDER" || continue
-        if [ "$(work_owner_listed "$ROW_HOLDER")" != 0 ]; then
-          SIBLING="$ROW_ID"
-          break
-        fi
-      done <<ROWS
-$(bd_json list --metadata-field "branch=$BRANCH" --limit 0 | jq -r --arg me "$WORK_ID" '.[]? | select(.id != $me) | [.id, (.metadata.work_holder // "")] | @tsv' 2>/dev/null)
-ROWS
-    fi
-    if [ -n "$SIBLING" ] && "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --blocked-by "$SIBLING" --formula "$FORMULA"; then
-      gc bd update "$WORK_ID" --append-notes "Yielded behind sibling $SIBLING on $BRANCH, whose run holds the tree: $TREE_FINDING. A re-sling is armed for when it closes." </dev/null >/dev/null 2>&1 \
-        || echo "$PROG: The note did not land on $WORK_ID; the cancel reason on this step still records it." >&2
-      "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID waits on sibling $SIBLING, whose run holds $BRANCH; a re-sling is armed for when it closes"
-      exit 1
-    fi ;;
-esac
-
-# No check could rule a holder out, so a person looks at the tree.
-WHY="possibly in flight in another session's tree: ${TREE_FINDING:-work-holder.sh exited $TREE_RC with no finding}"
-note "$DUPLICATE_NOTE" "$WHY"
-"$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "duplicate dispatch: $WORK_ID $WHY" \
-  --subject "$WORK_ID" --key polecat-duplicate-dispatch --formula "$FORMULA" \
-  --message "Possible duplicate dispatch on $WORK_ID: it is $WHY. $DISPATCHED_BY dispatched it to $SELF. Its run is cancelled and no workspace was touched. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead. The next run builds only if no live run holds the tree."
-exit 1
+refuse "$DUPLICATE_NOTE" "duplicate dispatch" "in flight in live run $OTHERS"

@@ -6,10 +6,10 @@ description: The record of what tk-1tfzr71.12 looked for in Gas City and bd befo
 # Gas City search for the work formula's rewrite
 
 Read on 2026-11-01 at `gastownhall/gascity` main ce6b62131,
-`gastownhall/gascity-packs` main 0b0d96250, and bd 1.3.2. The city's deployed `gc`
-is the fork's 1.4.3 at e03752646, whose embedded core pack is what `gc core
-scripts-dir` names here. A fork is not evidence for what upstream ships, so it is
-named only where it is what runs.
+`gastownhall/gascity-packs` main 0b0d96250, and bd 1.3.2. The second-run check and
+everything about `work-holder.sh` were read again that day at `gastownhall/gascity`
+main 879a71fa0. The city's deployed `gc` is the fork's 1.4.3 at e03752646. A fork is
+not evidence for what upstream ships, so it is named only where it is what runs.
 
 ## Composed
 
@@ -20,9 +20,28 @@ named only where it is what runs.
   (`stampHookSessionCurrentClaim`, `cmd/gc/cmd_hook_claim.go`), on every result
   that hands a bead over. Verified live in this run: the stamp moved with each of
   four claims, and `status=in_progress` on each.
-- **Core's `work-holder.sh --claim`**, reached by `gc core scripts-dir`, replaces
-  `work-tree-holder.sh` and takes the work with one compare-and-set. It is in the
-  fork's core pack and not upstream's, which the warrant records.
+- **`gc sling`'s refusal of a second live run** replaces `work-tree-holder.sh`'s
+  hold on a run in flight. `checkLegacySourceWorkflowConflict`
+  (`internal/sling/sling_core.go`) and `liveConvoyTrackedWorkflowRoots`
+  (`internal/sling/sling_attachment.go`) refuse a second live root of one formula on
+  one bead, under the lock `withGraphV2SourceWorkflowLock` takes. That lookup is
+  scoped to one formula because distinct formulas on one bead are legitimate, and
+  `--force` skips it. Verified live: `gc sling --dry-run` on a bead with a live run
+  answered that the bead already has an attached workflow.
+- **The record `gc sling` judges**, a root's `gc.input_convoy_id` and its convoy's
+  `tracks` edge, read through `run-lib.sh`, which is `work-gate.sh`'s whole check for
+  what gets past that refusal. A forced relaunch does: `--force` replaces only a
+  root with the same `graphv2.RootKey`, which names the input convoy, and a bare bead
+  gets a new convoy at each launch (`CreateSingleItemInputConvoy`,
+  `internal/graphv2/invocation.go`), so the new root stands beside the old one. A
+  claimant with no poured workflow never calls sling. The same key makes one live
+  root per convoy and formula, so a run knows itself by its `--convoy`: of the 5,951
+  roots in this rig's store on 2026-11-01, no two name one convoy. The older root
+  builds, which both dispatches read alike from the same rows, so the check writes
+  nothing.
+- **A claim on the work bead** decides a claimant with no poured workflow, as the
+  gate's owner check always has. **`git checkout`'s refusal of a branch another
+  worktree holds** decides a sibling on the branch, at `work-setup.sh`.
 - **`bd update --unset-metadata`, `gc bd dep add`, `gc sling`,
   `deferred-dispatch.sh`** carry the waits and writes. The scripts add no store of
   their own.
@@ -57,7 +76,7 @@ named only where it is what runs.
   their edge had landed.
 - **`work-setup.sh`, `work-enter.sh`, `work-submit.sh`, `rig-checks.sh`.** These are
   the bodies of overrides the warrant names, moved out of step text under rule 2,
-  with nothing added but the sibling yield, `work_holder`, the outage stop, and
+  with nothing added but the sibling yield, the outage stop, and
   `work-submit.sh`'s refusal of a `--bead` caller that holds neither that bead nor
   this step. `gc worktree` covers part of `work-setup.sh`, and tk-1tfzr71.10 moves
   that part.
@@ -79,6 +98,21 @@ named only where it is what runs.
 
 ## Rejected
 
+- **Core's `work-holder.sh --claim` and a `work_holder` key.** Only the fork's core
+  pack carries that script: `internal/bootstrap/packs/core/assets/scripts` has none
+  at main 879a71fa0, so on Gas City as shipped every run would fall through to a
+  person. foundation.md rules out answering a gap with a fork, and there is no gap:
+  the key would be a second record of what the run's root records already, and one
+  that runs poured before it never wrote. `gc beads metadata-cas`
+  (`docs/reference/cli.md`) is upstream's, but it compares a key, and the older-root
+  rule leaves it nothing to compare.
+- **`bd update --claim` on the work bead.** Upstream's `mol-polecat-base` leaves the
+  bead a run works unclaimed, and this formula's steps run across sessions, so one
+  session's claim would not name the run.
+- **`gc convoy delete-source`'s preview** as the reader of a bead's live runs. It
+  reads `sourceworkflow.ListLiveRoots`, which lists by `gc.source_bead_id`, and a
+  convoy-first `--on` launch never stamps that, as the comment on
+  `checkLegacySourceWorkflowConflict` records.
 - **A continuation group on inherited steps.** `mergeSteps` replaces a child step
   whole and the formula has no step default, so an inherited step cannot gain the
   markers without a core change. Gas Town runs these steps unmarked on `wake_mode =

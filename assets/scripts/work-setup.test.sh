@@ -59,6 +59,7 @@ case "${1:-} ${2:-}" in
   "runtime drain-ack") printf 'drain\n' >> "$CALLS"; exit 0 ;;
   "hook current") [ -n "${HOOK_CURRENT:-}" ] || exit 1; printf '%s\n' "$HOOK_CURRENT"; exit 0 ;;
   "convoy status") printf '{"children":[{"id":"tk-w"}]}\n'; exit 0 ;;
+  "session list") [ -z "${SESSIONS_JSON:-}" ] || printf '%s\n' "$SESSIONS_JSON"; exit 0 ;;
 esac
 [ "${1:-}" = "bd" ] || exit 0
 verb="${2:-}"; id="${3:-}"
@@ -67,6 +68,7 @@ case "$verb" in
     [ -z "${SHOW_DOWN:-}" ] || exit 1
     jq -c --arg id "$id" '[.[] | select(.id == $id)]' "$STORE" ;;
   list)
+    [ -z "${LIST_DOWN:-}" ] || exit 1
     field=""; shift 2
     while [ $# -gt 0 ]; do case "$1" in --metadata-field) field="$2"; shift 2 ;; *) shift ;; esac; done
     jq -c --arg b "${field#branch=}" '[.[] | select((.metadata.branch // "") == $b)]' "$STORE" ;;
@@ -304,7 +306,7 @@ eq "$(meta rejection_reason)" "$CONFLICTS" "(13) and the rejection stays"
 echo "# a stop to ask a person leaves the rejection, so the next run merges again"
 for how in molecule bare; do
   clone polecat/w2
-  setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a", work_holder: "sess-me"}')" | jq -c 'map(.status = "in_progress" | .assignee = "sess-me")')"
+  setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')" | jq -c 'map(.status = "in_progress" | .assignee = "sess-me")')"
   set_meta conflict_audit '[{"path":"resolved-before-the-stop.txt"}]'
   : > "$CALLS"
   if [ "$how" = molecule ]; then
@@ -313,7 +315,6 @@ for how in molecule bare; do
       && ok "(14) molecule: the bead waits on the question's gate on its anchor" \
       || bad "(14) molecule: the bead waits on the question's gate on its anchor"
     grep -q '^cancel --step mol-polecat-work.workspace-setup ' "$CALLS" && ok "(14) molecule: and its run is cancelled" || bad "(14) molecule: and its run is cancelled"
-    eq "$(meta work_holder)" "<absent>" "(14) molecule: this run lets go of the work"
   else
     TOOL_ENV=HOOK_CURRENT=tk-w tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
     eq "$(meta gc.routed_to)" "human" "(14) bare: the bead parks to a person"
@@ -368,13 +369,11 @@ eq "$(g "$TREE" branch --show-current)" "polecat/tk-w" "(20) on polecat/<bead>"
 eq "$(g "$TREE" rev-parse HEAD)" "$BASE_TIP" "(20) cut from the freshly fetched base"
 eq "$(meta branch)" "polecat/tk-w" "(20) the branch is recorded"
 eq "$(meta work_dir)" "$TREE" "(20) the tree is recorded"
-eq "$(meta work_holder)" "sess-me" "(20) the session that entered it is recorded"
 eq "$(meta gc.work_branch)" "polecat/tk-w" "(20) gc.work_branch is the branch HEAD is on"
 
-fresh_run "$(jq -nc --arg d "$TREE" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/tk-w", work_dir: $d, work_holder: "sess-gone"}}]')"
+fresh_run "$(jq -nc --arg d "$TREE" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/tk-w", work_dir: $d}}]')"
 eq "$RC" "0" "(21) a re-entry exits 0"
 eq "$(last_line)" "$TREE" "(21) it reuses the recorded tree"
-eq "$(meta work_holder)" "sess-me" "(21) the session that re-entered it is recorded"
 
 "$REAL_GIT" -C "$RIG" worktree remove --force "$TREE"
 GONE="$TMP/gone-tree"
@@ -413,13 +412,12 @@ g "$SEED" checkout -q polecat/w1
 commit_in "$SEED" other.txt "other" "origin moves"
 g "$SEED" push -q "$CO" polecat/w1:polecat/w1
 g "$SEED" reset -q --hard "$W1"
-setup_run "$(bead polecat/w1 '{"work_holder":"sess-me"}')"
+setup_run "$(bead polecat/w1)"
 eq "$RC" "1" "(32) a local branch diverged from origin: stops"
 grep -q '^gate --subject tk-w --key polecat-branch-divergence ' "$CALLS" && ok "(32) files a gate under its key" || bad "(32) files a gate under its key"
 grep -q '^await tk-w --key polecat-branch-divergence --formula mol-polecat-work$' "$CALLS" && ok "(32) the work waits on it" || bad "(32) the work waits on it"
 grep -q '^cancel --step mol-polecat-work.workspace-setup ' "$CALLS" && ok "(32) cancels the run" || bad "(32) cancels the run"
 grep -qx 'drain' "$CALLS" && ok "(32) drains" || bad "(32) drains"
-eq "$(meta work_holder)" "<absent>" "(32) lets go of the work"
 has "$(grep '^gate ' "$CALLS")" "clearing it re-slings tk-w" "(32) the gate says clearing it re-slings"
 
 clone polecat/w1
@@ -444,7 +442,7 @@ clone polecat/w1
 g "$C" checkout -q --detach
 PEER="$TMP/peer-tree"
 g "$C" worktree add -q "$PEER" polecat/w1
-SIB_BEADS="$(jq -nc --arg d "$C" --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d, work_holder: "sess-me"}},
+SIB_BEADS="$(jq -nc --arg d "$C" --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d}},
   {id: "tk-sib", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $p}}]')"
 LIVE='[{"root":"r","convoy":"c","bead":"tk-sib","formula":"mol-polecat-work","live":true}]'
 printf '%s' "$LIVE" > "$RUNS"
@@ -455,12 +453,17 @@ grep -q '^cancel --step mol-polecat-work.workspace-setup --reason work bead tk-w
 eq "$(grep -c '^gate ' "$CALLS")" "0" "(40) asks nobody"
 grep -qx 'drain' "$CALLS" && ok "(40) drains" || bad "(40) drains"
 has "$(jq -r '.[0].notes // ""' "$STORE")" "Yielded behind sibling tk-sib" "(40) the note says so"
-eq "$(meta work_holder)" "<absent>" "(40) lets go of the work"
 
 setup_run "$SIB_BEADS" AWAIT_RC=1
 grep -q '^gate --subject tk-w --key polecat-duplicate-dispatch ' "$CALLS" && ok "(41) the wait does not land: a person looks at the tree" || bad "(41) the wait does not land: a person looks at the tree"
 setup_run "$SIB_BEADS" RUN_LIB_STUB_FAIL=all
-grep -q '^await tk-w --blocked-by tk-sib ' "$CALLS" && ok "(41b) a run read that fails rules no run out: the work waits" || bad "(41b) a run read that fails rules no run out: the work waits"
+eq "$RC" "1" "(41b) a run read that fails: stops"
+eq "$(grep -cE '^(await|gate|cancel) ' "$CALLS")" "0" "(41b) it adopts nothing, waits on nothing and asks nobody"
+grep -qx 'drain' "$CALLS" && ok "(41b) the step goes back to the pool" || bad "(41b) the step goes back to the pool"
+setup_run "$SIB_BEADS" LIST_DOWN=1
+eq "$RC" "1" "(41c) a list of the branch's beads that fails: stops"
+eq "$(grep -cE '^(await|gate|cancel) ' "$CALLS")" "0" "(41c) it takes the tree for no bead's and asks nobody"
+grep -qx 'drain' "$CALLS" && ok "(41c) the step goes back to the pool" || bad "(41c) the step goes back to the pool"
 setup_run "$(bead polecat/w1)"
 eq "$RC" "1" "(42) a tree no bead records: stops"
 grep -q '^gate --subject tk-w --key polecat-duplicate-dispatch ' "$CALLS" && ok "(42) a person looks at the tree" || bad "(42) a person looks at the tree"
@@ -472,7 +475,6 @@ setup_run "$SIB_BEADS"
 eq "$RC" "0" "(43) no run works the bead that records the tree: exits 0"
 eq "$(last_line)" "$PEER" "(43) the tree is the one this run enters"
 eq "$(meta work_dir)" "$PEER" "(43) the bead records it"
-eq "$(meta work_holder)" "sess-me" "(43) with this session holding it"
 eq "$(meta gc.work_branch)" "polecat/w1" "(43) on the branch"
 eq "$(grep -cE '^(await|gate|cancel) ' "$CALLS")" "0" "(43) nothing waits, nobody is asked, nothing is cancelled"
 printf '[{"root":"r","convoy":"c","bead":"tk-sib","formula":"mol-polecat-work","live":false}]' > "$RUNS"
@@ -485,6 +487,54 @@ eq "$RC" "1" "(44) a dirty tree: stops"
 grep -q '^gate --subject tk-w --key polecat-duplicate-dispatch ' "$CALLS" && ok "(44) a person looks at the tree" || bad "(44) a person looks at the tree"
 has "$(grep '^gate ' "$CALLS")" "uncommitted paths" "(44) the gate says why"
 rm -f "$PEER/loose.txt"
+
+echo "# one record in flight decides, whatever the others beside it record"
+ANCHOR_FIRST="$(jq -nc --arg d "$C" --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d}},
+  {id: "tk-anchor", status: "open", assignee: "refinery", metadata: {branch: "polecat/w1", work_dir: $p}},
+  {id: "tk-sib", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $p}}]')"
+printf '%s' "$LIVE" > "$RUNS"
+setup_run "$ANCHOR_FIRST"
+eq "$RC" "1" "(46) a sibling adopted an anchor's tree, and the anchor lists first: stops"
+grep -q '^await tk-w --blocked-by tk-sib ' "$CALLS" && ok "(46) the work waits on the sibling in flight, not on the anchor" || bad "(46) the work waits on the sibling in flight, not on the anchor" "$(grep -E '^(await|gate)' "$CALLS")"
+eq "$(meta work_dir)" "$C" "(46) nothing adopts the tree"
+
+echo "# a claim a listed session holds is in flight too"
+printf '[]' > "$RUNS"
+CLAIMED="$(jq -nc --arg d "$C" --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d}},
+  {id: "tk-sib", status: "in_progress", assignee: "hq-peer", metadata: {branch: "polecat/w1", work_dir: $p}}]')"
+setup_run "$CLAIMED" SESSIONS_JSON='{"sessions":[{"session_name":"hq-peer"}]}'
+eq "$RC" "1" "(47) a sibling claimed by a listed session: stops"
+grep -q '^await tk-w --blocked-by tk-sib ' "$CALLS" && ok "(47) the work waits on it" || bad "(47) the work waits on it" "$(grep -E '^(await|gate)' "$CALLS")"
+setup_run "$CLAIMED"
+grep -q '^await tk-w --blocked-by tk-sib ' "$CALLS" && ok "(47) a session list that cannot be read proves nobody gone" || bad "(47) a session list that cannot be read proves nobody gone"
+setup_run "$CLAIMED" SESSIONS_JSON='{"sessions":[]}'
+eq "$RC" "0" "(48) a claim no listed session holds: the tree was left behind, so it is adopted"
+eq "$(last_line)" "$PEER" "(48) and entered"
+setup_run "$(printf '%s' "$CLAIMED" | jq -c 'map(if .id == "tk-sib" then .assignee = "sess-me" else . end)')" SESSIONS_JSON='{"sessions":[{"id":"sess-me"}]}'
+eq "$RC" "0" "(48b) a claim this session holds is no sibling to wait on"
+setup_run "$(printf '%s' "$CLAIMED" | jq -c 'map(if .id == "tk-sib" then .status = "open" else . end)')" SESSIONS_JSON='{"sessions":[{"session_name":"hq-peer"}]}'
+eq "$RC" "0" "(48c) a bead open under a live name is handed off, not in flight"
+
+echo "# a tree this bead recorded is read before it is reused, since no checkout refuses it"
+REUSED="$(jq -nc --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $p}},
+  {id: "tk-sib", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $p}}]')"
+printf '%s' "$LIVE" > "$RUNS"
+setup_run "$REUSED"
+eq "$RC" "1" "(49) a sibling in flight adopted the tree this bead records: stops"
+grep -q '^await tk-w --blocked-by tk-sib ' "$CALLS" && ok "(49) the work waits on it" || bad "(49) the work waits on it" "$(grep -E '^(await|gate)' "$CALLS")"
+grep -q '^git checkout ' "$CALLS" && bad "(49) and touches nothing in the tree" || ok "(49) and touches nothing in the tree"
+printf '[]' > "$RUNS"
+setup_run "$REUSED"
+eq "$RC" "0" "(49b) a sibling that records the tree with nothing in flight: this run reuses it"
+eq "$(last_line)" "$PEER" "(49b) and enters it"
+printf '[{"root":"r-me","convoy":"c-me","bead":"tk-w","formula":"mol-polecat-work","live":true}]' > "$RUNS"
+setup_run "$REUSED"
+eq "$RC" "0" "(49d) this run's own live root is no sibling: it reuses its tree"
+printf '[]' > "$RUNS"
+setup_run "$REUSED" LIST_DOWN=1
+eq "$RC" "1" "(49c) a list that fails before a reuse: stops"
+grep -qx 'drain' "$CALLS" && ok "(49c) the step goes back to the pool" || bad "(49c) the step goes back to the pool"
+
 # A run that made its own tree before the checkout refused it leaves none behind.
 RIG2="$TMP/rig2"; "$REAL_GIT" clone -q "$CO" "$RIG2" 2>/dev/null
 g "$RIG2" fetch -q origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"

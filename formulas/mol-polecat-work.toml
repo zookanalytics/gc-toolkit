@@ -63,16 +63,15 @@ gc prime
 gc bd prime
 ```
 
-**2. Prove the work is this run's to build, and take it (FAIL CLOSED):**
+**2. Prove the work is this run's to build (FAIL CLOSED):**
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-gate.sh" --convoy {{convoy_id}}
 ```
-Exit 0: no other live run holds the work, and this session is recorded as its
-holder. Any other exit: stop here and do not close this step. The script says why,
-and when the refusal is final it has already recorded what releases the work,
-cancelled the run and drained. Its cancel can interrupt this very tool call; that
-is the cancel landing, not a person refusing it. A store that did not answer sends
-the step back to the pool with nothing asked.
+Exit 0: this run builds the work. Any other exit: stop here and do not close this
+step. The script says why, and when the refusal is final it has already recorded
+what releases the work, cancelled the run and drained. Its cancel can interrupt
+this very tool call; that is the cancel landing, not a person refusing it. A store
+that did not answer sends the step back to the pool with nothing asked.
 
 Closing this step to decline the work would advance the workflow into
 workspace-setup, the branch-recreating step that destroys a live worker's

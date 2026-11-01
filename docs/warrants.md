@@ -69,13 +69,16 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Covers.** `formulas/mol-polecat-work.toml`, `assets/scripts/work-gate.sh`,
   `assets/scripts/work-setup.sh`, `assets/scripts/work-enter.sh`,
   `assets/scripts/rig-checks.sh`, `assets/scripts/work-submit.sh`,
-  `assets/scripts/work-lib.sh`, `assets/scripts/decline.sh`, the `work_holder` key.
+  `assets/scripts/work-lib.sh`, `assets/scripts/decline.sh`.
 - **Stands in for.** Steps of core's polecat base and Gas Town's polecat formula
   that would do what the pack needs. The formula overrides five steps and inherits
   `implement`. Each override differs for a reason of its own:
   - `load-context` refuses a bead that is finished, parked, blocked or in another
     live run, and ends the run by cancelling it with what releases the work on the
-    work bead. Upstream's has no such gate.
+    work bead. Upstream's has no such gate. `gc sling` keeps one live run of a
+    formula on a bead, and the gate reads the same record for what gets past it, a
+    forced relaunch and a claimant with no poured workflow, so it adds no key and
+    writes nothing to let a run through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
     rebases and force-pushes under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
@@ -92,10 +95,14 @@ shares only the word ([authority-map.md](authority-map.md)).
   - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
     whole, so an inherited step cannot gain metadata, and a step that needs
     `gc.continuation_group` must be overridden. The base declares none.
+  - `internal/sling/sling_core.go`, `checkLegacySourceWorkflowConflict`, and
+    `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
+    live root of one formula on one bead is refused, unless `--force` skips the
+    lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, and rebases a rejected
   branch.
-- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131 and
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main 879a71fa0 and
   `gastownhall/gascity-packs` main 0b0d96250.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
   and parked work and ends a run by cancelling it. `workspace-setup`:

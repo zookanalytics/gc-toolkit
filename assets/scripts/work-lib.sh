@@ -17,7 +17,6 @@
 #   work_owner_listed <name>      how many listed sessions go by <name>, "" when
 #                                 the list cannot be read
 #   work_outage <what>            stops the step, having asked nothing
-#   work_release_holder           this run is done with the tree
 #   work_stop_with_gate <key> <message> <reason>
 #                                 a person must rule before the work goes on, so
 #                                 the run ends on a gate its work bead waits on
@@ -114,15 +113,7 @@ work_outage() {
   exit 1
 }
 
-work_release_holder() {
-  gc bd update "$WORK_ID" --unset-metadata work_holder </dev/null >/dev/null 2>&1 \
-    || echo "$PROG: NOTE: $WORK_ID still records this session as work_holder, which a later dispatch reads as a live holder while this session is listed" >&2
-}
-
-# Every stop after the claim releases the work, because a holder a later dispatch
-# reads as live would refuse that dispatch while this session stays listed.
 work_stop_with_gate() {
-  work_release_holder
   "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "$3" --subject "$WORK_ID" --key "$1" --formula "$FORMULA" --message "$2"
   exit 1
 }

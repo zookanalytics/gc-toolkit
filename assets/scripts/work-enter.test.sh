@@ -75,7 +75,7 @@ eq "$RC" 0 "an open bead: exits 0"
 eq "$(printf '%s\n' "$OUT" | tail -n 1)" "$T" "the last line is the worktree"
 has "$OUT" "a late correction" "the notes, read at this moment, are printed"
 eq "$(git -C "$T" branch --show-current)" "polecat/tk-w" "the recorded branch is checked out"
-has "$(cat "$LOG")" "update tk-w --set-metadata work_holder=sess-me" "this session is recorded as the holder"
+case "$(cat "$LOG")" in *"update tk-w"*) bad "entering the tree writes nothing on the work bead" ;; *) ok "entering the tree writes nothing on the work bead" ;; esac
 has "$(cat "$LOG")" "update root-1 --set-metadata gc.var.issue=tk-w" "a self-review iteration stamps the root's issue"
 
 row closed '{}'
@@ -83,7 +83,6 @@ run
 eq "$RC" 1 "a closed bead: stops"
 has "$(cat "$LOG")" "cancel --step self-review --reason work bead tk-w was closed while its run was mid-flight" "the run is cancelled"
 has "$(cat "$LOG")" "drain" "the session drains"
-case "$(cat "$LOG")" in *"work_holder"*) bad "a withdrawn run records no holder" ;; *) ok "a withdrawn run records no holder" ;; esac
 
 jq -nc '[{id: "tk-w", status: "open", metadata: {work_dir: "/nowhere/at/all"}}]' > "$STORE"; : > "$LOG"
 run
