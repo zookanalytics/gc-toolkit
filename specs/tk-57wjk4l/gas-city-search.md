@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the removed-script hold and the open-step census
-description: The arch check asks a change that adds pack surface to show why Gas City does not already cover it. Read this when checking whether the pack still needs assets/scripts/script-callers.sh or the removed-script check in gctk merge, when Gas City ships a run that keeps the pack files it was poured from, or when gc beads list gains a text filter.
+description: The arch check asks a change that adds pack surface to show why Gas City does not already cover it. Read this when checking whether the pack still needs assets/scripts/script-callers.sh or the removed-script check in gctk merge, when Gas City ships a run that keeps the pack files it was poured from, when gc beads list gains a text filter, or when bd says whose a gate is.
 ---
 
 # Gas City search for the removed-script hold and the open-step census
@@ -17,10 +17,10 @@ detects formula drift only after the fact. It handles a missing script only for
 a step's declared check, and only once the script is gone. It ships no list of
 beads across stores that filters on text and reports a store it could not read.
 So the change composes what Gas City ships for each part it has: bd's list
-filters for the read in one store, `gc rig list` for the set of stores, and a
-human gate for the ask. The decision of when a removal may land is the pack's,
-because the pack's own rule, that step text calls a tested script, is what makes
-a run depend on a script by name.
+filters for the reads in one store, `gc rig list` for the set of stores, and the
+refinery's rejection for the repair. The decision of when a removal may land is
+the pack's, because the pack's own rule, that step text calls a tested script,
+is what makes a run depend on a script by name.
 
 Upstream was read at these commits, on 2026-11-01:
 
@@ -34,23 +34,31 @@ Upstream was read at these commits, on 2026-11-01:
 The change adds:
 
 - `assets/scripts/script-callers.sh`, whose two modes are a census of the open
-  steps that name a script, and `--check-merge <base> <head>`, which answers
-  whether a merge may remove a pack script yet.
+  steps that name a script, which also says which of them sit in a parked run,
+  and `--check-merge <base> <head>`, which answers whether a merge may remove a
+  pack script yet.
 - A check in `gctk merge`, right before `gh pr merge` on a pull request into the
-  default branch, that holds on the answer. It files one human gate under a new
-  situation key, `script-callers-merge-gate.<n>`, when a formula still names the
-  script. When only open steps call it, the arm records the existing `pr.machine`
-  value `settled` and files nothing.
+  default branch, that holds on the answer. When a formula at the base or the
+  head names the script, it hands the branch back through the existing
+  `rejection-repool.sh`, a new caller of that script and of its existing
+  `pull_request` to `poured` edge. When only the rig checkout's HEAD names it, or
+  open steps in moving runs call it, the arm records the existing `pr.machine`
+  value `settled`. When a person's gate parks a calling run, it records the
+  existing value `blocked` with the existing cause `blocker`, whose definition
+  widens to cover a blocker that holds the merge through a run. It files no gate.
 
-It adds no metadata key, bead kind or lifecycle state.
+It adds no metadata key, bead kind, lifecycle state or cause.
 
-The need has two parts. The census has to find, across every store of the city,
+The census has to find, across every store of the city,
 the open steps whose poured text names a script, and to say so when a store
 could not be read, because "no caller" from a store nobody read would let a
 deletion through. The hold has to answer at the merge, about the merge result,
 because that is when a removal starts to reach the city. That is a merge into the
 default branch, which the rig checkout follows. A merge into an integration
-branch reaches no copy of the pack, and the landing PR lists what it removed.
+branch reaches no copy of the pack, and the landing PR lists what it removed. The
+repair has to reach an agent, since the check names the remedy and a person has
+nothing to decide. And a wait only a person can end has to read as that person's,
+at the PR and on the board, for as long as it stands.
 
 ## A run that keeps what it was poured from
 
@@ -153,22 +161,75 @@ is a step that depends on a script by name. Nothing upstream had to solve that.
 - **Gas Town's refinery.** Its `mol-refinery-patrol` runs the rig's
   `lint_command` and `test_command` as it lands a branch, and a failure the
   branch caused puts the bead back in the pool with `rejection_reason`. This is
-  the nearest native seam. It answers at the right moment, but a rejection sends
-  work back to a polecat, and when only open steps call a script nothing on the
-  branch has to change, so a rejection is the wrong answer there. The pack lands
-  through `gctk merge` today. The migration member that moves landing onto Gas
-  Town's flow (tk-1tfzr71.20) carries this hold on its notes, to settle in its
-  design.
+  the nearest native seam, and the change uses it where it fits: a formula that
+  names the script is a failure the branch owns, so the branch goes back to a
+  polecat. When only open steps call a script, or only the checkout names it,
+  nothing on the branch has to change, so a rejection is the wrong answer there.
+  The pack lands through `gctk merge` today. The migration member that moves
+  landing onto Gas Town's flow (tk-1tfzr71.20) carries this hold on its notes, to
+  settle in its design.
 - **A native wait on each calling step.** A bd `bead` gate is the nearest wait
   across stores, but core's `gate-sweep.sh` skips bead gates ("Bead-type gates are
   skipped"), so nothing would clear it. It would also add a write per calling step
   for a state each merge pass can read again.
-- **A person's ask.** The hold that needs a person composes Gas City's human gate
-  through the pack's `human-gate.sh`, as every other ask in `gctk merge` does.
+- **The repair.** `rejection-repool.sh` is the pack's form of that rejection: it
+  records the reason, keeps the PR through `existing_pr`, and pours the work
+  formula with `gc sling`, because a route on the bead would not survive a park
+  on its epic. The nearer word, `rework-child.sh`, files a child that blocks the
+  anchor, but it takes a source that is a review or a ruling, and a merge hold is
+  neither. It retires under the deletion plan, so it gets no third source.
+- **A person's ask, which the formula answer does not need.** A human gate through
+  `human-gate.sh` is how `gctk merge` asks a person something. Here nobody has a
+  decision to make, and a choice the worker cannot make goes through the worker's
+  own gate.
+
+## Telling a parked run from a moving one
+
+A run parked behind a person's gate ends only when that person acts, so the merge
+has to read as held by that person. What decides it is which of a store's open
+steps a gate blocks, and whether a person holds that gate.
+
+- **The edges: bd's list rows, which the script already reads.**
+  [bd list](https://beads.gascity.com/cli-reference/list) carries each row's
+  `dependencies` (`Issue.Dependencies`, package types), so the read the census
+  makes for a step's text gives its edges at no cost.
+- **`bd blocked`, which does not add to that.**
+  [bd blocked](https://beads.gascity.com/cli-reference/blocked) answers each
+  blocked bead with the ids of its blockers (`BlockedIssue.BlockedBy`, package
+  types), and not their types, so it needs the same second read, over every
+  blocked bead in the store rather than the steps. On a chained run it names the
+  gate only on the step the edge sits on, so it answers no more than the edges do.
+- **The gates: bd's list again.** The second read is `bd list --type gate
+  --include-gates`, once per store and only when that store holds a caller. It
+  goes through the pack's guarded `bd_list`, so a failed read is exit 2.
+  [bd gate](https://beads.gascity.com/cli-reference/gate) has `bd gate list`, which
+  shows open gates and stops at 50 unless told otherwise (`gateListCmd`), where the
+  list read takes the statuses the census takes.
+- **Whose gate it is: core's sweep.** [bd
+  gate](https://beads.gascity.com/cli-reference/gate) names the types, and the core
+  pack's `gate-sweep.sh` runs `gc bd gate check` for timer and gh gates and no
+  others, so those close on their own and every other gate stays open until
+  someone closes it. Gas City ships no predicate for this, and the pack's own
+  `human_gate` asks for `await_type=human`. That misses a park, the plain gate
+  `gc-helm.sh park` files with no await type, which holds every parked run today.
+- **The runs API, which does not cover it.** `RunStep` carries no edge, as above.
+- **An edge from the anchor onto the gate, which does not fit.** It is the shape a
+  wait usually takes, and it would read as `held: gate` by itself. bd resolves an
+  edge only within one store, and a caller's gate can sit in another rig's store.
+  A gate also outlives a run cancelled from under it: a park holds many beads, so
+  the anchor would stay held after its caller ended, and each pass would have to
+  add and remove edges. The verdict is re-derived on every pass and leaves nothing
+  to clean up.
+- **The surface: the pack's machine axis.** A blocked verdict is what the status
+  label and the board already read as a person's hold, as the Machine axis warrant
+  records. The cause is the existing `blocker`, so no reader changes.
 
 ## What it leaves out
 
-The check reads a formula's file and each open step's text. A `description_file`
+A gate in another store than its step holds nothing, so the parked read looks only
+in the step's own store. A person can hold a run some other way, such as a live
+blocker routed to them, and that run reads as moving. The check reads a formula's
+file and each open step's text. A `description_file`
 over 4096 bytes reaches a step as a pointer to the file
 ([section 1.8](https://docs.gascity.com/reference/specs/formula-spec-v2#1-8-description-files)),
 so its text would be in neither place. No formula in this pack declares one. A
@@ -182,5 +243,7 @@ are outside the check, and tk-1tfzr71.36 tracks them.
   left.
 - `gc beads list` gains a text filter and reports a store it could not read. The
   census then composes it in place of the per-store loop.
+- Gas City or bd ships a predicate for whether a person holds a gate. The parked
+  read then composes it in place of the rule it carries.
 - The landing moves onto Gas Town's flow (tk-1tfzr71.20). `gctk merge` retires
   with that member, and the hold moves with its design.
