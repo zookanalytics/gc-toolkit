@@ -14,8 +14,11 @@
 #     base is read once;
 #   - a removed script that only open steps call exits 3, and one nothing
 #     calls exits 0;
+#   - a repository is read from its top, so a directory below it gets the same
+#     answers;
 #   - it exits 2 when it decides nothing: a usage error, a revision or
-#     repository it cannot read, no rig list, or a store that does not answer;
+#     repository it cannot read, a list of deletions or formulas git cannot give,
+#     no rig list, or a store that does not answer or holds a row it cannot read;
 #   - it exits 2 when a loop could not read its whole list: the temp file cannot
 #     be created or written, or the loop read fewer lines than the list holds.
 #     No failure of a list or a count under a loop reads as an all-clear.
@@ -152,6 +155,15 @@ has "$out" "cannot read the open steps in the store of rig 'lantern' ($STORES/la
   "...and names the store"
 unset STUB_BD_FAIL_DB
 
+callers_off
+printf '[{"id":"hb-bad","status":"open","assignee":"","description":7,"metadata":{"gc.step_ref":"mol-k.bad"}}]' \
+  > "$STORES/harbor/.beads/steps.json"
+run old-tool.sh
+eq "$rc" "2" "a step row the census cannot read decides nothing"
+has "$out" "cannot read the open steps in the store of rig 'harbor'" "...and names the store"
+hasnt "$out" "no open step calls" "...with no all-clear"
+callers_on
+
 export STUB_RIGS_RC=1
 run old-tool.sh
 eq "$rc" "2" "an unreadable rig list decides nothing"
@@ -160,6 +172,7 @@ unset STUB_RIGS_RC
 cp "$STUB_RIGS" "$TMP/rigs.keep"; printf '{"rigs":[]}' > "$STUB_RIGS"
 run old-tool.sh
 eq "$rc" "2" "a city that lists no rig decides nothing, since no store was read"
+has "$out" "the city lists no rig" "...and says so"
 printf '{"rigs":[{"name":"harbor","path":"%s"},{"name":"lantern"}]}' "$STORES/harbor" > "$STUB_RIGS"
 callers_off
 run old-tool.sh
@@ -227,6 +240,9 @@ for i in $(seq 1 300); do : > "$REPO/assets/scripts/$i-$LONG_NAME.test.sh"; done
 G add -A; G commit -qm long-base
 G checkout -q -b long-delete
 G rm -q 'assets/scripts/*0.test.sh' assets/scripts/old-tool.sh; G commit -qm long-delete
+G checkout -q main
+# A history of its own, which shares no merge base with main.
+G checkout -q --orphan unrelated; G commit -qm unrelated
 G checkout -q main
 
 callers_on; : > "$STUB_GC_LOG"
@@ -315,8 +331,36 @@ unset STUB_BD_FAIL_DB
 run --root "$REPO" --check-merge main no-such-branch
 eq "$rc" "2" "a revision the repository lacks decides nothing"
 has "$out" "'no-such-branch' names no commit" "...and says which"
+run --root "$REPO" --check-merge no-such-base delete
+eq "$rc" "2" "...on either side of the merge"
+has "$out" "'no-such-base' names no commit" "...and says which"
 run --root "$TMP/not-a-repo" --check-merge main delete
 eq "$rc" "2" "a directory that is not a repository decides nothing"
+has "$out" "not a git checkout: $TMP/not-a-repo" "...and says which"
+run --root "$REPO" --check-merge main unrelated
+eq "$rc" "2" "two commits with no merge base decide nothing, since what the head removes cannot be listed"
+has "$out" "cannot list what 'unrelated' removes from 'main'" "...and says so"
+hasnt "$out" "removes no pack script" "...with no all-clear"
+G symbolic-ref HEAD refs/heads/unborn
+run --root "$REPO" --check-merge main delete
+eq "$rc" "2" "a checkout whose HEAD has no commit decides nothing"
+has "$out" "has no HEAD commit" "...and says so"
+G symbolic-ref HEAD refs/heads/main
+
+echo "# a directory below the repository's top"
+run_below() { out=$(cd "$REPO/assets/scripts" && "$SUT" "$@" 2>&1); rc=$?; }
+callers_on
+run_below --check-merge main delete
+eq "$rc" "3" "run from below the top, a removed script open steps call still holds the merge"
+has "$(printf '%s\n' "$out" | head -1)" "(assets/scripts/old-tool.sh)" "...named by its path from the top"
+run_below --check-merge main~1 same-change
+eq "$rc" "1" "...and a formula that still names a removed script still counts"
+has "$out" "formulas/mol-b.toml at the base (main~1) still names it" "...named by its path from the top"
+run_below --check-merge main edit-only
+eq "$rc" "0" "...and a change that removes no script still passes"
+run --root "$REPO/packs/sub" --check-merge main delete
+eq "$rc" "3" "--root below the top reads the same repository"
+has "$(printf '%s\n' "$out" | head -1)" "(assets/scripts/old-tool.sh)" "...from its top"
 
 echo "# a loop that could not read its whole list"
 SCRATCH="$TMP/scratch"; mkdir -p "$SCRATCH"
@@ -415,6 +459,19 @@ chmod +x "$GIT_FAILS/git"
 run_with "$GIT_FAILS" --root "$REPO" --check-merge main delete
 eq "$rc" "2" "a read of whether the base carries a removed path that fails decides nothing"
 has "$out" "cannot read 'assets/scripts/old-tool.sh' at 'main'" "...and says so"
+
+GREP_FAILS="$TMP/grep-fails"; mkdir -p "$GREP_FAILS"
+cat > "$GREP_FAILS/git" <<STUB
+#!/usr/bin/env bash
+case " \$* " in *" grep "*) echo "fatal: unable to read tree" >&2; exit 128 ;; esac
+exec "$REAL_GIT" "\$@"
+STUB
+chmod +x "$GREP_FAILS/git"
+callers_off
+run_with "$GREP_FAILS" --root "$REPO" --check-merge main delete
+eq "$rc" "2" "a read of the formulas that fails decides nothing"
+has "$out" "cannot read the formulas at 'main'" "...and says so"
+hasnt "$out" "no formula names them" "...with no all-clear"
 
 NO_WC="$TMP/no-wc"; mkdir -p "$NO_WC"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$NO_WC/wc"; chmod +x "$NO_WC/wc"

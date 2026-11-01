@@ -158,7 +158,11 @@ if [ -z "$CHECK_MERGE" ]; then
   exit 0
 fi
 
-git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || fail "not a git repository: $ROOT"
+# Every path below is read from the top of the checkout, wherever <dir> sits in
+# it. A pathspec is relative to the directory git runs in, so from below the top
+# the deletions read empty and the merge seems to remove nothing.
+TOP=$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null) || fail "not a git checkout: $ROOT"
+ROOT=$TOP
 BASE_OID=$(git -C "$ROOT" rev-parse --verify --quiet "$MERGE_BASE^{commit}") || fail "'$MERGE_BASE' names no commit in $ROOT; fetch it first"
 HEAD_OID=$(git -C "$ROOT" rev-parse --verify --quiet "$MERGE_HEAD^{commit}") || fail "'$MERGE_HEAD' names no commit in $ROOT; fetch it first"
 CHECKOUT_OID=$(git -C "$ROOT" rev-parse --verify --quiet "HEAD^{commit}") || fail "the checkout in $ROOT has no HEAD commit"
@@ -174,7 +178,7 @@ if [ -n "$REMOVED" ]; then
     read_lines=$((read_lines + 1))
     case "$p" in assets/scripts/*|packs/*/assets/scripts/*) ;; *) continue ;; esac
     case "$p" in *.test.sh|*/testdata/*) continue ;; esac
-    carried=$(git -C "$ROOT" ls-tree --full-tree "$MERGE_BASE" -- "$p") \
+    carried=$(git -C "$ROOT" ls-tree "$MERGE_BASE" -- "$p") \
       || fail "cannot read '$p' at '$MERGE_BASE'"
     [ -n "$carried" ] || continue
     PATHS+=("$p"); NAMES+=("${p##*/}"); NREMOVED=$((NREMOVED + 1))
