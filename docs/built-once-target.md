@@ -328,7 +328,7 @@ convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | 10,920 |
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
-| A | tk-1tfzr71.23 | the membership readers on parent-child, since tk-tggczbp's branch deletes graduation and the convoy seed | partial files |
+| A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | B | tk-1tfzr71.14 | the rig checkout healer; the operator rules at its design | 2,704 |
 | B | tk-1tfzr71.13 | the duplicate sweep and the successor keys | 1,054 |
 | B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |

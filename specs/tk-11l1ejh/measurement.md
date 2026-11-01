@@ -410,7 +410,10 @@ Component-model §4 has a row for 115 of the 144 runtime scripts under
 `assets/scripts/`. The other 29, 8,079 lines, are placed by the `post` rules in
 `measure.sh`. The largest are `migrate-visits-to-gates.sh` (1,296), `bd-lib.sh`
 (915), `bead-context.sh` (705), `orphan-dispose.sh` (606) and
-`self-review-check.sh` (450).
+`self-review-check.sh` (450). No rule names `migrate-visits-to-gates.sh`, so the
+script and its test fall to the catch-all `shared` row. The doc's shared glue
+row therefore carries the 2,180 lines that its human engagement section says
+tk-1tfzr71.33 removes.
 
 ### What moved since the first measurement
 
