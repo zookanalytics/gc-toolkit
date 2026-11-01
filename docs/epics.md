@@ -113,8 +113,11 @@ owns it rather than scattered.
 
 The latest ruling and its reason are recorded on the epic (`epic_ruling`,
 `epic_ruling_reason`). An epic that carries a hypothesis stays open until it is
-ruled close with its outcome recorded, which
-[epic stewardship](epic-stewardship.md) enforces.
+ruled close with its outcome recorded, or until a disposition closes it, which
+records what carries the work or the evidence that it will not go on
+(`gc.superseded_by`). A person's ruling that an epic will not go on closes it that
+way, through `stand-down.sh`, whatever its latest ruling reads.
+[Epic stewardship](epic-stewardship.md) enforces both.
 
 ## Epics are mortal
 
