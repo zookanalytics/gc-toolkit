@@ -1290,12 +1290,23 @@ check_held "an assignee bd would refuse the close for" al-check6 "someone-else"
 mkbead alpha open al-check7
 check_held "a blocker read that fails" al-check7 "did not read" FAKE_BD_DEP_LIST_FAIL=1
 check_held "a child read that fails" al-check7 "did not read" FAKE_BD_LIST_PARENT_FAIL=1
+mkbead alpha open al-check10
+: > "$FG_LOG"
+check_held "the finalize gate's refusal" al-check10 "held by open human gate" FG_VERDICT=hold
+eq "$(cat "$FG_LOG")" "check al-check10 --except-key pr-dispose-failed.9" "--check: the finalize gate is asked with the key"
 # The close drops a wait edge onto its successor before it reads what holds it, so
-# --check does not hold it on that edge.
+# --check does not hold it on that edge, and the close holds only on an edge that
+# would not drop.
 mkbead alpha open al-check8
-printf 'dep.bt-check=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check8"
-rc=0; "$SCRIPT" --origin al-check8 --successor bt-check --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
+mkbead alpha open al-succ8
+printf 'dep.al-succ8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check8"
+rc=0; "$SCRIPT" --origin al-check8 --successor al-succ8 --kind not-needed --except-key pr-dispose-failed.9 --check >"$TMP/out" 2>"$TMP/err" || rc=$?
 eq "$rc" 0 "--check: a wait edge onto the successor holds nothing"
+hgate al-cg8 pr-dispose-failed.9
+printf 'dep.al-cg8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check8"
+rc=0; FAKE_BD_DEP_REMOVE_NOOP=1 run --origin al-check8 --successor al-succ8 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 5 "the close: a wait edge onto the successor that would not drop holds it"
+eq "$(field alpha status al-cg8)" open "the close: …and its own gate stays open"
 # Without the key, --check judges the evidence alone, as it always has.
 mkbead alpha open al-check9
 hgate al-cg9 another-question

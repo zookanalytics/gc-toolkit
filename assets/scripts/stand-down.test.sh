@@ -62,7 +62,9 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
 # the first bd call whose arguments carry it runs the command first, a write that
 # lands between two of a script's reads. STUB_PASS_AFTER_WRITES runs a reconcile
 # pass after each write the stand-down makes. STUB_SHOW_FAILS_AFTER is text: once a
-# bd call carrying it has run, every show fails.
+# bd call carrying it has run, every show fails. STUB_KEEP_KEY names a key an unset
+# leaves in place with exit 0, a write that reports success and half lands, and
+# STUB_CLOSE_NOOP has a close exit 0 and write nothing.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"
@@ -152,7 +154,7 @@ case "$verb" in
       case "$1" in
         --db) shift ;;
         --set-metadata) shift; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
-        --unset-metadata) shift; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
+        --unset-metadata) shift; [ "${1:-}" = "${STUB_KEEP_KEY:-}" ] && { shift; continue; }; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
         --append-notes) shift; args+=("${1:-}"); prog="$prog | .notes = ((.notes // \"\") + \"\n\" + \$ARGS.positional[$((${#args[@]} - 1))])" ;;
         --status=*) args+=("${1#--status=}"); prog="$prog | .status = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
         --assignee=*) args+=("${1#--assignee=}"); prog="$prog | .assignee = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
@@ -172,6 +174,7 @@ case "$verb" in
   close)
     id="${1:-}"; shift || true; reason=""
     while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
+    [ -z "${STUB_CLOSE_NOOP:-}" ] || exit 0
     who=$(jq -r --arg id "$id" '(.[] | select(.id == $id) | .assignee // "") // ""' "$S")
     if [ -n "$who" ] && [ "$who" != "$actor" ]; then
       echo "Error: cannot close $id: assignee is \"$who\", actor is \"$actor\"; reclaim or use --force to override" >&2; exit 1
@@ -356,11 +359,12 @@ eq "$(field tk-g status)" open "…with the gate unanswered"
 eq "$(field tk-w status)" open "…and the work open"
 
 # --- a stop at each write, then a re-run ------------------------------------------
-stop_case() { # <label> <text the stub refuses> <gate status after> <arm after>
+stop_case() { # <label> <text the stub refuses> <gate status after> <arm after> <text the stop names>
   fresh
   STUB_FAIL="$2" run tk-w --key polecat-x --ruling "stop"
   eq "$RC" 1 "stop at $1: exit 1"
   has "$OUT" "Re-run this command" "stop at $1: it names the way on"
+  has "$OUT" "$5" "stop at $1: it says what stands"
   eq "$(field tk-g status)" "$3" "stop at $1: the gate reads $3"
   case "$4" in
     armed) eq "$(meta tk-w gc.dispatch_when_ready)" rig/pool "stop at $1: the arm stands" ;;
@@ -375,14 +379,23 @@ stop_case() { # <label> <text the stub refuses> <gate status after> <arm after>
   eq "$(slings)" 0 "stop at $1: nothing was sent"
 }
 fresh
-STUB_SHOW_FAILS_AFTER="--unset-metadata gc.dispatch_when_ready " run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "an arm whose removal does not read back stops the stand-down"
+STUB_KEEP_KEY="gc.dispatch_when_ready" run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 1 "a disarm that reports success and leaves the arm stops the stand-down"
+has "$OUT" "does not read back unarmed" "…and says why"
 eq "$(field tk-g status)" open "…with the gate unanswered"
 eq "$(field tk-w status)" open "…and the work open"
-stop_case "the disarm" "--unset-metadata gc.dispatch_when_ready " open armed
-stop_case "the release" "gc.takeaway=" open gone
-stop_case "the answer" "gate resolve" open gone
-stop_case "the close" "close tk-w" closed gone
+fresh
+STUB_SHOW_FAILS_AFTER="--unset-metadata gc.dispatch_when_ready " run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 1 "an arm whose removal does not read at all stops the stand-down"
+eq "$(field tk-g status)" open "…with the gate unanswered"
+fresh
+STUB_CLOSE_NOOP=1 run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 1 "a close that reports success and does not land is no stand-down"
+has "$OUT" "does not read back closed" "…and it says so"
+stop_case "the disarm" "--unset-metadata gc.dispatch_when_ready " open armed "was not removed"
+stop_case "the release" "gc.takeaway=" open gone "did not end or its route did not clear"
+stop_case "the answer" "gate resolve" open gone "did not resolve"
+stop_case "the close" "close tk-w" closed gone "bead-rehome.sh said why"
 
 # --- refusals --------------------------------------------------------------------
 fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request" else . end)'
@@ -416,6 +429,13 @@ fresh; patch 'map(if .id == "tk-w" then .metadata.task_kind = "review" else . en
 refused "a review bead" tk-w --key polecat-x --ruling "x"
 fresh
 refused "an unreadable bead" tk-absent --key polecat-x --ruling "x"
+has "$OUT" "could not read tk-absent" "an unreadable bead: it says so"
+fresh
+cp "$STUB_STORE" "$TMP/before.json"
+STUB_FAIL="dep list tk-w" run tk-w --key polecat-x --ruling "x" --successor tk-conv
+eq "$RC" 1 "gates that do not read: exit 1"
+has "$OUT" "could not read the human gates of tk-w" "gates that do not read: it says so"
+cmp -s "$TMP/before.json" "$STUB_STORE" && ok "gates that do not read: nothing was written" || bad "gates that do not read: the store changed"
 fresh
 cp "$STUB_STORE" "$TMP/before.json"
 STUB_FAIL="--direction=up" run tk-w --key polecat-x --ruling "x"
