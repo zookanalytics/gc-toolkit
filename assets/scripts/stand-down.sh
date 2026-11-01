@@ -11,7 +11,7 @@
 # first makes the bead ready, which is what the arm waits for. This runs the one
 # order that does end it:
 #   1. It removes the arm, and any notice owed, through deferred-dispatch.sh
-#      disarm, and reads that back. The reconcile pass reads an arm again just
+#      disarm, and reads the arm back. The reconcile pass reads an arm again just
 #      before it slings, so a pass that reads the gate closed reads the arm gone.
 #   2. It ends the run beneath the bead and clears the bead's route and session
 #      pins through gc-helm.sh takeaway --release --no-wait, so nothing is still
