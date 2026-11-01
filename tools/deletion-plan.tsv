@@ -17,11 +17,9 @@ assets/scripts/step-close.sh	tk-1tfzr71.12
 assets/scripts/step-close.test.sh	tk-1tfzr71.12
 assets/scripts/work-tree-holder.sh	tk-1tfzr71.12
 assets/scripts/work-tree-holder.test.sh	tk-1tfzr71.12
-assets/scripts/worktree-reap.sh	tk-1tfzr71.10
-assets/scripts/worktree-reap.test.sh	tk-1tfzr71.10
-assets/scripts/worktree-setup.sh	tk-1tfzr71.10
-assets/scripts/worktree-setup.test.sh	tk-1tfzr71.10
-orders/worktree-reap.toml	tk-1tfzr71.10
+assets/scripts/worktree-reap.sh	tk-1tfzr71.42
+assets/scripts/worktree-reap.test.sh	tk-1tfzr71.42
+orders/worktree-reap.toml	tk-1tfzr71.42
 assets/scripts/branch-context.sh	tk-1tfzr71.20
 assets/scripts/branch-context.test.sh	tk-1tfzr71.20
 assets/scripts/branch-supersession.sh	tk-1tfzr71.20

@@ -1,30 +1,19 @@
 #!/usr/bin/env bash
-# Hermetic test for worktree-setup.sh's orphaned-stage self-heal, for its
-# --sync of a detached worktree, and for the provisioning (bead redirect, local
-# excludes) a re-run completes.
+# Hermetic test for worktree-setup.sh: staging a non-empty target, --sync, and
+# the provisioning (bead redirect, local excludes) a re-run completes.
 #
 # Uses a real temp git rig (a clone of a bare remote, so origin/HEAD resolves)
 # and drives the real script. No live city, gc, or network. Covers:
-#   (a) a legacy un-scoped orphan is NOT adopted — it carries no target
-#       attribution, so it is quarantined out of the stage namespace with its
-#       contents intact, never merged into the running target;
-#   (b) this target's own scoped orphan beside an ALREADY-created worktree is
-#       reclaimed (the sync path is where surviving orphans actually sit);
-#   (c) a stage dir named for a DIFFERENT target is left untouched — the parent
-#       is shared by every agent, so this is the concurrency/cross-target guard;
-#   (d) a target-scoped orphan (post-scoping crash) is reclaimed;
-#   (e) an orphan never clobbers an existing file (existing wins) and is still
-#       fully reclaimed (the losing source is dropped);
-#   (f) a normal run leaves no stage dir behind, and the one it creates carries
-#       the target's name;
-#   (g) two targets share one parent: a legacy orphan is never consumed by the
-#       wrong one — unprovable ownership means quarantine, not adoption.
-#   (h) a staged directory loses to an existing file at the same path: the
-#       existing file wins and the whole losing source subtree is dropped, so
-#       the orphan dir is still fully reclaimed rather than stranded.
+#   (e) a file staged from a non-empty target loses to the file the checkout
+#       brought, and a file only the stage holds comes back;
+#   (f) a normal run leaves no stage dir behind;
+#   (h) a staged directory loses to a checked-out file at the same path: the
+#       existing file wins and the whole losing source subtree is dropped, and
+#       the entries past it still come back;
 #   (i) --sync moves a detached, clean worktree that is behind the remote to
-#       the default-branch tip, back on its per-target branch, silently;
-#   (j) a detached HEAD carrying a commit the remote lacks stays put, and one
+#       the default-branch tip, back on its per-target branch, silently, and the
+#       next sync fast-forwards it;
+#   (j) a detached HEAD carrying a commit no ref reaches stays put, and one
 #       stderr line names the worktree and the reason;
 #   (k) a detached worktree with an uncommitted tracked change stays put, the
 #       change intact, with the same one-line warning;
@@ -51,7 +40,37 @@
 #       link gc adds later is hidden by the next run, a manifest name git
 #       would read as a pattern or that ends in a newline is never written, and
 #       without jq or a readable manifest the run still succeeds and adds no
-#       name.
+#       name;
+#   (s) a detached HEAD on a commit the tip lacks moves once a ref reaches it,
+#       such as a squash-landed branch's remote-tracking ref, a tag or another
+#       branch;
+#   (t) a per-target branch left behind by a rewritten default branch is reset
+#       to the tip when another ref reaches its commits;
+#   (u) a per-target branch holding a commit only it reaches is not reset: the
+#       attached worktree is detached at the tip and the branch keeps the commit;
+#   (v) a worktree on a branch that is not its own stays on it, and fast-forwards
+#       to its upstream when it can;
+#   (w) a worktree on its own branch with an uncommitted tracked change stays put
+#       with the change intact and one stderr line, both when the branch has
+#       diverged and when the next commit touches the changed file;
+#   (x) a per-target branch with no upstream moves to the tip and gains one;
+#   (y) a remote-tracking ref alone, a tag alone or another branch alone reaching
+#       a per-target branch's commit is enough to reset that branch;
+#   (z) when git cannot read a commit's reach or the tree's status, a detached
+#       worktree stays where it is and no branch is reset;
+#   (aa) a repository with no origin is left where it is, silently;
+#   (ab) a per-target branch ahead of its upstream, as a rewind of the default
+#        branch to an ancestor leaves it, is not at the tip even though its
+#        fast-forward succeeds: the worktree is detached at the tip when only the
+#        branch reaches its commits, the branch is reset when another ref does, and
+#        a tracked change keeps it there with one stderr line. A branch not its own
+#        stays there, silently;
+#   (ac) a per-target branch at the tip, or fast-forwarded to it, says nothing
+#        about an uncommitted tracked change;
+#   (ad) a per-target branch at an upstream that is not the default branch reaches
+#        the tip and tracks the default branch from then on;
+#   (ae) with origin/HEAD unset a per-target branch still fast-forwards, and one
+#        stderr line says why the sync goes no further.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,95 +120,32 @@ marker_in() {
         "$(git -C "$1" rev-parse --path-format=absolute --git-path info/exclude)" && echo yes || echo no
 }
 
-# --- (a) a legacy un-scoped orphan is quarantined, not adopted. ---------------
-# It carries no target name, so the run cannot prove it is agentA's; adopting it
-# would leak another target's files. The worktree is still created, and the
-# orphan is preserved under the .gascity-worktree-orphan.* name for a sweep.
-P="$TMP/a"; mkdir -p "$P"
-O="$P/$STAGE_PREFIX.LEG001"; mkdir -p "$O/.claude"
-echo x > "$O/.claude/settings.json"; echo unique-a > "$O/marker.txt"
-run "$P/agentA" agentA
-present "$P/agentA/.git"                     "(a) target became a worktree"
-absent  "$P/agentA/marker.txt"              "(a) legacy orphan NOT adopted into the worktree"
-absent  "$P/agentA/.claude/settings.json"   "(a) nested legacy content NOT adopted"
-present "$P/.gascity-worktree-orphan.LEG001/marker.txt" "(a) legacy orphan quarantined, content preserved"
-eq "$(cat "$P/.gascity-worktree-orphan.LEG001/marker.txt" 2>/dev/null)" "unique-a" "(a) quarantined content unchanged"
-eq "$(stages "$P")" ""                       "(a) no active stage dir left in the parent"
-
-# --- (b) this target's OWN scoped orphan beside an already-created worktree is
-#         reclaimed on the sync path (where surviving orphans actually sit). ----
-P="$TMP/b"; mkdir -p "$P"
-run "$P/agentB" agentB                       # create the worktree first
-present "$P/agentB/.git"                     "(b) worktree created on first run"
-O="$P/$STAGE_PREFIX.agentB.CRASH2"; mkdir -p "$O"; echo leftover > "$O/leftover.txt"
-run "$P/agentB" agentB --sync                  # second run: production sync path + adopt
-present "$P/agentB/leftover.txt"             "(b) scoped orphan reclaimed on the --sync path"
-absent  "$O"                                "(b) scoped orphan dir removed after adopt"
-eq "$(stages "$P")" ""                       "(b) no stage dir left after adopt"
-
-# --- (c) a DIFFERENT target's stage dir is left untouched. -------------------
-P="$TMP/c"; mkdir -p "$P"
-run "$P/agentC" agentC
-FOREIGN="$P/$STAGE_PREFIX.otherguy.LIVE99"; mkdir -p "$FOREIGN"; echo secret > "$FOREIGN/secret.txt"
-run "$P/agentC" agentC
-present "$FOREIGN/secret.txt"                "(c) foreign target's stage left in place"
-absent  "$P/agentC/secret.txt"              "(c) foreign contents not merged into us"
-
-# --- (d) a target-scoped orphan of THIS target is reclaimed. -----------------
-P="$TMP/d"; mkdir -p "$P"
-O="$P/$STAGE_PREFIX.agentD.CRASH1"; mkdir -p "$O"; echo resume > "$O/resume.txt"
-run "$P/agentD" agentD
-present "$P/agentD/resume.txt"               "(d) target-scoped orphan reclaimed"
-absent  "$O"                                "(d) scoped orphan dir removed"
-
-# --- (e) existing files win during adoption — a scoped orphan never clobbers a
-#         live file, and is still fully reclaimed: the losing source is dropped. --
-P="$TMP/e"; mkdir -p "$P"
+# --- (e) a non-empty target: the file the checkout brought wins over a staged
+#         one, and what only the stage holds comes back. ----------------------
+P="$TMP/e"; mkdir -p "$P/agentE"
+echo STALE > "$P/agentE/README.md"; echo extra > "$P/agentE/extra.txt"
 run "$P/agentE" agentE
-echo LIVE > "$P/agentE/keep.txt"
-O="$P/$STAGE_PREFIX.agentE.CRASH3"; mkdir -p "$O"; echo STALE > "$O/keep.txt"; echo extra > "$O/extra.txt"
-run "$P/agentE" agentE
-eq "$(cat "$P/agentE/keep.txt")" "LIVE"      "(e) existing file not clobbered by orphan"
-present "$P/agentE/extra.txt"                "(e) orphan-only file still adopted"
-absent  "$O"                                "(e) orphan dir removed though a staged file lost"
+present "$P/agentE/.git"                     "(e) worktree created over non-empty target"
+eq "$(cat "$P/agentE/README.md")" "seed"     "(e) checked-out file not clobbered by a staged one"
+present "$P/agentE/extra.txt"                "(e) stage-only file comes back"
 eq "$(stages "$P")" ""                       "(e) no stage dir left when an existing file wins"
 
-# --- (f) a normal run cleans its stage dir; created stage carries the name. ---
-# Seed the target with content so staging fires, then confirm nothing leaks. The
-# stage dir it creates mid-run is target-scoped (STAGE_SLUG in the name), so a
-# crash would leave a reclaimable scoped orphan, not an unattributable legacy one.
+# --- (f) a normal run cleans its stage dir. -----------------------------------
+# Seed the target with content so staging fires, then confirm nothing leaks.
 P="$TMP/f"; mkdir -p "$P/agentF/.claude"; echo s > "$P/agentF/.claude/settings.json"
 run "$P/agentF" agentF
 present "$P/agentF/.git"                     "(f) worktree created over non-empty target"
 present "$P/agentF/.claude/settings.json"   "(f) pre-existing content restored"
 eq "$(stages "$P")" ""                       "(f) staging cleaned up after itself"
 
-# --- (g) two targets share one parent: a legacy orphan is never consumed by the
-#         wrong one. Its owner is unprovable, so it is quarantined, not adopted. --
-P="$TMP/g"; mkdir -p "$P"
-run "$P/agentG1" agentG1                     # first target becomes a worktree
-run "$P/agentG2" agentG2                     # a second target shares the parent
-O="$P/$STAGE_PREFIX.LEGX"; mkdir -p "$O"; echo owned-by-g2 > "$O/foreign.txt"
-run "$P/agentG1" agentG1 --sync                # agentG1 runs with the legacy orphan present
-absent  "$P/agentG1/foreign.txt"             "(g) legacy orphan NOT merged into agentG1"
-absent  "$P/agentG2/foreign.txt"             "(g) legacy orphan NOT merged into agentG2"
-present "$P/.gascity-worktree-orphan.LEGX/foreign.txt" "(g) legacy orphan quarantined, contents preserved"
-eq "$(stages "$P")" ""                       "(g) no active stage dir left in the shared parent"
-
-# --- (h) a staged DIRECTORY loses to an existing file at the same path. The
-#         existing file wins, and the whole losing source subtree is dropped, so
-#         the orphan dir is still fully reclaimed instead of leaking: recursing
-#         would mkdir over the file, strand the subtree, and defeat the rmdir. ---
-P="$TMP/h"; mkdir -p "$P"
-run "$P/agentH" agentH
-echo LIVE > "$P/agentH/collision"            # target holds a FILE where the orphan holds a DIR
-O="$P/$STAGE_PREFIX.agentH.CRASH4"; mkdir -p "$O/collision"
-echo STALE > "$O/collision/nested.txt"; echo solo > "$O/solo.txt"
-run "$P/agentH" agentH
-eq "$(cat "$P/agentH/collision")" "LIVE"     "(h) existing file not clobbered by a staged dir"
-present "$P/agentH/solo.txt"                 "(h) orphan-only entry still adopted past the collision"
-absent  "$P/agentH/collision/nested.txt"    "(h) losing staged subtree dropped, not merged under the file"
-absent  "$O"                                "(h) orphan dir removed though a staged dir lost to a file"
+# --- (h) a staged DIRECTORY loses to a checked-out file at the same path. The
+#         file wins and the whole losing subtree is dropped: recursing would
+#         mkdir over the file and end the run. ------------------------------
+P="$TMP/h"; mkdir -p "$P/agentH/README.md"
+echo STALE > "$P/agentH/README.md/nested.txt"; echo solo > "$P/agentH/solo.txt"
+eq "$(rc_of "$RIG" "$P/agentH" agentH)" "0"  "(h) a staged dir losing to a file does not end the run"
+eq "$(cat "$P/agentH/README.md")" "seed"     "(h) checked-out file not clobbered by a staged dir"
+present "$P/agentH/solo.txt"                 "(h) stage-only entry still comes back past the collision"
 eq "$(stages "$P")" ""                       "(h) no stage dir left when a staged dir loses to a file"
 
 # --- (i) a detached, clean worktree behind the remote moves to the tip on
@@ -207,9 +163,14 @@ eq "$(branch_of "$P/agentI")" "$BR"          "(i) back on its per-target branch"
 eq "$(git -C "$P/agentI" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(i) per-target branch tracks origin/main"
 eq "$(cat "$P/agentI/.scratch/notes")" "keep" "(i) untracked file survives the move"
 eq "$ERR" ""                                 "(i) a safe move prints nothing"
+advance_remote i2.txt
+ERR=$(sync_stderr "$P/agentI" agentI)
+eq "$(head_of "$P/agentI")" "$(tip)"         "(i) the next sync fast-forwards the per-target branch"
+eq "$(branch_of "$P/agentI")" "$BR"          "(i) and stays on it"
+eq "$ERR" ""                                 "(i) a fast-forward prints nothing"
 
-# --- (j) a detached HEAD carrying a commit the remote lacks stays put: moving
-#         it would orphan the commit. One stderr line names the worktree and why.
+# --- (j) a detached HEAD carrying a commit no ref reaches stays put: moving it
+#         would orphan the commit. One stderr line names the worktree and why.
 P="$TMP/j"; mkdir -p "$P"
 run "$P/agentJ" agentJ
 git -C "$P/agentJ" checkout -q --detach
@@ -220,7 +181,7 @@ ERR=$(sync_stderr "$P/agentJ" agentJ)
 eq "$(head_of "$P/agentJ")" "$LOCAL"         "(j) HEAD with a local commit not moved"
 eq "$(branch_of "$P/agentJ")" "DETACHED"     "(j) still detached"
 has "$ERR" "$P/agentJ"                       "(j) warning names the worktree"
-has "$ERR" "commits that are not on origin/main" "(j) warning names the reason"
+has "$ERR" "holds commits no ref reaches"    "(j) warning names the reason"
 eq "$(lines "$ERR")" "1"                     "(j) exactly one stderr line"
 
 # --- (k) a detached worktree with an uncommitted change to a tracked file stays
@@ -410,6 +371,337 @@ has "$(git -C "$W" status --porcelain)" "?? .agents/skills/unread-skill" "(r) an
 echo '{"targets":' > "$W/.agents/skills/.gc-skill-ownership.json"
 eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) a run over a manifest jq cannot read succeeds"
 has "$(git -C "$W" status --porcelain)" "?? .agents/skills/unread-skill" "(r) and adds no name either"
+
+# --- (s) a detached HEAD on a commit the tip lacks moves once a ref reaches it,
+#         because a squash merge never brings a branch's commits onto the tip. A
+#         remote-tracking ref reaches it first, then only a tag, then only another
+#         branch. ----------------------------------------------------------------
+P="$TMP/s"; mkdir -p "$P"
+run "$P/agentS" agentS
+BR=$(branch_of "$P/agentS")
+git -C "$P/agentS" checkout -q --detach
+echo landed > "$P/agentS/landed.txt"; git -C "$P/agentS" add landed.txt; git -C "$P/agentS" commit -qm landed
+LANDED=$(head_of "$P/agentS")
+git -C "$P/agentS" push -q origin HEAD:refs/heads/polecat/s-work
+git -C "$RIG" fetch -q origin
+advance_remote s1.txt
+ERR=$(sync_stderr "$P/agentS" agentS)
+eq "$(head_of "$P/agentS")" "$(tip)"         "(s) a HEAD a remote-tracking ref reaches moves to the tip"
+eq "$(branch_of "$P/agentS")" "$BR"          "(s) back on its per-target branch"
+eq "$ERR" ""                                 "(s) a safe move prints nothing"
+eq "$(git -C "$RIG" rev-parse refs/remotes/origin/polecat/s-work)" "$LANDED" "(s) the ref that reaches the commit is untouched"
+git -C "$P/agentS" checkout -q --detach "$LANDED"
+git -C "$TMP/remote.git" update-ref -d refs/heads/polecat/s-work
+git -C "$RIG" update-ref -d refs/remotes/origin/polecat/s-work
+git -C "$RIG" tag s-pin "$LANDED"
+advance_remote s2.txt
+ERR=$(sync_stderr "$P/agentS" agentS)
+eq "$(head_of "$P/agentS")" "$(tip)"         "(s) a HEAD only a tag reaches moves to the tip"
+eq "$ERR" ""                                 "(s) and prints nothing"
+git -C "$P/agentS" checkout -q --detach "$LANDED"
+git -C "$RIG" tag -d s-pin >/dev/null
+git -C "$RIG" branch s-keep "$LANDED"
+advance_remote s3.txt
+ERR=$(sync_stderr "$P/agentS" agentS)
+eq "$(head_of "$P/agentS")" "$(tip)"         "(s) a HEAD only another branch reaches moves to the tip"
+eq "$ERR" ""                                 "(s) and that prints nothing either"
+
+# --- (t) a rewritten default branch leaves a per-target branch unable to
+#         fast-forward. Another ref reaches its commits, so it is reset to the
+#         tip. Its own remote, since this rewrites main. ------------------------
+TS="$TMP/tsrc"; git init -q -b main "$TS"
+echo seed > "$TS/README.md"; git -C "$TS" add -A; git -C "$TS" commit -qm init
+echo old > "$TS/old.txt"; git -C "$TS" add -A; git -C "$TS" commit -qm old
+git clone -q --bare "$TS" "$TMP/t.git"
+TR="$TMP/trig"; git clone -q "$TMP/t.git" "$TR"
+P="$TMP/t"; mkdir -p "$P"; W="$P/agentT"
+eq "$(rc_of "$TR" "$W" agentT)" "0"          "(t) the worktree is made"
+BR=$(branch_of "$W"); OLD=$(head_of "$W")
+git -C "$TS" push -q "$TMP/t.git" "$OLD:refs/heads/before-rewrite"
+git -C "$TS" reset -q --hard HEAD~1
+echo new > "$TS/new.txt"; git -C "$TS" add -A; git -C "$TS" commit -qm new
+git -C "$TS" push -q --force "$TMP/t.git" main
+NEW=$(git -C "$TMP/t.git" rev-parse main)
+ERR=$( { sh "$SCRIPT" "$TR" "$W" agentT --sync >/dev/null; } 2>&1 || echo "exit $?")
+eq "$(head_of "$W")" "$NEW"                  "(t) moved to the rewritten tip"
+eq "$(branch_of "$W")" "$BR"                 "(t) on its per-target branch, reset"
+eq "$(git -C "$TR" rev-parse "refs/heads/$BR")" "$NEW" "(t) the branch reads the new tip"
+eq "$(git -C "$TR" rev-parse refs/remotes/origin/before-rewrite)" "$OLD" "(t) the ref that reaches the old commits is untouched"
+eq "$ERR" ""                                 "(t) a safe move prints nothing"
+
+# --- (u) the per-target branch itself holds a commit only it reaches, with the
+#         worktree attached to it. The branch is not reset: the worktree goes to
+#         the tip detached, and the commit stays on the branch. -----------------
+P="$TMP/u"; mkdir -p "$P"
+run "$P/agentU" agentU
+BR=$(branch_of "$P/agentU")
+echo mine > "$P/agentU/mine-u.txt"; git -C "$P/agentU" add mine-u.txt; git -C "$P/agentU" commit -qm mine-u
+MINE=$(head_of "$P/agentU")
+advance_remote u1.txt
+ERR=$(sync_stderr "$P/agentU" agentU)
+eq "$(head_of "$P/agentU")" "$(tip)"         "(u) worktree advanced to the remote tip"
+eq "$(branch_of "$P/agentU")" "DETACHED"     "(u) detached, off the branch that holds the commit"
+eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(u) the branch keeps its commit"
+eq "$ERR" ""                                 "(u) a safe move prints nothing"
+advance_remote u2.txt
+ERR=$(sync_stderr "$P/agentU" agentU)
+eq "$(head_of "$P/agentU")" "$(tip)"         "(u) the next sync still reaches the tip"
+eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(u) and the branch still keeps its commit"
+
+# --- (v) a branch that is not the worktree's own is someone's work, so it stays
+#         where it is, silently, even when it cannot fast-forward. One that can
+#         takes its upstream's commits and stays on the branch. ------------------
+P="$TMP/v"; mkdir -p "$P"
+run "$P/agentV" agentV
+git -C "$P/agentV" checkout -q -b person-branch
+echo theirs > "$P/agentV/theirs.txt"; git -C "$P/agentV" add theirs.txt; git -C "$P/agentV" commit -qm theirs
+THEIRS=$(head_of "$P/agentV")
+advance_remote v1.txt
+ERR=$(sync_stderr "$P/agentV" agentV)
+eq "$(head_of "$P/agentV")" "$THEIRS"        "(v) a branch not its own is not moved"
+eq "$(branch_of "$P/agentV")" "person-branch" "(v) and stays checked out"
+eq "$ERR" ""                                 "(v) and says nothing"
+git -C "$P/agentV" checkout -q --track -b person-ff origin/main
+advance_remote v2.txt
+ERR=$(sync_stderr "$P/agentV" agentV)
+eq "$(head_of "$P/agentV")" "$(tip)"         "(v) a branch not its own fast-forwards when it can"
+eq "$(branch_of "$P/agentV")" "person-ff"    "(v) and stays on that branch"
+eq "$ERR" ""                                 "(v) and that says nothing either"
+
+# --- (w) a worktree on its own branch with an uncommitted change to a tracked
+#         file stays put with the change intact and one stderr line. The branch
+#         has diverged, then the next commit touches the changed file, which is
+#         what a home with a tracked settings change meets. ----------------------
+P="$TMP/w"; mkdir -p "$P"
+run "$P/agentW" agentW
+BR=$(branch_of "$P/agentW")
+echo mine > "$P/agentW/mine-w.txt"; git -C "$P/agentW" add mine-w.txt; git -C "$P/agentW" commit -qm mine-w
+BEFORE=$(head_of "$P/agentW")
+echo edited >> "$P/agentW/README.md"
+advance_remote w1.txt
+ERR=$(sync_stderr "$P/agentW" agentW)
+eq "$(head_of "$P/agentW")" "$BEFORE"        "(w) a diverged branch with a tracked change not moved"
+eq "$(branch_of "$P/agentW")" "$BR"          "(w) and still on it"
+eq "$(tail -n 1 "$P/agentW/README.md")" "edited" "(w) uncommitted change intact"
+has "$ERR" "uncommitted changes to tracked files" "(w) warning names the reason"
+eq "$(lines "$ERR")" "1"                     "(w) exactly one stderr line"
+advance_remote w2.txt
+run "$P/agentW2" agentW2 --sync
+BEFORE=$(head_of "$P/agentW2")
+echo edited > "$P/agentW2/w2.txt"
+echo next > "$SRC/w2.txt"; git -C "$SRC" add -A; git -C "$SRC" commit -qm w2-next
+git -C "$SRC" push -q "$TMP/remote.git" main
+ERR=$(sync_stderr "$P/agentW2" agentW2)
+eq "$(head_of "$P/agentW2")" "$BEFORE"       "(w) a change the next commit touches blocks the fast-forward"
+eq "$(cat "$P/agentW2/w2.txt")" "edited"     "(w) that change intact too"
+has "$ERR" "uncommitted changes to tracked files" "(w) and the warning names that reason"
+
+# --- (x) a per-target branch with no upstream has nothing to fast-forward to, so
+#         it moves to the tip and tracks the default branch from then on. --------
+P="$TMP/x"; mkdir -p "$P"
+run "$P/agentX" agentX
+BR=$(branch_of "$P/agentX")
+git -C "$P/agentX" branch -q --unset-upstream
+advance_remote x1.txt
+ERR=$(sync_stderr "$P/agentX" agentX)
+eq "$(head_of "$P/agentX")" "$(tip)"         "(x) its own branch with no upstream reaches the tip"
+eq "$(branch_of "$P/agentX")" "$BR"          "(x) and stays on it"
+eq "$(git -C "$P/agentX" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(x) which now tracks origin/main"
+eq "$ERR" ""                                 "(x) a safe move prints nothing"
+
+# --- (y) one ref of each kind, alone, reaches the commit on a per-target branch
+#         that cannot fast-forward, which is enough to reset the branch. ----------
+for KIND in remote tag branch; do
+    P="$TMP/y-$KIND"; mkdir -p "$P"; A="agentY$KIND"
+    run "$P/$A" "$A"
+    BR=$(branch_of "$P/$A")
+    echo "$KIND" > "$P/$A/y-$KIND.txt"; git -C "$P/$A" add "y-$KIND.txt"; git -C "$P/$A" commit -qm "y-$KIND"
+    PINNED=$(head_of "$P/$A")
+    case "$KIND" in
+        remote) PIN="refs/remotes/origin/y-pin-$KIND"; git -C "$RIG" update-ref "$PIN" "$PINNED" ;;
+        tag)    PIN="refs/tags/y-pin-$KIND"; git -C "$RIG" tag "y-pin-$KIND" "$PINNED" ;;
+        branch) PIN="refs/heads/y-pin-$KIND"; git -C "$RIG" branch "y-pin-$KIND" "$PINNED" ;;
+    esac
+    advance_remote "y-$KIND-tip.txt"
+    ERR=$(sync_stderr "$P/$A" "$A")
+    eq "$(head_of "$P/$A")" "$(tip)"         "(y) a commit only a $KIND ref reaches: moved to the tip"
+    eq "$(branch_of "$P/$A")" "$BR"          "(y) on its per-target branch, reset ($KIND)"
+    eq "$(git -C "$RIG" rev-parse "$PIN")" "$PINNED" "(y) the $KIND ref still reaches the commit"
+    eq "$ERR" ""                             "(y) a safe move prints nothing ($KIND)"
+done
+
+# --- (z) when git cannot answer, nothing moves that could lose a commit. A failed
+#         reachability read or status leaves a detached worktree where it is, and
+#         a failed reachability read never resets a branch. ----------------------
+REAL_GIT=$(command -v git)
+# git_failing <subcommand> — a PATH entry whose git fails that one subcommand.
+git_failing() {
+    local d="$TMP/fail-$1"; mkdir -p "$d"
+    printf '#!/bin/sh\ncase " $* " in *" %s "*) exit 1 ;; esac\nexec "%s" "$@"\n' "$1" "$REAL_GIT" > "$d/git"
+    chmod +x "$d/git"; echo "$d"
+}
+P="$TMP/z"; mkdir -p "$P"
+run "$P/agentZ" agentZ
+git -C "$P/agentZ" checkout -q --detach
+BEFORE=$(head_of "$P/agentZ")
+advance_remote z1.txt
+ERR=$(PATH="$(git_failing rev-list):$PATH" sync_stderr "$P/agentZ" agentZ)
+eq "$(head_of "$P/agentZ")" "$BEFORE"        "(z) a detached HEAD whose reach cannot be read stays"
+has "$ERR" "$P/agentZ"                       "(z) and the warning names the worktree"
+ERR=$(PATH="$(git_failing status):$PATH" sync_stderr "$P/agentZ" agentZ)
+eq "$(head_of "$P/agentZ")" "$BEFORE"        "(z) a worktree whose status cannot be read stays"
+has "$ERR" "git status failed"               "(z) and the warning says so"
+run "$P/agentZ2" agentZ2
+BR=$(branch_of "$P/agentZ2")
+echo mine > "$P/agentZ2/mine-z.txt"; git -C "$P/agentZ2" add mine-z.txt; git -C "$P/agentZ2" commit -qm mine-z
+MINE=$(head_of "$P/agentZ2")
+advance_remote z2.txt
+ERR=$(PATH="$(git_failing rev-list):$PATH" sync_stderr "$P/agentZ2" agentZ2)
+eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(z) a branch whose reach cannot be read is not reset"
+eq "$(head_of "$P/agentZ2")" "$(tip)"        "(z) and the worktree reaches the tip"
+eq "$(branch_of "$P/agentZ2")" "DETACHED"    "(z) detached, off that branch"
+
+# --- (aa) a repository with no origin has nothing to sync with, so the worktree
+#          stays where it is and the run says nothing. ----------------------------
+NO="$TMP/noorigin"; git clone -q "$TMP/remote.git" "$NO"
+P="$TMP/aa"; mkdir -p "$P"; W="$P/agentAA"
+eq "$(rc_of "$NO" "$W" agentAA)" "0"         "(aa) the worktree is made"
+git -C "$W" checkout -q --detach
+BEFORE=$(head_of "$W")
+git -C "$NO" remote remove origin
+ERR=$( { sh "$SCRIPT" "$NO" "$W" agentAA --sync >/dev/null; } 2>&1 || echo "exit $?")
+eq "$(head_of "$W")" "$BEFORE"               "(aa) not moved"
+eq "$ERR" ""                                 "(aa) and says nothing"
+
+# --- (ab) a branch ahead of its upstream merges as "Already up to date" and moves
+#          nothing, so that success cannot be where a sync ends. A default branch
+#          rewound to an ancestor leaves a per-target branch there with no new
+#          commit on the remote. Each shape has its own remote and rig, since this
+#          rewrites main and every other home's branch would count as a ref. --------
+# rewound_home <name> — a remote, a rig and a home on its own branch at a commit
+# main is about to drop. The rig's local main stays a commit behind, so only that
+# branch and origin/main reach the commit. Sets RB, RR, W, BR, BASE and OLD.
+rewound_home() {
+    local src="$TMP/$1-src"
+    git init -q -b main "$src"
+    echo seed > "$src/README.md"; git -C "$src" add -A; git -C "$src" commit -qm init
+    BASE=$(git -C "$src" rev-parse HEAD)
+    RB="$TMP/$1.git"; git clone -q --bare "$src" "$RB"
+    RR="$TMP/$1-rig"; git clone -q "$RB" "$RR"
+    echo old > "$src/old.txt"; git -C "$src" add -A; git -C "$src" commit -qm old
+    OLD=$(git -C "$src" rev-parse HEAD)
+    git -C "$src" push -q "$RB" main
+    mkdir -p "$TMP/$1"; W="$TMP/$1/agentAB"
+    eq "$(rc_of "$RR" "$W" agentAB)" "0"     "(ab) the worktree is made ($1)"
+    eq "$(head_of "$W")" "$OLD"              "(ab) on the commit main will drop ($1)"
+    BR=$(branch_of "$W")
+}
+rewind_main()  { git -C "$RB" update-ref refs/heads/main "$BASE"; }
+rewound_sync() { { sh "$SCRIPT" "$RR" "$W" agentAB --sync >/dev/null; } 2>&1 || echo "exit $?"; }
+
+rewound_home ab-alone
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$BASE"                 "(ab) a rewind's dropped commit only the branch reaches: worktree at the tip"
+eq "$(branch_of "$W")" "DETACHED"            "(ab) detached, off the branch that holds the commit"
+eq "$(git -C "$RR" rev-parse "refs/heads/$BR")" "$OLD" "(ab) the branch keeps the commit"
+eq "$ERR" ""                                 "(ab) a safe move prints nothing"
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$BASE"                 "(ab) the next sync stays at the tip"
+eq "$(git -C "$RR" rev-parse "refs/heads/$BR")" "$OLD" "(ab) and the branch still keeps the commit"
+eq "$ERR" ""                                 "(ab) and that prints nothing either"
+
+rewound_home ab-reached
+git -C "$RB" update-ref refs/heads/before-rewind "$OLD"
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$BASE"                 "(ab) a rewind's dropped commit another ref reaches: worktree at the tip"
+eq "$(branch_of "$W")" "$BR"                 "(ab) on its per-target branch"
+eq "$(git -C "$RR" rev-parse "refs/heads/$BR")" "$BASE" "(ab) which is reset to the tip"
+eq "$(git -C "$W" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(ab) and still tracks origin/main"
+eq "$(git -C "$RR" rev-parse refs/remotes/origin/before-rewind)" "$OLD" "(ab) the ref that reaches the commit is untouched"
+eq "$ERR" ""                                 "(ab) a safe reset prints nothing"
+
+rewound_home ab-dirty
+echo edited >> "$W/README.md"
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$OLD"                  "(ab) a tracked change keeps a branch ahead of the tip where it is"
+eq "$(branch_of "$W")" "$BR"                 "(ab) and on that branch"
+eq "$(tail -n 1 "$W/README.md")" "edited"    "(ab) the change intact"
+has "$ERR" "uncommitted changes to tracked files" "(ab) the warning names the reason"
+eq "$(lines "$ERR")" "1"                     "(ab) exactly one stderr line"
+
+rewound_home ab-other
+git -C "$W" checkout -q --track -b person-ahead origin/main
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$OLD"                  "(ab) a branch not its own stays ahead of its upstream"
+eq "$(branch_of "$W")" "person-ahead"        "(ab) and stays checked out"
+eq "$ERR" ""                                 "(ab) and says nothing"
+
+# A commit on its own branch with nothing new upstream is the same shape, with no
+# rewind behind it.
+P="$TMP/ab"; mkdir -p "$P"
+run "$P/agentAB" agentAB
+BR=$(branch_of "$P/agentAB")
+echo mine > "$P/agentAB/mine-ab.txt"; git -C "$P/agentAB" add mine-ab.txt; git -C "$P/agentAB" commit -qm mine-ab
+MINE=$(head_of "$P/agentAB")
+ERR=$(sync_stderr "$P/agentAB" agentAB)
+eq "$(head_of "$P/agentAB")" "$(tip)"        "(ab) a local commit with nothing new upstream: worktree at the tip"
+eq "$(branch_of "$P/agentAB")" "DETACHED"    "(ab) detached, off the branch that holds it"
+eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(ab) the branch keeps the local commit"
+eq "$ERR" ""                                 "(ab) that move prints nothing"
+
+# --- (ac) a per-target branch at the tip has nothing to do, so a tracked change is
+#          no refusal: live homes carry one in .claude/settings.json, and a line at
+#          every start would say nothing. The same goes for a fast-forward past it. --
+P="$TMP/ac"; mkdir -p "$P"
+run "$P/agentAC" agentAC
+BR=$(branch_of "$P/agentAC")
+echo edited >> "$P/agentAC/README.md"
+ERR=$(sync_stderr "$P/agentAC" agentAC)
+eq "$ERR" ""                                 "(ac) at the tip with a tracked change: says nothing"
+eq "$(branch_of "$P/agentAC")" "$BR"         "(ac) stays on its per-target branch"
+advance_remote ac1.txt
+ERR=$(sync_stderr "$P/agentAC" agentAC)
+eq "$(head_of "$P/agentAC")" "$(tip)"        "(ac) a fast-forward the change is not in the way of reaches the tip"
+eq "$(branch_of "$P/agentAC")" "$BR"         "(ac) and stays on that branch"
+eq "$(tail -n 1 "$P/agentAC/README.md")" "edited" "(ac) with the change intact"
+eq "$ERR" ""                                 "(ac) and says nothing either"
+
+# --- (ad) the fast-forward answers for the branch's upstream, and the default branch
+#          is what a home follows. A branch at an upstream that is not the default
+#          branch has nothing to fast-forward to and is not at the tip. ------------
+P="$TMP/ad"; mkdir -p "$P"
+run "$P/agentAD" agentAD
+BR=$(branch_of "$P/agentAD")
+git -C "$P/agentAD" push -q origin HEAD:refs/heads/ad-other
+git -C "$P/agentAD" fetch -q origin
+git -C "$P/agentAD" branch -q --set-upstream-to=origin/ad-other
+advance_remote ad1.txt
+ERR=$(sync_stderr "$P/agentAD" agentAD)
+eq "$(head_of "$P/agentAD")" "$(tip)"        "(ad) its own branch at another upstream reaches the default tip"
+eq "$(branch_of "$P/agentAD")" "$BR"         "(ad) and stays on it"
+eq "$(git -C "$P/agentAD" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(ad) which now tracks origin/main"
+eq "$ERR" ""                                 "(ad) a safe move prints nothing"
+
+# --- (ae) with origin/HEAD unset there is no default tip to reach, so the
+#          fast-forward is as far as a sync gets, and it says why. Its own rig, since
+#          origin/HEAD is shared by all of a repo's worktrees, and set so its fetch
+#          does not put origin/HEAD back, as a current git otherwise does. -----------
+NH="$TMP/noheadrig"; git clone -q "$TMP/remote.git" "$NH"
+P="$TMP/ae"; mkdir -p "$P"; W="$P/agentAE"
+eq "$(rc_of "$NH" "$W" agentAE)" "0"         "(ae) the worktree is made"
+BR=$(branch_of "$W")
+git -C "$NH" config remote.origin.followRemoteHEAD never
+git -C "$NH" remote set-head origin -d
+advance_remote ae1.txt
+ERR=$( { sh "$SCRIPT" "$NH" "$W" agentAE --sync >/dev/null; } 2>&1 || echo "exit $?")
+eq "$(head_of "$W")" "$(tip)"                "(ae) its own branch still fast-forwards to its upstream"
+eq "$(branch_of "$W")" "$BR"                 "(ae) and stays on it"
+has "$ERR" "origin/HEAD is unset"            "(ae) the warning names the reason"
+eq "$(lines "$ERR")" "1"                     "(ae) exactly one stderr line, so the run exited 0"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
