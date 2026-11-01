@@ -496,6 +496,7 @@ it('shows a key for the row markers and the state tints', async () => {
   expect(key.textContent).toContain('needs you');
   expect(key.textContent).toContain('waiting for you');
   expect(key.textContent).toContain('a sitting in session');
+  expect(key.textContent).toContain('a sitting failed to start');
   expect(key.textContent).toContain('a human gate or a conversation is on it');
   expect(key.textContent).toContain('gate = a human gate holds the work until you answer');
   expect(key.textContent).toContain('conversation = a conversation holds nothing, so the work is not held');
@@ -1232,15 +1233,16 @@ it('prints the state and headline the wire carries in the sittings table', async
   expect(section.textContent).not.toContain('running');
 
   // An open sitting's age runs from its start, and a closed one's from its end.
-  const cases: [string, string, string, string][] = [
-    ['tk-s1', 'in session', '40m', 'headline of the live one'],
-    ['tk-s2', 'waiting', '40m', 'headline of the waiting one'],
-    ['tk-s3', 'start failed', '40m', 'headline of the failed one'],
-    ['tk-s4', 'closed', '34m', 'headline of the closed one'],
+  const cases: [string, string, string, string, string][] = [
+    ['tk-s1', 'in session', 'sitting-marker--in-session', '40m', 'headline of the live one'],
+    ['tk-s2', 'waiting', 'sitting-marker--waiting', '40m', 'headline of the waiting one'],
+    ['tk-s3', 'start failed', 'sitting-marker--start-failed', '40m', 'headline of the failed one'],
+    ['tk-s4', 'closed', 'sitting-marker--closed', '34m', 'headline of the closed one'],
   ];
-  for (const [id, word, age, headline] of cases) {
+  for (const [id, word, wordClass, age, headline] of cases) {
     const row = within(section).getByText(id).closest('tr') as HTMLTableRowElement;
     expect(row.cells[0].textContent).toBe(word);
+    expect(row.cells[0].className).toBe(wordClass);
     expect(row.cells[4].textContent).toBe(age);
     expect(within(row).getByText(headline)).toBeTruthy();
     expect(within(row).queryByText(/not the headline/)).toBeNull();
@@ -1335,6 +1337,34 @@ it('reads a failed start on the chip of a held row and of a conversation’s own
   expect(ownCard.textContent).toContain('Start failed — provider error: model_not_found');
   // The row is the sitting's own, so its card names that sitting too.
   expect(ownCard.textContent).toContain('the ask nobody started on · start failed');
+});
+
+// A held row that reaches the chip with no state reads as waiting, the state that
+// invites the operator to look rather than telling them it is handled.
+it('reads a held row with no state as waiting', async () => {
+  serveBoard({
+    ...BOARD,
+    sittings: [],
+    tiles: [
+      tile({
+        id: 'tk-held',
+        kind: 'task',
+        title: 'a held row',
+        severity: 'ELEVATED',
+        section: 'gate',
+        owed: true,
+        held: true,
+        work_held: true,
+        sitting_state: '',
+      }),
+    ],
+  });
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('a held row')).toBeTruthy());
+
+  const chip = within(rowFor('a held row') as HTMLElement).getByRole('button', { name: /waiting for you/i });
+  expect(chip.textContent).toContain('gate · waiting');
+  expect(chip.parentElement?.className).toContain('sitting-marker--waiting');
 });
 
 it('drills into a sitting by its subject', async () => {

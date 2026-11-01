@@ -386,7 +386,7 @@ export interface Tile {
  *
  * Sittings are not tiles and are not ranked against them: a tile is an anchor
  * that wants something, a sitting is an event in the conversation record. The
- * board carries every running sitting plus those closed inside the service's
+ * board carries every open sitting plus those closed inside the service's
  * recent window (`GC_HELM_SITTINGS_WINDOW`, a day by default).
  */
 export interface Sitting {
@@ -398,14 +398,14 @@ export interface Sitting {
   /**
    * The conversation's close reason: the headline a sign-off settled on, or the
    * operator's dismissal. The sentence a closed sitting reads by when it left no
-   * takeaway. `''` while the sitting runs.
+   * takeaway. `''` while it is open.
    */
   outcome_reason: string;
   /** The converse session that ran it — what an operator attaches to while it is in session. */
   session: string;
   /** RFC 3339. Omitted when the source could not read the stamp. */
   opened_at?: string;
-  /** RFC 3339. Omitted while the sitting is still running. */
+  /** RFC 3339. Omitted while it is open. */
   closed_at?: string;
   /**
    * The headline THIS sitting left on its subject, or `''`. A takeaway lives on
@@ -502,7 +502,7 @@ export interface Board {
    */
   tiles: Tile[] | null;
   /**
-   * The conversation record: running sittings first (longest-running first),
+   * The conversation record: open sittings first (longest-open first),
    * then the recently closed (most recent first). `null` rather than `[]` when
    * empty, exactly like `tiles` — narrow before iterating.
    */

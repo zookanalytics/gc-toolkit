@@ -114,6 +114,14 @@ func TestRowRollsUpFromItsSittingsStates(t *testing.T) {
 	if row.SittingState != SittingInSession || row.Owed {
 		t.Errorf("the row reads the sitting's state: state=%q owed=%v", row.SittingState, row.Owed)
 	}
+
+	// A gather that builds no record, as the supervisor backend's does, reads no
+	// conversation in session, whoever it is assigned to.
+	b = BuildBoard([]Anchor{epicSubject("tk-subj"), conversationAnchor("tk-a", "tk-subj", "an ask", sittingAlias("tk-a"))},
+		fixtureNow, false, nil, liveOwners(sittingAlias("tk-a")))
+	if row = mustTile(t, b, "tk-subj"); row.SittingState != SittingWaiting || !row.Owed {
+		t.Errorf("with no record the row reads waiting: state=%q owed=%v", row.SittingState, row.Owed)
+	}
 }
 
 // TestARowOnlyAGateHoldsWaits: the roll-up of no sittings on a held row is

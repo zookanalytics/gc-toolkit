@@ -796,7 +796,7 @@ surface prints it as it stands. The close reason is the conversation task's own
 (`outcome_reason` on the wire): the headline a sign-off settled on, the
 operator's dismissal, or the reading a premise re-check closed it with. It is
 per-sitting and never rewritten, so it is attributable with no inference at
-all. A running sitting has none.
+all. An open sitting has none.
 
 `gc.takeaway` is the harder half, and it is why `Sitting.takeaway` is not a
 copy. **The takeaway lives on the SUBJECT, and each sitting overwrites the last
@@ -977,7 +977,8 @@ reasons: its closed half needs the closed conversations, and the scan reads
 `open`. Under `GC_HELM_SOURCE=supervisor` the envelope's `sittings` is `null` and
 neither view renders the section. Two narrowings follow from the same scan. A
 held conversation is `in_progress`, so the backend sees a conversation only
-while it waits in the queue. And the supervisor's bead carries no
+while it is `open`, and with no sitting to read a state from, that conversation
+reads `waiting` whoever it is assigned to. And the supervisor's bead carries no
 `await_type`, so the backend can tell no human gate from any other gate and
 folds none: a board served from it shows no human gate at all until the API
 carries the field.

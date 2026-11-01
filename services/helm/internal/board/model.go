@@ -677,7 +677,7 @@ type Sitting struct {
 
 	// OutcomeReason is the conversation task's close reason, the one-line
 	// sentence its ending wrote: the headline a sign-off settled on, or the
-	// operator's dismissal. Empty on a running sitting.
+	// operator's dismissal. Empty on an open sitting.
 	OutcomeReason string `json:"outcome_reason"`
 	// Session is the converse session that ran the sitting (gc.session_name),
 	// which is what an operator attaches to while the sitting is in session.
