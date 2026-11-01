@@ -134,12 +134,18 @@ and `gc beads list` was run against it, to know the design works here.
   reference requires it". *Session Model Unification* lists direct session targeting
   among the causes. `wake_mode = "fresh"` starts a new provider session on each wake.
 - A detach does not stop such a session. `computeAwakeSetKeyed` in package main keeps a
-  running on-demand session awake under the reason `on-demand:running`, and its comment
-  says it drains "via idle_timeout, not demand absence". `buildIdleTracker` registers
-  `idle_timeout` for a named session that is not `always`. The five-minute
-  `defaultOnDemandIdleTimeout` runs off `detached_at`, which `reconcileDetachedAtInfo`
-  writes only under a sleep policy, and this city sets none. So a sitting ends at
-  `gc runtime drain-ack` or at `idle_timeout`.
+  running on-demand session awake under the reason `on-demand:running`.
+- What ends it decides whether the next attach is fresh. `AcknowledgeDrainPatch` and
+  `CompleteDrainPatch` clear `session_key` on a fresh session, so `gc runtime drain-ack`
+  and an idle drain each leave nothing to resume. The idle drain comes from
+  [`sleep_after_idle`](https://docs.gascity.com/reference/config#agent):
+  `reconcileDetachedAtInfo` stamps `detached_at` under a sleep policy, and past the limit
+  the awake computation decides `idle-sleep`, which the reconciler drains. `idle_timeout`
+  takes another path: `buildIdleTracker` registers it for a named session that is not
+  `always`, and its kill writes `SleepPatch`, which keeps the key. `SessionHandle.Attach`
+  starts a stopped session from `startCommand` with no look at `wake_mode`, and only the
+  controller's `PreWakePatch` clears a key at a wake. So the seat sets `sleep_after_idle`
+  in place of Gas Town's `idle_timeout`, or an attach after an idle kill would resume.
 
 ## Paths that would reach the seat
 
@@ -222,4 +228,5 @@ The answer changes if one of these ships. None had fired at the commits above.
 - `gc mail` or a config field can scope who may mail a session: one arm of the check goes.
 - A graph.v2 pour runs `sling_query`, or an agent can refuse a pour: `--on` is refused at the
   caller, and the seat's empty default formula may go.
+- `gc session attach` honors `wake_mode`: the seat can take Gas Town's `idle_timeout`.
 - `gc convoy stranded` tells a live run from an ended one: tk-1tfzr71.19's need is covered.

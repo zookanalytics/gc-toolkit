@@ -112,7 +112,7 @@ The operator's account: "lots of items naturally did go to the mayor to handle..
 As a mayor, it works well. As the dumping ground of everything, it became a
 problem" (visit tk-2hdsjmg). This design's reading of why: a resident agent with an
 inbox is the easiest thing to send work to. So it removes the properties that made it
-easy, rather than asking the prompt to decline.
+easy, and leaves the prompt only the two paths nothing can refuse.
 
 - **Nothing is waiting to receive.** The seat is on demand and fresh, so no
   conversation accumulates what it was told. Plain mail wakes nothing. A nudge or a
@@ -181,9 +181,8 @@ the witness's differences from Gas Town:
 A role's default is Gas Town's, and each difference names its reason and what ends
 it (visit tk-dbpz6t2, said of the witness and applied here as this design's own
 reading). The agent shape is the same as Gas Town's: `scope = "city"`,
-`wake_mode = "fresh"`, `work_dir = ".gc/agents/mayor"`, `idle_timeout = "1h"`,
-`max_active_sessions = 1`. Each difference below ends with an operator ruling that
-gives the seat the job.
+`wake_mode = "fresh"`, `work_dir = ".gc/agents/mayor"`, `max_active_sessions = 1`. Each
+difference below but the last ends with an operator ruling that gives the seat the job.
 
 | Gas Town's mayor | This city's | Reason |
 |---|---|---|
@@ -193,6 +192,7 @@ gives the seat the job.
 | Handles escalations | Files or points | Findings and human gates carry them |
 | Rig wake and sleep | Reads only | The operator's and mechanik's today |
 | `gc handoff` when context fills | No handoff, no carried memory | A resident context is one symptom the record names |
+| `idle_timeout = "1h"` | `sleep_after_idle = "1h"` | An idle kill keeps the conversation key, and `gc session attach` would then resume the old conversation. An idle drain clears the key. This ends when `gc session attach` honors `wake_mode` |
 
 ## 2. What "overseer of all" means at landing
 
@@ -209,9 +209,10 @@ and it reports nothing nobody asked for.
 
 It starts fresh for each sitting, through `wake_mode = "fresh"` and `on_demand`. A
 detach does not end a sitting, because Gas City keeps a running on-demand session up
-until it idles past `idle_timeout`. So a sitting ends when the operator says it is
-done and the mayor runs `gc runtime drain-ack`, or after an hour idle. An attach
-inside that hour continues the sitting, and the first wake after it is a new
+until its idle limit. So a sitting ends when the operator says it is done and the mayor
+runs `gc runtime drain-ack`, or an hour after the operator detaches, through
+`sleep_after_idle`. An attach inside that hour continues the sitting. Both ends drain
+the session, which clears its conversation key, so the next attach is a new
 conversation. Each ruling lands on its bead before the next piece, so nothing is
 lost. The prompt forbids `gc handoff`, and the seat's `env` sets
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, because a handoff note or a memory file would
@@ -474,7 +475,8 @@ on each. They run in order, because they share files.
    pouring. Steering's "Placing a bead" and the authority map's place row come with it.
 3. **The seat.** `agents/mayor/` with its prompt, carrying the method and the exact
    commands; the batch-sort skill; the `pack.toml` stanza with `mode = "on_demand"`; the
-   `agent.toml` with its empty `default_sling_formula`, refusing `sling_query` and `env`;
+   `agent.toml` with its empty `default_sling_formula`, refusing `sling_query`,
+   `sleep_after_idle` and `env`;
    the default paths in the table; a line in mechanik's prompt
    saying placement is the mayor's; and `architecture.md`, `built-once-target.md`, §4 of
    `component-model.md`, and the seed audit's render. The prompt and skill are pack
@@ -482,7 +484,7 @@ on each. They run in order, because they share files.
    `gh-origin-guard` overlay, as mechanik does, which touches that warrant, so the unit
    re-verifies it. Done when a live probe shows that
    an attach materializes the seat and starts a new conversation with no memory index,
-   a detach leaves it up, `gc runtime drain-ack` or an hour idle ends it, and the next
+   a detach leaves it up, `gc runtime drain-ack` or the idle limit ends it, and the next
    attach starts another conversation. Plain mail wakes nothing, and a nudge wakes it for
    one turn. The probe also tries `gc sling` to the seat. Without `--on` it should exit
    non-zero, and with `--on` the run pours and the check's first arm names its steps. The
