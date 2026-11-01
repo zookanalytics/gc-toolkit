@@ -400,9 +400,12 @@ func routedWaits(a Anchor) (all, open []string) {
 // keeps the HIGHER band. So any rule that lowers the `human` row is silently
 // undone by its `parked` twin unless the twin is recognised as the same
 // human-gated bead — which is what reading the marker off the anchor does.
+//
+// The marker says nothing of a conversation. Its sitting's state says whether it
+// waits for a person, and a live session holding one means the person is in it.
 func humanGated(a Anchor) bool {
 	return a.Source == "decision" || a.Source == "human" || a.Source == KindGate ||
-		a.Metadata[mdRoutedTo] == routedHuman
+		(a.Source != KindConversation && a.Metadata[mdRoutedTo] == routedHuman)
 }
 
 // The two metadata markers that make an ordinary bead an anchor in its own
@@ -1996,7 +1999,8 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 // appears once, in its higher band), and then PARTITIONS: the operator's queue
 // ahead of the city overview, per [owedFirst]. Ties break by id ascending for
 // deterministic output. now stamps GeneratedAt. partial/partialErrors propagate
-// cross-rig degradation.
+// cross-rig degradation. A bead also admitted as a conversation is derived as
+// the conversation alone ([dropConversationTwins]).
 //
 // facts carries the cross-anchor joins (in-flight workflows, session liveness,
 // the sittings record); a zero value is legal and yields a board with no
@@ -2005,6 +2009,7 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 // whether a conversation is in session from its sitting's state, indexed once
 // here before any tile is derived.
 func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []string, facts Facts) Board {
+	anchors = dropConversationTwins(anchors)
 	facts.Sittings = stampSittings(facts.Sittings, facts)
 	facts.human = indexHuman(anchors, facts)
 	// Read before any tile: a merge anchor's machine axis reads a blocked

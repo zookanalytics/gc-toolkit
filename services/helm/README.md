@@ -349,6 +349,14 @@ the board said about `gc-sc8a8`, a bead held for a named operator ruling
 marker, so the two rows describe the bead the same way and the dedup has nothing
 left to arbitrate.
 
+A conversation is the bead this does not cover. It has no marker those queries
+could exclude it by, so one carrying either key is gathered under both kinds, and
+`BuildBoard` drops every other anchor of that bead before it derives anything
+(`board.dropConversationTwins`). The bead is a conversation and nothing else: it
+folds onto the bead it tracks and reads the state its sitting carries, whichever
+backend gathered it and in whichever order. `humanGated` does not read the marker
+on it, so the marker cannot make a conversation a live session holds read as owed.
+
 Both gathers read the anchor's `parent-child` children, exactly as the `epic`
 gather does. The relation belongs to the bead, not to the kind, and it is
 load-bearing for `parked` in particular — see *Until its work is done* below.

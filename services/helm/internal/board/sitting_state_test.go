@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 )
 
 // TestEachSittingCarriesOneState pins the state a sitting carries on the wire. A
@@ -158,5 +159,188 @@ func TestSittingStateAndHeadlineRideTheWire(t *testing.T) {
 		if _, ok := wire[key]; ok {
 			t.Errorf("%s is an input to the state, so it stays off the wire", key)
 		}
+	}
+}
+
+// conversationTwin is the anchor the gather also admits a conversation under
+// when it carries the key that kind selects on: the same bead, read as that kind.
+func conversationTwin(conv Anchor, kind string) Anchor {
+	twin := conv
+	twin.Kind, twin.Source = kind, kind
+	twin.Subjects, twin.RepliesTo, twin.Assignee = nil, nil, ""
+	return twin
+}
+
+// TestAConversationReadsTheSameHoweverItWasAdmitted: a key a metadata-keyed kind
+// selects on can sit on a conversation, which then reaches the board under both
+// kinds, ahead of the conversation on one backend and behind it on the other.
+// The whole board reads as it does for a conversation carrying no such key, so
+// neither the key nor the order decides what the row or its subject's row says.
+func TestAConversationReadsTheSameHoweverItWasAdmitted(t *testing.T) {
+	alias := sittingAlias("tk-conv")
+	for _, stamp := range []struct{ kind, key, value string }{
+		{"human", mdRoutedTo, routedHuman},
+		{"parked", mdTakeaway, "what a sitting concluded"},
+	} {
+		for _, st := range []struct {
+			name    string
+			sitting Sitting
+			facts   Facts
+		}{
+			{"waiting", Sitting{Status: "open", Assignee: assigneeHuman}, Facts{}},
+			{"start failed", Sitting{Status: "open", Assignee: assigneeHuman, StartFailure: "setup timeout"}, Facts{}},
+			{"in session", Sitting{Status: "in_progress", Assignee: alias}, liveOwners(alias)},
+		} {
+			for _, sub := range []struct {
+				name    string
+				anchors []Anchor
+			}{
+				{"its subject has no row", nil},
+				{"its subject has a row", []Anchor{epicSubject("tk-subj")}},
+			} {
+				t.Run(stamp.kind+"/"+st.name+"/"+sub.name, func(t *testing.T) {
+					st.sitting.ID, st.sitting.Subject = "tk-conv", "tk-subj"
+					st.facts.Sittings = []Sitting{st.sitting}
+					read := func(admitted ...Anchor) string {
+						t.Helper()
+						raw, err := json.Marshal(BuildBoard(append(admitted, sub.anchors...), fixtureNow, false, nil, st.facts))
+						if err != nil {
+							t.Fatal(err)
+						}
+						return string(raw)
+					}
+					plain := conversationAnchor("tk-conv", "tk-subj", "talk the plan over", st.sitting.Assignee)
+					carrying := plain
+					carrying.Metadata = map[string]string{stamp.key: stamp.value}
+					twin := conversationTwin(carrying, stamp.kind)
+
+					want := read(plain)
+					for _, tc := range []struct {
+						name     string
+						admitted []Anchor
+					}{
+						{"the key alone", []Anchor{carrying}},
+						{"the other kind first", []Anchor{twin, carrying}},
+						{"the other kind second", []Anchor{carrying, twin}},
+					} {
+						if got := read(tc.admitted...); got != want {
+							t.Errorf("%s reads differently from a conversation with no such key:\n got %s\nwant %s", tc.name, got, want)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestRowAndListAgreeOnAConversationAdmittedTwice pins what the row prints beside
+// what the list prints, for a conversation carrying `gc.routed_to=human` and
+// gathered the way the beads backend gathers it, the routed kind first. Each
+// state reads the same in both places, on the conversation's own row and on the
+// row of a subject it folds onto.
+func TestRowAndListAgreeOnAConversationAdmittedTwice(t *testing.T) {
+	alias := sittingAlias("tk-conv")
+	for _, tc := range []struct {
+		name    string
+		sitting Sitting
+		facts   Facts
+		want    string
+		reason  string
+		owed    bool
+		section string
+		needs   string
+	}{
+		{
+			name:    "in session",
+			sitting: Sitting{Status: "in_progress", Assignee: alias},
+			facts:   liveOwners(alias),
+			want:    SittingInSession, section: SectionActive,
+			needs: "in conversation",
+		},
+		{
+			name:    "waiting",
+			sitting: Sitting{Status: "open", Assignee: assigneeHuman},
+			want:    SittingWaiting, owed: true, section: SectionGate,
+			needs: "talk the plan over",
+		},
+		{
+			name:    "start failed",
+			sitting: Sitting{Status: "open", Assignee: assigneeHuman, StartFailure: "setup timeout"},
+			want:    SittingStartFailed, reason: "setup timeout", owed: true, section: SectionGate,
+			needs: "start failed (setup timeout): talk the plan over",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.sitting.ID, tc.sitting.Subject = "tk-conv", "tk-subj"
+			tc.facts.Sittings = []Sitting{tc.sitting}
+			conv := conversationAnchor("tk-conv", "tk-subj", "talk the plan over", tc.sitting.Assignee)
+			conv.Metadata = map[string]string{mdRoutedTo: routedHuman}
+			twin := conversationTwin(conv, "human")
+
+			b := BuildBoard([]Anchor{twin, conv}, fixtureNow, false, nil, tc.facts)
+			if got := b.Sittings[0].State; got != tc.want {
+				t.Errorf("the list reads %q, want %q", got, tc.want)
+			}
+			row := mustTile(t, b, "tk-conv")
+			if row.SittingState != tc.want || row.SittingStartFailure != tc.reason || !row.Held || row.Kind != KindConversation {
+				t.Errorf("its own row: state=%q reason=%q held=%v kind=%q, want %q reason %q, held", row.SittingState, row.SittingStartFailure, row.Held, row.Kind, tc.want, tc.reason)
+			}
+			if row.Owed != tc.owed || row.Section != tc.section || row.Needs != tc.needs {
+				t.Errorf("its own row: owed=%v section=%q needs=%q, want owed=%v section=%q needs=%q", row.Owed, row.Section, row.Needs, tc.owed, tc.section, tc.needs)
+			}
+
+			b = BuildBoard([]Anchor{twin, conv, epicSubject("tk-subj")}, fixtureNow, false, nil, tc.facts)
+			if got := b.Sittings[0].State; got != tc.want {
+				t.Errorf("beside a subject's row the list reads %q, want %q", got, tc.want)
+			}
+			subj := mustTile(t, b, "tk-subj")
+			if subj.SittingState != tc.want || subj.SittingStartFailure != tc.reason || !subj.Held || subj.Owed != tc.owed || subj.Needs != tc.needs {
+				t.Errorf("the subject's row: state=%q reason=%q held=%v owed=%v needs=%q, want %q reason %q owed=%v needs=%q", subj.SittingState, subj.SittingStartFailure, subj.Held, subj.Owed, subj.Needs, tc.want, tc.reason, tc.owed, tc.needs)
+			}
+			if _, doubled := tileByID(b, "tk-conv"); doubled {
+				t.Error("the conversation keeps a row beside its subject's")
+			}
+		})
+	}
+
+	// A closed conversation is a sitting and no conversation anchor, so the routed
+	// kind alone admits it. The list reads closed, and its row is a closed row,
+	// which holds nothing and marks nothing.
+	t.Run("closed", func(t *testing.T) {
+		twin := Anchor{ID: "tk-conv", Kind: "human", Source: "human", Title: "talk the plan over",
+			ClosedAt: fixtureNow.Add(-time.Hour), Metadata: map[string]string{mdRoutedTo: routedHuman}}
+		b := BuildBoard([]Anchor{twin}, fixtureNow, false, nil, Facts{
+			Sittings: []Sitting{{ID: "tk-conv", Subject: "tk-subj", Status: "closed", Assignee: assigneeHuman, ClosedAt: fixtureNow.Add(-time.Hour)}},
+		})
+		if got := b.Sittings[0].State; got != SittingClosed {
+			t.Errorf("the list reads %q, want %q", got, SittingClosed)
+		}
+		row := mustTile(t, b, "tk-conv")
+		if row.ClosedAt.IsZero() || row.SittingState != "" || row.Held || row.Owed {
+			t.Errorf("a closed row holds and marks nothing: closed_at=%v state=%q held=%v owed=%v", row.ClosedAt, row.SittingState, row.Held, row.Owed)
+		}
+	})
+}
+
+// TestDropConversationTwinsLeavesOtherBeadsAdmittedTwice: only a conversation is
+// settled ahead of the dedup. A bead admitted under two other kinds keeps both
+// anchors, for the dedup to reconcile by band, and the caller's slice is left
+// as it was.
+func TestDropConversationTwinsLeavesOtherBeadsAdmittedTwice(t *testing.T) {
+	routed := Anchor{ID: "tk-both", Kind: "human", Source: "human"}
+	parked := Anchor{ID: "tk-both", Kind: "parked", Source: "parked"}
+	conv := conversationAnchor("tk-conv", "tk-subj", "an ask", assigneeHuman)
+	in := []Anchor{conversationTwin(conv, "human"), routed, conv, parked}
+
+	var got []string
+	for _, a := range dropConversationTwins(in) {
+		got = append(got, a.ID+":"+a.Source)
+	}
+	want := []string{"tk-both:human", "tk-conv:conversation", "tk-both:parked"}
+	if !slices.Equal(got, want) {
+		t.Errorf("anchors = %v, want %v", got, want)
+	}
+	if in[0].Source != "human" || in[3].ID != "tk-both" {
+		t.Errorf("the caller's anchors were written through: %+v", in)
 	}
 }

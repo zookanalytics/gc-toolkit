@@ -65,6 +65,27 @@ func isWrapperKind(source string) bool {
 	return source == KindGate || source == KindConversation
 }
 
+// dropConversationTwins removes every other anchor of a bead the gather also
+// admitted as a conversation, so the board derives that bead once, as a
+// conversation. The metadata-keyed kinds select on keys any bead can carry, and
+// a conversation has no marker those queries could exclude it by, so one
+// carrying `gc.routed_to=human` or `gc.takeaway` arrives under both kinds.
+// Neither later pass can choose between them: the id-dedup keeps the louder row
+// and the fold reads a bead's first anchor, so rank and gather order would
+// decide whether the conversation folds onto its bead and reads its sitting's
+// state.
+func dropConversationTwins(anchors []Anchor) []Anchor {
+	conversations := map[string]bool{}
+	for _, a := range anchors {
+		if a.Source == KindConversation {
+			conversations[a.ID] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(anchors), func(a Anchor) bool {
+		return a.Source != KindConversation && conversations[a.ID]
+	})
+}
+
 // humanGate reports whether a blocker is a human gate, open or closed.
 func humanGate(b Blocker) bool {
 	return b.IssueType == "gate" && b.AwaitType == awaitHuman
