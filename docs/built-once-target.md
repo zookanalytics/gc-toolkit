@@ -179,7 +179,8 @@ reason and what ends it:
   tk-1tfzr71.19 retires the sweep.
 - **The nudge order.** Gas Town's deacon does this through a command and a step
   we do not carry. This ends when we take Gas Town's deacon or Gas City closes
-  issue #4090.
+  issue #4090 with a fix that also reaches a session stopped short of
+  `next-iteration`.
 
 ### Doctor
 

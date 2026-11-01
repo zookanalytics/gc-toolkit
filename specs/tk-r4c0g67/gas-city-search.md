@@ -63,9 +63,18 @@ Healthy witnesses were not looping in their conversations. They ran a fresh sess
 about every two minutes, and the supervisor log holds 6,384 "Cycled fresh-mode
 session" lines naming a witness.
 
-**The shape that stops short is upstream's as well.** gastownhall/gascity #4090, open
-since 2026-07-08, reports patrol sessions holding their wisp with every native
-recycle path deferring, and its reporter runs a nudge order as the workaround.
+**The shape that stops short is upstream's as well.** Gas City's restart holds off
+for a session that still holds its current wisp
+([the reassignment restart](#the-reassignment-restart)), and Gas Town answers that
+gap with a watcher ([Gas Town](#gas-town)).
+
+**gastownhall/gascity #4090 is not that shape.** Open since 2026-07-08, it reports this
+ending frozen on Gas City 1.3.3: patrol sessions poured and assigned their successor,
+exited idle and were never recycled, and its reporter runs a nudge order as the
+workaround. That release has no reassignment restart. `792ad0337` (#3288) added it and
+is in neither `v1.3.3` nor `v1.3.5`. This city's build has it, and here the same shape
+was restarted 53 of 53 times. So closing that issue does not by itself retire the
+order, which serves a session that stops short.
 
 ## The need
 
@@ -422,9 +431,10 @@ own session row.
 ## When the answer changes
 
 - Gas City paces an always-on session, as Gas Town's step assumes. The wait then goes.
-- Gas City closes #4090 or ships a continuation for a session that stops short, or a
-  stall recycler with an agent-level form that the v2 reconciler honours. On 2026-10-31
-  none exists at the commits above. The order then goes.
+- Gas City ships a continuation for a session that stops short, whether or not it
+  closes #4090 with it, or a stall recycler with an agent-level form that the v2
+  reconciler honours. On 2026-10-31 none exists at the commits above. The order then
+  goes.
 - tk-1tfzr71.19 moves the witness's duties onto orders or Gas Town's roles. The order
   goes if that takes Gas Town's deacon, which nudges a quiet witness through its
   health scan.
