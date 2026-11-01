@@ -77,15 +77,15 @@ held a cycle, and no gate had an open blocker of its own.
 
 | Across the stores | This rig's store | The widest and deepest of the others |
 |---|---|---|
-| Beads with an open blocker | 316 | 32 |
+| Beads with an open blocker | 304 | 40 |
 | Deepest walk from any of them | 7 | 6 |
-| Most beads reached from one | 21 | 7 |
+| Most beads reached from one | 25 | 8 |
 | Live PR anchors: deepest walk | 2 | 1 |
-| Live PR anchors: most beads reached | 6 | 2 |
+| Live PR anchors: most beads reached | 7 | 3 |
 
 `walkDepth` is 16, about twice the deepest graph, and bounds the levels of a root's
 walk, so the reads of one call too, since the walks of a call share a read per
-level. `walkBeads` is 256, about twelve times the widest, and bounds the beads a
+level. `walkBeads` is 256, about ten times the widest, and bounds the beads a
 root's walk reaches. Each root has both to itself, so a root's answer is the same
 alone as beside others, and the board and the label cannot differ on it. A root past
 either has no answer: its label stays as it is and the board's partial note names
@@ -105,11 +105,25 @@ it files reads once. A human gate now counts as a gate whatever its route, which
 board's comment on `demand` already said. Five of the 7 lose `blocked` by that. The
 other two keep it, because each also waits on a task routed to a person.
 
+Read again once each root walked for itself, over 46 live PR anchors and 755 board
+rows, against the deployed build. Eight anchors hold a gate, each directly on the
+anchor, and six of those gates carry the stamp. Five of the six lose `blocked`, and
+the sixth keeps it because it also waits on a task routed to a person. Seven rows
+read a gate's question in NEEDS where they read something else, and no other row
+moved.
+
 Because no live PR had a gate behind another bead, the walk was also checked
 against an answer computed apart from it: the same closure, taken from each store's
 `issues` and `dependencies` tables, for every open bead with an open blocker. Over
-395 such beads in six stores, one of them two edges from its gate, `gctk pr-status
-gates` and the board's library read each gave the tables' answer for all 395.
+420 such beads in six stores, two of them two edges from a gate, `gctk pr-status
+gates` gave the tables' answer for all 420, one bead at a time. The board's library
+read gave it too, with each store's beads in one call and with each bead alone, so
+the batch and the single read agree on the live graph, where nothing is near either
+bound. The walk that shared one set across its roots gave the same answers.
+
+The batch over this rig's 304 beads took 35 to 39 ms, and 42 to 64 ms on that earlier
+walk, at a load of about 45. The store's reads are the cost, and each root's own set
+adds nothing measurable.
 
 ## What this leaves
 
