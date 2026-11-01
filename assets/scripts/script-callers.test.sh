@@ -8,10 +8,12 @@
 #   - --check-merge takes the files the change removes from assets/scripts/
 #     and from a sub-pack's packs/<name>/assets/scripts/, a rename's old path
 #     included, that the base still carries, and leaves tests out;
-#   - a removed script that a formula at the base, at the head or at the
-#     checkout's HEAD still names, a sub-pack's formula included, exits 1
-#     before any store is read, since no wait clears it, and a checkout at the
-#     base is read once;
+#   - a removed script that a formula at the base or at the head still names, a
+#     sub-pack's formula included, exits 1 before any store is read, since no
+#     wait clears it;
+#   - a removed script only the checkout's HEAD still names exits 4 before any
+#     store is read, since its fast-forward clears it, and a checkout at the base
+#     is read once;
 #   - a removed script that only open steps call exits 3, and one nothing
 #     calls exits 0;
 #   - a repository is read from its top, so a directory below it gets the same
@@ -309,13 +311,22 @@ eq "$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0" "...and no store is read"
 G checkout -q --detach main~1
 : > "$STUB_GC_LOG"
 run --root "$REPO" --check-merge main delete
-eq "$rc" "1" "a formula the checkout's HEAD still carries counts, though the base and the head stopped naming it"
+eq "$rc" "4" "a formula only the checkout's HEAD still carries is a wait, since its fast-forward clears it"
 has "$out" "assets/scripts/old-tool.sh: the merge removes it, and formulas/mol-b.toml at the checkout's HEAD (" \
   "...naming the checkout's HEAD"
+has "$(printf '%s\n' "$out" | head -1)" "once it is fast-forwarded to the base, so the merge waits for that, and nobody has to act" "...and saying nobody has to act"
+hasnt "$out" "Keep a file at each such path" "...with no remedy to make"
 eq "$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0" "...before any store is read"
 run --root "$REPO" --check-merge main~1 same-change
+eq "$rc" "1" "a formula at the base and the checkout alike is the branch's to fix"
 has "$(printf '%s\n' "$out" | head -1)" "1 formula file(s) name a script the merge removes." \
   "a checkout at the base is read once, as the base"
+G checkout -q main~1
+G rm -q assets/scripts/keep.sh; G commit -qm checkout-ahead
+run --root "$REPO" --check-merge main~1 same-change
+eq "$rc" "1" "a formula at the base outranks one at the checkout's HEAD"
+has "$out" "formulas/mol-b.toml at the base (main~1) still names it" "...and is the one named"
+hasnt "$out" "at the checkout's HEAD (" "...with the checkout left unread"
 G checkout -q main
 
 callers_off

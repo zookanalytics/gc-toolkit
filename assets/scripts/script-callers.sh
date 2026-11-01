@@ -9,26 +9,28 @@
 #                  with its step ref, status and assignee, the run's root, and
 #                  the rig whose store holds it.
 #   --check-merge  the pack scripts that merging <head> into <base> removes,
-#                  and for each the formulas at <base>, at <head> or at the
-#                  checkout's HEAD that still name it and the open steps that
-#                  call it.
+#                  and for each the formulas at <base>, at <head> or, failing
+#                  those, at the checkout's HEAD that still name it and the open
+#                  steps that call it.
 #   --root <dir>   the repository <base> and <head> are read in, the current
 #                  directory's by default.
 #
 # A run keeps the step text it was poured with, and that text calls the pack's
 # scripts from the city's copy of the pack as each step runs. Once a merge that
 # removes a script reaches that copy, every open step that names the script
-# stops at it. While a formula still names the script, every run poured before
-# the merge reaches the city calls it too, so no wait clears it: the change
-# keeps a file at that path, a hand-off to what replaces the script, and a
-# later change removes it. A script that only open steps call is clear to
+# stops at it. While a formula at <base> or <head> names the script, every run
+# poured before the merge reaches the city calls it too, so no wait clears it:
+# the change keeps a file at that path, a hand-off to what replaces the script,
+# and a later change removes it. A script that only open steps call is clear to
 # remove once their runs end.
 #
 # The checkout's HEAD counts because a city that imports the pack from a
 # checkout pours its runs from the formulas there, and the checkout reaches
 # the base only when it is fast-forwarded. gctk merge runs in the rig checkout
 # this pack is imported from, so a formula the base has stopped naming still
-# pours runs that call the script until that checkout moves.
+# pours runs that call the script until that checkout moves. The fast-forward
+# clears it, so when only the checkout names the script the merge waits for it,
+# and nothing on the change has to move.
 #
 # A text names a script when it holds the file name with no letter, digit,
 # dot, dash or underscore on either side. A step is a bead carrying
@@ -43,11 +45,12 @@
 # and anyone about to remove a script.
 #
 # Exit: 0 no open step calls the scripts, or the merge removes no script that a
-#       formula names or an open step calls · 1 a formula at <base>, at <head>
-#       or at the checkout's HEAD names a script the merge removes · 2 usage, or
-#       a revision, the checkout's HEAD, the rig list, a store or a loop's input
-#       could not be read, so nothing was decided · 3 open steps call the
-#       scripts, or a script the merge removes
+#       formula names or an open step calls · 1 a formula at <base> or at <head>
+#       names a script the merge removes · 2 usage, or a revision, the checkout's
+#       HEAD, the rig list, a store or a loop's input could not be read, so
+#       nothing was decided · 3 open steps call the scripts, or a script the
+#       merge removes · 4 only the checkout's HEAD names a script the merge
+#       removes
 set -uo pipefail
 
 PROG="script-callers"
@@ -215,22 +218,28 @@ named_in() {
   [ "$read_lines" -eq "$LOOP_LINES" ] || fail "read $read_lines of the $LOOP_LINES files at '$1' that name $4"
 }
 
-SIDES=(base head)
-[ "$CHECKOUT_OID" = "$BASE_OID" ] || [ "$CHECKOUT_OID" = "$HEAD_OID" ] || SIDES+=(checkout)
-for i in "${!PATHS[@]}"; do
-  for side in "${SIDES[@]}"; do
-    case "$side" in
-      base) rev="$MERGE_BASE"; where="the base ($MERGE_BASE)" ;;
-      head) rev="$MERGE_HEAD"; where="the head ($MERGE_HEAD)" ;;
-      checkout) rev="$CHECKOUT_OID"; where="the checkout's HEAD (${CHECKOUT_OID:0:12})" ;;
-    esac
-    named_in "$rev" "$where" "${PATHS[$i]}" "${NAMES[$i]}"
+# named_on <rev> <where> — named_in for every script the merge removes.
+named_on() {
+  local i
+  for i in "${!PATHS[@]}"; do
+    named_in "$1" "$2" "${PATHS[$i]}" "${NAMES[$i]}"
   done
-done
+}
+
+named_on "$MERGE_BASE" "the base ($MERGE_BASE)"
+named_on "$MERGE_HEAD" "the head ($MERGE_HEAD)"
 if [ "$NAMED" -gt 0 ]; then
   echo "$NAMED formula file(s) name a script the merge removes. A formula that names a removed script pours runs that call it until the merge reaches the city, so no wait clears this. Keep a file at each such path, a hand-off to what replaces it, and remove it in a later change once no formula names it and $PROG lists no open step that calls it."
   printf '%s' "$NAMED_LINES"
   exit 1
+fi
+if [ "$CHECKOUT_OID" != "$BASE_OID" ] && [ "$CHECKOUT_OID" != "$HEAD_OID" ]; then
+  named_on "$CHECKOUT_OID" "the checkout's HEAD (${CHECKOUT_OID:0:12})"
+  if [ "$NAMED" -gt 0 ]; then
+    echo "$NAMED formula file(s) at the checkout's HEAD name a script the merge removes, and neither side of the merge does. The checkout stops naming it once it is fast-forwarded to the base, so the merge waits for that, and nobody has to act."
+    printf '%s' "$NAMED_LINES"
+    exit 4
+  fi
 fi
 
 callers "${NAMES[@]}"

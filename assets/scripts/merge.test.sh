@@ -1368,6 +1368,17 @@ printf '%s\n' "\${STUB_CALLERS_OUT:-the merge removes no pack script}"
 exit "\${STUB_CALLERS_RC:-0}"
 STUB
 chmod +x "$SD/script-callers.sh"
+# The refinery's rejection, as the arm sees it: the bead's row on stdout, and on
+# stderr what it did.
+REPOOL_LOG="$TMP/repool.log"; : > "$REPOOL_LOG"
+cat > "$SD/rejection-repool.sh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$REPOOL_LOG"
+echo '[{"id":"row-on-stdout"}]'
+echo "rejection-repool: \${STUB_REPOOL_SAID:-repooled}" >&2
+exit "\${STUB_REPOOL_RC:-0}"
+STUB
+chmod +x "$SD/rejection-repool.sh"
 # No rendered audit here, so this arm alone fetches what the merge would land.
 rm -f "$TMP/repo/generated/seed-audit/INDEX.md"
 export STUB_TOPLEVEL="$TMP/repo" STUB_RENDER_RC=0 STUB_RENDER_OUT="" STUB_CALLERS_RC=0 STUB_CALLERS_OUT=""
@@ -1393,12 +1404,86 @@ out=$("$SUT" 2>&1)
 has "$out" "PR#92 removes a pack script a formula still names; merge held" "a removed script a formula still names holds"
 has "$out" "1 formula file(s) name a script the merge removes" "…quoting what the check found"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
-has "$(cat "$STUB_ESC_LOG")" "--key script-callers-merge-gate.92" "…and one human gate carries it to a person, since no wait clears it"
-has "$(cat "$STUB_ESC_LOG")" "--key script-callers-merge-gate.92 --quiet-window 86400" "…declaring a day-long quiet window, since every pass detects the formula again"
-has "$(cat "$STUB_ESC_LOG")" "PR#92 removes a pack script a formula still names; the merge is held." \
-  "…whose first line is a headline, since human-gate.sh titles the gate from it"
-has "$(cat "$STUB_ESC_LOG")" "Keep a file at each such path" "…carrying the check's own remedy"
+has "$(cat "$REPOOL_LOG")" "C2 --reason PR#92 removes a pack script a formula still names" \
+  "…and the refinery's rejection hands the branch to a polecat, since no wait clears it and an agent can make the remedy"
+has "$(cat "$REPOOL_LOG")" "will not land it into 'main' at sha-92." "…whose reason opens on what it refused"
+has "$(cat "$REPOOL_LOG")" "Keep a file at each such path" "…carrying the check's own remedy"
+has "$(cat "$REPOOL_LOG")" "script-callers.sh --check-merge origin/main HEAD" "…and the command that says when the worker is done"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…and no person is asked"
+has "$out" "PR#92 went back to the polecat pool for the hand-off" "…and the pass says so"
+has "$out" "rejection-repool: repooled" "…keeping what the rejection did"
+hasnt "$out" "row-on-stdout" "…and not the bead's row it prints"
 eq "$(bstatus C2)" "open" "the anchor stays open"
+
+# The deletion stays held whatever the rejection answers.
+for repool_rc in 2 3; do
+  store "[$(anchor C2a 92), $(rev C2a)]"
+  export STUB_REPOOL_RC=$repool_rc
+  : > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+  out=$("$SUT" 2>&1)
+  has "$out" "the hand-off was not dispatched (rejection-repool.sh exit $repool_rc); merge held" "a rejection that exits $repool_rc is reported"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+  hasnt "$out" "went back to the polecat pool" "…and the pass does not say it went back"
+  eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…and the merge pass asks no person itself, since the rejection files its own stop"
+done
+unset STUB_REPOOL_RC
+store "[$(anchor C2b 92), $(rev C2b)]"
+rm -f "$SD/rejection-repool.sh"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "rejection-repool.sh is not in $SD; nobody was asked for the hand-off" "a missing rejection is named"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+# The ordinary case whole, with the real rejection: the repair reaches a polecat
+# with no person asked, and the PR lands on the approval it already has.
+mk_sut_dir "$SD" "$HERE/rejection-repool.sh" "$HERE/pool-route.sh" "$HERE/deferred-dispatch.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SD/patrol-finding.sh"; chmod +x "$SD/patrol-finding.sh"
+printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}' > "$TMP/agents.json"
+store "[$(anchor C2c 92 ',"gc.routed_to":""'), $(rev C2c)]"
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
+out=$(GC_RIG=gc-toolkit STUB_AGENTS="$TMP/agents.json" "$SUT" 2>&1)
+has "$out" "PR#92 went back to the polecat pool for the hand-off" "the real rejection takes the formula answer"
+eq "$(meta C2c merge_result)" "<absent>" "…so the anchor leaves the merge passes while the rework runs"
+eq "$(meta C2c gc.execution_routed_to)" "gc-toolkit/gc-toolkit.polecat" "…a polecat run is poured on it"
+has "$(cat "$STUB_GC_LOG")" "sling --rig gc-toolkit gc-toolkit/gc-toolkit.polecat C2c --on mol-polecat-work" "…through the work formula"
+eq "$(meta C2c existing_pr)" "https://github.com/zook/gc-toolkit/pull/92" "…which keeps the rework on this PR"
+has "$(meta C2c rejection_reason)" "Keep a file at each such path" "…and starts from what the check found"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no human gate"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+# The rework hands back at a new head that keeps a file at the path, and the
+# merge-push post-open path re-anchors the PR. The approval was given at the old
+# head, and the check now finds nothing removed.
+store "[$(anchor C2c 92), $(rev C2c)]"
+printf '%s' "$(prview 92 OPEN CLEAN)" | jq -c '.headRefOid = "sha-92-handoff"' > "$GH_DIR/pr_view_92.json"
+export STUB_FETCHED_HEAD="sha-92-handoff" STUB_CALLERS_RC=0 STUB_CALLERS_OUT="the merge removes no pack script"
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded C2c" "once the branch keeps the hand-off, the PR lands"
+has "$(cat "$STUB_GH_LOG")" "pr merge 92 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-92-handoff" "…at the new head, on the approval it already had"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…and from first to last no person was asked"
+rm -f "$SD/rejection-repool.sh" "$SD/pool-route.sh" "$SD/deferred-dispatch.sh" "$SD/patrol-finding.sh"
+cat > "$SD/rejection-repool.sh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$REPOOL_LOG"
+exit 0
+STUB
+chmod +x "$SD/rejection-repool.sh"
+printf '%s' "$(prview 92 OPEN CLEAN)" > "$GH_DIR/pr_view_92.json"
+
+# Only the rig checkout's HEAD names the script: its fast-forward clears that, so
+# the merge waits for it with nothing for anybody to do.
+store "[$(anchor C2d 92), $(rev C2d)]"
+export STUB_FETCHED_HEAD="sha-92" STUB_CALLERS_RC=4 \
+  STUB_CALLERS_OUT="1 formula file(s) at the checkout's HEAD name a script the merge removes, and neither side of the merge does."
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"; : > "$REPOOL_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#92 removes a pack script only the rig checkout's HEAD still names; merge held until the checkout takes 'main'" \
+  "a formula only the rig checkout names holds until the checkout moves"
+has "$out" "1 formula file(s) at the checkout's HEAD" "…quoting what the check found"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no human gate"
+eq "$(wc -c < "$REPOOL_LOG" | tr -d ' ')" "0" "…and no rework, since nothing on the branch has to change"
+has "$(meta C2d pr.machine)" "settled@sha-92" "…and the machine axis reads settled: every lane is green and the PR waits on this pass"
 
 store "[$(anchor C3 93), $(rev C3)]"
 printf '%s' "$(prview 93 OPEN CLEAN)" > "$GH_DIR/pr_view_93.json"
@@ -1454,7 +1539,7 @@ out=$("$SUT" 2>&1)
 has "$out" "PR#97 removes a pack script open steps still call; merge held" "a checkout that cannot name the default branch asks all the same"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 unset STUB_NO_ORIGIN_HEAD
-rm -f "$SD/script-callers.sh"
+rm -f "$SD/script-callers.sh" "$SD/rejection-repool.sh"
 export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_BASE_STALE="" STUB_REAUDIT_RC=0
 
 fi # part record

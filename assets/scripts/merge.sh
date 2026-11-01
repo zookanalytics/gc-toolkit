@@ -32,9 +32,11 @@
 # re-rendered, so a render the merge would leave stale holds and escalates
 # rather than landing); on a merge into the default branch, no file under
 # assets/scripts/ or a sub-pack's packs/<name>/assets/scripts/ that the merge
-# removes while a formula at the base, the head or the rig checkout's HEAD still
-# names it (held and escalated) or an open step in any store of the city calls
-# it (held until those runs end), which script-callers.sh --check-merge answers.
+# removes while a formula at the base or the head still names it (held, and the
+# branch goes back to a polecat for a hand-off), only the rig checkout's HEAD
+# names it (held until the checkout moves), or an open step in any store of the
+# city calls it (held until those runs end), which script-callers.sh --check-merge
+# answers.
 # The FULL anchor-local authorization set is re-read immediately before the
 # merge; any mismatch holds. `gh pr merge --squash --match-head-commit`, then
 # ONE lifecycle transition --to merged --close. A failed record exits non-zero

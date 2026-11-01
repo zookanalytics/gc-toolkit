@@ -90,7 +90,9 @@ of the city calls it
 ([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2). A change that
 stops calling a script therefore keeps a file at its path, a hand-off to what
 replaces it, and a later change removes that file once the runs poured before
-it have ended. `assets/scripts/script-callers.sh <script>` lists the open steps
+it have ended. A branch that removes the script while a formula at its base or
+head names it goes back to a polecat from the merge, to add that file.
+`assets/scripts/script-callers.sh <script>` lists the open steps
 that still call one. Step text from an earlier version of these formulas
 requires `assets/scripts/molecule-hold.sh` to exist before it resolves the
 pack's scripts, and calls it to decline. That script hands the call to

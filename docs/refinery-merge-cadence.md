@@ -252,15 +252,30 @@ the cadence — the arms run whether or not any refinery session is awake.
    removed. `script-callers.sh --check-merge` reads the same two fetched commits
    and takes the files the change removes, from `assets/scripts/` and from each
    sub-pack's `packs/<name>/assets/scripts/`, that the base still carries,
-   tests aside. A formula that still names one keeps pouring runs that call
-   it, so no wait clears it. That is a formula at the base, at the head, or at
-   the rig checkout's HEAD, which the city pours its runs from until the
-   checkout is fast-forwarded. The arm then holds the merge and files one human
-   gate per PR under `script-callers-merge-gate.<n>`. The way out is to keep a
-   file at the path, a hand-off to what replaces the script, and remove it in a
-   later change. Open steps in any store of the city that call a removed script
-   hold the merge until their runs end. Nothing on the PR has to change for
-   that, so the arm files no gate. It records `settled`, the verdict
+   tests aside. Its answer says who ends the hold.
+
+   A formula at the base or the head that still names a removed script keeps
+   pouring runs that call it, so no wait clears it and the branch has to change.
+   The arm holds the merge and hands the branch back through
+   `rejection-repool.sh`, the refinery's rejection, with what the check found as
+   the reason. A polecat keeps a file at the path, a hand-off to what replaces
+   the script, and a later change removes it. No person is asked: a choice the
+   worker cannot make goes through the worker's own human gate. The PR stays open
+   and its approval stands across the push, so the hand-off lands on the approval
+   it has, as any small fix does
+   ([state-machine.md](state-machine.md#checks)). A rejection that does not land
+   leaves the merge held, and the next pass meets the same formula and asks
+   again.
+
+   A formula only the rig checkout's HEAD names is a wait. The city pours its runs
+   from that checkout until it is fast-forwarded, and the fast-forward clears it,
+   so nothing on the PR has to change and nobody is asked. A checkout that cannot
+   be fast-forwarded has its own human gate (`reconcile-rig-checkouts.sh`). The
+   arm records `settled`.
+
+   Open steps in any store of the city that call a removed script hold the merge
+   until their runs end. Nothing on the PR has to change for that, so the arm
+   files no gate. It records `settled`, the verdict
    `gate-ensure.sh` reaches for the same green anchor later in the pass, so the
    two do not alternate: the board reads "green — waiting on the merge pass" and
    the PR `status: merging`. A run parked behind a person's gate ends only once

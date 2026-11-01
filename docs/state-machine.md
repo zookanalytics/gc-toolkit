@@ -63,6 +63,7 @@ stateDiagram-v2
   merged --> [*]
 
   handed_off --> poured: rejection-repool.sh — rejection_reason, then a fresh mol-polecat-work pour
+  pull_request --> poured: rejection-repool.sh — merge.sh, a formula names a script the merge removes
   handed_off --> poured: await-ruling.sh — the zero-diff check could not run, then a pour once its gate is cleared
 
   handed_off --> blocked: mol-refinery-patrol — existing_pr unusable, or a convoy's zero-diff check could not run
@@ -181,7 +182,7 @@ transition into a closed state writes none.
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a human gate |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable, or a graduated convoy's zero-diff check could not run three patrols in a row, its park held by the human gate, filed on it, that names git's error |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp |
-| handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
+| handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), and `merge.sh` on a PR that removes a pack script a formula still names, each through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | handed_off → poured | `mol-refinery-patrol` merge-push, through `assets/scripts/await-ruling.sh` | the zero-diff check could not run three patrols in a row: a human gate names git's error and blocks the bead, which waits on it unassigned and armed, until clearing the gate pours a fresh `mol-polecat-work` run on it |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 | unanchored → held | `skills/converse-hold`, a converse sitting's hold, via `lifecycle.sh`, only beside a human gate that blocks the bead | a sitting is waiting on an operator decision; state + route in one write |
@@ -812,10 +813,10 @@ what it waits on. While a fix unit answering it is in flight the anchor reads
 PR waits on that reviewer's re-review, and the standing review rides the
 posture axis.
 
-A merge held for open runs that call a pack script it removes is `settled`:
-every lane is green and the PR waits on the merge pass, whether a pool is working
-those runs or a person's gate parks them
-([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2).
+A merge held for open runs that call a pack script it removes, or for the rig
+checkout to stop naming one, is `settled`: every lane is green and the PR waits on
+the merge pass, whether a pool is working those runs or a person's gate parks
+them ([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2).
 
 **Dated keys.** `pr.machine` and `pr_posture` carry a third component,
 `<value>@<oid>@<since>`, under one write rule that `lifecycle.sh --set-dated`
@@ -864,7 +865,9 @@ also narrows by `task_kind=review` or by title, so a marked child joins no
 review's result set.
 
 - **Rejection** (refinery judgment): the anchor's branch is not accepted.
-  `mol-refinery-patrol` hands the bead back through `rejection-repool.sh`: one
+  `mol-refinery-patrol` hands the bead back through `rejection-repool.sh`, and
+  so does the merge pass when a PR removes a pack script a formula still names
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2): one
   lifecycle transition writes `rejection_reason`, then a fresh
   `mol-polecat-work` pour dispatches the rebuild. It is a pour, not a route on
   the bead, because the bead is a member of its epic and bd's blocked flag

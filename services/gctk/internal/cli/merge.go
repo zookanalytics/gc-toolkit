@@ -37,7 +37,8 @@ import (
 // writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git/jq
 // and the sibling shell helpers (human-gate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
-// script-callers.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh),
+// script-callers.sh, rejection-repool.sh, pr-status-label.sh, blocker-holder.sh,
+// pr-post.sh),
 // resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's
 // directory before it execs this binary.
 // Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
@@ -862,12 +863,14 @@ func (m *merger) handle(row *gcbd.Bead) {
 	// --- pack scripts the merge removes while live text still calls them -----------
 	// A run keeps the step text it was poured with and calls the pack's scripts
 	// from the city's copy of the pack, so a removed script stops every open
-	// step that names it once the merge reaches that copy. A formula that still
-	// names it is the change's to fix. Open steps that call it hold the merge
-	// until their runs end, with nothing on the PR to change. Every lane is green
-	// there and the PR waits on this pass, which is settled. gate-ensure.sh reaches
-	// the same verdict later in the pass, so any other one here would alternate
-	// with it for as long as the hold stands.
+	// step that names it once the merge reaches that copy. A formula at either
+	// side of the merge that still names it is the branch's to fix, so the branch
+	// goes back to a polecat. A checkout that has not taken the base yet, or open
+	// steps that call it, hold the merge until the checkout moves or their runs
+	// end, with nothing on the PR to change. Every lane is green there and the PR
+	// waits on this pass, which is settled. gate-ensure.sh reaches the same verdict
+	// later in the pass, so any other one here would alternate with it for as long
+	// as the hold stands.
 	if checkCallers {
 		scOut, scRC := runCombined("bash", callers, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
 		switch scRC {
@@ -875,13 +878,18 @@ func (m *merger) handle(row *gcbd.Bead) {
 		case 1:
 			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script a formula still names; merge held (anchor %s)\n", mergeProg, num, id)
 			m.printIndented(scOut, 12)
-			m.humanGate("--subject", id, "--key", "script-callers-merge-gate."+num, "--quiet-window", standingQuietWindow,
-				"--message", "PR#"+num+" removes a pack script a formula still names; the merge is held.\n\n"+scOut)
+			m.rejectForHandoff(id, num, base, headOid, scOut)
 			m.held++
 			return
 		case 3:
 			m.recordMachine(id, "settled", headOid, aroute)
 			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script open steps still call; merge held until their runs end (anchor %s)\n", mergeProg, num, id)
+			m.printIndented(scOut, 12)
+			m.held++
+			return
+		case 4:
+			m.recordMachine(id, "settled", headOid, aroute)
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script only the rig checkout's HEAD still names; merge held until the checkout takes '%s' (anchor %s)\n", mergeProg, num, base, id)
 			m.printIndented(scOut, 12)
 			m.held++
 			return
@@ -1526,12 +1534,12 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // that anchor. A missing blocker-holder.sh records no verdict for an anchor a
 // live blocker holds, whose merge is held anyway. A missing pr-post.sh counts
 // no PR's unanswered review threads. A missing human-gate.sh,
-// record-failure-cap.sh, render-seed-audit.sh, script-callers.sh or
-// pr-status-label.sh is skipped.
+// record-failure-cap.sh, render-seed-audit.sh, script-callers.sh,
+// rejection-repool.sh or pr-status-label.sh is skipped.
 // The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, human-gate.sh, record-failure-cap.sh, render-seed-audit.sh, script-callers.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, human-gate.sh, record-failure-cap.sh, render-seed-audit.sh, script-callers.sh, rejection-repool.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
@@ -1547,9 +1555,9 @@ func intoDefaultBranch(base string) bool {
 }
 
 // standingQuietWindow is the quiet period, in seconds, of a human gate whose
-// condition stands from one pass to the next, a duplicate anchor, a stale render
-// or a removed script a formula names, so every pass detects it again: a
-// person's moot or benign answer stands for a day.
+// condition stands from one pass to the next, a duplicate anchor or a stale
+// render, so every pass detects it again: a person's moot or benign answer stands
+// for a day.
 const standingQuietWindow = "86400"
 
 // humanGate files a human gate through human-gate.sh, best-effort: a gate that
@@ -1622,6 +1630,35 @@ func (m *merger) reaudit(base, num string, files []string) {
 	if rc != 0 {
 		fmt.Fprintf(m.stdout, "%s: PR#%s: the re-audit was not dispatched (seed-audit-reaudit.sh exit %d); the next merge that finds '%s' stale asks again\n", mergeProg, num, rc, base)
 	}
+}
+
+// rejectForHandoff hands a branch that removes a script a formula still names
+// back to the polecat pool, through the refinery's rejection. The check names the
+// remedy and an agent can make it, so no person is asked; a choice the worker
+// cannot make goes through the worker's own human gate. The PR stays open with the
+// approval it has, on which a small fix lands (docs/state-machine.md). The merge
+// is held whatever the helper answers. A rejection that lands takes the anchor out
+// of the passes until the rework hands it back, and any other answer leaves the
+// next pass to meet the same formula and ask again. The helper prints the bead's
+// row on stdout, and on stderr what it did, which is what the pass log keeps.
+func (m *merger) rejectForHandoff(id, num, base, headOid, found string) {
+	p := m.scriptPath("rejection-repool.sh")
+	if !isExecutable(p) {
+		fmt.Fprintf(m.stdout, "%s: PR#%s: rejection-repool.sh is not in %s; nobody was asked for the hand-off (anchor %s)\n", mergeProg, num, m.scriptsDir, id)
+		return
+	}
+	reason := fmt.Sprintf("PR#%s removes a pack script a formula still names, so the merge pass will not land it into '%s' at %s.\n\n%s\n\nThe PR stays open and keeps its approval. `assets/scripts/script-callers.sh --check-merge origin/%s HEAD` exits 1 while a formula still names a script the branch removes. Say in pr_summary what the PR now keeps.", num, base, shortSha(headOid), found, base)
+	cmd := exec.Command(p, id, "--reason", reason)
+	var said bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &said
+	rc := gcbd.ExitCode(cmd.Run())
+	m.printIndented(strings.TrimRight(said.String(), "\n"), 6)
+	if rc != 0 {
+		fmt.Fprintf(m.stdout, "%s: PR#%s: the hand-off was not dispatched (rejection-repool.sh exit %d); merge held (anchor %s)\n", mergeProg, num, rc, id)
+		return
+	}
+	fmt.Fprintf(m.stdout, "%s: PR#%s went back to the polecat pool for the hand-off (anchor %s)\n", mergeProg, num, id)
 }
 
 // readLines returns a file's non-empty lines, and none for a file it cannot read.
