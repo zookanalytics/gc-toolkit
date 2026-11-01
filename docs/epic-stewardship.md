@@ -7,16 +7,17 @@ description: How the pack holds an epic open until its hypothesis is ruled close
 
 Epic stewardship holds an epic to its contract. An epic that carries a
 hypothesis stays open until the operator rules it closed and records the
-outcome ([epics.md](epics.md)). The pack enforces that with a finalize-gate
-clause and a doctor invariant. It does not yet prompt the rulings themselves:
-the Epic Checkpoint layer that will is direction, described at the end of this
-doc and built by the follow-on epic *Epic Checkpoints & Features*.
+outcome, or until a disposition closes it ([epics.md](epics.md)). The pack
+enforces that with a finalize-gate clause and a doctor invariant. It does not
+yet prompt the rulings themselves: the Epic Checkpoint layer that will is
+direction, described at the end of this doc and built by the follow-on epic
+*Epic Checkpoints & Features*.
 
 ## Scope
 
 **Mandate.** The enforcement that an epic closes only on a recorded close
-ruling: the ruling fields an epic carries, the finalize-gate clause, the doctor
-invariant, and the direction the stewardship grows in.
+ruling or a disposition: the ruling fields an epic carries, the finalize-gate
+clause, the doctor invariant, and the direction the stewardship grows in.
 
 **Boundaries.** Not the contract an epic carries or what each ruling means —
 that is [epics.md](epics.md). Not how a bead becomes a member of an epic;
@@ -78,8 +79,11 @@ reason and passes.
    refuses to finalize an epic the predicate holds, on every close path that
    runs the gate. Neither path wired today reaches an undisposed epic:
    `merge.sh` finalizes merge anchors, and `bead-rehome.sh` records its
-   disposition before it gates. The clause is the precondition any gate-running
-   close of an epic inherits, not a choke point on today's closes.
+   disposition before it gates. Its read-only `--check` asks the gate about the
+   epic as that record will leave it (`--as-disposed`), so `stand-down.sh` carries
+   out a person's ruling that an epic will not go on. The clause is the
+   precondition any gate-running close of an epic inherits, not a choke point on
+   today's closes.
 2. **The doctor invariant** (I15, `doctor/check-epic-closed-implies-ruled`) sees
    every close after the fact. A closed epic the predicate would have held is an
    error, whatever path closed it. A bare `gc bd close` is the ordinary way an

@@ -1473,7 +1473,7 @@ reconcile_dispatch() {
     expected="$(wc -l < "$rows" | tr -d ' ')"
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; heldf="$REPLY"
 
-    local id status ready hold via json target args_json assignee slung rc merge_result fails flight
+    local id status ready hold via json fresh target args_json assignee slung rc merge_result fails flight
     while IFS=$'\037' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
@@ -1683,6 +1683,23 @@ reconcile_dispatch() {
             else
                 echo "$PROG: nothing holds $id: no open blocks blocker sits on it or on its ancestors. bd keeps it out of --ready all the same — dispatching"
             fi
+        fi
+
+        # The arm is read once more, because the row above is the listing the pass
+        # began with, and a pass can run for minutes. A disarm that landed since has
+        # withdrawn this dispatch. That is what lets stand-down.sh answer a bead's
+        # gate with a ruling not to proceed: it disarms first, so a pass that read
+        # the gate closed reads the arm gone here, and a pass that read the gate open
+        # holds the bead above. This is one read per sling, so it does not grow with
+        # the armed set. A read that does not answer leaves the bead armed for the
+        # next pass.
+        if ! fresh="$(show_bead "$id")" || [ -z "$fresh" ]; then
+            echo "$PROG: WARN could not re-read the arm on $id before slinging it — leaving armed, not slinging" >&2
+            failed=$((failed + 1)); continue
+        fi
+        if [ -z "$(meta_of "$fresh" "$K_TARGET")" ]; then
+            echo "$PROG: withdrawn $id — its arm was removed after this pass listed it; not slinging"
+            retired=$((retired + 1)); continue
         fi
 
         # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying

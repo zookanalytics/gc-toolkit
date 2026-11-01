@@ -46,7 +46,10 @@
 # would; it resolves each of those gates with a reason that names the retry and
 # carries no outcome word, so no quiet period starts; then it closes.
 # A run that stops between steps leaves a state the next run completes, because
-# a resolved gate stays resolved.
+# a resolved gate stays resolved. With --except-key, --check also reads what
+# would hold the close, and reads the origin as the close will leave it, disposed,
+# so a caller that answers those gates itself, such as stand-down.sh, can stop
+# before its first write.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
 # work outcome when the visit lacks it, with the gates skipped (the close they
 # would guard already happened).
@@ -61,7 +64,8 @@
 # writes only the canonical gc.-prefixed pair.
 # Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
 # pr-facts.sh (a PR closed with a pre-recorded disposition, and that branch's
-# parked rework children), scaffolding-sweep.sh (a finding a disposed PR leaves
+# parked rework children), stand-down.sh (a person's ruling that work a human
+# gate holds will not go on), scaffolding-sweep.sh (a finding a disposed PR leaves
 # unanswered, closed onto the bug that carries it), deferred-dispatch.sh
 # (folded, onto the `until` target that closed last, for an open, unassigned
 # bead whose `until` targets have all closed, whose `until` edge to that target
@@ -128,7 +132,8 @@ carries the operator's pre-recorded PR-close disposition for that kind and
 successor.
 
 --check evaluates that evidence and exits 0 (eligible) or non-zero (refused,
-reason on stderr) without writing anything.
+reason on stderr) without writing anything. With --except-key it also reads what
+would hold the close, as the close itself does once its pointer is stamped.
 
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
@@ -398,6 +403,64 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
     return 0
 }
 
+# What holds a close besides the origin's own gates under --except-key, read and
+# not written, for the close and for --check alike. <origin-row> is a `bd show`
+# answer. It sets OWN_GATES, the ids of those gates, and at most one of:
+# HOLD_UNREAD, the read that did not answer, so nothing proves the close clear;
+# HELD_BY, the other live blockers and the open child that hold it; and
+# CLOSE_GUARD, what an unforced `bd close` would refuse on.
+except_key_holds() { # <origin-row>
+    OWN_GATES=""; HOLD_UNREAD=""; HELD_BY=""; CLOSE_GUARD=""
+    local blk_json other_blockers kids_json open_kid
+    # Which of the gates are open is bd-lib.sh's open_human_gate rule. Every other
+    # live blocker and every open child holds the close, and with one standing
+    # the gates stay open and nothing closes, as a held close leaves it. Any other
+    # blocker that is closed or pinned holds nothing, as in bd. The close has
+    # already dropped its wait edge onto the successor by now, and --check, which
+    # writes nothing, reads past that edge.
+    blk_json=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    if ! printf '%s' "$blk_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        HOLD_UNREAD="its blockers did not read, so whether anything besides its own [$EXCEPT_KEY] gates holds the close is unknown"
+        return 0
+    fi
+    OWN_GATES=$(printf '%s' "$blk_json" | jq -r --arg k "$EXCEPT_KEY" "$HUMAN_GATE_JQ"'
+        .[] | select(open_human_gate($k) and ((.assignee // "") | tostring) == "") | .id' 2>/dev/null || true)
+    other_blockers=$(printf '%s' "$blk_json" | jq -r --arg k "$EXCEPT_KEY" --arg dropped "${CHECK:+$SUCCESSOR}" "$HUMAN_GATE_JQ"'
+        [ .[] | select(((.status // "open") | tostring) as $st | $st != "closed" and $st != "pinned")
+              | select((open_human_gate($k) and ((.assignee // "") | tostring) == "") | not)
+              | select((.id // "") != $dropped)
+              | .id ] | join(" ")' 2>/dev/null || true)
+    kids_json=$(bd_at "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+    if ! printf '%s' "$kids_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        HOLD_UNREAD="its children did not read, so whether an open child holds the close is unknown"
+        return 0
+    fi
+    open_kid=$(printf '%s' "$kids_json" | jq -r '.[0].id // empty' 2>/dev/null || true)
+    if [ -n "$other_blockers" ] || [ -n "$open_kid" ]; then
+        HELD_BY="${other_blockers:+blocker(s) $other_blockers}"
+        [ -z "$open_kid" ] || HELD_BY="${HELD_BY:+$HELD_BY and }open child $open_kid"
+        return 0
+    fi
+    # bd's unforced close also refuses a template, a pinned bead, and a bead
+    # assigned to anyone but the actor the close runs as, whatever its
+    # status. Withdrawing the gates ahead of a close bd then refuses would
+    # take the question away from the person it asks, and the caller's next
+    # refused retry would file it again. So these are read off the origin's
+    # row before anything is resolved, and any of them holds the close with
+    # the gates open. bd compares the assignee with the --actor it is given
+    # and with no other name of this session, so only an origin no one is
+    # assigned, or one assigned to exactly $ACTOR, goes on to the close.
+    CLOSE_GUARD=$(printf '%s' "$1" | jq -r --arg actor "$ACTOR" --arg who "${ACTOR:-the actor bd defaults to}" '.[0]
+        | ((.assignee // "") | tostring) as $as
+        | if (.is_template // false) == true then "it is a template, which bd never closes"
+          elif ((.status // "") | tostring | ascii_downcase) == "pinned" or (.pinned // false) == true
+            then "it is pinned, which bd closes only by force"
+          elif $as != "" and $as != $actor
+            then "it is assigned to \($as), and bd closes an assigned bead only for its assignee, while this close runs as \($who)"
+          else empty end' 2>/dev/null || true)
+    return 0
+}
+
 if [ "$ORIGIN_STATUS" != "closed" ]; then
     if ! gates_pass; then
         if [ -n "$CHECK" ]; then
@@ -411,6 +474,23 @@ if [ -n "$CHECK" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
         echo "bead-rehome: --check: $ORIGIN is already closed — the repair path adds the pointer only, no close is gated"
     else
+        if [ -n "$EXCEPT_KEY" ]; then
+            # The close stamps its pointer before it runs this gate, and a pointer is
+            # what the gate takes as a stewarded epic's terminal reason.
+            FG_REASON=""
+            if ! FG_REASON=$("$FINALIZE_GATE" check "$ORIGIN" --except-key "$EXCEPT_KEY" --as-disposed 2>/dev/null); then
+                echo "bead-rehome: --check refused: the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}" >&2
+                exit 1
+            fi
+            except_key_holds "$ORIGIN_JSON"
+            HOLD_WHY="$HOLD_UNREAD"
+            [ -z "$HELD_BY" ] || HOLD_WHY="the close is held by $HELD_BY"
+            [ -z "$CLOSE_GUARD" ] || HOLD_WHY="bd would refuse its close: $CLOSE_GUARD"
+            if [ -n "$HOLD_WHY" ]; then
+                echo "bead-rehome: --check refused: $HOLD_WHY" >&2
+                exit 1
+            fi
+        fi
         printf 'bead-rehome: --check: %s is eligible to close as "%s"\n' "$ORIGIN" "$REASON"
     fi
     exit 0
@@ -539,51 +619,19 @@ else
     fi
     # The retry's own gates. The finalize gate excepted the open human gates
     # under the caller's key that no person is assigned, but bd still refuses to
-    # close a bead they block, so they are resolved just before the close. Which
-    # of them are open is bd-lib.sh's open_human_gate rule. That happens only
-    # once nothing else would refuse it: every other live blocker and every open
-    # child holds the close, and with one standing the gates stay open and
-    # nothing closes, as a held close leaves it. Any other blocker that is closed
-    # or pinned holds nothing, as in bd. The reason names the retry and carries no
-    # outcome word, because the close has not landed yet: no quiet period starts.
+    # close a bead they block, so they are resolved just before the close. That
+    # happens only once nothing else would refuse it. The reason names the retry
+    # and carries no outcome word, because the close has not landed yet: no quiet
+    # period starts.
     if [ -n "$EXCEPT_KEY" ]; then
-        BLK_JSON=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
-        printf '%s' "$BLK_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
-            || die "pointer IS recorded on $ORIGIN, but its blockers did not read, so whether anything besides its own [$EXCEPT_KEY] gates holds the close is unknown; nothing was resolved or closed. Re-run this close." 5
-        OWN_GATES=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" "$HUMAN_GATE_JQ"'
-            .[] | select(open_human_gate($k) and ((.assignee // "") | tostring) == "") | .id' 2>/dev/null || true)
-        OTHER_BLOCKERS=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" "$HUMAN_GATE_JQ"'
-            [ .[] | select(((.status // "open") | tostring) as $st | $st != "closed" and $st != "pinned")
-                  | select((open_human_gate($k) and ((.assignee // "") | tostring) == "") | not)
-                  | .id ] | join(" ")' 2>/dev/null || true)
-        KIDS_JSON=$(bd_at "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
-        printf '%s' "$KIDS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
-            || die "pointer IS recorded on $ORIGIN, but its children did not read, so whether an open child holds the close is unknown; nothing was resolved or closed. Re-run this close." 5
-        OPEN_KID=$(printf '%s' "$KIDS_JSON" | jq -r '.[0].id // empty' 2>/dev/null || true)
-        if [ -n "$OTHER_BLOCKERS" ] || [ -n "$OPEN_KID" ]; then
-            HELD_BY="${OTHER_BLOCKERS:+blocker(s) $OTHER_BLOCKERS}"
-            [ -z "$OPEN_KID" ] || HELD_BY="${HELD_BY:+$HELD_BY and }open child $OPEN_KID"
+        except_key_holds "$CHECK_JSON"
+        [ -z "$HOLD_UNREAD" ] \
+            || die "pointer IS recorded on $ORIGIN, but $HOLD_UNREAD; nothing was resolved or closed. Re-run this close." 5
+        if [ -n "$HELD_BY" ]; then
             echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held by $HELD_BY, so its own [$EXCEPT_KEY] gates stay open and nothing closes." >&2
             echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
             exit 5
         fi
-        # bd's unforced close also refuses a template, a pinned bead, and a bead
-        # assigned to anyone but the actor the close runs as, whatever its
-        # status. Withdrawing the gates ahead of a close bd then refuses would
-        # take the question away from the person it asks, and the caller's next
-        # refused retry would file it again. So these are read off the origin's
-        # row before anything is resolved, and any of them holds the close with
-        # the gates open. bd compares the assignee with the --actor it is given
-        # and with no other name of this session, so only an origin no one is
-        # assigned, or one assigned to exactly $ACTOR, goes on to the close.
-        CLOSE_GUARD=$(printf '%s' "$CHECK_JSON" | jq -r --arg actor "$ACTOR" --arg who "${ACTOR:-the actor bd defaults to}" '.[0]
-            | ((.assignee // "") | tostring) as $as
-            | if (.is_template // false) == true then "it is a template, which bd never closes"
-              elif ((.status // "") | tostring | ascii_downcase) == "pinned" or (.pinned // false) == true
-                then "it is pinned, which bd closes only by force"
-              elif $as != "" and $as != $actor
-                then "it is assigned to \($as), and bd closes an assigned bead only for its assignee, while this close runs as \($who)"
-              else empty end' 2>/dev/null || true)
         if [ -n "$CLOSE_GUARD" ]; then
             echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but bd would refuse its close: $CLOSE_GUARD. Its own [$EXCEPT_KEY] gates stay open and nothing closes." >&2
             echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2

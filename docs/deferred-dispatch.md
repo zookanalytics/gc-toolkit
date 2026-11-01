@@ -90,9 +90,10 @@ is silent manual-follow-up debt — the exact miss
 An arm is a dispatch path, as a route is. Both are defined once, in
 `assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
 dispatch is already decided sources that file: the proactive scan and sling,
-`doctor/check-blocked-work-armed` and `doctor/check-step-terminal`. So an arm
-also keeps the bead out of the proactive scan. `tools/gc-proactive.sh scan`
-looks for raw input to react to, and it drops a bead that has a dispatch path.
+`doctor/check-blocked-work-armed`, `doctor/check-step-terminal` and
+`assets/scripts/stand-down.sh`. So an arm also keeps the bead out of the
+proactive scan. `tools/gc-proactive.sh scan` looks for raw input to react to,
+and it drops a bead that has a dispatch path.
 Otherwise a sweep that ran between a blocker closing and the next reconcile
 pass would sling a first reaction at a bead the arm is about to dispatch.
 `gc-helm.sh react` and `operator-intake.sh` skip the scan and name a bead to
@@ -106,6 +107,18 @@ deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatc
 deferred-dispatch.sh list --json # the armed beads alone, as bd lists them: no hold, no notice
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
+
+A person who rules that armed work a human gate holds will not go on runs
+`stand-down.sh <bead> --key <situation-key> --ruling "<why>"`. Answering the gate
+first would send the work, and bd refuses to close a bead an open gate blocks,
+so it removes the arm, ends the run beneath the bead, answers the gate and closes
+the bead, in that order. The pass reads the arm once more just before it slings,
+so a pass already running cannot send the work past that disarm: a pass that read
+the gate open holds the bead, and one that read it closed reads the arm gone. A
+gate that also holds another open bead takes no answer, because an answer releases
+everything it blocks. With `--successor` naming the evidence, the bead leaves that
+gate after its arm and route are gone. Removing that edge first would send the work,
+as any release of an armed bead does.
 
 ## Work assigned to a named agent owes a notice
 
@@ -204,7 +217,8 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also a bead in flight that bd keeps unready only through a held
-  ancestor (see below) — stamping its own
+  ancestor (see below) — reading the arm once more, so that an arm disarmed since
+  the pass's listing is not sent, then stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
