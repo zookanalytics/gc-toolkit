@@ -287,8 +287,7 @@ chmod +x "$TMP/helm"
 
 # human-gate.sh files the human gate a ruling or recommend holds on and prints
 # its id on stdout, as the real helper does. FAKE_GATE_FAILS models a gate that
-# did not file. A
-# --retract call is logged and changes nothing.
+# did not file. A --retract call is logged and changes nothing.
 cat > "$TMP/human-gate" <<'HG'
 #!/usr/bin/env bash
 printf 'GATE %s\n' "$*" >> "$FAKE_LOG"

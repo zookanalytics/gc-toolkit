@@ -1024,10 +1024,10 @@ fi
 # one line leads the message. An open first-reaction gate asks this reaction's
 # question when its title or its description's first line is this takeaway. The
 # description holds the message whole, while the helper keeps a title under 400
-# bytes, so a longer takeaway matches only by the description,
-# and a gate whose description does not lead with the takeaway matches by its
-# title. Any other open first-reaction gate asks a superseded reaction's
-# question, so it is withdrawn first, and the new gate carries this reaction's.
+# bytes, so a longer takeaway matches only by the description, and a gate whose
+# description does not lead with the takeaway matches by its title. Any other
+# open first-reaction gate asks a superseded reaction's question, so it is
+# withdrawn first, and the new gate carries this reaction's.
 GATE=""
 if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
     [ -x "$HUMAN_GATE" ] \

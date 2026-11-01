@@ -11,8 +11,9 @@
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
 #
 # warn and die, the report every script that sources the library makes, row_meta,
-# the metadata read it shares with them, and bd_gates_open_under_key, the order every writer and reader of one
-# situation's human gates reads them in, are pinned first; they read no store.
+# the metadata read it shares with them, and bd_gates_open_under_key, the order
+# every writer and reader of one situation's human gates reads them in, are
+# pinned first; they read no store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT

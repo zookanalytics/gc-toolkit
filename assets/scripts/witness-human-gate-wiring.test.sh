@@ -61,7 +61,6 @@ grep -q 'human-gate\.sh' "$TOML" \
   && ok "human-gate.sh is still reachable for an emergency" \
   || bad "the emergency path to a person is gone"
 
-
 # A report nothing waits on, or about a bead the witness cannot block, is a
 # patrol finding: the check-refinery monitor that cannot see its queue (the
 # patrol's run is a wisp, which human-gate.sh refuses), an orphan whose work

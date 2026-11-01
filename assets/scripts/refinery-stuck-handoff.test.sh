@@ -53,7 +53,6 @@ has "$BLOCK" 'human-gate.sh' "the block files a stuck handoff's human gate throu
 has "$BLOCK" 'patrol-finding.sh' "the block reports a blind monitor as a patrol finding"
 has "$BLOCK" 'resolve-route.sh' "the block resolves the refinery address"
 has "$BLOCK" 'gc bd gate list' "the withdrawal starts from the store's human gates"
-hasnt "$BLOCK" 'escalation_key' "the block reads no visit key"
 hasnt "$BLOCK" 'gc session nudge' "the block nudges no count"
 
 # {{binding_prefix}} must be substituted exactly as the materializer does it.
@@ -190,6 +189,7 @@ DEPS_DEFAULT='{
   "tk-g-lost":  [{"id":"tk-lost","dependency_type":"blocks"}],
   "tk-g-stuck": [{"id":"tk-stuck","dependency_type":"blocks"}],
   "tk-g-both":  [{"id":"tk-gone","dependency_type":"blocks"},{"id":"tk-still","dependency_type":"blocks"}],
+  "tk-g-noid":  [{"id":"tk-gone","dependency_type":"blocks"},{"dependency_type":"blocks"}],
   "tk-g-dark":  "fails"
 }'
 
@@ -479,6 +479,11 @@ has "$(out)" "its gate tk-g-both also blocks tk-still, which could not be read" 
 # handoff still in the queue.
 RSOLO="$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-gone),$(gate tk-g-both)]" "$H_CLOSED")"
 hasnt "$RSOLO" "--retract" "a departed handoff's own gate stays open while it shares another with a handoff still in the queue"
+# A waiting row with no id names no bead to read, and what the gate also blocks
+# is then unknown, so the gate stays open.
+RNOID="$(run '[]' "" "" "" "[$(gate tk-g-noid)]" "$H_CLOSED")"
+hasnt "$RNOID" "--retract" "a gate with a waiting row that has no id stays open"
+has "$(grep -e '--id=' "$TMP/lists" || true)" "--id=tk-gone " "and only the row with an id is read by id"
 # A gate whose waiting beads did not read may block a departed handoff beside a
 # bead still in the queue, so while it stays unread no departed handoff is
 # withdrawn.

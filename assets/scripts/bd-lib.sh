@@ -5,8 +5,8 @@
 # script files a stamped bead through, the metadata read-back that gates handing
 # such a bead on, the close that unmakes a bead no reader can find, the birth,
 # settle and route of PR-finishing work, the validation pass's work order, the
-# gating-PR read's field set, the per-rig key an order's state lives under, and
-# the pass lock that lets an order run one pass at a time, and the two lines a
+# gating-PR read's field set, the per-rig key an order's state lives under, the
+# pass lock that lets an order run one pass at a time, and warn and die, which a
 # script reports through. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it:

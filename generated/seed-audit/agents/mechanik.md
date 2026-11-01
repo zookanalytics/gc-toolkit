@@ -301,8 +301,10 @@ gc bd update <bead> --assignee <qualified-name>
 `<binding>` is the name the city imports the gc-toolkit pack under, which gc puts
 in front of its skills: `gc-toolkit` in `gc-toolkit.work`. A script called through
 `gc <binding> scripts-dir` is that pack's own copy, whichever pack the calling
-agent comes from. A converse sitting is neither: a conversation waits in the
-operator's queue, assigned to `human`, and `gc-helm engage` spawns the sitting
+agent comes from.
+
+A converse sitting is neither a pool nor a named agent: a conversation waits in
+the operator's queue, assigned to `human`, and `gc-helm engage` spawns the sitting
 when the operator engages it from the board. The `work` skill has the rest of
 sending work.
 

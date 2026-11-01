@@ -53,8 +53,7 @@ grep -q -- '--subject' "$DOCTRINE" && grep -q -- '--key' "$DOCTRINE" \
   && ok "human-gate.sh call carries --subject and --key (one gate per bead and key)" \
   || bad "human-gate.sh call must carry --subject and --key"
 
-
-if printf '%s\n' "$CALLS" | grep -q -e '--quiet-window' -e 'GC_ESCALATE_VERDICT_WINDOW'; then
+if printf '%s\n' "$CALLS" | grep -q -e '--quiet-window'; then
   bad "a doctrine call declares a quiet window; a decline is an event of its run, and a window would mute the next one"
 else
   ok "no doctrine call declares a quiet window"

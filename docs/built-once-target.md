@@ -239,9 +239,9 @@ A copy needs no trigger. It goes as soon as a change gives the fact one shared
 home.
 
 - The script-dir resolution: the candidate loop in the Claude Code overlays, which
-  gc copies into a session with no template pass, so they cannot name the binding.
-  Carried by tk-rzic0sg. All other pack text asks gc, in one line per shell block
-  that runs a pack script, since each block is its own shell.
+  gc copies into a session with no template pass, so their text cannot name the
+  binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
+  shell block that runs a pack script, since each block is its own shell.
 - The decline sequence (file the human gate, record the wait, cancel the run,
   drain): 19 copies in step text, 11 of them in `mol-polecat-work.toml` and one
   in the polecat doctrine fragment, with 28 copies of its refusal sentence.

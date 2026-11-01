@@ -179,8 +179,8 @@ LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
 BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
 DRY_RUN=0
 
-# The two ways the retry cap asks a person resolve beside this script; the env
-# overrides let the hermetic test point them at stubs.
+# The helpers the retry cap asks a person through resolve beside this script; the
+# env overrides let the hermetic test point them at stubs.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$SCRIPTS_DIR/human-gate.sh}"
 HELM="${GC_HELM_TOOL:-$SCRIPTS_DIR/gc-helm.sh}"

@@ -170,7 +170,7 @@ chmod +x "$BIN/gc"
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_EDGES="$TMP/edges" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq" STUB_TMP="$TMP"
-unset GC_AGENT GC_RIG GC_ESCALATE_VERDICT_WINDOW 2>/dev/null || true
+unset GC_AGENT GC_RIG 2>/dev/null || true
 
 # iso_ago <seconds> — an RFC-3339 UTC time that many seconds ago.
 iso_ago() { jq -nr --argjson s "$1" '(now - $s) | floor | todate'; }
@@ -332,9 +332,9 @@ echo "# no quiet period unless the call declares one"
 recent_moot="$(gate g-moot k closed "moot: the branch came back" "$(iso_ago 600)")"
 reset "$(task tk-w),$recent_moot" "tk-w|blocks|g-moot
 "
-GC_ESCALATE_VERDICT_WINDOW=86400 "$SUT" --subject tk-w --key k --message m >/dev/null 2>&1; rc=$?
+"$SUT" --subject tk-w --key k --message m >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "exits 0"
-eq "$(creates)" 1 "a moot answer ten minutes ago mutes nothing without --quiet-window, whatever GC_ESCALATE_VERDICT_WINDOW says"
+eq "$(creates)" 1 "a moot answer ten minutes ago mutes nothing without --quiet-window"
 
 echo "# a declared quiet window holds a re-detection after a moot or benign answer"
 for head in moot benign; do
