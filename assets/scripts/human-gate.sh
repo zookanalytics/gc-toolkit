@@ -8,8 +8,7 @@
 # that call, and every reader treats it the same. This helper makes the same
 # call, and around it:
 #   - it files nothing while an open human gate under the key already blocks
-#     the bead, and resolves its own gate as a duplicate when a racing
-#     writer's gate comes first;
+#     the bead, though two writers in the same instant can each file (below);
 #   - it files nothing inside a quiet period the call declares;
 #   - it refuses a `*-wisp-*` id as the subject, a patrol wisp's or a
 #     session's;
@@ -33,10 +32,9 @@
 # names no bead that can wait, so a situation with no bead of its own is a
 # patrol finding (patrol-finding.sh), which a first reaction puts to a person as
 # a human gate on the finding when it needs one.
-# stdout carries the id of the open gate that asks as of this call's last read
-# of the bead's gates (the one filed, the one already open, or the first one
-# still open after this call resolves its own duplicate), and with --retract the
-# id of each gate this call resolved. Everything else goes to stderr.
+# stdout carries the id of the gate that asks (the one filed, or the first one
+# already open), and with --retract the id of each gate this call resolved.
+# Everything else goes to stderr.
 # Exit: 0 filed, already open, inside a declared quiet window, or (--retract)
 # resolved or nothing open · 1 could not read the bead's gates, file, verify or
 # resolve · 2 usage, or a wisp named as the subject
@@ -49,12 +47,6 @@ PROG="human-gate"
 # message is the gate's description, so an over-cap first line is cut with an
 # ellipsis, not refused.
 TITLE_MAX=140
-
-# The head of the reason a writer that lost a create race resolves its own
-# gate with (below). It is headed `moot:`, because the duplicate needs nobody
-# once the first gate asks. The quiet window skips a gate closed with it,
-# because no person answered that gate.
-DUP_REASON_HEAD="moot: a duplicate of gate"
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -214,15 +206,12 @@ fi
 # that a person answered decides: a reason headed `moot:` or `benign:` says a
 # person judged the situation needs nobody, and a re-detection inside the
 # window files nothing. Any other answer means the person acted, so the next
-# occurrence stands on new ground. A gate a writer resolved as its own
-# duplicate is skipped, because nobody judged the situation by closing it, and
-# it can close after the person's answer, when its repair runs later. Without
-# --quiet-window there is no window, because only the filer knows whether a
-# repeat is the same condition seen again or a new event.
+# occurrence stands on new ground. Without --quiet-window there is no window,
+# because only the filer knows whether a repeat is the same condition seen again
+# or a new event.
 if [ -n "$QUIET_WINDOW" ] && [ "$QUIET_WINDOW" -gt 0 ]; then
-  QUIET_ROW=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" --arg dup "$DUP_REASON_HEAD " '
+  QUIET_ROW=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" '
     [ .[] | select((.await_id // "") == $k and (.status // "") == "closed")
-          | select((.close_reason // "") | tostring | startswith($dup) | not)
           | { id: .id, reason: (.close_reason // ""),
               at: (((.closed_at // "") | sub("\\.[0-9]+"; "") | fromdateiso8601?) // 0) }
           | select(.at > 0) ]
@@ -253,6 +242,13 @@ TITLE=$(printf '%s' "$MESSAGE" | head -n 1 | jq -Rsr --argjson n "$TITLE_MAX" \
   || TITLE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-"$TITLE_MAX")
 [ -n "$TITLE" ] || TITLE="$KEY"
 
+# bd keeps no idempotency at create, so two writers in the same instant can both
+# pass the read above and file. Both gates then stand, and the bead moves once a
+# person has cleared each. A writer never closes its own gate because another
+# comes first. From the moment the create lands, await-ruling.sh can read that
+# gate and make another bead wait on it, and bd has no close conditioned on a
+# gate's waiters, so the close would release that bead with no answer from a
+# person.
 CREATE_JSON=$(gc bd gate create --type=human --blocks "$SUBJECT" --await-id "$KEY" \
   --title "$TITLE" --reason "$MESSAGE" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub)
 GATE=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
@@ -285,46 +281,6 @@ fi
 # under bd's head, so the filing stands and only the repair is named.
 if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg m "$MESSAGE" 'any(.[]; .id == $g and (.description // "") == $m)' >/dev/null 2>&1; then
   warn "gate $GATE asks for $SUBJECT [$KEY], but its description did not become the message, so bd's own head stands above it; repair: gc bd update $GATE --description <the message>"
-fi
-
-# bd keeps no idempotency at create, so two writers racing in the same instant
-# can both pass the dedup above and file. Each reads the gates back after its
-# own create, and a writer whose gate is not the first resolves it as a
-# duplicate and names the gate still open. A writer resolves only the gate it
-# filed, because the other writer's caller may already wait on its own gate by
-# id. Two gates stand only when one create landed after the other writer read
-# back, and then the bead moves once both are cleared.
-FIRST_GATE=$(printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
-if [ -n "$FIRST_GATE" ] && [ "$FIRST_GATE" != "$GATE" ]; then
-  DUP_REASON="$DUP_REASON_HEAD $FIRST_GATE, filed for the same situation in the same instant"
-  gc bd gate resolve "$GATE" --reason "$DUP_REASON" </dev/null >/dev/null 2>&1
-  # bd's exit says nothing about whether the duplicate closed: it reports
-  # success on a resolve that closed nothing and on a gate another resolver
-  # closed first, as the retract above finds. So the duplicate is read back.
-  DUP_ROW=$(bd_json show "$GATE")
-  DUP_STATUS=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
-  DUP_GOT=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].close_reason // "") else "" end' 2>/dev/null)
-  if [ "$DUP_STATUS" != closed ]; then
-    warn "this call's gate $GATE duplicates gate $FIRST_GATE and did not resolve (its status reads '${DUP_STATUS:-unreadable}'), so $SUBJECT stays blocked until both are cleared. repair: gc bd gate resolve $GATE --reason \"$DUP_REASON\""
-  elif [ "$DUP_GOT" = "$DUP_REASON" ]; then
-    warn "resolved this call's duplicate, gate $GATE, of gate $FIRST_GATE"
-  else
-    warn "this call's duplicate, gate $GATE, was already cleared, and its answer stands: $DUP_GOT"
-  fi
-  # The gate named is the one still open once this call's own is resolved.
-  # FIRST_GATE can itself be a duplicate: with three writers racing, a third
-  # gate that came first but was not yet in this call's read-back can be in
-  # FIRST_GATE's writer's, and that writer resolves FIRST_GATE in the same
-  # instant. So the gates are read again, and the first open one under the key
-  # is named. A read that fails, or finds none open, names FIRST_GATE. The name
-  # is the gate that asks as of that read, so a caller that waits later reads
-  # the gate again in the same order (bd_gates_open_under_key), as
-  # await-ruling.sh does.
-  ASKS=$(bd_human_gates "$SUBJECT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
-  [ -n "$ASKS" ] || ASKS="$FIRST_GATE"
-  warn "gate $ASKS already asks for $SUBJECT [$KEY]"
-  printf '%s\n' "$ASKS"
-  exit 0
 fi
 
 # The deacon's shift record. Filing a gate is a non-routine action, and this is
