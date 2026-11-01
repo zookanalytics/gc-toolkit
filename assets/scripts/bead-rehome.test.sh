@@ -38,7 +38,8 @@
 #   (u) an already-closed visit missing its work outcome is repaired with it;
 #   (x) an open human gate on the origin holds the close at the finalize gate;
 #   (y) --except-key reaches that gate, and nothing is excepted without it, and
-#       --check under it reads what would hold the close, writing nothing;
+#       --check under it reads what would hold the close, writing nothing, with the
+#       gate asked about the origin as the close will leave it;
 #   (z) an already-closed visit that records an outcome is repaired with
 #       gc.work_outcome=no-op, and its outcome is left as it was;
 #   (aa) a store that refuses gc.work_outcome still re-homes and closes the
@@ -1293,7 +1294,7 @@ check_held "a child read that fails" al-check7 "did not read" FAKE_BD_LIST_PAREN
 mkbead alpha open al-check10
 : > "$FG_LOG"
 check_held "the finalize gate's refusal" al-check10 "held by open human gate" FG_VERDICT=hold
-eq "$(cat "$FG_LOG")" "check al-check10 --except-key pr-dispose-failed.9" "--check: the finalize gate is asked with the key"
+eq "$(cat "$FG_LOG")" "check al-check10 --except-key pr-dispose-failed.9 --as-disposed" "--check: the finalize gate is asked with the key, about the origin as the close will leave it"
 # The close drops a wait edge onto its successor before it reads what holds it, so
 # --check does not hold it on that edge, and the close holds only on an edge that
 # would not drop.

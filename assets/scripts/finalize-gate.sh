@@ -32,12 +32,18 @@
 # blocks the bead, so the caller withdraws those gates before it closes
 # (bead-rehome.sh).
 #
+# One reading, also named by the caller: --as-disposed reads the bead as carrying
+# a disposition pointer (gc.superseded_by). bead-rehome.sh stamps that pointer
+# before it runs this gate, so its --check, which writes nothing, asks about the
+# bead as the close will leave it. Only the epic clause reads a pointer, so this
+# releases no human gate, and a read that fails still refuses.
+#
 # FAIL CLOSED. A gate read that does not answer with a JSON array refuses the
 # finalization: an unreadable probe is never an all-clear, because the act it
 # guards cannot be taken back.
 #
 # Usage:
-#   finalize-gate.sh check <bead-id> [--except-key <situation-key>]
+#   finalize-gate.sh check <bead-id> [--except-key <situation-key>] [--as-disposed]
 #     exit 0 — every clause passed; the bead may be finalized (no output)
 #     exit 1 — a clause refuses (an open human gate, a stewarded epic not ruled
 #              closed, or a probe that failed closed); the one-line reason is
@@ -91,9 +97,9 @@ clause_no_open_human_gate() {
     return 0
 }
 
-# clause_epic_ruling_recorded <bead-id> — holds finalization of a stewarded epic
-# (issue_type=epic carrying an epic_hypothesis) until its hypothesis is ruled
-# closed. An epic closes on a ruling, never as a side effect of its last unit
+# clause_epic_ruling_recorded <bead-id> [<as-disposed>] — holds finalization of a
+# stewarded epic (issue_type=epic carrying an epic_hypothesis) until its hypothesis
+# is ruled closed. An epic closes on a ruling, never as a side effect of its last unit
 # merging (docs/epics.md). The ruling is continue, shift, or close, and only close
 # is terminal: continue and shift keep the epic open, so they hold it here as an
 # absent ruling does. A close ruling carries its outcome (epic_ruling_reason), and
@@ -102,11 +108,13 @@ clause_no_open_human_gate() {
 #
 # Neither finalize path wired today reaches an undisposed epic. merge.sh
 # finalizes merge anchors, and bead-rehome.sh stamps the epic's disposition before
-# it runs the gate, which this clause passes. The clause therefore holds only a
-# gate-running close that reaches an undisposed epic. A bare `gc bd close` runs no
+# it runs the gate, which this clause passes. Its --check, ahead of that stamp, asks
+# with <as-disposed> set. The clause therefore holds only a gate-running close that
+# reaches an undisposed epic. A bare `gc bd close` runs no
 # gate, and doctor/check-epic-closed-implies-ruled (I15) reports it after the fact.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
+    _fgr_as_disposed="${2:-}"
     # This probe runs for EVERY finalize (every merge.sh and bead-rehome.sh close,
     # epic or not). bd_json carries the strip of the `gc bd:` rig-store notice and
     # the C0 scrub a `gc bd --json` read needs (bead-context.sh); empty output is an
@@ -143,7 +151,7 @@ clause_epic_ruling_recorded() {
     # hypothesis predates the model, and a disposition pointer (bead-rehome's
     # gc.superseded_by) is a recorded terminal reason, so both pass.
     [ "$_fgr_hashyp" = true ] || return 0
-    [ -n "$_fgr_disposed" ] && return 0
+    [ -n "$_fgr_disposed$_fgr_as_disposed" ] && return 0
     # Only the close ruling, with its outcome recorded, releases the epic. A
     # non-terminal ruling and a value outside the enum (a draft like "pending", a
     # typo) both hold, each with its own reason, so an epic never closes "ruled"
@@ -160,8 +168,9 @@ clause_epic_ruling_recorded() {
     return 1
 }
 
-# finalize_gate_check <bead-id> [<except-key>] — run the clause set in order;
-# the first clause to refuse prints its reason (on stdout) and stops the set.
+# finalize_gate_check <bead-id> [<except-key>] [<as-disposed>] — run the clause set
+# in order; the first clause to refuse prints its reason (on stdout) and stops the
+# set.
 finalize_gate_check() {
     [ -n "${1:-}" ] || { echo "$PROG: check requires a bead id" >&2; return 2; }
     # Every clause reads the store as it stands now, because merge.sh re-asserts
@@ -170,7 +179,7 @@ finalize_gate_check() {
     # so the memo is off for every clause's reads.
     local GC_RECONCILE_BD_CACHE=""
     clause_no_open_human_gate "$1" "${2:-}" || return 1
-    clause_epic_ruling_recorded "$1" || return 1
+    clause_epic_ruling_recorded "$1" "${3:-}" || return 1
     # A further precondition is one more `clause_* "$1" || return 1` here.
     return 0
 }
@@ -182,7 +191,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
             shift
             _fg_bead="${1:-}"; [ $# -gt 0 ] && shift
             case "$_fg_bead" in -*) echo "$PROG: check requires a bead id before its options" >&2; exit 2 ;; esac
-            _fg_except=""
+            _fg_except=""; _fg_as_disposed=""
             while [ $# -gt 0 ]; do
                 case "$1" in
                     --except-key)
@@ -191,10 +200,11 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
                         # situation that script could have filed.
                         case "$2" in *[!A-Za-z0-9._-]*) echo "$PROG: --except-key must contain only [A-Za-z0-9._-] (got '$2')" >&2; exit 2 ;; esac
                         _fg_except="$2"; shift 2 ;;
+                    --as-disposed) _fg_as_disposed=1; shift ;;
                     *) echo "$PROG: unknown argument '$1'" >&2; exit 2 ;;
                 esac
             done
-            finalize_gate_check "$_fg_bead" "$_fg_except"; exit $? ;;
-        *) echo "usage: $PROG check <bead-id> [--except-key <situation-key>]" >&2; exit 2 ;;
+            finalize_gate_check "$_fg_bead" "$_fg_except" "$_fg_as_disposed"; exit $? ;;
+        *) echo "usage: $PROG check <bead-id> [--except-key <situation-key>] [--as-disposed]" >&2; exit 2 ;;
     esac
 fi

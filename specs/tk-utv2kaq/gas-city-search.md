@@ -1,13 +1,14 @@
 ---
 name: Gas City search for carrying out a ruling that gated work will not go on
-description: Use when you are judging whether stand-down.sh, bead-rehome.sh's --check under --except-key, or the reconcile pass's re-read of an arm should give way to something Gas City or bd ships, or when one of the triggers at its end may have fired.
+description: Use when you are judging whether stand-down.sh, bead-rehome.sh's --check under --except-key, finalize-gate.sh's --as-disposed, or the reconcile pass's re-read of an arm should give way to something Gas City or bd ships, or when one of the triggers at its end may have fired.
 ---
 
 # Gas City search for carrying out a ruling that gated work will not go on
 
 This change adds `assets/scripts/stand-down.sh`, grows `bead-rehome.sh --check`
 with a mode that reads what would hold the close when it is given `--except-key`,
-and has the deferred-dispatch reconcile pass read an arm again before it slings.
+gives `finalize-gate.sh check` a `--as-disposed` reading for that mode, and has the
+deferred-dispatch reconcile pass read an arm again before it slings.
 So the arch check asks what Gas City and bd already ship for each need
 ([review-arch.md](../../docs/review-arch.md#the-checks), checks 1 and 2).
 
@@ -71,6 +72,18 @@ this change does not touch that choice.
 `api`, `humaHandleRunCancel`), ends a run. The pack already reaches it through
 `run-cancel.sh` and `gc-helm.sh takeaway --release`, and stand-down.sh calls the
 latter.
+
+**Asking what a close would answer before it writes.** `bd close` (package `main`,
+`closeCmd`) has no dry run. Its flags are `--force`, `--reason`, `--reason-file`,
+`--continue`, `--no-auto`, `--suggest-next`, `--claim-next`, `--session` and
+`--if-revision`, and the refusals `closeDirectCheckOne` applies are bd's own
+(`storeissueops.CheckClosable`, `checkGateSatisfaction`), so none of them reads what
+the pack asks of a close. The clause in question is the pack's: `epic_hypothesis`
+and `epic_ruling` are the pack's keys, which neither bd nor Gas City names at those
+commits, and bead-rehome.sh's pointer is what the clause takes as an epic's terminal
+reason. So asking about the bead as the close will leave it is a reading on the
+pack's own gate. Stamping the pointer first would get the same answer, but it is a
+write, and `--check` exists to answer before the first write.
 
 **Withdrawing a pending dispatch.** `gc sling`'s flags on the
 [CLI page](https://docs.gascity.com/reference/cli#gc-sling) name no dispatch that

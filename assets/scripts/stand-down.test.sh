@@ -31,6 +31,10 @@
 #     nothing, a stop at the edge converges on a re-run, and the gate stays open and
 #     asking about the other bead;
 #   * a graduated convoy the refinery parked, which its gate's message sends here;
+#   * an epic that carries a hypothesis, whatever its ruling reads: the close's
+#     disposition is its terminal reason, so the check ahead of the first write lets
+#     it through, what the check refuses is what the close holds on, and every other
+#     refusal stands;
 #   * --successor names other evidence, the ruling is one line headed `ruled:`, a
 #     dry run writes nothing, and a closed bead is nothing to do;
 #   * the clause a decline message carries is a command that runs.
@@ -680,6 +684,92 @@ eq "$RC" 0 "a dry run exits 0"
 has "$OUT" "DRY RUN" "…and says so"
 has "$OUT" "tk-g" "…and names the evidence"
 cmp -s "$TMP/before.json" "$STUB_STORE" && ok "…and writes nothing" || bad "…and writes nothing"
+
+# --- an epic that carries a hypothesis ---------------------------------------------
+# The close stamps its disposition before it runs the finalize gate, and the gate
+# takes that as a stewarded epic's terminal reason. The check ahead of the first
+# write has to read the epic the same way, or it refuses what the close would do.
+epic() { # [metadata as a jq object]: the work bead as a stewarded epic
+  fresh
+  patch 'map(if .id == "tk-w" then .issue_type = "epic" | .metadata.epic_hypothesis = "the hypothesis" else . end)'
+  [ -z "${1:-}" ] || patch "map(if .id == \"tk-w\" then .metadata += $1 else . end)"
+}
+epic
+run tk-w --key polecat-x --ruling "the operator ruled this epic out" --successor tk-conv
+eq "$RC" 0 "an epic with no ruling stands down, with a conversation as the evidence"
+eq "$(field tk-w status)" closed "…and closes"
+has "$(field tk-w close_reason)" "not needed, per tk-conv" "…as not needed, per the conversation"
+eq "$(meta tk-w gc.superseded_by)" tk-conv "…recording the disposition that is its terminal reason"
+eq "$(field tk-g close_reason)" "ruled: the operator ruled this epic out" "…with its gate answered"
+eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "…and its arm gone"
+eq "$(meta tk-w epic_ruling)" "<absent>" "…and no epic_ruling written, which is the operator's alone"
+pass
+eq "$(slings)" 0 "…and the next pass slings nothing"
+epic
+run tk-w --key polecat-x --ruling "the operator ruled this epic out"
+eq "$RC" 0 "an epic with no ruling stands down with its gate as the evidence"
+eq "$(meta tk-w gc.superseded_by)" tk-g "…pointed at the gate"
+eq "$(field tk-w status)" closed "…and closes"
+for m in '{"epic_ruling":"continue"}' '{"epic_ruling":"shift"}' '{"epic_ruling":"pending"}' '{"epic_ruling":"close"}' '{"epic_ruling":"close","epic_ruling_reason":"held"}'; do
+  epic "$m"
+  run tk-w --key polecat-x --ruling "ruled out" --successor tk-conv
+  eq "$RC" 0 "an epic carrying $m stands down"
+  eq "$(field tk-w status)" closed "…and closes"
+done
+epic
+cp "$STUB_STORE" "$TMP/before.json"
+run tk-w --key polecat-x --ruling "x" --successor tk-conv --dry-run
+eq "$RC" 0 "a dry run on an epic with no ruling exits 0, as the stand-down would"
+cmp -s "$TMP/before.json" "$STUB_STORE" && ok "…and writes nothing" || bad "…and writes nothing"
+epic
+STUB_FAIL="close tk-w" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 1 "a close refused on an epic stops"
+pass
+eq "$(slings)" 0 "…a pass between the runs slings nothing"
+run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 0 "…and a re-run closes it"
+eq "$(field tk-w status)" closed "…and it reads closed"
+
+# What else holds a close holds an epic's: each of these refuses, writing nothing.
+epic; patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"another-question","title":"another question","metadata":{},"created_at":"2026-11-01T00:00:01Z"}]
+  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+refused "an epic under another open gate" tk-w --key polecat-x --ruling "x" --successor tk-conv
+has "$OUT" "tk-g2" "…naming that gate"
+refused "an epic with another open gate named as the evidence" tk-w --key polecat-x --ruling "x" --successor tk-g2
+has "$OUT" "tk-g2" "…naming that gate"
+epic; patch 'map(if .id == "tk-g" then .assignee = "a-person-it-asks" else . end)'
+refused "an epic whose gate a person is assigned" tk-w --key polecat-x --ruling "x" --successor tk-conv
+epic; patch '. + [{"id":"tk-pre","status":"open","assignee":"","issue_type":"task","title":"a prerequisite","metadata":{}}]
+  | map(if .id == "tk-w" then ._deps += [{"id":"tk-pre","dependency_type":"blocks"}] else . end)'
+refused "an epic with another live blocker" tk-w --key polecat-x --ruling "x" --successor tk-conv
+has "$OUT" "tk-pre" "…naming it"
+epic; patch '. + [{"id":"tk-kid","status":"open","assignee":"","issue_type":"task","title":"a unit","parent":"tk-w","metadata":{}}]'
+refused "an epic with an open child" tk-w --key polecat-x --ruling "x" --successor tk-conv
+has "$OUT" "tk-kid" "…naming it"
+epic; patch 'map(if .id == "tk-w" then .status = "in_progress" | .assignee = "a-live-session" else . end)'
+refused "an epic someone has claimed" tk-w --key polecat-x --ruling "x" --successor tk-conv
+has "$OUT" "a-live-session" "…naming them"
+
+# The check agrees with the close it stands in front of: what it lets through
+# closes, and what it refuses stays open.
+agree() { # <label>: the store as set up
+  local want=closed
+  "$HERE/bead-rehome.sh" --origin tk-w --successor tk-conv --kind not-needed --except-key polecat-x --check >/dev/null 2>&1 || want=open
+  "$HERE/bead-rehome.sh" --origin tk-w --successor tk-conv --kind not-needed --except-key polecat-x >/dev/null 2>&1
+  eq "$(field tk-w status)" "$want" "$1: the close does what the check said"
+}
+for m in '{}' '{"epic_ruling":"continue"}' '{"epic_ruling":"close"}' '{"epic_ruling":"close","epic_ruling_reason":"held"}' '{"gc.superseded_by":"tk-conv"}'; do
+  epic "$m"
+  agree "an epic carrying $m"
+done
+epic; patch '. + [{"id":"tk-kid","status":"open","assignee":"","issue_type":"task","title":"a unit","parent":"tk-w","metadata":{}}]'
+agree "an epic with an open child"
+epic; patch '. + [{"id":"tk-pre","status":"open","assignee":"","issue_type":"task","title":"a prerequisite","metadata":{}}]
+  | map(if .id == "tk-w" then ._deps += [{"id":"tk-pre","dependency_type":"blocks"}] else . end)'
+agree "an epic with another live blocker"
+epic; patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"another-question","title":"another question","metadata":{},"created_at":"2026-11-01T00:00:01Z"}]
+  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+agree "an epic under another open gate"
 
 # --- usage -------------------------------------------------------------------------
 fresh

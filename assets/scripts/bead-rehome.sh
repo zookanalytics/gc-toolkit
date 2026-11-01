@@ -47,8 +47,9 @@
 # carries no outcome word, so no quiet period starts; then it closes.
 # A run that stops between steps leaves a state the next run completes, because
 # a resolved gate stays resolved. With --except-key, --check also reads what
-# would hold the close, so a caller that answers those gates itself, such as
-# stand-down.sh, can stop before its first write.
+# would hold the close, and reads the origin as the close will leave it, disposed,
+# so a caller that answers those gates itself, such as stand-down.sh, can stop
+# before its first write.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
 # work outcome when the visit lacks it, with the gates skipped (the close they
 # would guard already happened).
@@ -132,7 +133,7 @@ successor.
 
 --check evaluates that evidence and exits 0 (eligible) or non-zero (refused,
 reason on stderr) without writing anything. With --except-key it also reads what
-would hold the close, as the close itself does.
+would hold the close, as the close itself does once its pointer is stamped.
 
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
@@ -474,8 +475,10 @@ if [ -n "$CHECK" ]; then
         echo "bead-rehome: --check: $ORIGIN is already closed — the repair path adds the pointer only, no close is gated"
     else
         if [ -n "$EXCEPT_KEY" ]; then
+            # The close stamps its pointer before it runs this gate, and a pointer is
+            # what the gate takes as a stewarded epic's terminal reason.
             FG_REASON=""
-            if ! FG_REASON=$("$FINALIZE_GATE" check "$ORIGIN" --except-key "$EXCEPT_KEY" 2>/dev/null); then
+            if ! FG_REASON=$("$FINALIZE_GATE" check "$ORIGIN" --except-key "$EXCEPT_KEY" --as-disposed 2>/dev/null); then
                 echo "bead-rehome: --check refused: the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}" >&2
                 exit 1
             fi

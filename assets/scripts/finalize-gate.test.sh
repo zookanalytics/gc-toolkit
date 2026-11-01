@@ -5,7 +5,8 @@
 # gate refuses (exit 1) only for an open human gate that blocks the subject or a
 # stewarded epic not ruled closed, allows (exit 0) otherwise, and fails closed
 # (exit 1) on an unreadable probe. A gate filed under the --except-key situation
-# passes only while no person is assigned it.
+# passes only while no person is assigned it. --as-disposed reads the bead as
+# carrying a disposition pointer, which only the ruling clause reads.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/finalize-gate-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -255,6 +256,53 @@ store "[$(epic_bead E27r open '{"epic_hypothesis":"h","epic_ruling":"close","epi
 printf 'G27r|blocks|E27r\n' > "$STUB_DEPS"
 out=$("$SUT" check E27r --except-key dispose-failed.27 2>/dev/null); rc=$?
 eq "$rc" 0 "an epic ruled close with its outcome whose only gate is excepted: exit 0"
+
+# 28. --as-disposed answers as a disposed epic (22) answers, whatever the epic's
+# ruling reads. That is what bead-rehome.sh's close finds once it has stamped its
+# pointer, and what its --check asks before the stamp.
+for m in '{"epic_hypothesis":"h"}' '{"epic_hypothesis":"h","epic_ruling":"continue"}' '{"epic_hypothesis":"h","epic_ruling":"shift"}' '{"epic_hypothesis":"h","epic_ruling":"pending"}' '{"epic_hypothesis":"h","epic_ruling":"close"}'; do
+  store "[$(epic_bead E28 open "$m")]"; : > "$STUB_DEPS"
+  "$SUT" check E28 >/dev/null 2>&1; eq "$?" 1 "$m: held as it stands"
+  out=$("$SUT" check E28 --as-disposed 2>/dev/null); rc=$?
+  eq "$rc" 0 "$m: read as disposed, the ruling clause passes it"
+  eq "$out" "" "$m: …with no output"
+done
+
+# 29. The reading reaches the ruling clause only. An open human gate holds a bead
+# read as disposed, epic or not, and --except-key still decides which gates do.
+store "[$(epic_bead E29 open '{"epic_hypothesis":"h"}'), $(hgate G29 open a-question)]"
+printf 'G29|blocks|E29
+' > "$STUB_DEPS"
+out=$("$SUT" check E29 --as-disposed 2>/dev/null); rc=$?
+eq "$rc" 1 "an open human gate holds an epic read as disposed"
+has "$out" "G29" "…and the gate is what it names"
+out=$("$SUT" check E29 --as-disposed --except-key another-question 2>/dev/null); rc=$?
+eq "$rc" 1 "a gate under another key holds it too"
+out=$("$SUT" check E29 --except-key a-question --as-disposed 2>/dev/null); rc=$?
+eq "$rc" 0 "its own unassigned gate under the key does not, the options in either order"
+out=$("$SUT" check E29 --as-disposed --except-key a-question 2>/dev/null); rc=$?
+eq "$rc" 0 "…the other order"
+store "[$(epic_bead E29a open '{"epic_hypothesis":"h"}'), $(hgate G29a open a-question someone)]"
+printf 'G29a|blocks|E29a
+' > "$STUB_DEPS"
+out=$("$SUT" check E29a --as-disposed --except-key a-question 2>/dev/null); rc=$?
+eq "$rc" 1 "a gate a person is assigned holds an epic read as disposed"
+store "[$(work W29 open), $(hgate G29w open a-question)]"
+printf 'G29w|blocks|W29
+' > "$STUB_DEPS"
+out=$("$SUT" check W29 --as-disposed 2>/dev/null); rc=$?
+eq "$rc" 1 "an open human gate holds a plain bead read as disposed"
+
+# 30. A read that fails still refuses: the reading stands in for one key on the
+# bead, and says nothing about whether the store answered.
+store "[$(epic_bead E30 open '{"epic_hypothesis":"h"}')]"; : > "$STUB_DEPS"
+out=$(STUB_SHOW_FAIL=1 "$SUT" check E30 --as-disposed 2>/dev/null); rc=$?
+eq "$rc" 1 "a bead that does not read refuses, read as disposed"
+has "$out" "fail-closed" "…naming the probe"
+
+# 31. Usage of the option.
+"$SUT" check --as-disposed >/dev/null 2>&1; eq "$?" 2 "--as-disposed in place of the bead id: exit 2"
+"$SUT" check E30 --as-disposed=yes >/dev/null 2>&1; eq "$?" 2 "--as-disposed takes no value: exit 2"
 
 echo "----- finalize-gate: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

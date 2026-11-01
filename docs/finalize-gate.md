@@ -25,7 +25,7 @@ read of a bead's human gates is defined once, as `bd_human_gates` in
 
 ## What it checks
 
-`finalize-gate.sh check <bead-id>`:
+`finalize-gate.sh check <bead-id> [--except-key <situation-key>] [--as-disposed]`:
 
 - exit 0 — every clause passed; the bead may be finalized (no output).
 - exit 1 — a clause refuses; the one-line reason is on stdout for the caller to log.
@@ -87,6 +87,12 @@ runs the gate. A bare `gc bd close` runs no gate, and the doctor invariant I15
 (`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
 without its ruling.
 
+`--as-disposed` reads the bead as carrying that disposition. `bead-rehome.sh
+--check` under `--except-key` writes nothing, so it runs ahead of the stamp, and
+it asks this way so that its answer is the one the close will get. Only this
+clause reads a disposition, so the option releases no human gate, and a bead that
+does not read still refuses.
+
 ## Fail closed
 
 A probe that does not read, or does not answer with a JSON array, refuses the
@@ -110,9 +116,9 @@ below exists to see a gate filed after the first check.
   so a hold leaves an open, pointed, findable bead — the same shape a refused
   close leaves. The release is to clear the gate, then re-run.
   `bead-rehome.sh --except-key <situation-key>` hands the key to the gate's
-  exception, and with `--check` it reads the gate and what else would hold the
-  close, writing nothing, which is how `stand-down.sh` stops before its first
-  write. `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
+  exception, and with `--check` it reads the gate, with `--as-disposed`, and what
+  else would hold the close, writing nothing, which is how `stand-down.sh` stops
+  before its first write. `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
   it retries a pre-recorded PR-close disposition. The retry then closes in three
   steps:
   1. It reads what would hold the close: the gate, and the bead's live blockers
