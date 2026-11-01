@@ -1948,6 +1948,10 @@ eq "$RC" 0 "(HOLD-NOBIN) …and exits 0"
 _hold_saved_bin="$GCTK_BIN"; unset GCTK_BIN
 run_fresh tk-subj --no-attach --no-input
 has "$OUT" "could not read the human gates that hold tk-subj" "(HOLD-NOBIN) a city root with no gctk built says the same"
+mkdir -p "$TMP/city/.gc/services/gctk/bin"
+cp "$TMP/bin/gctk-stub" "$TMP/city/.gc/services/gctk/bin/gctk"
+GC_CITY_PATH="$TMP/city" run_fresh tk-subj --no-attach --no-input
+has "$OUT" "tk-subj is held by human gate tk-gate" "(HOLD-CITYBIN) with no GCTK_BIN, engage reads the gctk the city deployed"
 export GCTK_BIN="$_hold_saved_bin"
 
 echo "# the real reader over an anchor, its rework and the gate on the rework"
