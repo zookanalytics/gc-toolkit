@@ -36,11 +36,11 @@ The change adds:
 - `assets/scripts/script-callers.sh`, whose two modes are a census of the open
   steps that name a script, and `--check-merge <base> <head>`, which answers
   whether a merge may remove a pack script yet.
-- A check in `gctk merge`, right before `gh pr merge`, that holds on the answer.
-  It files one human gate under a new situation key,
-  `script-callers-merge-gate.<n>`, when a formula still names the script. When
-  only open steps call it, the arm records the existing `pr.machine` value
-  `progressing` and files nothing.
+- A check in `gctk merge`, right before `gh pr merge` on a pull request into the
+  default branch, that holds on the answer. It files one human gate under a new
+  situation key, `script-callers-merge-gate.<n>`, when a formula still names the
+  script. When only open steps call it, the arm records the existing `pr.machine`
+  value `settled` and files nothing.
 
 It adds no metadata key, bead kind or lifecycle state.
 
@@ -48,7 +48,9 @@ The need has two parts. The census has to find, across every store of the city,
 the open steps whose poured text names a script, and to say so when a store
 could not be read, because "no caller" from a store nobody read would let a
 deletion through. The hold has to answer at the merge, about the merge result,
-because that is when a removal starts to reach the city.
+because that is when a removal starts to reach the city. That is a merge into the
+default branch, which the rig checkout follows. A merge into an integration
+branch reaches no copy of the pack, and the landing PR lists what it removed.
 
 ## A run that keeps what it was poured from
 
@@ -106,10 +108,12 @@ is a step that depends on a script by name. Nothing upstream had to solve that.
 ## A census across stores
 
 - **In one store: bd, which the script composes.** `bd list` takes
-  `--desc-contains` and `--has-metadata-key`
+  `--has-metadata-key` and `--status`
   ([bd list](https://beads.gascity.com/cli-reference/list)). The script reads
-  each store with both, through the pack's `bd_list`, and then matches the name
-  whole, since `--desc-contains` is a case-insensitive substring.
+  each store once for its open steps, through the pack's `bd_list`, and matches
+  each name whole in their text. `--desc-contains` is a case-insensitive
+  substring and takes one read per script per store, inside a merge pass with a
+  time budget.
 - **The set of stores: `gc rig list`, which the script composes.** Core's own
   scripts read the rig list the same way (`cascade-nudge-on-blocker-close.sh`,
   `cross-rig-deps.sh`, `notify-on-human-gate-creation.sh`).
@@ -160,7 +164,7 @@ is a step that depends on a script by name. Nothing upstream had to solve that.
   skipped"), so nothing would clear it. It would also add a write per calling step
   for a state each merge pass can read again.
 - **A person's ask.** The hold that needs a person composes Gas City's human gate
-  through the pack's `human-gate.sh`, as every other hold in `gctk merge` does.
+  through the pack's `human-gate.sh`, as every other ask in `gctk merge` does.
 
 ## What it leaves out
 

@@ -191,8 +191,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    refusal of the transition's own write, which a bare `--set-metadata` on the
    same bead is not subject to.
 
-   The seed-audit check and the removed-script check are the gates here that
-   are properties of the merge rather than of the head. `generated/seed-audit` is rendered from the whole
+   The seed-audit check and the removed-script check are properties of the merge
+   rather than of the head. `generated/seed-audit` is rendered from the whole
    source tree and committed per branch, so a PR carrying a render made at an
    older base overwrites prompt inputs it never saw, and two PRs that touch no
    common file still clobber each other. A lane's green derives from its
@@ -246,23 +246,29 @@ the cadence — the arms run whether or not any refinery session is awake.
    poured with, and that text calls the pack's scripts from the city's copy of
    the pack as each step runs. A merge that removes a script, a rename's old
    path included, stops every open step that names it once that copy takes the
-   merge. `script-callers.sh --check-merge` reads the same two fetched commits
+   merge. That copy follows the default branch, so the check asks only about a
+   merge into it. A merge into an integration branch reaches no copy, and the
+   landing PR that carries the branch to the default branch lists what it
+   removed. `script-callers.sh --check-merge` reads the same two fetched commits
    and takes the files the change removes, from `assets/scripts/` and from each
    sub-pack's `packs/<name>/assets/scripts/`, that the base still carries,
    tests aside. A formula that still names one keeps pouring runs that call
    it, so no wait clears it. That is a formula at the base, at the head, or at
    the rig checkout's HEAD, which the city pours its runs from until the
    checkout is fast-forwarded. The arm then holds the merge and files one human
-   gate per PR under `script-callers-merge-gate.<n>`. The way out is to keep a file
-   at the path, a hand-off to what replaces the script, and remove it in a
+   gate per PR under `script-callers-merge-gate.<n>`. The way out is to keep a
+   file at the path, a hand-off to what replaces the script, and remove it in a
    later change. Open steps in any store of the city that call a removed script
    hold the merge until their runs end. Nothing on the PR has to change for
-   that, so the arm files no gate and records the anchor as `progressing`. A
-   run parked behind a person's gate ends only once that gate is released or
-   the run is cancelled, and the merge waits that long.
-   `script-callers.sh <script>` lists each calling step with its run and the
-   rig whose store holds it. A check that cannot read a revision, the rig list
-   or a store holds the merge for the pass.
+   that, so the arm files no gate. It records `settled`, the verdict
+   `gate-ensure.sh` reaches for the same green anchor later in the pass, so the
+   two do not alternate: the board reads "green — waiting on the merge pass" and
+   the PR `status: merging`. A run parked behind a person's gate ends only once
+   that gate is released or the run is cancelled, and the merge waits that long
+   with nothing on the board to say so. Each pass's log names the calling steps,
+   and `script-callers.sh <script>` lists each with its run and the rig whose
+   store holds it. A check that cannot read a revision, the rig list or a store
+   holds the merge for the pass.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of

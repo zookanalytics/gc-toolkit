@@ -1437,7 +1437,7 @@ cat > "$BIN/git" <<'STUB'
 set -u
 case "$*" in
   *"remote get-url origin"*) echo "${STUB_ORIGIN_URL:-}" ;;
-  *"symbolic-ref"*) echo "origin/${STUB_ORIGIN_HEAD:-main}" ;;
+  *"symbolic-ref"*) [ -z "${STUB_NO_ORIGIN_HEAD:-}" ] || exit 1; echo "origin/${STUB_ORIGIN_HEAD:-main}" ;;
   # The checkout a merge pass runs over. Empty by default, which is a host with
   # no repository under it and therefore no committed artifact to keep current.
   *"rev-parse --show-toplevel"*) printf '%s\n' "${STUB_TOPLEVEL:-}" ;;

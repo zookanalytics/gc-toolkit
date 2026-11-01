@@ -38,8 +38,9 @@
 # packs/<name>/assets/scripts/, tests aside. The formulas are the files under
 # formulas/ and under each sub-pack's packs/<name>/formulas/.
 #
-# Callers: gctk merge (services/gctk/internal/cli/merge.go), which holds a pull
-# request's merge on every exit but 0, and anyone about to remove a script.
+# Callers: gctk merge (services/gctk/internal/cli/merge.go), which asks about a
+# pull request into the default branch and holds its merge on every exit but 0,
+# and anyone about to remove a script.
 #
 # Exit: 0 no open step calls the scripts, or the merge removes no script that a
 #       formula names or an open step calls · 1 a formula at <base>, at <head>
@@ -100,18 +101,19 @@ name_re() {
 
 # callers <script>... — collect each open step that names one of the scripts,
 # in every store of the city, one line per step in CALLER_LINES, and count them
-# in NCALLERS. A rig list or a store that cannot be read ends the script with
-# exit 2.
+# in NCALLERS. Each store is read once, so the cost does not grow with the
+# scripts asked about. A rig list or a store that cannot be read ends the script
+# with exit 2.
 NCALLERS=0; CALLER_LINES=""
 callers() {
   local rigs rig path name rows lines
-  rigs=$("$HERE/rig-map.sh" | jq -r '.rigs[]? | objects | select((.name // "") != "" and (.path // "") != "") | [.name, .path] | @tsv') \
+  rigs=$("$HERE/rig-map.sh" | jq -r '.rigs[] | [.name, .path] | @tsv') \
     || fail "cannot read the city's rigs (gc rig list --json)"
   [ -n "$rigs" ] || fail "the city lists no rig, so no store was read"
   while IFS=$'\t' read -r rig path; do
+    rows=$(bd_list --db "$path/.beads" --has-metadata-key gc.step_ref --status "$LIVE_STATUSES") \
+      || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
     for name in "$@"; do
-      rows=$(bd_list --db "$path/.beads" --has-metadata-key gc.step_ref --status "$LIVE_STATUSES" --desc-contains "$name") \
-        || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
       lines=$(printf '%s' "$rows" | jq -r --arg s "$name" --arg re "$(name_re "$name")" --arg rig "$rig" '
         .[] | select((.description // "") | test($re))
         | "\($s): step \(.id) (\(.metadata["gc.step_ref"] // "?"), \(.status), \(.assignee // "" | if . == "" then "unassigned" else . end)) in run \(.metadata["gc.root_bead_id"] // "?"), store of rig \($rig)"') \

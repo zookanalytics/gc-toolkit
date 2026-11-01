@@ -809,7 +809,9 @@ func (m *merger) handle(row *gcbd.Bead) {
 	callers := m.scriptPath("script-callers.sh")
 	packRepo := m.repoRoot != "" && fileExists(filepath.Join(m.repoRoot, "pack.toml"))
 	checkFreshness := packRepo && fileExists(filepath.Join(m.repoRoot, "generated/seed-audit/INDEX.md")) && fileExists(renderer)
-	checkCallers := packRepo && fileExists(callers)
+	// The city's copy of the pack follows the default branch. A merge into an
+	// integration branch reaches no copy, and the landing PR lists what it removed.
+	checkCallers := packRepo && fileExists(callers) && intoDefaultBranch(base)
 	if checkFreshness || checkCallers {
 		if rc := runRC("git", "fetch", "--quiet", "--no-tags", "origin",
 			"+refs/heads/"+base+":"+mergeGateRef+"/base", "+refs/heads/"+headRef+":"+mergeGateRef+"/head"); rc != 0 {
@@ -862,7 +864,10 @@ func (m *merger) handle(row *gcbd.Bead) {
 	// from the city's copy of the pack, so a removed script stops every open
 	// step that names it once the merge reaches that copy. A formula that still
 	// names it is the change's to fix. Open steps that call it hold the merge
-	// until their runs end, with nothing on the PR to change.
+	// until their runs end, with nothing on the PR to change. Every lane is green
+	// there and the PR waits on this pass, which is settled. gate-ensure.sh reaches
+	// the same verdict later in the pass, so any other one here would alternate
+	// with it for as long as the hold stands.
 	if checkCallers {
 		scOut, scRC := runCombined("bash", callers, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
 		switch scRC {
@@ -875,7 +880,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 			m.held++
 			return
 		case 3:
-			m.recordMachine(id, "progressing", headOid, aroute)
+			m.recordMachine(id, "settled", headOid, aroute)
 			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script open steps still call; merge held until their runs end (anchor %s)\n", mergeProg, num, id)
 			m.printIndented(scOut, 12)
 			m.held++
@@ -1532,6 +1537,14 @@ func helperDirProblem(dir string) string {
 }
 
 func (m *merger) scriptPath(name string) string { return filepath.Join(m.scriptsDir, name) }
+
+// intoDefaultBranch reports whether base is the branch origin's HEAD names. A
+// checkout that cannot name it answers true, so a check that only a merge into
+// the default branch owes is asked rather than skipped.
+func intoDefaultBranch(base string) bool {
+	head := strings.TrimSpace(runOut("git", "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"))
+	return head == "" || head == "origin/"+base
+}
 
 // standingQuietWindow is the quiet period, in seconds, of a human gate whose
 // condition stands from one pass to the next, a duplicate anchor, a stale render

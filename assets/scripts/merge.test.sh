@@ -1411,7 +1411,7 @@ has "$out" "PR#93 removes a pack script open steps still call; merge held until 
 has "$out" "2 open step(s) call a script the merge removes" "…quoting the count"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…with no human gate, since nothing on the PR has to change"
-has "$(meta C3 pr.machine)" "progressing@sha-93" "…and the machine axis says the city is moving it"
+has "$(meta C3 pr.machine)" "settled@sha-93" "…and the machine axis reads settled: every lane is green and the PR waits on this pass"
 
 store "[$(anchor C4 94), $(rev C4)]"
 printf '%s' "$(prview 94 OPEN CLEAN)" > "$GH_DIR/pr_view_94.json"
@@ -1433,6 +1433,27 @@ has "$out" "could not fetch 'main' and 'polecat/x95'" "an unreachable remote hol
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 eq "$(wc -c < "$CALLERS_LOG" | tr -d ' ')" "0" "…before the check is asked about refs it does not have"
 export STUB_FETCH_RC=""
+
+# The city's copy of the pack follows the default branch. A merge into an
+# integration branch reaches no copy, and the landing PR lists what it removed.
+store "[$(anchor C6 96 ',"merged_target":"integration/e1"'), $(rev C6)]"
+printf '%s' "$(prview 96 OPEN CLEAN)" | jq -c '.baseRefName = "integration/e1"' > "$GH_DIR/pr_view_96.json"
+approved 96
+export STUB_FETCHED_HEAD="sha-96" STUB_CALLERS_RC=3 STUB_CALLERS_OUT="1 open step(s) call a script the merge removes"
+: > "$CALLERS_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded C6" "a merge into an integration branch is not held for the scripts it removes"
+eq "$(wc -c < "$CALLERS_LOG" | tr -d ' ')" "0" "…since the check is not asked about it"
+
+store "[$(anchor C7 97 ',"merged_target":"integration/e1"'), $(rev C7)]"
+printf '%s' "$(prview 97 OPEN CLEAN)" | jq -c '.baseRefName = "integration/e1"' > "$GH_DIR/pr_view_97.json"
+approved 97
+export STUB_FETCHED_HEAD="sha-97" STUB_NO_ORIGIN_HEAD=1
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#97 removes a pack script open steps still call; merge held" "a checkout that cannot name the default branch asks all the same"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+unset STUB_NO_ORIGIN_HEAD
 rm -f "$SD/script-callers.sh"
 export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_BASE_STALE="" STUB_REAUDIT_RC=0
 
@@ -1922,6 +1943,34 @@ eq "$("$GCTK_BIN" pr-status derive --anchor CR2)" "needs-attention" "…so the P
 eq "$(pinned CR3) $(cause CR3)" "blocked@$(cr_head 180) review-threads" "an unresolved review thread keeps its verdict through both writers"
 eq "$("$GCTK_BIN" pr-status derive --anchor CR3)" "needs-attention" "…so the PR reads needs-attention"
 rm -f "$GH_DIR/rules_main.json" "$SD/gate-ensure.sh"
+
+echo "# through both writers, a merge held for open runs that call a script it removes stays settled and writes nothing more"
+# Every lane is green and the PR waits on the merge pass, so gate-ensure.sh
+# records settled for the same anchor. Any other verdict from the merge arm would
+# alternate with it on every pass for as long as the hold stands, each write
+# restarting the verdict's instant. CH1 carries a blocked verdict whose cause no
+# longer holds, which only the merge pass can clear.
+cp "$HERE/gate-ensure.sh" "$SD/gate-ensure.sh"; chmod +x "$SD/gate-ensure.sh"
+mkdir -p "$TMP/repo"; printf 'name = "t"\n' > "$TMP/repo/pack.toml"
+printf '#!/usr/bin/env bash\necho "1 open step(s) call a script the merge removes"\nexit 3\n' > "$SD/script-callers.sh"
+chmod +x "$SD/script-callers.sh"
+STUB_FETCHED_HEAD=$(cr_head 181)
+export STUB_TOPLEVEL="$TMP/repo" STUB_FETCHED_HEAD
+store "[$(cr_anchor CH1 181 check-failed), $(rev CH1)]"
+: > "$STUB_DEPS"
+cr_view 181 CLEAN "[]"
+out=$("$SUT" 2>&1)
+has "$out" "PR#181 removes a pack script open steps still call; merge held" "test premise: the merge pass holds"
+eq "$(pinned CH1) $(cause CH1)" "settled@$(cr_head 181) <absent>" "the hold clears a cause that no longer holds"
+held_verdict=$(machine CH1)
+out=$("$SD/gate-ensure.sh" --default correctness --review-pool rig/gc-toolkit.polecat-codex --fix-pool rig/gc-toolkit.polecat 2>&1); rc=$?
+eq "$rc" 0 "test premise: gate-ensure.sh's pass exits 0"
+eq "$(machine CH1)" "$held_verdict" "gate-ensure.sh reaches the same verdict, instant and all"
+out=$("$SUT" 2>&1)
+eq "$(machine CH1)" "$held_verdict" "…and the next merge pass leaves it as it stands"
+eq "$("$GCTK_BIN" pr-status derive --anchor CH1)" "merging" "…so the PR reads merging while the hold stands"
+export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
+rm -f "$SD/script-callers.sh" "$SD/gate-ensure.sh"
 
 echo "# a base gone BEHIND records blocked; the branch must be brought current"
 store "[$(anchor BK4 95), $(rev BK4)]"

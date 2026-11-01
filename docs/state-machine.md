@@ -735,7 +735,7 @@ ones.
 
 | Value | Meaning |
 |---|---|
-| `progressing` | some automated actor will act: one holds a live blocker, a declared lane is short of green, a required check is still running, a conflicting branch waits on its merge-in rework, or the merge waits for open runs that call a pack script it removes |
+| `progressing` | some automated actor will act: one holds a live blocker, a declared lane is short of green, a required check is still running, or a conflicting branch waits on its merge-in rework |
 | `settled` | every declared check derives `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `blocked` | a hold no automated actor will clear and no review verdict is owed on. The cause rides `pr.machine_cause` as one of the values below and `pr.machine_reason` as a sentence, and the board and the `status:` label show it as needs-attention rather than folding it into the awaiting-review tail |
 
@@ -811,6 +811,11 @@ what it waits on. While a fix unit answering it is in flight the anchor reads
 `progressing`. Once nothing is in flight the merge pass records `settled`, the
 PR waits on that reviewer's re-review, and the standing review rides the
 posture axis.
+
+A merge held for open runs that call a pack script it removes is `settled`:
+every lane is green and the PR waits on the merge pass, whether a pool is working
+those runs or a person's gate parks them
+([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2).
 
 **Dated keys.** `pr.machine` and `pr_posture` carry a third component,
 `<value>@<oid>@<since>`, under one write rule that `lifecycle.sh --set-dated`

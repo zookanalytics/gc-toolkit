@@ -44,8 +44,7 @@ REPO="$TMP/repo"
 
 # --- fake gc: the rig list, and each store's steps --------------------------
 # bd list honours the filters a census asks for, so a step the script lists
-# had to pass them; --desc-contains is a substring match, as bd's is, so the
-# whole-name rule is the script's own.
+# had to pass them. The whole-name rule is the script's own.
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
@@ -56,11 +55,10 @@ if [ "${1:-}" = rig ] && [ "${2:-}" = list ]; then
 fi
 if [ "${1:-}" = bd ] && [ "${2:-}" = list ]; then
   shift 2
-  db=""; contains=""; statuses=""; key=""
+  db=""; statuses=""; key=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --db) db="$2"; shift 2 ;;
-      --desc-contains) contains="$2"; shift 2 ;;
       --status) statuses="$2"; shift 2 ;;
       --has-metadata-key) key="$2"; shift 2 ;;
       *) shift ;;
@@ -69,8 +67,7 @@ if [ "${1:-}" = bd ] && [ "${2:-}" = list ]; then
   [ "$db" != "${STUB_BD_FAIL_DB:-}" ] || { echo "Error: database unavailable" >&2; exit 1; }
   [ -f "$db/steps.json" ] || { echo "Error: no database at $db" >&2; exit 1; }
   echo "gc bd: answering from the rig \"workshop\" store"
-  jq -c --arg c "$contains" --arg s "$statuses" --arg k "$key" '[.[]
-    | select((.description // "") | contains($c))
+  jq -c --arg s "$statuses" --arg k "$key" '[.[]
     | select(.status as $st | ($s | split(",")) | index($st))
     | select($k == "" or (.metadata | has($k)))]' "$db/steps.json"
   exit 0
@@ -127,9 +124,17 @@ hasnt "$out" "ws-n1" "a bead with no gc.step_ref is not a caller"
 hasnt "$out" "ws-s4" "a longer name that holds the script's name is not the script"
 eq "$(printf '%s\n' "$out" | head -1)" "3 open step(s) call old-tool.sh" "...the count first, so a log that keeps only the head keeps it"
 log=$(cat "$STUB_GC_LOG")
-has "$log" "bd list --db $STORES/harbor/.beads --has-metadata-key gc.step_ref --status open,in_progress,blocked,deferred,hooked,pinned --desc-contains old-tool.sh --limit=0 --json" \
+has "$log" "bd list --db $STORES/harbor/.beads --has-metadata-key gc.step_ref --status open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json" \
   "each store is read pinned by --db, for steps in every status but closed"
 has "$log" "bd list --db $STORES/lantern/.beads" "...the last rig's store included"
+
+: > "$STUB_GC_LOG"
+run old-tool.sh sub-tool.sh
+eq "$rc" "3" "steps that call either of two scripts exit 3"
+eq "$(printf '%s\n' "$out" | head -1)" "4 open step(s) call old-tool.sh sub-tool.sh" "...counting the steps of both"
+has "$out" "sub-tool.sh: step hb-s1 (mol-k.probe, open, unassigned) in run hb-r1, store of rig harbor" "...listing the second script's caller"
+has "$out" "old-tool.sh: step ws-s1 (mol-a.load, open, unassigned) in run ws-r1, store of rig workshop" "...and the first's"
+eq "$(grep -c '^bd list ' "$STUB_GC_LOG")" "3" "...reading each of the three stores once, however many scripts are asked about"
 
 callers_off
 run old-tool.sh keep.sh
@@ -152,6 +157,11 @@ unset STUB_RIGS_RC
 cp "$STUB_RIGS" "$TMP/rigs.keep"; printf '{"rigs":[]}' > "$STUB_RIGS"
 run old-tool.sh
 eq "$rc" "2" "a city that lists no rig decides nothing, since no store was read"
+printf '{"rigs":[{"name":"harbor","path":"%s"},{"name":"lantern"}]}' "$STORES/harbor" > "$STUB_RIGS"
+callers_off
+run old-tool.sh
+eq "$rc" "2" "a rig the list gives no path for decides nothing, since its store was not read"
+callers_on
 cp "$TMP/rigs.keep" "$STUB_RIGS"
 
 echo "# usage"
@@ -245,7 +255,6 @@ run --root "$REPO" --check-merge main delete
 eq "$rc" "3" "removing a script only open steps call exits 3"
 has "$out" "old-tool.sh: step ws-s1 (mol-a.load, open, unassigned) in run ws-r1, store of rig workshop" "...listing each caller"
 has "$(printf '%s\n' "$out" | head -1)" "3 open step(s) call a script the merge removes (assets/scripts/old-tool.sh)" "...under a headline with the count"
-has "$(cat "$STUB_GC_LOG")" "--desc-contains old-tool.sh" "...asking the stores by the script's file name"
 
 run --root "$REPO" --check-merge main rename
 eq "$rc" "3" "a rename removes the old path"
@@ -262,7 +271,6 @@ eq "$rc" "3" "removing a sub-pack's script that open steps call exits 3"
 has "$out" "sub-tool.sh: step hb-s1 (mol-k.probe, open, unassigned) in run hb-r1, store of rig harbor" "...listing its caller"
 has "$(printf '%s\n' "$out" | head -1)" "1 open step(s) call a script the merge removes (packs/sub/assets/scripts/sub-tool.sh)" \
   "...under a headline naming its path"
-has "$(cat "$STUB_GC_LOG")" "--desc-contains sub-tool.sh" "...asking the stores by its file name"
 : > "$STUB_GC_LOG"
 run --root "$REPO" --check-merge main sub-doc-drop
 eq "$rc" "0" "a sub-pack's file outside its assets/scripts/ is not a script"
