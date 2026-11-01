@@ -47,18 +47,3 @@ only explains the design shows no search.
 The arch check's divergence lens sends back a change without this record.
 [review-arch.md](docs/review-arch.md) holds its method, the evidence it accepts
 and its other checks.
-
-## A subject line's scope is a subsystem the size comment names
-
-Here the scope in a commit subject or a PR title, which the polecat doctrine's
-[Subject lines](template-fragments/polecat-doctrine.template.md#subject-lines)
-section has you decide, is a subsystem name from `tools/measure.sh`. Those are
-the names each PR's size comment prints, so there is no second list to keep.
-`shared` and `unplaced` name no area, so neither is ever a scope.
-
-Read the area off the diff with `tools/measure.sh --pr origin/<target> HEAD`. Its
-table has one row for each subsystem the change touches, the most net lines
-first. Take the one the change is mostly about, which is usually the first row,
-though a rewrite's net lines can place it lower. Write no scope when the table
-prints no row, as for a change only to docs, tooling or records, when `shared` or
-`unplaced` holds most of the change, or when no one row does.
