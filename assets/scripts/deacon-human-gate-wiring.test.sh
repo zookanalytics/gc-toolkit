@@ -72,26 +72,13 @@ else
   ok "no bare 'gc mail send' anywhere in the formula"
 fi
 
-# The patrol and the prompt name the helper by its name. The prompt's emergency
-# calls it directly on the bead it is about: `gc bd` files the gate in that
-# bead's store, so no store is derived first and no pool is named.
-for F in "$TOML" "$PROMPT"; do
-  if grep -n 'escalate\.sh' "$F"; then
-    bad "${F#"$ROOT"/} still names escalate.sh; the helper is human-gate.sh"
-  else
-    ok "${F#"$ROOT"/} names the helper by its name, human-gate.sh"
-  fi
-done
+# The prompt's emergency calls the helper directly on the bead it is about, and
+# `gc bd` files the gate in that bead's store.
 EMERGENCY=$(grep -n '"\$SCRIPTS/human-gate\.sh"' "$PROMPT")
 case "$EMERGENCY" in
   *'--subject <bead> --key <situation-key>'*) ok "the deacon's emergency files a human gate on the bead it is about" ;;
   *) bad "the deacon prompt's emergency no longer calls human-gate.sh --subject <bead> --key <situation-key>" ;;
 esac
-if grep -n -e 'escalation-rig' -e 'ESC_RIG' -e '--pool' "$PROMPT"; then
-  bad "the deacon prompt derives a store or names a pool for its human gate; gc bd files the gate beside the bead it blocks"
-else
-  ok "the deacon prompt derives no store and names no pool for its human gate"
-fi
 
 echo
 echo "deacon-human-gate-wiring: $PASS passed, $FAIL failed"

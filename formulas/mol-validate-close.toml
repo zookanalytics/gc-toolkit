@@ -141,9 +141,9 @@ gc bd close "$WORK_BEAD_ID" --reason "validated <done, or no work>: <one line>"
 work, or the call is the operator's. Leave the bead OPEN and ask; do not close
 it. Record why on the bead's notes so the operator lands on the disagreement.
 The ask is a human gate on the bead under the key `validate-close`, which holds
-the bead until the operator answers, and the helper files nothing while one is
-open. On a bead with an open child the ask is a conversation on the bead
-instead, because a gate on the parent would pause the child's work:
+the bead until the operator answers. On a bead with an open child the ask is a
+conversation on the bead instead, because a gate on the parent would pause the
+child's work:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -154,14 +154,10 @@ SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/hum
 # >>> validate-close-ask
 ASK="A first reaction proposed closing $WORK_BEAD_ID; validation did not confirm it. Read the subject's notes, then close, redirect, or route the work."
 # An open child is any child that is not closed or pinned, a gate or a wisp
-# among them, which is what a gate on the parent would pause. One read answers
-# it, and a read that fails files the gate, the ordinary ask, in a strict shell
-# too.
+# among them. One read answers it, and a read that fails files the gate, the
+# ordinary ask, in a strict shell too.
 CHILDREN=$(gc bd list --parent "$WORK_BEAD_ID" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | tr -d '[:cntrl:]') || CHILDREN=""
 if printf '%s' "$CHILDREN" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  # An open child that is real work is what raised the doubt, and a gate on
-  # the parent would pause that very work, so the ask is a conversation on the
-  # bead, which holds nothing.
   "$SCRIPTS/gc-helm.sh" open "$WORK_BEAD_ID" --reason "proposed close did not validate: accept or redirect" --body "$ASK" >/dev/null \
     || { echo "no conversation was opened on $WORK_BEAD_ID — stop, address what gc-helm.sh reported, and re-run this block" >&2; exit 1; }
 else

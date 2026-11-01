@@ -47,7 +47,9 @@ usage: upstream-finding.sh --message <why this send is warranted>
 U
 }
 
-warn() { echo "$PROG: $*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 MESSAGE=""; KEY=""; CMD=()
 while [ $# -gt 0 ]; do
@@ -304,10 +306,6 @@ if [ "$(eval "set -- $PASTE"; sig "$@")" != "$(sig "${CMD[@]}")" ]; then
   exit 1
 fi
 
-_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
-
 # One bead per situation, whatever its status. An open one is the same ask
 # still waiting; a closed one is an ask a human already answered, and re-filing
 # it re-asks a question that was settled.
@@ -413,7 +411,7 @@ if ! GATE=$("$HUMAN_GATE" --subject "$BEAD" --key "upstream-send-$KEY" --message
   warn "bead $BEAD carries the command but human-gate.sh did not file a gate — NO ONE HAS BEEN ASKED. Re-run this command; it will reuse $BEAD."
   exit 1
 fi
-echo "$PROG: gate ${GATE:-<none>} on $BEAD asks the operator for the send"
+echo "$PROG: gate $GATE on $BEAD asks the operator for the send"
 
 if [ -n "$EXISTING" ]; then
   echo "$PROG: $BEAD already carries this send — refreshed the ask, nothing filed twice"

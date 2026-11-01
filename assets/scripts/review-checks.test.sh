@@ -262,6 +262,7 @@ excludes "no-index --with-phase never tags a token merge" "$OUT" "	merge"
 # A fixture pack: the script under <pack>/assets/scripts, its index at <pack>.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
 cp "$SUT" "$PACK/assets/scripts/review-checks.sh"; chmod +x "$PACK/assets/scripts/review-checks.sh"
+cp "$REPO/assets/scripts/bd-lib.sh" "$PACK/assets/scripts/bd-lib.sh"
 PSUT="$PACK/assets/scripts/review-checks.sh"
 cat >"$PACK/review-checks.toml" <<'TOML'
 [checks.correctness]

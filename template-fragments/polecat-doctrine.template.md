@@ -268,9 +268,7 @@ must go on once a person rules, file the human gate first, then run
 `await-ruling.sh`. The gate blocks the work bead, and `await-ruling.sh` reads
 that wait back and arms the work's re-sling, so clearing the gate is the ruling
 to proceed: the next deferred-dispatch pass pours a fresh run. A ruling not to
-proceed closes the work bead first. A decline is an event of your run, so file
-its gate with no quiet window, and a situation a person answered `moot` or
-`benign` before is asked again. When nobody has a decision to make, because
+proceed closes the work bead first. When nobody has a decision to make, because
 the work is finished or a live peer is building it, cancel with no gate:
 
 ```bash

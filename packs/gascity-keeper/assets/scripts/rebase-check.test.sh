@@ -538,6 +538,15 @@ reset_env; ITERATION=3; RUN_BEAD=""; write_state
 run_case "FAIL before the work bead resolves" 1
 refute_call "no timing without a resolved work bead" "iteration_timings="
 
+# With no override, run-lib.sh is the one in the pack tree above the script.
+reset_env; write_state
+( cd "$TMP" && unset GC_RUN_LIB; GC_WISP_ID=wisp-1 GC_BEAD_ID=iter-1 GC_ITERATION=1 bash "$SCRIPT" ) >"$TMP/out" 2>&1
+if grep -qF "cannot source" "$TMP/out"; then
+  bad "with no override the script sources the run-lib.sh above it"; sed 's/^/       /' "$TMP/out"
+else
+  ok "with no override the script sources the run-lib.sh above it"
+fi
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -50,7 +50,7 @@ _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 2; }
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
 
-die() { echo "converse-rework: $1" >&2; exit 2; }
+DIE_STATUS=2
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 ANCHOR=""; RULING_BEAD=""; RULING=""; POOL_NAME=""

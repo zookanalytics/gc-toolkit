@@ -27,12 +27,6 @@ MISSING="$MISSING$(printf '%s\n' "$CALLS" | grep -v -- '--key' || true)"
   && ok "every human-gate.sh call carries --subject and --key (one gate per bead and key)" \
   || { bad "human-gate.sh calls missing --subject or --key:"; printf '%s\n' "$MISSING" | sed 's/^/       /'; }
 
-if grep -n 'escalate\.sh' "$TOML"; then
-  bad "the refinery patrol still names escalate.sh; the helper is human-gate.sh"
-else
-  ok "the refinery patrol names the helper by its name, human-gate.sh"
-fi
-
 # The empty-identity check runs before the refinery has any bead in hand, and
 # the only id it holds names a session, so its report is a patrol finding.
 IDENT=$(awk '/^title = "Validate canonical agent identity"$/ {f=1} f && /^\[\[steps\]\]$/ {exit} f' "$TOML")

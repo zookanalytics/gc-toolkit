@@ -155,6 +155,7 @@ without_gc() {
 R="$TMP/repo"
 mkdir -p "$R/agents/alpha" "$R/agents/beta" "$R/formulas" "$R/assets/scripts"
 cp "$SUT" "$R/assets/scripts/render-seed-audit.sh"
+cp "$HERE/bd-lib.sh" "$R/assets/scripts/bd-lib.sh"
 printf 'name = "fixture"\n' > "$R/pack.toml"
 for a in alpha beta; do
     printf 'name = "%s"\n' "$a" > "$R/agents/$a/agent.toml"

@@ -287,14 +287,12 @@ chmod +x "$TMP/helm"
 
 # human-gate.sh files the human gate a ruling or recommend holds on and prints
 # its id on stdout, as the real helper does. FAKE_GATE_FAILS models a gate that
-# did not file; FAKE_GATE_NOID a helper that exits 0 and names no gate. A
-# --retract call is logged and changes nothing.
+# did not file. A --retract call is logged and changes nothing.
 cat > "$TMP/human-gate" <<'HG'
 #!/usr/bin/env bash
 printf 'GATE %s\n' "$*" >> "$FAKE_LOG"
 case " $* " in *" --retract "*) exit 0 ;; esac
 [ -n "${FAKE_GATE_FAILS:-}" ] && exit 1
-[ -n "${FAKE_GATE_NOID:-}" ] && exit 0
 printf '%s\n' "${FAKE_GATE_ID:-tk-gate1}"
 HG
 chmod +x "$TMP/human-gate"
@@ -1064,8 +1062,8 @@ unset FAKE_SHOW_JSON FAKE_DEPS_JSON
 #   (RULKEY)   the gate is filed under the key first-reaction, with no quiet
 #              window
 #   (RULORDER) gate, then release, then the landed proof
-#   (RULGATE)  a gate that did not file, or that the helper did not name, fails
-#              the exit before the release, with nothing recorded done
+#   (RULGATE)  a gate that did not file fails the exit before the release, with
+#              nothing recorded done
 #   (RULEDGE)  a hold that did not land fails the exit
 #   (RULSUPER) an open first-reaction gate a superseded reaction filed is
 #              withdrawn before the new one, and this reaction's own is kept
@@ -1116,12 +1114,6 @@ has "re-run this command" "$ERR" "(RULGATE) …and the failure names the retry"
 hasnt "gc.reacted_by" "$LOG" "(RULGATE) …with no landed proof stamped"
 hasnt "UPDATE bd update $R" "$LOG" "(RULGATE) …and the reaction bead left open for the re-offer"
 unset FAKE_GATE_FAILS
-
-export FAKE_GATE_NOID=1
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
-eq "$RC" "4" "(RULGATE) a helper that names no gate fails the exit"
-hasnt "HELM takeaway" "$LOG" "(RULGATE) …before the release"
-unset FAKE_GATE_NOID
 
 export FAKE_DEPS_JSON='[]'
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"

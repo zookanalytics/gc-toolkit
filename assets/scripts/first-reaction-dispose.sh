@@ -101,7 +101,9 @@ PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 4; }
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 4; }
+DIE_STATUS=4
 usage_die() { printf '%s: %s\n' "$PROG" "$*" >&2; usage; exit 2; }
 note() { printf '%s: %s\n' "$PROG" "$*" >&2; }
 
@@ -400,9 +402,7 @@ case "$DISPOSITION" in
         # names no worker-runnable action, so the gate is Discuss-only).
         [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$UNTIL$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$EMERGENCY" ] \
             || usage_die "$DISPOSITION takes --recommended-formula on recommend and nothing else; --route/--assign/--waiting-on/--blocker/--until/--then-route/--then-assign/--after-workflow/--emergency belong to the other exits"
-        # The takeaway is the gate's title as well as the board headline, so its
-        # cap is checked before anything is filed, as gc-helm.sh takeaway
-        # checks it, in codepoints.
+        # In codepoints, as gc-helm.sh takeaway checks it.
         tlen=$(printf '%s' "$TAKEAWAY" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//' | jq -Rsr 'length' 2>/dev/null || true)
         case "$tlen" in ''|*[!0-9]*) tlen=${#TAKEAWAY} ;; esac
         [ "$tlen" -le 140 ] \
@@ -893,13 +893,11 @@ reco_ensure() { # <formula, or empty to clear> <what has already landed, for the
 
 # ── A recommendation already on the subject is cleared, before the act ─────
 # The subject states the current recommendation and never a superseded one the
-# operator could still Accept. Every exit clears a recommendation an earlier
-# reaction left, and recommend stamps its own only once its gate is filed
-# (below), so no recommendation is ever older than the newest first-reaction
-# gate. That is how Accept finds the recommendation's gate once the gate is
-# closed, and an exit that stops part way never leaves its gate beside an older
-# recommendation, which Accept would sling in place of the one the gate asks
-# about.
+# operator could still Accept. No recommendation older than the newest
+# first-reaction gate is how Accept finds the recommendation's gate once the gate
+# is closed, and an exit that stops part way never leaves its gate beside an
+# older recommendation, which Accept would sling in place of the one the gate
+# asks about.
 if [ -n "$(subject_meta gc.recommended_formula)" ]; then
     reco_ensure "" "Nothing else was written."
 fi
@@ -1020,23 +1018,16 @@ $REASON" >/dev/null 2>&1 \
 fi
 
 # ── The ruling and recommend exits' human gate ───────────────────────
-# The next move is the operator's, and what a person owes is a native human gate
-# that blocks the subject, filed through human-gate.sh under the key
-# first-reaction. Its title is the takeaway with its whitespace collapsed onto
-# one line, as gc-helm.sh takeaway stores it, so the gate says the sentence the
-# board shows on the subject. The helper titles a gate with its message's first
-# line, so that one line leads the message. The helper files nothing while an
-# open gate under the key blocks the subject, so a re-run of this reaction after
-# a partial finds the gate it filed. An open first-reaction gate asks this
-# reaction's question when its title or its description's first line is this
-# takeaway. The description holds the message whole, while the helper keeps a
-# title under 400 bytes, so a longer takeaway matches only by the description,
-# and a gate whose description does not lead with the takeaway matches by its
-# title. Any other open first-reaction gate asks a superseded reaction's
-# question, so it is withdrawn first, and the new gate carries this reaction's.
-# A reaction is an event of its own, so the call declares no quiet window. On a
-# subject with open children the gate blocks the parent, and its unstarted parts
-# wait with it.
+# The gate's title is the takeaway with its whitespace collapsed onto one line,
+# as gc-helm.sh takeaway stores it, so the gate says the sentence the board shows
+# on the subject. The helper titles a gate with its message's first line, so that
+# one line leads the message. An open first-reaction gate asks this reaction's
+# question when its title or its description's first line is this takeaway. The
+# description holds the message whole, while the helper keeps a title under 400
+# bytes, so a longer takeaway matches only by the description, and a gate whose
+# description does not lead with the takeaway matches by its title. Any other
+# open first-reaction gate asks a superseded reaction's question, so it is
+# withdrawn first, and the new gate carries this reaction's.
 GATE=""
 if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
     [ -x "$HUMAN_GATE" ] \
@@ -1060,9 +1051,6 @@ $REASON
 
 The card in $BEAD's notes carries the evidence. Clearing this gate makes $BEAD ready.") \
         || die "could not file the human gate on $BEAD (human-gate.sh failed; its message above names why). Clear the cause and re-run this command."
-    GATE=$(printf '%s\n' "$GATE" | tail -n 1)
-    [ -n "$GATE" ] \
-        || die "human-gate.sh named no gate for $BEAD. Re-run this command; the helper finds a gate it already filed rather than filing a second."
     TARGET="$GATE"
     note "put $BEAD to the operator as the human gate $GATE"
     if [ "$DISPOSITION" = "recommend" ]; then

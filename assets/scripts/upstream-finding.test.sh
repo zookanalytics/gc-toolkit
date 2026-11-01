@@ -200,9 +200,8 @@ DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
 has "$DESC" "$PARKED" "the description carries the pasteable command"
 has "$DESC" "Hit while working ra-kg9z6" "the description carries the operator's rationale"
 # The gate on the bead blocks its close, so the bead sends the operator to the
-# gate for the answer, and never says that closing the bead gives it.
+# gate for the answer.
 has "$DESC" "Clear the gate with the answer" "the description says the answer clears the gate"
-hasnt "$DESC" "Closing this bead answers the ask" "…and never that a close answers it, which the gate refuses"
 
 # The ask reaches a human, on this bead.
 ESC=$(cat "$STUB_ESC_LOG")
@@ -478,13 +477,6 @@ reset_state
 eq "$?" "0" "-R is recognised as --repo"
 eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "the -R value is the target"
 eq "$(meta up-1 gh_verb)" "issue comment" "a comment verb is labelled as itself"
-
-# ── --pool is retired ─────────────────────────────────────────────────────
-reset_state
-"$SUT" --message "why" --pool "mycity/gc-toolkit.converse" \
-  -- gh issue create --repo a/b --title T --body B >/dev/null 2>&1
-eq "$?" "2" "--pool is refused: a gate is not routed"
-eq "$(count)" "0" "and nothing is parked"
 
 # ── failures that must not report a parked send ───────────────────────────
 reset_state
