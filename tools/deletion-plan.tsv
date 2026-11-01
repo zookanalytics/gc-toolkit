@@ -7,6 +7,8 @@
 assets/scripts/escalate.sh	tk-kvdomjb
 assets/scripts/escalation-rig.sh	tk-kvdomjb
 assets/scripts/escalation-rig.test.sh	tk-kvdomjb
+assets/scripts/migrate-visits-to-gates.sh	tk-1tfzr71.33
+assets/scripts/migrate-visits-to-gates.test.sh	tk-1tfzr71.33
 assets/scripts/lease-heartbeat.sh	tk-1tfzr71.39
 assets/scripts/lease-heartbeat.test.sh	tk-1tfzr71.39
 assets/scripts/molecule-hold.sh	tk-1tfzr71.39
