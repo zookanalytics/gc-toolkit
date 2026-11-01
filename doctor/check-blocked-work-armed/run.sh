@@ -68,11 +68,11 @@ set -u
 # molecule, rig, agent, role, message, session, convoy, issue-type step, spec,
 # event, convergence, ...), `decision` (a person answers it, not a pool — arming
 # it would sling a human's question at a polecat), the container types (`epic`,
-# `milestone`, `story`, whose leaf children are the routed work), and any custom
-# type a rig adds are all not-pool-work by naming what IS. A type this check has
-# never heard of is left alone rather than mistaken for work. doctor.toml names
-# the same set.
-WORK_TYPES=" bug feature task chore spike "
+# `milestone`, whose leaf children are the routed work), and any custom type a
+# rig adds are all not-pool-work by naming what IS. A type this check has never
+# heard of is left alone rather than mistaken for work. doctor.toml names the
+# same set.
+WORK_TYPES=" bug feature task chore spike story "
 
 # The standing kinds, from the one definition shared with the liveness sweep and
 # the proactive scan. Exposes $STANDING_KINDS_JQ. An unsourceable one warns:

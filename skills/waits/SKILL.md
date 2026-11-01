@@ -71,8 +71,8 @@ human gate, below).
   `blocks` blocker of its own holds and that carries no live work. Live work
   includes a route or an arm, a branch or a PR, a `task_kind`, an open child, a
   convoy that tracks the bead, and an issue type other than task, bug, feature,
-  chore or spike. `assets/scripts/live-work.sh` defines every mark. The pass
-  leaves a resolved bead with live work open, and
+  chore, spike or story. `assets/scripts/live-work.sh` defines every mark. The
+  pass leaves a resolved bead with live work open, and
   `doctor/check-until-resolved-owed` reports it as a decision for a person.
 - A headline on the bead (the records skill) takes `--no-wait`, because
   nothing holds it: `--waiting-on` writes a `blocks` edge, which bd refuses

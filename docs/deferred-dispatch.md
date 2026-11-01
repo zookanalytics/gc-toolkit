@@ -461,8 +461,8 @@ live work fall into these groups:
 - **Owned by another closer:** any `task_kind`, a molecule step or workflow
   root, a demand, a duplicate diagnosis, a successor pointer
   (`gc.superseded_by`) that a disposition recorded without its close landing,
-  or an issue type outside plain work (task, bug, feature, chore, spike). An
-  epic closes on its own ruling.
+  or an issue type outside plain work (task, bug, feature, chore, spike,
+  story). An epic closes on its own ruling.
 - **Parked:** a `hold_reason` or a `rebase_hold`.
 - **Structural:** a convoy that parents the bead, or an open child under it.
 
