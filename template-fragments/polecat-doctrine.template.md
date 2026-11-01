@@ -239,7 +239,7 @@ spends a human only when one is required.
 
 File a human gate yourself when no agent can answer: missing credentials,
 external access, or a decision that is the operator's to make. File it before
-any cancel, whatever the reason for it. `human-gate.sh` files exactly one open
+any cancel, whatever the reason for it. `human-gate.sh` files one open
 gate per bead and situation key, on the work bead. The gate holds the work bead
 and every part filed under it: they leave the pool's offer until a person
 clears the gate. Its exit 0 is the release path the operator sees on the board:

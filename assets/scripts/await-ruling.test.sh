@@ -38,6 +38,9 @@
 #     human-gate.sh, called with no quiet window as the decline arms call it,
 #     files a fresh gate the wait lands on, and a declared window would leave
 #     the wait no gate to sit on;
+#   * a wait that lands on a writer's gate while another writer files under the
+#     same key: the real human-gate.sh and this script run interleaved at the
+#     create, and the work bead stays held until a person answers its gate;
 #   * a decline arm later in a mol-polecat-work run, its block taken from the
 #     formula, meets a crashed owner's claim that load-context built over: the
 #     wait lands and the run is cancelled, and a listed owner's claim stops the
@@ -72,7 +75,10 @@ mkdir -p "$TMP/bin"
 # dependency_type added, or an error object for an unknown id. `bd dep add`
 # records an edge unless $FAKE_DEP_FAIL is set. `bd gate create --type=human
 # --blocks <b> --await-id <k> --title <t> --reason <r>` files an open human gate
-# that <b> waits on, so the real human-gate.sh can run against the store. `bd update` applies --status,
+# that <b> waits on, so the real human-gate.sh can run against the store, and
+# runs $FAKE_GATE_CREATE_HOOK once the gate and its edge have landed and before
+# it answers. `bd gate resolve <id> --reason <r>` closes an open gate with that
+# reason, and on a closed gate keeps the first reason and still reports success. `bd update` applies --status,
 # --assignee, --set-metadata, --unset-metadata and --append-notes; it refuses
 # when the id is in $FAKE_UPD_FAIL, and refuses the arm's write (one that sets
 # gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set. `bd unclaim <id>
@@ -187,6 +193,15 @@ case "$verb" in
     fi
     echo "✓ Unclaimed $id" ;;
   gate)
+    if [ "${1:-}" = resolve ]; then
+      id="${2:-}"; reason=""; shift 2 || true
+      while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
+      jq -c --arg id "$id" --arg r "$reason" 'map(if .id == $id and .status != "closed"
+        then (.status = "closed" | .close_reason = $r | .closed_at = "2026-10-22T00:00:01Z") else . end)' \
+        "$S" > "$S.x" && mv "$S.x" "$S"
+      echo "✓ Gate resolved: $id"
+      exit 0
+    fi
     [ "${1:-}" = create ] || { echo "gc stub: unsupported 'bd gate $*'" >&2; exit 2; }
     shift; blocks=""; key=""; title=""; typ=""
     while [ $# -gt 0 ]; do
@@ -204,6 +219,7 @@ case "$verb" in
              "await_type": $ty, "await_id": $k, "created_at": "2026-10-22T00:00:00Z", "metadata": {}}]' \
       "$S" > "$S.x" && mv "$S.x" "$S"
     printf '%s|blocks|tk-gate%s\n' "$blocks" "$n" >> "$D"
+    [ -z "${FAKE_GATE_CREATE_HOOK:-}" ] || "$FAKE_GATE_CREATE_HOOK" >/dev/null
     printf '{"id":"tk-gate%s"}\n' "$n" ;;
   *) echo "gc stub: unsupported 'bd $verb'" >&2; exit 2 ;;
 esac
@@ -586,6 +602,48 @@ jq -c 'map(if .id == "tk-work" then .assignee = "hq-live" else . end)' "$FAKE_ST
 eq "$(arm "$LIVE_LIST")" "1|GATE;AWAIT;" \
    "a later arm on a listed owner's claim: the wait does not land, so no cancel and no drain"
 eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-live" "a later arm on a listed owner's claim: the claim is kept"
+
+# ── 10. a wait that lands on a writer's gate while another writer files ──────
+# bd keeps no idempotency at create, so a second writer's gate can appear after a
+# writer's create and before its read-back, and come first by created_at. By then
+# another work bead can already wait on the first writer's gate, because this
+# script adds its edge to the open gate it reads on --subject. The hook runs the
+# real await-ruling.sh at that point of the real human-gate.sh's create, then
+# files the second writer's gate, so the wait is on the gate the writer has just
+# filed and that gate no longer comes first.
+export RACE_KEY=polecat-race
+cat > "$TMP/interleave.sh" <<'HOOK'
+#!/usr/bin/env bash
+"${WAITER:?}" tk-work --key "${RACE_KEY:?}" --subject tk-anchor --formula mol-polecat-work > "${WAITER_LOG:?}" 2>&1
+printf '%s\n' "$?" > "$WAITER_LOG.rc"
+jq -c --arg k "$RACE_KEY" '. + [{"id":"tk-early","status":"open","assignee":"","title":"the other writer","issue_type":"gate","await_type":"human","await_id":$k,"created_at":"2026-10-21T23:59:59Z","metadata":{}}]' \
+  "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+printf 'tk-anchor|blocks|tk-early\n' >> "$FAKE_DEPS"
+HOOK
+chmod +x "$TMP/interleave.sh"
+# gates_holding <bead>: the open gates under the key that hold the bead, by the
+# readers every caller of a bead's gates uses.
+gates_holding() { ( . "$HERE/bd-lib.sh"; bd_human_gates "$1" | bd_gates_open_under_key "$RACE_KEY" | jq -r 'map(.id) | join(" ")' ); }
+reset
+# The stub names a gate by the store's next row.
+WRITER_GATE="tk-gate$(( $(jq 'length' "$FAKE_STORE") + 1 ))"
+FILED=$(WAITER="$SCRIPT" WAITER_LOG="$TMP/waiter.log" FAKE_GATE_CREATE_HOOK="$TMP/interleave.sh" \
+  "$HERE/human-gate.sh" --subject tk-anchor --key "$RACE_KEY" --message "Which base does this rebuild take?" 2>"$TMP/filer.err"); RC=$?
+eq "$RC" 0 "two writers: the filing exits 0"
+eq "$FILED" "$WRITER_GATE" "two writers: stdout names the gate this call filed"
+eq "$(cat "$TMP/waiter.log.rc")" 0 "two writers: the wait landed during the create"
+has "$(cat "$TMP/waiter.log")" "tk-work waits on gate $WRITER_GATE" "two writers: the work bead waits on the gate the writer had just filed"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "two writers: the work bead is armed to re-sling once its gate clears"
+hasnt "$(cat "$GC_LOG")" "bd gate resolve" "two writers: nothing resolves a gate before a person answers"
+eq "$(field "$WRITER_GATE" status)" open "two writers: the gate the work bead waits on stays open"
+eq "$(field tk-early status)" open "two writers: the other writer's gate stays open"
+eq "$(gates_holding tk-work)" "$WRITER_GATE" "two writers: the work bead stays held with no answer from a person"
+eq "$(gates_holding tk-anchor)" "tk-early $WRITER_GATE" "two writers: both gates hold the subject, the first by created_at first"
+gc bd gate resolve "$WRITER_GATE" --reason "ruled: take main" >/dev/null
+eq "$(gates_holding tk-work)" "" "two writers: a person's answer on its gate ends the work bead's wait"
+eq "$(gates_holding tk-anchor)" "tk-early" "two writers: the subject stays held by the gate not yet answered"
+gc bd gate resolve tk-early --reason "ruled: take main" >/dev/null
+eq "$(gates_holding tk-anchor)" "" "two writers: the subject moves once a person has answered both"
 
 echo
 echo "await-ruling.test.sh: $PASS passed, $FAIL failed"
