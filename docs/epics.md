@@ -81,6 +81,8 @@ into it (see [Elaboration is progressive](#elaboration-is-progressive)). The
 closure condition and indicators are filled in as the epic is elaborated. The
 only hard gate is that a hypothesis exists at all — its wording is expected to
 improve through the work, and nothing here is meant as a major gate on filing.
+A Delivery carries an aim in place of this contract, and its epic carries the
+contract ([Deliveries and Epic Checkpoints](#deliveries-and-epic-checkpoints)).
 
 ## How an epic closes
 
@@ -201,8 +203,8 @@ way a Delivery needs:
 
 - the helm board gives it a row of its own, nested under its epic's, and a
   Story's row, such as its PR's, nests under it;
-- the stranded-work check and the queues of routed work do not take it for work,
-  and it goes to no pool, because its Stories are the work;
+- the stranded-work check, the proactive scan and the refinery's queue do not
+  take it for work, and it goes to no pool, because its Stories are the work;
 - its Stories follow its priority, which follows the epic's, and a park on it or
   on the epic holds its unstarted Stories ([steering.md](steering.md));
 - bd refuses its close while a Story under it is open.

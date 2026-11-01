@@ -111,10 +111,10 @@ gathers the evidence and makes the ruling's writes
 ([epics.md](epics.md#deliveries-and-epic-checkpoints)). Machinery that does any of
 that for them is not built. It is designed from what those hand runs record.
 Plausibly that is a formula that files the checkpoint sitting and gathers its
-evidence when a Delivery lands, and one verb that makes the ruling's writes. The
-ruling the sitting records stays the one the gate and I15 read. It is a formula,
-not a doctor check: doctor is already over-leveraged, and its role here stays the
-after-the-fact invariant.
+evidence when a Delivery lands, and one verb that makes the ruling's writes. It
+is not a doctor check: doctor is already over-leveraged, and its role here stays
+the after-the-fact invariant. The ruling the sitting records stays the one the
+gate and I15 read.
 
 Until it lands, nothing asks for a ruling. An epic whose work has landed waits
 for the operator to call a sitting on it, so an answered or stalled epic stays
