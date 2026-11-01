@@ -114,7 +114,7 @@ fi
 # The step's check call reads the work bead's tree from what the bd stub serves.
 if [ "$1" = "bd" ] && [ "$2" = "show" ]; then
   shift
-  exec bd "$@"
+  exec "${0%/*}/bd" "$@"
 fi
 # The self-review step's note of setup and build lands in the state the bd stub
 # serves, so the exit condition reads what the step wrote.

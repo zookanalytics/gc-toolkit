@@ -157,11 +157,9 @@ bead with human-gate.sh (key `rig-demo-no-scenario`), cancel the run with
 gc bd update "$REQUEST_BEAD" --set-metadata demo_script_path="$SCRIPT_PATH" --append-notes "rig-demo: scenario resolved to $SCRIPT_PATH"
 ```
 
-**4. Close this step so the graph advances.** Non-terminal step, no drain: the
-same session then takes `capture` with `gc hook --claim --json`.
-```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-rig-demo.prepare-script
-```
+**4. Close this step so the graph advances:** `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-rig-demo.prepare-script`.
+Non-terminal step, no drain: the same session then takes `capture` with `gc hook
+--claim --json`.
 
 **Exit criteria:** a demo:capture script exists at `demo_script_path` on the
 request bead, and this step is closed.
@@ -265,11 +263,9 @@ gc bd update "$REQUEST_BEAD" --set-metadata demo_mp4_path="$OUT" --append-notes 
 # <<< rig-demo-capture-run
 ```
 
-**Close this step so the graph advances.** Non-terminal step, no drain: the same
-session then takes `deliver-and-finalize` with `gc hook --claim --json`.
-```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-rig-demo.capture
-```
+**Close this step so the graph advances:** `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-rig-demo.capture`.
+Non-terminal step, no drain: the same session then takes `deliver-and-finalize`
+with `gc hook --claim --json`.
 
 **Exit criteria:** a non-empty MP4 at `demo_mp4_path` on the request bead, and
 this step is closed.

@@ -93,6 +93,19 @@ else
   echo "skip - own-step check: $TOML_PY"
 fi
 
+# Closing load-dispatch would advance the graph into a review with nothing
+# gathered, so both of its failures end the run by cancelling it.
+if TOML_PY="$(tomllib_python)"; then
+  out=$("$TOML_PY" - "$ROOT/formulas/mol-review.toml" <<'PY'
+import sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+st = next(s for s in d["steps"] if s["id"] == "load-dispatch")
+print(st["description"].count('run-cancel.sh" --step mol-review.load-dispatch'))
+PY
+)
+  eq "$out" 2 "mol-review's load-dispatch cancels on a short record and on a failed gather"
+fi
+
 # --- 2b. A wait sits on an open gate. -------------------------------------------
 # human-gate.sh files nothing for a situation a person answered moot or benign
 # inside a quiet window the call declares, and the wait needs an open gate. So
