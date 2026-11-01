@@ -198,10 +198,20 @@ sign-off adds `PR #<n> still needs your Approve on GitHub` after your
 and the PR reminder. That takes about 45 of the 140 characters. An `--outcome`
 that leaves it too little stops the sign-off at the headline, and a re-run with
 a shorter one goes on. The sign-off also prints a line naming each such PR with
-its link. Tell the operator that in your sign-off, in plain words and with the
-link, as the one thing left for them to do, so they do not take the ruling for
-the approval. When it prints no such line, an Approve already stands or no PR is
-left waiting on one, so leave the subject out of your sign-off.
+its link. Pass on what the line says in your sign-off, in plain words and with
+the link, so they do not take the ruling for the approval. Keep what it does not
+know: a line saying the reviews could not be read means the PR may still need
+the Approve and you could not tell. Then place it by what the ruling left:
+- **Nothing but the Approve stands between this ruling and the merge.** Say it
+  is the one thing left for them to do.
+- **Anything else is still open:** the ruling holds the PR back, a gate or a
+  decision stays owed (`--leave`), or the subject waits on other work
+  (`--waiting-on`). Say that first, with what settles it, and give the Approve
+  as what the merge needs after that, so it reads as a later step rather than a
+  request to approve now.
+
+When it prints no such line, an Approve already stands or no PR is left waiting
+on one, so leave the subject out of your sign-off.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),

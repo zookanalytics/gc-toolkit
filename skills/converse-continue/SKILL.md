@@ -42,8 +42,10 @@ Until it exits 0, do not tell the operator the ruling is in place:
 ```
 An answer that reached the gate first stands, and the writer prints it: tell
 the operator. It also prints a line for each open PR the ruling leaves standing
-that still needs the operator's Approve review on GitHub: tell them that too,
-with the link. The sign-off reads a gate you answered here as already cleared
+whose merge still needs, or may still need, the operator's Approve review on
+GitHub. Tell them what the line says, with the link, after whatever the ruling
+leaves holding the PR, so it reads as what the merge needs rather than a request
+to approve now. The sign-off reads a gate you answered here as already cleared
 and leaves it. Record what each turn settles as step 6 says, and sign off
 (step 7) once nothing important is pending.
 
