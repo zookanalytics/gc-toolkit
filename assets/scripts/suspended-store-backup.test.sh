@@ -112,25 +112,92 @@ rig rig-c true false 'gc.endpoint_origin: explicit\n' yes
 rig rig-d true false "$INHERITS" no
 rig rig-e true false - yes
 rig rig-f true false '# gc.endpoint_origin: explicit\ngc.endpoint_origin:   inherited_city  \ngc.endpoint_origin: explicit\n' yes
-rig rig-g true false 'gc:\n  gc.endpoint_origin: inherited_city\n' yes
-rig rig-h true false 'gc.endpoint_origin: "inherited_city"\n' yes
-rig rig-i true false 'gc.endpoint_origin:\ngc.endpoint_origin: inherited_city\n' yes
-rig rig-j true false 'gc:\n  endpoint_origin: inherited_city\n' yes
 list_rigs
 run
 eq "$RC" 0 "a pass whose syncs all succeed exits 0"
-eq "$(synced)" "rig-a rig-f rig-i" "it syncs the covered stores, in the listing's order, and no other"
+eq "$(synced)" "rig-a rig-f" "it syncs the covered stores, in the listing's order, and no other"
 eq "$(sed -n 2p "$STUB_DIR/gc.log")" "bd --city $CITY --rig rig-a backup sync" "each through gc bd, naming the city and the rig"
 eq "$(sed -n 1p "$STUB_DIR/gc.log")" "--city $CITY rig list --json" "the rig list names the city too"
 has "$OUT" "rig-c: left alone, its endpoint origin is explicit" "a suspended rig with another origin is left alone, and the pass says why"
 has "$OUT" "rig-d: left alone, it has no registered backup destination" "so is a store with no registered destination"
-has "$OUT" "rig-e: left alone, its endpoint origin is not recorded" "and one whose config does not read"
-has "$OUT" "rig-g: left alone" "an indented key is not the line gc writes"
-has "$OUT" 'rig-h: left alone, its endpoint origin is "inherited_city"' "nor is a quoted value, though Gas City's own read takes one"
-has "$OUT" "rig-j: left alone" "nor is the nested spelling, which it also takes"
+has "$OUT" "rig-e: left alone, its endpoint origin is not recorded" "and one with no config"
+hasnt "$OUT" "config.yaml" "which is no error of its own"
 hasnt "$OUT" "rig-b" "a running rig is mol-dog-backup's, and goes unmentioned"
 hasnt "$OUT" "town" "so does the city's own row, whatever it reports"
-has "$OUT" "synced 3 of 3" "the summary counts what it covered"
+has "$OUT" "synced 2 of 2" "the summary counts what it covered"
+
+# Gas City's Go reader, ReadConfigState, reads inherited_city in the configs this
+# pass syncs and in the flow mapping, and in no other config here.
+echo "# the origin reads as Gas City reads it, in either spelling it takes"
+reset
+rig rig-dq true false 'gc.endpoint_origin: "inherited_city"\n' yes
+rig rig-sq true false "gc.endpoint_origin: 'inherited_city'\n" yes
+rig rig-cm true false 'gc.endpoint_origin: inherited_city # a note\n' yes
+rig rig-crlf true false 'dolt.mode: server\r\ngc.endpoint_origin: inherited_city\r\n' yes
+rig rig-nested true false 'gc:\n  endpoint_origin: inherited_city\n  endpoint_status: verified\n' yes
+rig rig-wide true false 'issue_prefix: x\ngc:\n    endpoint_status: verified\n    endpoint_origin: inherited_city\ndolt:\n    host: h\n' yes
+rig rig-nq true false "gc:\n  endpoint_origin: 'inherited_city' # a note\n" yes
+rig rig-nc true false 'gc: # a section\n  endpoint_origin: inherited_city\n' yes
+rig rig-nb true false 'gc:\n\n# a comment\n  # another\n  endpoint_origin: inherited_city\n' yes
+rig rig-ncrlf true false 'gc:\r\n  endpoint_origin: inherited_city\r\n' yes
+rig rig-deep true false 'gc:\n  sub:\n    endpoint_origin: explicit\n  endpoint_origin: inherited_city\n' yes
+rig rig-flat true false 'gc:\n  endpoint_origin: explicit\ngc.endpoint_origin: inherited_city\n' yes
+rig rig-first true false 'gc:\n  endpoint_origin: inherited_city\n  endpoint_origin: explicit\n' yes
+rig rig-qx true false 'gc.endpoint_origin: "explicit"\n' yes
+rig rig-nx true false 'gc:\n  endpoint_origin: explicit\n' yes
+rig rig-fx true false 'gc:\n  endpoint_origin: inherited_city\ngc.endpoint_origin: explicit\n' yes
+rig rig-other true false 'gc.endpoint_origin: inherited_city_x\n' yes
+rig rig-word true false 'gc.endpoint_origin: inherited_city extra\n' yes
+rig rig-ef true false "gc.endpoint_origin: ''\ngc:\n  endpoint_origin: inherited_city\n" yes
+rig rig-bf true false 'gc.endpoint_origin:\ngc:\n  endpoint_origin: inherited_city\n' yes
+rig rig-dup true false 'gc.endpoint_origin:\ngc.endpoint_origin: inherited_city\n' yes
+rig rig-dot true false 'gc:\n  gc.endpoint_origin: inherited_city\n' yes
+rig rig-sub true false 'gc:\n  sub:\n    endpoint_origin: inherited_city\n' yes
+rig rig-sec true false 'gc:\n  endpoint_status: verified\ndolt:\n  endpoint_origin: inherited_city\n' yes
+rig rig-key true false 'gc.endpoint_origin_old: inherited_city\n' yes
+rig rig-nkey true false 'gc:\n  endpoint_origin_old: inherited_city\n' yes
+rig rig-sval true false 'gc: x\n  endpoint_origin: inherited_city\n' yes
+rig rig-off true false '# gc.endpoint_origin: inherited_city\n' yes
+rig rig-seq true false 'gc:\n  - endpoint_origin: inherited_city\n' yes
+rig rig-flow true false 'gc: {endpoint_origin: inherited_city}\n' yes
+list_rigs
+run
+eq "$RC" 0 "a pass over every spelling exits 0"
+eq "$(synced)" "rig-dq rig-sq rig-cm rig-crlf rig-nested rig-wide rig-nq rig-nc rig-nb rig-ncrlf rig-deep rig-flat rig-first" "a quoted value, a comment, CRLF, the nested spelling and the flat one over a nested explicit all read as inheriting"
+has "$OUT" "synced 13 of 13" "and the summary counts them"
+has "$OUT" "rig-qx: left alone, its endpoint origin is explicit" "a quoted other origin is still another origin, named without its quotes"
+has "$OUT" "rig-nx: left alone, its endpoint origin is explicit" "so is a nested one"
+has "$OUT" "rig-fx: left alone, its endpoint origin is explicit" "the flat spelling wins over a nested inherited_city"
+has "$OUT" "rig-other: left alone, its endpoint origin is inherited_city_x" "a longer value is another origin"
+has "$OUT" "rig-word: left alone, its endpoint origin is inherited_city extra" "and so is one with a word after it"
+for r in rig-ef:"an empty flat value is the answer, over a nested one" \
+         rig-bf:"and so is a blank one" \
+         rig-dup:"and a blank first line of two, which is the key Gas City finds" \
+         rig-dot:"a dotted key under the section is neither spelling" \
+         rig-sub:"a deeper mapping that reuses the name is not the key" \
+         rig-sec:"nor is the same name in another section" \
+         rig-key:"nor a longer key" \
+         rig-nkey:"nor a longer key under the section" \
+         rig-sval:"a section with a value of its own holds no key" \
+         rig-off:"nor a commented-out line" \
+         rig-seq:"nor an item of a sequence" \
+         rig-flow:"a flow mapping, which only the Go reader takes, stays left alone and says so"; do
+  has "$OUT" "${r%%:*}: left alone, its endpoint origin is not recorded" "${r#*:}"
+done
+
+echo "# a config that does not read"
+if [ "$(id -u)" -eq 0 ]; then
+  ok "skipped as root, where every file reads"
+else
+  reset
+  rig rig-a true false "$INHERITS" yes
+  rig rig-f true false "$INHERITS" yes
+  list_rigs
+  chmod 000 "$CITY/rigs/rig-a/.beads/config.yaml"
+  run
+  eq "$(synced)" "rig-f" "the store is not synced, and the next one still is"
+  has "$OUT" "rig-a: left alone, its endpoint origin is not recorded" "and the reader's complaint is not taken for an origin"
+fi
 
 echo "# a pass with nothing to cover"
 reset

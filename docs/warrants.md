@@ -117,6 +117,18 @@ shares only the word ([authority-map.md](authority-map.md)).
     store going without a backup. No pack in `gastownhall/gascity-packs` runs a
     backup of its own: its one mention of `mol-dog-backup` is Gas Town's patrol
     reporting that the order may have failed.
+  - No command reports a rig's endpoint origin. `gc rig list --json` and
+    `gc rig status --json` leave it out (`RigListItem` in `cmd/gc/cmd_rig.go`,
+    `RigStatusRig` in `cmd/gc/cmd_status.go`). `gc rig set-endpoint --dry-run`
+    prints it only as preview text, and its `--json` form has no field for it
+    (`printRigEndpointDryRun` in `cmd/gc/cmd_rig_endpoint.go`, `rigEndpointJSON`
+    in `cmd/gc/management_json.go`). So the script carries a copy of
+    `beads_config_value` from the bd pack
+    (`examples/bd/assets/scripts/gc-beads-bd.sh`). The dolt pack and
+    `schemas/wisps-composite-index/common.sh` carry the same function because
+    they ship independently, and a test holds those three equal
+    (`cmd/gc/gc_beads_bd_config_value_test.go`). That test does not reach this
+    copy.
 
   In `gastownhall/beads`, auto-backup stays off on a shared server, and its
   documentation says to run `bd backup` explicitly there
@@ -124,6 +136,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   writes `.beads/dolt-backup-state.json` (`updateDoltBackupState` in
   `cmd/bd/backup_dolt.go`), the file Gas City's `scanDoltBackupFreshness` and
   `BulkDeleteSafe` judge (`internal/doctor/checks_bd_backup_freshness.go`).
+  `bd config get` reads a `gc.*` key from the store and not from the file
+  (`IsYamlOnlyKey` in `internal/config/yaml_config.go`), so it cannot report the
+  origin either.
 - **Verified.** 2026-10-31, at `gastownhall/gascity` main 6f5e14c2f,
   `gastownhall/gascity-packs` main 0b0d96250 and `gastownhall/beads` main
   6ebaacba8.

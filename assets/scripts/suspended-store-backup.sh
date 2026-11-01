@@ -71,17 +71,59 @@ command -v flock >/dev/null 2>&1 || {
     exit 1
 }
 
-# The endpoint origin in the form gc writes it: the first top-level
-# gc.endpoint_origin line with a value. Gas City's own read also takes a quoted or
-# nested spelling, which reads here as another origin, so that store is left alone
-# and the alarms keep flagging it.
-endpoint_origin() {
-    awk '/^gc\.endpoint_origin[[:space:]]*:/ {
-        v = $0
-        sub(/^[^:]*:[[:space:]]*/, "", v)
-        sub(/[[:space:]]+$/, "", v)
-        if (v != "") { print v; exit }
-    }' "$1" 2>/dev/null
+# A copy of Gas City's shell reader of a bd config key, unchanged from its bd pack's
+# gc-beads-bd.sh, so the pass reads the endpoint origin as Gas City's packs do. Each
+# of those packs carries its own copy because they ship independently, and so does
+# this one. A spelling only Gas City's Go reader takes, such as a flow mapping,
+# reads here as no origin, so that store is left alone and the alarms keep flagging
+# it.
+#
+# beads_config_value <config.yaml> <section.field> prints a two-part dotted
+# bd config key's value in either spelling bd reads: the flat top-level
+# `section.field: v` gc writes, or the nested `section:` / `  field: v` that
+# bd >= 1.3.1 writes on `bd config set`. The flat spelling wins when both are
+# present, as it does in viper. Trailing comments and surrounding quotes are
+# stripped; an absent file or key prints nothing. Mirrors findConfigValue in
+# internal/beads/contract/files.go.
+beads_config_value() {
+    [ -f "$1" ] || return 0
+    awk -v key="$2" '
+        function clean(v) {
+            sub(/^[[:space:]]+/, "", v)
+            if (v ~ /^#/) v = ""
+            sub(/[[:space:]]+#.*$/, "", v)
+            sub(/[[:space:]]+$/, "", v)
+            if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+            return v
+        }
+        BEGIN {
+            dot = index(key, ".")
+            section = substr(key, 1, dot - 1)
+            field = substr(key, dot + 1)
+        }
+        { sub(/\r$/, "") }
+        /^[[:space:]]*(#.*)?$/ { next }
+        /^[^[:space:]]/ {
+            in_section = 0
+            child_indent = -1
+            if (!flat_seen && index($0, key ":") == 1) {
+                flat_seen = 1
+                flat = clean(substr($0, length(key) + 2))
+            }
+            if (index($0, section ":") == 1 && clean(substr($0, length(section) + 2)) == "") in_section = 1
+            next
+        }
+        in_section {
+            match($0, /^[[:space:]]+/)
+            if (child_indent < 0) child_indent = RLENGTH
+            if (RLENGTH == child_indent && nested == "" && index(substr($0, RLENGTH + 1), field ":") == 1)
+                nested = clean(substr($0, RLENGTH + length(field) + 2))
+        }
+        END {
+            if (flat_seen) print flat
+            else if (nested != "") print nested
+        }
+    ' "$1"
 }
 
 # rig-map.sh writes to stderr only when the listing did not read, and then names
@@ -94,7 +136,7 @@ ROWS="$(printf '%s' "$MAP" | jq -r '.rigs[] | select((.hq // false) == false and
 
 COVERED=()
 while IFS= read -r name && IFS= read -r root; do
-    origin="$(endpoint_origin "$root/.beads/config.yaml")"
+    origin="$(beads_config_value "$root/.beads/config.yaml" gc.endpoint_origin)"
     if [ "$origin" != inherited_city ]; then
         echo "$PROG: $name: left alone, its endpoint origin is ${origin:-not recorded}"
     elif [ ! -f "$root/.beads/dolt-backup.json" ]; then
