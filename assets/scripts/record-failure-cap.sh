@@ -41,7 +41,7 @@ PROG="record-failure-cap"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-ESCALATE="$SCRIPTS_DIR/escalate.sh"
+HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
 
 # Consecutive failed records on one anchor before the retry stops being the
 # whole answer.
@@ -63,16 +63,17 @@ gc bd update "$ID" --set-metadata "merge_record_failures=$N" >/dev/null 2>&1 \
   || echo "$PROG: WARN could not count the record failure on $ID; the cap cannot arm from this pass" >&2
 
 [ "$N" -ge "$MAX_RECORD_FAILURES" ] || exit 0
-echo "$PROG: $ID has now failed to record merged PR#$NUM $N times (cap $MAX_RECORD_FAILURES); escalating" >&2
-[ -x "$ESCALATE" ] || exit 0
+echo "$PROG: $ID has now failed to record merged PR#$NUM $N times (cap $MAX_RECORD_FAILURES); filing a human gate" >&2
+[ -x "$HUMAN_GATE" ] || exit 0
 
-# One open visit per anchor and PR, however many passes the condition holds:
-# escalate.sh dedups on the key and narrows that to the subject when the subject
-# is durable, which an anchor is. The call is unconditional past the cap rather
-# than fired once on the crossing, so a visit closed without repairing the
-# anchor is re-filed on the next failure and one still open is left alone.
-# First line is the visit headline.
-"$ESCALATE" --subject "$ID" --key "merge-record-failed.$NUM" \
+# One open gate per anchor and PR, however many passes the condition holds:
+# human-gate.sh files nothing while an open gate under the key blocks the
+# anchor. The call is unconditional past the cap rather than fired once on the
+# crossing, and it declares no quiet window, so a gate cleared without repairing
+# the anchor is filed again on the next failure. The gate blocks the anchor, and
+# the record closes the anchor, so the message says to clear the gate first. The
+# first line is the gate's title.
+"$HUMAN_GATE" --subject "$ID" --key "merge-record-failed.$NUM" \
   --message "PR#$NUM landed on $TARGET at $SHA and anchor $ID still records merge_result=pull_request after $N failed records.
 
 Landing and recording are two writes. The landing happened; the record has been
@@ -81,9 +82,11 @@ on its own and no later pass will converge either. Until the record lands the
 anchor reads as a live gating anchor over a merged PR: the board shows it
 waiting, and every pass reprints the same line.
 
-The refusal names what has to change. Perform the record by hand and read it:
+The refusal names what has to change. This gate blocks $ID, and the record
+closes $ID, so clear this gate first. Then perform the record by hand and read
+it:
 
   assets/scripts/lifecycle.sh transition $ID --to merged --expect pull_request --close --set merged_sha=$SHA --append-notes 'Merged to $TARGET at $SHA (recorded by hand)'
 
-Clearing merge_record_failures on $ID re-arms this escalation." >/dev/null 2>&1 || true
+Clearing merge_record_failures on $ID re-arms this gate." >/dev/null 2>&1 || true
 exit 0

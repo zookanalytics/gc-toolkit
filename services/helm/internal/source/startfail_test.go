@@ -17,11 +17,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
-// The visit every case below is about, and the alias `gc-helm engage` spawns
-// its sitting under, qualified the way Gas City stores it.
+// The conversation every case below is about, and the alias `gc-helm engage`
+// spawns its sitting under, qualified the way Gas City stores it.
 const (
-	failVisit = "tk-vis"
-	failAlias = "gc-toolkit/gc-toolkit.tk-vis"
+	failConv  = "tk-conv"
+	failAlias = "gc-toolkit/gc-toolkit.tk-conv"
 )
 
 // metaJSON is a bead's metadata from key, value pairs.
@@ -63,14 +63,23 @@ func episodeBead(id, sessionName, kind, detail string, count int, created time.T
 	return i
 }
 
-// boundVisit is the visit as a failed start leaves it: in_progress under the
-// sitting's alias, the binding the witness later releases.
-func boundVisit(id string, created time.Time) *beads.Issue {
-	i := visitBead(id, "visit: tk-subj — talk the plan over", metaJSON(
-		"task_kind", "visit", "gc.routed_to", "human", "gc.continuation_group", "tk-subj"), created)
+// boundConversation is the conversation as a failed start leaves it:
+// in_progress under the alias of the sitting that never started, the binding a
+// hand-back returns to the operator's queue.
+func boundConversation(id string, created time.Time) *beads.Issue {
+	i := conversationBead(id, "talk the plan over", "gc-toolkit/gc-toolkit."+id, `{}`, created)
 	i.Status = beads.StatusInProgress
-	i.Assignee = failAlias
 	return i
+}
+
+// convStore is a rig store holding the conversations, each tracking tk-subj,
+// beside any other tasks.
+func convStore(convs []*beads.Issue, tasks ...*beads.Issue) *fakeStore {
+	deps := map[string][]*beads.IssueWithDependencyMetadata{}
+	for _, c := range convs {
+		deps[c.ID] = []*beads.IssueWithDependencyMetadata{tracks("tk-subj")}
+	}
+	return &fakeStore{issues: map[string][]*beads.Issue{"task": append(append([]*beads.Issue{}, convs...), tasks...)}, depsDown: deps}
 }
 
 // failCity lays out a city with an HQ store beside one rig, and returns the
@@ -92,13 +101,12 @@ func minsBefore(m int) time.Time { return testNow.Add(-time.Duration(m) * time.M
 
 func ptime(t time.Time) *time.Time { return &t }
 
-// gatherFailures gathers a city whose rig holds visits and whose HQ store holds
-// sessions and episodes, and returns the result.
-func gatherFailures(t *testing.T, visits []*beads.Issue, hq *fakeStore) *Result {
+// gatherFailures gathers a city whose rig holds conversations and whose HQ
+// store holds sessions and episodes, and returns the result.
+func gatherFailures(t *testing.T, convs []*beads.Issue, hq *fakeStore) *Result {
 	t.Helper()
 	root, hqName := failCity(t)
-	rig := &fakeStore{issues: map[string][]*beads.Issue{"task": visits}}
-	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": rig, hqName: hq})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": convStore(convs), hqName: hq})
 	res, err := src.Gather(context.Background())
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
@@ -146,9 +154,9 @@ func TestStartFailureReadsGasCitysRecord(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))},
+			res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))},
 				hqWith([]*beads.Issue{failed}, c.episodes...))
-			if got := sittingsByID(res)[failVisit].StartFailure; got != c.want {
+			if got := sittingsByID(res)[failConv].StartFailure; got != c.want {
 				t.Errorf("StartFailure = %q, want %q", got, c.want)
 			}
 			if res.Partial {
@@ -172,8 +180,8 @@ func TestProviderErrorIsReadOffTheSession(t *testing.T) {
 			failed.Metadata = json.RawMessage(metaJSON("alias", failAlias, "agent_name", failAlias,
 				"session_name", "s-hq-wisp-f1", "session_origin", "manual", "state", "failed-create",
 				"session_health", "unhealthy", "session_health_reason", c.code, "provider_terminal_error", c.code))
-			res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hqWith([]*beads.Issue{failed}))
-			if got := sittingsByID(res)[failVisit].StartFailure; got != c.want {
+			res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hqWith([]*beads.Issue{failed}))
+			if got := sittingsByID(res)[failConv].StartFailure; got != c.want {
 				t.Errorf("StartFailure = %q, want %q", got, c.want)
 			}
 		})
@@ -184,10 +192,10 @@ func TestProviderErrorIsReadOffTheSession(t *testing.T) {
 // the reason leads a row's NEEDS, so it is clipped and says so.
 func TestStartErrorIsBounded(t *testing.T) {
 	long := "resuming session: " + strings.Repeat("x", 400)
-	res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hqWith(
+	res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hqWith(
 		[]*beads.Issue{sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))},
 		episodeBead("hq-ep1", "s-hq-wisp-f1", "other", long, 1, minsBefore(8))))
-	got := sittingsByID(res)[failVisit].StartFailure
+	got := sittingsByID(res)[failConv].StartFailure
 	if !strings.HasPrefix(got, "start error: resuming session: x") || !strings.HasSuffix(got, "…") {
 		t.Errorf("a long error is carried clipped, marked: %q", got)
 	}
@@ -196,10 +204,11 @@ func TestStartErrorIsBounded(t *testing.T) {
 	}
 }
 
-// TestEngagingAgainClearsTheFailure: a session spawned under the visit's alias
-// after the failed one is the visit engaged again, whatever became of that
-// session, so the failure no longer describes the visit. A newer session that
-// failed too is the visit's failure now, with its own reason.
+// TestEngagingAgainClearsTheFailure: a session spawned under the
+// conversation's alias after the failed one is the conversation engaged again,
+// whatever became of that session, so the failure no longer describes the
+// conversation. A newer session that failed too is the conversation's failure
+// now, with its own reason.
 func TestEngagingAgainClearsTheFailure(t *testing.T) {
 	failed := sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))
 	timeout := episodeBead("hq-ep1", "s-hq-wisp-f1", "timeout", "context deadline exceeded", 1, minsBefore(8))
@@ -224,43 +233,43 @@ func TestEngagingAgainClearsTheFailure(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(40))},
+			res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(40))},
 				hqWith([]*beads.Issue{failed, c.newer}, append([]*beads.Issue{timeout}, c.eps...)...))
-			if got := sittingsByID(res)[failVisit].StartFailure; got != c.want {
+			if got := sittingsByID(res)[failConv].StartFailure; got != c.want {
 				t.Errorf("StartFailure = %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// TestStartFailureReadsOnlyWhatNamesAnOpenVisit: the mark belongs to an open
-// visit whose alias a failed manual session carries, and to nothing else.
-func TestStartFailureReadsOnlyWhatNamesAnOpenVisit(t *testing.T) {
+// TestStartFailureReadsOnlyWhatNamesAnOpenConversation: the mark belongs to an
+// open conversation whose alias a failed manual session carries, and to nothing
+// else.
+func TestStartFailureReadsOnlyWhatNamesAnOpenConversation(t *testing.T) {
 	timeout := func(name string) *beads.Issue {
 		return episodeBead("hq-ep-"+name, name, "timeout", "context deadline exceeded", 1, minsBefore(8))
 	}
 
-	t.Run("a closed visit", func(t *testing.T) {
-		v := closedVisitBead(failVisit, "visit: tk-subj — done", metaJSON("task_kind", "visit", "gc.continuation_group", "tk-subj"),
-			minsBefore(10), minsBefore(1))
-		res := gatherFailures(t, []*beads.Issue{v}, hqWith(
+	t.Run("a closed conversation", func(t *testing.T) {
+		c := closedConversationBead(failConv, "done", failAlias, `{}`, "settled", minsBefore(10), minsBefore(1))
+		res := gatherFailures(t, []*beads.Issue{c}, hqWith(
 			[]*beads.Issue{sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))},
 			timeout("s-hq-wisp-f1")))
-		if got := sittingsByID(res)[failVisit].StartFailure; got != "" {
-			t.Errorf("a closed visit is never marked: %q", got)
+		if got := sittingsByID(res)[failConv].StartFailure; got != "" {
+			t.Errorf("a closed conversation is never marked: %q", got)
 		}
 	})
 
 	t.Run("a failed session for another bead", func(t *testing.T) {
-		res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hqWith(
+		res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hqWith(
 			[]*beads.Issue{
 				sessionBead("hq-wisp-f1", "gc-toolkit/gc-toolkit.tk-other", "failed-create", minsBefore(9), ptime(minsBefore(8))),
-				// The visit id as a suffix of a longer segment is another bead.
-				sessionBead("hq-wisp-f2", "gc-toolkit/gc-toolkit.xtk-vis", "failed-create", minsBefore(9), ptime(minsBefore(8))),
+				// The conversation id as a suffix of a longer segment is another bead.
+				sessionBead("hq-wisp-f2", "gc-toolkit/gc-toolkit.xtk-conv", "failed-create", minsBefore(9), ptime(minsBefore(8))),
 			},
 			timeout("s-hq-wisp-f1"), timeout("s-hq-wisp-f2")))
-		if got := sittingsByID(res)[failVisit].StartFailure; got != "" {
-			t.Errorf("a failed session whose alias names another bead does not mark this visit: %q", got)
+		if got := sittingsByID(res)[failConv].StartFailure; got != "" {
+			t.Errorf("a failed session whose alias names another bead does not mark this conversation: %q", got)
 		}
 	})
 
@@ -268,38 +277,38 @@ func TestStartFailureReadsOnlyWhatNamesAnOpenVisit(t *testing.T) {
 		pool := sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))
 		pool.Metadata = json.RawMessage(metaJSON("alias", failAlias, "session_name", "s-hq-wisp-f1",
 			"session_origin", "ephemeral", "state", "failed-create"))
-		res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hqWith(
+		res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hqWith(
 			[]*beads.Issue{pool}, timeout("s-hq-wisp-f1")))
-		if got := sittingsByID(res)[failVisit].StartFailure; got != "" {
+		if got := sittingsByID(res)[failConv].StartFailure; got != "" {
 			t.Errorf("only a manual session is a sitting engage spawned: %q", got)
 		}
 	})
 
 	t.Run("a session that started", func(t *testing.T) {
-		res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hqWith(
+		res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hqWith(
 			[]*beads.Issue{sessionBead("hq-wisp-f1", failAlias, "closed", minsBefore(9), ptime(minsBefore(8)))},
 			timeout("s-hq-wisp-f1")))
-		if got := sittingsByID(res)[failVisit].StartFailure; got != "" {
+		if got := sittingsByID(res)[failConv].StartFailure; got != "" {
 			t.Errorf("a session that closed after it started did not fail to start: %q", got)
 		}
 	})
 }
 
-// TestStartFailureFollowsEveryAliasForm: engage falls back to a `v-` alias for
+// TestStartFailureFollowsEveryAliasForm: engage falls back to a `c-` alias for
 // an id Gas City refuses, and a bead id may itself contain a dot. Both still
-// name their visit; an alias with no binding prefix does too.
+// name their conversation; an alias with no binding prefix does too.
 func TestStartFailureFollowsEveryAliasForm(t *testing.T) {
-	for _, c := range []struct{ visit, alias string }{
-		{"rb-62297", "rig-b/gc-toolkit.v-rb-62297"},
+	for _, c := range []struct{ conv, alias string }{
+		{"rb-62297", "rig-b/gc-toolkit.c-rb-62297"},
 		{"tk-abc.3", "gc-toolkit/gc-toolkit.tk-abc.3"},
-		{"tk-vis", "tk-vis"},
+		{"tk-conv", "tk-conv"},
 	} {
 		t.Run(c.alias, func(t *testing.T) {
-			res := gatherFailures(t, []*beads.Issue{boundVisit(c.visit, minsBefore(10))}, hqWith(
+			res := gatherFailures(t, []*beads.Issue{boundConversation(c.conv, minsBefore(10))}, hqWith(
 				[]*beads.Issue{sessionBead("hq-wisp-f1", c.alias, "failed-create", minsBefore(9), ptime(minsBefore(8)))},
 				episodeBead("hq-ep1", "s-hq-wisp-f1", "timeout", "context deadline exceeded", 1, minsBefore(8))))
-			if got := sittingsByID(res)[c.visit].StartFailure; got != "startup timeout" {
-				t.Errorf("alias %q names visit %q: StartFailure = %q", c.alias, c.visit, got)
+			if got := sittingsByID(res)[c.conv].StartFailure; got != "startup timeout" {
+				t.Errorf("alias %q names conversation %q: StartFailure = %q", c.alias, c.conv, got)
 			}
 		})
 	}
@@ -308,10 +317,10 @@ func TestStartFailureFollowsEveryAliasForm(t *testing.T) {
 // TestOpenFailedCreateRowIsRead: a rollback whose close has not landed leaves
 // the row open in failed-create. The failure is recorded all the same.
 func TestOpenFailedCreateRowIsRead(t *testing.T) {
-	res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hqWith(
+	res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hqWith(
 		[]*beads.Issue{sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), nil)},
 		episodeBead("hq-ep1", "s-hq-wisp-f1", "timeout", "context deadline exceeded", 1, minsBefore(8))))
-	if got := sittingsByID(res)[failVisit].StartFailure; got != "startup timeout" {
+	if got := sittingsByID(res)[failConv].StartFailure; got != "startup timeout" {
 		t.Errorf("an open failed-create row is a recorded failure: %q", got)
 	}
 }
@@ -324,8 +333,8 @@ func TestStartFailureReadFailures(t *testing.T) {
 
 	hq := hqWith(sessions)
 	hq.failType["session"] = errors.New("session read timed out")
-	res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hq)
-	if got := sittingsByID(res)[failVisit].StartFailure; got != "" {
+	res := gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hq)
+	if got := sittingsByID(res)[failConv].StartFailure; got != "" {
 		t.Errorf("an unread session list marks nothing: %q", got)
 	}
 	if !res.Partial || !strings.Contains(strings.Join(res.PartialErrors, "; "), "start-failures@") {
@@ -334,8 +343,8 @@ func TestStartFailureReadFailures(t *testing.T) {
 
 	hq = hqWith(sessions)
 	hq.failType["startup-health-episode"] = errors.New("episode read timed out")
-	res = gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hq)
-	if got := sittingsByID(res)[failVisit].StartFailure; got != "reason unread" {
+	res = gatherFailures(t, []*beads.Issue{boundConversation(failConv, minsBefore(10))}, hq)
+	if got := sittingsByID(res)[failConv].StartFailure; got != "reason unread" {
 		t.Errorf("an unread episode still marks the established failure: %q", got)
 	}
 	if !res.Partial {
@@ -347,12 +356,12 @@ func TestStartFailureReadFailures(t *testing.T) {
 // read sessions from, and gathers its rigs exactly as before.
 func TestNoHQStoreReadsNoFailures(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
-	rig := &fakeStore{issues: map[string][]*beads.Issue{"task": {boundVisit(failVisit, minsBefore(10))}}}
+	rig := convStore([]*beads.Issue{boundConversation(failConv, minsBefore(10))})
 	res, err := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": rig}).Gather(context.Background())
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	if got := sittingsByID(res)[failVisit].StartFailure; got != "" || res.Partial {
+	if got := sittingsByID(res)[failConv].StartFailure; got != "" || res.Partial {
 		t.Errorf("no HQ store, no failure read: %q partial=%v %v", got, res.Partial, res.PartialErrors)
 	}
 }
@@ -377,35 +386,37 @@ func pickerCap(t *testing.T) int {
 }
 
 // TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain is the
-// whole path. An engaged visit's sitting fails to start, and Gas City records it
-// as it does: the session closes as failed-create and a timeout episode names
-// the session. The visit's row reads start failed with the reason. On a board
-// holding more owed rows than the picker offers, every one of them older, the
-// row is among the rows the picker offers. Engaging the visit again clears the
-// mark.
+// whole path. An engaged conversation's sitting fails to start, and Gas City
+// records it as it does: the session closes as failed-create and a timeout
+// episode names the session. The conversation's row reads start failed with
+// the reason. On a board holding more owed rows than the picker offers, every
+// one of them older, the row is among the rows the picker offers. Engaging the
+// conversation again clears the mark.
 func TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain(t *testing.T) {
 	limit := pickerCap(t)
 
-	// The visit's subject, an epic with work under it, so the visit folds onto
-	// its row; and more owed rows than the picker shows, each owed for days.
+	// The conversation's subject, an epic with work under it, so the
+	// conversation folds onto its row; and more owed rows than the picker shows,
+	// each owed for days.
 	subject := issue("tk-subj", "the plan", "epic", 2, minsBefore(60), "")
-	tasks := []*beads.Issue{boundVisit(failVisit, minsBefore(10))}
+	conv := boundConversation(failConv, minsBefore(10))
+	var tasks []*beads.Issue
 	for i := 0; i < limit+5; i++ {
 		tasks = append(tasks, issue(fmt.Sprintf("tk-old%02d", i), "waiting on a person", "task", 2,
 			testNow.Add(-time.Duration(30+i)*24*time.Hour), metaJSON("gc.routed_to", "human")))
 	}
-	rig := &fakeStore{
-		issues: map[string][]*beads.Issue{"epic": {subject}, "task": tasks},
-		depsUp: map[string][]*beads.IssueWithDependencyMetadata{
-			"tk-subj": {withDepType(child("tk-subj.1", "open", minsBefore(60), ""), "parent-child")},
-		},
+	rig := convStore([]*beads.Issue{conv}, tasks...)
+	rig.issues["epic"] = []*beads.Issue{subject}
+	rig.depsUp = map[string][]*beads.IssueWithDependencyMetadata{
+		"tk-subj": {withDepType(child("tk-subj.1", "open", minsBefore(60), ""), "parent-child")},
 	}
 	hq := hqWith(
 		[]*beads.Issue{sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))},
 		episodeBead("hq-ep1", "s-hq-wisp-f1", "timeout", "resuming session: context deadline exceeded", 1, minsBefore(8)))
 
 	root, hqName := failCity(t)
-	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": rig, hqName: hq})
+	sessions := &fakeGC{}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": rig, hqName: hq}, withGCClient(sessions))
 	offered := func() (board.Board, []board.Tile) {
 		t.Helper()
 		res, err := src.Gather(context.Background())
@@ -430,10 +441,10 @@ func TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain(t *testin
 	}
 	row, ok := find(rows, "tk-subj")
 	if !ok {
-		t.Fatalf("the visit's row is not among the %d rows the picker offers", limit)
+		t.Fatalf("the conversation's row is not among the %d rows the picker offers", limit)
 	}
-	if row.VisitState != board.VisitStartFailed || row.VisitStartFailure != "startup timeout" {
-		t.Errorf("the row reads start failed with the reason: state=%q reason=%q", row.VisitState, row.VisitStartFailure)
+	if row.SittingState != board.SittingStartFailed || row.SittingStartFailure != "startup timeout" {
+		t.Errorf("the row reads start failed with the reason: state=%q reason=%q", row.SittingState, row.SittingStartFailure)
 	}
 	if !strings.HasPrefix(row.Needs, "start failed (startup timeout)") {
 		t.Errorf("NEEDS leads with the failure: %q", row.Needs)
@@ -448,20 +459,20 @@ func TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain(t *testin
 	}
 	hq.issues["session"] = saved
 
-	// Engage the visit again: the witness has released the dead binding, and
-	// engage spawns a fresh sitting under the visit's alias and binds the visit.
-	tasks[0].Status = beads.StatusOpen
-	tasks[0].Assignee = "s-hq-wisp-n2"
+	// Engage the conversation again: engage spawns a fresh sitting under the
+	// conversation's alias, which holds the conversation, and Gas City lists
+	// the new session as live.
 	hq.issues["session"] = append(hq.issues["session"],
 		sessionBead("hq-wisp-n2", failAlias, "start-pending", minsBefore(1), nil))
+	sessions.sessions = map[string]string{failAlias: "active"}
 	b, _ = offered()
 	again, ok := tileOf(b, "tk-subj")
 	if !ok {
-		t.Fatal("the visit's row left the board")
+		t.Fatal("the conversation's row left the board")
 	}
-	if again.VisitState != board.VisitEngaged || again.VisitStartFailure != "" || strings.HasPrefix(again.Needs, "start failed") {
-		t.Errorf("engaging the visit again clears the mark: state=%q reason=%q needs=%q",
-			again.VisitState, again.VisitStartFailure, again.Needs)
+	if again.SittingState != board.SittingInSession || again.SittingStartFailure != "" || strings.HasPrefix(again.Needs, "start failed") {
+		t.Errorf("engaging the conversation again clears the mark: state=%q reason=%q needs=%q",
+			again.SittingState, again.SittingStartFailure, again.Needs)
 	}
 }
 

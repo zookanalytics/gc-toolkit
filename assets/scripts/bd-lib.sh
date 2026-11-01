@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, the one-write create every script files a stamped bead through,
-# the metadata read-back that gates handing such a bead on, the close that
-# unmakes a bead no reader can find, the birth, settle and route of PR-finishing
-# work, the validation pass's work order, the gating-PR read's field set, the
-# per-rig key an order's state lives under, and the pass lock that lets an order
-# run one pass at a time. Sourced, never executed.
+# queries it, the read of a bead's human gates every reader of them makes and
+# the order its open gates under one key are read in, the one-write create every
+# script files a stamped bead through, the metadata read-back that gates handing
+# such a bead on, the close that unmakes a bead no reader can find, the birth,
+# settle and route of PR-finishing work, the validation pass's work order, the
+# gating-PR read's field set, the per-rig key an order's state lives under, and
+# the pass lock that lets an order run one pass at a time. Sourced, never
+# executed.
 #
-# A caller resolves this file beside itself and sources it, the way
-# visit-identity.sh is sourced:
+# A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
 #   . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh" >&2; exit 1; }
 #
@@ -164,6 +165,104 @@ bd_list() {
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
+}
+
+# bd_human_gates <bead> — the bead's human gates: each bead its `blocks` edges
+# reach whose issue_type is `gate` and whose await_type is `human`, open and
+# closed alike. This is the one read every reader of a bead's human gates
+# makes. It prints the rows `gc bd dep list <bead> --type blocks` returns, as
+# one JSON array. For one bead, bd answers each edge with the whole row of the
+# bead it reaches plus the edge's dependency_type, and these are the fields of
+# that row the readers rely on: id, issue_type, await_type, await_id, status,
+# assignee, title, description, created_at, close_reason and closed_at. bd
+# leaves an empty field out, so a gate no person is assigned carries no
+# assignee. A read that exits non-zero, or answers anything but an array, as bd
+# answers a bead it cannot find, prints nothing and returns 1, so "no gate" and
+# "could not read" stay apart. `bd gate list <bead>` is not this read: it
+# returns the gates a bead reaches through an edge of any type, without saying
+# which edge.
+bd_human_gates() {
+  local raw
+  raw=$(_bd_call dep list "$1" --type blocks --json </dev/null 2>/dev/null) || return 1
+  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub)
+  printf '%s' "$raw" | jq -ce 'if type == "array"
+    then [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human") ]
+    else error("not an array") end' 2>/dev/null
+}
+
+# $HUMAN_GATE_JQ — the one rule of which human gates still hold the bead they
+# block, as jq defs in the in-variable convention standing-kinds.sh describes,
+# so every reader prepends the same text. A human gate holds in every status but
+# closed, pinned included, because only its resolve clears the question it asks;
+# gctk merge and pr-status read a gate the same way. The defs:
+#   human_gate             on one row: issue_type gate and await_type human
+#   open_human_gate($k)    on one row: a human gate that still holds, and when $k
+#                          is not "", one under that situation key
+#   open_human_gates       on a listing array: the ids of its open human gates,
+#                          for a reader that classifies many beads from one
+#                          listing that includes gates (`gc bd list
+#                          --include-gates`, `gc bd gate list`)
+#   gates_blocking($ids)   on one row: the ids among $ids that its own blocks
+#                          edges reach, the gates that hold the bead
+#   blocked_by_any($ids)   on one row: whether gates_blocking($ids) names any
+# shellcheck disable=SC2034  # read by the scripts that source this file
+HUMAN_GATE_JQ='
+  def human_gate: (.issue_type // "") == "gate" and (.await_type // "") == "human";
+  def open_human_gate($k):
+    human_gate
+    and (((.status // "open") | tostring | ascii_downcase) != "closed")
+    and ($k == "" or ((.await_id // "") | tostring) == $k);
+  def open_human_gates: [ .[] | select(open_human_gate("")) | .id ];
+  def gates_blocking($ids):
+    [ .dependencies[]? | select((.type // "") == "blocks")
+      | (.depends_on_id // "") as $d | select(($ids | index($d)) != null) | $d ];
+  def blocked_by_any($ids): (gates_blocking($ids) | length) > 0;
+'
+
+# bd_open_human_gates <bead> [<key>] — the bead's human gates that still hold it
+# (open_human_gate above), and with <key> only those under that situation key,
+# as one JSON array of the rows bd_human_gates prints: the read for a reader
+# that asks which open gates hold one bead. A gate read that does not answer
+# prints nothing and returns 1, so "none open" and "could not read" stay apart.
+bd_open_human_gates() {
+  local gates
+  gates=$(bd_human_gates "${1:-}") || return 1
+  printf '%s' "$gates" | jq -c --arg k "${2:-}" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate($k)) ]' 2>/dev/null
+}
+
+# bd_gates_open_under_key <key> — the open gates under a situation key, read
+# from a bd_human_gates array on stdin and printed as one JSON array, first to
+# last by when each was created, then id. The first is the gate that asks:
+# human-gate.sh keeps it and resolves its own gate when another comes first,
+# and await-ruling.sh makes the work bead wait on it, so every writer and
+# reader of one situation orders the gates here. created_at is read as a time,
+# its fractional seconds and its offset included, because as text a time with
+# a fraction sorts ahead of the whole second it follows, and one with an offset
+# sorts by its local clock. A gate whose created_at is absent or does not read
+# as an RFC 3339 time sorts after every gate whose does. Input that is not an
+# array prints nothing and returns 1. Which gates are open is open_human_gate's
+# rule, above.
+bd_gates_open_under_key() {
+  jq -ce --arg k "$1" "$HUMAN_GATE_JQ"'
+    def created_order:
+      ([ (.created_at // "") | tostring
+         | capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})$") ]
+       | .[0]) as $m
+      | (if $m == null then null
+         else try (
+           (($m.d + "Z") | fromdateiso8601)
+           - (if $m.z == "Z" then 0
+              else ($m.z | capture("^(?<s>[+-])(?<h>[0-9]{2}):?(?<mi>[0-9]{2})$")) as $o
+                | (($o.h | tonumber) * 3600 + ($o.mi | tonumber) * 60)
+                | if $o.s == "-" then -. else . end
+              end)
+         ) catch null end) as $sec
+      | if $sec == null then [1, 0, 0]
+        else [0, $sec, (("0" + ($m.f // "")) | tonumber)] end;
+    if type == "array"
+    then [ .[] | select(open_human_gate($k)) ]
+         | sort_by(created_order, (.id // "" | tostring))
+    else error("not an array") end' 2>/dev/null || return 1
 }
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework
@@ -661,8 +760,8 @@ pr_finishing_birth() {
 # gate-ensure.sh, pr-facts.sh, pre-open-rebase.sh and rejection-repool.sh. The
 # cadence and the patrol each run their arms one after another, so a longer wait
 # holds every arm after it. A bead whose settle times out in the cadence is
-# settled by a later pass, and rejection-repool.sh files a visit that asks for
-# its re-run. queue-priority.sh's own default wait is longer, and
+# settled by a later pass, and rejection-repool.sh files a human gate that asks
+# for its re-run. queue-priority.sh's own default wait is longer, and
 # rework-child.sh, which runs in a review or converse session rather than in the
 # cadence, keeps it.
 PR_FINISHING_LOCK_WAIT_SECS=30

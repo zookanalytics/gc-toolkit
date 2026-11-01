@@ -3,15 +3,15 @@
 #
 # A malformed validation dispatch cannot be ruled and never will be on a retry.
 # Two shapes are malformed: an input convoy without exactly one tracked member,
-# and a member carrying no anchor_bead. Before these arms existed load-dispatch answered both with a bare
-# `exit 1`, which leaves the step `open` and routed so the pool re-offers the same
-# unrulable pass every cycle, and the "escalation" the worker doctrine reached for
-# was bare witness mail, a record no query returns.
+# and a member carrying no anchor_bead. A bare `exit 1` there would leave the
+# step `open` and routed, so the pool would re-offer the same unrulable pass
+# every cycle, and bare witness mail is a record no query returns.
 #
-# Each arm files a tracked visit through escalate.sh and, only if that visit
-# landed, cancels the run through run-cancel.sh, then drains, the same contract
-# mol-polecat-work's load-context arm keeps. A pass closed before its run reached
-# load-dispatch was withdrawn, so its run is cancelled with no visit. This
+# Each arm files a human gate through human-gate.sh on the malformed unit (the
+# input convoy, or the pass) and, only if that gate landed, cancels the run
+# through run-cancel.sh, then drains, the same contract mol-polecat-work's
+# load-context arm keeps. A pass closed before its run reached load-dispatch was
+# withdrawn, so its run is cancelled with nothing asked. This
 # EXECUTES the real snippets extracted verbatim from the formula against a fake
 # `gc` and stub scripts, so the test cannot drift from the shipped instruction.
 # No live city, Dolt, or network.
@@ -61,33 +61,33 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# escalate.sh, run-cancel.sh in the pack the fake gc names for
+# human-gate.sh, run-cancel.sh in the pack the fake gc names for
 # `gc gc-toolkit scripts-dir`, $STUB_PACK. Each records its verb into the ordered trace and its argv where
 # the assertions can read it, and returns a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
-cat > "$TMP/pack/assets/scripts/escalate.sh" <<'ESC'
+cat > "$TMP/pack/assets/scripts/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
-printf 'ESCALATE\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "${FAKE_ESC:-/dev/null}"
-exit "${FAKE_ESC_RC:-0}"
-ESC
+printf 'GATE\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_GATE:-/dev/null}"
+exit "${FAKE_GATE_RC:-0}"
+GATE
 cat > "$TMP/pack/assets/scripts/run-cancel.sh" <<'CANCEL'
 #!/usr/bin/env bash
 printf 'CANCEL\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_CANCEL:-/dev/null}"
 exit "${FAKE_CANCEL_RC:-0}"
 CANCEL
-chmod +x "$TMP/pack/assets/scripts/escalate.sh" "$TMP/pack/assets/scripts/run-cancel.sh"
+chmod +x "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/run-cancel.sh"
 export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 
 # run <arm.sh> <VALIDATION_PASS> <ANCHOR> returns "<rc>|<ordered verb log>"
-#   FAKE_*_RC control each stub's exit; FAKE_ESC/CANCEL capture argv.
+#   FAKE_*_RC control each stub's exit; FAKE_GATE/CANCEL capture argv.
 run() {
-  : > "$TMP/log"; : > "$TMP/esc"; : > "$TMP/cancel"
+  : > "$TMP/log"; : > "$TMP/gate"; : > "$TMP/cancel"
   local rc=0
   VALIDATION_PASS="$2" ANCHOR="$3" CLAIMED_STEP_BEAD_ID=st-load \
-  FAKE_LOG="$TMP/log" FAKE_ESC="$TMP/esc" FAKE_CANCEL="$TMP/cancel" \
-  FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" \
+  FAKE_LOG="$TMP/log" FAKE_GATE="$TMP/gate" FAKE_CANCEL="$TMP/cancel" \
+  FAKE_GATE_RC="${FAKE_GATE_RC:-0}" FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" \
     bash "$1" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -106,27 +106,31 @@ check_arm() {
   esac
   bash -n "$A" && ok "$marker: syntactically valid bash" || bad "$marker: failed bash -n"
 
-  # The case the arm exists for: a malformed dispatch. escalate, then cancel, then
-  # drain; exits 1.
-  eq "$(run "$A" "$fvp" "$fanc")" "1|ESCALATE;CANCEL;DRAIN;" \
-     "$marker: refusal escalates, cancels the run, drains, exits 1"
+  # The case the arm exists for: a malformed dispatch. The gate, then the cancel,
+  # then the drain; exits 1.
+  eq "$(run "$A" "$fvp" "$fanc")" "1|GATE;CANCEL;DRAIN;" \
+     "$marker: refusal files a gate, cancels the run, drains, exits 1"
   run "$A" "$fvp" "$fanc" >/dev/null
-  has "$(cat "$TMP/esc")"  "--key $key"                "$marker: escalate names --key $key"
-  has "$(cat "$TMP/esc")"  "--subject $subj"           "$marker: escalate --subject names the malformed unit"
+  has "$(cat "$TMP/gate")"  "--key $key"                "$marker: the gate names --key $key"
+  has "$(cat "$TMP/gate")"  "--subject $subj"           "$marker: the gate blocks the malformed unit"
+  case "$(cat "$TMP/gate")" in
+    *--quiet-window*) bad "$marker: the gate declares a quiet window; a refusal is an event of this run" ;;
+    *) ok "$marker: the gate declares no quiet window" ;;
+  esac
   has "$(cat "$TMP/cancel")" "--step mol-validate.load-dispatch --bead st-load" "$marker: the cancel names THIS step"
 
   # A well-formed dispatch is a no-op: the arm falls through and load-dispatch
   # proceeds.
   eq "$(run "$A" "$nvp" "$nanc")" "0|" "$marker: well-formed dispatch is a no-op"
 
-  # No visit recorded (escalate exits non-zero): NEVER cancel or drain, so the
-  # step stays claimed and the next worker retries the escalation.
-  eq "$(FAKE_ESC_RC=1 run "$A" "$fvp" "$fanc")" "1|ESCALATE;" \
-     "$marker: escalate fails, so no cancel and no drain"
-  # The visit landed but the cancel did not: do NOT drain, since the run is still
+  # No gate recorded (human-gate.sh exits non-zero): NEVER cancel or drain, so
+  # the step stays claimed and the next worker retries the ask.
+  eq "$(FAKE_GATE_RC=1 run "$A" "$fvp" "$fanc")" "1|GATE;" \
+     "$marker: the gate fails, so no cancel and no drain"
+  # The gate landed but the cancel did not: do NOT drain, since the run is still
   # live.
-  eq "$(FAKE_CANCEL_RC=1 run "$A" "$fvp" "$fanc")" "1|ESCALATE;CANCEL;" \
-     "$marker: cancel fails after escalate, so no drain"
+  eq "$(FAKE_CANCEL_RC=1 run "$A" "$fvp" "$fanc")" "1|GATE;CANCEL;" \
+     "$marker: cancel fails after the gate, so no drain"
 }
 
 # malformed convoy: fires on an empty VALIDATION_PASS; subject is the convoy.
@@ -135,13 +139,13 @@ check_arm validate-malformed-convoy-refuse "" ""      "tk-vp" ""       validate-
 check_arm validate-no-anchor-refuse        "tk-vp" "" "tk-vp" "tk-anch" validate-no-anchor        "tk-vp"
 
 # A pass closed before its run reached load-dispatch was withdrawn: the run is
-# cancelled with no visit, and an open pass falls through.
+# cancelled with nothing asked, and an open pass falls through.
 W="$TMP/validate-withdrawn-pass.sh"
 extract validate-withdrawn-pass > "$W"
 [ -s "$W" ] && ok "validate-withdrawn-pass: extracted between markers" || bad "validate-withdrawn-pass: extraction EMPTY — markers missing"
 bash -n "$W" && ok "validate-withdrawn-pass: syntactically valid bash" || bad "validate-withdrawn-pass: failed bash -n"
 eq "$(FAKE_PASS_STATUS=closed run "$W" tk-vp tk-anch)" "1|CANCEL;DRAIN;" \
-   "validate-withdrawn-pass: a closed pass cancels the run with no visit, drains, exits 1"
+   "validate-withdrawn-pass: a closed pass cancels the run with nothing asked, drains, exits 1"
 has "$(cat "$TMP/cancel")" "--step mol-validate.load-dispatch --bead st-load" "validate-withdrawn-pass: the cancel names THIS step"
 has "$(cat "$TMP/cancel")" "tk-vp was closed" "validate-withdrawn-pass: the reason names the pass"
 eq "$(FAKE_PASS_STATUS=open run "$W" tk-vp tk-anch)" "0|" "validate-withdrawn-pass: an open pass falls through"

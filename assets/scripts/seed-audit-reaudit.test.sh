@@ -230,7 +230,7 @@ OUT=$(run --base main 2>/dev/null)
 eq "$OUT" "re-9 - held" "a parked re-audit is left to whoever parked it"
 
 # A declined run leaves its bead open, unassigned and unrouted, waiting on a
-# visit with a re-sling armed for when the visit closes (await-ruling.sh).
+# human gate with a re-sling armed for when the gate closes (await-ruling.sh).
 reset "$(reaudit re-9 open "" ',"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","resling_target":"gc-toolkit/gc-toolkit.polecat"')"
 OUT=$(run --base main 2>&1); RC=$?
 eq "$RC" "0" "a re-audit armed to re-sling once its wait clears exits 0"

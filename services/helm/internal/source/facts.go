@@ -11,27 +11,22 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
-// This file gathers the three CROSS-ANCHOR joins in [board.Facts] — visit
-// presence, the live-workflow map, and session liveness. They are what let the
-// board tell work in flight from work abandoned, and gc-helm.sh computes the
-// same three (gather_visits, gather_inflight, and its OWNER_MAP) before it
-// ranks anything.
+// This file gathers the CROSS-ANCHOR joins in [board.Facts] — the live-workflow
+// map and session liveness — and the conversations, which reach the board both
+// as anchors the fold moves onto their beads and as the sittings record. They
+// are what let the board tell work in flight from work abandoned, and a bead a
+// person is talking about from one nobody is.
 //
-// All three are BEST-EFFORT. Each failure is recorded as a partial error and
-// leaves its map empty; a board with no liveness join is narrower — nothing
-// reads as held or in flight — but it is not wrong about what it does show, and
-// that is a far better failure than aborting a gather over a session list.
+// All of them are BEST-EFFORT. Each failure is recorded as a partial error and
+// leaves its part empty; a board with no liveness join is narrower — nothing
+// reads as in flight or in session — but it is not wrong about what it does
+// show, and that is a far better failure than aborting a gather over a session
+// list.
 
-// liveStatuses is the "still open" set these joins query. A CLAIMED visit is a
-// held conversation, not a finished one, so in_progress counts as open here
-// exactly as it does in gc-helm.sh's snapshot.
+// liveStatuses is the "still open" set these joins query. A conversation a
+// sitting has claimed is in_progress, and so is a live graph.v2 root, so
+// in_progress counts as open here.
 var liveStatuses = []beads.Status{beads.StatusOpen, beads.StatusInProgress}
-
-// visitFilter selects converse sittings. task_kind is what separates a visit
-// from every other bead: gc.outcome — the field a closed sitting is read for —
-// is stamped on step beads, review beads and dog warrants too, so a query keyed
-// on it would gather most of the city.
-var visitFilter = map[string]string{"task_kind": "visit"}
 
 // defaultSittingWindow is how far back a CLOSED sitting stays on the board.
 // A day covers the shift an operator is actually reconstructing; older
@@ -55,137 +50,179 @@ func sittingWindow() time.Duration {
 	return d
 }
 
-// rigSittings gathers one rig's converse sittings: every open visit bead, plus
-// those closed inside the window.
+// rigConversations gathers one rig's conversations: every open one, as an
+// anchor the fold moves onto its bead ([board.KindConversation]) and as a
+// sitting, plus those closed inside the window, as sittings alone.
 //
-// The two passes fail INDEPENDENTLY. The open pass is what Tile.Held is derived
-// from, so losing the closed pass must not cost the board its held glyphs, and
-// losing the open pass must not suppress the record of what just finished.
-// Either failure narrows the section and says so in partial_errors.
+// A conversation is a task that tracks the one bead it is about, assigned to
+// `human` while it waits in the operator's queue and to an alias that names its
+// own id while a sitting holds it (assets/scripts/conversation.sh). It carries
+// no pack marker, so the query cuts by type and status and the shape is read
+// here: the assignee off the row, and the edges from one batched read of every
+// candidate's own dependencies. That read names the conversation's `tracks`
+// edge and its `replies-to` edges whichever store holds the gate a reply
+// names. bd's close leaves a task's assignee and edges as they were, so a
+// closed conversation keeps its shape, and the closed pass finds it the same
+// way.
 //
-// A CLOSED pass is new ground for this gather, which has otherwise only ever
-// read open beads. It is bounded on the query rather than in the renderer:
-// closed visits accumulate forever, and a gather that read them all to throw
-// most away would grow without limit against a store the whole city shares.
-func (s *BeadsSource) rigSittings(ctx context.Context, st beadStore, r rigRef, g *gatherState, now time.Time) []board.Sitting {
-	var out []board.Sitting
-
+// The two passes fail INDEPENDENTLY. The open pass is what holds a bead, so
+// losing the closed pass must not cost the board its held state, and losing
+// the open pass must not suppress the record of what just finished. A failed
+// edge read leaves no conversation from either, because without its edges no
+// task can be told for one. Each failure narrows the board and says so in
+// partial_errors.
+//
+// A CLOSED pass is bounded on the query rather than in the renderer: closed
+// tasks accumulate forever, and a gather that read them all to throw most away
+// would grow without limit against a store the whole city shares.
+func (s *BeadsSource) rigConversations(ctx context.Context, st beadStore, r rigRef, g *gatherState, now time.Time) ([]board.Anchor, []board.Sitting) {
+	task := beads.IssueType("task")
 	open, err := st.SearchIssues(ctx, "", beads.IssueFilter{
-		Statuses:       liveStatuses,
-		MetadataFields: visitFilter,
-		SkipWisps:      true,
+		IssueType: &task,
+		Statuses:  liveStatuses,
+		SkipWisps: true,
+		Lite:      true,
 	})
 	if err != nil {
-		g.note(true, []string{"visits@" + r.name + ": " + err.Error()})
+		g.note(true, []string{"conversations@" + r.name + ": " + err.Error()})
 	}
-	for _, iss := range open {
-		if iss != nil {
-			out = append(out, newSitting(iss, r))
-		}
-	}
+	open = conversationCandidates(open)
 
+	var done []*beads.Issue
 	if window := sittingWindow(); window > 0 {
 		cutoff := now.Add(-window)
 		status := beads.StatusClosed
-		done, err := st.SearchIssues(ctx, "", beads.IssueFilter{
-			Status:         &status,
-			MetadataFields: visitFilter,
-			ClosedAfter:    &cutoff,
-			SkipWisps:      true,
+		done, err = st.SearchIssues(ctx, "", beads.IssueFilter{
+			IssueType:   &task,
+			Status:      &status,
+			ClosedAfter: &cutoff,
+			SkipWisps:   true,
+			Lite:        true,
 		})
 		if err != nil {
-			g.note(true, []string{"closed-visits@" + r.name + ": " + err.Error()})
+			g.note(true, []string{"closed-conversations@" + r.name + ": " + err.Error()})
 		}
-		for _, iss := range done {
-			if iss != nil {
-				out = append(out, newSitting(iss, r))
-			}
-		}
+		done = conversationCandidates(done)
 	}
 
-	s.resolveVisitSubjects(ctx, st, r, g, out)
-	s.attributeTakeaways(ctx, st, r, g, out, now)
+	ids := make([]string, 0, len(open)+len(done))
+	for _, iss := range append(append([]*beads.Issue{}, open...), done...) {
+		ids = append(ids, iss.ID)
+	}
+	if ids = uniqueStrings(ids); len(ids) == 0 {
+		return nil, nil
+	}
+	recs, err := st.GetDependencyRecordsForIssues(ctx, ids)
+	if err != nil {
+		g.note(true, []string{"conversation-edges@" + r.name + ": " + err.Error()})
+		return nil, nil
+	}
+
+	var anchors []board.Anchor
+	var sittings []board.Sitting
+	for _, iss := range open {
+		subject, replies, ok := conversationEdges(recs[iss.ID])
+		if !ok {
+			continue
+		}
+		a := newAnchor(iss, board.KindConversation, r)
+		a.Subjects, a.RepliesTo, a.Assignee = []string{subject}, replies, iss.Assignee
+		anchors = append(anchors, a)
+		sittings = append(sittings, newSitting(iss, r, subject))
+	}
+	for _, iss := range done {
+		if subject, _, ok := conversationEdges(recs[iss.ID]); ok {
+			sittings = append(sittings, newSitting(iss, r, subject))
+		}
+	}
+	s.attributeTakeaways(ctx, st, r, g, sittings, now)
+	return anchors, sittings
+}
+
+// conversationCandidates keeps the tasks whose assignee is one a conversation
+// carries ([conversationAssignee]). Their edges decide the rest of the shape.
+func conversationCandidates(in []*beads.Issue) []*beads.Issue {
+	out := make([]*beads.Issue, 0, len(in))
+	for _, iss := range in {
+		if iss != nil && conversationAssignee(iss.Assignee, iss.ID) {
+			out = append(out, iss)
+		}
+	}
 	return out
 }
 
-// newSitting projects one visit bead onto the board's record of a sitting. Its
-// Subject starts as the gc.continuation_group stamp, which resolveVisitSubjects
-// keeps only for a visit that has no tracks edge.
-func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
+// conversationAssignee reports whether assignee is one a conversation carries:
+// `human`, or the alias that names the task's own id, bare, as its `c-`
+// fallback, or qualified by the session's rig and template binding
+// (`<rig>/<binding>.<alias>`). It is the rule conversation.sh's
+// conversation_assignee applies, so the board and the scripts read one shape.
+func conversationAssignee(assignee, id string) bool {
+	if assignee == "" || id == "" {
+		return false
+	}
+	if assignee == "human" {
+		return true
+	}
+	for _, alias := range []string{id, "c-" + id} {
+		if assignee == alias || strings.HasSuffix(assignee, "/"+alias) || strings.HasSuffix(assignee, "."+alias) {
+			return true
+		}
+	}
+	return false
+}
+
+// conversationEdges reads a conversation's subject and replies off its own
+// edges: ok only when exactly one `tracks` edge names a bead, which is the
+// subject, and replies is every gate its `replies-to` edges name.
+func conversationEdges(ds []*beads.Dependency) (subject string, replies []string, ok bool) {
+	var tracked []string
+	for _, d := range ds {
+		if d == nil {
+			continue
+		}
+		switch string(d.Type) {
+		case "tracks":
+			tracked = append(tracked, d.DependsOnID)
+		case "replies-to":
+			replies = append(replies, d.DependsOnID)
+		}
+	}
+	if tracked = uniqueStrings(tracked); len(tracked) != 1 {
+		return "", nil, false
+	}
+	return tracked[0], uniqueStrings(replies), true
+}
+
+// newSitting projects one conversation task onto the board's record of a
+// sitting. A closed conversation's close reason is the sentence its ending
+// wrote, which the card reads when the sitting left no takeaway.
+func newSitting(iss *beads.Issue, r rigRef, subject string) board.Sitting {
 	md := decodeMetadata(iss.Metadata)
 	st := board.Sitting{
-		ID:            iss.ID,
-		Rig:           r.name,
-		Subject:       md["gc.continuation_group"],
-		Title:         iss.Title,
-		Status:        string(iss.Status),
-		Outcome:       md["gc.outcome"],
-		OutcomeReason: md["gc.outcome_reason"],
-		Session:       md["gc.session_name"],
-		Assignee:      iss.Assignee,
-		FiledAt:       iss.CreatedAt.UTC(),
-		OpenedAt:      iss.CreatedAt,
+		ID:       iss.ID,
+		Rig:      r.name,
+		Subject:  subject,
+		Title:    iss.Title,
+		Status:   string(iss.Status),
+		Session:  md["gc.session_name"],
+		FiledAt:  iss.CreatedAt.UTC(),
+		OpenedAt: iss.CreatedAt,
 	}
-	// A visit exists from the moment it is filed, but the CONVERSATION starts
-	// when a converse session claims it, and a visit can wait on the board for
-	// as long as the operator leaves it there. The claim stamp is the truer
-	// start; the creation time is the fallback for a sitting that has not been
+	// A conversation exists from the moment it is filed, but the SITTING starts
+	// when a converse session claims it, and a conversation can wait in the
+	// operator's queue for as long as they leave it there. The claim stamp is
+	// the truer start; the creation time is the fallback for one no sitting has
 	// claimed.
 	if claimed, ok := parseStamp(md["gc.claimed_at"]); ok {
 		st.OpenedAt = claimed
+	}
+	if iss.Status == beads.StatusClosed {
+		st.OutcomeReason = strings.TrimSpace(iss.CloseReason)
 	}
 	if iss.ClosedAt != nil {
 		st.ClosedAt = iss.ClosedAt.UTC()
 	}
 	return st
-}
-
-// resolveVisitSubjects settles which beads each sitting's visit covers, by the
-// shared visit identity (assets/scripts/visit-identity.sh) that the status label,
-// the merge pass's finalize gate, and gc-helm.sh accept and dismiss read. A visit
-// covers every bead its tracks edges name, and its gc.continuation_group stamp
-// only when it has no tracks edge, so a stale stamp beside an edge to another
-// bead covers nothing. Subjects is that set, and it is what holds a row
-// (visitSubjects). Subject is the one bead the row names: the first tracks target
-// in id order, the order the store lists edges in, which is visit_subject's
-// choice, or the stamp when there is no edge.
-//
-// One batched read covers every gathered visit. A failed read leaves each sitting
-// on its stamp, the identity's fallback, and is noted partial, the same
-// best-effort direction as every other join in this file.
-func (s *BeadsSource) resolveVisitSubjects(ctx context.Context, st beadStore, r rigRef, g *gatherState, sittings []board.Sitting) {
-	ids := make([]string, 0, len(sittings))
-	for i := range sittings {
-		ids = append(ids, sittings[i].ID)
-	}
-	var recs map[string][]*beads.Dependency
-	if ids = uniqueStrings(ids); len(ids) > 0 {
-		var err error
-		if recs, err = st.GetDependencyRecordsForIssues(ctx, ids); err != nil {
-			g.note(true, []string{"visit-subjects@" + r.name + ": " + err.Error()})
-			recs = nil
-		}
-	}
-	for i := range sittings {
-		sit := &sittings[i]
-		if tracked := trackedSubjects(recs[sit.ID]); len(tracked) > 0 {
-			sit.Subject, sit.Subjects = tracked[0], tracked
-		} else if sit.Subject != "" {
-			sit.Subjects = []string{sit.Subject}
-		}
-	}
-}
-
-// trackedSubjects returns the beads a visit's tracks edges name, sorted and
-// deduplicated.
-func trackedSubjects(ds []*beads.Dependency) []string {
-	var subjects []string
-	for _, d := range ds {
-		if d != nil && string(d.Type) == "tracks" {
-			subjects = append(subjects, d.DependsOnID)
-		}
-	}
-	return uniqueStrings(subjects)
 }
 
 // attributeTakeaways fills in the two things a row reads off its SUBJECT bead,
@@ -283,19 +320,6 @@ func parseStamp(v string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t.UTC(), true
-}
-
-// visitSubjects is the conversation-is-held fact behind Tile.Held: every bead a
-// RUNNING sitting covers. It reads the gathered record rather than re-querying,
-// so the glyph and the sittings section can never disagree about what is held.
-func visitSubjects(sittings []board.Sitting) []string {
-	var out []string
-	for _, s := range sittings {
-		if s.Status != string(beads.StatusClosed) {
-			out = append(out, s.Subjects...)
-		}
-	}
-	return out
 }
 
 // workflowRoot is one graph.v2 molecule root as the in-flight join needs it:
@@ -511,12 +535,6 @@ func buildFacts(sittings []board.Sitting, inflight map[string][]string, owners m
 		Inflight:   inflight,
 		OwnerState: owners,
 		Sittings:   sittings,
-	}
-	if visits := visitSubjects(sittings); len(visits) > 0 {
-		f.Visits = make(map[string]bool, len(visits))
-		for _, v := range visits {
-			f.Visits[v] = true
-		}
 	}
 	for _, r := range rigs {
 		if r.prefix != "" {

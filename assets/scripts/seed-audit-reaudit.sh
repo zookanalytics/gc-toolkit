@@ -30,8 +30,8 @@
 # One filed and never dispatched, because an earlier run stopped between its
 # create and its sling, is adopted and slung. One someone holds, routes or parks
 # is reported and left alone, and so is one armed for a deferred dispatch
-# (gc.dispatch_when_ready). A run that declined it waits on a visit that way,
-# and the arm re-slings it once the visit closes, so a sling from here would
+# (gc.dispatch_when_ready). A run that declined it waits on a human gate that
+# way, and the arm re-slings it once the gate closes, so a sling from here would
 # step past the person's ruling. A dedup query that does not answer files
 # nothing, because an unreadable answer cannot be told from no bead, and it
 # reads the store itself, never a pass's memo, since a memo taken before this

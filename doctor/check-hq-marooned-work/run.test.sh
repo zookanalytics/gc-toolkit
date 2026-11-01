@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for doctor/check-hq-marooned-work. Stub gc/bd only; no city,
 # no network. Covers: a marooned bug and a pool-routed task are flagged; every
-# legitimate HQ resident is exempt (infra type, human route, task_kind=visit,
+# legitimate HQ resident is exempt (infra type, human route, a conversation,
 # deacon-ledger label, debt label, gc-doctor title, an assigned bead, a bead
 # routed to a city-scoped agent, a warrant label, a standing subject); the
 # machinery types bd's ready-work query excludes (step, convoy,
@@ -77,7 +77,9 @@ B_BUG='{"id":"m-bug","status":"open","issue_type":"bug","title":"real marooned d
 B_POOL='{"id":"m-pool","status":"open","issue_type":"task","title":"work routed nowhere readable","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}'
 B_SESSION='{"id":"ok-sess","status":"open","issue_type":"session","title":"gc-toolkit/gc-toolkit.witness"}'
 B_HUMAN='{"id":"ok-human","status":"open","issue_type":"task","title":"operator disk-size call","metadata":{"gc.routed_to":"human"}}'
-B_VISIT='{"id":"ok-visit","status":"open","issue_type":"task","title":"visit: operator pick","metadata":{"task_kind":"visit"}}'
+B_CONV='{"id":"ok-conv","status":"open","issue_type":"task","title":"about an operator pick","assignee":"human","dependencies":[{"issue_id":"ok-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
+B_GATE='{"id":"ok-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"operator-pick","title":"operator pick"}'
+B_UNASSIGNED_CONV='{"id":"m-conv","status":"open","issue_type":"task","title":"a conversation someone unassigned by hand","dependencies":[{"issue_id":"m-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
 B_LEDGER='{"id":"ok-ledger","status":"open","issue_type":"task","title":"deacon ledger 2026-09-29","labels":["deacon-ledger"]}'
 B_DEBT='{"id":"ok-debt","status":"open","issue_type":"task","title":"gc doctor: 2 new findings (dolt-drift)","labels":["debt"]}'
 B_DOCTOR='{"id":"ok-doctor","status":"open","issue_type":"task","title":"gc doctor: agent-token-telemetry"}'
@@ -108,17 +110,28 @@ eq "$RC" "2" "a task routed to a pool but sitting in the HQ store is an ERROR"
 has "$OUT" "routed to gc-toolkit/gc-toolkit.polecat" "the finding names the pool route"
 
 # --- 3. every legitimate HQ resident is exempt ------------------------------
-store "$B_SESSION" "$B_HUMAN" "$B_VISIT" "$B_LEDGER" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
+store "$B_SESSION" "$B_HUMAN" "$B_CONV" "$B_GATE" "$B_LEDGER" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "session/human/visit/ledger/debt/doctor/assigned are all legitimate HQ contents"
+eq "$RC" "0" "session/human/conversation/gate/ledger/debt/doctor/assigned are all legitimate HQ contents"
 has "$OUT" "OK:" "the pass message is the OK line"
 hasnt "$OUT" "ok-sess" "an infra session type is not flagged"
 hasnt "$OUT" "ok-human" "a decision routed to human is not flagged"
-hasnt "$OUT" "ok-visit" "a task_kind=visit is not flagged"
+hasnt "$OUT" "ok-conv" "a conversation in the operator's queue is assigned, so it is not flagged"
+hasnt "$OUT" "ok-gate" "a human gate is a gate, an infra type, so it is not flagged"
 hasnt "$OUT" "ok-ledger" "a deacon-ledger daily digest is not flagged"
 hasnt "$OUT" "ok-debt" "a debt-labelled advisory is not flagged"
 hasnt "$OUT" "ok-doctor" "a gc-doctor-titled advisory with no label is not flagged"
 hasnt "$OUT" "ok-assigned" "an already-assigned bead is not flagged"
+
+# --- 3b. a conversation unassigned by hand is marooned work ----------------
+# The design keeps a conversation assigned through every hand-off, so one
+# someone unassigned is not a state it keeps: the check reports it, and a
+# pre-cutover visit, which carries no exemption any more, the same way.
+store "$B_UNASSIGNED_CONV" '{"id":"m-visit","status":"open","issue_type":"task","title":"visit: left from before the cutover","metadata":{"task_kind":"visit"}}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an unassigned conversation in the HQ store is an ERROR"
+has "$OUT" "m-conv" "…and the finding names it"
+has "$OUT" "m-visit" "…and a leftover visit is flagged like any unassigned task"
 
 # --- 4. a mix names only the marooned beads ---------------------------------
 store "$B_BUG" "$B_SESSION" "$B_DEBT" "$B_HUMAN" "$B_DOCTOR"

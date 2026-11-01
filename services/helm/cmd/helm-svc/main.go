@@ -39,7 +39,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/server"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
-	"github.com/zookanalytics/gc-toolkit/services/helm/internal/visit"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/verbs"
 	"github.com/zookanalytics/gc-toolkit/services/helm/web"
 )
 
@@ -107,8 +107,8 @@ func serve() {
 	}
 
 	ttl := cacheTTL()
-	// Resolve the city once. Discovery shells out to gc, and the source, the visit
-	// opener, and the board's pack-health read must all name the same city — so
+	// Resolve the city once. Discovery shells out to gc, and the source, the verb
+	// runner, and the board's pack-health read must all name the same city — so
 	// resolve it here and thread it, rather than have each rediscover.
 	cityPath := source.DiscoverCityPath()
 	src, closeSrc := selectSource(cityPath)
@@ -177,7 +177,7 @@ func spaHandler() http.Handler {
 // The routes then answer 503 with the reason rather than 404, so an operator who
 // clicks an action learns why instead of thinking it vanished.
 func selectActuator(cityPath string) server.Actuator {
-	a, err := visit.New(cityPath)
+	a, err := verbs.New(cityPath)
 	if err != nil {
 		log.Printf("board actuation unavailable, board is read-only: %v", err)
 		return nil

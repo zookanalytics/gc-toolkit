@@ -20,11 +20,12 @@
 #
 # What this does NOT touch:
 #   - task_kind=review — review-sweep.sh (arm 8) owns a review with no surface.
-#   - task_kind=visit — a human conversation. A disposed PR does not moot why it
-#     closed or what comes next, and finalize-gate.sh holds the anchor's own
-#     close while a visit is open. Human gates and visits are left standing.
+#   - task_kind=visit, a human gate, a conversation — the human side. A disposed
+#     PR does not moot why it closed or what comes next, and finalize-gate.sh
+#     holds the anchor's own close while a human gate on it is open. All of them
+#     are left standing.
 #   - the anchor itself — bead-rehome.sh (via pr-facts.sh's close arm) is the one
-#     anchor-closer, and finalize-gate holds it while a human visit is owed.
+#     anchor-closer, and finalize-gate holds it while a human gate on it is open.
 #     Clearing the machine scaffolding here is what lets that close land once the
 #     human side is done; this sweep never closes an anchor.
 #   - a bead carrying rebase_hold — an operator's freeze, which pr-facts.sh's
@@ -326,7 +327,7 @@ while IFS="$US" read -r sid anchor kind hold fsrc fcid fpath; do
 
   gc bd update "$sid" \
     --set-metadata gc.outcome=moot \
-    --append-notes "$PROG: retired as moot. Anchor $anchor is disposed ($disposed; merge_result=${AMR:-unrecorded}), so this $kind tracks a subject that is not landing: it is closed with no verdict and no fix expected, which clears its hold on the anchor's close.$scope_note Machine scaffolding only — any human visits on the anchor are left standing." \
+    --append-notes "$PROG: retired as moot. Anchor $anchor is disposed ($disposed; merge_result=${AMR:-unrecorded}), so this $kind tracks a subject that is not landing: it is closed with no verdict and no fix expected, which clears its hold on the anchor's close.$scope_note Machine scaffolding only — any human gates on the anchor are left standing." \
     --status=closed </dev/null >/dev/null 2>&1 || true
 
   if ! SROW=$(bd_show "$sid"); then
