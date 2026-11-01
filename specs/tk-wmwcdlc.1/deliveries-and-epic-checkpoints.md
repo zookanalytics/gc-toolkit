@@ -8,7 +8,7 @@ description: The design for the level under an epic, which epic tk-wmwcdlc build
 ## The decision
 
 The model in
-[epics.md](../../docs/epics.md#direction-features-and-epic-checkpoints)
+[epics.md](../../docs/epics.md#deliveries-and-epic-checkpoints)
 delivers an epic through Deliveries, and an Epic Checkpoint follows each one.
 This level is SAFe's Feature, as epics.md also calls it, and it is named
 Delivery here because bd's `feature` type is a work item (fact 1). Unit 1
@@ -16,7 +16,7 @@ carries the name into the docs. This design builds the level from what bd and
 the pack already do with a child epic, and an epic takes it only when the
 operator aims a Delivery under it. It adds no bead type, no metadata key and no
 state. The goals consolidation, the epic's other scope item, already stands in
-[epics.md](../../docs/epics.md#direction-features-and-epic-checkpoints), and
+[epics.md](../../docs/epics.md#deliveries-and-epic-checkpoints), and
 the checkpoint below reads the measured and graded criteria it brought.
 
 - **A Delivery is an epic-typed bead whose parent is the epic it delivers.** Its

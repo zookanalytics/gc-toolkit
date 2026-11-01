@@ -1,6 +1,6 @@
 ---
 name: Epic Stewardship — holding an epic open until its hypothesis is ruled closed
-description: How the pack holds an epic open until its hypothesis is ruled close with its outcome — the ruling fields an epic carries, the finalize-gate clause that holds a gate-running close, and the doctor invariant that reports a close made without the ruling — plus the Epic Checkpoint layer that is direction, not built. Read it to rule on or close an epic, or to extend the enforcement; the contract an epic carries is epics.md.
+description: Use when you rule on or close an epic, close a Delivery, or extend the enforcement that holds an epic open until its hypothesis is ruled closed. The contract an epic carries is epics.md.
 ---
 
 # Epic Stewardship
@@ -8,9 +8,11 @@ description: How the pack holds an epic open until its hypothesis is ruled close
 Epic stewardship holds an epic to its contract. An epic that carries a
 hypothesis stays open until the operator rules it closed and records the
 outcome ([epics.md](epics.md)). The pack enforces that with a finalize-gate
-clause and a doctor invariant. It does not yet prompt the rulings themselves:
-the Epic Checkpoint layer that will is direction, described at the end of this
-doc and built by the follow-on epic *Epic Checkpoints & Features*.
+clause and a doctor invariant. Neither holds a Delivery, the level under an epic
+that SAFe calls a Feature, and the Epic Checkpoint closes it
+([Closing a Delivery](#closing-a-delivery)). The pack does not yet prompt the
+rulings themselves: the machinery that will is direction, described at the end of
+this doc.
 
 ## Scope
 
@@ -70,9 +72,9 @@ as a bare `gc bd close` or `bead-rehome.sh`'s close-with-successor.
 Two layers enforce the ruling, and they apply one predicate. An epic that
 carries a hypothesis may close only once it is ruled close with its outcome
 recorded. A continue or shift ruling holds it as an absent ruling does. An epic
-with no hypothesis predates the model and is exempt, and a disposed epic
-(`gc.superseded_by`, written by `bead-rehome.sh`) carries a recorded terminal
-reason and passes.
+with no hypothesis is a Delivery or predates the model and is exempt, and a
+disposed epic (`gc.superseded_by`, written by `bead-rehome.sh`) carries a recorded
+terminal reason and passes.
 
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
    refuses to finalize an epic the predicate holds, on every close path that
@@ -87,21 +89,37 @@ reason and passes.
    remedy is to record the ruling on the closed epic, or to reopen the epic
    (`gc bd reopen`) when it should go on.
 
-## Direction: the Epic Checkpoint layer
+## Closing a Delivery
 
-Not built. The model is in [epics.md](epics.md#direction-features-and-epic-checkpoints):
-after each Feature lands, an Epic Checkpoint rules continue, shift, or close.
-The follow-on epic *Epic Checkpoints & Features* builds the layer that runs it.
-When a Feature has landed and no checkpoint is open on its epic, a formula
-gathers the evidence and analysis the ruling needs and files the checkpoint
-sitting for the operator to judge. The ruling that sitting records is the one
-the gate and I15 read. It is a formula, not a doctor check: doctor is already
-over-leveraged, and its role here stays the after-the-fact invariant. The first
-checkpoints run by hand, and the machinery is built from what they show.
+A Delivery ([epics.md](epics.md#deliveries-and-epic-checkpoints)) is an epic-typed
+child of its epic that carries no hypothesis, so the finalize-gate clause and I15
+never hold it. It carries no ruling of its own either. The ruling answers the
+epic's hypothesis, and both layers read it on the epic.
+
+The Epic Checkpoint closes a Delivery, as one of the ruling's writes, with the
+ruling as the close reason. What stands in the way of that close is bd, which
+refuses to close a bead with an open child or an open blocker such as a park
+unless the close is forced, and the checkpoint does not force it. So the Delivery
+closes once every Story under it has closed and the sitting has released it from
+any park. A child epic that carries a hypothesis of its own is an epic, not a
+Delivery, and both layers hold it as one.
+
+## Direction: the checkpoint's machinery
+
+An Epic Checkpoint runs by hand: the operator calls the sitting, and the sitting
+gathers the evidence and makes the ruling's writes
+([epics.md](epics.md#deliveries-and-epic-checkpoints)). Machinery that does any of
+that for them is not built. It is designed from what those hand runs record.
+Plausibly that is a formula that files the checkpoint sitting and gathers its
+evidence when a Delivery lands, and one verb that makes the ruling's writes. It
+is not a doctor check: doctor is already over-leveraged, and its role here stays
+the after-the-fact invariant. The ruling the sitting records stays the one the
+gate and I15 read.
 
 Until it lands, nothing asks for a ruling. An epic whose work has landed waits
 for the operator to call a sitting on it, so an answered or stalled epic stays
-open until someone looks.
+open until someone looks. A Delivery that stalls before it lands is inspected only
+by such a sitting, and the machinery may add a nudge on a Delivery's age.
 
 Membership (re-homing work that drifted outside its epic) is a separate concern
 with its own deferral, recorded in `specs/tk-isd5sa/design.md`.
