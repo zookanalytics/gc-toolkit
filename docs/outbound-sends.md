@@ -12,7 +12,7 @@ agent that finds an upstream bug prepares the command and stops.
 
 Stopping is not dropping. The finding is worth keeping whether or not it is
 ever sent, so it lands as a bead carrying the exact command a human can paste,
-and a visit asks for the send.
+and a human gate on that bead asks for the send.
 
 An agent acts on this through the
 [`gc-toolkit.external-issue`](../skills/external-issue/SKILL.md) skill, which
@@ -30,7 +30,7 @@ is asked.
 speak for our own repository — a send to the rig's origin is ordinary work,
 and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). The
 commands an agent runs are the skill's. Who may act on what is
-[authority-map.md](authority-map.md); how a visit reaches a person is
+[authority-map.md](authority-map.md); how a human gate reaches a person is
 [human-engagement.md](human-engagement.md).
 
 ## The boundary is the rig's own origin
@@ -138,20 +138,22 @@ command in metadata:
 | `upstream_send_key` | the situation key that keeps one ask from becoming three |
 
 The description says whether the send is public or a private report, and
-carries the security-policy reading when one was given. The visit says both
-beside the command.
+carries the security-policy reading when one was given. The gate's message says
+both beside the command.
 
-The ask itself is a visit, filed through
-[`escalate.sh`](../assets/scripts/escalate.sh), which owns the route and its
-own dedup. Answering is closing the bead — sent, or declined. A re-run against
-an open bead refreshes that one ask; a re-run against a closed one files
-nothing, because a settled question is not re-asked. A re-run changes neither
-the bead nor its visit, so one that brings a different security-policy reading,
-or a different command under a reused `--key`, is refused rather than reported
-as a refresh. A send parked with no reading differs from any reading given now.
-The refusal shows what is parked beside what the run brought, and its repair
-parks the new send under a new `--key`, closing the stale one with the reason
-when the new one replaces it.
+The ask itself is a human gate on that bead, filed through
+[`human-gate.sh`](../assets/scripts/human-gate.sh) under the key
+`upstream-send-<key>`, which keeps one open gate per bead and key. The send is
+the operator's action, so the gate blocks the bead until they clear it, sent
+or declined. A re-run against an open bead refreshes that one ask; a re-run
+against a closed one files nothing, because a settled question is not
+re-asked. A re-run changes neither the bead nor its gate, so one that brings a
+different security-policy reading, or a different command under a reused
+`--key`, is refused rather than reported as a refresh. A send parked with no
+reading differs from any reading given now. The refusal shows what is parked
+beside what the run brought, and its repair parks the new send under a new
+`--key`. When the new send replaces the stale one, the repair withdraws the
+stale send's gate, which blocks its close, and closes it with the reason.
 
 The keeper's fork workflow prepares its own `gh` commands inline, in
 `packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml`, where the PR

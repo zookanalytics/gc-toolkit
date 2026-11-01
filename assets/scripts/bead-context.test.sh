@@ -5,9 +5,9 @@
 # target the contract that opening reads: subject core (A) with the anchor,
 # first_reaction, origin and takeaway fields; context edges (D) — parent,
 # relates-to (both the `relates-to` and older `related` spellings), the reverse
-# `tracks` visits, and the beads that wait on it by a reverse `blocks` or
-# `until` edge, open ones first and capped — each with a count; the store that
-# answered (E); and,
+# `tracks` edges (a conversation about the bead), and the beads that wait on it
+# by a reverse `blocks` or `until` edge, open ones first and capped — each with
+# a count; the store that answered (E); and,
 # each behind its opt-in flag, the frontier verdict over {ready, advancing,
 # stuck} (B) and the direct-children epic-health snapshot (C). The advance enum,
 # the cross-store fold, the fail-closed unknown, the status scope of the child
@@ -50,7 +50,7 @@ bead() { cat > "$1/.beads/$2.json"; }   # bead <store-repo> <id>  (object on std
 # tk-anchor: a subject core (A) with every field the opening reads — anchor
 # state, first_reaction, origin, a settled takeaway, task_kind and routing. Its
 # edges (D) are the parent tk-epic, two relates deps in each spelling, and a
-# reverse `tracks` visit (tk-visit, below). Its blocks are all closed — one
+# reverse `tracks` edge from a conversation (tk-conv, below). Its blocks are all closed — one
 # same-store (embedded status), one FOREIGN in the otherrig store (no embedded
 # status, the cross-store fold) — so its frontier verdict is ready. It also
 # carries a description and notes; the read returns its title but never that body.
@@ -78,9 +78,9 @@ J
 bead "$R_OR" or-far <<'J'
 {"id":"or-far","title":"foreign closed blocker","status":"closed","issue_type":"task","metadata":{}}
 J
-# tk-visit tracks tk-anchor: the reverse edge that makes tk-anchor tracked-by it.
-bead "$R_TK" tk-visit <<'J'
-{"id":"tk-visit","title":"visit: tk-anchor","status":"closed","issue_type":"task","metadata":{},
+# tk-conv tracks tk-anchor: the reverse edge that makes tk-anchor tracked-by it.
+bead "$R_TK" tk-conv <<'J'
+{"id":"tk-conv","title":"about tk-anchor","status":"closed","issue_type":"task","assignee":"human","metadata":{},
  "dependencies":[{"id":"tk-anchor","dependency_type":"tracks","status":"open"}]}
 J
 
@@ -291,7 +291,7 @@ blk "$R_TK" tk-k-hooked hooked '{}'
 blk "$R_TK" tk-k-deferred deferred "$POOL"
 bead "$R_TK" tk-k-gate <<'J'
 {"id":"tk-k-gate","title":"held by ruling","status":"open","issue_type":"gate",
- "metadata":{"gc.routed_to":"human","gc.demand_for":"tk-w-kinds"}}
+ "await_type":"human","await_id":"which-way","metadata":{}}
 J
 bead "$R_TK" tk-k-refinery <<'J'
 {"id":"tk-k-refinery","title":"handed to the refinery","status":"open","issue_type":"task",
@@ -597,7 +597,7 @@ JQF='.edges.counts.parent'            runj tk-anchor; eq "$JQ" 1           "edge
 JQF='.edges.relates_to | length'      runj tk-anchor; eq "$JQ" 2           "both relates spellings — relates-to AND related — are the relates class"
 JQF='[.edges.relates_to[].id]|sort|join(",")' runj tk-anchor; eq "$JQ" tk-rel,tk-rel2 "  ... and both are named"
 JQF='.edges.tracked_by | length'      runj tk-anchor; eq "$JQ" 1           "tracked-by is read from the reverse tracks edge"
-JQF='.edges.tracked_by[0].id'         runj tk-anchor; eq "$JQ" tk-visit    "  ... naming the tracking visit"
+JQF='.edges.tracked_by[0].id'         runj tk-anchor; eq "$JQ" tk-conv     "  ... naming the conversation that tracks it"
 has "$(cat "$FAKE_GC_LOG")" "dep list tk-anchor --direction=up --type tracks" \
   "  ... via a reverse dep-list, since the subject carries no tracked-by edge itself"
 
@@ -769,7 +769,7 @@ eq "$(blkr tk-k-needsyou)" "stuck tk-k-needsyou human" "a finding that needs the
 eq "$(blkr tk-k-refinery)" "advancing - -" "an open bead assigned to the refinery is in its queue"
 eq "$(blkr tk-k-capped)" "stuck tk-k-capped capped" "an armed dispatch at its sling-failure cap is stuck"
 eq "$(blkr tk-k-hooked)" "advancing - -" "a hooked bead is held by an agent, so advancing"
-eq "$(blkr tk-k-gate)" "stuck tk-k-gate human" "a gate bead, which a bare listing hides, is read and stuck on a person"
+eq "$(blkr tk-k-gate)" "stuck tk-k-gate human" "a human gate, which a bare listing hides and which carries no route, is read and stuck on a person"
 
 run tk-w-decides --frontier --json
 eq "$(blkr tk-k-decision)" "stuck tk-k-decision human" "a decision is a person's to make"

@@ -50,8 +50,9 @@ the supervisor and fail against a fixture, and the panel still offers its
 actions.
 
 A running helm service is out of a capture's reach, because a capture refuses a
-`--base-url` on this host, and its verbs file, dispatch and close visits in the
-live city. The verdict says that the board shows fixture data.
+`--base-url` on this host, and its verbs file and close conversations, clear
+human gates and dispatch work in the live city. The verdict says that the board
+shows fixture data.
 
 ## Reports a command prints
 

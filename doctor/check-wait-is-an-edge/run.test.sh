@@ -133,7 +133,7 @@ park_route = "human"
 marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 route_key = "gc.routed_to"
-terminal_wait_key = "gc.demand_for"
+terminal_wait_type = "gate"
 hold_severity = "warn"
 TOML
 
@@ -230,11 +230,19 @@ OUT=$(printf '[]' > "$TMP/stores/alpha.json"; gc --city "$TMP" --rig alpha bd li
 eq "$RC" "1" "the stub refuses an unknown status, so a narrowed scan cannot read as clean"
 
 # --- 9. the hidden bead categories are scanned ----------------------------
-for cat in '"issue_type":"gate"' '"issue_type":"agent"' '"issue_type":"molecule","labels":["template"]'; do
+for cat in '"issue_type":"agent"' '"issue_type":"molecule","labels":["template"]'; do
   store '[{"id":"aa-101","status":"open",'"$cat"',"metadata":{"triage.hold":"held"}}]'
   OUT=$(run_check); RC=$?
   eq "$RC" "1" "a held bead with $cat is scanned"
 done
+# A gate is read as well: a gate blocker has to be in the listing to answer a
+# hold (case 10). It is the terminal end of a wait, exempt by its type (case
+# 23), so a declaration that names no terminal-wait type is what shows it read.
+mkdir -p "$TMP/pack9/lifecycle"
+{ echo '[holds]'; echo 'marker_keys = ["triage.hold"]'; } > "$TMP/pack9/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"triage.hold":"held"}}]'
+OUT=$(PACK="$TMP/pack9" run_check); RC=$?
+eq "$RC" "1" "a held gate is scanned, as a declaration with no terminal-wait type shows"
 # Vacuity guard: the stub really does hide those rows without the flags, so the
 # assertions above are testing the flags and not a stub that serves everything.
 store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"triage.hold":"held"}}]'
@@ -477,47 +485,55 @@ OUT=$(PACK="$TMP/pack3" run_check); RC=$?
 eq "$RC" "0" "the built-in list carries the built-in pairing"
 
 # --- 23. the terminal end of a wait is exempt, not a finding --------------
-# A demand bead is the thing others block ON: the gated bead blocks on it and it
-# blocks on nothing, so it can hold no `blocks` edge of its own. It is exempt as
-# a WHOLE, unlike a settled marker (which answers one marker and leaves the bead
-# judged on the rest).
-notheld '{"gc.demand_for":"aa-500","gc.takeaway":"what should happen with X?","gc.routed_to":"human"}' \
-        "a demand bead carrying gc.demand_for is exempt"
-notheld '{"gc.demand_for":"aa-500","triage.hold":"x"}' \
-        "gc.demand_for exempts the bead even beside another marker"
-# An EMPTY value is not the terminal marker: clearing a key does not remove it,
-# so a bead that merely carries gc.demand_for="" is judged on its markers.
-held '{"gc.demand_for":"","gc.takeaway":"parked for a person"}' \
-     "an empty gc.demand_for does not exempt"
-# The exemption does not skip the store: a demand is not counted as a finding,
-# and a store whose only held bead is a demand reads clean and scanned.
-store '[{"id":"aa-101","status":"open","metadata":{"gc.demand_for":"aa-500","gc.takeaway":"needs a ruling","gc.routed_to":"human"}}]'
+# A gate is the thing others block ON: the gated bead blocks on it and it blocks
+# on nothing, so it can hold no `blocks` edge of its own. It is exempt as a
+# WHOLE, unlike a settled marker (which answers one marker and leaves the bead
+# judged on the rest). The rule is the bead's issue type, whatever metadata it
+# carries.
+gate_row() { # <issue-type> <metadata-json> — one open bead of that type
+  store '[{"id":"aa-101","status":"open","issue_type":"'"$1"'","metadata":'"$2"'}]'
+}
+gate_row gate '{"gc.takeaway":"what should happen with X?","gc.routed_to":"human"}'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a store whose only held bead is a demand passes"
+eq "$RC" "0" "a gate carrying a marker is exempt: it is the terminal end of its wait"
+gate_row gate '{"triage.hold":"x"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the gate type exempts the bead even beside another marker"
+# The type is the rule, not a key: a legacy demand of another type still
+# carrying gc.demand_for is judged on its markers like any bead.
+gate_row decision '{"gc.demand_for":"aa-500","gc.takeaway":"parked for a person"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a bead of another type is judged on its markers, gc.demand_for or not"
+has "$OUT" "aa-101" "…and it names the held bead"
+# The exemption does not skip the store: a gate is not counted as a finding,
+# and a store whose only held bead is a gate reads clean and scanned.
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"needs a ruling","gc.routed_to":"human"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a store whose only held bead is a gate passes"
 has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
 
 # The exemption is DECLARED, like the markers. A declaration that omits
-# terminal_wait_key does not exempt the terminal end — the demand's own markers
+# terminal_wait_type does not exempt the terminal end — the gate's own markers
 # still assert, which is the fail-safe an omitted field is meant to be.
 mkdir -p "$TMP/pack11/lifecycle"
 { echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
   echo 'marker_keys = ["gc.takeaway"]'; echo 'route_key = "gc.routed_to"'; } > "$TMP/pack11/lifecycle/lifecycle.toml"
-store '[{"id":"aa-101","status":"open","metadata":{"gc.demand_for":"aa-500","gc.takeaway":"needs a ruling"}}]'
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"needs a ruling"}}]'
 OUT=$(PACK="$TMP/pack11" run_check); RC=$?
-eq "$RC" "1" "a declaration that omits terminal_wait_key does not exempt the terminal end"
-has "$OUT" "aa-101" "and the demand's own marker still asserts"
-# A terminal_wait_key declared only in lifecycle.toml is honored, for a key of
+eq "$RC" "1" "a declaration that omits terminal_wait_type does not exempt the terminal end"
+has "$OUT" "aa-101" "and the gate's own marker still asserts"
+# A terminal_wait_type declared only in lifecycle.toml is honored, for a type of
 # the declaration's own choosing.
 mkdir -p "$TMP/pack12/lifecycle"
 { echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'
-  echo 'terminal_wait_key = "site.terminus"'; } > "$TMP/pack12/lifecycle/lifecycle.toml"
-store '[{"id":"aa-101","status":"open","metadata":{"site.terminus":"aa-9","gc.takeaway":"x"}}]'
+  echo 'terminal_wait_type = "site-terminus"'; } > "$TMP/pack12/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","issue_type":"site-terminus","metadata":{"gc.takeaway":"x"}}]'
 OUT=$(PACK="$TMP/pack12" run_check); RC=$?
-eq "$RC" "0" "a terminal_wait_key declared only in lifecycle.toml is honored"
-# With no lifecycle.toml at all the built-in terminal-wait key stands in.
-store '[{"id":"aa-101","status":"open","metadata":{"gc.demand_for":"aa-500","gc.takeaway":"x"}}]'
+eq "$RC" "0" "a terminal_wait_type declared only in lifecycle.toml is honored"
+# With no lifecycle.toml at all the built-in terminal-wait type stands in.
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"x"}}]'
 OUT=$(PACK="$TMP/pack3" run_check); RC=$?
-eq "$RC" "0" "the built-in list carries the built-in terminal-wait key"
+eq "$RC" "0" "the built-in list carries the built-in terminal-wait type"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -6,21 +6,13 @@
 # return a bead to a pool to be claimed again, and some of those return it only
 # when its work has not already reached a downstream court.
 #
-#   visit          release the sitting and keep the visit. The assignee and the
-#                  session pins (gc.session_id, gc.session_name) name the
-#                  sitting that is gone. The route, continuation group and
-#                  task_kind are the visit's identity and are never written.
-#                  Released, the visit names no owner, so orphan recovery does
-#                  not find it again, and the helm board reads it as parked,
-#                  under the headline engage's reclaim of a gone sitting
-#                  writes.
 #   review         a review bead is the source bead of its own mol-review
 #                  molecule and carries no worktree of its own, so it disposes by
 #                  the source contract below (delete-source is a no-op on an
 #                  input-convoy root, reopen-source returns it to its review
-#                  pool). It is recognised by task_kind before the source arm the
-#                  way a visit is, and the witness salvage scope gate skips its
-#                  worktree salvage and merge-verify for the same reason.
+#                  pool). It is recognised by task_kind before the source arm,
+#                  and the witness salvage scope gate skips its worktree salvage
+#                  and merge-verify for the same reason.
 #   workflow-root  skip. A graph.v2 root is not schedulable work: nothing
 #                  claims it, and it closes when its workflow-finalize step
 #                  closes. Setting it open+unassigned+routed is what makes a
@@ -48,8 +40,10 @@
 #                  offered again rather than left bd-ready but unrouted. EXCEPT
 #                  when the work already reached a downstream court — an in-flight
 #                  PR (merge_result pre_open_gate/pull_request) the refinery owns
-#                  landing, or a human gate (gc.routed_to=human) a person owns
-#                  clearing: reopening would return that work to the pool — skip it.
+#                  landing, a human route (gc.routed_to=human) a person owns
+#                  clearing, or a conversation, a task assigned to `human` or to
+#                  the alias of its sitting (conversation.sh): reopening would
+#                  return that work to the pool — skip it.
 #
 # The root read is what separates the two step arms, and it is a read of the
 # root itself — not of the input convoy, and not of the anchors it tracks. A
@@ -61,7 +55,7 @@
 # then runs alone. That is why the source arm is not the disposal for a step or
 # a root: reopening either one hands live molecule machinery to a pool.
 #
-# A visit or step release is ONE write. bd applies an update as one operation
+# A step release is ONE write. bd applies an update as one operation
 # and checks its --if-assignee and --if-status guards inside it, so the pins,
 # the status and the assignee land together or not at all, and a release never
 # leaves part of itself on a bead another writer has taken since this script
@@ -72,7 +66,7 @@
 # A disposal acts only on the claim orphan recovery found dead: the owner whose
 # session it proved gone, and the status and assignee its listing showed beside
 # that owner. The bead must still carry that claim when this script reads it,
-# and a visit or step release is guarded on the status and assignee the read
+# and a step release is guarded on the status and assignee the read
 # found, so a bead another holder takes before or during the release keeps that
 # holder's claim.
 #
@@ -152,16 +146,13 @@ read_bead() { gc bd show "$1" --json 2>/dev/null | scrub; }
 listing_strip() { tr -d '[:cntrl:]'; }
 # <<< listing-strip
 
-# The headline a released visit re-parks under: the one `gc-helm engage` writes
-# when it reclaims a visit from a gone sitting, so the board reads the two the
-# same.
-# >>> gone-sitting-takeaway
-GONE_SITTING_TAKEAWAY="Reclaimed from a gone sitting; re-parked for re-engagement."
-# <<< gone-sitting-takeaway
-
 # Resolved from $0 so a copy of this script runs against the copy beside it.
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 RUN_CANCEL="${GC_RUN_CANCEL_TOOL:-$HERE/run-cancel.sh}"
+# The one definition of a conversation's shape: conversation_assignee, which
+# the source arm's skip asks.
+# shellcheck source=conversation.sh
+. "$HERE/conversation.sh" || { echo "orphan-dispose: cannot source conversation.sh from $HERE" >&2; exit 1; }
 
 # The source arm's two `gc workflow` calls run under a hard bound. They are slow
 # rather than stuck: each scans every store in the city, and a healthy call takes
@@ -188,6 +179,7 @@ fi
 META="$(printf '%s' "$BEAD_JSON" | jq -c '.[0].metadata // {}')"
 STATUS="$(printf '%s' "$BEAD_JSON" | jq -r '.[0].status // ""')"
 ASSIGNEE="$(printf '%s' "$BEAD_JSON" | jq -r '.[0].assignee // ""')"
+ISSUE_TYPE="$(printf '%s' "$BEAD_JSON" | jq -r '.[0].issue_type // ""')"
 mval() { printf '%s' "$META" | jq -r --arg k "$1" '.[$k] // ""'; }
 
 TASK_KIND="$(mval task_kind)"
@@ -198,14 +190,11 @@ ROOT_ID="$(mval gc.root_bead_id)"
 ROUTED="$(mval gc.routed_to)"
 MERGE_RESULT="$(mval merge_result)"
 
-# Classification order matters. A visit and a review are each the source bead of
-# their own molecule (mol-visit, mol-review), so both must be recognised by
-# task_kind before the source arm would claim them. Root before step: gascity's
-# own IsWorkflowRoot is gc.kind=workflow OR gc.formula_contract=graph.v2, and a
-# step carries neither.
-if [ "$TASK_KIND" = "visit" ]; then
-    CLASS="visit"
-elif [ "$TASK_KIND" = "review" ]; then
+# Classification order matters. A review is the source bead of its own
+# molecule (mol-review), so it must be recognised by task_kind before the source
+# arm would claim it. Root before step: gascity's own IsWorkflowRoot is
+# gc.kind=workflow OR gc.formula_contract=graph.v2, and a step carries neither.
+if [ "$TASK_KIND" = "review" ]; then
     CLASS="review"
 elif [ "$KIND" = "workflow" ] || [ "$CONTRACT" = "graph.v2" ]; then
     CLASS="workflow-root"
@@ -236,19 +225,16 @@ fi
 # non-empty of gc.session_id, the assignee and gc.session_name, finds that
 # owner's session dead, and passes that owner, with the status and assignee it
 # listed beside it, as --claim. It judged the bead from that listing, and a
-# holder can take the bead before this read: `gc-helm engage` reclaims a visit
-# bound to a gone sitting and binds a fresh one, and a pool claims a step whose
-# dead holder Gas City released. So this read resolves the owner the same way
-# and compares the whole claim, because no one part of it settles the question.
-# A session that claims a step under the pool's alias, as a named session, a
+# holder can take the bead before this read: a pool claims a step whose dead
+# holder Gas City released. So this read resolves the owner the same way and
+# compares the whole claim, because no one part of it settles the question. A
+# session that claims a step under the pool's alias, as a named session, a
 # namepool member or an explicit `gc hook <agent>` target does, leaves the
 # assignee and status as they were listed, and only the owner, the
-# gc.session_id its claim stamps, tells it apart. A visit re-bound by a writer
-# that leaves an earlier sitting's pin on it resolves the listed owner again,
-# and only the assignee tells it apart. A bead whose claim differs from the
-# listed one, or that is no longer open or in_progress, the statuses recovery
-# lists, is not the claim recovery judged, and it is skipped with nothing
-# written.
+# gc.session_id its claim stamps, tells it apart. A bead whose claim differs
+# from the listed one, or that is no longer open or in_progress, the statuses
+# recovery lists, is not the claim recovery judged, and it is skipped with
+# nothing written.
 #
 # The listed claim was read through the listing's strip, which removes
 # characters this read keeps, so both claims are compared through that strip.
@@ -270,7 +256,7 @@ REPORT_OWNER="$ASSIGNEE"
 
 # The conditional guards. HELD_BY and HELD_STATUS are the assignee and status
 # this read found, which the claim check above has matched to --claim when it
-# was given. A visit or step release carries them as bd's --if-assignee and
+# was given. A step release carries them as bd's --if-assignee and
 # --if-status, which bd checks inside the write: once the bead's assignee or
 # status has moved, the write lands nothing and exits 13. LOST then names the
 # refused write, and the bead is skipped as the writer that moved it left it.
@@ -292,24 +278,20 @@ EXPECT_ROUTE=""
 note_failed() { FAILED="${FAILED:+$FAILED,}$1"; }
 note_landed() { LANDED="${LANDED:+$LANDED,}$1"; }
 
-# pin_args [--keep-continuation] sets PIN_ARGS to one --unset-metadata pair for
-# each pin a release removes. gc.session_id and gc.session_name name the
-# session a claim ran in, and both always go. Orphan recovery resolves a bead's
-# owner as the first non-empty of gc.session_id, the assignee, then
-# gc.session_name, so one left behind keeps resolving the dead session as the
-# owner once the bead is unassigned, and re-detects it every cycle. The helm
-# board also reads a visit whose gc.session_name is set as engaged.
-# gc.session_affinity and gc.continuation_group tie a step to the session that
-# ran its chain, and go with it. --keep-continuation keeps those two on a
-# visit, whose continuation group is its subject rather than a pin. Removing an
-# absent key changes nothing.
+# pin_args sets PIN_ARGS to one --unset-metadata pair for each pin a release
+# removes. gc.session_id and gc.session_name name the session a claim ran in.
+# Orphan recovery resolves a bead's owner as the first non-empty of
+# gc.session_id, the assignee, then gc.session_name, so one left behind keeps
+# resolving the dead session as the owner once the bead is unassigned, and
+# re-detects it every cycle. gc.session_affinity and gc.continuation_group tie a
+# step to the session that ran its chain, and go with it. Removing an absent key
+# changes nothing.
 pin_args() {
-    PIN_ARGS=(--unset-metadata gc.session_id --unset-metadata gc.session_name)
-    [ "${1:-}" = "--keep-continuation" ] \
-        || PIN_ARGS+=(--unset-metadata gc.session_affinity --unset-metadata gc.continuation_group)
+    PIN_ARGS=(--unset-metadata gc.session_id --unset-metadata gc.session_name
+        --unset-metadata gc.session_affinity --unset-metadata gc.continuation_group)
 }
 
-# release <update args...> releases a visit or a step in ONE write under the
+# release <update args...> releases a step in ONE write under the
 # conditional guards: the args given, open status and no assignee. bd applies
 # the whole update as one operation and checks the guards inside it, so the
 # release lands whole or not at all. bd fences an assignee change on another
@@ -390,22 +372,15 @@ verify() {
     sname="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_name"] // ""')"
     [ "$st"  = "open" ] || note_failed "status(still=$st)"
     [ -z "$asg" ]       || note_failed "assignee(still=$asg)"
-    # The arms that clear session pins — visit, workflow-step, source and review —
+    # The arms that clear session pins — workflow-step, source and review —
     # must land it: a surviving pin is exactly what makes orphan recovery
     # re-detect the bead.
     case "$CLASS" in
-        visit|workflow-step|source|review)
+        workflow-step|source|review)
             [ -n "$sid" ]   && note_failed "gc.session_id(still=$sid)"
             [ -n "$sname" ] && note_failed "gc.session_name(still=$sname)"
             ;;
     esac
-    # A visit's headline is read back like its pins: one that reports written
-    # and rolls back leaves the board showing what the gone sitting last wrote.
-    if [ "$CLASS" = "visit" ]; then
-        local tk
-        tk="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.takeaway"] // ""')"
-        [ "$tk" = "$GONE_SITTING_TAKEAWAY" ] || note_failed "gc.takeaway(got=${tk:-empty})"
-    fi
     # A restored route must survive the re-read: a gc.routed_to that reports set
     # and rolls back would strand the reopened bead exactly as before.
     if [ -n "$EXPECT_ROUTE" ]; then
@@ -436,23 +411,6 @@ case "$DISPOSAL" in
     claim-changed)
         ACTION="skip"
         DETAIL="$CLAIM_CHANGED"
-        ;;
-    visit)
-        # Release the sitting and keep the visit: the pins and the assignee go,
-        # and the route, continuation group and task_kind that ARE the visit are
-        # never written. The visit parks again, so the release writes the
-        # headline the board shows for it, and clears the settled flag the gone
-        # sitting may have left beside its own, the way engage's reclaim does.
-        ACTION="release-visit"
-        if [ "$APPLY" = "1" ]; then
-            pin_args --keep-continuation
-            release "${PIN_ARGS[@]}" \
-                --set-metadata "gc.takeaway=$GONE_SITTING_TAKEAWAY" \
-                --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                --set-metadata gc.takeaway_by=witness \
-                --set-metadata gc.takeaway_settled=
-            verify
-        fi
         ;;
     workflow-root)
         ACTION="skip"
@@ -506,22 +464,28 @@ case "$DISPOSAL" in
         ;;
     source|review)
         # A review bead shares this arm: it is the source of its own mol-review
-        # molecule, carries no merge_result of its own and is routed to a review
-        # pool rather than a human gate, so neither skip below fires and it is
-        # always reopened to that pool. It reaches here as class=review only so
-        # the witness salvage scope gate can skip its worktree salvage and
-        # merge-verify; the disposal it needs is exactly the source contract.
+        # molecule, carries no merge_result of its own, is routed to a review pool
+        # rather than to `human`, and is held by a review session, not by `human`
+        # or a sitting, so no skip below fires and it is reopened to that pool. It
+        # reaches here as class=review only so the witness salvage scope gate can
+        # skip its worktree salvage and merge-verify; the disposal it needs is
+        # exactly the source contract.
         # A source work bead whose work already reached a downstream court is not
         # lost, so delete-source + reopen-source must not return it to the pool
         # (every cycle would re-detect and re-recover it, stamping a recovery the
-        # crash-loop signal reads as a RATE, escalating a moot visit). Two states
-        # name a downstream court, the same set mol-witness-patrol's
+        # crash-loop signal reads as a RATE, putting a moot question to a person).
+        # These states name a downstream court, the same set mol-witness-patrol's
         # downstream-court-skip filter drops upstream: an in-flight PR (merge_result
-        # pre_open_gate/pull_request) the refinery owns landing, or a human gate
-        # (gc.routed_to=human) a person owns clearing. This is the correctness
-        # boundary at the disposal itself, the last step before the irreversible
-        # reopen — a source bead that moves onto a human gate after that filter, or
-        # reaches this script by recovery or manual replay, is still skipped here.
+        # pre_open_gate/pull_request) the refinery owns landing, a human route
+        # (gc.routed_to=human) a person owns clearing, or a conversation. A
+        # conversation is assigned, not routed, and no session carries either of
+        # its owners: `human`, which Gas City reserves from session aliases, or the
+        # alias of a sitting whose session has closed, which stays the assignee
+        # until a session under that alias takes the conversation back. This is
+        # the correctness boundary at the disposal itself, the last step before
+        # the irreversible reopen — a source bead that moves onto a human route
+        # after that filter, or reaches this script by recovery or manual replay,
+        # is still skipped here.
         # pr.machine is not read: a progressing stamp is written only with an anchor
         # merge_result (which the first arm catches), and unanchoring leaves it
         # behind, so on a repooled bead it is stale. The merge_result arm mirrors
@@ -531,7 +495,10 @@ case "$DISPOSAL" in
             DETAIL="inflight_pr(merge_result=${MERGE_RESULT:-none})"
         elif [ "$ROUTED" = "human" ]; then
             ACTION="skip"
-            DETAIL="human_gate(routed_to=human)"
+            DETAIL="human_route(routed_to=human)"
+        elif [ "$ISSUE_TYPE" = "task" ] && conversation_assignee "$ASSIGNEE" "$BEAD"; then
+            ACTION="skip"
+            DETAIL="conversation(assignee=$ASSIGNEE)"
         else
             ACTION="delegate-source-workflow"
             if [ "$APPLY" = "1" ]; then

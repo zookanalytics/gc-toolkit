@@ -44,8 +44,8 @@
 # closed before a fresh one is filed (bd_unmake_orphans), since its blocks edge
 # would hold the anchor beside it. Reach carried by the pour ALONE is qualified before it counts: a review
 # whose workflow is spent (every step closed but the finalizer) can never
-# produce a verdict, so it is escalated through escalate.sh under one deduped
-# situation key rather than holding the anchor in silence. There is no dispatch
+# produce a verdict, so it is put to a person through human-gate.sh under one
+# deduped situation key rather than holding the anchor in silence. There is no dispatch
 # ceiling: quiescence forbids the redundant round the ceiling used to bound, and
 # the runaway shapes left — a reviewer that dies after claim, a fix unit filed
 # with its edge reversed — stop the PR moving rather than spin the dispatcher.
@@ -124,7 +124,11 @@ case "$(cs_canon "$DEFAULT_CHECK_SET")" in
 esac
 
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-ESCALATOR="$SCRIPTS_DIR/escalate.sh"
+HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
+# A wedged review stays wedged until a person repairs it, and every pass detects
+# it again, so the wedge's call declares a quiet window: a moot or benign answer
+# stands for a day.
+WEDGE_QUIET_WINDOW=86400
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The shared graph-derivation helpers: lane green (the settled state) and the
 # fix unit answering the anchor's open must-fix findings (quiescence clause a),
@@ -487,13 +491,13 @@ tracked_roots() { # <bead-id>
 # A live step chain is in flight (say so, do nothing else). A spent chain (every
 # step closed but the finalizer) is wedged — the anchor holds for good with
 # nothing open to say why, the one failure this arm cannot leave silent — so it
-# is escalated once, after a one-pass hold. That hold is not politeness:
+# is put to a person once, after a one-pass hold. That hold is not politeness:
 # mol-review's failure arm closes its chain BEFORE it restores the route, so a
-# single read can catch a recovery mid-write and escalate a review that repairs
+# single read can catch a recovery mid-write and ask about a review that repairs
 # itself moments later. An unreadable root or step enumeration is HELD without
 # claiming a live pour — the merge stays held and the next pass re-probes.
 # Reads the current anchor's loop context ($id $g $title $branch $target
-# $REVIEW_POOL $ESCALATOR $WEDGE_KEY $PROG) and bumps $wedged on a filed visit.
+# $REVIEW_POOL $HUMAN_GATE $WEDGE_KEY $PROG) and bumps $wedged on a filed gate.
 judge_pour_liveness() { # <review-bead-id>
   local rid="$1" spent_root="" spent_rc=0 rev_row seen rpool
   spent_root=$(pour_spent "$rid") || spent_rc=$?
@@ -507,11 +511,11 @@ judge_pour_liveness() { # <review-bead-id>
       [ -n "$rpool" ] || rpool="$REVIEW_POOL"
       if [ "$seen" != "$spent_root" ]; then
         gc bd update "$rid" --set-metadata wedge_seen_root="$spent_root" >/dev/null 2>&1
-        echo "$PROG: $id check '$g' review $rid looks WEDGED (workflow $spent_root spent, no verdict, no route); holding one pass before escalating"
-      elif [ ! -x "$ESCALATOR" ]; then
-        echo "$PROG: $id check '$g' review $rid is WEDGED (workflow $spent_root spent) but $ESCALATOR is missing; repair by hand: gc bd update $rid --set-metadata gc.routed_to=$rpool" >&2
+        echo "$PROG: $id check '$g' review $rid looks WEDGED (workflow $spent_root spent, no verdict, no route); holding one pass before asking a person"
+      elif [ ! -x "$HUMAN_GATE" ]; then
+        echo "$PROG: $id check '$g' review $rid is WEDGED (workflow $spent_root spent) but $HUMAN_GATE is missing; repair by hand: gc bd update $rid --set-metadata gc.routed_to=$rpool" >&2
       else
-        "$ESCALATOR" --subject "$rid" --key "$WEDGE_KEY" --message \
+        "$HUMAN_GATE" --subject "$rid" --key "$WEDGE_KEY" --quiet-window "$WEDGE_QUIET_WINDOW" --message \
 "Review $rid is wedged: its poured workflow finished without a verdict, so check '$g' on $id is held with nothing driving it.
 
 Anchor:   $id — $title
@@ -524,16 +528,20 @@ The reviewing agent closed its step chain without calling signoff.sh and
 without restoring the review bead's route, so no verdict can still be coming
 and the merge is held indefinitely.
 
-Two repairs, either of which clears the hold:
+This gate blocks $rid, which keeps it out of the pool and refuses its close,
+so clear the gate as part of either repair. Two repairs, either of which clears
+the hold:
   return it to the pool as a formula-less review, the shape mol-review
   documents for exactly this recovery —
     gc bd update $rid --set-metadata gc.routed_to=$rpool
+  then clear this gate, so the pool can claim it;
   or drop the abandoned round and let the next pass dispatch a fresh review —
+  clear this gate, then
     gc bd close $rid" >/dev/null \
-          && { wedged=$((wedged + 1)); echo "$PROG: $id check '$g' review $rid is WEDGED (workflow $spent_root spent); escalated [$WEDGE_KEY]"; } \
-          || echo "$PROG: $id check '$g' review $rid is WEDGED (workflow $spent_root spent) but the escalation did not file; retry next pass" >&2
+          && { wedged=$((wedged + 1)); echo "$PROG: $id check '$g' review $rid is WEDGED (workflow $spent_root spent); filed a human gate [$WEDGE_KEY]"; } \
+          || echo "$PROG: $id check '$g' review $rid is WEDGED (workflow $spent_root spent) but the gate did not file; retry next pass" >&2
       fi ;;
-    *) echo "$PROG: $id check '$g' review $rid pour-liveness probe unreadable; no escalation this pass (merge stays held)" >&2 ;;
+    *) echo "$PROG: $id check '$g' review $rid pour-liveness probe unreadable; nothing asked this pass (merge stays held)" >&2 ;;
   esac
 }
 
@@ -957,11 +965,11 @@ while IFS= read -r tagged; do
           # whose exec stamp dropped, but the run ALONE is not proof the pour
           # still runs: its step chain may be live, spent (closed without a
           # verdict), or unreadable. So a run is judged by the same liveness
-          # check the poured arm uses — live counts in flight, spent escalates,
-          # unreadable holds — not counted in flight on sight. A convoy with NO
-          # root drives nothing (a pour minted the convoy and the tracks edge
-          # but died before the root), so that case, like a never-poured one, is
-          # re-slung rather than held in flight forever.
+          # check the poured arm uses — live counts in flight, spent files a
+          # human gate, unreadable holds — not counted in flight on sight. A
+          # convoy with NO root drives nothing (a pour minted the convoy and the
+          # tracks edge but died before the root), so that case, like a
+          # never-poured one, is re-slung rather than held in flight forever.
           rid="${FOUND#stranded }"
           [ -n "$REVIEW_POOL" ] || { skipped=$((skipped + 1)); continue; }
           # Quiescence gates the re-sling too: re-routing an inert review pours a
@@ -1234,7 +1242,7 @@ if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
   [ "$PACE_FIRST_SKIPPED" -eq 0 ] || paced="$paced; $PACE_FIRST_SKIPPED needing action wait for the next pass"
 fi
 echo "$PROG: $paced"
-echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/asked, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh with no check_set; merge.sh holds each on its own read; exiting rc=$UNSAFE_RC" >&2
   exit "$UNSAFE_RC"

@@ -114,8 +114,9 @@ th {
 }
 
 /* The attention highlight, in place: a row whose next move is the operator's, or
-   one an open visit is holding, is tinted where it already sits. wants-person is
-   the stronger signal, so its rule follows and wins when a row is both. */
+   one a human gate holds or a conversation is on, is tinted where it already
+   sits. wants-person is the stronger signal, so its rule follows and wins when a
+   row is both. */
 .row-held {
   background: rgb(128 128 128 / 10%);
 }
@@ -235,28 +236,27 @@ th {
 }
 
 /*
- * The visit marker: a visible chip on a row an open visit holds, telling a PARKED
- * visit (filed, waiting for the operator) from an ENGAGED one (a live sitting is
- * in it now) by word and colour. Parked wears the amber the board already spends
- * on the operator's own move — it is waiting for them; engaged wears teal, a live
- * conversation someone else is holding. The chip reads as interactive, and
+ * The sitting marker: a visible chip on a held row, telling a row that WAITS for
+ * the operator from one IN SESSION (a live sitting is on it now) by word and
+ * colour. Waiting wears the amber the board already spends on the operator's own
+ * move; in session wears teal, a live conversation a sitting is holding. The chip reads as interactive, and
  * hovering or focusing it reveals the details card below — not a native title,
  * which had no affordance and needed an exact hover to find.
  */
-.visit-marker {
+.sitting-marker {
   display: inline-block;
   position: relative;
 }
 
-.visit-marker--parked {
+.sitting-marker--waiting {
   color: #8a6100;
 }
 
-.visit-marker--engaged {
+.sitting-marker--in-session {
   color: #0e7490;
 }
 
-.visit-chip {
+.sitting-chip {
   background: color-mix(in srgb, currentColor 8%, transparent);
   border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
   border-radius: 999px;
@@ -269,11 +269,17 @@ th {
   white-space: nowrap;
 }
 
-.visit-chip__icon {
+.sitting-chip__icon {
   margin-right: 0.2em;
 }
 
-.visit-card {
+/* A conversation holds nothing, so the chip of a row only a conversation is on
+   wears a dashed outline beside the solid one of a row a human gate holds. */
+.sitting-marker--conversation .sitting-chip {
+  border-style: dashed;
+}
+
+.sitting-card {
   background: Canvas;
   border: 1px solid rgb(128 128 128 / 45%);
   border-radius: 4px;
@@ -292,29 +298,35 @@ th {
 }
 
 /* Revealed on hover OR keyboard focus, so a pointer is not the only way in. */
-.visit-marker:hover .visit-card,
-.visit-marker:focus-within .visit-card {
+.sitting-marker:hover .sitting-card,
+.sitting-marker:focus-within .sitting-card {
   display: block;
 }
 
-.visit-card__heading {
+.sitting-card__heading {
   color: inherit;
   display: block;
   font-weight: 600;
   margin-bottom: 0.25rem;
 }
 
-.visit-card__sitting {
+.sitting-card__hold {
+  color: CanvasText;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.sitting-card__sitting {
   color: CanvasText;
   display: block;
   padding: 0.15rem 0;
 }
 
-.visit-card__sitting + .visit-card__sitting {
+.sitting-card__sitting + .sitting-card__sitting {
   border-top: 1px solid rgb(128 128 128 / 25%);
 }
 
-.visit-card__meta {
+.sitting-card__meta {
   opacity: 0.75;
 }
 

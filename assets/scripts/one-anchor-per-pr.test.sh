@@ -146,18 +146,19 @@ printf '[%s]\n' "$out"
 exit "${FAKE_LIST_RC:-0}"
 GC
 chmod +x "$TMP/bin/gc"
-# escalate.sh and await-ruling.sh beside lifecycle.sh, where merge-push finds
-# them: one line per call on $ESCLOG and $AWAITLOG, the escalation's prefixed
-# by the verdict window it ran under. $ESCRC and $AWAITRC are their exits.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/escalate.sh" <<'ESC'
-[ -n "${ESCLOG:-}" ] && printf 'window=%s %s\n' "${GC_ESCALATE_VERDICT_WINDOW-unset}" "$*" >> "$ESCLOG"
-exit "${ESCRC:-0}"
-ESC
+# human-gate.sh and await-ruling.sh beside lifecycle.sh, where merge-push finds
+# them: one line per call on $GATELOG and $AWAITLOG, the gate's prefixed by
+# whether it asked for a quiet window. $GATERC and $AWAITRC are their exits.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/human-gate.sh" <<'GATE'
+case " $* " in *" --quiet-window "*) quiet=yes ;; *) quiet=no ;; esac
+[ -n "${GATELOG:-}" ] && printf 'quiet=%s %s\n' "$quiet" "$*" >> "$GATELOG"
+exit "${GATERC:-0}"
+GATE
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/await-ruling.sh" <<'AWAIT'
 [ -n "${AWAITLOG:-}" ] && printf '%s\n' "$*" >> "$AWAITLOG"
 exit "${AWAITRC:-0}"
 AWAIT
-chmod +x "$TMP/bin/escalate.sh" "$TMP/bin/await-ruling.sh"
+chmod +x "$TMP/bin/human-gate.sh" "$TMP/bin/await-ruling.sh"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors"
@@ -282,20 +283,20 @@ resolve3() { # <work> <branch> [bead-json] -> "EXISTING_ANCHOR|GATING_ANCHOR|LAN
   WORK="$1" BRANCH="$2" BEAD_JSON="${3:-}" bash "$TMP/run3.sh" 2>/dev/null | tail -1
 }
 # held <work> <branch> <bead-json> [VAR=value...]
-#   -> "<rc>|<resolved line>|<drain-acks>|<escalations>|<waits>"
+#   -> "<rc>|<resolved line>|<drain-acks>|<gates>|<waits>"
 #   for a resolve that may stop: it then prints no resolved line, drains and
-#   exits 1. LC names the lifecycle writer whose directory holds escalate.sh and
-#   await-ruling.sh.
+#   exits 1. LC names the lifecycle writer whose directory holds human-gate.sh
+#   and await-ruling.sh.
 held() {
-  : > "$TMP/drain.log"; : > "$TMP/esc.log"; : > "$TMP/await.log"; local out rc w="$1" b="$2" j="${3:-}"
+  : > "$TMP/drain.log"; : > "$TMP/gate.log"; : > "$TMP/await.log"; local out rc w="$1" b="$2" j="${3:-}"
   if [ "$#" -ge 3 ]; then shift 3; else shift "$#"; fi
   if out=$(env WORK="$w" BRANCH="$b" BEAD_JSON="$j" LC="$TMP/bin/lc-stub" \
-             DRAINLOG="$TMP/drain.log" ESCLOG="$TMP/esc.log" AWAITLOG="$TMP/await.log" "$@" \
+             DRAINLOG="$TMP/drain.log" GATELOG="$TMP/gate.log" AWAITLOG="$TMP/await.log" "$@" \
              bash "$TMP/run3.sh" 2>/dev/null); then rc=0; else rc=$?; fi
   printf '%s|%s|%s|%s|%s' "$rc" "$(printf '%s\n' "$out" | tail -1)" \
-    "$(tr '\n' ';' < "$TMP/drain.log")" "$(tr '\n' ';' < "$TMP/esc.log")" "$(tr '\n' ';' < "$TMP/await.log")"
+    "$(tr '\n' ';' < "$TMP/drain.log")" "$(tr '\n' ';' < "$TMP/gate.log")" "$(tr '\n' ';' < "$TMP/await.log")"
 }
-# The wait the hold records: await-ruling.sh makes the child wait on the visit
+# The wait the hold records: await-ruling.sh makes the child wait on the gate
 # and arms a fresh mol-polecat-work run on it.
 WAIT_ARGS="--key refinery-rebuild-convoy-not-open --formula mol-polecat-work"
 REBUILD_ROW='[{"id":"rebuild-1","metadata":{"task_kind":"rework","anchor_bead":"cv","branch":"integration/cv"}}]'
@@ -318,9 +319,9 @@ eq "$(resolve3 rebuild-1 integration/cv "$REBUILD_ROW")" "anchor-pre|anchor-pre|
 # (5e) The named convoy must be open on the same branch: one this lookup does
 #      not return is never anchored. The child does not anchor itself in its
 #      place either, or its merge would close the child and leave the convoy's
-#      graduation unanchored. A visit on the child asks a person about the
-#      convoy, filed with the verdict window off, and the child waits on it off
-#      the refinery's queue, so find-work never picks it again ahead of the
+#      graduation unanchored. A human gate on the child asks a person about the
+#      convoy, filed with no quiet window, and the child waits on it off the
+#      refinery's queue, so find-work never picks it again ahead of the
 #      handoffs behind it.
 cat > "$FAKE_ANCHORS" <<'A'
 rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
@@ -329,21 +330,21 @@ A
 printf 'cv|convoy|open\n' > "$FAKE_BY_ID"
 HELD_E="$(held rebuild-1 integration/cv "$REBUILD_ROW")"
 case "$HELD_E" in
-  "1||drain-ack;|window=0 --subject rebuild-1 --key refinery-rebuild-convoy-not-open --message "*"cv is not open on integration/cv"*";|rebuild-1 $WAIT_ARGS;")
-    ok "(5e) a named convoy open on another branch is not anchored, the child is not its own anchor, and it waits on a visit about it" ;;
-  *) bad "(5e) a rebuild child whose convoy is open on another branch must stop, drain, escalate once with the window off and wait (got: $HELD_E)" ;;
+  "1||drain-ack;|quiet=no --subject rebuild-1 --key refinery-rebuild-convoy-not-open --message "*"cv is not open on integration/cv"*";|rebuild-1 $WAIT_ARGS;")
+    ok "(5e) a named convoy open on another branch is not anchored, the child is not its own anchor, and it waits on a human gate about it" ;;
+  *) bad "(5e) a rebuild child whose convoy is open on another branch must stop, drain, file one gate with no quiet window and wait (got: $HELD_E)" ;;
 esac
 printf 'cv|convoy|closed\n' > "$FAKE_BY_ID"
 case "$(held rebuild-1 integration/cv "$REBUILD_ROW")" in
-  "1||drain-ack;|window=0 --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*";|rebuild-1 $WAIT_ARGS;")
-    ok "(5e) a closed named convoy holds the landing the same way, and the child waits on the visit" ;;
-  *) bad "(5e) a rebuild child whose convoy is closed must stop, drain, escalate once and wait" ;;
+  "1||drain-ack;|quiet=no --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*";|rebuild-1 $WAIT_ARGS;")
+    ok "(5e) a closed named convoy holds the landing the same way, and the child waits on the gate" ;;
+  *) bad "(5e) a rebuild child whose convoy is closed must stop, drain, file one gate and wait" ;;
 esac
 # (5e2) A named bead whose own row cannot be read might be a convoy, so the
 #       landing waits for the next pass. Nothing is a question for a person yet,
-#       so no visit is filed and the child stays on the queue.
+#       so no gate is filed and the child stays on the queue.
 eq "$(held rebuild-1 integration/cv "$REBUILD_ROW" FAKE_BY_ID_RC=1)" "1||drain-ack;||" \
-   "(5e2) a named bead whose read fails holds the landing, files no visit and records no wait"
+   "(5e2) a named bead whose read fails holds the landing, files no gate and records no wait"
 eq "$(held rebuild-1 integration/cv "$REBUILD_ROW" FAKE_BY_ID_RAW='{"error":"database is locked"}')" "1||drain-ack;||" \
    "(5e2) a read of the named bead that is no array holds the landing the same way"
 # (5e4) The store holds no bead by that id. The child names it as the bead its
@@ -351,20 +352,20 @@ eq "$(held rebuild-1 integration/cv "$REBUILD_ROW" FAKE_BY_ID_RAW='{"error":"dat
 #       asked and waited on as for a convoy that is not open.
 : > "$FAKE_BY_ID"
 case "$(held rebuild-1 integration/cv "$REBUILD_ROW")" in
-  "1||drain-ack;|window=0 --subject rebuild-1 --key refinery-rebuild-convoy-not-open --message "*"cv is not in this store"*";|rebuild-1 $WAIT_ARGS;")
-    ok "(5e4) a named bead the store does not hold is not anchored, and the child waits on a visit about it" ;;
-  *) bad "(5e4) a rebuild child whose named bead is not in the store must stop, drain, escalate once and wait" ;;
+  "1||drain-ack;|quiet=no --subject rebuild-1 --key refinery-rebuild-convoy-not-open --message "*"cv is not in this store"*";|rebuild-1 $WAIT_ARGS;")
+    ok "(5e4) a named bead the store does not hold is not anchored, and the child waits on a human gate about it" ;;
+  *) bad "(5e4) a rebuild child whose named bead is not in the store must stop, drain, file one gate and wait" ;;
 esac
-# (5e5) The wait is recorded only on a visit that was filed. An escalation that
-#       fails records no wait, and a wait that does not land leaves the child
+# (5e5) The wait is recorded only on a gate that was filed. A gate that does
+#       not file records no wait, and a wait that does not land leaves the child
 #       routed for the next pass. Either way nothing is anchored or closed.
 printf 'cv|convoy|closed\n' > "$FAKE_BY_ID"
-case "$(held rebuild-1 integration/cv "$REBUILD_ROW" ESCRC=1)" in
-  "1||drain-ack;|window=0 --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*";|") ok "(5e5) an escalation that fails is not followed by a wait" ;;
-  *) bad "(5e5) an escalation that fails must stop with one drain and no wait" ;;
+case "$(held rebuild-1 integration/cv "$REBUILD_ROW" GATERC=1)" in
+  "1||drain-ack;|quiet=no --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*";|") ok "(5e5) a gate that does not file is not followed by a wait" ;;
+  *) bad "(5e5) a gate that does not file must stop with one drain and no wait" ;;
 esac
 case "$(held rebuild-1 integration/cv "$REBUILD_ROW" AWAITRC=1)" in
-  "1||drain-ack;|window=0 --subject rebuild-1 "*";|rebuild-1 $WAIT_ARGS;") ok "(5e5) a wait that does not land still stops with one drain" ;;
+  "1||drain-ack;|quiet=no --subject rebuild-1 "*";|rebuild-1 $WAIT_ARGS;") ok "(5e5) a wait that does not land still stops with one drain" ;;
   *) bad "(5e5) a wait that does not land must still stop with one drain" ;;
 esac
 # (5e3) A named bead that is not a convoy and not open on the branch leaves
@@ -725,18 +726,18 @@ esac
 # cannot be resolved stops before the terminal: no gating transition, no note,
 # no close, one drain, exit 1. A read that fails leaves the child routed for the
 # next pass. A named convoy that is not open on the branch, or a named bead the
-# store does not hold, also files a visit, and the child waits on it off the
+# store does not hold, also files a human gate, and the child waits on it off the
 # refinery's queue.
 { printf '%s\n' "$SNIPPET"; printf '%s\n' "$TERMINAL"; } > "$TMP/landing.sh"
-run_landing() { # [VAR=value...] -> "<rc>#<lifecycle>#<gc writes>#<drain-acks>#<escalations>#<waits>"
-  : > "$LCLOG"; : > "$TMP/gc.log"; : > "$TMP/drain.log"; : > "$TMP/esc.log"; : > "$TMP/await.log"; local rc
+run_landing() { # [VAR=value...] -> "<rc>#<lifecycle>#<gc writes>#<drain-acks>#<gates>#<waits>"
+  : > "$LCLOG"; : > "$TMP/gc.log"; : > "$TMP/drain.log"; : > "$TMP/gate.log"; : > "$TMP/await.log"; local rc
   if env WORK=rebuild-1 BRANCH=integration/cv BEAD_JSON="$REBUILD_ROW" TARGET=main CHECK_SET=correctness \
        LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 GCLOG="$TMP/gc.log" \
-       DRAINLOG="$TMP/drain.log" ESCLOG="$TMP/esc.log" AWAITLOG="$TMP/await.log" \
+       DRAINLOG="$TMP/drain.log" GATELOG="$TMP/gate.log" AWAITLOG="$TMP/await.log" \
        STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
        "$@" bash "$TMP/landing.sh" >/dev/null 2>&1; then rc=0; else rc=$?; fi
   printf '%s#%s#%s#%s#%s#%s' "$rc" "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")" \
-    "$(tr '\n' ';' < "$TMP/drain.log")" "$(tr '\n' ';' < "$TMP/esc.log")" "$(tr '\n' ';' < "$TMP/await.log")"
+    "$(tr '\n' ';' < "$TMP/drain.log")" "$(tr '\n' ';' < "$TMP/gate.log")" "$(tr '\n' ';' < "$TMP/await.log")"
 }
 cat > "$FAKE_ANCHORS" <<'A'
 rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
@@ -778,9 +779,9 @@ A
 printf 'cv|convoy|closed\n' > "$FAKE_BY_ID"
 LANDING_CLOSED="$(run_landing)"
 case "$LANDING_CLOSED" in
-  "1###drain-ack;#window=0 --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*";#rebuild-1 $WAIT_ARGS;")
-    ok "(13f) a rebuild child whose convoy is closed anchors nothing, closes nothing, files one visit and waits on it" ;;
-  *) bad "(13f) expected no transition, no close, one drain, one visit and one wait (got: $LANDING_CLOSED)" ;;
+  "1###drain-ack;#quiet=no --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*";#rebuild-1 $WAIT_ARGS;")
+    ok "(13f) a rebuild child whose convoy is closed anchors nothing, closes nothing, files one gate and waits on it" ;;
+  *) bad "(13f) expected no transition, no close, one drain, one gate and one wait (got: $LANDING_CLOSED)" ;;
 esac
 # (13g) The named bead cannot be read at all.
 eq "$(run_landing FAKE_BY_ID_RC=1)" "1###drain-ack;##" \
@@ -788,14 +789,14 @@ eq "$(run_landing FAKE_BY_ID_RC=1)" "1###drain-ack;##" \
 # (13h) The store holds no bead by the id the child names.
 : > "$FAKE_BY_ID"
 case "$(run_landing)" in
-  "1###drain-ack;#window=0 --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*"not in this store"*";#rebuild-1 $WAIT_ARGS;")
-    ok "(13h) a rebuild child whose named bead is not in the store anchors nothing, closes nothing and waits on a visit" ;;
-  *) bad "(13h) expected no transition, no close, one drain, one visit and one wait" ;;
+  "1###drain-ack;#quiet=no --subject rebuild-1 --key refinery-rebuild-convoy-not-open "*"not in this store"*";#rebuild-1 $WAIT_ARGS;")
+    ok "(13h) a rebuild child whose named bead is not in the store anchors nothing, closes nothing and waits on a human gate" ;;
+  *) bad "(13h) expected no transition, no close, one drain, one gate and one wait" ;;
 esac
 # (13i) A wait that does not land anchors and closes nothing either.
 printf 'cv|convoy|closed\n' > "$FAKE_BY_ID"
 case "$(run_landing AWAITRC=1)" in
-  "1###drain-ack;#window=0 --subject rebuild-1 "*";#rebuild-1 $WAIT_ARGS;")
+  "1###drain-ack;#quiet=no --subject rebuild-1 "*";#rebuild-1 $WAIT_ARGS;")
     ok "(13i) a wait that does not land anchors nothing and closes nothing, and drains for the next pass" ;;
   *) bad "(13i) a wait that does not land must write nothing and drain once" ;;
 esac

@@ -2,7 +2,7 @@
 # converse-capability.sh — the single definition of "does a rig carry converse".
 #
 # Sourced (never executed) by gc-helm.sh (engage's guards and the new-subject
-# rig picker) and gc-visit-open.sh (require_reaction_agent), so the two answer
+# rig picker) and operator-intake.sh (require_reaction_agent), so the two answer
 # the same question the same way and cannot diverge.
 #
 # Converse is a PACK capability. Only gc-toolkit's own checkout holds

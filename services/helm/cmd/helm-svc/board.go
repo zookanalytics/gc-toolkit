@@ -47,8 +47,8 @@ import (
 const boardUsage = `Usage:
   helm-svc board [--all] [--json] [--limit=N] [--timeout=SECONDS]
 
-  What is owed by you, oldest first after any visit whose sitting failed to
-  start — the CLI view of the same gather and derivation the Helm dashboard
+  What is owed by you, oldest first after any conversation whose sitting failed
+  to start — the CLI view of the same gather and derivation the Helm dashboard
   serves.
 
   --all              The city overview instead: every anchor, ranked together.
@@ -370,7 +370,7 @@ func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, 
 	}
 
 	renderRows(w, queue)
-	fmt.Fprint(w, "\nOldest first — this queue is ordered by how long each row has been owed, not by rank; a visit whose sitting failed to start (✗) leads it\n")
+	fmt.Fprint(w, "\nOldest first — this queue is ordered by how long each row has been owed, not by rank; a conversation whose sitting failed to start (✗) leads it\n")
 	fmt.Fprint(w, "helm-svc board --all (prefix+B in tmux) for the city overview\n")
 	renderSittings(w, b.Sittings, now)
 	renderLegend(w)
@@ -513,15 +513,18 @@ func renderRows(w io.Writer, shown []board.Tile) {
 }
 
 // renderTileLine writes one anchor's row in the sized columns. Its glyph is ✗
-// on a row whose visit's sitting failed to start, ● on any other row an open
-// visit holds.
+// on a row whose conversation's sitting failed to start, ● on any other row
+// whose work a human gate or an unfinished acceptance holds, and ◌ on any other
+// row a conversation is on, which holds nothing.
 func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 	glyph := " "
 	switch {
-	case t.VisitState == board.VisitStartFailed:
+	case t.SittingState == board.SittingStartFailed:
 		glyph = "✗"
-	case t.Held:
+	case t.WorkHeld:
 		glyph = "●"
+	case t.Held:
+		glyph = "◌"
 	}
 	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
@@ -529,11 +532,24 @@ func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 }
 
 // needsCell is a row's NEEDS cell: its needs behind the accept marker
-// ([acceptCell]), then what holds a pull request row's PR ([heldNote]), then
-// where its conversation stands ([conversationNote]). NEEDS is the unpadded last
-// column, so the notes never push another column out of line.
+// ([acceptCell]), then the gates a live sitting is answering now, the gates
+// that hold Accept back on a recommendation Discuss must answer first, what
+// holds a pull request row's PR ([heldNote]), and where its conversation stands
+// ([conversationNote]). NEEDS is the unpadded last column, so the notes never
+// push another column out of line.
 func needsCell(t board.Tile) string {
-	return joinNotes(acceptCell(t), heldNote(t), conversationNote(t))
+	var parts []string
+	if n := acceptCell(t); n != "" {
+		parts = append(parts, n)
+	}
+	if t.GatesInSession != nil {
+		parts = append(parts, "in session: "+*t.GatesInSession)
+	}
+	if t.AcceptWithheld != nil {
+		parts = append(parts, "accept waits on: "+*t.AcceptWithheld)
+	}
+	parts = append(parts, heldNote(t), conversationNote(t))
+	return joinNotes(parts...)
 }
 
 // joinNotes joins the non-empty parts of a cell with the board's separator.
@@ -557,6 +573,12 @@ func heldNote(t board.Tile) string {
 	return "held: " + strings.Join(t.PRHeld, ", ")
 }
 
+// openAcceptLegend names the verbs a row offers beyond engage, and the two
+// notes the NEEDS cell carries about a recommendation's gates. Both legends
+// print it.
+const openAcceptLegend = "gc-helm.sh open <id> files a conversation in your queue · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy\n" +
+	"An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> clears its gate and dispatches its formula at the bead, no sitting; engage it to Discuss instead. \"accept waits on:\" names the other gates to answer first, and \"in session:\" the gates a live sitting is answering\n"
+
 // conversationNote names where a live pull request row's conversation with the
 // operator stands, in the wire's own word, which is how this board shows which
 // pull requests carry the operator's comments. A row that is not a merge anchor
@@ -570,8 +592,9 @@ func conversationNote(t board.Tile) string {
 }
 
 // acceptCell prefixes a row's needs with a compact affordance marker when the
-// row can be Accepted — a recommendation the operator can dispatch and dismiss
-// in one order, the extra move it offers over a discuss-only gate. The marker
+// row can be Accepted — a recommendation whose gate the operator can clear and
+// whose formula they can dispatch in one order, the extra move it offers over a
+// discuss-only gate. The marker
 // only flags the affordance; the verb is in the legend and the formula in
 // --json (Tile.AcceptFormula), since the takeaway a recommendation row carries
 // already names it at a glance.
@@ -604,22 +627,25 @@ func wantsPerson(t board.Tile) bool {
 }
 
 // familyGlyph is the overview's leading marker: ● a row whose next move is a
-// person's (review or gate), ○ a row an open visit holds, ◉ both, and ✗ a row
-// whose visit's sitting failed to start, which wants a person whatever else it
-// is. The overview's ● is the wants-you highlight, so a visit takes its own
-// glyph here rather than colliding with it. The default queue view has no
-// wants-you axis, so there ● stays free to mean held on its own
-// (renderTileLine).
+// person's (review or gate), ○ a row whose work a human gate or an unfinished
+// acceptance holds, ◉ both, ◌ a row a conversation is on, which holds nothing,
+// and ✗ a row whose conversation's sitting failed to start, which wants a
+// person whatever else it is. The overview's ● is the wants-you highlight, so a
+// row whose work is held takes its own glyph here rather than colliding with
+// it. The default queue view has no wants-you axis, so there ● stays free to
+// mean the work is held on its own (renderTileLine).
 func familyGlyph(t board.Tile) string {
 	switch {
-	case t.VisitState == board.VisitStartFailed:
+	case t.SittingState == board.SittingStartFailed:
 		return "✗"
-	case wantsPerson(t) && t.Held:
+	case wantsPerson(t) && t.WorkHeld:
 		return "◉"
 	case wantsPerson(t):
 		return "●"
-	case t.Held:
+	case t.WorkHeld:
 		return "○"
+	case t.Held:
+		return "◌"
 	default:
 		return " "
 	}
@@ -650,8 +676,9 @@ func renderFamilyRows(w io.Writer, shown []board.Tile) {
 
 // familyBanner is the labelled divider that opens a family block: the root's id,
 // kind, roll-up, frontier and needs, with the [familyGlyph] marking when the root
-// itself wants a person, is held by an open visit, or both. The root is the
-// family header rather than a member row, so its own ask rides here.
+// itself wants a person, has its work held by a gate, or both, or has a
+// conversation on it. The root is the family header rather than a member row,
+// so its own ask rides here.
 func familyBanner(root board.Tile) string {
 	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", familyGlyph(root), root.ID, root.Kind, nmCell(root), root.Frontier)
 	if n := needsCell(root); n != "" {
@@ -661,8 +688,8 @@ func familyBanner(root board.Tile) string {
 }
 
 // renderMemberLine writes one family member: its within-family band, the
-// [familyGlyph] marking a person's move and/or an open visit holding it, and the
-// same columns as an anchor row.
+// [familyGlyph] marking a person's move, a gate holding its work, or a
+// conversation on it, and the same columns as an anchor row.
 func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
 	fmt.Fprint(w, rpad(familyGlyph(t), colHeld)+rpad(t.Section, colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
@@ -674,19 +701,18 @@ func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
 func renderFamilyLegend(w io.Writer) {
 	fmt.Fprint(w, "\nFamilies (▌) group by dependency structure: a top-level anchor and the children, blockers, reviews and rework that hang off it, so a family reads as one thing\n")
 	fmt.Fprint(w, "BAND orders each family by the move a member wants: review=a pull request · gate=a person must answer · stalled=nothing moving · active=in-flight · cleanup=finished/empty · done=closed\n")
-	fmt.Fprint(w, "● wants YOU (review, gate) · ○ an open visit holds the row · ◉ both · ✗ the sitting spawned for its visit failed to start, and NEEDS says why. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
-	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway · review/rework=a gate child in flight (resume: prefix+a, then the id)\n")
+	fmt.Fprint(w, "● wants YOU (review, gate) · ○ a human gate holds the row's work until you answer · ◉ both · ◌ a conversation is on the row and holds nothing, so the work can move and merge · ✗ the sitting spawned for a conversation on the row failed to start, and NEEDS says why. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
+	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a bead with a takeaway · review/rework=a gate child in flight · gate/conversation=a question or a conversation whose bead has no row (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
-	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy\n")
-	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
+	fmt.Fprint(w, openAcceptLegend)
 	fmt.Fprint(w, conversationLegend)
 }
 
 // conversationLegend says what the held and conversation notes on a pull
 // request row ([heldNote], [conversationNote]) mean. renderLegend and
 // renderFamilyLegend print it.
-const conversationLegend = "A live pull request row a person must clear names what holds it, its held: labels: visit=an open visit on the PR or its work · review=review feedback the city has not answered, or a thread the merge waits on · blocked=a blocker no automated actor will clear\n" +
+const conversationLegend = "A live pull request row a person must clear names what holds it, its held: labels: gate=an open human gate on the PR · review=review feedback the city has not answered, or a thread the merge waits on · blocked=a blocker no automated actor will clear\n" +
 	"A live pull request row ends with its conversation: outstanding=a comment waits on the city · answered=the reply is there to look at · quiet=nothing said · unknown=not recorded\n"
 
 // clusterMemberCap bounds how many members a folded cluster spells out before it
@@ -753,21 +779,19 @@ func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "\nBands (▌) group by the KIND of move a row wants: REVIEW=a pull request · GATE=a person must answer · STALLED=open work nothing is moving · ACTIVE=healthy in-flight · CLEANUP=finished/empty · DONE=closed\n")
 	fmt.Fprint(w, "A \"N×\" line folds N rows that share one deterministic needs sentence; each member is listed under it with its id, rig and title. A row carrying a takeaway never folds — its sentence is per-bead\n")
 	fmt.Fprint(w, "Legend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
-	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
+	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a bead with a takeaway · gate/conversation=a question or a conversation whose bead has no row (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
-	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · ✗ the sitting spawned for its visit failed to start, NEEDS says why, and the row leads the queue until the visit is engaged again or closed · blank = none\n")
+	fmt.Fprint(w, "Held: ● a human gate holds this bead's work until you answer · ◌ a conversation is on this bead and holds nothing, so the work can move and merge (attach to a sitting in session via the sessions picker) · ✗ the sitting spawned for a conversation on this bead failed to start, NEEDS says why, and the row leads the queue until the conversation is engaged again or closed · blank = none\n")
 	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. A row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
-	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
-	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
+	fmt.Fprint(w, openAcceptLegend)
 	fmt.Fprint(w, conversationLegend)
 }
 
-// Sitting column widths. SUBJECT and OUTCOME are minimums sized to content by
-// colWidth for the same reason the ID column is: a truncated bead id and a
-// truncated outcome word are both unreadable, and HEADLINE is last and unpadded
-// so a wide cell costs nothing.
+// Sitting column widths. SUBJECT is a minimum sized to content by colWidth for
+// the same reason the ID column is: a truncated bead id is unreadable, and
+// HEADLINE is last and unpadded so a wide cell costs nothing.
 const (
 	colSubjectMin = 12
 	// colSubjectMax bounds the SUBJECT cell now that it renders the subject's
@@ -778,7 +802,6 @@ const (
 	// HEADLINE.
 	colSubjectMax  = 44
 	colAge         = 7
-	colOutcomeMin  = 10
 	colHeadlineMax = 96
 )
 
@@ -787,7 +810,7 @@ const (
 //
 // The ranked table answers what needs doing. This answers what is being talked
 // about, which is a different question and deliberately not ranked against it —
-// a sitting is an event, not a demand.
+// a sitting is an event, not a question owed.
 func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 	if len(sittings) == 0 {
 		return
@@ -804,39 +827,33 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 	}
 
 	fmt.Fprintf(w, "\nSittings — %d running · %d closed recently\n", running, closed)
-	fmt.Fprint(w, "● still running · AGE is time since it started, or since it ended · OUTCOME is what a closed sitting closed on\n")
+	fmt.Fprint(w, "● still running · AGE is time since it started, or since it ended · HEADLINE is what a closed sitting concluded, or why it closed\n")
 
 	// Sized to content for the same reason the ranked table sizes its ID
-	// column: an id or an outcome word loses its meaning when its tail is cut.
-	idW, rigW, subjW, outW := colIDMin, colRigMin, colSubjectMin, colOutcomeMin
+	// column: an id loses its meaning when its tail is cut.
+	idW, rigW, subjW := colIDMin, colRigMin, colSubjectMin
 	for _, s := range shown {
 		idW = max(idW, len([]rune(s.ID))+1)
 		rigW = max(rigW, len([]rune(s.Rig))+1)
 		subjW = max(subjW, len([]rune(clip(s.Topic(), colSubjectMax)))+1)
-		outW = max(outW, len([]rune(s.Outcome))+1)
 	}
 
 	fmt.Fprint(w, rpad(" ", colHeld)+rpad("ID", idW)+rpad("RIG", rigW)+
-		rpad("SUBJECT", subjW)+rpad("AGE", colAge)+rpad("OUTCOME", outW)+"HEADLINE\n")
+		rpad("SUBJECT", subjW)+rpad("AGE", colAge)+"HEADLINE\n")
 
 	for _, s := range shown {
-		glyph, since, outcome := " ", s.ClosedAt, s.Outcome
+		glyph, since := " ", s.ClosedAt
 		if s.Status != "closed" {
 			glyph, since = "●", s.OpenedAt
 		}
-		if outcome == "" {
-			// "—" is the same claim the N/M column makes above: this row has no
-			// such value, rather than a value that happens to be empty.
-			outcome = "—"
-		}
 		// SUBJECT is the topic — the subject bead's title, so the row says what
 		// it is about and not just which id it stands on. HEADLINE is what the
-		// sitting concluded (the takeaway), falling back to that same topic
-		// rather than the visit bead's own generic title. Both are the model's
-		// derivation, shared with the web renderer.
+		// sitting concluded (the takeaway), then its close reason, then that
+		// same topic rather than the conversation's own title. Both are the
+		// model's derivation, shared with the web renderer.
 		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(s.ID, idW)+rpad(s.Rig, rigW)+
 			rpad(clip(s.Topic(), colSubjectMax), subjW)+rpad(shortAge(since, now), colAge)+
-			rpad(outcome, outW)+clip(s.Headline(), colHeadlineMax)+"\n")
+			clip(s.Headline(), colHeadlineMax)+"\n")
 	}
 
 	if dropped > 0 {

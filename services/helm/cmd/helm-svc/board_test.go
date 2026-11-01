@@ -16,70 +16,72 @@ func minsAgo(m int) time.Time { return renderNow.Add(-time.Duration(m) * time.Mi
 
 // TestRenderSittingsShowsBothHalves: a running sitting and a closed one, each
 // saying the thing the operator asked the section for — that it is running, or
-// what it closed on.
+// what it concluded. A closed sitting that left no takeaway shows why it
+// closed.
 func TestRenderSittingsShowsBothHalves(t *testing.T) {
 	var buf bytes.Buffer
 	renderSittings(&buf, []board.Sitting{
-		{ID: "tk-live", Rig: "gc-toolkit", Subject: "tk-anchor", Title: "visit: tk-anchor — still talking",
+		{ID: "tk-live", Rig: "gc-toolkit", Subject: "tk-anchor", Title: "still talking",
 			Status: "in_progress", Session: "gc-toolkit__converse-1", OpenedAt: minsAgo(41)},
-		{ID: "tk-done", Rig: "gc-toolkit", Subject: "tk-other", Title: "visit: tk-other — a long escalation subject",
-			Status: "closed", Outcome: "diagnosed", OpenedAt: minsAgo(90), ClosedAt: minsAgo(20),
+		{ID: "tk-done", Rig: "gc-toolkit", Subject: "tk-other", Title: "a long escalation subject",
+			Status: "closed", OutcomeReason: "the re-offer loop was the routing", OpenedAt: minsAgo(90), ClosedAt: minsAgo(20),
 			Takeaway: "the re-offer loop was the routing, not the bead"},
+		{ID: "tk-dismissed", Rig: "gc-toolkit", Subject: "tk-third", Title: "a third",
+			Status: "closed", OutcomeReason: "dismissed by the operator", OpenedAt: minsAgo(80), ClosedAt: minsAgo(10)},
 	}, renderNow)
 	out := buf.String()
 
 	for _, want := range []string{
-		"1 running · 1 closed",
+		"1 running · 2 closed",
 		"tk-live", "tk-anchor", "41m", "●",
-		"tk-done", "diagnosed", "20m",
+		"tk-done", "20m",
 		"the re-offer loop was the routing, not the bead",
+		"dismissed by the operator",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered sittings missing %q:\n%s", want, out)
 		}
 	}
-	// A running sitting has not concluded, so it must not display an outcome.
-	live, _, _ := strings.Cut(out[strings.Index(out, "tk-live"):], "\n")
-	if !strings.Contains(live, "—") {
-		t.Errorf("a running sitting shows no outcome, it shows the absence: %q", live)
+	if strings.Contains(out, "OUTCOME") {
+		t.Errorf("the record has no outcome column:\n%s", out)
 	}
-	// The takeaway is preferred over the title: it is what the sitting concluded.
+	// The takeaway is preferred over the close reason and the title: it is what
+	// the sitting concluded.
 	done, _, _ := strings.Cut(out[strings.Index(out, "tk-done"):], "\n")
-	if strings.Contains(done, "a long escalation subject") {
-		t.Errorf("a sitting with a takeaway renders it, not its title: %q", done)
+	if strings.Contains(done, "a long escalation subject") || strings.HasSuffix(done, "the re-offer loop was the routing") {
+		t.Errorf("a sitting with a takeaway renders it, not its title or close reason: %q", done)
 	}
 }
 
 // TestRenderSittingsFallsBackToTheSubjectTitle: a sitting that left no
-// attributable takeaway shows the subject's title — the topic — as its
-// headline, never the visit bead's own generic name. Only a subject the gather
-// could not read at all drops to the visit title.
+// attributable takeaway and no close reason shows the subject's title — the
+// topic — as its headline, never the conversation's own title. Only a subject
+// the gather could not read at all drops to the conversation's title.
 func TestRenderSittingsFallsBackToTheSubjectTitle(t *testing.T) {
 	var buf bytes.Buffer
 	renderSittings(&buf, []board.Sitting{{
 		ID: "tk-bare", Rig: "gc-toolkit", Subject: "tk-anchor",
 		SubjectTitle: "helm returns the raw script path",
-		Title:        "visit: tk-anchor — first reaction ready: accept or redirect",
-		Status:       "closed", Outcome: "folded", OpenedAt: minsAgo(60), ClosedAt: minsAgo(30),
+		Title:        "operator pick from the board",
+		Status:       "in_progress", OpenedAt: minsAgo(60),
 	}}, renderNow)
 	out := buf.String()
 
 	if !strings.Contains(out, "helm returns the raw script path") {
 		t.Errorf("no takeaway falls back to the subject title (the topic):\n%s", out)
 	}
-	if strings.Contains(out, "first reaction ready") {
-		t.Errorf("the generic visit title must not be the headline once the subject has one:\n%s", out)
+	if strings.Contains(out, "operator pick from the board") {
+		t.Errorf("the conversation's title must not be the headline once the subject has one:\n%s", out)
 	}
 
-	// Only an unreadable subject — no title at all — drops to the visit title.
+	// Only an unreadable subject — no title at all — drops to the conversation's title.
 	var last bytes.Buffer
 	renderSittings(&last, []board.Sitting{{
 		ID: "tk-none", Rig: "gc-toolkit", Subject: "tk-anchor",
-		Title: "visit: tk-anchor — first reaction ready", Status: "closed",
-		Outcome: "folded", OpenedAt: minsAgo(60), ClosedAt: minsAgo(30),
+		Title: "operator pick from the board", Status: "in_progress", OpenedAt: minsAgo(60),
 	}}, renderNow)
-	if !strings.Contains(last.String(), "first reaction ready") {
-		t.Errorf("an unread subject still says what it was called, via the visit title:\n%s", last.String())
+	if !strings.Contains(last.String(), "operator pick from the board") {
+		t.Errorf("an unread subject still says what it was called, via the conversation's title:\n%s", last.String())
 	}
 }
 
@@ -90,7 +92,7 @@ func TestRenderSittingsSaysWhatItElided(t *testing.T) {
 	for i := range board.DefaultMaxSittings + 4 {
 		in = append(in, board.Sitting{
 			ID: fmt.Sprintf("tk-c%02d", i), Rig: "gc-toolkit", Subject: "tk-anchor",
-			Title: "visit", Status: "closed", Outcome: "moot",
+			Title: "a conversation", Status: "closed", OutcomeReason: "settled",
 			OpenedAt: minsAgo(600 - i), ClosedAt: minsAgo(500 - i),
 		})
 	}
@@ -148,7 +150,7 @@ func TestShortAge(t *testing.T) {
 func TestEveryRenderedViewCarriesTheConversationRecord(t *testing.T) {
 	sittings := []board.Sitting{{
 		ID: "tk-live", Rig: "gc-toolkit", Subject: "tk-anchor",
-		Title: "visit: tk-anchor", Status: "in_progress", OpenedAt: minsAgo(41),
+		Title: "talk it through", Status: "in_progress", OpenedAt: minsAgo(41),
 	}}
 	anchors := []board.Anchor{{
 		ID: "tk-owed", Title: "waiting on a person", Kind: "human", Source: "human",

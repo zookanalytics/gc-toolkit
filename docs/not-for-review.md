@@ -121,7 +121,7 @@ Nothing. It is never feedback, so:
 
 - it raises no unanswered feedback, so it neither holds the merge nor moves a
   watermark;
-- it files no finding, rework child, validation pass or visit;
+- it files no finding, rework child, validation pass or human gate;
 - the write-back neither acknowledges nor answers it, and in a review thread it
   neither asks the city for an answer nor ends a wait on the reviewer;
 - it is nothing said, so a pull request whose only comments are not for review
