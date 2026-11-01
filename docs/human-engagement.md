@@ -531,6 +531,21 @@ It reads the
 conversation's id from the session's alias and strips the `c-` prefix. Its
 warrant, with the trigger that retires it, is in [warrants.md](warrants.md).
 
+**Iterating on a document.** A sitting writes no files, so it changes a document
+by sending work, and a worker sent on a short ruling makes every call the ruling
+left open. When more than one call stands between a document's text and what the
+operator wants, the sitting settles them with the operator item by item and then
+sends one rework that carries the decisions as content. The big picture between
+sittings is the subject's notes: the dated rulings and the newest
+`## Current state` block. That block with no open question left is the scaffold:
+a verb for each section of the document, the settled substance of each rewrite,
+and the rules the worker follows for what the block leaves open. The ruling's
+line names the block, `converse-rework.sh` files the rework on the ordinary lane
+and `mol-polecat-work` runs it, so the loop needs no formula, key or script of
+its own. With no PR open, the work is sent as a sign-off sends any other, and its
+bead names the block. The `gc-toolkit.converse-iterate-document` skill holds the
+steps and the block's form.
+
 ## Accept
 
 A first reaction's recommend exit puts its recommendation to the operator as a
