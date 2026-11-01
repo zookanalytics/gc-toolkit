@@ -496,6 +496,13 @@ has "$OUT" "tk-note, which conversation tk-conv replies to, is no human gate" "(
 reply_to_task; setf tk-note status closed; setf tk-note close_reason "ruled: fix the retry before the merge"
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
 eq "$RC" 0 "(EPIC-PR-NO-GATE) a closed one under this ruling's own answer does not reach it either"
+# Each reply target is judged by its own row, so a human gate the conversation
+# also answers lends the task beside it nothing.
+reply_to_task; bead tk-other; gate tk-rg approach; edge tk-other blocks tk-rg; edge tk-conv replies-to tk-rg
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
+eq "$RC" 0 "(EPIC-PR-NO-GATE) a human gate answered beside that reply target does not make it reach the PR"
+has "$OUT" "tk-note, which conversation tk-conv replies to, is no human gate" "(EPIC-PR-NO-GATE) …it still resolves nothing"
+eq "$(field tk-rg status)" "closed" "(EPIC-PR-NO-GATE) …and the gate beside it is answered"
 
 echo "# a gate about the subject and another open PR"
 # One gate blocks the subject's PR and another PR, so its answer releases both.
