@@ -233,6 +233,7 @@ func TestHoldingGatesAnswerARootAloneOrInABatch(t *testing.T) {
 		{"at", "small"},
 		{"n1", "n2"},
 		{"n2", "n1", "past", "none"},
+		{"past", "past"},
 	}
 	for root := range want {
 		batches = append(batches, []string{root})
@@ -241,23 +242,28 @@ func TestHoldingGatesAnswerARootAloneOrInABatch(t *testing.T) {
 		t.Run(strings.Join(batch, "+"), func(t *testing.T) {
 			g := &graph{edges: edges}
 			got, err := HoldingGates(batch, g.read)
-			anyPast := false
+			wantNamed := []string{}
 			for _, root := range batch {
 				ids, answered := got[root]
 				if want[root] == nil {
-					anyPast = true
+					if !slices.Contains(wantNamed, root) {
+						wantNamed = append(wantNamed, root)
+					}
 					if answered {
 						t.Errorf("%s answered %v, want no answer past its bound", root, gateIDs(ids))
-					}
-					if err == nil || !strings.Contains(err.Error(), root) {
-						t.Errorf("err = %v, want it to name %s", err, root)
 					}
 				} else if !answered || !slices.Equal(gateIDs(ids), want[root]) {
 					t.Errorf("%s answered %v (%v), want %v", root, gateIDs(ids), answered, want[root])
 				}
 			}
-			if anyPast != errors.Is(err, ErrWalkBound) || (!anyPast && err != nil) {
+			if anyPast := len(wantNamed) > 0; anyPast != errors.Is(err, ErrWalkBound) || (!anyPast && err != nil) {
 				t.Errorf("err = %v, want ErrWalkBound only with a root past its bound", err)
+			}
+			named := boundRoots(err)
+			slices.Sort(named)
+			slices.Sort(wantNamed)
+			if !slices.Equal(named, wantNamed) {
+				t.Errorf("err = %v names %v, want each root past its bound once: %v", err, named, wantNamed)
 			}
 			read := map[string]int{}
 			for _, ids := range g.reads {
@@ -275,6 +281,16 @@ func TestHoldingGatesAnswerARootAloneOrInABatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// boundRoots is the roots a walk-bound error names, read after ErrWalkBound's own
+// words, so a root's name cannot match them.
+func boundRoots(err error) []string {
+	if err == nil {
+		return nil
+	}
+	_, names, _ := strings.Cut(err.Error(), ErrWalkBound.Error()+": ")
+	return strings.Fields(names)
 }
 
 // A bead one walk read at an earlier level costs a later walk no read, and a level
