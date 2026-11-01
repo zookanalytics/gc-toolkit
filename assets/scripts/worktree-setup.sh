@@ -1,5 +1,6 @@
 #!/bin/sh
-# worktree-setup.sh — idempotent git worktree creation for Gas City agents.
+# worktree-setup.sh — provision an agent's home, the git worktree its sessions
+# start in.
 #
 # Usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync]
 #
@@ -8,9 +9,11 @@
 # local excludes an agent needs (provision_worktree). Called from agent
 # pre_start (agents/*/agent.toml) before the session exists, so the agent
 # starts IN the worktree. An existing worktree is never re-created: it gets
-# whatever provisioning it lacks, and --sync fast-forwards a branch to its
-# upstream and moves a detached HEAD to the default-branch tip when no commit
-# or tracked change can be lost (sync_detached).
+# whatever provisioning it lacks, and --sync brings it to the default-branch
+# tip unless that would lose a commit or a tracked change (sync_worktree).
+#
+# docs/warrants.md, "Agent home provisioning", says why a home is not a
+# `gc worktree` tree.
 
 set -eu
 
@@ -115,58 +118,43 @@ exclude_skill_links() {
     done
 }
 
-rebase_in_progress() {
-    for STATE in rebase-merge rebase-apply; do
-        DIR=$(git -C "$WT" rev-parse --git-path "$STATE" 2>/dev/null) || DIR=""
-        if [ -n "$DIR" ] && [ -d "$DIR" ]; then
-            return 0
-        fi
-    done
-    return 1
-}
-
 sync_worktree() {
     [ "$SYNC" = "--sync" ] || return 0
     if ! git -C "$WT" remote get-url origin >/dev/null 2>&1; then
         return 0
     fi
 
-    # Clear a conflicted index left by an earlier cycle; --abort restores the
-    # branch tip, so no commit is at risk.
-    if rebase_in_progress; then
-        git -C "$WT" rebase --abort 2>/dev/null || true
-    fi
-    if git -C "$WT" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
-        git -C "$WT" merge --abort 2>/dev/null || true
-    fi
-
     git -C "$WT" fetch origin 2>/dev/null || true
 
-    if ! git -C "$WT" symbolic-ref -q HEAD >/dev/null 2>&1; then
-        sync_detached
-        return 0
+    CURRENT=$(git -C "$WT" symbolic-ref -q --short HEAD 2>/dev/null) || CURRENT=""
+    if [ -n "$CURRENT" ]; then
+        # Fast-forward only, never replay local commits: a `pull --rebase` replays
+        # shed commits onto every fetched tip and parks the worktree mid-rebase.
+        UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || UPSTREAM=""
+        if [ -n "$UPSTREAM" ] && git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1; then
+            return 0
+        fi
+        # Any branch but the home's own is someone's work, left as it stands.
+        [ "$CURRENT" = "$(branch_name)" ] || return 0
     fi
-
-    # Fast-forward only, never replay local commits: a `pull --rebase` replays
-    # shed commits onto every fetched tip and parks the worktree mid-rebase.
-    UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || return 0
-    [ -n "$UPSTREAM" ] || return 0
-
-    # A branch that cannot fast-forward is left as it stands, by design.
-    git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1 || true
+    move_to_default_tip
 }
 
-# A detached HEAD has no upstream, so the fast-forward never moves it, and the
-# agent would run that commit's files on every later start. It moves to the
-# remote default tip only when no commit or tracked change can be lost: the
-# tracked tree is clean and HEAD is already an ancestor of the tip. It lands on
-# its per-target branch, tracking the default branch, so the next sync takes
-# the fast-forward path. That branch is reset only when the tip already
-# contains it; when it holds commits the tip lacks, or another worktree has it
-# checked out, the worktree is detached at the tip instead. A worktree that
-# cannot move safely stays where it is, and one stderr line names it and the
-# reason.
-sync_detached() {
+# A home holds no work of its own, so it moves to the remote default tip unless
+# that would lose something: the tracked tree must be clean, and a detached HEAD's
+# commits must all be reachable from some ref. Reachability, not ancestry of the
+# tip, because a squash merge lands a branch's content under a new sha, so its
+# commits never reach the tip and an ancestry test would hold the home on them
+# for good. An attached HEAD needs no such test, since its branch keeps its
+# commits whatever the worktree does next.
+#
+# The worktree lands on its per-target branch, tracking the default branch, so
+# the next sync takes the fast-forward path. That branch is reset only when every
+# commit it holds is reachable from another ref. When it alone holds one, or
+# another worktree has it checked out, the worktree is detached at the tip
+# instead. A worktree that cannot move safely stays where it is, and one stderr
+# line names it and the reason.
+move_to_default_tip() {
     DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || DEFAULT_REF=""
     if [ -z "$DEFAULT_REF" ]; then
         sync_skipped "origin/HEAD is unset, so there is no default branch to move to"
@@ -181,14 +169,16 @@ sync_detached() {
         sync_skipped "it has uncommitted changes to tracked files"
         return 0
     fi
-    if ! git -C "$WT" merge-base --is-ancestor HEAD "$DEFAULT_REF" 2>/dev/null; then
-        sync_skipped "HEAD has commits that are not on $TARGET"
-        return 0
+    if ! git -C "$WT" symbolic-ref -q HEAD >/dev/null 2>&1; then
+        if ! ALONE=$(git -C "$WT" rev-list -n 1 HEAD --not --branches --remotes --tags 2>/dev/null) || [ -n "$ALONE" ]; then
+            sync_skipped "its detached HEAD holds commits no ref reaches"
+            return 0
+        fi
     fi
 
     BRANCH=$(branch_name)
     if ! git -C "$WT" show-ref --verify --quiet "refs/heads/$BRANCH" \
-        || git -C "$WT" merge-base --is-ancestor "refs/heads/$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
+        || ! branch_holds_commits_alone "$BRANCH"; then
         if GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --track -B "$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
             return 0
         fi
@@ -199,8 +189,15 @@ sync_detached() {
     sync_skipped "git checkout $TARGET failed: $(printf '%s\n' "$ERR" | head -n 1)"
 }
 
+# True when a commit on the branch is reachable from no other ref, or when that
+# cannot be read.
+branch_holds_commits_alone() {
+    ALONE=$(git -C "$WT" rev-list -n 1 "refs/heads/$1" --not --exclude="$1" --branches --remotes --tags 2>/dev/null) || return 0
+    [ -n "$ALONE" ]
+}
+
 sync_skipped() {
-    printf 'worktree-setup: not syncing %s (detached HEAD): %s\n' "$WT" "$1" >&2
+    printf 'worktree-setup: not syncing %s: %s\n' "$WT" "$1" >&2
 }
 
 branch_name() {
@@ -212,10 +209,6 @@ branch_name() {
 
 mkdir -p "$(dirname "$WT")"
 
-# Stage dirs carry their target's name so a later run can tell its own orphaned
-# stage (safe to reclaim) from another target's — the parent directory is
-# shared by every agent in the rig, so the name is the only attribution.
-STAGE_SLUG=$(printf '%s' "$(basename "$WT")" | tr -c 'A-Za-z0-9_-' '_')
 STAGE=""
 
 merge_stage_entry() (
@@ -225,8 +218,7 @@ merge_stage_entry() (
     if [ -d "$SRC" ]; then
         # A staged directory loses to an existing non-directory at the same
         # path: the existing file wins, so drop the whole losing source subtree.
-        # Recursing would mkdir over the file, which fails and strands the
-        # subtree in the stage/orphan dir, defeating the rmdir that reclaims it.
+        # Recursing would mkdir over the file, which fails and ends the run.
         if [ -e "$DST" ] && [ ! -d "$DST" ]; then
             rm -rf "$SRC"
             exit 0
@@ -241,8 +233,7 @@ merge_stage_entry() (
     fi
 
     # Existing destination wins; drop the losing source. Leaving it would keep
-    # the stage/orphan dir non-empty, so the rmdir that reclaims it (here and in
-    # restore_stage / adopt_orphan_stages) silently fails and the dir leaks.
+    # the stage dir non-empty, so the rmdir in restore_stage would leave it behind.
     if [ -e "$DST" ]; then
         rm -f "$SRC"
         exit 0
@@ -261,50 +252,6 @@ restore_stage() {
     STAGE=""
 }
 
-# Reclaim a stage dir a force-killed run left behind: its EXIT trap never ran,
-# so nothing else merges it back and the staged contents are lost forever.
-# Before touching the worktree — including on the already-a-worktree sync path
-# below, where surviving orphans actually accumulate — reclaim any orphan this
-# target can prove is its own, merging it back with the same "existing files
-# win" rule restore_stage uses. Attribution lives entirely in the name, because
-# the parent directory is shared by every agent in the rig:
-#   - "<this-target>.XXXXXX": this target's own scoped orphan — adopt it.
-#   - "<other-target>.XXXXXX": another target's scoped stage — leave it; it may
-#     be that target's live, in-flight stage and its contents are not ours.
-#   - "XXXXXX" with no target segment: a legacy orphan from before stages were
-#     scoped. Nothing can prove which target created it, so adopting it into
-#     whichever target runs first leaks one target's files into another. Such
-#     unscoped names can no longer be created, so it is always old debris, never
-#     a live stage — quarantine it out of the stage namespace with its contents
-#     intact, for an attribution-aware manual sweep, and let no target claim it.
-# Best-effort self-heal; it must never block worktree creation.
-adopt_orphan_stages() {
-    PARENT=$(dirname "$WT")
-    [ -d "$PARENT" ] || return 0
-    for ORPHAN in "$PARENT"/.gascity-worktree-stage.*; do
-        [ -d "$ORPHAN" ] || continue
-        REST=${ORPHAN##*/}
-        REST=${REST#.gascity-worktree-stage.}
-        case "$REST" in
-            "$STAGE_SLUG".*) ;;   # this target's own scoped orphan — adopt below
-            *.*) continue ;;      # another target's scoped stage — may be live, leave it
-            *)                    # legacy un-scoped orphan — unprovable owner, quarantine it
-                QUARANTINE="$PARENT/.gascity-worktree-orphan.$REST"
-                if [ ! -e "$QUARANTINE" ] && mv "$ORPHAN" "$QUARANTINE" 2>/dev/null; then
-                    echo "worktree-setup: quarantined unattributable legacy stage dir ${ORPHAN##*/} as ${QUARANTINE##*/} (owning target unknown; reclaim manually)" >&2
-                fi
-                continue ;;
-        esac
-        mkdir -p "$WT"
-        for ENTRY in "$ORPHAN"/.[!.]* "$ORPHAN"/..?* "$ORPHAN"/*; do
-            [ -e "$ENTRY" ] || continue
-            merge_stage_entry "$ENTRY" "$WT/$(basename "$ENTRY")"
-        done
-        rmdir "$ORPHAN" 2>/dev/null || true
-    done
-}
-adopt_orphan_stages || true
-
 # Idempotent: an existing worktree is provisioned and synced, never re-created.
 if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
     provision_worktree
@@ -315,7 +262,7 @@ fi
 # A non-empty target that is not yet a worktree: stage its contents aside,
 # create the worktree, then merge them back (existing files win).
 if [ -d "$WT" ] && [ "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
-    STAGE=$(mktemp -d "$(dirname "$WT")/.gascity-worktree-stage.$STAGE_SLUG.XXXXXX")
+    STAGE=$(mktemp -d "$(dirname "$WT")/.gascity-worktree-stage.XXXXXX")
     find "$WT" -mindepth 1 -maxdepth 1 -exec mv {} "$STAGE"/ \;
     trap 'restore_stage' EXIT HUP INT TERM
 fi
