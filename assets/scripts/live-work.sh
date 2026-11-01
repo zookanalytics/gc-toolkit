@@ -68,7 +68,7 @@ LIVE_WORK_JQ='
   # names as what a pool claims and works. An allowlist: a type it has never
   # heard of, a container (epic) or a question for a person (a gate, a decision)
   # is closed by its own owner.
-  def live_work_plain_types: ["task", "bug", "feature", "chore", "spike"];
+  def live_work_plain_types: ["task", "bug", "feature", "chore", "spike", "story"];
   # One "<what>=<value>" per mark this bead row carries, empty when it carries
   # none. Reads the row `bd list --json` or `bd show --json` returns: status,
   # assignee, issue_type and metadata.

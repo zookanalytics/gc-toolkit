@@ -55,14 +55,14 @@ for k in merge_result pr_url branch gc.routed_to gc.execution_routed_to gc.dispa
     eq "$(printf '%s' "$KEYS_JSON" | jq -r --arg k "$k" 'index($k) != null' 2>/dev/null)" \
        "true" "(DEF) live_work_keys names $k"
 done
-eq "$(jq -nc "$LIVE_WORK_JQ"'live_work_plain_types' 2>/dev/null)" '["task","bug","feature","chore","spike"]' \
+eq "$(jq -nc "$LIVE_WORK_JQ"'live_work_plain_types' 2>/dev/null)" '["task","bug","feature","chore","spike","story"]' \
    "(DEF) the plain-work types are the work allowlist"
 
 echo "# the row"
 row() { printf '%s' "$1" | jq -c "$LIVE_WORK_JQ"'live_work_reasons' 2>/dev/null; }
 PLAIN='{"id":"a","issue_type":"task","status":"open","assignee":"","metadata":{}}'
 eq "$(row "$PLAIN")" "[]" "(ROW) a plain open, unassigned bead carries no mark"
-for t in task bug feature chore spike; do
+for t in task bug feature chore spike story; do
     eq "$(row "{\"id\":\"a\",\"issue_type\":\"$t\",\"status\":\"open\"}")" "[]" "(ROW) a $t with no metadata at all carries no mark"
 done
 for k in $(printf '%s' "$KEYS_JSON" | jq -r '.[]'); do
