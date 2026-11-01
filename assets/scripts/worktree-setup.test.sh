@@ -65,8 +65,8 @@
 #        branch reaches its commits, the branch is reset when another ref does, and
 #        a tracked change keeps it there with one stderr line. A branch not its own
 #        stays there, silently;
-#   (ac) a home at the tip, or fast-forwarded to it, says nothing about an
-#        uncommitted tracked change;
+#   (ac) a per-target branch at the tip, or fast-forwarded to it, says nothing
+#        about an uncommitted tracked change;
 #   (ad) a per-target branch at an upstream that is not the default branch reaches
 #        the tip and tracks the default branch from then on;
 #   (ae) with origin/HEAD unset a per-target branch still fast-forwards, and one
@@ -653,8 +653,8 @@ eq "$(branch_of "$P/agentAB")" "DETACHED"    "(ab) detached, off the branch that
 eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(ab) the branch keeps the local commit"
 eq "$ERR" ""                                 "(ab) that move prints nothing"
 
-# --- (ac) a home at the tip has nothing to do, so a tracked change in it is no
-#          refusal: live homes carry one in .claude/settings.json, and a line at
+# --- (ac) a per-target branch at the tip has nothing to do, so a tracked change is
+#          no refusal: live homes carry one in .claude/settings.json, and a line at
 #          every start would say nothing. The same goes for a fast-forward past it. --
 P="$TMP/ac"; mkdir -p "$P"
 run "$P/agentAC" agentAC
