@@ -75,15 +75,12 @@ export interface Tile {
    */
   held: boolean;
   /**
-   * Refines `held`: `'in_session'` when a conversation that tracks this bead is
-   * held by a live session right now, `'start-failed'` when the sitting last
-   * spawned for a conversation on this row failed to start and none has been
-   * spawned since (`sitting_start_failure` says why), `'waiting'` on any other
-   * held row, which waits for the operator. `''` on a row nothing holds (`held`
-   * is false), except a conversation's own row whose sitting failed to start,
-   * which reads `'start-failed'`. Derived on the Go side, because it reads each
-   * conversation's holder against the session list, which the wire does not
-   * carry. Always present.
+   * Refines `held`. It is the roll-up of the `state` of the sittings on this
+   * row, so the row and the record cannot disagree: `'start-failed'` when one
+   * failed to start (`sitting_start_failure` says why), `'in_session'` when a
+   * live session holds one right now, `'waiting'` on any other held row, which
+   * waits for the operator. `''` on a row nothing holds (`held` is false).
+   * Derived on the Go side. Always present.
    */
   sitting_state: string;
   n_closed: number;
@@ -389,7 +386,7 @@ export interface Tile {
  *
  * Sittings are not tiles and are not ranked against them: a tile is an anchor
  * that wants something, a sitting is an event in the conversation record. The
- * board carries every running sitting plus those closed inside the service's
+ * board carries every open sitting plus those closed inside the service's
  * recent window (`GC_HELM_SITTINGS_WINDOW`, a day by default).
  */
 export interface Sitting {
@@ -399,22 +396,16 @@ export interface Sitting {
   subject: string;
   title: string;
   /**
-   * The conversation task's status. `'closed'` is finished; anything else is
-   * running — `'open'` while it waits in the operator's queue, `'in_progress'`
-   * once a sitting has claimed it.
-   */
-  status: string;
-  /**
    * The conversation's close reason: the headline a sign-off settled on, or the
    * operator's dismissal. The sentence a closed sitting reads by when it left no
-   * takeaway. `''` while the sitting runs.
+   * takeaway. `''` while it is open.
    */
   outcome_reason: string;
-  /** The converse session that ran it — what an operator attaches to. */
+  /** The converse session that ran it — what an operator attaches to while it is in session. */
   session: string;
   /** RFC 3339. Omitted when the source could not read the stamp. */
   opened_at?: string;
-  /** RFC 3339. Omitted while the sitting is still running. */
+  /** RFC 3339. Omitted while it is open. */
   closed_at?: string;
   /**
    * The headline THIS sitting left on its subject, or `''`. A takeaway lives on
@@ -427,10 +418,24 @@ export interface Sitting {
    * The subject bead's title — the row's topic, what the conversation is about.
    * Read in the same batch as the takeaway, so a row says what it concerns even
    * with nothing concluded on it. `''` when the subject could not be read, which
-   * the render falls back on the subject id (topic) or the conversation's title
-   * (headline) for.
+   * the render falls back on the subject id (topic) for.
    */
   subject_title: string;
+  /**
+   * Where this sitting stands: `'in_session'` while a live session holds its
+   * conversation, `'waiting'` while it is open and no live session holds it,
+   * `'start-failed'` when the sitting last spawned for it failed to start and
+   * none has been spawned since, `'closed'` once it has ended. Derived on the
+   * Go side, because it reads the holder against the session list, which the
+   * wire does not carry. Print it; do not re-derive it. Always present.
+   */
+  state: string;
+  /**
+   * What this sitting concluded, or failing that what it is about: its takeaway,
+   * else its close reason, else its subject's title, else the conversation's own
+   * title. Derived on the Go side. Print it; do not re-derive it. Always present.
+   */
+  headline: string;
 }
 
 /**
@@ -497,7 +502,7 @@ export interface Board {
    */
   tiles: Tile[] | null;
   /**
-   * The conversation record: running sittings first (longest-running first),
+   * The conversation record: open sittings first (longest-open first),
    * then the recently closed (most recent first). `null` rather than `[]` when
    * empty, exactly like `tiles` — narrow before iterating.
    */

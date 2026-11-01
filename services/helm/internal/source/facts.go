@@ -204,6 +204,7 @@ func newSitting(iss *beads.Issue, r rigRef, subject string) board.Sitting {
 		Subject:  subject,
 		Title:    iss.Title,
 		Status:   string(iss.Status),
+		Assignee: iss.Assignee,
 		Session:  md["gc.session_name"],
 		FiledAt:  iss.CreatedAt.UTC(),
 		OpenedAt: iss.CreatedAt,

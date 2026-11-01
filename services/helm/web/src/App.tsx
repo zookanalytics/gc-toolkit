@@ -33,28 +33,21 @@ const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done']
 // information-complete default that hides nothing until the operator folds it.
 const COLLAPSE_STORAGE_KEY = 'helm.board.collapsed';
 
-// The one Tile.sitting_state value the marker branches on
-// (board.SittingInSession). A held row carries 'in_session', 'start-failed' or
-// 'waiting'; anything that is not 'in_session' — 'waiting', 'start-failed'
-// (whose row's needs names the failure), or the '' a re-derivation slip could
-// leave — reads as waiting, the state that invites the operator to look rather
-// than telling them it is handled.
+// The states of a sitting and of a held row, as the board service derives them
+// (board.SittingInSession and its siblings). Every surface here prints what the
+// wire says and none re-derives it.
 const SITTING_IN_SESSION = 'in_session';
+const SITTING_WAITING = 'waiting';
+const SITTING_START_FAILED = 'start-failed';
+const SITTING_CLOSED = 'closed';
 
-// A sitting is finished when its conversation closed; anything else is a
-// conversation someone is still in. Reading the status rather than the presence
-// of closed_at keeps a sitting whose stamp could not be read on the running
-// side, which is the side that shows a row rather than hides one.
-const isRunning = (s: Sitting): boolean => s.status !== 'closed';
+// A sitting state as a person reads it: 'in_session' is 'in session' and
+// 'start-failed' is 'start failed'. A state this build does not know still
+// prints as what it is, rather than as one it knows.
+const sittingWord = (state: string): string => state.replace(/[_-]/g, ' ');
 
-// What a sitting CONCLUDED, or failing that what it is ABOUT: the takeaway wins,
-// then the close reason (why the conversation closed), then the subject's title
-// (the topic), and the conversation's own title only as a last resort. Mirrors
-// the board service's Sitting.Headline so the sittings table and the per-row
-// marker read one rule.
-function sittingHeadline(s: Sitting): string {
-  return s.takeaway || s.outcome_reason || s.subject_title || s.title;
-}
+// The class that colours a state's word, on the chip and in the sittings table.
+const sittingStateClass = (state: string): string => `sitting-marker--${state.replace(/_/g, '-')}`;
 
 // How long ago a stamp was, in the coarsest unit that still says something. An
 // absent stamp is unknown, never "just now": the sitting whose timestamp the
@@ -539,45 +532,54 @@ function FamilySummary({ descendants, collapsed }: { descendants: Tile[]; collap
 // The sitting marker: a visible, self-evident chip on a held row, one the
 // operator's side has. It says at a glance what the row has — a human gate,
 // which holds the work until the operator answers, or only a conversation,
-// which holds nothing (tile.work_held) — and which of two states it is in:
-// WAITING for the operator, or IN SESSION (a live sitting is on it right now).
-// It says so in words, a colour, an icon and, on a conversation-only row, a
-// dashed outline, all read straight off the tile (derived once in the Go layer,
-// never re-derived here). The chip is a real button so it is keyboard-reachable
-// and announced as interactive; hovering or focusing it reveals a details card
-// that says whether the work is held and names the sittings on the bead — each
-// one's headline, whether it runs, and the session to attach to. The details
-// live in this card rather than a native `title` tooltip because a native
-// tooltip has no visible affordance and stays invisible until an exact hover
-// lands on a one-character glyph. The card is non-interactive text, so it needs
-// no click to open or dismiss.
+// which holds nothing (tile.work_held) — and which state it is in: WAITING for
+// the operator, IN SESSION (a live sitting is on it right now), or START FAILED
+// (the sitting spawned for a conversation on it never started, and the card says
+// why). It says so in words, a colour, an icon and, on a conversation-only row,
+// a dashed outline, all read straight off the tile (derived once in the Go
+// layer, never re-derived here). The chip is a real button so it is
+// keyboard-reachable and announced as interactive; hovering or focusing it
+// reveals a details card that says whether the work is held and names the
+// sittings on the bead — each one's headline, its state, and the session to
+// attach to while it is in session. The details live in this card rather than a
+// native `title` tooltip because a native tooltip has no visible affordance and
+// stays invisible until an exact hover lands on a one-character glyph. The card
+// is non-interactive text, so it needs no click to open or dismiss.
 function SittingMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
-  const inSession = tile.sitting_state === SITTING_IN_SESSION;
-  const word = inSession ? 'in session' : 'waiting';
+  // A held row reads in session, start failed or waiting. Anything else, such as
+  // the '' a derivation slip could leave, reads as waiting, the state that
+  // invites the operator to look rather than telling them it is handled.
+  const state = tile.sitting_state === SITTING_IN_SESSION || tile.sitting_state === SITTING_START_FAILED
+    ? tile.sitting_state
+    : SITTING_WAITING;
+  const inSession = state === SITTING_IN_SESSION;
+  const failed = state === SITTING_START_FAILED;
   const what = tile.work_held ? 'gate' : 'conversation';
-  const heading = inSession ? 'In session — being worked right now' : 'Waiting for you';
+  const heading = failed
+    ? `Start failed — ${tile.sitting_start_failure}`
+    : inSession
+      ? 'In session — being worked right now'
+      : 'Waiting for you';
   const hold = tile.work_held
     ? 'a human gate holds the work until you answer'
     : 'a conversation is on this bead and holds nothing: the work is not held';
-  const label = inSession
-    ? `in session — a live sitting is on this row now; ${hold}; hover or focus for details`
-    : `waiting for you — ${hold}; hover or focus for details`;
+  const label = failed
+    ? `start failed: ${tile.sitting_start_failure} — ${hold}; hover or focus for details`
+    : inSession
+      ? `in session — a live sitting is on this row now; ${hold}; hover or focus for details`
+      : `waiting for you — ${hold}; hover or focus for details`;
   const cardId = `sitting-card-${tile.id}`;
-  const className = [
-    'sitting-marker',
-    `sitting-marker--${inSession ? 'in-session' : 'waiting'}`,
-    tile.work_held ? '' : 'sitting-marker--conversation',
-  ]
+  const className = ['sitting-marker', sittingStateClass(state), tile.work_held ? '' : 'sitting-marker--conversation']
     .filter(Boolean)
     .join(' ');
   return (
     <span className={className}>
       <button type="button" className="sitting-chip" aria-label={label} aria-describedby={cardId}>
         <span className="sitting-chip__icon" aria-hidden="true">
-          {inSession ? '◉' : '○'}
+          {failed ? '✗' : inSession ? '◉' : '○'}
         </span>
         <span className="sitting-chip__text">
-          {what} · {word}
+          {what} · {sittingWord(state)}
         </span>
       </button>
       {/* Non-interactive detail, revealed on hover or focus of the chip (CSS).
@@ -589,11 +591,11 @@ function SittingMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) 
         <span className="sitting-card__hold">{hold}</span>
         {sittings.map((s) => (
           <span key={s.id} className="sitting-card__sitting">
-            {sittingHeadline(s)}
+            {s.headline}
             <span className="sitting-card__meta">
               {' · '}
-              {isRunning(s) ? 'running' : 'closed'}
-              {s.session ? ` · ${s.session}` : ''}
+              {sittingWord(s.state)}
+              {s.state === SITTING_IN_SESSION && s.session ? ` · ${s.session}` : ''}
             </span>
           </span>
         ))}
@@ -633,7 +635,7 @@ function AnchorRow({
   drilled,
   onOpen,
   onActuated,
-  sittingsBySubject,
+  sittingsOnRow,
   descendants,
   collapsed,
   onToggleCollapse,
@@ -644,8 +646,8 @@ function AnchorRow({
   // Called after a board write lands, so the acted-on row re-gathers rather than
   // waiting out the poll interval. App passes its refresh.
   onActuated: () => void;
-  // The sittings on each bead, keyed by subject id, for the per-row marker hover.
-  sittingsBySubject: Map<string, Sitting[]>;
+  // The sittings on each row, for the per-row marker hover.
+  sittingsOnRow: Map<string, Sitting[]>;
   // This row's subtree tiles (empty for a leaf), for the header summary.
   descendants: Tile[];
   // Whether this parent is folded. Meaningless on a leaf, which never collapses.
@@ -668,7 +670,7 @@ function AnchorRow({
   return (
     <tr className={className}>
       <td>
-        <RowMarker tile={tile} sittings={sittingsBySubject.get(tile.id) ?? []} />
+        <RowMarker tile={tile} sittings={sittingsOnRow.get(tile.id) ?? []} />
         <span className="band">{tile.section}</span>
       </td>
       <td>
@@ -785,6 +787,12 @@ function Legend() {
         a sitting in session
       </span>
       <span className="legend__item">
+        <span className="sitting-marker--start-failed" aria-hidden="true">
+          ✗
+        </span>{' '}
+        a sitting failed to start
+      </span>
+      <span className="legend__item">
         <span className="legend__swatch legend__swatch--wants" aria-hidden="true" /> row needs you
       </span>
       <span className="legend__item">
@@ -819,7 +827,7 @@ function AnchorsTable({
   drillTarget,
   onOpen,
   onActuated,
-  sittingsBySubject,
+  sittingsOnRow,
   descByParent,
   collapsed,
   onToggleCollapse,
@@ -830,7 +838,7 @@ function AnchorsTable({
   drillTarget: string | null;
   onOpen: (id: string) => void;
   onActuated: () => void;
-  sittingsBySubject: Map<string, Sitting[]>;
+  sittingsOnRow: Map<string, Sitting[]>;
   // Each parent's subtree tiles, for the header summaries.
   descByParent: Map<string, Tile[]>;
   // The folded parents; a row is collapsed when its id is in here.
@@ -877,7 +885,7 @@ function AnchorsTable({
               drilled={row.tile.id === drillTarget}
               onOpen={onOpen}
               onActuated={onActuated}
-              sittingsBySubject={sittingsBySubject}
+              sittingsOnRow={sittingsOnRow}
               descendants={descByParent.get(row.tile.id) ?? []}
               collapsed={collapsed.has(row.tile.id)}
               onToggleCollapse={onToggleCollapse}
@@ -904,15 +912,19 @@ function AnchorsTable({
 // nobody asked. The bands say what needs doing; this says what is being said.
 function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number; onOpen: (id: string) => void }) {
   if (sittings.length === 0) return null;
-  const running = sittings.filter(isRunning).length;
+  const count = (state: string): number => sittings.filter((s) => s.state === state).length;
+  const failed = count(SITTING_START_FAILED);
 
   return (
     <section className="sittings" aria-labelledby="sittings-heading">
       <h2 id="sittings-heading">converse sittings</h2>
       <p className="sub">
-        {running} running · {sittings.length - running} closed recently. A running sitting is a
-        conversation someone is still in or one waiting in your queue; a closed one shows what it
-        concluded, or why it closed. The takeaway shows on the sitting that wrote it.
+        {count(SITTING_IN_SESSION)} in session · {count(SITTING_WAITING)} waiting ·{' '}
+        {failed > 0 && `${failed} start failed · `}
+        {count(SITTING_CLOSED)} closed recently. In session: a live session holds the conversation, so
+        you can attach to it. Waiting: it is open and no live session holds it, so it waits for you. A
+        closed one shows what it concluded, or why it closed. The takeaway shows on the sitting that
+        wrote it.
       </p>
       <table>
         <thead>
@@ -927,10 +939,9 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
         </thead>
         <tbody>
           {sittings.map((s) => {
-            const live = isRunning(s);
             return (
-              <tr key={s.id} className={live ? 'sitting-running' : undefined}>
-                <td>{live ? 'running' : 'closed'}</td>
+              <tr key={s.id} className={s.state === SITTING_IN_SESSION ? 'sitting-in-session' : undefined}>
+                <td className={sittingStateClass(s.state)}>{sittingWord(s.state)}</td>
                 <td>{s.id}</td>
                 <td>{s.rig}</td>
                 <td>
@@ -939,12 +950,8 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                       is about, falling back to the id when the title is unread. */}
                   <DrillOpen id={s.subject} label={s.subject_title || s.subject} onOpen={onOpen} />
                 </td>
-                <td>{shortAge(live ? s.opened_at : s.closed_at, now)}</td>
-                {/* The takeaway is what the sitting concluded; with none, a
-                    closed conversation shows its close reason (why it closed),
-                    then the subject's title (the topic) rather than the
-                    conversation's own title. */}
-                <td>{sittingHeadline(s)}</td>
+                <td>{shortAge(s.state === SITTING_CLOSED ? s.closed_at : s.opened_at, now)}</td>
+                <td>{s.headline}</td>
               </tr>
             );
           })}
@@ -1102,17 +1109,20 @@ export function App() {
     [boardRows, collapsed],
   );
 
-  // Sittings keyed by the bead they are about, so each row shows the sittings
-  // holding it without re-scanning the list per row. Keyed off the full sittings
-  // list, not the rig-filtered one, so a shown row always finds its own.
-  const sittingsBySubject = useMemo(() => {
-    const bySubject = new Map<string, Sitting[]>();
+  // Sittings keyed by the rows they are on, the bead they are about and a
+  // conversation's own row, so each row shows its sittings without re-scanning
+  // the list per row. Keyed off the full sittings list, not the rig-filtered one,
+  // so a shown row always finds its own.
+  const sittingsOnRow = useMemo(() => {
+    const byRow = new Map<string, Sitting[]>();
     for (const s of sittings) {
-      const list = bySubject.get(s.subject);
-      if (list) list.push(s);
-      else bySubject.set(s.subject, [s]);
+      for (const row of new Set([s.subject, s.id])) {
+        const list = byRow.get(row);
+        if (list) list.push(s);
+        else byRow.set(row, [s]);
+      }
     }
-    return bySubject;
+    return byRow;
   }, [sittings]);
 
   const owed = visibleTiles.filter((t) => t.owed);
@@ -1220,7 +1230,7 @@ export function App() {
         drillTarget={drillTarget}
         onOpen={setDrillTarget}
         onActuated={refresh}
-        sittingsBySubject={sittingsBySubject}
+        sittingsOnRow={sittingsOnRow}
         descByParent={descByParent}
         collapsed={collapsed}
         onToggleCollapse={toggleCollapse}
