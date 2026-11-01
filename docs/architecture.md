@@ -156,6 +156,7 @@ the cadence) records PR events and files a visit, the witness patrol recovers
 work orphaned by dead sessions, the `dog` pool is warrant executor for
 due-process recovery of wedged sessions (demand-scaled 0-2),
 `quota-park-nudge.sh` nudges a session parked behind a provider limit,
+`witness-nudge.sh` gives a witness whose pane has gone quiet its next patrol turn,
 `boot-health.sh` detects a wedged deacon (report-only by design),
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which the merge arm calls,
