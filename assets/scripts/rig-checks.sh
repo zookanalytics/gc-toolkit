@@ -3,27 +3,19 @@
 # mol-polecat-work's steps. setup and preflight run in the current directory, and
 # self-review in the tree its work bead records.
 #
-#   rig-checks.sh setup <<'CHECKS'
-#   setup=<command>
-#   CHECKS
-#   rig-checks.sh preflight <<'CHECKS'
-#   typecheck=<command>
-#   lint=<command>
-#   test=<command>
-#   CHECKS
-#   rig-checks.sh self-review --bead <work-bead> <<'CHECKS'
-#   setup=<command>
-#   typecheck=<command>
-#   lint=<command>
-#   build=<command>
-#   affected=<command>
-#   test=<command>
-#   CHECKS
+#   rig-checks.sh setup --setup <command>
+#   rig-checks.sh preflight --typecheck <command> --lint <command> --test <command>
+#   rig-checks.sh self-review --bead <work-bead> --setup <command>
+#       --typecheck <command> --lint <command> --build <command>
+#       --affected <command> --test <command>
 #
-# The step renders each command into a quoted here-document, which hands it over
-# verbatim whatever quotes it carries, one line per check. `gctk rig` records each
-# result against the commit it ran at, so a run already recorded there answers
-# from its record and every polecat starting from one base shares one run.
+# A rig's command is a shell string of any shape, so it is one argument. The step
+# renders it into a quoted here-document inside that argument, which hands it over
+# whole: quotes, more lines than one, a here-document of its own. Trailing newlines
+# drop, and only a line reading CMD_EOF alone would end it early. An absent or empty
+# command is a check the rig does not declare. `gctk rig` records each result against
+# the commit it ran at, so a run already recorded there answers from its record and
+# every polecat starting from one base shares one run.
 #
 # preflight and setup run what the rig declares and skip the rest. self-review
 # publishes test, lint and typecheck to the work bead's rig_check.<check>, with a
@@ -48,24 +40,39 @@ PROG="rig-checks"
 
 usage() {
   cat >&2 <<'USAGE'
-usage: rig-checks.sh setup|preflight <<'CHECKS'
-       rig-checks.sh self-review --bead <work-bead> <<'CHECKS'
-       <check>=<command>, one per line, on stdin
-       CHECKS
+usage: rig-checks.sh setup --setup <command>
+       rig-checks.sh preflight --typecheck <command> --lint <command> --test <command>
+       rig-checks.sh self-review --bead <work-bead> --setup <command>
+           --typecheck <command> --lint <command> --build <command>
+           --affected <command> --test <command>
+
+  An absent or empty command is a check the rig does not declare.
 
 exit: 0 every check passed · 1 a check failed · 4 a check could not say, or
       self-review could not name its tree · 2 usage
 USAGE
 }
 
+require_value() {
+  if [ "$#" -lt 2 ]; then
+    echo "$PROG: $1 requires a value" >&2
+    usage
+    exit 2
+  fi
+}
+
 MODE="${1:-}"
 [ "$#" -eq 0 ] || shift
-BEAD=""
+BEAD=""; SETUP_CMD=""; TYPECHECK_CMD=""; LINT_CMD=""; BUILD_CMD=""; AFFECTED_CMD=""; TEST_CMD=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --bead)
-      [ "$#" -ge 2 ] || { echo "$PROG: --bead requires a value" >&2; usage; exit 2; }
-      BEAD="$2"; shift 2 ;;
+    --bead)      require_value "$@"; BEAD="$2";          shift 2 ;;
+    --setup)     require_value "$@"; SETUP_CMD="$2";     shift 2 ;;
+    --typecheck) require_value "$@"; TYPECHECK_CMD="$2"; shift 2 ;;
+    --lint)      require_value "$@"; LINT_CMD="$2";      shift 2 ;;
+    --build)     require_value "$@"; BUILD_CMD="$2";     shift 2 ;;
+    --affected)  require_value "$@"; AFFECTED_CMD="$2";  shift 2 ;;
+    --test)      require_value "$@"; TEST_CMD="$2";      shift 2 ;;
     -h|--help) usage; exit 2 ;;
     *) echo "$PROG: unknown argument '$1'" >&2; usage; exit 2 ;;
   esac
@@ -77,20 +84,6 @@ case "$MODE" in
     [ -n "$BEAD" ] || { echo "$PROG: self-review publishes to a work bead, so --bead is required" >&2; usage; exit 2; } ;;
   *) echo "$PROG: unknown mode '$MODE'" >&2; usage; exit 2 ;;
 esac
-
-SETUP_CMD=""; TYPECHECK_CMD=""; LINT_CMD=""; BUILD_CMD=""; AFFECTED_CMD=""; TEST_CMD=""
-while IFS= read -r line || [ -n "$line" ]; do
-  [ -n "$line" ] || continue
-  case "$line" in
-    setup=*)     SETUP_CMD="${line#setup=}" ;;
-    typecheck=*) TYPECHECK_CMD="${line#typecheck=}" ;;
-    lint=*)      LINT_CMD="${line#lint=}" ;;
-    build=*)     BUILD_CMD="${line#build=}" ;;
-    affected=*)  AFFECTED_CMD="${line#affected=}" ;;
-    test=*)      TEST_CMD="${line#test=}" ;;
-    *) echo "$PROG: a line on stdin names no check: $line. A rig's command fits on one line." >&2; exit 2 ;;
-  esac
-done
 
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"

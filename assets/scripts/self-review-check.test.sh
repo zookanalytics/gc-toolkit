@@ -492,6 +492,14 @@ for sh in $SHELLS; do
   eq "$(git -C "$WT" status --porcelain)/$(cat "$WT/f")" "/more" "$sh: …which leaves the tree HEAD holds"
   # Whatever the case left must not reach the cases after it.
   git -C "$WT" reset -q --hard; git -C "$WT" clean -fdq
+  # A rig's command may run over several lines or hold a here-document. It reaches
+  # the record whole, so the exit condition reads the run the step declares.
+  reset_env; MD_SETUP_BUILD=""; VAR_BUILD=$'true\ntrue'; VAR_AFFECTED=$'true\ntrue'
+  VAR_LINT=$'cat <<EOF >/dev/null\nit\'s a "body" ) (\n\nEOF\ntrue'; write_state
+  run_checks "$sh"
+  run_case "$sh: PASS after the block ran multi-line commands and one holding a here-document" 0
+  eq "$(recorded lint | jq -r '.command')" "$VAR_LINT" "$sh: …with the here-document's command recorded whole"
+  eq "$(recorded test | jq -r '.command')" "$VAR_AFFECTED" "$sh: …and the multi-line test run"
   # A test run that leaves a file keeps its record, and the note the block
   # wrote before the run stands, so removing the file is all the loop needs.
   reset_env; MD_SETUP_BUILD=""; VAR_AFFECTED='printf x > cover.out'; VAR_BUILD=true; write_state

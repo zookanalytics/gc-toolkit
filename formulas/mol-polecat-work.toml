@@ -183,9 +183,10 @@ prepare.
 command runs in the worktree through `gctk rig setup`, which records nothing; an
 empty one is skipped:
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-checks.sh" setup <<'CHECKS'
-setup={{setup_command}}
-CHECKS
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-checks.sh" setup --setup "$(cat <<'CMD_EOF'
+{{setup_command}}
+CMD_EOF
+)"
 ```
 
 **4. Close this step:**
@@ -213,11 +214,16 @@ polecat starting from this base shares one run: a call whose run is already
 recorded there answers from the record without running. An empty command is
 skipped.
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-checks.sh" preflight <<'CHECKS'
-typecheck={{typecheck_command}}
-lint={{lint_command}}
-test={{test_command}}
-CHECKS
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-checks.sh" preflight --typecheck "$(cat <<'CMD_EOF'
+{{typecheck_command}}
+CMD_EOF
+)" --lint "$(cat <<'CMD_EOF'
+{{lint_command}}
+CMD_EOF
+)" --test "$(cat <<'CMD_EOF'
+{{test_command}}
+CMD_EOF
+)"
 ```
 It exits 0 when every check passes and 1 when one fails. A fail answered from the
 record prints no output of its own; run `"$GC_CITY_PATH/.gc/services/gctk/bin/gctk"
@@ -229,7 +235,7 @@ files an earlier run left that git does not ignore.
 (whichever your provider uses) for quality-gate guidance. Look for sections
 named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
 verification commands listed there, in code blocks or bullet lists. Run each
-through the gate the same way, such as `rig-checks.sh preflight <<< 'test=<test
+through the gate the same way, such as `rig-checks.sh preflight --test '<test
 command>'`, so its result is recorded at this base.
 
 Run ONLY read-only verification commands (typecheck, lint, build, test).
@@ -391,14 +397,25 @@ tree the call notes their outcome at HEAD on the work bead
 record, and for a declared command no other run's record counts. The test run is
 the affected subset when the rig declares one, else the full suite.
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-checks.sh" self-review --bead "<the work bead>" <<'CHECKS'
-setup={{setup_command}}
-typecheck={{typecheck_command}}
-lint={{lint_command}}
-build={{build_command}}
-affected={{affected_tests_command}}
-test={{test_command}}
-CHECKS
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-checks.sh" self-review --bead "<the work bead>" --setup "$(cat <<'CMD_EOF'
+{{setup_command}}
+CMD_EOF
+)" --typecheck "$(cat <<'CMD_EOF'
+{{typecheck_command}}
+CMD_EOF
+)" --lint "$(cat <<'CMD_EOF'
+{{lint_command}}
+CMD_EOF
+)" --build "$(cat <<'CMD_EOF'
+{{build_command}}
+CMD_EOF
+)" --affected "$(cat <<'CMD_EOF'
+{{affected_tests_command}}
+CMD_EOF
+)" --test "$(cat <<'CMD_EOF'
+{{test_command}}
+CMD_EOF
+)"
 ```
 It exits 0 when every check passes and 1 when one fails. Fix a failure your diff
 introduced, commit, and run the checks again. Exit 4 with no check run means it
@@ -409,7 +426,7 @@ exit 4 says nothing about the code, and `gctk rig`'s line names why, such as
 untracked files a run left, or a crash; a repeat at one commit is the code's or the
 command's doing. When the rig declares no command and you
 run the repo's own quality gate (CLAUDE.md or AGENTS.md) instead, run it through
-the gate the same way, with `test=<its test command>` on the call's input.
+the gate the same way, with `--test '<its test command>'` on the call.
 
 **4. A failure your diff did not cause.** A red check that fails the same way on
 `origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or

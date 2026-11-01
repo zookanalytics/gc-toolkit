@@ -170,10 +170,12 @@ the rule in
   region with awk reads the raw file, so a backslash in the region tests text
   the agent never runs.
 - **A rendered var is raw text.** A pour writes each `{{var}}` into the step as
-  it stands, so a var that holds a command, quotes and all, reaches the block
-  through a quoted heredoc, never inside quotes. The check commands in
+  it stands, so a var that holds a command, quotes and line breaks and all,
+  reaches the block through a quoted heredoc, never inside quotes or on a line of
+  a format that reads line by line. The check commands in
   `formulas/mol-polecat-work.toml` arrive that way, and `rig-checks.test.sh`
-  runs them with both quote kinds.
+  renders the step's own calls and runs them with both quote kinds, several lines
+  and a here-document of the command's own.
 
 ## Marker-fenced blocks
 

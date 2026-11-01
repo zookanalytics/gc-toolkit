@@ -59,6 +59,17 @@ named only where it is what runs.
   the bodies of overrides the warrant names, moved out of step text under rule 2,
   with nothing added but the sibling yield, `work_holder`, and the outage stop. `gc
   worktree` covers part of `work-setup.sh`, and tk-1tfzr71.10 moves that part.
+- **`rig-checks.sh`'s command arguments.** Searched: `formula.Substitute`
+  (`internal/formula/parser.go`), which writes a var into step text as it stands
+  and has no shell-quoting form, and `stampFormulaVars`
+  (`internal/molecule/molecule.go`), which records each non-empty var on the root
+  as `gc.var.<name>`. A script could read a poured run's commands from those
+  stamps, but a claimant with no poured workflow has no root, and a step's fallback
+  to the repo's own quality gate runs a command no pour stamped, so the commands
+  need an input either way, and a second source is a second way to differ. `gctk
+  rig --command` takes one string, so each is one argument: a quoted heredoc inside
+  it hands over a shell string of any shape, as the old blocks' heredocs did, and
+  the call stays one call under rule 2.
 - **`await-ruling.sh --blocked-by`.** Searched: `gc sling --after`, order triggers on
   `bead.closed`. Gas City has no sling on unblock (`docs/warrants.md`, deferred
   dispatch), so a bead that waits on another needs the edge and the arm this script
