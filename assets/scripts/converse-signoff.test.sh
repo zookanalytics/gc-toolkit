@@ -470,6 +470,32 @@ eq "$RC" 0 "(EPIC-PR-RERUN) the re-run exits 0"
 has "$(cat "$CALLS")" "converse-rework --anchor tk-mem --ruling-bead tk-conv" "(EPIC-PR-RERUN) …sending the rework to the member's PR again"
 hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-epic" "(EPIC-PR-RERUN) …never to the epic"
 eq "$(field tk-conv status)" "closed" "(EPIC-PR-RERUN) …and closes the conversation"
+# A re-run that says nothing of the PR still reaches it through the gate this
+# ruling's answer closed, so it is asked what the ruling does to that PR.
+epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
+eq "$RC" 2 "(EPIC-PR-RERUN) a re-run saying nothing of the PR exits 2"
+has "$OUT" "reaches tk-mem at merge_result=pull_request" "(EPIC-PR-RERUN) …naming the member's PR"
+# What a ruling reaches is what it releases. A gate another answer closed first
+# has already released its beads, and a reply onto a bead that is no human gate
+# resolves nothing, in any status and under any close reason.
+epic_pr; setf tk-mg status closed; setf tk-mg close_reason "moot: the question was withdrawn"
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
+eq "$RC" 0 "(EPIC-PR-EARLIER) a gate another answer closed first does not reach the PR behind it"
+has "$OUT" "gate tk-mg was already cleared before this sign-off" "(EPIC-PR-EARLIER) …and that answer stands"
+# reply_to_task -> a member's open PR behind a task the epic's conversation replies to.
+reply_to_task() {
+    fresh; bead tk-epic epic; bead tk-mem; setm tk-mem merge_result pull_request; edge tk-mem parent-child tk-epic
+    bead tk-note; edge tk-mem blocks tk-note
+    conv tk-conv tk-epic; edge tk-conv replies-to tk-note
+}
+reply_to_task
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
+eq "$RC" 0 "(EPIC-PR-NO-GATE) an open reply target that is no human gate does not reach the PR behind it"
+has "$OUT" "tk-note, which conversation tk-conv replies to, is no human gate" "(EPIC-PR-NO-GATE) …and it resolves nothing"
+reply_to_task; setf tk-note status closed; setf tk-note close_reason "ruled: fix the retry before the merge"
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
+eq "$RC" 0 "(EPIC-PR-NO-GATE) a closed one under this ruling's own answer does not reach it either"
 
 echo "# a gate about the subject and another open PR"
 # One gate blocks the subject's PR and another PR, so its answer releases both.
