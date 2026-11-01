@@ -252,7 +252,7 @@ eq "$rc" "5" "...and so does a gate of a type the city's sweep does not close"
 for await in timer gh:run gh:run:7 gh:pr gh:pr:7; do
   printf '[%s]' "$(gate ws-g open "$await")" > "$STORES/workshop/.beads/gates.json"
   run old-tool.sh
-  eq "$rc" "3" "a $await gate closes on its own and parks nothing"
+  eq "$rc" "3" "a $await gate is the sweep's to close and parks nothing"
   hasnt "$out" "parked behind" "...and no step is marked"
 done
 

@@ -36,9 +36,12 @@
 # A run is parked when one of its open steps is blocked by a gate a person holds.
 # The edge sits on one step and its later steps wait on the step before them, so
 # a run is judged whole, and it ends only once a person releases the gate or
-# cancels the run. A gate a person holds is any gate the city does not close by
-# itself: a human gate, and a park, which carries no await type. A timer gate and
-# a gate on a GitHub run or pull request close on their own (core's gate-sweep).
+# cancels the run. A gate a person holds is any gate but the types core's
+# gate-sweep is there to close, a timer gate and a gate on a GitHub run or pull
+# request, which is the rule the board reads (sweptGate). So it is a human gate,
+# or a park, which carries no await type. That sweep runs at the city's scope, so
+# a gate of its types in a rig's store reads as moving though nothing closes it.
+# The pack files none.
 # A run in a suspended rig is parked too: the reconciler skips the rig's agents
 # and gc hook returns empty, so nothing works the run until a person resumes the
 # rig or cancels the run.

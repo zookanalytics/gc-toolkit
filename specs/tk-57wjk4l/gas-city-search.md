@@ -209,8 +209,9 @@ person holds that gate, and whether the store's rig is suspended.
 - **Whose gate it is: core's sweep.** [bd
   gate](https://beads.gascity.com/cli-reference/gate) names the types, and the core
   pack's `gate-sweep.sh` runs `gc bd gate check` for timer and gh gates and no
-  others, so those close on their own and every other gate stays open until
-  someone closes it. Gas City ships no predicate for this, and the pack's own
+  others, so every other gate stays open until someone closes it. The script takes
+  those two types as the sweep's and every other gate as a person's, the rule the
+  board reads. Gas City ships no predicate for this, and the pack's own
   `human_gate` asks for `await_type=human`. That misses a park, the plain gate
   `gc-helm.sh park` files with no await type, which holds every parked run today.
 - **A suspended rig: the rig list, which the script already reads.**
@@ -235,8 +236,12 @@ person holds that gate, and whether the store's rig is suspended.
 
 A gate in another store than its step holds nothing, so the parked read looks only
 in the step's own store. A person can hold a run some other way, such as a live
-blocker routed to them, and that run reads as moving. The check reads a formula's
-file and each open step's text. A `description_file`
+blocker routed to them, and that run reads as moving. So does a run behind a timer
+or gh gate in a rig's store: core's `orders/gate-sweep.toml` names no rig, `gc order
+list` shows it at the city's scope here, and a timer gate in a rig's store stayed
+open past its expiry with the order firing. The board reads such a gate the same
+way. Nothing in the pack files one, and no store held one on 2026-11-01. The check
+reads a formula's file and each open step's text. A `description_file`
 over 4096 bytes reaches a step as a pointer to the file
 ([section 1.8](https://docs.gascity.com/reference/specs/formula-spec-v2#1-8-description-files)),
 so its text would be in neither place. No formula in this pack declares one. A

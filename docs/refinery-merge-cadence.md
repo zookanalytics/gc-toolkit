@@ -288,11 +288,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    what ends the wait. The PR reads `status: needs-attention` and `held: blocked`,
    and the board's row gives the reason. `gate-ensure.sh` leaves that verdict
    standing, and the next pass that finds no parked caller replaces it. A run is
-   parked when one of its open steps is blocked by a gate the city does not close
-   by itself: a human gate or a park, and not a timer gate or a gate on a GitHub
-   run or pull request. A person releases the gate or cancels the run. A run is
-   parked too when its rig is suspended, since nothing works it until a person
-   resumes the rig or cancels the run.
+   parked when one of its open steps is blocked by a gate a person holds: a human
+   gate or a park, and not a timer gate or a gate on a GitHub run or pull request,
+   the types core's gate sweep is there to close. A person releases the gate or
+   cancels the run. A run is parked too when its rig is suspended, since nothing
+   works it until a person resumes the rig or cancels the run.
 
    Each pass's log counts the calling steps and names the first of them, and
    `script-callers.sh <script>` lists each with its run, any gate that parks it
