@@ -118,6 +118,18 @@ other bead: {"status":"open","armed":"probe/probe.polecat", ...}
 an answer once the work has closed, then a pass: slings 1: sling probe/probe.polecat pb-8mb
 ```
 
+A route is the other way a bead goes out. A pool's query does not offer a routed bead
+on the gate, and it does once the bead is taken off by hand. Through the command, the
+same query right behind that write offers nothing, because the script reads back that
+the bead has no route before it lets the edge go:
+
+```
+a pool's query, on the gate: []
+a pool's query, off the gate by hand: ["pb-8rf"]
+stand-down: pb-edu left gate pb-ghy, which stays open: gate pb-ghy also holds pb-bx7
+a pool's query, right behind the edge: []
+```
+
 A sitting always names its conversation as the evidence, so it goes the same way, and
 `--leave` on the sign-off keeps the gate for the other bead:
 

@@ -194,6 +194,25 @@ gc bd gate resolve "$GL2" --reason "ruled: the other bead goes on" >/dev/null 2>
 before=$(slings); pass "$SCRIPTS" | tail -1
 echo "an answer once the work has closed, then a pass: slings $(($(slings) - before)): $(tail -1 "$PROBE_LOG")"
 
+say "A routed bead on a shared gate: off it by hand a pool's query offers the work, and through the command it does not"
+routed() { # <title> <key> -> a work bead a pool's route names, on a real gate beside another bead
+  local b g o; b=$(mk "$1")
+  gc bd update "$b" --set-metadata gc.routed_to=probe/probe.polecat >/dev/null
+  "$SCRIPTS/human-gate.sh" --subject "$b" --key "$2" --message "$1: does this go on?" >/dev/null || { echo "gate not filed on $b" >&2; return 1; }
+  g=$(gate_of "$b" "$2"); o=$(mk "the other bead"); gc bd dep add "$o" "$g" -t blocks >/dev/null 2>&1
+  printf '%s' "$b"
+}
+offered() { gc bd ready --metadata-field gc.routed_to=probe/probe.polecat --unassigned --json 2>/dev/null | jq -c --arg b "$1" '[ .[] | select(.id == $b) | .id ]'; }
+R1=$(routed "routed, by hand" polecat-r1); GR1=$(gate_of "$R1" polecat-r1)
+echo "a pool's query, on the gate: $(offered "$R1")"
+gc bd dep remove "$R1" "$GR1" >/dev/null 2>&1
+echo "a pool's query, off the gate by hand: $(offered "$R1")"
+R2=$(routed "routed, through the command" polecat-r2); EV2=$(mk "evidence")
+PROBE_AFTER="dep remove $R2" PROBE_AFTER_RUN="gc bd ready --metadata-field gc.routed_to=probe/probe.polecat --unassigned --json 2>/dev/null | jq -c '[ .[] | select(.id == \"$R2\") | .id ]' > '$W/offered-behind.log'" \
+  "$SCRIPTS/stand-down.sh" "$R2" --key polecat-r2 --ruling "only this bead stops" --successor "$EV2" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "rc=${PIPESTATUS[0]}"
+echo "a pool's query, right behind the edge: $(cat "$W/offered-behind.log")"
+echo "work: $(row "$R2")"
+
 say "The same gate in a sitting: stand down, then a sign-off that leaves the gate to the other bead"
 S=$(waiting "sitting, shared gate" polecat-s); GS=$(gate_of "$S" polecat-s); M4=$(mk "the other bead"); gc bd dep add "$M4" "$GS" -t blocks >/dev/null 2>&1
 VS=$(gc bd create "Discuss: $S" -t task --assignee human --metadata '{"task_kind":"visit"}' --json 2>>"$W/mk.err" | jq -r 'if type == "array" then .[0].id else .id end')
