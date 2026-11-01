@@ -7,12 +7,12 @@ description: What gc-toolkit would be if built once on Gas City as shipped, with
 
 Built once, on Gas City as shipped and with every fact said in one place,
 gc-toolkit would weigh an estimated 64k lines: 35.0k of runtime and 28.5k of
-tests. At the baseline it weighs 250.6k: 109.0k of runtime and 141.6k of tests.
+tests. At the baseline it weighs 265.9k: 114.8k of runtime and 151.1k of tests.
 The estimates show where the weight is. They set no limit, since useful code
 grows. [The rules](#the-rules) aim at code written without value to the
 operator: no new work in code the deletion plan retires, no procedures in step
 text, and a computed size change on every PR. The migration epic's members
-(tk-1tfzr71) and the native-gates convoy carry most of the removals below.
+(tk-1tfzr71) carry most of the removals below.
 
 ## Scope
 
@@ -36,19 +36,19 @@ bead carries it, and the operator funds each one.
   board's web source. Flow is formulas, orders and the other TOML and JSON config. Text
   is agent prompts, fragments and skills. Test is tests and their fixtures.
   Runtime is code, flow and text.
-- **Beside the pack** are docs (15.0k), the tooling under `tools/` and
-  `.github/` (13.0k), the record under `specs/` (61.0k) and generated files
+- **Beside the pack** are docs (16.8k), the tooling under `tools/` and
+  `.github/` (15.9k), the record under `specs/` (72.3k) and generated files
   (8.0k). They are reported beside pack weight and are not part of it.
 - **A path's subsystem** is its row in
   [component-model.md](component-model.md#4-where-each-component-sits) §4, and
-  a test takes its script's row. §4 has a row for 104 of the 145 runtime
+  a test takes its script's row. §4 has a row for 115 of the 144 runtime
   scripts under `assets/scripts/`, and the measuring script's rules place the
-  other 41 (9.1k lines).
+  other 29 (8.1k lines).
 
 `tools/measure.sh [REF]` prints a commit's table, `measure.sh BASE HEAD`
 prints what a change adds net of what it removes, and `measure.sh --pr BASE
 HEAD` prints a PR's size section ([rule 3](#the-rules)). The baseline is main
-at b09345315 (2026-10-25). Every number on this page is derived in
+at d983f9f50 (2026-10-31). Every number on this page is derived in
 [the measurement record](../specs/tk-11l1ejh/measurement.md).
 
 ## The built-once shape, subsystem by subsystem
@@ -60,8 +60,8 @@ assumptions:
   is a call to it, and the pack's version weighs nothing.
 - **Said once.** A fact, a rule or an idiom has one home, and a call site
   carries only its own facts. A comment states a reason the code cannot show,
-  which the estimate puts at about 15% of a runtime file. Runtime shell is 36%
-  comment today, and Go 32%.
+  which the estimate puts at about 15% of a runtime file. Runtime shell is 35%
+  comment today, and Go 33%.
 - **Tests follow code.** The estimate puts a subsystem's tests at about the
   weight of its code and flow. A test pins the behavior of the one copy where it
   lives. No test extracts formula step text to run it, holds two copies equal,
@@ -69,20 +69,20 @@ assumptions:
 
 | Subsystem | Built once, it is | Baseline runtime / tests | Built once, estimated runtime / tests |
 |---|---|---|---|
-| work | one formula extending core's polecat base | 6.7k / 12.6k | 2.5k / 2.5k |
-| review | the declared checks as lanes of one check loop | 10.6k / 10.0k | 4.0k / 2.0k |
-| merge | Gas Town's refinery flow under GitHub's branch rules | 16.6k / 25.2k | 2.0k / 2.0k |
-| human engagement | native human gates and conversation tasks | 15.0k / 24.0k | 5.5k / 4.0k |
-| board | a ranked render of platform objects | 15.6k / 18.4k | 5.0k / 5.0k |
-| patrol | Gas City's orders, plus the patrols' judgment | 9.8k / 15.6k | 2.5k / 2.0k |
-| doctor | one check per surviving invariant | 7.6k / 8.9k | 3.0k / 3.0k |
-| shared glue | one call per series of native steps | 10.9k / 19.7k | 5.0k / 5.0k |
-| gctk | the rig check runner and its records | 5.8k / 4.3k | 1.5k / 1.5k |
-| feedback | the learning loop | 2.5k / 1.9k | 2.0k / 1.5k |
-| config | the pack, its check index and its key registry | 2.5k / 0 | 0.7k / 0 |
-| doctrine | shared fragments and skills | 1.7k / 0 | 1.3k / 0 |
+| work | one formula extending core's polecat base | 7.1k / 12.7k | 2.5k / 2.5k |
+| review | the declared checks as lanes of one check loop | 11.4k / 11.1k | 4.0k / 2.0k |
+| merge | Gas Town's refinery flow under GitHub's branch rules | 16.5k / 27.2k | 2.0k / 2.0k |
+| human engagement | native human gates and conversation tasks | 13.9k / 21.3k | 5.5k / 4.0k |
+| board | a ranked render of platform objects | 17.5k / 21.0k | 5.0k / 5.0k |
+| patrol | Gas City's orders, plus the patrols' judgment | 9.8k / 16.1k | 2.5k / 2.0k |
+| doctor | one check per surviving invariant | 7.7k / 9.4k | 3.0k / 3.0k |
+| shared glue | one call per series of native steps | 13.2k / 24.5k | 5.0k / 5.0k |
+| gctk | the rig check runner and its records | 6.7k / 4.8k | 1.5k / 1.5k |
+| feedback | the learning loop | 2.4k / 1.9k | 2.0k / 1.5k |
+| config | the pack, its check index and its key registry | 3.0k / 0 | 0.7k / 0 |
+| doctrine | shared fragments and skills | 1.8k / 0 | 1.3k / 0 |
 | keeper sub-pack | nothing: the built-once shape has no fork | 3.8k / 1.1k | 0 / 0 |
-| **total** | | **109.0k / 141.6k** | **35.0k / 28.5k** |
+| **total** | | **114.8k / 151.1k** | **35.0k / 28.5k** |
 
 Human engagement is the workflow §4 calls visit. The keeper is the opt-in
 `packs/gascity-keeper/`.
@@ -134,9 +134,9 @@ conversation doctrine. Intake is slung work whose exits are native writes. The
 subsystem owns the converse, first-reaction and mechanik prompts, the converse
 skills, the operator's intake and the terminal surfaces.
 
-The trade: the visit kind, its folds, holds and sweeps, and the keys only they
-read go with the native-gates convoy (tk-iirrmiw). The first reaction stops
-being a bead kind of its own (tk-1tfzr71.17).
+The trade: the keys the visit kind left behind, and the migration that still
+reads them, go with the cutover's follow-up (tk-1tfzr71.33). The first reaction
+stops being a bead kind of its own (tk-1tfzr71.17).
 
 ### Board
 
@@ -144,12 +144,11 @@ The board renders platform objects (beads, human gates, conversations and the
 supervisor's objects) read through the supervisor API, and ranks them by the
 pack's attention model.
 
-The trade: the second data plane that reads the store directly, the visit
-rows, the rows that exist only because a pack writer stamped a route, and the
-hand-written TypeScript mirror of the Go contract with the parity test that
-holds the two equal all go. Which views stay is the Helm UX epic's (tk-ikpyzn)
-decision with tk-1tfzr71.24, which makes the board's estimate the least certain
-on the page.
+The trade: the second data plane that reads the store directly, the rows that
+exist only because a pack writer stamped a route, and the hand-written
+TypeScript mirror of the Go contract with the parity test that holds the two
+equal all go. Which views stay is the Helm UX epic's (tk-ikpyzn) decision with
+tk-1tfzr71.24, which makes the board's estimate the least certain on the page.
 
 ### Patrol
 
@@ -161,8 +160,8 @@ watch on the refinery's queue, and the deacon running `gc doctor` from an
 order. Patrol owns the warranted Dolt reclaim and suspended-store backup, and the
 scratch reapers that no native reaper covers.
 
-The trade: the liveness census stops filing visits, the incident ledger moves
-onto events and bead notes, and the dog's due process moves to the
+The trade: the liveness census stops filing human gates, the incident ledger
+moves onto events and bead notes, and the dog's due process moves to the
 controller's stall handling or to Gas Town's dance (tk-1tfzr71.18 and .19).
 
 ### Doctor
@@ -171,7 +170,7 @@ Doctor keeps one check per invariant of a surviving pack noun or warranted
 mechanism, and the checks of molecule execution (I8, I11 and I13) become one.
 
 The trade: a check retires with the noun it guards, such as the anchor, a
-lane, a visit, a raw route or a dispatch arm.
+lane, a raw route or a dispatch arm.
 
 ### Shared glue
 
@@ -202,7 +201,7 @@ Feedback is the miner and distiller formulas, the learning-distill skill and
 their orders, and saying each fact once is the only cut its estimate takes.
 Config is `pack.toml`, the check index, the overlays, the pack command, and a
 key registry that declares only the keys of surviving warranted nouns, as data:
-1,428 of the registry's 1,791 lines are comments today. Doctrine is the shared
+1,584 of the registry's 1,966 lines are comments today. Doctrine is the shared
 fragments and skills, with each doctrine sentence in one home.
 
 ### Keeper sub-pack
@@ -239,12 +238,13 @@ bd 1.3.2.
 A copy needs no trigger. It goes as soon as a change gives the fact one shared
 home.
 
-- The script-dir resolution loop: 122 copies in 20 files, 30 of them in
-  `mol-polecat-work.toml`. Carried by tk-c8724xi.
-- The decline sequence (escalate, record the wait, cancel the run, drain): 20
-  copies in step text, 12 of them in `mol-polecat-work.toml` and one in the
-  polecat doctrine fragment, with 29 copies of its refusal sentence. Carried by
-  tk-qitjxcm (P3).
+- The script-dir resolution: 11 copies of the loop in 7 files, and 141 of its
+  one-line form in 16 files, 33 of them in `mol-polecat-work.toml`. Carried by
+  tk-c8724xi.
+- The decline sequence (file the human gate, record the wait, cancel the run,
+  drain): 19 copies in step text, 11 of them in `mol-polecat-work.toml` and one
+  in the polecat doctrine fragment, with 28 copies of its refusal sentence.
+  Carried by tk-qitjxcm (P3).
 - The step-close loop: 10 copies in 5 formulas. It goes with step-close.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
@@ -257,25 +257,29 @@ A compatibility piece carries a dated debt and the trigger that retires it,
 and the change that fires the trigger deletes it.
 
 - The hand-offs at `escalate.sh` and `escalation-rig.sh`, 241 lines with their
-  test at the head of the convoy's integration fix (tk-iirrmiw.1). Trigger: no
-  open step bead names them, and no session started before the cutover still
-  runs. Carried by tk-kvdomjb.
+  test. Trigger: no open step bead names them, and no session started before the
+  cutover still runs. Carried by tk-kvdomjb.
+- `migrate-visits-to-gates.sh`, the cutover's one-shot move of every open visit,
+  2,180 lines with its test, and the keys only it still reads. Trigger: its
+  `--check` passes and the operator clears the cutover gate (tk-nly1mqd). Carried
+  by tk-1tfzr71.33.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
   with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.12.
-- The PR reminder's old marker. Trigger: no open PR carries one. Carried by the
-  cutover's follow-up, which tk-o6pd01i files.
-- Readers of legacy shapes, which "legacy" names 30 times across 15 runtime
-  files: the bare `superseded_by` key, the `gc.proactive_reaction=1` proof and
-  PR bodies older than the managed region, among others. Trigger: no store or
-  open PR holds the shape. Each goes with the member that rewrites its reader.
+- The PR reminder's old marker. Trigger: no open PR carries one. Carried by
+  tk-1tfzr71.33.
+- Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
+  files beside the migration's own 43: the bare `superseded_by` key, the
+  `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
+  among others. Trigger: no store or open PR holds the shape. Each goes with the
+  member that rewrites its reader.
 
 ### Doctrine restated per call site
 
 A restatement needs no trigger either, once the doctrine has its home.
 
-- Comments: runtime shell is 36% comment (20.8k of 57.7k lines), Go 32%, the
-  key registry 79% and the orders 66%.
-- Formula step text: 3.9k of the formulas' 8.8k lines are shell inside code
+- Comments: runtime shell is 35% comment (21.2k of 59.7k lines), Go 33%, the
+  key registry 81% and the orders 66%.
+- Formula step text: 3.7k of the formulas' 8.8k lines are shell inside code
   fences, and step prose restates doctrine the fragments hold. Rule 2 keeps new
   procedures out of step text.
 - tk-c8724xi's census names the sentences restated at each site and carries
@@ -283,8 +287,8 @@ A restatement needs no trigger either, once the doctrine has its home.
 
 ### Tests that pin what should not exist
 
-- 52 test files, 16.4k lines, have no script of their own. Each reads a marked
-  block of formula step text, to run it or to pin its text, and 13 script tests
+- 47 test files, 16.4k lines, have no script of their own. Each reads a marked
+  block of formula step text, to run it or to pin its text, and 14 script tests
   read one too. Trigger: the step's mechanics become one call to a script with
   its own test, as rule 2 requires (P4).
 - Tests that hold two copies equal, and tests that assert a retired name stays
@@ -294,7 +298,7 @@ A restatement needs no trigger either, once the doctrine has its home.
 ## The deletion schedule
 
 Stage 1, the native-gates convoy (tk-iirrmiw) and its cutover (tk-o6pd01i),
-has landed, and the baseline's re-measure for it is tk-1tfzr71.35. Stages 2
+has landed, and the baseline is main at the commit that landed it. Stages 2
 and 3 run in the order below, and each of the page's own items starts when
 what it waits on lands. An armed bead is blocked by what it waits on and
 slings itself when that lands. A size is the lines of the whole files a
@@ -302,14 +306,15 @@ bead's contract retires, with their tests, at the baseline, so a bead that also
 rewrites part of a file retires more than its size. A branch already in flight
 shows its measured net instead.
 
-### 2. Armed on the native-gates convoy landing
+### 2. Released by the native-gates convoy landing
 
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
-| tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | tk-iirrmiw, then its drain check |
-| tk-c8724xi | the 122 resolution loops, the doctrine its census names, its comment excess | 122 loops, about 35 restatements, about 150 comment lines | tk-iirrmiw |
-| tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,340 | tk-iirrmiw |
-| tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | tk-iirrmiw |
+| tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
+| tk-1tfzr71.33 | the cutover's migration script, the keys only it reads, the PR reminder's old marker | 2,180 | the cutover gate (tk-nly1mqd) |
+| tk-c8724xi | the resolution loops, the doctrine its census names, its comment excess | 11 loops, about 35 restatements, about 150 comment lines | nothing |
+| tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,390 | nothing |
+| tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | nothing |
 
 ### 3. The lanes
 
@@ -320,27 +325,26 @@ convoy lands only after the operator approves its design.
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
 | A | tk-1tfzr71.11 | per-site read-backs, about 130 blocks in 46 files | partial files |
-| A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | 10,899 |
-| A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,643 |
-| A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 14,850 |
-| A | tk-1tfzr71.23 | the membership readers on parent-child, since tk-tggczbp's branch deletes graduation and the convoy seed | partial files |
-| B | tk-1tfzr71.14 | the rig checkout healer; the operator rules at its design | 2,716 |
-| B | tk-1tfzr71.13 | the duplicate sweep and the successor keys | 1,053 |
-| B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,173 |
+| A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | 10,920 |
+| A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
+| A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
+| A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
+| B | tk-1tfzr71.14 | the rig checkout healer; the operator rules at its design | 2,704 |
+| B | tk-1tfzr71.13 | the duplicate sweep and the successor keys | 1,054 |
+| B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
-| B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,571 |
-| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps | 7,859 |
+| B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,815 |
+| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps | 7,869 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
-| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,474 |
+| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-o6pd01i, tk-kvdomjb and the migration members name come
-to 63k of the 187k between the baseline and the built-once estimate. Their
-partial rewrites carry more, chiefly the board, `gc-helm.sh`, the work and
-patrol formulas, deferred dispatch and the sign-off. tk-c8724xi and the page's
-own items below carry the script-dir and decline copies and the step-text
-tests. Most of the comment and test weight of the code that survives
-has no bead.
+The whole files that tk-kvdomjb and the migration members name come to 65k of
+the 202k between the baseline and the built-once estimate. Their partial
+rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
+formulas, deferred dispatch and the sign-off. tk-c8724xi and the page's own
+items below carry the script-dir and decline copies and the step-text tests.
+Most of the comment and test weight of the code that survives has no bead.
 
 ### 4. The page's own items
 
@@ -348,8 +352,8 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P3 | One decline call replaces the 20 copies of the decline sequence in step text, under rule 2 | 20 copies, 29 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
-| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.9k lines of shell in step text, 52 tests of 16.4k lines | tk-1tfzr71.12, .19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
+| P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
+| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.12, .19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
 ## The rules
