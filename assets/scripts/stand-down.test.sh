@@ -25,6 +25,9 @@
 #     gate, a gate a person is assigned, another live blocker, an open child, a gate
 #     that also holds another open bead, a claim, an unreadable bead, a pointer to
 #     other evidence, a review bead;
+#   * the way on the refusal of a shared gate names, which stops this bead and leaves
+#     the gate asking about the other one;
+#   * a graduated convoy the refinery parked, which its gate's message sends here;
 #   * --successor names other evidence, the ruling is one line headed `ruled:`, a
 #     dry run writes nothing, and a closed bead is nothing to do;
 #   * the clause a decline message carries is a command that runs.
@@ -420,6 +423,13 @@ has "$OUT" "tk-c" "an open child: it names it"
 fresh; patch '. + [{"id":"tk-o","status":"open","assignee":"","issue_type":"task","title":"another bead","metadata":{},"_deps":[{"id":"tk-g","dependency_type":"blocks"}]}]'
 refused "a gate that also holds another open bead" tk-w --key polecat-x --ruling "x"
 has "$OUT" "also holds tk-o" "a gate that also holds another open bead: it names it"
+has "$OUT" "gc bd dep remove tk-w tk-g" "a gate that also holds another open bead: it names the way on"
+gc bd dep remove tk-w tk-g >/dev/null 2>&1
+run tk-w --key polecat-x --ruling "only this bead stops" --successor tk-conv
+eq "$RC" 0 "that way on stands this bead down"
+eq "$(field tk-w status)" closed "…and closes it, pointed at the evidence named"
+eq "$(meta tk-w gc.superseded_by)" tk-conv "…with the pointer naming it"
+eq "$(field tk-g status)" open "…and leaves the gate asking about the other bead"
 fresh; patch 'map(if .id == "tk-w" then .assignee = "someone" | .status = "in_progress" else . end)'
 refused "a claim" tk-w --key polecat-x --ruling "x"
 has "$OUT" "someone" "a claim: it names the holder"
@@ -501,6 +511,11 @@ run tk-w --key polecat-x --ruling "from a held sitting"
 eq "$RC" 0 "a subject a sitting's hold left at held stands down, for the sign-off to release"
 eq "$(field tk-w status)" closed "…and closes"
 eq "$(meta tk-w gc.routed_to)" "" "…with its person route cleared"
+fresh; patch 'map(if .id == "tk-w" then .issue_type = "convoy" | .metadata = {"merge_result":"blocked","gc.routed_to":"human"} else . end)'
+run tk-w --key polecat-x --ruling "drop the graduation"
+eq "$RC" 0 "a graduated convoy the refinery parked stands down, as its gate's message says"
+eq "$(field tk-w status)" closed "…and closes"
+eq "$(field tk-g close_reason)" "ruled: drop the graduation" "…with the gate answered"
 fresh; patch 'map(if .id == "tk-w" then .metadata.branch = "polecat/tk-w" else . end)'
 run tk-w --key polecat-x --ruling "drop the branch"
 has "$(cat "$STUB_GC_LOG")" "branch-end --rig tkrig --branch polecat/tk-w" "the bead's branch ends with the close"

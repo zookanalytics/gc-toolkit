@@ -17,8 +17,9 @@ env -i HOME="$HOME" TERM=dumb bash specs/tk-utv2kaq/real-store-proof.sh \
   <work dir> <this branch's assets/scripts> <a base's assets/scripts> <gctk binary>
 ```
 
-Run on 2026-11-01 against this branch, with `d983f9f50` as the base. Ids are the
-scratch store's.
+Each run takes a fresh work dir, because the store's server outlives a run for a
+little while and would answer for a new store on the same path. Run on 2026-11-01
+against this branch, with `d983f9f50` as the base. Ids are the scratch store's.
 
 ## What the bead reported
 
@@ -91,6 +92,31 @@ SIGNED OFF conversation pb-wys on pb-jxa (settled)
 Each of these exits 1 with the bead's row unchanged: a key no gate carries, another
 open gate, another live blocker, an open child, a gate that also holds another bead,
 an open PR, a gate a person is assigned, and a claim.
+
+## Two more shapes
+
+The refusal of a shared gate names a way on: take this bead off the gate and name
+the evidence. That stops this bead and leaves the gate asking about the other one:
+
+```
+stand-down: pb-j3o closed as not needed, per pb-u2z; nothing re-slings it
+work: {"status":"closed","armed":"","route":"","pointer":"pb-u2z","outcome":"no-op", ...}
+gate: {"status":"open"}
+other bead: {"status":"open", ...}
+```
+
+A graduated convoy the refinery parked `blocked` stands down the same way, as its
+gate's message says, and the bead it tracks stays open:
+
+```
+lifecycle: pb-q7z unanchored -> blocked
+stand-down: answered gate pb-2y5: ruled: drop the graduation
+stand-down: pb-q7z closed as not needed, per pb-2y5; nothing re-slings it
+convoy: {"status":"closed","armed":"","route":"","pointer":"pb-2y5","outcome":"no-op", ...}
+tracked: {"status":"open", ...}
+```
+
+## What the first run found
 
 The first run of this proof found a defect in the first draft, which handed the
 gates to `bead-rehome.sh --except-key`. A gate named as the close's evidence lost its

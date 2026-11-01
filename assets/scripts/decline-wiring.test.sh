@@ -22,7 +22,9 @@
 #     already answered moot or benign;
 #   * STAND-DOWN: a gate that arms a re-sling tells a person how to rule the other
 #     way, through stand-down.sh under the gate's own key, and nothing tells them
-#     to close a bead the gate blocks, which bd refuses;
+#     to close a bead the gate blocks, which bd refuses. bring-current-audit.sh's
+#     ask is the one that does not, because its gate asks how to resolve a conflict.
+#     The skills a person's ruling reaches give the command;
 #   * ORDER, executed: workspace-setup's missing-branch arm files the gate,
 #     records the wait, cancels, then drains, and stops at the first part that
 #     does not land;
@@ -217,6 +219,17 @@ eq "$CLOSE_FIRST" "" "nothing tells a person to close a bead before they clear t
 grep -q 'stand-down\.sh' "$ROOT/template-fragments/polecat-doctrine.template.md" \
   && ok "the doctrine names stand-down.sh for a ruling not to proceed" \
   || bad "the doctrine does not name stand-down.sh for a ruling not to proceed"
+skill_has() { # <skill> <text> <label>: a phrase may wrap across lines there
+  local text
+  text=$(tr '\n' ' ' < "$ROOT/skills/$1/SKILL.md" | tr -s ' ')
+  case "$text" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2')" ;; esac
+}
+skill_has waits '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the waits skill gives the stand-down's command"
+skill_has waits 'Never answer the gate first and close afterwards' "the waits skill rules out answering the gate first"
+skill_has work '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the work skill gives the stand-down's command"
+skill_has work 'It leaves a deferred-dispatch arm in place' "the work skill says a stop that keeps the bead leaves its arm"
+skill_has converse-settle '/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"' "the converse-settle step gives the stand-down's command, with the conversation as its evidence"
+skill_has converse-settle 'Stand it down first' "the converse-settle step stands the subject down before the sign-off"
 if TOML_PY="$(tomllib_python)"; then
   for f in mol-polecat-work mol-refinery-patrol; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
@@ -229,7 +242,12 @@ def judge(key, message):
     checked += 1
     if not re.search(r"stand-down\.sh \$[A-Z_]+ --key " + re.escape(key) + r" --ruling ", message):
         bad.append(key)
-for key in set(re.findall(r'await-ruling\.sh" "\$[A-Z_]+" --key ([a-z][a-z-]*) ', text)):
+for key in set(re.findall(r'await-ruling\.sh" "\$[A-Z_]+" --key (\S+) ', text)):
+    # The GATE_MESSAGE loop below judges the first. bring-current-audit.sh composes
+    # the second's text, which asks how to resolve a conflict: a stand-down refuses
+    # that gate while it also holds the anchor, and names the way on.
+    if key == '"$GATE_KEY"' or key.startswith('"bring-current-question.'):
+        continue
     messages = [l for l in text.split("\n") if "--key %s --message" % key in l]
     if not messages:
         bad.append(key + " has no message")
@@ -242,7 +260,7 @@ PY
 )
     case "$out" in
       0\|*) bad "$f: no gate that arms a re-sling was found" ;;
-      *\|) ok "$f: each of its ${out%%|*} gates that arm a re-sling names stand-down.sh under its own key" ;;
+      *\|) ok "$f: the ${out%%|*} gate messages that offer a stop name stand-down.sh under their own keys" ;;
       *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
     esac
   done

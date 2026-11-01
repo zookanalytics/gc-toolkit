@@ -13,7 +13,7 @@
 set -u
 W="$1"; SCRIPTS="$2"; BASE="$3"; GCTK="$4"
 STORE="$W/store"
-rm -rf "${STORE:?}" "${W:?}/state" "${W:?}/bin"
+[ ! -e "$STORE" ] || { echo "$W already holds a store, and a server from that run can still answer for it: use a fresh work dir"; exit 1; }
 mkdir -p "$STORE" "$W/state" "$W/tmp" "$W/bin"
 export PATH="$W/bin:/opt/homebrew/bin:/Users/gc/.local/bin:/usr/bin:/bin:/usr/sbin"
 export TMPDIR="$W/tmp" PROBE_STORE="$STORE" PROBE_LOG="$W/sling.log" GCTK_BIN="$GCTK"
@@ -162,5 +162,20 @@ L=$(waiting "shared" polecat-l); GL=$(gate_of "$L" polecat-l); M=$(mk "other bea
 N=$(waiting "PR" polecat-n); gc bd update "$N" --set-metadata merge_result=pull_request >/dev/null; try "an open PR" "$N" --key polecat-n --ruling x
 O=$(waiting "assigned person" polecat-o); GO=$(gate_of "$O" polecat-o); gc bd update "$GO" --assignee someone >/dev/null; try "a gate a person is assigned" "$O" --key polecat-o --ruling x
 Q=$(waiting "claimed" polecat-q); gc bd update "$Q" --assignee someone --status in_progress >/dev/null; try "a claim" "$Q" --key polecat-q --ruling x
+
+say "A gate that holds another bead: the way on its refusal names"
+L2=$(waiting "shared, way on" polecat-l2); GL2=$(gate_of "$L2" polecat-l2); M2=$(mk "the other bead"); gc bd dep add "$M2" "$GL2" -t blocks >/dev/null 2>&1
+EV=$(mk "evidence")
+gc bd dep remove "$L2" "$GL2" >/dev/null 2>&1
+"$SCRIPTS/stand-down.sh" "$L2" --key polecat-l2 --ruling "only this bead stops" --successor "$EV" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "rc=${PIPESTATUS[0]}"
+echo "work: $(row "$L2")"; echo "gate: $(gc bd show "$GL2" --json | jq -c '.[0] | {status}')"; echo "other bead: $(row "$M2")"
+
+say "A graduated convoy the refinery parked, whose gate's message names the stand-down"
+CV=$(gc bd create "a graduated convoy" -t convoy --json 2>>"$W/mk.err" | jq -r 'if type == "array" then .[0].id else .id end')
+TR=$(mk "a bead the convoy tracks"); gc bd dep add "$CV" "$TR" -t tracks >/dev/null 2>&1
+"$SCRIPTS/human-gate.sh" --subject "$CV" --key refinery-zero-diff-check-failed --message "the zero-diff check could not run" >/dev/null
+"$SCRIPTS/lifecycle.sh" transition "$CV" --to blocked --assignee "" --route human --set "blocked_reason=the check could not run" --takeaway "the check could not run" 2>&1 | cut -c1-170
+"$SCRIPTS/stand-down.sh" "$CV" --key refinery-zero-diff-check-failed --ruling "drop the graduation" 2>&1 | grep -v 'attribution\|SELECT' | cut -c1-170; echo "rc=${PIPESTATUS[0]}"
+echo "convoy: $(row "$CV")"; echo "tracked: $(row "$TR")"
 
 printf '\n## What the shim was asked that it does not serve\n'; sort -u "$PROBE_LOG.unsupported"
