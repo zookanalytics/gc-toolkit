@@ -154,16 +154,23 @@ each to `.claude/settings.json`, and none of them is stuck, because a fast-forwa
 that does not touch that file still applies. No home was mid-rebase or mid-merge,
 and no stage or orphan directory existed anywhere under `.gc/worktrees/`.
 
+A second read at about 09:40Z counted the same 18 and the same five tracked changes.
+Every home's own branch tracks its rig's default branch, and none sits ahead of the
+tip with nothing to pull, which is the shape a rewind to an ancestor leaves. That
+part of the rule moves no home today.
+
 ## What the wrapper's change is
 
 - **The sync rule.** A home moves to the default tip unless that loses a tracked
   change, or a detached HEAD's commits no ref reaches. Ancestry of the tip was the
   old test, and a squash merge never satisfies it. Reachability is what Gas Town's
   script and Gas City's reaper both test.
-- **Its own branch.** A home on its own branch moves too when it cannot fast-forward.
-  The branch is reset when another ref reaches its commits. Otherwise the worktree
-  detaches at the tip and the branch keeps them, so no home can be stuck by a commit
-  on that branch. Any other branch stays as it is.
+- **Its own branch.** A home on its own branch moves too when a fast-forward does not
+  bring it to the tip. That covers a branch that has diverged and one ahead of the tip,
+  where the fast-forward succeeds and moves nothing, as it does when the default branch
+  is rewound to an ancestor. The branch is reset when another ref reaches its commits.
+  Otherwise the worktree detaches at the tip and the branch keeps them, so no home can
+  be stuck by a commit on that branch. Any other branch stays as it is.
 - **Removed, with no case behind them.** Adopting and quarantining orphaned stage
   directories, which Gas Town's script does not do either, and aborting a rebase or
   merge at start. The census found no such directory and no such home. The abort
@@ -174,7 +181,7 @@ and no stage or orphan directory existed anywhere under `.gc/worktrees/`.
   bead's note allowed for that, but the census leaves no such slot: every stuck home
   moves under the new rule. The one stderr line a refusal prints stays unread, as
   before. If a home ever holds a commit no ref reaches, a tracked change that blocks
-  its fast-forward, or a branch that is not its own, it stays silently at its old
+  its move, or a branch that is not its own, it stays silently at its old
   checkout. tk-d3daseg holds the question of whether that needs a signal.
 
 ## How this copy differs from Gas Town's
@@ -190,7 +197,7 @@ as Gas Town's ref-format check on the branch name, are left out.
 | A failed fetch does not stop a sync, which then reads the last tip it fetched | Refuses and exits 1 | The same as the row above: a slot that cannot reach origin still takes work | The exit-1 row above is adopted |
 | A repository with no origin is left alone with no line, and an unset `origin/HEAD` is a refusal | Refuses a repository with no origin, and tries `git remote set-head origin --auto` first | No case: all 317 homes have both | A case appears |
 | Only tracked changes block a sync | Any untracked file blocks it | gc writes untracked files into a home, such as `.worktree-stale` | Gas City writes nothing untracked into a home |
-| Its own branch, when it cannot fast-forward, is reset if another ref reaches its commits, and otherwise the worktree detaches at the tip and the branch keeps them | Refuses and exits 1 whenever that branch holds a commit the default branch lacks | A stuck home silently loses every rule landed after it, and neither move loses a commit | The exit-1 row above is adopted |
+| Its own branch, when a fast-forward does not bring it to the tip, is reset if another ref reaches its commits, and otherwise the worktree detaches at the tip and the branch keeps them | Refuses and exits 1 whenever that branch holds a commit the default branch lacks | A stuck home silently loses every rule landed after it, and neither move loses a commit | The exit-1 row above is adopted |
 | A home on any other branch stays there, fast-forwarding to that branch's upstream when it can | Switches a clean home to its own branch, and the other branch keeps its commits | No measured reason either way, so this change leaves the script's existing rule alone: no home is on such a branch, and no home's reflog shows one checked out in the last 30 days | A home is found stuck on one, and then Gas Town's rule goes in |
 | Reachability also counts tags | Counts branches and remote-tracking refs | The pack's archive tags pin commits, and Gas City's reaper counts tags too | The tags are gone |
 | The redirect and excludes are completed on every run | Excludes every run, redirect only at creation | A hook failure or a kill can leave a half-built tree | Gas Town's script completes the redirect |

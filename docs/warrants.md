@@ -478,7 +478,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     This pack imports no pack it could call that copy from.
   - The search, and each way this script differs from Gas Town's and why, is
     [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-01, at `gastownhall/gascity` main 6b90a9fb22ff and
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main 879a71fa0bc5 and
   `gastownhall/gascity-packs` main 0b0d96250f66.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at

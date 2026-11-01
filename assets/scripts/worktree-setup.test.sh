@@ -58,7 +58,19 @@
 #       a per-target branch's commit is enough to reset that branch;
 #   (z) when git cannot read a commit's reach or the tree's status, a detached
 #       worktree stays where it is and no branch is reset;
-#   (aa) a repository with no origin is left where it is, silently.
+#   (aa) a repository with no origin is left where it is, silently;
+#   (ab) a per-target branch ahead of its upstream, as a rewind of the default
+#        branch to an ancestor leaves it, is not at the tip even though its
+#        fast-forward succeeds: the worktree is detached at the tip when only the
+#        branch reaches its commits, the branch is reset when another ref does, and
+#        a tracked change keeps it there with one stderr line. A branch not its own
+#        stays there, silently;
+#   (ac) a home at the tip, or fast-forwarded to it, says nothing about an
+#        uncommitted tracked change;
+#   (ad) a per-target branch at an upstream that is not the default branch reaches
+#        the tip and tracks the default branch from then on;
+#   (ae) with origin/HEAD unset a per-target branch still fast-forwards, and one
+#        stderr line says why the sync goes no further.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -560,6 +572,136 @@ git -C "$NO" remote remove origin
 ERR=$( { sh "$SCRIPT" "$NO" "$W" agentAA --sync >/dev/null; } 2>&1 || echo "exit $?")
 eq "$(head_of "$W")" "$BEFORE"               "(aa) not moved"
 eq "$ERR" ""                                 "(aa) and says nothing"
+
+# --- (ab) a branch ahead of its upstream merges as "Already up to date" and moves
+#          nothing, so that success cannot be where a sync ends. A default branch
+#          rewound to an ancestor leaves a per-target branch there with no new
+#          commit on the remote. Each shape has its own remote and rig, since this
+#          rewrites main and every other home's branch would count as a ref. --------
+# rewound_home <name> — a remote, a rig and a home on its own branch at a commit
+# main is about to drop. The rig's local main stays a commit behind, so only that
+# branch and origin/main reach the commit. Sets RB, RR, W, BR, BASE and OLD.
+rewound_home() {
+    local src="$TMP/$1-src"
+    git init -q -b main "$src"
+    echo seed > "$src/README.md"; git -C "$src" add -A; git -C "$src" commit -qm init
+    BASE=$(git -C "$src" rev-parse HEAD)
+    RB="$TMP/$1.git"; git clone -q --bare "$src" "$RB"
+    RR="$TMP/$1-rig"; git clone -q "$RB" "$RR"
+    echo old > "$src/old.txt"; git -C "$src" add -A; git -C "$src" commit -qm old
+    OLD=$(git -C "$src" rev-parse HEAD)
+    git -C "$src" push -q "$RB" main
+    mkdir -p "$TMP/$1"; W="$TMP/$1/agentAB"
+    eq "$(rc_of "$RR" "$W" agentAB)" "0"     "(ab) the worktree is made ($1)"
+    eq "$(head_of "$W")" "$OLD"              "(ab) on the commit main will drop ($1)"
+    BR=$(branch_of "$W")
+}
+rewind_main()  { git -C "$RB" update-ref refs/heads/main "$BASE"; }
+rewound_sync() { { sh "$SCRIPT" "$RR" "$W" agentAB --sync >/dev/null; } 2>&1 || echo "exit $?"; }
+
+rewound_home ab-alone
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$BASE"                 "(ab) a rewind's dropped commit only the branch reaches: worktree at the tip"
+eq "$(branch_of "$W")" "DETACHED"            "(ab) detached, off the branch that holds the commit"
+eq "$(git -C "$RR" rev-parse "refs/heads/$BR")" "$OLD" "(ab) the branch keeps the commit"
+eq "$ERR" ""                                 "(ab) a safe move prints nothing"
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$BASE"                 "(ab) the next sync stays at the tip"
+eq "$(git -C "$RR" rev-parse "refs/heads/$BR")" "$OLD" "(ab) and the branch still keeps the commit"
+eq "$ERR" ""                                 "(ab) and that prints nothing either"
+
+rewound_home ab-reached
+git -C "$RB" update-ref refs/heads/before-rewind "$OLD"
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$BASE"                 "(ab) a rewind's dropped commit another ref reaches: worktree at the tip"
+eq "$(branch_of "$W")" "$BR"                 "(ab) on its per-target branch"
+eq "$(git -C "$RR" rev-parse "refs/heads/$BR")" "$BASE" "(ab) which is reset to the tip"
+eq "$(git -C "$W" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(ab) and still tracks origin/main"
+eq "$(git -C "$RR" rev-parse refs/remotes/origin/before-rewind)" "$OLD" "(ab) the ref that reaches the commit is untouched"
+eq "$ERR" ""                                 "(ab) a safe reset prints nothing"
+
+rewound_home ab-dirty
+echo edited >> "$W/README.md"
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$OLD"                  "(ab) a tracked change keeps a branch ahead of the tip where it is"
+eq "$(branch_of "$W")" "$BR"                 "(ab) and on that branch"
+eq "$(tail -n 1 "$W/README.md")" "edited"    "(ab) the change intact"
+has "$ERR" "uncommitted changes to tracked files" "(ab) the warning names the reason"
+eq "$(lines "$ERR")" "1"                     "(ab) exactly one stderr line"
+
+rewound_home ab-other
+git -C "$W" checkout -q --track -b person-ahead origin/main
+rewind_main
+ERR=$(rewound_sync)
+eq "$(head_of "$W")" "$OLD"                  "(ab) a branch not its own stays ahead of its upstream"
+eq "$(branch_of "$W")" "person-ahead"        "(ab) and stays checked out"
+eq "$ERR" ""                                 "(ab) and says nothing"
+
+# A commit on its own branch with nothing new upstream is the same shape, with no
+# rewind behind it.
+P="$TMP/ab"; mkdir -p "$P"
+run "$P/agentAB" agentAB
+BR=$(branch_of "$P/agentAB")
+echo mine > "$P/agentAB/mine-ab.txt"; git -C "$P/agentAB" add mine-ab.txt; git -C "$P/agentAB" commit -qm mine-ab
+MINE=$(head_of "$P/agentAB")
+ERR=$(sync_stderr "$P/agentAB" agentAB)
+eq "$(head_of "$P/agentAB")" "$(tip)"        "(ab) a local commit with nothing new upstream: worktree at the tip"
+eq "$(branch_of "$P/agentAB")" "DETACHED"    "(ab) detached, off the branch that holds it"
+eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(ab) the branch keeps the local commit"
+eq "$ERR" ""                                 "(ab) that move prints nothing"
+
+# --- (ac) a home at the tip has nothing to do, so a tracked change in it is no
+#          refusal: live homes carry one in .claude/settings.json, and a line at
+#          every start would say nothing. The same goes for a fast-forward past it. --
+P="$TMP/ac"; mkdir -p "$P"
+run "$P/agentAC" agentAC
+BR=$(branch_of "$P/agentAC")
+echo edited >> "$P/agentAC/README.md"
+ERR=$(sync_stderr "$P/agentAC" agentAC)
+eq "$ERR" ""                                 "(ac) at the tip with a tracked change: says nothing"
+eq "$(branch_of "$P/agentAC")" "$BR"         "(ac) stays on its per-target branch"
+advance_remote ac1.txt
+ERR=$(sync_stderr "$P/agentAC" agentAC)
+eq "$(head_of "$P/agentAC")" "$(tip)"        "(ac) a fast-forward the change is not in the way of reaches the tip"
+eq "$(branch_of "$P/agentAC")" "$BR"         "(ac) and stays on that branch"
+eq "$(tail -n 1 "$P/agentAC/README.md")" "edited" "(ac) with the change intact"
+eq "$ERR" ""                                 "(ac) and says nothing either"
+
+# --- (ad) the fast-forward answers for the branch's upstream, and the default branch
+#          is what a home follows. A branch at an upstream that is not the default
+#          branch has nothing to fast-forward to and is not at the tip. ------------
+P="$TMP/ad"; mkdir -p "$P"
+run "$P/agentAD" agentAD
+BR=$(branch_of "$P/agentAD")
+git -C "$P/agentAD" push -q origin HEAD:refs/heads/ad-other
+git -C "$P/agentAD" fetch -q origin
+git -C "$P/agentAD" branch -q --set-upstream-to=origin/ad-other
+advance_remote ad1.txt
+ERR=$(sync_stderr "$P/agentAD" agentAD)
+eq "$(head_of "$P/agentAD")" "$(tip)"        "(ad) its own branch at another upstream reaches the default tip"
+eq "$(branch_of "$P/agentAD")" "$BR"         "(ad) and stays on it"
+eq "$(git -C "$P/agentAD" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(ad) which now tracks origin/main"
+eq "$ERR" ""                                 "(ad) a safe move prints nothing"
+
+# --- (ae) with origin/HEAD unset there is no default tip to reach, so the
+#          fast-forward is as far as a sync gets, and it says why. Its own rig, since
+#          origin/HEAD is shared by all of a repo's worktrees, and set so its fetch
+#          does not put origin/HEAD back, as a current git otherwise does. -----------
+NH="$TMP/noheadrig"; git clone -q "$TMP/remote.git" "$NH"
+P="$TMP/ae"; mkdir -p "$P"; W="$P/agentAE"
+eq "$(rc_of "$NH" "$W" agentAE)" "0"         "(ae) the worktree is made"
+BR=$(branch_of "$W")
+git -C "$NH" config remote.origin.followRemoteHEAD never
+git -C "$NH" remote set-head origin -d
+advance_remote ae1.txt
+ERR=$( { sh "$SCRIPT" "$NH" "$W" agentAE --sync >/dev/null; } 2>&1 || echo "exit $?")
+eq "$(head_of "$W")" "$(tip)"                "(ae) its own branch still fast-forwards to its upstream"
+eq "$(branch_of "$W")" "$BR"                 "(ae) and stays on it"
+has "$ERR" "origin/HEAD is unset"            "(ae) the warning names the reason"
+eq "$(lines "$ERR")" "1"                     "(ae) exactly one stderr line, so the run exited 0"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

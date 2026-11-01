@@ -132,13 +132,20 @@ sync_worktree() {
         # Fast-forward only, never replay local commits: a `pull --rebase` replays
         # shed commits onto every fetched tip and parks the worktree mid-rebase.
         UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || UPSTREAM=""
-        if [ -n "$UPSTREAM" ] && git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1; then
+        # The merge also succeeds on a branch ahead of its upstream, where it moves
+        # nothing, so a fast-forward ends the sync only when it leaves HEAD at the tip.
+        if [ -n "$UPSTREAM" ] && git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1 && head_at_default_tip; then
             return 0
         fi
         # Any branch but the home's own is someone's work, left as it stands.
         [ "$CURRENT" = "$(branch_name)" ] || return 0
     fi
     move_to_default_tip
+}
+
+head_at_default_tip() {
+    TIP=$(git -C "$WT" rev-parse -q --verify refs/remotes/origin/HEAD 2>/dev/null) || return 1
+    [ "$(git -C "$WT" rev-parse HEAD)" = "$TIP" ]
 }
 
 # A home holds no work of its own, so it moves to the remote default tip unless
