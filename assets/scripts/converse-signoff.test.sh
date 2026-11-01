@@ -222,11 +222,13 @@ GH
 chmod +x "$TMP/bin/gh"
 
 # --- timeout stub -------------------------------------------------------------
-# Runs what it is given, so a suite never waits on a real bound. GH_STALL=<text>
-# stands for a connection that never answers the gh call whose arguments hold
-# <text>: under the bound it runs out of time, as timeout reports it, and with no
-# bound it answers as usual, which is how (APPROVE-STALL) tells the two apart.
+# Runs what it is given, so a suite never waits on a real bound, and logs its
+# arguments to $STORE/timeout-args. GH_STALL=<text> stands for a connection that
+# never answers the gh call whose arguments hold <text>: under the bound it runs
+# out of time, as timeout reports it, and with no bound it answers as usual, which
+# is how (APPROVE-STALL) tells the two apart.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/timeout" <<'T'
+printf '%s\n' "$*" >> "$STORE/timeout-args"
 while :; do
   case "${1:-}" in
     --foreground) shift ;;
@@ -1062,6 +1064,8 @@ esac
 eq "$(field tk-rev status)" "closed" "(APPROVE-OWED) the ruling still answers the gate"
 has "$(cat "$GH_CALLS")" "repos/acme/widgets/pulls/77/reviews" "(APPROVE-OWED) the reviews are read from the repo the PR's url names"
 eq "$(grep -cv '^writes=0 ' "$GH_CALLS" || true)" 0 "(APPROVE-OWED) …before the first write"
+has "$(cat "$STORE/timeout-args")" "-k 5 20 gh api --hostname github.com user" "(APPROVE-OWED) the login read gives up after 20 seconds"
+has "$(cat "$STORE/timeout-args")" "-k 5 20 gh api --hostname github.com --paginate repos/acme/widgets/pulls/77/reviews" "(APPROVE-OWED) …and so does the review list"
 run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-RERUN) a re-run exits 0"
 said "(APPROVE-RERUN)" owed
@@ -1228,7 +1232,7 @@ run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}"
 eq "$(meta tk-anc gc.takeaway)" "the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) two PRs left standing are counted in the headline"
 eq "$(field tk-conv close_reason)" "the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) …and the close reason"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "--summary the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) …and the PR reminder's summary"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "PR #77, PR #78 still need your Approve on GitHub" "(APPROVE-TWO) …and its actions name them"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "as it stands; PR #77, PR #78 still need your Approve on GitHub" "(APPROVE-TWO) …and its actions name them"
 has "$OUT" "PR #77 still needs the operator's Approve review" "(APPROVE-TWO) …and the sitting is told of the first"
 has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-TWO) …with its link"
 has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …and of the second"
