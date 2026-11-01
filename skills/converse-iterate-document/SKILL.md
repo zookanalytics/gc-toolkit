@@ -9,13 +9,14 @@ A sitting writes no files, so it changes a document by sending work. A worker
 sent on a short ruling makes every call the ruling left open, the operator
 redlines those calls at the next gate, and each round costs a whole re-review.
 So settle the calls here with the operator, item by item, and then send one
-rework that carries the decisions as content, for a worker to transcribe.
+rework that carries the decisions as content, for a worker to transcribe. The
+block of notes that carries them is the scaffold.
 
 This applies when the operator wants a document's content changed and more than
 one call stands between its text and what they want. The document can be a
 design, a spec, a docs page, a prompt or a skill, on an open PR or not written
-yet. A ruling that asks for one plain change needs none of this: it goes straight
-to the sign-off (step 7).
+yet. A ruling that asks for one plain change needs none of this: it goes
+straight to the sign-off (step 7).
 
 The steps keep their own skills. The hold still records what the operator owes
 before the first framing, each hand-back is still recorded before you post it,
@@ -41,8 +42,8 @@ found, at the top of every call below.
   a decision the worker transcribes. Read what another system does or cannot do
   at a named commit, and send a call the document rests on to a subagent charged
   with breaking it.
-- **Record each ruling on the subject when it lands (step 6),** dated, in the
-  operator's words where they gave them.
+- **Record each ruling on the subject when it lands (step 6),** opening with
+  `$(date -u +%Y-%m-%d)`, in the operator's words where they gave them.
 
 ## Where the big picture lives between sittings
 
@@ -79,20 +80,21 @@ operator would want to make. Read each line that way:
 
 The block goes on the subject. When the PR's anchor is another bead, it goes on
 that anchor instead, because the rework's reviewers read it there, so use that
-bead's id in place of `$SUBJECT`. The first lines below are the worker's rules,
-so keep them as they stand:
+bead's id in place of `$SUBJECT` and name that bead in the subject's record,
+because the next sitting primes from the subject. The first lines below are the
+worker's rules, so keep them as they stand:
 
 ```bash
 TODAY=$(date -u +%Y-%m-%d) \
-  && gc bd update "$SUBJECT" --append-notes "## Current state ($TODAY)
-$(cat <<'SCAFFOLD'
+  && SCAFFOLD="## Current state ($TODAY)
+$(cat <<'BLOCK'
 <what the operator ruled and where the document stands, in a sentence or two>
 
 This block is the rework's scaffold: decisions, not questions, settled against <the files> at <the commit>.
 Where a file's text and this block disagree, this block wins.
 Its facts are yours to check: re-derive each count, line reference and claim about another system, and where one is false, write what is true and say so in a note on this bead.
 Where it names a thing and leaves the form open, take the smallest form that carries the decided content and list each choice in that note, because the re-review reads this bead.
-Self-review reads the branch against this block, line by line.
+Self-review starts fresh and reads the branch against this block, line by line, so your work bead's notes name this block.
 A point this block and its sources cannot settle goes to the operator through a human gate. Never decide it.
 
 Decisions in force:
@@ -105,9 +107,10 @@ OTHER FILES: <each other file the decisions reach, with the same verbs, and what
 VERIFY: <each fact nobody has settled, where to read it, and where the document states it>
 
 Open questions: none
-SCAFFOLD
+BLOCK
 )" \
-  && gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -e --arg h "## Current state ($TODAY)" '(.[0].notes // "") | contains($h)' >/dev/null \
+  && gc bd update "$SUBJECT" --append-notes "$SCAFFOLD" \
+  && gc bd show "$SUBJECT" --json | jq -e --arg b "$SCAFFOLD" '(.[0].notes // "") | contains($b)' >/dev/null \
   && echo "the scaffold reads back, dated $TODAY"
 ```
 
@@ -116,8 +119,8 @@ No closing line means the scaffold did not land: send nothing.
 ## Send one rework
 
 On an open PR the sign-off files the rework, and its ruling line is what the
-worker starts from, so that line names the block. Pass the bead that holds it and
-the date the write printed:
+worker starts from, so that line names the block. Pass the bead that holds it
+and the date the write printed:
 
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
@@ -129,13 +132,14 @@ the date the write printed:
 The `converse-settle` step carries the rest of that call, such as `--pr-anchor`
 when the ruling reaches more than one PR. Send it only when no rework is running
 on the branch: a running worker may never read a newer block, and two workers on
-one branch collide at the push.
+one branch collide at the push. `"$CONV/bead-context.sh" <bead> --frontier` lists
+a running rework among the open blockers.
 
 With no PR open, `--rework` has nothing to act on. A subject that is the work
 keeps the block in its own notes, and work on a new bead names the block in its
 description the same way the ruling line does. Send either one as the
 `converse-settle` step says.
 
-A further round is another block and one more rework, and the newest block is the
-one in force. When the operator engages the document again, start again from the
-read above.
+A further round is another block and one more rework, and the newest block is
+the one in force. When the operator engages the document again, start again from
+the read above.

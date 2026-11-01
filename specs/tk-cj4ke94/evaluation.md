@@ -64,9 +64,9 @@ and the options for that were:
 
 | Home | When it loads | Result |
 |---|---|---|
-| Text in the converse prompt, the literal reading of "standing instructions" | Every sitting, at every turn | 13 of the 104 visits filed since 2026-10-15 ended in a ruling rework on a design or docs PR, so most sittings would carry it unused |
+| Text in the converse prompt, the literal reading of "standing instructions" | Every sitting, at every turn | 13 of the 104 conversations filed since 2026-10-15, as visit beads then, ended in a ruling rework on a design or docs PR, so most sittings would carry it unused |
 | A section of `converse-continue` | Every sitting that reaches step 8 | The same, a little later |
-| An option in the `prs` or `records` skill | Any role that loads them | The loop is a sitting's, and those skills keep converse's vocabulary out |
+| An option in the `prs` or `records` skill | Any role that loads them | The loop is a sitting's, and those skills' descriptions keep converse's vocabulary out |
 | A skill the prompt's step table names | Only when a sitting iterates on a document | Chosen |
 
 The choice departs from the literal words the operator answered "Sure" to, and it
@@ -114,7 +114,7 @@ sittings ran on converse-fable.
 | Facts to check, not to transcribe | The first scaffold copied "three changed live answers" from an old note, and the design had two. The accepted naming proposal said `arm` reuses gc's word, and Gas City has no dispatch primitive of that name. Both workers re-derived these and said so on the anchor. |
 | Each choice of form, listed on the bead | Both workers listed theirs on the anchor. A review reads them there, because `mol-review` prints `gc bd show` of the anchor as it gathers. |
 | A stop through a human gate | The runs' blocks said a stop "says so on this bead". The polecat doctrine holds that a run ending needs a gate behind it, so the block says that. No run had to stop. |
-| Self-review against the block | The first rework's self-review did this of its own accord. The block asks for it, because no review check compares a rework with its scaffold. |
+| Self-review against the block, with the worker's notes naming it | The first rework's self-review did this of its own accord. The block asks for it, because no review check compares a rework with its scaffold. A self-review session starts fresh and workspace-setup clears the `rejection_reason` that names the block, so it finds the block through the worker's notes. Both workers had written that note unasked. |
 | The commit its line references read at | Both scaffolds named it, and the audit's line references read at the rework's head. |
 
 ### Against charter-to-rework rounds
@@ -133,8 +133,8 @@ The bead's stated cost is rounds. Counts for design and docs PRs in the same wee
 
 This shows a direction and no more. The documents differ in subject and size, and
 the larger ones drew more review: PR #1305's design is 2,966 lines at main and
-PR #1298's 1,226, against 521 and 463 for PR #1345's page and design, 591 for
-PR #1352's and 388 for PR #1328's. The last ruling round on each of PR #1305 and
+PR #1298's 1,226, against 521 and 463 for PR #1345's page and design on their
+integration branch, and 591 for PR #1352's and 388 for PR #1328's at main. The last ruling round on each of PR #1305 and
 PR #1298 also carried a settled `## Current state` block, and each was still followed
 by two review reworks. So a settled block does not by itself end review rounds on a
 large design.
@@ -150,9 +150,9 @@ from a fixture holding only the skills, with `GC_*`, `BEADS_*` and `CLAUDE_*` un
 and auto memory off, and with 10 turns for the send case. Codex runs
 `codex exec -s read-only -m gpt-6.1-sol` with the skills under `.agents/skills`. A
 load is a Skill call, or a Codex command that reads the `SKILL.md`. In the Claude
-arms 281 of 290 shell calls came back refused, and the other nine were `pwd` and
+arms 302 of 311 shell calls came back refused, and the other nine were `pwd` and
 `ls -la`. Codex ran read-only and outside any city, where `gc bd` answers "not in a
-city directory". So nothing was sent. 62 Claude runs cost $14.57, beside 6 Codex
+city directory". So nothing was sent. 67 Claude runs cost $16.96, beside 6 Codex
 runs.
 
 | Case | The operator's turn | Opus | Fable | Codex |
@@ -171,17 +171,23 @@ runs.
 N2 is the one miss. It is a document with one plain change, and the skill says such
 a ruling needs none of this. All nine N2 runs took that path whether or not they
 loaded it: no block, and where a run reached the sign-off, a one-line ruling. So a
-load there costs one read of the skill's 7.4 KB and changes nothing.
+load there costs one read of the skill's 7.8 KB and changes nothing.
+
+The load cases ran on the skill's first two texts, and the description and table
+row that decide a load are the same in all three texts below.
 
 The send case hands a sitting a five-section page and five settled rulings, one an
 accepted proposal and one in the operator's words, then "Yes, send it." Base is the
-prompt and skills at 451687e63. The Opus branch row holds 4 runs on the first text
-and 3 on the final text, which moved one paragraph and changed two clauses.
+prompt and skills at 451687e63. The branch rows span three texts of the skill. The
+first took 4 Opus and 2 Fable runs. The second moved one paragraph and changed two
+clauses, and took 3 Opus runs. The committed text took 3 Opus and 2 Fable runs. It
+also says what a scaffold is before first using the word, reads the whole block
+back, and adds the lines that name the block for self-review and the next sitting.
 
 | Arm | Writes a block before the sign-off | A verb for every section | Accepted text and operator's words in it | Worker's rules in it | Ruling line names the block |
 |---|---|---|---|---|---|
-| Branch, Opus | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 |
-| Branch, Fable | 2 of 2 | 2 of 2 | 2 of 2 | 2 of 2 | 2 of 2 |
+| Branch, Opus | 10 of 10 | 10 of 10 | 10 of 10 | 10 of 10 | 10 of 10 |
+| Branch, Fable | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
 | Base, Opus | 1 of 4 | 0 of 4 | 1 of 4 | 0 of 4 | 0 of 4 |
 
 On base, three runs put the decisions in one long `--ruling` line, and the fourth

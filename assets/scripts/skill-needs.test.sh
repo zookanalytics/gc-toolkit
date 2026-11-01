@@ -650,7 +650,8 @@ cat >"$CH/bin/gc" <<'STUB'
 # scripts-dir under any binding, prints an id for a create, and applies an
 # update's --set-metadata and --unset-metadata to a store of one file per key.
 # An --append-notes adds to one notes file that a show reads back, unless
-# CHAIN_NOTES_LOST is set, when it exits 0 and nothing lands.
+# CHAIN_NOTES_LOST is set, when it exits 0 and nothing lands. A show also reads
+# CHAIN_NOTES_EARLIER, as notes already on the bead.
 # A dep add records its edge as a "<waiting> <blocker>" line that a dep list
 # reads back and a dep remove deletes, in the one store a --rig names or not.
 # With CHAIN_CROSS_STORE set, a dep add answers as bd does for a blocker in
@@ -673,7 +674,7 @@ case "$1 ${2:-}" in
                 *) shift ;;
             esac
         done ;;
-    "bd show") jq -n --rawfile n "$CHAIN_DIR/notes" '[{notes: $n}]' ;;
+    "bd show") { [ -z "${CHAIN_NOTES_EARLIER:-}" ] || printf '%s\n' "$CHAIN_NOTES_EARLIER"; cat "$CHAIN_DIR/notes"; } | jq -Rs '[{notes: .}]' ;;
     "bd dep")
         case "${3:-}" in
             add)
@@ -754,7 +755,7 @@ disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outc
 converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
 converse-settle: arming a follow-up|$SETTLE|gc bd --rig <rig> dep add <follow-up> <blocker>
 converse-settle: arming a follow-up on a human gate|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
-converse-iterate-document: writing the scaffold|$ITERATE|--append-notes "## Current state (\$TODAY)
+converse-iterate-document: writing the scaffold|$ITERATE|--append-notes "\$SCAFFOLD"
 SPECS
 # The arm runs only once the follow-up's own store reads the edge back. A dep add
 # onto a bead in another store prints success and exits 0 but holds nothing, so
@@ -790,7 +791,9 @@ have "…by name" '`converse-iterate-document` |' "$PROMPT"
 have "the ruling line names the block the worker starts from" 'to the scaffold in the notes of <bead>, the block headed ## Current state (<date>)' "$ITERATE"
 have "…and the sign-off files the rework" '--route human --no-wait --rework' "$ITERATE"
 have "every section of the document gets a verb" 'keep, cut, rewrite or add' "$ITERATE"
-fenced_block "$ITERATE" '--append-notes "## Current state ($TODAY)' | fill_block >"$CH/block"
+have "a self-review that starts fresh finds the block through the worker's notes" "so your work bead's notes name this block" "$ITERATE"
+have "a block on another bead leaves the next sitting its name" "name that bead in the subject's record" "$ITERATE"
+fenced_block "$ITERATE" '--append-notes "$SCAFFOLD"' | fill_block >"$CH/block"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -815,6 +818,12 @@ for sh_ in $shells; do
         ok "($sh_) converse-iterate-document: a block that does not read back is not reported as written"
     else
         bad "($sh_) converse-iterate-document: a block that does not read back is not reported as written" "exit $rc"
+    fi
+    rc=$(CHAIN_NOTES_LOST=1 CHAIN_NOTES_EARLIER="## Current state ($(date -u +%Y-%m-%d))" run_chain "$run" "$CH/block")
+    if [ "$rc" -ne 0 ]; then
+        ok "($sh_) converse-iterate-document: an earlier block of the same date does not pass for one that did not land"
+    else
+        bad "($sh_) converse-iterate-document: an earlier block of the same date does not pass for one that did not land" "exit $rc"
     fi
 done
 echo "── a moot or benign close releases a subject a cut-short hold left at held ──"
