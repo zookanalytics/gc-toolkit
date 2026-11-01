@@ -501,7 +501,7 @@ hold() {
   jq -c --arg id "$1" --arg who "$2" 'map(if .id == $id then .status = "in_progress" | .assignee = $who
     | .metadata["gc.session_id"] = $who | .metadata["gc.session_name"] = "x" | .metadata["gc.routed_to"] = "pool" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
 }
-direct() { submit HOOK_CURRENT=tk-w "$@" -- --bead tk-w --base main --notes "Implemented: it"; }
+direct() { submit HOOK_CURRENT=tk-w -- --bead tk-w --base main --notes "Implemented: it"; }
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
 direct
 eq "$RC" 0 "(36) a direct claim hands off and exits 0: $OUT"
