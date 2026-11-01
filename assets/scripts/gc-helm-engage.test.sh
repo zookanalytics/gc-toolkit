@@ -1905,6 +1905,7 @@ export HAVE_CONV=1
 fresh_gctk; run_fresh tk-subj --no-attach --no-input
 eq "$RC" 0 "(HOLD-NOINPUT) --no-input on a held bead exits 0"
 has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate' "(HOLD-NOINPUT) …naming the gate and how to engage it"
+hasnt "$(cat "$TMP/err")" "is held by human gate" "(HOLD-NOINPUT) …on stdout, all the board's route returns from an engage that exits 0"
 has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-NOINPUT) …and carrying on with the bead's conversation"
 hasnt "$CALLED" "--type replies-to" "(HOLD-NOINPUT) …which answers no gate unasked"
 fresh_gctk; run_fresh tk-subj --reason "a distinct concern" --no-attach
@@ -1935,6 +1936,7 @@ export GCTK_GATES_FAIL=1
 fresh_gctk; run_fresh tk-subj --no-attach --no-input
 eq "$RC" 0 "(HOLD-UNREAD) a reader that fails does not stop the engage"
 has "$OUT" "could not read the human gates that hold tk-subj" "(HOLD-UNREAD) …which says so"
+hasnt "$(cat "$TMP/err")" "could not read the human gates" "(HOLD-UNREAD) …on stdout, as the names of the gates are"
 has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-UNREAD) …and goes on"
 fresh_gctk; run_fresh_tty '\n\n' tk-subj --no-attach
 eq "$RC" 0 "(HOLD-UNREAD) …on a TTY as well"

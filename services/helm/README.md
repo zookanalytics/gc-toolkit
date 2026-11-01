@@ -1430,7 +1430,8 @@ is a read. Each shells out to the matching `gc-helm.sh` verb:
   recommendation the operator has already decided (Accept/Discuss flow,
   tk-hsm4d9). It refuses while another human gate blocks the bead.
 - **engage** spawns a Discuss sitting bound to the bead's conversation
-  (`--no-input --no-attach`).
+  (`--no-input --no-attach`). Its message also names each open human gate that
+  holds the bead and how to engage it, since that sitting answers none of them.
 - **dismiss** ends the sitting: it closes the conversation a live sitting holds,
   and answers no gate.
 

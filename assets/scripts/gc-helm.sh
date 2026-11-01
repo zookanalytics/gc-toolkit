@@ -3433,9 +3433,10 @@ holding_gate_rows() {
 
 # engage_warn_gates_unread <bead> — say that the gates holding the bead did not
 # read, which leaves the operator to look for them. Engage goes on: a sitting on
-# the bead can still be started.
+# the bead can still be started. It writes to stdout, as engage_say_holding_gates
+# does, because stdout is all the board's route returns from an engage that exits 0.
 engage_warn_gates_unread() {
-    echo "$PROG: engage: could not read the human gates that hold $1 ('gctk pr-status gates' did not answer), so none are offered." >&2
+    echo "$PROG: engage: could not read the human gates that hold $1 ('gctk pr-status gates' did not answer), so none are offered."
 }
 
 # engage_say_holding_gates <bead> — name each open human gate that holds the bead,
@@ -3449,7 +3450,7 @@ engage_say_holding_gates() {
     printf '%s\n' "$_esh_rows" | while IFS= read -r _esh_row; do
         [ -n "$_esh_row" ] || continue
         _esh_id=$(printf '%s' "$_esh_row" | cut -f1)
-        echo "$PROG: engage: $1 is held by human gate $_esh_id (\"$(printf '%s' "$_esh_row" | cut -f2-)\"). To answer it: $PROG engage $_esh_id" >&2
+        echo "$PROG: engage: $1 is held by human gate $_esh_id (\"$(printf '%s' "$_esh_row" | cut -f2-)\"). To answer it: $PROG engage $_esh_id"
     done
 }
 
