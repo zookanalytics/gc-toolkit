@@ -612,8 +612,6 @@ eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-live" "a 
 # files the second writer's gate, so the wait is on the gate the writer has just
 # filed and that gate no longer comes first.
 export RACE_KEY=polecat-race
-# The stub names a gate by the store's next row, and reset leaves eight.
-WRITER_GATE=tk-gate9
 cat > "$TMP/interleave.sh" <<'HOOK'
 #!/usr/bin/env bash
 "${WAITER:?}" tk-work --key "${RACE_KEY:?}" --subject tk-anchor --formula mol-polecat-work > "${WAITER_LOG:?}" 2>&1
@@ -627,6 +625,8 @@ chmod +x "$TMP/interleave.sh"
 # readers every caller of a bead's gates uses.
 gates_holding() { ( . "$HERE/bd-lib.sh"; bd_human_gates "$1" | bd_gates_open_under_key "$RACE_KEY" | jq -r 'map(.id) | join(" ")' ); }
 reset
+# The stub names a gate by the store's next row.
+WRITER_GATE="tk-gate$(( $(jq 'length' "$FAKE_STORE") + 1 ))"
 FILED=$(WAITER="$SCRIPT" WAITER_LOG="$TMP/waiter.log" FAKE_GATE_CREATE_HOOK="$TMP/interleave.sh" \
   "$HERE/human-gate.sh" --subject tk-anchor --key "$RACE_KEY" --message "Which base does this rebuild take?" 2>"$TMP/filer.err"); RC=$?
 eq "$RC" 0 "two writers: the filing exits 0"
