@@ -1693,15 +1693,13 @@ reconcile_dispatch() {
         # holds the bead above. This is one read per sling, so it does not grow with
         # the armed set. A read that does not answer leaves the bead armed for the
         # next pass.
-        if [ "$DRY_RUN" != 1 ]; then
-            if ! fresh="$(show_bead "$id")" || [ -z "$fresh" ]; then
-                echo "$PROG: WARN could not re-read the arm on $id before slinging it — leaving armed, not slinging" >&2
-                failed=$((failed + 1)); continue
-            fi
-            if [ -z "$(meta_of "$fresh" "$K_TARGET")" ]; then
-                echo "$PROG: withdrawn $id — its arm was removed after this pass listed it; not slinging"
-                retired=$((retired + 1)); continue
-            fi
+        if ! fresh="$(show_bead "$id")" || [ -z "$fresh" ]; then
+            echo "$PROG: WARN could not re-read the arm on $id before slinging it — leaving armed, not slinging" >&2
+            failed=$((failed + 1)); continue
+        fi
+        if [ -z "$(meta_of "$fresh" "$K_TARGET")" ]; then
+            echo "$PROG: withdrawn $id — its arm was removed after this pass listed it; not slinging"
+            retired=$((retired + 1)); continue
         fi
 
         # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying
