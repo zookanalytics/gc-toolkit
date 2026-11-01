@@ -6,7 +6,8 @@
 # that answers, for one bead, whether every precondition for that act holds. It
 # is a SET of independent clauses run in order; the first to refuse stops the set
 # and names why. The clauses are no-open-human-gate and epic-ruling-recorded (a
-# stewarded epic closes only on the close ruling, not its last unit merging).
+# stewarded epic closes only on the close ruling or a disposition, not its last
+# unit merging).
 # A later precondition is one more `clause_* "$1" || return 1` line in
 # finalize_gate_check.
 #
@@ -110,8 +111,8 @@ clause_no_open_human_gate() {
 # finalizes merge anchors, and bead-rehome.sh stamps the epic's disposition before
 # it runs the gate, which this clause passes. Its --check, ahead of that stamp, asks
 # with <as-disposed> set. The clause therefore holds only a gate-running close that
-# reaches an undisposed epic. A bare `gc bd close` runs no
-# gate, and doctor/check-epic-closed-implies-ruled (I15) reports it after the fact.
+# reaches an undisposed epic. A bare `gc bd close` runs no gate, and
+# doctor/check-epic-closed-implies-ruled (I15) reports it after the fact.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     _fgr_as_disposed="${2:-}"

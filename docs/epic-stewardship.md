@@ -7,16 +7,17 @@ description: How the pack holds an epic open until its hypothesis is ruled close
 
 Epic stewardship holds an epic to its contract. An epic that carries a
 hypothesis stays open until the operator rules it closed and records the
-outcome ([epics.md](epics.md)). The pack enforces that with a finalize-gate
-clause and a doctor invariant. It does not yet prompt the rulings themselves:
-the Epic Checkpoint layer that will is direction, described at the end of this
-doc and built by the follow-on epic *Epic Checkpoints & Features*.
+outcome, or until a disposition closes it ([epics.md](epics.md)). The pack
+enforces that with a finalize-gate clause and a doctor invariant. It does not
+yet prompt the rulings themselves: the Epic Checkpoint layer that will is
+direction, described at the end of this doc and built by the follow-on epic
+*Epic Checkpoints & Features*.
 
 ## Scope
 
 **Mandate.** The enforcement that an epic closes only on a recorded close
-ruling: the ruling fields an epic carries, the finalize-gate clause, the doctor
-invariant, and the direction the stewardship grows in.
+ruling or a disposition: the ruling fields an epic carries, the finalize-gate
+clause, the doctor invariant, and the direction the stewardship grows in.
 
 **Boundaries.** Not the contract an epic carries or what each ruling means —
 that is [epics.md](epics.md). Not how a bead becomes a member of an epic;
