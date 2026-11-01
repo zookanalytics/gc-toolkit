@@ -449,8 +449,9 @@ has landed.
 ## Method
 The polecat doctrine's paragraph on integration branches: read the finished
 branch and each landed bead's own summary, state what the whole branch does,
-name where it departs from the description of $SUBJECT, and read the write
-back. Change no file, and write nothing else on $SUBJECT.")
+name where it departs from the description of $SUBJECT, title $SUBJECT with the
+branch's subject line, and read both writes back. Change no file, and write
+nothing else on $SUBJECT.")
   [ -z "$EPIC" ] || SUMMARY_ARGS+=(--parent "$EPIC")
   CREATE_JSON=$(gc bd create "${SUMMARY_ARGS[@]}" --json | tr -d '[:cntrl:]')
   SUMMARY_TASK=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)

@@ -630,7 +630,7 @@ elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" -
   git status --porcelain
   # All work is useful work — commit whatever is uncommitted, then publish.
   git add -A
-  git commit -m "witness: salvage work from orphaned agent (<bead>)" || true
+  git commit -m "chore: salvage work from an orphaned agent (<bead>)" || true
   BRANCH=$(git branch --show-current)
   git push origin HEAD
   gc bd update <bead> --set-metadata branch="$BRANCH"

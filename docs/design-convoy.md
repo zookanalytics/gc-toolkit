@@ -140,13 +140,15 @@ its own.
 task by `blocks` edges, and the `dispatch` step assigned it to the refinery. The
 summary task is dispatched once both children have landed, and writes the
 subject's `pr_summary` from the finished branch: what the whole branch does,
-and where the finished work departs from the subject's description. Once it
-closes, nothing the subject waits on is open. The refinery takes the subject and
-brings its branch current with the default branch, and the merge cadence opens
-the PR from the integration branch into the default branch, with the summary
-task's account as its `## Summary`. The same universal rule holds that PR until
-an operator's approval stands on it, so the operator reviews the whole unit,
-design and implementation together, before the default branch moves.
+and where the finished work departs from the subject's description. It also
+titles the subject with the branch's subject line, because the PR's title is
+composed from the subject's. Once it closes, nothing the subject waits on is
+open. The refinery takes the subject and brings its branch current with the
+default branch, and the merge cadence opens the PR from the integration branch
+into the default branch, with the summary task's account as its `## Summary`.
+The same universal rule holds that PR until an operator's approval stands on
+it, so the operator reviews the whole unit, design and implementation together,
+before the default branch moves.
 
 ## When the subject closes
 

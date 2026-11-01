@@ -126,10 +126,11 @@ bead. This is how to write it:
    where the finished work departs from the landing bead's description: work the
    description promised that did not land, work that landed beyond it, and an
    approach that changed.
-4. Stamp it on the landing bead with
-   `gc bd update <landing-bead> --set-metadata pr_summary="$(cat <file>)"`, read
-   it back, and write nothing else there. The formula's write-report step then
-   closes the task, which releases the landing bead to the refinery.
+4. Stamp it on the landing bead, with the whole branch's subject line as its title
+   (the skill `{{ .BindingPrefix }}subject-lines`):
+   `gc bd update <landing-bead> --title "<subject line>" --set-metadata pr_summary="$(cat <file>)"`.
+   Read both back, and write nothing else there. The formula's write-report step
+   then closes the task, which releases the landing bead to the refinery.
 
 ## Work bead metadata contract
 

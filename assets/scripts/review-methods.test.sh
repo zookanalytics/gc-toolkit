@@ -177,6 +177,9 @@ echo "# the arch skill's rules on docs/architecture.md, and this repo's own arch
 flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 hasF() { if flat "$1" | grep -qF -- "$2"; then ok "$3"; else bad "$3" "missing: $2"; fi; }
 notF() { if flat "$1" | grep -qF -- "$2"; then bad "$3" "unexpected: $2"; else ok "$3"; fi; }
+hasF "$METHOD" 'a title whose type or words misname what the diff does' "the correctness method judges a PR title's type and words against its diff"
+hasF "$METHOD" 'a false one blocks as a false summary does' "…blocks a false title"
+hasF "$METHOD" 'one that is true but merely weak is a P2' "…and grades a title that is only weak a P2"
 ARCH_SKILL="$ROOT/skills/review-arch/SKILL.md"
 hasF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "the arch skill approves no commit without docs/architecture.md"
 hasF "$ARCH_SKILL" 'a passable account of the architecture the change covers' "…whose change adds one covering the architecture it covers"

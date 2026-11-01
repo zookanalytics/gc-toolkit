@@ -257,18 +257,20 @@ prs_establish_region() { # <body-file> <section-file> <out-file>
 # own title; each writer appends the bead id. pr-open.sh composes it at create
 # and pr-stack.sh keeps an open PR's title equal to it, so both read the type
 # from here and a title the create wrote is one the refresh already agrees with.
+# The type is the author's: the subject-lines skill has the anchor's title open
+# with the type that says what the branch does, and a title that opens with a
+# recognized type is kept as written, whatever the bead's kind.
 # A conventional-commit PR-title check (which product repos run on every PR)
-# requires the title to open with a type token: `type:` or `type(scope):`.
-# Bead titles carry none, so one is derived from the bead's issue_type. A
-# title that already opens with a recognized conventional type is left
-# untouched, so a bead a human already titled `fix(x): …` is not
-# double-prefixed. The derived types are ordinary conventional types every
-# such check accepts; the recognized set is wider so any hand-written prefix
-# survives. The prefix test is a regex match on the title itself rather than a
-# pipe into `grep -q`, for the pipefail reason prs_region_names_head gives, and
-# it reads only the title's opening, where the type has to be.
-CONVENTIONAL_TYPES='build|chore|docs|feat|fix|ops|perf|refactor|revert|security|style|test'
-cc_type_for() { # <issue_type> — the conventional-commit type for a bead kind
+# requires the title to open with a type token: `type:` or `type(scope):`, so a
+# title no author typed still needs one. The bead's issue_type is the only signal
+# left by then, and cc_type_for reads it as a last resort. The types it supplies
+# are ordinary conventional types every such check accepts; the recognized set is
+# wider so any hand-written prefix survives. The prefix test is a regex match on
+# the title itself rather than a pipe into `grep -q`, for the pipefail reason
+# prs_region_names_head gives, and it reads only the title's opening, where the
+# type has to be.
+CONVENTIONAL_TYPES='build|chore|ci|docs|feat|fix|ops|perf|refactor|revert|security|style|test'
+cc_type_for() { # <issue_type> — a type for a title no author typed, from the bead's kind
   case "${1:-}" in
     bug)          printf 'fix' ;;
     feature|feat) printf 'feat' ;;
