@@ -749,7 +749,7 @@ records `blocked` only for a cause no automated actor will clear:
 | `check-failed` | a required check's newest run failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR`; or the `UNSTABLE` arm holds the head on a superseded run that ended without passing |
 | `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
 | `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
-| `blocker` | a live blocker holds the anchor, and no automated actor holds any of its live blockers; or the merge removes a pack script open steps call, and a person's gate parks one of their runs, which is the blocker that holds it |
+| `blocker` | a live blocker holds the anchor, and no automated actor holds any of its live blockers; or the merge removes a pack script open steps call, and a person's gate or a suspended rig parks one of their runs, which is the blocker that holds it |
 | `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check whose newest run failed or is still running |
 
 GitHub reports `BLOCKED` for every unmet rule, so the pass reads the branch's
@@ -815,8 +815,8 @@ posture axis.
 
 A merge held for open runs that call a pack script it removes, or for the rig
 checkout to stop naming one, is `settled`: every lane is green and the PR waits on
-the merge pass. A person's gate that parks one of those runs makes it `blocked`,
-cause `blocker`, with a reason that names the gate
+the merge pass. A person's gate or a suspended rig that parks one of those runs
+makes it `blocked`, cause `blocker`, with a reason that names what parks it
 ([refinery-merge-cadence.md](refinery-merge-cadence.md), arm 2).
 
 **Dated keys.** `pr.machine` and `pr_posture` carry a third component,

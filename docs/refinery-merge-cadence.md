@@ -263,9 +263,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    worker cannot make goes through the worker's own human gate. The PR stays open
    and its approval stands across the push, so the hand-off lands on the approval
    it has, as any small fix does
-   ([state-machine.md](state-machine.md#checks)). A rejection that does not land
-   leaves the merge held, and the next pass meets the same formula and asks
-   again.
+   ([state-machine.md](state-machine.md#checks)). The rejection's release lands
+   first and takes the anchor out of the merge passes until the rework hands it
+   back. A pour that then stops short leaves an armed dispatch or a human gate
+   carrying the bead. A release that does not land leaves the anchor in the
+   passes, where the merge stays held and a later pass meets the same formula and
+   asks again.
 
    A formula only the rig checkout's HEAD names is a wait. The city pours its runs
    from that checkout until it is fast-forwarded, and the fast-forward clears it,
@@ -280,14 +283,16 @@ the cadence — the arms run whether or not any refinery session is awake.
    two do not alternate: the board reads "green — waiting on the merge pass" and
    the PR `status: merging`.
 
-   A run a person's gate parks ends only once that gate is released or the run is
-   cancelled, so one parked caller makes the verdict `blocked`, cause `blocker`,
-   with a reason that names the gate and what ends the wait. The PR reads
-   `status: needs-attention` and `held: blocked`, and the board's row gives the
-   reason. `gate-ensure.sh` leaves that verdict standing, and the next pass that
-   finds no parked caller replaces it. A run is parked when one of its open steps
-   is blocked by a gate the city does not close by itself: a human gate or a
-   park, and not a timer gate or a gate on a GitHub run or pull request.
+   A parked run ends only when a person acts, so one parked caller makes the
+   verdict `blocked`, cause `blocker`, with a reason that names what parks it and
+   what ends the wait. The PR reads `status: needs-attention` and `held: blocked`,
+   and the board's row gives the reason. `gate-ensure.sh` leaves that verdict
+   standing, and the next pass that finds no parked caller replaces it. A run is
+   parked when one of its open steps is blocked by a gate the city does not close
+   by itself: a human gate or a park, and not a timer gate or a gate on a GitHub
+   run or pull request. That person releases the gate or cancels the run. A run
+   is parked too when its rig is suspended, since nothing works it until a person
+   resumes the rig or cancels the run.
 
    Each pass's log counts the calling steps and names the first of them, and
    `script-callers.sh <script>` lists each with its run, any gate that parks it

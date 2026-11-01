@@ -38,9 +38,8 @@ import (
 // and the sibling shell helpers (human-gate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
 // script-callers.sh, rejection-repool.sh, pr-status-label.sh, blocker-holder.sh,
-// pr-post.sh),
-// resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's
-// directory before it execs this binary.
+// pr-post.sh), resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as
+// merge.sh's directory before it execs this binary.
 // Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
 // the observability and permissions surfaces those tools have for every other
 // caller. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass refuses
@@ -870,10 +869,11 @@ func (m *merger) handle(row *gcbd.Bead) {
 	// end, with nothing on the PR to change. Every lane is green there and the PR
 	// waits on this pass, which is settled. gate-ensure.sh reaches the same verdict
 	// later in the pass, so any other one here would alternate with it for as long
-	// as the hold stands. A run a person's gate parks ends only when that person
-	// acts, so one parked caller reads blocked and its reason names the gate.
-	// gate-ensure.sh leaves that verdict standing while no actor holds a blocker of
-	// the anchor, and the next pass here replaces it once no run is parked.
+	// as the hold stands. A run behind a person's gate or in a suspended rig ends
+	// only when a person acts, so one parked caller reads blocked and its reason
+	// names what parks it. gate-ensure.sh leaves that verdict standing while no
+	// actor holds a blocker of the anchor, and the next pass here replaces it once
+	// no run is parked.
 	if checkCallers {
 		scOut, scRC := runCombined("bash", callers, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
 		switch scRC {
@@ -899,7 +899,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		case 5:
 			reason, _, _ := strings.Cut(scOut, "\n")
 			m.recordBlocked(id, headOid, aroute, prstatus.CauseBlocker, reason)
-			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script steps of a parked run still call; merge held until a person releases the gate or cancels the run (anchor %s)\n", mergeProg, num, id)
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script steps of a parked run still call; merge held until a person acts (anchor %s)\n", mergeProg, num, id)
 			m.printIndented(scOut, 12)
 			m.held++
 			return
@@ -1566,8 +1566,8 @@ func intoDefaultBranch(base string) bool {
 
 // standingQuietWindow is the quiet period, in seconds, of a human gate whose
 // condition stands from one pass to the next, a duplicate anchor or a stale
-// render, so every pass detects it again: a person's moot or benign answer stands
-// for a day.
+// render, so every pass detects it again: a person's moot or benign answer
+// stands for a day.
 const standingQuietWindow = "86400"
 
 // humanGate files a human gate through human-gate.sh, best-effort: a gate that
@@ -1647,10 +1647,13 @@ func (m *merger) reaudit(base, num string, files []string) {
 // remedy and an agent can make it, so no person is asked; a choice the worker
 // cannot make goes through the worker's own human gate. The PR stays open with the
 // approval it has, on which a small fix lands (docs/state-machine.md). The merge
-// is held whatever the helper answers. A rejection that lands takes the anchor out
-// of the passes until the rework hands it back, and any other answer leaves the
-// next pass to meet the same formula and ask again. The helper prints the bead's
-// row on stdout, and on stderr what it did, which is what the pass log keeps.
+// is held whatever the helper answers. The helper's release lands first and takes
+// the anchor out of the passes until the rework hands it back, and when its pour
+// then stops short, the armed dispatch or the human gate it leaves carries the
+// bead. A release that does not land leaves the anchor in the passes, where the
+// merge stays held and a later pass meets the same formula and asks again. The
+// helper prints the bead's row on stdout, and on stderr what it did, which is what
+// the pass log keeps.
 func (m *merger) rejectForHandoff(id, num, base, headOid, found string) {
 	p := m.scriptPath("rejection-repool.sh")
 	if !isExecutable(p) {

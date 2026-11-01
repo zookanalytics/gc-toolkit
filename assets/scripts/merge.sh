@@ -36,12 +36,11 @@
 # branch goes back to a polecat for a hand-off), only the rig checkout's HEAD
 # names it (held until the checkout moves), or an open step in any store of the
 # city calls it (held until those runs end), which script-callers.sh --check-merge
-# answers.
-# The FULL anchor-local authorization set is re-read immediately before the
-# merge; any mismatch holds. `gh pr merge --squash --match-head-commit`, then
-# ONE lifecycle transition --to merged --close. A failed record exits non-zero
-# loudly and the anchor is recovered by the already-merged arm above on a later
-# pass — that arm is here, and not left
+# answers. The FULL anchor-local authorization set is
+# re-read immediately before the merge; any mismatch holds. `gh pr merge
+# --squash --match-head-commit`, then ONE lifecycle transition --to merged
+# --close. A failed record exits non-zero loudly and the anchor is recovered by
+# the already-merged arm above on a later pass — that arm is here, and not left
 # to pr-facts.sh alone, because the arms are ordered and a killed pass loses
 # the later ones. A record that keeps failing is bounded rather than retried
 # forever: record-failure-cap.sh counts the failures on the anchor and

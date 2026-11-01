@@ -7,7 +7,8 @@
 #   <script>...    each open step whose text names one of the scripts, given by
 #                  file name (foo.sh), one line per step: the script, the step
 #                  with its step ref, status and assignee, the run's root, the
-#                  rig whose store holds it, and any gate that parks its run.
+#                  rig whose store holds it and whether it is suspended, and any
+#                  gate that parks its run.
 #   --check-merge  the pack scripts that merging <head> into <base> removes,
 #                  and for each the formulas at <base>, at <head> or, failing
 #                  those, at the checkout's HEAD that still name it and the open
@@ -38,6 +39,9 @@
 # cancels the run. A gate a person holds is any gate the city does not close by
 # itself: a human gate, and a park, which carries no await type. A timer gate and
 # a gate on a GitHub run or pull request close on their own (core's gate-sweep).
+# A run in a suspended rig is parked too: the reconciler skips the rig's agents
+# and gc hook returns empty, so nothing works the run until a person resumes the
+# rig or cancels the run.
 #
 # A text names a script when it holds the file name with no letter, digit,
 # dot, dash or underscore on either side. A step is a bead carrying
@@ -156,18 +160,20 @@ store_parks() {
 # in every store of the city, one line per step in CALLER_LINES, and count them
 # in NCALLERS. Each store is read once, so the cost does not grow with the
 # scripts asked about. A store that holds a caller has its gates read once too:
-# NPARKED counts the callers in a parked run, and PARKED_GATES names what parks
-# them, space-separated. A rig list or a store that cannot be read ends the script
-# with exit 2.
-NCALLERS=0; CALLER_LINES=""; NPARKED=0; PARKED_GATES=""
+# NPARKED counts the callers in a parked run, PARKED_GATES names the gates that
+# park them and PARKED_RIGS the suspended rigs that do, each space-separated. A
+# rig list or a store that cannot be read ends the script with exit 2.
+NCALLERS=0; CALLER_LINES=""; NPARKED=0; PARKED_GATES=""; PARKED_RIGS=""
 callers() {
-  local rigs rig path name rows hits parks parked gate lines newlines read_lines=0
-  rigs=$("$HERE/rig-map.sh" | jq -r '.rigs[] | [.name, .path] | @tsv') \
+  local rigs suspended rig path where name rows hits parks parked gate lines newlines count read_lines=0
+  rigs=$("$HERE/rig-map.sh" | jq -r '.rigs[] | [(.suspended // false), .name, .path] | @tsv') \
     || fail "cannot read the city's rigs (gc rig list --json)"
   [ -n "$rigs" ] || fail "the city lists no rig, so no store was read"
   loop_input "$rigs"
-  while IFS=$'\t' read -r rig path; do
+  while IFS=$'\t' read -r suspended rig path; do
     read_lines=$((read_lines + 1))
+    where="store of rig $rig"
+    [ "$suspended" != true ] || where="$where, which is suspended"
     rows=$(bd_list --db "$path/.beads" --has-metadata-key gc.step_ref --status "$LIVE_STATUSES") \
       || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
     parks=""
@@ -179,8 +185,8 @@ callers() {
         || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
       [ "$hits" != "[]" ] || continue
       [ -n "$parks" ] || parks=$(store_parks "$rig" "$path" "$rows") || exit 2
-      lines=$(printf '%s' "$hits" | jq -r --arg s "$name" --arg rig "$rig" --argjson parks "$parks" '
-        .[] | "\($s): step \(.id) (\(.ref), \(.status), \(if .assignee == "" then "unassigned" else .assignee end)) in run \(.root), store of rig \($rig)"
+      lines=$(printf '%s' "$hits" | jq -r --arg s "$name" --arg where "$where" --argjson parks "$parks" '
+        .[] | "\($s): step \(.id) (\(.ref), \(.status), \(if .assignee == "" then "unassigned" else .assignee end)) in run \(.root), \($where)"
               + (if $parks[.run] then ", parked behind " + ($parks[.run] | join(", ")) else "" end)') \
         || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
       parked=$(printf '%s' "$hits" | jq -r --argjson parks "$parks" '
@@ -188,8 +194,17 @@ callers() {
         || fail "cannot read the open steps in the store of rig '$rig' ($path/.beads)"
       CALLER_LINES="$CALLER_LINES$lines"$'\n'
       newlines=${lines//[!$'\n']/}
-      NCALLERS=$((NCALLERS + ${#newlines} + 1))
-      NPARKED=$((NPARKED + ${parked%% *}))
+      count=$((${#newlines} + 1))
+      NCALLERS=$((NCALLERS + count))
+      if [ "$suspended" = true ]; then
+        NPARKED=$((NPARKED + count))
+        case " $PARKED_RIGS " in
+          *" $rig "*) ;;
+          *) PARKED_RIGS="$PARKED_RIGS${PARKED_RIGS:+ }$rig" ;;
+        esac
+      else
+        NPARKED=$((NPARKED + ${parked%% *}))
+      fi
       for gate in ${parked#* }; do
         case " $PARKED_GATES " in
           *" $gate "*) ;;
@@ -201,10 +216,28 @@ callers() {
   [ "$read_lines" -eq "$LOOP_LINES" ] || fail "read $read_lines of the $LOOP_LINES rigs the city lists"
 }
 
+# parked_words — set PARKED_WHAT to what parks the callers NPARKED counts, and
+# PARKED_ENDS to what ends that wait.
+PARKED_WHAT=""; PARKED_ENDS=""
+parked_words() {
+  local gates=${PARKED_GATES// /, } rigs=${PARKED_RIGS// /, }
+  if [ -n "$gates" ] && [ -n "$rigs" ]; then
+    PARKED_WHAT="runs a person's gate parks ($gates) or in runs of a suspended rig ($rigs)"
+    PARKED_ENDS="Release each gate, resume each rig or cancel each such run, and the merge goes on."
+  elif [ -n "$rigs" ]; then
+    PARKED_WHAT="runs of a suspended rig ($rigs)"
+    PARKED_ENDS="Resume each rig or cancel each of its runs, and the merge goes on."
+  else
+    PARKED_WHAT="runs a person's gate parks ($gates)"
+    PARKED_ENDS="Release each gate or cancel each parked run, and the merge goes on."
+  fi
+}
+
 if [ -z "$CHECK_MERGE" ]; then
   callers "${SCRIPTS[@]}"
   if [ "$NPARKED" -gt 0 ]; then
-    echo "$NCALLERS open step(s) call ${SCRIPTS[*]}, and $NPARKED of them sit in runs a person's gate parks (${PARKED_GATES// /, })"
+    parked_words
+    echo "$NCALLERS open step(s) call ${SCRIPTS[*]}, and $NPARKED of them sit in $PARKED_WHAT"
     printf '%s' "$CALLER_LINES"
     exit 5
   fi
@@ -300,7 +333,8 @@ fi
 
 callers "${NAMES[@]}"
 if [ "$NPARKED" -gt 0 ]; then
-  echo "$NCALLERS open step(s) call a script the merge removes (${PATHS[*]}), and $NPARKED of them sit in runs a person's gate parks (${PARKED_GATES// /, }). Release each gate or cancel each parked run, and the merge goes on."
+  parked_words
+  echo "$NCALLERS open step(s) call a script the merge removes (${PATHS[*]}), and $NPARKED of them sit in $PARKED_WHAT. $PARKED_ENDS"
   printf '%s' "$CALLER_LINES"
   exit 5
 fi

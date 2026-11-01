@@ -21,6 +21,8 @@
 #     run the edge sits on; a timer or GitHub gate, a closed gate or a blocker
 #     that is no gate parks nothing, and only a store holding a caller has its
 #     gates read;
+#   - one caller in a suspended rig exits 5 and names the rig, with no gate
+#     anywhere, and a suspended rig holding no caller parks nothing;
 #   - a repository is read from its top, so a directory below it gets the same
 #     answers;
 #   - it exits 2 when it decides nothing: a usage error, a revision or
@@ -247,7 +249,7 @@ printf '[%s]' "$(gate ws-g open bead)" > "$STORES/workshop/.beads/gates.json"
 run old-tool.sh
 eq "$rc" "5" "...and so does a gate of a type the city's sweep does not close"
 
-for await in timer gh:run gh:pr; do
+for await in timer gh:run gh:run:7 gh:pr gh:pr:7; do
   printf '[%s]' "$(gate ws-g open "$await")" > "$STORES/workshop/.beads/gates.json"
   run old-tool.sh
   eq "$rc" "3" "a $await gate closes on its own and parks nothing"
@@ -261,6 +263,21 @@ rm -f "$STORES/workshop/.beads/gates.json"
 parked_on ws-task
 run old-tool.sh
 eq "$rc" "3" "a blocker that is no gate parks nothing, since its work can end on its own"
+printf '[%s]' "$(gate ws-g open human)" > "$STORES/workshop/.beads/gates.json"
+parked_on ws-g
+jq -c 'map(if .id == "ws-a" then .dependencies[0].type = "related" else . end)' \
+  "$STORES/workshop/.beads/steps.json" > "$TMP/related.json"
+cp "$TMP/related.json" "$STORES/workshop/.beads/steps.json"
+run old-tool.sh
+eq "$rc" "3" "an edge onto a gate that does not block parks nothing"
+parked_on ws-g
+jq -c 'map(if .id == "ws-b" then .dependencies = [{issue_id: "ws-b", depends_on_id: "ws-g", type: "blocks"}] else . end)' \
+  "$STORES/workshop/.beads/steps.json" > "$TMP/two-edges.json"
+cp "$TMP/two-edges.json" "$STORES/workshop/.beads/steps.json"
+run old-tool.sh
+has "$out" "in run ws-r1, store of rig workshop, parked behind ws-g" "two steps of a run on one gate name it"
+hasnt "$out" "ws-g, ws-g" "...once"
+parked_on ws-task
 
 printf '[%s,%s]' "$(gate ws-g open)" "$(gate ws-h open human)" > "$STORES/workshop/.beads/gates.json"
 jq -c 'map(if .id == "ws-c" then .dependencies = [{issue_id: "ws-c", depends_on_id: "ws-h", type: "blocks"}] elif .id == "ws-a" then .dependencies[0].depends_on_id = "ws-g" else . end)' \
@@ -311,6 +328,55 @@ cp "$TMP/bad-edges.json" "$STORES/workshop/.beads/steps.json"
 run old-tool.sh
 eq "$rc" "2" "a step's edges it cannot read decide nothing"
 has "$out" "cannot read the gates in the store of rig 'workshop'" "...and name the store"
+gates_off; callers_on
+
+echo "# a run in a suspended rig"
+cp "$STUB_RIGS" "$TMP/rigs.plain"
+suspend_rigs() { # name [name]
+  jq -c --arg a "$1" --arg b "${2:-}" '.rigs |= map(.suspended = (.name == $a or .name == $b))' "$TMP/rigs.plain" > "$STUB_RIGS"
+}
+gates_off; callers_off
+parked_on ws-task
+suspend_rigs lantern
+run old-tool.sh
+eq "$rc" "3" "a suspended rig holding no caller parks nothing"
+hasnt "$out" "suspended" "...and goes unmentioned"
+suspend_rigs workshop
+run old-tool.sh
+eq "$rc" "5" "a caller in a suspended rig exits 5 with no gate anywhere, since nothing works its run until a person acts"
+eq "$(printf '%s\n' "$out" | head -1)" "3 open step(s) call old-tool.sh, and 3 of them sit in runs of a suspended rig (workshop)" \
+  "...counting each caller, naming the rig"
+has "$out" "old-tool.sh: step ws-c (mol-a.load, open, unassigned) in run ws-r2, store of rig workshop, which is suspended" "...and marking each step"
+hasnt "$out" "parked behind" "...with no gate to name"
+
+printf '[%s]' "$(gate ws-g open)" > "$STORES/workshop/.beads/gates.json"
+parked_on ws-g
+run old-tool.sh
+eq "$(printf '%s\n' "$out" | head -1)" "3 open step(s) call old-tool.sh, and 3 of them sit in runs a person's gate parks (ws-g) or in runs of a suspended rig (workshop)" \
+  "a step behind a gate in a suspended rig counts once, and both are named"
+has "$out" "in run ws-r1, store of rig workshop, which is suspended, parked behind ws-g" "...on its line too"
+
+suspend_rigs lantern
+printf '[%s]' "$(step ln-s1 mol-b.check open "" ln-r1 'old-tool.sh')" > "$STORES/lantern/.beads/steps.json"
+run old-tool.sh
+eq "$rc" "5" "one rig suspended and another moving still exits 5"
+eq "$(printf '%s\n' "$out" | head -1)" "4 open step(s) call old-tool.sh, and 3 of them sit in runs a person's gate parks (ws-g) or in runs of a suspended rig (lantern)" \
+  "...counting only the callers parked"
+hasnt "$out" "store of rig workshop, which is suspended" "...and marking only the rig suspended"
+
+gates_off
+parked_on ws-task
+printf '[%s]' "$(step ln-s1 mol-b.check open "" ln-r1 'old-tool.sh keep.sh')" > "$STORES/lantern/.beads/steps.json"
+suspend_rigs workshop lantern
+run old-tool.sh keep.sh
+eq "$(printf '%s\n' "$out" | head -1)" "5 open step(s) call old-tool.sh keep.sh, and 5 of them sit in runs of a suspended rig (workshop, lantern)" \
+  "two suspended rigs are both named, each once though two scripts' callers sit in one"
+
+export STUB_BD_FAIL_DB="$STORES/workshop/.beads"
+run old-tool.sh
+eq "$rc" "2" "a suspended rig's store that cannot be read decides nothing"
+unset STUB_BD_FAIL_DB
+cp "$TMP/rigs.plain" "$STUB_RIGS"
 gates_off; callers_on
 
 echo "# usage"
@@ -425,6 +491,20 @@ first=$(printf '%s\n' "$out" | head -1)
 has "$first" "(assets/scripts/old-tool.sh), and 2 of them sit in runs a person's gate parks (ws-g)." "...naming the gate on the first line, which the merge's reason keeps"
 has "$first" "Release each gate or cancel each parked run, and the merge goes on." "...and what ends the wait"
 has "$out" "in run ws-r1, store of rig workshop, parked behind ws-g" "...listing each caller"
+
+# A suspended rig's run waits on a person too, and the first line says what ends it.
+callers_off; gates_off; parked_on ws-task
+suspend_rigs workshop
+run --root "$REPO" --check-merge main delete
+eq "$rc" "5" "removing a script a suspended rig's run calls exits 5"
+has "$(printf '%s\n' "$out" | head -1)" "(assets/scripts/old-tool.sh), and 3 of them sit in runs of a suspended rig (workshop). Resume each rig or cancel each of its runs, and the merge goes on." \
+  "...naming the rig and what ends the wait on the first line"
+printf '[%s]' "$(gate ws-g open)" > "$STORES/workshop/.beads/gates.json"
+parked_on ws-g
+run --root "$REPO" --check-merge main delete
+has "$(printf '%s\n' "$out" | head -1)" "sit in runs a person's gate parks (ws-g) or in runs of a suspended rig (workshop). Release each gate, resume each rig or cancel each such run, and the merge goes on." \
+  "...and both when both hold"
+cp "$TMP/rigs.plain" "$STUB_RIGS"
 gates_off; callers_on
 
 run --root "$REPO" --check-merge main rename

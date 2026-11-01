@@ -43,8 +43,9 @@ The change adds:
   `rejection-repool.sh`, a new caller of that script and of its existing
   `pull_request` to `poured` edge. When only the rig checkout's HEAD names it, or
   open steps in moving runs call it, the arm records the existing `pr.machine`
-  value `settled`. When a person's gate parks a calling run, it records the
-  existing value `blocked` with the existing cause `blocker`, whose definition
+  value `settled`. When a person's gate or a suspended rig parks a calling run,
+  it records the existing value `blocked` with the existing cause `blocker`, whose
+  definition
   widens to cover a blocker that holds the merge through a run. It files no gate.
 
 It adds no metadata key, bead kind, lifecycle state or cause.
@@ -185,9 +186,9 @@ is a step that depends on a script by name. Nothing upstream had to solve that.
 
 ## Telling a parked run from a moving one
 
-A run parked behind a person's gate ends only when that person acts, so the merge
-has to read as held by that person. What decides it is which of a store's open
-steps a gate blocks, and whether a person holds that gate.
+A parked run ends only when a person acts, so the merge has to read as held by a
+person. What decides it is which of a store's open steps a gate blocks, whether a
+person holds that gate, and whether the store's rig is suspended.
 
 - **The edges: bd's list rows, which the script already reads.**
   [bd list](https://beads.gascity.com/cli-reference/list) carries each row's
@@ -212,6 +213,12 @@ steps a gate blocks, and whether a person holds that gate.
   someone closes it. Gas City ships no predicate for this, and the pack's own
   `human_gate` asks for `await_type=human`. That misses a park, the plain gate
   `gc-helm.sh park` files with no await type, which holds every parked run today.
+- **A suspended rig: the rig list, which the script already reads.**
+  [`gc rig suspend`](https://docs.gascity.com/reference/cli#gc-rig-suspend) says the
+  reconciler skips the rig's agents, `gc hook` returns empty and the rig's store
+  stays open, so its runs stay open and nothing works them until a person resumes
+  the rig or cancels them. `gc rig list --json` carries each rig's `suspended`
+  (`RigListItem`, package main), so this adds no read.
 - **The runs API, which does not cover it.** `RunStep` carries no edge, as above.
 - **An edge from the anchor onto the gate, which does not fit.** It is the shape a
   wait usually takes, and it would read as `held: gate` by itself. bd resolves an

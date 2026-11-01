@@ -1409,6 +1409,8 @@ has "$(cat "$REPOOL_LOG")" "C2 --reason PR#92 removes a pack script a formula st
 has "$(cat "$REPOOL_LOG")" "will not land it into 'main' at sha-92." "…whose reason opens on what it refused"
 has "$(cat "$REPOOL_LOG")" "Keep a file at each such path" "…carrying the check's own remedy"
 has "$(cat "$REPOOL_LOG")" "script-callers.sh --check-merge origin/main HEAD" "…and the command that says when the worker is done"
+has "$(cat "$REPOOL_LOG")" "The PR stays open and keeps its approval." "…what becomes of the PR"
+has "$(cat "$REPOOL_LOG")" "Say in pr_summary what the PR now keeps." "…and what the worker owes the person who approved it"
 eq "$(wc -c < "$STUB_ESC_LOG" | tr -d ' ')" "0" "…and no person is asked"
 has "$out" "PR#92 went back to the polecat pool for the hand-off" "…and the pass says so"
 has "$out" "rejection-repool: repooled" "…keeping what the rejection did"
@@ -1505,7 +1507,7 @@ STUB_CALLERS_OUT="$(printf '%s\n%s' "2 open step(s) call a script the merge remo
 export STUB_CALLERS_OUT
 : > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"; : > "$REPOOL_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "PR#93 removes a pack script steps of a parked run still call; merge held until a person releases the gate or cancels the run" \
+has "$out" "PR#93 removes a pack script steps of a parked run still call; merge held until a person acts" \
   "a removed script a parked run calls holds"
 has "$out" "x.sh: step s1 (mol-a.load, open, unassigned) in run r1, store of rig w, parked behind g-1" "…quoting the callers"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
