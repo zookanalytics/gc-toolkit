@@ -238,6 +238,13 @@ It is keyed by the conversation's id under the marker
 `<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it,
 or the marker reminders carried before it, as the city's own.
 
+A PR comment can be a public record, and no person reads this one before it
+posts. So it never carries the reason a sitting opened with, which is what the
+operator typed to start a private conversation. The outcome, summary and actions
+a close adds go on field by field, each only once
+`assets/scripts/rig-mentions.sh` answers that it names no other rig, and a field
+it lists or cannot answer for is left out.
+
 ### The operator's intake
 
 Every other producer attaches to a bead that already exists. The operator's

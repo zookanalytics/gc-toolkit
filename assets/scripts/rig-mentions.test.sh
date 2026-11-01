@@ -12,8 +12,10 @@
 #     keeps, and the messages of the commits no remote has yet;
 #   - --bead reads the title, summary and dispatch text the pull request
 #     publishes, which for a rework child are its anchor's;
-#   - --file reads a whole file, and --tree every tracked text file, generated
-#     ones included, each symlink and binary file left out;
+#   - --file reads a whole file, a process substitution included, and --tree
+#     every tracked text file, generated ones included, each symlink and binary
+#     file left out;
+#   - --rig-map takes the rig map from the caller and reads no listing;
 #   - it exits 0 with nothing named, 1 with each mention and the advice, and 2
 #     when it could check nothing: no rig list, an unknown rig, no rig to judge
 #     for, a bead, file or base it cannot read, or a usage error.
@@ -206,6 +208,32 @@ eq "$rc" 2 "a file that does not read checks nothing"
 rc=0; out=$(run --file "$TMP/summary.md" --bead ws-anchor) || rc=$?
 has "$out" "summary.md:2:" "sources combine in one run: the file"
 has "$out" "ws-anchor description:1:" "...and the bead"
+rc=0; out=$(run --file <(printf 'a line that names lantern\n')) || rc=$?
+eq "$rc" 1 "a process substitution is read as a file"
+has "$out" ":1: names rig lantern" "...by line"
+rc=0; out=$(run --file <(printf 'a line that names nothing\n')) || rc=$?
+eq "$rc" 0 "a process substitution naming nothing exits 0"
+rc=0; out=$(run --file "$TMP") || rc=$?
+eq "$rc" 2 "a directory is not a file to read"
+
+# --- 5a. --rig-map ----------------------------------------------------------------
+# STUB_RIGS_RC makes the listing fail, so a pass here cannot have read it.
+cp "$STUB_RIGS" "$TMP/rig-map.json"
+rc=0; out=$(STUB_RIGS_RC=1 run --rig-map "$TMP/rig-map.json" --file "$TMP/summary.md") || rc=$?
+eq "$rc" 1 "--rig-map answers with no listing behind it"
+has "$out" "summary.md:2: names bead hb-q01 of rig harbor" "...from the rigs in the map it was given"
+hasnt "$out" "the store did not answer" "...and the listing is never read"
+rc=0; out=$(STUB_RIGS_RC=1 run --rig-map <(cat "$TMP/rig-map.json") --file <(printf 'names nothing\n')) || rc=$?
+eq "$rc" 0 "--rig-map takes a process substitution too"
+rc=0; out=$(run --rig-map "$TMP/no-such-map.json" --file "$TMP/summary.md") || rc=$?
+eq "$rc" 2 "a map that does not read checks nothing, and does not fall back to a listing"
+has "$out" "cannot read the city's rigs ($TMP/no-such-map.json)" "...and names the map"
+printf 'not json\n' > "$TMP/bad-map.json"
+rc=0; out=$(run --rig-map "$TMP/bad-map.json" --file "$TMP/summary.md") || rc=$?
+eq "$rc" 2 "a map that is not JSON checks nothing"
+printf '{"rigs":[]}\n' > "$TMP/empty-map.json"
+rc=0; out=$(run --rig-map "$TMP/empty-map.json" --file "$TMP/summary.md") || rc=$?
+eq "$rc" 2 "a map with no rigs checks nothing"
 
 # --- 6. --tree -------------------------------------------------------------------
 git -C "$REPO" checkout -q main

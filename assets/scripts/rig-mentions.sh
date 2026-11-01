@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # rig-mentions.sh — list each place a change names another rig of this city:
 # the rig's name, a bead id from its store, or a path into its checkout.
-#   rig-mentions.sh [--rig <name>] [--branch <base>] [--bead <id>]
-#                   [--file <path>]... [--tree]
+#   rig-mentions.sh [--rig <name>] [--rig-map <file>] [--branch <base>]
+#                   [--bead <id>] [--file <path>]... [--tree]
 #
 #   --branch <base>  the lines the branch adds since it left <base>, and the
 #                    messages of its commits that no remote has yet
@@ -13,6 +13,8 @@
 #   --tree           every tracked file
 #   --rig <name>     the rig the change is for. Without it, that is the rig
 #                    whose checkout holds this repository, else $GC_RIG.
+#   --rig-map <file> the rig map as rig-map.sh printed it, from a caller that
+#                    already read it, so the listing is not read a second time.
 #
 # Rigs shouldn't use other rigs for data in a commit or a PR. The squash merge
 # takes its commit message from the pull request's body, so the title, summary
@@ -33,6 +35,8 @@
 # Callers: the self-review of formulas/mol-polecat-work.toml, on the branch and
 # the work bead, and its submit-and-exit, on the summary it composes. Each
 # reads the list and fixes what it finds, and neither stops on it.
+# pr-sitting-comment.sh posts with no reader to decide, so it leaves off a PR each
+# field this lists or cannot check.
 #
 # Exit: 0 no other rig named · 1 mentions printed, one per line, then the
 #       advice · 2 usage, or the rig list, a bead, a file or the repository
@@ -57,18 +61,19 @@ PACK_DEPENDENCIES="gascity gc-toolkit sprintshow"
 
 usage() {
   [ -z "${1:-}" ] || echo "$PROG: $1" >&2
-  echo "usage: $PROG [--rig <name>] [--branch <base>] [--bead <id>] [--file <path>]... [--tree]" >&2
+  echo "usage: $PROG [--rig <name>] [--rig-map <file>] [--branch <base>] [--bead <id>] [--file <path>]... [--tree]" >&2
   exit 2
 }
 fail() { echo "$PROG: $1; nothing was checked" >&2; exit 2; }
 
-RIG=""; BASE=""; BEAD=""; TREE=""; FILES=(); NFILES=0
+RIG=""; RIG_MAP=""; BASE=""; BEAD=""; TREE=""; FILES=(); NFILES=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --rig|--branch|--bead|--file)
+    --rig|--rig-map|--branch|--bead|--file)
       [ "$#" -ge 2 ] && [ -n "$2" ] || usage "$1 needs a value"
       case "$1" in
         --rig) RIG="$2" ;;
+        --rig-map) RIG_MAP="$2" ;;
         --branch) BASE="$2" ;;
         --bead) BEAD="$2" ;;
         --file) FILES+=("$2"); NFILES=$((NFILES + 1)) ;;
@@ -83,10 +88,15 @@ done
 
 # rig-map.sh is the pack's one read of the rig map. It bounds the listing, and
 # when the listing does not read it names why on stderr, ahead of the line below.
-RIGS=$("$HERE/rig-map.sh" | jq -c '[.rigs[]? | objects
+if [ -n "$RIG_MAP" ]; then
+  MAP=$(cat -- "$RIG_MAP" 2>/dev/null) || MAP=""
+else
+  MAP=$("$HERE/rig-map.sh") || MAP=""
+fi
+RIGS=$(printf '%s' "$MAP" | jq -c '[.rigs[]? | objects
   | {name: (.name // "" | tostring), prefix: (.prefix // "" | tostring), path: (.path // "" | tostring)}
   | select(.name != "")]' 2>/dev/null) || RIGS=""
-[ -n "$RIGS" ] && [ "$RIGS" != "[]" ] || fail "cannot read the city's rigs (gc rig list --json)"
+[ -n "$RIGS" ] && [ "$RIGS" != "[]" ] || fail "cannot read the city's rigs (${RIG_MAP:-gc rig list --json})"
 
 # The rig whose checkout holds this repository: a worktree's common directory
 # is the .git of the checkout it was added to.
@@ -153,7 +163,7 @@ if [ -n "$BEAD" ]; then
 fi
 
 for f in ${FILES[@]+"${FILES[@]}"}; do
-  [ -f "$f" ] && [ -r "$f" ] || fail "cannot read $f"
+  [ -r "$f" ] && [ ! -d "$f" ] || fail "cannot read $f"
   number "$f" < "$f" >> "$LINES"
 done
 
