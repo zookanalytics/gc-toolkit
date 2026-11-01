@@ -59,9 +59,10 @@ review method (`mol-review`). A bead with no poured workflow states its
 method in its metadata and dispatch note — a rework child, for example,
 resumes `metadata.branch` and fixes `metadata.rejection_reason` per
 `mol-polecat-work`'s steps — and `gc formula show <name>` reads any formula
-by name, whose scripts take `--bead <id>` where a step passes `--convoy`. Do not
-use internal task-planning tools in place of the steps: the step descriptions are
-the plan.
+by name, whose scripts take `--bead <id>` where a step passes `--convoy`. That
+claim has no step bead, so leave out the steps' `claim-close.sh` calls, and
+`work-submit.sh --bead` finishes it without one. Do not use internal task-planning
+tools in place of the steps: the step descriptions are the plan.
 
 ## A subagent for the search, not the work
 

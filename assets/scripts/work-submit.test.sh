@@ -494,6 +494,119 @@ eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(35) the handoff stands
 eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(35) no drain: it would hand the step back"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(35) the branch stays, so a re-offered step reads the same shape"
 
+echo "# a claimant with no poured workflow holds the work bead itself"
+# hold <bead> <assignee> : the bead in_progress under <assignee>, with the session
+# pins a claim leaves, as `gc hook --claim` leaves a bead routed with no pour.
+hold() {
+  jq -c --arg id "$1" --arg who "$2" 'map(if .id == $id then .status = "in_progress" | .assignee = $who
+    | .metadata["gc.session_id"] = $who | .metadata["gc.session_name"] = "x" | .metadata["gc.routed_to"] = "pool" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+}
+direct() { submit HOOK_CURRENT=tk-w "$@" -- --bead tk-w --base main --notes "Implemented: it"; }
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
+direct
+eq "$RC" 0 "(36) a direct claim hands off and exits 0: $OUT"
+eq "$(ON_ORIGIN polecat/tk-w)" "$HEAD_SHA" "(36) the branch is on origin at HEAD"
+eq "$(field status) $(field assignee)" "open gc-toolkit/gc-toolkit.refinery" "(36) the bead is the refinery's, and open"
+eq "$(meta gc.routed_to)" "" "(36) unrouted"
+eq "$(meta gc.session_id)" "<absent>" "(36) with its pins removed"
+eq "$(meta branch)" "polecat/tk-w" "(36) and its branch recorded"
+no "$OUT" "is not closed" "(36) it asks for no close"
+eq "$(closed_step)" "in_progress" "(36) no step is written: it closes nothing of any other run"
+eq "$(grep -c '^update st-submit' "$LOG" | tr -d ' ')" 0 "(36) not even a stray stamp"
+eq "$(g "$C" branch --list polecat/tk-w)" "" "(36) the local branch is released"
+eq "$(tail -n 1 "$LOG")" "drain" "(36) and the drain is last"
+
+prepare polecat/tk-w '{"auto_push":"false"}'; hold tk-w sess-me
+direct
+eq "$RC" 0 "(37) a direct claim halts at branch-ready and exits 0: $OUT"
+eq "$(pushed)" 0 "(37) nothing is pushed"
+eq "$(meta halt_reason)" "auto_push_false" "(37) the halt is recorded"
+eq "$(field status) $(field assignee)" "open " "(37) the claim is released"
+eq "$(closed_step)" "in_progress" "(37) no step is written"
+eq "$(tail -n 1 "$LOG")" "drain" "(37) and the drain is last"
+
+prepare DETACHED "$FRESH"; hold tk-w sess-me
+submit HOOK_CURRENT=tk-w -- --store-only "tk-z" --notes "what closes this" --bead tk-w --base main
+eq "$RC" 0 "(38) a direct claim's store-only exit exits 0: $OUT"
+eq "$(meta halt_reason)" "store_only" "(38) the exit is recorded"
+eq "$(field status) $(field assignee)" "open " "(38) the claim is released"
+eq "$(meta gc.routed_to)" "" "(38) unrouted"
+eq "$(closed_step)" "in_progress" "(38) no step is written"
+eq "$(tail -n 1 "$LOG")" "drain" "(38) and the drain is last"
+
+prepare polecat/tk-w '{"merge_result":"merged"}'; hold tk-w sess-me
+jq -c 'map(if .id == "tk-w" then .status = "closed" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+direct
+eq "$RC" 0 "(39) a direct claim already landed exits 0: $OUT"
+eq "$(words)" "drain " "(39) and only drains"
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
+jq -c 'map(if .id == "tk-w" then .status = "closed" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+direct
+eq "$RC" 1 "(39b) a direct claim closed unlanded: stops"
+has "$OUT" "was closed while this session held it" "(39b) says so"
+eq "$(words)" "drain " "(39b) with no run to cancel, it only drains"
+
+# A call interrupted after the handoff and before the release leaves the branch here.
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
+direct
+g "$C" checkout -q -b polecat/tk-w "$HEAD_SHA"
+: > "$LOG"
+direct
+eq "$RC" 0 "(40) the call again, with the bead already the refinery's: exits 0: $OUT"
+eq "$(field status) $(field assignee)" "open gc-toolkit/gc-toolkit.refinery" "(40) the handoff stands"
+eq "$(g "$C" branch --list polecat/tk-w)" "" "(40) the release finishes"
+eq "$(tail -n 1 "$LOG")" "drain" "(40) and the drain is last"
+
+echo "# --bead validates the claim before anything is written"
+prepare polecat/tk-w "$FRESH"
+submit -- --bead tk-w --base main --notes "Implemented: it"
+eq "$RC" 0 "(41) --bead while holding this step: exits 0: $OUT"
+eq "$(closed_step)" "closed" "(41) the step closes, by claim-close.sh's checks"
+eq "$(meta gc.outcome st-submit)" "pass" "(41) with outcome pass"
+prepare polecat/tk-w "$FRESH"
+submit UPDATE_FAIL=gc.outcome= -- --bead tk-w --base main --notes "n"
+eq "$RC" 1 "(41b) that close refused: stops, as a step's close does"
+has "$OUT" "this step is not closed" "(41b) says so"
+eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(41b) no drain"
+
+refused() { # <label> : exit 3, with no write of any kind and no drain.
+  eq "$RC" 3 "$1: exit 3"
+  has "$OUT" "tk-w is NOT handed off" "$1: says so"
+  eq "$(pushed)" 0 "$1: nothing is pushed"
+  eq "$(grep -cE '^(update|drain|gate|cancel|guard|session|release) ?' "$LOG" | tr -d ' ')" 0 "$1: nothing is written and nothing drains"
+}
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
+submit HOOK_CURRENT=tk-other -- --bead tk-w --base main --notes "n"
+refused "(42) the current claim is another plain bead"
+jq -c '. + [{id: "tk-other", status: "in_progress", assignee: "sess-me", metadata: {}}]' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"; : > "$LOG"
+submit HOOK_CURRENT=tk-other -- --bead tk-w --base main --notes "n"
+refused "(42b) one this session holds"
+has "$OUT" "not mol-polecat-work.submit-and-exit" "(42b) and claim-close.sh names what it found"
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
+submit HOOK_CURRENT= -- --bead tk-w --base main --notes "n"
+refused "(43) no current claim can be read"
+has "$OUT" "gc hook current names no bead" "(43) names that"
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-other
+direct
+refused "(44) the bead is another session's claim"
+has "$OUT" "held by sess-other" "(44) names the holder"
+prepare polecat/tk-w "$FRESH"
+submit HOOK_CURRENT=st-submit -- --bead st-submit --base main --notes "n"
+eq "$RC" 3 "(45) --bead names a step, even the one held: exit 3"
+has "$OUT" "st-submit is the step mol-polecat-work.submit-and-exit" "(45) says so"
+eq "$(pushed)" 0 "(45) nothing is pushed"
+eq "$(closed_step)" "in_progress" "(45) and the step stays open"
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-other
+submit HOOK_CURRENT=tk-other -- --anchor-only --bead tk-w
+eq "$RC" 0 "(46) --anchor-only writes nothing, so it validates no claim"
+
+echo "# a step's close stays strict over --convoy"
+prepare polecat/tk-w "$FRESH"
+go HOOK_CURRENT=tk-w
+eq "$RC" 1 "(47) --convoy with a plain current claim: stops, as a step's close does"
+has "$OUT" "this step is not closed" "(47) says so"
+eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(47) no drain"
+
 echo "# usage"
 submit -- ; eq "$RC" 2 "no work named: usage error"
 submit -- --bead a --convoy b --base x --notes n; eq "$RC" 2 "both named: usage error"

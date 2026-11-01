@@ -57,8 +57,10 @@ named only where it is what runs.
   their edge had landed.
 - **`work-setup.sh`, `work-enter.sh`, `work-submit.sh`, `rig-checks.sh`.** These are
   the bodies of overrides the warrant names, moved out of step text under rule 2,
-  with nothing added but the sibling yield, `work_holder`, and the outage stop. `gc
-  worktree` covers part of `work-setup.sh`, and tk-1tfzr71.10 moves that part.
+  with nothing added but the sibling yield, `work_holder`, the outage stop, and
+  `work-submit.sh`'s refusal of a `--bead` caller that holds neither that bead nor
+  this step. `gc worktree` covers part of `work-setup.sh`, and tk-1tfzr71.10 moves
+  that part.
 - **`rig-checks.sh`'s command arguments.** Searched: `formula.Substitute`
   (`internal/formula/parser.go`), which writes a var into step text as it stands
   and has no shell-quoting form, and `stampFormulaVars`

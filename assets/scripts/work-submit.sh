@@ -46,6 +46,12 @@
 # it destroys the shape the branch gate reads. A session that dies before that
 # costs a held ref and nothing more, and a re-offered step finds the same branch.
 #
+# A claimant with no poured workflow holds the work bead itself: `gc hook current`
+# names it and it carries no gc.step_ref, so there is no step to close and no other
+# bead to write. Any other --bead caller must hold this step, as claim-close.sh judges
+# it. Both are read before anything is pushed or written, because a close refused
+# after the handoff can only be reported.
+#
 # --anchor-only prints the anchor and its title, for the caller to judge whether
 # the title still names what the branch does, and writes nothing.
 #
@@ -65,7 +71,9 @@ usage: work-submit.sh --convoy <id>|--bead <id> --base <branch> --notes "<text>"
                       --convoy <id>|--bead <id> --base <branch>
 
   --convoy         the run's input convoy; its one tracked bead is the work
-  --bead           the work bead, for a claimant with no poured workflow
+  --bead           the work bead, for a claimant with no poured workflow, which
+                   this session must hold; exit 3 when it holds neither that bead
+                   nor this step
   --base           the branch the work was poured from
   --notes          appended to the work bead's notes with the handoff
   --anchor         the anchor --anchor-only printed; absent, it is resolved here
@@ -143,7 +151,29 @@ case $? in
   *) work_outage "could not read work bead $WORK_ID" ;;
 esac
 
+REFINERY_TARGET="${GC_RIG:+$GC_RIG/}${BINDING_PREFIX}refinery"
+DIRECT_CLAIM=0
+refuse_claim() {
+  echo "$PROG: $1 Nothing is pushed, and $WORK_ID is NOT handed off." >&2
+  exit 3
+}
+if [ -n "$BEAD" ] && [ "$ANCHOR_ONLY" = 0 ]; then
+  CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIMED=""
+  OWNER=$(work_field .assignee)
+  if [ -n "$(work_meta gc.step_ref)" ]; then
+    refuse_claim "$WORK_ID is the step $(work_meta gc.step_ref), and --bead names the work bead."
+  elif [ "$CLAIMED" != "$WORK_ID" ]; then
+    "$SCRIPT_DIR/claim-close.sh" --step "$STEP" --dry-run >/dev/null \
+      || refuse_claim "--bead $WORK_ID is not this session's claim, and neither is $STEP."
+  elif [ -n "$OWNER" ] && [ "$OWNER" != "$REFINERY_TARGET" ] && ! work_is_self "$OWNER"; then
+    refuse_claim "$WORK_ID is held by $OWNER, not this session."
+  else
+    DIRECT_CLAIM=1
+  fi
+fi
+
 close_step() {
+  [ "$DIRECT_CLAIM" = 0 ] || return 0
   "$SCRIPT_DIR/claim-close.sh" --step "$STEP" \
     || { echo "$PROG: this step is not closed. What it owed is written. Run claim-close.sh --step $STEP again, then gc runtime drain-ack." >&2; exit 1; }
 }
@@ -153,6 +183,11 @@ if [ "$ANCHOR_ONLY" = 0 ] && [ "$(work_field .status)" = closed ]; then
     close_step
     gc runtime drain-ack
     exit 0
+  fi
+  if [ "$DIRECT_CLAIM" = 1 ]; then
+    echo "$PROG: $WORK_ID was closed while this session held it, so nothing is handed off." >&2
+    gc runtime drain-ack
+    exit 1
   fi
   "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID was closed while its run was mid-flight"
   exit 1
@@ -317,7 +352,6 @@ fi
 
 # The refinery's find-work is exact-match on assignee, so a bead sent to an address
 # no agent holds is never read, and nothing reports the strand.
-REFINERY_TARGET="${GC_RIG:+$GC_RIG/}${BINDING_PREFIX}refinery"
 ROSTER=$(gc agent list --json 2>/dev/null </dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
 if [ -z "$ROSTER" ]; then
   echo "roster unreadable: handing off to $REFINERY_TARGET unchecked"
