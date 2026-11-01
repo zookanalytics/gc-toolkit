@@ -839,7 +839,7 @@ sequenceDiagram
   P->>G: git ls-remote — verify HEAD == remote
   Note over P: push unverified ⇒ abort, keep the bead
   P->>L: handoff — branch, target,<br/>assignee=RIG/refinery, in ONE atomic gc bd update
-  P->>P: step-close + drain
+  P->>P: claim-close + drain
   C->>L: gate-ensure — check_set present, every check raisable
   C->>L: merge-push → pre_open_gate (lifecycle.sh)
   C->>G: pr-open.sh — gh pr create when every check in check_set derives green

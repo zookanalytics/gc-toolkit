@@ -1892,7 +1892,7 @@ keys = [
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
 #   stood), `superseded`, `moot` and `dismissed`, written by the pack component
-#   that reached the outcome (step-close.sh, signoff.sh, review-outcome.sh,
+#   that reached the outcome (claim-close.sh, signoff.sh, review-outcome.sh,
 #   pr-facts.sh, gc-helm.sh and the done arms), and `canceled`, which gascity's
 #   run cancel stamps on every member of a run it ends; read by the done gates
 #   and the review graph. gc.routed_to and gc.execution_routed_to are

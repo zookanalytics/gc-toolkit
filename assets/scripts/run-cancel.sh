@@ -13,11 +13,12 @@
 # the molecule. In --step mode, once the run has ended, it appends the reason to
 # the step this session holds, which is the one bead a worker writes.
 #
-# --step names the run by the step this shell is executing: this session's bead
-# for that gc.step_ref, found by assignee (in_progress first, then open, then
-# blocked), and that bead's gc.root_bead_id. --bead is a hint, used only when it
-# verifies as this session's bead for the step. --root names the run directly,
-# for a caller that holds no step of it.
+# --step names the run by the step this shell is executing: the bead `gc hook
+# current` names, when it verifies as this session's bead for that gc.step_ref,
+# and that bead's gc.root_bead_id. A --bead hint from step text poured before
+# this read is tried first, and a step that text holds through no claim is found
+# by assignee (in_progress first, then open, then blocked). --root names the run
+# directly, for a caller that holds no step of it.
 #
 # A run whose root is already closed is not cancelled, because gascity's cancel
 # leaves a terminal run's members as they are and answers 409. A 409 for a root
@@ -33,8 +34,8 @@
 # does not land the script exits 1, and the caller does not drain: its step
 # stays claimed, so whichever worker the step goes to next retries the cancel.
 #
-# Callers: the decline arms of mol-polecat-work, mol-validate and mol-rig-demo;
-# molecule-hold.sh (--step, for step text that names that script);
+# Callers: decline.sh; the decline arms of mol-review, mol-validate and
+# mol-rig-demo; molecule-hold.sh (--step, for step text that names that script);
 # orphan-dispose.sh (--ended); gc-helm.sh takeaway --release.
 # exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 set -uo pipefail
@@ -55,12 +56,14 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [-
        run-cancel.sh --root <root-id> --reason "<text>" [--ended] [--db <path>] [--dry-run]
 
   --step     the gc.step_ref of the step this shell is executing, e.g.
-             mol-polecat-work.load-context. The run is that step's molecule.
+             mol-polecat-work.load-context, or a check loop's name, e.g.
+             self-review, for one of its iterations. The run is that step's
+             molecule.
   --root     the run's root bead, for a caller that holds no step of it.
   --reason   why the run ends; appended to the held step in --step mode once
              the run has ended, and printed on the result line (required)
-  --bead     candidate id, e.g. `.bead_id` from `gc hook --claim --json`. A
-             HINT: used only if it verifies as this session's bead for --step.
+  --bead     candidate id in place of `gc hook current`'s. A HINT: used only if
+             it verifies as this session's bead for --step.
   --ended    the caller read the root as closed: close only what the run left
              open, and refuse a root that reads live rather than cancel it.
   --db       the store the run's beads live in, for a caller outside it.
@@ -180,7 +183,7 @@ if [ -n "$STEP" ]; then
       ($ids | split("\n") | map(select(. != ""))) as $me
       | .[0] as $b
       | if $b == null then empty
-        elif (($b.metadata["gc.step_ref"] // "") != $step) then empty
+        elif ((($b.metadata["gc.step_ref"] // "") == $step or (($b.metadata["gc.step_ref"] // "") | startswith($step + ".iteration."))) | not) then empty
         elif (($me | index($b.assignee // "")) == null) then empty
         else ($b.status // "") end
     ' 2>/dev/null
@@ -201,6 +204,8 @@ if [ -n "$STEP" ]; then
     done <<< "$IDENTITIES"
   }
 
+  # A claim that names nothing, or another step, leaves the store to answer.
+  [ -n "$HINT" ] || HINT=$(gc hook current --id-only </dev/null 2>/dev/null) || HINT=""
   if [ -n "$HINT" ]; then
     case "$(verify "$HINT")" in
       in_progress|open|blocked|closed) TARGET="$HINT" ;;

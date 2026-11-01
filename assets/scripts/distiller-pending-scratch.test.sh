@@ -76,11 +76,11 @@ if [ -f "$f" ]; then cat "$f"; else printf 'no such store: %s\n' "$rig" >&2; exi
 STUB
 chmod +x "$SANDBOX/bin/gc"
 
-cat > "$SANDBOX/pack/assets/scripts/step-close.sh" <<'STUB'
+cat > "$SANDBOX/pack/assets/scripts/claim-close.sh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_CLOSE_LOG"
 STUB
-chmod +x "$SANDBOX/pack/assets/scripts/step-close.sh"
+chmod +x "$SANDBOX/pack/assets/scripts/claim-close.sh"
 
 # write_store <path> <bead-id> <category> — one pending observation.
 write_store() {
@@ -105,7 +105,7 @@ run_block() {
     TMPDIR="$RUN_TMP" \
     PATH="$SANDBOX/bin:$PATH" \
     STUB_STORE_DIR="$SANDBOX/stores" \
-    STUB_SC="$SANDBOX/pack/assets/scripts/step-close.sh" \
+    STUB_SC="$SANDBOX/pack/assets/scripts/claim-close.sh" \
     STUB_CLOSE_LOG="$SANDBOX/close-$label.log" \
     GC_PACK_DIR="$SANDBOX/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
       bash "$SANDBOX/run-$label.sh"

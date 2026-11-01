@@ -24,11 +24,8 @@ rubric holds the selection rule.
 Read-only plus bead-filing: this formula never edits a fragment, prompt, or
 skill — only an operator-merged PR changes agent behavior.
 
-Every step closes its own bead through `assets/scripts/step-close.sh --step
-<step-id>` (resolved into `$SC` at the top of each shell block) — never any
-other way, and never on an id read from the environment; the helper resolves
-by (gc.root_bead_id, gc.step_ref) and refuses when it cannot prove which
-molecule it is executing.
+Every step closes its own bead through `assets/scripts/claim-close.sh --step
+<step-id>` (resolved into `$SC` at the top of each shell block).
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
 drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
@@ -94,7 +91,7 @@ description = """
 ## 1. Prime and home-rig gate
 
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 gc prime
 gc bd prime
 REPO="$(git rev-parse --show-toplevel)"
@@ -111,7 +108,7 @@ DISTILL_RUN=open   # open | gated | aborted | off-home
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   DISTILL_RUN=off-home
   echo "DISTILL_RUN=off-home — not the gc-toolkit pack home rig; nothing to distill here."
-  "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome pass
+  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome pass
   exit 0
 fi
 ```
@@ -124,7 +121,7 @@ an unreadable listing for ANY store sets `DISTILL_RUN=aborted`, closes this
 step `--outcome fail`, and files nothing — never judge on partial data.
 
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 # Rig set: a poured {{rig_list}} wins; else enumerate. `gc rig list --json`
 # returns an OBJECT ({"rigs":[...]}), and the HQ entry is addressable only by
 # PATH (`--rig <city>` fails) — so carry name + path per line.
@@ -157,7 +154,7 @@ fi
 if [ ! -s "$RIGSET" ]; then
   DISTILL_RUN=aborted
   echo "FAIL-SAFE: no rig_list poured and rig enumeration returned nothing — DISTILL_RUN=aborted, nothing judged, nothing filed"
-  "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome fail
+  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome fail
   exit 0
 fi
 
@@ -178,7 +175,7 @@ while IFS="$TAB" read -r R RPATH; do
   if ! jq -e 'type=="array"' "$RAW" >/dev/null 2>&1; then
     DISTILL_RUN=aborted
     echo "FAIL-SAFE: observation listing for store $R unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
-    "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome fail
+    "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome fail
     exit 0
   fi
   # obs_rig_path rides along so step 3's stamping reopens the SAME store.
@@ -242,10 +239,11 @@ adopted, OPEN = in flight. Skip cleanly when gh or the repo slug is
 unavailable. Vetoes filed this sweep are judged by the NEXT gate-opening
 run.
 
-Then close this step (non-terminal — same session continues, carrying
-$REPO, $PENDING, $DISTILL_RUN, and the rig set):
+Then close this step (non-terminal: the same session then takes the next step
+with `gc hook --claim --json`, carrying $REPO, $PENDING, $DISTILL_RUN, and the
+rig set):
 ```bash
-"${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome pass
+"${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome pass
 ```
 
 **Exit criteria:** disposition decided and echoed as `$DISTILL_RUN`; on
@@ -267,11 +265,11 @@ truth; never restate it in parallel prose.
 ## 0. Carry the run disposition
 
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — nothing to judge here."
-  "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome pass
+  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome pass
   exit 0
 fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
@@ -279,7 +277,7 @@ if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   # "still binding? no recent evidence" is only answerable from a read that
   # succeeded.
   echo "DISTILL_RUN=aborted — judging nothing, proposing nothing."
-  "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome fail
+  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome fail
   exit 0
 fi
 ```
@@ -394,7 +392,7 @@ later run's survivors empty here and it finalizes as a no-op. Cap survivors at
 Then close this step (non-terminal; the session carries the survivors and
 the consumed-observation map forward):
 ```bash
-"${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome pass
+"${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome pass
 ```
 
 **Exit criteria:** judgeable set deduped and judged into pattern beads with
@@ -425,17 +423,17 @@ one; it never blocks.
 ## 0. Carry the run disposition
 
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
   echo "DISTILL_RUN=off-home — no bead filed, no observation stamped."
-  "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
+  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
   gc runtime drain-ack
   exit 0
 fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   echo "DISTILL_RUN=aborted — no bead filed, no observation stamped."
-  "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome fail
+  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome fail
   gc runtime drain-ack
   exit 0
 fi
@@ -540,7 +538,7 @@ SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/hum
 ## 4. Summarize and drain
 
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
+SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held/surfaced H, G human gate(s), discarded D, stamped S observation(s)."
 # The loop's success metric, in the run log where the run that moved it is
 # visible. It also runs standalone, which is how the metric is read while
@@ -557,7 +555,7 @@ fi
 # Step 1 hands the pending set past its own trap because every step reads it;
 # this is its last use. Guarded because each block is its own shell.
 [ -n "${PENDING:-}" ] && rm -f "$PENDING"
-"${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
+"${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```
 

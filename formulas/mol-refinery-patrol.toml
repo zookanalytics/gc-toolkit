@@ -1170,9 +1170,9 @@ the next pass tries again. A named bead that is not a convoy leaves $WORK its ow
 anchor, as a first handoff is. No other bead is anchored this way. A review's
 or a ruling's rework names a bead whose own rebuild may still be queued, and
 anchoring that bead would make the rebuild's load-context read it as finished
-work. Step 4b of
-`mol-polecat-work`'s submit-and-exit runs the same `rebuild-child-lands-on`
-block, so the polecat stamps its summary on the bead this landing anchors.
+work. `work-submit.sh`, which `mol-polecat-work`'s submit-and-exit calls, runs
+the same `rebuild-child-lands-on` block, so the polecat stamps its summary on the
+bead this landing anchors.
 
 The child leaves through `lifecycle.sh` because `merge_result` is the
 lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the

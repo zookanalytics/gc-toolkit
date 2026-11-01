@@ -90,17 +90,17 @@ Human engagement is the workflow §4 calls visit. The keeper is the opt-in
 ### Work
 
 `mol-polecat-work` extends core's `mol-polecat-base` and overrides only what
-differs: the per-bead worktree that `gc worktree` provisions, the self-review
-loop over `gctk rig` records, and the push and handoff. Each step closes
+differs: load-context's refusals, the per-bead worktree that `gc worktree`
+provisions, the pre-flights and the self-review loop over `gctk rig` records, and
+the push and handoff, each for the reason its warrant gives. Each step closes
 through `gc hook current`, and a decline is one call. Work owns the work branch
 and the handoff write. Priority following stays under its warrant, and deferred
 dispatch shrinks to the residuals tk-1tfzr71.16 keeps under warrants: sling on
 unblock, and close on an `until` edge.
 
-The trade: load-context becomes core's, so a pack refinement of it waits for
-upstream or carries a warrant of its own. The duplicate-dispatch gate is in the
-fork's load-context and not in upstream's. Until upstream takes it, keeping the
-gate keeps a fork commit or a warranted override.
+The trade: `implement` is core's, so a pack refinement of it goes in the polecat
+doctrine or waits for upstream. A step inherited from core declares no
+continuation group, so a session may take `implement` fresh.
 
 ### Review
 
@@ -227,7 +227,7 @@ bd 1.3.2.
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
 | `worktree-reap.sh`, `worktree-setup.sh` | the controller's closed-bead worktree reaper, `gc worktree` | tk-1tfzr71.10 |
-| `step-close.sh` | `gc hook current` | tk-1tfzr71.12 |
+| `step-close.sh` | `gc hook current` | tk-1tfzr71.39 |
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
@@ -245,7 +245,6 @@ home.
   drain): 19 copies in step text, 11 of them in `mol-polecat-work.toml` and one
   in the polecat doctrine fragment, with 28 copies of its refusal sentence.
   Carried by tk-qitjxcm (P3).
-- The step-close loop: 10 copies in 5 formulas. It goes with step-close.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
@@ -264,7 +263,7 @@ and the change that fires the trigger deletes it.
   `--check` passes and the operator clears the cutover gate (tk-nly1mqd). Carried
   by tk-1tfzr71.33.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
-  with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.12.
+  with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.39.
 - The PR reminder's old marker. Trigger: no open PR carries one. Carried by
   tk-1tfzr71.33.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
@@ -313,7 +312,7 @@ shows its measured net instead.
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
 | tk-1tfzr71.33 | the cutover's migration script, the keys only it reads, the PR reminder's old marker | 2,180 | the cutover gate (tk-nly1mqd) |
 | tk-c8724xi | the resolution loops, the doctrine its census names, its comment excess | 11 loops, about 35 restatements, about 150 comment lines | nothing |
-| tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,390 | nothing |
+| tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
 | tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | nothing |
 
 ### 3. The lanes
@@ -353,7 +352,7 @@ Each item is carried by the bead it names.
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
 | P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
-| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.12, .19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
+| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
 ## The rules

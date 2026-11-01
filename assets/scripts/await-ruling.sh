@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # await-ruling — make a work bead wait on the human gate that asks a person for
-# a ruling on it, and re-sling it when the ruling is "proceed".
+# a ruling on it, or on another bead, and re-sling it when that wait clears.
 #
 #   await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
 #                   [--subject <bead>] [--target <pool>] [--dry-run]
+#   await-ruling.sh <work-bead> --blocked-by <bead> --formula <formula>
+#                   [--target <pool>] [--dry-run]
+#
+# --blocked-by is the same wait with no person in it: the work bead takes a
+# `blocks` edge onto <bead> unless it has one, and everything below applies, with
+# <bead> closing in place of the gate clearing.
 #
 # A worker that declines work it cannot finish without a person files the
 # question with human-gate.sh, then cancels its run (run-cancel.sh). Nothing
@@ -61,8 +67,9 @@
 # and after an arm that did not land, the re-run arms to the pool the earlier
 # run recorded.
 #
-# Callers: the decline arms of mol-polecat-work that wait for a person, and two
-# arms of mol-refinery-patrol's merge-push: the zero-diff guard, which makes
+# Callers: work-gate.sh and work-setup.sh, the decline arms of mol-polecat-work
+# that wait for a person or a sibling, and two arms of mol-refinery-patrol's
+# merge-push: the zero-diff guard, which makes
 # work whose check could not run three patrols in a row wait on a human gate,
 # and the arm that makes a convoy's rebuild child wait when no bead can carry
 # its PR. That work is assigned to the refinery, so the release is of a claim in
@@ -85,9 +92,12 @@ usage() {
   cat >&2 <<'USAGE'
 usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
                        [--subject <bead>] [--target <pool>] [--dry-run]
+       await-ruling.sh <work-bead> --blocked-by <bead> --formula <formula>
+                       [--target <pool>] [--dry-run]
 
   <work-bead>     the bead the declined run was poured for
-  --key           the situation key human-gate.sh filed the gate under (required)
+  --key           the situation key human-gate.sh filed the gate under
+  --blocked-by    the bead the work waits on when no person is asked anything
   --formula       the formula the re-sling pours, e.g. mol-polecat-work
                   (required)
   --subject       the bead the gate was filed on; default the work bead
@@ -111,15 +121,16 @@ require_value() {
     echo "$PROG: $1 requires a value" >&2; usage; exit 2
   fi
   case "$2" in
-    --key|--formula|--subject|--target|--dry-run|-h|--help)
+    --key|--blocked-by|--formula|--subject|--target|--dry-run|-h|--help)
       echo "$PROG: $1 requires a value, but the next argument is the option '$2'" >&2; usage; exit 2 ;;
   esac
 }
 
-WORK=""; KEY=""; FORMULA=""; SUBJECT=""; TARGET=""; DRY_RUN=0
+WORK=""; KEY=""; BLOCKER=""; FORMULA=""; SUBJECT=""; TARGET=""; DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)     require_value "$@"; KEY="$2";     shift 2 ;;
+    --blocked-by) require_value "$@"; BLOCKER="$2"; shift 2 ;;
     --formula) require_value "$@"; FORMULA="$2"; shift 2 ;;
     --subject) require_value "$@"; SUBJECT="$2"; shift 2 ;;
     --target)  require_value "$@"; TARGET="$2";  shift 2 ;;
@@ -131,17 +142,20 @@ while [ $# -gt 0 ]; do
       WORK="$1"; shift ;;
   esac
 done
-if [ -z "$WORK" ] || [ -z "$KEY" ] || [ -z "$FORMULA" ]; then
-  echo "$PROG: a work bead, --key and --formula are all required" >&2; usage; exit 2
+if [ -z "$WORK" ] || [ -z "$FORMULA" ] || { [ -z "$KEY" ] && [ -z "$BLOCKER" ]; }; then
+  echo "$PROG: a work bead, --formula, and --key or --blocked-by are all required" >&2; usage; exit 2
+fi
+if [ -n "$BLOCKER" ] && { [ -n "$KEY" ] || [ -n "$SUBJECT" ]; }; then
+  echo "$PROG: --blocked-by names the wait itself, so --key and --subject do not apply" >&2; usage; exit 2
 fi
 [ -n "$SUBJECT" ] || SUBJECT="$WORK"
-case "$WORK$KEY$FORMULA$SUBJECT" in
+case "$WORK$KEY$BLOCKER$FORMULA$SUBJECT" in
   *'{{'*|*'}}'*)
-    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$FORMULA' '$SUBJECT'); the pour did not render it" >&2; exit 2 ;;
+    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$BLOCKER' '$FORMULA' '$SUBJECT'); the pour did not render it" >&2; exit 2 ;;
 esac
-case "$WORK$KEY$FORMULA$SUBJECT" in
+case "$WORK$KEY$BLOCKER$FORMULA$SUBJECT" in
   *[!A-Za-z0-9._-]*)
-    echo "$PROG: the work bead, --key, --formula and --subject must contain only [A-Za-z0-9._-]" >&2; exit 2 ;;
+    echo "$PROG: the work bead, --key, --blocked-by, --formula and --subject must contain only [A-Za-z0-9._-]" >&2; exit 2 ;;
 esac
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -221,19 +235,24 @@ open_gate_under_key() { # <bead> -> the id, or nothing; non-zero on a failed rea
   gates=$(bd_human_gates "$1") || return 1
   printf '%s' "$gates" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null
 }
-if ! GATE=$(open_gate_under_key "$SUBJECT"); then
-  echo "$PROG: could not read the human gates of $SUBJECT; no wait was recorded" >&2
-  exit 1
-fi
-if [ -z "$GATE" ] && [ "$SUBJECT" != "$WORK" ]; then
-  if ! GATE=$(open_gate_under_key "$WORK"); then
-    echo "$PROG: could not read the human gates of $WORK; no wait was recorded" >&2
+GATE="$BLOCKER"
+WAIT_ON="$BLOCKER"
+if [ -z "$BLOCKER" ]; then
+  if ! GATE=$(open_gate_under_key "$SUBJECT"); then
+    echo "$PROG: could not read the human gates of $SUBJECT; no wait was recorded" >&2
     exit 1
   fi
-fi
-if [ -z "$GATE" ]; then
-  echo "$PROG: no open human gate under $KEY blocks $SUBJECT; file it with human-gate.sh first. No wait was recorded." >&2
-  exit 1
+  if [ -z "$GATE" ] && [ "$SUBJECT" != "$WORK" ]; then
+    if ! GATE=$(open_gate_under_key "$WORK"); then
+      echo "$PROG: could not read the human gates of $WORK; no wait was recorded" >&2
+      exit 1
+    fi
+  fi
+  if [ -z "$GATE" ]; then
+    echo "$PROG: no open human gate under $KEY blocks $SUBJECT; file it with human-gate.sh first. No wait was recorded." >&2
+    exit 1
+  fi
+  WAIT_ON="gate $GATE"
 fi
 
 if [ -z "$TARGET" ]; then
@@ -250,7 +269,7 @@ case "$TARGET" in
 esac
 
 if [ "$DRY_RUN" = 1 ]; then
-  echo "$PROG: DRY RUN: $WORK would wait on gate $GATE, armed to re-sling to $TARGET --on $FORMULA${RELEASE:+, after releasing its claim (status $STATUS${ASSIGNEE:+, assignee $ASSIGNEE})}"
+  echo "$PROG: DRY RUN: $WORK would wait on $WAIT_ON, armed to re-sling to $TARGET --on $FORMULA${RELEASE:+, after releasing its claim (status $STATUS${ASSIGNEE:+, assignee $ASSIGNEE})}"
   exit 0
 fi
 
@@ -258,13 +277,18 @@ fi
 # read back from the work bead's side, the read every reader of its gates makes.
 blocks_on_gate() {
   local gates
+  if [ -n "$BLOCKER" ]; then
+    gates=$(bd_json_array dep list "$WORK") || return 1
+    printf '%s' "$gates" | jq -e --arg g "$GATE" 'any(.[]; .id == $g and ((.dependency_type // .type // "") == "blocks"))' >/dev/null 2>&1
+    return
+  fi
   gates=$(bd_human_gates "$WORK") || return 1
   printf '%s' "$gates" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1
 }
 if ! blocks_on_gate; then
   gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1 || true
   if ! blocks_on_gate; then
-    echo "$PROG: the blocks edge from $WORK onto gate $GATE did not land; no wait was recorded" >&2
+    echo "$PROG: the blocks edge from $WORK onto $WAIT_ON did not land; no wait was recorded" >&2
     exit 1
   fi
 fi
@@ -275,12 +299,12 @@ fi
 case "$RELEASE" in
   unclaim)
     if ! gc bd unclaim "$WORK" --if-assignee "$ASSIGNEE" </dev/null >/dev/null 2>&1; then
-      echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (bd refused it, or the claim changed hands); it waits on gate $GATE unarmed" >&2
+      echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (bd refused it, or the claim changed hands); it waits on $WAIT_ON unarmed" >&2
       exit 1
     fi ;;
   reopen)
     if ! gc bd update "$WORK" --status=open </dev/null >/dev/null 2>&1; then
-      echo "$PROG: $WORK is in_progress with no assignee and was not reopened; it waits on gate $GATE unarmed" >&2
+      echo "$PROG: $WORK is in_progress with no assignee and was not reopened; it waits on $WAIT_ON unarmed" >&2
       exit 1
     fi ;;
 esac
@@ -294,12 +318,12 @@ if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.defer
     --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" \
     --set-metadata gc.deferred_assignee="" --set-metadata resling_target="$TARGET" \
     --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null >/dev/null 2>&1; then
-  echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on gate $GATE unarmed" >&2
+  echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on $WAIT_ON unarmed" >&2
   exit 1
 fi
 if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
-    --reason "waits on the ruling asked by gate $GATE ($KEY)" 2>&1); then
-  echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on gate $GATE unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
+    --reason "${KEY:+waits on the ruling asked by $WAIT_ON ($KEY)}${BLOCKER:+waits on $BLOCKER}" 2>&1); then
+  echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on $WAIT_ON unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
   exit 1
 fi
 BACK=$(bd_json show "$WORK")
@@ -310,5 +334,9 @@ if [ "$ARMED" != "$TARGET" ] || [ "$BACK_STATUS" != open ] || [ -n "$BACK_ASSIGN
   echo "$PROG: $WORK reads back armed to '${ARMED}', status '${BACK_STATUS}', assignee '${BACK_ASSIGNEE}'; the re-sling fires only for an open, unassigned bead armed to $TARGET" >&2
   exit 1
 fi
-echo "$PROG: $WORK waits on gate $GATE ($KEY); clearing the gate re-slings it to $TARGET --on $FORMULA"
+if [ -n "$BLOCKER" ]; then
+  echo "$PROG: $WORK waits on $BLOCKER; its close re-slings it to $TARGET --on $FORMULA"
+else
+  echo "$PROG: $WORK waits on gate $GATE ($KEY); clearing the gate re-slings it to $TARGET --on $FORMULA"
+fi
 exit 0

@@ -76,6 +76,10 @@ if [ "${1:-}" = "status" ]; then
   [ -n "${FAKE_STATUS:-}" ] || { echo "gc: no city here (stub)" >&2; exit 1; }
   printf '%s\n' "$FAKE_STATUS"; exit 0
 fi
+if [ "${1:-} ${2:-}" = "hook current" ]; then
+  [ -n "${FAKE_HOOK_CURRENT:-}" ] || { echo "gc hook current: no claim (stub)" >&2; exit 1; }
+  printf '%s\n' "$FAKE_HOOK_CURRENT"; exit 0
+fi
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
 shift
 verb="${1:-}"; shift || true
@@ -237,6 +241,13 @@ run --step "$STEP" --bead tk-b --reason r
 eq "$RC" 0 "--bead: a verified hint resolves two same-step beads"
 has "$(cat "$CURL_LOG")" "/runs/tk-rootB/cancel" "--bead: the hint's root is cancelled (a graph.v2-contract root counts)"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
+OUT=$(FAKE_HOOK_CURRENT=tk-b "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
+eq "$RC" 0 "claim: gc hook current names which of two same-step beads this session runs"
+has "$(cat "$CURL_LOG")" "/runs/tk-rootB/cancel" "claim: the claimed step's root is cancelled"
+cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
+OUT=$(FAKE_HOOK_CURRENT=tk-rootA "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
+eq "$RC" 2 "claim: a current claim that is not this step leaves the store to answer, and two beads refuse"
+cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
 run --step "$STEP" --reason r
 eq "$RC" 2 "ambiguous: two in_progress beads for the step and no hint are refused"
 eq "$(calls)" 0 "ambiguous: no request"
@@ -252,6 +263,19 @@ run --step "$STEP" --bead "<the bead_id your gc hook --claim returned>" --reason
 eq "$RC" 0 "a placeholder --bead is ignored and the store resolves this session's step"
 has "$OUT" "is not a bead id; resolving from the store" "a placeholder --bead is reported"
 has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "a placeholder --bead: this session's root"
+
+# ── 3b. a check loop's step is named by the loop ─────────────────────────────
+cat > "$FAKE_STORE" <<JSON
+[
+ {"id":"tk-rootL","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow"}},
+ {"id":"tk-iter","status":"in_progress","assignee":"$MINE","metadata":{"gc.step_ref":"self-review.iteration.2","gc.root_bead_id":"tk-rootL"}}
+]
+JSON
+: > "$CURL_LOG"; : > "$GC_LOG"
+OUT=$(FAKE_HOOK_CURRENT=tk-iter "$SCRIPT" --step self-review --reason r 2>&1); RC=$?
+eq "$RC" 0 "loop: an iteration answers to its loop's name"
+has "$(cat "$CURL_LOG")" "/runs/tk-rootL/cancel" "loop: its root is cancelled"
+reset
 
 # ── 4. tiers: open, then blocked ─────────────────────────────────────────────
 reset

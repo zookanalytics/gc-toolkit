@@ -19,9 +19,7 @@ The molecule writes no code and needs no worktree of its own. Its one push is a
 ref push from the rig's checkout, which a converse sitting cannot make. Each step
 re-derives the subject from the input convoy ({{convoy_id}}'s one tracked member)
 in its own shell, records its result on the subject so a resume is idempotent,
-and closes its own step bead through assets/scripts/step-close.sh — resolved by
-(gc.root_bead_id, gc.step_ref), never a GC_*BEAD_ID env var, which after a
-hook-claim names a different step.
+and closes its own step bead through assets/scripts/claim-close.sh.
 
 Every PR the effort produces merges only with a standing APPROVED review from an
 account other than the city's, which counts until it is dismissed: merge.sh
@@ -95,8 +93,7 @@ echo "design_gated resolves to $DESIGN_GATED"
 
 **Close this step bead so the graph advances.** Non-terminal, so no drain:
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.load-context --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.load-context
 ```
 
 **Exit criteria:** the subject and its card are read, and this step is closed.
@@ -171,8 +168,7 @@ esac
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-branch --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.seed-branch
 ```
 
 **Exit criteria:** `integration/<subject-id>` is on origin, the subject records it
@@ -276,8 +272,7 @@ WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null 
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-design --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.file-design
 ```
 
 **Exit criteria:** the design child is filed with its target, the subject waits
@@ -389,8 +384,7 @@ fi
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-implementation --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.file-implementation
 ```
 
 **Exit criteria:** the implementation child is filed with its target, the
@@ -481,8 +475,7 @@ HELD=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null |
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-summary --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.file-summary
 ```
 
 **Exit criteria:** the summary task is filed beside the subject with no target,
@@ -609,9 +602,7 @@ themselves in order) and drain. The control-dispatcher's `workflow-finalize`
 closes the `kind=workflow` root once every step is closed; never close the root,
 the subject, the summary task, or any child yourself.
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.dispatch --convoy {{convoy_id}} --outcome pass
-gc runtime drain-ack
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.dispatch && gc runtime drain-ack
 ```
 
 **Exit criteria:** every target and edge of the setup read back, the subject is

@@ -43,10 +43,9 @@ Hard rules, in force for every step:
 
 Mechanics the steps are written around: the validation-pass bead arrives as the
 input convoy (each step re-derives VALIDATION_PASS in its own shell), and each
-step closes its own bead through assets/scripts/step-close.sh, which resolves by
-(gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var, which does not
-track the current step. The terminal step closes the validation-pass bead
-itself, the validator's own working bead that no other writer disposes of.
+step closes its own bead through assets/scripts/claim-close.sh. The terminal step
+closes the validation-pass bead itself, the validator's own working bead that no
+other writer disposes of.
 """
 formula = "mol-validate"
 
@@ -186,11 +185,10 @@ its grade, its failure scenario and its verification. That is what you rule on.
 branch it gates tell you what the diff was for, which is what makes a finding
 "introduces risk" judgeable in `triage-findings`.
 
-**5. Close this step bead so the graph advances.** Non-terminal step, no drain —
-the same session carries on into `triage-findings`:
+**5. Close this step bead so the graph advances.** Non-terminal step, no drain:
+the same session then takes `triage-findings` with `gc hook --claim --json`.
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one}" --step mol-validate.load-dispatch --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-validate.load-dispatch
 ```
 
 **Exit criteria:** validation-pass bead derived, anchor and lane and reviewed
@@ -403,11 +401,10 @@ owns (tk-o1bzbm), not this pass: this pass rules dispositions and lets the
 primitive file a deferral's follow-up; it does not create or route must-fix fix
 units.
 
-**Close this step bead so the graph advances.** Non-terminal step, no drain —
-the same session carries on into `rule-convergence`:
+**Close this step bead so the graph advances.** Non-terminal step, no drain:
+the same session then takes `rule-convergence` with `gc hook --claim --json`.
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-validate.triage-findings --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-validate.triage-findings
 ```
 
 **Exit criteria:** every finding in the batch carries a ruled disposition
@@ -537,11 +534,10 @@ a converged human batch, and the block above on any batch that has not
 converged. No path closes, routes or marks the anchor. Its one write is the note
 the withdrawal appends when it dismisses an approval.
 
-**Close this step bead so the graph advances.** Non-terminal step, no drain —
-the same session carries on into `finalize-and-drain`:
+**Close this step bead so the graph advances.** Non-terminal step, no drain:
+the same session then takes `finalize-and-drain` with `gc hook --claim --json`.
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack}" --step mol-validate.rule-convergence --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-validate.rule-convergence
 ```
 
 **Exit criteria:** convergence ruled and recorded through review-outcome.sh — a
@@ -555,7 +551,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "finalize-and-drain"
-title = "Close the validation pass, close the step chain, and drain"
+title = "Close the validation pass and this step, and drain"
 needs = ["rule-convergence"]
 description = """
 Re-derive the validation-pass bead:
@@ -578,25 +574,17 @@ gc bd update "$VALIDATION_PASS" --status=closed --set-metadata gc.outcome=record
 Do not close the anchor, the findings you left open (must-fix and deferred are
 answered elsewhere), or the approve outcome (back-lane already closed it).
 
-**2. Close this workflow's step chain, then drain.** Terminal step: it still
-closes its own bead — that is how a graph.v2 step advances, and skipping it
-leaves an open assigned step bead that re-pools a fresh worker every cycle.
-Forward order is mandatory (each step blocks the next); close only through
-step-close.sh, which resolves by (gc.root_bead_id, gc.step_ref) — a GC_*BEAD_ID
-env var names the wrong bead after a claim. Never close `workflow-finalize`
-(the control-dispatcher's):
+**2. Close this step, then drain.** Terminal step: it still closes its own bead,
+because that is how a graph.v2 step advances, and skipping it leaves an open
+assigned step bead that re-pools a fresh worker every cycle. Never close
+`workflow-finalize` (the control-dispatcher's):
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
-for STEP in load-dispatch triage-findings rule-convergence finalize-and-drain; do
-  "$SC" --step "mol-validate.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-validate.$STEP was not this session's to close — left for the finalizer"
-done
-gc runtime drain-ack
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-validate.finalize-and-drain && gc runtime drain-ack
 ```
 
 **Never** close or route the anchor, and never approve on GitHub. Done means gone.
 
-**Exit criteria:** validation-pass bead closed, step chain closed forward, drain
+**Exit criteria:** validation-pass bead closed, this step closed, drain
 acknowledged.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

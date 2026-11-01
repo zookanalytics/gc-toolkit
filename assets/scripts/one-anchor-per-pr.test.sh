@@ -421,16 +421,16 @@ eq "$(resolve3 rv-2 integration/cv '[{"id":"rv-2","metadata":{"task_kind":"rewor
    "(5h) a review's rework of a convoy never anchors the convoy"
 eq "$(resolve3 ru-1 integration/cv '[{"id":"ru-1","metadata":{"task_kind":"rework","anchor_bead":"cv","source_ruling_bead":"tk-visit"}}]')" "|ru-1|" \
    "(5h) a ruling's rework of a convoy never anchors the convoy"
-# (5i) Submit step 4b in mol-polecat-work resolves the summary's anchor with the
-#      same block, so a polecat stamps its summary on the bead this landing
-#      anchors. One text, held equal here.
+# (5i) work-submit.sh resolves the summary's anchor with the same block, so a
+#      polecat stamps its summary on the bead this landing anchors. One text,
+#      held equal here.
 lands_block() { awk '/# >>> rebuild-child-lands-on$/ {f=1; next} /# <<< rebuild-child-lands-on$/ {f=0} f' "$1"; }
 LANDS_PATROL="$(lands_block "$TOML")"
-LANDS_POLECAT="$(lands_block "$ROOT/formulas/mol-polecat-work.toml")"
+LANDS_POLECAT="$(lands_block "$HERE/work-submit.sh")"
 if [ -n "$LANDS_PATROL" ] && [ "$LANDS_PATROL" = "$LANDS_POLECAT" ]; then
-  ok "(5i) merge-push and submit step 4b carry one rebuild-child-lands-on block"
+  ok "(5i) merge-push and work-submit.sh carry one rebuild-child-lands-on block"
 else
-  bad "(5i) the rebuild-child-lands-on block differs between the two formulas, or is missing"
+  bad "(5i) the rebuild-child-lands-on block differs between merge-push and work-submit.sh, or is missing"
 fi
 
 # --- Static guards: the terminal arm's shape in the formula. ------------------

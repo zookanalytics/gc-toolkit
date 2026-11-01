@@ -548,25 +548,21 @@ eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "as the decline arms call it
 # ── 9. a decline arm later in the run meets a crashed owner's claim ──────────
 # load-context builds over an in_progress claim whose owner no session lists, and
 # nothing in the run releases it before a later decline arm asks for the wait.
-# The arm is workspace-setup's missing-branch block, read from the formula, and
-# its await-ruling.sh is this script; the gate filing it follows and the cancel
-# after it are stubs that record their turn, and the gate is already open.
-ARM="$TMP/missing-branch-arm.sh"
-awk '/^# >>> workspace-setup-missing-branch-decline$/ {f=1; next} /^# <<< workspace-setup-missing-branch-decline$/ {f=0} f' \
-  "$HERE/../../formulas/mol-polecat-work.toml" | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$ARM"
-has "$(cat "$ARM")" 'await-ruling.sh" "$WORK_BEAD_ID" --key polecat-missing-branch' \
-  "the missing-branch arm is read from mol-polecat-work.toml"
-mkdir -p "$TMP/pack/assets/scripts"
+# decline.sh is the arm, and its await-ruling.sh is this script; the gate filing it
+# follows and the cancel after it are stubs that record their turn, and the gate is
+# already open.
+mkdir -p "$TMP/pack"
+cp "$HERE/decline.sh" "$TMP/pack/decline.sh"
 for v in human-gate:GATE run-cancel:CANCEL; do
-  printf '#!/usr/bin/env bash\nprintf "%s\\n" >> "$FAKE_TRACE"\n' "${v#*:}" > "$TMP/pack/assets/scripts/${v%%:*}.sh"
+  printf '#!/usr/bin/env bash\nprintf "%s\\n" >> "$FAKE_TRACE"\n' "${v#*:}" > "$TMP/pack/${v%%:*}.sh"
 done
-printf '#!/usr/bin/env bash\nprintf "AWAIT\\n" >> "$FAKE_TRACE"\nexec "%s" "$@"\n' "$SCRIPT" > "$TMP/pack/assets/scripts/await-ruling.sh"
-chmod +x "$TMP/pack/assets/scripts/"*.sh
+printf '#!/usr/bin/env bash\nprintf "AWAIT\\n" >> "$FAKE_TRACE"\nexec "%s" "$@"\n' "$SCRIPT" > "$TMP/pack/await-ruling.sh"
+chmod +x "$TMP/pack/"*.sh
 arm() { # <session list> -> "<rc>|<ordered trace>"
   local rc=0
   : > "$TMP/trace"
-  env "${SELF[@]}" FAKE_SESSIONS="$1" FAKE_TRACE="$TMP/trace" STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
-    WORK_BEAD_ID=tk-work BRANCH=polecat/tk-work CLAIMED_STEP_BEAD_ID=st-setup bash "$ARM" > "$TMP/arm.out" 2>&1 || rc=$?
+  env "${SELF[@]}" FAKE_SESSIONS="$1" FAKE_TRACE="$TMP/trace" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    "$TMP/pack/decline.sh" --step mol-polecat-work.workspace-setup --reason why --subject tk-work --key polecat-missing-branch --formula mol-polecat-work --message "the branch is gone." > "$TMP/arm.out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/trace")"
 }
 arm_reset() {
@@ -576,7 +572,7 @@ arm_reset() {
   printf 'tk-work|blocks|tk-vm\n' >> "$FAKE_DEPS"
 }
 arm_reset
-eq "$(arm "$LIVE_LIST")" "1|GATE;AWAIT;CANCEL;DRAIN;" \
+eq "$(arm "$LIVE_LIST")" "0|GATE;AWAIT;CANCEL;DRAIN;" \
    "a later arm on a crashed owner's claim: the gate, the wait, the cancel, the drain"
 eq "$(grep -c '^tk-work|blocks|tk-vm$' "$FAKE_DEPS" | tr -d ' ')" 1 "a later arm on a crashed owner's claim: the work bead waits on the arm's gate"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a later arm on a crashed owner's claim: the claim is released"
@@ -586,6 +582,66 @@ jq -c 'map(if .id == "tk-work" then .assignee = "hq-live" else . end)' "$FAKE_ST
 eq "$(arm "$LIVE_LIST")" "1|GATE;AWAIT;" \
    "a later arm on a listed owner's claim: the wait does not land, so no cancel and no drain"
 eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-live" "a later arm on a listed owner's claim: the claim is kept"
+
+# ── a wait on another bead, with no person in it ─
+reset
+jq -c '. + [{"id":"tk-sib","status":"in_progress","assignee":"hq-peer","metadata":{}}]' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+run tk-work --blocked-by tk-sib --formula mol-polecat-work
+eq "$RC" 0 "--blocked-by: the wait lands"
+has "$OUT" "tk-work waits on tk-sib; its close re-slings it to $POOL --on mol-polecat-work" "--blocked-by: the result names the blocker and the re-sling"
+eq "$(grep -c '^tk-work|blocks|tk-sib$' "$FAKE_DEPS" | tr -d ' ')" 1 "--blocked-by: the work bead takes the edge"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "--blocked-by: the re-sling is armed to the last pour's pool"
+eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "--blocked-by: the re-sling pours the formula"
+has "$(meta tk-work gc.dispatch_when_ready_reason)" "tk-sib" "--blocked-by: the arm's reason names the blocker"
+eq "$(meta tk-work gc.execution_routed_to)" "" "--blocked-by: the pour's route stamp is cleared"
+eq "$(meta tk-work resling_target)" "$POOL" "--blocked-by: the clear records the pool, so a retry still knows it"
+adds=$(edge_adds)
+run tk-work --blocked-by tk-sib --formula mol-polecat-work
+eq "$RC" 0 "--blocked-by: a re-run converges"
+eq "$(edge_adds)" "$adds" "--blocked-by: an edge already in place is not written again"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "--blocked-by: a re-run re-arms to the pool it recorded, with the route keys gone"
+
+reset
+jq -c '. + [{"id":"tk-sib","status":"open","assignee":"","metadata":{}}]' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+printf 'tk-work|blocks|tk-sib\n' >> "$FAKE_DEPS"
+run tk-work --blocked-by tk-sib --formula mol-polecat-work
+eq "$RC" 0 "--blocked-by: an edge that already holds the bead carries the wait"
+eq "$(edge_adds)" 0 "--blocked-by: no second edge is written"
+
+reset
+jq -c '. + [{"id":"tk-sib","status":"open","assignee":"","metadata":{}}]' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+printf 'tk-work|related|tk-sib\n' >> "$FAKE_DEPS"
+run tk-work --blocked-by tk-sib --formula mol-polecat-work
+eq "$RC" 0 "--blocked-by: a bead related to the blocker can still wait on it"
+eq "$(grep -c '^tk-work|blocks|tk-sib$' "$FAKE_DEPS" | tr -d ' ')" 1 "--blocked-by: an edge of another kind holds nothing, so the blocks edge is added"
+
+reset
+jq -c '. + [{"id":"tk-sib","status":"open","assignee":"","metadata":{}}]' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+claim in_progress hq-me
+OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --blocked-by tk-sib --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 0 "--blocked-by: a claim in this session's name is released before the arm"
+eq "$(field tk-work status)" open "--blocked-by: the released bead reads open"
+eq "$(field tk-work assignee)" "" "--blocked-by: the released bead reads unassigned"
+
+reset
+FAKE_DEP_FAIL=1 run tk-work --blocked-by tk-sib --formula mol-polecat-work
+eq "$RC" 1 "--blocked-by: an edge bd refuses exits 1"
+has "$OUT" "the blocks edge from tk-work onto tk-sib did not land" "--blocked-by: the refusal names the bead"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "--blocked-by: an edge that did not land arms nothing"
+
+run tk-work --blocked-by tk-sib --key x --formula mol-polecat-work
+eq "$RC" 2 "--blocked-by with --key is a usage error"
+run tk-work --blocked-by tk-sib --subject tk-anchor --formula mol-polecat-work
+eq "$RC" 2 "--blocked-by with --subject is a usage error"
+run tk-work --blocked-by --formula mol-polecat-work
+eq "$RC" 2 "--blocked-by with no value is a usage error"
+run tk-work --formula mol-polecat-work
+eq "$RC" 2 "neither --key nor --blocked-by is a usage error"
+reset
+run tk-work --blocked-by tk-sib --formula mol-polecat-work --dry-run
+eq "$RC" 0 "--blocked-by --dry-run exits 0"
+has "$OUT" "would wait on tk-sib" "--blocked-by --dry-run names the blocker"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "--blocked-by --dry-run writes nothing"
 
 echo
 echo "await-ruling.test.sh: $PASS passed, $FAIL failed"
