@@ -88,12 +88,13 @@ and the pattern-bead set, then pick exactly one:
 Duplicated near-rules are this system's own version of the pasted
 boilerplate comment it exists to eliminate. Do not become the disease.
 
-### 4. Contradiction is a conversation, never a flip
+### 4. Contradiction is a human gate, never a flip
 
 Evidence against an adopted rule **never silently retires, weakens, or
-rewrites it**. File the contention visit on the pattern bead with both
-evidence lists framed; scope-narrowing, retirement, or dismissal is the
-operator's pick, not yours. The exception: an operator-endorsed
+rewrites it**. File the contention as a human gate on the pattern bead,
+through human-gate.sh under the key `distiller-contention`, with both evidence
+lists framed; scope-narrowing, retirement, or dismissal is the operator's pick,
+not yours. The exception: an operator-endorsed
 contradiction (`obs.endorsed=operator`) *is* the operator picking — file
 the UPDATE/SUPERSEDE proposal under judgment 1 instead.
 
@@ -172,7 +173,7 @@ Choose by what the learning *is*:
   is one dimension sharpened or added, never a checklist bolted on.
 - **`convention`** when the behavior must be carried *into* the turn by one
   role and no reviewer sees the moment it goes wrong — a claiming rule, a
-  handoff, an escalation choice.
+  handoff, the choice to ask a person.
 - **`exemplar`** when the lesson is a shape rather than a statement: two
   versions of the same artifact where the better one is obvious side by side
   and mushy in a sentence. Costs the most per read, so it earns its place
@@ -257,8 +258,8 @@ every agent capture as `self`, so an operator correction captured by the agent
 it corrected reads `self`. Before you treat a cluster as all-self, check each
 self observation's voice: a PR comment or review whose GitHub author is the
 operator (`gh api` on the provenance, `.user.login`), or the operator's own
-words in a session the operator attends, such as the converse sitting on a
-visit or mechanik, is an operator correction. Find a quoted turn in that
+words in a session the operator attends, such as a converse sitting or
+mechanik, is an operator correction. Find a quoted turn in that
 session's transcript (`gc session logs <session>`, or the codex rollout under
 `~/.codex/sessions`), and rule out text the city sends as a user turn,
 whatever the capture calls it: a configured nudge, a reminder, hook output, or

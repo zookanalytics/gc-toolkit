@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
 // The `gc` CLI is the third sanctioned Gas City interface this package reads,
@@ -49,8 +51,10 @@ const defaultGCTimeout = 30 * time.Second
 // gcClient is the slice of the `gc` CLI this source uses. It is an interface so
 // tests can drive the gather without a live city.
 type gcClient interface {
-	// Sessions maps every session's NAME and its ALIAS to that session's state.
-	// Both forms are keys because a child's assignee may be written either way.
+	// Sessions maps every session's NAME, ALIAS and ID to that session's state.
+	// Each form is a key because a child's assignee may be written any of these
+	// ways. A key a live session shares with an ended one holds the live one's
+	// state, whichever is listed first ([board.SessionEnded]).
 	Sessions(ctx context.Context) (map[string]string, error)
 }
 
@@ -161,9 +165,17 @@ func (g *gcExec) Sessions(ctx context.Context) (map[string]string, error) {
 		// writes the session NAME, a routed assignment writes the ALIAS, and a
 		// bead claimed by id carries the ID.
 		for _, k := range []string{s.SessionName, s.Alias, s.ID} {
-			if k != "" {
-				out[k] = s.State
+			if k == "" {
+				continue
 			}
+			// Two listed sessions can share a key, because a new session can
+			// take an identifier a failed-create session still carries. The
+			// list puts the newest first, so the ended session is listed after
+			// the live one that took its identifier.
+			if prev, ok := out[k]; ok && !board.SessionEnded(prev) && board.SessionEnded(s.State) {
+				continue
+			}
+			out[k] = s.State
 		}
 	}
 	return out, nil

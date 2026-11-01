@@ -26,9 +26,9 @@ executes warrants), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). A finding becomes one deduped
 BEAD through assets/scripts/patrol-finding.sh, and a proactive first reaction
 disposes it: routed to a pool, held for the operator's placement sitting, held
-on an edge, or escalated to the operator as a visit. assets/scripts/escalate.sh
-is for what a patrol cannot express as a bead — an emergency that needs a human
-now.
+on an edge, or put to the operator as a human gate on the finding.
+assets/scripts/human-gate.sh files a human gate on a bead directly, for an
+emergency about that bead that needs a human now.
 
 Every address this formula stamps or queries comes from
 assets/scripts/resolve-route.sh. The agents it addresses do not share a scope:
@@ -44,7 +44,7 @@ Marked blocks (bug-file, notice-finding, candidate-pipeline,
 host-bead-skip, downstream-court-skip, topology-root-skip,
 liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
 owning-store-guard, recovery-stamp-gate, crash-loop-window,
-patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
+patrol-wisp-pour, refinery-stuck-handoff) are extracted and executed by
 their tests; keep markers, keep them backslash-free.
 
 Variables:

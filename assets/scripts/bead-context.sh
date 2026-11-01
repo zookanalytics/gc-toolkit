@@ -13,9 +13,9 @@
 #      gc.takeaway headline (with gc.takeaway_settled). The free-text body is
 #      never parsed.
 #   D. Context edges, shown but never gating — the parent, the relates-to edges,
-#      the tracked-by visits, the beads that wait on this one by a blocks or an
-#      until edge (open ones first, at most AWAITED_CAP named), and a count per
-#      class.
+#      the beads that track it (a conversation about it, a convoy carrying it),
+#      the beads that wait on this one by a blocks or an until edge (open ones
+#      first, at most AWAITED_CAP named), and a count per class.
 #   E. Store — the store that answered, and the db it read.
 # and, each behind its own opt-in flag:
 #   B. --frontier — the blockers. A verdict over {ready, advancing, stuck}: ready
@@ -96,9 +96,9 @@ usage: bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads]
 
 Rebuilds one bead's working context in a single call: its core (title, status,
 priority, type, task_kind, assignee, routing, anchor state, first_reaction,
-origin, takeaway), its context edges (parent, relates-to, tracked-by visits,
-the beads that wait on it by a blocks or until edge, with a count per class),
-and the store that answered. --frontier adds the blocker verdict
+origin, takeaway), its context edges (parent, relates-to, the beads that
+track it, the beads that wait on it by a blocks or until edge, with a count per
+class), and the store that answered. --frontier adds the blocker verdict
 (ready/advancing/stuck) with open blockers named and closed counted; --horizon
 adds the direct-children epic-health snapshot. Each named
 blocker or child carries a transitive advance: stuck names the bead that stops
@@ -216,9 +216,10 @@ bd_rows() {
 #              a merge anchor the cadence acts on: its recorded machine axis is
 #                progressing, or settled before a PR exists (the PR-open pass
 #                publishes it), or settled with a PR that needs no further review.
-#   stuck      human: routed or assigned to the reserved `human` gate, a
-#                decision, a finding that needs the operator, or an anchor parked
-#                in a human state.
+#   stuck      human: a human gate (a gate whose await type is human, which
+#                carries no route), a bead routed or assigned to the reserved
+#                `human`, a decision, a finding that needs the operator, or an
+#                anchor parked in a human state.
 #              held: any other status. Blocked, deferred and pinned are
 #                deliberate holds no pool offers; a status a store adds is one
 #                this classifier does not know, so it fails closed.
@@ -266,7 +267,8 @@ def adv_own($cap):
   | (($m["merge_result"] // "") | tostring) as $mr
   | ((.assignee // "") | tostring) as $a
   | if .status == "in_progress" or .status == "hooked" then {state: "advancing"}
-    elif ($r | adv_human) or ($a | adv_human) or .issue_type == "decision" then {state: "stuck", why: "human"}
+    elif ($r | adv_human) or ($a | adv_human) or .issue_type == "decision"
+         or (.issue_type == "gate" and ((.await_type // "") | tostring) == "human") then {state: "stuck", why: "human"}
     elif .status != "open" then {state: "stuck", why: "held"}
     elif $mr != "" then adv_anchor($m; $mr)
     elif $tk == "finding" and (($m["finding.disposition"] // "") == "needs-you") then {state: "stuck", why: "human"}
@@ -426,16 +428,16 @@ STORE_JSON=$(jq -nc --arg rig "$SUBJ_RIG" --arg db "$DB" \
 # ── D. Context edges (never gating) ─────────────────────────────────────────
 # The parent link and the relates-to edges are outbound, so they come from the
 # subject's own read. Both edge spellings live in the store — `relates-to` and
-# the older `related` — so the class matches either. The tracked-by visits are
-# an INBOUND `tracks` edge (a visit tracks its subject; the subject carries no
-# reverse edge), so they are read with a reverse dep-list. The beads that wait on
-# the subject carry a `blocks` or an `until` edge to it, inbound too, and they
-# come from the dependents the subject's own read carries. The dependents also
-# hold every child and every inbound `related` edge, the review and rework
-# machinery this list leaves out, so it keeps the two edge types. bd neither
-# bounds the dependents nor puts the open ones first, so the list does both and
-# counts all of them. bd reads only the subject's store, so a bead in another
-# store that waits on it is not listed.
+# the older `related` — so the class matches either. The beads that track it are
+# an INBOUND `tracks` edge (a conversation tracks the bead it is about, and the
+# subject carries no reverse edge), so they are read with a reverse dep-list.
+# The beads that wait on the subject carry a `blocks` or an `until` edge to it,
+# inbound too, and they come from the dependents the subject's own read carries.
+# The dependents also hold every child and every inbound `related` edge, the
+# review and rework machinery this list leaves out, so it keeps the two edge
+# types. bd neither bounds the dependents nor puts the open ones first, so the
+# list does both and counts all of them. bd reads only the subject's store, so a
+# bead in another store that waits on it is not listed.
 TRACKED_BY=$(bd_json "$DB" dep list "$BEAD" --direction=up --type tracks \
   | jq -c 'if type == "array" then [.[] | {id, status}] else [] end' 2>/dev/null || echo '[]')
 AWAITED=$(printf '%s' "$SUBJ" | jq -c --argjson cap "$AWAITED_CAP" '

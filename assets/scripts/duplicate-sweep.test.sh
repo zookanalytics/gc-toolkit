@@ -621,21 +621,21 @@ eq "$(live_blockers A1)" "" "…releasing the anchor's merge"
 eq "$(meta O1 gc.work_outcome)" "no-op" "…recording gc.work_outcome=no-op, as a review's twin does"
 eq "$(meta O1 duplicate_of)" "<absent>" "…and no duplicate_of"
 a=$(rehome_args)
-has "$a" "answers the same ruling visit V1 on anchor A1" "the reason names the shared ruling and anchor"
-has "$a" "and ruling visit V1 is closed" "…and that its sitting is over"
+has "$a" "answers the same ruling conversation V1 on anchor A1" "the reason names the shared ruling and anchor"
+has "$a" "and ruling conversation V1 is closed" "…and that its sitting is over"
 ruling_scene open
 out=$(run)
 eq "$(bstatus O1)" "open" "a twin whose ruling's visit is still open is not disposed"
-has "$out" "its ruling visit V1 is open, so its sitting's sign-off may still adopt and dispatch it" "…saying why"
+has "$out" "its ruling conversation V1 is open, so its sitting's sign-off may still adopt and dispatch it" "…saying why"
 ruling_scene closed
 store "$(jq -c 'map(select(.id != "V1"))' "$STUB_STORE")"
 out=$(run)
 eq "$(bstatus O1)" "open" "a visit that does not resolve holds the twin"
-has "$out" "its ruling visit V1 does not resolve" "…saying so"
+has "$out" "its ruling conversation V1 does not resolve" "…saying so"
 ruling_scene closed "$(landed L1 V1 A1)"
 out=$(run)
 eq "$(bstatus O1)" "open" "a landed child keyed on a review with the same id is not the ruling's sibling"
-has "$out" "no other child of ruling visit V1 on anchor A1 has landed" "…so the twin is held"
+has "$out" "no other child of ruling conversation V1 on anchor A1 has landed" "…so the twin is held"
 ruling_scene closed
 store "$(jq -c '(.[] | select(.id == "O1") | .metadata.source_review_bead) |= "R9"' "$STUB_STORE")"
 out=$(run)

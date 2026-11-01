@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/escalation-rig.sh — the bead id prefix is
-# the only input, so the answer is the subject's store whatever the caller's
-# ambient rig or the subject's route say. Stubbed gc; no live city.
+# Hermetic test for assets/scripts/escalation-rig.sh, the hand-off that runs
+# bead-store.sh for a run or a session that still names the old path. It pins
+# the two forms those callers use, that bead-store.sh's answer and exit come
+# back unchanged, and that each caller's derivation, as it was poured, still
+# reaches human-gate.sh through the hand-off at escalate.sh. Stubbed gc; no live
+# city.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,114 +19,81 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { if grep -qF -- "$2" <<< "$1"; then ok "$3"; else bad "$3 (missing '$2')"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
+# The stub answers `gc rig list --json` from STUB_RIGS, and `gc bd show <id>
+# --json` with a task row for the id, as a warrant or a work bead reads, because
+# the hand-off at escalate.sh reads its subject's row. Any other call prints
+# nothing and exits 0.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
+if [ "${1:-} ${2:-}" = "bd show" ]; then
+  printf '[{"id":"%s","status":"open","issue_type":"task"}]\n' "${3:-}"
+  exit 0
+fi
 [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ] || exit 0
 [ -n "${STUB_RIGS_FAIL:-}" ] && { echo "gc: rig list unavailable" >&2; exit 1; }
 printf '%s\n' "${STUB_RIGS:-}"
 STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
-unset STUB_RIGS_FAIL 2>/dev/null || true
+unset STUB_RIGS_FAIL GC_RIG 2>/dev/null || true
 export STUB_RIGS='{"rigs":[{"name":"mycity","prefix":"hq","path":"/c"},
   {"name":"gc-toolkit","prefix":"tk","path":"/c/rigs/gc-toolkit"},
-  {"name":"gascity","prefix":"gc","path":"/c/rigs/gascity"},
-  {"name":"rig-a","prefix":"ra","path":"/c/rigs/rig-a"}]}'
+  {"name":"gascity","prefix":"gc","path":"/c/rigs/gascity"}]}'
 
 run() { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 
-# The finding this guards: a warrant living outside gc-toolkit, whose route is
-# a bare identity carrying no rig segment, still resolves to its own store.
-export GC_RIG=gc-toolkit
+echo "# the two forms the old callers use answer as bead-store.sh does"
 run gc-yxpj8
-eq "$RC" "0" "a non-gc-toolkit bead resolves while the caller sits in gc-toolkit (rc)"
-eq "$OUT" "gascity" "  ... and names the bead's own rig, not the ambient one"
-
-unset GC_RIG
-run gc-yxpj8
-eq "$OUT" "gascity" "the same answer with GC_RIG unset — the ambient rig is not an input"
-
-run tk-3y6toq
-eq "$RC" "0" "a gc-toolkit bead resolves (rc)"
-eq "$OUT" "gc-toolkit" "  ... to gc-toolkit"
-
-run ra-abc12
-eq "$OUT" "rig-a" "a rig-a bead resolves to rig-a"
-
-# Fail closed: every unresolved shape refuses with empty stdout, so a caller
-# binding GC_RIG=$(...) gets nothing to bind rather than a guess. The exit code
-# then says WHICH refusal it is — 1 for a subject that names no placeable bead
-# (an unknown prefix, or no prefix segment at all), 3 for a bead-shaped id whose
-# store could not be read (an unreadable rig set, or a prefix two rigs carry) —
-# so escalate.sh can bucket the first as ephemeral and fail closed on the second.
-run zz-abc12
-eq "$RC" "1" "an unknown prefix is a proven no-such-bead (exit 1)"
-eq "$OUT" "" "  ... printing no rig to stdout"
-has "$ERR" "no rig carries the prefix 'zz'" "  ... and naming the prefix it could not place"
-
-run abc12
-eq "$RC" "1" "an id with no prefix segment refuses"
-eq "$OUT" "" "  ... printing no rig to stdout"
-
-STUB_RIGS='{"rigs":[{"name":"one","prefix":"dup","path":"/a"},{"name":"two","prefix":"dup","path":"/b"}]}' \
-  run dup-abc12
-eq "$RC" "3" "a prefix two rigs carry is unproven (exit 3), not a proven no-such-bead"
-eq "$OUT" "" "  ... printing no rig to stdout"
-has "$ERR" "carried by 2 rigs" "  ... and saying how many carry it"
-
-STUB_RIGS_FAIL=1 run tk-3y6toq
-eq "$RC" "3" "an unreadable rig list is unproven (exit 3), a store that could not be read"
-eq "$OUT" "" "  ... printing no rig to stdout"
-has "$ERR" "could not read" "  ... reported apart from 'no such prefix', which has a different repair"
-
-# Only bead-store.sh can prove a no. A helper that cannot be run asked no store,
-# so its refusal is unproven (3), never the proven no-such-bead (1) that
-# escalate.sh redirects onto the triage subject.
-GC_BEAD_STORE_TOOL="$TMP/no-such-bead-store.sh" run tk-3y6toq
-eq "$RC" "3" "a missing bead-store.sh is unproven (exit 3), not a proven no-such-bead"
-eq "$OUT" "" "  ... printing no rig to stdout"
-has "$ERR" "cannot execute" "  ... and saying the store helper could not be run"
-
-printf '#!/usr/bin/env bash\necho gc-toolkit\n' > "$TMP/bead-store-noexec.sh"
-GC_BEAD_STORE_TOOL="$TMP/bead-store-noexec.sh" run tk-3y6toq
-eq "$RC" "3" "a bead-store.sh that is not executable is unproven (exit 3) too"
-eq "$OUT" "" "  ... and nothing it would answer is read"
-
-run
-eq "$RC" "2" "no argument is a usage error"
-run tk-3y6toq extra
-eq "$RC" "2" "a second argument is a usage error"
-run --help
-eq "$RC" "2" "--help is a usage error"
-
-# Callers bind the output directly, so it must carry nothing but the name.
-export GC_RIG=gc-toolkit
-BOUND=$(GC_RIG="$("$SUT" gc-yxpj8)" sh -c 'printf "[%s]" "$GC_RIG"')
-eq "$BOUND" "[gascity]" "the output binds straight into GC_RIG with no trailing junk"
-
-# The city's own store answers to its rig name in this mode, but `gc bd` ignores
-# that name as GC_RIG. --db prints the path, which selects every store.
+eq "$RC" "0" "a bead's rig resolves (rc)"
+eq "$OUT" "gascity" "  ... to the rig its id prefix names"
+run --db gc-yxpj8
+eq "$RC" "0" "--db resolves (rc)"
+eq "$OUT" "/c/rigs/gascity/.beads" "  ... to that rig's .beads path"
 run hq-abc12
 eq "$OUT" "mycity" "a city-store bead names the city's rig"
-run --db hq-abc12
-eq "$RC" "0" "--db resolves a city-store bead (rc)"
-eq "$OUT" "/c/.beads" "  ... to the city's own .beads path"
-run --db gc-yxpj8
-eq "$OUT" "/c/rigs/gascity/.beads" "--db resolves a rig bead to that rig's .beads path, whatever the caller's GC_RIG"
+BOUND=$(GC_RIG="$("$SUT" tk-3y6toq)" sh -c 'printf "[%s]" "$GC_RIG"')
+eq "$BOUND" "[gc-toolkit]" "the output binds straight into GC_RIG with no trailing junk"
 
-# A rig carries the prefix, so the bead may be real: its store is unproven (3),
-# not a proven no-such-bead (1).
-STUB_RIGS='{"rigs":[{"name":"unbound","prefix":"ub","path":""}]}' run --db ub-abc12
-eq "$RC" "3" "--db refuses a rig that reports no path as unproven (exit 3)"
-eq "$OUT" "" "  ... printing no path to stdout"
-has "$ERR" "reports no path" "  ... and saying why"
-run --db zz-abc12
-eq "$RC" "1" "--db refuses an unknown prefix as a proven no-such-bead (exit 1)"
-eq "$OUT" "" "  ... printing no path to stdout"
-run --db
-eq "$RC" "2" "--db with no bead is a usage error"
-run --db tk-3y6toq extra
-eq "$RC" "2" "--db with a second argument is a usage error"
+echo "# bead-store.sh's refusals come back with their exit codes"
+run zz-abc12
+eq "$RC" "1" "an unknown prefix is a proven no-such-bead (exit 1)"
+eq "$OUT" "" "  ... printing nothing to bind"
+has "$ERR" "no rig carries the prefix 'zz'" "  ... with bead-store.sh's reason"
+STUB_RIGS_FAIL=1 run tk-3y6toq
+eq "$RC" "3" "an unreadable rig list is unproven (exit 3)"
+eq "$OUT" "" "  ... printing nothing to bind"
+run
+eq "$RC" "2" "no argument is a usage error"
+
+# Each caller, as it was poured, runs from a private copy of the pack's scripts
+# whose human-gate.sh records what reached it.
+PACK="$TMP/pack"; mkdir -p "$PACK"
+cp "$SUT" "$HERE/bead-store.sh" "$HERE/rig-map.sh" "$HERE/escalate.sh" "$HERE/bd-lib.sh" "$PACK/"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$PACK/human-gate.sh" <<'STUB'
+{ printf 'GC_RIG=%s' "${GC_RIG:-}"; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'; } >> "${STUB_HG_LOG:?}"
+echo "gate-1"
+STUB
+chmod +x "$PACK"/*.sh
+export STUB_HG_LOG="$TMP/hg.log"
+SCRIPTS="$PACK"
+
+echo "# the deacon's emergency recipe still files through both old names"
+: > "$STUB_HG_LOG"
+ESC_RIG=$("$SCRIPTS/escalation-rig.sh" tk-3y6toq) \
+  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject tk-3y6toq --key dolt-outage --message "Dolt is down" >/dev/null 2>&1
+eq "$?" "0" "the chain exits 0"
+eq "$(cat "$STUB_HG_LOG")" "GC_RIG=gc-toolkit [--subject] [tk-3y6toq] [--key] [dolt-outage] [--message] [Dolt is down]" \
+  "human-gate.sh receives the call, with the derived rig bound"
+
+echo "# the dog's warrant derivation still lets its wedged-session call file"
+: > "$STUB_HG_LOG"
+warrant_id=hq-w4rr4nt target=hq-wisp-p3
+ESC_RIG="$("$SCRIPTS/escalation-rig.sh" "$warrant_id")" || ESC_RIG=""
+if [ -n "$ESC_RIG" ]; then
+  GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$warrant_id" --key "wedged-$target" --message "kill failed" >/dev/null 2>&1
+fi
+eq "$ESC_RIG" "mycity" "the warrant's store resolves, so the call is made"
+has "$(cat "$STUB_HG_LOG")" "[--subject] [hq-w4rr4nt] [--key] [wedged-hq-wisp-p3]" "human-gate.sh receives the wedged-session call on the warrant"
 
 echo
 echo "escalation-rig: $PASS passed, $FAIL failed"

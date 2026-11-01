@@ -76,11 +76,11 @@ scan() {
          done)
   if [ -z "$hits" ]; then ok "$label"; else bad "$label" "$(printf '%s\n' "$hits" | head -20)"; fi
 }
-RESOLVED='SCRIPTS=$(b='"'"'{{binding_prefix}}'"'"'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""'
+RESOLVED='SCRIPTS=$(b='"'"'{{binding_prefix}}'"'"'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""'
 PACKDIRS='(assets|tools|formulas|agents|skills|template-fragments|lifecycle|commands|doctor|orders)'
 scan "no text joins the city root with rigs/gc-toolkit" \
   '(GC_CITY_PATH|GC_CITY_ROOT|GC_CITY)[^/"'"'"' ]*/rigs/gc-toolkit' \
-  '"${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts/escalate.sh" --subject x' "$RESOLVED"
+  '"${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts/human-gate.sh" --subject x' "$RESOLVED"
 scan "no text joins the caller's checkout (git rev-parse --show-toplevel) with a pack directory" \
   'show-toplevel[^)]*\)"?/'"$PACKDIRS"'([/"]|$)' \
   'TOOLS="$(git rev-parse --show-toplevel 2>/dev/null)/tools"' 'TOOLS="$(gc {{ .BindingName }} scripts-dir)/../../tools"'
@@ -95,7 +95,7 @@ scan "no loop tries GC_PACK_DIR or rigs/gc-toolkit as a candidate" \
   'for [A-Za-z_]+ in [^;]*(GC_PACK_DIR|rigs/gc-toolkit)' \
   'for c in "${GC_PACK_DIR:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do' 'for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do'
 scan "no text an agent session runs reads GC_PACK_DIR, which gc sets only for orders and pack commands" \
-  '\$\{?GC_PACK_DIR' '[ -x "${GC_PACK_DIR:-}/assets/scripts/escalate.sh" ]' "$RESOLVED" \
+  '\$\{?GC_PACK_DIR' '[ -x "${GC_PACK_DIR:-}/assets/scripts/human-gate.sh" ]' "$RESOLVED" \
   '^(formulas|agents|skills|template-fragments)/'
 
 # A loop over any candidate list that probes for a pack file is the same guess
@@ -112,7 +112,7 @@ loop_probes() { # <label> <file>
     NR > until { v = "" }
   ' "$2"
 }
-printf '%s\n' 'for cand in "$A" "$B"; do' '  [ -x "$cand/assets/scripts/escalate.sh" ] && { X="$cand/assets/scripts"; break; }' 'done' > "$TMP/loop-sample"
+printf '%s\n' 'for cand in "$A" "$B"; do' '  [ -x "$cand/assets/scripts/human-gate.sh" ] && { X="$cand/assets/scripts"; break; }' 'done' > "$TMP/loop-sample"
 [ -n "$(loop_probes sample "$TMP/loop-sample")" ] || bad "the loop rule flags a loop that probes its candidates for a pack file" "$(cat "$TMP/loop-sample")"
 loops=$(while IFS= read -r f; do loop_probes "$f" "$ROOT/$f"; done < "$TMP/files")
 if [ -z "$loops" ]; then ok "no loop probes candidate directories for a pack file"
@@ -166,10 +166,10 @@ done)
 echo "── 3. a formula's resolver takes the directory gc names, and nothing else ──"
 # The lines under test are the formulas' own: one that resolves the directory
 # under a probe, and one that resolves a script's path.
-DIR_LINE=$(grep -h -m1 -E "^SCRIPTS=\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\) && \[ -x \"\\\$SCRIPTS/escalate\.sh\" \] \|\| SCRIPTS=\"\"\$" "$ROOT/formulas/mol-polecat-work.toml" || true)
+DIR_LINE=$(grep -h -m1 -E "^SCRIPTS=\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\) && \[ -x \"\\\$SCRIPTS/human-gate\.sh\" \] \|\| SCRIPTS=\"\"\$" "$ROOT/formulas/mol-polecat-work.toml" || true)
 PATH_LINE=$(grep -h -m1 -E "^SC=\"\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\)/step-close\.sh\" && \[ -x \"\\\$SC\" \] \|\| SC=\"\"\$" "$ROOT/formulas/mol-polecat-work.toml" || true)
-[ -n "$DIR_LINE" ] && ok "mol-polecat-work carries a directory resolver under an escalate.sh probe" \
-  || bad "mol-polecat-work carries a directory resolver under an escalate.sh probe" "no such line"
+[ -n "$DIR_LINE" ] && ok "mol-polecat-work carries a directory resolver under a human-gate.sh probe" \
+  || bad "mol-polecat-work carries a directory resolver under a human-gate.sh probe" "no such line"
 [ -n "$PATH_LINE" ] && ok "mol-polecat-work carries a step-close.sh path resolver" \
   || bad "mol-polecat-work carries a step-close.sh path resolver" "no such line"
 
@@ -184,9 +184,9 @@ echo "gc: unknown command \"${1:-}\"" >&2
 exit 1
 STUB
 chmod +x "$TMP/bin/gc"
-printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/escalate.sh"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/human-gate.sh"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/step-close.sh"
-chmod +x "$TMP/pack/assets/scripts/escalate.sh" "$TMP/pack/assets/scripts/step-close.sh"
+chmod +x "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/step-close.sh"
 # Every place the old lookup tried holds the scripts too, so a line that still
 # guessed would find one: the rig root, the city's rigs/gc-toolkit, and the
 # git checkout the line runs in.
@@ -209,9 +209,9 @@ if [ -n "$DIR_LINE" ]; then
   eq_ "$(resolve other. "$DIR_LINE" SCRIPTS)" "" "a binding gc does not know resolves nothing, though every old candidate holds the script"
   eq_ "$(resolve '' "$DIR_LINE" SCRIPTS)" "" "an empty binding_prefix resolves nothing: gc refuses the empty command"
   eq_ "$(resolve '{{binding_prefix}}' "$DIR_LINE" SCRIPTS)" "" "an unrendered {{binding_prefix}} resolves nothing"
-  rm "$TMP/pack/assets/scripts/escalate.sh"
+  rm "$TMP/pack/assets/scripts/human-gate.sh"
   eq_ "$(resolve kit. "$DIR_LINE" SCRIPTS)" "" "a pack that lacks the probed script resolves nothing, so the guard after it stops"
-  printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/escalate.sh"; chmod +x "$TMP/pack/assets/scripts/escalate.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/human-gate.sh"; chmod +x "$TMP/pack/assets/scripts/human-gate.sh"
   eq_ "$(STUB_PACK='' resolve kit. "$DIR_LINE" SCRIPTS)" "" "a gc that answers nothing resolves nothing"
 fi
 if [ -n "$PATH_LINE" ]; then
@@ -259,19 +259,19 @@ else
   RIG_KIT=$(IN_DIR="$CITY/rigs/probe" in_city gc kit scripts-dir 2>/dev/null)
   [ -n "$KIT" ] && [ "$RIG_KIT" = "$KIT" ] && ok "a shell in the rig gets the same answer" \
     || bad "a shell in the rig gets the same answer" "named '$RIG_KIT'"
-  COOK=$(in_city gc formula cook mol-visit --var subject=rp-subj --var visit=probe --var binding_prefix=kit. --json 2>/dev/null)
-  STEP=$(printf '%s' "$COOK" | jq -r '.id_mapping["mol-visit.file-visit"] // empty' 2>/dev/null)
-  [ -n "$STEP" ] && ok "the city pours mol-visit from the fetched pack" \
-    || bad "the city pours mol-visit from the fetched pack" "cook answered: $COOK"
+  COOK=$(in_city gc formula cook mol-dog-shutdown-dance --var binding_prefix=kit. --json 2>/dev/null)
+  STEP=$(printf '%s' "$COOK" | jq -r '.id_mapping["mol-dog-shutdown-dance.receive-warrant"] // empty' 2>/dev/null)
+  [ -n "$STEP" ] && ok "the city pours mol-dog-shutdown-dance from the fetched pack" \
+    || bad "the city pours mol-dog-shutdown-dance from the fetched pack" "cook answered: $COOK"
   jq -r --arg id "$STEP" '[.. | objects | select(.id? == $id) | .description] | .[0] // empty' "$CITY/.gc/beads.json" > "$TMP/step.md" 2>/dev/null
-  LINE=$(grep -m1 -E "^VI=\"\\\$\(b='kit\.'; gc " "$TMP/step.md")
+  LINE=$(grep -m1 -E "^SCRIPTS=\\\$\(b='kit\.'; gc " "$TMP/step.md")
   [ -n "$LINE" ] && ok "the poured step names the binding its pour carried" \
     || bad "the poured step names the binding its pour carried" "$(grep -m1 'scripts-dir' "$TMP/step.md")"
-  GOT=$(IN_DIR="$TMP/away" in_city bash -c "$LINE"'; . "$VI" && printf "%s|%s" "$VI" "${VISIT_IDENTITY_JQ:+loaded}"' 2>/dev/null)
-  if [ -n "$KIT" ] && [ "$GOT" = "$KIT/visit-identity.sh|loaded" ]; then
-    ok "the poured step sources the pack's visit-identity.sh from the fetched copy"
+  GOT=$(IN_DIR="$TMP/away" in_city bash -c "$LINE"'; . "$SCRIPTS/bd-lib.sh" && printf "%s|%s" "$SCRIPTS" "${HUMAN_GATE_JQ:+loaded}"' 2>/dev/null)
+  if [ -n "$KIT" ] && [ "$GOT" = "$KIT|loaded" ]; then
+    ok "the poured step finds the pack's scripts in the fetched copy, and sources its bd-lib.sh from there"
   else
-    bad "the poured step sources the pack's visit-identity.sh from the fetched copy" "got '$GOT'"
+    bad "the poured step finds the pack's scripts in the fetched copy, and sources its bd-lib.sh from there" "got '$GOT'"
   fi
   # gc registers a pack's commands only for a city-level import, so a city
   # that imports the pack only in a rig has no gc kit scripts-dir.

@@ -88,8 +88,8 @@ chmod +x "$TMP/bin/gc"
 # u1  names no owner                                  -> DROP (host-bead-skip)
 # d1  owned, in-flight PR                             -> DROP (downstream-court-skip)
 # h1  owned, human gate                               -> DROP (downstream-court-skip)
-# v1  visit routed to human, bound to a sitting that never started
-#                                                     -> KEEP (owner: assignee)
+# v1  conversation held under a sitting that never started
+#                                                     -> DROP (downstream-court-skip)
 # r1  graph.v2 topology root                          -> DROP (topology-root-skip)
 # c1  owned, a RAW control byte and a raw tab inside a string -> KEEP only
 #     because the strip runs ahead of the first jq
@@ -101,7 +101,7 @@ S1='  {"id":"s1","status":"in_progress","metadata":{"gc.session_id":"hq-dead","g
 U1='  {"id":"u1","assignee":"","metadata":{}}'
 D1='  {"id":"d1","assignee":"gc-toolkit/gc-toolkit.refinery","metadata":{"merge_result":"pull_request"}}'
 H1='  {"id":"h1","assignee":"gc-toolkit/gc-toolkit.refinery","metadata":{"gc.routed_to":"human"}}'
-V1='  {"id":"v1","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}}'
+V1='  {"id":"v1","status":"in_progress","issue_type":"task","assignee":"gc-toolkit/gc-toolkit.v1","metadata":{}}'
 R1='  {"id":"r1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}'
 
 # listing <file> [raw] — writes the listing the stub serves, pretty-printed one
@@ -177,12 +177,12 @@ rows() { sort "$TMP/out" | paste -sd ',' -; }
 said_unreadable() { grep -q 'did not parse' "$TMP/err"; }
 leftovers() { find "$TMP/runtmp" -mindepth 1 | wc -l | tr -d ' '; }
 
-WANT="c1 gc-toolkit/gc-toolkit.rictus gc-toolkit/gc-toolkit.rictus:in_progress:gc-toolkit/gc-toolkit.rictus,s1 hq-dead hq-dead:in_progress:,v1 s-hq-wisp-tjt3y s-hq-wisp-tjt3y:open:s-hq-wisp-tjt3y,w1 gc-toolkit/gc-toolkit.furiosa gc-toolkit/gc-toolkit.furiosa:in_progress:gc-toolkit/gc-toolkit.furiosa"
+WANT="c1 gc-toolkit/gc-toolkit.rictus gc-toolkit/gc-toolkit.rictus:in_progress:gc-toolkit/gc-toolkit.rictus,s1 hq-dead hq-dead:in_progress:,w1 gc-toolkit/gc-toolkit.furiosa gc-toolkit/gc-toolkit.furiosa:in_progress:gc-toolkit/gc-toolkit.furiosa"
 
 for SH in "${SHELLS[@]}"; do
   if run "$SH" "$TMP/raw.json"; then ok "[$SH] the block exits 0"; else bad "[$SH] the block exited non-zero"; fi
   eq "$(rows)" "$WANT" \
-     "[$SH] prints one <bead> <owner> <claim> row per candidate: drops unowned, downstream and root beads; keeps the bound visit, and c1 through its raw byte"
+     "[$SH] prints one <bead> <owner> <claim> row per candidate: drops unowned, downstream and root beads and the conversation, and keeps c1 through its raw byte"
   if said_unreadable; then bad "[$SH] a readable listing reported 'did not parse'"; else ok "[$SH] a readable listing reports no parse failure"; fi
   eq "$(cat "$TMP/calls")" "bd list --status=in_progress,open --json --limit=0" \
      "[$SH] makes exactly one listing, of both live statuses"

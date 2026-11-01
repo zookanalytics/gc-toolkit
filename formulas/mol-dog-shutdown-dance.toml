@@ -24,8 +24,9 @@ pool session never receives $GC_BEAD_ID, so a close written against that
 variable writes nothing and still exits 0, leaving the warrant open and
 silent. Every step that touches the warrant re-derives the id in its own
 shell. Pardon-biased: one `alive` verdict ends the dance. EVERY stop path
-either closes the warrant with gc.outcome=pardoned|executed|refused or files
-escalate.sh (--key wedged-<session>) — never both silence and an open claim.
+either closes the warrant with gc.outcome=pardoned|executed|refused or files a
+human gate on the warrant (human-gate.sh --key wedged-<session>) — never both
+silence and an open claim.
 
 Step-close discipline, same as the sibling formulas: when this runs as a
 poured molecule each step closes its own bead via
@@ -59,25 +60,14 @@ reason="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.reason"] /
 requester="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.requester"] // "deacon"')"
 requester_endpoint="${requester%/}/"
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/dance-probe.sh" ] || SCRIPTS=""
-# Every escalate.sh call below is rig-bound because this pool is city-scoped:
-# with GC_RIG unset escalate's default board route (human) still files, but into
-# whatever store the ambient environment resolves, not the warrant's. The rig is
-# the warrant's OWN store — where the visit must land for its tracks edge to
-# reach the warrant. The warrant's route cannot supply it: warrants are routed to
-# a bare identity, which carries no rig segment.
-# >>> escalation-rig
-ESC_RIG="$("$SCRIPTS/escalation-rig.sh" "$warrant_id")" || ESC_RIG=""
-# <<< escalation-rig
+# A human gate this dance files lands in the warrant's own store, because
+# `gc bd` runs a gate create in the store of the bead it blocks, so no call
+# below derives a store. The malformed-warrant report is filed after the warrant
+# closes refused, so nothing waits on it: it is a patrol finding that names the
+# warrant, filed in the pack's store because this pool is city-scoped.
 if [ -z "$target" ] || [ -z "$reason" ]; then
-  if [ -z "$ESC_RIG" ]; then
-    echo "dog: warrant $warrant_id is malformed and its store did not resolve; leaving it OPEN, because a visit filed elsewhere never reaches it" >&2
-    gc bd update "$warrant_id" --append-notes "MALFORMED_WARRANT, NOT closed: its store did not resolve, so no visit could be filed against it" || true
-    gc session nudge "$requester_endpoint" "DOG_DONE: warrant $warrant_id - REFUSED (malformed warrant; store unresolvable, no visit filed, warrant left open)" || true
-    gc runtime drain-ack
-    exit 1
-  fi
   gc bd update "$warrant_id" --set-metadata gc.outcome=refused --append-notes "MALFORMED_WARRANT: missing warrant.target or warrant.reason" --status=closed
-  GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$warrant_id" --key dog-malformed-warrant --message "Warrant $warrant_id was malformed (missing warrant.target or warrant.reason); closed refused. Check the detector that filed it."
+  GC_RIG="${GC_RIG:-gc-toolkit}" "$SCRIPTS/patrol-finding.sh" --scope dog-findings --key "dog-malformed-warrant.$warrant_id" --title "Warrant $warrant_id was malformed and closed refused" --message "Warrant $warrant_id was malformed (missing warrant.target or warrant.reason); closed refused. Check the detector that filed it."
   gc session nudge "$requester_endpoint" "DOG_DONE: warrant $warrant_id - REFUSED (malformed warrant)" || true
   gc runtime drain-ack
   exit 1
@@ -86,8 +76,8 @@ fi
 
 A `warrant.target` dance-probe.sh rejects as unsafe (its usage error, exit
 2) is malformed too — same stop path, same REFUSED notice. Otherwise
-continue to interrogate-1 carrying $target, $reason, $requester_endpoint,
-$ESC_RIG, $SCRIPTS."""
+continue to interrogate-1 carrying $target, $reason, $requester_endpoint and
+$SCRIPTS."""
 
 [[steps]]
 id = "interrogate-1"
@@ -152,15 +142,13 @@ warrant:
 
 ```bash
 warrant_id="$(gc hook current --id-only)" || exit 1
-if [ -n "$ESC_RIG" ]; then
-  GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$warrant_id" --key "wedged-$target" --message "Shutdown dance for $target: three silent interrogations but gc session kill failed. Warrant $warrant_id left open; a human owns this session now."
-else
-  echo "dog: $warrant_id has no resolvable store, so no visit was filed; the open warrant is the only signal" >&2
-fi
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+"$SCRIPTS/human-gate.sh" --subject "$warrant_id" --key "wedged-$target" --message "Shutdown dance for $target: three silent interrogations but gc session kill failed. Warrant $warrant_id left open; a human owns this session now." \
+  || echo "dog: no human gate could be filed on $warrant_id; the open warrant is the only signal" >&2
 gc runtime drain-ack
 ```
 
-and stop — the open warrant plus the visit is the honest state. On success
+and stop — the open warrant, held by its gate, is the honest state. On success
 continue to epitaph with outcome `executed`."""
 
 [[steps]]
@@ -180,8 +168,8 @@ gc session nudge "$requester_endpoint" "DOG_DONE: warrant $warrant_id - <PARDONE
 ```
 
 `DOG_DONE:` is a protocol token — the deacon/witness inbox steps consume it;
-keep the prefix verbatim. If the close itself fails, escalate
-(`GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --key "wedged-$target"`) instead
-of leaving a silent open claim. Then
+keep the prefix verbatim. If the close itself fails, file a human gate on the
+warrant (`"$SCRIPTS/human-gate.sh" --subject "$warrant_id" --key "wedged-$target"
+--message "<why the close failed>"`) instead of leaving a silent open claim. Then
 close any poured step beads (step-close.sh, forward order — refusal on a
 plain warrant is the designed no-op) and `gc runtime drain-ack`."""
