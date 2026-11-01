@@ -1,35 +1,78 @@
 ---
 name: Gas City search for a witness's next patrol turn
-description: Read this when you change how a witness's patrol continues, or ask why the witness takes a nudge from an order while the deacon takes a Stop hook. It is the search the arch check asks for before the pack adds the witness-nudge order. It holds what Gas City and its published packs ship for a named session whose turn has ended, read at named upstream commits, and the comparison that chose the order.
+description: Read this when you change how a witness's patrol continues, or ask why the witness ends its turn with a nudge order behind it while the deacon takes a Stop hook. It is the search the arch check asks for before the pack adds the witness-nudge order. It holds what Gas City and its published packs ship for a named session whose turn has ended, read at named upstream commits, the transcript census behind the cause, and the comparison that chose Gas Town's ending with the order as its backstop.
 ---
 
 # Gas City search for a witness's next patrol turn
 
-A witness is a named session in mode `always`, and its patrol is a loop of wisps
-that lives in its conversation. The model ends its turn after a pass, or partway
-through a cycle when a command fails. Each of the three witnesses running on
-2026-10-31 sat idle at its prompt for two to three days, twice, until something
-restarted it, and its HELP mail went unread the whole time.
+A witness is a named session in mode `always`, and its patrol is a loop of wisps,
+one pass each. Each of the three witnesses running on 2026-10-31 sat idle at its
+prompt for two to three days, twice, until something restarted it, and its HELP
+mail went unread the whole time.
 
-This change adds an order that nudges a witness whose pane has gone quiet
-([patrol-continue.md](../../docs/patrol-continue.md#the-witnesss-order)). An
-order is new operational surface, so the arch check asks what Gas City already
-ships for the need ([review-arch.md](../../docs/review-arch.md#the-checks),
-check 1).
+This change takes Gas Town's ending for the witness, with one named difference: its
+last step waits before it pours. A pass then ends the way Gas Town's does. The step
+pours and assigns the next wisp, leaves it open, burns the current one and ends the
+turn, and Gas City's reassignment restart runs the next pass in a fresh session.
+It also adds an order that nudges a witness whose pane has gone quiet, as the
+backstop for a session that stops short of that step
+([patrol-continue.md](../../docs/patrol-continue.md#the-witnesss-order)). An order is
+new operational surface, so the arch check asks what Gas City already ships for the
+need ([review-arch.md](../../docs/review-arch.md#the-checks), check 1).
 
-Gas City ships no continuation for a named session in mode `always`. Its restart
-holds off in the shapes that stall, its stall timeouts are city-wide and ignored
-under the v2 reconciler this city is moving to, and its ladder and backstops
-govern pool seats only. A pack therefore composes the continuation from a
-documented seam. The two on offer are a provider hook and an order that nudges,
-and the second won the comparison below.
+Gas City's continuation for a named session in mode `always` is the reassignment
+restart. It holds off in the shapes that stall, and the first of them is this
+pack's own: our copy of the step told the session to carry on in its conversation,
+where upstream had ended the turn since June. The other shape, a session that stops
+short of its last step, is upstream's as well. There Gas City's stall timeouts are
+city-wide and ignored under the v2 reconciler this city is moving to, and its ladder
+and backstops govern pool seats only, so a pack composes the backstop from a
+documented seam. The two on offer are a provider hook and an order that nudges, and
+the second won the comparison below.
+
+## The cause
+
+The census reads witness transcripts on every rig, 8,073 sessions born since
+2026-10-14. A session's class comes from its own Bash commands: the first command
+outside the startup reconcile that holds both the pour and a burn, then any
+`bd update` that marks the next wisp in progress at or after it. A new transcript
+within 15 minutes of the pour means the restart worked. Pours run from a scratch
+script land in neither class, so the stalls below were read by hand.
+
+Gas City's any-claim guard, #8012 (`2dec01c71`, merged 2026-10-17), reached this city
+with the build installed at 2026-10-24T19:01Z, and the supervisor restarted at 19:03Z.
+
+| After the pour, the session | Before that build | Since that build |
+|---|---|---|
+| left the next wisp open | 6,648 of 6,675 restarted | 369 of 369 restarted |
+| marked the next wisp in progress | 142 of 148 restarted | 0 of 8 restarted |
+
+Since that build, 13 gaps of 6 hours or more separate one witness session's start
+from the next. Nine sessions held their next wisp, three stopped short of
+`next-iteration` still holding their wisp, and one hit a usage limit.
+
+**The shape that adopts its next wisp is ours.** Our `next-iteration` waited after
+the pour and then told the session to read the formula again for the next cycle, so
+a session that took the text at its word carried on in the same conversation and
+sometimes marked its next wisp in progress. Gas Town's ended the turn at that point
+from 2026-06-07 (gascity `a7af62efe`, #3156), and ours never took that change. The
+restart used to cover the difference: it fired anyway, a median 39 seconds into the
+wait, so the conversational loop in our text rarely ran. #8012 took that cover away
+on 2026-10-24 for a session holding any in-progress work, and the session idled.
+Healthy witnesses were not looping in their conversations. They ran a fresh session
+about every two minutes, and the supervisor log holds 6,384 "Cycled fresh-mode
+session" lines naming a witness.
+
+**The shape that stops short is upstream's as well.** gastownhall/gascity #4090, open
+since 2026-07-08, reports patrol sessions holding their wisp with every native
+recycle path deferring, and its reporter runs a nudge order as the workaround.
 
 ## The need
 
-- The next cycle comes without the model's cooperation, because the model ending
-  its turn is the failure. The two measured shapes are a turn that ended after
-  the session adopted its next wisp, and a turn that ended partway through a
-  cycle on a store error, still holding that cycle's wisp.
+- The next pass comes without the model's cooperation once a pass has ended, and a
+  session that ends its turn short of that still gets another turn, because the
+  model ending its turn early is the failure. The measured shapes are in
+  [the cause](#the-cause).
 - It comes within a bounded time, of the same order as the formula's 600s
   inter-cycle wait.
 - A pack can ship it, and it reaches witnesses without changing how any other
@@ -48,7 +91,8 @@ Each was read on 2026-10-31:
   for session restarts, stall recycling, the work ladder and pool backstops, idle
   and age limits, nudge delivery, events and the hooks it installs.
 - The Gas Town pack at `cb6a612882b8`, the pin that Gas City at that commit
-  bundles, and every published pack at packs main `0b0d96250f66`.
+  bundles, and every published pack at packs main `0b0d96250f66`, with the history
+  of Gas Town's `next-iteration`.
 - The Claude Code hooks reference, for the hook alternative.
 - The city's installed build, `gc` 1.4.3 at the fork commit `e03752646`. It is
   not an ancestor of upstream main, so it says what runs here and not what Gas
@@ -63,7 +107,11 @@ An alive `wake_mode = "fresh"` session whose assigned bead differs from the bead
 it last recorded is stopped and started on a new conversation (package main,
 `cycleAliveSessionForFreshReassign` on the legacy reconciler and `freshCycle` on
 v2). This is what normally moves a witness from one wisp to the next, and it does
-not need the model's cooperation.
+not need the model's cooperation. Gas City's config check names the pairing of mode
+`always` and `wake_mode = "fresh"` "a deliberate restart-per-cycle actor" (package
+config). Its restart reaches a session at an idle prompt as it does one in a wait:
+53 of 53 sessions that ended their turn with the next wisp open since the build were
+restarted, a median 52 seconds after the turn ended and at most 302.
 
 It holds off in both shapes that stall. The legacy reconciler skips it when the
 previous bead is still open and assigned to the session, and when the session
@@ -199,6 +247,11 @@ It confirms the shape and the clock this change uses. This change takes a shorte
 window, because this witness has a 600s wait to compare against rather than a
 one-hour idle timeout.
 
+Gas Town's step is the ending this change takes, with the differences named in
+[the comparison](#the-comparison). The plan's page lists every remaining difference
+between our witness and Gas Town's
+([built-once-target.md](../../docs/built-once-target.md#patrol)).
+
 Gas Town's deacon prompt rejects a hand-back at the turn boundary: "A deacon that
 re-enters its own loop never ends a turn and patrols back to back, model call
 after model call, on an idle town." An order leaves the turn ended and sets the
@@ -224,35 +277,73 @@ the plan retires, and the definition is ten lines.
 
 ## The comparison
 
-The candidates that can serve are a hand-back at the turn boundary, which is the
-hook this branch first extended to the witness and which remains on main for the
-deacon, and a nudge from a cooldown order.
+The candidates are ending the turn as Gas Town does, a hand-back at the turn
+boundary, which is the hook this branch first extended to the witness and which
+remains on main for the deacon, and a nudge from a cooldown order. The first
+changes how a pass ends, and the other two act once a session has stopped, so the
+question is what each covers.
 
-| | `Stop` hook hand-back | Cooldown order and nudge |
-|---|---|---|
-| Both measured shapes | the next cycle at once | the next cycle after the quiet bound and the next pass |
-| A witness already idle at landing | needs one prompt by hand | reached by the first pass |
-| An operator who leaves the pane with no prompt | stays idle | reached once they detach |
-| A conversation Claude Code ends after nine blocks | stays idle | reached |
-| A nudge or hand-back arriving mid-cycle | cannot, it runs only at a boundary | cannot, a working pane does not read as quiet |
-| An attached operator | the hand-back goes on, only the reset waits | skipped |
-| Store or controller outage | quick turns while cycles fail, and a reset to retry | the pass fails and spends nothing, and the next one retries |
-| Loop risk | needs a guard, a state file, a reset and a failed-reset path | none, the order sets the pace |
-| Pace | the formula's, while the model takes the wait | about 11 to 16 minutes after a turn ends, longer on a loaded host |
-| What it depends on | nothing for a hand-back, the store and controller for the reset | the controller's order lane and the session list |
-| Provider | Claude Code only | any, by way of `gc session nudge` |
-| v2 | unaffected | unaffected |
-| New surface | a role and several paths in an existing script | one order, one short script and its suite |
+| | End the turn as Gas Town does | `Stop` hook hand-back | Cooldown order and nudge |
+|---|---|---|---|
+| A session that holds its next wisp and idles | the session no longer marks it, by the step and the prompt | the next cycle at once | the next cycle after the quiet bound and the next pass |
+| A session that stops short of its last step | no restart, so it does not help | the next cycle at once | the next cycle after the quiet bound and the next pass |
+| A witness already idle at landing | needs one prompt by hand | needs one prompt by hand | reached by the first pass |
+| An operator who leaves the pane with no prompt | no restart if it holds its wisp | stays idle | reached once they detach |
+| A conversation Claude Code ends after nine blocks | not applicable | stays idle | reached |
+| A prompt arriving mid-cycle | none is typed | cannot, it runs only at a boundary | cannot, a working pane does not read as quiet |
+| An attached operator | the restart reads no attachment, so it ends the conversation under them at each burn, as it did before this change | the hand-back goes on, only the reset waits | skipped |
+| Store or controller outage | the pour guard leaves the wisp, and the turn ends | quick turns while cycles fail, and a reset to retry | the pass fails and spends nothing, and the next one retries |
+| Loop risk | none, a fresh session per pass | needs a guard, a state file, a reset and a failed-reset path | none, the order sets the pace |
+| Pace | about twelve minutes a pass with the wait | the formula's, while the model takes the wait | for a witness that went quiet, about 11 to 16 minutes after its turn ended, longer on a loaded host |
+| What it depends on | the model reaching the step, and the controller's restart | nothing for a hand-back, the store and controller for the reset | the controller's order lane and the session list |
+| Provider | any | Claude Code only | any, by way of `gc session nudge` |
+| v2 | `freshCycle` restarts it, by reading, since v2 does not run here | unaffected | unaffected |
+| New surface | none, a step's prose and a prompt paragraph | a role and several paths in an existing script | one order, one short script and its suite |
 
-**Pace.** One pass per order tick does not make the formula's wait redundant,
-because a witness that goes on to its next wisp in the same turn never reads as
-quiet, and the formula is unchanged. A witness that ends its turn waits out the
-bound and the next pass. The declared interval is 5m. The pack's `boot-health`,
-also on 5m, ran 5.0 to 5.7 minutes apart over its last ten runs on 2026-10-31. On a
-loaded host the dispatch budget can stretch a 5m order past fifteen minutes
-(`max_dispatches_per_tick`), so the bound is minutes to tens of minutes where the
-failure was days. The hook is faster at the boundary, and the measured harm does
-not need that speed.
+**Pace and token cost.** The wait comes before the pour because a wait after it
+never holds. A healthy session was killed a median 39 seconds into its wait (330
+sessions since the build whose kill is in the event archive; 44 seconds across all
+513 with one), and its successor's transcript started a median 65 seconds in. While
+the session holds its current wisp in progress the restart holds off, so a wait
+before the pour runs to its end. Gas Town's has no wait because it credits a
+`session_sleep` policy, and `ComputeAwakeSet` exempts these sessions from idle sleep,
+so its ending would run back to back here.
+
+Those measured numbers set the pace. Across the 7,017 sessions that left the next
+wisp open and were restarted, a new session started a median 133 seconds after the
+last. Each averaged 13 API calls, 59.8k tokens of cache writes, 623.7k of cache reads
+and 4.2k of output, 688k tokens in all and 91% of them cache reads (772k across the
+369 since the build). A pass reached its pour a median 53 seconds in, and 122 at the
+90th percentile. So the new step's cycle is that minute, the 600 second wait, and a
+restart about a minute after the turn ends: about twelve minutes, or about 120 passes
+a rig a day by arithmetic. Each pass gains one API call, because the session now
+outlives its wait, at about 73k tokens of cache reads. The wait loses no cache: every
+cache write on record is in the one-hour tier, and after 194 gaps of 500 seconds or
+more the next call wrote a mean 1.4k tokens and read a mean 85.9k. That comes to about
+100M tokens a rig a day, nearly all cache reads. With no spacing, one rig spent 398M
+and 480M tokens on its two busiest days, at 575 and 698 sessions. A witness spends
+next to nothing while it idles, so against the last week this is new spend.
+
+The nearest measured case for the spacing is the deacon, whose step has waited before
+its pour since 2026-10-01. Of its 841 sessions from 2026-10-02 to 10-12, 751 waited and
+then poured, one poured with no wait, and the other 89 show no pour the census could
+read. The pour came a median 602 seconds after the wait began (580 at the 10th
+percentile, 642 at the 90th), and its sessions started a median 903 seconds apart, on a
+longer pass. No witness has run this step, so its pace and whether its model takes the
+wait are what only a live run can show. Under the old step, 39 of the 369 restarted
+witnesses since the build issued no wait the census could read. A witness that skips
+the wait under this step costs one short cycle, not a stall.
+
+[The ending probe](ending-probe.md) runs the step on the witness's model against a
+stubbed `gc`, and it holds what a late configured nudge does.
+
+The 11 to 16 minutes this record first gave as the pace holds only for a witness that
+went quiet. It is the quiet bound plus the next order pass. The declared interval is
+5m. The pack's `boot-health`, also on 5m, ran 5.0 to 5.7 minutes apart over its last
+ten runs on 2026-10-31. On a loaded host the dispatch budget can stretch a 5m order
+past fifteen minutes (`max_dispatches_per_tick`), so the bound is minutes to tens of
+minutes where the failure was days. The hook is faster at the boundary, and the
+measured harm does not need that speed.
 
 **A nudge arriving mid-cycle.** `--delivery` defaults to `wait-idle`. For a
 Claude-family session it delivers live when the pane reads idle, and a wrapped
@@ -300,34 +391,40 @@ The comment on `orders/boot-health.toml` calls delivery to a fresh-wake singleto
 unreliable. All of those nudges landed, so that comment does not hold here, and the
 bead that retires that order carries the point.
 
-**The decision.** The order meets every item in the need, reaches the cold cases
-the hook cannot, and needs no loop guard. The hook's own account of itself had grown
-to wait wording, a repeat hand-back, a failed-reset path and a bound that holds only
-where `timeout` is on `PATH`, all of which go with this move. So the witness takes
-the order, and the branch's changes to the hook come out.
+**The decision.** The witness takes Gas Town's ending with the wait before the pour,
+because it removes the cause of 9 of the 13 stalls at no new surface and makes the
+restart the normal continuation. It leaves the three that stopped short, so a backstop
+stays. Between the backstop's two candidates the order meets every item in the need,
+reaches the cold cases the hook cannot, and needs no loop guard. The hook's own account
+of itself had grown to wait wording, a repeat hand-back, a failed-reset path and a
+bound that holds only where `timeout` is on `PATH`, all of which go with this move. So
+the order stays as the backstop, and the branch's changes to the hook come out.
 
 ## The deacon
 
 The deacon keeps its hook, and this change leaves its behaviour as it is on main.
 Its hook has an arch review behind it, it has held the deacon's patrol since it
-landed, and `boot-health` reports the cases it misses. The order could serve the
-deacon too, and whether it should is left for a change that has that question as its
-subject, since it would also have to weigh the deacon's ledger and its doctor sweep.
+landed, and `boot-health` reports the cases it misses. Its step differs from Gas
+Town's in the same way the witness's did, and neither its ending nor the order is
+weighed here. tk-hpy4lgk carries that, since a change to it would also have to weigh
+the deacon's ledger and its doctor sweep.
 
 ## What the change adds
 
 It adds no pack noun: no bead kind, lifecycle state or metadata key, so it takes no
 warrant ([warrants.md](../../docs/warrants.md)), and no warrant covers its paths. The
-surface is one order and one script that runs `gc session list` and
-`gc session nudge`. It adds no semantics Gas City's mechanisms express: it holds no
+ending adds no surface: it reorders two blocks of one step, unchanged, and rewrites
+that step's prose and a prompt paragraph. The surface is one order and one script that
+runs `gc session list` and `gc session nudge`. It adds no semantics Gas City's mechanisms express: it holds no
 claim, assigns nothing and waits on nothing. The quiet clock is read from Gas City's
 own session row.
 
 ## When the answer changes
 
-- Gas City ships a continuation for a named session in mode `always`, or a stall
-  recycler with an agent-level form that the v2 reconciler honours. On 2026-10-31
-  neither exists at the commits above. The order then goes.
+- Gas City paces an always-on session, as Gas Town's step assumes. The wait then goes.
+- Gas City closes #4090 or ships a continuation for a session that stops short, or a
+  stall recycler with an agent-level form that the v2 reconciler honours. On 2026-10-31
+  none exists at the commits above. The order then goes.
 - tk-1tfzr71.19 moves the witness's duties onto orders or Gas Town's roles. The order
-  goes with the loop it serves, unless the replacement keeps a loop that lives in a
-  conversation.
+  goes if that takes Gas Town's deacon, which nudges a quiet witness through its
+  health scan.
