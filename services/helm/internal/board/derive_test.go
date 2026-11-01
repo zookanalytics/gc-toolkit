@@ -2812,8 +2812,11 @@ func TestPRPhaseCountsEveryChildInFlight(t *testing.T) {
 // (services/gctk/prstatus/testdata/parity.json, whose label side is
 // TestPRStatusDeriveParity): each case's in-flight set is anchor tk-a's
 // InFlight, a member prstatus.IsWork accepts is also the review or rework row the
-// beads source gathers, and each bead an open human gate blocks has the gate the
-// gate gather admits beside it.
+// beads source gathers, each bead an open human gate blocks has the gate the gate
+// gather admits beside it, the anchor's blockers are its `blocks` listing, its
+// HoldingGates are what prstatus.HoldingGates reads over those edges, as the
+// beads source walks them, and a conversation is the row the gather admits for
+// it.
 func TestPRHeldParity(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "gctk", "prstatus", "testdata", "parity.json"))
 	if err != nil {
@@ -2827,8 +2830,10 @@ func TestPRHeldParity(t *testing.T) {
 			TaskKind string `json:"task_kind"`
 			Status   string `json:"status"`
 		} `json:"in_flight"`
-		Gates []string `json:"gates"`
-		Want  struct {
+		Blockers      []string `json:"blockers"`
+		Gates         []string `json:"gates"`
+		Conversations []string `json:"conversations"`
+		Want          struct {
 			Status string   `json:"status"`
 			Held   []string `json:"held"`
 		} `json:"want"`
@@ -2847,8 +2852,26 @@ func TestPRHeldParity(t *testing.T) {
 						Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{mdAnchorBead: "tk-a", mdTaskKind: c.TaskKind}})
 				}
 			}
+			edges := map[string][]prstatus.Blocker{}
+			for _, b := range tc.Blockers {
+				anchors[0].Blockers = append(anchors[0].Blockers, Blocker{ID: b, Status: "open", IssueType: "task"})
+				edges["tk-a"] = append(edges["tk-a"], prstatus.Blocker{ID: b, Status: "open", IssueType: "task"})
+			}
 			for _, g := range tc.Gates {
 				anchors = append(anchors, gateAnchor("tk-g-"+g, "sign off the release", g))
+				edges[g] = append(edges[g], prstatus.Blocker{ID: "tk-g-" + g, Title: "sign off the release", Status: "open", IssueType: "gate", AwaitType: "human"})
+			}
+			for _, c := range tc.Conversations {
+				anchors = append(anchors, conversationAnchor("tk-c-"+c, c, "what about this?", assigneeHuman))
+			}
+			gates, err := prstatus.HoldingGates([]string{"tk-a"}, func(ids []string) (map[string][]prstatus.Blocker, error) {
+				return edges, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, g := range gates["tk-a"] {
+				anchors[0].HoldingGates = append(anchors[0].HoldingGates, Blocker{ID: g.ID, Title: g.Title, Status: g.Status, IssueType: g.IssueType, AwaitType: g.AwaitType})
 			}
 			tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
 			if tile.PRPhase != tc.Want.Status || !slices.Equal(tile.PRHeld, tc.Want.Held) {
@@ -2971,11 +2994,139 @@ func TestMergeAnchorAsksItsGateAtEveryPosition(t *testing.T) {
 				t.Fatalf("test premise: the unheld twin reads %q; got %q", pos.unheld, fr.Needs)
 			}
 			h := mustTile(t, b, "tk-held")
-			if h.Phase != PhaseNeedsAttention || h.Needs != "asking: "+older.Title || !h.Owed {
-				t.Errorf("a gated row reads needs-attention and asks its oldest gate: phase=%q needs=%q owed=%v", h.Phase, h.Needs, h.Owed)
+			want := "asking: 2× — " + older.Title + " · " + newer.Title
+			if h.Phase != PhaseNeedsAttention || h.Needs != want || !h.Owed {
+				t.Errorf("a gated row reads needs-attention and asks each gate, oldest first: phase=%q needs=%q owed=%v", h.Phase, h.Needs, h.Owed)
 			}
 		})
 	}
+}
+
+// heldThroughRework is a merge anchor the way the beads source gathers one that
+// waits on a rework which waits on an open human gate: the rework in its `blocks`
+// listing, and the gate among the ones its walk reached.
+func heldThroughRework(md map[string]string, gates ...Blocker) Anchor {
+	a := mergeAnchor("tk-a", md, Blocker{ID: "tk-rw", Title: "fix the check", Status: "open", IssueType: "task"})
+	a.HoldingGates = gates
+	return a
+}
+
+// The row of a PR a gate on its rework holds names the gate, reads as what a
+// person owes from the gate's own age, and reads held as the label does.
+// Resolving the gate clears each of those, and a conversation changes none.
+func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
+	at := fixtureNow.Add(-time.Hour)
+	md := map[string]string{
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineSettled, headLive, at),
+		mdPRNumber:  "79",
+	}
+	signOff := Blocker{ID: "tk-g", Title: "sign off the release", Status: "open", IssueType: "gate", AwaitType: "human", CreatedAt: daysAgo(2)}
+	rework := Anchor{ID: "tk-rw", Title: "fix the check", Kind: kindRework, Source: kindRework, Rig: "gc-toolkit", Prefix: "tk",
+		Metadata: map[string]string{mdAnchorBead: "tk-a", mdTaskKind: kindRework}}
+
+	t.Run("an open gate", func(t *testing.T) {
+		anchors := []Anchor{heldThroughRework(md, signOff), rework, gateAnchor("tk-g", signOff.Title, "tk-rw")}
+		tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" {
+			t.Errorf("needs = %q, want it to name the gate", tile.Needs)
+		}
+		if !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldGate)}) || tile.PRPhase != PhaseNeedsAttention {
+			t.Errorf("pr_held = %v, pr_phase = %q, want the gate's hold", tile.PRHeld, tile.PRPhase)
+		}
+		if !tile.Owed || !tile.Held || !tile.WorkHeld {
+			t.Errorf("owed=%v held=%v work_held=%v, want a row a gate holds", tile.Owed, tile.Held, tile.WorkHeld)
+		}
+		if !tile.PROwedSince.Equal(signOff.CreatedAt) {
+			t.Errorf("pr_owed_since = %v, want the gate's age %v", tile.PROwedSince, signOff.CreatedAt)
+		}
+		if tile.PRConversation != ConversationAsking {
+			t.Errorf("pr_conversation = %q, want %q", tile.PRConversation, ConversationAsking)
+		}
+		if r := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-rw"); !r.WorkHeld {
+			t.Errorf("the rework's own row keeps the gate it folds: work_held=%v", r.WorkHeld)
+		}
+	})
+
+	t.Run("a gate resolved", func(t *testing.T) {
+		anchors := []Anchor{heldThroughRework(md), rework}
+		tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if strings.Contains(tile.Needs, "asking") || strings.Contains(tile.Needs, "sign off the release") {
+			t.Errorf("needs = %q, want no ask once the gate has gone", tile.Needs)
+		}
+		if len(tile.PRHeld) != 0 || tile.WorkHeld || tile.Held {
+			t.Errorf("pr_held=%v work_held=%v held=%v, want nothing holding it", tile.PRHeld, tile.WorkHeld, tile.Held)
+		}
+	})
+
+	t.Run("a conversation tracking the anchor", func(t *testing.T) {
+		plain := []Anchor{heldThroughRework(md), rework}
+		talk := append(slices.Clone(plain), conversationAnchor("tk-c", "tk-a", "what holds this?", assigneeHuman))
+		before := mustTile(t, BuildBoard(plain, fixtureNow, false, nil, Facts{}), "tk-a")
+		after := mustTile(t, BuildBoard(talk, fixtureNow, false, nil, Facts{}), "tk-a")
+		if after.Needs != before.Needs || len(after.PRHeld) != 0 || after.WorkHeld || after.PRPhase != before.PRPhase {
+			t.Errorf("needs=%q pr_held=%v work_held=%v phase=%q, want what the row read without it: needs=%q phase=%q",
+				after.Needs, after.PRHeld, after.WorkHeld, after.PRPhase, before.Needs, before.PRPhase)
+		}
+	})
+
+	t.Run("a takeaway does not hide the gate", func(t *testing.T) {
+		a := heldThroughRework(md, signOff)
+		a.Takeaway = "routed to a polecat to fix the check"
+		tile := mustTile(t, BuildBoard([]Anchor{a, rework, gateAnchor("tk-g", signOff.Title, "tk-rw")}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" {
+			t.Errorf("needs = %q, want the gate's question", tile.Needs)
+		}
+		if tile.Takeaway == nil || *tile.Takeaway != a.Takeaway {
+			t.Errorf("takeaway = %v, want it left on the wire", tile.Takeaway)
+		}
+	})
+
+	t.Run("a person's other blocker keeps its takeaway", func(t *testing.T) {
+		a := mergeAnchor("tk-a", md, Blocker{ID: "tk-d", Title: "which way?", Status: "open", IssueType: "decision"})
+		a.Takeaway = "the sitting's headline"
+		tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != a.Takeaway {
+			t.Errorf("needs = %q, want the takeaway: only a gate outranks it", tile.Needs)
+		}
+	})
+
+	t.Run("a gate routed to a person counts once, as a gate", func(t *testing.T) {
+		routed := signOff
+		routed.RoutedTo = routedHuman
+		tile := mustTile(t, BuildBoard([]Anchor{mergeAnchor("tk-a", md, routed)}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldGate)}) {
+			t.Errorf("pr_held = %v, want the gate alone", tile.PRHeld)
+		}
+	})
+
+	t.Run("a gate listed and walked is named once", func(t *testing.T) {
+		a := mergeAnchor("tk-a", md, signOff)
+		a.HoldingGates = []Blocker{signOff}
+		tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" {
+			t.Errorf("needs = %q, want the one gate", tile.Needs)
+		}
+	})
+
+	t.Run("a row with several gates names each, oldest first", func(t *testing.T) {
+		older := Blocker{ID: "tk-old", Title: "the older ask", Status: "open", IssueType: "gate", AwaitType: "human", CreatedAt: daysAgo(5)}
+		tile := mustTile(t, BuildBoard([]Anchor{heldThroughRework(md, signOff, older)}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if want := "asking: 2× — the older ask · sign off the release"; tile.Needs != want {
+			t.Errorf("needs = %q, want %q", tile.Needs, want)
+		}
+		if !tile.PROwedSince.Equal(older.CreatedAt) {
+			t.Errorf("pr_owed_since = %v, want the oldest gate's age %v", tile.PROwedSince, older.CreatedAt)
+		}
+	})
+
+	t.Run("a blocker with no date sorts behind one with a date", func(t *testing.T) {
+		undated := Blocker{ID: "tk-u", Title: "undated", Status: "open", IssueType: "gate", AwaitType: "human"}
+		tile := mustTile(t, BuildBoard([]Anchor{heldThroughRework(md, undated, signOff)}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if want := "asking: 2× — sign off the release · undated"; tile.Needs != want {
+			t.Errorf("needs = %q, want %q", tile.Needs, want)
+		}
+	})
 }
 
 // A pre-PR branch links to its GitHub tree view, and the repository comes from

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -768,8 +769,10 @@ func blockedBy(recs []*beads.Dependency) []string {
 // [BeadsSource.readReviews] makes, one that gathers a live merge anchor adds the
 // read [BeadsSource.readInFlight] makes, each once for the whole set, and a pass
 // with an open child under a live anchor adds the two
-// [BeadsSource.attachChildWaits] makes. The read count is fixed by the
-// rig+status pass, so it does not scale with the number of anchors.
+// [BeadsSource.attachChildWaits] makes. A live merge anchor with an open blocker
+// adds the two [BeadsSource.attachHoldingGates] makes per level of its walk. The
+// read count is fixed by the rig+status pass and the depth of the `blocks` graph,
+// so it does not scale with the number of anchors.
 //
 // The two batched reads fail INDEPENDENTLY, and each failure degrades only the
 // roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
@@ -897,6 +900,101 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 		}
 	}
 	s.attachChildWaits(ctx, g, st, r, pending, issueByID)
+	if dependenciesOK {
+		known := make(map[string][]*beads.Dependency, len(dependencyIDs))
+		for _, id := range dependencyIDs {
+			known[id] = depyRecs[id]
+		}
+		s.attachHoldingGates(ctx, g, st, r, pending, known, issueByID)
+	}
+}
+
+// attachHoldingGates reads, for every live merge anchor in pending, the open human
+// gates that hold it ([prstatus.HoldingGates]), on the anchor or behind a bead it
+// waits on, so a PR's row and held: value count the gates its labels count. The
+// one walk serves every anchor of the pass and reads each level in one batched
+// OUTBOUND read and one hydration of the far ends it has not fetched, so its cost
+// is the depth of the `blocks` graph and not the number of anchors. known holds
+// the edges the pass already read, an anchor's own among them, which cost nothing.
+//
+// A failed read notes partial and leaves every anchor's gates empty, and each row
+// then reads the gates on its own bead.
+func (s *BeadsSource) attachHoldingGates(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor, known map[string][]*beads.Dependency, issueByID map[string]*beads.Issue) {
+	var roots []string
+	for i := range pending {
+		if needsInFlight(pending[i]) {
+			roots = append(roots, pending[i].anchor.ID)
+		}
+	}
+	if len(roots) == 0 {
+		return
+	}
+	issues := maps.Clone(issueByID)
+	read := func(ids []string) (map[string][]prstatus.Blocker, error) {
+		recs := make(map[string][]*beads.Dependency, len(ids))
+		var unread []string
+		for _, id := range ids {
+			if list, ok := known[id]; ok {
+				recs[id] = list
+			} else {
+				unread = append(unread, id)
+			}
+		}
+		if len(unread) > 0 {
+			fetched, err := st.GetDependencyRecordsForIssues(ctx, unread)
+			if err != nil {
+				return nil, err
+			}
+			maps.Copy(recs, fetched)
+		}
+		missing := map[string]struct{}{}
+		for _, list := range recs {
+			for _, d := range list {
+				if d != nil && string(d.Type) == "blocks" && issues[d.DependsOnID] == nil {
+					missing[d.DependsOnID] = struct{}{}
+				}
+			}
+		}
+		hydrated, err := s.hydrate(ctx, st, missing)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(issues, hydrated)
+		out := make(map[string][]prstatus.Blocker, len(ids))
+		for _, id := range ids {
+			for _, d := range recs[id] {
+				if d == nil || string(d.Type) != "blocks" {
+					continue
+				}
+				if iss := issues[d.DependsOnID]; iss != nil {
+					out[id] = append(out[id], prstatus.Blocker{
+						ID:        iss.ID,
+						Title:     iss.Title,
+						Status:    string(iss.Status),
+						IssueType: string(iss.IssueType),
+						AwaitType: iss.AwaitType,
+					})
+				}
+			}
+		}
+		return out, nil
+	}
+	gates, err := prstatus.HoldingGates(roots, read)
+	if err != nil {
+		g.note(true, []string{"holding-gates@" + r.name + ": " + err.Error()})
+		return
+	}
+	for i := range pending {
+		p := &pending[i]
+		if !needsInFlight(*p) {
+			continue
+		}
+		for _, gate := range gates[p.anchor.ID] {
+			if iss := issues[gate.ID]; iss != nil {
+				p.anchor.HoldingGates = append(p.anchor.HoldingGates, blockerOf(iss))
+			}
+		}
+	}
 }
 
 // attachChildWaits reads the `blocks` waits of every open child of a live
@@ -1229,22 +1327,27 @@ func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issu
 		if iss.Status == beads.StatusClosed {
 			closed = append(closed, iss.ID)
 		}
-		md := decodeMetadata(iss.Metadata)
-		blockers = append(blockers, board.Blocker{
-			ID:          iss.ID,
-			Title:       iss.Title,
-			Status:      strings.ToLower(string(iss.Status)),
-			RoutedTo:    md["gc.routed_to"],
-			IssueType:   strings.ToLower(string(iss.IssueType)),
-			Assignee:    iss.Assignee,
-			CreatedAt:   iss.CreatedAt,
-			UpdatedAt:   iss.UpdatedAt,
-			AwaitType:   iss.AwaitType,
-			AwaitID:     iss.AwaitID,
-			CloseReason: iss.CloseReason,
-		})
+		blockers = append(blockers, blockerOf(iss))
 	}
 	return blockers, all, closed, false
+}
+
+// blockerOf projects one hydrated `blocks` far end onto the shape the board reads.
+func blockerOf(iss *beads.Issue) board.Blocker {
+	md := decodeMetadata(iss.Metadata)
+	return board.Blocker{
+		ID:          iss.ID,
+		Title:       iss.Title,
+		Status:      strings.ToLower(string(iss.Status)),
+		RoutedTo:    md["gc.routed_to"],
+		IssueType:   strings.ToLower(string(iss.IssueType)),
+		Assignee:    iss.Assignee,
+		CreatedAt:   iss.CreatedAt,
+		UpdatedAt:   iss.UpdatedAt,
+		AwaitType:   iss.AwaitType,
+		AwaitID:     iss.AwaitID,
+		CloseReason: iss.CloseReason,
+	}
 }
 
 // collectMetadataAnchors gathers the metadata-keyed anchor ROWS for one rig;

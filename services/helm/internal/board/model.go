@@ -207,6 +207,16 @@ type Anchor struct {
 	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 
+	// HoldingGates is every open human gate that holds a live merge anchor, on the
+	// anchor itself or behind a bead it waits on, which prstatus.HoldingGates
+	// reads through open `blocks` edges. The PR's held: gate value and its row's
+	// `asking` read it, so the row and the label count the same gates. The beads
+	// source walks it for each live merge anchor
+	// ([source.BeadsSource.attachHoldingGates]). A walk that fails is noted partial
+	// and leaves it empty, and the row then reads the gates on the anchor itself.
+	// The supervisor backend walks none, because its beads carry no await type.
+	HoldingGates []Blocker `json:"holding_gates,omitempty"`
+
 	// Reviews is the anchor's review beads, open and closed: each carries
 	// task_kind=review and names this anchor in anchor_bead. A lane's green
 	// derives from them ([laneGreen]). The beads source gathers them for a live

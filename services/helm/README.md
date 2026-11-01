@@ -82,7 +82,7 @@ accept_withheld gates_in_session sitting_start_failure pr_held work_held
 on a row whose conversation's sitting failed to start (`sitting_start_failure`
 says why; see *A sitting that failed to start*, below), `waiting` on any other
 held row, and empty on a row nothing holds. `work_held` refines `held`: it is
-true when an open human gate blocks the bead or an acceptance an earlier Accept
+true when an open human gate holds the bead or an acceptance an earlier Accept
 left unfinished keeps it, so the operator's answer is required before the work
 can move. A held row where it is false only has a conversation on it, which
 blocks nothing, and the boards mark it apart: ◌ in both terminal views, except
@@ -269,8 +269,12 @@ gate's title, or `N× — a · b` over several. A conversation not in session ma
 its bead owed, one in the operator's queue or one whose sitting's session has
 closed, and a row no gate holds shows its conversation's title, or "in
 conversation" while a sitting holds the conversation. A merge anchor keeps its
-own PR needs, whose `asking` already names the gate that blocks it. The owed
-clock is the earliest `updated_at` among the row's open gates and owed
+own PR needs, whose `asking` names each open human gate that holds it, oldest
+first, and outranks a takeaway. Those are the gates on the anchor and the ones
+behind a bead it waits on, such as a rework, which the beads source reads for
+each live merge anchor by `prstatus.HoldingGates`, the walk behind the PR's
+`held: gate` label. The supervisor backend walks none, because its beads carry no
+await type. The owed clock is the earliest `updated_at` among the row's open gates and owed
 conversations. A bead that carries `gc.recommended_formula` and that no open
 gate under the key `first-reaction` blocks has its own `blocks` listing read
 too, which returns a closed gate with its close reason: that is how the board
@@ -609,7 +613,7 @@ field would be lying on a normal day.
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from a human gate's edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
-| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open human gate on the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's demand blockers |
+| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's demand blockers |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
@@ -636,7 +640,7 @@ is the discriminator: an anchor also blocks on ordinary prerequisites and on the
 human gate that makes it `asking`, and no pool will claim either.
 
 **Whose move.** A row is owed by the operator when the machine axis is blocked,
-when an open `blocks` edge to a human gate means the city is asking, or when the
+when an open human gate holds the anchor, so the city is asking, or when the
 cadence is `settled` and GitHub is holding the merge for a human review — one
 never given, or a standing `changes_requested` the city has reworked as far as it
 can. GitHub keeps the veto standing across pushes and the city never dismisses

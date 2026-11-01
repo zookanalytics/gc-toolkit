@@ -587,7 +587,7 @@ carries none.
 
 | Label | What holds the PR | Read from |
 |---|---|---|
-| `held: gate` | an open human gate blocks the anchor | the anchor's `blocks` edges, kept to the human gates that are not closed (`bd_human_gates`), one a person has claimed included |
+| `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.HoldingGates`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
 | `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
 | `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision |
 
@@ -640,9 +640,15 @@ board applies it too, over the in-flight set the labels count, and by it decides
 a blocked row's phase, whether the operator's queue lists the row, and the row's
 needs phrase.
 
+`prstatus.HoldingGates` is the one reader of the gates that hold a PR. The
+label's value counts them, the board's row names them, and `gc-helm engage` on the
+PR offers each, through `gctk pr-status gates`. The walk is bounded, reads each
+bead once, and reads its edges a level at a time. A walk that passes its bound
+reads as a read that did not answer.
+
 A read that does not answer changes no label. When gctk is unavailable, or the
-anchor, its in-flight set or its blockers do not read, `pr-status-label.sh`
-exits 2 and leaves both families as they are. Otherwise it writes both from one
+anchor, its in-flight set, its blockers or the walk from them do not read,
+`pr-status-label.sh` exits 2 and leaves both families as they are. Otherwise it writes both from one
 derivation in one edit: the `status:` value and a `held:` label for each held
 value, with every other label under either prefix taken off. A `held:` label
 comes off on the first derivation after its condition clears.

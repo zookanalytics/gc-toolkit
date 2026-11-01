@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 // The operator's side of the board is two kinds of bead the gather admits as
@@ -39,7 +41,6 @@ const (
 )
 
 const (
-	awaitHuman = "human"
 	// firstReactionKey is the key the recommend exit files its gate under, so
 	// the recommendation's gate is the human gate with this await id.
 	firstReactionKey = "first-reaction"
@@ -61,9 +62,7 @@ func isWrapperKind(source string) bool {
 }
 
 // humanGate reports whether a blocker is a human gate, open or closed.
-func humanGate(b Blocker) bool {
-	return b.IssueType == "gate" && b.AwaitType == awaitHuman
-}
+func humanGate(b Blocker) bool { return prstatus.IsHumanGate(b.IssueType, b.AwaitType) }
 
 // openHumanGate reports whether a blocker is a human gate that is still open.
 func openHumanGate(b Blocker) bool { return humanGate(b) && b.Status != "closed" }
@@ -206,13 +205,14 @@ func SessionEnded(state string) bool {
 	return false
 }
 
-// humanIndex holds, for each bead, the open human gates that block it and the
+// humanIndex holds, for each bead, the open human gates that hold it and the
 // open conversations that track it, read off the gate and conversation anchors
-// the gather admitted, and which of them a live sitting holds or answers.
-// [BuildBoard] builds it once, before it derives any tile, so a row's held
-// fact and the fold read one index.
+// the gather admitted and off a merge anchor's [Anchor.HoldingGates], and which
+// of them a live sitting holds or answers. [BuildBoard] builds it once, before
+// it derives any tile, so a row's held fact and the fold read one index.
 type humanIndex struct {
-	// gates maps a bead id to the open human gates whose Subjects name it.
+	// gates maps a bead id to the open human gates whose Subjects name it, and,
+	// on a merge anchor, the ones behind the beads it waits on.
 	gates map[string][]string
 	// convs maps a bead id to the open conversations that track it.
 	convs map[string][]string
@@ -232,6 +232,11 @@ func indexHuman(anchors []Anchor, f Facts) humanIndex {
 	}
 	seen := map[string]bool{}
 	for _, a := range anchors {
+		for _, g := range a.HoldingGates {
+			if !slices.Contains(ix.gates[a.ID], g.ID) {
+				ix.gates[a.ID] = append(ix.gates[a.ID], g.ID)
+			}
+		}
 		if !isWrapperKind(a.Source) || !a.ClosedAt.IsZero() || seen[a.ID] {
 			continue
 		}
@@ -247,7 +252,7 @@ func indexHuman(anchors []Anchor, f Facts) humanIndex {
 			}
 		}
 		for _, s := range a.Subjects {
-			if s != "" && s != a.ID {
+			if s != "" && s != a.ID && !slices.Contains(into[s], a.ID) {
 				into[s] = append(into[s], a.ID)
 			}
 		}
@@ -262,7 +267,7 @@ func (ix humanIndex) holds(id string) bool {
 	return len(ix.gates[id]) > 0 || len(ix.convs[id]) > 0
 }
 
-// holdsWork reports whether an open human gate blocks the bead, so its work
+// holdsWork reports whether an open human gate holds the bead, so its work
 // cannot move until the operator answers. A conversation blocks nothing.
 func (ix humanIndex) holdsWork(id string) bool {
 	return len(ix.gates[id]) > 0
