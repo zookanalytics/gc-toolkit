@@ -64,10 +64,15 @@ and the options for that were:
 
 | Home | When it loads | Result |
 |---|---|---|
-| Text in the converse prompt, the literal reading of "standing instructions" | Every sitting, at every turn | 13 of the 104 conversations filed since 2026-10-15, as visit beads then, ended in a ruling rework on a design or docs PR, so most sittings would carry it unused |
+| Text in the converse prompt, the literal reading of "standing instructions" | Every sitting in every rig, at every turn | 25 of the 246 conversations filed across the city's stores since 2026-10-15, as visit beads then, ended in a ruling rework on a design or docs PR, 13 of 104 of them in this rig's store, so most sittings would carry it unused |
 | A section of `converse-continue` | Every sitting that reaches step 8 | The same, a little later |
 | An option in the `prs` or `records` skill | Any role that loads them | The loop is a sitting's, and those skills' descriptions keep converse's vocabulary out |
 | A skill the prompt's step table names | Only when a sitting iterates on a document | Chosen |
+
+The census reads each store on 2026-11-01. It counts the `visit:` beads and the
+reworks whose `source_ruling_bead` names one, and a PR counts as design or docs when
+it changes only markdown, or, like PR #1328, a page with its spec's measuring script.
+Nothing has been filed in a conversation's shape under any other title.
 
 The choice departs from the literal words the operator answered "Sure" to, and it
 follows what the operator wrote on PR #1375 on 2026-11-01, review 5726471751, about
