@@ -135,7 +135,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    (`pr.unanswered_threads`, which the labels and the board read for
    `held: review` and the merge does not), then
    validate holds/posture/checks/children/human-gate/approval/base/CLEAN, check
-   that the merge makes no `generated/seed-audit` render stale, re-read the full
+   that the merge makes no `generated/seed-audit` render stale and removes no
+   pack script that a formula names or an open step calls, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record in one lifecycle
    transition, which `gctk merge` runs in-process. The posture it validates is
@@ -190,7 +191,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    refusal of the transition's own write, which a bare `--set-metadata` on the
    same bead is not subject to.
 
-   The seed-audit check is the one gate here that is a property of the merge
+   The seed-audit check and the removed-script check are properties of the merge
    rather than of the head. `generated/seed-audit` is rendered from the whole
    source tree and committed per branch, so a PR carrying a render made at an
    older base overwrites prompt inputs it never saw, and two PRs that touch no
@@ -240,6 +241,64 @@ the cadence — the arms run whether or not any refinery session is awake.
    whatever else they do. So `generated/seed-audit/` holds the renders and an
    `INDEX.md` that moves only when the pack's composition moves, and byte and
    token counts print on request (`render-seed-audit.sh --sizes`).
+
+   The removed-script check exists because a run keeps the step text it was
+   poured with, and that text calls the pack's scripts from the city's copy of
+   the pack as each step runs. A merge that removes a script, a rename's old
+   path included, stops every open step that names it once that copy takes the
+   merge. That copy follows the default branch, so the check asks only about a
+   merge into it. A merge into an integration branch reaches no copy, and the
+   landing PR that carries the branch to the default branch lists what it
+   removed. `script-callers.sh --check-merge` reads the same two fetched commits
+   and takes the files the change removes, from `assets/scripts/` and from each
+   sub-pack's `packs/<name>/assets/scripts/`, that the base still carries,
+   tests aside. Its answer says who ends the hold.
+
+   A formula at the base or the head that still names a removed script keeps
+   pouring runs that call it, so no wait clears it and the branch has to change.
+   The arm holds the merge and hands the branch back through
+   `rejection-repool.sh`, the refinery's rejection, with what the check found as
+   the reason. A polecat keeps a file at the path, a hand-off to what replaces
+   the script, and a later change removes it. No person is asked: a choice the
+   worker cannot make goes through the worker's own human gate. The PR stays open
+   and its approval stands across the push, so the hand-off lands on the approval
+   it has, as any small fix does
+   ([state-machine.md](state-machine.md#checks)). The rejection's release lands
+   first and takes the anchor out of the merge passes until the rework hands it
+   back. A pour that then stops short leaves an armed dispatch or a human gate
+   carrying the bead. A release that does not land leaves the anchor in the
+   passes, where the merge stays held and a later pass meets the same formula and
+   asks again.
+
+   A formula only the rig checkout's HEAD names is a wait. The city pours its runs
+   from that checkout until it is fast-forwarded, and the fast-forward clears it,
+   so nothing on the PR has to change and nobody is asked. A checkout that cannot
+   be fast-forwarded has its own human gate (`reconcile-rig-checkouts.sh`). The
+   arm records `settled`.
+
+   Open steps in any store of the city that call a removed script hold the merge
+   until their runs end. Nothing on the PR has to change for that, so the arm
+   files no gate. While those runs are moving it records `settled`, the verdict
+   `gate-ensure.sh` reaches for the same green anchor later in the pass, so the
+   two do not alternate: the board reads "green — waiting on the merge pass" and
+   the PR `status: merging`.
+
+   A parked run ends only when a person acts, so one parked caller makes the
+   verdict `blocked`, cause `blocker`, with a reason that names what parks it and
+   what ends the wait. The PR reads `status: needs-attention` and `held: blocked`,
+   and the board's row gives the reason. `gate-ensure.sh` leaves that verdict
+   standing, and the next pass that finds no parked caller replaces it. A run is
+   parked when one of its open steps is blocked by a gate a person holds: a human
+   gate or a park, and not a timer gate or a gate on a GitHub run or pull request,
+   the types core's gate sweep is there to close. A person releases the gate or
+   cancels the run. A run is parked too when its rig is suspended, since nothing
+   works it until a person resumes the rig or cancels the run.
+
+   Each pass's log counts the calling steps and names the first of them, and
+   `script-callers.sh <script>` lists each with its run, any gate that parks it
+   and the rig whose store holds it. A check that cannot read a revision, the rig
+   list, a store, a store's gates or the temp file behind one of its loops holds
+   the merge for the pass.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of

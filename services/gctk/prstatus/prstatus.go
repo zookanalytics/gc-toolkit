@@ -100,7 +100,7 @@ const (
 	CauseCheckFailed   = "check-failed"   // a required check failed at the head
 	CauseConflict      = "conflict"       // the branch conflicts and its merge-in is deferred
 	CauseBehind        = "behind"         // the base moved ahead and nothing brings the branch current
-	CauseBlocker       = "blocker"        // a live blocker no automated actor holds
+	CauseBlocker       = "blocker"        // a live blocker no automated actor holds, on the anchor or on a run its merge would stop
 	CauseRule          = "rule"           // a branch rule the merge pass cannot name
 )
 

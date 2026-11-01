@@ -6,7 +6,8 @@
 # --pool defaults to gc-toolkit.polecat. Callers: formulas/mol-refinery-patrol.toml,
 # from the rebase step's conflict arm and the handle-failures step's
 # branch-caused arm. Both run `gc workflow reopen-source` first, which leaves
-# the bead open with no assignee, out of the refinery's queue.
+# the bead open with no assignee, out of the refinery's queue. gctk merge, on a
+# PR that removes a pack script a formula still names; its anchor is open already.
 # Stdout is one line: the bead's row as read before any write (the scrubbed
 # `gc bd show --json` array). Stdout is empty when the bead could not be read.
 #

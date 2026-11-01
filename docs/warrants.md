@@ -368,9 +368,10 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37,
-  `gastownhall/gascity-packs` main 5bf643ca55bd with the packs Gas City
-  bundles at 66c672b5ed00, and `gastownhall/beads` main e46de42b3c59.
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main 688b5c4e0acd,
+  `gastownhall/gascity-packs` main 0b0d96250f66 with the packs Gas City
+  bundles at cb6a612882b8 (`gastown`) and 5bf643ca55bd (`gascity`), and
+  `gastownhall/beads` main 6ebaacba8f5f.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base

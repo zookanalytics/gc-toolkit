@@ -37,9 +37,9 @@ import (
 // writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git/jq
 // and the sibling shell helpers (human-gate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
-// pr-status-label.sh, blocker-holder.sh, pr-post.sh), resolved from
-// GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's directory
-// before it execs this binary.
+// script-callers.sh, rejection-repool.sh, pr-status-label.sh, blocker-holder.sh,
+// pr-post.sh), resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as
+// merge.sh's directory before it execs this binary.
 // Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
 // the observability and permissions surfaces those tools have for every other
 // caller. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass refuses
@@ -804,10 +804,15 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 
-	// --- generated-artifact freshness AT THE MERGE RESULT --------------------------
+	// --- what the MERGE RESULT lands, in a repository that is a pack ---------------
 	renderer := m.scriptPath("render-seed-audit.sh")
-	if m.repoRoot != "" && fileExists(filepath.Join(m.repoRoot, "pack.toml")) &&
-		fileExists(filepath.Join(m.repoRoot, "generated/seed-audit/INDEX.md")) && fileExists(renderer) {
+	callers := m.scriptPath("script-callers.sh")
+	packRepo := m.repoRoot != "" && fileExists(filepath.Join(m.repoRoot, "pack.toml"))
+	checkFreshness := packRepo && fileExists(filepath.Join(m.repoRoot, "generated/seed-audit/INDEX.md")) && fileExists(renderer)
+	// The city's copy of the pack follows the default branch. A merge into an
+	// integration branch reaches no copy, and the landing PR lists what it removed.
+	checkCallers := packRepo && fileExists(callers) && intoDefaultBranch(base)
+	if checkFreshness || checkCallers {
 		if rc := runRC("git", "fetch", "--quiet", "--no-tags", "origin",
 			"+refs/heads/"+base+":"+mergeGateRef+"/base", "+refs/heads/"+headRef+":"+mergeGateRef+"/head"); rc != 0 {
 			fmt.Fprintf(m.stdout, "%s: PR#%s could not fetch '%s' and '%s' to check what the merge would land; merge held (anchor %s)\n", mergeProg, num, base, headRef, id)
@@ -820,10 +825,14 @@ func (m *merger) handle(row *gcbd.Bead) {
 			if shown == "" {
 				shown = "none"
 			}
-			fmt.Fprintf(m.stdout, "%s: PR#%s head moved during the freshness probe (fetched '%s', validated '%s'); merge held (anchor %s)\n", mergeProg, num, shown, headOid, id)
+			fmt.Fprintf(m.stdout, "%s: PR#%s head moved during the merge-result probe (fetched '%s', validated '%s'); merge held (anchor %s)\n", mergeProg, num, shown, headOid, id)
 			m.held++
 			return
 		}
+	}
+
+	// --- generated-artifact freshness at the merge result ---------------------------
+	if checkFreshness {
 		saArgs := []string{renderer, "--root", m.repoRoot, "--check-merge", mergeGateRef + "/base", mergeGateRef + "/head"}
 		staleList := ""
 		if f, err := os.CreateTemp("", "gctk-merge-base-stale.*"); err == nil {
@@ -847,6 +856,58 @@ func (m *merger) handle(row *gcbd.Bead) {
 		}
 		if staleList != "" {
 			m.reaudit(base, num, readLines(staleList))
+		}
+	}
+
+	// --- pack scripts the merge removes while live text still calls them -----------
+	// A run keeps the step text it was poured with and calls the pack's scripts
+	// from the city's copy of the pack, so a removed script stops every open
+	// step that names it once the merge reaches that copy. A formula at either
+	// side of the merge that still names it is the branch's to fix, so the branch
+	// goes back to a polecat. A checkout that has not taken the base yet, or open
+	// steps that call it, hold the merge until the checkout moves or their runs
+	// end, with nothing on the PR to change. Every lane is green there and the PR
+	// waits on this pass, which is settled. gate-ensure.sh reaches the same verdict
+	// later in the pass, so any other one here would alternate with it for as long
+	// as the hold stands. A run behind a person's gate or in a suspended rig ends
+	// only when a person acts, so one parked caller reads blocked and its reason
+	// names what parks it. gate-ensure.sh leaves that verdict standing while no
+	// actor holds a blocker of the anchor, and the next pass here replaces it once
+	// no run is parked.
+	if checkCallers {
+		scOut, scRC := runCombined("bash", callers, "--root", m.repoRoot, "--check-merge", mergeGateRef+"/base", mergeGateRef+"/head")
+		switch scRC {
+		case 0:
+		case 1:
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script a formula still names; merge held (anchor %s)\n", mergeProg, num, id)
+			m.printIndented(scOut, 12)
+			m.rejectForHandoff(id, num, base, headOid, scOut)
+			m.held++
+			return
+		case 3:
+			m.recordMachine(id, "settled", headOid, aroute)
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script open steps still call; merge held until their runs end (anchor %s)\n", mergeProg, num, id)
+			m.printIndented(scOut, 12)
+			m.held++
+			return
+		case 4:
+			m.recordMachine(id, "settled", headOid, aroute)
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script only the rig checkout's HEAD still names; merge held until the checkout takes '%s' (anchor %s)\n", mergeProg, num, base, id)
+			m.printIndented(scOut, 12)
+			m.held++
+			return
+		case 5:
+			reason, _, _ := strings.Cut(scOut, "\n")
+			m.recordBlocked(id, headOid, aroute, prstatus.CauseBlocker, reason)
+			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script steps of a parked run still call; merge held until a person acts (anchor %s)\n", mergeProg, num, id)
+			m.printIndented(scOut, 12)
+			m.held++
+			return
+		default:
+			fmt.Fprintf(m.stdout, "%s: PR#%s: whether the merge removes a pack script open steps still call could not be determined (script-callers.sh exit %d); merge held (anchor %s)\n", mergeProg, num, scRC, id)
+			m.printIndented(scOut, 6)
+			m.held++
+			return
 		}
 	}
 
@@ -1483,16 +1544,25 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // that anchor. A missing blocker-holder.sh records no verdict for an anchor a
 // live blocker holds, whose merge is held anyway. A missing pr-post.sh counts
 // no PR's unanswered review threads. A missing human-gate.sh,
-// record-failure-cap.sh, render-seed-audit.sh or pr-status-label.sh is skipped.
+// record-failure-cap.sh, render-seed-audit.sh, script-callers.sh,
+// rejection-repool.sh or pr-status-label.sh is skipped.
 // The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, human-gate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, human-gate.sh, record-failure-cap.sh, render-seed-audit.sh, script-callers.sh, rejection-repool.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
 
 func (m *merger) scriptPath(name string) string { return filepath.Join(m.scriptsDir, name) }
+
+// intoDefaultBranch reports whether base is the branch origin's HEAD names. A
+// checkout that cannot name it answers true, so a check that only a merge into
+// the default branch owes is asked rather than skipped.
+func intoDefaultBranch(base string) bool {
+	head := strings.TrimSpace(runOut("git", "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"))
+	return head == "" || head == "origin/"+base
+}
 
 // standingQuietWindow is the quiet period, in seconds, of a human gate whose
 // condition stands from one pass to the next, a duplicate anchor or a stale
@@ -1570,6 +1640,38 @@ func (m *merger) reaudit(base, num string, files []string) {
 	if rc != 0 {
 		fmt.Fprintf(m.stdout, "%s: PR#%s: the re-audit was not dispatched (seed-audit-reaudit.sh exit %d); the next merge that finds '%s' stale asks again\n", mergeProg, num, rc, base)
 	}
+}
+
+// rejectForHandoff hands a branch that removes a script a formula still names
+// back to the polecat pool, through the refinery's rejection. The check names the
+// remedy and an agent can make it, so no person is asked; a choice the worker
+// cannot make goes through the worker's own human gate. The PR stays open with the
+// approval it has, on which a small fix lands (docs/state-machine.md). The merge
+// is held whatever the helper answers. The helper's release lands first and takes
+// the anchor out of the passes until the rework hands it back, and when its pour
+// then stops short, the armed dispatch or the human gate it leaves carries the
+// bead. A release that does not land leaves the anchor in the passes, where the
+// merge stays held and a later pass meets the same formula and asks again. The
+// helper prints the bead's row on stdout, and on stderr what it did, which is what
+// the pass log keeps.
+func (m *merger) rejectForHandoff(id, num, base, headOid, found string) {
+	p := m.scriptPath("rejection-repool.sh")
+	if !isExecutable(p) {
+		fmt.Fprintf(m.stdout, "%s: PR#%s: rejection-repool.sh is not in %s; nobody was asked for the hand-off (anchor %s)\n", mergeProg, num, m.scriptsDir, id)
+		return
+	}
+	reason := fmt.Sprintf("PR#%s removes a pack script a formula still names, so the merge pass will not land it into '%s' at %s.\n\n%s\n\nThe PR stays open and keeps its approval. `assets/scripts/script-callers.sh --check-merge origin/%s HEAD` exits 1 while a formula still names a script the branch removes. Say in pr_summary what the PR now keeps.", num, base, shortSha(headOid), found, base)
+	cmd := exec.Command(p, id, "--reason", reason)
+	var said bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &said
+	rc := gcbd.ExitCode(cmd.Run())
+	m.printIndented(strings.TrimRight(said.String(), "\n"), 6)
+	if rc != 0 {
+		fmt.Fprintf(m.stdout, "%s: PR#%s: the hand-off was not dispatched (rejection-repool.sh exit %d); merge held (anchor %s)\n", mergeProg, num, rc, id)
+		return
+	}
+	fmt.Fprintf(m.stdout, "%s: PR#%s went back to the polecat pool for the hand-off (anchor %s)\n", mergeProg, num, id)
 }
 
 // readLines returns a file's non-empty lines, and none for a file it cannot read.
