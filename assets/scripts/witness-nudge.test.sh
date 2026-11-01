@@ -207,6 +207,27 @@ else
   bad "the bound '$default_quiet' must stay over mol-witness-patrol's event_timeout default '$wait_default'"
 fi
 
+echo "--- the step this order backs up: a pass waits, pours and ends its turn"
+STEP=$(awk '/^id = "next-iteration"$/ { inb = 1; next } /^\[\[steps\]\]$/ { inb = 0 } inb' "$FORMULA")
+line_of() { printf '%s\n' "$STEP" | grep -n -F -- "$1" | head -1 | cut -d: -f1; }
+wait_at=$(line_of 'until [ "$(date +%s)" -ge "$end" ]')
+pour_at=$(line_of '# >>> patrol-wisp-pour')
+idle_at=$(line_of 'IDLE: no work, exiting turn.')
+if [ -n "$wait_at" ] && [ -n "$pour_at" ] && [ "$wait_at" -lt "$pour_at" ]; then
+  ok "next-iteration waits before it pours, because a wait after the pour never holds"
+else
+  bad "next-iteration waits before it pours (wait at line '$wait_at', pour at line '$pour_at')"
+fi
+if [ -n "$pour_at" ] && [ -n "$idle_at" ] && [ "$pour_at" -lt "$idle_at" ]; then
+  ok "next-iteration writes the idle line after the pour"
+else
+  bad "next-iteration writes the idle line after the pour (pour at line '$pour_at', idle line at line '$idle_at')"
+fi
+hasnt "$STEP" "gc formula show" "next-iteration does not send the session back through the formula"
+marks=$(printf '%s\n' "$STEP" | grep -E 'gc bd update [^;|&]*--status' || true)
+eq "$marks" "" "next-iteration marks no wisp's status"
+has "$(cat "$ROOT/agents/witness/prompt.template.md")" "A pass ends at next-iteration" "the witness's prompt says where a pass ends"
+
 echo
 echo "witness-nudge.test: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

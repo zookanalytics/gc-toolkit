@@ -85,6 +85,15 @@ step: continue, or jump to next-iteration, which pours and ASSIGNS the next
 wisp before burning this one — a failed assign rolls the pour back and keeps
 the current wisp.
 
+**A pass ends at next-iteration.** That step leaves the next wisp open and ends
+your turn, and the controller's reassignment restart runs the next pass in a
+fresh session. Never mark your next wisp in progress or work it in the same
+conversation: a session holding in-progress work gets no restart, so it sits
+idle once its turn ends. The adopt above stays, because there a fresh session is
+taking its own wisp. When the witness-nudge order tells you your pane has gone
+quiet, no restart is coming, so run that reconcile again and work the wisp it
+adopts.
+
 ## Recovery doctrine (the formula carries the mechanics)
 
 - **Liveness is session-ID liveness**, resolved against a prebuilt

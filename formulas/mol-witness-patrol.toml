@@ -15,7 +15,9 @@ for the step that reads it:
 Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
 pour the next iteration. Steps are not materialized; read each description
 as you reach it. Never exit the wisp from an intermediate step — continue,
-or jump to next-iteration to pour and burn.
+or jump to next-iteration to pour and burn. A pass ends at next-iteration,
+which ends the turn, and the controller's reassignment restart runs the next
+pass in a fresh session.
 
 Scope: the witness recovers work whose owner died, files ONE warrant bead
 for the dog pool when an owner is alive but wedged, files a bug bead that
@@ -54,7 +56,7 @@ description = "Agent identity prefix with trailing dot. Non-empty default on pur
 default = "gc-toolkit."
 
 [vars.event_timeout]
-description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
+description = "Seconds next-iteration waits before it pours the next wisp, which spaces the passes. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
 default = "600"
 
 [[steps]]
@@ -1077,23 +1079,38 @@ next-iteration."""
 
 [[steps]]
 id = "next-iteration"
-title = "Pour next iteration and loop"
+title = "Wait, pour the next iteration and end the turn"
 needs = ["check-refinery"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
-**1. Pour the next iteration and burn this one, both BEFORE the wait — and
-GUARD the assign.** The pour and the assign are separate writes; a wisp poured
-but not assigned reaches no hook and drops the loop, invisibly (the prompt's
-title-scoped startup reconcile is the backstop, not the fix). Burning this
-wisp is folded in right after the assign so it precedes the wait: a session
-reset during that wait has already poured and assigned its successor and
-burned itself, so the next boot adopts the successor instead of orphaning this
-wisp. Pass exactly the vars the startup pour passes, which is binding_prefix
-alone, and nothing else. An omitted var renders the formula's current default
-on the new wisp, while a passed one keeps the first wisp's value for as long
-as the chain runs, so a default changed on main would never reach it. Keep
-each gc command on ONE line (TOML eats a trailing backslash).
+A pass ends at this step. It leaves the next wisp open and assigned, burns this
+one and ends the turn, and the controller's reassignment restart runs the next
+pass in a fresh session. Never mark the next wisp in progress or start it in
+this conversation: a session holding in-progress work gets no restart, so it
+sits idle once its turn ends.
+
+**1. Wait out the cycle BEFORE pouring** — a bounded clock-poll in ONE tool call
+(the harness blocks a standalone sleep, and caps one call at 600s):
+```bash
+end=$(( $(date +%s) + {{event_timeout}} ))
+until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
+```
+This wait spaces the passes, and it has to come first. A wait after the pour
+never holds, because the restart fires about 40 seconds after the next wisp is
+assigned and this one burned. While this wisp is yours and in progress the
+restart holds off, so a wait before the pour runs to its end.
+
+**2. Pour the next iteration, assign it and burn this one — and GUARD the
+assign.** The pour and the assign are separate writes; a wisp poured but not
+assigned reaches no hook and drops the loop, invisibly (the prompt's
+title-scoped startup reconcile is the backstop, not the fix). Burning this wisp
+is folded in right after the assign, so no turn boundary falls between them.
+Pass exactly the vars the startup pour passes, which is binding_prefix alone,
+and nothing else. An omitted var renders the formula's current default on the
+new wisp, while a passed one keeps the first wisp's value for as long as the
+chain runs, so a default changed on main would never reach it. Keep each gc
+command on ONE line (TOML eats a trailing backslash).
 
 `GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
 current wisp has to work: a wisp is an EPHEMERAL molecule, which means
@@ -1126,21 +1143,19 @@ fi
 # <<< patrol-wisp-pour
 ```
 If the pour or assign guard fires, this wisp is unburned and its successor was
-rolled back or never poured: stay on the current wisp and retry next cycle,
-skipping the wait below. If the pour succeeded but no current wisp resolves,
-the successor is already live, so this exit hands off to it and leaves any
-stray to the title-scoped reconcile.
+rolled back or never poured. Leave this wisp in place and end the turn: the
+witness-nudge order prompts this session for the next try. If the pour succeeded
+but no current wisp resolves, the successor is already live, so go on to step 3
+and leave any stray to the title-scoped reconcile.
 
-**2. Wait before the next cycle** — a bounded clock-poll in ONE tool call
-(the harness blocks a standalone sleep, and caps one call at 600s):
-```bash
-end=$(( $(date +%s) + {{event_timeout}} ))
-until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
+**3. End the turn.** Write exactly:
 ```
+IDLE: no work, exiting turn.
+```
+Then stop at once. Do NOT sleep, schedule a wakeup, use Monitor, run `gc hook`
+or read the formula again. The next wisp is already assigned, and the restarted
+session adopts it through its startup reconcile.
 
-Re-read the plain `gc formula show mol-witness-patrol` for step order (not
-the full --json; pull one step's description only as you reach it).
-
-**Exit criteria:** the next wisp poured and assigned, this one burned, and the
-inter-cycle wait elapsed — or a guard fired and this wisp survives for the
-retry."""
+**Exit criteria:** the inter-cycle wait elapsed, the next wisp poured, assigned
+and left open, this one burned, and the turn ended on the idle line; or a guard
+fired, this wisp survives, and the turn ended."""
