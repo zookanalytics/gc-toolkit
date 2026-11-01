@@ -271,8 +271,7 @@ done
 # 29. The reading reaches the ruling clause only. An open human gate holds a bead
 # read as disposed, epic or not, and --except-key still decides which gates do.
 store "[$(epic_bead E29 open '{"epic_hypothesis":"h"}'), $(hgate G29 open a-question)]"
-printf 'G29|blocks|E29
-' > "$STUB_DEPS"
+printf 'G29|blocks|E29\n' > "$STUB_DEPS"
 out=$("$SUT" check E29 --as-disposed 2>/dev/null); rc=$?
 eq "$rc" 1 "an open human gate holds an epic read as disposed"
 has "$out" "G29" "…and the gate is what it names"
@@ -283,13 +282,11 @@ eq "$rc" 0 "its own unassigned gate under the key does not, the options in eithe
 out=$("$SUT" check E29 --as-disposed --except-key a-question 2>/dev/null); rc=$?
 eq "$rc" 0 "…the other order"
 store "[$(epic_bead E29a open '{"epic_hypothesis":"h"}'), $(hgate G29a open a-question someone)]"
-printf 'G29a|blocks|E29a
-' > "$STUB_DEPS"
+printf 'G29a|blocks|E29a\n' > "$STUB_DEPS"
 out=$("$SUT" check E29a --as-disposed --except-key a-question 2>/dev/null); rc=$?
 eq "$rc" 1 "a gate a person is assigned holds an epic read as disposed"
 store "[$(work W29 open), $(hgate G29w open a-question)]"
-printf 'G29w|blocks|W29
-' > "$STUB_DEPS"
+printf 'G29w|blocks|W29\n' > "$STUB_DEPS"
 out=$("$SUT" check W29 --as-disposed 2>/dev/null); rc=$?
 eq "$rc" 1 "an open human gate holds a plain bead read as disposed"
 
