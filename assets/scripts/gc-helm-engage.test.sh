@@ -79,6 +79,13 @@
 #             skill
 #   (NEWSUBJ*) --new-subject files a marked subject and its one conversation
 #   (SKILL*)  --skill files a new conversation whose ask is the lens brief
+#   (HOLD-*)  the open human gates that hold a bead, read through gctk: the prompt
+#             offers each on the numbers after the conversations, a pick engages
+#             it as if it were named, an engage that asks nothing names them, and
+#             one pointed at a gate or a conversation does not read them. A read
+#             that does not answer is said and stops nothing. (HOLD-REAL) runs the
+#             real gctk reader over the fixture of an anchor, its rework and the
+#             gate on the rework.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -153,6 +160,15 @@ conv_row() {
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
 }
+# The walk's read in gctk, under the (HOLD-REAL) wrapper: a row per id, its edges
+# from $WALK_EDGES, a JSON object of each bead's dependency rows.
+if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd show" ]; then
+  shift 2
+  _ids=()
+  for a in "$@"; do case "$a" in --*) ;; *) _ids+=("$a") ;; esac; done
+  printf '%s' "${WALK_EDGES:-{\}}" | jq -c --args '. as $e | [$ARGS.positional[] | {id: ., dependencies: ($e[.] // [])}]' "${_ids[@]}"
+  exit 0
+fi
 case "$1 ${2:-}" in
   "rig list")
     # The HQ row leads, as gc lists it; its running flag is gc's probe of the city
@@ -1808,6 +1824,157 @@ has "$CALLED" "session attach gc-50" "(LIVE-ENDED) a tab attached to the live si
 has "$OUT" "The sitting on tk-subj has ended: conversation tk-conv closed (settled the rollout)." \
     "(LIVE-ENDED) …reports its ending the same way"
 unset LIVE_SITTINGS
+reset
+
+# --- the human gates that hold the bead ----------------------------------------
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk-stub" <<'GCTK'
+printf '%s\n' "$*" >> "$STATE_DIR/gctk.calls"
+[ -z "${GCTK_GATES_FAIL:-}" ] || exit 2
+printf '%s\n' "${GCTK_GATES:-[]}"
+GCTK
+chmod +x "$TMP/bin/gctk-stub"
+export GCTK_BIN="$TMP/bin/gctk-stub"
+ONE_GATE='[{"id":"tk-gate","title":"Approve the rollout"}]'
+gctk_calls() { cat "$STATE_DIR/gctk.calls" 2>/dev/null || true; }
+fresh_gctk() { rm -f "$STATE_DIR/gctk.calls"; }
+
+echo "# on a TTY the gates that hold the bead are offered, and a pick engages the gate"
+export GATE_WAITERS='[{"id":"tk-rework","status":"open","dependency_type":"blocks"}]'
+export GCTK_GATES="$ONE_GATE" HAVE_CONV=0
+fresh_gctk; run_fresh_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(HOLD-OFFER) picking a gate that holds the bead exits 0"
+eq "$(gctk_calls)" "pr-status gates --anchor tk-subj" "(HOLD-OFFER) …read through the one reader"
+has "$OUT" "Held by human gate(s):" "(HOLD-OFFER) …listed under their own heading"
+has "$OUT" '[1] tk-gate — "Approve the rollout"' "(HOLD-OFFER) …numbered, with what the gate asks"
+has "$OUT" "[1-1] engage a listed gate" "(HOLD-OFFER) …and the prompt says the number engages it"
+has "$OUT" "tk-gate is a gate about tk-rework" "(HOLD-OFFER) …the pick takes the bead waiting on the gate"
+has "$CALLED" "--deps tracks:tk-rework" "(HOLD-OFFER) …the conversation tracks that bead"
+hasnt "$CALLED" "--deps tracks:tk-subj" "(HOLD-OFFER) …not the bead the gate was offered on"
+has "$CALLED" "--title Approve the rollout" "(HOLD-OFFER) …titled with what the gate asks"
+has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(HOLD-OFFER) …and it replies to the gate"
+
+fresh_gctk; run_fresh_tty '\n\n' tk-subj --no-attach
+eq "$RC" 0 "(HOLD-ENTER) Enter with only gates listed exits 0"
+has "$OUT" "Held by human gate(s):" "(HOLD-ENTER) …having offered the gate"
+has "$CALLED" "--deps tracks:tk-subj" "(HOLD-ENTER) …and files a new conversation on the bead, as it does with none listed"
+hasnt "$CALLED" "--type replies-to" "(HOLD-ENTER) …which replies to no gate"
+
+export HAVE_CONV=1
+fresh_gctk; run_fresh_tty '2\n\n' tk-subj --no-attach
+eq "$RC" 0 "(HOLD-NUMBERS) a gate numbered after the conversations exits 0"
+has "$OUT" '[1] tk-conv' "(HOLD-NUMBERS) …the conversation keeps number 1"
+has "$OUT" '[2] tk-gate — "Approve the rollout"' "(HOLD-NUMBERS) …and the gate follows it"
+has "$OUT" "[1-2] take a listed conversation or gate" "(HOLD-NUMBERS) …the prompt offers both"
+has "$CALLED" "--deps tracks:tk-rework" "(HOLD-NUMBERS) …number 2 engages the gate"
+fresh_gctk; run_fresh_tty '1\n\n' tk-subj --no-attach
+has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-NUMBERS) number 1 takes the conversation"
+hasnt "$CALLED" "--type replies-to" "(HOLD-NUMBERS) …which replies to no gate"
+fresh_gctk; run_fresh_tty '\n\n' tk-subj --no-attach
+has "$OUT" "Enter = the first conversation" "(HOLD-NUMBERS) Enter names the conversation, not the first number's kind alone"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-NUMBERS) …and takes it"
+
+echo "# a gate several beads wait on takes the bead the operator came from"
+export GATE_WAITERS='[{"id":"tk-subj","status":"open"},{"id":"tk-rework","status":"open"}]'
+fresh_gctk; run_fresh_tty '2\n\n' tk-subj --no-attach
+eq "$RC" 0 "(HOLD-FROM) a gate on the bead and another exits 0"
+has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(HOLD-FROM) …and the bead's own conversation replies to it"
+export GATE_WAITERS='[{"id":"tk-other","status":"open"},{"id":"tk-rework","status":"open"}]'
+fresh_gctk; run_fresh_tty '2\n\n' tk-subj --no-attach
+eq "$RC" 4 "(HOLD-FROM) a gate on two other beads is refused"
+has "$OUT" "gate tk-gate is about 2 beads" "(HOLD-FROM) …naming them"
+hasnt "$CALLED" "session new" "(HOLD-FROM) …and starts nothing"
+
+echo "# nothing holding the bead leaves the prompt as it was"
+export GATE_WAITERS='[{"id":"tk-rework","status":"open","dependency_type":"blocks"}]'
+export GCTK_GATES='[]'
+fresh_gctk; run_fresh_tty '\n\n' tk-subj --no-attach
+hasnt "$OUT" "Held by human gate" "(HOLD-NONE) no heading"
+has "$OUT" "[1-1] take a listed conversation · a letter or text starts a new one · Enter = the first listed" "(HOLD-NONE) …and the prompt it always had"
+export HAVE_CONV=0
+fresh_gctk; run_fresh_tty '\n\n' tk-subj --no-attach
+has "$OUT" "a letter or text starts a new conversation · Enter = a new one, blank" "(HOLD-NONE) …with or without a conversation"
+
+echo "# a reply beyond the list is an opener, not a gate"
+export GCTK_GATES="$ONE_GATE"
+fresh_gctk; run_fresh_tty '7\n\n\n' tk-subj --no-attach
+has "$CALLED" "--deps tracks:tk-subj" "(HOLD-RANGE) a number no row carries opens a conversation on the bead"
+hasnt "$CALLED" "--type replies-to" "(HOLD-RANGE) …and answers no gate"
+
+echo "# an engage that asks nothing names the gates"
+export HAVE_CONV=1
+fresh_gctk; run_fresh tk-subj --no-attach --no-input
+eq "$RC" 0 "(HOLD-NOINPUT) --no-input on a held bead exits 0"
+has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate' "(HOLD-NOINPUT) …naming the gate and how to engage it"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-NOINPUT) …and carrying on with the bead's conversation"
+hasnt "$CALLED" "--type replies-to" "(HOLD-NOINPUT) …which answers no gate unasked"
+fresh_gctk; run_fresh tk-subj --reason "a distinct concern" --no-attach
+has "$OUT" "tk-subj is held by human gate tk-gate" "(HOLD-REASON) a concern on the argv names the gate too"
+fresh_gctk; run_fresh_tty '\n' tk-subj --reason "a distinct concern" --no-attach
+has "$OUT" "tk-subj is held by human gate tk-gate" "(HOLD-REASON) …on a TTY as well, whose prompt it skips"
+export GCTK_GATES='[{"id":"tk-g1","title":"first"},{"id":"tk-g2","title":"second"}]'
+fresh_gctk; run_fresh tk-subj --no-attach --no-input
+has "$OUT" 'human gate tk-g1 ("first")' "(HOLD-NOINPUT) each gate is named"
+has "$OUT" 'human gate tk-g2 ("second")' "(HOLD-NOINPUT) …the second too"
+export GCTK_GATES='[]'
+fresh_gctk; run_fresh tk-subj --no-attach --no-input
+hasnt "$OUT" "is held by human gate" "(HOLD-NOINPUT) nothing holding it says nothing"
+export GCTK_GATES="$ONE_GATE"
+
+echo "# an engage pointed at a gate or a conversation does not look for others"
+fresh_gctk; run_fresh tk-gate --no-attach --no-input
+eq "$(gctk_calls)" "" "(HOLD-POINTED) a gate named on the argv reads no gates"
+hasnt "$OUT" "is held by human gate" "(HOLD-POINTED) …and names none"
+fresh_gctk; run_fresh_tty '\n\n' tk-gate --no-attach
+eq "$(gctk_calls)" "" "(HOLD-POINTED) …nor at the prompt"
+hasnt "$OUT" "Held by human gate" "(HOLD-POINTED) …which lists none"
+fresh_gctk; run_fresh tk-conv --no-attach --no-input
+eq "$(gctk_calls)" "" "(HOLD-CONVID) a conversation named on the argv reads no gates"
+
+echo "# a read that does not answer is said, and stops nothing"
+export GCTK_GATES_FAIL=1
+fresh_gctk; run_fresh tk-subj --no-attach --no-input
+eq "$RC" 0 "(HOLD-UNREAD) a reader that fails does not stop the engage"
+has "$OUT" "could not read the human gates that hold tk-subj" "(HOLD-UNREAD) …which says so"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-UNREAD) …and goes on"
+fresh_gctk; run_fresh_tty '\n\n' tk-subj --no-attach
+eq "$RC" 0 "(HOLD-UNREAD) …on a TTY as well"
+has "$OUT" "could not read the human gates that hold tk-subj" "(HOLD-UNREAD) …saying so there"
+unset GCTK_GATES_FAIL
+GCTK_BIN=none run_fresh tk-subj --no-attach --no-input
+has "$OUT" "could not read the human gates that hold tk-subj" "(HOLD-NOBIN) no gctk says the same"
+eq "$RC" 0 "(HOLD-NOBIN) …and exits 0"
+_hold_saved_bin="$GCTK_BIN"; unset GCTK_BIN
+run_fresh tk-subj --no-attach --no-input
+has "$OUT" "could not read the human gates that hold tk-subj" "(HOLD-NOBIN) a city root with no gctk built says the same"
+export GCTK_BIN="$_hold_saved_bin"
+
+echo "# the real reader over an anchor, its rework and the gate on the rework"
+ROOT="$(cd "$HERE/../.." && pwd)"
+if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1; then
+  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'STUB_WALK=1 exec "%s/gctk" "$@"\n' "$TMP"; } > "$TMP/bin/gctk-real"
+  chmod +x "$TMP/bin/gctk-real"
+  export GCTK_BIN="$TMP/bin/gctk-real"
+  REWORK_EDGE='{"id":"tk-rework","title":"fix the check","status":"open","issue_type":"task","dependency_type":"blocks"}'
+  GATE_EDGE='{"id":"tk-gate","title":"Approve the rollout","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}'
+  export HAVE_CONV=0
+  export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":['"$GATE_EDGE"']}'
+  run_fresh tk-subj --no-attach --no-input
+  has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate' "(HOLD-REAL) a gate on the rework the anchor waits on is offered"
+  run_fresh_tty '1\n\n' tk-subj --no-attach
+  has "$OUT" '[1] tk-gate — "Approve the rollout"' "(HOLD-REAL) …at the prompt too"
+  has "$CALLED" "--deps tracks:tk-rework" "(HOLD-REAL) …and engaging it takes the rework"
+  export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":[{"id":"tk-gate","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]}'
+  run_fresh tk-subj --no-attach --no-input
+  hasnt "$OUT" "is held by human gate" "(HOLD-REAL) resolving the gate clears the offer"
+  hasnt "$OUT" "could not read" "(HOLD-REAL) …on a read that answered"
+  export WALK_EDGES='{"tk-subj":[{"id":"tk-c","status":"open","issue_type":"task","assignee":"human","dependency_type":"tracks"}]}'
+  run_fresh tk-subj --no-attach --no-input
+  hasnt "$OUT" "is held by human gate" "(HOLD-REAL) a conversation tracking the anchor offers nothing"
+  unset WALK_EDGES
+else
+  bad "(HOLD-REAL) gctk did not build; the real reader was NOT exercised — $(tail -3 "$TMP/gctk-build.log" | tr '\n' ' ')"
+fi
+unset GCTK_BIN GCTK_GATES GATE_WAITERS HAVE_CONV
 reset
 
 echo

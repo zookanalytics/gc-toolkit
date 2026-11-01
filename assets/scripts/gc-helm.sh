@@ -93,6 +93,10 @@ the sitting to start on its own, to attach later). Pointed at a human gate,
 engage takes the one bead still waiting on the gate and makes the conversation
 it lands on reply to the gate; with several beads waiting it names them and
 starts nothing, and with none it says nothing waits and starts nothing.
+Engaging a bead or a PR names each open human gate that holds it, reached
+through its open blocks edges, by the reader the PR's held: gate label and the
+board's row read: the interactive prompt offers each, and picking one engages
+it as if it were named, and any other engage says how to.
 --model picks the converse variant (opus, the work tier, is the default),
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
@@ -2026,19 +2030,20 @@ verify_subject() {
 }
 
 # ── Conversations: the bead a call is about, and the reply onto a gate ──
-# take_bead <verb> <nothing-msg> — settle which bead a conversation is about,
+# take_bead <verb> <nothing-msg> [<from>] — settle which bead a conversation is about,
 # from the verified row verify_subject left in VS_ROW: the bead itself, the
 # subject a conversation id tracks, or, for a gate, the one bead still waiting
 # on it, since a conversation always tracks a bead and never a gate. Sets
 # TAKE_BEAD (that bead), TAKE_GATE (the human gate the id named, which the
 # conversation replies to) and TAKE_CONV (the conversation the id named). A gate
-# several open beads wait on is refused, naming them, so the operator names the
-# one they mean, and so is a gate nothing waits on, naming the beads it was
-# about, because a sitting there would answer an ask that holds nothing. A
-# refusal or a read that did not answer exits 4 with <nothing-msg>.
+# several open beads wait on takes <from>, the bead the operator reached the gate
+# from, when it is one of them. Otherwise it is refused, naming them, so the
+# operator names the one they mean, and so is a gate nothing waits on, naming the
+# beads it was about, because a sitting there would answer an ask that holds
+# nothing. A refusal or a read that did not answer exits 4 with <nothing-msg>.
 TAKE_BEAD=""; TAKE_GATE=""; TAKE_CONV=""
 take_bead() {
-    _tb_verb="$1"; _tb_nothing="$2"
+    _tb_verb="$1"; _tb_nothing="$2"; _tb_from="${3:-}"
     TAKE_BEAD=""; TAKE_GATE=""; TAKE_CONV=""
     # A `gc bd show` row spells an edge {dependency_type, id}; the shape rule
     # reads the `gc bd list` spelling {type, depends_on_id}, so the row is
@@ -2058,6 +2063,9 @@ take_bead() {
             fi
             _tb_open=$(printf '%s' "$_tb_waiters" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id // empty ] | join(" ")')
             _tb_closed=$(printf '%s' "$_tb_waiters" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) == "closed") | .id // empty ] | join(" ")')
+            if [ -n "$_tb_from" ]; then
+                case " $_tb_open " in *" $_tb_from "*) _tb_open="$_tb_from" ;; esac
+            fi
             # shellcheck disable=SC2086  # split the ids into positional parameters to count them
             set -- $_tb_open
             case $# in
@@ -2759,19 +2767,26 @@ cmd_dismiss() {
 # <city>/.gc/runtime/packs/gc-toolkit, the directory Gas City sets aside for the
 # pack's runtime state. It is named from the city root, never through
 # GC_PACK_STATE_DIR, which Gas City sets only for an order's run, so the CLI,
-# helm-svc and any other caller reach the same file. The root is GC_CITY_PATH,
-# GC_CITY or GC_CITY_ROOT when it is an absolute path holding .gc, else the path
-# gc reports for the city's HQ rig. Prints nothing when none names one.
+# helm-svc and any other caller reach the same file. Prints nothing when no city
+# root can be named.
 accept_lock_dir() {
-    for _ald_root in "${GC_CITY_PATH:-}" "${GC_CITY:-}" "${GC_CITY_ROOT:-}"; do
-        case "$_ald_root" in
-            /*) if [ -d "$_ald_root/.gc" ]; then printf '%s/.gc/runtime/packs/gc-toolkit' "$_ald_root"; return 0; fi ;;
+    _ald_root=$(city_root)
+    [ -z "$_ald_root" ] || printf '%s/.gc/runtime/packs/gc-toolkit' "$_ald_root"
+}
+
+# city_root — the city's root: GC_CITY_PATH, GC_CITY or GC_CITY_ROOT when it is an
+# absolute path holding .gc, else the path gc reports for the city's HQ rig.
+# Prints nothing when none names one.
+city_root() {
+    for _cr_root in "${GC_CITY_PATH:-}" "${GC_CITY:-}" "${GC_CITY_ROOT:-}"; do
+        case "$_cr_root" in
+            /*) if [ -d "$_cr_root/.gc" ]; then printf '%s' "$_cr_root"; return 0; fi ;;
         esac
     done
     enumerate_rigs
-    _ald_root=$(printf '%s' "$RIGS" | jq -r '[ .[] | objects | select(.hq == true) | .path // empty ] | first // empty' 2>/dev/null || true)
-    if [ -n "$_ald_root" ] && [ -d "$_ald_root/.gc" ]; then
-        printf '%s/.gc/runtime/packs/gc-toolkit' "$_ald_root"
+    _cr_root=$(printf '%s' "$RIGS" | jq -r '[ .[] | objects | select(.hq == true) | .path // empty ] | first // empty' 2>/dev/null || true)
+    if [ -n "$_cr_root" ] && [ -d "$_cr_root/.gc" ]; then
+        printf '%s' "$_cr_root"
     fi
 }
 
@@ -3399,6 +3414,67 @@ engage_valid_model() {
     return "$_evm_ok"
 }
 
+# holding_gate_rows <bead> — the open human gates that hold the bead, nearest
+# first, one "<id>\t<title>" row each: `gctk pr-status gates`, the reader the PR's
+# held: gate label and the board's row read, so what engage offers cannot differ
+# from what they say. Returns 1 when gctk is not there or did not answer, which
+# says nothing about the gates.
+holding_gate_rows() {
+    _hgr_bin="${GCTK_BIN:-}"
+    if [ -z "$_hgr_bin" ]; then
+        _hgr_root=$(city_root)
+        [ -n "$_hgr_root" ] || return 1
+        _hgr_bin="$_hgr_root/.gc/services/gctk/bin/gctk"
+    fi
+    [ -x "$_hgr_bin" ] || return 1
+    _hgr_json=$("$_hgr_bin" pr-status gates --anchor "$1" 2>/dev/null) || return 1
+    printf '%s' "$_hgr_json" | jq -r '.[] | [.id, (.title // "")] | @tsv' 2>/dev/null
+}
+
+# engage_warn_gates_unread <bead> — say that the gates holding the bead did not
+# read, which leaves the operator to look for them. Engage goes on: a sitting on
+# the bead can still be started.
+engage_warn_gates_unread() {
+    echo "$PROG: engage: could not read the human gates that hold $1 ('gctk pr-status gates' did not answer), so none are offered." >&2
+}
+
+# engage_say_holding_gates <bead> — name each open human gate that holds the bead,
+# and how to engage it, for an engage that asks nothing. A sitting on the bead does
+# not answer them unless its conversation replies to them.
+engage_say_holding_gates() {
+    if ! _esh_rows=$(holding_gate_rows "$1"); then
+        engage_warn_gates_unread "$1"
+        return 0
+    fi
+    printf '%s\n' "$_esh_rows" | while IFS= read -r _esh_row; do
+        [ -n "$_esh_row" ] || continue
+        _esh_id=$(printf '%s' "$_esh_row" | cut -f1)
+        echo "$PROG: engage: $1 is held by human gate $_esh_id (\"$(printf '%s' "$_esh_row" | cut -f2-)\"). To answer it: $PROG engage $_esh_id" >&2
+    done
+}
+
+# engage_take <id> [<from>] — settle what the engage is about from a bead, a
+# conversation or a gate: sets bead and bead_row to the bead its conversation
+# tracks, pointed_gate to a gate the id named, which the conversation replies to,
+# and named_conv to a conversation it named. <from> is the bead a gate was picked
+# from (take_bead). A refusal exits.
+engage_take() {
+    bead="$1"
+    verify_subject "$bead" engage "Nothing spawned." || exit $?
+    take_bead engage "Nothing spawned." "${2:-}"
+    pointed_gate="$TAKE_GATE"; named_conv="$TAKE_CONV"
+    if [ "$TAKE_BEAD" != "$bead" ]; then
+        if [ -n "$named_conv" ]; then
+            echo "$PROG: engage: $bead is a conversation on $TAKE_BEAD" >&2
+        else
+            echo "$PROG: engage: $bead is a gate about $TAKE_BEAD, the one bead still waiting on it — engaging $TAKE_BEAD, and the conversation replies to the gate" >&2
+        fi
+        bead="$TAKE_BEAD"
+        verify_subject "$bead" engage "Nothing spawned." || exit $?
+    fi
+    bead_row="$VS_ROW"
+}
+
 # engage_find_conversations <subject> — the subject's conversations that are
 # not closed, one "<id>\t<state>\t<assignee>\t<status>\t<title>" row each. The
 # state is `live` when a live sitting holds the conversation, `queue` when it
@@ -3528,21 +3604,24 @@ EOF
     done
 }
 
-# engage_prompt_conversation_or_starter <subject> — ONE prompt covering both the
-# choice of a conversation the subject already has and the starter of a new
-# one. The subject's open conversations are listed numbered with their state;
-# the starter seeds follow, each keyed by its letter. The single reply resolves
-# as: a number takes that conversation (a live sitting is attached to, any
-# other is held in a fresh sitting); a seed letter opens a new conversation on
-# that seed; any other text opens a new conversation with that text as its
-# opener; Enter takes the default, which attaches to a live sitting, takes a
-# conversation from the queue, or files one. Numbers and letters never collide,
-# so both live in one prompt. Sets ENGAGE_CONV_CHOICE to a conversation id,
-# "new", or "" for the default; on "new" it also sets ENGAGE_STARTER_BODY (the
-# conversation's ask; empty = blank) and ENGAGE_STARTER_TAIL (a short title).
+# engage_prompt_conversation_or_starter <subject> — ONE prompt covering the
+# choice of a conversation the subject already has, of a human gate that holds
+# it, and the starter of a new conversation. The subject's open conversations are
+# listed numbered with their state, and the gates follow on the same numbers,
+# unless the engage was pointed at a gate already; the starter seeds follow, each
+# keyed by its letter. The single reply resolves as: a number takes that
+# conversation (a live sitting is attached to, any other is held in a fresh
+# sitting) or engages that gate; a seed letter opens a new conversation on that
+# seed; any other text opens a new conversation with that text as its opener;
+# Enter takes the default, which attaches to a live sitting, takes a conversation
+# from the queue, or files one. Numbers and letters never collide, so both live
+# in one prompt. Sets ENGAGE_CONV_CHOICE to a conversation id, "new", or "" for
+# the default, and ENGAGE_GATE_CHOICE to a gate picked; on "new" it also sets
+# ENGAGE_STARTER_BODY (the conversation's ask; empty = blank) and
+# ENGAGE_STARTER_TAIL (a short title).
 engage_prompt_conversation_or_starter() {
-    ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""; ENGAGE_CONV_CHOICE=""
-    _epv_i=0; _epv_map=""
+    ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""; ENGAGE_CONV_CHOICE=""; ENGAGE_GATE_CHOICE=""
+    _epv_i=0; _epv_map=""; _epv_gmap=""; _epv_convs=0
     _epv_rows=$(engage_find_conversations "$1" || true)
     if [ -n "$_epv_rows" ]; then
         printf '  Subject has open conversation(s):\n'
@@ -3566,6 +3645,25 @@ engage_prompt_conversation_or_starter() {
         done <<EOR
 $_epv_rows
 EOR
+        _epv_convs="$_epv_i"
+    fi
+    if [ -z "$pointed_gate" ]; then
+        if _epv_rows=$(holding_gate_rows "$1"); then
+            [ -z "$_epv_rows" ] || printf '  Held by human gate(s):\n'
+            while IFS= read -r _epv_row; do
+                [ -n "$_epv_row" ] || continue
+                _epv_id=$(printf '%s' "$_epv_row" | cut -f1)
+                _epv_i=$((_epv_i + 1))
+                printf '    [%s] %s — "%s"  (takes the bead waiting on it, and answers the gate)\n' \
+                    "$_epv_i" "$_epv_id" "$(printf '%s' "$_epv_row" | cut -f2-)"
+                _epv_gmap="$_epv_gmap$_epv_i $_epv_id
+"
+            done <<EOR
+$_epv_rows
+EOR
+        else
+            engage_warn_gates_unread "$1"
+        fi
     fi
     # The new-conversation starters, keyed by letter; a menu and a letter->key map.
     _epv_smenu=""; _epv_smap=""
@@ -3579,10 +3677,14 @@ EOR
 $(engage_starter_list)
 EOR
     [ -n "$_epv_smenu" ] && printf '    new:  %s · or type your own opener\n' "$_epv_smenu"
-    if [ "$_epv_i" -gt 0 ]; then
-        printf '  [1-%s] take a listed conversation · a letter or text starts a new one · Enter = the first listed › ' "$_epv_i"
-    else
+    if [ "$_epv_i" -eq 0 ]; then
         printf '  a letter or text starts a new conversation · Enter = a new one, blank › '
+    elif [ "$_epv_convs" -eq 0 ]; then
+        printf '  [1-%s] engage a listed gate · a letter or text starts a new conversation · Enter = a new one, blank › ' "$_epv_i"
+    elif [ -n "$_epv_gmap" ]; then
+        printf '  [1-%s] take a listed conversation or gate · a letter or text starts a new one · Enter = the first conversation › ' "$_epv_i"
+    else
+        printf '  [1-%s] take a listed conversation · a letter or text starts a new one · Enter = the first listed › ' "$_epv_i"
     fi
     IFS= read -r _epv_reply || return 1
     # Enter → the default: the first listed conversation, or a new blank one.
@@ -3596,12 +3698,14 @@ EOR
         ENGAGE_STARTER_TAIL=$(engage_starter_list | awk -F"$TAB" -v k="$_epv_seed" '$1==k{print $2}')
         return 0
     fi
-    # A number naming a listed conversation → take it.
+    # A number naming a listed conversation → take it; one naming a gate → engage it.
     case "$_epv_reply" in
         *[!0-9]*) : ;;
         *)
             _epv_sel=$(printf '%s' "$_epv_map" | awk -v n="$_epv_reply" '$1==n{print $2}')
-            if [ -n "$_epv_sel" ]; then ENGAGE_CONV_CHOICE="$_epv_sel"; return 0; fi ;;
+            if [ -n "$_epv_sel" ]; then ENGAGE_CONV_CHOICE="$_epv_sel"; return 0; fi
+            _epv_sel=$(printf '%s' "$_epv_gmap" | awk -v n="$_epv_reply" '$1==n{print $2}')
+            if [ -n "$_epv_sel" ]; then ENGAGE_GATE_CHOICE="$_epv_sel"; return 0; fi ;;
     esac
     # Anything else → a new conversation with the reply verbatim as its opener.
     ENGAGE_CONV_CHOICE="new"
@@ -4028,19 +4132,7 @@ cmd_engage() {
     # so an unanswered read fails closed as a data-plane outage, not a missing
     # bead, the way open does. A gate names the one bead still waiting on it, and
     # a conversation id names its own conversation and the bead it tracks.
-    verify_subject "$bead" engage "Nothing spawned." || exit $?
-    take_bead engage "Nothing spawned."
-    pointed_gate="$TAKE_GATE"; named_conv="$TAKE_CONV"
-    if [ "$TAKE_BEAD" != "$bead" ]; then
-        if [ -n "$named_conv" ]; then
-            echo "$PROG: engage: $bead is a conversation on $TAKE_BEAD" >&2
-        else
-            echo "$PROG: engage: $bead is a gate about $TAKE_BEAD, the one bead still waiting on it — engaging $TAKE_BEAD, and the conversation replies to the gate" >&2
-        fi
-        bead="$TAKE_BEAD"
-        verify_subject "$bead" engage "Nothing spawned." || exit $?
-    fi
-    bead_row="$VS_ROW"
+    engage_take "$bead"
 
     # --skill and --reason write a NEW conversation's ask, which is written once,
     # at filing. An explicit conversation id names a conversation whose ask
@@ -4090,9 +4182,11 @@ cmd_engage() {
     fi
 
     # Interactive decision for a SUBJECT, in one prompt: take one of its
-    # conversations, or open a new one (blank, on a seed, or with a typed
-    # opener). An explicit conversation id names its own conversation, and a
-    # pre-filled --reason/--template already chose a new one.
+    # conversations, engage a gate that holds it, or open a new one (blank, on a
+    # seed, or with a typed opener). An explicit conversation id names its own
+    # conversation, and a pre-filled --reason/--template already chose a new one.
+    # An engage that asks nothing names the gates instead, unless it was pointed
+    # at a conversation or a gate.
     if [ "$engage_interactive" = 1 ] && [ -z "$named_conv" ] && [ "$starter_prefilled" = 0 ]; then
         engage_prompt_conversation_or_starter "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
         case "$ENGAGE_CONV_CHOICE" in
@@ -4102,6 +4196,9 @@ cmd_engage() {
             "")  ;;
             *)   engage_chosen_conv="$ENGAGE_CONV_CHOICE" ;;
         esac
+        [ -z "$ENGAGE_GATE_CHOICE" ] || engage_take "$ENGAGE_GATE_CHOICE" "$bead"
+    elif [ -z "$named_conv" ] && [ -z "$pointed_gate" ]; then
+        engage_say_holding_gates "$bead"
     fi
 
     # Model: prompt when interactive and unset, else the opus default (or the
