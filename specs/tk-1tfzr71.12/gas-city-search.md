@@ -34,11 +34,10 @@ not evidence for what upstream ships, so it is named only where it is what runs.
   root with the same `graphv2.RootKey`, which names the input convoy, and a bare bead
   gets a new convoy at each launch (`CreateSingleItemInputConvoy`,
   `internal/graphv2/invocation.go`), so the new root stands beside the old one. A
-  claimant with no poured workflow never calls sling. The same key makes one live
-  root per convoy and formula, so a run knows itself by its `--convoy`: of the 5,951
-  roots in this rig's store on 2026-11-01, no two name one convoy. The older root
-  builds, which both dispatches read alike from the same rows, so the check writes
-  nothing.
+  claimant with no poured workflow never calls sling. Since each launch of a bare
+  bead has its own convoy, a run knows itself by its `--convoy`: of the 5,951 roots
+  in this rig's store on 2026-11-01, no two name one convoy. The older root builds,
+  which both dispatches read alike from the same rows, so the check writes nothing.
 - **A claim on the work bead** decides a claimant with no poured workflow, as the
   gate's owner check always has. **`git checkout`'s refusal of a branch another
   worktree holds** decides a sibling on the branch, at `work-setup.sh`.
