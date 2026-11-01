@@ -1530,6 +1530,87 @@ eq "$(cause BK1e)" "blocker" "…its cause is the blocker"
 has "$(reason BK1e)" "rw-BK1e" "…and the reason names the bead no automated actor holds"
 : > "$STUB_DEPS"
 
+# A blocker an open human gate holds is a person's to clear, however far the gate
+# sits behind it, so it is not the blocker no one will clear, and the PR's
+# held: gate label and the board's row name the gate.
+GATE_ROW='{"id":"%s","status":"open","assignee":"","notes":"","title":"sign off","issue_type":"gate","await_type":"human","metadata":{}}'
+BARE_ROW='{"id":"%s","status":"open","assignee":"","notes":"","metadata":{}}'
+STALE_VERDICT=',"pr.machine":"blocked@sha-%s@2026-10-27T00:00:00Z","pr.machine_cause":"blocker","pr.machine_reason":"held by must-fix finding tk-gone (open), which no automated actor holds or will claim"'
+
+echo "# a rework an open human gate holds records no blocked verdict"
+store "[$(anchor BKg 175), $(rev BKg), $(printf "$BARE_ROW" rw-bkg), $(printf "$GATE_ROW" g-bkg)]"
+printf 'rw-bkg|blocks|BKg\ng-bkg|blocks|rw-bkg\n' > "$STUB_DEPS"
+printf '%s' "$(prview 175 OPEN CLEAN)" > "$GH_DIR/pr_view_175.json"
+approved 175
+out=$("$SUT" 2>&1)
+has "$out" "held by unclosed rework/review bead rw-bkg" "the rework still holds the merge"
+eq "$(cause BKg)" "<absent>" "…with no blocked cause"
+eq "$(reason BKg)" "<absent>" "…and no reason calling it unclaimed"
+
+echo "# the gate may sit further behind the blocker"
+store "[$(anchor BKf 176), $(rev BKf), $(printf "$BARE_ROW" rw-bkf), $(printf "$BARE_ROW" t-bkf), $(printf "$GATE_ROW" g-bkf)]"
+printf 'rw-bkf|blocks|BKf\nt-bkf|blocks|rw-bkf\ng-bkf|blocks|t-bkf\n' > "$STUB_DEPS"
+printf '%s' "$(prview 176 OPEN CLEAN)" > "$GH_DIR/pr_view_176.json"
+approved 176
+"$SUT" >/dev/null 2>&1
+eq "$(cause BKf)" "<absent>" "a gate two beads behind the blocker leaves it a person's"
+
+echo "# a blocker verdict recorded earlier goes once only a person holds the blockers"
+store "[$(anchor BKs 177 "$(printf "$STALE_VERDICT" 177)"), $(rev BKs), $(printf "$BARE_ROW" rw-bks), $(printf "$GATE_ROW" g-bks)]"
+printf 'rw-bks|blocks|BKs\ng-bks|blocks|rw-bks\n' > "$STUB_DEPS"
+printf '%s' "$(prview 177 OPEN CLEAN)" > "$GH_DIR/pr_view_177.json"
+approved 177
+"$SUT" >/dev/null 2>&1
+eq "$(pinned BKs)" "settled@sha-177" "a gate behind the blocker replaces the stale verdict"
+eq "$(cause BKs)" "<absent>" "…takes its cause off"
+eq "$(reason BKs)" "<absent>" "…and stops naming the bead that has closed"
+
+store "[$(anchor BKn 178 "$(printf "$STALE_VERDICT" 178)"), $(rev BKn), $(printf "$GATE_ROW" g-bkn)]"
+printf 'g-bkn|blocks|BKn\n' > "$STUB_DEPS"
+printf '%s' "$(prview 178 OPEN CLEAN)" > "$GH_DIR/pr_view_178.json"
+approved 178
+"$SUT" >/dev/null 2>&1
+eq "$(pinned BKn)" "settled@sha-178" "a gate on the anchor replaces the stale verdict, where the holder answers none"
+eq "$(reason BKn)" "<absent>" "…and stops naming the bead that has closed"
+
+echo "# only a blocker verdict goes: a person's blocker says nothing of any other"
+store "[$(anchor BKo 179 ',"pr.machine":"blocked@sha-179@2026-10-27T00:00:00Z","pr.machine_cause":"check-failed","pr.machine_reason":"required check(s) ci failed"'), $(rev BKo), $(printf "$GATE_ROW" g-bko)]"
+printf 'g-bko|blocks|BKo\n' > "$STUB_DEPS"
+printf '%s' "$(prview 179 OPEN CLEAN)" > "$GH_DIR/pr_view_179.json"
+approved 179
+"$SUT" >/dev/null 2>&1
+eq "$(cause BKo)" "check-failed" "a failed-check verdict stands"
+
+echo "# a blocker armed to dispatch is the city's move, gate or no gate"
+store "[$(anchor BKa 182), $(rev BKa), {\"id\":\"rw-bka\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.dispatch_when_ready\":\"rig/pool\"}}]"
+printf 'rw-bka|blocks|BKa\n' > "$STUB_DEPS"
+printf '%s' "$(prview 182 OPEN CLEAN)" > "$GH_DIR/pr_view_182.json"
+approved 182
+"$SUT" >/dev/null 2>&1
+eq "$(pinned BKa)" "progressing@sha-182" "a blocker with an armed dispatch records progressing"
+eq "$(cause BKa)" "<absent>" "…and is not called a blocker no one will claim"
+
+echo "# a gate on one stuck blocker leaves the other stuck"
+store "[$(anchor BKm 180), $(rev BKm), $(printf "$BARE_ROW" rw-bkm1), $(printf "$BARE_ROW" rw-bkm2), $(printf "$GATE_ROW" g-bkm)]"
+printf 'rw-bkm1|blocks|BKm\nrw-bkm2|blocks|BKm\ng-bkm|blocks|rw-bkm1\n' > "$STUB_DEPS"
+printf '%s' "$(prview 180 OPEN CLEAN)" > "$GH_DIR/pr_view_180.json"
+approved 180
+"$SUT" >/dev/null 2>&1
+eq "$(cause BKm)" "blocker" "the ungated blocker records blocked"
+has "$(reason BKm)" "rw-bkm2" "…and the reason names it"
+hasnt "$(reason BKm)" "rw-bkm1" "…not the one a person holds"
+
+echo "# a walk that does not read records no verdict"
+store "[$(anchor BKu 181 "$(printf "$STALE_VERDICT" 181)"), $(rev BKu), $(printf "$BARE_ROW" rw-bku), $(printf "$GATE_ROW" g-bku)]"
+printf 'rw-bku|blocks|BKu\ng-bku|blocks|rw-bku\n' > "$STUB_DEPS"
+printf '%s' "$(prview 181 OPEN CLEAN)" > "$GH_DIR/pr_view_181.json"
+approved 181
+out=$(STUB_SHOW_FAIL_ON=rw-bku "$SUT" 2>&1)
+has "$out" "could not be read; no verdict recorded" "the pass says it could not read the holders"
+eq "$(cause BKu)" "blocker" "…and the verdict stands, neither replaced nor rewritten"
+has "$(reason BKu)" "tk-gone" "…with its reason"
+: > "$STUB_DEPS"
+
 echo "# the blocked reason names the unrouted blocker, not the first holder of the merge"
 # A bead stamped with the PR's number holds the merge first, and an unrouted
 # blocker beside it is what records blocked, so the reason names the blocker.

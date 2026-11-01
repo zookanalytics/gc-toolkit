@@ -754,7 +754,7 @@ records `blocked` only for a cause no automated actor will clear:
 | `check-failed` | a required check's newest run failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR`; or the `UNSTABLE` arm holds the head on a superseded run that ended without passing |
 | `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
 | `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
-| `blocker` | a live blocker holds the anchor, and no automated actor holds any of its live blockers |
+| `blocker` | a live blocker holds the anchor, no automated actor holds any of its live blockers, and no open human gate holds this one (`prstatus.HoldingGates`). A blocker a gate holds is a person's to clear, and `held: gate` names the gate |
 | `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check whose newest run failed or is still running |
 
 GitHub reports `BLOCKED` for every unmet rule, so the pass reads the branch's
@@ -797,6 +797,11 @@ refinery is claimed by it until it lands, and a graph.v2 pour leaves the bead
 it works unrouted and unassigned, so its run is the only mark. The
 `gc.execution_routed_to` stamp a pour leaves outlives the run, so it is not
 one.
+
+Once only a person holds the live blockers, the merge pass replaces a `blocker`
+verdict it recorded earlier with `settled`, because the bead that verdict names
+may have closed, and no later arm of the pass runs while the person's blocker
+stands.
 
 `gate-ensure.sh` records its own `progressing` or `settled` after the merge pass
 in the same reconcile pass. It replaces a `blocked` verdict at the same head
