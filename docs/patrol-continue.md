@@ -121,8 +121,9 @@ bead, keeps no state and files nothing.
   idle line is restarted well inside the bound. A pane that takes a nudge and
   does nothing gets another one after the bound, not one per pass, because
   `last_nudge_delivered_at` counts as well.
-- **The pace.** A witness that reaches `next-iteration` is never nudged. One that
-  stops short waits out the bound and the next pass, which is up to about 16 minutes
+- **The pace.** A witness whose `next-iteration` leaves its next wisp open is
+  restarted inside the bound, so it takes no nudge. One that stops short, or whose
+  guard fired, waits out the bound and the next pass, which is up to about 16 minutes
   at the declared interval, and then takes one pass, which ends at `next-iteration`
   like any other.
 - **An attached operator.** A session with a client attached is skipped, because
