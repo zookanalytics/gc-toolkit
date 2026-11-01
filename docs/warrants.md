@@ -183,13 +183,14 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go` 544-724, the lock at 563 and the check at
-  589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
-  `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
+  live (`internal/sling/sling_core.go`, the lock at 621 and the check at 647,
+  `checkLegacySourceWorkflowConflict`, which reads the live roots at 1857; the
+  terminal-root skip in `internal/sling/sling_attachment.go` 326;
+  and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
   `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
-  by a key (`cmd/gc/cmd_sling.go` 145-160).
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main e2671dc4d.
+  by a key (`cmd/gc/cmd_sling.go` 146-161).
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -305,9 +306,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37,
-  `gastownhall/gascity-packs` main 5bf643ca55bd with the packs Gas City
-  bundles at 66c672b5ed00, and `gastownhall/beads` main e46de42b3c59.
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1,
+  `gastownhall/gascity-packs` main 0b0d96250f66 with the packs Gas City
+  bundles at cb6a612882b8, and `gastownhall/beads` main 6ebaacba8f5f.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -379,9 +380,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
     keeps no record of it.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 with
-  the `gastown` pack it bundles at 66c672b5ed00, `gastownhall/gascity-packs`
-  main 5bf643ca55bd, and `gastownhall/beads` main e46de42b3c59.
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1 with
+  the `gastown` pack it bundles at cb6a612882b8, `gastownhall/gascity-packs`
+  main 0b0d96250f66, and `gastownhall/beads` main 6ebaacba8f5f.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
