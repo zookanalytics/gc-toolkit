@@ -127,10 +127,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
     # A closed epic is judged only once it has entered stewardship — i.e. carries
-    # a recorded hypothesis. One closed without a hypothesis predates the model
-    # (there is no ruling to expect of an epic the stewardship contract never
-    # reached), so it is exempt, which also keeps this a forward regression
-    # detector: a store of pre-stewardship epics reports clean.
+    # a recorded hypothesis. One closed without a hypothesis is a Delivery, whose
+    # epic carries the ruling, or predates the model (there is no ruling to expect
+    # of an epic the stewardship contract never reached), so it is exempt, which
+    # also keeps this a forward regression detector: a store of pre-stewardship
+    # epics reports clean.
     # bd returns an {"error":...} object when a query does not resolve
     # (bead-context.sh). Iterating it with `.[]?` would yield zero rows at exit 0
     # and report the store OK; `error` on a non-array aborts jq non-zero, caught
@@ -188,7 +189,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: $n_disposed closed epic(s) carry gc.superseded_by (retired into a successor), so they were not judged")
     fi
     if [ "$n_legacy" -gt 0 ]; then
-        notes+=("$label: $n_legacy closed epic(s) predate epic stewardship (no recorded hypothesis), so no ruling is expected of them")
+        notes+=("$label: $n_legacy closed epic(s) carry no recorded hypothesis (Deliveries, or epics that predate epic stewardship), so no ruling is expected of them")
     fi
 done < "$ENUM_TMP/scopes"
 

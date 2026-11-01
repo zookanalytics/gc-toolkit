@@ -140,8 +140,8 @@ clause_epic_ruling_recorded() {
     # The predicate doctor/check-epic-closed-implies-ruled (I15) applies to a
     # closed epic: an epic is held once it carries a hypothesis, unless it is
     # disposed or ruled close with its outcome. An epic that never carried a
-    # hypothesis predates the model, and a disposition pointer (bead-rehome's
-    # gc.superseded_by) is a recorded terminal reason, so both pass.
+    # hypothesis is a Delivery or predates the model, and a disposition pointer
+    # (bead-rehome's gc.superseded_by) is a recorded terminal reason, so both pass.
     [ "$_fgr_hashyp" = true ] || return 0
     [ -n "$_fgr_disposed" ] && return 0
     # Only the close ruling, with its outcome recorded, releases the epic. A

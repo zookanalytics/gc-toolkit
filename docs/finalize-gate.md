@@ -74,8 +74,8 @@ An epic that carries a hypothesis (`epic_hypothesis`) refuses finalization until
 it is ruled close with its outcome recorded (`epic_ruling=close` and
 `epic_ruling_reason`). A continue or shift ruling keeps an epic open, so it holds
 the epic as an absent ruling does, and so does a value outside the enum. An epic
-with no hypothesis predates the model, and a disposed epic (`gc.superseded_by`)
-carries a recorded terminal reason, so both pass. A non-epic bead is untouched
+with no hypothesis is a Delivery or predates the model, and a disposed epic
+(`gc.superseded_by`) carries a recorded terminal reason, so both pass. A non-epic bead is untouched
 ([epic-stewardship.md](epic-stewardship.md)). The clause reads the bead itself
 (`gc bd show`), so that read runs for every finalize, epic or not. The
 `--except-key` exception excepts a human gate, so it never releases an epic this
