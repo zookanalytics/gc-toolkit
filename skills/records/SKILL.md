@@ -1,6 +1,6 @@
 ---
 name: records
-description: Use when you need to write down what was decided, what happened, or what a bead needs, so whoever reads it next inherits it. Covers recording an outcome or a finding by appending to a bead's notes, summing up long notes under a Current state heading, and setting the one-line headline the board shows for a bead (its takeaway). To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
+description: Use when you need to write down what was decided, what happened, or what a bead needs, such as an outcome or a finding in its notes, a Current state summary of long notes, or the headline the board shows for it (its takeaway). To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -48,8 +48,13 @@ the document instead (the work skill).
 ## Set the headline the board shows
 
 The message is one sentence saying what the bead needs now. The helm board
-shows it as the bead's NEEDS cell, and `doctor/check-wait-is-an-edge` checks
-the wait it declares against the bead's `blocks` edges.
+shows it as the bead's NEEDS cell, except on a row with no PR that a human gate
+holds or a conversation is on, where NEEDS names what the gate asks, or what a
+conversation waiting in the operator's queue asks, or reads `in conversation`
+while a sitting holds the conversation. A gate holds the bead's work until a
+person answers it, and a conversation holds nothing.
+`doctor/check-wait-is-an-edge` checks the wait the headline declares against
+the bead's `blocks` edges.
 
 Writer: `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
 when the bead waits on nothing, or `--waiting-on <bead>` (repeatable) for each

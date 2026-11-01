@@ -36,15 +36,23 @@
 # the engine serves that page from a directory and captures the surface's
 # element, with a one-step script whose proof is that the surface is drawn.
 #
-# It FAILS CLOSED. A missing engine, an engine with no screenshot command, a
-# terminal capture on an engine with no terminal surface, a browser that cannot
-# be installed, a renderer that errors or refuses its surface, a drawn surface
-# the engine cannot prove is on its page, a command the engine stopped waiting
-# on before it finished or took the screen, output captured earlier that cat
-# could not print or had not finished printing when the engine stopped waiting
-# on it, or a capture that leaves no PNG behind all exit 1, because a capture
-# that quietly produces nothing is the undelivered visual this modality exists
-# to end, and one that shows a surface unfinished misleads whoever reads it.
+# Every kind captures inside the sandbox demo-engine-lib.sh runs the engine in,
+# where the live city cannot be reached. A command, a --serve command or a page
+# that reads the city's stores or its API fails there, so a capture shows the
+# reviewed commit on fixture data, or shows the failure, and never live state.
+# --text and markdown draw a file they are given, as it is, so what they show
+# is what was written to that file.
+#
+# It FAILS CLOSED. A host with no sandbox, a capture the sandbox refuses, a
+# missing engine, an engine with no screenshot command, a terminal capture on an
+# engine with no terminal surface, a browser that cannot be installed, a
+# renderer that errors or refuses its surface, a drawn surface the engine cannot
+# prove is on its page, a command the engine stopped waiting on before it
+# finished or took the screen, output captured earlier that cat could not print
+# or had not finished printing when the engine stopped waiting on it, or a
+# capture that leaves no PNG behind all exit 1, because a capture that quietly
+# produces nothing is the undelivered visual this modality exists to end, and
+# one that shows a surface unfinished misleads whoever reads it.
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
@@ -64,8 +72,10 @@
 #                down. --cwd is its working directory. With --port, the
 #                command's environment carries the port as PORT, and --port 0
 #                picks a free one, so captures side by side never share a
-#                server.
-#   --base-url   drive a server that is already running.
+#                server. A port that a server already answers on is refused.
+#   --base-url   drive a deployed preview. A URL on this host is refused,
+#                because a server already running here runs outside the
+#                sandbox.
 #                Exactly one of --serve-dir / --serve / --base-url is required.
 #   --selector   capture this element instead of the viewport.
 #   --full-page  capture the whole scrollable page instead of the viewport.
@@ -260,13 +270,12 @@ fi
 # --- what the engine captures --------------------------------------------
 case "$KIND" in
   page)
-    # The engine reuses whatever already answers on a --serve port and spawns
-    # nothing, so a capture that must not meet another one's server takes a
-    # port of its own. The port is free when it is read here, and stays so
-    # unless another process binds it before the command does.
+    # The engine would capture whatever already answers on a --serve port, so
+    # the sandbox refuses such a port, and a capture that runs beside another
+    # takes a port of its own. The port is free when it is read here, and stays
+    # so unless another process binds it before the command does.
     if [ "$PORT" = 0 ]; then
-      PORT=$(node -e 'const s = require("net").createServer(); s.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port)); s.close(); });' 2>/dev/null)
-      case "$PORT" in ''|*[!0-9]*|0*) fail "could not find a free port for the --serve command" ;; esac
+      PORT=$(demo_engine_free_port) || fail "could not find a free port for the --serve command"
     fi
     [ -z "$SERVE_CMD" ] || [ -z "$PORT" ] || export PORT
     set -- "$SCRIPT"

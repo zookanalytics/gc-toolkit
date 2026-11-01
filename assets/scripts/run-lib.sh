@@ -30,9 +30,8 @@
 #                                   poured over <id> when it is an input
 #                                   convoy; [] for any other bead, and for one
 #                                   the store does not return
-#   run_lib map <reader> [all]      every live run in the store, or every run
-#                                   with `all`, for a caller that judges many
-#                                   beads in one pass
+#   run_lib map <reader>            every live run in the store, for a caller
+#                                   that judges many beads in one pass
 # <reader> is a command the caller defines: given bd's own arguments, it runs
 # `gc bd` or `bd` against the caller's one store, with the pinning and time
 # bound the caller needs, and exits non-zero when the read fails. A read that
@@ -71,6 +70,9 @@
 # blocker-holder.sh takes the runs that work each live blocker of an anchor
 # that no route or claim marks, to tell one a live run works from one nothing
 # does.
+# store-only-exit.sh takes the run whose root its session's claimed step
+# names, to confirm it is live and works the bead over the step's --convoy
+# before that root holds the validating closer it arms until the run ends.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in
@@ -92,7 +94,7 @@
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-# How many convoy ids one read of convoy rows names, so a map of every run
+# How many convoy ids one read of convoy rows names, so a map of every live run
 # never builds an argument the store refuses.
 RUN_LIB_ID_BATCH=200
 
@@ -145,8 +147,8 @@ run_lib() {
             [ -n "${3:-}" ] || { echo "run_lib $verb: no bead given" >&2; return 2; }
             "run_lib_$verb" "$reader" "$3" ;;
         map)
-            case "${3:-}" in ''|all) ;; *) echo "run_lib map: unknown scope '$3'" >&2; return 2 ;; esac
-            run_lib_map "$reader" "${3:-}" ;;
+            [ -z "${3:-}" ] || { echo "run_lib map: unexpected argument '$3'" >&2; return 2; }
+            run_lib_map "$reader" ;;
         *) echo "run_lib: unknown verb '$verb'" >&2; return 2 ;;
     esac
 }
@@ -165,7 +167,7 @@ run_lib_read() {
 }
 
 # run_lib_join <array-json> <array-json> — the two arrays as one, joined on
-# stdin, since a map of every run outgrows what one argument can carry.
+# stdin, since a map of every live run can outgrow what one argument carries.
 run_lib_join() {
     { printf '%s\n' "$1"; printf '%s\n' "$2"; } | jq -cs 'add' 2>/dev/null
 }
@@ -224,18 +226,12 @@ run_lib_subject() {
     printf '%s' "$row" | jq -c --arg id "$id" "$RUN_JQ"'run_rows | map(select(.root == $id or .convoy == $id))' 2>/dev/null
 }
 
-# run_lib_map <reader> [all] — every root that names an input convoy or
-# records an issue, live or with `all` of every status, and the convoys they
-# name.
+# run_lib_map <reader> — every live root that names an input convoy or records
+# an issue, and the convoys they name.
 run_lib_map() {
-    local reader="$1" scope="${2:-}" roots legacy rows
-    if [ "$scope" = all ]; then
-        roots="$(run_lib_read "$reader" list --has-metadata-key gc.input_convoy_id --all --include-ephemeral --json --limit 0)" || return 1
-        legacy="$(run_lib_read "$reader" list --has-metadata-key gc.var.issue --all --include-ephemeral --json --limit 0)" || return 1
-    else
-        roots="$(run_lib_read "$reader" list --has-metadata-key gc.input_convoy_id --include-ephemeral --json --limit 0)" || return 1
-        legacy="$(run_lib_read "$reader" list --has-metadata-key gc.var.issue --include-ephemeral --json --limit 0)" || return 1
-    fi
+    local reader="$1" roots legacy rows
+    roots="$(run_lib_read "$reader" list --has-metadata-key gc.input_convoy_id --include-ephemeral --json --limit 0)" || return 1
+    legacy="$(run_lib_read "$reader" list --has-metadata-key gc.var.issue --include-ephemeral --json --limit 0)" || return 1
     rows="$(run_lib_join "$roots" "$legacy")" || return 1
     rows="$(run_lib_convoys "$reader" "$rows")" || return 1
     printf '%s' "$rows" | jq -c "$RUN_JQ"'run_rows' 2>/dev/null

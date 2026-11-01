@@ -1,6 +1,6 @@
 ---
 name: prs
-description: Use when something has to happen to an open pull request or its anchor bead. Covers answering its review comments (posting a comment, replying in a thread, resolving a thread), sending it back for rework so its branch changes, holding its merge until something is settled, and retiring it (closing the PR and disposing of its anchor because the work moved, is not needed, or is wrong). For work that is not a pull request yet, use work; for a bead that must wait on another, use waits.
+description: Use when something has to happen to an open pull request or its anchor bead, such as answering its review comments, replying in or resolving a thread, sending it back for rework on its branch, holding its merge until something is settled, or retiring it because the work moved, is not needed, or is wrong. For work that is not a pull request yet, use work; for a bead that must wait on another, use waits.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -56,10 +56,11 @@ branch, so the PR keeps its history.
 
 Writer: `rework-child.sh`, the one writer of a rework child that a ruling or a
 review verdict sends. A sitting reaches it through its sign-off, by adding
-`--rework` to the `--ruled yes` call (the converse-settle step), which also
-returns every review lane to unreviewed so the whole branch is reviewed again
-once the rework lands. A review verdict reaches it through the reviewer's own
-sign-off.
+`--rework` to the `--ruled yes` call (the converse-settle step), or to the
+`--answer` call of a turn that does not sign off (the converse-continue step).
+That also returns every review lane to unreviewed, so the whole branch is
+reviewed again once the rework lands. A review verdict reaches it through the
+reviewer's own sign-off.
 
 Scope found while the PR is open, with no ruling behind it, rides a supplement
 bead instead. A supplement is PR-finishing work, and its create sets up
@@ -100,13 +101,22 @@ exposed is a supplement.
 ## Hold its merge
 
 The message is that the PR must not land until something is settled. The merge
-holds while any open bead blocks the anchor, and resolving that bead releases
-it.
+holds while any open bead blocks the anchor, and clearing that bead releases
+it. The operator sees the gate on the anchor's row of the board and answers it
+there or in a sitting.
 
-Writer: in a sitting, `converse-hold.sh --hold-merge` (the converse-hold step).
-Anywhere else, file the open question as a demand on the anchor:
-`"$(gc <binding> scripts-dir)/gc-helm.sh" demand <anchor> "<what must be settled first, at most 140 characters>"`.
-The gate-visit sweep then files a visit, so the operator is asked.
+Writer: a human gate on the anchor, filed through the helper, which keeps one
+open gate per anchor and situation key:
+`"$(gc <binding> scripts-dir)/human-gate.sh" --subject <anchor> --key <situation-key> --message "<what must be settled first, at most 140 characters>"`.
+A sitting files its own with a key that names its conversation,
+`conversation.<conversation id>`, and replies to it (the converse-hold step),
+so two conversations on one PR each hold its merge. The gate is cleared with
+`gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and the same call
+with `--retract` withdraws your own gate once the question has gone. A sitting
+clears a gate the operator ruled on only through its sign-off writer (the
+converse-settle and converse-continue steps), which first carries out what the
+ruling does to the PR, its rework or its retirement, so the merge never lands
+in between.
 
 Every open bead the anchor waits on, and every open bead filed under it, holds
 its merge, whatever it was for. Never make an anchor wait on a follow-up that
@@ -122,23 +132,29 @@ disposition writer, `bead-rehome.sh`.
 
 Writer: `"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <bead> --kind not-needed --note "<why, one sentence>"`.
 The anchor must be open at `merge_result=pull_request`. Under `not-needed` the
-successor is the evidence that ruled the work out, such as the visit where it
-was decided. Under `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is
-the bead that carries the work now. Never close the PR by hand first: a PR
-closed with no disposition recorded reads as abandoned, and the reconcile files
-a visit asking what to do with it.
+successor is the evidence that ruled the work out, such as the conversation
+where it was decided. Under `duplicate`, `folded`, `re-homed` and
+`fixed-upstream` it is the bead that carries the work now. Never close the PR
+by hand first: a PR closed with no disposition recorded reads as abandoned, and
+the reconcile files a human gate on the anchor asking whether to rework it or
+close it.
 
 A supplement still open on the PR keeps its `blocks` edge on the anchor, so the
 anchor's close waits until the supplement closes. Stop and close the supplement
-too (the work skill).
+too (the work skill). An open human gate on the anchor holds its close the same
+way (`docs/finalize-gate.md`), so the reconcile closes the anchor once each
+gate is cleared.
 
-In a sitting, retire a PR only on the operator's ruling, after the sign-off,
-and close the visit right after it:
+In a sitting, retire a PR only on the operator's ruling, and only through the
+sign-off writer: `--retire <kind>` on its `--ruled yes` call (the
+converse-settle step), or on its `--answer` call when the ruling comes on a
+turn that does not sign off (the converse-continue step). The writer runs
+`pr-dispose.sh` before it answers any gate, so a gate that holds the merge
+keeps holding it until the PR is closed. Answered first, that gate would let
+an approved PR merge before its retirement. Under `not-needed` the successor
+is the sitting's conversation, and every other kind names the bead that
+carries the work with `--successor <bead>`:
 
 ```bash
-"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <visit> --kind not-needed --note "<why, one sentence>" \
-  && "$(gc <binding> scripts-dir)/visit-close.sh" --visit <visit> --outcome "<one-word-outcome>" --reason "<one line: why this sitting closed>"
+"$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --route human --no-wait --retire not-needed
 ```
-
-The sitting's open visit holds the anchor's close (`docs/finalize-gate.md`), so
-the reconcile closes the anchor once the visit is closed.

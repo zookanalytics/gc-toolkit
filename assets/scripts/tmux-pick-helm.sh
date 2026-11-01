@@ -5,17 +5,17 @@
 #
 # Renders `helm-svc board --json` (the Go board, services/helm) as a tmux
 # display-menu; picking a row runs `gc-helm.sh engage <bead> --no-attach`, which
-# spawns a converse sitting on demand for that visit (the converse routed-pool
-# is retired; a sitting holds only while an operator engages one). Bound as the
+# spawns a converse sitting on the bead's conversation (no pool serves converse;
+# a sitting holds only while an operator engages one). Bound as the
 # sibling of the live-session picker (prefix+S = "what's running"; this = "what
 # needs me").
 #
 # TWO MENUS, ONE SCRIPT. Bare, this renders the operator's QUEUE — what is owed
-# by a person, oldest first, each row headlined by the demand itself. --all
+# by a person, oldest first, each row headlined by what it asks. --all
 # renders the city overview, headlined by the object, and is bound one keystroke
 # away (prefix+B). They are the same rows, ranked and labelled to answer
 # different questions, and the queue is the one a keystroke should reach first:
-# the overview sorts by severity then subtree size, where a demand owed by a
+# the overview sorts by severity then subtree size, where an ask owed by a
 # person has a subtree of one.
 #
 # The helm-svc binary is resolved at the path the launcher/builder deploy
@@ -45,6 +45,18 @@ TAB="$(printf '\t')"
 # sq <string> — POSIX shell-quote $1 for safe embedding in a run-shell body.
 sq() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# menu_text <text> — $1 with every # doubled, so a display-menu item name or -T
+# title shows it as written. tmux expands both as formats, where #(...) runs a
+# shell command, #{...} expands and #[...] restyles, and a row's cells are text
+# other components write: bead titles, takeaways, asks, and the error Gas City
+# recorded for a failed start. A run of two or more # can show shorter than
+# written, and still nothing in it expands. LC_ALL=C keeps sed byte-wise: under
+# a UTF-8 locale BSD sed prints nothing for a line holding an invalid byte, and
+# an empty name is a separator that shifts every argument after it.
+menu_text() {
+    printf '%s' "$1" | LC_ALL=C sed 's/#/##/g'
 }
 
 SCRIPT="$(readlink -f "$0" 2>/dev/null || echo "$0")"
@@ -115,16 +127,18 @@ CMD_PREFIX=""
 SQ_ATTN=$(sq "$ATTN")
 
 # One TSV row per anchor: glyph, severity, id, rig, title, frontier, needs. The
-# glyph is ✗ when the sitting spawned for the row's visit failed to start, ● when
-# an open visit holds the row, and · otherwise. helm-svc puts a failed start at
-# the head of the queue menu, inside the cap above, and its needs leads with why.
+# glyph is ✗ when the sitting spawned for a conversation on the row failed to
+# start, ● when a human gate holds the row's work until the operator answers, ◌
+# when a conversation is on the row, which holds nothing, and · otherwise.
+# helm-svc puts a failed start at the head of the queue menu, inside the cap
+# above, and its needs leads with why.
 #
 # Every cell carries a placeholder when it is empty. IFS=TAB is IFS WHITESPACE,
 # so an empty field collapses against its neighbour and every later column
 # shifts left — a row with no title would render its frontier as its title.
 ROWS=$(printf '%s' "$BOARD" | jq -r '
     def nz(v; d): (v // "") | if . == "" then d else . end;
-    .[] | [(if .visit_state == "start-failed" then "✗" elif .held then "●" else "·" end), nz(.severity; "?"), .id, nz(.rig; "?"),
+    .[] | [(if .sitting_state == "start-failed" then "✗" elif .work_held then "●" elif .held then "◌" else "·" end), nz(.severity; "?"), .id, nz(.rig; "?"),
            (nz(.title; "—")[0:38]), (nz(.frontier; "—")[0:34]),
            (nz(.needs; "—")[0:48])] | @tsv')
 
@@ -133,9 +147,9 @@ set --
 i=1
 while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
     [ -n "$id" ] || continue
-    # The queue's headline is the DEMAND — helm-svc puts the authored
-    # gc.takeaway in `needs`, and what the operator owes is the whole reason the
-    # row is on this menu. The bead's own title names the object and follows it.
+    # The queue's headline is the ASK — helm-svc puts what the row needs in
+    # `needs`, the authored gc.takeaway or the title of the human gate that holds
+    # it, and what the operator owes is the whole reason the row is on this menu. The bead's own title names the object and follows it.
     # The overview asks the other question, so it leads with the object.
     if [ -n "$ALL" ]; then
         label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$title" "$frontier")
@@ -145,10 +159,10 @@ while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
 
     # Background the engage: spawning a converse sitting takes seconds and
     # must never freeze the tmux server. --no-attach spawns and binds the
-    # visit; the operator attaches from the session picker (prefix+S), the way
-    # a pool sitting was reached before. --no-input keeps engage non-interactive:
-    # the picker already names the visit, and a backgrounded run-shell job has no
-    # terminal to prompt on. run-shell drops the job's stderr and shows only
+    # conversation; the operator attaches from the session picker (prefix+S).
+    # --no-input keeps engage non-interactive: the picker already names the
+    # bead, and a backgrounded run-shell job has no terminal to prompt on.
+    # run-shell drops the job's stderr and shows only
     # stdout plus "returned N" in its view window, and every engage refusal
     # (already engaged, blocked, lost race, no template in this rig) is a stderr
     # line — fold it into stdout so the reason reaches the operator.
@@ -159,10 +173,10 @@ while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
     else
         key=""
     fi
-    set -- "$@" "$label" "$key" "$cmd"
+    set -- "$@" "$(menu_text "$label")" "$key" "$cmd"
     i=$((i + 1))
 done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-gcmux display-menu -T "$MENU_TITLE" -x C -y C -- "$@"
+gcmux display-menu -T "$(menu_text "$MENU_TITLE")" -x C -y C -- "$@"

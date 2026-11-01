@@ -307,7 +307,7 @@ adjudicate every promotable statement against what exists
 external check, all-self or a lone unendorsed observation, does not
 auto-promote into an always-injected fragment; Gate 2 (remedy class) —
 exhortations and structural fixes route to an engineering bead, not a
-prompt bullet; contradiction with an adopted rule is a visit, never a
+prompt bullet; contradiction with an adopted rule is a human gate, never a
 silent flip; rule bullets name their scope.
 
 ## 2. Dedup, then cluster onto pattern beads
@@ -347,7 +347,7 @@ is the corroboration Gate 1 exists to withhold.
 
 One outcome per cluster: **promote** (ADD/UPDATE/SUPERSEDE, reasoning
 written down — the D3 reviewer judges from the PR alone), **hold** (say
-what recurrence would change the call), **contest** (becomes a visit in
+what recurrence would change the call), **contest** (becomes a human gate in
 step 3), **discard with reason**, **surface** (Gate 1 block — hold awaiting
 corroboration or operator endorsement), or **route-to-engineering** (Gate 2
 — step 3 files an engineering bead instead).
@@ -407,7 +407,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "file-and-dispatch"
-title = "File one prompt-update bead per proposal, stamp consumed observations, visit contested rules, drain"
+title = "File one prompt-update bead per proposal, stamp consumed observations, gate contested rules, drain"
 needs = ["judge-and-cluster"]
 description = """
 The TERMINAL step — the one place this workflow drains, on every path.
@@ -524,75 +524,24 @@ else
 fi
 ```
 
-## 3. Contested rules: file a visit, never a flip
+## 3. Contested rules: file a human gate, never a flip
 
-One live visit per contested pattern: the block reuses a conversation visit
-already open on the subject and files nothing.
+A contested rule is a human gate on its pattern bead under the key
+`distiller-contention`: the pattern's rule waits on the operator's ruling, and
+the helper files nothing while that gate is open.
 ```bash
-SUBJECT="$PATTERN"
-# >>> gate-visit
-# Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
-POOL="human"
-# One conversation visit per subject: a re-run of this block, or a pattern that
-# already has a conversation open, reuses that visit and files nothing.
-# Coverage is visit-identity.sh's rule (the tracks edge, else the group stamp).
-# An escalate.sh visit (escalation_key) closes on its own situation's terms, so
-# it never stands in for this one. A listing that does not read files anyway.
-VISIT=""
-VI="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/visit-identity.sh" && [ -f "$VI" ] || VI=""
-if [ -n "$VI" ] && . "$VI"; then
-  VISIT=$(gc bd list --status=open,in_progress --metadata-field task_kind=visit --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' \
-    | jq -r --arg s "$SUBJECT" "$VISIT_IDENTITY_JQ"'if type == "array" then ([ .[]
-        | select((.metadata.task_kind // "") == "visit" and (.metadata.escalation_key // "") == "")
-        | select(.status == "open" or .status == "in_progress")
-        | select(visit_covers($s)) | .id ] | sort | .[0] // "") else "" end' 2>/dev/null || printf '')
-else
-  echo "gate-visit: warning: visit-identity.sh not found, so no open visit on $SUBJECT can be matched — filing" >&2
-fi
-if [ -n "$VISIT" ]; then
-  echo "gate-visit: visit $VISIT is already open on $SUBJECT — reusing it, not filing a second" >&2
-else
-  # The route, the group and task_kind ride the create, so the visit and the keys
-  # every live-visit guard matches land in one write; a visit stamped in a second
-  # write is invisible to those guards whenever that write fails.
-  VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$SUBJECT" \
-    '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit"}')
-  VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
-    -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" \
-    --metadata "$VISIT_META" --json)
-  VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-    || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
-         echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
-  gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
-  # tracks, not parent-child: a parent-child edge would transmit the
-  # subject's blocked state to the visit, making it unclaimable.
-  # Read the group stamp back and repair it from the subject if it landed
-  # empty: it can land present-but-empty while every sibling stamp in the
-  # same update lands, and an empty group disables converse's group-scoped
-  # re-claim fence. Repair and warn, never exit — this block files the one
-  # visit for its scope, and on a persistent miss the tracks edge still
-  # carries the subject for guards that read the union.
-  GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
-  if [ "$GROUP_GOT" != "$SUBJECT" ]; then
-    echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '$SUBJECT' — repairing" >&2
-    gc bd update "$VISIT" --set-metadata "gc.continuation_group=$SUBJECT" || true
-    GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
-    if [ "$GROUP_GOT" = "$SUBJECT" ]; then
-      echo "gate-visit: the repair landed on $VISIT" >&2
-    else
-      echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union" >&2
-    fi
-  fi
-fi
-# <<< gate-visit
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+"${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$PATTERN" --key distiller-contention \
+  --message "Contested rule: <rule summary>
+<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" >/dev/null \
+  || { echo "human-gate.sh filed no gate on $PATTERN — stop, address what it reported, and re-run this block" >&2; exit 1; }
 ```
 
 ## 4. Summarize and drain
 
 ```bash
 SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held/surfaced H, V visit(s), discarded D, stamped S observation(s)."
+echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held/surfaced H, G human gate(s), discarded D, stamped S observation(s)."
 # The loop's success metric, in the run log where the run that moved it is
 # visible. It also runs standalone, which is how the metric is read while
 # this order is disabled.

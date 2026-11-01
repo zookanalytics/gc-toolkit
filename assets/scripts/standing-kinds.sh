@@ -15,15 +15,16 @@
 # dropped by every one of them at once, and standing-kinds.test.sh fails when a
 # reader stops sourcing this file or carries a list of its own.
 #
-# Usage follows the in-variable jq convention (visit-identity.sh): prepend the
-# defs to a jq program, e.g.
+# Usage follows the in-variable jq convention: prepend the defs to a jq
+# program, e.g.
 #   jq "$STANDING_KINDS_JQ"' map(select(is_standing_kind | not)) '
 # A program whose defs sit mid-body splices the variable in at that point
 # instead, closing and reopening its single quotes around it.
+# shellcheck disable=SC2034  # read by the scripts that source this file
 STANDING_KINDS_JQ='
   # The task_kind values of a standing record.
   def standing_kinds: [
-    "triage-subject",    # a triage bucket visits hang on (escalate.sh, liveness-sweep.sh)
+    "triage-subject",    # a triage bucket the liveness sweep files on (liveness-sweep.sh)
     "feedback-pattern"   # a learning-loop pattern record (mol-feedback-distiller.toml)
   ];
   # True when this bead is a standing record. Reads metadata.task_kind only.

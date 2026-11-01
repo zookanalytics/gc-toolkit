@@ -19,37 +19,36 @@
 # out. The blocks run against real git repositories, the real
 # direct-merge-push.sh, refinery-workspace.sh, detached-job.sh, bd-lib.sh,
 # await-ruling.sh and deferred-dispatch.sh, a stub gc that keeps the beads and
-# their edges in files, a stub lifecycle.sh that logs, and a stub escalate.sh
-# that logs and files its visit. They run from a directory that is no git
+# their edges in files, a stub lifecycle.sh that logs, and a stub human-gate.sh
+# that logs and files its gate. They run from a directory that is no git
 # checkout, as a refinery's scratch directory is, so every git call has to name
 # the rig by path.
 # Proves:
 #   - an attempt that pushes and then cannot record leaves the landing on
 #     origin, the stamp on the bead and the branch on origin, and the next
 #     attempt stages the branch again and records the landing at the stamped
-#     commit without parking, escalating or draining, whether origin/main
+#     commit without parking, filing a gate or draining, whether origin/main
 #     stayed at the landing or moved on past it, and whatever strategy the
 #     bead reads by then; the branch is deleted once the landing is recorded;
-#   - a branch that never introduced work is still refused, parked and
-#     escalated, with no stamp and with a stamp its target does not carry, and
-#     so is a branch whose commits net to no change;
+#   - a branch that never introduced work is still refused, parked and put to a
+#     person as a human gate, with no stamp and with a stamp its target does not
+#     carry, and so is a branch whose commits net to no change;
 #   - a check that cannot run leaves the work with the refinery to retry,
-#     counting the failures in a row on the bead. The third files a visit with
-#     the verdict window off, which says the check could not run and names
-#     git's error and the directory, never that the branch has no change. The
-#     work then waits on that visit, with no lifecycle park and no
-#     merge_result: a blocks edge onto the visit, the refinery's assignment
-#     released and a fresh mol-polecat-work pour armed, which the
-#     deferred-dispatch pass holds while the visit is open and pours once it
-#     closes. A graduated convoy, which no pour rebuilds, is parked blocked
-#     instead, held by a blocks edge onto the visit, with no pour armed;
-#   - a visit that is not filed, a pack without await-ruling.sh, a wait whose
-#     edge or arm does not land, and a convoy whose edge does not land or
-#     whose park lifecycle.sh refuses each leave the work assigned to the
-#     refinery and counted at the cap, the refinery taking back an
-#     assignment the wait released, and the next failed check's wait lands.
-#     A take-back that fails says the work is stranded. A check that runs
-#     clears the count.
+#     counting the failures in a row on the bead. The third files a human gate
+#     with no quiet window, which says the check could not run and names git's
+#     error and the directory, never that the branch has no change. The gate
+#     blocks the work, and that edge is its wait, with no lifecycle park and no
+#     merge_result: the refinery's assignment is released and a fresh
+#     mol-polecat-work pour armed, which the deferred-dispatch pass holds while
+#     the gate is open and pours once it is cleared. A graduated convoy, which
+#     no pour rebuilds, is parked blocked instead, held by its gate, with no
+#     pour armed;
+#   - a gate that is not filed, a pack without await-ruling.sh, a wait whose
+#     arm does not land, and a convoy whose park lifecycle.sh refuses each
+#     leave the work assigned to the refinery and counted at the cap, the
+#     refinery taking back an assignment the wait released, and the next
+#     failed check's wait lands. A take-back that fails says the work is
+#     stranded. A check that runs clears the count.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -138,15 +137,17 @@ echo "$*" >> "$FAKE_LC_LOG"
 [ -z "${LC_FAIL:-}" ] || { echo "lifecycle: refused" >&2; exit 1; }
 exit 0
 LC
-# escalate logs its argv and the verdict window it ran under. With FAKE_STORE
-# set it files the visit as the real one does: an open visit routed to human,
-# keyed by the situation and the subject, with a tracks edge onto the subject,
-# and a call for a situation already open files nothing. ESC_FAIL refuses.
-cat > "$PACK/escalate.sh" <<'ESC'
+# human-gate logs its argv and whether the call asked for a quiet window. With
+# FAKE_STORE set it files the gate as the real one does: an open human gate
+# under the key, blocking the subject, its id on stdout, and a call for a key
+# already open on the subject files nothing and answers that gate's id.
+# GATE_FAIL refuses.
+cat > "$PACK/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
-echo "escalate $*" >> "$FAKE_LOG"
-echo "escalate-window ${GC_ESCALATE_VERDICT_WINDOW-unset}" >> "$FAKE_LOG"
-[ -z "${ESC_FAIL:-}" ] || { echo "escalate: could not file the visit (stub)" >&2; exit 1; }
+echo "human-gate $*" >> "$FAKE_LOG"
+case " $* " in *" --quiet-window "*) quiet=yes ;; *) quiet=no ;; esac
+echo "human-gate-quiet $quiet" >> "$FAKE_LOG"
+[ -z "${GATE_FAIL:-}" ] || { echo "human-gate: could not file the gate (stub)" >&2; exit 1; }
 [ -n "${FAKE_STORE:-}" ] || exit 0
 subject=""; key=""; message=""
 while [ $# -gt 0 ]; do
@@ -157,14 +158,17 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-open=$(jq --arg k "$key" --arg s "$subject" '[ .[] | select(.status == "open" and .metadata.escalation_key == $k and .metadata["gc.continuation_group"] == $s) ] | length' "$FAKE_STORE")
-[ "$open" = 0 ] || exit 0
-id="visit$(( $(jq 'length' "$FAKE_STORE") + 1 ))"
-jq -c --arg id "$id" --arg k "$key" --arg s "$subject" --arg t "${message%%. *}" \
-  '. + [{id: $id, status: "open", assignee: "", title: $t, metadata: {task_kind: "visit", escalation_key: $k, "gc.continuation_group": $s, "gc.routed_to": "human"}}]' \
+blockers=$(awk -F'|' -v s="$subject" '$1 == s && $2 == "blocks" { print $3 }' "$FAKE_DEPS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+open=$(jq -r --arg k "$key" --argjson b "$blockers" '[ .[] | select(.issue_type == "gate" and .await_type == "human" and .await_id == $k
+  and .status != "closed" and (.id as $i | $b | index($i)) != null) | .id ] | .[0] // empty' "$FAKE_STORE")
+[ -z "$open" ] || { printf '%s\n' "$open"; exit 0; }
+id="gate$(( $(jq 'length' "$FAKE_STORE") + 1 ))"
+jq -c --arg id "$id" --arg k "$key" --arg t "${message%%. *}" \
+  '. + [{id: $id, status: "open", issue_type: "gate", await_type: "human", await_id: $k, title: $t, created_at: "2026-10-30T00:00:00Z", metadata: {}}]' \
   "$FAKE_STORE" > "$FAKE_STORE.new" && mv "$FAKE_STORE.new" "$FAKE_STORE"
-printf '%s|tracks|%s\n' "$id" "$subject" >> "$FAKE_DEPS"
-ESC
+printf '%s|blocks|%s\n' "$subject" "$id" >> "$FAKE_DEPS"
+printf '%s\n' "$id"
+GATE
 chmod +x "$PACK"/*.sh
 # gc names the pack for `gc gc-toolkit scripts-dir` and answers the roster for
 # `rig list`. The work bead is the one row of the
@@ -174,9 +178,10 @@ chmod +x "$PACK"/*.sh
 # --id, --has-metadata-key and each --metadata-field, answers with --ready only
 # an open bead whose every blocks edge names a closed bead, leaves closed beads
 # out unless --all or a status names them, and gives each row its edges in the
-# listing shape. `bd dep
-# list` answers a bead's edges in the show shape, and `bd dep add` records one
-# unless FAKE_DEP_FAIL is set. `bd unclaim --if-assignee` is bd's
+# listing shape. `bd dep list` answers the beads a bead depends on, each row
+# whole with its dependency_type, and with --type only edges of that type, as
+# bd-lib.sh's human-gate reader reads them, and `bd dep add` records one.
+# `bd unclaim --if-assignee` is bd's
 # compare-and-swap release. `bd update` refuses with exit 13 and writes nothing
 # when an --if-assignee or --if-status guard does not hold, refuses an arm's
 # write (one setting gc.dispatch_when_ready) when FAKE_ARM_WRITE_FAIL is set and
@@ -234,12 +239,17 @@ case "$1 ${2:-}" in
   "bd dep")
     case "${3:-}" in
       list)
-        rows | jq -c --argjson e "$(edges)" --arg id "${4:-}" '
-          . as $r | [ $e[] | select(.from == $id) | . as $x | ($r[] | select(.id == $x.to)) as $b
-            | {id: $x.to, dependency_type: $x.type, status: ($b.status // "open"), title: ($b.title // "")} ]' ;;
+        id="${4:-}"; t=""
+        shift 4
+        while [ $# -gt 0 ]; do
+          case "$1" in --type) shift; t="${1:-}" ;; --type=*) t="${1#--type=}" ;; esac
+          shift
+        done
+        rows | jq -c --argjson e "$(edges)" --arg id "$id" --arg t "$t" '
+          . as $r | [ $e[] | select(.from == $id and ($t == "" or .type == $t)) | . as $x | ($r[] | select(.id == $x.to)) as $b
+            | $b + {id: $x.to, dependency_type: $x.type, status: ($b.status // "open"), title: ($b.title // "")} ]' ;;
       add)
         echo "$*" >> "$FAKE_LOG"
-        [ -z "${FAKE_DEP_FAIL:-}" ] || { echo "bd: refused the edge (stub)" >&2; exit 1; }
         t=blocks
         for x in "$@"; do case "$x" in --type=*) t="${x#--type=}" ;; esac; done
         printf '%s|%s|%s\n' "${4:-}" "$t" "${5:-}" >> "$FAKE_DEPS" ;;
@@ -377,9 +387,9 @@ recorded_at() { # <label> <sha>: one transition, recording and closing at <sha>
     *) bad "$1: recorded and closed at ${2:0:9} through one lifecycle transition" "$(cat "$D/lc.log")" ;;
   esac
 }
-not_parked() { # <label>: no refusal, no escalation, no drain
+not_parked() { # <label>: no refusal, no gate, no drain
   hasnt "$(cat "$D/lc.log")" "refused_false_completion" "$1: the bead is not parked as a false completion"
-  hasnt "$(cat "$D/gc.log")" "escalate " "$1: nothing is escalated"
+  hasnt "$(cat "$D/gc.log")" "human-gate " "$1: no gate is filed"
   hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "$1: the session does not drain"
 }
 # unrecorded_landing <label>: the first attempt, whose record never lands.
@@ -435,7 +445,7 @@ attempt
 eq "$PREP_RC" 0 "nowork: the prepare stages the branch"
 eq "$RC" 1 "nowork: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nowork: the bead is parked as a false completion"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "nowork: the refusal is escalated"
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "nowork: the refusal files a gate on the bead"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nowork: the session drains"
 eq "$(merged_tries)" 0 "nowork: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nowork: nothing is pushed"
@@ -449,11 +459,11 @@ jq --arg s "$SIDE" '.[0].metadata.direct_landing_sha = $s' "$D/bead.json" > "$D/
 attempt
 eq "$RC" 1 "stale: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "stale: the bead is parked as a false completion"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "stale: the refusal is escalated"
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "stale: the refusal files a gate on the bead"
 eq "$(merged_tries)" 0 "stale: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "stale: nothing is pushed"
 
-echo "── a refusal files its visit through the pack gc names ──"
+echo "── a refusal files its gate through the pack gc names ──"
 # The refinery sits in a scratch directory, and GC_RIG_ROOT is unset, so the
 # rig comes from the roster. Every script the block runs is the pack's that gc
 # names.
@@ -472,26 +482,26 @@ pack_merge_push() { # <the pack gc names>
 pack_merge_push "$CITY/rigs/gc-toolkit"
 eq "$RC" 1 "pack: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "pack: the bead is parked as a false completion"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "pack: the refusal files its visit"
-# A pack with no escalate.sh: the park stands, and the block says no visit was
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "pack: the refusal files its gate"
+# A pack with no human-gate.sh: the park stands, and the block says no gate was
 # filed.
-mkdir -p "$TMP/no-escalate/assets/scripts"
-cp "$PACK/lifecycle.sh" "$PACK/rig-root.sh" "$TMP/no-escalate/assets/scripts/"
-pack_merge_push "$TMP/no-escalate"
-eq "$RC" 1 "pack/no escalate.sh: merge-push stops"
-has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "pack/no escalate.sh: the bead is parked as a false completion"
-hasnt "$(cat "$D/gc.log")" "escalate " "pack/no escalate.sh: no visit is filed"
-has "$OUT" "escalate.sh not found in the pack; wb is parked for a human with no refinery-false-completion visit" "pack/no escalate.sh: the block says the park has no visit"
+mkdir -p "$TMP/no-gate/assets/scripts"
+cp "$PACK/lifecycle.sh" "$PACK/rig-root.sh" "$TMP/no-gate/assets/scripts/"
+pack_merge_push "$TMP/no-gate"
+eq "$RC" 1 "pack/no human-gate.sh: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "pack/no human-gate.sh: the bead is parked as a false completion"
+hasnt "$(cat "$D/gc.log")" "human-gate " "pack/no human-gate.sh: no gate is filed"
+has "$OUT" "human-gate.sh not found in the pack; wb is parked for a human with no refinery-false-completion gate" "pack/no human-gate.sh: the block says the park has no gate"
 # A pack with no rig-root.sh, so the rig does not resolve: the block stops
 # before the check, parks nothing and leaves the work with the refinery to
 # retry.
 mkdir -p "$TMP/no-rig-root/assets/scripts"
-cp "$PACK/lifecycle.sh" "$PACK/escalate.sh" "$TMP/no-rig-root/assets/scripts/"
+cp "$PACK/lifecycle.sh" "$PACK/human-gate.sh" "$TMP/no-rig-root/assets/scripts/"
 pack_merge_push "$TMP/no-rig-root"
 eq "$RC" 1 "pack/no rig-root.sh: merge-push stops"
 has "$OUT" "cannot resolve the rig root; leaving the work with the refinery to retry" "pack/no rig-root.sh: the block says the rig did not resolve"
 hasnt "$(cat "$D/lc.log")" "transition" "pack/no rig-root.sh: nothing is parked"
-hasnt "$(cat "$D/gc.log")" "escalate " "pack/no rig-root.sh: nothing is escalated"
+hasnt "$(cat "$D/gc.log")" "human-gate " "pack/no rig-root.sh: no gate is filed"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "pack/no rig-root.sh: the session drains"
 
 echo "── a branch whose commits net to no change is refused ──"
@@ -501,11 +511,11 @@ eq "$PREP_RC" 0 "netzero: the prepare stages the branch"
 eq "$(git -C "$PREP" rev-list --count "$BASE..HEAD" 2>/dev/null || echo 0)" 2 "netzero: precondition, the prepared head is two commits ahead of the target"
 eq "$RC" 1 "netzero: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "netzero: the bead is parked as a false completion"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "netzero: the refusal is escalated"
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "netzero: the refusal files a gate on the bead"
 eq "$(merged_tries)" 0 "netzero: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "netzero: nothing is pushed"
 
-echo "── a check that cannot run is retried, then waits on a visit as a failed check, not as a branch without work ──"
+echo "── a check that cannot run is retried, then waits on a human gate as a failed check, not as a branch without work ──"
 REFINERY=gc-toolkit/gc-toolkit.refinery
 POOL=gc-toolkit/gc-toolkit.polecat
 # nocheck_fixture <dir>: a branch with work, on a bead in the shape a polecat's
@@ -528,7 +538,7 @@ nocheck_fixture() {
 fails() { jq -r '.[0].metadata.zero_diff_check_failures // "none"' "$D/bead.json"; }
 field() { jq -r --arg f "$1" '.[0][$f] // ""' "$D/bead.json"; }
 meta() { jq -r --arg k "$1" '.[0].metadata[$k] // "<absent>"' "$D/bead.json"; }
-visit_of() { jq -r '[ .[] | select(.metadata.escalation_key == "refinery-zero-diff-check-failed") | .id ] | .[0] // ""' "$D/store.json"; }
+gate_of() { jq -r '[ .[] | select(.issue_type == "gate" and .await_id == "refinery-zero-diff-check-failed") | .id ] | .[0] // ""' "$D/store.json"; }
 # nocheck_merge_push [<env>...]: one patrol's merge-push, its logs started over.
 nocheck_merge_push() {
   : > "$D/gc.log"; : > "$D/lc.log"
@@ -547,23 +557,24 @@ for n in 1 2; do
   has "$OUT" "Not a valid object name origin/main (failure $n of 3 in a row); leaving the work with the refinery to retry" \
     "nocheck, patrol $n: it carries git's own error and leaves the work with the refinery"
   eq "$(cat "$D/lc.log")" "" "nocheck, patrol $n: the bead is not parked"
-  hasnt "$(cat "$D/gc.log")" "escalate " "nocheck, patrol $n: nothing is escalated"
+  hasnt "$(cat "$D/gc.log")" "human-gate " "nocheck, patrol $n: no gate is filed"
   has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck, patrol $n: the session drains"
   eq "$(fails)" "$n" "nocheck, patrol $n: the bead counts $n failed check(s) in a row"
   eq "$(field assignee)" "$REFINERY" "nocheck, patrol $n: the work stays assigned to the refinery"
 done
 nocheck_merge_push
-VISIT=$(visit_of)
+GATE=$(gate_of)
 eq "$RC" 1 "nocheck, patrol 3: merge-push stops"
 eq "$(cat "$D/lc.log")" "" "nocheck, patrol 3: no lifecycle transition parks the bead"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-zero-diff-check-failed --message The zero-diff check of branch polecat/wb against origin/main could not run in $D/rig, 3 patrols in a row. The last error: merge-base origin/main " \
-  "nocheck, patrol 3: the visit is a failed-check situation, naming the directory, the count and the failed git call"
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-zero-diff-check-failed --message The zero-diff check of branch polecat/wb against origin/main could not run in $D/rig, 3 patrols in a row. The last error: merge-base origin/main " \
+  "nocheck, patrol 3: the gate is a failed-check situation, naming the directory, the count and the failed git call"
 has "$(cat "$D/gc.log")" "Not a valid object name origin/main. It verified nothing either way" \
-  "nocheck, patrol 3: the visit carries git's own error, its trailing newline not left as a space before the rest"
-has "$(cat "$D/gc.log")" "escalate-window 0" "nocheck, patrol 3: the visit is filed with the verdict window off, so the wait has an open visit to sit on"
-hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck, patrol 3: the visit is not a no-change situation"
-if [ -n "$VISIT" ]; then ok "nocheck, patrol 3: the visit is filed"; else bad "nocheck, patrol 3: the visit is filed" "$(cat "$D/store.json")"; fi
-eq "$(grep -cxF "wb|blocks|$VISIT" "$D/deps.txt")" 1 "nocheck, patrol 3: the work is blocked by its visit"
+  "nocheck, patrol 3: the gate carries git's own error, its trailing newline not left as a space before the rest"
+has "$(cat "$D/gc.log")" "human-gate-quiet no" "nocheck, patrol 3: the gate is filed with no quiet window, so the wait has an open gate to sit on"
+hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck, patrol 3: the gate is not a no-change situation"
+if [ -n "$GATE" ]; then ok "nocheck, patrol 3: the gate is filed"; else bad "nocheck, patrol 3: the gate is filed" "$(cat "$D/store.json")"; fi
+eq "$(grep -cxF "wb|blocks|$GATE" "$D/deps.txt")" 1 "nocheck, patrol 3: the work is blocked by its gate"
+hasnt "$(cat "$D/gc.log")" "bd dep add" "nocheck, patrol 3: the gate's own edge is the wait, so no other edge is written"
 eq "$(field status) $(field assignee)" "open " "nocheck, patrol 3: the refinery's assignment is released, so find-work no longer offers the work"
 eq "$(meta gc.dispatch_when_ready)" "$POOL" "nocheck, patrol 3: a fresh pour is armed to the pool the work's last pour ran on"
 eq "$(meta gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "nocheck, patrol 3: the pour is a mol-polecat-work run"
@@ -572,20 +583,22 @@ eq "$(meta gc.routed_to)" "" "nocheck, patrol 3: the work is routed nowhere"
 eq "$(meta blocked_reason) $(meta gc.takeaway)" "<absent> <absent>" "nocheck, patrol 3: no hold marker is written beside the edge"
 eq "$(fails)" none "nocheck, patrol 3: the wait clears the count"
 has "$(field notes)" "Refinery: the zero-diff check of polecat/wb could not run in $D/rig, 3 patrols in a row (merge-base origin/main " \
-  "nocheck, patrol 3: a note on the work says why it waits and what closing the visit does"
-has "$OUT" "wb waits on visit $VISIT (refinery-zero-diff-check-failed); closing the visit re-slings it to $POOL --on mol-polecat-work" \
+  "nocheck, patrol 3: a note on the work says why it waits and what clearing the gate does"
+has "$(field notes)" "wb waits on its refinery-zero-diff-check-failed gate. Clearing that gate pours a fresh run" \
+  "nocheck, patrol 3: the note names the gate and what clearing it does"
+has "$OUT" "wb waits on gate $GATE (refinery-zero-diff-check-failed); clearing the gate re-slings it to $POOL --on mol-polecat-work" \
   "nocheck, patrol 3: the patrol says what the work waits on and what releases it"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck, patrol 3: the session drains"
 eq "$(merged_tries)" 0 "nocheck: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nocheck: nothing is pushed"
 
-echo "── closing the visit lets the armed pour take the work ──"
-has "$(armed_state)" "wb -> $POOL [HELD by $VISIT" "nocheck, visit open: the deferred-dispatch pass holds the pour on the visit"
-jq -c --arg v "$VISIT" 'map(if .id == $v then .status = "closed" else . end)' "$D/store.json" > "$D/store.json.new" \
+echo "── clearing the gate lets the armed pour take the work ──"
+has "$(armed_state)" "wb -> $POOL [HELD by $GATE" "nocheck, gate open: the deferred-dispatch pass holds the pour on the gate"
+jq -c --arg g "$GATE" 'map(if .id == $g then .status = "closed" else . end)' "$D/store.json" > "$D/store.json.new" \
   && mv "$D/store.json.new" "$D/store.json"
-has "$(armed_state)" "wb -> $POOL [DISPATCHABLE NOW]" "nocheck, visit closed: the deferred-dispatch pass pours the work on its next pass"
+has "$(armed_state)" "wb -> $POOL [DISPATCHABLE NOW]" "nocheck, gate cleared: the deferred-dispatch pass pours the work on its next pass"
 
-echo "── a visit or a wait that does not land leaves the work with the refinery ──"
+echo "── a gate or a wait that does not land leaves the work with the refinery ──"
 # third_failure <dir>: the nocheck fixture with two failed checks counted, so
 # the next patrol meets the third.
 third_failure() {
@@ -603,30 +616,24 @@ kept() {
   has "$OUT" "the wait did not land, so wb stays with the refinery, and the next patrol checks it again" "$1: the patrol says the work stays with the refinery"
   has "$(cat "$D/gc.log")" "runtime drain-ack" "$1: the session drains"
 }
-third_failure "$TMP/noesc"
-nocheck_merge_push ESC_FAIL=1
-kept "escalation refused"
-has "$OUT" "escalate.sh recorded no visit for wb" "escalation refused: the patrol says no visit was filed"
-eq "$(jq length "$D/store.json")" 0 "escalation refused: no visit exists"
-eq "$(grep -c . "$D/deps.txt" || true)" 0 "escalation refused: no edge is written"
-hasnt "$(cat "$D/gc.log")" "bd unclaim" "escalation refused: the assignment is never released"
+third_failure "$TMP/nogate"
+nocheck_merge_push GATE_FAIL=1
+kept "gate refused"
+has "$OUT" "human-gate.sh filed no gate on wb" "gate refused: the patrol says no gate was filed"
+eq "$(jq length "$D/store.json")" 0 "gate refused: no gate exists"
+eq "$(grep -c . "$D/deps.txt" || true)" 0 "gate refused: no edge is written"
+hasnt "$(cat "$D/gc.log")" "bd unclaim" "gate refused: the assignment is never released"
 
-# A pack that holds escalate.sh and no await-ruling.sh. The block takes both
-# from one pack, so it files no visit that no wait could follow.
+# A pack that holds human-gate.sh and no await-ruling.sh. The block takes both
+# from one pack, so it files no gate that no wait could follow.
 third_failure "$TMP/noawait"
-mkdir -p "$TMP/esc-only/assets/scripts"
-cp "$PACK/lifecycle.sh" "$PACK/escalate.sh" "$PACK/rig-root.sh" "$TMP/esc-only/assets/scripts/"
-nocheck_merge_push STUB_PACK="$TMP/esc-only"
+mkdir -p "$TMP/gate-only/assets/scripts"
+cp "$PACK/lifecycle.sh" "$PACK/human-gate.sh" "$PACK/rig-root.sh" "$TMP/gate-only/assets/scripts/"
+nocheck_merge_push STUB_PACK="$TMP/gate-only"
 kept "no await-ruling.sh"
-has "$OUT" "escalate.sh and await-ruling.sh were not both found in the pack, so no visit asks about wb" \
-  "no await-ruling.sh: the patrol says no visit was filed"
-hasnt "$(cat "$D/gc.log")" "escalate " "no await-ruling.sh: no visit is filed"
-
-third_failure "$TMP/noedge"
-nocheck_merge_push FAKE_DEP_FAIL=1
-kept "edge refused"
-eq "$(jq length "$D/store.json")" 1 "edge refused: precondition, the visit is filed"
-hasnt "$(cat "$D/gc.log")" "bd unclaim" "edge refused: the wait stops before it releases the assignment"
+has "$OUT" "human-gate.sh and await-ruling.sh were not both found in the pack, so no gate asks about wb" \
+  "no await-ruling.sh: the patrol says no gate was filed"
+hasnt "$(cat "$D/gc.log")" "human-gate " "no await-ruling.sh: no gate is filed"
 
 # The arm is refused after the wait has released the assignment, so the
 # refinery has to take the work back.
@@ -637,9 +644,9 @@ has "$(cat "$D/gc.log")" "bd unclaim wb --if-assignee $REFINERY" "arm refused: p
 has "$(cat "$D/gc.log")" "bd update wb --if-assignee  --if-status open --assignee $REFINERY" "arm refused: the refinery takes the released work back"
 # The next patrol fails the check again, and its wait lands.
 nocheck_merge_push
-eq "$(jq '[ .[] | select(.metadata.escalation_key == "refinery-zero-diff-check-failed") ] | length' "$D/store.json")" 1 \
-  "arm refused, next patrol: the open visit answers again, and no second one is filed"
-eq "$(grep -cF "wb|blocks|" "$D/deps.txt")" 1 "arm refused, next patrol: the edge already in place is not written again"
+eq "$(jq '[ .[] | select(.issue_type == "gate" and .await_id == "refinery-zero-diff-check-failed") ] | length' "$D/store.json")" 1 \
+  "arm refused, next patrol: the open gate answers again, and no second one is filed"
+eq "$(grep -cF "wb|blocks|" "$D/deps.txt")" 1 "arm refused, next patrol: the gate's edge is the only one, not written again"
 eq "$(field status) $(field assignee)" "open " "arm refused, next patrol: the work is released to wait"
 eq "$(meta gc.dispatch_when_ready)" "$POOL" "arm refused, next patrol: the pour is armed to the pool the first wait recorded"
 eq "$(fails)" none "arm refused, next patrol: the wait clears the count"
@@ -654,7 +661,7 @@ has "$OUT" "the wait did not land, and wb could not be left with the refinery (i
   "take-back refused: the patrol names the stranded work and its hand-back"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "take-back refused: the session drains"
 
-echo "── a graduated convoy is parked on its visit, since no pour rebuilds a convoy ──"
+echo "── a graduated convoy is parked on its gate, since no pour rebuilds a convoy ──"
 # convoy_failure <dir>: the third failure, on a graduated convoy that carries the
 # pool its design pour ran on, as graduated convoys do.
 convoy_failure() {
@@ -664,15 +671,15 @@ convoy_failure() {
 }
 convoy_failure "$TMP/convoy"
 nocheck_merge_push
-VISIT=$(visit_of)
+GATE=$(gate_of)
 eq "$RC" 1 "convoy: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to blocked --assignee  --route human --set blocked_reason=the zero-diff check could not run in $D/rig, 3 patrols in a row: merge-base origin/main " \
   "convoy: the convoy is parked blocked, its reason naming the rig, the count and the failed git call"
-has "$(cat "$D/lc.log")" "--unset zero_diff_check_failures --takeaway the zero-diff check could not run 3 patrols in a row; fix the error its visit names, then hand the convoy back" \
+has "$(cat "$D/lc.log")" "--unset zero_diff_check_failures --takeaway the zero-diff check could not run 3 patrols in a row; fix the error its gate names, then hand the convoy back" \
   "convoy: the park clears the count, and its takeaway names the hand-back"
-eq "$(grep -cxF "wb|blocks|$VISIT" "$D/deps.txt")" 1 "convoy: the park is held by a blocks edge onto its visit"
-has "$(cat "$D/gc.log")" "escalate-window 0" "convoy: the visit is filed with the verdict window off"
-has "$(cat "$D/gc.log")" "Fix that error, then hand wb back to the refinery and close this visit." "convoy: the visit asks for the hand-back"
+eq "$(grep -cxF "wb|blocks|$GATE" "$D/deps.txt")" 1 "convoy: the park is held by its gate, which blocks the convoy"
+has "$(cat "$D/gc.log")" "human-gate-quiet no" "convoy: the gate is filed with no quiet window"
+has "$(cat "$D/gc.log")" "Fix that error, then hand wb back to the refinery and clear this gate." "convoy: the gate asks for the hand-back"
 hasnt "$(cat "$D/gc.log")" "bd unclaim" "convoy: the wait that pours a run is not taken"
 eq "$(meta gc.dispatch_when_ready)" "<absent>" "convoy: no pour is armed onto the convoy"
 hasnt "$OUT" "the wait did not land" "convoy: the park lands"
@@ -685,14 +692,13 @@ eq "$(field status) $(field assignee)" "open $REFINERY" "convoy, park refused: t
 eq "$(fails)" 3 "convoy, park refused: the count stays at the cap, so the next failed check asks again"
 has "$OUT" "the wait did not land, so wb stays with the refinery, and the next patrol checks it again" \
   "convoy, park refused: the patrol says the convoy stays with the refinery"
-# An edge that does not land leaves the convoy with the refinery too: a park
-# with no edge onto the visit would hold it on nothing.
-convoy_failure "$TMP/convoy-noedge"
-nocheck_merge_push FAKE_DEP_FAIL=1
-kept "convoy, edge refused"
-eq "$(jq length "$D/store.json")" 1 "convoy, edge refused: precondition, the visit is filed"
-has "$OUT" "no blocks edge from wb onto its visit landed, so wb is not parked" \
-  "convoy, edge refused: the patrol says the convoy is not parked"
+# A gate that is not filed leaves the convoy with the refinery too: a park with
+# no gate would hold it on nothing.
+convoy_failure "$TMP/convoy-nogate"
+nocheck_merge_push GATE_FAIL=1
+kept "convoy, gate refused"
+eq "$(jq length "$D/store.json")" 0 "convoy, gate refused: no gate exists"
+has "$OUT" "human-gate.sh filed no gate on wb" "convoy, gate refused: the patrol says no gate was filed"
 
 echo "── a check that runs again clears the count, and the landing goes on ──"
 fixture "$TMP/recheck" work

@@ -19,7 +19,7 @@ func doneBoard() (board.Board, []board.Tile) {
 		{
 			ID: "tk-live", Rig: "gc-toolkit", Kind: "epic", Title: "still open",
 			Severity: board.SevHigh, MTotal: 2, Open: 2, Section: board.SectionStalled,
-			Frontier: "2 open · 0 in flight (stranded)", Needs: "decomposed, idle — assign or visit",
+			Frontier: "2 open · 0 in flight (stranded)", Needs: "decomposed, idle — assign or discuss",
 			RankScore: 3_002_000,
 		},
 		{
@@ -207,7 +207,7 @@ func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 			Needs: "green — waiting on the merge pass", GroupRoot: "tk-pr", RankScore: 2_000_000},
 		{ID: "tk-strand", Rig: "gc-toolkit", Kind: "epic", Title: "stranded", Severity: board.SevHigh,
 			Section: board.SectionStalled, MTotal: 2, Open: 2, Frontier: "2 open · 0 in flight (stranded)",
-			Needs: "decomposed, idle — assign or visit", GroupRoot: "tk-strand", RankScore: 3_000_000},
+			Needs: "decomposed, idle — assign or discuss", GroupRoot: "tk-strand", RankScore: 3_000_000},
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
 	var out strings.Builder
@@ -229,10 +229,38 @@ func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 	}
 }
 
-// The overview's leading glyph encodes a visit as well as a person's move: ○ a
-// row an open visit holds, ◉ a row that is both held and wants a person, ● a
-// plain person's move. In this view ● means wants-a-person, so a held row takes
-// its own ○ rather than colliding with it.
+// A recommendation Accept is withheld on names the gates that hold it back
+// beside its needs, and a row whose gate a live sitting is answering names that
+// gate, so the operator reads why Accept is missing and what is being answered
+// now without opening --json.
+func TestNeedsCellNamesWithheldAcceptAndGatesInSession(t *testing.T) {
+	withheld, answering := "Rule on it", "Rebase?"
+	tiles := []board.Tile{{
+		ID: "tk-rec", Rig: "gc-toolkit", Kind: "parked", Title: "a recommendation",
+		Severity: board.SevNormal, Section: board.SectionGate, Owed: true, Held: true,
+		Frontier: "owed", Needs: "2× — Accept? · Rule on it", RankScore: 2_000_000,
+		AcceptWithheld: &withheld, GatesInSession: &answering,
+	}}
+	b := board.Board{GeneratedAt: time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC), Total: 1, Tiles: tiles}
+	var out strings.Builder
+	renderTable(&out, b, tiles, b.GeneratedAt, 1)
+	got := out.String()
+
+	want := "2× — Accept? · Rule on it · in session: Rebase? · accept waits on: Rule on it"
+	if !strings.Contains(got, want) {
+		t.Errorf("the needs cell carries both notes:\nwant %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "accept ▸ 2×") {
+		t.Errorf("a withheld row offers no Accept:\n%s", got)
+	}
+}
+
+// The overview's leading glyph encodes what holds a row as well as a person's
+// move: ○ a row whose work a human gate holds, ◉ a row whose work is held and
+// that wants a person, ◌ a row a conversation is on, which holds nothing, and ●
+// a plain person's move. In this view ● means wants-a-person, so a row whose
+// work is held takes its own ○ rather than colliding with it, and a
+// conversation-only row that wants a person keeps ●.
 func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
 	tiles := []board.Tile{
@@ -240,11 +268,17 @@ func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 			Section: board.SectionStalled, MTotal: 3, Open: 3, Frontier: "3 open",
 			Needs: "decomposed, idle", GroupRoot: "tk-fam", RankScore: 3_000_000},
 		{ID: "tk-held", Rig: "gc-toolkit", Kind: "task", Title: "held only", Severity: board.SevNormal,
-			Section: board.SectionActive, Held: true, Frontier: "in flight",
+			Section: board.SectionActive, Held: true, WorkHeld: true, Frontier: "in flight",
 			Needs: "working", GroupRoot: "tk-fam", RankScore: 2_500_000},
+		{ID: "tk-talk", Rig: "gc-toolkit", Kind: "task", Title: "a conversation only", Severity: board.SevNormal,
+			Section: board.SectionActive, Held: true, Frontier: "in flight",
+			Needs: "in conversation", GroupRoot: "tk-fam", RankScore: 2_450_000},
 		{ID: "tk-both", Rig: "gc-toolkit", Kind: "review", Title: "held and gated", Severity: board.SevElevated,
-			Section: board.SectionGate, Held: true, Frontier: "PR #7",
+			Section: board.SectionGate, Held: true, WorkHeld: true, Frontier: "PR #7",
 			Needs: "answer", GroupRoot: "tk-fam", RankScore: 2_400_000},
+		{ID: "tk-asks", Rig: "gc-toolkit", Kind: "task", Title: "a conversation that waits", Severity: board.SevElevated,
+			Section: board.SectionGate, Held: true, Frontier: "in flight",
+			Needs: "talk it over", GroupRoot: "tk-fam", RankScore: 2_350_000},
 		{ID: "tk-wants", Rig: "gc-toolkit", Kind: "review", Title: "wants a person", Severity: board.SevElevated,
 			Section: board.SectionReview, Frontier: "PR #8",
 			Needs: "review", GroupRoot: "tk-fam", RankScore: 2_300_000},
@@ -270,16 +304,20 @@ func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 		return "«no row for " + id + "»"
 	}
 	for _, c := range []struct{ id, glyph, why string }{
-		{"tk-held", "○", "a held row no one owes leads with ○"},
-		{"tk-both", "◉", "a held row that also wants a person leads with ◉"},
+		{"tk-held", "○", "a row whose work a gate holds and no one owes leads with ○"},
+		{"tk-talk", "◌", "a row only a conversation is on leads with ◌, not the held ○"},
+		{"tk-both", "◉", "a row whose work is held that also wants a person leads with ◉"},
+		{"tk-asks", "●", "a conversation-only row that wants a person leads with the wants-you ●"},
 		{"tk-wants", "●", "a plain person's move still leads with ●"},
 	} {
 		if g := glyphFor(c.id); g != c.glyph {
 			t.Errorf("%s: want %q, got %q\n%s", c.why, c.glyph, g, got)
 		}
 	}
-	// The legend teaches all three glyphs, not just ●.
-	for _, want := range []string{"○ an open visit holds the row", "◉ both"} {
+	// The legend teaches every glyph, not just ●, and says a conversation holds
+	// nothing.
+	for _, want := range []string{"○ a human gate holds the row's work until you answer", "◉ both",
+		"◌ a conversation is on the row and holds nothing"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("family legend must explain %q; got:\n%s", want, got)
 		}
@@ -349,7 +387,7 @@ func TestRenderShowsWherePRConversationsStand(t *testing.T) {
 		pr("tk-ask", board.ConversationAsking, "asking: Which base should this land on?", 2_000_001),
 		{ID: "tk-epic", Rig: "gc-toolkit", Kind: "epic", Title: "not a pull request",
 			Severity: board.SevHigh, Section: board.SectionStalled, MTotal: 2, Open: 2,
-			Frontier: "2 open", Needs: "decomposed, idle — assign or visit", GroupRoot: "tk-epic",
+			Frontier: "2 open", Needs: "decomposed, idle — assign or discuss", GroupRoot: "tk-epic",
 			RankScore: 3_000_000},
 	}
 	shut := pr("tk-shut", board.ConversationAnswered, "closed — ages out", -999_000)
@@ -431,7 +469,7 @@ func TestRenderShowsWhatHoldsAPR(t *testing.T) {
 		}
 	}
 	tiles := []board.Tile{
-		pr("tk-two", []string{"visit", "blocked"}, 2_000_002),
+		pr("tk-two", []string{"gate", "blocked"}, 2_000_002),
 		pr("tk-free", nil, 2_000_001),
 	}
 	var queue strings.Builder
@@ -447,13 +485,13 @@ func TestRenderShowsWhatHoldsAPR(t *testing.T) {
 		t.Fatalf("no row for %s in:\n%s", id, out)
 		return ""
 	}
-	if want := "in the merge cadence · held: visit, blocked · conversation quiet"; !strings.HasSuffix(strings.TrimRight(lineFor("tk-two"), " "), want) {
+	if want := "in the merge cadence · held: gate, blocked · conversation quiet"; !strings.HasSuffix(strings.TrimRight(lineFor("tk-two"), " "), want) {
 		t.Errorf("a held PR's row must end %q; got %q", want, lineFor("tk-two"))
 	}
 	if strings.Contains(lineFor("tk-free"), "held:") {
 		t.Errorf("a PR nothing holds carries no held note; got %q", lineFor("tk-free"))
 	}
-	if !strings.Contains(out, "names what holds it, its held: labels: visit=") {
+	if !strings.Contains(out, "names what holds it, its held: labels: gate=") {
 		t.Errorf("the legend explains the held note; got:\n%s", out)
 	}
 

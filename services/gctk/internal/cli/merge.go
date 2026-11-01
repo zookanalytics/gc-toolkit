@@ -35,7 +35,7 @@ import (
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
 // writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git/jq
-// and the sibling shell helpers (escalate.sh, record-failure-cap.sh,
+// and the sibling shell helpers (human-gate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
 // script-callers.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh),
 // resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's
@@ -574,13 +574,13 @@ func (m *merger) handle(row *gcbd.Bead) {
 	// anchor would buy no fresher view.
 	if others := duplicateAnchors(m.anchors, id, num, prurl); others != "" {
 		fmt.Fprintf(m.stdout, "%s: PR#%s is claimed by more than one open anchor (%s + %s); merge held — close/demote the duplicate (doctor check-one-anchor-per-pr owns the structure)\n", mergeProg, num, id, others)
-		m.escalate("--subject", id, "--key", "one-anchor-per-pr."+num,
+		m.humanGate("--subject", id, "--key", "one-anchor-per-pr."+num, "--quiet-window", standingQuietWindow,
 			"--message", "PR#"+num+" ("+liveURL+") is claimed by multiple open anchors ("+id+", "+others+"); every anchor of this PR is held until exactly one remains.")
 		m.held++
 		return
 	}
 	if target != "" && base != "" && target != base {
-		fmt.Fprintf(m.stdout, "%s: PR#%s base '%s' != merged_target '%s' (retargeted); merge held (anchor %s, pr-facts escalates)\n", mergeProg, num, base, target, id)
+		fmt.Fprintf(m.stdout, "%s: PR#%s base '%s' != merged_target '%s' (retargeted); merge held (anchor %s, pr-facts files the human gate)\n", mergeProg, num, base, target, id)
 		m.held++
 		return
 	}
@@ -637,7 +637,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 
-	// --- open visit on this anchor: a person owes a conversation before finalize ---
+	// --- the finalize gate: an open human gate, or an unruled epic, holds it ------
 	if reason, ok := m.finalizeGate(id); !ok {
 		if reason == "" {
 			reason = "finalize gate refused (fail-closed)"
@@ -847,7 +847,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 			}
 			fmt.Fprintf(m.stdout, "%s: PR#%s %s; merge held (anchor %s)\n", mergeProg, num, saWhy, id)
 			m.printIndented(saOut, 6)
-			m.escalate("--subject", id, "--key", "seed-audit-merge-gate."+num,
+			m.humanGate("--subject", id, "--key", "seed-audit-merge-gate."+num, "--quiet-window", standingQuietWindow,
 				"--message", "PR#"+num+" "+saWhy+"; the merge is held.\n\ngenerated/seed-audit is rendered from the whole source tree and committed per\nbranch, so a branch carrying a render made at an older base lands over prompt\ninputs it never saw. Bring the head branch current with '"+base+"', run\nassets/scripts/render-seed-audit.sh --since origin/"+base+", commit generated/seed-audit,\nand push.\n\n"+saOut)
 			m.held++
 			return
@@ -870,7 +870,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		case 1:
 			fmt.Fprintf(m.stdout, "%s: PR#%s removes a pack script a formula still names; merge held (anchor %s)\n", mergeProg, num, id)
 			m.printIndented(scOut, 12)
-			m.escalate("--subject", id, "--key", "script-callers-merge-gate."+num,
+			m.humanGate("--subject", id, "--key", "script-callers-merge-gate."+num, "--quiet-window", standingQuietWindow,
 				"--message", "PR#"+num+" removes a pack script a formula still names; the merge is held.\n\n"+scOut)
 			m.held++
 			return
@@ -909,7 +909,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 			if reason != "" {
 				freason = reason
 			} else {
-				freason = "open visit or unreadable visit probe (fail-closed)"
+				freason = "finalize gate refused (fail-closed)"
 			}
 		}
 	}
@@ -1047,7 +1047,7 @@ func (m *merger) recordCheckVerdict(id, headOid, aroute string, failed, pending 
 // freeze on the branch. The merge pass has already held a merge_hold and every
 // live blocker, a demand included, before its merge-state switch, and a branch
 // a landed change supersedes reaches no merge state here, because that arm
-// files a visit the finalize gate holds the merge on. What is left to read here
+// files a human gate the finalize gate holds the merge on. What is left to read here
 // is the anchor's own rebase_hold and arm, and the freeze a bead naming the
 // branch puts on it. onBranch is every bead naming the branch, in any status.
 func mergeInDeferred(anchor *gcbd.Bead, onBranch []gcbd.Bead) string {
@@ -1520,21 +1520,29 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // handled where it is called. A missing lane-state.sh or finalize-gate.sh holds
 // that anchor. A missing blocker-holder.sh records no verdict for an anchor a
 // live blocker holds, whose merge is held anyway. A missing pr-post.sh counts
-// no PR's unanswered review threads. A missing escalate.sh,
+// no PR's unanswered review threads. A missing human-gate.sh,
 // record-failure-cap.sh, render-seed-audit.sh, script-callers.sh or
 // pr-status-label.sh is skipped.
 // The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, script-callers.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, human-gate.sh, record-failure-cap.sh, render-seed-audit.sh, script-callers.sh, pr-status-label.sh, blocker-holder.sh, pr-post.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
 
 func (m *merger) scriptPath(name string) string { return filepath.Join(m.scriptsDir, name) }
 
-func (m *merger) escalate(args ...string) {
-	p := m.scriptPath("escalate.sh")
+// standingQuietWindow is the quiet period, in seconds, of a human gate whose
+// condition stands from one pass to the next, a duplicate anchor, a stale render
+// or a removed script a formula names, so every pass detects it again: a
+// person's moot or benign answer stands for a day.
+const standingQuietWindow = "86400"
+
+// humanGate files a human gate through human-gate.sh, best-effort: a gate that
+// does not land is filed by the next pass, which meets the same condition.
+func (m *merger) humanGate(args ...string) {
+	p := m.scriptPath("human-gate.sh")
 	if !isExecutable(p) {
 		return
 	}
@@ -2002,10 +2010,10 @@ func duplicateAnchors(dups []gcbd.Bead, id, num, ourURL string) string {
 	return strings.Join(out, ",")
 }
 
-// inflightHolder is the first open rework/review/finding bead that holds the
-// merge: a pr_number holder qualified by repository, or any dep-edge blocker
-// (the edge is the claim, local by construction). The order is by_pr, then
-// children, then blockers.
+// inflightHolder is the first open rework/review/finding bead, or open human
+// gate, that holds the merge: a pr_number holder qualified by repository, or
+// any dep-edge blocker (the edge is the claim, local by construction). The
+// order is by_pr, then children, then blockers.
 func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead) string {
 	ours := strings.ToLower(m.originRepoQ)
 	type tagged struct {
@@ -2045,7 +2053,9 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 // status.
 func holderLabel(b *gcbd.Bead) string {
 	kind := "unclosed rework/review bead"
-	if b.Meta("task_kind") == "finding" {
+	if b.IsHumanGate() {
+		kind = "open human gate"
+	} else if b.Meta("task_kind") == "finding" {
 		if fd := b.Meta("finding.disposition"); fd != "" {
 			kind = fd + " finding"
 		} else {

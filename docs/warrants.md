@@ -26,8 +26,22 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 ## An entry
 
-- **Covers.** The paths and keys the warrant justifies. A change finds the
-  warrants it touches by searching this page for the paths in its diff.
+- **Covers.** The paths and keys the warrant justifies.
+  `tools/warrants-touched.sh` builds the list of warrants a branch touches from
+  this line, and reads these forms:
+  - A path in backticks from the top of the repository, or a link to a page in
+    `docs/`. A change to the file, or to anything under a directory, touches the
+    warrant.
+  - A name in backticks followed by `key`, `keys`, `name`, `names` or `file`,
+    and each name listed before it. A changed line that names it whole touches
+    the warrant, in any file other than a markdown file, a test or `specs/`.
+  - The `x` block of a path, a `# >>> x` fence in that file, or the `[x]` table
+    of a TOML file. A change inside it touches the warrant, and a change
+    elsewhere in the file does not.
+
+  A file named for another part of it, such as a verb or a function, is listed
+  on any change to it, and is touched only when the change reaches that part.
+  The list prints the Covers line, so the author can read which part it names.
 - **Stands in for.** The primitive Gas City does not ship.
 - **Evidence.** Where upstream shows the primitive missing: a page of Gas City's
   or bd's documentation, or a symbol and file at a named upstream commit. Never
@@ -43,7 +57,11 @@ shares only the word ([authority-map.md](authority-map.md)).
 - A change that touches a covered path re-verifies the entry against Gas City's
   current upstream documentation and updates Verified. When the trigger has
   fired, the change files the move onto the primitive instead of building
-  further on the noun.
+  further on the noun. `tools/lint.sh` prints the list at the polecat's
+  self-review, with each entry's Verified date and whether the branch has
+  updated it, and `tools/warrants-touched.sh --base origin/<base>` prints it at
+  any time. The list judges nothing, and the arch check judges the
+  re-verification.
 - A change that retires a noun removes its entry.
 
 ## Dolt reclaim
@@ -100,7 +118,10 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 - **Covers.** `assets/scripts/gh-origin-guard.sh`,
   `assets/scripts/gh-origin-guard-codex.sh`, `overlays/gh-origin-guard/`,
-  [gh-origin-guard.md](gh-origin-guard.md).
+  [gh-origin-guard.md](gh-origin-guard.md), and the guard's wiring, which
+  carries the `gh-origin-guard` or `gh-origin-guard-codex` name: the overlay
+  stanzas in pack.toml, the hook in the work-context and cycle-recycle overlays,
+  and each Codex agent's `pre_start`.
 - **Stands in for.** Scoping an agent's outbound writes to the repositories its
   rig owns.
 - **Evidence.**
@@ -126,6 +147,51 @@ shares only the word ([authority-map.md](authority-map.md)).
   rig's origin can sit under another owner's account and a city-scope agent
   owns every rig's origin. A token the rigs share also leaves each rig's agents
   free to write to the others' repositories, which the guard refuses.
+
+## Converse reap
+
+- **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
+- **Stands in for.** Ending a manual session that outlives the conversation it
+  held: a stop that did not take, a conversation another path closed, or one a
+  sitting cut short handed back to the operator's queue.
+- **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
+  work closes. It stays until it is closed or drained, and attaching wakes one
+  that sleeps (`cmd/gc/compute_awake_set.go` 432-440, 583-594 and 668-693).
+  No closer the controller runs on its own ends one because its work closed:
+  the stale-session closers exempt a session that has started its
+  conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
+  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3057, 3237 and
+  3500), and the core reaper prunes a session only once it has drained
+  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69 and 1402-1404).
+  A sitting drains itself once its conversation closes, and `gc-helm dismiss`
+  stops the session that held the conversation it closes, so nothing in the
+  controller ends a session either of them missed.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` 1e05ae624, beside a live
+  `gc session list --state closed`.
+- **Retires when.** Gas City ends a manual session once its claimed work has
+  closed.
+
+## Accept's lock
+
+- **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one
+  `flock` file per bead, `accept-<rig>-<bead>.lock`, under the city's
+  `.gc/runtime/packs/gc-toolkit`, held from Accept's live read to its last
+  write.
+- **Stands in for.** A launch that pours once per acceptance across a finished
+  run: a `gc sling` that refuses a second root under a caller's key whatever
+  the first root's status.
+- **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
+  <formula>` launches under a per-bead lock and refuses a second launch of the
+  formula at the bead, exiting 3, only while a root an earlier launch poured is
+  live (`internal/sling/sling_core.go` 544-724, the lock at 563 and the check at
+  589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
+  `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
+  `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
+  launch pours again. No `gc sling` flag checks an earlier root by its title or
+  by a key (`cmd/gc/cmd_sling.go` 145-160).
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main e2671dc4d.
+- **Retires when.** A Gas City launch can refuse a second root under a caller's
+  key whatever the first root's status.
 
 ## Prep worktree staging record
 

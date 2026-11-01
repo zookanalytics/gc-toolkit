@@ -1,6 +1,6 @@
 ---
 name: Outbound sends
-description: Writing to a GitHub repository the rig does not own is the operator's send, not an agent's. How an agent preserves such a finding — a bead carrying the ready-to-paste command, and a visit that asks a human — and what the path refuses so the parked command still works when it is pasted.
+description: Writing to a GitHub repository the rig does not own is the operator's send, not an agent's. How an agent preserves such a finding — a bead carrying the ready-to-paste command, and a human gate on it that asks a human — and what the path refuses so the parked command still works when it is pasted.
 ---
 
 # Outbound sends
@@ -12,7 +12,7 @@ agent that finds an upstream bug prepares the command and stops.
 
 Stopping is not dropping. The finding is worth keeping whether or not it is
 ever sent, so it lands as a bead carrying the exact command a human can paste,
-and a visit asks for the send.
+and a human gate on that bead asks for the send.
 
 ## Scope
 
@@ -23,8 +23,8 @@ and how a human is asked.
 **Boundaries.** This covers GitHub writes issued through `gh`. It does not
 speak for our own repository — a send to the rig's origin is ordinary work,
 and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). Who may
-act on what is [authority-map.md](authority-map.md); how a visit reaches a
-person is [human-engagement.md](human-engagement.md).
+act on what is [authority-map.md](authority-map.md); how a human gate reaches
+a person is [human-engagement.md](human-engagement.md).
 
 ## The boundary is the rig's own origin
 
@@ -94,11 +94,13 @@ command in metadata:
 | `gh_verb` | the `gh` verb, for the board label |
 | `upstream_send_key` | the situation key that keeps one ask from becoming three |
 
-The ask itself is a visit, filed through
-[`escalate.sh`](../assets/scripts/escalate.sh), which owns the route and its
-own dedup. Answering is closing the bead — sent, or declined. A re-run against
-an open bead refreshes that one ask; a re-run against a closed one files
-nothing, because a settled question is not re-asked.
+The ask itself is a human gate on that bead, filed through
+[`human-gate.sh`](../assets/scripts/human-gate.sh) under the key
+`upstream-send-<key>`, which keeps one open gate per bead and key. The send is
+the operator's action, so the gate blocks the bead until they clear it, sent
+or declined. A re-run against an open bead refreshes that one ask; a re-run
+against a closed one files nothing, because a settled question is not
+re-asked.
 
 The keeper's fork workflow prepares its own `gh` commands inline, in
 `packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml`, where the PR

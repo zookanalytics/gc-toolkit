@@ -79,7 +79,7 @@ describe('ActuateButton', () => {
 
   it('engage reports the sitting without claiming to have attached the operator', async () => {
     reply = () =>
-      json({ bead: BEAD_ID, verb: 'engage', message: '✓ converse-opus on new visit tk-v1 for ' + BEAD_ID + '\n  attach: gc session attach gc-42' });
+      json({ bead: BEAD_ID, verb: 'engage', message: '✓ converse-opus on new conversation tk-v1 for ' + BEAD_ID + '\n  attach: gc session attach gc-42' });
     render(<ActuateButton verb="engage" beadId={BEAD_ID} />);
     fireEvent.click(screen.getByRole('button', { name: /discuss/i }));
 
@@ -90,13 +90,13 @@ describe('ActuateButton', () => {
     expect(text(status)).toMatch(/does not attach you/i);
   });
 
-  it('dismiss reports the closed visit', async () => {
-    reply = () => json({ bead: BEAD_ID, verb: 'dismiss', message: 'dismiss: closed visit tk-v1 — the sitting on ' + BEAD_ID + ' ends' });
+  it('dismiss reports the closed conversation', async () => {
+    reply = () => json({ bead: BEAD_ID, verb: 'dismiss', message: 'dismiss: closed conversation tk-v1 — the sitting on ' + BEAD_ID + ' ends' });
     render(<ActuateButton verb="dismiss" beadId={BEAD_ID} />);
     fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
 
     const status = await screen.findByRole('status');
-    expect(text(status)).toContain('closed visit tk-v1');
+    expect(text(status)).toContain('closed conversation tk-v1');
   });
 
   it('falls back to a verb sentence when the tool message is empty', async () => {
@@ -104,7 +104,7 @@ describe('ActuateButton', () => {
     render(<ActuateButton verb="dismiss" beadId={BEAD_ID} />);
     fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
     const status = await screen.findByRole('status');
-    expect(text(status)).toMatch(/visit was closed/i);
+    expect(text(status)).toMatch(/sitting was ended/i);
   });
 
   // Different operator moves must not render identically: each reason gets its own
@@ -175,7 +175,7 @@ describe('ActuateButton', () => {
   // button is handed a new beadId rather than being remounted. A result left over
   // from the previous bead would sit under the NEW bead.
   it('drops a result when pointed at a different bead', async () => {
-    reply = () => json({ bead: BEAD_ID, verb: 'dismiss', message: 'dismiss: closed visit tk-v1' });
+    reply = () => json({ bead: BEAD_ID, verb: 'dismiss', message: 'dismiss: closed conversation tk-v1' });
     const { rerender } = render(<ActuateButton verb="dismiss" beadId={BEAD_ID} />);
     fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
     await screen.findByRole('status');
@@ -194,7 +194,7 @@ describe('ActuateButton', () => {
     await screen.findByRole('button', { name: /dismissing…/i });
 
     rerender(<ActuateButton verb="dismiss" beadId="tk-other9" />);
-    release(json({ bead: BEAD_ID, verb: 'dismiss', message: 'dismiss: closed visit tk-v1' }));
+    release(json({ bead: BEAD_ID, verb: 'dismiss', message: 'dismiss: closed conversation tk-v1' }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^dismiss$/i })).toBeTruthy());
     expect(screen.queryByRole('status')).toBeNull();
   });

@@ -11,10 +11,9 @@
 #     state, an outcome;
 #   - owned by another closer: any task_kind (review, visit, rework, finding,
 #     validation, a standing record, ...), a molecule step or workflow root, a
-#     demand, a duplicate diagnosis, a successor pointer recorded by a
-#     disposition whose close has not landed, or an issue type that is not plain
-#     work (an epic closes on its own ruling, and a convoy or a decision is not
-#     work);
+#     duplicate diagnosis, a successor pointer recorded by a disposition whose
+#     close has not landed, or an issue type that is not plain work (an epic
+#     closes on its own ruling, and a convoy, a gate or a decision is not work);
 #   - parked: a hold_reason or a rebase_hold, somebody's judgement in progress;
 #   - structural: a convoy parents it (a planned batch), or a child under it
 #     is still open.
@@ -56,19 +55,19 @@ LIVE_WORK_JQ='
     "self_review_passed_sha", "prepare_mode", "rejection_reason", "target",
     "pr_number", "pr_url", "existing_pr", "merge_result", "merged_target",
     "gc.work_outcome", "work_outcome",
-    # owned by another closer: a review cycle, a molecule, a demand, a
-    # duplicate diagnosis, a disposition recorded and not closed
+    # owned by another closer: a review cycle, a molecule, a duplicate
+    # diagnosis, a disposition recorded and not closed
     "task_kind", "anchor_bead", "source_review_bead", "source_review",
     "source_ruling_bead", "gc.kind", "gc.root_bead_id", "gc.step_ref",
     "gc.step_id", "gc.formula_contract", "gc.input_convoy_id",
-    "gc.demand_for", "duplicate_of", "gc.superseded_by",
+    "duplicate_of", "gc.superseded_by",
     # parked: a judgement somebody has in progress
     "hold_reason", "rebase_hold"
   ];
   # The issue types of plain work, the ones doctor/check-blocked-work-armed
   # names as what a pool claims and works. An allowlist: a type it has never
-  # heard of, a container (epic) or a question for a person (decision) is closed
-  # by its own owner.
+  # heard of, a container (epic) or a question for a person (a gate, a decision)
+  # is closed by its own owner.
   def live_work_plain_types: ["task", "bug", "feature", "chore", "spike"];
   # One "<what>=<value>" per mark this bead row carries, empty when it carries
   # none. Reads the row `bd list --json` or `bd show --json` returns: status,

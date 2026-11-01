@@ -7,8 +7,8 @@
 #   (FAIL)    a read that fails, or answers anything but a JSON array, at any
 #             stage of any verb fails the verb, which prints nothing, so no
 #             caller reads it as no runs
-#   (USAGE)   an unknown verb or scope, and a missing reader or bead, are usage
-#             errors
+#   (USAGE)   an unknown verb, a missing reader or bead, and an argument given
+#             the map are usage errors
 #   (SHAPE)   a convoy read by `bd show` tracks the same beads as one read by a
 #             list
 #   (BATCH)   the map reads the convoys its roots name in batches, and prints
@@ -139,7 +139,7 @@ fails "subject: the bead itself" "--id root-a1" subject fx_bd root-a1
 fails "subject: the convoy a root names" "--id cv-a1" subject fx_bd root-a1
 fails "subject: the roots poured over a convoy" "gc.input_convoy_id=cv-a1" subject fx_bd cv-a1
 fails "map: the roots that name a convoy" "--has-metadata-key gc.input_convoy_id" map fx_bd
-fails "map: the roots that record an issue" "--has-metadata-key gc.var.issue" map fx_bd all
+fails "map: the roots that record an issue" "--has-metadata-key gc.var.issue" map fx_bd
 fails "map: the convoys the roots name" "--id " map fx_bd
 noticed_bd() { printf 'gc bd: answering from the rig "x" store\n'; fx_bd "$@"; }
 eq "$(run_lib subject noticed_bd root-a1 | jq -r '.[0].bead')" "work-a" "(FAIL) a store notice printed on stdout is dropped, not read as a failure"
@@ -151,7 +151,7 @@ got="$(run_lib subject mixed_bd x)"; rc=$?
 eq "$rc:$got" "1:" "(FAIL) a read that answers an array holding a non-object fails the verb"
 
 echo "# usage"
-for args in "nope fx_bd x" "runs" "runs fx_bd" "subject fx_bd" "map fx_bd live"; do
+for args in "nope fx_bd x" "runs" "runs fx_bd" "subject fx_bd" "map fx_bd live" "map fx_bd all"; do
     # shellcheck disable=SC2086  # each case is a word list
     run_lib $args >/dev/null 2>&1; rc=$?
     eq "$rc" "2" "(USAGE) run_lib $args is a usage error"
@@ -166,19 +166,20 @@ eq "$(printf '%s' '[{"id":"r","issue_type":"task","status":"open","metadata":{"g
    '["w-1"]' "(SHAPE) run_rows judges rows already read, a show's convoy included"
 
 echo "# batched convoy reads"
-want="$(verb map fx_bd all)"
+want="$(verb map fx_bd)"
 RUN_LIB_ID_BATCH=2
-got="$(verb map fx_bd all)"; rc=$?
+got="$(verb map fx_bd)"; rc=$?
 n="$(grep -c -- '--id ' "$READS")"
 RUN_LIB_ID_BATCH=200
 eq "$rc" "0" "(BATCH) a map read in batches of two answers"
 eq "$got" "$want" "(BATCH) batching the convoy reads changes no run"
-eq "$n" "3" "(BATCH) the six convoys the roots name are read two at a time"
+eq "$n" "3" "(BATCH) the five convoys the live roots name are read two at a time"
 
 echo "# the stub its readers' suites source"
 # Given every run of the fixture's store, the stub answers each case as the
 # lib does, so a reader's suite that feeds it runs feeds what the lib reads.
-verb map fx_bd all > "$TMP/every-run.json"
+# Every run is the rule's own run_rows over every bead in the store.
+jq -c "$RUN_JQ"'.beads | run_rows' "$FX" > "$TMP/every-run.json"
 STUB_OUT="$(
     GC_RUN_LIB="$HERE/run-lib.stub.sh"
     RUN_LIB_STUB_RUNS="$TMP/every-run.json"
@@ -197,6 +198,7 @@ STUB_OUT="$(
     run_lib map fx_bd >/dev/null; printf 'fail-verb\t%s\n' "$?"
     RUN_LIB_STUB_FAIL=""
     run_lib runs no_such_reader work-a >/dev/null 2>&1; printf 'no-reader\t%s\n' "$?"
+    run_lib map fx_bd all >/dev/null 2>&1; printf 'map-arg\t%s\n' "$?"
     RUN_LIB_STUB_RUNS="$TMP/absent.json"
     printf 'no-file\t%s\n' "$(run_lib map fx_bd)"
     printf '#!/bin/sh\nprintf "%%s %%s %%s\\n" "$1" "$2" "$3" > %s\ncat %s\n' "$TMP/cmd-args" "$TMP/every-run.json" > "$TMP/runs-cmd"; chmod +x "$TMP/runs-cmd"
@@ -214,6 +216,7 @@ while IFS=$'\t' read -r name verdict; do
         other-arg) eq "$verdict" "0" "(STUB) the same verb with another argument answers" ;;
         fail-verb) eq "$verdict" "1" "(STUB) a verb RUN_LIB_STUB_FAIL names fails" ;;
         no-reader) eq "$verdict" "2" "(STUB) a reader the caller never defined is a usage error" ;;
+        map-arg) eq "$verdict" "2" "(STUB) an argument given the map is a usage error, as it is to run-lib.sh" ;;
         no-file) eq "$verdict" "[]" "(STUB) a runs file that does not exist is a store with no runs" ;;
         cmd) eq "$verdict" "root-a0,root-a1" "(STUB) RUN_LIB_STUB_CMD's output is the runs each call answers from" ;;
         cmd-args) eq "$verdict" "runs fx_bd work-a" "(STUB) RUN_LIB_STUB_CMD is given the call's verb, reader and argument" ;;
@@ -243,7 +246,8 @@ doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 tools/gc-proactive.sh
 assets/scripts/until-resolved.sh
-assets/scripts/blocker-holder.sh"
+assets/scripts/blocker-holder.sh
+assets/scripts/store-only-exit.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"

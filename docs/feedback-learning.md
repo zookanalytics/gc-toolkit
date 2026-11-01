@@ -86,7 +86,11 @@ Four producers file the same bead contract:
    carry the `file-feedback-observations` fragment: when a turn brings
    corrective feedback about standing behavior, the agent fixes the
    instance first, then files one observation bead with
-   `obs.source=self`.
+   `obs.source=self`. A pool session such as a polecat has no one at its
+   terminal, so every turn there is text the city sends. It captures only
+   from durable sources: a PR review or comment, a rework's rejection
+   reason, and a bead's notes. A session the operator attends, mechanik
+   or a converse sitting, also captures the operator's own turns.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
    rig's merged/closed PRs' review and conversation comments, with
    `obs.source=miner`, in two captures:
@@ -350,5 +354,5 @@ Recurrence after adoption is the pass's sharpest input: the rule was
 adopted and the feedback came back anyway. That argues for a different
 carrier or a mechanism, never for restating the same bullet more loudly.
 Evidence against an adopted rule never silently retires it — contradiction
-files a visit for the operator, who picks scope-narrowing, retirement, or
-dismissal.
+files a human gate on the rule's pattern bead for the operator, who picks
+scope-narrowing, retirement, or dismissal.

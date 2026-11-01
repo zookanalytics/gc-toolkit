@@ -99,55 +99,52 @@ Every gate runs as the run-tests step's detached job
 Never launch a gate as a background job of your own, and never end your turn
 while one runs: a gate that finishes while you sit idle wakes nothing.
 
-## Escalation
+## Human gates
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+What a person must act on is a human gate on the bead it is about, filed
+through one writer that dedups repeats:
 
 ```bash
-"$(gc gc-toolkit scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$(gc gc-toolkit scripts-dir)/human-gate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
 ```
 
-Escalate what a human must act on; a PR awaiting the operator's approval is
-a HEALTHY resting state worth zero escalations. Most idle wakes escalate
+The gate blocks the bead it names until a person clears it, and a gate on a
+PR's anchor holds its merge. A gate on a bead with open children pauses every
+part of it that has not started, so when only one member waits, name that
+member. A situation with no bead of its own is a patrol finding
+(`patrol-finding.sh --scope refinery-findings`): `human-gate.sh` refuses a
+patrol wisp or a session, and files nothing on a bead it cannot read.
+
+File a gate for what a human must act on; a PR awaiting the operator's
+approval is a HEALTHY resting state worth zero gates. Most idle wakes file
 nothing — log the verdict line and move on.
 
 
-### Closing a visit: never by hand
+### Withdrawing a human gate you filed
 
-A closed visit records why it closed in two keys: `gc.outcome`, one word,
-and `gc.outcome_reason`, one sentence. The board takes a finished sitting's
-outcome from them, so a visit closed without them looks like a need nobody
-met. A bare `gc bd close` or `--status=closed` on a visit records neither.
+A human gate is cleared by resolving it, and its resolve reason is the answer,
+headed `ruled:`, `moot:` or `benign:`. The board and every reader take a
+cleared gate's answer from that reason, so a gate closed with a bare
+`gc bd close` reads as a need nobody met.
 
-A sitting closes the visit it works. Outside a sitting, a visit is closed
-only by the role that raised it, and only when it was filed in error, when
-another visit already carries its need, or when its premise is gone. That
-close goes through one of two writers:
+A person clears a gate. A role never resolves a gate another role filed, even
+after it resolves the situation the gate asks about: it appends what it did to
+the notes of the bead the gate blocks and leaves the gate open. A role
+withdraws its own gate, and only when the situation it asked about is gone,
+with one call:
 
 ```bash
-SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
-# An open escalation you raised on a bead:
-"$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
-# Any other visit you raised:
-"$SCRIPTS/visit-close.sh" --visit <visit> --outcome <word> --reason "<one sentence>"
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+"$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 
-`escalate.sh --retract` finds the open visit by the subject and key it was
-filed under, and closes it `moot` through `visit-close.sh`. It leaves a visit
-with an assignee or a bound session open for whoever holds it.
-`visit-close.sh` stamps both keys and reads them back before it closes. On a
-visit that is already closed it records the two keys and leaves the close as
-it was, so it also repairs a visit closed by hand.
-
-The word carries weight. `moot` (the premise is gone) and `benign` (it holds
-but needs nobody) stop `escalate.sh` filing the same key and subject again
-for a day. Any other word means someone acted. Use `duplicate` when another
-visit carries the need, and `resolved` when you acted to end it.
-
-A visit another role raised, or one a sitting has claimed, is the sitting's
-to close, even after you resolve its situation. Append what you did to its
-notes and leave it open. Close it yourself only when the operator tells you
-to, and then through `visit-close.sh`.
+`human-gate.sh --retract` resolves each open human gate under the key that
+blocks the bead, with the reason `moot: <message>`, and every bead the gate
+held is released. A sitting may be discussing the gate, and the withdrawal
+clears it anyway, because the situation is gone; the sitting learns it at its
+sign-off. A gate a person already cleared keeps that person's answer. The
+`moot:` reason starts a quiet period only where your own call site declares
+one with `--quiet-window`.
 
 
 
@@ -164,7 +161,8 @@ cannot be un-nudged: typing at a pending prompt types into the UI, not into
 you, so you stay parked until a human walks past your pane.
 
 **What to do instead — none of these block:**
-- **A decision you cannot make:** file a bead, or escalate (a visit).
+- **A decision you cannot make:** file a bead, or a human gate on the bead
+  that waits (`human-gate.sh`).
   Durable state outlives your session; a pending prompt does not.
 - **Something a person must see:** park the bead with `gc.routed_to=human`.
   They read it when they are there; you keep cycling.
@@ -193,14 +191,15 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298, bead:tk-0c9csp8, bead:tk-ab9p1pk (operator) adopted:2026-08-26 updated:2026-10-15 -->
 - A rename, a re-framing, a rendering change, a sweep that closes state
-  which should not exist, or one more guard for each newly found bypass is
-  not a fix for the thing that produced the symptom. Take a report at the
+  which should not exist, an alert that fires once something has waited
+  past a set time, or one more guard for each newly found bypass is not a
+  fix for the thing that produced the symptom. Take a report at the
   severity it was filed, find what allowed it to happen, and prefer a design
   in which it cannot happen again over a patch for the instance. When a
-  sweep or a guard must still ship, the change names the cause it leaves in
-  place and why that cause cannot be fixed where it arises.
+  sweep, a timer or a guard must still ship, the change names the cause it
+  leaves in place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
@@ -226,6 +225,21 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   note or a manual sling a later session must run. A gc.hold note still
   surfaces the bead in gc hook and bd ready as live demand; a blocked-by
   edge excludes it until the blocker lands, then self-clears.
+
+<!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
+- Give as the operator's only what they said: a ruling, approval, practice,
+  reason or expectation you attribute to them quotes or cites where they
+  said it, and reaches no further than those words and the case they
+  answered. Your own inference, a prior session's note, a template's text
+  and your elaboration of a ruling each name their real source, and a
+  decision you record before the operator rules on it says it is proposed.
+
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
+- A command, flag, key or name that the operator or a reviewer sketches in
+  passing shows what they want, not the shape it must take. Derive the
+  shape from the conventions of the surface it joins, starting with the
+  commands and names already beside it, and say where the result departs
+  from the sketch.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -114,34 +113,34 @@ func TestMetaOnNilBeadIsEmpty(t *testing.T) {
 	}
 }
 
-// An edge row renders as {dependency_type, id} under `gc bd show` and as {type,
-// depends_on_id} under `gc bd list`. DependsOn reads both with jq's `//`, as
-// visit-identity.sh does, so a null key falls through to the other spelling and
-// an empty id names nothing. A dependencies value of an unexpected shape still
-// decodes the bead and names no edge.
-func TestDependsOnReadsBothEdgeSpellings(t *testing.T) {
+// A `gc bd dep list <bead> --type blocks --json` row carries the far bead's
+// issue_type and await_type, and bd leaves an empty field out of the row. A bead
+// is a human gate only when it is a gate whose await type is human: a gate of
+// another await type, or of none, as park's gate declares, is not one, and
+// neither is a task.
+func TestIsHumanGateReadsTheGateFields(t *testing.T) {
 	for _, tc := range []struct {
 		name, row string
-		want      []string
+		want      bool
 	}{
-		{"show spelling", `[{"id":"v","dependencies":[{"id":"s","dependency_type":"tracks","title":"the subject"}]}]`, []string{"s"}},
-		{"list spelling", `[{"id":"v","dependencies":[{"issue_id":"v","depends_on_id":"s","type":"tracks","metadata":"{}"}]}]`, []string{"s"}},
-		{"other types are skipped and order is kept", `[{"id":"v","dependencies":[
-			{"depends_on_id":"b","type":"blocks"},{"depends_on_id":"s1","type":"tracks"},{"id":"s2","dependency_type":"tracks"}]}]`, []string{"s1", "s2"}},
-		{"a null key falls through to the other spelling", `[{"id":"v","dependencies":[{"dependency_type":null,"type":"tracks","id":null,"depends_on_id":"s"}]}]`, []string{"s"}},
-		{"an empty id names nothing", `[{"id":"v","dependencies":[{"depends_on_id":"","type":"tracks"}]}]`, nil},
-		{"no dependencies", `[{"id":"v"}]`, nil},
-		{"not an array", `[{"id":"v","dependencies":{"depends_on_id":"s","type":"tracks"}}]`, nil},
+		{"human gate", `[{"id":"g","issue_type":"gate","await_type":"human","await_id":"k","status":"open","dependency_type":"blocks"}]`, true},
+		{"a gate with no await type", `[{"id":"g","issue_type":"gate","status":"open"}]`, false},
+		{"a gate of another await type", `[{"id":"g","issue_type":"gate","await_type":"timer"}]`, false},
+		{"a task", `[{"id":"t","issue_type":"task","await_type":"human"}]`, false},
+		{"a null await type", `[{"id":"g","issue_type":"gate","await_type":null}]`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := decode(t, tc.row).DependsOn("tracks"); !slices.Equal(got, tc.want) {
-				t.Errorf("DependsOn(tracks) = %q, want %q", got, tc.want)
+			if got := decode(t, tc.row).IsHumanGate(); got != tc.want {
+				t.Errorf("IsHumanGate = %v, want %v", got, tc.want)
 			}
 		})
 	}
 	var b *Bead
-	if got := b.DependsOn("tracks"); got != nil {
-		t.Errorf("DependsOn on a nil bead = %q, want nil", got)
+	if b.IsHumanGate() {
+		t.Error("IsHumanGate on a nil bead = true, want false")
+	}
+	if got := decode(t, `[{"id":"g","issue_type":"gate","await_type":"human","await_id":"pr-comments.7.x"}]`).AwaitID; got != "pr-comments.7.x" {
+		t.Errorf("AwaitID = %q, want the situation key", got)
 	}
 }
 

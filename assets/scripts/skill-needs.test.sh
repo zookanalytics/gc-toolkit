@@ -17,7 +17,9 @@
 # words are dropped and word endings stripped, and weights each word by how few
 # descriptions carry it, so a word most descriptions use decides little. It is
 # a floor, not a model of the agent: a description that fails it lacks the words
-# a real need used, and one that passes still has to read well.
+# a real need used, and one that passes still has to read well. A description
+# that carries more than the load decision fails on its own: over the character
+# limit, with a contents list opening on "Covers", or with a step number.
 #
 # The same file pins the skills' shape: each names its neighbors, keeps
 # converse's vocabulary out of its description, and calls every writer as the
@@ -26,7 +28,9 @@
 # skill names one. It pins that command and checks it against the real gc
 # under a renamed import. It pins that the converse steps and the mechanik give
 # the exact command for each act they name while the skills explain the act
-# once, with one fragment pointing both prompts at the skills. It pins that the
+# once, with one fragment pointing both prompts at the skills. It pins how the
+# prompt's hand-back definition has a framing name its subject, and that the
+# hold skill points at it. It pins that the
 # dispatch fragment the mechanik and the keeper compose calls deferred-dispatch.sh
 # and gc-bd-watch.sh the work skill's way, so both renders reach the pack's own
 # copies. It pins the prs
@@ -36,9 +40,13 @@
 # the formula fits. It runs each example whose second step depends on its first
 # under a gc that refuses the first step, and fails if anything after it runs.
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
-# a blocker in another store, and fails if the arm runs. It pins that every
-# skill and formula names a pack skill to load by its catalog name, never by
-# its path, so an agent in any tree loads the installed pack's copy.
+# a blocker in another store, and fails if the arm runs. It runs the premise
+# re-check's moot or benign close under stubs, and fails unless the close
+# releases a held subject that no open human gate still holds, leaves one that
+# a gate holds, and closes the conversation only once every read and write
+# before it has answered. It pins that every skill and formula names a
+# pack skill to load by its catalog name, never by its path, so an agent in any
+# tree loads the installed pack's copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
@@ -55,6 +63,7 @@ REPO="$HERE/../.."
 SKILLS="$REPO/skills"
 PROMPT="$REPO/agents/_converse/prompt.template.md"
 SETTLE="$REPO/skills/converse-settle/SKILL.md"
+CONTINUE="$REPO/skills/converse-continue/SKILL.md"
 MECHANIK="$REPO/agents/mechanik/prompt.template.md"
 WORK_SKILL="$REPO/skills/work/SKILL.md"
 PRS_SKILL="$REPO/skills/prs/SKILL.md"
@@ -110,8 +119,6 @@ for s in $BLOCKS; do
     compat=$(frontmatter "$f" compatibility)
     [ "$name" = "$s" ] && ok "$s: name equals its directory" || bad "$s: name equals its directory" "got '$name'"
     [ -n "$desc" ] && ok "$s: has a description" || bad "$s: has a description"
-    [ "${#desc}" -le 1024 ] && ok "$s: description fits the 1024-character limit" \
-        || bad "$s: description fits the 1024-character limit" "${#desc} characters"
     [ -n "$compat" ] && ok "$s: declares its compatibility" || bad "$s: declares its compatibility"
     # Every agent reads these descriptions, so they speak in the words any role
     # uses, and say which neighbor to load instead.
@@ -127,6 +134,31 @@ for s in $BLOCKS; do
     done
     [ -n "$named" ] && ok "$s: description names a neighbor to use instead ($named )" \
         || bad "$s: description names a neighbor to use instead" "no 'use <work|waits|records|prs>' in: $desc"
+done
+
+echo "── every description carries only what decides whether to load the skill ──"
+# Every agent holds every description in context in every session, so a
+# description says when to load the skill and the body carries the rest
+# (docs/skills.md, Frontmatter). The needs below hold a description to the words
+# a real need used. These checks hold back what no need asks for: a list of the
+# skill's contents, and a step number that goes stale when the steps move. The
+# limit sits a little above the longest description the needs justify, because
+# the cost is the length, however the text is worded.
+DESCRIPTION_LIMIT=650
+for f in "$SKILLS"/*/SKILL.md; do
+    [ -r "$f" ] || continue
+    s=$(basename "$(dirname "$f")")
+    desc=$(frontmatter "$f" description)
+    [ "${#desc}" -le "$DESCRIPTION_LIMIT" ] && ok "$s: description fits the $DESCRIPTION_LIMIT-character limit" \
+        || bad "$s: description fits the $DESCRIPTION_LIMIT-character limit" "${#desc} characters; what goes beyond the load decision belongs in the body"
+    case "$desc" in
+        Covers\ * | *". Covers "*) bad "$s: description lists no contents" "$desc" ;;
+        *) ok "$s: description lists no contents" ;;
+    esac
+    case "$(printf '%s' "$desc" | tr '[:upper:]' '[:lower:]')" in
+        *"step "[0-9]* | *"steps "[0-9]*) bad "$s: description carries no step number" "$desc" ;;
+        *) ok "$s: description carries no step number" ;;
+    esac
 done
 
 echo "── each building-block skill calls the pack's own writers, never a checkout's ──"
@@ -145,9 +177,13 @@ for s in $BLOCKS; do
     f="$SKILLS/$s/SKILL.md"
     [ -r "$f" ] || continue
     found=""
-    for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' 'CONV' '"$S/' 'GC_CITY_PATH/rigs'; do
+    for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' '"$S/' 'GC_CITY_PATH/rigs'; do
         grep -qF -- "$probe" "$f" && found="$found [$probe]"
     done
+    # CONV, the scripts directory a converse sitting sets, as a whole word: the
+    # sitting's CONVERSATION, which a writer takes in its environment, is
+    # another variable.
+    grep -qE '(^|[^A-Za-z0-9_])CONV([^A-Za-z0-9_]|$)' "$f" && found="$found [CONV]"
     [ -z "$found" ] && ok "$s: looks for no writer in a checkout or a variable an earlier call set" \
         || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
     refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
@@ -421,11 +457,24 @@ lacks "…and keeps no blanket rule against filing under the subject" \
     "an epic subject's decomposition is filed as its member"
 have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
 have "…once the follow-up's own store reads the edge back" '&& gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json' "$SETTLE"
-have "…and holds a follow-up on another rig's bead with a demand in its own store" 'gc-helm.sh" demand <follow-up>' "$SETTLE"
+have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
-have "the prompt gives the retire call" 'pr-dispose.sh" --anchor "$SUBJECT"' "$PROMPT"
+have "the prompt gives the retire call, through the sign-off" '--route human --no-wait --retire not-needed' "$PROMPT"
+have "…as the prs skill does" '--route human --no-wait --retire not-needed' "$PRS_SKILL"
+# A gate can hold a merge, so a sitting answers every gate through the sign-off
+# writer, which carries out what the ruling does to the PR first.
+have "the continue step answers a ruling on a turn that does not sign off through the writer" 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$CONTINUE"
+lacks "…and never through a bare gate resolve" 'gc bd gate resolve <gate>' "$CONTINUE" \
+    "a bare resolve releases what the gate holds before the ruling's rework or retirement is in place"
 have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
-have "the prompt gives the call that asks for a visit" 'gc-helm.sh" open <bead>' "$PROMPT"
+# One writer dispatches a recommendation, under the bead's acceptance lock and a
+# token that finds a dispatch an Accept that stopped part way already poured. A
+# sling of the agent's own pours the formula again once that run has finished.
+have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh" accept <bead>' "$WORK_SKILL"
+lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
+    "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
+have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --route human --no-wait --accept' "$SETTLE"
+have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
 have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
 for f in "$PROMPT" "$SETTLE"; do
     missing=""
@@ -437,7 +486,7 @@ for f in "$PROMPT" "$SETTLE"; do
 done
 # The roles that route work point at the four skills through one fragment, so
 # the pointer is written once: each prompt includes it and keeps no copy of its
-# own. The skill descriptions every agent sees say what each skill covers, so
+# own. The skill descriptions every agent sees say when to load each skill, so
 # no prompt restates that, and no prompt singles out one formula.
 ASK="$REPO/template-fragments/ask-for-work.template.md"
 tr '\n' ' ' <"$ASK" >"$TMP/ask-joined"
@@ -455,6 +504,33 @@ lacks "the converse prompt does not single out a design-convoy" 'design-convoy i
     "choosing a formula is the work skill's option"
 lacks "the prompt no longer carries the design-convoy questions" 'design-convoy-routing' "$PROMPT" \
     "choosing the formula is the work skill's option"
+# Every converse framing is composed from the prompt's hand-back definition, so
+# the definition says how a framing places its subject and the step skills point
+# at it. These read the prompt with its whitespace squeezed, so a re-wrap keeps
+# them.
+PROMPT_JOINED="$TMP/prompt-squeezed"
+tr -s '[:space:]' ' ' <"$PROMPT" >"$PROMPT_JOINED"
+have "a hand-back names its subject by what it is to the operator" \
+    'names its subject by what it is to the operator' "$PROMPT_JOINED"
+have "a PR, or a decision about one, is named by the PR's number and what it does" \
+    "by the PR's number and what it does for them" "$PROMPT_JOINED"
+have "a report is named by who filed it and what it found" \
+    'by who filed it and what it found' "$PROMPT_JOINED"
+have "the operator's own ask stands in their words, ahead of what was proposed from it" \
+    'in their words rather than anything proposed from it' "$PROMPT_JOINED"
+have "the body opens on the subject, its state and why it reached the operator, before any mechanism" \
+    'why it reached the operator now, before any mechanism' "$PROMPT_JOINED"
+have "a report with no PR involved says so" 'a report with no PR involved says so' "$PROMPT_JOINED"
+have "a message with detail opens the way the body does" \
+    'A message with detail above its hand-back opens the way the body does' "$PROMPT_JOINED"
+have "the message keeps pipeline vocabulary out or says what it means" \
+    'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
+have "an option says what it does rather than what it avoids" \
+    'saying what it does rather than what it avoids' "$PROMPT_JOINED"
+have "an option that accepts a known defect names what it breaks" \
+    'names what the defect breaks and where' "$PROMPT_JOINED"
+lacks "the hold skill points at the shape and keeps no copy of its order" 'detail and evidence' \
+    "$SKILLS/converse-hold/SKILL.md" "the prompt's definition is the one place a framing's order is stated"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
 lacks "the work skill's formula choice carries no one formula's variables" 'design_gated' "$WORK_SKILL" \
     "a formula's own description says when it fits and how to tune it"
@@ -558,14 +634,13 @@ for script in deferred-dispatch.sh gc-bd-watch.sh; do
 done
 
 echo "── a step that depends on the one before it runs only once that one succeeded ──"
-# An example that sends work and then records the dispatch, records an outcome
-# and then closes, files a bead and then sends it, or adds a wait and then
-# arms, chains the second step onto the first with &&. Run apart, a refused
-# first step leaves the second recording what never happened: a dispatch marker
-# over a failed sling strips the recommendation, and the board's Accept reads
-# the marker as a dispatch already sent; an arm with no edge sends its bead on
-# the next pass. Each example runs as written, its placeholders filled, under a
-# stub gc that refuses its first call, and nothing may run after that call.
+# An example that records an outcome and then closes, files a bead and then
+# sends it, or adds a wait and then arms, chains the second step onto the first
+# with &&. Run apart, a refused first step lets the second act on what never
+# happened: a close with no recorded outcome, a sling of a bead never filed, or
+# an arm with no edge, which sends its bead on the next pass. Each example
+# runs as written, its placeholders filled, under a stub gc that refuses its
+# first call, and nothing may run after that call.
 CH="$TMP/chain"
 mkdir -p "$CH/bin" "$CH/pack/assets/scripts"
 cat >"$CH/bin/gc" <<'STUB'
@@ -619,9 +694,9 @@ if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "writer: refused" >&2; exit 1; fi
 exit 0
 STUB
 cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh"
-cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/gc-helm.sh"
+cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/human-gate.sh"
 chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh" \
-    "$CH/pack/assets/scripts/gc-helm.sh"
+    "$CH/pack/assets/scripts/human-gate.sh"
 # fill_block — an example with each <placeholder> filled with x, the stub pack in
 # for a template's {{ .ConfigDir }}, and the disposition kinds cut to one.
 fill_block() {
@@ -630,16 +705,15 @@ fill_block() {
         -e 's#<[^>]*>#x#g'
 }
 # run_chain <shell> <block> [fail-at] [cross-store] — one run of a filled example
-# in a fresh shell, from an empty log, no edges and a store holding one
-# recommendation, with call number <fail-at> refused; prints its status.
+# in a fresh shell, from an empty log, no edges and an empty store, with call
+# number <fail-at> refused; prints its status.
 run_chain() {
     rm -rf "$CH/store" "$CH/count"
     mkdir -p "$CH/store"
     : >"$CH/log"
     : >"$CH/edges"
-    printf 'x' >"$CH/store/gc.recommended_formula"
     (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_AT="${3:-}" \
-        CHAIN_CROSS_STORE="${4:-}" CONV="$CH/pack/assets/scripts" SUBJECT=tk-x VISIT=tk-v \
+        CHAIN_CROSS_STORE="${4:-}" CONV="$CH/pack/assets/scripts" SUBJECT=tk-x CONVERSATION=tk-v \
         PATH="$CH/bin:$PATH" $1 "$2" </dev/null >/dev/null 2>&1)
     echo $?
 }
@@ -668,20 +742,19 @@ while IFS='|' read -r label file marker; do
         fi
     done
 done <<SPECS
-work: taking a recommendation|$WORK_SKILL|gc.recommended_formula_dispatched=
 work: closing a bead that needs no work|$WORK_SKILL|gc.work_outcome=no-op
 converse prompt: disposing of a no-work subject|$PROMPT|gc.work_outcome=no-op
 disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outcome=no-op
 converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
 converse-settle: arming a follow-up|$SETTLE|gc bd --rig <rig> dep add <follow-up> <blocker>
-converse-settle: arming a follow-up on a demand|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
+converse-settle: arming a follow-up on a human gate|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
 SPECS
 # The arm runs only once the follow-up's own store reads the edge back. A dep add
 # onto a bead in another store prints success and exits 0 but holds nothing, so
 # on that answer the example stops at the read-back and arms nothing. When the
-# wait goes on a demand instead, a demand that did not land arms nothing either.
+# wait goes on a human gate instead, a gate that did not land arms nothing either.
 fenced_block "$SETTLE" 'gc bd --rig <rig> dep add <follow-up> <blocker>' | fill_block >"$CH/block"
-fenced_block "$SETTLE" 'gc bd --rig <rig> dep remove <follow-up> <blocker>' | fill_block >"$CH/demand-block"
+fenced_block "$SETTLE" 'gc bd --rig <rig> dep remove <follow-up> <blocker>' | fill_block >"$CH/gate-block"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -697,29 +770,100 @@ for sh_ in $shells; do
     else
         bad "($sh_) converse-settle: …and an edge that reads back is armed" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
-    rc=$(run_chain "$run" "$CH/demand-block" 2)
-    if [ "$rc" -ne 0 ] && grep -q '^writer gc-helm.sh demand ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
-        ok "($sh_) converse-settle: a demand that did not land arms nothing"
+    rc=$(run_chain "$run" "$CH/gate-block" 2)
+    if [ "$rc" -ne 0 ] && grep -q '^writer human-gate.sh --subject ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+        ok "($sh_) converse-settle: a gate that did not land arms nothing"
     else
-        bad "($sh_) converse-settle: a demand that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+        bad "($sh_) converse-settle: a gate that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
 done
-# Taking a recommendation records the dispatch only once the sling went: a
-# refused sling leaves both keys as they were, and a sent one swaps them.
-fenced_block "$WORK_SKILL" 'gc.recommended_formula_dispatched=' | fill_block >"$CH/block"
-run_chain bash "$CH/block" 1 >/dev/null
-if [ "$(cat "$CH/store/gc.recommended_formula" 2>/dev/null)" = x ] && [ ! -e "$CH/store/gc.recommended_formula_dispatched" ]; then
-    ok "work: a refused sling leaves the recommendation and records no dispatch"
-else
-    bad "work: a refused sling leaves the recommendation and records no dispatch" "store holds: $(ls "$CH/store" | tr '\n' ' ')"
-fi
-run_chain bash "$CH/block" >/dev/null
-if [ ! -e "$CH/store/gc.recommended_formula" ] && [ "$(cat "$CH/store/gc.recommended_formula_dispatched" 2>/dev/null)" = x ]; then
-    ok "work: …and a sent one strips the recommendation and records the dispatch"
-else
-    bad "work: …and a sent one strips the recommendation and records the dispatch" "store holds: $(ls "$CH/store" | tr '\n' ' ')"
-fi
-
+echo "── a moot or benign close releases a subject a cut-short hold left at held ──"
+# A cut-short sitting leaves its subject held, and the next sitting's premise
+# re-check can find the conversation moot and close it. The block runs as
+# written, its placeholders filled, under stubs: gc answers the subject's
+# blocks edges from RL_GATES, and lifecycle.sh answers the state from a file
+# that a transition rewrites.
+RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
+RL="$TMP/release"
+mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
+cat >"$RL/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+printf 'gc %s\n' "$*" >>"$RL_DIR/log"
+case "$1 ${2:-} ${3:-}" in
+    "bd dep list") printf '%s\n' "$RL_GATES" ;;
+esac
+exit 0
+STUB
+cat >"$RL/pack/assets/scripts/lifecycle.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'lifecycle %s\n' "$*" >>"$RL_DIR/log"
+case "$1" in
+    state) [ -z "${RL_STATE_DOWN:-}" ] || exit 2; cat "$RL_DIR/state" ;;
+    transition) [ -z "${RL_REFUSE:-}" ] || exit 1; echo unanchored >"$RL_DIR/state" ;;
+esac
+STUB
+cat >"$RL/pack/assets/scripts/gc-helm.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'gc-helm %s\n' "$*" >>"$RL_DIR/log"
+STUB
+cat >"$RL/pack/assets/scripts/pr-sitting-comment.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'pr-sitting-comment %s\n' "$*" >>"$RL_DIR/log"
+STUB
+chmod +x "$RL/bin/gc" "$RL/pack/assets/scripts/"*.sh
+fenced_block "$RECHECK" 'lifecycle.sh" transition "$SUBJECT" --to unanchored' | fill_block >"$RL/block"
+[ -s "$RL/block" ] && ok "the premise re-check's close is found" \
+    || bad "the premise re-check's close is found" "no fenced bash block holds its release in $RECHECK"
+# run_release <shell> <state> <gates-json> [NAME=VALUE...] — one run of the
+# close from a subject in <state>; prints its status.
+run_release() {
+    local run=$1 state=$2 gates=$3
+    shift 3
+    : >"$RL/log"
+    printf '%s\n' "$state" >"$RL/state"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV RL_DIR="$RL" RL_GATES="$gates" "$@" CONV="$RL/pack/assets/scripts" \
+        SUBJECT=tk-x CONVERSATION=tk-v PATH="$RL/bin:$PATH" $run "$RL/block" >"$RL/out" 2>&1)
+    echo $?
+}
+NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-t","issue_type":"gate","await_type":"timer","status":"open"},{"id":"tk-w","issue_type":"task","status":"open"}]'
+ONE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    rc=$(run_release "$run" held "$NONE_HOLDS")
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls" in
+        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;lifecycle transition tk-x --to unanchored --expect held --route human;lifecycle state tk-x;"*"gc bd close tk-v --reason x: x;"*)
+            ok "($sh_) recheck close: a held subject nothing still holds is released, its headline replaced, before the conversation closes" ;;
+        *) bad "($sh_) recheck close: a held subject nothing still holds is released, its headline replaced, before the conversation closes" "exit $rc, calls: $calls" ;;
+    esac
+    rc=$(run_release "$run" held "$ONE_HOLDS")
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls" in
+        *"lifecycle transition"*|*"gc-helm takeaway"*) bad "($sh_) recheck close: a held subject another open human gate holds stays held" "exit $rc, calls: $calls" ;;
+        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a held subject another open human gate holds stays held, and the conversation closes" ;;
+        *) bad "($sh_) recheck close: a held subject another open human gate holds stays held" "exit $rc, calls: $calls" ;;
+    esac
+    rc=$(run_release "$run" unanchored '[]')
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls" in
+        *"lifecycle transition"*|*"gc-helm takeaway"*|*"bd dep list"*) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
+        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject that is not held is not written, and the conversation closes" ;;
+        *) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
+    esac
+    for stop in "RL_REFUSE=1|a release that does not land|$NONE_HOLDS" "RL_STATE_DOWN=1|a state that does not read|$NONE_HOLDS" \
+        "RL_NONE=1|a gate listing that does not read|{\"error\":\"no issue found\"}"; do
+        IFS='|' read -r setting what gates <<EOF
+$stop
+EOF
+        rc=$(run_release "$run" held "$gates" "$setting")
+        calls=$(tr '\n' ';' <"$RL/log")
+        case "$rc:$calls" in
+            0:*|*"bd close"*|*"bd update"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
+            *) ok "($sh_) recheck close: $what closes nothing" ;;
+        esac
+    done
+done
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>
 cat >"$TMP/needs" <<'NEEDS'

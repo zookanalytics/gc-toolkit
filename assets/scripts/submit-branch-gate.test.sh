@@ -18,7 +18,8 @@
 #      store-only exit), and workflow-finalize is never touched.
 #   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
 #      way the halt arm does, a metadata write and then the hand-back, and
-#      refuses the arm outright when the run has a diff to land.
+#      store-only-exit.sh, run for real, refuses the arm outright when the run
+#      has a diff to land.
 #   6. SESSION PINS — every terminal exit that lets go of the bead removes the
 #      claim's gc.session_id and gc.session_name, the same pair at all three:
 #      the refinery handoff in its first write, the halt and store-only exits
@@ -134,9 +135,10 @@ BP_DEFAULT="$(awk '
   || bad "binding_prefix default is EMPTY — a source-read renders <rig>/refinery, which names no agent"
 
 # --- Fakes. -------------------------------------------------------------------
-# git   : `branch --show-current` answers $FAKE_BRANCH; the three probes the
-#         store-only arm makes answer $FAKE_AHEAD / $FAKE_DIRTY / $FAKE_PUSHED,
-#         each empty by default so the arm sees a run with nothing to land.
+# git   : `branch --show-current` answers $FAKE_BRANCH; the three probes
+#         store-only-exit.sh makes, each after a `-C <tree>`, answer
+#         $FAKE_AHEAD / $FAKE_DIRTY / $FAKE_PUSHED, each empty by default so
+#         the arm sees a run with nothing to land.
 # gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
 #         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
 #         assertions can prove WHAT was written and WHETHER the arm halted.
@@ -162,6 +164,7 @@ BP_DEFAULT="$(awk '
 mkdir -p "$TMP/bin"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
+[ "${1:-}" = "-C" ] && shift 2
 case "$1 $2" in
   "branch --show-current") printf '%s\n' "${FAKE_BRANCH:-}"; exit 0 ;;
   "rev-list --count")      printf '%s\n' "${FAKE_AHEAD:-0}"; exit 0 ;;
@@ -242,11 +245,11 @@ chmod +x "$TMP/bin/git" "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export WORK_BEAD_ID=tk-work
 
-# run-cancel.sh, await-ruling.sh and escalate.sh, in the pack the fake gc names
-# for `gc gc-toolkit scripts-dir`, $STUB_PACK. Every fail-closed arm ESCALATES (files the
-# visit), then makes the work bead WAIT on it, then CANCELS the run, then drains:
-# a cancelled run with no visit and no wait behind it leaves work nothing
-# re-offers. Each stub records its call so the order can be asserted, and returns
+# run-cancel.sh, await-ruling.sh and human-gate.sh, in the pack the fake gc
+# names for `gc gc-toolkit scripts-dir`, $STUB_PACK. Every fail-closed arm files
+# a human GATE on the work bead, then makes the work bead WAIT on it, then
+# CANCELS the run, then drains: a cancelled run with no gate and no wait behind
+# it leaves work nothing re-offers. Each stub records its call so the order can be asserted, and returns
 # a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
 cat > "$TMP/pack/assets/scripts/run-cancel.sh" <<'CANCEL'
@@ -263,21 +266,24 @@ printf 'AWAIT\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_AWAIT:-/dev/null}"
 exit "${FAKE_AWAIT_RC:-0}"
 AWAIT
-cat > "$TMP/pack/assets/scripts/escalate.sh" <<'ESC'
+cat > "$TMP/pack/assets/scripts/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
-printf 'ESCALATE\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "${FAKE_ESCALATE:-/dev/null}"
-exit "${FAKE_ESC_RC:-0}"
-ESC
-chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" "$TMP/pack/assets/scripts/escalate.sh"
+printf 'GATE\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_GATE:-/dev/null}"
+exit "${FAKE_GATE_RC:-0}"
+GATE
+chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" "$TMP/pack/assets/scripts/human-gate.sh"
 # hand-back.sh is the pack's own script, run for real: the halt and store-only
 # arms hand the bead back through it, and the fake gc answers its read and its
-# write.
+# write. So is store-only-exit.sh, with the two libraries it sources beside it:
+# the store-only arm runs it before its first write, and the fake gc and git
+# answer its read and its probes. Its --done hand-off has a suite of its own.
 cp "$HERE/hand-back.sh" "$TMP/pack/assets/scripts/hand-back.sh"
-chmod +x "$TMP/pack/assets/scripts/hand-back.sh"
+cp "$HERE/store-only-exit.sh" "$HERE/bd-lib.sh" "$HERE/run-lib.sh" "$TMP/pack/assets/scripts/"
+chmod +x "$TMP/pack/assets/scripts/hand-back.sh" "$TMP/pack/assets/scripts/store-only-exit.sh"
 export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
-export FAKE_CANCEL="$TMP/cancel" FAKE_CANCEL_RC=0 FAKE_AWAIT="$TMP/await" FAKE_AWAIT_RC=0 FAKE_ESCALATE="$TMP/escalate" FAKE_ESC_RC=0
-: > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/escalate"
+export FAKE_CANCEL="$TMP/cancel" FAKE_CANCEL_RC=0 FAKE_AWAIT="$TMP/await" FAKE_AWAIT_RC=0 FAKE_GATE="$TMP/gate" FAKE_GATE_RC=0
+: > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/gate"
 
 # run_gate <current-branch> <metadata-json>
 #   -> prints "<rc>|<log>"; the log is the recorded gc writes, newline-joined
@@ -326,8 +332,8 @@ eq "$(run_gate polecat/tk-work '{}')" \
 # still on its agent home branch. Nothing recorded a branch, so the convention
 # catches it. Must halt, and must not record the wrong branch.
 eq "$(run_gate polecat/tk-agent-home '{}')" \
-   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "fresh + wrong branch: escalates, halts, drain-acks, records no branch"
+   "1|GATE;AWAIT;CANCEL;DRAIN;" \
+   "fresh + wrong branch: files a gate, halts, drain-acks, records no branch"
 
 # THE REGRESSION. Rework child: metadata.branch names the reviewed
 # branch and the polecat is standing on it. Base rejected this; the invariant
@@ -341,7 +347,7 @@ eq "$(run_gate polecat/rb-uzy9.5 '{"branch":"polecat/rb-uzy9.5"}')" \
 # polecat/<bead-id> from the reviewed branch instead of resuming it. That forks
 # the branch under review, so it must halt even though the name looks correct.
 eq "$(run_gate polecat/tk-work '{"branch":"polecat/rb-uzy9.5"}')" \
-   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|GATE;AWAIT;CANCEL;DRAIN;" \
    "rework: halts on a forked polecat/<bead-id> branch, not just any mismatch"
 
 # An empty branch name must never be treated as a match. The branch release
@@ -349,10 +355,10 @@ eq "$(run_gate polecat/tk-work '{"branch":"polecat/rb-uzy9.5"}')" \
 # so a detached HEAD here is not a stage the recipe walks through on its way
 # to one.
 eq "$(run_gate '' '{"branch":"polecat/rb-uzy9.5"}')" \
-   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|GATE;AWAIT;CANCEL;DRAIN;" \
    "detached HEAD with metadata.branch set: halts"
 eq "$(run_gate '' '{}')" \
-   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|GATE;AWAIT;CANCEL;DRAIN;" \
    "detached HEAD with no metadata.branch: halts"
 
 # An empty-STRING metadata.branch is the absent case, not a branch named "".
@@ -467,8 +473,8 @@ eq "$(run_consume main myrig)" \
 # metadata value round-trips as set-but-empty and is not the same as absent,
 # so a silent empty write is its own strand.
 eq "$(run_consume '')" \
-   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "unset LANDING_TARGET: escalates, waits, cancels the run, then halts instead of writing an empty target"
+   "1|GATE;AWAIT;CANCEL;DRAIN;" \
+   "unset LANDING_TARGET: files a gate, waits, cancels the run, then halts instead of writing an empty target"
 has_cancel() { grep -q -- "$1" "$TMP/cancel"; }
 
 # The handoff itself fails closed. gc bd update exits non-zero and rolls its call
@@ -476,15 +482,15 @@ has_cancel() { grep -q -- "$1" "$TMP/cancel"; }
 # refused even after --status=open — a shape the guard should never take, forced
 # here with FAKE_FORCE_GUARD — the step must NOT close its chain and drain past
 # the strand. The first two writes land; the assignee write is refused, so
-# HANDOFF_OK stays 0 and the arm escalates, waits, cancels the run, then drains.
+# HANDOFF_OK stays 0 and the arm files a gate, waits, cancels the run, then drains.
 printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/consume.sh"
 : > "$TMP/log"; : > "$TMP/cancel"; : > "$TMP/await"
 REFUSED_HANDOFF_RC=0
 LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_FORCE_GUARD=1 FAKE_LOG="$TMP/log" \
   bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || REFUSED_HANDOFF_RC=$?
 eq "$REFUSED_HANDOFF_RC|$(tr '\n' ';' < "$TMP/log")" \
-   "1|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "a refused handoff write escalates, waits, cancels the run, then drains — never closes the chain"
+   "1|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;GATE;AWAIT;CANCEL;DRAIN;" \
+   "a refused handoff write files a gate, waits, cancels the run, then drains — never closes the chain"
 has_cancel "refinery handoff refused" \
   && ok "the handoff-refusal cancel names why the run ended" \
   || bad "handoff-refusal cancel has no reason: $(cat "$TMP/cancel")"
@@ -495,7 +501,7 @@ has_cancel "--step mol-polecat-work.submit-and-exit" \
 # --- 3b. Fail-closed arms CANCEL their run before they drain. -----------------
 # An arm that drains leaving its step claimable hands it to a fresh polecat,
 # which re-derives the same refusal. Every arm below cancels the run of the
-# step it holds, through run-cancel.sh, after the work bead waits on the visit.
+# step it holds, through run-cancel.sh, after the work bead waits on the gate.
 run_gate polecat/tk-work '{"branch":"polecat/rb-uzy9.5"}' >/dev/null
 has_cancel "--step mol-polecat-work.submit-and-exit" \
   && ok "branch-shape refusal cancels the run of its own step" \
@@ -504,7 +510,7 @@ has_cancel "branch shape gate" \
   && ok "and the cancel carries the reason" \
   || bad "branch-shape cancel has no reason: $(cat "$TMP/cancel")"
 grep -q -- "tk-work --key polecat-branch-shape --formula mol-polecat-work" "$TMP/await" \
-  && ok "and the work bead waits on the branch-shape visit, re-slung through mol-polecat-work" \
+  && ok "and the work bead waits on the branch-shape gate, re-slung through mol-polecat-work" \
   || bad "branch-shape refusal recorded no wait: $(cat "$TMP/await")"
 
 run_resolve polecat/rb-uzy9.5 polecat/rb-uzy9.5 '{}' >/dev/null
@@ -514,8 +520,8 @@ has_cancel "--step mol-polecat-work.submit-and-exit" \
 has_cancel "no landing branch" \
   && ok "and names what must be set to release it" \
   || bad "target-resolution cancel has no reason: $(cat "$TMP/cancel")"
-eq "$(tr '\n' ';' < "$TMP/log")" "ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "and escalates, then waits, then cancels, before it drains"
+eq "$(tr '\n' ';' < "$TMP/log")" "GATE;AWAIT;CANCEL;DRAIN;" \
+   "and files a gate, then waits, then cancels, before it drains"
 
 run_consume '' >/dev/null
 has_cancel "LANDING_TARGET unset" \
@@ -862,17 +868,17 @@ eq "$(FAKE_TITLE_REFUSE=1 run_consume_title 'Compare heads, not names' tk-anchor
 # A cancel that did not land must not drain. run-cancel.sh exits non-zero when it
 # cannot prove which step this shell is executing or when gascity does not
 # confirm the cancel; draining there hands the step to a fresh polecat while the
-# run is still live. The escalation and the wait still ran first, so the log
-# carries ESCALATE, AWAIT, CANCEL, and no DRAIN.
+# run is still live. The gate and the wait still ran first, so the log carries
+# GATE, AWAIT, CANCEL, and no DRAIN.
 FAKE_CANCEL_RC=1
 eq "$(run_gate polecat/tk-agent-home '{}')" \
-   "1|ESCALATE;AWAIT;CANCEL;" \
+   "1|GATE;AWAIT;CANCEL;" \
    "branch-shape refusal: a cancel that did not land halts WITHOUT draining"
 run_resolve polecat/rb-uzy9.5 polecat/rb-uzy9.5 '{}' >/dev/null
-eq "$(tr '\n' ';' < "$TMP/log")" "ESCALATE;AWAIT;CANCEL;" \
+eq "$(tr '\n' ';' < "$TMP/log")" "GATE;AWAIT;CANCEL;" \
    "target resolution: a cancel that did not land halts WITHOUT draining"
 eq "$(run_consume '')" \
-   "1|ESCALATE;AWAIT;CANCEL;" \
+   "1|GATE;AWAIT;CANCEL;" \
    "the handoff guard: a cancel that did not land halts WITHOUT draining"
 FAKE_CANCEL_RC=0
 
@@ -880,25 +886,25 @@ FAKE_CANCEL_RC=0
 # recorded on the work bead leaves work nothing re-slings.
 FAKE_AWAIT_RC=1
 eq "$(run_gate polecat/tk-agent-home '{}')" \
-   "1|ESCALATE;AWAIT;" \
+   "1|GATE;AWAIT;" \
    "branch-shape refusal: a wait that did not land neither cancels nor drains"
 eq "$(run_consume '')" \
-   "1|ESCALATE;AWAIT;" \
+   "1|GATE;AWAIT;" \
    "the handoff guard: a wait that did not land neither cancels nor drains"
 FAKE_AWAIT_RC=0
 
-# An escalation that did not land must not wait, cancel or drain. escalate.sh
-# files the visit a human claims, so a cancel with no visit behind it is a run
-# ended on a question nobody is asked. When escalate.sh exits non-zero the arm
-# stops there, leaving the step claimed for the next worker.
-FAKE_ESC_RC=1
+# A gate that did not land must not wait, cancel or drain. human-gate.sh files
+# the gate a person clears, so a cancel with no gate behind it is a run ended on
+# a question nobody is asked. When human-gate.sh exits non-zero the arm stops
+# there, leaving the step claimed for the next worker.
+FAKE_GATE_RC=1
 eq "$(run_gate polecat/tk-agent-home '{}')" \
-   "1|ESCALATE;" \
-   "branch-shape refusal: a refused escalation neither cancels nor drains"
+   "1|GATE;" \
+   "branch-shape refusal: a refused gate neither cancels nor drains"
 eq "$(run_consume '')" \
-   "1|ESCALATE;" \
-   "the handoff guard: a refused escalation neither cancels nor drains"
-FAKE_ESC_RC=0
+   "1|GATE;" \
+   "the handoff guard: a refused gate neither cancels nor drains"
+FAKE_GATE_RC=0
 
 # --- 4. The snippets compose. -------------------------------------------------
 # They share variables across the step: the resolver reads $CURRENT_BRANCH from
@@ -1223,7 +1229,7 @@ run_store() {
 # The shipped snippet declares STORE_ONLY_RECORD empty — the polecat fills it
 # in. `armed` is that same snippet with the declaration filled, which is what
 # taking the arm looks like.
-printf '%s\n' "$STORE" | sed "s|{{base_branch}}|main|g" > "$TMP/store.sh"
+printf '%s\n' "$STORE" | sed "s|{{base_branch}}|main|g; s|{{convoy_id}}|tk-convoy|g" > "$TMP/store.sh"
 sed 's|^STORE_ONLY_RECORD=""$|STORE_ONLY_RECORD="tk-filed,gc-filed"|' "$TMP/store.sh" > "$TMP/store-armed.sh"
 bash -n "$TMP/store.sh" \
   && ok "extracted store-only arm is syntactically valid bash" \
@@ -1231,6 +1237,18 @@ bash -n "$TMP/store.sh" \
 [ "$(cmp -s "$TMP/store.sh" "$TMP/store-armed.sh"; echo $?)" = "1" ] \
   && ok "store-only arm ships STORE_ONLY_RECORD empty (the polecat opts in)" \
   || bad "store-only arm does not ship an empty STORE_ONLY_RECORD declaration"
+# The close brief is a quoted heredoc the polecat writes only when the record
+# finishes the bead, so the shipped one is empty and hands nothing off.
+eq "$(bash -c "$(sed -n '/^STORE_ONLY_DONE=/,/^)$/p' "$TMP/store.sh")"'
+printf "[%s]" "$STORE_ONLY_DONE"')" "[]" \
+   "store-only arm ships STORE_ONLY_DONE empty (the polecat writes a brief only for a record that finishes the bead)"
+# store-only-exit.sh runs before the arm's first write, so its refusal leaves
+# nothing written.
+CHECK_LN=$(grep -n 'store-only-exit.sh" --bead' "$TMP/store.sh" | head -1 | cut -d: -f1)
+RECORD_LN=$(grep -n 'halt_reason=store_only' "$TMP/store.sh" | head -1 | cut -d: -f1)
+{ [ -n "$CHECK_LN" ] && [ -n "$RECORD_LN" ] && [ "$CHECK_LN" -lt "$RECORD_LN" ]; } \
+  && ok "the store-only arm runs store-only-exit.sh before it records the exit" \
+  || bad "store-only-exit.sh must run before the record write (check ${CHECK_LN:-?}, record ${RECORD_LN:-?})"
 
 # Not opted in: the arm is inert. A polecat with a branch to push must fall
 # through to the gate having written nothing and drained nothing.
@@ -1295,6 +1313,12 @@ eq "$(run_store "$TMP/store-armed.sh" FAKE_DIRTY=' M formulas/mol-polecat-work.t
    "uncommitted changes: refuses, drains, writes nothing"
 eq "$(run_store "$TMP/store-armed.sh" FAKE_PUSHED='abc123	refs/heads/polecat/tk-work')|$(trace)" "1|DRAIN" \
    "branch already on origin: refuses, drains, writes nothing"
+# A check that cannot run is no clearance: with store-only-exit.sh gone from
+# the pack, the arm stops the same way.
+mv "$TMP/pack/assets/scripts/store-only-exit.sh" "$TMP/store-only-exit.sh.aside"
+eq "$(run_store "$TMP/store-armed.sh")|$(trace)" "1|DRAIN" \
+   "store-only-exit.sh missing from the pack: refuses, drains, writes nothing"
+mv "$TMP/store-only-exit.sh.aside" "$TMP/pack/assets/scripts/store-only-exit.sh"
 
 # The arm must not reach the push, and must not hand the bead to the refinery:
 # there is no branch, so a handoff would strand it in the merge queue forever.

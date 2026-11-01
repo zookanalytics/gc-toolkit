@@ -89,10 +89,10 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 # >>> validate-malformed-convoy-refuse
 if [ -z "$VALIDATION_PASS" ]; then
   echo "mol-validate needs an input convoy with exactly one tracked member" >&2
-  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-  : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
-  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key validate-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-validate cannot derive its validation-pass bead; the pour is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
-    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+  : "${SCRIPTS:?run-cancel.sh and human-gate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+  if ! "$SCRIPTS/human-gate.sh" --subject "{{convoy_id}}" --key validate-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-validate cannot derive its validation-pass bead; the pour is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
+    echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
     gc runtime drain-ack
   else
@@ -103,7 +103,7 @@ fi
 # <<< validate-malformed-convoy-refuse
 # >>> validate-withdrawn-pass
 # A pass closed before its run reached this step was withdrawn by whoever closed
-# it, so the run ends with no visit and nothing is ruled.
+# it, so the run ends with no gate and nothing is ruled.
 if [ "$(gc bd show "$VALIDATION_PASS" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
   CANCEL="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" && [ -x "$CANCEL" ] || CANCEL=""
   if [ -n "$CANCEL" ] && "$CANCEL" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass $VALIDATION_PASS was closed before its run ruled it"; then
@@ -127,10 +127,10 @@ REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # >>> validate-no-anchor-refuse
 if [ -z "$ANCHOR" ]; then
   echo "validation pass carries no anchor_bead; nothing to rule" >&2
-  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-  : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
-  if ! "$SCRIPTS/escalate.sh" --subject "$VALIDATION_PASS" --key validate-no-anchor --message "Validation pass $VALIDATION_PASS carries no anchor_bead, so there is nothing to rule; the dispatch is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
-    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+  : "${SCRIPTS:?run-cancel.sh and human-gate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+  if ! "$SCRIPTS/human-gate.sh" --subject "$VALIDATION_PASS" --key validate-no-anchor --message "Validation pass $VALIDATION_PASS carries no anchor_bead, so there is nothing to rule; the dispatch is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
+    echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass carries no anchor_bead; the dispatch is malformed and must be redone"; then
     gc runtime drain-ack
   else
@@ -146,15 +146,15 @@ gate-ensure.sh use, so a pass dispatched without one rules the correctness lane.
 
 A malformed dispatch cannot be ruled and never will be on a retry. Its convoy has
 no single tracked member, or that member carries no `anchor_bead`. So each refusal
-above files a visit through `escalate.sh` and, only if that visit landed, cancels
-the run through `run-cancel.sh`, which closes every step through gascity, then
-drains. A bare `exit 1` would leave the step claimed, and the pool would re-offer
-the same unrulable pass to a fresh validator once this session ended. A pass
-closed before its run reached this step was withdrawn, so its run is cancelled
-with no visit. The store-read guards further down are the opposite case: an
-unreadable or non-array finding ledger is transient, so those DO fail closed to
-a plain `exit 1` and a later claim retries once the store recovers. Do not
-convert them to a cancel.
+above files a human gate through `human-gate.sh` and, only if that gate landed,
+cancels the run through `run-cancel.sh`, which closes every step through
+gascity, then drains. A bare `exit 1` would leave the step claimed, and the pool
+would re-offer the same unrulable pass to a fresh validator once this session
+ended. A pass closed before its run reached this step was withdrawn, so its run
+is cancelled with no gate. The store-read guards further down are the opposite
+case: an unreadable or non-array finding ledger is transient, so those DO fail
+closed to a plain `exit 1` and a later claim retries once the store recovers. Do
+not convert them to a cancel.
 
 **3. Read the batch.** The findings to rule are the LIVE `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition
@@ -228,36 +228,36 @@ printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
       | select(((.metadata["finding.lane"] // "") ) == $lane)
       | select((.metadata["finding.disposition"] // "") == "unvalidated")
       | "\\(.id)\\t\\(.title)"'
-echo "open visits on anchor $ANCHOR's feedback:"
+echo "open human gates on anchor $ANCHOR's feedback:"
 "$SCRIPTS/finding.sh" open-visits --anchor "$ANCHOR"; VRC=$?
-[ "$VRC" -le 1 ] || { echo "cannot read the open visits on anchor $ANCHOR; refusing to rule its findings past them unread" >&2; exit 1; }
+[ "$VRC" -le 1 ] || { echo "cannot read the open human gates on anchor $ANCHOR; refusing to rule its findings past them unread" >&2; exit 1; }
 [ "$VRC" -eq 0 ] || echo "  (none)"
 ```
 
-**First, the questions the operator already holds.** The open visits printed
-above sit on this anchor's feedback: each tracks the anchor or one of its rework
-children, or holds a rework child through a blocks edge, which is how a rework
-parks itself on a question it put to the operator. Read what each one asks, from
-its title or `gc bd show <visit>`. A human finding whose question one of them
-already carries is ruled `needs-you` on that visit, never on its merits. The
-operator holds that decision. A decline or a deferral would overrule it, and the
-finding's close would let pr-facts.sh dismiss their review while they decide;
-must-fix would settle it as "keep the change and fix it". `needs-you --visit`
-leaves the finding open and the review changes-requested, files no second visit,
-and posts the visit's id to the raiser's thread. Once the operator has ruled
-that visit, or the one a fold hands it to, and the work the ruling calls for has
-landed, the finding closes on its own:
+**First, the questions the operator already holds.** The open human gates
+printed above sit on this anchor's feedback: each blocks the anchor or one of
+its live rework children, which is how a rework parks itself on a question it put
+to the operator. Read what each one asks, from its title or `gc bd show <gate>`.
+A human finding whose question one of them already carries is ruled `needs-you`
+on that gate, never on its merits. The operator holds that decision. A decline
+or a deferral would overrule it, and the finding's close would let pr-facts.sh
+dismiss their review while they decide; must-fix would settle it as "keep the
+change and fix it". `needs-you --visit <gate>` leaves the finding open and the
+review changes-requested, files no second gate, and posts the gate's id to the
+raiser's thread. Once a person rules on that gate, clearing it with a reason
+headed `ruled:`, and the work the ruling calls for has landed, the finding
+closes on its own:
 ```bash
-"$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --visit <V> --reason "<the question visit <V> already carries>"
+"$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --visit <G> --reason "<the question gate <G> already carries>"
 ```
-`finding.sh` enforces the case it can name exactly. When an open visit tracks or
-holds the rework child minted for the finding's own feedback batch, every other
-ruling of that human finding exits 3 and names the visit. An exit 3 is a ruling
+`finding.sh` enforces the case it can name exactly. When an open human gate
+blocks the rework child minted for the finding's own feedback batch, every other
+ruling of that human finding exits 3 and names the gate. An exit 3 is a ruling
 to redo, not a failure to stop the pass on: rule `needs-you --visit` on that
-visit, or, when the visit asks something else (a rebase, a red check, a stuck
-dispatch), repeat the ruling you meant with `--unrelated-visit <V>`, which
-records that judgment on the finding. A visit on the anchor itself refuses
-nothing, because an anchor gathers visits about anything; judge whether it
+gate, or, when the gate asks something else (a rebase, a red check, a stuck
+dispatch), repeat the ruling you meant with `--unrelated-visit <G>`, which
+records that judgment on the finding. A gate on the anchor itself refuses
+nothing, because an anchor gathers gates about anything; judge whether it
 carries the finding's question the same way.
 
 **The threshold** — this rig's `defer_policy`, rendered here at pour:
@@ -304,7 +304,7 @@ each disposition takes, so you never touch a dependency edge by hand:
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined --reason "<why this is not an objection>"
   ```
   A HUMAN finding — `finding.source` begins `human:` — you may decline on its
-  merits exactly as you decline a machine one, unless an open visit already
+  merits exactly as you decline a machine one, unless an open human gate already
   carries its question (see the first paragraph). The operator is a highly informed
   peer whose objection you weigh, not an authority you may never overrule; the old
   rule that only the raiser could withdraw their objection made their word gospel,
@@ -345,18 +345,18 @@ each disposition takes, so you never touch a dependency edge by hand:
 
 - **needs-you** — a human comment this pass genuinely cannot judge: it turns on
   product intent, a business fact, or a call that is the operator's to make, not
-  one you can weigh against the diff. `finding.sh` files a visit (board-visible,
-  routed to the operator), records its id as the reply the raiser's PR thread
-  receives, and leaves the finding OPEN. An open finding holds the review
-  changes-requested until the operator rules the visit, so the decision is visible
-  — a visit plus a PR comment — never a silent park. Once the operator has ruled
-  the visit, or the one a fold hands it to, and no fix unit on the finding's
-  lane, nor a ruling's rework child, is in flight, gate-ensure's `finding.sh
-  close-answered` closes the finding. A visit closed with no ruling releases
-  nothing. Reserve it for what you cannot judge: a comment you can weigh is
-  must-fix or declined, and one you can defer is deferred. A question an open
-  visit already carries is `needs-you --visit` on that visit, as the first
-  paragraph says, never a second visit.
+  one you can weigh against the diff. `finding.sh` files a human gate on the
+  anchor (board-visible, owed by the operator), records its id as the reply the
+  raiser's PR thread receives, and leaves the finding OPEN. An open finding holds
+  the review changes-requested until a person rules on the gate, so the decision
+  is visible — a gate plus a PR comment — never a silent park. Once a person has
+  cleared the gate with a reason headed `ruled:`, and no fix unit on the
+  finding's lane, nor a ruling's rework child, is in flight, gate-ensure's
+  `finding.sh close-answered` closes the finding. A gate cleared `moot:` or
+  `benign:` releases nothing. Reserve it for what you cannot judge: a comment you
+  can weigh is must-fix or declined, and one you can defer is deferred. A
+  question an open gate already carries is `needs-you --visit` on that gate, as
+  the first paragraph says, never a second gate.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
   ```
@@ -366,7 +366,7 @@ review round: a label and a sentence per point. With any human ruling, pass
 `--label "<a few words>"` when the comment has no bold headline, and with a
 decline, a deferral or needs-you pass `--answer "<one sentence>"` that starts by
 saying, in your own words, how you answered compared with what was asked
-(needs-you: the visit's question; it defaults to `--reason`). "Declined: …" and
+(needs-you: the gate's question; it defaults to `--reason`). "Declined: …" and
 "Noted; no change asked" are examples, not a template.
 
 **Check every exit status.** `finding.sh set-disposition` stamps the
@@ -377,16 +377,16 @@ exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
 leave the chain open for the next claim to resume. Two refusals are the
-exceptions, because each wrote nothing: exit 3, because an open visit already
-carries the finding's question, so re-rule that finding as the first paragraph
-says; and a P2's deferral, so rule it must-fix or declined. Carry on after
-either. The rulings that owe an answer ride the same guard: a declined finding's
-`--reply`, a deferred finding's follow-up and its reply, and a needs-you
-finding's visit and its reply are all recorded BEFORE the finding is closed or
-left open, and `set-disposition` exits non-zero if any does not stick — so an
-answer the raiser would never hear leaves the finding unruled and the pass open
-to retry rather than closing over a silent overrule or a deferral with no
-tracked follow-up.
+exceptions, because each wrote nothing: exit 3, because an open human gate
+already carries the finding's question, so re-rule that finding as the first
+paragraph says; and a P2's deferral, so rule it must-fix or declined. Carry on
+after either. The rulings that owe an answer ride the same guard: a declined
+finding's `--reply`, a deferred finding's follow-up and its reply, and a
+needs-you finding's gate and its reply are all recorded BEFORE the finding is
+closed or left open, and `set-disposition` exits non-zero if any does not
+stick — so an answer the raiser would never hear leaves the finding unruled and
+the pass open to retry rather than closing over a silent overrule or a deferral
+with no tracked follow-up.
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
 to the merge predicate, so an objection you leave unruled is silently dropped. An
