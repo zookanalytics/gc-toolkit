@@ -76,7 +76,7 @@ case "${1:-}" in
       '($d | split(",")) as $drop | with_entries(select(.key as $k | $drop | index($k) | not))')
     tmp=$(mktemp)
     # The real `gc bd create` stamps --metadata (a JSON object) atomically; model
-    # it so the visit carries the identity the create sets, not only what a
+    # it so the bead carries the identity the create sets, not only what a
     # follow-up update writes.
     jq -c --arg id "up-$n" --arg t "$title" --arg d "$body" --argjson m "$meta" \
       '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":$m,"notes":""}]' \
@@ -92,6 +92,9 @@ case "${1:-}" in
           case ",${STUB_DROP_KEYS:-}," in *",$k,"*) shift || true; continue ;; esac
           jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
             'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --description) shift
+          jq -c --arg id "$id" --arg d "${1:-}" \
+            'map(if .id == $id then .description = $d else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
     done
@@ -110,7 +113,22 @@ case "${1:-}" in
         jq -c --arg ids "$ids" '($ids | split("\n") | map(select(. != ""))) as $w
           | [ .[] | select(.id as $i | $w | index($i)) | . + {dependency_type: "blocks"} ]' "$STORE" ;;
     esac ;;
+  close)
+    # bd refuses the close of a bead an open gate blocks.
+    id="${2:-}"; reason=""; [ "${3:-}" = "--reason" ] && reason="${4:-}"
+    blockers=$(awk -F'|' -v b="$id" '$1 == b && $3 == "blocks" { print $2 }' "${STUB_DEPS:?}")
+    if jq -e --arg ids "$blockers" '($ids | split("\n")) as $w | any(.[]; (.id as $i | $w | index($i)) and .status != "closed")' "$STORE" >/dev/null; then
+      echo "cannot close $id: blocked by an open issue" >&2; exit 1
+    fi
+    tmp=$(mktemp)
+    jq -c --arg id "$id" --arg r "$reason" 'map(if .id == $id then .status = "closed" | .close_reason = $r else . end)' "$STORE" > "$tmp" && mv "$tmp" "$STORE" ;;
   gate)
+    if [ "${2:-}" = "resolve" ]; then
+      reason=""; [ "${4:-}" = "--reason" ] && reason="${5:-}"
+      tmp=$(mktemp)
+      jq -c --arg id "${3:-}" --arg r "$reason" 'map(if .id == $id then .status = "closed" | .close_reason = $r else . end)' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+      exit 0
+    fi
     [ "${2:-}" = "create" ] || { echo "gc bd stub: unsupported 'gate ${2:-}'" >&2; exit 2; }
     shift 2
     blocks=""; key=""; title=""; reason=""
@@ -252,7 +270,7 @@ has "$OUT" "files nothing once it is closed" "the repair does not send the calle
 
 # ── a re-run with a different security-policy reading is a divergence ─────
 # The reading is the operator's evidence that the send may be public, and a
-# re-run rewrites neither the bead nor its visit, so a changed reading is
+# re-run rewrites neither the bead nor its gate, so a changed reading is
 # refused under the default key too, rather than reported as a refresh.
 reset_state
 "$UF" --message "why" --security-policy "No security policy." \
@@ -268,7 +286,7 @@ has "$OUT" "parked there: No security policy." "the refusal shows the reading th
 has "$OUT" "yours:        SECURITY.md asks for vulnerabilities in private." "…beside the one the run brought"
 has "$OUT" "new --key" "the refusal's repair parks under a new key"
 hasnt "$OUT" "refreshed the ask" "the refusal does not report a refresh"
-eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no visit is refreshed with a reading the bead does not carry"
+eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no gate is asked for with a reading the bead does not carry"
 eq "$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")" "$PARKED_DESC" "the bead's description is as it was parked"
 
 # The label and the paste line bound the parked reading, so a reading that
@@ -558,6 +576,9 @@ has "$OUT" "--security-policy" "the refusal names the reading it needs"
 has "$OUT" "isSecurityPolicyEnabled securityPolicyUrl" "the refusal says how to find the policy"
 has "$OUT" "repos/otherowner/widget/private-vulnerability-reporting" "the refusal says how to check for private reporting"
 has "$OUT" "gh api --method POST repos/otherowner/widget/security-advisories/reports" "the refusal names this target's private report"
+has "$OUT" "ask on a bead of its own" "for a channel gh cannot reach, the refusal asks on a bead of its own, since a gate on the work bead would hold that work"
+has "$OUT" "human-gate.sh --subject <that bead> --key report-owed" "…and gives the ask's command"
+hasnt "$OUT" "escalate.sh" "…through the gate's own helper, not its old name"
 eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no human is asked to paste an unchecked public send"
 
 OUT=$("$UF" --message "why" -- gh issue create --repo ghe.example.com/otherowner/widget --title T --body B 2>&1)
@@ -579,7 +600,7 @@ eq "$?" "0" "a public send carrying the reading parks"
 DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
 has "$DESC" "Public: everyone who can see otherowner/widget can read it once it is sent." "the bead says the send is public"
 has "$DESC" "Security policy, as read before parking: $READING" "the bead carries the reading"
-has "$(cat "$STUB_ESC_LOG")" "Security policy, as read before parking: $READING" "the visit carries the reading beside the command"
+has "$(cat "$STUB_ESC_LOG")" "Security policy, as read before parking: $READING" "the gate carries the reading beside the command"
 
 # ── a private vulnerability report parks as gh api ────────────────────────
 # The private channel a security policy can name that gh reaches. gh api has
@@ -599,7 +620,7 @@ has "$(jq -r '.[] | select(.id == "up-1") | .title' "$STUB_STORE")" "private vul
 DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
 has "$DESC" "Private: the report goes to the maintainers of otherowner/widget, not to a public page." "the bead says the send is private"
 hasnt "$DESC" "Security policy, as read" "a report parked with no reading records none"
-has "$(cat "$STUB_ESC_LOG")" "Approve or decline an outbound private vulnerability report on otherowner/widget" "the visit names the private channel"
+has "$(cat "$STUB_ESC_LOG")" "Approve or decline an outbound private vulnerability report on otherowner/widget" "the gate names the private channel"
 PARKED=$(meta up-1 gh_command)
 eval "set -- $PARKED"
 eq "$#" "11" "the parked report re-splits into the same argument count"
@@ -835,6 +856,30 @@ has "$OUT" "parked there: no reading" "…which says the send carries none"
 eq "$(gates)" "1" "…files no second gate"
 eq "$(desc "$GATE")$(desc up-1)" "$GATE_DESC$BEAD_DESC" "…and leaves both descriptions as they were"
 
+# The refusal's repair runs as it prints: a stale send's gate blocks its close,
+# so the repair withdraws that gate under the key the filing used, then closes
+# the bead, and the corrected send parks under a key of its own.
+reset_state
+real_rerun --security-policy "$POLICY_READ" >/dev/null
+GATE=$(jq -r '[.[] | select((.issue_type // "") == "gate")] | .[0].id // ""' "$STUB_STORE")
+OUT=$(real_rerun --security-policy "SECURITY.md asks for vulnerabilities in private.")
+eq "$?" "2" "a changed reading is refused, and the refusal prints its repair"
+if gc bd close up-1 --reason "replaced" >/dev/null 2>&1; then bad "the gate blocks a close that skips the repair's first step"
+else ok "the gate blocks a close that skips the repair's first step"; fi
+REPAIR=$(printf '%s\n' "$OUT" | sed -n 's/.*close up-1 with the reason: //p' | sed 's/<the reason>/a corrected send replaces it/g')
+hasin "$REPAIR" "--retract --subject up-1" && ok "the repair names the stale send's gate" || bad "the repair names the stale send's gate (got '$REPAIR')"
+eval "$REPAIR" >/dev/null 2>&1
+eq "$?" "0" "the repair runs as printed"
+row() { jq -r --arg id "$1" --arg k "$2" '.[] | select(.id == $id) | .[$k] // ""' "$STUB_STORE"; }
+eq "$(row "$GATE" status)" "closed" "…withdraws the gate"
+eq "$(row "$GATE" close_reason)" "moot: a corrected send replaces it" "…with the reason, as nobody answered the ask"
+eq "$(row up-1 status)" "closed" "…and closes the stale send"
+eq "$(row up-1 close_reason)" "a corrected send replaces it" "…with the same reason"
+OUT=$(real_rerun --key corrected --security-policy "SECURITY.md asks for vulnerabilities in private.")
+eq "$?" "0" "the corrected send parks under a new key"
+has "$OUT" "parked issue create on get-convex/agent" "…as a send of its own"
+eq "$(gates)" "2" "…with a gate of its own"
+
 # ── the skill's examples park as written ─────────────────────────────────────
 # Agents take these commands from the gc-toolkit.external-issue skill, so each of
 # its parks runs through this script with only its placeholders filled.
@@ -846,7 +891,8 @@ skill_example() { # skill_example <text the block holds> — the block, filled, 
     f { b = b $0 "\n" }
   ' "$SKILL_DOC" \
     | sed -e 's#"$(gc <binding> scripts-dir)/upstream-finding.sh"#"$UF"#' \
-          -e 's#<owner>#otherowner#g' -e 's#<name>#widget#g' -e 's#<[^>]*>#x#g'
+          -e 's#"$(gc <binding> scripts-dir)/human-gate.sh"#"$HERE/human-gate.sh"#' \
+          -e 's#<that bead>#up-9#g' -e 's#<owner>#otherowner#g' -e 's#<name>#widget#g' -e 's#<[^>]*>#x#g'
 }
 for example in "gh issue create" "security-advisories/reports"; do
   reset_state
@@ -860,6 +906,21 @@ for example in "gh issue create" "security-advisories/reports"; do
     *) has "$(desc up-1)" "Private: the report goes to the maintainers" "…as a private report" ;;
   esac
 done
+
+# A channel gh cannot reach is asked on a bead of its own, through the real
+# helper: the ask's first line is what the board shows, and the whole of it is
+# what the person reads.
+reset_state
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-upstream-finding-test.XXXXXX")
+jq -c '. + [{"id":"up-9","status":"open","assignee":"","title":"a finding","description":"","metadata":{},"notes":""}]' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+skill_example "report-owed" > "$TMP/example.sh"
+grep -q '"$HERE/human-gate.sh"' "$TMP/example.sh" || bad "the skill's ask for a channel gh cannot reach calls the helper"
+OUT=$(HERE="$HERE" bash "$TMP/example.sh" 2>&1)
+eq "$?" "0" "the skill's ask for a channel gh cannot reach files through the real helper"
+has "$(cat "$STUB_DEPS")" "up-9|gate-" "…as a gate that blocks the bead it names"
+GATE=$(jq -r '[.[] | select((.issue_type // "") == "gate")] | .[0].id // ""' "$STUB_STORE")
+eq "$(row "$GATE" title)" "Send or decline a report to x" "…titled by the ask's first line"
+has "$(desc "$GATE")" "clear this gate with ruled: sent or ruled: declined" "…and telling the person how to answer it"
 
 eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh was never invoked by any case"
 

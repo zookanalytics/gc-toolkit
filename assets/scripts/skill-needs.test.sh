@@ -661,7 +661,7 @@ have "the outbound-sends doc links the skill" '../skills/external-issue/SKILL.md
 fences=$(grep -c '^ *```' "$OUTBOUND")
 [ "$fences" = 0 ] && ok "the outbound-sends doc holds no command block: each command lives in the skill" \
     || bad "the outbound-sends doc holds no command block: each command lives in the skill" "$fences fence lines"
-for probe in 'upstream-finding.sh" \' 'isSecurityPolicyEnabled securityPolicyUrl' '/private-vulnerability-reporting' 'security-advisories/reports' 'escalate.sh" --subject'; do
+for probe in 'upstream-finding.sh" \' 'isSecurityPolicyEnabled securityPolicyUrl' '/private-vulnerability-reporting' 'security-advisories/reports' 'human-gate.sh" --subject'; do
     have "the skill gives the command: $probe" "$probe" "$EXTERNAL"
     lacks "…and the doc does not" "$probe" "$OUTBOUND" "each command lives only in the skill"
 done

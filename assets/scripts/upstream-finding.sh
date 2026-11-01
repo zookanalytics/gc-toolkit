@@ -59,7 +59,7 @@ usage: upstream-finding.sh --message <why this send is warranted>
   --key      names the SITUATION: one bead per key, so a re-run of the same
              finding refreshes rather than files again. A re-run with another
              command or security-policy reading is refused: neither the bead
-             nor its visit changes in place. [A-Za-z0-9._-] only.
+             nor its human gate changes in place. [A-Za-z0-9._-] only.
              Default: target repo, verb and a digest of the command
   --         everything after it is the command, verbatim. It must name its
              target with `--repo <owner/name>`, or a private vulnerability
@@ -426,12 +426,12 @@ else
     warn "\`$VERB\` on $TARGET is public: once pasted, everyone who can see $TARGET can read it. Read $TARGET's security policy first, and pass what it says as --security-policy \"<where it is or that there is none, and why it lets this report be public>\"."
     warn "  GitHub says whether $TARGET has one and where, its owner's default included: gh api ${HOST_ARG}graphql -f query='{repository(owner:\"$OWNER\",name:\"$NAME\"){isSecurityPolicyEnabled securityPolicyUrl}}'"
     warn "  If it asks for this finding in private, park the private channel it names instead. GitHub's private vulnerability reporting is one wherever gh api ${HOST_ARG}repos/$OWNER/$NAME/private-vulnerability-reporting reads {\"enabled\":true}: gh api ${HOST_ARG}--method POST repos/$OWNER/$NAME/security-advisories/reports -f summary=<one line> -f description=<the report>"
-    warn "  A private channel gh cannot reach, such as an email address, is the operator's to use: ask through escalate.sh with the report in its message, and park nothing public."
+    warn "  A private channel gh cannot reach, such as an email address, is the operator's to use, so park nothing public. A human gate on your work bead would hold that work, which does not wait on the send, so ask on a bead of its own, with the report in the message: $HUMAN_GATE --subject <that bead> --key report-owed --message \"<the channel, and the report to send there>\""
     exit 2
   fi
 fi
 # A re-run reads the parked reading back from between these two labels, so the
-# bead's description and the visit are written with them.
+# bead's description and the gate's message are written with them.
 POLICY_LABEL="Security policy, as read before parking:"
 PASTE_LABEL="Paste this, unedited, to send it:"
 [ "$POLICY_SET" = 1 ] && CHANNEL="$CHANNEL
@@ -497,7 +497,7 @@ fi
 # command they were shown while the caller believes the new one is parked. A
 # changed security-policy reading is a divergence under any key, because the
 # reading is the operator's evidence that the send may be public, and a re-run
-# rewrites neither the bead nor its visit.
+# rewrites neither the bead nor its gate.
 if [ -n "$EXISTING" ]; then
   EXISTING_SHOW=$(bd_json show "$EXISTING")
   # Only a bead that was actually read can be called divergent. A failed read

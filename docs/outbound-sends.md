@@ -60,9 +60,9 @@ A parked send is pasted as it stands, so whether its text may be public is
 settled before it is parked. An issue, a PR or a comment is public the moment
 it is pasted, so the script parks one only with `--security-policy`: the
 target's security policy as the preparer read it, and why it lets this report
-be public. The reading rides the bead and the visit beside the command, so the
-operator weighs it before pasting. A public send without one is refused, and the
-refusal prints how to read that target's policy.
+be public. The reading rides the bead and its human gate beside the command, so
+the operator weighs it before pasting. A public send without one is refused, and
+the refusal prints how to read that target's policy.
 
 When the policy asks for a finding like this one to be reported privately, the
 parked send is the private channel the policy names. GitHub's private
@@ -76,11 +76,10 @@ so a report without either is refused, as is a method other than POST. The
 private report is the one `gh api` write the path parks.
 
 A private channel `gh` cannot reach, such as an email address, is the operator's
-to use, so it reaches them as a question through
-[`escalate.sh`](../assets/scripts/escalate.sh), with the report in the message
-and nothing public parked. That question sits on a bead of its own, because an
-open visit holds its subject's merge and the agent's work does not wait on the
-send.
+to use, so it reaches them as a human gate, with the report in its message and
+nothing public parked. That gate sits on a bead of its own. On the agent's work
+bead it would take the bead out of the pool's offer, hold its merge and refuse
+its close, and that work does not wait on the send.
 
 ## What keeps the command pasteable
 

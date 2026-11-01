@@ -56,8 +56,9 @@ else is a public send.
   -- gh issue create --repo <owner>/<name> --title "<title>" --body "<body>"
 ```
 
-This files one bead carrying the exact command, ready to paste, and a visit
-asks a human for the send. A pull request or a comment parks the same way.
+This files one bead carrying the exact command, ready to paste, and a human
+gate on it that the operator clears once the send is made or declined. A pull
+request or a comment parks the same way.
 `--message` is what the operator reads to decide, and the `gh` body is written
 for the maintainer. Name the target with `--repo` and write the body inline: the
 operator pastes the command later, from their own shell, where an implicit
@@ -86,13 +87,17 @@ the pull request publishes, and any file in a public repository.
 
 A private channel `gh` cannot reach, such as a security email address, is the
 operator's to use, and so is a project hosted off GitHub. Park nothing public.
-File a bead of its own for the finding (the `gc-toolkit.work` skill), because an
-open visit holds its subject's merge and your work does not wait on this. Then
-ask on that bead:
+File a bead of its own for the finding (the `gc-toolkit.work` skill). A human
+gate on your work bead would take it out of the pool's offer, hold its merge and
+refuse its close, and your work does not wait on this. Then ask on that bead:
 
 ```bash
-"$(gc <binding> scripts-dir)/escalate.sh" --subject <that bead> --key report-owed \
-  --message "<the channel the policy names, and the report to send there>. Closing <that bead> answers this, sent or declined."
+"$(gc <binding> scripts-dir)/human-gate.sh" --subject <that bead> --key report-owed \
+  --message "Send or decline a report to <the channel the policy names>
+
+<the report to send there>
+
+Once you have sent it, or decided not to, clear this gate with ruled: sent or ruled: declined, then close <that bead>."
 ```
 
 ## Then carry on
