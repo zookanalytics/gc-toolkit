@@ -81,8 +81,10 @@
 #   (SKILL*)  --skill files a new conversation whose ask is the lens brief
 #   (HOLD-*)  the open human gates that hold a bead, read through gctk: the prompt
 #             offers each on the numbers after the conversations, a pick engages
-#             it as if it were named, an engage that asks nothing names them, and
-#             one pointed at a gate or a conversation does not read them. A read
+#             it as if it were named, or takes the bead it was picked from when
+#             several wait on the gate, with a conversation to take or none, an
+#             engage that asks nothing names them, and one pointed at a gate or a
+#             conversation does not read them. A read
 #             that does not answer is said and stops nothing. (HOLD-REAL) runs the
 #             real gctk reader over the fixture of an anchor, its rework and the
 #             gate on the rework.
@@ -1878,6 +1880,21 @@ export GATE_WAITERS='[{"id":"tk-subj","status":"open"},{"id":"tk-rework","status
 fresh_gctk; run_fresh_tty '2\n\n' tk-subj --no-attach
 eq "$RC" 0 "(HOLD-FROM) a gate on the bead and another exits 0"
 has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(HOLD-FROM) …and the bead's own conversation replies to it"
+export HAVE_CONV=0
+fresh_gctk; run_fresh_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(HOLD-FROM-NEW) a gate on the bead and another, with no conversation to take, exits 0"
+has "$OUT" "tk-gate is a gate about tk-subj" "(HOLD-FROM-NEW) …saying which bead it takes"
+hasnt "$OUT" "the one bead still waiting" "(HOLD-FROM-NEW) …which is one of two still waiting on it"
+has "$CALLED" "--deps tracks:tk-subj" "(HOLD-FROM-NEW) …filing a conversation about the bead the gate was picked from"
+hasnt "$CALLED" "--deps tracks:tk-rework" "(HOLD-FROM-NEW) …not the other bead waiting on it"
+has "$CALLED" "--title Approve the rollout" "(HOLD-FROM-NEW) …titled with what the gate asks"
+has "$CALLED" "Answer the human gate tk-gate on tk-subj" "(HOLD-FROM-NEW) …asking what the gate asks"
+has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(HOLD-FROM-NEW) …replying to the gate"
+has "$CALLED" "session new converse-opus --alias tk-new" "(HOLD-FROM-NEW) …and holding it in a sitting"
+fresh_gctk; run_fresh tk-gate --no-attach --no-input
+eq "$RC" 4 "(HOLD-FROM-NEW) the same gate named outright is still refused"
+hasnt "$CALLED" "bd create" "(HOLD-FROM-NEW) …filing nothing"
+export HAVE_CONV=1
 export GATE_WAITERS='[{"id":"tk-other","status":"open"},{"id":"tk-rework","status":"open"}]'
 fresh_gctk; run_fresh_tty '2\n\n' tk-subj --no-attach
 eq "$RC" 4 "(HOLD-FROM) a gate on two other beads is refused"

@@ -96,7 +96,8 @@ starts nothing, and with none it says nothing waits and starts nothing.
 Engaging a bead or a PR names each open human gate that holds it, reached
 through its open blocks edges, by the reader the PR's held: gate label and the
 board's row read: the interactive prompt offers each, and picking one engages
-it as if it were named, and any other engage says how to.
+it, taking this bead when several wait on the gate and this is one of them, and
+any other engage says how to.
 --model picks the converse variant (opus, the work tier, is the default),
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
@@ -2175,6 +2176,9 @@ open_join() {
 # wording. The conversation is filed in the bead's own store. It leaves the
 # conversation's id in CONV and OPEN_FILED at 1 when it filed it, or 0 when it
 # joined one already in the queue, for engage, which runs it in its own shell.
+# Engage sets OPEN_GATE_FROM to the bead it settled on, so a gate several beads
+# wait on files the conversation about that bead, as engage took it (take_bead).
+OPEN_GATE_FROM=""
 cmd_open() {
     bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""; OPEN_FILED=""
     while [ $# -gt 0 ]; do
@@ -2219,7 +2223,7 @@ cmd_open() {
     verify_subject "$bead" open "No conversation filed." || exit $?
     # <<< open-subject-exists
     # A gate or a conversation id names the bead the conversation is about.
-    take_bead open "No conversation filed."
+    take_bead open "No conversation filed." "$OPEN_GATE_FROM"
     if [ "$TAKE_BEAD" != "$bead" ]; then
         open_what=gate; [ -n "$TAKE_CONV" ] && open_what=conversation
         echo "$PROG: open: $bead is a $open_what about $TAKE_BEAD — the conversation is about $TAKE_BEAD" >&2
@@ -3468,7 +3472,7 @@ engage_take() {
         if [ -n "$named_conv" ]; then
             echo "$PROG: engage: $bead is a conversation on $TAKE_BEAD" >&2
         else
-            echo "$PROG: engage: $bead is a gate about $TAKE_BEAD, the one bead still waiting on it — engaging $TAKE_BEAD, and the conversation replies to the gate" >&2
+            echo "$PROG: engage: $bead is a gate about $TAKE_BEAD — engaging $TAKE_BEAD, and the conversation replies to the gate" >&2
         fi
         bead="$TAKE_BEAD"
         verify_subject "$bead" engage "Nothing spawned." || exit $?
@@ -3959,7 +3963,8 @@ engage_new_subject_cleanup() {
 # ends the sitting.
 #
 # The argument is the bead the operator picked off the board. A conversation id
-# names its own conversation. A gate names the one bead still waiting on it, and
+# names its own conversation. A gate names the one bead still waiting on it, or,
+# picked from a bead's list, that bead when it is one of several waiting on it, and
 # the conversation engage lands on replies to the gate (bd's replies-to edge),
 # read back before any sitting starts, so the sitting finds the gate among its
 # conversation's replies. Engage warns when it starts a sitting while another
@@ -4287,8 +4292,10 @@ cmd_engage() {
             [ -n "$engage_body" ] && set -- "$@" --body "$engage_body"
         else
             # Pointed at a gate, the conversation is filed through the gate, so
-            # its title and ask are what the gate asks.
+            # its title and ask are what the gate asks, and it is about the bead
+            # engage took from that gate.
             echo "$PROG: engage: no conversation on $bead — filing one, then engaging it" >&2
+            OPEN_GATE_FROM="$bead"
             set -- "${pointed_gate:-$bead}"
         fi
         # cmd_open runs in this shell and leaves in CONV the conversation it

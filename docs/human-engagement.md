@@ -230,10 +230,11 @@ reached from the bead through its open `blocks` edges (`gctk pr-status gates`,
 `prstatus.HoldingGates`), the reader the PR's `held: gate` label and the board's
 row read, so a gate on a rework the anchor waits on is offered from the PR. The
 prompt lists them after the bead's conversations, and picking one engages it as
-if it were named. An engage that asks nothing, as `--no-input`, the tmux picker
-and the board's route do, names each and how to engage it, and an engage pointed
-at a gate or a conversation does not look for others. A conversation on the bead
-answers none of them until it replies to one.
+if it were named, except that a gate several beads wait on takes the bead it was
+picked from when that bead is one of them. An engage that asks nothing, as
+`--no-input`, the tmux picker and the board's route do, names each and how to
+engage it, and an engage pointed at a gate or a conversation does not look for
+others. A conversation on the bead answers none of them until it replies to one.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
