@@ -27,16 +27,17 @@ beads upstream `6ebaacba8` (`gastownhall/beads`) and Gas City upstream `f3c4ca5b
 |---|---|---|
 | `bd dep tree <id>` (`GetDependencyTreeInTx`, `isDependencyTreeEdge` in `internal/storage/issueops/dependency_tree.go`) | A bounded, cycle-safe walk down from a bead | It follows every dependency type except `relates-to`, so it walks parent-child and tracks edges too, and a bead reached first through one of those is listed once under that edge (the first-visit rule on `TreeResult.Nodes`, `issueops/treewalker.go`). `cmd/bd/dep.go` omits `--type` on purpose and says to use `bd dep list --type`. Its `--status` filters what it shows, and a walk must not pass through a closed blocker. A walk that must follow only open `blocks` edges cannot be rebuilt from its rows |
 | `WalkTreeRequest` (`issueops/treewalker.go`) | The same walk as a library call: `RootID`, `Direction`, `MaxDepth`, `Status`, `MaxRows` | It has no edge-type field, and its walk counts every dependency type but `relates-to` as an edge |
+| `bd graph <id> --json` (`loadGraphSubgraph` in `cmd/bd/graph.go`, `loadGraphSubgraphUOW` in `cmd/bd/graph_proxied_server.go`, `GraphNode.DependsOn`) | One read of a bead's connected component: a row per bead with its status and await type, and each node's `blocks` edges | It reaches that component through every edge type in both directions, a read per bead, so its cost is the size of the bead's whole family. On one live PR anchor in an epic it took about 8 minutes at a load of 20 to 50, where this walk answers in 0.3 s; on an anchor with a small family it took 0.25 s. A read that fails inside its walk is skipped on both routes, so a partial component reads as a whole one, which a reader of what holds a PR cannot take |
 | `bd dep list <id> --type blocks` | One bead's blockers, whole rows | One level. Over several ids it prints bare edges with no far bead, so a status needs a second read |
 | `bd gate list <id>` (`cmd/bd/gate.go`) | "ONLY the gates that block that issue" | One level. It cannot see a gate on a rework from the PR |
 | `bd show <ids> --json` | A row per id, each dependency's far bead with its `dependency_type`, `status`, `issue_type`, `await_type` and `title` | One level per call, and this is the read the walk composes |
-| `GET /v0/beads/graph/{rootID}` (`humaHandleBeadGraph`, `collectBeadGraph` in `internal/api/handler_beads.go`) | A root's member set: its root id and parent-child closure, with a convoy's members | That is membership, not the `blocks` graph, and `beads.Bead` (`internal/beads/beads.go`) carries no await type, so no API bead can be told to be a human gate |
+| `GET /v0/beads/graph/{rootID}` (`humaHandleBeadGraph` in `internal/api/huma_handlers_beads.go`, `collectBeadGraph` in `internal/api/handler_beads.go`) | A root's member set: its root id and parent-child closure, with a convoy's members | That is membership, not the `blocks` graph, and `beads.Bead` (`internal/beads/beads.go`) carries no await type, so no API bead can be told to be a human gate |
 | `bdBurnDependents` (`cmd/gc/bd_split_judges.go`) | Gas City's own transitive walk | It walks dependents through any edge type, and it is private to `gc`. It asks bd "one level at a time" as this walk does, so upstream has no primitive it could use either |
 
-No primitive returns what the bead asks for, so the pack composes `bd show` a
-level at a time. A release of `bd dep tree` that takes `--type`, keeps a bead
-reached by a second path and stops at a closed blocker retires the walk in
-`gates.go`, and only that.
+No primitive returns what the bead asks for at the cost a label pass can pay, so
+the pack composes `bd show` a level at a time. A release of `bd dep tree` that
+takes `--type`, keeps a bead reached by a second path and stops at a closed
+blocker retires the walk in `gates.go`, and only that.
 
 ## Why the shell asks gctk
 
@@ -99,7 +100,14 @@ On those 7, `held` read both `gate` and `blocked`. Each gate carries
 `gc.routed_to=human`, a stamp from before the native-gates cutover, so
 `personBlocker` counted it a second time. `human-gate.sh` stamps no route, so a gate
 it files reads once. A human gate now counts as a gate whatever its route, which the
-board's comment on `demand` already said.
+board's comment on `demand` already said. Five of the 7 lose `blocked` by that. The
+other two keep it, because each also waits on a task routed to a person.
+
+Because no live PR had a gate behind another bead, the walk was also checked
+against an answer computed apart from it: the same closure, taken from each store's
+`issues` and `dependencies` tables, for every open bead with an open blocker. Over
+395 such beads in six stores, one of them two edges from its gate, `gctk pr-status
+gates` and the board's library read each gave the tables' answer for all 395.
 
 ## What this leaves
 
@@ -109,4 +117,8 @@ board's comment on `demand` already said.
 - The supervisor backend walks nothing, because `beads.Bead` carries no await type,
   so it knows no human gate at all. `tk-1tfzr71.24`, which retires the embedded
   store reader, carries that requirement.
+- The walk stays in the bead's store. `bd show` lists no edge onto another store's
+  bead, and the board's hydration drops one, so a gate in another store counts
+  nowhere. Three open beads carried such a `blocks` edge on 2026-11-01, none of them
+  a PR anchor.
 - `tk-1sks8ez` waits on this bead and reads what landed.
