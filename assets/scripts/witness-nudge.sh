@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # witness-nudge — give a witness whose pane has gone quiet its next patrol turn.
 #
-# A witness's patrol loop lives in its conversation. When a turn ends, whether
-# after a pass or partway through a cycle, the session sits at its prompt until
-# something types into it. So each pass of the witness-nudge order reads the
-# session list once and nudges every active witness with nobody attached whose
-# pane has printed nothing, and which has had no nudge, for QUIET_SECS.
+# The backstop to the controller's reassignment restart, which runs a witness's
+# next pass once next-iteration has left its next wisp open. A session that ends
+# its turn short of that step, or holding its wisp, gets no restart and sits at
+# its prompt until something types into it. So each pass of the witness-nudge
+# order reads the session list once and nudges every active witness with nobody
+# attached whose pane has printed nothing, and which has had no nudge, for
+# QUIET_SECS.
 #
 # A working pane animates a spinner, so it never reads as quiet, and a witness
 # in its inter-cycle wait is left alone. A nudge is the only action. Nothing here

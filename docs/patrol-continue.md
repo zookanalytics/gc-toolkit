@@ -1,33 +1,41 @@
 ---
 name: Patrol continue
-description: Read it when a patrol session idles between cycles, or before changing the deacon's Stop hooks or the witness-nudge order. Covers what gives the deacon and the witness their next cycle after a turn ends, when the hook lets a turn end, its loop guard, and when the order nudges.
+description: Read it when a patrol session idles between cycles, or before changing how the witness ends a pass, the deacon's Stop hooks or the witness-nudge order. Covers what gives the deacon and the witness their next cycle after a turn ends, why the witness waits before its pour, when the hook lets a turn end, its loop guard, and when the order nudges.
 ---
 
 # Patrol continue
 
 The deacon's patrol is a loop of `mol-deacon-patrol` wisps and the witness's
-is a loop of `mol-witness-patrol` wisps, one cycle each. Each loop lives in its
-session's conversation: next-iteration pours the next wisp and the session goes
-on to it. The model ends its turn after a cycle anyway, and that leaves the
-session idle at its prompt. Each patrol has its own way back:
+is a loop of `mol-witness-patrol` wisps, one cycle each. They continue
+differently:
 
-- A `Stop` hook hands the deacon the next cycle at every turn boundary. The
-  implementation is `overlays/cycle-recycle/.claude/hooks/patrol-continue.sh`,
-  staged into the deacon's work dir by the
-  `overlay_dir = "overlays/cycle-recycle"` patch in `pack.toml`, beside the
-  cycle-recycle hook.
-- The `witness-nudge` order nudges a witness whose pane has gone quiet. The
-  implementation is `orders/witness-nudge.toml` and
+- **The witness ends its turn at the end of every pass**, and Gas City's
+  reassignment restart runs the next one. Its `next-iteration` step waits out the
+  cycle, pours and assigns the next wisp, leaves it open, burns the current one
+  and stops. A fresh session then adopts that wisp through its startup reconcile.
+  This is the ending of Gas Town's witness plus the wait
+  ([built-once-target.md](built-once-target.md#patrol)).
+- **The `witness-nudge` order is the witness's backstop**, for a session the
+  restart does not reach: one that ended its turn short of `next-iteration`, or
+  still holding its wisp. The implementation is `orders/witness-nudge.toml` and
   `assets/scripts/witness-nudge.sh`.
+- **The deacon's loop lives in its conversation.** Its next-iteration pours the
+  next wisp and the session goes on to it. The model ends its turn after a cycle
+  anyway, which leaves the session idle at its prompt, so a `Stop` hook hands it
+  the next cycle at every turn boundary. The implementation is
+  `overlays/cycle-recycle/.claude/hooks/patrol-continue.sh`, staged into the
+  deacon's work dir by the `overlay_dir = "overlays/cycle-recycle"` patch in
+  `pack.toml`, beside the cycle-recycle hook.
 
-This document is the policy behind both.
+This document is the policy behind all three.
 
 ## Scope
 
 **Mandate.** Whether the deacon's and the witness's patrols continue after a
-turn ends: what gives each its next cycle, when the hook lets a turn end, its
-loop guard and recovery, how the hook and the context recycle share a turn
-boundary, and when the order nudges a witness.
+turn ends: what gives each its next cycle, how the witness ends a pass and spaces
+its passes, when the hook lets a turn end, its loop guard and recovery, how the
+hook and the context recycle share a turn boundary, and when the order nudges a
+witness.
 
 **Boundaries.** The context recycle, which ends a patrol session's
 conversation past its threshold, is [cycle-recycle.md](cycle-recycle.md).
@@ -43,34 +51,61 @@ against consent UI from a heartbeat agent is
 
 ## What gives a patrol its next cycle
 
-Gas City ships no continuation for a named session in mode `always`, which both
-patrols are, and what it ships nearby leaves the gap:
+Gas City ships one continuation for a named session in mode `always`, which both
+patrols are, and what it ships nearby leaves the rest to the pack:
 
+- Gas City restarts a `wake_mode = "fresh"` session whose assigned bead has
+  changed, on a new conversation. Once the next wisp is assigned and the current
+  one is gone, that restart needs nothing more from the model. It is held off
+  while the bead the session last recorded is still open and assigned to it, so a
+  session whose turn ended partway through a cycle is not restarted. On the legacy
+  reconciler it is also held off while the session holds any in-progress claim, so
+  neither is a session that marked its next wisp in progress.
 - Gas City exempts such a session from `idle_timeout` and `max_session_age`, so
   the `idle_timeout` in each `agent.toml` never stops it, and an idle patrol
   session stays up with nothing to do.
-- A configured nudge arrives at most once per session, when the first turn ends.
-- Gas City restarts a `wake_mode = "fresh"` session whose assigned bead has
-  changed, so a new wisp assigned to a patrol session can restart it. That
-  restart serves a reassignment. It is held off while the bead the session last
-  recorded is still open and assigned to it, so a session whose turn ended
-  partway through a cycle is not restarted. On the legacy reconciler it is also
-  held off while the session holds any in-progress claim, so neither is a session
-  that adopted its next wisp before ending its turn.
+- A configured nudge arrives at most once per session, near its start.
 - The `[session]` stall timeouts restart an idle session on the legacy reconciler
   only. They are city-wide, and no pack can set them. The v2 work ladder that
   replaces them paces pool seats, and a patrol session is not one.
 
-The patrol formulas and the prompts tell each session to keep cycling, and the
-model still ends its turn after a cycle summary, or after a failure partway
-through a cycle. A remedy that depends on an agent following an instruction
-fails at exactly the moment it is needed, so the pack composes one from outside
-the model's decision: a `Stop` hook for the deacon, and a nudge from an order for
-the witness. [The Gas City search](../specs/tk-r4c0g67/gas-city-search.md)
-records what was read and how the two compare.
+So a witness that reaches `next-iteration` continues without further help. The
+deacon's formula and prompt tell it to keep cycling, and the model still ends its
+turn after a cycle summary or after a failure partway through a cycle, and a
+witness can stop short of its last step the same way. A remedy that depends on an
+agent following an instruction fails at exactly the moment it is needed, so for
+those shapes the pack composes one from outside the model's decision: a `Stop` hook
+for the deacon, and a nudge from an order for the witness.
+[The Gas City search](../specs/tk-r4c0g67/gas-city-search.md) records what was read,
+how the candidates compare, and the measurements behind the numbers below.
+
+## How the witness ends a pass
+
+`next-iteration` runs in this order, and the order is the design:
+
+1. **It waits `event_timeout` (600s).** A wait after the pour never holds: a session
+   with its next wisp assigned and its current one burned is restarted about 40
+   seconds into that wait. While the session holds its current wisp in progress the
+   restart holds off, so a wait before the pour runs to its end. Gas Town's step has
+   no wait, because it credits an idle policy that Gas City refuses on an always-on
+   session, so there the passes run back to back.
+2. **It pours and assigns the next wisp and burns the current one.** A guard that
+   fires leaves the current wisp in place and ends the turn, and the order gives that
+   session its next try.
+3. **It writes `IDLE: no work, exiting turn.` and stops.** The restart comes about a
+   minute later.
+
+The session never marks its next wisp in progress or works it in the same
+conversation, because a session holding in-progress work gets no restart. The
+startup adopt marks a wisp in progress because there a fresh session is taking its
+own wisp.
+
+A pass takes about a minute, so the passes run about twelve minutes apart. A rig's
+witness then costs about 120 sessions a day, each a short conversation.
 
 ## The witness's order
 
+The order is the backstop for a session the restart does not reach.
 `orders/witness-nudge.toml` runs `assets/scripts/witness-nudge.sh` every 5m,
 city-wide. The script reads the session list once. It nudges each witness that
 is `active`, has nobody attached, and whose pane has printed nothing and taken
@@ -82,12 +117,14 @@ bead, keeps no state and files nothing.
   spinner, so a witness in a long tool call or its inter-cycle wait reads as busy,
   and it is left alone. The bound sits over the formula's 600s `event_timeout`, so
   a witness that moved that wait to the background is not nudged out of it, and the
-  script's suite fails when the default drops to it. A pane that takes a nudge and
+  script's suite fails when the default drops to it. A pane that has written the
+  idle line is restarted well inside the bound. A pane that takes a nudge and
   does nothing gets another one after the bound, not one per pass, because
   `last_nudge_delivered_at` counts as well.
-- **The pace.** A witness that goes on to its next wisp in the same turn is never
-  nudged. One that ends its turn waits out the bound and the next pass, which is
-  up to about 16 minutes at the declared interval, and then takes one cycle.
+- **The pace.** A witness that reaches `next-iteration` is never nudged. One that
+  stops short waits out the bound and the next pass, which is up to about 16 minutes
+  at the declared interval, and then takes one pass, which ends at `next-iteration`
+  like any other.
 - **An attached operator.** A session with a client attached is skipped, because
   the person at the pane can prompt it. The next pass after they leave counts the
   same quiet clock.
