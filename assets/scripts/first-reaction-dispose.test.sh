@@ -189,7 +189,8 @@ case "$1 ${2:-}" in
     # FAKE_DEP_FAILS refuses every add, the close exit's hold that did not land,
     # and FAKE_DEP_REFUSES refuses an edge onto that bead. FAKE_DEP_PASS is a
     # command the stub runs after each add, the deferred-dispatch pass running
-    # right after the write.
+    # right after the write. FAKE_DEP_LIST_FAILS is a list the store refuses,
+    # with nothing on stdout.
     case "${3:-}" in
       add)
         case " $* " in
@@ -214,7 +215,9 @@ case "$1 ${2:-}" in
         [ "$_rc" -eq 0 ] && printf '%s\n' "$_edges" | sed 's/^/EDGE /' >> "$FAKE_LOG"
         [ -z "${FAKE_DEP_PASS:-}" ] || "$FAKE_DEP_PASS"
         exit "$_rc" ;;
-      list) printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;;
+      list)
+        [ -z "${FAKE_DEP_LIST_FAILS:-}" ] || exit 1
+        printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;;
     esac ;;
   "bd close") printf 'CLOSE %s\n' "$*" >> "$FAKE_LOG" ;;
   # The real human-gate.sh, which one case runs in place of the stubbed helper,
@@ -1138,6 +1141,48 @@ export FAKE_DEPS_JSON='[{"id":"tk-gate1","issue_type":"gate","await_type":"human
 run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
 eq "$RC" "0" "(RULSUPER) a re-run of the same reaction succeeds"
 hasnt "--retract" "$LOG" "(RULSUPER) …and withdraws nothing: the open gate asks this reaction's question"
+# Which gates still ask is bd-lib.sh's one rule: a human gate under this key, in
+# any status but closed, whatever its case. Each gate below carries another
+# reaction's question, so only a gate the rule reads as open is withdrawn.
+# fr_gate <status> [await-id] [issue-type] -> a store whose gate is a superseded reaction's.
+fr_gate() {
+  jq -cn --arg s "$1" --arg k "${2:-first-reaction}" --arg i "${3:-gate}" \
+    '[{id: "tk-gate0", issue_type: $i, await_type: "human", await_id: $k, status: $s, title: "an older reaction asked this"}, {id: "tk-gate1"}]'
+}
+for GS in pinned in_progress; do
+  FAKE_DEPS_JSON="$(fr_gate "$GS")"; export FAKE_DEPS_JSON
+  run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+  has "GATE --retract --subject tk-sub --key first-reaction" "$LOG" "(RULRULE) a gate at status $GS still asks, so it is withdrawn"
+done
+for GS in closed CLOSED Closed; do
+  FAKE_DEPS_JSON="$(fr_gate "$GS")"; export FAKE_DEPS_JSON
+  run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+  eq "$RC" "0" "(RULRULE) a ruling beside a gate at status $GS succeeds"
+  hasnt "--retract" "$LOG" "(RULRULE) …and withdraws nothing: that gate asks nothing"
+done
+FAKE_DEPS_JSON="$(fr_gate open another-key)"; export FAKE_DEPS_JSON
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+hasnt "--retract" "$LOG" "(RULRULE) an open gate under another key is not this reaction's to withdraw"
+FAKE_DEPS_JSON="$(fr_gate open first-reaction task)"; export FAKE_DEPS_JSON
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+hasnt "--retract" "$LOG" "(RULRULE) a bead that is not a gate is not a question to withdraw"
+# A read that fails cannot say whether a gate already asks, and neither can a
+# store's answer that is not an array.
+export FAKE_DEP_LIST_FAILS=1
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+eq "$RC" "4" "(RULREAD) a gate read the store refuses stops the exit"
+has "could not read the human gates of tk-sub" "$ERR" "(RULREAD) …saying so"
+hasnt "GATE " "$LOG" "(RULREAD) …and neither withdraws nor files a gate"
+unset FAKE_DEP_LIST_FAILS
+export FAKE_DEPS_JSON='{"error":"no issue found"}'
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+eq "$RC" "4" "(RULREAD) a gate read that answers with something other than an array stops the exit"
+hasnt "GATE " "$LOG" "(RULREAD) …and neither withdraws nor files a gate"
+GC_BD_LIB="$TMP/no-such-bd-lib.sh" run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
+eq "$RC" "4" "(RULREAD) a script that cannot source bd-lib.sh stops as a runtime failure"
+has "cannot source bd-lib.sh" "$ERR" "(RULREAD) …naming the file"
+hasnt "GATE " "$LOG" "(RULREAD) …before it files anything"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1","issue_type":"gate","await_type":"human","await_id":"first-reaction","status":"open","title":"needs a ruling: which default"}]'
 # The helper titles a gate with its message's first line. A takeaway that spans
 # lines is stored on the board as one line, and the gate's title has to be that
 # same line, or each re-run reads its own gate as a superseded reaction's.
@@ -1740,6 +1785,11 @@ has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --reason first r
     "$LOG" "(PIN) …and to the deferred dispatch it arms"
 has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed --db $TMP/rig/.beads" \
     "$LOG" "(PIN) …and to the close of the reaction bead"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
+has "DEP bd dep list tk-sub --type blocks --json --db $TMP/rig/.beads" "$LOG" \
+    "(PIN) …and to the read of the subject's human gates"
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 unset FAKE_RIG_PATH
 
 # ── The invariant that outranks every exit ───────────────────────────────────

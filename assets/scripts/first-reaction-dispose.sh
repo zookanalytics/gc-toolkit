@@ -105,6 +105,11 @@ die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 4; }
 usage_die() { printf '%s: %s\n' "$PROG" "$*" >&2; usage; exit 2; }
 note() { printf '%s: %s\n' "$PROG" "$*" >&2; }
 
+# The one read of a bead's human gates, and the rule of which of them still hold
+# it. Exposes bd_open_human_gates, which reads through _bd_call.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || die "cannot source bd-lib.sh from $HERE"
+
 usage() {
     cat >&2 <<'EOF'
 Usage:
@@ -450,6 +455,7 @@ RIG_PATH="${_path:-}"
 # form every other caller in the pack uses.
 # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
 gc_bd() { gc bd "$@" $BD_DB_ARGS; }
+_bd_call() { gc_bd "$@"; }
 
 # ── Read the subject once; the guards below all ask its metadata ──────
 # The store is pinned, so this reads the subject's own rig. The stand-down, the
@@ -1042,10 +1048,7 @@ if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
     [ -x "$HUMAN_GATE" ] \
         || die "human-gate.sh not found beside this script ($HUMAN_GATE); no gate was filed on $BEAD. Restore it and re-run this command."
     TITLE_WANT=$(printf '%s' "$TAKEAWAY" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')
-    FR_GATES=$(gc_bd dep list "$BEAD" --type blocks --json 2>/dev/null | scrub | jq -c 'if type == "array"
-        then [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human"
-                         and (.await_id // "") == "first-reaction" and (.status // "") != "closed") ]
-        else error("not an array") end' 2>/dev/null) \
+    FR_GATES=$(bd_open_human_gates "$BEAD" first-reaction) \
         || die "could not read the human gates of $BEAD, so whether a first-reaction gate already asks is unknown; nothing was filed. Clear the cause and re-run this command."
     if printf '%s' "$FR_GATES" | jq -e --arg t "$TITLE_WANT" \
         'any(.[]; (.title // "") != $t and ((.description // "") | tostring | split("\n")[0]) != $t)' >/dev/null 2>&1; then
