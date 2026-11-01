@@ -42,12 +42,23 @@
 #       without jq or a readable manifest the run still succeeds and adds no
 #       name;
 #   (s) a detached HEAD on a commit the tip lacks moves once a ref reaches it,
-#       such as a squash-landed branch's remote-tracking ref or a tag;
+#       such as a squash-landed branch's remote-tracking ref, a tag or another
+#       branch;
 #   (t) a per-target branch left behind by a rewritten default branch is reset
 #       to the tip when another ref reaches its commits;
 #   (u) a per-target branch holding a commit only it reaches is not reset: the
 #       attached worktree is detached at the tip and the branch keeps the commit;
-#   (v) a worktree on a branch that is not its own stays where it is.
+#   (v) a worktree on a branch that is not its own stays on it, and fast-forwards
+#       to its upstream when it can;
+#   (w) a worktree on its own branch with an uncommitted tracked change stays put
+#       with the change intact and one stderr line, both when the branch has
+#       diverged and when the next commit touches the changed file;
+#   (x) a per-target branch with no upstream moves to the tip and gains one;
+#   (y) a remote-tracking ref alone, a tag alone or another branch alone reaching
+#       a per-target branch's commit is enough to reset that branch;
+#   (z) when git cannot read a commit's reach or the tree's status, a detached
+#       worktree stays where it is and no branch is reset;
+#   (aa) a repository with no origin is left where it is, silently.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -351,7 +362,8 @@ has "$(git -C "$W" status --porcelain)" "?? .agents/skills/unread-skill" "(r) an
 
 # --- (s) a detached HEAD on a commit the tip lacks moves once a ref reaches it,
 #         because a squash merge never brings a branch's commits onto the tip. A
-#         remote-tracking ref reaches it first, then only a tag. -----------------
+#         remote-tracking ref reaches it first, then only a tag, then only another
+#         branch. ----------------------------------------------------------------
 P="$TMP/s"; mkdir -p "$P"
 run "$P/agentS" agentS
 BR=$(branch_of "$P/agentS")
@@ -374,6 +386,13 @@ advance_remote s2.txt
 ERR=$(sync_stderr "$P/agentS" agentS)
 eq "$(head_of "$P/agentS")" "$(tip)"         "(s) a HEAD only a tag reaches moves to the tip"
 eq "$ERR" ""                                 "(s) and prints nothing"
+git -C "$P/agentS" checkout -q --detach "$LANDED"
+git -C "$RIG" tag -d s-pin >/dev/null
+git -C "$RIG" branch s-keep "$LANDED"
+advance_remote s3.txt
+ERR=$(sync_stderr "$P/agentS" agentS)
+eq "$(head_of "$P/agentS")" "$(tip)"         "(s) a HEAD only another branch reaches moves to the tip"
+eq "$ERR" ""                                 "(s) and that prints nothing either"
 
 # --- (t) a rewritten default branch leaves a per-target branch unable to
 #         fast-forward. Another ref reaches its commits, so it is reset to the
@@ -418,7 +437,8 @@ eq "$(head_of "$P/agentU")" "$(tip)"         "(u) the next sync still reaches th
 eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(u) and the branch still keeps its commit"
 
 # --- (v) a branch that is not the worktree's own is someone's work, so it stays
-#         where it is, silently, even when it cannot fast-forward. --------------
+#         where it is, silently, even when it cannot fast-forward. One that can
+#         takes its upstream's commits and stays on the branch. ------------------
 P="$TMP/v"; mkdir -p "$P"
 run "$P/agentV" agentV
 git -C "$P/agentV" checkout -q -b person-branch
@@ -429,6 +449,117 @@ ERR=$(sync_stderr "$P/agentV" agentV)
 eq "$(head_of "$P/agentV")" "$THEIRS"        "(v) a branch not its own is not moved"
 eq "$(branch_of "$P/agentV")" "person-branch" "(v) and stays checked out"
 eq "$ERR" ""                                 "(v) and says nothing"
+git -C "$P/agentV" checkout -q --track -b person-ff origin/main
+advance_remote v2.txt
+ERR=$(sync_stderr "$P/agentV" agentV)
+eq "$(head_of "$P/agentV")" "$(tip)"         "(v) a branch not its own fast-forwards when it can"
+eq "$(branch_of "$P/agentV")" "person-ff"    "(v) and stays on that branch"
+eq "$ERR" ""                                 "(v) and that says nothing either"
+
+# --- (w) a worktree on its own branch with an uncommitted change to a tracked
+#         file stays put with the change intact and one stderr line. The branch
+#         has diverged, then the next commit touches the changed file, which is
+#         what a home with a tracked settings change meets. ----------------------
+P="$TMP/w"; mkdir -p "$P"
+run "$P/agentW" agentW
+BR=$(branch_of "$P/agentW")
+echo mine > "$P/agentW/mine-w.txt"; git -C "$P/agentW" add mine-w.txt; git -C "$P/agentW" commit -qm mine-w
+BEFORE=$(head_of "$P/agentW")
+echo edited >> "$P/agentW/README.md"
+advance_remote w1.txt
+ERR=$(sync_stderr "$P/agentW" agentW)
+eq "$(head_of "$P/agentW")" "$BEFORE"        "(w) a diverged branch with a tracked change not moved"
+eq "$(branch_of "$P/agentW")" "$BR"          "(w) and still on it"
+eq "$(tail -n 1 "$P/agentW/README.md")" "edited" "(w) uncommitted change intact"
+has "$ERR" "uncommitted changes to tracked files" "(w) warning names the reason"
+eq "$(lines "$ERR")" "1"                     "(w) exactly one stderr line"
+advance_remote w2.txt
+run "$P/agentW2" agentW2 --sync
+BEFORE=$(head_of "$P/agentW2")
+echo edited > "$P/agentW2/w2.txt"
+echo next > "$SRC/w2.txt"; git -C "$SRC" add -A; git -C "$SRC" commit -qm w2-next
+git -C "$SRC" push -q "$TMP/remote.git" main
+ERR=$(sync_stderr "$P/agentW2" agentW2)
+eq "$(head_of "$P/agentW2")" "$BEFORE"       "(w) a change the next commit touches blocks the fast-forward"
+eq "$(cat "$P/agentW2/w2.txt")" "edited"     "(w) that change intact too"
+has "$ERR" "uncommitted changes to tracked files" "(w) and the warning names that reason"
+
+# --- (x) a per-target branch with no upstream has nothing to fast-forward to, so
+#         it moves to the tip and tracks the default branch from then on. --------
+P="$TMP/x"; mkdir -p "$P"
+run "$P/agentX" agentX
+BR=$(branch_of "$P/agentX")
+git -C "$P/agentX" branch -q --unset-upstream
+advance_remote x1.txt
+ERR=$(sync_stderr "$P/agentX" agentX)
+eq "$(head_of "$P/agentX")" "$(tip)"         "(x) its own branch with no upstream reaches the tip"
+eq "$(branch_of "$P/agentX")" "$BR"          "(x) and stays on it"
+eq "$(git -C "$P/agentX" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(x) which now tracks origin/main"
+eq "$ERR" ""                                 "(x) a safe move prints nothing"
+
+# --- (y) one ref of each kind, alone, reaches the commit on a per-target branch
+#         that cannot fast-forward, which is enough to reset the branch. ----------
+for KIND in remote tag branch; do
+    P="$TMP/y-$KIND"; mkdir -p "$P"; A="agentY$KIND"
+    run "$P/$A" "$A"
+    BR=$(branch_of "$P/$A")
+    echo "$KIND" > "$P/$A/y-$KIND.txt"; git -C "$P/$A" add "y-$KIND.txt"; git -C "$P/$A" commit -qm "y-$KIND"
+    PINNED=$(head_of "$P/$A")
+    case "$KIND" in
+        remote) PIN="refs/remotes/origin/y-pin-$KIND"; git -C "$RIG" update-ref "$PIN" "$PINNED" ;;
+        tag)    PIN="refs/tags/y-pin-$KIND"; git -C "$RIG" tag "y-pin-$KIND" "$PINNED" ;;
+        branch) PIN="refs/heads/y-pin-$KIND"; git -C "$RIG" branch "y-pin-$KIND" "$PINNED" ;;
+    esac
+    advance_remote "y-$KIND-tip.txt"
+    ERR=$(sync_stderr "$P/$A" "$A")
+    eq "$(head_of "$P/$A")" "$(tip)"         "(y) a commit only a $KIND ref reaches: moved to the tip"
+    eq "$(branch_of "$P/$A")" "$BR"          "(y) on its per-target branch, reset ($KIND)"
+    eq "$(git -C "$RIG" rev-parse "$PIN")" "$PINNED" "(y) the $KIND ref still reaches the commit"
+    eq "$ERR" ""                             "(y) a safe move prints nothing ($KIND)"
+done
+
+# --- (z) when git cannot answer, nothing moves that could lose a commit. A failed
+#         reachability read or status leaves a detached worktree where it is, and
+#         a failed reachability read never resets a branch. ----------------------
+REAL_GIT=$(command -v git)
+# git_failing <subcommand> — a PATH entry whose git fails that one subcommand.
+git_failing() {
+    local d="$TMP/fail-$1"; mkdir -p "$d"
+    printf '#!/bin/sh\ncase " $* " in *" %s "*) exit 1 ;; esac\nexec "%s" "$@"\n' "$1" "$REAL_GIT" > "$d/git"
+    chmod +x "$d/git"; echo "$d"
+}
+P="$TMP/z"; mkdir -p "$P"
+run "$P/agentZ" agentZ
+git -C "$P/agentZ" checkout -q --detach
+BEFORE=$(head_of "$P/agentZ")
+advance_remote z1.txt
+ERR=$(PATH="$(git_failing rev-list):$PATH" sync_stderr "$P/agentZ" agentZ)
+eq "$(head_of "$P/agentZ")" "$BEFORE"        "(z) a detached HEAD whose reach cannot be read stays"
+has "$ERR" "$P/agentZ"                       "(z) and the warning names the worktree"
+ERR=$(PATH="$(git_failing status):$PATH" sync_stderr "$P/agentZ" agentZ)
+eq "$(head_of "$P/agentZ")" "$BEFORE"        "(z) a worktree whose status cannot be read stays"
+has "$ERR" "git status failed"               "(z) and the warning says so"
+run "$P/agentZ2" agentZ2
+BR=$(branch_of "$P/agentZ2")
+echo mine > "$P/agentZ2/mine-z.txt"; git -C "$P/agentZ2" add mine-z.txt; git -C "$P/agentZ2" commit -qm mine-z
+MINE=$(head_of "$P/agentZ2")
+advance_remote z2.txt
+ERR=$(PATH="$(git_failing rev-list):$PATH" sync_stderr "$P/agentZ2" agentZ2)
+eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(z) a branch whose reach cannot be read is not reset"
+eq "$(head_of "$P/agentZ2")" "$(tip)"        "(z) and the worktree reaches the tip"
+eq "$(branch_of "$P/agentZ2")" "DETACHED"    "(z) detached, off that branch"
+
+# --- (aa) a repository with no origin has nothing to sync with, so the worktree
+#          stays where it is and the run says nothing. ----------------------------
+NO="$TMP/noorigin"; git clone -q "$TMP/remote.git" "$NO"
+P="$TMP/aa"; mkdir -p "$P"; W="$P/agentAA"
+eq "$(rc_of "$NO" "$W" agentAA)" "0"         "(aa) the worktree is made"
+git -C "$W" checkout -q --detach
+BEFORE=$(head_of "$W")
+git -C "$NO" remote remove origin
+ERR=$( { sh "$SCRIPT" "$NO" "$W" agentAA --sync >/dev/null; } 2>&1 || echo "exit $?")
+eq "$(head_of "$W")" "$BEFORE"               "(aa) not moved"
+eq "$ERR" ""                                 "(aa) and says nothing"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -10,7 +10,8 @@
 # pre_start (agents/*/agent.toml) before the session exists, so the agent
 # starts IN the worktree. An existing worktree is never re-created: it gets
 # whatever provisioning it lacks, and --sync brings it to the default-branch
-# tip unless that would lose a commit or a tracked change (sync_worktree).
+# tip unless that would lose a commit or a tracked change, or it sits on a
+# branch that is not its own (sync_worktree).
 #
 # docs/warrants.md, "Agent home provisioning", says why a home is not a
 # `gc worktree` tree.

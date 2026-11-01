@@ -67,6 +67,14 @@ repository:
   fits creation only, with values a re-dispatch can reproduce.
 - No core formula and no pack in `gascity-packs` calls it. Core's `mol-polecat-commit`
   and `mol-scoped-work` use `git worktree add`.
+- `ensure` returns its evidence for the caller to publish on the bead, and the
+  controller reads it there: `gc.work_dir`, `gc.work_branch` and the `gc.worktree_*`
+  keys (`worktreeSpecForBead`). With all of them it starts a pool session inside that
+  tree (`verifiedPoolTriggerWorkDir`), it leaves a start candidate out when they do
+  not verify, and `gc hook --claim` from any other session skips the bead. So a tree
+  that goes at hand-off has to take that evidence with it, which tk-1tfzr71.43
+  carries. A fresh bead has no such evidence, since no caller runs `ensure` before a
+  session exists, so its session still starts in a home.
 
 **Agent homes.** Gas Town's polecat and refinery run
 `gastown/assets/scripts/worktree-setup.sh` at `pre_start`, the script this pack's
@@ -165,19 +173,25 @@ and no stage or orphan directory existed anywhere under `.gc/worktrees/`.
 - **Not built.** Anything that makes a slot that cannot move visible to someone. The
   bead's note allowed for that, but the census leaves no such slot: every stuck home
   moves under the new rule. The one stderr line a refusal prints stays unread, as
-  before. If a home ever holds a commit no ref reaches, or a tracked change that
-  blocks its fast-forward, it stays silently at its old checkout.
+  before. If a home ever holds a commit no ref reaches, a tracked change that blocks
+  its fast-forward, or a branch that is not its own, it stays silently at its old
+  checkout. tk-d3daseg holds the question of whether that needs a signal.
 
 ## How this copy differs from Gas Town's
 
 Each is a difference from `gastown/assets/scripts/worktree-setup.sh` at
-0b0d96250f66, with its reason and what ends it.
+0b0d96250f66, with its reason and what ends it. The rows cover every difference in
+where a home ends up and whether its session starts. Checks with no case here, such
+as Gas Town's ref-format check on the branch name, are left out.
 
 | This script | Gas Town's | Why | Ends when |
 |---|---|---|---|
 | A refusal prints a line, exits 0, and the session starts on the checkout it has | Exits 1, so the session does not start | A pool slot that cannot start takes no work, and these homes can carry a tracked `.claude/settings.json` change | Never by itself: a choice to weigh if refusals start to matter |
+| A failed fetch does not stop a sync, which then reads the last tip it fetched | Refuses and exits 1 | The same as the row above: a slot that cannot reach origin still takes work | The exit-1 row above is adopted |
+| A repository with no origin is left alone with no line, and an unset `origin/HEAD` is a refusal | Refuses a repository with no origin, and tries `git remote set-head origin --auto` first | No case: all 317 homes have both | A case appears |
 | Only tracked changes block a sync | Any untracked file blocks it | gc writes untracked files into a home, such as `.worktree-stale` | Gas City writes nothing untracked into a home |
-| A branch holding a commit of its own detaches the worktree at the tip | Refuses and exits 1 | A stuck home silently loses every rule landed after it | The exit-1 row above is adopted |
+| Its own branch, when it cannot fast-forward, is reset if another ref reaches its commits, and otherwise the worktree detaches at the tip and the branch keeps them | Refuses and exits 1 whenever that branch holds a commit the default branch lacks | A stuck home silently loses every rule landed after it, and neither move loses a commit | The exit-1 row above is adopted |
+| A home on any other branch stays there, fast-forwarding to that branch's upstream when it can | Switches a clean home to its own branch, and the other branch keeps its commits | No measured reason either way, so this change leaves the script's existing rule alone: no home is on such a branch, and no home's reflog shows one checked out in the last 30 days | A home is found stuck on one, and then Gas Town's rule goes in |
 | Reachability also counts tags | Counts branches and remote-tracking refs | The pack's archive tags pin commits, and Gas City's reaper counts tags too | The tags are gone |
 | The redirect and excludes are completed on every run | Excludes every run, redirect only at creation | A hook failure or a kill can leave a half-built tree | Gas Town's script completes the redirect |
 | Hides only the skill links gc's manifest names under `.agents/skills/`, and adds `.runtime/` and `.beads.gate.lock` | Hides all of `.agents/skills/` | Some repositories track skills there, this one included, and a person's new skill must still show | gc excludes its own links |
