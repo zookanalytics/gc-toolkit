@@ -201,7 +201,7 @@ if [ -z "$WHY" ]; then
       WHY="possibly in flight in another session's tree: ${TREE_FINDING:-work-tree-holder.sh exited $TREE_RC with no finding}"
       GATE_KEY=polecat-duplicate-dispatch
       AWAIT=1
-      GATE_MESSAGE="Possible duplicate dispatch on $WORK_BEAD_ID: it is $WHY. Convoy {{convoy_id}} dispatched it to $GC_SESSION_NAME. Its run is cancelled and no workspace was touched. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead. $WORK_BEAD_ID waits on this gate, and clearing it re-slings $WORK_BEAD_ID, whose next run builds only if no live run holds the tree; to stand down instead, close $WORK_BEAD_ID first." ;;
+      GATE_MESSAGE="Possible duplicate dispatch on $WORK_BEAD_ID: it is $WHY. Convoy {{convoy_id}} dispatched it to $GC_SESSION_NAME. Its run is cancelled and no workspace was touched. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead. $WORK_BEAD_ID waits on this gate, and clearing it re-slings $WORK_BEAD_ID, whose next run builds only if no live run holds the tree; to stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-duplicate-dispatch --ruling '<why>'." ;;
   esac
   if [ "$TREE_RC" != 0 ]; then
     NOTE_LABEL="Duplicate dispatch refused; run cancelled"
@@ -481,7 +481,7 @@ if [ -n "$BRANCH" ]; then
         echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."
         SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
         : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
-        if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Its run is cancelled and nothing was touched. Reconcile them, then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+        if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Its run is cancelled and nothing was touched. Reconcile them, then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-branch-divergence --ruling '<why>'."; then
           echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
         elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-branch-divergence --formula mol-polecat-work; then
           echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -502,7 +502,7 @@ if [ -n "$BRANCH" ]; then
 # >>> workspace-setup-missing-branch-decline
     SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
-    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Its run is cancelled and nothing was touched. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Its run is cancelled and nothing was touched. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-missing-branch --ruling '<why>'."; then
       echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-missing-branch --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1416,7 +1416,7 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     fi
     SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
-    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-branch-shape --ruling '<why>'."; then
       echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-branch-shape --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1471,7 +1471,7 @@ else
     echo "Set it, then re-run submit-and-exit:  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
     SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
-    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-no-landing-target --ruling '<why>'."; then
       echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-no-landing-target --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1505,7 +1505,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
     echo "LANDING_TARGET unset — run step 1b before this arm."
     SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
-    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-landing-target-unset --ruling '<why>'."; then
       echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-landing-target-unset --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1762,7 +1762,7 @@ if [ -z "${LANDING_TARGET:-}" ]; then
   echo "LANDING_TARGET unset — run step 1b before this arm."
   SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
   : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
-  if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was handed off. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+  if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was handed off. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-landing-target-unset --ruling '<why>'."; then
     echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
   elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-landing-target-unset --formula mol-polecat-work; then
     echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1804,7 +1804,7 @@ if [ "$HANDOFF_OK" != "1" ]; then
     echo "HANDOFF REFUSED: a gc bd update in the handoff exited non-zero and rolled itself back, so $WORK_BEAD_ID is not open, assigned to $REFINERY_TARGET, and unrouted. The branch is pushed, and this run is cancelled after the wait below lands."
     SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
-    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery, and its run is cancelled. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery, and its run is cancelled. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK_BEAD_ID --key polecat-handoff-refused --ruling '<why>'."; then
       echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-handoff-refused --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2

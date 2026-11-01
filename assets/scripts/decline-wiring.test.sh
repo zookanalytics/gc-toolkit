@@ -20,6 +20,9 @@
 #     declares no quiet window, or bring-current-audit.sh's ask, because a wait
 #     needs an open gate and a quiet window files none for a situation a person
 #     already answered moot or benign;
+#   * STAND-DOWN: a gate that arms a re-sling tells a person how to rule the other
+#     way, through stand-down.sh under the gate's own key, and nothing tells them
+#     to close a bead the gate blocks, which bd refuses;
 #   * ORDER, executed: workspace-setup's missing-branch arm files the gate,
 #     records the wait, cancels, then drains, and stops at the first part that
 #     does not land;
@@ -204,6 +207,48 @@ run() {
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
 args() { cat "$TMP_ARGS/$1" 2>/dev/null; }
+
+# --- 2c. A wait says how to rule the other way. ---------------------------------
+# bd refuses to close a bead an open gate blocks, and clearing the gate re-slings
+# armed work, so the one way to rule that it will not go on is stand-down.sh.
+CLOSE_FIRST=$(git -C "$ROOT" grep -n -E 'closes the work bead first|close \$[A-Z_]+,? (first|then clear)' \
+  -- 'formulas/*.toml' 'template-fragments/*.md' 'agents/*' 'skills/*' 'assets/scripts/await-ruling.sh' 2>/dev/null || true)
+eq "$CLOSE_FIRST" "" "nothing tells a person to close a bead before they clear the gate that blocks it"
+grep -q 'stand-down\.sh' "$ROOT/template-fragments/polecat-doctrine.template.md" \
+  && ok "the doctrine names stand-down.sh for a ruling not to proceed" \
+  || bad "the doctrine does not name stand-down.sh for a ruling not to proceed"
+if TOML_PY="$(tomllib_python)"; then
+  for f in mol-polecat-work mol-refinery-patrol; do
+    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+import re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+text = "\n".join(st.get("description", "") for st in d.get("steps", []))
+checked, bad = 0, []
+def judge(key, message):
+    global checked
+    checked += 1
+    if not re.search(r"stand-down\.sh \$[A-Z_]+ --key " + re.escape(key) + r" --ruling ", message):
+        bad.append(key)
+for key in set(re.findall(r'await-ruling\.sh" "\$[A-Z_]+" --key ([a-z][a-z-]*) ', text)):
+    messages = [l for l in text.split("\n") if "--key %s --message" % key in l]
+    if not messages:
+        bad.append(key + " has no message")
+    for message in messages:
+        judge(key, message)
+for key, message in re.findall(r'GATE_KEY=([a-z-]+)\n\s*AWAIT=1\n\s*GATE_MESSAGE="([^\n]*)', text):
+    judge(key, message)
+print("%d|%s" % (checked, "; ".join(bad)))
+PY
+)
+    case "$out" in
+      0\|*) bad "$f: no gate that arms a re-sling was found" ;;
+      *\|) ok "$f: each of its ${out%%|*} gates that arm a re-sling names stand-down.sh under its own key" ;;
+      *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
+    esac
+  done
+else
+  echo "skip - stand-down wiring check: $TOML_PY"
+fi
 
 # --- 3. The missing-branch arm, in order. ----------------------------------------
 extract mol-polecat-work workspace-setup-missing-branch-decline \

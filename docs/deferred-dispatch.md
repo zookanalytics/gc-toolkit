@@ -107,6 +107,14 @@ deferred-dispatch.sh list --json # the armed beads alone, as bd lists them: no h
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
 
+A person who rules that armed work a human gate holds will not go on runs
+`stand-down.sh <bead> --key <situation-key> --ruling "<why>"`. Answering the gate
+first would send the work, and bd refuses to close a bead an open gate blocks,
+so it removes the arm, ends the run beneath the bead, answers the gate and closes
+the bead, in that order. The pass reads the arm once more just before it slings,
+so a pass already running cannot send the work past that disarm: a pass that read
+the gate open holds the bead, and one that read it closed reads the arm gone.
+
 ## Work assigned to a named agent owes a notice
 
 gc-toolkit hands work to a named agent by assignee, never by route. That is
@@ -204,7 +212,8 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also a bead in flight that bd keeps unready only through a held
-  ancestor (see below) — stamping its own
+  ancestor (see below) — reading the arm once more, so that an arm disarmed since
+  the pass's listing is not sent, then stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;

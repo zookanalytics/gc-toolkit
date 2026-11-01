@@ -914,7 +914,7 @@ if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
   WAITS=""
   if [ -z "$SCRIPTS" ] || [ ! -x "$SCRIPTS/await-ruling.sh" ]; then
     echo "human-gate.sh and await-ruling.sh were not both found in the pack, so no gate asks about $WORK"
-  elif ! "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this gate. Fix that error, then $HANDBACK. To drop the work instead, close $WORK, then clear this gate as moot."; then
+  elif ! "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this gate. Fix that error, then $HANDBACK. To drop the work instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK --key refinery-zero-diff-check-failed --ruling '<why>'."; then
     echo "human-gate.sh filed no gate on $WORK"
   elif [ "$WORK_KIND" = convoy ]; then
     # human-gate.sh read its gate back from the convoy's side, so the gate
@@ -1242,7 +1242,7 @@ if [ -n "$NAMED" ] && [ -z "$LANDS_ON" ]; then
       if [ "$NAMED_KIND" = absent ]; then NAMED_STATE="not in this store"; else NAMED_STATE="not open on $BRANCH"; fi
       echo "merge-push: $WORK rebuilds $NAMED, which is $NAMED_STATE, so its landing has no bead to anchor; recording no landing and closing nothing." >&2
       LC_DIR="${LC%/*}"; WAITS=""
-      if "$LC_DIR/human-gate.sh" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of $NAMED, has landed on $BRANCH, but $NAMED is $NAMED_STATE, so no bead can carry the PR, and the refinery anchored and closed nothing. $WORK waits on this gate, off the refinery's queue. To go on with the graduation, make $NAMED open with branch $BRANCH, then clear this gate: that pours a fresh run on $WORK, whose hand-back anchors $NAMED. To abandon the graduation, close $WORK, then clear this gate as moot."; then
+      if "$LC_DIR/human-gate.sh" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of $NAMED, has landed on $BRANCH, but $NAMED is $NAMED_STATE, so no bead can carry the PR, and the refinery anchored and closed nothing. $WORK waits on this gate, off the refinery's queue. To go on with the graduation, make $NAMED open with branch $BRANCH, then clear this gate: that pours a fresh run on $WORK, whose hand-back anchors $NAMED. To abandon the graduation, do not clear this gate: run $LC_DIR/stand-down.sh $WORK --key refinery-rebuild-convoy-not-open --ruling '<why>'."; then
         "$LC_DIR/await-ruling.sh" "$WORK" --key refinery-rebuild-convoy-not-open --formula mol-polecat-work && WAITS=1
       fi
       if [ -n "$WAITS" ]; then

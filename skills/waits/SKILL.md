@@ -115,7 +115,8 @@ same gate:
   the gate is cleared:
   `"$(gc <binding> scripts-dir)/await-ruling.sh" <work-bead> --key <situation-key> --formula <formula>`
   gives the work bead its edge onto the gate and arms its re-sling. Clearing
-  the gate is the ruling to proceed.
+  the gate is the ruling to proceed. A ruling not to proceed is a stand-down
+  (below).
 
 Write what is owed so the person can answer it in about a minute: the plain
 stake and what each option costs, with ids only as references. In a sitting,
@@ -166,6 +167,13 @@ limits arming too (the work skill).
   replies to and releases a `held` bead (the converse-settle step), and its
   `--answer` resolves the gates a ruling settles on a turn that does not sign
   off (the converse-continue step).
+- **A wait a person owed, when they rule the work will not go on:**
+  `"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>"`,
+  with the gate's `await_id` as the key. It removes the arm, ends the run beneath
+  the bead, answers the gate with the ruling and closes the bead. Never answer
+  the gate first and close afterwards: an armed bead is sent as soon as its gate
+  clears, and bd refuses to close a bead an open gate blocks. It refuses, writing
+  nothing, an open PR (retire it, the prs skill) and a bead anything else holds.
 - **An arm no longer wanted:** `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 - **A park** (`gc-helm.sh park`) is released by closing its gate,
   `gc bd close <gate>`, or for one bead by `gc bd dep remove <bead> <gate>`
