@@ -11,9 +11,8 @@ observation. A pool session captures only from durable sources: a PR
 review or comment, a rework's rejection reason, and a bead's notes. A PR
 review or comment is the operator's only when the operator's own GitHub
 account posted it. A session the operator attends, such as a converse
-sitting on a visit or mechanik, captures from those sources and from the
-operator's own turns. Text the city sends into that session is still the
-city's.
+sitting or mechanik, captures from those sources and from the operator's
+own turns. Text the city sends into that session is still the city's.
 
 When a turn brings you corrective feedback about *standing* agent
 behavior — a PR review comment, an operator correction, a rework whose

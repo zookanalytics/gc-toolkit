@@ -59,7 +59,7 @@ func TestAnchorOwnWorkflowCounts(t *testing.T) {
 		if tl.InProgressLive != 0 || !tl.Stranded {
 			t.Errorf("a drained molecule over the anchor stops counting and strands: in_progress_live=%d stranded=%v", tl.InProgressLive, tl.Stranded)
 		}
-		if tl.Needs != "decomposed, idle — assign or visit" {
+		if tl.Needs != "decomposed, idle — assign or discuss" {
 			t.Errorf("a stranded anchor asks for an assignment: needs=%q", tl.Needs)
 		}
 	})

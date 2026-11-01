@@ -431,34 +431,35 @@ func fixtureBoard() board.Board {
 	takeaway := "the drill-in plane needs an operator decision on tile density"
 	takeawayAt := "2026-08-07T09:31:00Z"
 	takeawayBy := "host"
+	tileDensity := "Which tile density should the canvas default to?"
 
 	return board.Board{
 		GeneratedAt: time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
 		Total:       3,
 		// One sitting of each half, so the fixture exercises both the running
-		// shape (no outcome, no close stamp) and the finished one.
+		// shape (no close reason, no close stamp) and the finished one.
 		Sittings: []board.Sitting{
 			{
 				ID:           "tk-vst01",
 				Rig:          "gc-toolkit",
 				Subject:      "tk-eemvf",
-				Title:        "visit: tk-eemvf — tile density",
+				Title:        "tile density",
 				SubjectTitle: "Attention Canvas — spatial in-canvas operator dashboard",
 				Status:       "in_progress",
 				Session:      "gc-toolkit__converse-1",
 				OpenedAt:     time.Date(2026, 8, 11, 14, 40, 0, 0, time.UTC),
 			},
 			{
-				ID:       "tk-vst02",
-				Rig:      "gascity",
-				Subject:  "gt-1a2b3",
-				Title:    "visit: gt-1a2b3 — the convoy is complete",
-				Status:   "closed",
-				Outcome:  "diagnosed",
-				Session:  "gascity__converse-2",
-				OpenedAt: time.Date(2026, 8, 11, 9, 12, 0, 0, time.UTC),
-				ClosedAt: time.Date(2026, 8, 11, 9, 48, 0, 0, time.UTC),
-				Takeaway: "every tracked child has landed; the convoy is complete",
+				ID:            "tk-vst02",
+				Rig:           "gascity",
+				Subject:       "gt-1a2b3",
+				Title:         "the convoy is complete",
+				Status:        "closed",
+				OutcomeReason: "every tracked child has landed; graduate it",
+				Session:       "gascity__converse-2",
+				OpenedAt:      time.Date(2026, 8, 11, 9, 12, 0, 0, time.UTC),
+				ClosedAt:      time.Date(2026, 8, 11, 9, 48, 0, 0, time.UTC),
+				Takeaway:      "every tracked child has landed; the convoy is complete",
 			},
 		},
 		Tiles: []board.Tile{
@@ -471,9 +472,9 @@ func fixtureBoard() board.Board {
 
 				Weight: 14,
 				Held:   true,
-				// Its sitting (tk-vst01) is in_progress, so a live conversation is
-				// engaged on it — the state that carries the field into the check.
-				VisitState: board.VisitEngaged,
+				// Its conversation (tk-vst01) is held by a live session — the state
+				// that carries the field into the check.
+				SittingState: board.SittingInSession,
 
 				NClosed:    3,
 				MTotal:     11,
@@ -520,6 +521,15 @@ func fixtureBoard() board.Board {
 				// A top-level epic with no in-fixture parent or blocker: its own
 				// family root, which is the common shape (group_root == id).
 				GroupRoot: "tk-eemvf",
+				// A recommendation rides the epic beside a second human gate, the
+				// one its live sitting replies to, so Accept is withheld by that
+				// gate and the gate is in session: both fields non-null into the
+				// TypeScript check.
+				AcceptWithheld: &tileDensity,
+				GatesInSession: &tileDensity,
+				// That gate blocks the epic, so its work is held, as the board
+				// derives for any row an open human gate blocks.
+				WorkHeld: true,
 			},
 			{
 				ID:       "gt-1a2b3",

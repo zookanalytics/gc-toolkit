@@ -11,7 +11,8 @@
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
 #
 # row_meta, the metadata read the library shares with every script that sources
-# it, is pinned first; it reads no store.
+# it, and bd_gates_open_under_key, the order every writer and reader of one
+# situation's human gates reads them in, are pinned first; they read no store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -26,6 +27,29 @@ eq "$(row_meta "$ROW" pr_number)" "42" "…a number as its string"
 eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
 eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
 eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
+
+# --- bd_gates_open_under_key: the open gates under a key, in the one order ----
+# gate_row <id> <key> <status> <created_at> — one row as bd_human_gates prints it.
+gate_row() { jq -nc --arg id "$1" --arg k "$2" --arg st "$3" --arg at "$4" \
+  '{id: $id, status: $st, issue_type: "gate", await_type: "human", await_id: $k} + (if $at == "" then {} else {created_at: $at} end)'; }
+open_ids() { bd_gates_open_under_key "$1" | jq -r '[.[].id] | join(" ")'; }
+GATES_IN="[$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-b k open 2026-10-22T00:00:01Z),$(gate_row g-a k open 2026-10-22T00:00:01Z),$(gate_row g-shut k closed 2026-10-21T00:00:00Z),$(gate_row g-other other open 2026-10-21T00:00:00Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-a g-b g-late" "bd_gates_open_under_key keeps the open gates under the key, by created_at, then id"
+eq "$(printf '%s' "$GATES_IN" | open_ids none)" "" "…and is an empty array when none is open under the key"
+# created_at is read as a time. As text, '.' sorts before 'Z', so a fraction
+# would sort ahead of the whole second it follows, and an offset would sort by
+# its local clock.
+GATES_IN="[$(gate_row g-whole k open 2026-10-22T00:00:01Z),$(gate_row g-frac k open 2026-10-22T00:00:00.900Z),$(gate_row g-zero k open 2026-10-22T00:00:00Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-zero g-frac g-whole" "…a fractional second sorts after the whole second it follows"
+GATES_IN="[$(gate_row g-utc k open 2026-10-22T00:00:00Z),$(gate_row g-east k open 2026-10-22T01:59:59+02:00),$(gate_row g-west k open 2026-10-21T17:59:58-06:00)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-west g-east g-utc" "…an offset is read as the instant it names"
+GATES_IN="[$(gate_row g-none k open ""),$(gate_row g-word k open yesterday),$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-early k open 2026-10-22T00:00:01Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-early g-late g-none g-word" "…a created_at that is absent or not a time sorts after every one that is, then by id"
+for bad_in in '{"error":"not found"}' ''; do
+  out=$(printf '%s' "$bad_in" | bd_gates_open_under_key k); rc=$?
+  eq "$rc" 1 "…returns 1 on input that is not an array ('$bad_in')"
+  eq "$out" "" "…and prints nothing then"
+done
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
@@ -829,6 +853,67 @@ else
   bad "the pass fixture never started its program"
   : > "$PROG_DIR/release"; kill -9 "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
 fi
+
+# --- bd_open_human_gates: one bead's open human gates, by the one rule ----------
+# A gate blocks its bead through a `blocks` edge (gate|blocks|bead). A human gate
+# holds in every status but closed, a pinned one included. A closed gate, a gate
+# of another type, and a gate that blocks some other bead are not this bead's
+# open human gates.
+store '[{"id":"hg-bead","status":"open","title":"waits","metadata":{}},
+  {"id":"tk-a","status":"open","title":"another bead","metadata":{}},
+  {"id":"hg-open","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"asks"},
+  {"id":"hg-pinned","status":"pinned","issue_type":"gate","await_type":"human","await_id":"k2","title":"pinned"},
+  {"id":"hg-closed","status":"closed","issue_type":"gate","await_type":"human","await_id":"k1","title":"answered","close_reason":"ruled: yes"},
+  {"id":"hg-timer","status":"open","issue_type":"gate","await_type":"timer","await_id":"k1","title":"a timer"},
+  {"id":"hg-other","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"blocks another bead"}]'
+printf '%s\n' "hg-open|blocks|hg-bead" "hg-pinned|blocks|hg-bead" "hg-closed|blocks|hg-bead" \
+  "hg-timer|blocks|hg-bead" "hg-other|blocks|tk-a" > "$STUB_DEPS"
+got=$(bd_open_human_gates hg-bead); rc=$?
+eq "$rc" 0 "bd_open_human_gates: a bead whose gates read answers 0"
+eq "$(printf '%s' "$got" | jq -c '[.[].id] | sort')" '["hg-open","hg-pinned"]' "…with the open human gates its blocks edges reach, a pinned one included"
+eq "$(bd_open_human_gates hg-bead k1 | jq -c '[.[].id]')" '["hg-open"]' "…and with a key, only the open ones under that key"
+eq "$(bd_open_human_gates hg-bead k9 | jq -c '.')" '[]' "…an empty array when nothing open is under the key"
+got=$(bd_open_human_gates tk-missing); rc=$?
+[ "$rc" -ne 0 ] && ok "…non-zero for a bead the store cannot find" || bad "a bead the store cannot find answered 0"
+eq "$got" "" "…and nothing printed, so no reader takes it for no gate"
+export STUB_DEP_PARTIAL=1
+got=$(bd_open_human_gates hg-bead); rc=$?
+unset STUB_DEP_PARTIAL
+[ "$rc" -ne 0 ] && [ -z "$got" ] && ok "…and the same for a gate read that fails after printing an array" \
+  || bad "a failed gate read answered rc=$rc with '$got'"
+
+# The readers rely on these fields of each row, which the read hands on whole:
+# the assignee that says a person holds the gate, the description that carries
+# its message, and the type fields the rule reads.
+store '[{"id":"hf-bead","status":"open","title":"waits","metadata":{}},
+  {"id":"hf-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"asks",
+   "assignee":"pat","description":"the whole message\nover two lines","created_at":"2026-10-24T00:00:00Z"},
+  {"id":"hf-closed","status":"closed","issue_type":"gate","await_type":"human","await_id":"k1","title":"done",
+   "close_reason":"ruled: yes","closed_at":"2026-10-24T01:00:00Z"}]'
+printf '%s\n' "hf-gate|blocks|hf-bead" "hf-closed|blocks|hf-bead" > "$STUB_DEPS"
+row=$(bd_human_gates hf-bead | jq -c '.[] | select(.id == "hf-gate")')
+eq "$(printf '%s' "$row" | jq -r '.assignee')" "pat" "bd_human_gates: a row carries the gate's assignee"
+eq "$(printf '%s' "$row" | jq -r '.description')" "the whole message
+over two lines" "…its description whole"
+eq "$(printf '%s' "$row" | jq -r '[.issue_type, .await_type, .await_id, .status, .title, .created_at] | join(" ")')" \
+  "gate human k1 open asks 2026-10-24T00:00:00Z" "…and the fields the open-gate rule and the dedup read"
+eq "$(bd_human_gates hf-bead | jq -r '.[] | select(.id == "hf-closed") | [.close_reason, .closed_at] | join(" ")')" \
+  "ruled: yes 2026-10-24T01:00:00Z" "…and a closed gate its answer and when it came"
+eq "$(bd_open_human_gates hf-bead k1 | jq -r '.[0].assignee')" "pat" "bd_open_human_gates hands the same rows on"
+
+# The listing form of the same rule, for a reader that reads many beads at once.
+LISTING='[{"id":"g1","issue_type":"gate","await_type":"human","status":"open"},
+  {"id":"g2","issue_type":"gate","await_type":"human","status":"closed"},
+  {"id":"g3","issue_type":"gate","await_type":"timer","status":"open"},
+  {"id":"g4","issue_type":"gate","await_type":"human","status":"pinned"},
+  {"id":"w1","issue_type":"task","status":"open","dependencies":[
+     {"issue_id":"w1","depends_on_id":"g1","type":"blocks"},
+     {"issue_id":"w1","depends_on_id":"g4","type":"tracks"}]}]'
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates')" '["g1","g4"]' "open_human_gates: the listing's open human gates, by the same rule"
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | .[] | select(.id == "w1") | gates_blocking($g)')" '["g1"]' \
+  "gates_blocking: the open gates a row's own blocks edges reach, and no other edge type"
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | [.[] | select(blocked_by_any($g)) | .id]')" '["w1"]' \
+  "blocked_by_any: the rows a gate holds"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

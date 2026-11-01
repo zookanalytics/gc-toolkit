@@ -14,7 +14,7 @@ The pack is its workflows. Every component belongs to one of six:
 | **work** | a filed bead becomes a pushed branch | `mol-polecat-work`, `lifecycle/lifecycle.toml`, `assets/scripts/lifecycle.sh` |
 | **review** | a gate verdict lands on the anchor | polecat pools (cadence-routed via `REVIEW_POOL`), `formulas/mol-review.toml`, `assets/scripts/signoff.sh` |
 | **merge** | gates green at the live head become a landed PR | `orders/refinery-reconcile.toml` + 5 arms ([docs/refinery-merge-cadence.md](docs/refinery-merge-cadence.md)) |
-| **visit** | a human decision is prepared, framed, and held for | `mol-visit`, converse, `assets/scripts/escalate.sh`, the helm board |
+| **visit** | a human decision is asked for on the bead that waits for it, and settled in a sitting | `assets/scripts/human-gate.sh`, `gc-helm engage`, converse, the helm board |
 | **feedback** | corrective lessons become standing pack behavior | feedback miner/distiller orders ([docs/feedback-learning.md](docs/feedback-learning.md)) |
 | **patrol** | drift between recorded and true state is repaired | witness / deacon patrols, `orders/liveness-sweep.toml`, `doctor/` |
 
@@ -30,7 +30,7 @@ All agents are native to this pack — no gastown import.
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
 | `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
-| `converse-opus`, `converse-fable`, `converse-codex` | conversation sitting | one per engaged visit: `gc-helm engage` opens it on a board visit, and it holds that subject's conversation |
+| `converse-opus`, `converse-fable`, `converse-codex` | conversation sitting | one per engaged conversation: `gc-helm engage` starts it on a conversation about a board row's bead, and it holds that conversation |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | always-on first-reaction pass (2-slot pool) |
 
@@ -93,7 +93,7 @@ render's byte and token counts.
 - [docs/epic-stewardship.md](docs/epic-stewardship.md) — how an epic is held open until its hypothesis is ruled closed, and the Epic Checkpoint layer that is direction
 - [docs/steering.md](docs/steering.md) — how the operator steers the city's work: the intake rule that holds new work for placement, and the park, which holds work under a bead that has not started while work in flight finishes
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
-- [docs/human-engagement.md](docs/human-engagement.md) — how the pack engages a person: the subject and visit model, converse sittings, demands and the helm boards
+- [docs/human-engagement.md](docs/human-engagement.md) — how the pack engages a person: the subject, its human gates and conversations, converse sittings, Accept and the helm boards
 - [docs/pack-authoring.md](docs/pack-authoring.md) — the pack's own conventions for its formulas, scripts, skills and agents on top of Gas City
 - [docs/gascity/](docs/gascity/README.md) — Gas City itself: the pages that state Gas City behavior only, cited and dated, and the index of canonical Gas City documentation
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota

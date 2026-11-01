@@ -37,8 +37,8 @@ the transcript you no longer have:
 "$(gc gc-toolkit scripts-dir)/gc-deacon-ledger.sh" show --since 48h
 ```
 
-An open escalation named there is already asked; do not re-file it. A cleanup
-that repeats every cycle is a fault to escalate, not a chore to keep doing.
+An open human gate named there is already asked; do not re-file it. A cleanup
+that repeats every cycle is a fault to report, not a chore to keep doing.
 
 Reconcile to exactly one patrol wisp before pouring. Wisps are EPHEMERAL —
 `--include-infra` is required or every query reads empty and each restart
@@ -106,7 +106,8 @@ patrol-continue hook, which hands you the next cycle; run it
 
 A finding is a BEAD, filed through one writer that dedups repeats by
 situation key. A proactive first reaction then reads that bead and disposes
-it: routed to a pool, held on an edge, or put to the operator as a visit.
+it: routed to a pool, held on an edge, or put to the operator as a human gate
+on the finding.
 
 ```bash
 GC_RIG="${GC_RIG:-gc-toolkit}" "$(gc gc-toolkit scripts-dir)/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
@@ -127,57 +128,47 @@ the reaction's `blocked` exit to find.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — still goes straight to a
-visit:
+human gate on the bead it is about:
 
 ```bash
 SCRIPTS=$(gc gc-toolkit scripts-dir) \
-  && ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
-  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
+  && "$SCRIPTS/human-gate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
 ```
 
-escalate.sh's default converse pool renders bare when `GC_RIG` is unset, an
-address no pool holds, and it refuses before filing anything. The rig comes
-from the subject bead's own store, which selects both where the visit lands
-and which pool can claim it. Context recycling is the cycle-recycle Stop
-hook's job — never something you ask about.
+The gate lands in the store of the bead it names and blocks that bead, so the
+bead leaves the pool's offer until a person clears the gate. A gate on a bead
+with open children pauses every part of it that has not started, so when only
+one member waits, name that member. An emergency with no bead of its own is a
+patrol finding, filed as above: `human-gate.sh` refuses a patrol wisp or a
+session, and files nothing on a bead it cannot read. Context recycling is the
+cycle-recycle Stop hook's job — never something you ask about.
 
 
-### Closing a visit: never by hand
+### Withdrawing a human gate you filed
 
-A closed visit records why it closed in two keys: `gc.outcome`, one word,
-and `gc.outcome_reason`, one sentence. The board takes a finished sitting's
-outcome from them, so a visit closed without them looks like a need nobody
-met. A bare `gc bd close` or `--status=closed` on a visit records neither.
+A human gate is cleared by resolving it, and its resolve reason is the answer,
+headed `ruled:`, `moot:` or `benign:`. The board and every reader take a
+cleared gate's answer from that reason, so a gate closed with a bare
+`gc bd close` reads as a need nobody met.
 
-A sitting closes the visit it works. Outside a sitting, a visit is closed
-only by the role that raised it, and only when it was filed in error, when
-another visit already carries its need, or when its premise is gone. That
-close goes through one of two writers:
+A person clears a gate. A role never resolves a gate another role filed, even
+after it resolves the situation the gate asks about: it appends what it did to
+the notes of the bead the gate blocks and leaves the gate open. A role
+withdraws its own gate, and only when the situation it asked about is gone,
+with one call:
 
 ```bash
-SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/visit-close.sh" ] || SCRIPTS=""
-# An open escalation you raised on a bead:
-"$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
-# Any other visit you raised:
-"$SCRIPTS/visit-close.sh" --visit <visit> --outcome <word> --reason "<one sentence>"
+SCRIPTS=$(gc gc-toolkit scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+"$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 
-`escalate.sh --retract` finds the open visit by the subject and key it was
-filed under, and closes it `moot` through `visit-close.sh`. It leaves a visit
-with an assignee or a bound session open for whoever holds it.
-`visit-close.sh` stamps both keys and reads them back before it closes. On a
-visit that is already closed it records the two keys and leaves the close as
-it was, so it also repairs a visit closed by hand.
-
-The word carries weight. `moot` (the premise is gone) and `benign` (it holds
-but needs nobody) stop `escalate.sh` filing the same key and subject again
-for a day. Any other word means someone acted. Use `duplicate` when another
-visit carries the need, and `resolved` when you acted to end it.
-
-A visit another role raised, or one a sitting has claimed, is the sitting's
-to close, even after you resolve its situation. Append what you did to its
-notes and leave it open. Close it yourself only when the operator tells you
-to, and then through `visit-close.sh`.
+`human-gate.sh --retract` resolves each open human gate under the key that
+blocks the bead, with the reason `moot: <message>`, and every bead the gate
+held is released. A sitting may be discussing the gate, and the withdrawal
+clears it anyway, because the situation is gone; the sitting learns it at its
+sign-off. A gate a person already cleared keeps that person's answer. The
+`moot:` reason starts a quiet period only where your own call site declares
+one with `--quiet-window`.
 
 
 ## The incident ledger
@@ -196,8 +187,8 @@ action produced (`mail:<id>`, `bead:<id>`, `memory:<path>`, `event:<seq>`, or
 seven days, so `append` is all a caller does.
 
 What earns a line is an ACTION, and only when nothing else records it. A
-visit writes its own entry from inside escalate.sh, so never append a second
-one beside it. A reading that came back on-track earns nothing at all: a
+human gate writes its own entry from inside human-gate.sh, so never append a
+second one beside it. A reading that came back on-track earns nothing at all: a
 ledger that logs every cycle is the transcript again, and the operator goes
 back to skipping it.
 
@@ -215,7 +206,8 @@ cannot be un-nudged: typing at a pending prompt types into the UI, not into
 you, so you stay parked until a human walks past your pane.
 
 **What to do instead — none of these block:**
-- **A decision you cannot make:** file a bead, or escalate (a visit).
+- **A decision you cannot make:** file a bead, or a human gate on the bead
+  that waits (`human-gate.sh`).
   Durable state outlives your session; a pending prompt does not.
 - **Something a person must see:** park the bead with `gc.routed_to=human`.
   They read it when they are there; you keep cycling.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for gc-helm-engage-starters.sh — the starter-seed table engage
-# reads for its interactive visit/starter prompt and its --template flag.
+# reads for its interactive conversation/starter prompt and its --template flag.
 # Runs the REAL emitter via `sh` (POSIX, as gc-helm.sh invokes it). No gc, store,
 # or network. Covered:
 #   (LIST)   `list` prints one "<key>\t<label>\t<letter>" row per seed, in order

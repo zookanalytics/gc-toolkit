@@ -1,7 +1,7 @@
 # liveness-sweep — P3: every open bead is worked, gated, conversing, or
-# held-by-design; unnamed waits batch into ONE triage visit per rig per pass.
-# Fully exec now (no formula, no pool, no session): the sweep is queries +
-# classification + one gate-visit write, all in liveness-sweep.sh. Gated by a
+# held-by-design; unnamed waits batch into ONE triage human gate per rig per
+# pass. Fully exec (no formula, no pool, no session): the sweep is queries +
+# classification + one human-gate write, all in liveness-sweep.sh. Gated by a
 # mechanical precheck so an empty board costs ~3s and no agent ever spawns;
 # the precheck's exclusions are a strict SUBSET of the sweep's, so a skip is
 # provably safe. No `interval` key: a condition trigger ignores it — the
@@ -12,7 +12,7 @@
 # caller that runs nothing.
 # check_timeout must exceed the precheck's own worst case (3 bounded reads).
 [order]
-description = "liveness sweep: classify open beads; batch unnamed waits into one triage visit (P3). Precheck-gated; fully exec."
+description = "liveness sweep: classify open beads; batch unnamed waits into one triage human gate (P3). Precheck-gated; fully exec."
 trigger = "condition"
 check = "$PACK_DIR/assets/scripts/liveness-sweep-precheck.sh"
 check_timeout = "300s"

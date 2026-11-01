@@ -95,14 +95,18 @@ WORK_STATUS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].status // empty' 2>/de
 WORK_OWNER=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].assignee // empty' 2>/dev/null)
 WORK_MERGE_RESULT=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty' 2>/dev/null)
 # A refusal sets WHY, and every refusal cancels this run. A finished bead and a
-# live duplicate set no ESCALATE_KEY, because nobody has a decision to make;
-# every other refusal names the visit a person must answer, and AWAIT makes the
-# work bead wait on that visit so closing it re-slings the work.
+# live duplicate set no GATE_KEY, because nobody has a decision to make. A
+# parked bead and a possible duplicate name the human gate a person must clear,
+# and the gate blocks the work bead. For a possible duplicate, AWAIT has
+# await-ruling.sh read that wait back and arm the re-sling, so clearing the
+# gate re-slings the work. An unreadable bead cannot be blocked, so it files a
+# patrol finding naming the bead (FINDING_KEY) instead of a gate.
 WHY=""
-NOTE_LABEL="Duplicate dispatch refused (work finished; run cancelled without escalation)"
+NOTE_LABEL="Duplicate dispatch refused (work finished; run cancelled with nothing asked)"
 CANCEL_LABEL="duplicate dispatch (work finished)"
-ESCALATE_KEY=""
-ESCALATE_MESSAGE=""
+GATE_KEY=""
+GATE_MESSAGE=""
+FINDING_KEY=""
 AWAIT=""
 # A merge_result stamp means a PR or merge already exists for THIS bead (fresh
 # work is its own anchor), and it outlives a cleared assignee.
@@ -111,12 +115,14 @@ MERGED=""
 case "$WORK_STATUS" in
   "")
     # An unreadable bead is not proof of safety, and no liveness answer can
-    # clear a bead nobody can read, so a person looks at it.
+    # clear a bead nobody can read, so a person looks at it. A gate on it
+    # would need the bead to block, so the finding names it instead.
     WHY="unreadable (gc bd show returned no status)"
     NOTE_LABEL="Unreadable work bead; run cancelled for a person"
     CANCEL_LABEL="unreadable work bead"
-    ESCALATE_KEY=polecat-unreadable-work
-    ESCALATE_MESSAGE="Could not read work bead $WORK_BEAD_ID at load-context (gc bd show returned no status), so nothing proves it is safe to build. Its run is cancelled and no workspace was touched. Check that the bead exists and its store answers, then re-sling it." ;;
+    FINDING_KEY="polecat-unreadable-work.$WORK_BEAD_ID"
+    FINDING_TITLE="Work bead $WORK_BEAD_ID could not be read at load-context"
+    FINDING_MESSAGE="Could not read work bead $WORK_BEAD_ID at load-context (gc bd show returned no status), so nothing proves it is safe to build. Convoy {{convoy_id}} dispatched it to $GC_SESSION_NAME. Its run is cancelled and no workspace was touched. Check that the bead exists and its store answers, then re-sling it." ;;
   closed)
     # Closed is finished whoever holds it. A close that lands after the pour,
     # such as a duplicate or a no-work close, leaves the assignee empty and
@@ -127,7 +133,7 @@ case "$WORK_STATUS" in
     else
       CLOSED_HOW=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0] | [(.metadata["gc.superseded_by"] // "" | tostring | select(length > 0) | "superseded by " + .), (.metadata["gc.outcome"] // "" | tostring | select(length > 0) | "outcome " + .), (.close_reason // "" | tostring | gsub("[[:space:]]+"; " ") | select(length > 0) | "close reason: " + .[0:200])] | join("; ")' 2>/dev/null)
       WHY="already closed${CLOSED_HOW:+ ($CLOSED_HOW)}; its work is done or was ruled unnecessary"
-      NOTE_LABEL="Closed before claim; run cancelled without escalation"
+      NOTE_LABEL="Closed before claim; run cancelled with nothing asked"
       CANCEL_LABEL="closed before claim"
     fi ;;
   open|in_progress)
@@ -143,7 +149,7 @@ case "$WORK_STATUS" in
           # field. Match all of them.
           OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
           # No answer means you could not disprove a live owner — assume one.
-          # The live owner builds the work, so this run ends with no visit.
+          # The live owner builds the work, so this run ends with no gate.
           if [ "${OWNER_LIVE:-1}" != "0" ]; then
             WHY="already in_progress under live $WORK_OWNER"
             NOTE_LABEL="Duplicate dispatch refused; run cancelled"
@@ -163,7 +169,7 @@ case "$WORK_STATUS" in
     [ -z "$WHY" ] && WHY="$MERGED" ;;
   *)
     # blocked, deferred, hooked, pinned: whoever parked the bead releases it,
-    # and nothing re-slings it then, so a visit asks for the re-sling. A
+    # and nothing re-slings it then, so a gate asks for the re-sling. A
     # merge_result still reads as finished: the PR is with the refinery.
     if [ -n "$MERGED" ]; then
       WHY="$MERGED"
@@ -171,18 +177,18 @@ case "$WORK_STATUS" in
       WHY="parked (status $WORK_STATUS), so it is not this session's to build"
       NOTE_LABEL="Parked work bead; run cancelled for a person"
       CANCEL_LABEL="parked work bead"
-      ESCALATE_KEY=polecat-parked-work
-      ESCALATE_MESSAGE="Work bead $WORK_BEAD_ID is $WORK_STATUS, and convoy {{convoy_id}} reached $GC_SESSION_NAME with it. A parked bead is not built, so its run is cancelled and no workspace was touched. Nothing re-slings it when it is released: once it is ready to build, re-sling it with gc sling <pool> $WORK_BEAD_ID --on mol-polecat-work."
+      GATE_KEY=polecat-parked-work
+      GATE_MESSAGE="Work bead $WORK_BEAD_ID is $WORK_STATUS, and convoy {{convoy_id}} reached $GC_SESSION_NAME with it. A parked bead is not built, so its run is cancelled and no workspace was touched. Nothing re-slings it when it is released: once it is ready to build, re-sling it with gc sling <pool> $WORK_BEAD_ID --on mol-polecat-work."
     fi ;;
 esac
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] && [ -x "$SCRIPTS/work-tree-holder.sh" ] || SCRIPTS=""
-: "${SCRIPTS:?run-cancel.sh, await-ruling.sh, escalate.sh and work-tree-holder.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/work-tree-holder.sh" ] || SCRIPTS=""
+: "${SCRIPTS:?run-cancel.sh, await-ruling.sh, human-gate.sh, patrol-finding.sh and work-tree-holder.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
 # This workflow never claims its work bead, so a run in flight leaves it open
 # and unassigned, and only the run's tree shows it. work-tree-holder.sh exits
 # 0 when no live session is working this work in the bead's recorded work_dir
 # or in the worktree with its branch checked out, and 1 when one is. Exit 1 is
 # a live duplicate, which needs nobody. Any other exit could not rule a holder
-# out, so a person checks the tree, and closing that visit re-slings the work.
+# out, so a person checks the tree, and clearing that gate re-slings the work.
 if [ -z "$WHY" ]; then
   TREE_RC=0
   TREE_FINDING=$("$SCRIPTS/work-tree-holder.sh" --bead "$WORK_BEAD_ID" --work-dir "$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.work_dir // empty' 2>/dev/null)" --branch "$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.branch // empty' 2>/dev/null)") || TREE_RC=$?
@@ -193,9 +199,9 @@ if [ -z "$WHY" ]; then
       WHY="in flight in another session's tree: $TREE_FINDING" ;;
     *)
       WHY="possibly in flight in another session's tree: ${TREE_FINDING:-work-tree-holder.sh exited $TREE_RC with no finding}"
-      ESCALATE_KEY=polecat-duplicate-dispatch
+      GATE_KEY=polecat-duplicate-dispatch
       AWAIT=1
-      ESCALATE_MESSAGE="Possible duplicate dispatch on $WORK_BEAD_ID: it is $WHY. Convoy {{convoy_id}} dispatched it to $GC_SESSION_NAME. Its run is cancelled and no workspace was touched. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead. $WORK_BEAD_ID waits on this visit, and closing it re-slings $WORK_BEAD_ID, whose next run builds only if no live run holds the tree; to stand down instead, close $WORK_BEAD_ID first." ;;
+      GATE_MESSAGE="Possible duplicate dispatch on $WORK_BEAD_ID: it is $WHY. Convoy {{convoy_id}} dispatched it to $GC_SESSION_NAME. Its run is cancelled and no workspace was touched. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead. $WORK_BEAD_ID waits on this gate, and clearing it re-slings $WORK_BEAD_ID, whose next run builds only if no live run holds the tree; to stand down instead, close $WORK_BEAD_ID first." ;;
   esac
   if [ "$TREE_RC" != 0 ]; then
     NOTE_LABEL="Duplicate dispatch refused; run cancelled"
@@ -210,17 +216,17 @@ if [ -n "$WHY" ]; then
   # applies, before the cancel: a cancelled run with no record behind it leaves
   # work that nothing re-offers. Any part that does not land leaves this step
   # claimed and undrained, so the next worker it goes to retries.
-  # A wait needs an open visit to sit on, and escalate.sh files nothing for a
-  # situation a person closed moot or benign inside its verdict window, so the
-  # escalation a wait follows runs with the window off. The claim the owner
-  # check let through is this session's or a crashed owner's, and the wait
-  # releases it, because the re-sling fires only for an open, unassigned bead.
-  # await-ruling.sh proves a crashed owner gone by the same session list.
-  ESCALATE_WINDOW="${GC_ESCALATE_VERDICT_WINDOW:-}"
-  [ -z "$AWAIT" ] || ESCALATE_WINDOW=0
-  if [ -n "$ESCALATE_KEY" ] && ! GC_ESCALATE_VERDICT_WINDOW="$ESCALATE_WINDOW" "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --message "$ESCALATE_MESSAGE"; then
-    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
-  elif [ -n "$AWAIT" ] && ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --formula mol-polecat-work; then
+  # Each refusal is an event of this run, so its gate declares no quiet window,
+  # and a situation a person answered moot or benign before is asked again. The
+  # claim the owner check let through is this session's or a crashed owner's,
+  # and the wait releases it, because the re-sling fires only for an open,
+  # unassigned bead. await-ruling.sh proves a crashed owner gone by the same
+  # session list.
+  if [ -n "$FINDING_KEY" ] && ! "$SCRIPTS/patrol-finding.sh" --scope polecat-findings --key "$FINDING_KEY" --title "$FINDING_TITLE" --message "$FINDING_MESSAGE"; then
+    echo "patrol-finding.sh recorded no finding; NOT cancelling or draining, so the next worker retries." >&2
+  elif [ -n "$GATE_KEY" ] && ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key "$GATE_KEY" --message "$GATE_MESSAGE"; then
+    echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
+  elif [ -n "$AWAIT" ] && ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "$GATE_KEY" --formula mol-polecat-work; then
     echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "$CANCEL_LABEL: $WORK_BEAD_ID $WHY"; then
     gc runtime drain-ack
@@ -246,27 +252,28 @@ the refusals split by whether a person has a decision to make.
 A FINISHED bead (closed, a completed hand-off, or carrying a `merge_result`)
 and a LIVE duplicate need nobody. The work has landed, is landing with the
 refinery, was ruled unnecessary, or is being built by the other run. The gate
-notes the work bead and cancels with no visit. A closed bead's note names what
+notes the work bead and cancels with nothing asked. A closed bead's note names what
 the bead records about its close, so a duplicate close reads differently from
 a merge. A live duplicate is a bead in flight under a foreign owner still
 present in `gc session list --state all`, or one another live session is
 working in its tree.
 
-Three situations need a person, and each files its own visit before the
-cancel. An UNREADABLE bead proves nothing. A PARKED bead (`blocked`,
-`deferred`, `hooked`, `pinned`) waits on whoever parked it, and nothing re-slings
-it when it is released, so its visit asks for the re-sling. A POSSIBLE
-duplicate is a tree no check could rule out, and its visit asks a person to
-look at the tree. For that one, `await-ruling.sh` makes the work bead wait on
-the visit with a `blocks` edge and arms its re-sling, so closing the visit
-re-slings the work. The re-sling fires only for an open, unassigned bead, so the
-wait first releases the claim the owner check let through, this session's or a
-crashed owner's. The escalation before it runs with `escalate.sh`'s verdict
-window off, because a wait needs an open visit, and `escalate.sh` files none
-for a situation a person closed `moot` or `benign` inside the window. When
-`escalate.sh` or `await-ruling.sh` cannot record its part, the gate neither
-cancels nor drains. The step stays claimed, and the next worker it goes to
-retries.
+Three situations need a person, and each records its ask before the cancel.
+An UNREADABLE bead proves nothing, and a bead no read reaches cannot be
+blocked, so it files a patrol finding that names the bead, and the finding's
+first reaction puts it to a person. A PARKED bead (`blocked`, `deferred`,
+`hooked`, `pinned`) waits on whoever parked it, and nothing re-slings it when
+it is released, so the human gate it files asks for the re-sling. A POSSIBLE
+duplicate is a tree no check could rule out, and its gate asks a person to look
+at the tree. For that one, the gate blocks the work bead, and `await-ruling.sh`
+reads that wait back and arms the re-sling, so clearing the gate re-slings the
+work. The re-sling fires only for an open, unassigned bead, so the wait first
+releases the claim the owner check let through, this session's or a crashed
+owner's. Each refusal is an event of this run, so `human-gate.sh` is called
+with no quiet window, and a situation a person answered `moot` or `benign`
+before is asked again. When `patrol-finding.sh`, `human-gate.sh` or
+`await-ruling.sh` cannot record its part, the gate neither cancels nor drains.
+The step stays claimed, and the next worker it goes to retries.
 
 `run-cancel.sh` exits non-zero when it cannot prove which step this shell is
 executing, or when gascity does not confirm the cancel. The gate then does not
@@ -277,7 +284,7 @@ session holds more than one bead for the step.
 
 The same rule covers every other reason you might decline this bead. A polecat
 that judges the work already delivered, or the premise falsified, cancels the
-run the same way, after filing the visit and the wait where a person must
+run the same way, after filing the human gate and the wait where a person must
 rule.
 
 Owner liveness gates the in-flight case only: an idle pool worker between
@@ -308,7 +315,7 @@ A tree with no listed session in its directory is adoptable, which is how a
 re-dispatch recovers a crashed run. A tree no session directory accounts for,
 an unreadable session list or bead listing, a claim that cannot be traced to
 its work, and a failed `git worktree list` decline as a possible duplicate. The
-note and the visit name the tree and count its uncommitted paths, so the
+note and the gate name the tree and count its uncommitted paths, so the
 holder's work can be salvaged.
 
 **4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
@@ -330,17 +337,17 @@ OPEN_BLOCKERS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '[.[0].dependencies[]? | s
 if [ -n "$OPEN_BLOCKERS" ]; then
   POOL=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
   gc bd update "$WORK_BEAD_ID" --append-notes "bd-ready guard: refused to build $WORK_BEAD_ID at load-context; open blocks-blocker(s): $OPEN_BLOCKERS. Run cancelled; re-dispatch armed to '$POOL' to fire once the blocker(s) close."
-  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-  : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+  : "${SCRIPTS:?run-cancel.sh and human-gate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
   gc bd update "$WORK_BEAD_ID" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" --set-metadata gc.deferred_assignee=""
   RELEASE_OK=0
   if [ -n "$POOL" ] && [ -x "$SCRIPTS/deferred-dispatch.sh" ] && "$SCRIPTS/deferred-dispatch.sh" arm "$WORK_BEAD_ID" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "bd-ready guard: blocked by $OPEN_BLOCKERS"; then
     RELEASE_OK=1
-  elif "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-blocked-work --message "Formula-slung $WORK_BEAD_ID reached a polecat while blocked by open blocks-dep(s): $OPEN_BLOCKERS. Its run is cancelled and no workspace was touched. Auto re-dispatch could not be armed (target='$POOL'); re-sling this work once the blocker(s) close."; then
+  elif "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-blocked-work --message "Formula-slung $WORK_BEAD_ID reached a polecat while blocked by open blocks-dep(s): $OPEN_BLOCKERS. Its run is cancelled and no workspace was touched. Auto re-dispatch could not be armed (target='$POOL'); re-sling this work once the blocker(s) close."; then
     RELEASE_OK=1
   fi
   if [ "$RELEASE_OK" != "1" ]; then
-    echo "neither deferred-dispatch arm nor escalate recorded a release path; NOT cancelling or draining, so the next worker retries." >&2
+    echo "neither the deferred-dispatch arm nor a human gate recorded a release path; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID has open blocks-blocker(s) $OPEN_BLOCKERS; re-dispatch armed to re-sling when they close"; then
     gc runtime drain-ack
   else
@@ -361,7 +368,7 @@ advertise a finished pour's pool. `status` stays `open` and `assignee` empty fro
 the pour, so neither is written and no claim-guard rollback is possible. The open blocker keeps the bead out of `bd ready`
 throughout, so clearing the route opens no pool window. The re-dispatch is armed
 to the same pool the pour was executing on, replaying `--on mol-polecat-work`,
-so the work re-slings once the blocker closes; escalation is the fallback only
+so the work re-slings once the blocker closes; a human gate is the fallback only
 when the arm cannot be recorded. The cancel runs only after a recorded release
 path, for the same reason as in the duplicate-dispatch gate above: a cancelled
 run with nothing recorded to re-sling it leaves work nothing re-offers.
@@ -390,11 +397,14 @@ gc mail inbox
 - What does "done" look like?
 - If rejected: what specifically needs fixing?
 
-If blocked or unclear, escalate. Your mail budget is zero, and an escalation
-files one open visit per situation key that a human can claim and close:
+If blocked or unclear, mail the witness first, as your prompt's "Blocked work
+and human gates" section says: it answers what another agent can. When no
+agent can answer, as with a decision that is the operator's to make, file a
+human gate. `human-gate.sh` files one open gate per bead and situation key,
+which blocks the work bead until a person clears it:
 ```bash
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-"${SCRIPTS:?escalate.sh not found in the pack}/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-unclear-requirements --message "Unclear requirements on $WORK_BEAD_ID. Question: <what you need clarified>. Tried: <where you already looked>."
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+"${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-unclear-requirements --message "Unclear requirements on $WORK_BEAD_ID. Question: <what you need clarified>. Tried: <where you already looked>."
 ```
 
 **Exit criteria:** You understand the work and can begin."""
@@ -420,10 +430,10 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 if [ -z "$WORK_BEAD_ID" ]; then
   echo "mol-polecat-work requires an input convoy with exactly one tracked member" >&2
-  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-  : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack}"
-  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key polecat-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-polecat-work cannot derive its work bead; the pour is malformed. Its run is cancelled and nothing was touched. Sling the work again to pour a well-formed run."; then
-    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+  : "${SCRIPTS:?run-cancel.sh and human-gate.sh not found in the pack}"
+  if ! "$SCRIPTS/human-gate.sh" --subject "{{convoy_id}}" --key polecat-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-polecat-work cannot derive its work bead; the pour is malformed. Its run is cancelled and nothing was touched. Sling the work again to pour a well-formed run, then clear this gate."; then
+    echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed"; then
     gc runtime drain-ack
   else
@@ -469,10 +479,10 @@ if [ -n "$BRANCH" ]; then
       git checkout "$BRANCH" || exit 1
       if ! git merge --ff-only "origin/$BRANCH"; then
         echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."
-        SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-        : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-        if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Its run is cancelled and nothing was touched. Reconcile them, then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
-          echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+        SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+        : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
+        if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Its run is cancelled and nothing was touched. Reconcile them, then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+          echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
         elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-branch-divergence --formula mol-polecat-work; then
           echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
         elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "local $BRANCH diverged from origin/$BRANCH; the work waits on the reconcile"; then
@@ -490,10 +500,10 @@ if [ -n "$BRANCH" ]; then
   else
     echo "metadata.branch=$BRANCH is set but no local or origin branch exists. STOP — do not create a different branch."
 # >>> workspace-setup-missing-branch-decline
-    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Its run is cancelled and nothing was touched. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
-      echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Its run is cancelled and nothing was touched. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+      echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-missing-branch --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
     elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "metadata.branch=$BRANCH names a branch that exists neither locally nor on origin; the work waits on its restore"; then
@@ -586,25 +596,26 @@ guard will hold the hand-off to, and which already have an entry.
 **A conflict you cannot resolve without guessing** (two live designs, an
 intent you cannot infer) is a question for a person, not a guess. Push
 nothing: the branch stays as it was last reviewed. Ask once, with what
-collided and the one decision you need; the visit it files on the anchor
-carries your entries so far. Then abort the merge, end the run, and drain. On a
-molecule's step the work bead waits on that visit, and closing it re-slings the
-work:
+collided and the one decision you need; the human gate it files on the anchor
+carries your entries so far, and holds the anchor's merge. Then abort the merge,
+end the run, and drain. On a molecule's step the work bead waits on that gate
+through its own edge, and clearing the gate re-slings the work:
 ```bash
 # >>> bring-current-unresolvable
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/bring-current-audit.sh" ] && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/hand-back.sh" ] && BCA="$SCRIPTS/bring-current-audit.sh" || { BCA=""; SCRIPTS=""; }
 : "${BCA:?bring-current-audit.sh, run-cancel.sh, await-ruling.sh and hand-back.sh not found in the pack}"
 "$BCA" ask --bead "$WORK_BEAD_ID" --path "<file>" \
   --collided "<the two intents that met>" --question "<the one decision you need>" \
-  || { echo "the question reached no visit; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
+  || { echo "the question reached no gate; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
 git merge --abort
 if [ -n "${CLAIMED_STEP_BEAD_ID:-}" ] && [ "$CLAIMED_STEP_BEAD_ID" != "$WORK_BEAD_ID" ]; then
-  # ask filed the visit on the anchor, under a key that names this bead.
+  # ask filed the gate on the anchor, under a key that names this bead, and
+  # await-ruling.sh gives the work bead its own edge onto it.
   ANCHOR=$("$BCA" anchor --bead "$WORK_BEAD_ID") \
     && "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "bring-current-question.$WORK_BEAD_ID" --subject "$ANCHOR" --formula mol-polecat-work \
     || { echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2; exit 1; }
   "$SCRIPTS/run-cancel.sh" --step "<the step you hold, e.g. mol-polecat-work.workspace-setup>" --bead "$CLAIMED_STEP_BEAD_ID" \
-    --reason "bringing the branch current needs a decision only a person can make; the bring-current-question visit on the anchor asks it" \
+    --reason "bringing the branch current needs a decision only a person can make; the bring-current-question gate on the anchor asks it" \
     || { echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2; exit 1; }
 else
   # A bead with no molecule parks to a person, naming what it waits for. The
@@ -613,9 +624,9 @@ else
   # the claim on the route it had, which Gas City can release when the session
   # ends. No agent serves the person route, so a claim parked there would stay
   # held.
-  gc bd update "$WORK_BEAD_ID" --append-notes "Stopped bringing the branch current: a conflict needs a decision (the bring-current-question visit on the anchor asks it). Nothing was pushed."
+  gc bd update "$WORK_BEAD_ID" --append-notes "Stopped bringing the branch current: a conflict needs a decision (the bring-current-question gate on the anchor asks it). Nothing was pushed."
   "$SCRIPTS/hand-back.sh" "$WORK_BEAD_ID" --set-metadata gc.routed_to=human \
-    --set-metadata "gc.takeaway=Needs a decision before its branch can be brought current; the visit on its anchor asks it" \
+    --set-metadata "gc.takeaway=Needs a decision before its branch can be brought current; the gate on its anchor asks it" \
     --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --set-metadata gc.takeaway_by=mol-polecat-work \
     --set-metadata gc.takeaway_settled=
 fi
@@ -1404,10 +1415,10 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     else
         echo "Re-run workspace-setup: create '$EXPECTED_BRANCH' from origin/{{base_branch}}, cherry-pick your commits, re-run submit-and-exit."
     fi
-    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
-      echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+      echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-branch-shape --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
     elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); the work waits on the commits moving onto $EXPECTED_BRANCH"; then
@@ -1432,8 +1443,8 @@ notes now:
 gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].notes // ""'
 ```
 Reconcile the diff you are about to hand off against what you read, and fix
-what a note contradicts. A note asking for a decision you cannot make is an
-escalation, not something to ship past.
+what a note contradicts. A note asking for a decision you cannot make is a
+human gate to file, not something to ship past.
 
 **1b. Resolve the landing target (fails closed).** `{{base_branch}}` is what
 the worktree was poured FROM, not necessarily where the work LANDS. A
@@ -1459,10 +1470,10 @@ else
     echo "  current branch:  $CURRENT_BRANCH"
     echo "Nothing names a landing branch, and base_branch is empty or the branch being pushed — recording it would be a self-merge."
     echo "Set it, then re-run submit-and-exit:  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
-    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
-      echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+      echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-no-landing-target --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
     elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "no landing branch: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}; the work waits on a target"; then
@@ -1493,10 +1504,10 @@ if [ "$AUTO_PUSH" = "false" ]; then
   BRANCH=$(git branch --show-current)
   if [ -z "${LANDING_TARGET:-}" ]; then
     echo "LANDING_TARGET unset — run step 1b before this arm."
-    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
-      echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was pushed. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+      echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-landing-target-unset --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
     elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset; step 1b did not run"; then
@@ -1733,8 +1744,8 @@ handoff, and named-session work must not read as pool demand.
 
 A refused `gc bd update` exits non-zero and rolls its own call back, so the
 three writes are chained. If any one fails the bead is not handed off, and the
-step holds and escalates rather than closing its chain and draining past a
-strand the refinery never sees.
+step holds and files a human gate rather than closing its chain and draining
+past a strand the refinery never sees.
 
 The handoff clears the polecat's `gc.session_id`/`gc.session_name`: once it
 lands the refinery holds the bead and this session does not. The witness
@@ -1756,10 +1767,10 @@ arrives in the three writes below.
 # >>> submit-target-consume
 if [ -z "${LANDING_TARGET:-}" ]; then
   echo "LANDING_TARGET unset — run step 1b before this arm."
-  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-  : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-  if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was handed off. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
-    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+  SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+  : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
+  if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was handed off. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
   elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-landing-target-unset --formula mol-polecat-work; then
     echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the handoff with LANDING_TARGET unset; step 1b did not run"; then
@@ -1798,10 +1809,10 @@ HANDOFF_OK=0
 if gc bd update "$WORK_BEAD_ID" "${HANDOFF_META[@]}" --append-notes "Implemented: <brief summary>" && gc bd update "$WORK_BEAD_ID" --status=open && gc bd update "$WORK_BEAD_ID" --assignee="$REFINERY_TARGET"; then HANDOFF_OK=1; fi
 if [ "$HANDOFF_OK" != "1" ]; then
     echo "HANDOFF REFUSED: a gc bd update in the handoff exited non-zero and rolled itself back, so $WORK_BEAD_ID is not open, assigned to $REFINERY_TARGET, and unrouted. The branch is pushed, and this run is cancelled after the wait below lands."
-    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery, and its run is cancelled. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
-      echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+    : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and human-gate.sh not found in the pack}"
+    if ! "$SCRIPTS/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery, and its run is cancelled. Then clear this gate: $WORK_BEAD_ID waits on it, and clearing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+      echo "human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-handoff-refused --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
     elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "refinery handoff refused: a gc bd update exited non-zero and rolled back; the branch is pushed but the bead is not handed off"; then

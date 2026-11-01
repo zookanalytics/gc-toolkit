@@ -23,9 +23,9 @@ passes: docs/refinery-merge-cadence.md.
 
 State writes: every merge_result transition goes through
 assets/scripts/lifecycle.sh (one atomic validated write per transition);
-every escalation goes through assets/scripts/escalate.sh (one open visit
-per situation key). Resolve both at shell runtime — formula bodies get no
-{{.ConfigDir}}:
+every human gate goes through assets/scripts/human-gate.sh (one open gate
+per bead and situation key). Resolve both at shell runtime — formula bodies
+get no {{.ConfigDir}}:
 
     LC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/lifecycle.sh" && [ -x "$LC" ] || LC=""
 
@@ -42,7 +42,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a visit in place of the pour."
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a human gate in place of the pour."
 default = "gc-toolkit."
 
 [vars.rig_name]
@@ -104,8 +104,10 @@ healthy):
 ```bash
 if [ -z "${GC_AGENT:-}" ]; then
     echo "GC_AGENT is empty — refusing to self-poll with an empty filter."
-    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "${GC_SESSION_ID:-refinery}" --key refinery-empty-identity --message "Refinery session started with empty GC_AGENT; investigate the session harness."
+    # The condition has no bead of its own: the session id names a session,
+    # not work that can wait, so it is a patrol finding, not a human gate.
+    SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
+    [ -n "$SCRIPTS" ] && "$SCRIPTS/patrol-finding.sh" --scope refinery-findings --key refinery-empty-identity --title "Refinery session started with an empty GC_AGENT" --message "Refinery session ${GC_SESSION_ID:-<unknown>} started with empty GC_AGENT, so it cannot self-poll and idles while looking healthy; investigate the session harness."
     gc runtime drain-ack
     exit 1
 fi
@@ -160,14 +162,16 @@ fi
 # flight, so only a blocker on the bead itself holds it, never a park on an
 # ancestor. A blocker the store does not return holds the bead too, and a walk
 # that cannot read ends the turn, since a hold nobody read is no release.
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
+# hold-lib.sh builds on bd-lib.sh's rule of which human gates still hold, so
+# bd-lib.sh is sourced first.
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
 fw_hold_read() { gc bd list ${GC_RIG:+--rig="$GC_RIG"} --id "$1" --all --include-gates --include-infra --include-templates --limit=0 --json; }
 WORK_JUDGED=""
-if [ -n "$SCRIPTS" ] && . "$SCRIPTS/hold-lib.sh"; then
+if [ -n "$SCRIPTS" ] && . "$SCRIPTS/bd-lib.sh" && . "$SCRIPTS/hold-lib.sh"; then
   WORK_JUDGED=$(printf '%s' "$WORK_ROWS" | jq -c '[.[] | select((.metadata.merge_result // "") == "")]' | hold_annotate fw_hold_read) || WORK_JUDGED=""
 fi
 if ! printf '%s' "$WORK_JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  echo "find-work: could not read what holds the assigned handoffs (hold-lib.sh not in the pack, or a store read failed) — ending the turn without claiming; the next patrol retries." >&2
+  echo "find-work: could not read what holds the assigned handoffs (bd-lib.sh or hold-lib.sh not in the pack, or a store read failed) — ending the turn without claiming; the next patrol retries." >&2
   gc runtime drain-ack
   exit 0
 fi
@@ -313,7 +317,7 @@ and `existing_pr` carries the anchor's PR over so the rework reuses it instead
 of minting a duplicate. A fresh `mol-polecat-work` pour then dispatches the
 rebuild, which no hold on the bead's epic reaches. reopen-source has already
 taken the bead out of this queue, so a repool that stops short arms a retry
-or files a visit:
+or files a human gate:
 
 ```bash
 # >>> rejection-conflict-reason
@@ -583,17 +587,17 @@ Read the result off the report and the job's log (`$GATE/log`):
   summary, so the work goes back to its author.
 - `state=running` from a wait that exits 1: the gate ran past the limit and
   its process group survived TERM and KILL, so it still runs in the prep
-  worktree. Never start another gate beside it. Escalate with key
-  `refinery-gate-unstoppable`, naming the bead and the gate's pid, and leave
-  the work with the refinery: `gc runtime drain-ack` and end the cycle
-  without a rejection.
+  worktree. Never start another gate beside it. File a human gate on the bead
+  with `human-gate.sh` under the key `refinery-gate-unstoppable`, naming the
+  gate's pid, and leave the work with the refinery: `gc runtime drain-ack` and
+  end the cycle without a rejection.
 - anything else (`state=died`, `state=exceeded`, or any other `rc`): the gate
   stopped short of a verdict, ended by a signal, a restart, the limit, or a
   missing prep worktree, which says nothing about the branch. Start it once
-  more. If the second run stops short too, escalate with key
-  `refinery-gate-cut-short`, naming the bead and the cause, and leave the work
-  with the refinery: `gc runtime drain-ack` and end the cycle without a
-  rejection.
+  more. If the second run stops short too, file a human gate on the bead with
+  `human-gate.sh` under the key `refinery-gate-cut-short`, naming the cause,
+  and leave the work with the refinery: `gc runtime drain-ack` and end the
+  cycle without a rejection.
 
 Close this step once the gate has finished, pass or fail."""
 
@@ -863,19 +867,19 @@ did not record. The block sends that bead down the direct path, which records
 it. A check that cannot run verifies nothing either way, and its cause is often
 gone by the next patrol, so the block leaves that bead with the refinery to
 retry, as this step's other infrastructure failures do. It counts the failures
-in a row on the bead. At the third it files a visit, with `escalate.sh`'s
-verdict window off, that names git's error and the directory the check ran in,
-so nobody reads it as a branch with no change. Then `await-ruling.sh` makes the
-work wait on that visit. It adds a `blocks` edge from the work onto the visit,
-releases the refinery's assignment, which takes the work off the queue, and
-arms a fresh `mol-polecat-work` pour for when the visit closes. That run hands
-the branch back to the refinery. The work is not parked `blocked`: a park
-records a `merge_result`, the pour's load-context reads a bead carrying one as
-finished work, and on a rework child it would be a second anchor on the PR.
+in a row on the bead. At the third it files a human gate on the work with
+`human-gate.sh` and no quiet window, which names git's error and the directory
+the check ran in, so nobody reads it as a branch with no change. The gate blocks
+the work, and that edge is the wait: `await-ruling.sh` releases the refinery's
+assignment, which takes the work off the queue, and arms a fresh
+`mol-polecat-work` pour for when the gate is cleared. That run hands the branch
+back to the refinery. The work is not parked `blocked`: a park records a
+`merge_result`, the pour's load-context reads a bead carrying one as finished
+work, and on a rework child it would be a second anchor on the PR.
 A graduated convoy is the exception, because a run poured onto a convoy works
-on the beads the convoy tracks. The convoy is parked `blocked` once a `blocks`
-edge holds it on the visit, and a person hands it back.
-When the visit, the convoy's edge or the wait does not land, the work stays
+on the beads the convoy tracks. The convoy is parked `blocked`, held by its
+gate, and a person hands it back.
+When the gate, the convoy's park or the wait does not land, the work stays
 with the refinery, which takes back an assignment the wait released, and the
 count stays at the cap, so the next failed check asks again. A check that runs
 clears the count:
@@ -891,38 +895,34 @@ branch_has_real_change "$RIG_ROOT" "origin/$TARGET" "$PREP_SHA" || BHRC_RC=$?
 CHECK_FAIL_CAP=3
 CHECK_FAILS=$(printf '%s' "$BEAD_JSON" | jq -r '(.[0].metadata.zero_diff_check_failures // "0") | tostring' 2>/dev/null)
 case "$CHECK_FAILS" in ''|*[!0-9]*) CHECK_FAILS=0 ;; esac
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
   CHECK_FAILS=$((CHECK_FAILS + 1))
   if [ "$CHECK_FAILS" -lt "$CHECK_FAIL_CAP" ]; then
-    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK, so the visit after $CHECK_FAIL_CAP in a row may come later"
+    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK, so the gate after $CHECK_FAIL_CAP in a row may come later"
     echo "the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR (failure $CHECK_FAILS of $CHECK_FAIL_CAP in a row); leaving the work with the refinery to retry"
     gc runtime drain-ack
     exit 1
   fi
   echo "the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR (failure $CHECK_FAILS in a row); asking a person, and taking $WORK off the refinery's queue until they answer"
   # A run poured onto a convoy works on the beads the convoy tracks, so no pour
-  # rebuilds a graduated convoy. It is parked blocked instead, held by a blocks
-  # edge onto the visit, and a person hands it back.
+  # rebuilds a graduated convoy. It is parked blocked instead, held by its gate,
+  # and a person hands it back.
   WORK_KIND=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].issue_type // empty' 2>/dev/null)
-  HANDBACK="close this visit: closing it pours a fresh run on $WORK, and that run hands the branch back to the refinery"
-  [ "$WORK_KIND" != convoy ] || HANDBACK="hand $WORK back to the refinery and close this visit"
+  HANDBACK="clear this gate: clearing it pours a fresh run on $WORK, and that run hands the branch back to the refinery"
+  [ "$WORK_KIND" != convoy ] || HANDBACK="hand $WORK back to the refinery and clear this gate"
   WAITS=""
   if [ -z "$SCRIPTS" ] || [ ! -x "$SCRIPTS/await-ruling.sh" ]; then
-    echo "escalate.sh and await-ruling.sh were not both found in the pack, so no visit asks about $WORK"
-  elif ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this visit. Fix that error, then $HANDBACK. To drop the work instead, close $WORK first, then this visit."; then
-    echo "escalate.sh recorded no visit for $WORK"
+    echo "human-gate.sh and await-ruling.sh were not both found in the pack, so no gate asks about $WORK"
+  elif ! "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this gate. Fix that error, then $HANDBACK. To drop the work instead, close $WORK, then clear this gate as moot."; then
+    echo "human-gate.sh filed no gate on $WORK"
   elif [ "$WORK_KIND" = convoy ]; then
-    VISIT=$(gc bd list --status=open,in_progress --metadata-field escalation_key=refinery-zero-diff-check-failed --metadata-field "gc.continuation_group=$WORK" --limit=20 --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" then ([ .[].id ] | sort | .[0] // empty) else empty end' 2>/dev/null)
-    [ -z "$VISIT" ] || gc bd dep add "$WORK" "$VISIT" --type=blocks >/dev/null 2>&1 || true
-    if [ -z "$VISIT" ] || ! gc bd dep list "$WORK" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -e --arg v "$VISIT" 'any(.[]?; (.id // "") == $v and (.dependency_type // "") == "blocks")' >/dev/null 2>&1; then
-      echo "no blocks edge from $WORK onto its visit landed, so $WORK is not parked"
-    else
-      "$LC" transition "$WORK" --to blocked --assignee "" --route human --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its visit names, then hand the convoy back" && WAITS=1
-    fi
+    # human-gate.sh read its gate back from the convoy's side, so the gate
+    # blocks the convoy already, and that holds the park.
+    "$LC" transition "$WORK" --to blocked --assignee "" --route human --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its gate names, then hand the convoy back" && WAITS=1
   elif "$SCRIPTS/await-ruling.sh" "$WORK" --key refinery-zero-diff-check-failed --formula mol-polecat-work; then
     WAITS=1
-    gc bd update "$WORK" --unset-metadata zero_diff_check_failures --append-notes "Refinery: the zero-diff check of $BRANCH could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row ($BHRC_ERROR), so the branch was not judged and nothing was merged. $WORK waits on its refinery-zero-diff-check-failed visit. Closing that visit pours a fresh run, and that run hands the branch back to the refinery." >/dev/null 2>&1 || echo "could not clear the failed-check count on $WORK, so its next failed check asks a person at once"
+    gc bd update "$WORK" --unset-metadata zero_diff_check_failures --append-notes "Refinery: the zero-diff check of $BRANCH could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row ($BHRC_ERROR), so the branch was not judged and nothing was merged. $WORK waits on its refinery-zero-diff-check-failed gate. Clearing that gate pours a fresh run, and that run hands the branch back to the refinery." >/dev/null 2>&1 || echo "could not clear the failed-check count on $WORK, so its next failed check asks a person at once"
   fi
   if [ -z "$WAITS" ]; then
     # A wait that did not land leaves the work with the refinery to retry.
@@ -949,9 +949,9 @@ if [ "$BHRC_RC" = 1 ]; then
   else
     "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
     if [ -n "$SCRIPTS" ]; then
-      "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+      "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
     else
-      echo "escalate.sh not found in the pack; $WORK is parked for a human with no refinery-false-completion visit"
+      echo "human-gate.sh not found in the pack; $WORK is parked for a human with no refinery-false-completion gate"
     fi
     gc runtime drain-ack
     exit 1
@@ -1054,8 +1054,8 @@ not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
 needs, capped at 140 characters.
 ```bash
 "$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>" --takeaway "existing_pr failed validation: <what is wrong> — supply a valid PR or clear existing_pr"
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-[ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+[ -n "$SCRIPTS" ] && "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
 ```
 Then jump to next-iteration (pour before burn).
 
@@ -1159,11 +1159,11 @@ anchoring closes nothing. A child never takes a gating state itself. When the
 bead it names is not open on the branch, merge-push reads that bead by its id. A
 read that fails makes the landing wait the same way. A convoy there, or no such
 bead in the store, leaves a question only a person can answer: whether the
-graduation goes on. So merge-push files a visit on $WORK with `escalate.sh`'s
-verdict window off, and `await-ruling.sh` makes $WORK wait on it. The script
-adds a `blocks` edge from $WORK onto the visit, releases $WORK's assignment, which
-takes it off the refinery's queue, and arms a fresh `mol-polecat-work` pour of
-$WORK for when the visit closes. A held child is then never picked again ahead
+graduation goes on. So merge-push files a human gate on $WORK with
+`human-gate.sh` and no quiet window, and `await-ruling.sh` makes $WORK wait on
+it. The gate blocks $WORK already, and the script releases $WORK's assignment,
+which takes it off the refinery's queue, and arms a fresh `mol-polecat-work`
+pour of $WORK for when the gate is cleared. A held child is then never picked again ahead
 of the handoffs behind it, and it is held without a `merge_result`, which would
 make it the branch's anchor. When the wait does not land, $WORK stays routed and
 the next pass tries again. A named bead that is not a convoy leaves $WORK its own
@@ -1242,13 +1242,13 @@ if [ -n "$NAMED" ] && [ -z "$LANDS_ON" ]; then
       if [ "$NAMED_KIND" = absent ]; then NAMED_STATE="not in this store"; else NAMED_STATE="not open on $BRANCH"; fi
       echo "merge-push: $WORK rebuilds $NAMED, which is $NAMED_STATE, so its landing has no bead to anchor; recording no landing and closing nothing." >&2
       LC_DIR="${LC%/*}"; WAITS=""
-      if GC_ESCALATE_VERDICT_WINDOW=0 "$LC_DIR/escalate.sh" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of $NAMED, has landed on $BRANCH, but $NAMED is $NAMED_STATE, so no bead can carry the PR, and the refinery anchored and closed nothing. $WORK waits on this visit, off the refinery's queue. To go on with the graduation, make $NAMED open with branch $BRANCH, then close this visit: that pours a fresh run on $WORK, whose hand-back anchors $NAMED. To abandon the graduation, close $WORK, then this visit."; then
+      if "$LC_DIR/human-gate.sh" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of $NAMED, has landed on $BRANCH, but $NAMED is $NAMED_STATE, so no bead can carry the PR, and the refinery anchored and closed nothing. $WORK waits on this gate, off the refinery's queue. To go on with the graduation, make $NAMED open with branch $BRANCH, then clear this gate: that pours a fresh run on $WORK, whose hand-back anchors $NAMED. To abandon the graduation, close $WORK, then clear this gate as moot."; then
         "$LC_DIR/await-ruling.sh" "$WORK" --key refinery-rebuild-convoy-not-open --formula mol-polecat-work && WAITS=1
       fi
       if [ -n "$WAITS" ]; then
-        echo "merge-push: $WORK waits on that visit, off the refinery's queue, and closing the visit pours a fresh run on it." >&2
+        echo "merge-push: $WORK waits on that gate, off the refinery's queue, and clearing the gate pours a fresh run on it." >&2
       else
-        echo "merge-push: the wait on a visit did not land, so $WORK stays routed for the next pass." >&2
+        echo "merge-push: the wait on a human gate did not land, so $WORK stays routed for the next pass." >&2
       fi
       gc runtime drain-ack
       exit 1 ;;
@@ -1347,9 +1347,9 @@ fi
 Never delete `$BRANCH` in mr mode — the PR needs it. The rig root's HEAD was
 never moved, so nothing has to be restored here.
 
-**Unsupported strategies (e.g. `local`):** transition nothing; escalate
-via escalate.sh (`--subject $WORK --key refinery-unsupported-strategy`) and
-leave the bead for a human to re-strategize.
+**Unsupported strategies (e.g. `local`):** transition nothing; file a human
+gate with human-gate.sh (`--subject $WORK --key refinery-unsupported-strategy`)
+and leave the bead for a human to re-strategize.
 
 **GATE**: direct requires a verified target push then one merged+close
 transition; mr requires a verified branch push then one gating transition
@@ -1366,8 +1366,8 @@ needs = ["merge-push"]
 description = """
 Summarize the cycle for handoff context (it lives in the wisp's closing
 reason): branch handled and disposition (merged / gated / rejected /
-blocked), check results, bugs filed, escalations sent — and holds observed
-that did NOT escalate; suppression removes the mail, never the record. If
+blocked), check results, bugs filed, human gates filed — and holds observed
+that filed none; suppression removes the mail, never the record. If
 the cycle ended early, note why and what state was left."""
 
 [[steps]]

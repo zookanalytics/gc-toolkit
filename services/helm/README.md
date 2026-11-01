@@ -11,8 +11,8 @@ the bash dies).
 > binary. `gc-helm.sh` no longer renders a board at all: it carries the write
 > and read-only verbs that `gc-helm --help` lists, and `gc-helm.sh --json`
 > exits 2 with `unknown verb`. Its own usage text points at `helm-svc board`.
-> Retiring the remaining verbs is a separate decision recorded under "Two helm
-> boards" in `docs/human-engagement.md`, under Watch items.
+> Retiring the remaining verbs is a separate decision recorded under "Two
+> programs behind one board" in `docs/human-engagement.md`, under Watch items.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
@@ -49,11 +49,13 @@ GET /            -> the board JSON, or the embedded web app for a browser
                     (Accept: text/html) — see *Web UI*
 GET /assets/...  -> the web app's bundle
 
-POST /helm/open     -> { bead, outcome, visit?, message }   file a visit on a bead
-POST /helm/accept   -> { bead, verb, message }   dispatch the subject's recommended
-                       formula and dismiss its visit (Accept)
-POST /helm/engage   -> { bead, verb, message }   spawn a Discuss sitting on the visit
-POST /helm/dismiss  -> { bead, verb, message }   close the subject's open visit
+POST /helm/open     -> { bead, outcome, conversation?, message }   file a conversation
+                       about a bead in the operator's queue
+POST /helm/accept   -> { bead, verb, message }   clear the recommendation's human gate
+                       and dispatch the bead's recommended formula (Accept)
+POST /helm/engage   -> { bead, verb, message }   spawn a Discuss sitting on the bead's
+                       conversation
+POST /helm/dismiss  -> { bead, verb, message }   end the sitting: close its conversation
                     — the write routes; see *Actuating from the board*
 ```
 
@@ -63,7 +65,7 @@ the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
 
 ```
-id rig kind title severity owed weight held visit_state
+id rig kind title severity owed weight held sitting_state
 n_closed m_total open in_progress assigned
 in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
 stranded empty complete
@@ -73,8 +75,26 @@ takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 section cluster_key group_root group_parent
 acceptable accept_formula pr_branch_url pr_phase phase recommendation
-visit_start_failure pr_held
+accept_withheld gates_in_session sitting_start_failure pr_held work_held
 ```
+
+`sitting_state` is `in_session` on a row a live sitting is in, `start-failed`
+on a row whose conversation's sitting failed to start (`sitting_start_failure`
+says why; see *A sitting that failed to start*, below), `waiting` on any other
+held row, and empty on a row nothing holds. `work_held` refines `held`: it is
+true when an open human gate blocks the bead or an acceptance an earlier Accept
+left unfinished keeps it, so the operator's answer is required before the work
+can move. A held row where it is false only has a conversation on it, which
+blocks nothing, and the boards mark it apart: ◌ in both terminal views, except
+where the overview's ● marks a row that wants you, and a chip reading
+`conversation` rather than `gate` on the web. `acceptable` reads
+Accept's three conditions (`docs/human-engagement.md`, "Accept").
+`accept_withheld` is set on a row that
+meets the first two and fails the third: it names the open human gates that
+hold Accept back, the way NEEDS names gates, and the boards print it beside
+Discuss. `gates_in_session` names the open gates on the row that a live
+sitting's conversation replies to, and the boards print it beside NEEDS. Both
+are null on every other row.
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
 is `omitempty` — the fields a tile may omit. A source that cannot read
@@ -85,8 +105,8 @@ is not one of a template's several.
 
 Tiles are deduplicated by id and **partitioned**: every `owed` row first,
 longest-waiting first, then everything else by `rank_score` descending. A row
-whose visit's sitting failed to start leads the owed rows whatever its age (see
-*A sitting that failed to start*, below).
+whose conversation's sitting failed to start leads the owed rows whatever its
+age (see *A sitting that failed to start*, below).
 
 `section` bands each row by the KIND of attention it wants — `review` (a pull
 request), `gate` (a person must answer), `stalled` (open work nothing is
@@ -113,8 +133,8 @@ family by it (`flattenFamilies` in `web/src/App.tsx`); the CLI board renders one
 level deep.
 
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
-that are one template (a visit family, a run of PRs green and waiting on
-review); a renderer folds them into one entry while the wire keeps every
+that are one template (a run of rows held by gates with one title, a run of
+PRs green and waiting on review); a renderer folds them into one entry while the wire keeps every
 member. `specs/tk-9tbbk.4/` records the band taxonomy and the wrapper fold.
 
 ### The two questions, and why they are two surfaces
@@ -125,8 +145,8 @@ the board's default answer; the city overview is one flag or one keystroke away.
 
 Ranking cannot express the split. `rank_score` is severity, then subtree size,
 then staleness; severity is coarse and shared between stranded, unowned and
-human-gated rows, so the term that actually orders a board is SIZE — and a
-demand owed by a person has a subtree near 1 where an epic has up to 999. On one
+human-gated rows, so the term that actually orders a board is SIZE — and an
+ask owed by a person has a subtree near 1 where an epic has up to 999. On one
 globally ranked list the operator's own queue therefore sorts under the city's
 containers by construction, whatever the bands say. Inside the queue, size is
 not the question either: it is a list of decisions, so it is ordered by how long
@@ -147,7 +167,7 @@ it were ranked costs twice: the overview leads with the queue it is meant to
 sit behind, and the cap then drops whatever the hoisted rows pushed past the
 limit.
 
-In the queue the row's HEADLINE is the demand — the `needs` sentence — and the
+In the queue the row's HEADLINE is what it asks — the `needs` sentence — and the
 bead title is secondary; `prefix+b` and the *owed by you* table both read it
 that way. The overview asks what the city's shape is, so it leads with the
 object and its frontier.
@@ -225,8 +245,9 @@ on every tick.
 
 ### Anchor kinds
 
-Six kinds are gathered. The first three are selected by the bead's issue
-**type**; the last three by its **metadata** (`tk-2v08m`).
+Three kinds are selected by the bead's issue **type**, three by its
+**metadata** (`tk-2v08m`), and the operator's side, the human gates and the
+conversations, by their native shape.
 
 | kind | selected by | band | why |
 |---|---|---|---|
@@ -236,6 +257,25 @@ Six kinds are gathered. The first three are selected by the bead's issue
 | `human` | `gc.routed_to=human` | ELEVATED; NORMAL or LOW once *ruled* | the operator owns it; no agent will take it |
 | `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed and nothing else holds or moves it | a conversation that reached a takeaway |
 | `merge` | `merge_result` present | derived from the roll-up, so LOW while childless | a branch the city is trying to land — the PR round-trip's row |
+| `gate` | `issue_type=gate` with `await_type=human` | folds onto the row of every bead it blocks, read from the gate's `blocks` dependents; a row of its own only when none of them has one | a wait a person must clear |
+| `conversation` | a task that tracks one bead and is assigned to `human` or to the alias that names its own id | folds onto the row of the bead it tracks | a dialogue waiting in the operator's queue or held by a sitting |
+
+`gate` and `conversation` are WRAPPERS: each folds onto the rows of the beads
+it concerns (`board.foldWrappers`), which it marks `held`. A gate also marks
+them `work_held`, because it holds their work until a person clears it, and a
+conversation does not, because it blocks nothing. An open gate makes each bead
+it blocks owed, even while work on the bead is in flight, and NEEDS names the
+gate's title, or `N× — a · b` over several. A conversation not in session makes
+its bead owed, one in the operator's queue or one whose sitting's session has
+closed, and a row no gate holds shows its conversation's title, or "in
+conversation" while a sitting holds the conversation. A merge anchor keeps its
+own PR needs, whose `asking` already names the gate that blocks it. The owed
+clock is the earliest `updated_at` among the row's open gates and owed
+conversations. A bead that carries `gc.recommended_formula` and that no open
+gate under the key `first-reaction` blocks has its own `blocks` listing read
+too, which returns a closed gate with its close reason: that is how the board
+finds an acceptance an earlier Accept left unfinished, which keeps the row
+owed.
 
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
 at `pre_open_gate` has a branch, a gate set and a machine axis with no number
@@ -248,14 +288,21 @@ dedup instead of flipping kind between passes. A merge anchor a sitting talked
 about carries a takeaway too, and keeps its `merge` row: the kind says what
 admitted the bead, and a takeaway does not make a pull request a parked bead.
 
-All six are gathered by **both** backends. The library backend filters the two
-metadata kinds in the store query; the HTTP backend filters them client-side
-over a paged `/beads?status=open` scan (`tk-lb3u4m`), plus a `type=gate` page
-unioned in by id: a human demand is a native gate (`issue_type=gate`), which
-`bd list` hides by default. The API's list path passes `--include-gates` today,
-so the bare scan already carries gates; the extra page is the guard that keeps
-the two backends agreeing on the `human` kind should that default ever change.
-The two selectors live in `source.metadataAnchor`
+The typed and metadata kinds are gathered by **both** backends. The library
+backend filters the metadata kinds in the store query; the HTTP backend filters
+them client-side over a paged `/beads?status=open` scan (`tk-lb3u4m`). The
+library backend reads human gates with a gate-typed search per store, the open
+ones and those closed inside the sittings window, because `bd list` hides gates
+and a gate carries no pack marker, and it reads each gate's `blocks` dependents
+in the batched inbound read it makes for the anchors' children. It reads the
+conversations by their shape, with each one's subject and replies from its own
+edges in one batched call. The HTTP backend unions a `type=gate` page into its
+scan and inverts the rows' `blocks` edges to find what each gate blocks, but it
+admits a gate as a human gate only when the payload names its await type, which
+the supervisor's bead does not carry today, so a board served from it folds no
+human gate. It sees a conversation only while the conversation waits in the
+queue, because a held one is `in_progress` and the scan reads `open`. The two
+metadata selectors live in `source.metadataAnchor`
 — one field set, read two ways — because a bead that is an anchor on one backend
 and absent from the other is the shape of bug that cost the board its
 human-routed rows.
@@ -266,8 +313,9 @@ queries stop returning an anchor the moment it is answered, so the second pass
 is the only thing that gives a closed one a row. It bands `DONE`, which sorts
 below every live band, and stays there until the window ages it out. The band
 carries no per-row state: nothing retires a row early, so a row leaves only once
-it has been closed longer than the window. A visit or demand is the exception.
-Once it closes, a wrapper whose subject is on the board takes no row of its own,
+it has been closed longer than the window. A human gate or a conversation is
+the exception. Once it closes, a wrapper whose subject is on the board takes no
+row of its own,
 because the subject's row stands for the attention it carried
 (`board.foldWrappers`). The collapse to a stateless band:
 `specs/tk-7cb4l2/collapse.md`; the layout-stability rule and the tradeoff the
@@ -307,10 +355,10 @@ load-bearing for `parked` in particular — see *Until its work is done* below.
 **`parked` is deliberately not an attention item.** It is LOW so it can never
 compete for rank with a stranded epic, and the web app lists it in a section of
 its own below the ranked table rather than as a row inside it. What the operator
-needs from these is not triage but recall: an open bead whose visit ended with a
-takeaway is already resumable — typing a bare bead id into the `prefix+a` popup
-reopens the conversation on that bead (`assets/scripts/tmux-visit-prompt.sh`) —
-it was only unfindable.
+needs from these is not triage but recall: an open bead whose sitting ended
+with a takeaway is already resumable — typing a bare bead id into the `prefix+a`
+popup runs the operator's intake on that bead
+(`assets/scripts/tmux-intake-prompt.sh`) — it was only unfindable.
 
 **Until its work is done.** The floor is a claim about the bead — it wants
 nothing — and open work hanging under it falsifies the claim. So a `parked`
@@ -333,10 +381,10 @@ open children were on no board anywhere. Measured on `tk-z9nln`, 2026-08-22 —
 the row read `m_total=0 · conversation parked`, while the deliverable it was
 waiting for sat open, unassigned and unrouted, invisible.
 
-Converse files routed work, and the demand beads that record what a person
-owes, as SIBLINGS of the subject (`docs/human-engagement.md`, "How a
-sitting ends"), so the `waiting_on` edge takes and the disposition rule below
-fires for them. The child roll-up stays exactly as it is: it is what keeps the
+Converse files routed work as SIBLINGS of the subject
+(`docs/human-engagement.md`, "How a parked subject comes back"), and a human
+gate blocks the bead that waits on it, so the `waiting_on` edge takes and the
+disposition rule below fires for them. The child roll-up stays exactly as it is: it is what keeps the
 work already filed as a child visible, and nothing re-parents it.
 
 A roll-up whose children have ALL closed stays LOW. The row can now *say* the
@@ -358,7 +406,7 @@ prose — and the board re-derives, per render, whether it has been discharged:
 
 | `waiting_on` | `waiting_on_open` | row |
 |---|---|---|
-| empty | — | LOW, "conversation parked — takeaway recorded", or "— no takeaway recorded" when the sitting left none (a childless row; with children the roll-up answers instead). A row a live sitting, a visit, a route or an arm holds names that instead |
+| empty | — | LOW, "conversation parked — takeaway recorded", or "— no takeaway recorded" when the sitting left none (a childless row; with children the roll-up answers instead). A row a live sitting, a conversation, a route or an arm holds names that instead |
 | non-empty | non-empty | LOW, "queued · waiting on N", or "parked · waiting on N" when a gate a person releases or a demand is among the waits — a live hold, still quiet. NEEDS names the oldest wait by its title, and says "starts by itself" when an arm or a route will start the row |
 | non-empty | empty | `disposition_due` when nothing holds or moves the row: ELEVATED, "blocker landed", and NEEDS becomes "blocker landed — dispose or resume". Otherwise the row reads what holds it: a pull request in review reads as its merge anchor, a live sitting as "in conversation", an arm or a route as "queued · starts by itself", live work as "in flight", and an ancestor's wait as "parked · held by an ancestor's wait" or "queued · held by an ancestor's wait", with NEEDS naming that wait |
 
@@ -369,8 +417,8 @@ and live work (`board.deriveState`), in this order:
 |---|---|
 | in flight | is claimed by a live session, or a live workflow stands over it |
 | in review | carries a pull request the city is landing: `merge_result` is `pre_open_gate` or `pull_request` |
-| in conversation | has a visit a live sitting holds |
-| parked | waits on an open gate a person releases or on a demand, is routed to the operator, or has a visit no one has engaged |
+| in conversation | has a conversation a live sitting holds |
+| parked | waits on an open gate a person releases or on a demand, is routed to the operator, or has a conversation waiting in the operator's queue |
 | queued | waits on open work or on a gate the city closes by itself, or carries a pool route, an arm or an assignee that will start it |
 | stranded | none of the above: no open wait, no route, no arm, nothing in progress |
 
@@ -426,13 +474,16 @@ since converse never closes a subject by contract, nothing in the city could
 ever have retired them. Two constants that never stand down are not
 *unmissable*; uniform is the same thing as invisible.
 
-A row is **ruled** — the operator has answered it — when all four hold:
+A row is **ruled** — the operator has answered it — when all three hold:
 
 1. it is human-gated — kind `decision` or `human`, or a bead carrying
    `gc.routed_to=human` (which is how the `parked` twin of one is recognised);
-2. it carries a `gc.takeaway`;
-3. its `blocks` waits were READ (an unread graph proves nothing); and
-4. it is not a demand — no `gc.demand_for`.
+2. it carries a `gc.takeaway`; and
+3. its `blocks` waits were READ (an unread graph proves nothing).
+
+A human gate's own row never reaches it: the gate's question is its title, and
+the derivation reads no takeaway on a gate or a conversation, so nothing on
+that row reads as an answer.
 
 A ruled row then reads by whether the work its ruling slung has landed: **in
 flight** while a `blocks` wait is still open — an agent holds the next move — and
@@ -442,7 +493,6 @@ flight** while a `blocks` wait is still open — an agent holds the next move �
 |---|---|
 | no takeaway | ELEVATED, frontier "human-gated decision" or "routed to the operator — no agent will take it"; NEEDS names the silence (below) |
 | takeaway, waits unreadable | as un-ruled — an unread graph proves nothing |
-| open demand (`gc.demand_for`) | as un-ruled — its takeaway is the question, not an answer to it |
 | takeaway, a wait still open, no children | NORMAL, "ruled — work in flight": answered, but an agent holds the slung work — neither the settled stand-down below nor an un-ruled gate |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
 | takeaway, *with* children (wait open or landed) | banded by the roll-up, like a decomposed `parked` subject |
@@ -473,13 +523,11 @@ Three properties carry over from the disposition rule, and one is new:
   the band it was standing down from. The in-flight case above is deliberately
   NORMAL instead: its slung work is live, so a ruling whose work has stalled for
   weeks SHOULD re-elevate — exactly what the settled case must not do.
-- **A demand is exempt.** `gc-helm demand` stamps the authored ask as the
-  demand bead's own `gc.takeaway` so the board has a sentence to show, and the
-  demand carries no blocker of its own — it *is* the blocker, and the edge
-  points at it from the gated work. Clauses 2 and 3 are therefore satisfied the
-  moment it is filed, and without clause 4 the row the verb exists to raise
-  stood down on the render that first saw it. A demand is answered by being
-  CLOSED, which is what makes the gated work ready; until then it is owed.
+- **A human gate is exempt by construction.** A gate carries no blocker of its
+  own — it *is* the blocker, and the edge points at it from the gated work — so
+  a takeaway read on it would satisfy the clauses the moment it was filed. The
+  derivation reads none there. A gate is answered by being resolved, which is
+  what makes the gated work ready; until then it is owed.
 - **`dispositionDue` yields to it.** That promotion exists to lift a row out of
   the parked LOW *floor*; a human-gated bead was never in that floor, and the
   stand-down answers for the same state at the volume the operator asked for.
@@ -498,20 +546,20 @@ longest cell in that column and the least actionable.
 
 An anchor's roll-up reports how many children are open and how many are moving.
 The gap between those two numbers is what makes a row HIGH — *stranded*, with
-`decomposed, idle — assign or visit` next to it. That reading is wrong for every
-child something holds: one waiting its turn behind open work, one a person
+`decomposed, idle — assign or discuss` next to it. That reading is wrong for
+every child something holds: one waiting its turn behind open work, one a person
 holds, one in review, or one in a conversation. None of them is work nobody has
 picked up.
 
 So each open child that is not in flight is classified by its state (the table
 above), read off its own `blocks` waits, which the gather reads for every open
-child of a live anchor, and its route, arm and visits. `parked_heads` names the
-parked children, and the queued, in-review and in-conversation ones are counted
-apart the same way. `open_heads` keeps only the stranded ones, and the band,
-the `stranded` flag and the frontier's count phrases all read that IDLE
-remainder with the children in flight and the stuck ones. `open` on the wire is
-unchanged: it is still every non-closed child, because the total was never the
-thing that was wrong.
+child of a live anchor, its route and arm, and the human gates and
+conversations on it. `parked_heads` names the parked children, and the queued,
+in-review and in-conversation ones are counted apart the same way. `open_heads`
+keeps only the stranded ones, and the band, the `stranded` flag and the
+frontier's count phrases all read that IDLE remainder with the children in
+flight and the stuck ones. `open` on the wire is unchanged: it is still every
+non-closed child, because the total was never the thing that was wrong.
 
 Four shapes come out of it:
 
@@ -558,10 +606,10 @@ field would be lying on a normal day.
 | field | values | read from |
 |---|---|---|
 | `pr_machine` | `progressing`, `settled`, `blocked`, `unknown` | `pr.machine` on the anchor |
-| `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
+| `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from a human gate's edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
-| `pr_held` | any of `visit`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open visit on the anchor or on one of its live review or rework children, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's demand blockers |
+| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open human gate on the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's demand blockers |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
@@ -585,10 +633,10 @@ not grow with the number of pull requests.
 already makes. It overrides any verdict the last gate pass recorded except
 `blocked`, which reads by the status rule (see *Blocked, not settled*). The route
 is the discriminator: an anchor also blocks on ordinary prerequisites and on the
-demand bead that makes it `asking`, and no pool will claim either.
+human gate that makes it `asking`, and no pool will claim either.
 
 **Whose move.** A row is owed by the operator when the machine axis is blocked,
-when an open `blocks` edge to a demand bead means the city is asking, or when the
+when an open `blocks` edge to a human gate means the city is asking, or when the
 cadence is `settled` and GitHub is holding the merge for a human review — one
 never given, or a standing `changes_requested` the city has reworked as far as it
 can. GitHub keeps the veto standing across pushes and the city never dismisses
@@ -647,18 +695,18 @@ on the anchor, because a rework title names no lane.
 Routed-ness is not liveness: a review routed to a pool no session is draining is
 itself the stall, not a healthy hold, so the suppression turns on a live worker
 (`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A
-demand, a takeaway or a human route already owns the row and names it, so the
+human gate, a takeaway or a human route already owns the row and names it, so the
 signal defers to each; it is a merge anchor either way, so it reads in the
 `review` band beside the other pre-open rows.
 
-**`pr_conversation` reads the recorded position.** `asking` is the demand edge,
+**`pr_conversation` reads the recorded position.** `asking` is a human gate's edge,
 rendered wherever it is there. `quiet`, `outstanding` and `answered` are read
 off `pr.conversation`, which `pr-facts.sh` records each pass against the
 acknowledgement watermarks and the routing disposition: `quiet` when no human
 has spoken, and on a pre-open gate, where no PR yet exists to speak on;
 `outstanding` while a human utterance sits above its space's watermark, or a
 batch routed to a fix unit that has not closed yet; `answered` once that fix
-unit closes — a rework child when its branch lands, a visit when a person
+unit closes — a rework child when its branch lands, a human gate when a person
 resolves it — so the city's reply is there to look at. A head move alone is not
 `answered`: a merge-in of the base or an operator push leaves the fix unit open.
 A batch the city is working reads the coarser `outstanding` rather than `quiet`,
@@ -689,58 +737,57 @@ says which. `board.Coverage` computes it for both renderers.
 ## Converse sittings (`tk-ghlg1e.1`)
 
 Beside the ranked list the envelope carries the **conversation record**: every
-converse sitting that is running, plus those that closed inside a recent window.
-A sitting is a `task_kind=visit` bead — the bead a converse session claims and
-holds a conversation inside — and it is the same read that produces `held`.
+conversation that is not closed, plus those that closed inside a recent window.
+A sitting's row is its conversation task, the task a converse session holds, and
+the open half is the same read that folds conversations onto their beads and
+produces `held`.
 
 Sittings are **not tiles and are not ranked against them**. A tile is an anchor
 that wants something; a sitting is an event. The web app gives them a section of
 their own below the parked one, and `helm-svc board` prints them under the
 table, for the same reason parked conversations get a section: putting an event
-in a queue of demands answers a question nobody asked.
+in a queue of asks answers a question nobody asked.
 
 | | gathered | shown |
 |---|---|---|
-| running | `status` open or in_progress | always — a live conversation is never elided |
+| running | `status` open or in_progress: in the operator's queue, or held by a sitting | always — a live conversation is never elided |
 | closed | `closed_at` inside `GC_HELM_SITTINGS_WINDOW` (default `24h`) | most recent first, capped at 12 in a rendered view |
 
 `GC_HELM_SITTINGS_WINDOW` takes a Go duration (`6h`, `90m`). `0` gathers no
 closed sittings and leaves the running ones untouched; anything unparseable
 falls back to the default, because a malformed knob must not cost the board a
 section. The bound lives on the QUERY (`ClosedAfter`), not in the renderer:
-closed visits accumulate forever, and reading them all to throw most away would
-grow without limit against a store the whole city shares.
+closed conversations accumulate forever, and reading them all to throw most
+away would grow without limit against a store the whole city shares. bd's close
+leaves a task's assignee and edges as they were, so a closed conversation keeps
+the shape the gather finds it by.
 
 The two passes fail independently. Losing the closed pass costs the recent
-history and nothing else — `held` is derived from the running half of the same
+history and nothing else — `held` is derived from the open half of the same
 record, so the glyph and the section can never disagree about what is held.
 
-### The justification a sitting closed on
+### The headline a sitting closed on
 
-`gc.outcome` is stamped on the VISIT before it closes (`folded`, `moot`,
-`benign`, `diagnosed`, `cut-short`, or the word a held sitting signs off with).
-It is per-sitting and never rewritten, so it is attributable with no inference
-at all. A running sitting has none, and renders as `—` rather than as blank.
+A sitting's headline is its takeaway, else its close reason, else its subject's
+title (`Sitting.Headline`). The close reason is the conversation task's own
+(`outcome_reason` on the wire): the headline a sign-off settled on, the
+operator's dismissal, or the reading a premise re-check closed it with. It is
+per-sitting and never rewritten, so it is attributable with no inference at
+all. A running sitting has none.
 
 `gc.takeaway` is the harder half, and it is why `Sitting.takeaway` is not a
 copy. **The takeaway lives on the SUBJECT, and each sitting overwrites the last
-one's.** A subject visited three times has one takeaway and two sittings that
+one's.** A subject discussed three times has one takeaway and two sittings that
 did not write it, so hanging it on all three rows would credit two of them with
 a conclusion they never reached. The service carries it only for the sitting
-whose own span — `gc.claimed_at` (falling back to the bead's creation) to
+whose own span — `gc.claimed_at` (falling back to the task's creation) to
 `closed_at`, or to now while it runs — contains `gc.takeaway_at`.
 
-Measured on the live city, 2026-08-26: `tk-7linih` was visited twice, by
-`tk-5063jn` (closed 20:52, `diagnosed`) and `tk-eb5cot` (20:58–21:21,
-`unblocked`). Its single takeaway is stamped 21:20:48, inside the second span
-and after the first had ended. The span test is what stops the earlier sitting
-from displaying a headline written half an hour after it closed.
-
 Two sittings that genuinely overlap on one subject could both contain the stamp.
-The visit claim serializes them in practice, and the failure there is a
-duplicated headline rather than a misattributed one. A subject that cannot be
-read at all leaves its sittings showing an outcome and no headline — narrower,
-not wrong — and marks the gather partial.
+The conversation's claim serializes them in practice, and the failure there is
+a duplicated headline rather than a misattributed one. A subject that cannot be
+read at all leaves its sittings showing a close reason and no takeaway —
+narrower, not wrong — and marks the gather partial.
 
 ### Where it shows up
 
@@ -749,32 +796,28 @@ alike: the record belongs to the board rather than to one of its views, and a
 conversation nobody ended is owed in the same sense the queue's rows are. `●`
 marks a running sitting; AGE is measured from the start of a running one and
 from the end of a closed one. `--json` is **untouched**: it emits the bare
-ranked array that `gc-helm.sh --json` emits and `tmux-pick-helm.sh` consumes,
-and growing a second shape there would break that contract.
+ranked array that `tmux-pick-helm.sh` consumes, and growing a second shape
+there would break that contract.
 
 The web app renders the same order — running first, longest-running first, then
 most recently closed — and drills in on a sitting's SUBJECT, since that is the
 anchor the drill plane knows how to open. Because `POST /helm/open` already
-invalidates the cached board, a visit filed from the drill panel appears in this
-section on the next read rather than after the TTL.
-
-**`gc-helm.sh` needs no counterpart.** This adds no field to `Tile` and no
-anchor kind, so the bash board's `--json` contract and the parity test are
-untouched; the bash board simply has no sittings section. Adding one there is a
-separate decision, in the same class as the other bash-only verbs.
+invalidates the cached board, a conversation filed from the drill panel appears
+in this section on the next read rather than after the TTL.
 
 ### A sitting that failed to start
 
-`gc-helm engage` binds a visit to the sitting it spawns before that sitting
-starts, so a sitting Gas City cannot start leaves its visit bound to a session
-that never ran. The binding alone reads `engaged`, and once the witness releases
-it the visit reads like any parked one. So the board reads the failure itself
+`gc-helm engage` hands a conversation to the sitting it spawns before that
+sitting starts, so a sitting Gas City cannot start leaves its conversation held
+by a session that never ran. A holder whose session has ended reads like a
+conversation waiting in the operator's queue, and so does the conversation once
+it is handed back. So the board reads the failure itself
 (`source.BeadsSource.markStartFailures`), from the records Gas City keeps in the
 city store:
 
 - engage spawns the sitting as a manual session (`session_origin=manual`) whose
-  alias is the visit's id, stored qualified as `<rig>/<binding>.<alias>`, or
-  `v-<id>` where Gas City refuses the bare id as an alias;
+  alias is the conversation's id, stored qualified as `<rig>/<binding>.<alias>`,
+  or `c-<id>` where Gas City refuses the bare id as an alias;
 - the reconciler's rollback closes that session bead with `state=failed-create`;
 - a start that failed on a provider error a person must fix, a model not found
   or a quota exceeded, has the rollback write the error's code to the session
@@ -784,11 +827,11 @@ city store:
 - every other rollback records no cause, such as that of a create rolled back
   before any start ran.
 
-The read goes from the session side, which the witness's release does not
-touch: every failed-create manual session whose alias names an open visit. A
-session spawned under the same alias after the failed one is the visit engaged
-again, and clears the mark whatever became of that session; a newer session
-that failed too is the visit's failure now. The reason reads
+The read goes from the session side, which handing the conversation back does
+not touch: every failed-create manual session whose alias names an open
+conversation. A session spawned under the same alias after the failed one is
+the conversation engaged again, and clears the mark whatever became of that
+session; a newer session that failed too is the conversation's failure now. The reason reads
 `provider error: <code>` for a provider error, `startup timeout` for a
 deadline, `setup timeout` for a deadline inside a `pre_start` command,
 `start error: <the recorded error>` for any other error the episode recorded,
@@ -796,23 +839,22 @@ and `never started` when Gas City recorded no cause.
 
 | field | on the row |
 |---|---|
-| `visit_state` | `start-failed`, on the held subject's row, or on the visit's own row when its subject has none |
-| `visit_start_failure` | the reason |
+| `sitting_state` | `start-failed`, on the held subject's row, or on the conversation's own row when its subject has none |
+| `sitting_start_failure` | the reason |
 | `needs` | `start failed (<reason>): <the ask>` |
 | `owed`, `severity` | owed, and at least `ELEVATED` |
 
 The row leads the operator's queue, ahead of every row owed longer, so it is
 among the rows `tmux-pick-helm.sh` offers off the head of the queue, and the
 picker and both terminal views mark it `✗`. The mark shows as soon as Gas City
-records the failure and stays until the visit is engaged again or closed. A
-failed start outranks a live sitting on the same row, because each visit on a
-subject is its own conversation. Accept follows the visit's binding, the way
-`gc-helm.sh accept` reads it: it stays off while the failed sitting's binding
-stands and returns once the witness releases it.
+records the failure and stays until the conversation is engaged again or
+closed. A failed start outranks a live sitting on the same row, because each
+conversation on a subject is a conversation of its own. A sitting never
+withholds Accept, so a failed start does not either.
 
 The read costs two queries over the city's session beads on every gather (about
-half a second on the live city), plus up to three small ones for each open visit
-with a failed start on record. A read that fails is noted partial and marks nothing
+half a second on the live city), plus up to three small ones for each open
+conversation with a failed start on record. A read that fails is noted partial and marks nothing
 it could not establish. An episode read that fails after the failure is
 established marks the row `reason unread`. The supervisor backend gathers no
 sittings, so it shows no failed start either.
@@ -826,6 +868,7 @@ Three packages, a clean dependency line `board <- source <- server <- cmd`:
 | `internal/board` | The MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
 | `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). |
 | `internal/server` | HTTP routes + a server-side TTL cache of the computed board. |
+| `internal/verbs` | Runs a `gc-helm.sh` write verb for the server's POST routes, under a deadline that kills the run's whole process group. It owns no verb logic. |
 | `web` | The operator's web app (Vite + React + TS) and the `go:embed` that compiles its built bundle into the binary. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
 
@@ -848,9 +891,11 @@ restart.
 **`SupervisorSource` — the loopback HTTP API (fallback).** Endpoints consumed
 (all under `/v0/city/<city>/`): `/rigs`, `/beads?type=epic`, `/beads/graph/{id}`
 (all-status child roll-up), `/beads?type=decision`, `/convoys` + `/convoy/{id}`,
-and `/beads?status=open` paged to the end — one scan the `human` and `parked`
-kinds are filtered out of client-side, and whose parent-child edges are inverted
-into those anchors' child roll-ups so they cost no request of their own.
+and `/beads?status=open` paged to the end, with a `type=gate` page unioned in —
+one scan the `human`, `parked` and `merge` kinds, the human gates and the
+queued conversations are filtered out of client-side, and whose parent-child and
+`blocks` edges are inverted into those anchors' child roll-ups and each gate's
+blocked beads, so they cost no request of their own.
 
 **The `gc` CLI (`internal/source/gccli.go`) — for the one fact no bead carries.**
 `gc session list --state all --json` for session liveness (the gate that tells
@@ -904,9 +949,14 @@ all, and the epic above one of them read `decomposed, idle — assign or visit`.
 Measured on the live city, the same gather went from 28 tiles to 81.
 
 The **sittings** record is absent on this backend, and not for either of those
-reasons: it is derived from the visit read, which `SupervisorSource` does not do
-at all. Under `GC_HELM_SOURCE=supervisor` the envelope's `sittings` is `null`
-and neither view renders the section.
+reasons: its closed half needs the closed conversations, and the scan reads
+`open`. Under `GC_HELM_SOURCE=supervisor` the envelope's `sittings` is `null` and
+neither view renders the section. Two narrowings follow from the same scan. A
+held conversation is `in_progress`, so the backend sees a conversation only
+while it waits in the queue. And the supervisor's bead carries no
+`await_type`, so the backend can tell no human gate from any other gate and
+folds none: a board served from it shows no human gate at all until the API
+carries the field.
 
 **Costs of the library backend, paid at build time, not per request:** the
 module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
@@ -934,7 +984,7 @@ healthy.
 |---|---|
 | unset (default) | beads library if this binary can actually OPEN a rig store; otherwise the HTTP API, with a log line naming the consequence |
 | `beads` | force the library; **fatal** if no store can be opened, rather than a quiet downgrade |
-| `supervisor` | force the HTTP API (accepting `stale_days = 0`, no visits or sittings, no in-flight join, and unresolved waiting edges) |
+| `supervisor` | force the HTTP API (accepting `stale_days = 0`, no human gates, no held conversations or sittings, no in-flight join, and unresolved waiting edges) |
 
 **The test is an OPEN, not a path check** (tk-4cqtv). Resolving
 `<city>/rigs/*/.beads` is not enough to know this backend can serve: a binary
@@ -1368,13 +1418,17 @@ fixture): `specs/tk-eemvf.2/decisions.md`.
 The board's write routes — the only writes this service serves; everything else
 is a read. Each shells out to the matching `gc-helm.sh` verb:
 
-- **open** files a visit on a bead so it parks on the board (tk-yc00g).
-- **accept** dispatches the subject's `gc.recommended_formula` at the subject and
-  dismisses its visit — the low-friction actuation of a recommendation the
-  operator has already decided (Accept/Discuss flow, tk-hsm4d9).
-- **engage** spawns a Discuss sitting bound to the visit (`--no-input
-  --no-attach`).
-- **dismiss** closes the subject's open visit.
+- **open** files a conversation about a bead in the operator's queue, where it
+  waits on the board until the operator engages it (tk-yc00g).
+- **accept** clears the human gate that put a first reaction's recommendation to
+  the operator, and nothing else, then dispatches the bead's
+  `gc.recommended_formula` at it — the low-friction actuation of a
+  recommendation the operator has already decided (Accept/Discuss flow,
+  tk-hsm4d9). It refuses while another human gate blocks the bead.
+- **engage** spawns a Discuss sitting bound to the bead's conversation
+  (`--no-input --no-attach`).
+- **dismiss** ends the sitting: it closes the conversation a live sitting holds,
+  and answers no gate.
 
 Where they surface: **Accept** renders on the board row itself, when the wire
 says the row is `acceptable` — mirroring the CLI board's `accept ▸` marker
@@ -1385,11 +1439,12 @@ per-bead conversation actions. Each affordance already existed in tmux / the CLI
 needed to exist there too.
 
 **They own no verb logic.** Each verb lives once, in `gc-helm.sh`, and these
-routes *shell out to it* exactly as `assets/scripts/gc-visit-open.sh` does — so
-subject resolution, the one-open-visit-per-subject gate, rig resolution, the
-un-engaged re-check `accept` makes before it slings, and the board cache bust are
-inherited, not reimplemented. `assets/scripts/gate-visit.test.sh` and
-`gc-helm-accept.test.sh` guard those single copies; a Go reimplementation would
+routes *shell out to it* exactly as `assets/scripts/operator-intake.sh` does —
+so subject resolution, open's join of a conversation already in the queue, rig
+resolution, the live re-read and the acceptance lock `accept` takes before it
+writes, and the board cache bust are inherited, not reimplemented.
+`gc-helm-open.test.sh`, `gc-helm-engage.test.sh`, `gc-helm-accept.test.sh` and
+`gc-helm-dismiss.test.sh` guard those single copies; a Go reimplementation would
 be an unguarded second one.
 
 ```bash
@@ -1401,7 +1456,7 @@ curl -X POST http://127.0.0.1:8372/v0/city/<city>/svc/helm/helm/accept \
 caller and `engage` attaches the spawned sitting. In a browser there is no pane
 to attach to until the embedded ttyd can be retargeted at the new session
 (tk-rbf9r, whose city-repo half tk-xlup8 is written but unapplied). So the web
-`open` *files* the visit and the web `engage` *spawns* the sitting with
+`open` *files* the conversation and the web `engage` *spawns* the sitting with
 `--no-attach`; the panel copy is explicit that neither attached you. That is a
 follow-on, not a reason to hold this. accept and dismiss have no sitting to
 attach.
@@ -1418,10 +1473,10 @@ script's knowledge.
 | exit | HTTP | `reason` | meaning |
 |---|---|---|---|
 | 0 | 200 | — | open: `outcome` is `filed`/`existing`; the others carry the tool's sentence in `message` |
-| 1 | 422 | `verb_failed` | accept's sling failed — the visit is left open for retry or Discuss |
+| 1 | 422 | `verb_failed` | accept's sling poured no root — the recommendation's gate is reopened for retry or Discuss |
 | 2 | 500 (open) / 422 (others) | `usage` / `verb_failed` | open: a wiring bug (the id is pre-validated). accept: the row is discuss-only (no recommended formula) — a refusal, not a service fault |
-| 3 | 503 | `environment` | missing dependency, rigs unenumerable, gather failed |
-| 4 | 422 | `verb_failed` | bead not found / unverifiable / an engaged or absent visit / filing failed |
+| 3 | 503 | `environment` | missing dependency, rigs unenumerable, gather failed, or no city root or `flock` for Accept's lock |
+| 4 | 422 | `verb_failed` | bead not found / unverifiable / filing failed / an Accept refused, because another human gate blocks the bead, an earlier answer reached the gate, or another Accept holds the bead's lock |
 | — | 504 | `timeout` | the tool did not finish; the action may or may not have gone through — check the bead |
 | — | 503 | `unavailable` | no write tool resolved, or it could not be run |
 
@@ -1459,7 +1514,7 @@ copy in front of it would only drift.
 
 Concurrent runs of the same `(verb, bead)` are collapsed in-process (409 `busy`):
 the scripts' state checks are read-then-act, so a double-click could otherwise
-race one (open filing a second visit, accept slinging twice). A different verb on
+race one (open filing a second conversation, accept slinging twice). A different verb on
 the same bead — Accept and Dismiss on one row — never contends.
 
 ### Configuration
@@ -1673,11 +1728,11 @@ same-origin reachability confirmed and detach-not-kill verified — see
   stored before that gate existed. `--json` always carries the whole string, in
   `needs` and in `takeaway`. It is a bound on PROSE only: NEEDS never holds an
   identifier, because the mechanical heads are `--json`-only (`tk-9tbbk.1`).
-- **A demand with no takeaway says so.** A `human` row with no `gc.takeaway`
-  reads "routed to you — no question recorded", and a childless `parked` row
-  "parked for you — no question recorded". Both absent and blank count as
-  silent: `collapseWS` flattens whitespace-only prose to empty. The phrase is
-  the actionable one, because a silent demand means whoever routed or parked
+- **A human route with no takeaway says so.** A `human` row with no
+  `gc.takeaway` reads "routed to you — no question recorded", and a childless
+  `parked` row "parked for you — no question recorded". Both absent and blank
+  count as silent: `collapseWS` flattens whitespace-only prose to empty. The
+  phrase is the actionable one, because a silent route means whoever routed or parked
   the row never finished the handoff; a generic "operator action" reads like a
   valid ask and leaves the operator nothing to act on.
 - **`stranded`/`empty`/`complete`** booleans, and `held`.
@@ -1697,8 +1752,8 @@ that adds a third sanctioned backend to.
 
 **Still deferred** (and *why*):
 
-- **Retiring `gc-helm.sh`.** Its `open`, `react`, `takeaway`, `demand` and
-  `dismiss` verbs have no Go equivalent, so the script stays. Retirement is a
+- **Retiring `gc-helm.sh`.** Its `open`, `engage`, `react`, `takeaway`,
+  `dismiss` and `accept` verbs have no Go equivalent, so the script stays. Retirement is a
   follow-up once the board view is proven at parity in daily use.
 - **A CLI cache.** `helm-svc board` re-gathers every run (~2.7-3.3s). The bash
   board's 45s file cache makes a repeat glance ~1.8s. Caching here would buy

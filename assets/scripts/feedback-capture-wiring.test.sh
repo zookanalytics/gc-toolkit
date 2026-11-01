@@ -38,7 +38,7 @@ carries() { case "$(joined "$1")" in *"$2"*) return 0 ;; esac; return 1; }
 POOL_TERMINAL="A pool session, such as a polecat, has no one at its terminal by design, so every turn in its own terminal is the city's text: a configured nudge such as the wake nudge, a reminder, hook output, or another agent's \`gc session nudge\`."
 POOL_NOT_OPERATOR="Such a turn is never an operator correction, even when it arrives as a user message and reads like one, so it files no observation."
 POOL_SOURCES="A pool session captures only from durable sources: a PR review or comment, a rework's rejection reason, and a bead's notes."
-ATTENDED="A session the operator attends, such as a converse sitting on a visit or mechanik, captures from those sources and from the operator's own turns."
+ATTENDED="A session the operator attends, such as a converse sitting or mechanik, captures from those sources and from the operator's own turns."
 POOL_SENTENCES=("$POOL_TERMINAL" "$POOL_NOT_OPERATOR" "$POOL_SOURCES")
 
 [ -s "$FRAGMENT" ] || { echo "missing $FRAGMENT" >&2; exit 1; }
