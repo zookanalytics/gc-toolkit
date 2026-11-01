@@ -587,9 +587,9 @@ carries none.
 
 | Label | What holds the PR | Read from |
 |---|---|---|
-| `held: gate` | an open human gate blocks the anchor | the anchor's `blocks` edges, kept to the human gates that are not closed (`bd_human_gates`), one a person has claimed included |
+| `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.HoldingGates`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
 | `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
-| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision. A human gate is not among them, whatever its route, because `held: gate` counts it |
 
 Any `held:` label reads `status: needs-attention`, because each names something
 a person has to act on. The merge freeze and the rebase hold carry no `held:`
@@ -640,9 +640,18 @@ board applies it too, over the in-flight set the labels count, and by it decides
 a blocked row's phase, whether the operator's queue lists the row, and the row's
 needs phrase.
 
+`prstatus.HoldingGates` is the one reader of the gates that hold a PR. The
+label's value counts them, the board's row names them, and `gc-helm engage` on the
+PR offers each, through `gctk pr-status gates`. Each bead walks for itself, and
+the walks of one call share their reads: each bead is read once, and its edges a
+level at a time. So a PR reads the same on the board, which walks a rig's PRs
+together, as on its label and at engage, which walk it alone. A walk is bounded,
+and one that passes its bound reads as a read that did not answer, for that bead
+alone.
+
 A read that does not answer changes no label. When gctk is unavailable, or the
-anchor, its in-flight set or its blockers do not read, `pr-status-label.sh`
-exits 2 and leaves both families as they are. Otherwise it writes both from one
+anchor, its in-flight set, its blockers or the walk from them do not read,
+`pr-status-label.sh` exits 2 and leaves both families as they are. Otherwise it writes both from one
 derivation in one edit: the `status:` value and a `held:` label for each held
 value, with every other label under either prefix taken off. A `held:` label
 comes off on the first derivation after its condition clears.
@@ -667,10 +676,11 @@ An open human gate holds the anchor through its `blocks` edge onto it, read by
 the one reader rule every reader of a bead's human gates makes (`bd_human_gates`
 in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept to the gates
 whose await type is human). The merge pass's finalize gate (`finalize-gate.sh`)
-refuses the merge while one is open on the anchor, and the labels count each
-human gate on the anchor that is not closed, one a person has claimed included.
-A conversation about the anchor tracks it and blocks nothing, so it holds no
-label.
+refuses the merge while one is open on the anchor, and a gate behind a bead the
+anchor waits on holds the merge through that open blocker. The labels count each
+human gate `prstatus.HoldingGates` reaches that is not closed, one a person has
+claimed included. A conversation about the anchor tracks it and blocks nothing,
+so it holds no label.
 
 The labels read the city's own state — the refinery-computed posture on the
 anchor, the merge cadence's machine verdict and its cause, its holds, any open
@@ -748,7 +758,7 @@ records `blocked` only for a cause no automated actor will clear:
 | `check-failed` | a required check's newest run failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR`; or the `UNSTABLE` arm holds the head on a superseded run that ended without passing |
 | `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
 | `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
-| `blocker` | a live blocker holds the anchor, and no automated actor holds any of its live blockers |
+| `blocker` | a live blocker holds the anchor, no automated actor holds any of its live blockers, and no open human gate holds this one (`prstatus.HoldingGates`). A blocker a gate holds is a person's to clear, and `held: gate` names the gate |
 | `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check whose newest run failed or is still running |
 
 GitHub reports `BLOCKED` for every unmet rule, so the pass reads the branch's
@@ -782,15 +792,24 @@ check rollup, the beads naming the branch) records nothing, and the verdict the
 last pass recorded stands.
 
 An anchor a live blocker holds is `progressing` when an automated actor holds
-any of its live blockers, `blocked` with cause `blocker` when none does, and
-gets no verdict when every live blocker is routed to a person.
-`assets/scripts/blocker-holder.sh` answers that question for each writer of
-the axis. An automated actor holds a blocker routed to a pool or an agent, one
-an agent has claimed, and one a live run works. A rework handed back to the
-refinery is claimed by it until it lands, and a graph.v2 pour leaves the bead
-it works unrouted and unassigned, so its run is the only mark. The
-`gc.execution_routed_to` stamp a pour leaves outlives the run, so it is not
-one.
+any of its live blockers. When none does, the merge pass reads who holds each
+one. A person holds a blocker that is a human gate, that is routed to a person, or
+that has an open human gate behind it (`prstatus.HoldingGates`). A blocker no
+person holds makes the verdict `blocked` with cause `blocker`, and when a person
+holds them all the anchor gets no new verdict.
+`assets/scripts/blocker-holder.sh` answers whether an actor holds one for each
+writer of the axis. An automated actor holds a blocker routed to a pool or an
+agent, one an agent has claimed, one armed to dispatch, because the
+deferred-dispatch pass slings it once nothing holds it, and one a live run works.
+A rework handed back to the refinery is claimed by it until it lands, and a
+graph.v2 pour leaves the bead it works unrouted and unassigned, so its run is the
+only mark. The `gc.execution_routed_to` stamp a pour leaves outlives the run, so
+it is not one.
+
+Once only a person holds the live blockers, the merge pass replaces a `blocker`
+verdict it recorded earlier with `settled`, because the bead that verdict names
+may have closed, and no later arm of the pass runs while the person's blocker
+stands.
 
 `gate-ensure.sh` records its own `progressing` or `settled` after the merge pass
 in the same reconcile pass. It replaces a `blocked` verdict at the same head

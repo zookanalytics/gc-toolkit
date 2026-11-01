@@ -26,6 +26,7 @@ type fakeStore struct {
 	failType map[string]error                                // issue type -> forced SearchIssues error
 	failMeta map[string]error                                // metadata key -> forced SearchIssues error
 	failDeps map[string]error                                // issue id -> forced dependency error
+	failIDs  map[string]error                                // issue id -> forced error from an ID search naming it
 	kv       map[string]string                               // config table: `bd kv` keys, "kv."-prefixed
 	failKV   error                                           // forced GetConfig error
 	closed   bool
@@ -156,6 +157,9 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 	}
 	want := map[string]bool{}
 	for _, id := range filter.IDs {
+		if err, bad := f.failIDs[id]; bad {
+			return nil, err
+		}
 		want[id] = true
 	}
 	found := map[string]bool{}
@@ -3124,6 +3128,233 @@ func TestMergeAnchorUnreadableEdgesStayUnknown(t *testing.T) {
 	if !res.Partial {
 		t.Error("the gather is degraded and the board has to say so out loud")
 	}
+}
+
+// holdingGateIDs lists the gates a walk reached for an anchor, in its order.
+func holdingGateIDs(a board.Anchor) []string {
+	ids := []string{}
+	for _, g := range a.HoldingGates {
+		ids = append(ids, g.ID)
+	}
+	return ids
+}
+
+// blocksEdge is one `blocks` edge fixture, onto the far bead it names.
+func blocksEdge(far *beads.Issue) *beads.IssueWithDependencyMetadata {
+	return &beads.IssueWithDependencyMetadata{Issue: *far, DependencyType: "blocks"}
+}
+
+// TestMergeAnchorHoldingGatesAreWalked: a live merge anchor carries the open human
+// gates that hold it, through the `blocks` edges of what it waits on, read by the
+// walk the PR labels read, with each gate's own age and question. A closed
+// blocker ends a path, a closed gate holds nothing, and a conversation, which
+// tracks its bead, is no edge the walk follows.
+func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
+	const prMeta = `{"merge_result":"pull_request","pr_number":"79"}`
+	pr := func() *beads.Issue { return issue("tk-pr", "an open PR", "task", 2, testNow, prMeta) }
+	rework := func() *beads.Issue {
+		return issue("tk-rw", "fix the check", "task", 2, testNow, `{"task_kind":"rework","anchor_bead":"tk-pr"}`)
+	}
+	gate := func(id string) *beads.Issue {
+		g := gateBead(id, "ask "+id, "human", "", time.Time{}, `{}`)
+		g.CreatedAt = testNow.Add(-48 * time.Hour)
+		return g
+	}
+	closed := func(i *beads.Issue) *beads.Issue {
+		i.Status = beads.StatusClosed
+		return i
+	}
+	store := func(edges map[string][]*beads.IssueWithDependencyMetadata) *fakeStore {
+		return &fakeStore{issues: map[string][]*beads.Issue{"task": {pr()}}, depsDown: edges}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		edges map[string][]*beads.IssueWithDependencyMetadata
+		want  []string
+	}{
+		{"nothing blocks it", nil, []string{}},
+		{"a gate on the anchor", map[string][]*beads.IssueWithDependencyMetadata{"tk-pr": {blocksEdge(gate("tk-g"))}}, []string{"tk-g"}},
+		{"a gate on its rework", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}}, []string{"tk-g"}},
+		{"a gate two beads away", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())},
+			"tk-rw": {blocksEdge(issue("tk-t", "t", "task", 2, testNow, `{}`))},
+			"tk-t":  {blocksEdge(gate("tk-g"))}}, []string{"tk-g"}},
+		{"a resolved gate", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(closed(gate("tk-g")))}}, []string{}},
+		{"a gate behind a closed blocker", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(closed(rework()))}, "tk-rw": {blocksEdge(gate("tk-g"))}}, []string{}},
+		{"a gate the rework only tracks", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())},
+			"tk-rw": {{Issue: *gate("tk-g"), DependencyType: "tracks"}}}, []string{}},
+		{"a conversation tracking the anchor", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {{Issue: *issue("tk-c", "c", "task", 2, testNow, `{}`), DependencyType: "tracks"}}}, []string{}},
+		{"a cycle", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())},
+			"tk-rw": {blocksEdge(issue("tk-t", "t", "task", 2, testNow, `{}`))},
+			"tk-t":  {blocksEdge(rework()), blocksEdge(gate("tk-g"))}}, []string{"tk-g"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, anchor := gatherPreOpen(t, store(tc.edges), "tk-pr")
+			if got := holdingGateIDs(anchor); !slices.Equal(got, tc.want) {
+				t.Errorf("holding gates = %v, want %v", got, tc.want)
+			}
+			if res.Partial {
+				t.Errorf("a walk that read notes nothing partial: %v", res.PartialErrors)
+			}
+		})
+	}
+
+	t.Run("the gate comes back whole", func(t *testing.T) {
+		_, anchor := gatherPreOpen(t, store(map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}}), "tk-pr")
+		if len(anchor.HoldingGates) != 1 {
+			t.Fatalf("holding gates = %v, want one", anchor.HoldingGates)
+		}
+		g := anchor.HoldingGates[0]
+		if g.Title != "ask tk-g" || g.IssueType != "gate" || g.AwaitType != "human" || g.Status != "open" ||
+			!g.CreatedAt.Equal(testNow.Add(-48*time.Hour)) {
+			t.Errorf("gate = %+v, want its title, kind, status and age", g)
+		}
+	})
+
+	t.Run("a closed anchor walks nothing", func(t *testing.T) {
+		doneAt := testNow.Add(-time.Hour)
+		done := issue("tk-done", "landed", "task", 2, testNow, `{"merge_result":"merged"}`)
+		done.Status, done.ClosedAt = beads.StatusClosed, &doneAt
+		st := &fakeStore{
+			issues:   map[string][]*beads.Issue{"task": {pr(), done}},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{"tk-done": {blocksEdge(gate("tk-g"))}},
+		}
+		res, _ := gatherPreOpen(t, st, "tk-pr")
+		if i, ok := findAnchor(res, "tk-done"); ok && len(res.Anchors[i].HoldingGates) != 0 {
+			t.Errorf("a closed anchor carries gates %v", holdingGateIDs(res.Anchors[i]))
+		}
+	})
+
+	t.Run("a walk that fails notes partial and keeps the anchor's own waits", func(t *testing.T) {
+		st := store(map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}})
+		st.failDeps = map[string]error{"tk-rw": errors.New("dolt timeout")}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if len(anchor.HoldingGates) != 0 {
+			t.Errorf("holding gates = %v, want none from a walk that failed", holdingGateIDs(anchor))
+		}
+		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "holding-gates@") }) {
+			t.Errorf("partial=%v errors=%v, want the walk's failure noted", res.Partial, res.PartialErrors)
+		}
+		if len(anchor.Blockers) != 1 || anchor.WaitingUnknown {
+			t.Errorf("blockers=%v unknown=%v: the anchor's own edges read, so they stand", anchor.Blockers, anchor.WaitingUnknown)
+		}
+	})
+
+	t.Run("a far bead that does not hydrate notes partial, as a failed edge read does", func(t *testing.T) {
+		st := store(map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}})
+		st.failIDs = map[string]error{"tk-g": errors.New("dolt timeout")}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if len(anchor.HoldingGates) != 0 {
+			t.Errorf("holding gates = %v, want none from a walk that failed", holdingGateIDs(anchor))
+		}
+		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "holding-gates@") }) {
+			t.Errorf("partial=%v errors=%v, want the walk's failure noted", res.Partial, res.PartialErrors)
+		}
+	})
+
+	t.Run("an anchor past the walk's bound notes partial, and another anchor keeps its gates", func(t *testing.T) {
+		wide := []*beads.IssueWithDependencyMetadata{blocksEdge(gate("tk-own"))}
+		for i := range 300 {
+			wide = append(wide, blocksEdge(issue(fmt.Sprintf("tk-t%d", i), "t", "task", 2, testNow, `{}`)))
+		}
+		st := &fakeStore{
+			issues: map[string][]*beads.Issue{"task": {pr(), issue("tk-pr2", "another PR", "task", 2, testNow, prMeta)}},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+				"tk-pr":  wide,
+				"tk-pr2": {blocksEdge(rework())},
+				"tk-rw":  {blocksEdge(gate("tk-g"))},
+			},
+		}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if got := holdingGateIDs(anchor); len(got) != 0 {
+			t.Errorf("tk-pr's holding gates = %v, want none from a walk that did not finish", got)
+		}
+		if len(anchor.Blockers) != len(wide) {
+			t.Errorf("tk-pr has %d blockers, want its own %d: its own edges read, so they stand", len(anchor.Blockers), len(wide))
+		}
+		i, ok := findAnchor(res, "tk-pr2")
+		if !ok {
+			t.Fatal("anchor tk-pr2 is missing")
+		}
+		if got := holdingGateIDs(res.Anchors[i]); !slices.Equal(got, []string{"tk-g"}) {
+			t.Errorf("tk-pr2's holding gates = %v, want its own, whatever walk beside it passed its bound", got)
+		}
+		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool {
+			return strings.HasPrefix(e, "holding-gates@") && strings.HasSuffix(e, ": tk-pr")
+		}) {
+			t.Errorf("partial=%v errors=%v, want the note to name tk-pr", res.Partial, res.PartialErrors)
+		}
+	})
+
+	t.Run("a gate reached for one anchor holds only the anchor its blocks edge reaches", func(t *testing.T) {
+		// The anchors' walks share their reads, so tk-g's row is read for tk-pr2, and
+		// only the edge's type says tk-pr does not wait on it.
+		st := &fakeStore{
+			issues: map[string][]*beads.Issue{"task": {pr(), issue("tk-pr2", "another PR", "task", 2, testNow, prMeta)}},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+				"tk-pr":  {{Issue: *gate("tk-g"), DependencyType: "related"}},
+				"tk-pr2": {blocksEdge(gate("tk-g"))},
+			},
+		}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if got := holdingGateIDs(anchor); len(got) != 0 {
+			t.Errorf("tk-pr's holding gates = %v, want none: it only relates to the gate", got)
+		}
+		i, ok := findAnchor(res, "tk-pr2")
+		if !ok {
+			t.Fatal("anchor tk-pr2 is missing")
+		}
+		if got := holdingGateIDs(res.Anchors[i]); !slices.Equal(got, []string{"tk-g"}) {
+			t.Errorf("tk-pr2's holding gates = %v, want the gate its edge reaches", got)
+		}
+	})
+
+	t.Run("the walk reads per level, not per anchor", func(t *testing.T) {
+		reads := func(prs int) int {
+			edges := map[string][]*beads.IssueWithDependencyMetadata{"tk-rw": {blocksEdge(gate("tk-g"))}}
+			rows := []*beads.Issue{}
+			for i := range prs {
+				id := fmt.Sprintf("tk-pr%d", i)
+				rows = append(rows, issue(id, "a PR", "task", 2, testNow, prMeta))
+				edges[id] = []*beads.IssueWithDependencyMetadata{blocksEdge(rework())}
+			}
+			st := &fakeStore{issues: map[string][]*beads.Issue{"task": rows}, depsDown: edges}
+			res, anchor := gatherPreOpen(t, st, "tk-pr0")
+			if got := holdingGateIDs(anchor); !slices.Equal(got, []string{"tk-g"}) {
+				t.Errorf("holding gates = %v, want the shared gate (partial %v)", got, res.PartialErrors)
+			}
+			return st.depyN
+		}
+		if one, many := reads(1), reads(5); one != many {
+			t.Errorf("%d outbound reads for one PR, %d for five: the walk must not scale with the anchors", one, many)
+		}
+	})
+
+	t.Run("an anchor with no open blocker costs no read past its own edges", func(t *testing.T) {
+		count := func(edges map[string][]*beads.IssueWithDependencyMetadata) int {
+			st := store(edges)
+			gatherPreOpen(t, st, "tk-pr")
+			return st.depyN
+		}
+		bare := count(nil)
+		landed := count(map[string][]*beads.IssueWithDependencyMetadata{"tk-pr": {blocksEdge(closed(rework()))}})
+		if bare != landed {
+			t.Errorf("%d outbound reads with no blocker, %d with a closed one: neither has anything to walk", bare, landed)
+		}
+		if bare != 1 {
+			t.Errorf("%d outbound reads, want the pass's own: the walk starts from the anchor edges it already read", bare)
+		}
+	})
 }
 
 // TestMergeAnchorInFlightSetIsGathered: each live merge anchor carries its

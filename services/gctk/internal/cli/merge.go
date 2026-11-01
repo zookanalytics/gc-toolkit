@@ -623,14 +623,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		// gate-ensure.sh asks blocker-holder.sh the same question before it
 		// replaces a blocker verdict, so the writers reach one answer.
 		if hasLiveBlocker(blockers) {
-			switch kind, bead, ok := m.blockerHolder(id); {
-			case !ok:
-				fmt.Fprintf(m.stdout, "%s: PR#%s the holders of anchor %s's blockers could not be read; no verdict recorded\n", mergeProg, num, id)
-			case kind == "actor":
-				m.recordMachine(id, "progressing", headOid, aroute)
-			case kind == "stuck":
-				m.recordBlocked(id, headOid, aroute, prstatus.CauseBlocker, "held by "+blockerLabel(blockers, bead)+", which no automated actor holds or will claim")
-			}
+			m.recordBlockerVerdict(fresh, num, headOid, aroute, blockers)
 		}
 		fmt.Fprintf(m.stdout, "%s: PR#%s held by %s; merge held (anchor %s)\n", mergeProg, num, inflight, id)
 		m.held++
@@ -2048,28 +2041,75 @@ func hasLiveBlocker(blockers []gcbd.Bead) bool {
 	return false
 }
 
+// recordBlockerVerdict records what the anchor's live blockers make of the merge.
+// An automated actor holding one is progressing. A blocker nothing the city runs
+// will clear is blocked, and the reason names it, unless an open human gate holds
+// it: that blocker is a person's to clear, as a gate on the anchor is, and the
+// PR's held: gate value and the board's row name the gate. When only a person
+// holds the blockers, no verdict the pass can write moves them, and it replaces
+// only a blocker verdict recorded earlier, whose bead may have closed since and
+// which nothing else would replace while the person's blocker stands.
+func (m *merger) recordBlockerVerdict(anchor *gcbd.Bead, num, headOid, route string, blockers []gcbd.Bead) {
+	kind, beads, ok := m.blockerHolder(anchor.ID)
+	var stuck []string
+	if ok && kind == "stuck" {
+		stuck, ok = m.ungated(beads)
+	}
+	switch {
+	case !ok:
+		fmt.Fprintf(m.stdout, "%s: PR#%s the holders of anchor %s's blockers could not be read; no verdict recorded\n", mergeProg, num, anchor.ID)
+	case kind == "actor":
+		m.recordMachine(anchor.ID, "progressing", headOid, route)
+	case len(stuck) > 0:
+		m.recordBlocked(anchor.ID, headOid, route, prstatus.CauseBlocker, "held by "+blockerLabel(blockers, stuck[0])+", which no automated actor holds or will claim")
+	default:
+		verdict, _, _ := strings.Cut(anchor.Meta("pr.machine"), "@")
+		if verdict == "blocked" && anchor.Meta("pr.machine_cause") == prstatus.CauseBlocker {
+			m.recordMachine(anchor.ID, "settled", headOid, route)
+		}
+	}
+}
+
+// ungated is the beads among ids that no open human gate holds, in their order.
+// ok is false when the walk to their gates did not read.
+func (m *merger) ungated(ids []string) (out []string, ok bool) {
+	gates, err := prstatus.HoldingGates(ids, blockerRead(m.client, nil))
+	if err != nil {
+		return nil, false
+	}
+	for _, id := range ids {
+		if len(gates[id]) == 0 {
+			out = append(out, id)
+		}
+	}
+	return out, true
+}
+
 // blockerHolder asks blocker-holder.sh whether an automated actor holds the
-// anchor's live blockers. kind is actor, stuck or none, and bead is the blocker
-// an actor or stuck answer names. ok is false when the helper is missing or did
-// not answer, and the pass then records no verdict.
-func (m *merger) blockerHolder(id string) (kind, bead string, ok bool) {
+// anchor's live blockers. kind is actor, stuck or none, and beads names the
+// blocker an actor answer names, or every blocker a stuck answer names. ok is
+// false when the helper is missing or did not answer, and the pass then records
+// no verdict.
+func (m *merger) blockerHolder(id string) (kind string, beads []string, ok bool) {
 	p := m.scriptPath("blocker-holder.sh")
 	if !isExecutable(p) {
-		return "", "", false
+		return "", nil, false
 	}
 	out, rc := capture(p, "--anchor", id)
 	if rc != 0 {
-		return "", "", false
+		return "", nil, false
 	}
 	line, _, _ := strings.Cut(string(out), "\n")
 	f := strings.Fields(line)
 	switch {
-	case len(f) >= 2 && (f[0] == "actor" || f[0] == "stuck"):
-		return f[0], f[1], true
+	case len(f) >= 2 && f[0] == "actor":
+		return f[0], f[1:2], true
+	case len(f) >= 2 && f[0] == "stuck":
+		return f[0], f[1:], true
 	case len(f) == 1 && f[0] == "none":
-		return f[0], "", true
+		return f[0], nil, true
 	}
-	return "", "", false
+	return "", nil, false
 }
 
 // blockerLabel names the blocker id among blockers by holderLabel, or by its id

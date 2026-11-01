@@ -812,7 +812,7 @@ func collapseWS(s string) string {
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
 func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen []string, own beadState, dispDue, isRuled, humanGatedInFlight bool,
-	machine, approval string, ask *Blocker, prIsOwed bool, stallNeeds string) string {
+	machine, approval string, asks []Blocker, prIsOwed bool, stallNeeds string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
 	// nothing now — it ages out of the DONE band on its own once it has been
@@ -852,6 +852,13 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	// takeaway and is banded by those children, so the two halves of it agree.
 	if isRuled && r.mTotal == 0 {
 		return "ruled — close or extend"
+	}
+	// An open human gate that holds a PR is what the row owes, as the fold makes
+	// it on any other row. The takeaway is what a sitting concluded, and it stays
+	// on the wire, but a row that reads it says nothing of the question only a
+	// person can answer.
+	if isMergeAnchor(a) && slices.ContainsFunc(asks, humanGate) {
+		return prNeeds(machine, approval, "", "", asks)
 	}
 	if takeaway != "" {
 		return takeaway
@@ -907,7 +914,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], asks)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -924,7 +931,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], asks)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -1116,9 +1123,10 @@ func asksAPerson(b Blocker) bool {
 // demand reports whether an open blocker is one a person owes that is not a
 // human gate: a ruling only the operator can give (a `decision`), or a bead
 // routed to the operator. A PR's held: blocked value reads it, beside the human
-// gate its held: gate value reads, so one gate never counts as both.
+// gate its held: gate value reads, so one gate never counts as both, whatever
+// its route.
 func demand(b Blocker) bool {
-	return b.Status != "closed" &&
+	return b.Status != "closed" && !humanGate(b) &&
 		(b.IssueType == "decision" || b.RoutedTo == routedHuman)
 }
 
@@ -1208,25 +1216,31 @@ func prApproval(a Anchor) string {
 	return AxisUnknown
 }
 
-// askingBlocker is the open blocker a person owes that this anchor is waiting
-// on, or nil.
+// askingBlockers is every open blocker a person owes that this anchor is waiting
+// on, once each, oldest first.
 //
 // `asking` needs no key of its own: it IS the edge, and closing the blocker is
-// what ends the state. The OLDEST one wins, because it is the one whose turn
-// started first and the queue is ordered by how long a row has been owed.
-func askingBlocker(blockers []Blocker) *Blocker {
-	var oldest *Blocker
-	for i := range blockers {
-		b := &blockers[i]
-		if !asksAPerson(*b) {
-			continue
-		}
-		if oldest == nil || (!b.CreatedAt.IsZero() &&
-			(oldest.CreatedAt.IsZero() || b.CreatedAt.Before(oldest.CreatedAt))) {
-			oldest = b
+// what ends the state. The oldest leads because its turn started first and the
+// queue is ordered by how long a row has been owed.
+func askingBlockers(blockers ...[]Blocker) []Blocker {
+	var asks []Blocker
+	seen := map[string]bool{}
+	for _, b := range slices.Concat(blockers...) {
+		if asksAPerson(b) && !seen[b.ID] {
+			seen[b.ID] = true
+			asks = append(asks, b)
 		}
 	}
-	return oldest
+	slices.SortStableFunc(asks, func(x, y Blocker) int {
+		if x.CreatedAt.IsZero() != y.CreatedAt.IsZero() {
+			if x.CreatedAt.IsZero() {
+				return 1
+			}
+			return -1
+		}
+		return x.CreatedAt.Compare(y.CreatedAt)
+	})
+	return asks
 }
 
 // prOwed applies the owed rule to a merge anchor, and dates it.
@@ -1486,15 +1500,18 @@ func humanSince(t, now time.Time) string {
 // on: a question names itself, a block names its cause, an unmet approval names
 // the one thing that would land the row — a first review, or the re-review a
 // standing changes_requested is waiting on — and a row nothing is owed on says
-// who has it. An open human gate on the anchor is the question: the merge pass
-// refuses the merge while one blocks the anchor, so the question outranks the
-// approval and the cadence's position, as it does in the row's phase.
-// `unknown` says the cadence has not recorded a position, which is a fact about
-// the city rather than an all-clear.
-func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
+// who has it. An open human gate that holds the anchor is the question: while
+// one stands, what it blocks holds the merge, so the question outranks the
+// approval and the cadence's position, as it does in the row's phase. Every
+// question asked names itself, the way [askList] names gates. `unknown` says the
+// cadence has not recorded a position, which is a fact about the city rather than
+// an all-clear.
+func prNeeds(machine, approval, posture, reason string, asks []Blocker) string {
 	switch {
-	case ask != nil:
-		if t := collapseWS(ask.Title); t != "" {
+	case len(asks) > 1:
+		return "asking: " + askList(gateTitles(asks))
+	case len(asks) == 1:
+		if t := collapseWS(asks[0].Title); t != "" {
 			return "asking: " + t
 		}
 		return "asking — waiting on an answer"
@@ -1840,7 +1857,11 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 
 	machine := prMachine(a, a.Blockers, phaseFacts(a, f, work))
 	approval := prApproval(a)
-	ask := askingBlocker(a.Blockers)
+	asks := askingBlockers(a.Blockers, a.HoldingGates)
+	var ask *Blocker
+	if len(asks) > 0 {
+		ask = &asks[0]
+	}
 	prIsOwed, owedSince := prOwed(a, machine, approval, ask)
 
 	// A pre-open check that nothing is advancing — no live review, no in-flight
@@ -1958,7 +1979,7 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, workHeld, takeaway, waitingOpen, own, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
+		Needs:     needs(a, r, held, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, asks, prIsOwed, stallNeeds),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -2444,9 +2465,10 @@ func beadPhase(a Anchor, f Facts, work anchorWork) string {
 // waiting on the city's answer, and the draft-stage markers are read straight
 // off the anchor — prstatus splits the '@' and applies the hold truthiness
 // itself, so the stored values pass through as they are. An open human gate is
-// one that blocks the bead, read from the gates the gather admitted and from
-// the bead's own `blocks` listing, the one reader rule `gctk pr-status derive`
-// applies for the PR labels, so the phase and the labels count the same gates.
+// one that holds the bead, read from the gates the gather admitted, the bead's
+// own `blocks` listing and the gates its walk reached ([Anchor.HoldingGates]),
+// the walk `gctk pr-status derive` runs for the PR labels, so the phase and the
+// labels count the same gates.
 // A conversation blocks nothing, so it sets nothing here. The rest differs by
 // row shape. A merge anchor counts its in-flight set ([anchorWorkSet]) as its
 // in-flight count, as the PR labels do, and reads an open demand blocker

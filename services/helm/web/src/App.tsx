@@ -799,8 +799,9 @@ function Legend() {
         <span className="pr-held" aria-hidden="true">
           held:
         </span>{' '}
-        what holds a PR: gate = an open human gate on the PR · review = review feedback the city
-        has not answered, or a thread the merge waits on · blocked = a blocker no automated actor will clear
+        what holds a PR: gate = an open human gate on the PR or on a bead it waits on · review = review
+        feedback the city has not answered, or a thread the merge waits on · blocked = a blocker no
+        automated actor will clear
       </span>
       <span className="legend__item">
         <span aria-hidden="true">💬</span> PR conversation: outstanding = a comment waits on the city ·
