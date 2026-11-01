@@ -640,7 +640,7 @@ hasnt "$(cat "$D/gc.log")" "human-gate " "no await-ruling.sh: no gate is filed"
 third_failure "$TMP/noarm"
 nocheck_merge_push FAKE_ARM_WRITE_FAIL=1
 kept "arm refused"
-has "$(cat "$D/gc.log")" "bd unclaim wb --if-assignee $REFINERY" "arm refused: precondition, the wait released the assignment before the arm"
+has "$(cat "$D/gc.log")" "bd unclaim wb --if-assignee=$REFINERY" "arm refused: precondition, the wait released the assignment before the arm"
 has "$(cat "$D/gc.log")" "bd update wb --if-assignee  --if-status open --assignee $REFINERY" "arm refused: the refinery takes the released work back"
 # The next patrol fails the check again, and its wait lands.
 nocheck_merge_push
