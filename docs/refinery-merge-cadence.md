@@ -265,10 +265,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    two do not alternate: the board reads "green — waiting on the merge pass" and
    the PR `status: merging`. A run parked behind a person's gate ends only once
    that gate is released or the run is cancelled, and the merge waits that long
-   with nothing on the board to say so. Each pass's log names the calling steps,
-   and `script-callers.sh <script>` lists each with its run and the rig whose
-   store holds it. A check that cannot read a revision, the rig list or a store
-   holds the merge for the pass.
+   with nothing on the board to say so. Each pass's log counts the calling steps
+   and names the first of them, and `script-callers.sh <script>` lists each with
+   its run and the rig whose store holds it. A check that cannot read a revision,
+   the rig list or a store holds the merge for the pass.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of
