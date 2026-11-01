@@ -570,30 +570,39 @@ has "$tlog" "--title ci: pin the actions (ttci) --body-file" \
     "an author's ci type is recognized, not double-prefixed"
 hasnt "$tlog" "chore: ci:" "…and no derived type is prepended to it"
 
-echo "# every type the doctrine's Subject lines table offers is one the composer keeps"
+echo "# every type the subject-lines skill's table offers is one the composer keeps"
 # An author who follows the table must never read `chore: <type>: ...`, which is
 # what a type the composer does not recognize composes to.
-DOCTRINE="$HERE/../../template-fragments/polecat-doctrine.template.md"
-doctrine_types=$(awk -F'`' '/^## Subject lines$/ { on = 1; next } /^## / { on = 0 } on && /^\| `/ { print $2 }' "$DOCTRINE")
-has "$doctrine_types" "fix" "the table is read: it offers fix"
-has "$doctrine_types" "chore" "…and chore"
+SUBJECT_SKILL="$HERE/../../skills/subject-lines/SKILL.md"
+skill_types=$(awk -F'`' '/^\| `/ { print $2 }' "$SUBJECT_SKILL")
+has "$skill_types" "fix" "the table is read: it offers fix"
+has "$skill_types" "chore" "…and chore"
 while IFS= read -r dtype; do
   eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype: name the change" task)" \
-     "$dtype: name the change" "the composer keeps the doctrine's $dtype"
+     "$dtype: name the change" "the composer keeps the skill's $dtype"
   eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype(api): name the change" task)" \
      "$dtype(api): name the change" "…and that type with a scope"
-done <<<"$doctrine_types"
-subject_lines=$(awk '/^## Subject lines$/ { on = 1; next } /^## / { on = 0 } on' "$DOCTRINE" | tr '\n' ' ')
-has "$subject_lines" "**The scope says where in the system" "the section has the author decide the scope"
+done <<<"$skill_types"
+subject_lines=$(tr '\n' ' ' < "$SUBJECT_SKILL")
+has "$subject_lines" "**The scope says where in the system" "the skill has the author decide the scope"
 has "$subject_lines" "never coin a name of your own" "…and coin no scope where the rig names none"
 has "$subject_lines" "**The words name what changes rather than how**" "…has the words name what changes rather than how"
 has "$subject_lines" "at most 72 characters with the type and scope" "…counts the type and scope in the limit"
 has "$subject_lines" "its rules come first" "…and puts a rig's own commit rules first"
-has "$(cat "$HERE/../../formulas/mol-polecat-work.toml")" "Subject lines section" \
-    "mol-polecat-work names the section the doctrine carries"
+has "$subject_lines" 'docs/subject-lines.md' "…and says where to read them"
+has "$(cat "$HERE/../../docs/subject-lines.md")" "tools/measure.sh" "this rig's page gives its scope list"
+# The rules load when a line is being written, so the prompt every polecat starts
+# with and the file every session here loads stay free of them.
+hasnt "$(cat "$HERE/../../template-fragments/polecat-doctrine.template.md")" "## Subject lines" \
+    "the polecat prompt does not carry the rules"
+hasnt "$(cat "$HERE/../../AGENTS.md")" "subject line" "…and neither does this rig's AGENTS.md"
+has "$(cat "$HERE/../../template-fragments/polecat-doctrine.template.md")" '{{ .BindingPrefix }}subject-lines' \
+    "an effort's summary task names the skill"
 # The rule reaches a title only through submit's 4c, and a title with no type
 # composes from the bead's kind with nothing failing, so this pins the line 4c has
 # the author fill in.
+step4c=$(awk '/^\*\*4c\. /{on=1} /^\*\*5\. The refinery handoff/{on=0} on' "$HERE/../../formulas/mol-polecat-work.toml")
+has "$step4c" '{{binding_prefix}}subject-lines' "submit's 4c loads the skill"
 step4c_sets=$(grep -F 'ANCHOR_TITLE=' "$HERE/../../formulas/mol-polecat-work.toml" || true)
 has "$step4c_sets" 'ANCHOR_TITLE="<type>(<scope>): ' "submit's 4c has the author write the title with its type and scope"
 hasnt "$step4c_sets" 'ANCHOR_TITLE=""' "…and offers no empty title as the line to run"

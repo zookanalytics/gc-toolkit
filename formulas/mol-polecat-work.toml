@@ -973,8 +973,8 @@ BODY
 )"
 ```
 
-Your prompt's Subject lines section says how to pick the type and scope and word
-the subject.
+The skill `{{binding_prefix}}subject-lines` says how to pick the type and scope
+and word the subject.
 
 **Examples of strong subjects + bodies:**
 - `fix: preserve lifecycle metadata during crash adoption (ga-xxxx)`
@@ -1698,10 +1698,10 @@ gc bd show "${GATING_ANCHOR:-$WORK_BEAD_ID}" --json | jq -r '.[0].title // empty
 ```
 
 A title was filed before the work, so it can name a symptom or work the branch
-does not do, and only you know what the branch turned out to be. Set
-`ANCHOR_TITLE` to the branch's subject line, by your prompt's Subject lines
-section: the type, the scope if your rig's rules name scopes, then the words, with
-no bead id, because the PR title adds it.
+does not do, and only you know what the branch turned out to be. Load the skill
+`{{binding_prefix}}subject-lines` and set `ANCHOR_TITLE` to the branch's subject
+line by it: the type, the scope if your rig's rules name scopes, then the words,
+with no bead id, because the PR title adds it.
 `git log --format=%s origin/<target>..HEAD` lists the subjects you committed. A
 title with no type takes one from the bead's kind, which reads `chore:` on a
 task.

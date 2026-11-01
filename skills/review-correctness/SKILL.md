@@ -160,7 +160,7 @@ that names its cause.
   summary that does not state what the whole diff does is a finding — a
   placeholder, a restatement of the dispatch, and an account of other work
   each qualify. So is a title whose type or words misname what the diff does,
-  by the polecat doctrine's Subject lines section. The title becomes the
+  by the skill `gc-toolkit.subject-lines`. The title becomes the
   squash commit's subject, so a false one blocks as a false summary does, and
   one that is true but merely weak is a P2. `chore` is false on a diff another
   type describes, and a type the diff could fairly take is the author's call
