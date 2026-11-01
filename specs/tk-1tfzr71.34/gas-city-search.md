@@ -13,7 +13,9 @@ board's PR row and `gc-helm engage` at it. It adds this surface:
 - `gctk pr-status gates --anchor <id>`, a new verb, which is how `gc-helm.sh`, a
   POSIX shell script, reaches the Go reader.
 - `blocker-holder.sh`'s `stuck` answer, which now names every blocker nothing
-  marks instead of the first, so `gctk merge` can read each for a gate.
+  marks instead of the first, so `gctk merge` can read each for a gate. Its `actor`
+  answer also counts `gc.dispatch_when_ready`, the pack's own arm, which has no
+  Gas City reader to ask.
 
 It adds no metadata key, bead kind or lifecycle state. Read on 2026-11-01 at
 beads upstream `6ebaacba8` (`gastownhall/beads`) and Gas City upstream `f3c4ca5bb`
