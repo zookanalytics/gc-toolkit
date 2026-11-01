@@ -911,14 +911,16 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 
 // attachHoldingGates reads, for every live merge anchor in pending, the open human
 // gates that hold it ([prstatus.HoldingGates]), on the anchor or behind a bead it
-// waits on, so a PR's row and held: value count the gates its labels count. The
-// one walk serves every anchor of the pass and reads each level in one batched
-// OUTBOUND read and one hydration of the far ends it has not fetched, so its cost
-// is the depth of the `blocks` graph and not the number of anchors. known holds
-// the edges the pass already read, an anchor's own among them, which cost nothing.
+// waits on, so a PR's row and held: value count the gates its labels count. Each
+// anchor walks for itself, and the walks of the pass share their reads: one batched
+// OUTBOUND read and one hydration of the far ends not yet fetched per level, so
+// their cost is the depth of the `blocks` graph and not the number of anchors.
+// known holds the edges the pass already read, an anchor's own among them, which
+// cost nothing.
 //
 // A failed read notes partial and leaves every anchor's gates empty, and each row
-// then reads the gates on its own bead.
+// then reads the gates on its own bead. An anchor past its walk's bound has no
+// answer: the note names it, its row reads the same, and the others keep theirs.
 func (s *BeadsSource) attachHoldingGates(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor, known map[string][]*beads.Dependency, issueByID map[string]*beads.Issue) {
 	var roots []string
 	for i := range pending {
@@ -982,7 +984,6 @@ func (s *BeadsSource) attachHoldingGates(ctx context.Context, g *gatherState, st
 	gates, err := prstatus.HoldingGates(roots, read)
 	if err != nil {
 		g.note(true, []string{"holding-gates@" + r.name + ": " + err.Error()})
-		return
 	}
 	for i := range pending {
 		p := &pending[i]

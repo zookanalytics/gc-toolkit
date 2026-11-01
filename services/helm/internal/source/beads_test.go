@@ -3262,9 +3262,43 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 		}
 	})
 
+	t.Run("an anchor past the walk's bound notes partial, and another anchor keeps its gates", func(t *testing.T) {
+		wide := []*beads.IssueWithDependencyMetadata{blocksEdge(gate("tk-own"))}
+		for i := range 300 {
+			wide = append(wide, blocksEdge(issue(fmt.Sprintf("tk-t%d", i), "t", "task", 2, testNow, `{}`)))
+		}
+		st := &fakeStore{
+			issues: map[string][]*beads.Issue{"task": {pr(), issue("tk-pr2", "another PR", "task", 2, testNow, prMeta)}},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+				"tk-pr":  wide,
+				"tk-pr2": {blocksEdge(rework())},
+				"tk-rw":  {blocksEdge(gate("tk-g"))},
+			},
+		}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if got := holdingGateIDs(anchor); len(got) != 0 {
+			t.Errorf("tk-pr's holding gates = %v, want none from a walk that did not finish", got)
+		}
+		if len(anchor.Blockers) != len(wide) {
+			t.Errorf("tk-pr has %d blockers, want its own %d: its own edges read, so they stand", len(anchor.Blockers), len(wide))
+		}
+		i, ok := findAnchor(res, "tk-pr2")
+		if !ok {
+			t.Fatal("anchor tk-pr2 is missing")
+		}
+		if got := holdingGateIDs(res.Anchors[i]); !slices.Equal(got, []string{"tk-g"}) {
+			t.Errorf("tk-pr2's holding gates = %v, want its own, whatever walk beside it passed its bound", got)
+		}
+		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool {
+			return strings.HasPrefix(e, "holding-gates@") && strings.HasSuffix(e, ": tk-pr")
+		}) {
+			t.Errorf("partial=%v errors=%v, want the note to name tk-pr", res.Partial, res.PartialErrors)
+		}
+	})
+
 	t.Run("a gate reached for one anchor holds only the anchor its blocks edge reaches", func(t *testing.T) {
-		// One walk serves both anchors, so tk-g's row is read for tk-pr2, and only
-		// the edge's type says tk-pr does not wait on it.
+		// The anchors' walks share their reads, so tk-g's row is read for tk-pr2, and
+		// only the edge's type says tk-pr does not wait on it.
 		st := &fakeStore{
 			issues: map[string][]*beads.Issue{"task": {pr(), issue("tk-pr2", "another PR", "task", 2, testNow, prMeta)}},
 			depsDown: map[string][]*beads.IssueWithDependencyMetadata{

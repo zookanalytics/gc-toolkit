@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -103,8 +104,8 @@ func TestHoldingGatesKeepTheTitle(t *testing.T) {
 	}
 }
 
-// One walk over several anchors reads each level once and each bead once, and a
-// gate holds only the roots that reach it.
+// The walks of several anchors read each level once and each bead once, and a gate
+// holds only the roots that reach it.
 func TestHoldingGatesOverManyRoots(t *testing.T) {
 	g := &graph{edges: map[string][]Blocker{
 		"a":  {task("rw")},
@@ -160,8 +161,8 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 			g.edges[fmt.Sprintf("n%d", i)] = []Blocker{task(fmt.Sprintf("n%d", i+1))}
 		}
 		got, err := HoldingGates([]string{"n0"}, g.read)
-		if !errors.Is(err, ErrWalkBound) || got != nil {
-			t.Errorf("(%v, %v), want (nil, ErrWalkBound)", got, err)
+		if _, answered := got["n0"]; answered || !errors.Is(err, ErrWalkBound) {
+			t.Errorf("(%v, %v), want no answer for n0 and ErrWalkBound", got, err)
 		}
 		if len(g.reads) != walkDepth {
 			t.Errorf("%d reads, want the bound's %d", len(g.reads), walkDepth)
@@ -188,20 +189,108 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 		if _, err := HoldingGates([]string{"a"}, g.read); !errors.Is(err, ErrWalkBound) {
 			t.Errorf("err = %v, want ErrWalkBound", err)
 		}
+		if len(g.reads) != 1 {
+			t.Errorf("%d reads, want only the root's: the bound stops what the walk reads next", len(g.reads))
+		}
 	})
+}
 
-	t.Run("the fan bound counts per root", func(t *testing.T) {
-		wide := make([]Blocker, 0, walkBeads)
-		for i := 0; i < walkBeads; i++ {
-			wide = append(wide, task(fmt.Sprintf("t%d", i)))
+// A root's answer is its own. The label and engage walk one bead and the board a
+// rig's anchors together, so a root reads the same in any batch as alone, at each
+// bound and one past it, whatever allowance another root leaves unused and however
+// much sooner another root's walk reaches the same beads.
+func TestHoldingGatesAnswerARootAloneOrInABatch(t *testing.T) {
+	edges := map[string][]Blocker{"none": nil, "small": {task("rw")}, "rw": {gate("small-g")}}
+	// fan gives a root n blockers, the first a gate, so its walk reaches n+1 beads.
+	fan := func(root string, n int) {
+		edges[root] = []Blocker{gate(root + "-g")}
+		for i := 1; i < n; i++ {
+			edges[root] = append(edges[root], task(fmt.Sprintf("%s-t%d", root, i)))
 		}
-		other := make([]Blocker, 0, walkBeads)
-		for i := 0; i < walkBeads-2; i++ {
-			other = append(other, task(fmt.Sprintf("u%d", i)))
+	}
+	fan("at", walkBeads-1)
+	fan("past", walkBeads)
+	// A chain to a gate. From n2 the gate is the last of walkDepth levels, and from
+	// n1 it is one level past them.
+	for i := range walkDepth {
+		edges[fmt.Sprintf("n%d", i)] = []Blocker{task(fmt.Sprintf("n%d", i+1))}
+	}
+	edges[fmt.Sprintf("n%d", walkDepth)] = []Blocker{gate("chain-g")}
+
+	// What each root answers, and nil for a root past its bound.
+	want := map[string][]string{
+		"none":  {},
+		"small": {"small-g"},
+		"at":    {"at-g"},
+		"past":  nil,
+		"n2":    {"chain-g"},
+		"n1":    nil,
+	}
+	batches := [][]string{
+		{"past", "none"},
+		{"none", "past"},
+		{"past", "small", "at", "none"},
+		{"at", "small"},
+		{"n1", "n2"},
+		{"n2", "n1", "past", "none"},
+	}
+	for root := range want {
+		batches = append(batches, []string{root})
+	}
+	for _, batch := range batches {
+		t.Run(strings.Join(batch, "+"), func(t *testing.T) {
+			g := &graph{edges: edges}
+			got, err := HoldingGates(batch, g.read)
+			anyPast := false
+			for _, root := range batch {
+				ids, answered := got[root]
+				if want[root] == nil {
+					anyPast = true
+					if answered {
+						t.Errorf("%s answered %v, want no answer past its bound", root, gateIDs(ids))
+					}
+					if err == nil || !strings.Contains(err.Error(), root) {
+						t.Errorf("err = %v, want it to name %s", err, root)
+					}
+				} else if !answered || !slices.Equal(gateIDs(ids), want[root]) {
+					t.Errorf("%s answered %v (%v), want %v", root, gateIDs(ids), answered, want[root])
+				}
+			}
+			if anyPast != errors.Is(err, ErrWalkBound) || (!anyPast && err != nil) {
+				t.Errorf("err = %v, want ErrWalkBound only with a root past its bound", err)
+			}
+			read := map[string]int{}
+			for _, ids := range g.reads {
+				for _, id := range ids {
+					read[id]++
+				}
+			}
+			for id, n := range read {
+				if n != 1 {
+					t.Errorf("%s read %d times, want once", id, n)
+				}
+			}
+			if len(g.reads) > walkDepth {
+				t.Errorf("%d reads, past the %d levels one call may read", len(g.reads), walkDepth)
+			}
+		})
+	}
+}
+
+// A bead one walk read at an earlier level costs a later walk no read, and a level
+// that names only such beads reads nothing.
+func TestHoldingGatesShareReadsAcrossLevels(t *testing.T) {
+	g := &graph{edges: map[string][]Blocker{"a": {task("x")}, "x": {task("y")}, "b": {task("y")}, "y": {gate("g")}}}
+	got, err := HoldingGates([]string{"a", "b"}, g.read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{"a", "b"} {
+		if ids := gateIDs(got[root]); !slices.Equal(ids, []string{"g"}) {
+			t.Errorf("gates of %s = %v, want the gate each walk reaches", root, ids)
 		}
-		g := &graph{edges: map[string][]Blocker{"a": wide, "b": other}}
-		if _, err := HoldingGates([]string{"a", "b"}, g.read); err != nil {
-			t.Errorf("two roots inside their bound: %v", err)
-		}
-	})
+	}
+	if want := [][]string{{"a", "b"}, {"x", "y"}, {"g"}}; !slices.EqualFunc(g.reads, want, slices.Equal[[]string]) {
+		t.Errorf("reads = %v, want %v", g.reads, want)
+	}
 }

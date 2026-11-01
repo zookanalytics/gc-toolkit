@@ -83,11 +83,13 @@ held a cycle, and no gate had an open blocker of its own.
 | Live PR anchors: deepest walk | 2 | 1 |
 | Live PR anchors: most beads reached | 6 | 2 |
 
-`walkDepth` is 16, about twice the deepest graph, and bounds the reads of one
-walk. `walkBeads` is 256 per root, about twelve times the widest, and bounds what
-those reads name. A walk past either reads as a read that did not resolve, so a
-label stays as it is and the board notes the row partial, rather than reporting a
-set it did not finish.
+`walkDepth` is 16, about twice the deepest graph, and bounds the levels of a root's
+walk, so the reads of one call too, since the walks of a call share a read per
+level. `walkBeads` is 256, about twelve times the widest, and bounds the beads a
+root's walk reaches. Each root has both to itself, so a root's answer is the same
+alone as beside others, and the board and the label cannot differ on it. A root past
+either has no answer: its label stays as it is and the board's partial note names
+it, rather than reporting a set it did not finish, and the other roots keep theirs.
 
 ## Live comparison
 

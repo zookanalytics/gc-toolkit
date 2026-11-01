@@ -212,8 +212,10 @@ type Anchor struct {
 	// reads through open `blocks` edges. The PR's held: gate value and its row's
 	// `asking` read it, so the row and the label count the same gates. The beads
 	// source walks it for each live merge anchor
-	// ([source.BeadsSource.attachHoldingGates]). A walk that fails is noted partial
-	// and leaves it empty, and the row then reads the gates on the anchor itself.
+	// ([source.BeadsSource.attachHoldingGates]). A read that fails is noted partial
+	// and leaves it empty on every anchor. An anchor past its walk's bound has no
+	// answer, so it is noted partial and left empty, and the others keep theirs. A
+	// row with it empty reads the gates on the anchor itself.
 	// The supervisor backend walks none, because its beads carry no await type.
 	HoldingGates []Blocker `json:"holding_gates,omitempty"`
 

@@ -642,9 +642,12 @@ needs phrase.
 
 `prstatus.HoldingGates` is the one reader of the gates that hold a PR. The
 label's value counts them, the board's row names them, and `gc-helm engage` on the
-PR offers each, through `gctk pr-status gates`. The walk is bounded, reads each
-bead once, and reads its edges a level at a time. A walk that passes its bound
-reads as a read that did not answer.
+PR offers each, through `gctk pr-status gates`. Each bead walks for itself, and
+the walks of one call share their reads: each bead is read once, and its edges a
+level at a time. So a PR reads the same on the board, which walks a rig's PRs
+together, as on its label and at engage, which walk it alone. A walk is bounded,
+and one that passes its bound reads as a read that did not answer, for that bead
+alone.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
 anchor, its in-flight set, its blockers or the walk from them do not read,
