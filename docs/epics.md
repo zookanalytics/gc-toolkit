@@ -1,6 +1,6 @@
 ---
 name: Epics — what an epic is, what it carries, and when it closes
-description: gc-toolkit's stance on epics — the contract an epic carries (hypothesis, Belongs/Boundaries, closure condition, leading indicators), the continue/shift/close ruling that answers its hypothesis, epic mortality, the unit an epic lands as, progressive elaboration, and the Feature and Epic Checkpoint model epics are headed toward. Read it to write or judge an epic. Not how a bead becomes a member of one — that is membership.
+description: Use when you write or judge an epic, rule on one, or decide whether work is an epic, a Delivery or ordinary flow. Not how a bead becomes a member of one — that is membership.
 ---
 
 # Epics
@@ -16,8 +16,9 @@ BMAD-Method's epic template, and Shape Up's ban on standing containers.
 
 **Mandate.** What makes a body of work an epic: the contract every epic
 carries, how an epic closes, the unit of work it lands as, and how it is
-elaborated — the form every epic follows — and the Feature and Epic Checkpoint
-model it is headed toward.
+elaborated — the form every epic follows — and the Delivery and the Epic
+Checkpoint, the level an epic may land through and the sitting that judges a
+landing.
 
 **Boundaries.** The form of an epic, not the scope content of any particular
 epic: a given epic's own Belongs/Boundaries is authored on that epic, not here.
@@ -28,7 +29,9 @@ which the engine owns. Not a standing theme or initiative layer above epics,
 which is deliberately deferred. Filing conventions are
 [file-structure.md](file-structure.md); where epics sit in the workflow is
 [architecture.md](architecture.md); what the operator judges a change against is
-[product-goals.md](product-goals.md).
+[product-goals.md](product-goals.md). The design behind the Delivery and the Epic
+Checkpoint, with the alternatives it rejected and the units that build them, is
+[specs/tk-wmwcdlc.1/deliveries-and-epic-checkpoints.md](../specs/tk-wmwcdlc.1/deliveries-and-epic-checkpoints.md).
 
 ## The contract an epic carries
 
@@ -169,35 +172,120 @@ re-reading the epic against completed work and proposing updates in place.
 Neither is built. Today the operator records the contract on the epic, and
 [epic stewardship](epic-stewardship.md) enforces only the ruling that closes it.
 
-## Direction: Features and Epic Checkpoints
+## Deliveries and Epic Checkpoints
 
-This model is the direction and is not built. Today the operator records each
+The Delivery is built from what bd and the pack already do with a child epic,
+and the Epic Checkpoint runs by hand. The operator records each
 ruling on the epic, and the pack checks that an epic closes only on the close
 ruling with its outcome ([epic-stewardship.md](epic-stewardship.md)). Nothing
 prompts an evaluation when work lands, so one happens when the operator calls a
-sitting on the epic. The follow-on epic *Epic Checkpoints & Features* builds the
-rest, and runs the first checkpoints by hand before any machinery grows around
-them.
+sitting on the epic. The machinery a checkpoint may grow is
+[direction](epic-stewardship.md#direction-the-checkpoints-machinery).
 
-**Epic, Feature, Story.** An epic is delivered through Features, and a Feature
-through Stories. A Feature is a bounded delivery window in SAFe's sense: a group
-of Stories, worked in parallel where they can be, whose landing says something
-about the hypothesis. A Story is one unit as defined above, one PR or a few.
-Most epics are answered over several Features, not one.
+**Epic, Delivery, Story.** A Delivery is a bounded step toward an epic's
+hypothesis: a group of Stories, worked in parallel where they can be, whose
+landing tests a portion of the hypothesis. It is the level SAFe calls a Feature,
+named Delivery here because bd's `feature` type is a work item, a single change.
+A Story is one unit as defined above, one PR or a few.
 
-**The Epic Checkpoint.** After a Feature lands, the epic is evaluated against
+**The layer is opt-in per epic.** An epic may reach its hypothesis entirely on
+Stories under itself, entirely through Deliveries, or through any mix of the two.
+Only the operator's aim adds the layer. An epic the operator never aims a
+Delivery under works as any epic works: its Stories go under it, and its
+checkpoint comes when the operator calls a sitting on it.
+
+**What a Delivery is as a bead.** An epic-typed bead whose parent is the epic it
+delivers, with its Stories as its children. "Delivery" names that position. It
+adds no type, key or state, because each reader already treats a child epic the
+way a Delivery needs:
+
+- the helm board gives it a row of its own, nested under its epic's, and a
+  Story's row, such as its PR's, nests under it;
+- the stranded-work check and the queues of routed work do not take it for work,
+  and it goes to no pool, because its Stories are the work;
+- its Stories follow its priority, which follows the epic's, and a park on it or
+  on the epic holds its unstarted Stories ([steering.md](steering.md));
+- bd refuses its close while a Story under it is open.
+
+Its title names what it lands and starts with `Delivery: `. Its description opens
+with two lines:
+
+- `Aim:` the portion of its epic's hypothesis that its landing tests, a step
+  toward the hypothesis and never a hypothesis of its own;
+- `Done when:` what lands, as Stories or as checks a person can run.
+
+It carries no hypothesis, no handle and no ruling. A hypothesis is answered by a
+ruling, and the epic's checkpoint makes the one ruling. A child epic that carries
+a hypothesis of its own is an epic, not a Delivery, and
+[epic stewardship](epic-stewardship.md) holds it as one.
+
+**Each bd type keeps its own meaning.** A bd type is used only with its own
+semantics, or not at all. So a Story is typed by its work, one of the types the
+pack counts as plain work
+([deferred-dispatch.md](deferred-dispatch.md#the-resolved-by-consumer-until)). It
+may be bd's `feature`, and `feature` never types a container. `milestone` stays
+reserved for a marker that holds no work, which is what bd says it is.
+
+**When work becomes a Delivery.** A Delivery is filed by the decision that aims
+it, and that decision is the operator's:
+
+- the sitting that elaborates an epic and aims its first Delivery;
+- the approval of a design whose units deliver it, after which the units are
+  filed as its Stories;
+- an Epic Checkpoint's continue or shift ruling that aims the next one.
+
+Each Delivery spends the operator's judgment at a checkpoint, so the operator
+decides how many there are. A product area, a theme or a wish to find work on the
+board does not file one.
+
+**Where a Story goes.** A Story goes under the open Delivery whose aim covers it.
+When no open Delivery's aim covers it, it goes under the epic itself, and the next
+checkpoint gathers it into a Delivery or leaves it there. An epic may have more
+than one open Delivery, and each lands on its own. PR-finishing work stays outside
+every epic and Delivery ([steering.md](steering.md#pr-finishing-work)).
+
+**How a Delivery ends.** A Delivery has landed when every Story under it has
+closed. It closes at the Epic Checkpoint that follows its landing, as one of the
+ruling's writes, never on its own when its last Story closes. Between its landing
+and its checkpoint it stays open, so its row stays on the board.
+
+Until its checkpoint it takes only work its aim covers, such as a follow-up that
+finishes one of its Stories, and a follow-up still open at the checkpoint is
+settled with the operator before the Delivery closes. Other work found after it
+lands goes under its epic. Once closed, a Delivery takes nothing. Later work for
+the same part of the product goes under the epic, and the next checkpoint gathers
+it into a Delivery it aims or leaves it there. A part of the product with a
+hypothesis of its own is an epic of its own, and one that is only ever improvable
+is ordinary flow ([Epics are mortal](#epics-are-mortal)).
+
+**The Epic Checkpoint.** After a Delivery lands, the epic is evaluated against
 its hypothesis at a sitting the operator judges, and the checkpoint rules
-continue, shift, or close ([How an epic closes](#how-an-epic-closes)). A
-continue or shift ruling aims the next Feature, and close ends the epic with its
-outcome. Every checkpoint has the same shape whatever it rules; only the next
-action differs. Stories run in parallel, but an epic's checkpoints come one at a
-time. The checkpoint arrives with the evidence the ruling needs and re-reads it,
-the landed work and the measures re-run, rather than taking the worker's
-account. The judge is never the worker that built the Feature.
+continue, shift, or close ([How an epic closes](#how-an-epic-closes)). Every
+checkpoint has the same shape whatever it rules; only the next action differs.
+Stories run in parallel, but an epic's checkpoints come one at a
+time. The sitting re-reads the evidence the ruling needs, the landed work and the
+measures re-run, rather than taking the worker's account, and it reads each landed
+Delivery's aim against what its landing showed. The judge is never the worker that
+built the Delivery.
+
+**What a checkpoint writes.** The ruling goes on the epic, in the fields
+[epic stewardship](epic-stewardship.md#recording-a-ruling) registers. Each ruling
+overwrites the last, so the checkpoint's lasting record is its block in the epic's
+notes and the close reasons of the Deliveries it closes. That is also why one
+checkpoint reads and closes every Delivery of the epic that has landed by then,
+under its one ruling.
+
+A continue or shift ruling files the next Delivery when it aims one, and a shift
+re-aims each Delivery still open. A close ruling settles the epic's other open
+work with the operator, item by item, before the epic closes: its other
+Deliveries, the Stories under it and the PRs in flight under either. Work that
+still coheres around a hypothesis moves to the epic that owns it. Work worth doing
+on its own moves to ordinary flow, by a decision about that item and never by
+default. Work that served only this hypothesis is retired.
 
 **A checkpoint is always qualified.** A checkpoint is any point where the city
 evaluates something, and its qualifier names what is evaluated. An Epic
-Checkpoint evaluates an epic after a Feature lands. A PR Checkpoint is the merge
+Checkpoint evaluates an epic against its hypothesis. A PR Checkpoint is the merge
 workflow's checkpoint, a pull request that lands a stage on an integration branch
 for review ([state-machine.md](state-machine.md)). A Bead Checkpoint evaluates a
 single bead.
@@ -208,7 +296,7 @@ bead or metadata of its own, so the epic is its home. The epic contract takes
 four of its ideas:
 
 - The checkpoint shape. Work advances in bounded batches, each closed by an
-  evaluation that aims the next; here that is the Feature and its Epic
+  evaluation that aims the next; here that is the Delivery and its Epic
   Checkpoint.
 - Judge independence. The worker never renders the verdict on its own work.
 - Measured and graded criteria. The closure condition holds numbers where
