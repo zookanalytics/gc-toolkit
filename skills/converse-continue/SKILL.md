@@ -41,7 +41,9 @@ Until it exits 0, do not tell the operator the ruling is in place:
   # --waiting-on <bead> for each bead this turn routed work into, or --no-wait
 ```
 An answer that reached the gate first stands, and the writer prints it: tell
-the operator. The sign-off reads a gate you answered here as already cleared
+the operator. It also prints a line for each open PR the ruling leaves standing
+that still needs the operator's Approve review on GitHub: tell them that too,
+with the link. The sign-off reads a gate you answered here as already cleared
 and leaves it. Record what each turn settles as step 6 says, and sign off
 (step 7) once nothing important is pending.
 

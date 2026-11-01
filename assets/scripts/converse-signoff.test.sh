@@ -68,6 +68,10 @@
 #             Accept does not complete stops the sign-off, and an answer that
 #             reached the gate first stands; each --var reaches Accept's writer,
 #             and one without --accept, or not <key>=<value>, is refused
+#   (APPROVE*) a PR a ruling leaves standing with no approval that would land it
+#             is named in the headline, the close reason and the reminder, and
+#             printed with its link, read before the first write through the
+#             rule the merge lands on; a PR the ruling reworks or retires is not
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, linked into a stub pack beside the libraries it sources and
@@ -186,6 +190,24 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+# --- gh stub ------------------------------------------------------------------
+# `api ... user` names the city's login, and a PR's reviews come from
+# $STORE/reviews-<n>.json, one value per line as --jq '.[]' prints them. Every
+# call is logged to $GH_CALLS with how many writes came before it. GH_DOWN fails
+# every call.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
+printf 'writes=%s %s\n' "$(grep -c -v '^lifecycle state' "$CALLS" 2>/dev/null)" "$*" >> "$GH_CALLS"
+[ -n "${GH_DOWN:-}" ] && { echo "gh: network down" >&2; exit 1; }
+case "$*" in
+  *" user "*) echo city-bot ;;
+  *"/pulls/"*"/reviews"*)
+    _n=$(printf '%s' "$*" | sed -n 's#.*/pulls/\([0-9][0-9]*\)/reviews.*#\1#p')
+    [ -f "$STORE/reviews-$_n.json" ] && jq -c '.[]' "$STORE/reviews-$_n.json" ;;
+esac
+exit 0
+GH
+chmod +x "$TMP/bin/gh"
+
 # --- stub pack scripts at the rig root the sign-off searches first ------------
 # gc-helm.sh's accept leaves the store as Accept's writer would, per
 # ACCEPT_DOES: take (the default) answers each open first-reaction gate on the
@@ -256,18 +278,18 @@ P
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh bead-store.sh rig-map.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh bead-store.sh rig-map.sh; do
     ln -s "$HERE/$_lib" "$S/$_lib"
 done
 SCRIPT="$S/converse-signoff.sh"
 
 mkdir -p "$TMP/rig-a" "$TMP/rig-b"
 RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"
-export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B
+export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GH_CALLS="$TMP/gh-calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B
 unset GC_CITY_PATH 2>/dev/null || true
 
 # --- fixtures -----------------------------------------------------------------
-fresh() { rm -rf "$STORE"; mkdir -p "$STORE/b"; : > "$CALLS"; }
+fresh() { rm -rf "$STORE"; mkdir -p "$STORE/b"; : > "$CALLS"; : > "$GH_CALLS"; }
 # bead <id> [type] [status] [assignee]
 bead() {
     jq -n --arg id "$1" --arg t "${2:-task}" --arg s "${3:-open}" --arg a "${4:-}" '{id:$id, title:("the bead " + $id), issue_type:$t,
@@ -967,6 +989,143 @@ eq "$(writes)" 0 "(ACCEPT-VAR-ALONE) …writing nothing"
 recommend; run_signoff --conversation tk-conv --outcome x "${TAKE[@]}" --var design_gated
 eq "$RC" 2 "(ACCEPT-VAR-FORM) a --var that is not <key>=<value> exits 2"
 eq "$(writes)" 0 "(ACCEPT-VAR-FORM) …writing nothing"
+
+echo "# a ruling is not an approval: a PR it leaves standing with none says so"
+# pr_at <anchor> <n> — the PR the anchor records. review <n> <login> <state>
+# <submitted_at> — a review on it.
+pr_at() { setm "$1" pr_number "$2"; setm "$1" pr_url "https://github.com/acme/widgets/pull/$2"; }
+review() {
+    _f="$STORE/reviews-$1.json"; [ -f "$_f" ] || echo '[]' > "$_f"
+    jq --arg l "$2" --arg s "$3" --arg t "$4" '. + [{id: (length + 1), user: {login: $l}, state: $s, submitted_at: $t}]' "$_f" > "$_f.x" && mv "$_f.x" "$_f"
+}
+# said <label> <owed|landed> — what a sign-off outcome "design approved" on PR #77
+# wrote and printed: the Approve still owed, or nothing of it.
+said() {
+    if [ "$2" = owed ]; then
+        eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "$1 the headline says the Approve is owed"
+        has "$OUT" "PR #77 still needs the operator's Approve review on GitHub" "$1 …and the sitting is told"
+    else
+        eq "$(meta tk-anc gc.takeaway)" "design approved" "$1 the headline stays as given"
+        hasnt "$OUT" "Approve" "$1 …and the sitting is told nothing about an Approve"
+    fi
+}
+STAND=(--conversation tk-conv --outcome "design approved" "${RULED[@]}" --no-rework)
+
+open_pr; pr_at tk-anc 77
+run_signoff "${STAND[@]}"
+eq "$RC" 0 "(APPROVE-OWED) a ruling that leaves an unapproved PR standing signs off"
+said "(APPROVE-OWED)" owed
+eq "$(field tk-conv close_reason)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-OWED) the close reason says so"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--summary design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-OWED) …and so does the PR reminder"
+has "$OUT" "this ruling does not count as one" "(APPROVE-OWED) the sitting is told the ruling is not the approval"
+has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-OWED) …with the PR's link"
+case "$OUT" in
+  *"SIGNED OFF"*"PR #77 still needs the operator's Approve"*) ok "(APPROVE-OWED) …as the last thing it reads" ;;
+  *) bad "(APPROVE-OWED) the tell does not follow SIGNED OFF: $OUT" ;;
+esac
+eq "$(field tk-rev status)" "closed" "(APPROVE-OWED) the ruling still answers the gate"
+has "$(cat "$GH_CALLS")" "repos/acme/widgets/pulls/77/reviews" "(APPROVE-OWED) the reviews are read from the repo the PR's url names"
+eq "$(grep -cv '^writes=0 ' "$GH_CALLS" || true)" 0 "(APPROVE-OWED) …before the first write"
+run_signoff "${STAND[@]}"
+eq "$RC" 0 "(APPROVE-RERUN) a re-run exits 0"
+said "(APPROVE-RERUN)" owed
+
+open_pr; pr_at tk-anc 77
+run_signoff --conversation tk-conv --outcome "design approved." "${RULED[@]}" --no-rework
+said "(APPROVE-PERIOD)" owed
+
+open_pr; pr_at tk-anc 77; review 77 operator APPROVED 2026-10-20T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-STANDS)" landed
+eq "$(field tk-conv close_reason)" "design approved" "(APPROVE-STANDS) the close reason stays as given"
+
+open_pr; pr_at tk-anc 77; review 77 city-bot APPROVED 2026-10-20T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-CITY) the city's own approval counts for nothing:" owed
+
+open_pr; pr_at tk-anc 77; review 77 operator APPROVED 2026-10-20T00:00:00Z; review 77 other CHANGES_REQUESTED 2026-10-21T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-VETO) a standing request for changes holds the merge:" owed
+
+open_pr; pr_at tk-anc 77; setm tk-anc bring_current_lifted_at 2026-10-21T00:00:00Z; review 77 operator APPROVED 2026-10-20T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-LIFTED) an approval a bring-current round lifted counts for nothing:" owed
+open_pr; pr_at tk-anc 77; setm tk-anc bring_current_lifted_at 2026-10-21T00:00:00Z; review 77 operator APPROVED 2026-10-22T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-LIFTED) an approval given after that line counts:" landed
+
+open_pr; pr_at tk-anc 77
+GH_DOWN=1 run_signoff "${STAND[@]}"
+eq "$RC" 0 "(APPROVE-UNREAD) reviews that do not read do not stop the sign-off"
+eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-UNREAD) …and the PR counts as needing one"
+has "$OUT" "The reviews of PR #77 could not be read" "(APPROVE-UNREAD) …and the sitting is told they did not read"
+has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-UNREAD) …with the PR's link"
+eq "$(field tk-conv status)" "closed" "(APPROVE-UNREAD) …and the conversation closes"
+
+open_pr; setm tk-anc pr_url "https://github.com/acme/widgets/pull/78"; review 78 operator APPROVED 2026-10-20T00:00:00Z
+run_signoff "${STAND[@]}"
+said "(APPROVE-URL-ONLY) a PR's number comes from its url when none is recorded:" landed
+open_pr; setm tk-anc existing_pr "https://github.com/acme/widgets/pull/79"
+run_signoff "${STAND[@]}"
+eq "$(meta tk-anc gc.takeaway)" "design approved; PR #79 still needs your Approve on GitHub" "(APPROVE-URL-ONLY) …and its url from existing_pr when no pr_url is"
+open_pr
+run_signoff "${STAND[@]}"
+eq "$RC" 0 "(APPROVE-NO-URL) an anchor that records no PR identity signs off"
+eq "$(meta tk-anc gc.takeaway)" "design approved; tk-anc's PR still needs your Approve on GitHub" "(APPROVE-NO-URL) …naming the PR by its anchor"
+hasnt "$OUT" "link it" "(APPROVE-NO-URL) …with no link to give"
+eq "$(cat "$GH_CALLS")" "" "(APPROVE-NO-URL) …and no GitHub read"
+
+open_pr; pr_at tk-anc 77
+run_signoff --conversation tk-conv --outcome "fix the retry" "${RULED[@]}" --rework
+eq "$RC" 0 "(APPROVE-REWORK) --rework signs off"
+eq "$(meta tk-anc gc.takeaway)" "fix the retry" "(APPROVE-REWORK) …with the headline as given: the branch is changing, so no Approve is owed yet"
+eq "$(cat "$GH_CALLS")" "" "(APPROVE-REWORK) …and no GitHub read"
+open_pr; pr_at tk-anc 77
+run_signoff --conversation tk-conv --outcome "it will not land" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 0 "(APPROVE-RETIRE) --retire signs off"
+eq "$(meta tk-anc gc.takeaway)" "it will not land" "(APPROVE-RETIRE) …with the headline as given"
+eq "$(cat "$GH_CALLS")" "" "(APPROVE-RETIRE) …and no GitHub read"
+acceptance; run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
+eq "$(meta tk-anc gc.takeaway)" "settled" "(APPROVE-NO-PR) --no-rework where the ruling reaches no open PR says nothing of an Approve"
+eq "$(cat "$GH_CALLS")" "" "(APPROVE-NO-PR) …and reads nothing from GitHub"
+open_pr; pr_at tk-anc 77
+run_signoff --conversation tk-conv --outcome "not yet" --ruled no
+eq "$RC" 0 "(APPROVE-CUT-SHORT) a sign-off cut short exits 0"
+eq "$(meta tk-anc gc.takeaway)" "not yet" "(APPROVE-CUT-SHORT) …and, with no ruling, says nothing of an Approve"
+eq "$(cat "$GH_CALLS")" "" "(APPROVE-CUT-SHORT) …and reads nothing from GitHub"
+
+epic_pr; pr_at tk-mem 78
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
+eq "$(meta tk-epic gc.takeaway)" "the epic takes option B; PR #78 still needs your Approve on GitHub" "(APPROVE-EPIC) the epic's headline names the member's PR"
+has "$OUT" "PR #78 still needs the operator's Approve review on GitHub" "(APPROVE-EPIC) …and the sitting is told"
+eq "$(meta tk-mem gc.takeaway)" "" "(APPROVE-EPIC) …and the member carries no headline"
+
+shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78
+run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
+eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #77, PR #78 still need your Approve on GitHub" "(APPROVE-TWO) two PRs left standing are both named"
+has "$OUT" "PR #77 still needs the operator's Approve review" "(APPROVE-TWO) …and the sitting is told of the first"
+has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …and of the second"
+shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78; review 77 operator APPROVED 2026-10-20T00:00:00Z
+run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
+eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) only the one with no approval is named"
+shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78
+run_signoff --conversation tk-conv --outcome "fix the retry" "${RULED[@]}" --rework --pr-anchor tk-anc
+eq "$(meta tk-anc gc.takeaway)" "fix the retry; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) a PR reworked beside one left standing is not named"
+
+open_pr; pr_at tk-anc 77
+TAKEAWAY_FAIL=1 run_signoff "${STAND[@]}"
+eq "$RC" 1 "(APPROVE-CAP) a headline refused with the clause on it stops the sign-off"
+has "$OUT" "after --outcome, which counts toward the cap" "(APPROVE-CAP) …saying a shorter --outcome makes room"
+eq "$(field tk-rev status)" "open" "(APPROVE-CAP) …before any gate is resolved"
+open_pr; pr_at tk-anc 77; review 77 operator APPROVED 2026-10-20T00:00:00Z
+TAKEAWAY_FAIL=1 run_signoff "${STAND[@]}"
+hasnt "$OUT" "counts toward the cap" "(APPROVE-CAP) a headline with no clause on it says nothing of one"
+
+open_pr; pr_at tk-anc 77
+run_signoff --conversation tk-conv --answer tk-rev --ruling "design approved" --outcome "design approved" --no-rework
+eq "$RC" 0 "(APPROVE-ANSWER) an answer that leaves the PR standing exits 0"
+said "(APPROVE-ANSWER)" owed
+eq "$(field tk-conv status)" "in_progress" "(APPROVE-ANSWER) …and the conversation stays open"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"

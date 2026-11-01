@@ -488,6 +488,18 @@ which runs steps 1 to 3 for the gates it names, and step 5 when the ruling
 takes the recommendation, and stops there, leaving the conversation open for
 the sign-off.
 
+A ruling is not an approval. The merge counts only an Approve review on GitHub
+from an account other than the city's (the merge condition in
+[state-machine.md](state-machine.md)), and nothing the sign-off writes is one.
+So each open PR a ruling leaves standing with no such review is read before the
+first write, through `review-verdict.sh`, and the headline ends by saying that
+PR still needs the operator's Approve on GitHub. The conversation's close reason
+and the PR reminder repeat the headline, and the board shows it as the row's
+NEEDS. The sign-off also prints a line with the PR's link, which the sitting
+tells the operator. A PR whose reviews do not read counts as needing one. The
+headline is a sentence written at the sign-off, so it keeps saying so after the
+operator approves, until the PR merges or another headline replaces it.
+
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
 place and hands the conversation back to the operator's queue with one write

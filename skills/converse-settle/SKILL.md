@@ -190,6 +190,19 @@ out. `--rework` and `--retire` apply only to an open PR. When the ruling
 reaches none, file and send its consequence as work (below), and re-run
 without them.
 
+**A ruling does not approve a PR.** The merge counts only an Approve review on
+GitHub from an account other than the city's, and nothing a sitting writes is
+one. For each open PR the ruling leaves standing with no such review, the
+sign-off adds `PR #<n> still needs your Approve on GitHub` after your
+`--outcome`, in the headline the board shows, the conversation's close reason
+and the PR reminder. That takes about 45 of the 140 characters. An `--outcome`
+that leaves it too little stops the sign-off at the headline, and a re-run with
+a shorter one goes on. The sign-off also prints a line naming each such PR with
+its link. Tell the operator that in your sign-off, in plain words and with the
+link, as the one thing left for them to do, so they do not take the ruling for
+the approval. When it prints no such line, an Approve already stands or no PR is
+left waiting on one, so leave the subject out of your sign-off.
+
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),
 self-contained enough to act on from its last few lines:

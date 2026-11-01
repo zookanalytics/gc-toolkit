@@ -43,6 +43,15 @@
 # merge_result, `held` included, as a PR or merge that already exists, and
 # cancels a run poured at a bead that still carries one.
 #
+# A ruling is not an approval. The merge counts only an Approve review on GitHub
+# from an account other than the city's (review-verdict.sh), and nothing this
+# sign-off writes is one. So each open PR the ruling leaves standing with no such
+# review is named as still needing it: in the headline step 2 writes, which step
+# 6's close reason and step 7's reminder repeat, and in a line the sitting relays
+# to the operator with the PR's link. This is read before the first write. A PR
+# whose reviews do not read counts as needing one, because a needless ask costs a
+# glance at GitHub and a missed one leaves the PR sitting unmerged.
+#
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 5 when it takes the recommendation,
 # and stops there: the conversation stays open under its sitting, and the
@@ -76,7 +85,9 @@
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
 #     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]]
 #   --outcome is the subject's headline, and the close reason the sittings card
-#   falls back to. --ruled defaults to `no`. --ruled yes requires --ruling, the
+#   falls back to. A PR the ruling leaves standing with no Approve review adds
+#   "; PR #<n> still needs your Approve on GitHub" after it, and the addition
+#   counts toward the cap. --ruled defaults to `no`. --ruled yes requires --ruling, the
 #   answer each gate resolves with, and --route, where a `held` subject is
 #   released to. --subject, when given, must be the bead the conversation tracks.
 #   --leave (with --ruled yes) names a gate the conversation replies to that the
@@ -224,6 +235,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # $HUMAN_GATE_JQ.
 # shellcheck source=bd-lib.sh
 . "$HERE/bd-lib.sh" || die "cannot source bd-lib.sh from $HERE"
+# The one definition of the approval rule the merge lands on. Exposes
+# $REVIEW_VERDICT_DEF.
+# shellcheck source=review-verdict.sh
+. "$HERE/review-verdict.sh" || die "cannot source review-verdict.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -533,6 +548,55 @@ if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
 fi
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
+# pr_approval <pr-url> <pr-number> <bring_current_lifted_at> — prints `approved`
+# when the rule the merge lands on finds an approval standing and no veto, and
+# `owed` when it does not. Non-zero, printing nothing, when the reviews do not
+# read.
+pr_approval() {
+  local host repo self reviews
+  host=$(printf '%s' "$1" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9].*#\1#p')
+  repo=$(printf '%s' "$1" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9].*#\1#p')
+  [ -n "$host" ] && [ -n "$repo" ] && [ -n "$2" ] || return 1
+  self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null) && [ -n "$self" ] || return 1
+  reviews=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$2/reviews?per_page=100" --jq '.[]' 2>/dev/null) || return 1
+  printf '%s' "$reviews" | scrub | jq -sr --arg self "$self" --arg lifted "$3" "$REVIEW_VERDICT_DEF"'
+    review_verdict($self; $lifted) | if .approver != "" and .veto == "" then "approved" else "owed" end' 2>/dev/null
+}
+APPROVE_OWED=()
+APPROVE_TELL=()
+for p in "${STANDS[@]+"${STANDS[@]}"}"; do
+  reaches_pr "$p" || continue
+  PROW=$(show_row "$p") \
+    || stopped "$p, an open PR this ruling leaves standing, could not be read to tell whether its merge still needs an Approve review; nothing was written"
+  P_URL=$(printf '%s' "$PROW" | jq -r '.metadata.pr_url // .metadata.existing_pr // ""')
+  P_NUM=$(printf '%s' "$PROW" | jq -r '.metadata.pr_number // "" | tostring')
+  [ -n "$P_NUM" ] || P_NUM=$(printf '%s' "$P_URL" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
+  P_LIFTED=$(printf '%s' "$PROW" | jq -r '.metadata.bring_current_lifted_at // ""')
+  P_READ=$(pr_approval "$P_URL" "$P_NUM" "$P_LIFTED") || P_READ=""
+  [ "$P_READ" != approved ] || continue
+  P_NAME="PR #$P_NUM"
+  [ -n "$P_NUM" ] || P_NAME="$p's PR"
+  APPROVE_OWED+=("$P_NAME")
+  if [ "$P_READ" = owed ]; then
+    P_SAYS="$P_NAME still needs the operator's Approve review on GitHub before it can merge, and this ruling does not count as one."
+  else
+    P_SAYS="The reviews of $P_NAME could not be read, so its merge may still need the operator's Approve review on GitHub, and this ruling does not count as one."
+  fi
+  APPROVE_TELL+=("$P_SAYS Tell them so in plain words${P_URL:+ and link it: $P_URL}")
+done
+APPROVE_CLAUSE=""
+if [ "${#APPROVE_OWED[@]}" -gt 0 ]; then
+  P_VERB=needs
+  [ "${#APPROVE_OWED[@]}" -eq 1 ] || P_VERB=need
+  APPROVE_CLAUSE=$(printf ', %s' "${APPROVE_OWED[@]}")
+  APPROVE_CLAUSE="${APPROVE_CLAUSE#, } still $P_VERB your Approve on GitHub"
+  OUTCOME="${OUTCOME%.}; $APPROVE_CLAUSE"
+fi
+tell_approve_owed() {
+  local line
+  for line in "${APPROVE_TELL[@]+"${APPROVE_TELL[@]}"}"; do echo "$line"; done
+}
+
 # take_recommendation — step 5: hand the recommendation's gate to gc-helm.sh
 # accept, the writer the board's Accept runs, and read back what it left. Accept
 # exits 0 once it has dispatched the formula, or recorded a dispatch that an
@@ -638,7 +702,7 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 # word-split an unquoted parameter, so "${WAIT[@]}" is what passes each flag as
 # its own argument, and nothing when it is empty.
 "$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
-  || stopped "the headline did not land on $SUBJECT (gc-helm.sh takeaway refused it); no gate was resolved and the conversation is not closed"
+  || stopped "the headline did not land on $SUBJECT (gc-helm.sh takeaway refused it)${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 show_row "$SUBJECT" | jq -e '(.metadata["gc.takeaway"] // "") != ""' >/dev/null 2>&1 \
   || stopped "no headline reads back on $SUBJECT; no gate was resolved and the conversation is not closed"
 
@@ -692,6 +756,7 @@ if [ "$RULED" = yes ]; then
   if [ -n "$ANSWERING" ]; then
     [ -z "$ACCEPT" ] || take_recommendation
     echo "ANSWERED $TO_ANSWER for conversation $CONVERSATION on $SUBJECT; the conversation stays open, and its sign-off reads each of those gates as already cleared"
+    tell_approve_owed
     exit 0
   fi
 
@@ -772,3 +837,4 @@ if [ -n "$REMINDER" ] && [ -n "$REMINDER_OUTCOME" ]; then
     --outcome "$REMINDER_OUTCOME" --summary "$OUTCOME" --actions "$ACTIONS_TEXT" || true
 fi
 echo "SIGNED OFF conversation $CONVERSATION on $SUBJECT (${REMINDER_OUTCOME:-already closed})"
+tell_approve_owed

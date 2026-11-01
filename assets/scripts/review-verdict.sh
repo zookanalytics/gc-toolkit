@@ -7,8 +7,10 @@
 # pr-facts.sh (the posture arm records an approval the lift line set aside as
 # review_required, and the conflict arm brings a branch current only for an
 # approved PR), bring-current-guard.sh (an approval the ruling on a
-# bring-current round lifts is dismissed) and approval-withdraw.sh (a validator
-# ruling that a fresh whole-diff review is warranted withdraws it). One
+# bring-current round lifts is dismissed), approval-withdraw.sh (a validator
+# ruling that a fresh whole-diff review is warranted withdraws it) and
+# converse-signoff.sh (a ruling that leaves a PR standing with no approval says
+# the PR still needs one). One
 # definition, no copies: review-verdict.test.sh fails when a reader stops
 # sourcing this file or carries a rule of its own. gctk merge (services/gctk/internal/cli/merge.go,
 # reviewVerdict) states the same rule natively for the universal approval merge
