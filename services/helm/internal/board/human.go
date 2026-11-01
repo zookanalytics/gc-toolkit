@@ -27,15 +27,21 @@ const (
 	KindConversation = "conversation"
 )
 
-// The states a held row can be in, carried on [Tile.SittingState].
-// SittingStartFailed is a row a conversation on which last spawned a sitting
-// that failed to start, with no sitting spawned for it since. A row nothing
-// holds carries the empty string, except a conversation's own row whose
-// sitting failed to start ([classifySittings]).
+// The states a sitting can be in, carried on [Sitting.State] and derived once
+// ([Facts.sittingState]). SittingInSession is a conversation a live session
+// holds now. SittingStartFailed is an open conversation whose last spawned
+// sitting failed to start, with no sitting spawned for it since. SittingWaiting
+// is any other open conversation: no live session holds it, so it waits for the
+// operator. SittingClosed is a conversation that has ended.
+//
+// A held row's [Tile.SittingState] is the roll-up of the states of the sittings
+// on it ([classifySittings]). It never reads SittingClosed, and a row nothing
+// holds carries the empty string.
 const (
 	SittingInSession   = "in_session"
 	SittingWaiting     = "waiting"
 	SittingStartFailed = "start-failed"
+	SittingClosed      = "closed"
 )
 
 const (
@@ -46,7 +52,6 @@ const (
 	// assigneeHuman is a conversation's assignee while it waits in the
 	// operator's queue.
 	assigneeHuman = "human"
-	mdSessionName = "gc.session_name"
 )
 
 // acceptAnswer is an Accept's answer on the recommendation's gate: the close
@@ -174,16 +179,35 @@ func gateTitles(gates []Blocker) []string {
 	return out
 }
 
-// inSession reports whether a sitting holds the conversation now: it is open,
-// its assignee is a sitting's alias rather than the operator's queue, and the
-// session holding it is a live sitting ([Facts.sittingLive]). A sitting whose
-// session has ended does not hold it, so its conversation waits for the
-// operator again.
-func (f Facts) inSession(a Anchor) bool {
-	if a.Source != KindConversation || !a.ClosedAt.IsZero() || a.Assignee == "" || a.Assignee == assigneeHuman {
-		return false
+// sittingState derives a sitting's one state from its conversation's status and
+// holder. A sitting is in session when its assignee is a sitting's alias rather
+// than the operator's queue, and the session holding it is a live sitting
+// ([Facts.sittingLive]). A sitting whose session has ended holds nothing, so its
+// conversation waits for the operator again. A failed start outranks a live
+// holder, because it is the state nothing else would tell the operator about.
+func (f Facts) sittingState(s Sitting) string {
+	switch {
+	case s.Status == "closed":
+		return SittingClosed
+	case s.StartFailure != "":
+		return SittingStartFailed
+	case s.Assignee != "" && s.Assignee != assigneeHuman && (f.sittingLive(s.Assignee) || f.sittingLive(s.Session)):
+		return SittingInSession
 	}
-	return f.sittingLive(a.Assignee) || f.sittingLive(a.Metadata[mdSessionName])
+	return SittingWaiting
+}
+
+// stampSittings is the record as the board carries it: a copy of the gather's
+// sittings, each with its state and headline derived. [BuildBoard] runs it
+// before anything reads a sitting, so every row and every renderer reads these
+// values and none derives its own.
+func stampSittings(in []Sitting, f Facts) []Sitting {
+	out := slices.Clone(in)
+	for i := range out {
+		out[i].State = f.sittingState(out[i])
+		out[i].Headline = sittingHeadline(out[i])
+	}
+	return out
 }
 
 // sittingLive reports whether the session a conversation's holder names is a
@@ -216,9 +240,10 @@ type humanIndex struct {
 	gates map[string][]string
 	// convs maps a bead id to the open conversations that track it.
 	convs map[string][]string
-	// live is the open conversations a live session holds.
-	live map[string]bool
-	// answering is the open human gates a conversation in live replies to.
+	// sittings maps a conversation's id to its sitting. A row reads the state it
+	// carries ([stampSittings]) and has no reading of its own.
+	sittings map[string]Sitting
+	// answering is the open human gates a conversation in session replies to.
 	answering map[string]bool
 }
 
@@ -227,8 +252,11 @@ func indexHuman(anchors []Anchor, f Facts) humanIndex {
 	ix := humanIndex{
 		gates:     map[string][]string{},
 		convs:     map[string][]string{},
-		live:      map[string]bool{},
+		sittings:  map[string]Sitting{},
 		answering: map[string]bool{},
+	}
+	for _, s := range f.Sittings {
+		ix.sittings[s.ID] = s
 	}
 	seen := map[string]bool{}
 	for _, a := range anchors {
@@ -239,8 +267,7 @@ func indexHuman(anchors []Anchor, f Facts) humanIndex {
 		into := ix.gates
 		if a.Source == KindConversation {
 			into = ix.convs
-			if f.inSession(a) {
-				ix.live[a.ID] = true
+			if ix.inSession(a.ID) {
 				for _, g := range a.RepliesTo {
 					ix.answering[g] = true
 				}
@@ -268,22 +295,24 @@ func (ix humanIndex) holdsWork(id string) bool {
 	return len(ix.gates[id]) > 0
 }
 
-// inSessionOn reports whether a live sitting is on the row: the row is a
-// conversation a live session holds, or one of the conversations that track
-// its bead is.
-func (ix humanIndex) inSessionOn(id string) bool {
-	if ix.live[id] {
-		return true
-	}
-	return slices.ContainsFunc(ix.convs[id], func(c string) bool { return ix.live[c] })
+// inSession reports whether the conversation id is in session: a live session
+// holds it, by the state its sitting carries.
+func (ix humanIndex) inSession(id string) bool {
+	return ix.sittings[id].State == SittingInSession
 }
 
-// classifySittings stamps [Tile.SittingState] on every held row: start failed
-// when the sitting last spawned for a conversation on the row failed to start
-// ([humanIndex.startFailure]), in session when a live sitting is on it
-// ([humanIndex.inSessionOn]), and waiting on any other held row, which waits
-// for the operator. It runs after the fold, where Held is final, and before
-// [tagClusters], which keys on the section a failed start rewrites.
+// inSessionOn reports whether a live sitting is on the row: the row is a
+// conversation in session, or one of the conversations that track its bead is.
+func (ix humanIndex) inSessionOn(id string) bool {
+	return ix.inSession(id) || slices.ContainsFunc(ix.convs[id], ix.inSession)
+}
+
+// classifySittings stamps [Tile.SittingState] on every held row, the roll-up of
+// the states of the sittings on it: start failed when one failed to start
+// ([humanIndex.startFailure]), in session when one is in session
+// ([humanIndex.inSessionOn]), and waiting otherwise, which is also what a row
+// only a human gate holds reads. It runs after the fold, where Held is final,
+// and before [tagClusters], which keys on the section a failed start rewrites.
 //
 // A failed start outranks a live sitting on the same row. Each conversation on
 // a bead is a conversation of its own, and the failure is the one state on the
@@ -291,17 +320,12 @@ func (ix humanIndex) inSessionOn(id string) bool {
 // because a closed anchor is never owed. A conversation whose subject has no
 // live row keeps a row of its own, so that row carries the failure instead.
 func classifySittings(tiles []Tile, f Facts) {
-	failed := startFailures(f.Sittings)
 	for i := range tiles {
 		t := &tiles[i]
-		live := t.ClosedAt.IsZero()
 		if !t.Held {
-			if reason := failed[t.ID]; reason != "" && live {
-				markStartFailed(t, reason)
-			}
 			continue
 		}
-		if reason := f.human.startFailure(t.ID, failed); reason != "" && live {
+		if reason := f.human.startFailure(t.ID); reason != "" && t.ClosedAt.IsZero() {
 			markStartFailed(t, reason)
 			continue
 		}
@@ -312,28 +336,13 @@ func classifySittings(tiles []Tile, f Facts) {
 	}
 }
 
-// startFailures maps each open conversation whose last sitting failed to start
-// ([Sitting.StartFailure]) to the reason.
-func startFailures(sittings []Sitting) map[string]string {
-	out := map[string]string{}
-	for _, s := range sittings {
-		if s.Status != "closed" && s.StartFailure != "" {
-			out[s.ID] = s.StartFailure
-		}
-	}
-	return out
-}
-
 // startFailure returns why the sitting last spawned for a conversation on the
 // row id failed to start: the row's own conversation, or one that tracks its
-// bead. It is "" when none of them records a failed start.
-func (ix humanIndex) startFailure(id string, failed map[string]string) string {
-	if reason := failed[id]; reason != "" {
-		return reason
-	}
-	for _, c := range ix.convs[id] {
-		if reason := failed[c]; reason != "" {
-			return reason
+// bead. It is "" when no sitting on the row is in that state.
+func (ix humanIndex) startFailure(id string) string {
+	for _, c := range append([]string{id}, ix.convs[id]...) {
+		if s := ix.sittings[c]; s.State == SittingStartFailed {
+			return s.StartFailure
 		}
 	}
 	return ""

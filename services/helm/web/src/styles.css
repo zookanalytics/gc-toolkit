@@ -239,9 +239,11 @@ th {
  * The sitting marker: a visible chip on a held row, telling a row that WAITS for
  * the operator from one IN SESSION (a live sitting is on it now) by word and
  * colour. Waiting wears the amber the board already spends on the operator's own
- * move; in session wears teal, a live conversation a sitting is holding. The chip reads as interactive, and
- * hovering or focusing it reveals the details card below — not a native title,
- * which had no affordance and needed an exact hover to find.
+ * move; in session wears teal, a live conversation a sitting is holding; start
+ * failed wears the board's red. The sittings table colours each state's word the
+ * same way. The chip reads as interactive, and hovering or focusing it reveals
+ * the details card below — not a native title, which had no affordance and needed
+ * an exact hover to find.
  */
 .sitting-marker {
   display: inline-block;
@@ -254,6 +256,10 @@ th {
 
 .sitting-marker--in-session {
   color: #0e7490;
+}
+
+.sitting-marker--start-failed {
+  color: #b3261e;
 }
 
 .sitting-chip {
@@ -503,8 +509,8 @@ th {
   margin: 0;
 }
 
-/* A running sitting is the row an operator can still join. */
-.sitting-running td {
+/* A sitting in session is the row an operator can join now. */
+.sitting-in-session td {
   font-weight: 600;
 }
 

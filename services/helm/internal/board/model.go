@@ -323,16 +323,13 @@ type Tile struct {
 	// question or the conversation IS the attention it would be flagged for
 	// lacking.
 	Held bool `json:"held"`
-	// SittingState refines Held: SittingInSession when a conversation that
-	// tracks this bead is held by a live session right now, SittingStartFailed
-	// when the sitting last spawned for a conversation on this row failed to
-	// start and none has been spawned since, SittingWaiting on any other held
-	// row, which waits for the operator. Empty on a row nothing holds (Held is
-	// false), the same not-applicable empty a closed row's Phase carries. The
-	// one row that is not held and still carries a value is a conversation's
-	// own row whose sitting failed to start, which reads SittingStartFailed too
-	// ([classifySittings]). It is derived here rather than in the browser
-	// because it reads each conversation's holder against the session list.
+	// SittingState refines Held. It is the roll-up of the [Sitting.State] of the
+	// sittings on this row, so the row and the record cannot disagree:
+	// SittingStartFailed when one failed to start, SittingInSession when a live
+	// session holds one right now, and SittingWaiting on any other held row,
+	// which waits for the operator ([classifySittings]). Empty on a row nothing
+	// holds (Held is false), the same not-applicable empty a closed row's Phase
+	// carries.
 	SittingState string `json:"sitting_state"`
 
 	NClosed int `json:"n_closed"`
@@ -668,18 +665,22 @@ type Sitting struct {
 	// `tracks` edge names.
 	Subject string `json:"subject"`
 	Title   string `json:"title"`
-	// Status is the conversation task's own status. A sitting is finished when
-	// this reads "closed" and running under any other value: a conversation in
-	// the operator's queue is open, and one a sitting has claimed is
-	// in_progress.
-	Status string `json:"status"`
+	// Status is the conversation task's own status, and Assignee is who holds
+	// it: `human` while it waits in the operator's queue, a sitting's alias
+	// while a sitting holds it. Neither says whether anyone is on the
+	// conversation, because a session that ends without handing it back leaves
+	// it in_progress under that alias. [Facts.sittingState] reads them against
+	// the session list, so they are gather inputs and carry no wire tag. A reader
+	// of a sitting reads [Sitting.State].
+	Status   string `json:"-"`
+	Assignee string `json:"-"`
 
 	// OutcomeReason is the conversation task's close reason, the one-line
 	// sentence its ending wrote: the headline a sign-off settled on, or the
 	// operator's dismissal. Empty on a running sitting.
 	OutcomeReason string `json:"outcome_reason"`
 	// Session is the converse session that ran the sitting (gc.session_name),
-	// which is what an operator attaches to while it is still open.
+	// which is what an operator attaches to while the sitting is in session.
 	Session string `json:"session"`
 
 	// FiledAt is when the conversation task was created. A sitting spawned for
@@ -728,6 +729,16 @@ type Sitting struct {
 	// conversation's title for. It carries the whole title; a renderer clips it
 	// to its column.
 	SubjectTitle string `json:"subject_title"`
+
+	// State is where this sitting stands: SittingInSession, SittingWaiting,
+	// SittingStartFailed or SittingClosed. It is the one reading of it, derived
+	// when the board is built ([Facts.sittingState]) because it reads the holder
+	// against the session list, which the wire does not carry. A row's
+	// [Tile.SittingState] rolls up from it and every surface prints it.
+	State string `json:"state"`
+	// Headline is what this sitting concluded, or failing that what it is about
+	// ([sittingHeadline]). Every surface prints it as it stands.
+	Headline string `json:"headline"`
 }
 
 // Topic is what a sitting is about, for a surface that shows one cell of it: the
@@ -741,14 +752,14 @@ func (s Sitting) Topic() string {
 	return s.Subject
 }
 
-// Headline is what a sitting CONCLUDED, or failing that what it is ABOUT. The
-// takeaway is the conversation's own one-line conclusion and wins whenever one
-// was attributed. A closed sitting that left no takeaway shows its close reason
-// next, the sentence naming why it closed, such as the operator's dismissal, so
-// the row reads as a decision rather than a blank. Without either the row shows
-// the subject's title — the topic — and the conversation's own title is the
-// last resort, for a subject the gather could not read at all.
-func (s Sitting) Headline() string {
+// sittingHeadline is what a sitting CONCLUDED, or failing that what it is ABOUT.
+// The takeaway is the conversation's own one-line conclusion and wins whenever
+// one was attributed. A closed sitting that left no takeaway shows its close
+// reason next, the sentence naming why it closed, such as the operator's
+// dismissal, so the row reads as a decision rather than a blank. Without either
+// the row shows the subject's title — the topic — and the conversation's own
+// title is the last resort, for a subject the gather could not read at all.
+func sittingHeadline(s Sitting) string {
 	if s.Takeaway != "" {
 		return s.Takeaway
 	}
@@ -785,8 +796,9 @@ type Facts struct {
 	OwnerState map[string]string
 	// Sittings are the converse sittings the gather read: every open
 	// conversation, plus those closed inside the recent window. [BuildBoard]
-	// orders them and passes them through to the envelope. The fold reads the
-	// open conversations from their anchors ([KindConversation]), not from here.
+	// stamps and orders them and passes them through to the envelope. The fold
+	// reads what an open conversation asks from its anchor ([KindConversation]),
+	// and whether a live session holds it from here.
 	Sittings []Sitting
 	// Prefixes is every rig's issue prefix; RigNames is every rig's name. The
 	// cross-rig-ref scan looks for OTHER rigs' prefixes in an anchor's prose and

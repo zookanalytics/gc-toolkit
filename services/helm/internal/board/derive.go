@@ -1870,7 +1870,7 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 	// A conversation waiting for the operator is a question they owe, banded as
 	// a human gate is. One a live sitting holds is the operator's attention at
 	// work, banded as work in flight.
-	convOwed := a.Source == KindConversation && a.ClosedAt.IsZero() && !f.inSession(a)
+	convOwed := a.Source == KindConversation && a.ClosedAt.IsZero() && !f.human.inSession(a.ID)
 	if a.Source == KindConversation && a.ClosedAt.IsZero() {
 		sev = SevNormal
 		if convOwed {
@@ -2001,9 +2001,11 @@ func computeTile(a Anchor, now time.Time, f Facts, work anchorWork) Tile {
 // facts carries the cross-anchor joins (in-flight workflows, session liveness,
 // the sittings record); a zero value is legal and yields a board with no
 // in-flight signal and no conversation in session — narrower, not wrong. The
-// held fact is read from the gate and conversation anchors themselves, indexed
-// once here before any tile is derived.
+// held fact is read from the gate and conversation anchors themselves, and
+// whether a conversation is in session from its sitting's state, indexed once
+// here before any tile is derived.
 func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []string, facts Facts) Board {
+	facts.Sittings = stampSittings(facts.Sittings, facts)
 	facts.human = indexHuman(anchors, facts)
 	// Read before any tile: a merge anchor's machine axis reads a blocked
 	// verdict over the in-flight count its phase reads, and each tile settles
@@ -2044,8 +2046,8 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// each row to its top-most tile.
 	assignGroupRoots(folded, anchors)
 
-	// Split Held into in session, waiting or start-failed on each held row, from
-	// the same index the fold read. After the fold so it sees the final Held,
+	// Roll each held row up to in session, waiting or start-failed, from the
+	// sitting states the fold read. After the fold so it sees the final Held,
 	// and before the clusters, because marking a failed start rewrites the row's
 	// section and needs.
 	classifySittings(folded, facts)
@@ -2614,7 +2616,7 @@ func wrapperAsk(a Anchor, t Tile, f Facts) foldedAsk {
 		fa.owed = true
 		fa.inSession = f.human.answering[a.ID]
 	case KindConversation:
-		fa.inSession = f.human.live[a.ID]
+		fa.inSession = f.human.inSession(a.ID)
 		fa.owed = !fa.inSession
 	}
 	if fa.owed {
@@ -3063,11 +3065,11 @@ func orderSittings(in []Sitting) []Sitting {
 	return out
 }
 
-// running reports whether this sitting is still holding its conversation. The
-// test is on the status the conversation task actually carries, so a status the city
-// grows later reads as running rather than as finished — the direction that
-// shows a row instead of hiding it.
-func (s Sitting) running() bool { return s.Status != "closed" }
+// running reports whether this sitting's conversation is still open, whoever is
+// on it. It reads the state, and only [SittingClosed] is finished, so a status
+// the city grows later reads as running rather than as finished — the direction
+// that shows a row instead of hiding it.
+func (s Sitting) running() bool { return s.State != SittingClosed }
 
 // DefaultMaxSittings bounds the closed half of the conversation record in a
 // rendered view. Running sittings are never elided: there are as many of them

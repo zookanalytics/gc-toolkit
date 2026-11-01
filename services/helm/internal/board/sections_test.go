@@ -31,6 +31,30 @@ func conversationAnchor(id, subject, title, assignee string, repliesTo ...string
 // sittingAlias is the qualified alias a sitting holds conversation id under.
 func sittingAlias(id string) string { return "gc-toolkit/gc-toolkit." + id }
 
+// mdSessionName is the key the gather reads a conversation's session from.
+const mdSessionName = "gc.session_name"
+
+// withSittings gives facts the record the gather reads beside the anchors: a
+// sitting projected from each conversation anchor, from the same task, the way
+// source.newSitting does. A conversation the facts already record keeps its
+// sitting. The record comes back stamped, so a test can index it directly.
+func withSittings(anchors []Anchor, f Facts) Facts {
+	sittings := slices.Clone(f.Sittings)
+	for _, a := range anchors {
+		if a.Source != KindConversation || slices.ContainsFunc(sittings, func(s Sitting) bool { return s.ID == a.ID }) {
+			continue
+		}
+		status := "open"
+		if !a.ClosedAt.IsZero() {
+			status = "closed"
+		}
+		sittings = append(sittings, Sitting{ID: a.ID, Subject: a.Subjects[0], Title: a.Title, Status: status,
+			Assignee: a.Assignee, Session: a.Metadata[mdSessionName]})
+	}
+	f.Sittings = stampSittings(sittings, f)
+	return f
+}
+
 // epicSubject is a plain live anchor with one open child, which bands
 // stranded (HIGH) when nothing holds it.
 func epicSubject(id string) Anchor {
@@ -169,7 +193,7 @@ func TestSharedGateAnsweredInTheAnchorsSitting(t *testing.T) {
 	build := func(conv Anchor) Board {
 		return BuildBoard([]Anchor{
 			epicSubject("tk-anchor"), humanKid("tk-child"), gateAnchor("tk-gate", ask, "tk-anchor", "tk-child"), conv,
-		}, fixtureNow, false, nil, liveOwners(sittingAlias("tk-conv")))
+		}, fixtureNow, false, nil, withSittings([]Anchor{conv}, liveOwners(sittingAlias("tk-conv"))))
 	}
 
 	b := build(conv)
@@ -202,11 +226,12 @@ func TestSharedGateAnsweredInTheAnchorsSitting(t *testing.T) {
 // tracks the member.
 func TestEpicSittingAnswersItsMembersGate(t *testing.T) {
 	const ask = "Which shape should the member take?"
+	conv := conversationAnchor("tk-conv", "tk-epic", "the epic", sittingAlias("tk-conv"), "tk-gate")
 	b := BuildBoard([]Anchor{
 		epicWith("tk-epic", "tk-member"), humanKid("tk-member"),
 		gateAnchor("tk-gate", ask, "tk-member"),
-		conversationAnchor("tk-conv", "tk-epic", "the epic", sittingAlias("tk-conv"), "tk-gate"),
-	}, fixtureNow, false, nil, liveOwners(sittingAlias("tk-conv")))
+		conv,
+	}, fixtureNow, false, nil, withSittings([]Anchor{conv}, liveOwners(sittingAlias("tk-conv"))))
 
 	m := mustTile(t, b, "tk-member")
 	if m.GatesInSession == nil || *m.GatesInSession != ask || m.SittingState != SittingWaiting {
@@ -258,7 +283,7 @@ func TestConversationInTheQueueOwesItsBead(t *testing.T) {
 			if tc.session != "" {
 				conv.Metadata = map[string]string{mdSessionName: tc.session}
 			}
-			b := BuildBoard([]Anchor{epicSubject("tk-subj"), conv}, fixtureNow, false, nil, tc.facts)
+			b := BuildBoard([]Anchor{epicSubject("tk-subj"), conv}, fixtureNow, false, nil, withSittings([]Anchor{conv}, tc.facts))
 			if _, ok := tileByID(b, "tk-conv"); ok {
 				t.Errorf("the conversation folds onto its bead's row")
 			}
@@ -289,7 +314,7 @@ func TestConversationInSessionHoldsWithoutOwing(t *testing.T) {
 			if tc.session != "" {
 				conv.Metadata = map[string]string{mdSessionName: tc.session}
 			}
-			b := BuildBoard([]Anchor{epicSubject("tk-subj"), conv}, fixtureNow, false, nil, tc.facts)
+			b := BuildBoard([]Anchor{epicSubject("tk-subj"), conv}, fixtureNow, false, nil, withSittings([]Anchor{conv}, tc.facts))
 
 			s := mustTile(t, b, "tk-subj")
 			if !s.Held || s.Owed || s.Needs != "in conversation" || s.SittingState != SittingInSession {
@@ -312,9 +337,9 @@ func TestConversationKeptWhenItsBeadHasNoRow(t *testing.T) {
 		!queued.Owed || !queued.Held || queued.SittingState != SittingWaiting || queued.Section != SectionGate {
 		t.Errorf("a kept queued conversation states its ask and waits: %+v", queued)
 	}
-	live := mustTile(t, BuildBoard([]Anchor{
-		conversationAnchor("tk-conv", "tk-ghost", "investigate the flake", sittingAlias("tk-conv")),
-	}, fixtureNow, false, nil, liveOwners(sittingAlias("tk-conv"))), "tk-conv")
+	conv := conversationAnchor("tk-conv", "tk-ghost", "investigate the flake", sittingAlias("tk-conv"))
+	live := mustTile(t, BuildBoard([]Anchor{conv}, fixtureNow, false, nil,
+		withSittings([]Anchor{conv}, liveOwners(sittingAlias("tk-conv")))), "tk-conv")
 	if live.Needs != "in conversation" || live.Owed || live.SittingState != SittingInSession {
 		t.Errorf("a kept conversation in session owes nothing: needs=%q owed=%v state=%q", live.Needs, live.Owed, live.SittingState)
 	}
@@ -399,7 +424,7 @@ func TestFoldDatesTheRowByTheEarliestOwedAsk(t *testing.T) {
 	queued.UpdatedAt = daysAgo(7)
 	live := conversationAnchor("tk-cl", "tk-subj", "a live sitting", sittingAlias("tk-cl"))
 	live.UpdatedAt = daysAgo(9)
-	facts := liveOwners(sittingAlias("tk-cl"))
+	facts := withSittings([]Anchor{live}, liveOwners(sittingAlias("tk-cl")))
 
 	if got := mustTile(t, BuildBoard([]Anchor{subject, gate, live}, fixtureNow, false, nil, facts), "tk-subj").PROwedSince; !got.Equal(daysAgo(5)) {
 		t.Errorf("the gate dates the row, and the live sitting does not: got %v, want %v", got, daysAgo(5))
@@ -471,7 +496,7 @@ func TestClosedConversationIsOnTheCardAndHoldsNothing(t *testing.T) {
 		OpenedAt: daysAgo(1), ClosedAt: daysAgo(0),
 	}}})
 
-	if len(b.Sittings) != 1 || b.Sittings[0].Headline() != reason {
+	if len(b.Sittings) != 1 || b.Sittings[0].Headline != reason {
 		t.Fatalf("the card lists the closed conversation with its close reason as headline: %+v", b.Sittings)
 	}
 	if s := mustTile(t, b, "tk-subj"); s.Held || s.Owed || s.SittingState != "" {
@@ -551,7 +576,7 @@ func TestALiveSittingDoesNotWithholdAccept(t *testing.T) {
 		recommendationSubject("tk-anchor", "mol-polecat-work", rec),
 		conversationAnchor("tk-conv", "tk-anchor", rec.Title, sittingAlias("tk-conv"), "tk-rec"),
 	}, gatesFor("tk-anchor", rec)...)
-	row := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, liveOwners(sittingAlias("tk-conv"))), "tk-anchor")
+	row := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, withSittings(anchors, liveOwners(sittingAlias("tk-conv")))), "tk-anchor")
 
 	if row.SittingState != SittingInSession || row.GatesInSession == nil || *row.GatesInSession != rec.Title {
 		t.Errorf("the row is in session on the recommendation's gate: state=%q gates_in_session=%v", row.SittingState, row.GatesInSession)

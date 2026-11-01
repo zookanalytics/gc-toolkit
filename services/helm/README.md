@@ -78,9 +78,10 @@ acceptable accept_formula pr_branch_url pr_phase phase recommendation
 accept_withheld gates_in_session sitting_start_failure pr_held work_held
 ```
 
-`sitting_state` is `in_session` on a row a live sitting is in, `start-failed`
-on a row whose conversation's sitting failed to start (`sitting_start_failure`
-says why; see *A sitting that failed to start*, below), `waiting` on any other
+`sitting_state` rolls up the `state` of the sittings on a row (see *Where a
+sitting stands*, below): `start-failed` when one failed to start
+(`sitting_start_failure` says why; see *A sitting that failed to start*, below),
+`in_session` when a live session holds one, `waiting` on any other
 held row, and empty on a row nothing holds. `work_held` refines `held`: it is
 true when an open human gate blocks the bead or an acceptance an earlier Accept
 left unfinished keeps it, so the operator's answer is required before the work
@@ -750,7 +751,7 @@ in a queue of asks answers a question nobody asked.
 
 | | gathered | shown |
 |---|---|---|
-| running | `status` open or in_progress: in the operator's queue, or held by a sitting | always — a live conversation is never elided |
+| open | its task is open or in_progress: in the operator's queue, or held by a sitting | always — a live conversation is never elided |
 | closed | `closed_at` inside `GC_HELM_SITTINGS_WINDOW` (default `24h`) | most recent first, capped at 12 in a rendered view |
 
 `GC_HELM_SITTINGS_WINDOW` takes a Go duration (`6h`, `90m`). `0` gathers no
@@ -766,10 +767,32 @@ The two passes fail independently. Losing the closed pass costs the recent
 history and nothing else — `held` is derived from the open half of the same
 record, so the glyph and the section can never disagree about what is held.
 
+### Where a sitting stands
+
+Each sitting carries one `state`, derived once, when the board is built. A row's
+`sitting_state` rolls up from the same values, so the row and the list cannot
+disagree.
+
+| `state` | the word | the sitting |
+|---|---|---|
+| `in_session` | in session | A live session holds its conversation: the assignee is a sitting's alias rather than `human`, and that alias or the conversation's `gc.session_name` names a session the list does not read as ended |
+| `waiting` | waiting | Its conversation is open and no live session holds it: it is in the operator's queue, or a sitting left it and its session ended |
+| `start-failed` | start failed | The sitting last spawned for it failed to start, and none has been spawned since |
+| `closed` | closed | Its conversation has ended |
+
+The task's own status cannot say this, because a session that ends without
+handing the conversation back leaves it `in_progress` under the sitting's alias.
+So the status and the assignee are inputs to the derivation and stay off the
+wire. The web row marker and its hover card, the web sittings table and the
+terminal section each print the state's word, and none derives it. Each list's
+count line splits the open sittings into in session and waiting, and names failed
+starts when there are any.
+
 ### The headline a sitting closed on
 
 A sitting's headline is its takeaway, else its close reason, else its subject's
-title (`Sitting.Headline`). The close reason is the conversation task's own
+title (`headline` on the wire, derived by `board.sittingHeadline`), and every
+surface prints it as it stands. The close reason is the conversation task's own
 (`outcome_reason` on the wire): the headline a sign-off settled on, the
 operator's dismissal, or the reading a premise re-check closed it with. It is
 per-sitting and never rewritten, so it is attributable with no inference at
@@ -793,14 +816,14 @@ narrower, not wrong — and marks the gather partial.
 
 Both terminal views print the section under their rows, the queue and `--all`
 alike: the record belongs to the board rather than to one of its views, and a
-conversation nobody ended is owed in the same sense the queue's rows are. `●`
-marks a running sitting; AGE is measured from the start of a running one and
+conversation nobody ended is owed in the same sense the queue's rows are. STATE
+prints each sitting's word; AGE is measured from the start of an open one and
 from the end of a closed one. `--json` is **untouched**: it emits the bare
 ranked array that `tmux-pick-helm.sh` consumes, and growing a second shape
 there would break that contract.
 
-The web app renders the same order — running first, longest-running first, then
-most recently closed — and drills in on a sitting's SUBJECT, since that is the
+The web app renders the same order — open first, longest-open first, then most
+recently closed — and drills in on a sitting's SUBJECT, since that is the
 anchor the drill plane knows how to open. Because `POST /helm/open` already
 invalidates the cached board, a conversation filed from the drill panel appears
 in this section on the next read rather than after the TTL.
@@ -845,8 +868,9 @@ and `never started` when Gas City recorded no cause.
 | `owed`, `severity` | owed, and at least `ELEVATED` |
 
 The row leads the operator's queue, ahead of every row owed longer, so it is
-among the rows `tmux-pick-helm.sh` offers off the head of the queue, and the
-picker and both terminal views mark it `✗`. The mark shows as soon as Gas City
+among the rows `tmux-pick-helm.sh` offers off the head of the queue. The picker
+and both terminal views mark it `✗`, and the web chip reads `start failed`, with
+the reason in its card. The mark shows as soon as Gas City
 records the failure and stays until the conversation is engaged again or
 closed. A failed start outranks a live sitting on the same row, because each
 conversation on a subject is a conversation of its own. A sitting never
