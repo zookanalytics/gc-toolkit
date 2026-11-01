@@ -610,6 +610,13 @@ eq "$(edge_adds)" 0 "--blocked-by: no second edge is written"
 
 reset
 jq -c '. + [{"id":"tk-sib","status":"open","assignee":"","metadata":{}}]' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+printf 'tk-work|related|tk-sib\n' >> "$FAKE_DEPS"
+run tk-work --blocked-by tk-sib --formula mol-polecat-work
+eq "$RC" 0 "--blocked-by: a bead related to the blocker can still wait on it"
+eq "$(grep -c '^tk-work|blocks|tk-sib$' "$FAKE_DEPS" | tr -d ' ')" 1 "--blocked-by: an edge of another kind holds nothing, so the blocks edge is added"
+
+reset
+jq -c '. + [{"id":"tk-sib","status":"open","assignee":"","metadata":{}}]' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
 claim in_progress hq-me
 OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --blocked-by tk-sib --formula mol-polecat-work 2>&1); RC=$?
 eq "$RC" 0 "--blocked-by: a claim in this session's name is released before the arm"

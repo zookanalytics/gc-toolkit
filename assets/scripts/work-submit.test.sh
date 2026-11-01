@@ -440,6 +440,9 @@ prepare polecat/tk-w "$FRESH"
 submit -- --anchor-only --convoy cv-1
 has "$OUT" "none other on this branch" "(27) fresh work is its own anchor"
 has "$OUT" "title: the work" "(27) and prints its title"
+prepare polecat/tk-w '{"branch":"polecat/tk-w","merge_result":"pull_request"}'
+submit -- --anchor-only --convoy cv-1
+has "$OUT" "none other on this branch" "(27b) a bead carrying its own merge_result is no child of itself"
 prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$(jq -c '.[0].title = "the anchor"' <<<"$ANCHOR_ROW")"
 submit -- --anchor-only --convoy cv-1
 has "$OUT" "title: the anchor" "(28) a child prints the anchor's title"

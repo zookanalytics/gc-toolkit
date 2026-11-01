@@ -220,10 +220,10 @@ test={{test_command}}
 CHECKS
 ```
 It exits 0 when every check passes and 1 when one fails. A fail answered from the
-record prints no output of its own; run `gctk rig <check> --command '<command>'
---force` when you need what failed to key it (3a). Exit 4 says nothing about the
-code, and `gctk rig`'s line names why, such as files an earlier run left that git
-does not ignore.
+record prints no output of its own; run `"$GC_CITY_PATH/.gc/services/gctk/bin/gctk"
+rig <check> --command '<command>' --force` when you need what failed to key it
+(3a). Exit 4 says nothing about the code, and `gctk rig`'s line names why, such as
+files an earlier run left that git does not ignore.
 
 **If ALL the commands above are empty**, check the repo's CLAUDE.md or AGENTS.md
 (whichever your provider uses) for quality-gate guidance. Look for sections
@@ -403,10 +403,11 @@ CHECKS
 It exits 0 when every check passes and 1 when one fails. Fix a failure your diff
 introduced, commit, and run the checks again. Exit 4 with no check run means it
 could not name the worktree, and it says why. A fail answered from its record
-prints no output; `gctk rig <check> --command '<command>' --force` runs it again
-to show what failed. Exit 4 says nothing about the code, and `gctk rig`'s line
-names why, such as untracked files a run left, or a crash; a repeat at one commit
-is the code's or the command's doing. When the rig declares no command and you
+prints no output; `"$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig <check> --command
+'<command>' --force`, in the worktree, runs it again to show what failed. Any other
+exit 4 says nothing about the code, and `gctk rig`'s line names why, such as
+untracked files a run left, or a crash; a repeat at one commit is the code's or the
+command's doing. When the rig declares no command and you
 run the repo's own quality gate (CLAUDE.md or AGENTS.md) instead, run it through
 the gate the same way, with `test=<its test command>` on the call's input.
 

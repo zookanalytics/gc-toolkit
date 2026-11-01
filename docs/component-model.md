@@ -418,7 +418,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/work-gate.sh` | work | load-context's refusal of work that is not this run's to build: gone, parked, finished, waiting on a blocker, or in another live session's tree. It takes the work through core's `work-holder.sh --claim`, the one sign of a run in flight on a work bead the workflow never claims. |
 | `assets/scripts/work-setup.sh` | work | workspace-setup: the per-bead worktree and the recorded branch, the resume of a rejected branch by merge, and the wait behind a sibling whose tree holds the branch. |
 | `assets/scripts/work-enter.sh` | work | A step a session claims part way through a run enters the recorded tree as the session now holding it, and a work bead closed mid-run ends the run. |
-| `assets/scripts/rig-checks.sh` | work | Runs the rig's declared checks through `gctk rig` for a step, each command handed over verbatim. |
+| `assets/scripts/rig-checks.sh` | work | Runs the rig's declared checks through `gctk rig` for a step, each command handed over verbatim, and for self-review in the tree the work bead records, so a pass is never recorded at the session's home commit. |
 | `assets/scripts/work-submit.sh` | work | submit-and-exit: the gates, the push, the bring-current guard, the refinery handoff and the release, or the store-only exit. |
 | `assets/scripts/work-lib.sh` | work | What those scripts share: one read of the work bead, which tells a store that does not answer from an absent field. |
 | `assets/scripts/work-tree-holder.sh` | work | The name that step text from an earlier version of `mol-polecat-work` calls to judge a tree. It stays until no open step bead names it. |

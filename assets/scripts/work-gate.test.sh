@@ -204,6 +204,8 @@ eq "$(FAKE_SHOW_OUT='' run '')" "1|DRAIN;" "a store that never answers: asks not
 has "$(cat "$TMP/out")" 'The store did not answer' "no answer: says so"
 eq "$(FAKE_SHOW_OUT='bd: invalid connection' run '')" "1|DRAIN;" "error text on stdout is no answer"
 eq "$(FAKE_SHOW_OUT='' FAKE_SHOW_RC=0 run '')" "1|DRAIN;" "exit 0 with nothing printed is no answer"
+eq "$(FAKE_SHOW_OUT="$(row '{"status":"open","metadata":{}}')" FAKE_SHOW_RC=1 run '')" "1|DRAIN;" "a row beside a failed exit is no answer"
+eq "$(FAKE_SHOW_OUT='[{"id":"tk-other","status":"open","metadata":{}}]' FAKE_SHOW_RC=0 run '')" "1|DRAIN;" "a row for another bead is no answer"
 eq "$(FAKE_CONVOY_DOWN=1 run '')" "1|DRAIN;" "a convoy read the store does not answer: drains and asks nothing"
 
 # A read that fails once and answers on the retry is an answer.
@@ -317,6 +319,14 @@ eq "$(cat "$TMP/gate")" "" "a sibling holds the tree: nothing asked"
 eq "$(FAKE_SESSIONS="$SESS_PEER" FAKE_AWAIT_RC=1 FAKE_TREE_RC=1 FAKE_TREE_OUT="$HELD_SIB" FAKE_BEADS="$SIBLING_ROWS" run "$REWORK")" "1|AWAIT;UPDATE;GATE;AWAIT;" \
    "the wait on the sibling does not land: a person looks at the tree, and no wait means no cancel"
 eq "$(FAKE_TREE_RC=1 FAKE_TREE_OUT="$HELD_SIB" FAKE_BEADS='[]' run "$REWORK")" "$DONE_WAIT" "a live holder nobody's record names: a person looks at the tree"
+SELF_ROWS="[{\"id\":\"tk-mine\",\"metadata\":{\"branch\":\"polecat/tk-anchor\",\"work_holder\":\"$SELF_ID\"}}]"
+SESS_SELF="{\"sessions\":[{\"id\":\"$SELF_ID\"}]}"
+eq "$(FAKE_SESSIONS="$SESS_SELF" FAKE_TREE_RC=1 FAKE_TREE_OUT="$HELD_SIB" FAKE_BEADS="$SELF_ROWS" run "$REWORK")" "$DONE_WAIT" "this session's own record is no sibling to wait on"
+
+# Each name a claim writes as an assignee finds the session that goes by it.
+for owner in hq-busy sess-busy rig/rig.polecat-busy rig.polecat-busy; do
+  eq "$(FAKE_SESSIONS="$SESS_REAL" run "$(row "{\"status\":\"in_progress\",\"assignee\":\"$owner\",\"metadata\":{}}")")" "$DONE_NOBODY" "in_progress under '$owner', a listed session's name: refused"
+done
 
 # --- usage ------------------------------------------------------------------------
 OUT="$("$PACK/work-gate.sh" 2>&1)"; eq "$?" "2" "no work named: usage error"

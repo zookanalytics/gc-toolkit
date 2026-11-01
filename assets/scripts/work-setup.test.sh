@@ -49,8 +49,9 @@ printf 'git %s\n' "$*" >> "$CALLS"
 if [ "${1:-}" = "merge" ]; then cp "$STORE" "$AT_MERGE"; fi
 exec "$REAL_GIT" "$@"
 SH
-# bd list answers every row that records the branch it asks for. An update that
-# DROP_WRITES names refuses, the way a store outage or a guard does.
+# bd list answers every row that records the branch it asks for. Every update
+# refuses under DROP_WRITES, and one naming DROP_WRITE_WITH refuses, the way a
+# store outage or a guard does.
 cat > "$BIN/gc" <<'SH'
 #!/usr/bin/env bash
 printf 'gc %s\n' "$*" >> "$CALLS"
@@ -71,6 +72,7 @@ case "$verb" in
     jq -c --arg b "${field#branch=}" '[.[] | select((.metadata.branch // "") == $b)]' "$STORE" ;;
   update)
     [ -z "${DROP_WRITES:-}" ] || exit 1
+    [ -z "${DROP_WRITE_WITH:-}" ] || case "$*" in *"$DROP_WRITE_WITH"*) exit 1 ;; esac
     shift 3
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -302,7 +304,7 @@ eq "$(meta rejection_reason)" "$CONFLICTS" "(13) and the rejection stays"
 echo "# a stop to ask a person leaves the rejection, so the next run merges again"
 for how in molecule bare; do
   clone polecat/w2
-  setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')" | jq -c 'map(.status = "in_progress" | .assignee = "sess-me")')"
+  setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a", work_holder: "sess-me"}')" | jq -c 'map(.status = "in_progress" | .assignee = "sess-me")')"
   set_meta conflict_audit '[{"path":"resolved-before-the-stop.txt"}]'
   : > "$CALLS"
   if [ "$how" = molecule ]; then
@@ -334,6 +336,16 @@ setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: 
 TOOL_ENV=ASK_FAIL=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
 eq "$RC" "1" "(16) a question that reaches no gate stops the stop"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16) and the merge stays open"
+clone polecat/w2
+setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')")"
+TOOL_ENV="HOOK_CURRENT=tk-step AWAIT_RC=1" tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+eq "$RC" "1" "(16b) a wait that does not land stops the stop"
+eq "$(grep -cE '^(cancel|drain)( |$)' "$CALLS")" "0" "(16b) and nothing cancels or drains"
+
+clone polecat/w1
+setup_run "$(bead polecat/w1 "$(jq -nc --arg r "$STALE" '{rejection_reason: $r}')")" DROP_WRITE_WITH=bring_current_from
+eq "$RC" "1" "(16c) a round the store refuses stops the resume"
+called "git merge --no-edit origin/$BASE" && bad "(16c) before the merge" || ok "(16c) before the merge"
 
 echo "# a fresh run makes its worktree in the rig, whatever repo its directory is in"
 RIG="$TMP/rig"; "$REAL_GIT" clone -q "$O" "$RIG"
@@ -401,7 +413,7 @@ g "$SEED" checkout -q polecat/w1
 commit_in "$SEED" other.txt "other" "origin moves"
 g "$SEED" push -q "$CO" polecat/w1:polecat/w1
 g "$SEED" reset -q --hard "$W1"
-setup_run "$(bead polecat/w1)"
+setup_run "$(bead polecat/w1 '{"work_holder":"sess-me"}')"
 eq "$RC" "1" "(32) a local branch diverged from origin: stops"
 grep -q '^gate --subject tk-w --key polecat-branch-divergence ' "$CALLS" && ok "(32) files a gate under its key" || bad "(32) files a gate under its key"
 grep -q '^await tk-w --key polecat-branch-divergence --formula mol-polecat-work$' "$CALLS" && ok "(32) the work waits on it" || bad "(32) the work waits on it"
@@ -432,7 +444,7 @@ clone polecat/w1
 g "$C" checkout -q --detach
 PEER="$TMP/peer-tree"
 g "$C" worktree add -q "$PEER" polecat/w1
-SIB_BEADS="$(jq -nc --arg d "$C" --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d}},
+SIB_BEADS="$(jq -nc --arg d "$C" --arg p "$PEER" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d, work_holder: "sess-me"}},
   {id: "tk-sib", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $p}}]')"
 LIVE='[{"root":"r","convoy":"c","bead":"tk-sib","formula":"mol-polecat-work","live":true}]'
 printf '%s' "$LIVE" > "$RUNS"

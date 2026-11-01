@@ -119,6 +119,10 @@ eq "$(status_of iter-2)" closed "the iteration is closed"
 seed; export FAKE_HOOK_CURRENT=iter-2
 run --step self
 eq "$RC" 2 "a prefix of the loop's name is not its name"
+seed; export FAKE_HOOK_CURRENT=live-impl
+run --step mol-polecat-work
+eq "$RC" 2 "a formula's name is not one of its steps"
+eq "$(status_of live-impl)" in_progress "so the step it names stays open"
 
 # --- a bead that is already closed is the retry of an interrupted close ---------
 seed; export FAKE_HOOK_CURRENT=gone
