@@ -664,9 +664,8 @@ anchor's `pr_url` names, so a write that records the key on an anchor with no
 against origin.
 
 An open human gate holds the anchor through its `blocks` edge onto it, read by
-the one reader rule every reader of a bead's human gates makes (`bd_human_gates`
-in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept to the gates
-whose await type is human). The merge pass's finalize gate (`finalize-gate.sh`)
+`bd_human_gates` in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept
+to the gates whose await type is human. The merge pass's finalize gate (`finalize-gate.sh`)
 refuses the merge while one is open on the anchor, and the labels count each
 human gate on the anchor that is not closed, one a person has claimed included.
 A conversation about the anchor tracks it and blocks nothing, so it holds no

@@ -475,9 +475,9 @@ bd_rows() {
 }
 
 # human_gate_rows <bead> — the bead's human gates, open and closed, as the rows
-# `gc bd dep list <bead> --type blocks` answers: the one reader rule. Each row
-# carries the gate's id, status, await_id, assignee, title, created_at and,
-# once closed, close_reason. Returns 1 when the read did not answer.
+# `gc bd dep list <bead> --type blocks` answers. Each row carries the gate's id,
+# status, await_id, assignee, title, created_at and, once closed, close_reason.
+# Returns 1 when the read did not answer.
 human_gate_rows() {
     need_human_gate_jq
     _hg_rows=$(bd_rows dep list "$1" --type blocks) || return 1

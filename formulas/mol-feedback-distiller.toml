@@ -527,8 +527,7 @@ fi
 ## 3. Contested rules: file a human gate, never a flip
 
 A contested rule is a human gate on its pattern bead under the key
-`distiller-contention`: the pattern's rule waits on the operator's ruling, and
-the helper files nothing while that gate is open.
+`distiller-contention`: the pattern's rule waits on the operator's ruling.
 ```bash
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$PATTERN" --key distiller-contention \

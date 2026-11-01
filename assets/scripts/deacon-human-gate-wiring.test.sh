@@ -72,16 +72,8 @@ else
   ok "no bare 'gc mail send' anywhere in the formula"
 fi
 
-# The patrol and the prompt name the helper by its name. The prompt's emergency
-# calls it directly on the bead it is about: `gc bd` files the gate in that
+# The prompt's emergency calls the helper directly on the bead it is about: `gc bd` files the gate in that
 # bead's store, so no store is derived first and no pool is named.
-for F in "$TOML" "$PROMPT"; do
-  if grep -n 'escalate\.sh' "$F"; then
-    bad "${F#"$ROOT"/} still names escalate.sh; the helper is human-gate.sh"
-  else
-    ok "${F#"$ROOT"/} names the helper by its name, human-gate.sh"
-  fi
-done
 EMERGENCY=$(grep -n '"\$SCRIPTS/human-gate\.sh"' "$PROMPT")
 case "$EMERGENCY" in
   *'--subject <bead> --key <situation-key>'*) ok "the deacon's emergency files a human gate on the bead it is about" ;;

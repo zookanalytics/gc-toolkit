@@ -350,10 +350,8 @@ if [ -n "$DRY" ]; then
 fi
 
 # ── The finding already has a bead ───────────────────────────────────
-# Its recurrence belongs on that bead. This is the whole point: the live bead
-# spans the recurrence, where an open VISIT did not — a sitting closes each
-# visit before the next sweep runs, so the dedup window never covered the gap
-# and one situation filed a visit per tick.
+# Its recurrence belongs on that bead, the one record that spans every
+# occurrence of the finding.
 #
 # Every live status is read, not just open and in_progress: a bead parked at
 # blocked, deferred, hooked or pinned is still the finding's bead, and a lookup

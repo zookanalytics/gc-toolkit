@@ -36,8 +36,7 @@ read of a bead's human gates is defined once, as `bd_human_gates` in
 An open human gate that blocks this bead refuses the bead's finalization. A human
 gate is Gas City's native bead for a wait a person must clear (`issue_type=gate`,
 `await_type=human`). A bead's human gates are the human gates its `blocks` edges
-reach, open and closed alike, by the one reader rule every reader of them
-follows:
+reach, open and closed alike:
 
 - `gc bd dep list <bead> --type blocks --json` returns each bead the given bead
   depends on through a `blocks` edge, with its type, status, await type, await

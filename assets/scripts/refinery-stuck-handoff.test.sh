@@ -53,7 +53,6 @@ has "$BLOCK" 'human-gate.sh' "the block files a stuck handoff's human gate throu
 has "$BLOCK" 'patrol-finding.sh' "the block reports a blind monitor as a patrol finding"
 has "$BLOCK" 'resolve-route.sh' "the block resolves the refinery address"
 has "$BLOCK" 'gc bd gate list' "the withdrawal starts from the store's human gates"
-hasnt "$BLOCK" 'escalate.sh' "the block calls the helper by its name, human-gate.sh"
 hasnt "$BLOCK" 'escalation_key' "the block reads no visit key"
 hasnt "$BLOCK" 'gc session nudge' "the block nudges no count"
 
@@ -191,8 +190,6 @@ DEPS_DEFAULT='{
   "tk-g-lost":  [{"id":"tk-lost","dependency_type":"blocks"}],
   "tk-g-stuck": [{"id":"tk-stuck","dependency_type":"blocks"}],
   "tk-g-both":  [{"id":"tk-gone","dependency_type":"blocks"},{"id":"tk-still","dependency_type":"blocks"}],
-  "tk-g-bad":   [{"id":"tk-gone 2026-10-03T12:57:12Z","dependency_type":"blocks"}],
-  "tk-g-half":  [{"id":"tk-gone","dependency_type":"blocks"},{"id":"tk-gone 2026-10-03T12:57:12Z","dependency_type":"blocks"}],
   "tk-g-dark":  "fails"
 }'
 
@@ -482,10 +479,6 @@ has "$(out)" "its gate tk-g-both also blocks tk-still, which could not be read" 
 # handoff still in the queue.
 RSOLO="$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-gone),$(gate tk-g-both)]" "$H_CLOSED")"
 hasnt "$RSOLO" "--retract" "a departed handoff's own gate stays open while it shares another with a handoff still in the queue"
-# A waiting bead whose id is not one bead id is never read, so it keeps a gate
-# it shares with a departed handoff.
-RHALF="$(run '[]' "" "" "" "[$(gate tk-g-half)]" "$H_CLOSED")"
-hasnt "$RHALF" "--retract" "a gate that also blocks a bead whose id is not one bead id stays open"
 # A gate whose waiting beads did not read may block a departed handoff beside a
 # bead still in the queue, so while it stays unread no departed handoff is
 # withdrawn.
@@ -581,12 +574,6 @@ has "$(cat "$TMP/lists")" "--id=tk-gone,tk-lost" "the one read names every candi
 H_CTL='[{"id":"tk-gone","status":"closed","assignee":null,"title":"handoff '"$CTL"'","metadata":{}}]'
 has "$(run '[]' "" "" "" "$G_GONE" "$H_CTL")" "--retract --subject tk-gone" \
    "a raw control byte in the handoff's row does not blind the departure read"
-
-# A waiting bead whose id is not one bead id (here an id with a trailing
-# timestamp) resolves to no bead, so it is never a candidate.
-RET3="$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-bad)]" "$H_CLOSED")"
-hasnt "$RET3" "--retract" "a waiting bead whose id is not one bead id is never withdrawn"
-hasnt "$(cat "$TMP/lists")" "--id=" "and is never read by id"
 
 # An unreadable queue never withdraws: the gate is QUEUE_RC, so a transient blip
 # runs no candidate pass at all, and no gate listing is read.

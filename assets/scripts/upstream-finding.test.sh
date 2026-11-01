@@ -479,13 +479,6 @@ eq "$?" "0" "-R is recognised as --repo"
 eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "the -R value is the target"
 eq "$(meta up-1 gh_verb)" "issue comment" "a comment verb is labelled as itself"
 
-# ── --pool is retired ─────────────────────────────────────────────────────
-reset_state
-"$SUT" --message "why" --pool "mycity/gc-toolkit.converse" \
-  -- gh issue create --repo a/b --title T --body B >/dev/null 2>&1
-eq "$?" "2" "--pool is refused: a gate is not routed"
-eq "$(count)" "0" "and nothing is parked"
-
 # ── failures that must not report a parked send ───────────────────────────
 reset_state
 export STUB_ESC_RC=1

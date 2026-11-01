@@ -413,7 +413,7 @@ if ! GATE=$("$HUMAN_GATE" --subject "$BEAD" --key "upstream-send-$KEY" --message
   warn "bead $BEAD carries the command but human-gate.sh did not file a gate — NO ONE HAS BEEN ASKED. Re-run this command; it will reuse $BEAD."
   exit 1
 fi
-echo "$PROG: gate ${GATE:-<none>} on $BEAD asks the operator for the send"
+echo "$PROG: gate $GATE on $BEAD asks the operator for the send"
 
 if [ -n "$EXISTING" ]; then
   echo "$PROG: $BEAD already carries this send — refreshed the ask, nothing filed twice"

@@ -380,8 +380,6 @@ pending prompt does not:**
 - **A decision only the operator can make, or work you must decline and cannot
   close:** file the human gate with `human-gate.sh`, record the wait on the
   work bead, then cancel your run and drain, per Blocked work and human gates.
-  The gate holds the work bead and every part filed under it until a person
-  clears it, and clearing it is the release path.
 - **`/handoff` is operator-initiated** — never proposed via consent UI.
 
 
@@ -442,9 +440,7 @@ must go on once a person rules, file the human gate first, then run
 `await-ruling.sh`. The gate blocks the work bead, and `await-ruling.sh` reads
 that wait back and arms the work's re-sling, so clearing the gate is the ruling
 to proceed: the next deferred-dispatch pass pours a fresh run. A ruling not to
-proceed closes the work bead first. A decline is an event of your run, so file
-its gate with no quiet window, and a situation a person answered `moot` or
-`benign` before is asked again. When nobody has a decision to make, because
+proceed closes the work bead first. When nobody has a decision to make, because
 the work is finished or a live peer is building it, cancel with no gate:
 
 ```bash

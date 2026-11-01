@@ -266,8 +266,7 @@ EOF
 # is the real guarantee).
 gc session nudge "$KEEPER_TARGET" "rebase race loss on $WORK: origin/main advanced — operator decision needed (metadata.aborted_at=refinery-race-loss)" || true
 
-# Secondary signal: one open human gate per bead and situation key. The race
-# loss is an event of this run, so the call declares no quiet window.
+# Secondary signal: a human gate on the work.
 "$(gc {{ .BindingName }} scripts-dir)/human-gate.sh" --subject "$WORK" --key rebase-race-loss \
   --message "Rebase race loss on $WORK: origin/main advanced after the rebase polecat finished ($BRANCH no longer landable as-is). Routed to the keeper (assignee=$KEEPER_TARGET, aborted_at=refinery-race-loss) for the operator decision; clear this gate with it. Backup ref: $BACKUP_REF" || true
 ```
@@ -278,7 +277,5 @@ This rebase-handling overlay is opt-in per rig (only rigs that import
 the `gascity-keeper` sub-pack). A refinery in a rig that does NOT
 import the sub-pack will not carry these instructions; a rebase-shaped
 bead that ends up at such a refinery is a routing leak. File a human
-gate on the bead with `human-gate.sh` instead of force-pushing. PR #17's
-"reject as routing leak" intent survives in the unintended-target case;
-the legitimate path is the overlay above.
+gate on the bead with `human-gate.sh` instead of force-pushing.
 {{ end }}

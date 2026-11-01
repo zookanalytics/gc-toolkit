@@ -18,21 +18,11 @@
 #   - it reads the gate back from the bead's side;
 #   - it records a gate the deacon files in the deacon's incident ledger
 #     (gc-deacon-ledger.sh).
-#   human-gate.sh --subject <bead-id> --key <situation-key> --message <text>
-#                 [--quiet-window <seconds>]
-# The counterpart withdraws the filer's own gate once the situation it asked
-# about has gone, resolving each open human gate under the key with a `moot:`
-# reason:
-#   human-gate.sh --retract --subject <bead-id> --key <situation-key> --message <reading>
-# A changed situation gets a NEW key.
 #
 # The gate lands in the store of the bead it blocks, because `gc bd gate create`
 # runs in the store that owns the bead named after --blocks, and a bead that
 # exists nowhere fails the create. So the bead is passed as its own word and no
-# --rig, --city or --db is passed. A wisp is refused: a patrol wisp or a session
-# names no bead that can wait, so a situation with no bead of its own is a
-# patrol finding (patrol-finding.sh), which a first reaction puts to a person as
-# a human gate on the finding when it needs one.
+# --rig, --city or --db is passed.
 # stdout carries the id of the open gate that asks as of this call's last read
 # of the bead's gates (the one filed, the one already open, or the first one
 # still open after this call resolves its own duplicate), and with --retract the
@@ -115,9 +105,7 @@ fi
 case "$KEY" in
   *[!A-Za-z0-9._-]*) warn "--key must contain only [A-Za-z0-9._-] (got '$KEY')"; exit 2 ;;
 esac
-# The subject is one bead id. A space in it usually comes from an unquoted
-# expansion that did not word-split (zsh does not), which joins the id to the
-# word beside it, and `gc bd` would then route the call by the wrong word.
+# `gc bd` would route a call by the wrong word of a joined id.
 case "$SUBJECT" in
   *[!A-Za-z0-9._-]*)
     warn "--subject must be one bead id, [A-Za-z0-9._-] only (got '$SUBJECT'). An id joined to its neighbour usually comes from an unquoted \$VAR that did not word-split (zsh does not split it); read each field into its own variable, as 'while read -r SID SWHEN' does, and pass the id alone. Nothing was filed or resolved."
@@ -131,9 +119,8 @@ if [ "$RETRACT" = 1 ] && [ -n "$QUIET_WINDOW" ]; then
   warn "--quiet-window applies to a filing; --retract resolves gates and keeps no window"; exit 2
 fi
 
-# A patrol wisp is burned and re-poured every cycle, and a session id names no
-# work, so neither is a bead that can wait. A gate on one would block nothing
-# once the wisp burns, and the next pass would file again.
+# A patrol wisp is burned and re-poured every cycle, so a gate on one would
+# block nothing once it burns, and the next pass would file again.
 case "$SUBJECT" in
   *-wisp-*)
     warn "'$SUBJECT' names a patrol wisp or a session, not a bead that can wait for a person. Nothing was filed or resolved. A situation with no bead of its own is a patrol finding: file it with patrol-finding.sh --key $KEY --title <one line> --message <text>, and its first reaction files a human gate on the finding when a person must answer."
@@ -144,30 +131,21 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
-# Every decision below reads the bead's human gates through its `blocks` edges,
-# the one reader rule, closed gates included, and tells the open ones by
-# open_human_gate, bd-lib.sh's rule of which gates still hold. A subject that
-# names no bead fails this read, and nothing is filed or resolved on an
-# unreadable one.
+# Every decision below reads this one read (bd_human_gates), closed gates
+# included, and tells the open ones by open_human_gate.
 if ! GATES=$(bd_human_gates "$SUBJECT"); then
   warn "could not read the human gates of '$SUBJECT' (no such bead, or its store did not answer). Nothing was filed or resolved."
   exit 1
 fi
-# The open human gates under the key are read in bd-lib.sh's one order
-# (bd_gates_open_under_key), so two writers that read the same gates name the
-# same first gate, and await-ruling.sh waits on that gate too.
 
 # >>> retract-moot
-# --retract withdraws the filer's own gate: it resolves every open human gate
-# under the key among the bead's gates, with a `moot:` reason, because the
-# situation it asked about is gone. A gate that blocks several beads is
-# resolved once, and every bead it held is released. A sitting may be
-# discussing the gate, and the retract clears it anyway; the sitting learns it
-# at its sign-off, which reads each gate back. bd reports success on a gate
-# another resolver closed first and keeps that resolver's reason, so each gate
-# is read back, and a reason other than ours is reported as the answer that
-# stood. A retract interrupted part way leaves gates the next retract for the
-# situation finds and resolves.
+# A gate that blocks several beads is resolved once, and every bead it held is
+# released. A sitting may be discussing the gate, and the retract clears it
+# anyway; the sitting learns it at its sign-off, which reads each gate back. bd
+# reports success on a gate another resolver closed first and keeps that
+# resolver's reason, so each gate is read back, and a reason other than ours is
+# reported as the answer that stood. A retract interrupted part way leaves gates
+# the next retract for the situation finds and resolves.
 if [ "$RETRACT" = 1 ]; then
   REASON="moot: $MESSAGE"
   OPEN_IDS=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY" | jq -r '.[].id' 2>/dev/null)
@@ -242,10 +220,8 @@ if [ -n "$QUIET_WINDOW" ] && [ "$QUIET_WINDOW" -gt 0 ]; then
   fi
 fi
 
-# The title is the first line of the message, whitespace collapsed and cut at
-# the cap with an ellipsis. bd caps a title at 500 bytes, and a codepoint cap
-# alone overruns that once the tail is in 4-byte characters, so the title is
-# also held under 400 bytes.
+# bd caps a title at 500 bytes, and a codepoint cap alone overruns that once the
+# tail is in 4-byte characters, so the title is also held under 400 bytes.
 TITLE=$(printf '%s' "$MESSAGE" | head -n 1 | jq -Rsr --argjson n "$TITLE_MAX" \
   '((gsub("\\s+"; " ")) | sub("^ "; "") | sub(" $"; "")) as $h
    | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end
@@ -256,7 +232,7 @@ TITLE=$(printf '%s' "$MESSAGE" | head -n 1 | jq -Rsr --argjson n "$TITLE_MAX" \
 CREATE_JSON=$(gc bd gate create --type=human --blocks "$SUBJECT" --await-id "$KEY" \
   --title "$TITLE" --reason "$MESSAGE" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub)
 GATE=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-if [ -z "$GATE" ] || [ "$GATE" = null ]; then
+if [ -z "$GATE" ]; then
   CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
   warn "bd gate create returned no id${CREATE_ERR:+: $CREATE_ERR} — nothing filed on $SUBJECT [$KEY]"
   exit 1
@@ -337,7 +313,7 @@ fi
 # >>> deacon-ledger-append
 LEDGER_ROLE="${GC_AGENT:-}"; LEDGER_ROLE="${LEDGER_ROLE##*/}"; LEDGER_ROLE="${LEDGER_ROLE##*.}"
 if [ "$LEDGER_ROLE" = deacon ]; then
-  LEDGER_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/gc-deacon-ledger.sh"
+  LEDGER_SH="$_bd_lib_dir/gc-deacon-ledger.sh"
   if [ -x "$LEDGER_SH" ]; then
     "$LEDGER_SH" append escalation "$KEY: $TITLE" "bead:$GATE" >/dev/null \
       || warn "gate $GATE is filed, but its ledger entry was not written"

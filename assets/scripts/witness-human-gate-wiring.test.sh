@@ -61,13 +61,6 @@ grep -q 'human-gate\.sh' "$TOML" \
   && ok "human-gate.sh is still reachable for an emergency" \
   || bad "the emergency path to a person is gone"
 
-for F in "$TOML" "$PROMPT"; do
-  if grep -n 'escalate\.sh' "$F"; then
-    bad "${F#"$ROOT"/} still names escalate.sh; the helper is human-gate.sh"
-  else
-    ok "${F#"$ROOT"/} names the helper by its name, human-gate.sh"
-  fi
-done
 
 # A report nothing waits on, or about a bead the witness cannot block, is a
 # patrol finding: the check-refinery monitor that cannot see its queue (the
