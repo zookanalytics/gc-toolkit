@@ -25,8 +25,7 @@
 #     unreadable bead;
 #   * a write that does not land exits 1 and stops what follows it;
 #   * a re-run converges on one edge and the arm;
-#   * the step's own call, taken from the formula, runs against this script, and
-#     the brief's header is the one mol-validate-close reads;
+#   * the brief's header is the one mol-validate-close reads;
 #   * usage errors.
 #
 # No live city, Dolt, network, or beads: a tmpdir, a `gc` stub over a JSON store
@@ -36,7 +35,6 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$HERE/store-only-exit.sh"
-TOML="$ROOT/formulas/mol-polecat-work.toml"
 CLOSER_TOML="$ROOT/formulas/mol-validate-close.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-store-only-exit-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -345,25 +343,7 @@ OUT=$(FAKE_ARM_WRITE_NOOP=1 "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 eq "$RC" 1 "an arm the store took and did not keep: exit 1"
 has "$OUT" "reads back armed to ''" "an arm the store did not keep: the read-back says so"
 
-# ── 7. the step's own call, and the brief's reader ───────────────────────────
-CALL="$(awk '/# >>> submit-store-only-check$/{f=1; next} /# <<< submit-store-only-check$/{f=0} f' "$TOML" \
-  | sed 's|{{binding_prefix}}|gc-toolkit.|g; s|{{base_branch}}|main|g; s|{{convoy_id}}|tk-cv|g')"
-[ -n "$CALL" ] && ok "the step's call is extracted between submit-store-only-check markers" \
-  || bad "the step's call extraction is EMPTY — markers missing from $TOML"
-eq "$(printf '%s\n' "$CALL" | grep -c 'store-only-exit.sh' | tr -d ' ')" 1 "the step calls this script once"
-printf '%s\n' "$CALL" > "$TMP/call.sh"
-reset
-OUT=$(WORK_BEAD_ID=tk-work STORE_ONLY_DONE="$BRIEF" bash "$TMP/call.sh" 2>&1); RC=$?
-eq "$RC" 0 "the step's call with a brief: exit 0"
-eq "$(edge_rows)|$(meta tk-work gc.dispatch_when_ready)" "1|$POOL" "the step's call with a brief: held and armed"
-eq "$(cat "$FAKE_TRACE")" "" "the step's call that lands does not drain"
-reset
-OUT=$(WORK_BEAD_ID=tk-work STORE_ONLY_DONE="" bash "$TMP/call.sh" 2>&1); RC=$?
-eq "$RC|$(writes)" "0|0" "the step's call with no brief: exit 0, nothing written"
-reset
-OUT=$(WORK_BEAD_ID=tk-work STORE_ONLY_DONE="$BRIEF" FAKE_AHEAD=1 bash "$TMP/call.sh" 2>&1); RC=$?
-eq "$RC|$(cat "$FAKE_TRACE")|$(writes)" "1|DRAIN|0" "the step's call refused: exit 1 and drain, nothing written"
-
+# ── 7. the brief's reader ───────────────────────────
 grep -qF '## Close brief (store-only exit, <time>)' "$CLOSER_TOML" \
   && ok "mol-validate-close names the store-only exit's brief header" \
   || bad "mol-validate-close does not name '## Close brief (store-only exit, <time>)', the header this script writes"

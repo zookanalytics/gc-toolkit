@@ -223,8 +223,8 @@ fi
 exec "$BIN/gc" "\$@"
 EOF
 chmod +x "$POUR/gc"
-DERIVE=$(grep -m 1 -o "jq -r 'if (.children | length) == 1 then [^']*'" "$HERE/../../formulas/mol-polecat-work.toml" | sed "s/^jq -r '//; s/'\$//")
-has "$DERIVE" ".children[0].id" "mol-polecat-work's work-bead derivation was read from the formula"
+DERIVE=$(grep -m 1 -o "jq -r 'if (.children | length) == 1 then [^']*'" "$HERE/work-lib.sh" | sed "s/^jq -r '//; s/'\$//")
+has "$DERIVE" ".children[0].id" "mol-polecat-work's work-bead derivation was read from work-lib.sh"
 work_bead_of() { PATH="$POUR:$PATH" gc convoy status "$1" --json 2>/dev/null | jq -r "$DERIVE" 2>/dev/null; }
 run_pour() { PATH="$POUR:$PATH" _run "$SD/rejection-repool.sh" "$@"; }
 grad() { # [extra-convoy-metadata-fields]

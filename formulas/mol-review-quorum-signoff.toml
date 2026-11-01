@@ -28,11 +28,9 @@ the two lanes land on two provider pools and each runs on its pool's default
 model. The synthesis reads each lane's durable review-quorum.lane.v1 output
 from the lane step bead's gc.output_json.
 
-Each step closes its own bead through assets/scripts/step-close.sh, which
-resolves by (gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var. The
-lanes run in separate pool sessions and each closes its own lane step; the
-synthesis is the terminal step and closes the chain forward. No shell variable
-survives from one block to the next, so each block names the values it uses.
+Each step closes its own bead through assets/scripts/claim-close.sh. The lanes
+run in separate pool sessions and each closes its own lane step; the synthesis
+is the terminal step. No shell variable survives from one block to the next, so each block names the values it uses.
 """
 formula = "mol-review-quorum-signoff"
 
@@ -228,16 +226,12 @@ why it matters / the fix, `file`, and `line` or range), `evidence` (what you
 read), `read_only_enforcement` (`baseline_command`, `after_command`,
 `passed`), `mutations_delta` (empty if none).
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-: "${SC:?step-close.sh not found in the pack}"
-# LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
-# you (a direct single-step claim, so the claimed id IS this lane step). Write
-# your review-quorum.lane.v1 object into gc.output_json — metadata is stored as
-# a string, so store it compact — then close by (root, step_ref) with the id as
-# the hint. step-close.sh closes only; it does not write gc.output_json.
-LANE_BEAD="<the bead_id from your gc hook --claim --json>"
+# gc hook current names this lane step. Write your review-quorum.lane.v1 object
+# into gc.output_json, stored compact because metadata is a string, then close
+# the step.
+LANE_BEAD=$(gc hook current --id-only) || exit 1
 gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_one_id}}.json)"
-"$SC" --step mol-review-quorum-signoff.review-lane-one --convoy {{convoy_id}} --bead "$LANE_BEAD" --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review-quorum-signoff.review-lane-one
 ```
 
 **Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
@@ -361,16 +355,12 @@ why it matters / the fix, `file`, and `line` or range), `evidence` (what you
 read), `read_only_enforcement` (`baseline_command`, `after_command`,
 `passed`), `mutations_delta` (empty if none).
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-: "${SC:?step-close.sh not found in the pack}"
-# LANE_BEAD is this lane step bead: the bead_id `gc hook --claim --json` handed
-# you (a direct single-step claim, so the claimed id IS this lane step). Write
-# your review-quorum.lane.v1 object into gc.output_json — metadata is stored as
-# a string, so store it compact — then close by (root, step_ref) with the id as
-# the hint. step-close.sh closes only; it does not write gc.output_json.
-LANE_BEAD="<the bead_id from your gc hook --claim --json>"
+# gc hook current names this lane step. Write your review-quorum.lane.v1 object
+# into gc.output_json, stored compact because metadata is a string, then close
+# the step.
+LANE_BEAD=$(gc hook current --id-only) || exit 1
 gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_two_id}}.json)"
-"$SC" --step mol-review-quorum-signoff.review-lane-two --convoy {{convoy_id}} --bead "$LANE_BEAD" --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review-quorum-signoff.review-lane-two
 ```
 
 **Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
@@ -384,14 +374,14 @@ title = "Synthesize the two lanes and hand ONE verdict to signoff.sh"
 needs = ["review-lane-one", "review-lane-two"]
 description = """
 Combine the two lanes into ONE verdict, hand it to signoff.sh once, then
-close the chain and drain. This review is `{{review_bead}}`, the `{{check}}`
+close this step and drain. This review is `{{review_bead}}`, the `{{check}}`
 check at `{{reviewed_oid}}` on `{{review_branch}}`. Why the dispatch sent it:
 {{review_context}}
 
 **1. Check the record.** When the block names a missing key, review nothing:
 append to the review's notes which key its record lacks and that closing the
-review lets the next gate-ensure pass dispatch a fresh one, then close the
-chain and drain as part 9 does, leaving the route empty.
+review lets the next gate-ensure pass dispatch a fresh one, then close this
+step and drain as part 9 does, leaving the route empty.
 ```bash
 # >>> review-record-check
 MISSING=""
@@ -473,11 +463,9 @@ none.
 <!-- <<< review-method-load -->
 
 The lanes ran nothing, so this is the quorum's one run of everything the
-method runs, at the reviewed commit and against the pre-change code alike. A
-long command runs under the claim-lease keepalive, `lease-heartbeat.sh <the
-bead_id your gc hook --claim returned for this step> -- <command>`, from the
-pack's scripts the gather printed. Anything else you write to disk goes in the
-review's workspace, beside the worktree.
+method runs, at the reviewed commit and against the pre-change code alike.
+Anything else you write to disk goes in the review's workspace, beside the
+worktree.
 
 <!-- >>> review-subagents -->
 The check's method may hand part of the reading to subagents, where your
@@ -512,27 +500,22 @@ SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/sig
 ```
 
 **8. Failure arms** are mol-review's `verdict-and-drain` arms: after a
-`superseded` or `already closed` exit, close the chain and drain; after any
+`superseded` or `already closed` exit, close this step and drain; after any
 other failure, part 3's gather included, append `findings.md` and
-`findings.json` to the review bead (`--append-notes`), close the chain, then
+`findings.json` to the review bead (`--append-notes`), close this step, then
 restore its route from `metadata.review_pool` and drain.
 
-**9. Close the chain forward, remove the workspace, then drain.** Close every
-step through step-close.sh in forward order; the lanes closed their own beads,
-so those report "not this session's to close". Never close `workflow-finalize`.
+**9. Close this step, remove the workspace, then drain.** The lanes closed their
+own beads. Never close `workflow-finalize`.
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-: "${SC:?step-close.sh not found in the pack}"
-for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
-  "$SC" --step "mol-review-quorum-signoff.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
-done
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review-quorum-signoff.synthesize-and-signoff || exit 1
 # >>> quorum-review-workspace-remove
-"$(dirname "$SC")/review-workspace.sh" remove --review-bead "{{review_bead}}"
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-workspace.sh" remove --review-bead "{{review_bead}}"
 # <<< quorum-review-workspace-remove
 gc runtime drain-ack
 ```
 
-**Exit criteria:** one signoff.sh call succeeded or a failure arm taken, the
-chain closed forward, drain acknowledged.
+**Exit criteria:** one signoff.sh call succeeded or a failure arm taken, this
+step closed, drain acknowledged.
 """
 metadata = { "gc.run_target" = "{{synthesis_target}}", "gc.review_quorum_role" = "synthesis" }

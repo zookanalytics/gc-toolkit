@@ -26,7 +26,6 @@ PATROL_TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 MINER_TOML="$ROOT/formulas/mol-feedback-miner.toml"
 REBASE_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml"
 PRPREP_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml"
-POLECAT_TOML="$ROOT/formulas/mol-polecat-work.toml"
 SYNC_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-sync.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-formula-git-rig-test.XXXXXX")"
 # git lists a worktree by its resolved path, so every path is built on a
@@ -43,7 +42,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3" "found '$2' in: $1" ;; *) ok "$3" ;; esa
 
 command -v jq  >/dev/null 2>&1 || { echo "jq is required"  >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
-for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$POLECAT_TOML" "$SYNC_TOML"; do
+for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
   [ -s "$f" ] || { echo "formula not found: $f" >&2; exit 1; }
 done
 
@@ -478,22 +477,22 @@ for mode in env roster nomatch; do
     *)       eq "$OUT" "REPO=$MN/rig" "miner/$mode: the repository mined is the rig, not the cwd repo" ;;
   esac
 done
-# mine-and-file: the line after its lookup, run with a stub step-close.sh. A rig
+# mine-and-file: the line after its lookup, run with a stub claim-close.sh. A rig
 # that no longer resolves ends the run as a no-op that names the cause, and the
 # sweep never starts.
 awk '/# <<< feedback-miner-repo$/ { if (++n == 2) { getline; print; exit } }' "$MINER_TOML" > "$TMP/miner-2-noop.sh"
-printf '#!/usr/bin/env bash\necho "step-close $*" >> "$FAKE_LOG"\n' > "$MN/step-close.sh"
-chmod +x "$MN/step-close.sh"
+printf '#!/usr/bin/env bash\necho "claim-close $*" >> "$FAKE_LOG"\n' > "$MN/claim-close.sh"
+chmod +x "$MN/claim-close.sh"
 FAKE_ROSTER="$MN/roster-nomatch.json"; pick nomatch "$MN/rig"
 : > "$MN/gc.log"
 RC=0
 OUT=$(cd "$MN/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$MN/roster-nomatch.json" FAKE_LOG="$MN/gc.log" \
-        SC="$MN/step-close.sh" bash -c "$(cat "$TMP/miner-2.sh" "$TMP/miner-2-noop.sh"; echo 'echo "SWEEP STARTED"')" 2>&1) || RC=$?
+        SC="$MN/claim-close.sh" bash -c "$(cat "$TMP/miner-2.sh" "$TMP/miner-2-noop.sh"; echo 'echo "SWEEP STARTED"')" 2>&1) || RC=$?
 eq "$RC" 0 "miner/mine-and-file: an unresolvable rig ends the run cleanly"
 has "$OUT" "feedback-miner: cannot resolve the rig root — nothing to mine this run." \
   "miner/mine-and-file: the run says the rig did not resolve"
 hasnt "$OUT" "SWEEP STARTED" "miner/mine-and-file: the sweep never starts"
-has "$(cat "$MN/gc.log")" "step-close --step mol-feedback-miner.mine-and-file --outcome pass" "miner/mine-and-file: the step closes with outcome pass"
+has "$(cat "$MN/gc.log")" "claim-close --step mol-feedback-miner.mine-and-file --outcome pass" "miner/mine-and-file: the step closes with outcome pass"
 has "$(cat "$MN/gc.log")" "runtime drain-ack" "miner/mine-and-file: the session drains"
 
 # --- 7. One rig-root lookup. -----------------------------------------------------
@@ -509,7 +508,7 @@ echo "── one rig-root lookup ──"
 LOCATOR='RR="$(b='"'"'{{binding_prefix}}'"'"'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""'
 KEEPER_LOCATOR='RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done'
 SITES=0
-for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$POLECAT_TOML" "$SYNC_TOML"; do
+for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
   name="${f##*/}"
   want="$LOCATOR"
   case "$f" in "$ROOT"/packs/gascity-keeper/*) want="$KEEPER_LOCATOR" ;; esac

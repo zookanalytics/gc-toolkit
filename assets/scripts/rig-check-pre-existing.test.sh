@@ -204,10 +204,11 @@ block() {
 PACK="$TMP/pack"
 mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh" "$HERE/rig-root.sh"
 
-block mol-polecat-work.toml self-review-pre-existing > "$TMP/self-review.sh"
-[ -s "$TMP/self-review.sh" ] && ok "self-review-pre-existing extracts" || bad "self-review-pre-existing extracts"
+grep -qF 'rig-check-pre-existing.sh" --bead "<the work bead>" --check "<' "$ROOT/formulas/mol-polecat-work.toml" \
+  && ok "self-review calls it with the bead, the check, the commit and the trackers" \
+  || bad "self-review calls it with the bead, the check, the commit and the trackers"
 store '[{"id":"tk-w","status":"open","metadata":{}}]'
-( cd "$REPO" && env PATH="$REAL_PATH" STUB_PACK="$PACK" WORK_BEAD_ID=tk-w bash "$TMP/self-review.sh" ) >/dev/null 2>&1
+( cd "$REPO" && env PATH="$REAL_PATH" "$PACK/assets/scripts/rig-check-pre-existing.sh" --bead tk-w --check lint --commit "$WORK_HEAD" --trackers "tk-t1 tk-t2" ) >/dev/null 2>&1
 eq "$(value tk-w lint)" "$(mark "$WORK_HEAD" "$RL" tk-t1 tk-t2)" "the self-review marks lint's record at the worktree's HEAD on the work bead"
 
 block mol-refinery-patrol.toml refinery-pre-existing-mark > "$TMP/refinery.sh"

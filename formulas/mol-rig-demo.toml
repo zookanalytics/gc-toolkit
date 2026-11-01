@@ -34,8 +34,7 @@ inline-playable path and no .gitattributes LFS filter covers an MP4.
 
 Contract: single continuation group, run inline in one session. Derive the
 demo-request bead from the input convoy's single member; produce the script;
-capture; deliver or report; close the request bead and the step chain forward;
-drain. On any blocker, human-gate.sh files one human gate and run-cancel.sh cancels
+capture; deliver or report; close the request bead and this step; drain. On any blocker, human-gate.sh files one human gate and run-cancel.sh cancels
 the run through gascity before the drain, so a declined demo is never a silent
 strand. A demo's pour carries its vars, so a person re-pours it rather than an
 arm re-slinging it.
@@ -274,8 +273,8 @@ REQUEST_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 
 REQUEST_JSON=$(gc bd show "$REQUEST_BEAD" --json | tr -d '\\000-\\037')
 MP4=$(printf '%s' "$REQUEST_JSON" | jq -r '.[0].metadata.demo_mp4_path // empty')
 [ -n "$MP4" ] && [ -s "$MP4" ] || { echo "no captured MP4 on $REQUEST_BEAD; re-run capture" >&2; exit 1; }
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/step-close.sh" ] || SCRIPTS=""
-: "${SCRIPTS:?step-close.sh not found in the pack}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/claim-close.sh" ] || SCRIPTS=""
+: "${SCRIPTS:?claim-close.sh not found in the pack}"
 ```
 
 **1. Deliver, or report.** When a PR is named — `deliver_pr` directly, or
@@ -315,19 +314,13 @@ OUTCOME="reported (clip at $MP4)"
 gc bd update "$REQUEST_BEAD" --status=closed --set-metadata gc.outcome=recorded --append-notes "rig-demo: $OUTCOME."
 ```
 
-**3. Close the step chain forward, then drain.** Forward order (each step blocks
-the next); close only through step-close.sh, which resolves by
-(gc.root_bead_id, gc.step_ref). Never close an injected `workflow-finalize`
+**3. Close this step, then drain.** Never close an injected `workflow-finalize`
 (the control-dispatcher's):
 ```bash
-SC="$SCRIPTS/step-close.sh"
-for STEP in prepare-script capture deliver-and-finalize; do
-  "$SC" --step "mol-rig-demo.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-rig-demo.$STEP was not this session's to close — left for the finalizer"
-done
-gc runtime drain-ack
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-rig-demo.deliver-and-finalize && gc runtime drain-ack
 ```
 
 **Exit criteria:** the clip delivered or its path reported, the request bead
-closed, the step chain closed forward, the session drained.
+closed, this step closed, the session drained.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

@@ -28,11 +28,9 @@ the two lanes land on two provider pools and each runs on its pool's default
 model. The synthesis reads each lane's durable review-quorum.lane.v1 output
 from the lane step bead's gc.output_json.
 
-Each step closes its own bead through assets/scripts/step-close.sh, which
-resolves by (gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var. The
-lanes run in separate pool sessions and each closes its own lane step; the
-synthesis is the terminal step and closes the chain forward. No shell variable
-survives from one block to the next, so each block names the values it uses.
+Each step closes its own bead through assets/scripts/claim-close.sh. The lanes
+run in separate pool sessions and each closes its own lane step; the synthesis
+is the terminal step. No shell variable survives from one block to the next, so each block names the values it uses.
 
 
 Required vars:

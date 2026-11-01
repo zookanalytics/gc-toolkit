@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for lease-heartbeat.sh — the holder-side claim-lease keepalive
-# that wraps a long command and refreshes the bead's lease while it runs — and
-# for the formula regions that wire it into the long pool-claim paths.
+# that wraps a long command and refreshes the bead's lease while it runs.
 #
 # No live city, Dolt, or network: a stub `gc` on PATH records every
 # `bd heartbeat <id>` it is asked for, and the cadence knobs are
@@ -9,14 +8,7 @@
 # in a few seconds. What it proves: the command's exit status is propagated, the
 # lease is refreshed up front and again during a long run, a failing or missing
 # heartbeat never fails the command, a refused heartbeat is reported once on
-# stderr, an empty bead id runs the command plain, and misuse exits 2. The
-# wiring section EXECUTES each formula's keepalive region, extracted verbatim,
-# and asserts the id it hands the wrapper is the bead the step's own
-# `gc hook --claim` returned — never the work bead, which carries no lease
-# for the holder to refresh. It also renders each polecat step's
-# check lines with a command carrying both quote kinds and runs them against a
-# stub gctk, so the rig's test command reaches the gate, under the keepalive,
-# verbatim.
+# stderr, an empty bead id runs the command plain, and misuse exits 2.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -120,191 +112,6 @@ has "$(cat "$TMP/err")" "no bead id given" "an empty bead id is reported on stde
 run tk-x -- 2> /dev/null; eq "$RC" "2" "missing command exits 2"
 run tk-x bash -c 'exit 0' 2> /dev/null; eq "$RC" "2" "missing -- separator exits 2"
 run 2> /dev/null; eq "$RC" "2" "missing bead id exits 2"
-
-# --- wiring: each long pool-claim path heartbeats its own claim --------------
-# The lease is on the bead the step's `gc hook --claim` returned and nowhere
-# else; a keepalive handed any other id is refused by the store and refreshes
-# nothing. Each region is extracted verbatim from its formula and executed with
-# a stub wrapper that records the id it was handed, with every candidate id set
-# to a distinct value, so the region's target is read off what it passed.
-ROOT="$(cd "$HERE/../.." && pwd)"
-
-# A region comes out with {{binding_prefix}} rendered as the pour renders it:
-# the binding the city imports the pack under plus a dot, gc-toolkit. here.
-extract() {  # extract <toml> <marker>
-    awk -v m="$2" '
-        $0 ~ ("# >>> " m "$") {f=1; next}
-        $0 ~ ("# <<< " m "$") {f=0}
-        f' "$1" | sed 's|{{binding_prefix}}|gc-toolkit.|g'
-}
-
-STUB_PACK="$TMP/pack"
-mkdir -p "$STUB_PACK/assets/scripts"
-cat > "$STUB_PACK/assets/scripts/lease-heartbeat.sh" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$1" >> "$TARGET_LOG"
-shift 2
-exec "$@"
-EOF
-chmod +x "$STUB_PACK/assets/scripts/lease-heartbeat.sh"
-export TARGET_LOG="$TMP/target.log"
-
-# run_region <region-file> <pack-dir> : source the region in a fresh shell, from
-# a directory outside any repo, then run `hb touch $TMP/hb-ran`.
-run_region() {
-    : > "$TARGET_LOG"
-    rm -f "$TMP/hb-ran"
-    ( cd "$TMP" && env STUB_PACK="$2" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
-        CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
-        WORK_BEAD_ID=tk-work-bead \
-        bash -c '. "$1" && hb touch "$2"' _ "$1" "$TMP/hb-ran" )
-}
-
-check_region() {  # check_region <toml-path-under-root> <marker> <want-target>
-    local toml="$ROOT/$1" label="$1 $2" want="$3" block var
-    block="$(extract "$toml" "$2")"
-    if [ -z "$block" ]; then
-        bad "$label: region not found (markers missing)"
-        return 0
-    fi
-    eq "$(grep -c "^# >>> $2\$" "$toml")" "1" "$label: exactly one region"
-    # A TOML triple-quoted string eats a trailing backslash and joins lines.
-    case "$block" in
-        *\\*) bad "$label: region contains a backslash, which TOML would mangle" ;;
-        *)    ok  "$label: region is backslash-free" ;;
-    esac
-    printf '%s\n' "$block" > "$TMP/region.sh"
-    if ! bash -n "$TMP/region.sh"; then
-        bad "$label: region fails bash -n"
-        return 0
-    fi
-    # The keepalive's target is the id the region actually hands the wrapper.
-    if run_region "$TMP/region.sh" "$STUB_PACK"; then ok "$label: hb exits 0"; else bad "$label: hb exited non-zero"; fi
-    [ -f "$TMP/hb-ran" ] && ok "$label: hb runs the wrapped command" || bad "$label: hb did not run the wrapped command"
-    eq "$(cat "$TARGET_LOG")" "$want" "$label: the keepalive targets the claimed bead"
-    # ...and that id comes from the step's own claim, not from some other pin.
-    var="$(printf '%s\n' "$block" | sed -n 's/.*"\$LHB" "\$\([A-Z_]*\)" -- .*/\1/p')"
-    if [ -n "$var" ] && awk -v p="$var=\"<the bead_id your gc hook --claim returned" 'index($0, p) == 1 { f = 1 } END { exit !f }' "$toml"; then
-        ok "$label: \$$var is set from the step's gc hook --claim"
-    else
-        bad "$label: the keepalive's id variable (${var:-none}) is not set from a gc hook --claim in $1"
-    fi
-    # With no wrapper resolvable, hb still runs the command, plain.
-    if run_region "$TMP/region.sh" "$TMP/no-pack"; then ok "$label: hb exits 0 with no wrapper"; else bad "$label: hb exited non-zero with no wrapper"; fi
-    [ -f "$TMP/hb-ran" ] && ok "$label: hb runs the command plain when no wrapper resolves" || bad "$label: hb did not run the command with no wrapper"
-}
-
-check_region formulas/mol-polecat-work.toml preflight-lease-keepalive   tk-claimed-step
-check_region formulas/mol-polecat-work.toml self-review-lease-keepalive tk-claimed-iter
-
-# --- the rig's test command reaches the gate verbatim ------------------------
-# A pour renders the rig's test command into the step text, so a quote inside
-# it must not re-split the command the step hands to gctk rig through hb. Each
-# block runs from its keepalive region to its closing fence, rendered the way a
-# pour renders it, against the stub wrapper and a stub gctk that logs its call
-# and runs --command as gctk rig does. The command carries both quote kinds and
-# a pipe character, which a single-quoted rendering turns into shell syntax.
-cat > "$TMP/gctk" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$GCTK_LOG"
-cmd=""
-while [ "$#" -gt 0 ]; do
-    case "$1" in --command) cmd="$2"; shift ;; esac
-    shift
-done
-[ -z "$cmd" ] || bash -c "$cmd" </dev/null
-EOF
-chmod +x "$TMP/gctk"
-export GCTK_LOG="$TMP/gctk.log"
-block_tail() {  # block_tail <toml> <marker> : the lines after the region, up to the closing fence
-    awk -v m="$2" '
-        $0 ~ ("# <<< " m "$") {f=1; next}
-        f && /^```/ {exit}
-        f' "$1"
-}
-
-# render : substitute each command var literally, test_command from $TC and
-# affected_tests_command from $ATC, every other command var empty.
-render() {
-    TC="$TC" ATC="$ATC" awk '
-        function rep(s, k, v,   i, out) {
-            out = ""
-            while ((i = index(s, k)) > 0) { out = out substr(s, 1, i - 1) v; s = substr(s, i + length(k)) }
-            return out s
-        }
-        {
-            s = rep($0, "{{test_command}}", ENVIRON["TC"])
-            s = rep(s, "{{affected_tests_command}}", ENVIRON["ATC"])
-            s = rep(s, "{{setup_command}}", ""); s = rep(s, "{{typecheck_command}}", "")
-            s = rep(s, "{{lint_command}}", ""); s = rep(s, "{{build_command}}", "")
-            print s
-        }'
-}
-
-run_block() {  # run_block <toml-path-under-root> <marker> : status lands in BLOCK_RC
-    extract "$ROOT/$1" "$2" > "$TMP/region.sh"
-    block_tail "$ROOT/$1" "$2" | render > "$TMP/tail.sh"
-    : > "$TARGET_LOG"
-    : > "$GCTK_LOG"
-    rm -f "$TMP/cmd-out"
-    BLOCK_RC=0
-    ( cd "$TMP" && env STUB_PACK="$STUB_PACK" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
-        GCTK_BIN="$TMP/gctk" WORK_BEAD_ID=tk-work-bead \
-        CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
-        bash -c '. "$1"; . "$2"' _ "$TMP/region.sh" "$TMP/tail.sh" ) 2> /dev/null || BLOCK_RC=$?
-}
-
-QUOTED="printf '%s|%s|' 'one two' \"it's\" > cmd-out"
-WANT_OUT="one two|it's|"
-
-check_tail() {  # check_tail <toml-path-under-root> <marker>
-    local tail_text
-    tail_text="$(block_tail "$ROOT/$1" "$2")"
-    [ -n "$tail_text" ] && ok "$2: test-command lines found" || bad "$2: no test-command lines after the region"
-    case "$tail_text" in
-        *\\*) bad "$2: test-command lines contain a backslash, which TOML would mangle" ;;
-        *)    ok  "$2: test-command lines are backslash-free" ;;
-    esac
-    case "$(printf '%s\n' "$tail_text" | TC=x ATC=x render)" in
-        *'{{'*) bad "$2: test-command lines carry a var the render does not cover" ;;
-        *)      ok  "$2: every var in the test-command lines is rendered" ;;
-    esac
-}
-
-check_tail formulas/mol-polecat-work.toml preflight-lease-keepalive
-check_tail formulas/mol-polecat-work.toml self-review-lease-keepalive
-
-# gate_calls : each gctk call's flags with its --command value dropped, one per line.
-gate_calls() { sed -E -e 's/ --command .* --/ --command <cmd> --/' -e t -e 's/ --command .*$/ --command <cmd>/' "$GCTK_LOG"; }
-
-TC="$QUOTED"; ATC=""; run_block formulas/mol-polecat-work.toml preflight-lease-keepalive
-eq "$BLOCK_RC" "0" "preflight: a quoted test command exits 0"
-eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "preflight: a quoted test command reaches the gate verbatim"
-eq "$(cat "$TARGET_LOG")" "tk-claimed-step" "preflight: the test command runs under the keepalive"
-eq "$(gate_calls)" "rig test --scope full --command <cmd>" "preflight: the test command is the full suite, recorded at the base and published nowhere"
-
-TC=""; ATC=""; run_block formulas/mol-polecat-work.toml preflight-lease-keepalive
-eq "$BLOCK_RC" "0" "preflight: an empty test command exits 0"
-eq "$(cat "$TARGET_LOG")" "" "preflight: an empty test command runs nothing"
-eq "$(cat "$GCTK_LOG")" "" "preflight: an empty command reaches no gate"
-
-TC="false"; ATC="$QUOTED"; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
-eq "$BLOCK_RC" "0" "self-review: a quoted affected-tests command exits 0"
-eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: the affected-tests command reaches the gate verbatim, in place of the full suite"
-eq "$(cat "$TARGET_LOG")" "tk-claimed-iter" "self-review: the affected-tests command runs under the keepalive"
-has "$(gate_calls)" "rig test --scope affected --command <cmd> --publish-bead tk-work-bead" "self-review: the affected run is declared as such and published to the work bead"
-has "$(gate_calls)" "rig lint --nothing-declared --publish-bead tk-work-bead" "self-review: a check the rig declares nothing for records a pass that ran nothing"
-has "$(gate_calls)" "rig typecheck --nothing-declared --publish-bead tk-work-bead" "self-review: …typecheck too, so the exit condition finds a record for each"
-
-TC="$QUOTED"; ATC=""; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
-eq "$BLOCK_RC" "0" "self-review: a quoted test command exits 0"
-eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: with no affected-tests command, the test command reaches the gate verbatim"
-has "$(gate_calls)" "rig test --scope full --command <cmd> --publish-bead tk-work-bead" "self-review: …declared as the full suite"
-
-TC=""; ATC=""; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
-eq "$BLOCK_RC" "0" "self-review: no test command exits 0"
-eq "$(cat "$TARGET_LOG")" "" "self-review: no test command runs nothing under the keepalive"
-has "$(gate_calls)" "rig test --nothing-declared --publish-bead tk-work-bead" "self-review: no test command records a test pass that ran nothing"
 
 echo "----"
 echo "lease-heartbeat.test.sh: $PASS passed, $FAIL failed"

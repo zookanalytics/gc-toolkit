@@ -43,9 +43,7 @@ Hard rules, in force for every step:
 
 Mechanics the steps are written around: the validation-pass bead arrives as the
 input convoy (each step re-derives VALIDATION_PASS in its own shell), and each
-step closes its own bead through assets/scripts/step-close.sh, which resolves by
-(gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var, which does not
-track the current step. The terminal step closes the validation-pass bead
+step closes its own bead through assets/scripts/claim-close.sh. The terminal step closes the validation-pass bead
 itself, the validator's own working bead that no other writer disposes of.
 
 
@@ -69,5 +67,5 @@ Steps (5):
   ├── mol-validate.load-dispatch: Read the dispatch and pin the batch you are validating
   ├── mol-validate.triage-findings: Decisions 1 and 2: rule each finding must-fix, deferred, declined, needs-you or restates [needs: mol-validate.load-dispatch]
   ├── mol-validate.rule-convergence: Decision 3: rule whether a fresh whole-diff review is warranted [needs: mol-validate.triage-findings]
-  ├── mol-validate.finalize-and-drain: Close the validation pass, close the step chain, and drain [needs: mol-validate.rule-convergence]
+  ├── mol-validate.finalize-and-drain: Close the validation pass and this step, and drain [needs: mol-validate.rule-convergence]
   └── mol-validate.workflow-finalize: Finalize workflow [needs: mol-validate.finalize-and-drain]

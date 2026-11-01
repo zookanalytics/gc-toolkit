@@ -81,10 +81,9 @@ layout change is a screenshot, not a video. A new multi-step flow is a video.
 
 The pack's scripts named here sit in the directory `gc <binding> scripts-dir`
 prints, where `<binding>` is the name in front of this skill's: `gc-toolkit` in
-`gc-toolkit.review-demo`. A capture takes minutes, so it runs under the
-claim-lease keepalive the review formula names, from the review workspace, the
-directory that holds `<worktree>`, so the engine's working files stay out of
-the reviewed tree.
+`gc-toolkit.review-demo`. A capture runs from the review workspace, the directory
+that holds `<worktree>`, so the engine's working files stay out of the reviewed
+tree.
 
 Every capture runs inside a sandbox from which the live city cannot be reached
 (`demo-engine-lib.sh`). The engine, the command a terminal capture types, the

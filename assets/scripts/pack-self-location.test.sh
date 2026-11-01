@@ -166,12 +166,12 @@ done)
 echo "── 3. a formula's resolver takes the directory gc names, and nothing else ──"
 # The lines under test are the formulas' own: one that resolves the directory
 # under a probe, and one that resolves a script's path.
-DIR_LINE=$(grep -h -m1 -E "^SCRIPTS=\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\) && \[ -x \"\\\$SCRIPTS/human-gate\.sh\" \] \|\| SCRIPTS=\"\"\$" "$ROOT/formulas/mol-polecat-work.toml" || true)
-PATH_LINE=$(grep -h -m1 -E "^SC=\"\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\)/step-close\.sh\" && \[ -x \"\\\$SC\" \] \|\| SC=\"\"\$" "$ROOT/formulas/mol-polecat-work.toml" || true)
-[ -n "$DIR_LINE" ] && ok "mol-polecat-work carries a directory resolver under a human-gate.sh probe" \
-  || bad "mol-polecat-work carries a directory resolver under a human-gate.sh probe" "no such line"
-[ -n "$PATH_LINE" ] && ok "mol-polecat-work carries a step-close.sh path resolver" \
-  || bad "mol-polecat-work carries a step-close.sh path resolver" "no such line"
+DIR_LINE=$(grep -h -m1 -E "^SCRIPTS=\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\) && \[ -x \"\\\$SCRIPTS/human-gate\.sh\" \] \|\| SCRIPTS=\"\"\$" "$ROOT"/formulas/*.toml || true)
+PATH_LINE=$(grep -h -m1 -E "^SC=\"\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\)/claim-close\.sh\" && \[ -x \"\\\$SC\" \] \|\| SC=\"\"\$" "$ROOT"/formulas/*.toml || true)
+[ -n "$DIR_LINE" ] && ok "a formula carries a directory resolver under a human-gate.sh probe" \
+  || bad "a formula carries a directory resolver under a human-gate.sh probe" "no such line"
+[ -n "$PATH_LINE" ] && ok "a formula carries a claim-close.sh path resolver" \
+  || bad "a formula carries a claim-close.sh path resolver" "no such line"
 
 # gc answers `kit scripts-dir` with STUB_PACK, which is empty for a gc that
 # succeeds and prints nothing, and refuses every other binding the way the
@@ -185,8 +185,8 @@ exit 1
 STUB
 chmod +x "$TMP/bin/gc"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/human-gate.sh"
-printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/step-close.sh"
-chmod +x "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/step-close.sh"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/claim-close.sh"
+chmod +x "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/claim-close.sh"
 # Every place the old lookup tried holds the scripts too, so a line that still
 # guessed would find one: the rig root, the city's rigs/gc-toolkit, and the
 # git checkout the line runs in.
@@ -215,8 +215,8 @@ if [ -n "$DIR_LINE" ]; then
   eq_ "$(STUB_PACK='' resolve kit. "$DIR_LINE" SCRIPTS)" "" "a gc that answers nothing resolves nothing"
 fi
 if [ -n "$PATH_LINE" ]; then
-  eq_ "$(resolve kit. "$PATH_LINE" SC)" "$TMP/pack/assets/scripts/step-close.sh" "the path form resolves the pack's own script"
-  eq_ "$(resolve other. "$PATH_LINE" SC)" "" "the path form resolves nothing for an unknown binding, never a bare /step-close.sh"
+  eq_ "$(resolve kit. "$PATH_LINE" SC)" "$TMP/pack/assets/scripts/claim-close.sh" "the path form resolves the pack's own script"
+  eq_ "$(resolve other. "$PATH_LINE" SC)" "" "the path form resolves nothing for an unknown binding, never a bare /claim-close.sh"
 fi
 
 echo "── 4. a city that imports the pack from git reaches the pack's scripts in its cache ──"

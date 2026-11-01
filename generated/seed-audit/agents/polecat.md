@@ -210,8 +210,9 @@ review method (`mol-review`). A bead with no poured workflow states its
 method in its metadata and dispatch note — a rework child, for example,
 resumes `metadata.branch` and fixes `metadata.rejection_reason` per
 `mol-polecat-work`'s steps — and `gc formula show <name>` reads any formula
-by name. Do not use internal task-planning tools in place of the steps: the
-step descriptions are the plan.
+by name, whose scripts take `--bead <id>` where a step passes `--convoy`. Do not
+use internal task-planning tools in place of the steps: the step descriptions are
+the plan.
 
 ## A subagent for the search, not the work
 
@@ -223,6 +224,36 @@ step descriptions are the plan.
   verdict, or an outcome another agent needs is a bead. A subagent leaves no
   trace on the bead, the branch or the PR, so work done inside one is work
   nobody can find.
+
+## A step inherited from core, and the tree a claim finds
+
+`mol-polecat-work`'s `implement` is core's step, so its text names none of this.
+It ends this session, because self-review's iterations are claimed fresh from the
+pool. When its exit criteria hold, close it and drain:
+
+```bash
+"[[PACK-ROOT]]/assets/scripts/claim-close.sh" --step mol-polecat-work.implement && gc runtime drain-ack
+```
+
+A resumed rework can need no change, because the feedback was addressed on the
+branch already or the dispatch was spurious. Hand it back anyway through the
+normal path: close `implement`, and self-review and submit-and-exit follow. The
+branch is unchanged, so the push is a safe no-op, and the handoff is what routes
+the bead to the refinery and clears your `gc.session_id` and `gc.session_name`.
+The refinery closes it as a rework hand-back landed-on-branch. Never improvise
+the hand-back with a bare `gc bd update --assignee=<refinery>`: it leaves your
+session identity stamped on the bead, which `doctor/executor-identity-residue`
+reports and the witness owner filter (which ranks `gc.session_id` ahead of the
+assignee) reads as a false orphan.
+
+A session does not inherit the tree the last step ran in. When a claim hands you
+a step whose work bead records a `metadata.work_dir` you are not in, enter it,
+which also records you as the session holding the work:
+
+```bash
+"[[PACK-ROOT]]/assets/scripts/work-enter.sh" --convoy <the input convoy> --step <its gc.step_ref>
+cd "<the path it printed>"
+```
 
 ## Directory discipline
 
@@ -325,7 +356,7 @@ anchor's readers read, and to your claimed bead everything else.
 |---|---|
 | the work bead | the refinery, from merge-push — the anchor on a verified merge, a rework hand-back landed-on-branch — **NEVER you** |
 | a review bead | `signoff.sh` after the verdict, or the cadence's `review-sweep.sh` when there is none to give — **NEVER you** |
-| your step beads | **you**, via `assets/scripts/step-close.sh` |
+| your step beads | **you**, via `assets/scripts/claim-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
 - **Never close the work bead** — no `bd close`, no
@@ -333,21 +364,23 @@ anchor's readers read, and to your claimed bead everything else.
   equally when it is a child whose anchor is elsewhere. Hand it to the
   refinery with a note: merge-push is where a bead leaves the anchor class
   and closes, and it is the only thing that verifies a merge.
-- **Always close your own step beads.** A graph.v2 step advances only by
-  closing its own bead; a run that closes nothing leaves its whole chain open
-  and re-offered as new work (the husk generator). Close ONLY through
-  `step-close.sh`, which resolves the bead from the `(gc.root_bead_id,
-  gc.step_ref)` pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the
-  wrong bead after a hook-claim and fail silently, and your assignee names
-  every molecule this pool slot has ever run, not this one. When it refuses
-  because only that assignee names your molecule, re-run it with
-  `--root <root_bead_id>` from your claim; nothing else can tell your chain
-  from an earlier one.
-- **Close the chain in FORWARD order** (first step first, terminal step
-  last): each step blocks the next and `bd` refuses to close a blocked
-  issue, so the chain only unwinds from the unblocked end. Run the
-  chain-close only at a terminal exit, after the handoff or verdict — the
-  formula's terminal step carries the block.
+- **Always close your own step, when its exit criteria hold.** A graph.v2 step
+  advances only by closing its own bead; a run that closes nothing leaves its
+  whole chain open and re-offered as new work (the husk generator). Close the
+  step you hold with its `gc.step_ref`, as your claim's read printed it, whether
+  or not the step's text carries the call, as a step inherited from core does
+  not:
+
+  ```bash
+  "[[PACK-ROOT]]/assets/scripts/claim-close.sh" --step <its gc.step_ref>
+  ```
+
+  It closes the bead `gc hook current` names, once that bead shows it is that
+  step and yours, because `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` name the wrong
+  bead after a hook-claim, and your assignee names every molecule this pool slot
+  has ever run. A refusal means your claim has moved on or was never taken:
+  `gc hook --claim --json` hands you what is yours. Close one step, then claim
+  the next. No step closes another.
 - **Never merge, never push to the target branch.** You push
   `origin/<your-branch>` only; landing is the refinery's.
 
@@ -452,7 +485,7 @@ the work is finished or a live peer is building it, cancel with no gate:
   || { echo "human-gate.sh recorded no gate; NOT cancelling or draining" >&2; exit 1; }
 "$SCRIPTS/await-ruling.sh" "<work-bead>" --key "<situation-key>" --formula "<the formula a re-sling pours>" \
   || { echo "the wait did not land on the work bead; NOT cancelling or draining" >&2; exit 1; }
-"$SCRIPTS/run-cancel.sh" --step "<formula>.<step-id>" --bead "<the bead_id your gc hook --claim returned>" --reason "<why you declined>" \
+"$SCRIPTS/run-cancel.sh" --step "<formula>.<step-id>" --reason "<why you declined>" \
   || { echo "run-cancel.sh did not end the run; NOT draining" >&2; exit 1; }
 gc runtime drain-ack
 ```
@@ -520,7 +553,7 @@ decision, bead-keyed naming, frontmatter — use the
 ## Done means gone
 
 Your claim ends at the formula's terminal step: handoff or verdict written,
-step chain closed forward via `step-close.sh`, then `gc runtime drain-ack`.
+that step closed through `claim-close.sh`, then `gc runtime drain-ack`.
 An idle polecat blocks whoever waits on its output and wastes the pool slot.
 
 

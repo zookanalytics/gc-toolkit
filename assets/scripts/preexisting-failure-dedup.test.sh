@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic test for the pre-existing-failure dedup at its two call sites: the
-# refinery's `handle-failures` step (mol-refinery-patrol.toml, the
-# preexisting-failure-dedup block) and a polecat's `preflight-tests` step
-# (mol-polecat-work.toml, the preflight-failure-lookup, preflight-fix-landed-check
-# and preflight-failure-file blocks). Both must find the tracker a gate already
-# filed for the same red and file no second one.
+# Hermetic test for the pre-existing-failure dedup at the refinery's
+# `handle-failures` step (mol-refinery-patrol.toml, the preexisting-failure-dedup
+# block). It must find the tracker a gate already filed for the same red and file
+# no second one. A polecat's `preflight-tests` step makes the same calls one at a
+# time, and preexisting-failure.test.sh holds what each answers.
 #
 # A probe that reads a failure as "no duplicate" files a fresh P1 on every
 # patrol. bd answers a flag it does not have, such as `--search`, on stderr
@@ -41,7 +40,6 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 REFINERY="$ROOT/formulas/mol-refinery-patrol.toml"
-POLECAT="$ROOT/formulas/mol-polecat-work.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-preexisting-failure-dedup-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -296,110 +294,6 @@ store
 eq "$(STUB_SHOW_FAIL=1 refinery)/$(created)" "0/1" "(M) a filing whose read-back failed -> proceeds with the merge, one bead filed"
 has "$(cat "$TMP/out")" "tracked as tk-new1" "(M) the filed tracker is reported for the merge notes"
 hasnt "$(cat "$TMP/out")" "no tracker filed" "(M) it is not reported as a failed filing"
-
-# ============================================================================
-# The polecat: preflight-tests 3a-3e
-# ============================================================================
-render() { sed -e 's/{{convoy_id}}/cv-1/g' -e 's/{{escalation_target}}/human/g' -e 's/{{base_branch}}/main/g' -e 's/{{binding_prefix}}/gc-toolkit./g' "$1" > "$1.r" && mv "$1.r" "$1"; }
-eq "$(extract "$POLECAT" preflight-failure-lookup "$TMP/lookup.sh")" "1" "polecat: one preflight-failure-lookup block"
-eq "$(extract "$POLECAT" preflight-fix-landed-check "$TMP/landed.sh")" "1" "polecat: one preflight-fix-landed-check block"
-eq "$(extract "$POLECAT" preflight-failure-file "$TMP/file.sh")" "1" "polecat: one preflight-failure-file block"
-render "$TMP/lookup.sh"; render "$TMP/landed.sh"; render "$TMP/file.sh"
-sed -i.bak 's|<failing test function, e.g. TestFoo/some_subtest>|TestWidget/rebase_case|' "$TMP/lookup.sh" && rm -f "$TMP/lookup.sh.bak"
-echo 'echo "EXISTING=$EXISTING LOOKUP_RC=$LOOKUP_RC KEY=$SYMPTOM_KEY"' >> "$TMP/lookup.sh"
-echo 'echo "CLOSED_MATCH=$CLOSED_MATCH CLOSED_RC=$CLOSED_RC"' >> "$TMP/landed.sh"
-sed -i.bak -e 's|<the full failure: the test or check, its subtest or lines, the package, and the raw output>|--- FAIL: TestWidget/rebase_case (0.12s) want `ok`, got $STATUS|' \
-  -e 's|<short description>|rebase loses the lock|' "$TMP/file.sh" && rm -f "$TMP/file.sh.bak"
-
-# polecat <block> [list-scenario] -> the block's stdout. gc names this checkout
-# as the pack, or PACK when it is set. The
-# key and the work bead the later blocks reuse from 3b are passed in.
-polecat() {
-  (cd "$TMP/cwd" && LIST_SCENARIO="${2:-}" STUB_PACK="${PACK:-$ROOT}" SYMPTOM_KEY=TestWidget WORK_BEAD_ID=work-1 \
-     bash "$1" 2>/dev/null)
-}
-PKEY="TestWidget"
-
-echo "# polecat 3a/3b: the lookup"
-store "$(bead tk-fix in_progress bug "Make widget rebase wait for the lock" "{\"failure_key\":\"$PKEY\"}")"
-OUT=$(polecat "$TMP/lookup.sh")
-has "$OUT" "KEY=$PKEY" "3a: the key is the test function, its subtest dropped"
-has "$OUT" "EXISTING=tk-fix LOOKUP_RC=0" "3b: a RETITLED tracker is found by its stamp"
-store "$(bead tk-held blocked bug "Rebase loses the lock" "{\"failure_key\":\"$PKEY\"}")"
-has "$(polecat "$TMP/lookup.sh")" "EXISTING=tk-held LOOKUP_RC=0" "3b: a tracker in a blocked status, which 3b once missed, is found by its stamp"
-store "$(bead tk-old open bug "Pre-existing failure: $PKEY — rebase loses the lock")"
-has "$(polecat "$TMP/lookup.sh")" "EXISTING= LOOKUP_RC=0" "3b: an unstamped bug titled with the key is not taken for its tracker"
-store "$(folded tk-folded "$PKEY" tk-batch)" "$(bead tk-batch open task "batch: clear the pre-existing failure set")"
-has "$(polecat "$TMP/lookup.sh")" "EXISTING=tk-batch LOOKUP_RC=0" "3b: a closed twin folded into a live batch answers with the batch, so 3c confirms on it"
-store "$(bead tk-done closed bug "Pre-existing failure: $PKEY" "{\"failure_key\":\"$PKEY\"}" 2026-10-09T08:00:00Z)"
-has "$(polecat "$TMP/lookup.sh")" "EXISTING= LOOKUP_RC=0" "3b: a closed twin with no successor tracks nothing, so 3d and 3e run"
-store
-has "$(polecat "$TMP/lookup.sh")" "EXISTING= LOOKUP_RC=0" "3b: no tracker -> an empty, successful lookup"
-eq "$(grep -c '^MAIL|' "$FAKE_META")" "0" "3b: a successful lookup mails nobody"
-OUT=$(polecat "$TMP/lookup.sh" unreadable)
-case "$OUT" in *"LOOKUP_RC=0"*) bad "3b: an unreadable store reads as a successful lookup" ;; *) ok "3b: an unreadable store fails the lookup" ;; esac
-has "$(cat "$FAKE_META")" "MAIL|human -s NOTICE: main pre-flight failed, dedupe lookup broken" "3b: the broken lookup is mailed to the escalation target"
-sed 's/TestWidget\/rebase_case/<failing test function, e.g. TestFoo\/some_subtest>/' "$TMP/lookup.sh" > "$TMP/lookup-placeholder.sh"
-store
-OUT=$(polecat "$TMP/lookup-placeholder.sh")
-case "$OUT" in *"LOOKUP_RC=0"*) bad "3b: an unsubstituted key placeholder reads as a successful lookup" ;; *) ok "3b: an unsubstituted key placeholder fails the lookup" ;; esac
-has "$(cat "$FAKE_META")" "MAIL|human -s NOTICE: main pre-flight failed, no failure key derived" "3b: a placeholder is reported as no key derived"
-sed 's|TestWidget/rebase_case|assets/scripts/pr-facts.test.sh|' "$TMP/lookup.sh" > "$TMP/lookup-badkey.sh"
-store
-has "$(polecat "$TMP/lookup-badkey.sh")" "EXISTING= LOOKUP_RC=2 KEY=" "3b: a key the script refuses stops the block (LOOKUP_RC=2)"
-has "$(cat "$FAKE_META")" "Could not derive a key from: --test assets/scripts/pr-facts.test.sh" "3b: the notice names the input it could not key"
-hasnt "$(cat "$FAKE_META")" "dedupe lookup broken" "3b: a refused key is not reported as a broken lookup"
-eq "$(grep -c '^bd list' "$STUB_LOG")" "0" "3b: nothing is looked up without a key"
-store
-has "$(PACK="$TMP/nopack" polecat "$TMP/lookup.sh")" "EXISTING= LOOKUP_RC=127 KEY=" "3b: the script not found stops the block (LOOKUP_RC=127)"
-has "$(cat "$FAKE_META")" "MAIL|human -s NOTICE: main pre-flight failed, preexisting-failure.sh not found -m Failure: --test TestWidget/rebase_case." "3b: the notice says the script was not found and names the failure"
-hasnt "$(cat "$FAKE_META")" "dedupe lookup broken" "3b: a missing script is not reported as a broken lookup"
-eq "$(grep -c '^bd list' "$STUB_LOG")" "0" "3b: nothing is looked up without the script"
-
-echo "# polecat 3d: the landed-fix check"
-RECENT=$(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ)
-store "$(bead tk-landed closed bug "Make widget rebase wait for the lock" "{\"failure_key\":\"$PKEY\"}" "$RECENT")"
-has "$(polecat "$TMP/landed.sh")" "CLOSED_MATCH=tk-landed CLOSED_RC=0" "3d: a retitled tracker closed this week is found by its stamp"
-store "$(bead tk-landed closed bug "Make widget rebase wait for the lock" "{\"failure_key\":\"$PKEY\"}" 2020-01-01T00:00:00Z)"
-has "$(polecat "$TMP/landed.sh")" "CLOSED_MATCH= CLOSED_RC=0" "3d: one closed long ago is no recent fix"
-OUT=$(polecat "$TMP/landed.sh" unreadable)
-case "$OUT" in *"CLOSED_RC=0"*) bad "3d: an unreadable store reads as a successful check" ;; *) ok "3d: an unreadable store fails the check" ;; esac
-case "$OUT" in *"CLOSED_RC=127"*) bad "3d: an unreadable store reads as the script not found" ;; *) ok "3d: an unreadable store is not the script not found" ;; esac
-store
-has "$(PACK="$TMP/nopack" polecat "$TMP/landed.sh")" "CLOSED_MATCH= CLOSED_RC=127" "3d: the script not found stops the check (CLOSED_RC=127, not a lookup)"
-has "$(cat "$FAKE_META")" "MAIL|human -s NOTICE: main pre-flight failed, preexisting-failure.sh not found -m Symptom: TestWidget." "3d: the notice says the script was not found"
-eq "$(grep -c '^bd list' "$STUB_LOG")" "0" "3d: nothing is looked up without the script"
-
-echo "# polecat 3e: the filing"
-store
-polecat "$TMP/file.sh" >/dev/null
-eq "$(created)" "1" "3e: exactly one bead filed"
-eq "$(field tk-new1 .title)" "Pre-existing failure: $PKEY — rebase loses the lock" "3e: the title carries the key, then the summary"
-eq "$(field tk-new1 .metadata.failure_key)" "$PKEY" "3e: the key is stamped in the create"
-eq "$(grep -c '^DESIGN_USED$' "$FAKE_META")" "0" "3e: the evidence is not filed as --design"
-has "$(field tk-new1 .description)" '--- FAIL: TestWidget/rebase_case (0.12s) want `ok`, got $STATUS' "3e: the raw log reaches the body verbatim"
-has "$(field tk-new1 .description)" "Observed on main while starting work-1" "3e: the body names the base branch and the work bead"
-has "$(cat "$FAKE_META")" "Tracked as: tk-new1" "3e: the notice names the tracker"
-store "$(bead tk-race open bug "Rebase loses the lock" "{\"failure_key\":\"$PKEY\"}")"
-polecat "$TMP/file.sh" >/dev/null
-eq "$(created)" "0" "3e: a tracker another gate filed since the lookup is not duplicated"
-has "$(cat "$FAKE_META")" "Tracked as: tk-race" "3e: the notice names that tracker"
-store "$(folded tk-folded "$PKEY" tk-batch)" "$(bead tk-batch open task "batch: clear the pre-existing failure set")"
-polecat "$TMP/file.sh" >/dev/null
-eq "$(created)" "0" "3e: a closed twin folded into a live batch is not filed again"
-has "$(cat "$FAKE_META")" "Tracked as: tk-batch" "3e: the notice names the batch"
-store
-(cd "$TMP/cwd" && STUB_CREATE_FAIL=1 STUB_PACK="$ROOT" SYMPTOM_KEY=TestWidget WORK_BEAD_ID=work-1 bash "$TMP/file.sh" >/dev/null 2>&1)
-has "$(cat "$FAKE_META")" "Tracked as: nothing, the filing failed" "3e: a filing that did not land is reported as nothing filed"
-store
-STUB_SHOW_FAIL=1 polecat "$TMP/file.sh" >/dev/null
-eq "$(created)" "1" "3e: a filing whose read-back failed files one bead"
-has "$(cat "$FAKE_META")" "Tracked as: tk-new1" "3e: and the notice names it, not a failed filing"
-store
-PACK="$TMP/nopack" polecat "$TMP/file.sh" >/dev/null
-eq "$(created)" "0" "3e: the script not found files nothing"
-has "$(cat "$FAKE_META")" "MAIL|human -s NOTICE: main has failing pre-flights, preexisting-failure.sh not found -m Symptom: TestWidget." "3e: the notice says the script was not found"
-hasnt "$(cat "$FAKE_META")" "Tracked as:" "3e: it is not reported as a failed filing"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

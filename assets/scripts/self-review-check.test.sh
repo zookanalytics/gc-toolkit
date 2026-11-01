@@ -423,35 +423,37 @@ run_case "FAIL when the note ran no setup, though the step declares one" 1
 assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
 
 # --- 3d4. the step's own block, rendered as a pour renders it -------------------
-# The self-review step's check block, rendered with the case's commands, runs in
-# the fixture worktree against the gctk built from this checkout. The root stub
+# The self-review step's check call, rendered with the case's commands, runs
+# rig-checks.sh in the fixture worktree against the gctk built from this checkout. The root stub
 # stamps the same commands, as a pour does, and the block's note of setup and
 # build reaches the state the bd stub serves, so the exit condition reads what
 # the block wrote.
 ROOT="$(cd "$HERE/../.." && pwd)"
 awk '
   /^```bash$/ {buf = ""; f = 1; next}
-  /^```$/ {if (f && buf ~ /# >>> self-review-lease-keepalive/) {printf "%s", buf; exit} f = 0; next}
+  /^```$/ {if (f && buf ~ /rig-checks\.sh" self-review/) {printf "%s", buf; exit} f = 0; next}
   f {buf = buf $0 "\n"}' "$ROOT/formulas/mol-polecat-work.toml" > "$TMP/checks.tmpl"
-grep -qF 'self_review_setup_build=' "$TMP/checks.tmpl" \
-  && ok "the self-review check block extracts, with its note of setup and build" \
-  || bad "the self-review check block did not extract with its note of setup and build"
+grep -qF 'rig-checks.sh" self-review' "$TMP/checks.tmpl" \
+  && ok "the self-review check call extracts" \
+  || bad "the self-review check call did not extract"
 # render_checks : the block, each placeholder filled with what the case's pour
 # renders (pour_vars).
 render_checks() {
   jq -Rr --argjson v "$(pour_vars)" \
-    'reduce ($v | to_entries[]) as $e (.; split("{{" + $e.key + "}}") | join($e.value))' "$TMP/checks.tmpl"
+    'reduce ($v | to_entries[]) as $e (.; split("{{" + $e.key + "}}") | join($e.value))' "$TMP/checks.tmpl" \
+    | sed -e "s|\"<the work bead>\"|\"\${ISSUE_ID-gc-issue}\"|" \
+          -e "s|\"\$(b='gc-toolkit.'; gc \"\${b%.}\" scripts-dir)/rig-checks.sh\"|\"$HERE/rig-checks.sh\"|"
 }
 # run_checks <shell> : the rendered block in the fixture worktree.
 run_checks() {
   render_checks > "$TMP/checks.sh"
   ( cd "$WT" && env GC_PACK_DIR="" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" GCTK_BIN="$GCTK_BUILT" \
-      WORK_BEAD_ID="${ISSUE_ID-gc-issue}" CLAIMED_ITER_BEAD=iter-1 "$1" "$TMP/checks.sh" ) >"$TMP/checks.out" 2>&1
+      ISSUE_ID="${ISSUE_ID-gc-issue}" "$1" "$TMP/checks.sh" ) >"$TMP/checks.out" 2>&1
 }
 reset_env; render_checks > "$TMP/checks.sh"
 grep -qF '{{' "$TMP/checks.sh" \
-  && bad "the block renders with a placeholder pour_vars does not fill" \
-  || ok "pour_vars fills every placeholder in the block"
+  && bad "the call renders with a placeholder pour_vars does not fill" \
+  || ok "pour_vars fills every placeholder in the call"
 SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
 for sh in $SHELLS; do
   reset_env; MD_SETUP_BUILD=""; VAR_BUILD='exit 1'; write_state

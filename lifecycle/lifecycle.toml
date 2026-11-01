@@ -465,7 +465,7 @@ since_format = "RFC 3339 UTC"
 keys = [
   "branch", "target", "merged_target", "merged_sha", "pr_url", "pr_number",
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
-  "rejection_reason", "graduation", "blocked_reason", "work_dir",
+  "rejection_reason", "graduation", "blocked_reason", "work_dir", "work_holder",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
   "pr_summary", "merge_record_failures", "zero_diff_check_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
@@ -574,6 +574,12 @@ keys = [
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
+# work_holder — the session running this bead's work, which leaves the assignee
+#   empty. Core's work-holder.sh takes it for the session with one compare-and-set
+#   at load-context, work-setup.sh and work-enter.sh record the session entering
+#   the tree, and the run clears it when it hands off or stops, so a later dispatch
+#   tells a run in flight from a tree left behind. Absent means no run holds the
+#   work. A session id.
 # false_completion_suspected — the reason mol-refinery-patrol.toml refused to
 #   close a branch as merged when it carried no verified change against its
 #   target; written on the `refused_false_completion` transition for a person to
@@ -1892,7 +1898,7 @@ keys = [
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
 #   stood), `superseded`, `moot` and `dismissed`, written by the pack component
-#   that reached the outcome (step-close.sh, signoff.sh, review-outcome.sh,
+#   that reached the outcome (claim-close.sh, signoff.sh, review-outcome.sh,
 #   pr-facts.sh, gc-helm.sh and the done arms), and `canceled`, which gascity's
 #   run cancel stamps on every member of a run it ends; read by the done gates
 #   and the review graph. gc.routed_to and gc.execution_routed_to are

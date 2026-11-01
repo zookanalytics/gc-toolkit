@@ -64,6 +64,46 @@ shares only the word ([authority-map.md](authority-map.md)).
   re-verification.
 - A change that retires a noun removes its entry.
 
+## The work formula's overrides
+
+- **Covers.** `formulas/mol-polecat-work.toml`, `assets/scripts/work-gate.sh`,
+  `assets/scripts/work-setup.sh`, `assets/scripts/work-enter.sh`,
+  `assets/scripts/rig-checks.sh`, `assets/scripts/work-submit.sh`,
+  `assets/scripts/work-lib.sh`, `assets/scripts/decline.sh`, the `work_holder` key.
+- **Stands in for.** Steps of core's polecat base and Gas Town's polecat formula
+  that would do what the pack needs. The formula overrides five steps and inherits
+  `implement`. Each override differs for a reason of its own:
+  - `load-context` refuses a bead that is finished, parked, blocked or in another
+    live run, and ends the run by cancelling it with what releases the work on the
+    work bead. Upstream's has no such gate.
+  - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
+    rebases and force-pushes under an open PR, and waits behind a sibling.
+  - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
+    from one base shares one recorded run, and keys a tracker on a stamp. Core's
+    runs each command raw per polecat and matches trackers by title.
+  - `self-review` is a bounded check loop over those records, where Gas Town's is
+    one inline step.
+  - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
+    exit, which are nouns of the merge and review subsystems.
+- **Evidence.** In `gastownhall/gascity`:
+  - `internal/bootstrap/packs/core/formulas/mol-polecat-base.toml`: its
+    `load-context` has no duplicate-dispatch gate, and its `preflight-tests` runs
+    `{{test_command}}` raw.
+  - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
+    whole, so an inherited step cannot gain metadata, and a step that needs
+    `gc.continuation_group` must be overridden. The base declares none.
+  In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
+  `workspace-setup`, `self-review` and `submit-and-exit`, and rebases a rejected
+  branch.
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131 and
+  `gastownhall/gascity-packs` main 0b0d96250.
+- **Retires when.** A step at a time. `load-context`: core's gate refuses finished
+  and parked work and ends a run by cancelling it. `workspace-setup`:
+  `tk-1tfzr71.10` moves its worktree to `gc worktree`, and the refinery's rework
+  machinery goes (`tk-1tfzr71.20`), which ends the merge resume. `preflight-tests`
+  and `self-review`: Gas City ships a record of a check per commit. `submit-and-exit`:
+  `tk-1tfzr71.20` moves the merge onto GitHub's branch rules.
+
 ## Dolt reclaim
 
 - **Covers.** `assets/scripts/dolt-reclaim.sh`, `orders/dolt-reclaim.toml`,

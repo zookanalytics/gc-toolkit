@@ -911,19 +911,20 @@ out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --r
 eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "a stored line that is not an instant gives way to the round's time"
 
 # --- the resume block -------------------------------------------------------------
-echo "# the filers' rejection prefixes are the ones the resume block reads as merge-only"
-RESUME=$(awk '/# >>> rejected-branch-resume-mode$/ {f=1; next} /# <<< rejected-branch-resume-mode$/ {f=0} f' \
-  "$ROOT/formulas/mol-polecat-work.toml" | sed 's/{{base_branch}}/main/g')
-[ -n "$RESUME" ] && ok "the resume block is extracted from the formula" || bad "the resume block is not extracted from the formula"
-has "$RESUME" '"stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only' "the block reads a conflict or stale-base rejection as merge-only"
+echo "# the filers' rejection prefixes are the ones the resume reads as merge-only"
+RESUME_PACK="$TMP/resumepack"; mkdir -p "$RESUME_PACK"
+cp "$HERE/work-setup.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/bd-lib.sh" "$RESUME_PACK/"
+# resume <bead> — work-setup.sh as a run resuming a rejected branch calls it.
+resume() { ( cd "$R" && GC_SESSION_ID=polecat WORK_READ_WAIT=0 "$RESUME_PACK/work-setup.sh" --bead "$1" --base main ) >/dev/null 2>&1; }
+has "$(cat "$HERE/work-setup.sh")" '"stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only' "work-setup.sh reads a conflict or stale-base rejection as merge-only"
 eq "$(grep -c '"stale base at head \$head_oid: PR#\$num conflicts with' "$HERE/pr-facts.sh")" "1" "pr-facts.sh's merge-in child is rejected 'stale base at head …'"
 eq "$(grep -c 'FIX_REASON="stale base at head \$head_oid:' "$HERE/pre-open-rebase.sh")" "1" "…and so is pre-open-rebase.sh's child"
 eq "$(grep -c 'REJECT_REASON="Conflicts with \$TARGET at' "$ROOT/formulas/mol-refinery-patrol.toml")" "1" "the refinery's prepare re-queue is rejected 'Conflicts with …'"
 
-echo "# the resume block records the start and scope before its merge, and the guard reads from there"
+echo "# the resume records the start and scope before its merge, and the guard reads from there"
 R="$MODIFY_R"; A="$MODIFY_A"; git -C "$R" merge --abort >/dev/null 2>&1; git -C "$R" reset -q --hard "$A"
-store "[$(child MI12 ",\"rejection_reason\":\"stale base at head sha-1: PR#1 conflicts with main.\"$(audit_meta "$(entry stale.txt)")"), $(anchorrow AN1)]"
-( cd "$R" && WORK_BEAD_ID=MI12 bash -c "$RESUME" ) >/dev/null 2>&1
+store "[$(child MI12 ",\"work_dir\":\"$R\",\"rejection_reason\":\"stale base at head sha-1: PR#1 conflicts with main.\"$(audit_meta "$(entry stale.txt)")"), $(anchorrow AN1)]"
+resume MI12
 eq "$(meta MI12 bring_current_from)" "$A" "the stamp is the PR head the round started from"
 eq "$(meta MI12 bring_current_scope)" "merge-only" "…a stale-base rejection makes the round merge-only"
 eq "$(meta MI12 conflict_audit)" "<absent>" "…the last round's audit is cleared"
@@ -940,35 +941,37 @@ has "$out" "NEEDS AN ENTRY  v.txt" "…naming the conflict"
 out=$(guard --bead MI12 --from "$H" --to "$H"); rc=$?
 eq "$rc" "0" "with the entry recorded the hand-off proceeds"
 eq "$(rec_of AN1 | jq -r '.audit[0].resolution')" "kept 2" "…and the entry rides into the anchor's record"
-store "[$(child MI13 ",\"rejection_reason\":\"Review feedback on PR#1 is unanswered at head x.\"")]"
+store "[$(child MI13 ",\"work_dir\":\"$R\",\"rejection_reason\":\"Review feedback on PR#1 is unanswered at head x.\"")]"
 git -C "$R" reset -q --hard "$A"
-( cd "$R" && WORK_BEAD_ID=MI13 bash -c "$RESUME" ) >/dev/null 2>&1
+resume MI13
 eq "$(meta MI13 bring_current_scope)" "with-work" "a feedback rejection carries work of its own"
-STUB_UPDATE_FAIL="MI14" store "[$(child MI14 ",\"rejection_reason\":\"stale base at head sha-1: x\"")]"
+STUB_UPDATE_FAIL="MI14" store "[$(child MI14 ",\"work_dir\":\"$R\",\"rejection_reason\":\"stale base at head sha-1: x\"")]"
 git -C "$R" merge --abort >/dev/null 2>&1; git -C "$R" reset -q --hard "$A"
-( cd "$R" && STUB_UPDATE_FAIL="MI14" WORK_BEAD_ID=MI14 bash -c "$RESUME" ) >/dev/null 2>&1; rc=$?
-eq "$rc" "1" "a stamp that does not read back stops the block"
+STUB_UPDATE_FAIL="MI14" resume MI14; rc=$?
+eq "$rc" "1" "a stamp the store refuses stops the resume"
 eq "$(git -C "$R" rev-parse HEAD)" "$A" "…before it merges anything"
 
-echo "# the audit-entry block passes the flags the audit script reads"
-ENTRY_BLOCK=$(awk '/# >>> bring-current-audit-entry$/ {f=1; next} /# <<< bring-current-audit-entry$/ {f=0} f' "$ROOT/formulas/mol-polecat-work.toml")
-[ -n "$ENTRY_BLOCK" ] && ok "the audit-entry block is extracted from the formula" || bad "the audit-entry block is not extracted from the formula"
+echo "# the audit-entry call passes the flags the audit script reads"
+ENTRY_BLOCK=$(grep -F 'bring-current-audit.sh" add' "$ROOT/formulas/mol-polecat-work.toml")
+[ -n "$ENTRY_BLOCK" ] && ok "the audit-entry call is in the formula" || bad "the audit-entry call is not in the formula"
 for flag in --bead --path --rating --collided --resolution --check; do
-  case "$ENTRY_BLOCK" in *"$flag "*) : ;; *) bad "the audit-entry block does not pass $flag"; continue ;; esac
+  case "$ENTRY_BLOCK" in *"$flag "*) : ;; *) bad "the audit-entry call does not pass $flag"; continue ;; esac
   grep -q -- "      $flag) " "$HERE/bring-current-audit.sh" && ok "…$flag is one the audit script's add reads" || bad "bring-current-audit.sh add does not read $flag"
 done
 
-echo "# the stop-and-ask block asks once, aborts the merge, pushes nothing, parks or ends the run, and drains"
-UNRES=$(awk '/# >>> bring-current-unresolvable$/ {f=1; next} /# <<< bring-current-unresolvable$/ {f=0} f' "$ROOT/formulas/mol-polecat-work.toml" \
-  | sed -e 's/"<file>"/"v.txt"/' \
-        -e 's/"<the two intents that met>"/"main set x to 3 while the branch set it to 2"/' \
-        -e 's/"<the one decision you need>"/"which default wins?"/' \
-        -e 's/"<the step you hold, e.g. mol-polecat-work.workspace-setup>"/"mol-polecat-work.workspace-setup"/' \
-        -e 's/{{binding_prefix}}/gc-toolkit./g')
-[ -n "$UNRES" ] && ok "the stop-and-ask block is extracted from the formula" || bad "the stop-and-ask block is not extracted from the formula"
-hasnt "$UNRES" "git push" "the block pushes nothing"
-# The block's scripts are in the pack the stub gc names, $STUB_PACK.
+echo "# work-setup.sh --stop-merge asks once, aborts the merge, pushes nothing, parks or ends the run, and drains"
+hasnt "$(cat "$HERE/work-setup.sh")" "git push" "work-setup.sh pushes nothing"
+# The scripts it calls sit beside it. The audit, the wait and the cancel are stubs,
+# and gc hook current answers $HOOK_CURRENT, or nothing for a bead with no molecule.
 PK="$TMP/askpack/assets/scripts"; mkdir -p "$PK"
+cp "$HERE/work-setup.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/bd-lib.sh" "$PK/"
+mkdir -p "$TMP/hook-shim"
+cat > "$TMP/hook-shim/gc" <<S
+#!/usr/bin/env bash
+if [ "\${1:-} \${2:-}" = "hook current" ]; then [ -n "\${HOOK_CURRENT:-}" ] || exit 1; printf '%s\n' "\$HOOK_CURRENT"; exit 0; fi
+exec "$BIN/gc" "\$@"
+S
+chmod +x "$TMP/hook-shim/gc"
 cat > "$PK/bring-current-audit.sh" <<'S'
 #!/usr/bin/env bash
 if [ "${1:-}" = "anchor" ]; then printf '%s\n' "${ASK_ANCHOR:-ANC}"; exit "${ANCHOR_RC:-0}"; fi
@@ -987,7 +990,10 @@ chmod +x "$PK/bring-current-audit.sh" "$PK/await-ruling.sh" "$PK/run-cancel.sh"
 # is handed back through it, as this session, whose claim records it as polecat.
 cp "$HERE/hand-back.sh" "$PK/hand-back.sh"; chmod +x "$PK/hand-back.sh"
 export ASK_LOG="$TMP/ask.log" GC_SESSION_ID=polecat
-unres() { ( cd "$R" && STUB_PACK="$TMP/askpack" WORK_BEAD_ID="$1" bash -c "$UNRES" ) >/dev/null 2>&1; }
+unres() { # <bead> — with the environment the case sets
+  ( cd "$R" && PATH="${SHIM_FIRST:-}$TMP/hook-shim:$PATH" WORK_READ_WAIT=0 "$PK/work-setup.sh" --stop-merge --bead "$1" --path v.txt \
+      --collided "main set x to 3 while the branch set it to 2" --question "which default wins?" ) >/dev/null 2>&1
+}
 # The claim a hook claim leaves on a bead it hands this session: both session
 # pins, and the pool route the bead was offered on.
 HELD=',"gc.session_id":"polecat","gc.session_name":"gc-toolkit__polecat-polecat","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"'
@@ -995,7 +1001,7 @@ R="$MODIFY_R"; A="$MODIFY_A"; restart; bring
 store "[$(child MI20 "$HELD")]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
 unres MI20; rc=$?
-eq "$rc" "0" "a bead with no molecule: the block exits 0"
+eq "$rc" "0" "a bead with no molecule: --stop-merge exits 0"
 has "$(cat "$ASK_LOG")" "ASK ask --bead MI20 --path v.txt --collided main set x to 3 while the branch set it to 2 --question which default wins?" "the question is asked once, with what collided"
 eq "$(git -C "$R" rev-parse HEAD)" "$A" "the merge is aborted: HEAD is the head last reviewed"
 [ -f "$R/.git/MERGE_HEAD" ] && bad "a merge is still in progress" || ok "…and no merge is left in progress"
@@ -1016,7 +1022,7 @@ store "[$(child MI25 "$HELD")]"
 jq -c 'map(if .id == "MI25" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
 unres MI25; rc=$?
-eq "$rc" "0" "a bead with no molecule that shows closed: the block exits 0"
+eq "$rc" "0" "a bead with no molecule that shows closed: --stop-merge exits 0"
 eq "$(bstatus MI25) $(bassignee MI25)" "closed polecat" "…and the hand-back reopens nothing and clears nothing"
 eq "$(meta MI25 gc.routed_to)|$(meta MI25 gc.takeaway)" "gc-toolkit/gc-toolkit.polecat|<absent>" "…nor parks it"
 has "$(notes MI25)" "Hand-back refused: MI25 shows status closed and assignee polecat, which is not a claim this session can hand back, so nothing was released." "…and the notes say so"
@@ -1032,8 +1038,8 @@ case " \$* " in *" bd update "*" --status=open "*) printf 'bd update %s refused 
 exec "$BIN/gc" "\$@"
 S
 chmod +x "$TMP/refuse-reopen/gc"
-( cd "$R" && PATH="$TMP/refuse-reopen:$PATH" STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI26 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
-eq "$rc" "0" "a bead with no molecule whose reopen the store refuses: the block exits 0"
+SHIM_FIRST="$TMP/refuse-reopen:" unres MI26; rc=$?
+eq "$rc" "0" "a bead with no molecule whose reopen the store refuses: --stop-merge exits 0"
 eq "$(bstatus MI26) $(bassignee MI26)" "in_progress polecat" "…and the claim is left held, never in_progress with no assignee"
 eq "$(meta MI26 gc.session_id)|$(meta MI26 gc.session_name)" "polecat|gc-toolkit__polecat-polecat" \
   "…both session pins still on it, so the claim reads as this session's when the session ends"
@@ -1052,42 +1058,42 @@ has "$(notes MI27)" "Hand-back refused: MI27 shows status in_progress and assign
 restart; bring
 store "[$(child MI21)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI21 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
-eq "$rc" "0" "a molecule's step: the block exits 0"
+HOOK_CURRENT=ST1 unres MI21; rc=$?
+eq "$rc" "0" "a molecule's step: --stop-merge exits 0"
 has "$(cat "$ASK_LOG")" "AWAIT MI21 --key bring-current-question.MI21 --subject ANC --formula mol-polecat-work" "the work bead waits on the question's gate, filed on its anchor"
-has "$(cat "$ASK_LOG")" "CANCEL --step mol-polecat-work.workspace-setup --bead ST1" "…and the run is cancelled at the step"
+has "$(cat "$ASK_LOG")" "CANCEL --step mol-polecat-work.workspace-setup --reason" "…and the run is cancelled at the step"
 eq "$(sed -n 's/ .*//p' "$ASK_LOG" | tr '\n' ';')" "ASK;AWAIT;CANCEL;" "…in that order: the question, the wait, the cancel"
 eq "$(meta MI21 gc.routed_to)" "<absent>" "…and the bead is not parked as well"
 restart; bring
 store "[$(child MI23)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && AWAIT_RC=1 STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI23 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+AWAIT_RC=1 HOOK_CURRENT=ST1 unres MI23; rc=$?
 eq "$rc" "1" "a molecule's step whose wait does not land exits 1"
 hasnt "$(cat "$ASK_LOG")" "CANCEL" "…and cancels nothing"
 hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and does not drain"
 restart; bring
 store "[$(child MI24)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && CANCEL_RC=1 STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI24 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+CANCEL_RC=1 HOOK_CURRENT=ST1 unres MI24; rc=$?
 eq "$rc" "1" "a molecule's step whose cancel does not land exits 1"
 hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and does not drain"
 restart; bring
 store "[$(child MI22)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-( cd "$R" && ASK_RC=1 STUB_PACK="$TMP/askpack" WORK_BEAD_ID=MI22 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+ASK_RC=1 unres MI22; rc=$?
 eq "$rc" "1" "a question that reached no gate exits 1"
 [ -f "$R/.git/MERGE_HEAD" ] && ok "…leaving the merge in progress, for the retry" || bad "the merge must not be aborted before a gate asks the question"
 hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and not draining"
 restart
 
-echo "# every metadata key the bring-current scripts and their formula blocks write is registered"
+echo "# every metadata key the bring-current scripts and work-setup.sh write is registered"
 REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$ROOT/lifecycle/lifecycle.toml" \
   | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
-WRITTEN=$( { cat "$HERE/bring-current-guard.sh" "$HERE/bring-current-audit.sh"; printf '%s\n%s\n' "$RESUME" "$UNRES"; } \
+WRITTEN=$( cat "$HERE/bring-current-guard.sh" "$HERE/bring-current-audit.sh" "$HERE/work-setup.sh" \
   | grep -oE -- '--(set|unset)-metadata "?[A-Za-z_][A-Za-z0-9_.]*' | sed -E 's/^--(set|unset)-metadata "?//' | sort -u)
 has "$WRITTEN" "bring_current_record" "the extraction reads the guard's writes"
 has "$WRITTEN" "conflict_audit" "…and the audit script's"
-has "$WRITTEN" "bring_current_scope" "…and the resume block's"
+has "$WRITTEN" "bring_current_scope" "…and work-setup.sh's"
 UNREGISTERED=$(printf '%s\n' "$WRITTEN" | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
 eq "$UNREGISTERED" "" "every key they write is registered in lifecycle.toml"
 
