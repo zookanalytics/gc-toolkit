@@ -133,10 +133,10 @@ bd_cache_clear() {
   return 0
 }
 
-# _bd_call <gc-bd-args...> — the `gc bd` call bd_list and the anchor-graph
-# reads make. A script that pins its reads to one store redefines it after
-# sourcing this file (liveness-sweep.sh adds its --db pin and per-call time
-# bound), and those reads follow the pin.
+# _bd_call <gc-bd-args...> — the `gc bd` call bd_list, the human gate reads and
+# the anchor-graph reads make. A script that pins its reads to one store
+# redefines it after sourcing this file (liveness-sweep.sh adds its --db pin and
+# per-call time bound), and those reads follow the pin.
 _bd_call() { gc bd "$@"; }
 
 # bd_list <gc-bd-list-args...> — a guarded array read. --limit=0 so a

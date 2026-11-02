@@ -501,18 +501,30 @@ eq "$(printf '%s' "$RDUP" | grep -c -e '--retract' || true)" "1" "two gates on o
 has "$(grep -e '--id=' "$TMP/lists" || true)" "--id=tk-gone " "and one candidate in the by-id read"
 
 # The listing holds only gates that stand for this situation: open, human, under
-# the key. bd prints null with no gates and [] through a proxied server, and a
-# failed listing leaves nothing to withdraw.
+# the key, which is bd-lib.sh's rule. A gate holds in every status but closed,
+# whatever its case. bd prints null with no gates and [] through a proxied
+# server, and a failed listing leaves nothing to withdraw.
 for GL in null '[]' "[$(gate tk-g-gone witness-refinery-queue closed)]" \
+          "[$(gate tk-g-gone witness-refinery-queue CLOSED)]" \
           "[$(gate tk-g-gone witness-refinery-queue open timer)]" \
           "[$(gate tk-g-gone some-other-key)]"; do
   hasnt "$(run "$QUEUE_OTHER" "" "" "" "$GL" "$H_CLOSED")" "--retract" \
      "a gate listing of $GL withdraws nothing"
   hasnt "$(cat "$TMP/lists")" "--id=" "and reads no handoff by id"
 done
+has "$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-gone witness-refinery-queue pinned)]" "$H_CLOSED")" "human-gate --retract" \
+   "a pinned gate still holds, so it is withdrawn the way an open one is"
 RGF="$(GATES_RC_OVERRIDE=1 run "$STUCK_ONE" "" "" "" "$G_GONE" "$H_CLOSED")"
 hasnt "$RGF" "--retract" "a failed gate listing withdraws nothing"
 has "$RGF" "human-gate --subject tk-stuck" "and the stuck handoff beside it is still gated"
+# A pack whose bd-lib.sh will not source has no rule to read a gate by, so the
+# block stops the way it does for a script the pack lacks.
+cp "$TMP/rig/assets/scripts/bd-lib.sh" "$TMP/bd-lib.good"
+printf 'return 1\n' > "$TMP/rig/assets/scripts/bd-lib.sh"
+eq "$(run "$QUEUE_OTHER" "" "" "" "$G_GONE" "$H_CLOSED")" "" "a bd-lib.sh that will not source files and withdraws nothing"
+has "$(out)" "or bd-lib.sh did not source" "and the stop says so"
+eq "$(cat "$TMP/lists")" "" "and no queue and no gate listing is read"
+cp "$TMP/bd-lib.good" "$TMP/rig/assets/scripts/bd-lib.sh"
 
 # Absence from the listing is not departure. A listing under a wrong address is
 # a valid empty array with exit 0, and a handoff still open and assigned to the
