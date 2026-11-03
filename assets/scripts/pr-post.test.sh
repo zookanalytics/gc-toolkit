@@ -6,8 +6,8 @@
 # every shape the readers hand them; not-for-review and feedback-def read the
 # rig's declaration from its default branch; acting-login prints a login only
 # on gh's exit 0 and in a login's shape; no reader carries the no-review rule of
-# its own; and no file in the pack posts to a pull request any other way. A gh stub records each call's argv and the body it would post; no
-# network, no city.
+# its own; and no file in the pack posts to a pull request any other way. A gh
+# stub records each call's argv and the body it would post; no network, no city.
 #
 # run-tests-scope: tree
 set -u
