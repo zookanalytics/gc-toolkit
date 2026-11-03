@@ -4175,6 +4175,9 @@ printf '%s' "$(prview 52 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPR
 out=$(STUB_SELF_LOGIN="" run)
 has "$out" "the acting login is unresolved" "an unresolved login is named"
 eq "$(meta P7 pr_posture)" "commented@sha-52" "the standing posture is left holding, never downgraded blind"
+out=$(STUB_SELF_LOGIN_RC=1 run)
+has "$out" "the acting login is unresolved" "…and a login read that fails the way gh fails, its error body on stdout, is no login"
+eq "$(meta P7 pr_posture)" "commented@sha-52" "…so the standing posture is left holding then too"
 
 echo "# identity mismatch records nothing"
 store "[$(anchor I1 30)]"

@@ -303,7 +303,7 @@ if [ -z "$ORIGIN_REPO" ]; then
 fi
 ORIGIN_REPO_Q="$ORIGIN_HOST/$ORIGIN_REPO"
 gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
-SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
+SELF_LOGIN=$("$PR_POST" acting-login --host "$ORIGIN_HOST")
 
 # Which status checks actually gate <branch>. The red-check arm routes on the
 # same set gctk merge holds a merge on (requiredContextsFor in
