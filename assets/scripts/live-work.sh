@@ -65,9 +65,13 @@ LIVE_WORK_JQ='
     "hold_reason", "rebase_hold"
   ];
   # The issue types of plain work, the ones doctor/check-blocked-work-armed
-  # names as what a pool claims and works. An allowlist: a type it has never
-  # heard of, a container (epic) or a question for a person (a gate, a decision)
-  # is closed by its own owner.
+  # names as what a pool claims and works. A bead of any other type has a
+  # closer of its own. An epic closes on its own ruling, and the routed pool
+  # query and gc sling in Gas City both leave epics out. A milestone holds no
+  # work of its own, as bd describes the type. A gate is a wait, closed when
+  # that wait resolves, and a decision is settled by a person. A type this list
+  # has never heard of, such as one a rig adds, is left to its owner rather
+  # than taken for work.
   def live_work_plain_types: ["task", "bug", "feature", "chore", "spike", "story"];
   # One "<what>=<value>" per mark this bead row carries, empty when it carries
   # none. Reads the row `bd list --json` or `bd show --json` returns: status,

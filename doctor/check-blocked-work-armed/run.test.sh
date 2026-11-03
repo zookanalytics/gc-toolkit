@@ -315,10 +315,11 @@ for k in $KINDS; do
 done
 
 # A negative list would flag any type it forgot; the allowlist exempts every
-# non-work type by naming what IS work. Topology/infra types `bd ready` excludes
-# (step, convoy, session, spec, event, convergence) and container types (epic,
-# milestone) must all pass — each of these is flagged by the pre-allowlist
-# negative list, so this loop fails against the old check and proves the fix.
+# non-work type by naming what IS work. Types Gas City's Ready() leaves out
+# (step, convoy, session), records no ready list leaves out (spec, event,
+# convergence), and epic and milestone must all pass — each of these is flagged
+# by the pre-allowlist negative list, so this loop fails against the old check
+# and proves the fix.
 for t in decision epic merge-request gate molecule step convoy session spec event convergence milestone; do
     blocked_store alpha "$(btyped a-1 "$t")"
     eq "$(run_check >/dev/null; echo $?)" "0" "a blocked $t is not pool work — not flagged"
