@@ -72,8 +72,13 @@ as a bare `gc bd close` or `bead-rehome.sh`'s close-with-successor.
 Two layers enforce the ruling, and they apply one predicate. An epic that
 carries a hypothesis may close only once it is ruled close with its outcome
 recorded. A continue or shift ruling holds it as an absent ruling does. An epic
-with no hypothesis is a Delivery or predates the model and is exempt, and a
-disposed epic (`gc.superseded_by`, written by `bead-rehome.sh`) carries a recorded
+with no hypothesis has nothing to rule on, so it passes. It is a Delivery
+([Closing a Delivery](#closing-a-delivery)), or an incomplete Epic, which is
+fixed by recording its hypothesis
+([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
+Epic is compatibility debt
+([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
+epic (`gc.superseded_by`, written by `bead-rehome.sh`) carries a recorded
 terminal reason and passes.
 
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)

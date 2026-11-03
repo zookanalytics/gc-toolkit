@@ -139,9 +139,13 @@ clause_epic_ruling_recorded() {
     [ "$_fgr_type" = "epic" ] || return 0   # not an epic: this clause does not apply
     # The predicate doctor/check-epic-closed-implies-ruled (I15) applies to a
     # closed epic: an epic is held once it carries a hypothesis, unless it is
-    # disposed or ruled close with its outcome. An epic that never carried a
-    # hypothesis is a Delivery or predates the model, and a disposition pointer
-    # (bead-rehome's gc.superseded_by) is a recorded terminal reason, so both pass.
+    # disposed or ruled close with its outcome. An epic with no hypothesis has
+    # nothing to rule on, so it passes. It is a Delivery, which carries an aim
+    # and closes at its epic's checkpoint, or an incomplete Epic, which is fixed
+    # by recording its hypothesis (docs/epics.md). The pass for an incomplete
+    # Epic is compatibility debt (docs/built-once-target.md). A disposition
+    # pointer (bead-rehome's gc.superseded_by) is a recorded terminal reason, so
+    # it passes too.
     [ "$_fgr_hashyp" = true ] || return 0
     [ -n "$_fgr_disposed" ] && return 0
     # Only the close ruling, with its outcome recorded, releases the epic. A

@@ -195,7 +195,8 @@ out=$("$SUT" check E3off 2>/dev/null); rc=$?
 eq "$rc" 1 "epic with an off-enum ruling ('pending'): exit 1"
 has "$out" "continue/shift/close" "the refusal names the allowed ruling set"
 
-# 21. A pre-stewardship epic (no hypothesis) is exempt — it predates the model.
+# 21. An epic with no hypothesis, a Delivery or an incomplete Epic, passes: it
+# has nothing to rule on.
 store "[$(epic_bead E3b open '{}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E3b 2>/dev/null); rc=$?
 eq "$rc" 0 "an epic with no hypothesis is not held by the ruling clause: exit 0"
