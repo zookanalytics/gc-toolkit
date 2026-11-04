@@ -303,7 +303,7 @@ if [ -z "$ORIGIN_REPO" ]; then
 fi
 ORIGIN_REPO_Q="$ORIGIN_HOST/$ORIGIN_REPO"
 gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
-SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
+SELF_LOGIN=$("$PR_POST" acting-login --host "$ORIGIN_HOST")
 
 # Which status checks actually gate <branch>. The red-check arm routes on the
 # same set gctk merge holds a merge on (requiredContextsFor in
@@ -3473,14 +3473,16 @@ $CBODY"
   # a PR waiting on a required approving review is the operator's own review queue,
   # state the board's review section already surfaces from the posture recorded
   # above (pr_posture), not a question a gate should ask. Anything else — a
-  # rule this cadence does not model, unreadable rules, or a thread count that
-  # could not be read — files nothing rather than a guess; the next reconcile
-  # retries. CHANGES_REQUESTED is active feedback the arms above and the dismissal
+  # rule this cadence does not model, unreadable rules, a thread count that
+  # could not be read, or no acting login — files nothing rather than a guess;
+  # the next reconcile retries. Without the acting login, a thread holding only
+  # the city's own findings would count as one a person must resolve.
+  # CHANGES_REQUESTED is active feedback the arms above and the dismissal
   # below own; an operator merge_hold is their own gate; leave both.
   if [ "$merge_state" = "BLOCKED" ] && ! is_held "$hold" && [ "$rd" != "CHANGES_REQUESTED" ]; then
     review_gates_for "$base"
     bcause="unnameable"; bthreads=0
-    if [ "$PROT_STATE" = "known" ] && [ "$PROT_THREAD_REQ" = "true" ]; then
+    if [ "$PROT_STATE" = "known" ] && [ "$PROT_THREAD_REQ" = "true" ] && [ -n "$SELF_LOGIN" ]; then
       if review_threads_load "$num" && bthreads=$(unresolved_threads); then
         [ "$bthreads" -gt 0 ] && bcause="threads"
       else
