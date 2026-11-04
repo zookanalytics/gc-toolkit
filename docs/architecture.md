@@ -195,6 +195,7 @@ moves it afterwards.
 | The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
 | The rig's check index rows | The rig's `review-checks.toml`, laid over the pack's rows | The reviewed commit |
 | The rig's guidance for the check | The rig's `docs/review-<check>.md`, which the formula prints | The reviewed commit |
+| Whether a demo capture may reach the rig's own app on this host | The rig's `demo-capture.toml`, which `assets/scripts/demo-engine-lib.sh` reads | The rig's default branch, as its checkout last fetched it |
 | The diff, and the docs a check stewards, such as `docs/architecture.md` for arch and `docs/product-goals.md` for pm | The review's worktree ([review-workspace.md](review-workspace.md)) | The reviewed commit |
 
 The header of [`review-checks.toml`](../review-checks.toml) states how the
@@ -218,6 +219,10 @@ none.
   default branch,** so a branch is judged against the guidance it carries. A
   guidance fix merged on the default branch reaches an open PR when that PR
   next merges its base.
+- **A rig's declaration that its app never reads the city is read from its
+  default branch, not the reviewed commit,** so a pull request cannot declare
+  it for its own demo. A capture reaches the rig's own app on this host only
+  once the declaration has merged.
 - **When gc-toolkit reviews itself, the pack and the rig are the same files at
   two commits.** A branch that edits a check's method, the specialist stance, a
   review formula or a script the review calls is reviewed under the installed

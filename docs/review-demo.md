@@ -49,10 +49,11 @@ the script's start path opens a row's drill panel. The panel's own reads go to
 the supervisor and fail against a fixture, and the panel still offers its
 actions.
 
-A running helm service is out of a capture's reach, because a capture refuses a
-`--base-url` on this host, and its verbs file and close conversations, clear
-human gates and dispatch work in the live city. The verdict says that the board
-shows fixture data.
+A running helm service is out of a capture's reach. The board and the scripts
+read the city, so gc-toolkit declares nothing in `demo-capture.toml`, and a
+capture refuses a `--base-url` on this host. The service's verbs would also
+file and close conversations, clear human gates and dispatch work in the live
+city. The verdict says that the board shows fixture data.
 
 ## Reports a command prints
 

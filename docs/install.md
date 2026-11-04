@@ -127,6 +127,10 @@ that does not import the pack itself.
   posts on a pull request stays out of review when it opens with gc-toolkit's
   no-review mark or with a marker the rig declares in
   `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
+- **Demo captures of a rig's own app** — a demo capture runs where the live
+  city cannot be reached. A rig whose app never reads the city declares so in
+  `demo-capture.toml`, and a capture may then reach that app on this host
+  ([skills/demo-capture/SKILL.md](../skills/demo-capture/SKILL.md)).
 
 ---
 
