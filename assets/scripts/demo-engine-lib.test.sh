@@ -44,28 +44,45 @@
 #               worktree each stop the capture; a rig worktree inside the city
 #               is allowed, with its git directories
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
-#               already answers on, and a --base-url on this host, stop the
+#               already answers on, and a --base-url on this host that no
+#               declaring rig's worktree serves, stop the capture
+#   (LOCAL-APP) a --base-url on this host whose port every listener serves from
+#               a worktree of a rig whose default branch declares in
+#               demo-capture.toml that its app never reads the city captures,
+#               and the sandbox opens that port and no other; the declaration
+#               is read at origin/HEAD, or origin/main where none is recorded;
+#               a rig that declares nothing there, whatever its worktree commits
+#               or its checkout holds, a declaration that sets anything else, a
+#               server in the rig's checkout, in the city's own repository or in
+#               no rig's repository, a second listener outside any rig, a
+#               listener lsof names no directory for, no listener, no lsof, a
+#               port a city variable names, and a URL with no port each stop the
 #               capture
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
-#               them, though the same command run outside the sandbox does; and
-#               a capture's own server answers it on each of a run of free
-#               ports, which opens neither another loopback service nor a Unix
-#               socket
+#               them, though the same command run outside the sandbox does; a
+#               capture's own server answers it on each of a run of free ports,
+#               which opens neither another loopback service nor a Unix socket;
+#               and with the host's lsof, a declaring rig's own app server
+#               answers a page capture's --base-url on each of a run of ports,
+#               with the same two still shut, while the same server in an
+#               undeclaring rig is refused and a terminal capture in the
+#               declaring rig reaches neither the app nor the city
 #   (SHELLS)    under zsh and macOS's bash 3.2, the shells an agent can source
 #               the library in, the skill's resolve block runs, and an engine
 #               call hands the engine the arguments and the profile this suite's
-#               bash does and drops the variables that point at the city
+#               bash does and drops the variables that point at the city, for a
+#               server the engine starts and for a declaring rig's own app
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
 # The behavior cases run under `env -i`, with a PATH of a coreutils symlink farm
-# and stubs for node, npm, npx, gc, ffmpeg and sandbox-exec, so nothing reaches
-# the network, a browser, or a city. Every stub but sandbox-exec logs its call
-# to $CALLLOG. The sandbox-exec stub keeps the profile it was handed and the
-# environment the engine runs in, then runs the engine. The ISOLATION case
-# runs the host's own sandbox-exec instead.
+# and stubs for node, npm, npx, gc, ffmpeg, lsof and sandbox-exec, so nothing
+# reaches the network, a browser, or a city. Every stub but sandbox-exec logs
+# its call to $CALLLOG. The sandbox-exec stub keeps the profile it was handed
+# and the environment the engine runs in, then runs the engine. The ISOLATION
+# case runs the host's own sandbox-exec and lsof instead.
 #
 # run-tests-scope: tree
 set -u
@@ -87,8 +104,8 @@ hasnt() { case "$2" in *"$1"*) printf 'FAIL - %s\n     unwanted substring: %s\n 
 eq()    { if [ "$1" = "$2" ]; then printf 'ok   - %s\n' "$3"; else printf 'FAIL - %s\n     want: %s\n     got:  %s\n' "$3" "$2" "$1"; FAIL=1; fi; }
 
 TMPD="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/demo-engine-lib-test.XXXXXX")" && pwd -P)"
-API_PID=""; API_SOCK=""
-trap '[ -z "$API_PID" ] || kill "$API_PID" 2>/dev/null; rm -rf "$TMPD" ${API_SOCK:+"$API_SOCK"}' EXIT
+API_PID=""; API_SOCK=""; APP_PID=""
+trap '[ -z "$API_PID" ] || kill "$API_PID" 2>/dev/null; [ -z "$APP_PID" ] || kill "$APP_PID" 2>/dev/null; rm -rf "$TMPD" ${API_SOCK:+"$API_SOCK"}' EXIT
 
 # Only the tools the two captures call. env -i keeps everything else off PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
@@ -172,7 +189,29 @@ env >"${SANDBOX_ENV:-/dev/null}"
 shift 2
 exec "$@"
 SBX
-chmod +x "$BIN"/node "$BIN"/npm "$BIN"/npx "$BIN"/gc "$BIN"/ffmpeg "$BIN"/sandbox-exec
+# lsof answers from $LISTENERS, one "<port> <pid> <working directory>" per
+# line: the pids that listen on the port -iTCP: names, or the working directory
+# of the process -p names, in lsof's field output.
+cat >"$BIN/lsof" <<'LSOF'
+#!/usr/bin/env bash
+printf 'lsof %s\n' "$*" >>"${CALLLOG:?}"
+port=""; pid=""; prev=""
+for a in "$@"; do
+  case "$a" in -iTCP:*) port="${a#-iTCP:}" ;; esac
+  [ "$prev" = "-p" ] && pid="$a"
+  prev="$a"
+done
+rc=1
+while read -r lp lpid ldir; do
+  [ -n "$lp" ] || continue
+  if [ -n "$port" ] && [ "$lp" = "$port" ]; then printf '%s\n' "$lpid"; rc=0; fi
+  if [ -n "$pid" ] && [ "$lpid" = "$pid" ]; then printf 'p%s\nfcwd\nn%s\n' "$lpid" "$ldir"; rc=0; break; fi
+done <<EOF
+${LISTENERS:-}
+EOF
+exit "$rc"
+LSOF
+chmod +x "$BIN"/node "$BIN"/npm "$BIN"/npx "$BIN"/gc "$BIN"/ffmpeg "$BIN"/sandbox-exec "$BIN"/lsof
 # The same stubs without npx, without node, without ffmpeg, and without
 # sandbox-exec.
 NONPX="$TMPD/bin-nonpx"; mkdir -p "$NONPX"
@@ -185,6 +224,8 @@ NOSBX="$TMPD/bin-nosandbox"; mkdir -p "$NOSBX"
 for s in jq node npx npm gc ffmpeg; do ln -s "$BIN/$s" "$NOSBX/$s"; done
 NOGC="$TMPD/bin-nogc"; mkdir -p "$NOGC"
 for s in jq node npx npm ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOGC/$s"; done
+NOLSOF="$TMPD/bin-nolsof"; mkdir -p "$NOLSOF"
+for s in jq node npx npm gc ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOLSOF/$s"; done
 
 # The engine's CLI: help lists its commands, lint passes, run writes the clip
 # and the engine's closing report, and screenshot writes the PNG.
@@ -412,6 +453,46 @@ git -C "$RIGA" init -q && git -C "$RIGA" -c user.name=fixture -c user.email=fixt
 RWT="$CITY/.gc/worktrees/alpha/wt"; mkdir -p "$(dirname "$RWT")"
 git -C "$RIGA" worktree add -q --detach "$RWT" HEAD >/dev/null 2>&1 || { echo "test setup: cannot add the rig's worktree" >&2; exit 2; }
 
+# The rigs a --base-url on this host is judged against. alpha declares on its
+# default branch that its app never reads the city. beta, in the city beside
+# it, declares nothing there, though its worktree commits a declaration and its
+# checkout holds an uncommitted one. The city's own repository, which the rig
+# map lists as its hq entry, declares as alpha does. Each has a worktree.
+# decl_commit <repo> [<text>] prints a commit whose tree is demo-capture.toml
+# holding the text, or an empty tree when no text is given, and origin_main
+# <repo> <commit> makes that commit the default branch the checkout last fetched.
+decl_commit() {
+  local tree
+  if [ $# -ge 2 ]; then
+    tree=$(printf '100644 blob %s\tdemo-capture.toml\n' "$(printf '%s\n' "$2" | git -C "$1" hash-object -w --stdin)" | git -C "$1" mktree)
+  else
+    tree=$(git -C "$1" mktree </dev/null)
+  fi
+  git -C "$1" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit-tree "$tree" -m fixture
+}
+origin_main() {
+  git -C "$1" update-ref refs/remotes/origin/main "$2" && git -C "$1" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+}
+RIGB="$CITY/rigs/beta"; BWT="$CITY/.gc/worktrees/beta/wt"; HQ="$TMPD/hq"; HQWT="$TMPD/hq-wt"
+for r in "$RIGB" "$HQ"; do
+  mkdir -p "$r/.beads" && git -C "$r" init -q \
+    && git -C "$r" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q --allow-empty -m init \
+    || { echo "test setup: cannot make the repository $r" >&2; exit 2; }
+done
+mkdir -p "$(dirname "$BWT")"
+git -C "$RIGB" worktree add -q --detach "$BWT" HEAD >/dev/null 2>&1 && git -C "$HQ" worktree add -q --detach "$HQWT" HEAD >/dev/null 2>&1 \
+  || { echo "test setup: cannot add the worktrees" >&2; exit 2; }
+origin_main "$RIGA" "$(decl_commit "$RIGA" '# The app reads only its own database.
+app_reads_city = false')" && origin_main "$RIGB" "$(decl_commit "$RIGB")" \
+  && origin_main "$HQ" "$(decl_commit "$HQ" 'app_reads_city = false')" \
+  || { echo "test setup: cannot record the rigs' default branches" >&2; exit 2; }
+printf 'app_reads_city = false\n' | tee "$BWT/demo-capture.toml" >"$RIGB/demo-capture.toml"
+git -C "$BWT" add demo-capture.toml && git -C "$BWT" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q -m declare \
+  || { echo "test setup: cannot commit beta's declaration in its worktree" >&2; exit 2; }
+RIGS_LOCAL=$(jq -nc --arg h "$HQ" --arg a "$RIGA" --arg b "$RIGB" --arg o "$OUTRIG" --arg e "$ENGINE" \
+  '{rigs: [{name: "fixture", path: $h, hq: true}, {name: "alpha", path: $a}, {name: "beta", path: $b}, {name: "outside", path: $o}, {name: "sprintshow", path: $e}]}')
+LOCAL_ENV=("${CITY_ENV[@]}" RIGS_JSON="$RIGS_LOCAL")
+
 for cap in video screenshot; do
   echo "# ($cap) SANDBOX: the engine runs under sandbox-exec, in a profile that keeps the city out of reach"
   capture "$cap" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
@@ -520,6 +601,84 @@ for cap in video screenshot; do
   hasnt "(allow network-outbound (remote ip" "$(profile)" "($cap) and opens no loopback port"
 done
 
+# local_refused <cap> <case> <wanted reason>: the capture just run was refused
+# for that reason, as a --base-url on this host, and never ran.
+local_refused() {
+  eq "$RC" 1 "($1) $2 exits 1"
+  has "names a server on this host, which runs outside the capture's sandbox" "$(err)" "($1) it says the server runs outside the sandbox"
+  has "$3" "$(err)" "($1) and why that server is not a declaring rig's own app"
+  not_run "$1"
+}
+DECL_TEXTS=('app_reads_city = true' 'app_reads_city = "false"' '# app_reads_city = false' 'app_reads_city = false
+app_reads_city = false' 'app_reads_city = false
+port = 3000')
+DECL_WHYS=('sets app_reads_city = true' 'because line 1 is not app_reads_city = true or false' 'because it does not set app_reads_city'
+  'because line 2 sets app_reads_city a second time' 'because line 2 is not app_reads_city = true or false')
+for cap in video screenshot; do
+  echo "# ($cap) LOCAL-APP: a --base-url on this host reaches a server that works in a worktree of a rig that declares its app never reads the city, at that server's port alone"
+  for url in http://127.0.0.1:5180/ http://localhost:5180 'http://[::1]:5180/fixture'; do
+    capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT" -- --base-url "$url"
+    eq "$RC" 0 "($cap) --base-url $url, served from a worktree of the declaring rig, captures"
+    has "--base-url $url is served from a worktree of $RIGA, which declares in demo-capture.toml that its app never reads the city" "$(err)" "($cap) it says whose server the capture reaches"
+    has "--base-url $url" "$(calls)" "($cap) the engine drives that URL"
+    has "(allow network-outbound (remote ip \"localhost:5180\"))" "$(profile)" "($cap) the sandbox opens the server's port"
+    eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
+    has "(deny network-outbound (remote ip \"localhost:*\"))" "$(profile)" "($cap) and denies every other one"
+  done
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="80 4242 $RWT" -- --base-url http://localhost/
+  eq "$RC" 0 "($cap) a URL that names no port captures"
+  has "(allow network-outbound (remote ip \"localhost:80\"))" "$(profile)" "($cap) at the port its scheme implies"
+
+  echo "# ($cap) LOCAL-APP: the declaration is read at origin/HEAD, or at origin/main where the checkout records none"
+  git -C "$RIGB" update-ref refs/remotes/origin/trunk "$(decl_commit "$RIGB" 'app_reads_city = false')"
+  git -C "$RIGB" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) a rig whose origin/HEAD names a branch that declares captures, though its origin/main declares nothing"
+  git -C "$RIGB" update-ref -d refs/remotes/origin/trunk; git -C "$RIGB" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  git -C "$RIGA" symbolic-ref --delete refs/remotes/origin/HEAD
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
+  eq "$RC" 0 "($cap) a rig whose checkout records no origin/HEAD is read at origin/main"
+  A_MAIN=$(git -C "$RIGA" rev-parse refs/remotes/origin/main); git -C "$RIGA" update-ref -d refs/remotes/origin/main
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
+  local_refused "$cap" "a rig whose checkout has neither" "works in a worktree of $RIGA, and its checkout has no origin/main to read demo-capture.toml from"
+  origin_main "$RIGA" "$A_MAIN"
+
+  echo "# ($cap) LOCAL-APP: a rig that declares nothing on its default branch keeps the refusal, whatever its pull requests and its checkout hold"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  local_refused "$cap" "a server in a worktree of a rig that declares nothing" "process 4243, which listens on port 5181, works in a worktree of $RIGB, and its default branch, origin/main, carries no demo-capture.toml"
+  for i in "${!DECL_TEXTS[@]}"; do
+    origin_main "$RIGB" "$(decl_commit "$RIGB" "${DECL_TEXTS[$i]}")"
+    capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+    local_refused "$cap" "a default branch whose demo-capture.toml reads '${DECL_TEXTS[$i]//$'\n'/ | }'" "${DECL_WHYS[$i]}"
+  done
+  origin_main "$RIGB" "$(decl_commit "$RIGB")"
+
+  echo "# ($cap) LOCAL-APP: a server that works in a rig's checkout, in the city's own repository or in no rig's repository, or on a port the city's variables name, keeps the refusal"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5182 4244 $RIGA" -- --base-url http://127.0.0.1:5182/
+  local_refused "$cap" "a server in the declaring rig's own checkout" "process 4244, which listens on port 5182, works in $RIGA, in a tree that holds the city's state"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5183 4245 $HQWT" -- --base-url http://127.0.0.1:5183/
+  local_refused "$cap" "a server in a worktree of the city's own repository, which declares" "process 4245, which listens on port 5183, works in $HQWT, in the city's own repository"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5184 4246 $WORK" -- --base-url http://127.0.0.1:5184/
+  local_refused "$cap" "a server in no rig's repository" "process 4246, which listens on port 5184, works in $WORK, which is in no rig's repository"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5185 4247 $RWT
+5185 4248 /" -- --base-url http://127.0.0.1:5185/
+  local_refused "$cap" "a port where a second process listens outside any rig" "process 4248, which listens on port 5185, works in /, which is in no rig's repository"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5186 4249" -- --base-url http://127.0.0.1:5186/
+  local_refused "$cap" "a listener whose working directory lsof does not name" "lsof names no working directory for process 4249, which listens on port 5186"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --base-url http://127.0.0.1:5187/
+  local_refused "$cap" "a port nothing of this user's listens on" "no process of yours listens on port 5187"
+  STUB_PATH="$NOLSOF" capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
+  local_refused "$cap" "a host with no lsof on PATH" "lsof, which names the processes that listen on port 5180, is not on PATH"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="3307 4250 $RWT" -- --base-url http://127.0.0.1:3307/
+  local_refused "$cap" "the port a city variable names, though a declaring rig's worktree serves it" "port 3307 is the one DOLT_PORT names, which is the city's"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GC_FIXTURE_API_URL=http://127.0.0.1:5188/v0 LISTENERS="5188 4251 $RWT" -- --base-url http://localhost:5188/
+  local_refused "$cap" "the port of a URL a city variable names" "port 5188 is the one GC_FIXTURE_API_URL names, which is the city's"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" BEADS_FIXTURE_ADDR=127.0.0.1:5189 LISTENERS="5189 4252 $RWT" -- --base-url http://localhost:5189/
+  local_refused "$cap" "the port of a host:port a city variable names" "port 5189 is the one BEADS_FIXTURE_ADDR names, which is the city's"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT" -- --base-url http://localhost:99999/
+  local_refused "$cap" "a URL that names no port a server can take" "the URL names no port from 1 to 65535"
+done
+
 echo "# ISOLATION: a terminal capture whose command reads the city reaches none of it, through the host's own sandbox"
 if [ ! -x /usr/bin/sandbox-exec ] || ! /usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true 2>/dev/null; then
   echo "# ISOLATION: SKIPPED (no working sandbox-exec on this host; NO-SANDBOX shows that a capture there never runs)"
@@ -548,11 +707,12 @@ ENGINE
   # A service on the loopback interface stands in for the supervisor's API and
   # the Dolt server, and one on a Unix socket for the session server, when the
   # host has a node to run them. A Unix socket's path has a short limit, so it
-  # sits directly under /tmp.
+  # sits directly under /tmp. Each answers every connection and ignores one its
+  # client resets, as a knock does, so it answers the cases after a knock too.
   APIPORT=""; REAL_NODE="$(command -v node || true)"
   if [ -n "$REAL_NODE" ]; then
     API_SOCK="$(mktemp -u /tmp/demo-engine-lib-test.XXXXXX)"
-    "$REAL_NODE" -e 'const net = require("net"); net.createServer((c) => c.end("SECRET-SOCKET\n")).listen(process.argv[2]); const s = net.createServer((c) => c.end("SECRET-API\n")); s.listen(0, "127.0.0.1", () => require("fs").writeFileSync(process.argv[1], String(s.address().port)));' "$TMPD/api.port" "$API_SOCK" &
+    "$REAL_NODE" -e 'const net = require("net"); const answer = (text) => (c) => { c.on("error", () => {}); c.end(text); }; net.createServer(answer("SECRET-SOCKET\n")).listen(process.argv[2]); const s = net.createServer(answer("SECRET-API\n")); s.listen(0, "127.0.0.1", () => require("fs").writeFileSync(process.argv[1], String(s.address().port)));' "$TMPD/api.port" "$API_SOCK" &
     API_PID=$!
     for _ in $(seq 1 100); do [ -s "$TMPD/api.port" ] && break; sleep 0.1; done
     APIPORT="$(cat "$TMPD/api.port" 2>/dev/null)"
@@ -636,6 +796,104 @@ JS
     outside=$("$REAL_NODE" "$KNOCK" "$port" "$APIPORT" "$API_SOCK" 2>&1)
     has "other reached" "$outside" "(ISOLATION) outside the sandbox the loopback service answers"
     has "socket reached" "$outside" "(ISOLATION) and so does the Unix socket"
+
+    # A rig's own app, served on this host from a worktree of the rig that
+    # declares its app never reads the city, answers a page capture's
+    # --base-url, which opens no other loopback service and no Unix socket. The
+    # host's own lsof finds the server. This also runs on several ports, for the
+    # reason above. The same server in a worktree of a rig that declares nothing
+    # is refused, and a terminal capture in the declaring rig reaches neither the
+    # app nor the city.
+    if ! LSOF_BIN=$(command -v lsof); then
+      echo "# ISOLATION: a rig's own app on this host is SKIPPED (no lsof on this host)"
+    else
+      REALLSOF="$TMPD/bin-reallsof"; mkdir -p "$REALLSOF"; ln -s "$LSOF_BIN" "$REALLSOF/lsof"
+      BASE_STUB="$TMPD/engine-base"
+      cat >"$BASE_STUB" <<'ENGINE'
+#!/usr/bin/env bash
+case "${1:-}" in
+  help) printf 'Usage:\n  sprintshow screenshot <demo.md> -o <file.png> [options]\n'; exit 0 ;;
+  screenshot) ;;
+  *) exit 97 ;;
+esac
+o=""; url=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; [ "$prev" = "--base-url" ] && url="$a"; prev="$a"; done
+port="${url##*:}"; port="${port%%/*}"
+"${REAL_NODE:?}" "${BASEKNOCK:?}" "$port" "${APIPORT:?}" "${API_SOCK:?}" >"${CMD_OUT:?}" 2>&1
+printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00' >"$o"
+printf '\n✅ screenshot → %s\n' "$o"
+ENGINE
+      chmod +x "$BASE_STUB"
+      BASEKNOCK="$TMPD/baseknock.js"
+      cat >"$BASEKNOCK" <<'JS'
+const net = require("net");
+const [app, other, sock] = process.argv.slice(2);
+const knock = (to) => new Promise((done) => {
+  const s = net.connect(to);
+  s.setTimeout(3000, () => { s.destroy(); done("timeout"); });
+  s.once("connect", () => { s.destroy(); done("reached"); });
+  s.once("error", (e) => done(e.code));
+});
+(async () => {
+  console.log("app", await knock({ host: "127.0.0.1", port: Number(app) }));
+  console.log("other", await knock({ host: "127.0.0.1", port: Number(other) }));
+  console.log("socket", await knock({ path: sock }));
+  process.exit(0);
+})();
+JS
+      # start_app <dir>: an app server that works in the directory, on a free
+      # port, in APPPORT, whose process is APP_PID. stop_app ends it.
+      start_app() {
+        rm -f "$TMPD/app.port"
+        ( cd "$1" && exec "$REAL_NODE" -e 'const s = require("net").createServer((c) => { c.on("error", () => {}); c.end("APP-OK\n"); }); s.listen(0, "127.0.0.1", () => require("fs").writeFileSync(process.argv[1], String(s.address().port)));' "$TMPD/app.port" ) &
+        APP_PID=$!
+        for _ in $(seq 1 100); do [ -s "$TMPD/app.port" ] && break; sleep 0.1; done
+        APPPORT="$(cat "$TMPD/app.port" 2>/dev/null)"
+      }
+      stop_app() { [ -z "$APP_PID" ] || { kill "$APP_PID" 2>/dev/null; wait "$APP_PID" 2>/dev/null; }; APP_PID=""; }
+      # app_capture: a page capture of the app at APPPORT, from $WORK, through the
+      # host's sandbox and lsof, with its output in $out and its status in $rc.
+      app_capture() {
+        : >"$CMD_OUT"
+        out=$( cd "$WORK" && env -i PATH="$REALSBX:$REALLSOF:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+            ENGINE_STUB="$BASE_STUB" REAL_NODE="$REAL_NODE" BASEKNOCK="$BASEKNOCK" APIPORT="$APIPORT" API_SOCK="$API_SOCK" \
+            CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" \
+            bash "$SHOT" page --script "$SCRIPT" --base-url "http://127.0.0.1:$APPPORT/" --output "$WORK/app.png" 2>&1 ); rc=$?
+      }
+      for _ in 1 2 3 4; do
+        start_app "$RWT"
+        app_capture
+        stop_app
+        inside="$(cat "$CMD_OUT")"
+        eq "$rc" 0 "(LOCAL-APP) a page capture of the declaring rig's server on port $APPPORT runs, in the host's sandbox"
+        has "is served from a worktree of $RIGA" "$out" "(LOCAL-APP) the host's lsof finds the server in the rig's worktree"
+        has "app reached" "$inside" "(LOCAL-APP) the capture reaches that server"
+        hasnt "other reached" "$inside" "(LOCAL-APP) and no other loopback service"
+        hasnt "socket reached" "$inside" "(LOCAL-APP) and no Unix socket"
+      done
+      start_app "$BWT"
+      app_capture
+      stop_app
+      eq "$rc" 1 "(LOCAL-APP) the same capture of a server in a worktree of a rig that declares nothing exits 1"
+      has "works in a worktree of $RIGB, and its default branch, origin/main, carries no demo-capture.toml" "$out" "(LOCAL-APP) because that rig declares nothing"
+      eq "$(cat "$CMD_OUT")" "" "(LOCAL-APP) and the engine never runs"
+
+      start_app "$RWT"
+      TPROBE="(exec 3<>/dev/tcp/127.0.0.1/$APPPORT && cat <&3); (exec 3<>/dev/tcp/127.0.0.1/$APIPORT && cat <&3); cat '$CITY/city.toml' '$RIGA/.beads/issues.jsonl' '$GCH/cities.toml'; echo PROBED"
+      : >"$CMD_OUT"
+      out=$( cd "$RWT" && env -i PATH="$REALSBX:$REALLSOF:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+          ENGINE_STUB="$EXEC_STUB" CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" \
+          bash "$SHOT" terminal --command "$TPROBE" --cwd "$RWT" --output "$WORK/term.png" 2>&1 ); rc=$?
+      inside="$(cat "$CMD_OUT")"
+      outside=$( cd "$RWT" && bash -c "$TPROBE" 2>&1 )
+      stop_app
+      eq "$rc" 0 "(LOCAL-APP) a terminal capture in the declaring rig's worktree runs, in the host's sandbox"
+      has "PROBED" "$inside" "(LOCAL-APP) its command runs to the end"
+      for secret in APP-OK SECRET-API SECRET-CITY-CONFIG SECRET-RIG-STORE SECRET-GC-HOME; do
+        hasnt "$secret" "$inside" "(LOCAL-APP) the terminal capture does not reach $secret"
+        has "$secret" "$outside" "(LOCAL-APP) though the same command outside the sandbox reaches $secret"
+      done
+    fi
   fi
 fi
 
@@ -725,12 +983,16 @@ echo "# SHELLS: the library runs in the agent's own shell, which can be zsh or m
 # environment. The engine call names a server and a port, so what the shell does
 # with the arguments reaches the engine and the profile.
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --serve-dir app --port 5199 -o clip.mp4#' >"$TMPD/skill-serve.sh"
+skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --base-url http://127.0.0.1:5180/ -o clip.mp4#' >"$TMPD/skill-base.sh"
+skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --base-url http://127.0.0.1:5180/ --serve-dir app -o clip.mp4#' >"$TMPD/skill-two.sh"
+# shell_run <shell> <block> [VAR=VAL ...]: run the block through the shell, in
+# the city's environment and the variables given.
 shell_run() {
-  local sh="$1" blk="$2"
+  local sh="$1" blk="$2"; shift 2
   : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
   ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$ENGINE_STUB" PACK_SCRIPTS="$HERE" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
-      "${CITY_ENV[@]}" "$sh" "$blk" >"$OUTF" 2>"$ERRF" )
+      "${CITY_ENV[@]}" "$@" "$sh" "$blk" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
 shell_run bash "$TMPD/skill-serve.sh"
@@ -738,6 +1000,14 @@ eq "$RC" 0 "(shells) this suite's bash runs the engine call"
 has "node [$ENGINE/src/cli.ts] [run] [demo.md] [--serve-dir] [app] [--port] [5199] [-o] [clip.mp4]" "$(calls)" "(shells) and the engine gets its arguments"
 has '(allow network-outbound (remote ip "localhost:5199"))' "$(profile)" "(shells) and the profile opens the port they name"
 SERVE_CALLS="$(calls)"; SERVE_PROFILE="$(profile)"
+shell_run bash "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
+eq "$RC" 0 "(shells) this suite's bash runs an engine call whose --base-url a declaring rig's worktree serves"
+has '(allow network-outbound (remote ip "localhost:5180"))' "$(profile)" "(shells) and the profile opens that server's port"
+BASE_CALLS="$(calls)"; BASE_PROFILE="$(profile)"
+shell_run bash "$TMPD/skill-two.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
+eq "$RC" 1 "(shells) an engine call that names a --base-url on this host and a --serve-dir exits 1"
+has "--base-url http://127.0.0.1:5180/ and --serve or --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
 for sh in /bin/zsh /bin/bash; do
   if [ ! -x "$sh" ]; then echo "# SHELLS: $sh SKIPPED (not on this host)"; continue; fi
   shell_run "$sh" "$TMPD/skill-resolve.sh"
@@ -748,6 +1018,13 @@ for sh in /bin/zsh /bin/bash; do
   eq "$(calls)" "$SERVE_CALLS" "(shells) $sh hands the engine the same arguments"
   eq "$(profile)" "$SERVE_PROFILE" "(shells) $sh builds the same profile"
   eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(shells) $sh drops the variables that point at the city"
+  shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
+  eq "$RC" 0 "(shells) $sh runs the engine call whose --base-url a declaring rig's worktree serves"
+  eq "$(calls)" "$BASE_CALLS" "(shells) $sh asks lsof and hands the engine what this suite's bash does"
+  eq "$(profile)" "$BASE_PROFILE" "(shells) $sh builds the same profile for it"
+  shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4243 $BWT"
+  eq "$RC" 1 "(shells) $sh refuses the same call when an undeclaring rig's worktree serves the port"
+  has "carries no demo-capture.toml" "$(err)" "(shells) $sh names why"
 done
 
 echo "# NO-COPY: no other script, and no skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
