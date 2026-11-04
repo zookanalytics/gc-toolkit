@@ -133,10 +133,10 @@ bd_cache_clear() {
   return 0
 }
 
-# _bd_call <gc-bd-args...> — the `gc bd` call bd_list and the anchor-graph
-# reads make. A script that pins its reads to one store redefines it after
-# sourcing this file (liveness-sweep.sh adds its --db pin and per-call time
-# bound), and those reads follow the pin.
+# _bd_call <gc-bd-args...> — the `gc bd` call bd_list, the human gate reads and
+# the anchor-graph reads make. A script that pins its reads to one store
+# redefines it after sourcing this file (liveness-sweep.sh adds its --db pin and
+# per-call time bound), and those reads follow the pin.
 _bd_call() { gc bd "$@"; }
 
 # bd_list <gc-bd-list-args...> — a guarded array read. --limit=0 so a
@@ -232,8 +232,8 @@ bd_open_human_gates() {
 
 # bd_gates_open_under_key <key> — the open gates under a situation key, read
 # from a bd_human_gates array on stdin and printed as one JSON array, first to
-# last by when each was created, then id. The first is the gate that asks:
-# human-gate.sh keeps it and resolves its own gate when another comes first,
+# last by when each was created, then id. Two stand when racing writers both
+# filed. The first is the one a caller names: human-gate.sh's dedup prints it,
 # and await-ruling.sh makes the work bead wait on it, so every writer and
 # reader of one situation orders the gates here. created_at is read as a time,
 # its fractional seconds and its offset included, because as text a time with

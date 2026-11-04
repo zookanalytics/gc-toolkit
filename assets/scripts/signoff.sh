@@ -947,7 +947,7 @@ ensure_validation_pass() {
 dismiss_superseded() {
   [ -n "$POST_OPEN" ] || return 0
   local handle live raw rc stale rid paired owndef since
-  handle=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
+  handle=$("$PR_POST" acting-login --host "$PR_HOST" 2>/dev/null)
   [ -n "$handle" ] || return 0
   owndef=$("$PR_POST" own-def 2>/dev/null) && [ -n "$owndef" ] || return 0
   # Passed on as found: gc_city_cutover reads a malformed stamp as no cutover.

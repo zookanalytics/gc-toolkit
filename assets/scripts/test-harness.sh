@@ -81,7 +81,7 @@ harness_init() {
   export STUB_SESSION_LOG="$TMP/session.log"
   export STUB_ORIGIN_URL="https://github.com/zook/gc-toolkit"
   export STUB_ORIGIN_HEAD="main"
-  export STUB_SELF_LOGIN="gc-city-bot"
+  export STUB_SELF_LOGIN="gc-city-bot" STUB_SELF_LOGIN_RC=""
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   # STUB_SHOW_NOTICE: when set to a rig name, `gc bd show` leads its stdout with a
@@ -1302,7 +1302,14 @@ case "$sub" in
     esac
     out=""
     case "$path" in
-      user) out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;
+      user)
+        # STUB_SELF_LOGIN_RC models a failed read the way real gh answers it: the
+        # error body on STDOUT, --jq ignored, a non-zero exit.
+        if [ "${STUB_SELF_LOGIN_RC:-0}" != 0 ]; then
+          printf '{"message":"Server Error","documentation_url":"https://docs.github.com/rest","status":"502"}'
+          exit "$STUB_SELF_LOGIN_RC"
+        fi
+        out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;
       */commits/*)
         br="${path##*/commits/}"
         f="$G/head_$(san "$br")"
