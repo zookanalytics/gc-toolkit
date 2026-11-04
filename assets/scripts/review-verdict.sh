@@ -3,19 +3,13 @@
 # request carries a standing approval from an account other than the city's, and
 # whether a standing request for changes vetoes it.
 #
-# Sourced (never executed) by the shell readers that act on a PR's approval:
-# pr-facts.sh (the posture arm records an approval the lift line set aside as
-# review_required, and the conflict arm brings a branch current only for an
-# approved PR), bring-current-guard.sh (an approval the ruling on a
-# bring-current round lifts is dismissed), approval-withdraw.sh (a validator
-# ruling that a fresh whole-diff review is warranted withdraws it) and
-# converse-signoff.sh (a ruling that leaves a PR standing says when the PR still
-# needs an approval or a request for changes holds it). One
-# definition, no copies: review-verdict.test.sh fails when a reader stops
-# sourcing this file or carries a rule of its own. gctk merge (services/gctk/internal/cli/merge.go,
-# reviewVerdict) states the same rule natively for the universal approval merge
-# rule and the visit order that predicts it, and merge.test.sh runs both over
-# the same review histories and fails when their verdicts differ.
+# Sourced (never executed) by each shell script that acts on a PR's approval.
+# One definition, no copies: review-verdict.test.sh lists those readers and
+# fails when one stops sourcing this file or carries a rule of its own. gctk
+# merge (services/gctk/internal/cli/merge.go, reviewVerdict) states the same
+# rule natively for the universal approval merge rule and the visit order that
+# predicts it, and merge.test.sh runs both over the same review histories and
+# fails when their verdicts differ.
 #
 # The input is a list of reviews in the REST shape that
 # `GET /repos/{owner}/{repo}/pulls/{n}/reviews` returns: `.user.login`,

@@ -43,25 +43,17 @@
 # merge_result, `held` included, as a PR or merge that already exists, and
 # cancels a run poured at a bead that still carries one.
 #
-# A ruling is not an approval. The merge counts only an Approve review on GitHub
-# from an account other than the city's (review-verdict.sh), and nothing this
-# sign-off writes is one. So each open PR the ruling leaves standing with no such
-# review is said to still need it: in the headline step 2 writes, which step 6's
-# close reason and step 7's reminder repeat, and in a line the sitting relays to
-# the operator with the PR's link. The headline names one such PR and counts
-# several, so its length does not grow with them, and the reminder's actions name
-# each. This is read before the first write, and each call gives up after 20
-# seconds, so a stalled connection cannot hold the ruling's writes to the store. A
-# PR whose reviews do not read counts as needing one, because a needless ask costs
-# a glance at GitHub and a missed one leaves the PR sitting unmerged.
-#
-# The merge also holds on any standing request for changes, whatever approval
-# stands beside it. A PR with both needs no Approve, so its headline stays as
-# given and its line names the account whose request holds the merge. A PR with a
-# request and no approval still needs an Approve, and its line names that account
-# too, because the operator's Approve replaces only the operator's own request.
-# The sign-off cannot tell which login is the operator's, so each line reads true
-# whichever it is.
+# A ruling is not an approval: the merge counts only an Approve review on GitHub
+# from an account other than the city's (review-verdict.sh). So the headline
+# says when an open PR the ruling leaves standing still needs one, naming one PR
+# and counting several so the clause fits the cap, and a printed line gives the
+# sitting each PR's link. The reviews are read before the first write, each call
+# bounded at 20 seconds, so a stalled read cannot hold the ruling's writes. A PR
+# whose reviews do not read counts as needing one: a needless ask costs a glance,
+# and a missed one leaves the PR unmerged. A standing request for changes holds
+# the merge whatever approval stands, so a PR with both needs no Approve, and its
+# line names whose request holds it. The sign-off cannot tell which login is the
+# operator's, so each line reads true whichever it is.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 5 when it takes the recommendation,
@@ -96,12 +88,11 @@
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
 #     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]]
 #   --outcome is the subject's headline, and the close reason the sittings card
-#   falls back to. A PR the ruling leaves standing with no Approve review adds
-#   "; PR #<n> still needs your Approve on GitHub" after it, and more than one adds
-#   "; <count> PRs still need your Approve on GitHub". The addition counts toward
-#   the cap. --ruled defaults to `no`. --ruled yes requires --ruling, the
-#   answer each gate resolves with, and --route, where a `held` subject is
-#   released to. --subject, when given, must be the bead the conversation tracks.
+#   falls back to. A PR the ruling leaves standing with no Approve review adds a
+#   clause saying so, which counts toward the cap. --ruled defaults to `no`.
+#   --ruled yes requires --ruling, the answer each gate resolves with, and
+#   --route, where a `held` subject is released to. --subject, when given, must
+#   be the bead the conversation tracks.
 #   --leave (with --ruled yes) names a gate the conversation replies to that the
 #   ruling leaves owed: it stays open, and its reply stays as the record that
 #   this conversation took it up.
