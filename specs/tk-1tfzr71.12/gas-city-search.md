@@ -68,8 +68,9 @@ not evidence for what upstream ships, so it is named only where it is what runs.
   with no record behind it leaves work nothing re-offers. tk-qitjxcm carries the rest
   of the copies onto this script.
 - **`work-gate.sh`.** Searched: core's `load-context`. Upstream's has no gate. The
-  fork's parks the step and mails, where the operator's ruling on visit tk-r69f9cv
-  has every decline cancel its run. Neither refuses a finished, parked or blocked
+  fork's parks the step and mails, where this gate follows the model the operator's
+  ruling on visit tk-r69f9cv adopted, tk-0nk367j: runs stop through gascity's run
+  cancel, and waits sit on the work bead. Neither refuses a finished, parked or blocked
   bead, and `gc sling --on` pours without reading a blocks edge, which is why the
   guard exists: tk-1tfzr71.12's notes record reworks this gate refused only because
   their edge had landed.
