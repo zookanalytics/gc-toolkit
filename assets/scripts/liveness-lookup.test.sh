@@ -270,18 +270,18 @@ eq "$(bead_state '{"gascity/gc-toolkit.gc-z0vi2":"active"}' '{"id":"b2","metadat
 #     resolve, and inventing an owner for it would be the false-orphan path.
 eq "$(bead_state "$MAP_STEP" '{"id":"n1","metadata":{"gc.kind":"workflow","gc.root_bead_id":"tk-root"}}')" "" \
    "(V) ownerless bead is dropped by the filter, never classified"
-# (AF) A visit engage bound to a sitting names that sitting's runtime name in its
-#      assignee, before the sitting starts. When the create fails, its row
-#      either stays open in failed-create or, closed by the rollback, leaves
-#      the list. Both are dead, so the visit is orphaned. A sitting still
-#      starting is owned, and its visit is left alone.
-VISIT_BOUND='{"id":"gc-v1","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human"}}'
-eq "$(bead_state '{"hq-wisp-tjt3y":"failed-create","s-hq-wisp-tjt3y":"failed-create"}' "$VISIT_BOUND")" "failed-create" \
-   "(AF) visit bound to a sitting whose failed create is still open -> failed-create (orphaned)"
-eq "$(bead_state "$MAP_STEP" "$VISIT_BOUND")" "absent" \
-   "(AF) visit bound to a sitting whose failed create closed -> absent (orphaned)"
-eq "$(bead_state '{"hq-wisp-tjt3y":"start-pending","s-hq-wisp-tjt3y":"start-pending"}' "$VISIT_BOUND")" "start-pending" \
-   "(AF) visit bound to a sitting the reconciler has not started yet -> start-pending (owned)"
+# (AF) A bead can name a session by its runtime name before the session starts.
+#      When the session's create fails, its row either stays open in
+#      failed-create or, closed by the rollback, leaves the list. Both are dead,
+#      so the bead is orphaned. A session still starting is owned, and its bead
+#      is left alone.
+SESSION_BOUND='{"id":"gc-b1","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{}}'
+eq "$(bead_state '{"hq-wisp-tjt3y":"failed-create","s-hq-wisp-tjt3y":"failed-create"}' "$SESSION_BOUND")" "failed-create" \
+   "(AF) a bead bound to a session whose failed create is still open -> failed-create (orphaned)"
+eq "$(bead_state "$MAP_STEP" "$SESSION_BOUND")" "absent" \
+   "(AF) a bead bound to a session whose failed create closed -> absent (orphaned)"
+eq "$(bead_state '{"hq-wisp-tjt3y":"start-pending","s-hq-wisp-tjt3y":"start-pending"}' "$SESSION_BOUND")" "start-pending" \
+   "(AF) a bead bound to a session the reconciler has not started yet -> start-pending (owned)"
 
 # --- Fail-safe guard: only an unloadable map may skip orphan recovery. -------
 # The fail safe is a predicate, not a judgment call. The liveness-map-guard

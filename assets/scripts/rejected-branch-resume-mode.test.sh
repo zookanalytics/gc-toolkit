@@ -381,8 +381,8 @@ for how in molecule bare; do
   if [ "$how" = molecule ]; then
     again "$TMP/bring-current-unresolvable.sh" CLAIMED_STEP_BEAD_ID=tk-step
     grep -q '^await tk-w --key bring-current-question\.tk-w --subject tk-a ' "$CALLS" \
-      && ok "(14) molecule: the bead waits on the question's visit on its anchor" \
-      || bad "(14) molecule: the bead waits on the question's visit on its anchor"
+      && ok "(14) molecule: the bead waits on the question's human gate on its anchor" \
+      || bad "(14) molecule: the bead waits on the question's human gate on its anchor"
     grep -q '^cancel .*--bead tk-step ' "$CALLS" && ok "(14) molecule: …and its run is cancelled" \
       || bad "(14) molecule: …and its run is cancelled"
   else

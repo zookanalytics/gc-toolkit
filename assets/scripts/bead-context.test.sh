@@ -89,7 +89,7 @@ J
 # blocks edges; an earlier build (closed) by a blocks edge and a duplicate it
 # answered (closed) by an until edge. The closed ones' ids sort before the open
 # ones', so only an open-first order lists the build first. A review's inbound
-# `related` edge, a visit's `tracks` edge and a child's `parent-child` edge also
+# `related` edge, a conversation's `tracks` edge and a child's `parent-child` edge also
 # point at it, and none of those waits on it. The build carries a body the read
 # must never surface.
 bead "$R_TK" tk-design <<'J'
@@ -118,7 +118,7 @@ bead "$R_TK" tk-aw-review <<'J'
  "dependencies":[{"id":"tk-design","dependency_type":"related","status":"closed","title":"the design"}]}
 J
 bead "$R_TK" tk-aw-track <<'J'
-{"id":"tk-aw-track","title":"visit: tk-design","status":"closed","issue_type":"task","metadata":{},
+{"id":"tk-aw-track","title":"the conversation about the design","status":"closed","issue_type":"task","metadata":{},
  "dependencies":[{"id":"tk-design","dependency_type":"tracks","status":"closed"}]}
 J
 bead "$R_TK" tk-aw-kid <<'J'
@@ -610,7 +610,7 @@ eq "$(jr '[.edges.awaited_by[] | "\(.id):\(.status):\(.edge)"] | join(" ")')" \
 eq "$(jr '.edges.awaited_by[0].title')" "the build it released" "  ... and its title"
 eq "$(jr '.edges.counts | "\(.awaited_by) \(.awaited_by_open)"')" "4 2" "  ... counted in all and open"
 eq "$(jr '[.edges.tracked_by[].id] | join(",")')" tk-aw-track \
-  "  ... while a visit's tracks edge stays tracked-by, and a related review and a child are in neither"
+  "  ... while a conversation's tracks edge stays tracked-by, and a related review and a child are in neither"
 eq "$(jr '[.edges.awaited_by[] | keys | join(",")] | unique | join(" ")')" "edge,id,status,title" \
   "  ... each cut to its id, title, status and edge"
 eq "$(jr '[paths | join(".")] | map(select(test("description|notes|comment"; "i"))) | length')" 0 \

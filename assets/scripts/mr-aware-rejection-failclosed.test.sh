@@ -10,7 +10,7 @@
 #      bash and in zsh, the shells an agent pastes the block into.
 #   2. FAIL CLOSED when rejection-repool.sh is missing: the block repools
 #      nothing by hand, and ends the turn.
-#   3. A repool that stops short but leaves an armed dispatch or a visit (exit 2)
+#   3. A repool that stops short but leaves an armed dispatch or a human gate (exit 2)
 #      ends the arm as a landed one does. One that recorded nothing (exit 1 or
 #      3) ends the turn.
 #   4. The block reads no bead of its own, and the row rejection-repool.sh
@@ -131,9 +131,9 @@ for i in 1 2; do
   eq "$(run "$i" '{}' "$TMP/nowhere")" "1|DRAIN;" \
      "block $i: missing rejection-repool.sh -> no repool, drain"
 
-  # (3) An armed dispatch or a visit carries a repool that stopped short.
+  # (3) An armed dispatch or a human gate carries a repool that stopped short.
   eq "$(run "$i" '{}' "$TMP/rig" 2)" "0|$CALL" \
-     "block $i: repool exit 2 (an arm or a visit carries it) -> the arm ends normally"
+     "block $i: repool exit 2 (an arm or a human gate carries it) -> the arm ends normally"
 
   # (4) A repool that recorded nothing ends the turn.
   eq "$(run "$i" '{}' "$TMP/rig" 3)" "1|${CALL}DRAIN;" \
@@ -141,7 +141,7 @@ for i in 1 2; do
   eq "$(run "$i" '{}' "$TMP/rig" 1)" "1|${CALL}DRAIN;" \
      "block $i: repool exit 1 (usage) -> drain"
 
-  # (5) A repool that could read no row files a visit and exits 2. The arm ends
+  # (5) A repool that could read no row files a patrol finding and exits 2. The arm ends
   #     as a landed one does, with no read of its own.
   eq "$(run "$i" - "$TMP/rig" 2)" "0|$CALL" \
      "block $i: no row from the repool (exit 2) -> the arm ends normally, no bd show"
@@ -188,7 +188,7 @@ eq "$STRAY" "0" "no step reads metadata.merge_strategy outside that block"
 
 # --- The rejection keeps the branch. ---------------------------------------------
 # The repool dispatches a rebuild that resumes metadata.branch, so a deleted
-# branch would stop that rebuild at workspace-setup's missing-branch visit.
+# branch would stop that rebuild at workspace-setup's missing-branch human gate.
 # Every line of both rejection arms counts, prose included: a command quoted in
 # a step's prose is one an agent types.
 echo "── the rejection keeps the branch ──"
