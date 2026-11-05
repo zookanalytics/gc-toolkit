@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# pr-sitting-comment.sh — leave a reminder on a subject's PR that a sitting
-# happened. `engage` posts (or refreshes) a marked comment saying a sitting is
-# open; `close` edits that same comment in place to say the sitting ended, with
-# its outcome, summary and actions. One comment per conversation, found by a
+# pr-sitting-comment.sh — the comment on a subject's PR that a visit is
+# discussing it. `topic` posts (or refreshes) a marked comment naming what the
+# visit discusses; `close` edits that same comment in place to say what it
+# discussed and the action taken. One comment per conversation, found by a
 # hidden marker keyed to the conversation task's id, <!-- gc:sitting:<task> -->.
 #
 # It is a reminder, so it never blocks a sitting: a missing gh, an unresolvable
@@ -12,16 +12,29 @@
 # the comment lands.
 #
 # Usage:
-#   pr-sitting-comment.sh engage --sitting <task> --subject <id>
-#   pr-sitting-comment.sh close  --sitting <task> --subject <id> \
-#       [--outcome <word>] [--summary <text>] [--actions <text>]
+#   pr-sitting-comment.sh topic --sitting <task> --subject <id> --topic <text>
+#   pr-sitting-comment.sh close --sitting <task> --subject <id> \
+#       --outcome <word> [--summary <text>]
 #
-#   engage: upsert the marked comment into its "open" shape.
-#   close:  edit the marked comment into its "ended" shape. UPDATE-ONLY — a
-#           conversation no sitting engaged has no comment, and close leaves the
-#           PR alone. Its callers run it once their own write reads back: the
-#           sign-off once the conversation is closed or handed back to the
-#           operator's queue, and dismiss once it is closed.
+#   topic: upsert the marked comment into its open shape, with <text> as the
+#          topic under discussion. converse-prep's title step runs it with the
+#          topic it titles the session with, after the premise re-check, so a
+#          conversation that closes before then posts nothing.
+#   close: edit the marked comment into its ended shape: the topic it carries,
+#          the action <word> names, then <text>, the sitting's one-line
+#          outcome. UPDATE-ONLY — a conversation whose sitting named no topic
+#          has no comment, and close leaves the PR alone. Its callers run it
+#          once their own write reads back: the sign-off once the conversation
+#          is closed or handed back to the operator's queue, dismiss once it is
+#          closed, and the premise re-check once it closes the conversation.
+#          <word> is one of:
+#            rework        the ruling sent the PR back for rework
+#            retired       the ruling retired the PR
+#            accepted      the ruling took the subject's recommendation
+#            ruled         a ruling that did nothing to the PR
+#            handed back   cut short, back in the operator's queue undecided
+#            dismissed     the operator dismissed the visit
+#            moot, benign  the premise re-check closed the conversation
 set -u
 
 PROG=pr-sitting-comment
@@ -43,17 +56,17 @@ scrub() { tr -d '\000-\037'; }
 oneline() { printf '%s' "${1:-}" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/^ *//; s/ *$//'; }
 
 MODE="${1:-}"
-case "$MODE" in engage|close) shift ;; *) echo "$PROG: first argument must be 'engage' or 'close'" >&2; exit 2 ;; esac
+case "$MODE" in topic|close) shift ;; *) echo "$PROG: first argument must be 'topic' or 'close'" >&2; exit 2 ;; esac
 
-SITTING=""; SUBJECT=""; OUTCOME=""; SUMMARY=""; ACTIONS=""
+SITTING=""; SUBJECT=""; TOPIC=""; OUTCOME=""; SUMMARY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --sitting)  shift; [ $# -gt 0 ] || { echo "$PROG: --sitting needs a value" >&2; exit 2; }; SITTING="$1" ;;
     --subject)  shift; [ $# -gt 0 ] || { echo "$PROG: --subject needs a value" >&2; exit 2; }; SUBJECT="$1" ;;
+    --topic)    shift; [ $# -gt 0 ] || { echo "$PROG: --topic needs a value" >&2; exit 2; }; TOPIC="$1" ;;
     --outcome)  shift; [ $# -gt 0 ] || { echo "$PROG: --outcome needs a value" >&2; exit 2; }; OUTCOME="$1" ;;
     --summary)  shift; [ $# -gt 0 ] || { echo "$PROG: --summary needs a value" >&2; exit 2; }; SUMMARY="$1" ;;
-    --actions)  shift; [ $# -gt 0 ] || { echo "$PROG: --actions needs a value" >&2; exit 2; }; ACTIONS="$1" ;;
-    -h|--help)  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "$PROG: unknown flag '$1'" >&2; exit 2 ;;
     *)  echo "$PROG: unexpected argument '$1'" >&2; exit 2 ;;
   esac
@@ -62,18 +75,39 @@ done
 
 [ -n "$SITTING" ] || { echo "$PROG: --sitting is required" >&2; exit 2; }
 [ -n "$SUBJECT" ] || { echo "$PROG: --subject is required" >&2; exit 2; }
+TOPIC=$(oneline "$TOPIC")
+SUMMARY=$(oneline "$SUMMARY")
+# The action is said in these words only, so no caller's text stands in for it.
+ACTION=""
+if [ "$MODE" = topic ]; then
+  [ -n "$TOPIC" ] || { echo "$PROG: topic needs --topic <text>" >&2; exit 2; }
+  [ -z "$OUTCOME$SUMMARY" ] || { echo "$PROG: topic takes no --outcome or --summary; close does" >&2; exit 2; }
+else
+  [ -z "$TOPIC" ] || { echo "$PROG: close takes no --topic: it shows the one the comment carries" >&2; exit 2; }
+  case "$OUTCOME" in
+    rework)            ACTION="sent back for rework" ;;
+    retired)           ACTION="retired" ;;
+    accepted)          ACTION="its recommended work started" ;;
+    ruled|moot|benign) ACTION="none" ;;
+    "handed back")     ACTION="none; the visit went back to the operator's queue undecided" ;;
+    dismissed)         ACTION="none; the visit was dismissed" ;;
+    "") echo "$PROG: close needs --outcome <word>" >&2; exit 2 ;;
+    *)  echo "$PROG: unknown --outcome '$OUTCOME': it takes rework, retired, accepted, ruled, handed back, dismissed, moot or benign" >&2; exit 2 ;;
+  esac
+fi
 
-# From here on every exit is 0: a reminder must not break an engage or a sign-off.
+# From here on every exit is 0: a reminder must not break a sitting's prep or its close.
 command -v gh >/dev/null 2>&1 || exit 0
 command -v gc >/dev/null 2>&1 || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
 # The repository every gh call is pinned to — resolved from the SUBJECT's rig
-# origin, never gh's movable current repo, and never the caller's cwd: engage
-# and dismiss are launched from the board, outside any rig checkout, where a cwd
-# origin lookup resolves nothing and the reminder would silently never post. The
-# rig map maps the subject's id prefix to its repo path; cwd is the fallback for
-# a caller that already runs inside the subject's rig (the converse sign-off).
+# origin, never gh's movable current repo, and never the caller's cwd: dismiss
+# is launched from the board, outside any rig checkout, where a cwd origin
+# lookup resolves nothing and the reminder would silently never post. The rig
+# map maps the subject's id prefix to its repo path; cwd is the fallback for a
+# caller that already runs inside the subject's rig (a sitting, or the
+# converse sign-off).
 ORIGIN_HOST=""; ORIGIN_REPO=""; ORIGIN_REPO_Q=""
 RIG_MAP=$("$HERE/rig-map.sh")
 REPO_DIR=$(printf '%s' "$RIG_MAP" \
@@ -123,7 +157,7 @@ MARKER="<!-- gc:sitting:$SITTING -->"
 
 # The one comment carrying our marker, on the PR's issue-comment thread (what
 # `gh pr comment` posts to). Unreadable is fail-safe: for close there is nothing
-# to edit, and for engage we skip rather than risk a duplicate.
+# to edit, and for topic we skip rather than risk a duplicate.
 COMMENTS=$(gh api "repos/$ORIGIN_REPO/issues/$PR/comments" --paginate --hostname "$ORIGIN_HOST" 2>/dev/null) || COMMENTS=""
 if [ -z "$COMMENTS" ]; then
   echo "$PROG: could not read PR#$PR comments; nothing posted" >&2
@@ -135,19 +169,21 @@ if [ -n "$MATCH" ]; then
   COMMENT_ID=$(printf '%s' "$MATCH" | jq -r '.id // ""' 2>/dev/null || true)
 fi
 
-OUTCOME=$(oneline "$OUTCOME")
-SUMMARY=$(oneline "$SUMMARY")
-ACTIONS=$(oneline "$ACTIONS")
+# UPDATE-ONLY: a conversation whose sitting named no topic has no comment, and
+# its close leaves the PR alone.
+[ "$MODE" = topic ] || [ -n "$COMMENT_ID" ] || exit 0
 
 # A PR comment can be public and it stays, and no person reads this one before it
-# posts. So it carries the ids and the state, and never the reason engage was
-# given: those are the words typed to open a private conversation, cut short to
-# fit a title, and a name misspelled or cut off there passes any check by name.
-# What a sitting wrote for the record goes on field by field, each printed here
-# only once rig-mentions.sh clears it. A field the check lists, or cannot answer
-# for, is left out, and the comment still says the sitting ended. The check judges
-# for the subject's rig, whose PR this is, from the listing read above, so a close
-# costs no second read of a listing that can take many seconds.
+# posts. So nothing the operator typed reaches it: not the words that opened the
+# conversation and not a dismiss's reason. The action is this script's own words.
+# What a sitting wrote for it, the topic and the one-line outcome, goes on field
+# by field, each printed here only once rig-mentions.sh clears it. A field the
+# check lists, or cannot answer for, is left out, and the comment still says
+# where the visit stands. The check judges for the subject's rig, whose PR this
+# is, from the listing read above, so the check costs no second read of a
+# listing that can take many seconds.
+RIG_NAME=$(printf '%s' "$RIG_MAP" \
+  | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .name' 2>/dev/null | head -n1)
 cleared() { # <field> <text>
   [ -n "$2" ] || return 0
   local rc=0
@@ -160,32 +196,24 @@ cleared() { # <field> <text>
   esac
 }
 
-if [ "$MODE" = close ]; then
-  # UPDATE-ONLY: a conversation no sitting engaged has no comment, and its close
-  # leaves the PR alone.
-  [ -n "$COMMENT_ID" ] || exit 0
-  RIG_NAME=$(printf '%s' "$RIG_MAP" \
-    | jq -r --arg p "${SUBJECT%%-*}" '.rigs[]? | objects | select(.prefix == $p) | .name' 2>/dev/null | head -n1)
-  OUTCOME=$(cleared outcome "$OUTCOME")
-  SUMMARY=$(cleared summary "$SUMMARY")
-  ACTIONS=$(cleared actions "$ACTIONS")
-fi
-
 # Compose the body. Both shapes carry the marker so the next call finds it.
 BODY="$MARKER"$'\n'
-if [ "$MODE" = engage ]; then
-  BODY="$BODY### Sitting on $SITTING — open"$'\n'
+if [ "$MODE" = topic ]; then
+  TOPIC=$(cleared topic "$TOPIC")
+  BODY="$BODY### Under discussion${TOPIC:+: $TOPIC}"$'\n'
+  BODY="$BODY(visit $SITTING · updated with the action taken when it ends)"$'\n'
 else
-  if [ -n "$OUTCOME" ]; then
-    BODY="$BODY### Sitting on $SITTING — ended ($OUTCOME)"$'\n'
-  else
-    BODY="$BODY### Sitting on $SITTING — ended"$'\n'
-  fi
-fi
-BODY="$BODY- Subject: $SUBJECT"$'\n'
-if [ "$MODE" = close ]; then
-  [ -n "$SUMMARY" ] && BODY="$BODY- Summary: $SUMMARY"$'\n'
-  [ -n "$ACTIONS" ] && BODY="$BODY- Actions Taken: $ACTIONS"$'\n'
+  # The topic the comment carries is the one its sitting named last, since the
+  # title step posts each topic it names.
+  OLD_BODY=$(printf '%s' "$MATCH" | jq -r '.body // ""' 2>/dev/null || true)
+  TOPIC=$(printf '%s\n' "$OLD_BODY" | sed -n -e 's/^### Under discussion: //p' -e 's/^### Discussed: //p' | head -n1)
+  TOPIC=$(cleared topic "$(oneline "$TOPIC")")
+  SUMMARY=$(cleared summary "$SUMMARY")
+  LINE="$ACTION${SUMMARY:+; $SUMMARY}"
+  case "$LINE" in *[.!?]) ;; *) LINE="$LINE." ;; esac
+  BODY="$BODY### Discussed${TOPIC:+: $TOPIC}"$'\n'
+  BODY="${BODY}Action taken: $LINE"$'\n'
+  BODY="$BODY(visit $SITTING)"$'\n'
 fi
 
 if [ -n "$COMMENT_ID" ]; then
@@ -195,7 +223,7 @@ if [ -n "$COMMENT_ID" ]; then
     echo "$PROG: could not update sitting comment $COMMENT_ID on PR#$PR" >&2
   fi
 else
-  # No comment yet. engage creates one; close already returned above.
+  # No comment yet. topic creates one; close already returned above.
   if "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR" --body "$BODY" >/dev/null 2>&1; then
     echo "$PROG: posted sitting comment on PR#$PR"
   else

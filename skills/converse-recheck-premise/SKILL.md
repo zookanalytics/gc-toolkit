@@ -8,7 +8,8 @@ description: Converse's premise re-check, and the silent moot or benign close of
 The condition that justified a conversation, or a gate it replies to,
 routinely dies before the operator engages it. Test the premise against live
 state before you prep, and before the rename: a conversation that closes here
-should not have moved the operator's session title.
+should not have moved the operator's session title or posted its topic on the
+subject's pull request.
 
 Each tool call starts a fresh shell, so set `CONV`, `CONVERSATION` and
 `SUBJECT` literally, from what step 1 found, at the top of every call below.
@@ -58,7 +59,8 @@ gc bd gate resolve <gate> --reason "<moot|benign>: <the premise, and what is tru
 When the conversation's own ask dies with it, because the ask was those gates
 or its concern is moot, close the conversation with the record written: the
 reading goes on the subject's notes, the conversation closes with the reading
-as its reason, and the PR reminder, where the engage left one, says so.
+as its reason, and the PR reminder, where an earlier sitting on this
+conversation posted one, says so.
 Deliberately **no takeaway stamp**, except on a held subject the close
 releases (below): it is the subject's headline of what it NEEDS, and one for a
 conversation that needs nobody spends the attention this exit saves.

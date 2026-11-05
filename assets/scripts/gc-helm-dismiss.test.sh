@@ -16,7 +16,8 @@
 #   (WORK-OUTCOME, WORK-REFUSED, WORK-KEPT) gc.work_outcome=no-op is stamped in
 #             a write of its own before the close, and never holds it
 #   (ANSWERS-NOTHING, NOSUBJECT) no gate is resolved and the bead is not written
-#   (PRCOMMENT) the PR reminder is updated to say the sitting closed
+#   (PRCOMMENT) the PR reminder is updated to say the visit was dismissed, with
+#   none of the operator's words
 #   (QUEUE, LEFT, IDEM) a bead with no live sitting has nothing to end
 #   (CONVID, GATEID) a conversation id names its own conversation, a gate id the
 #             bead still waiting on it
@@ -227,7 +228,8 @@ hasnt "$(calls)" "bd gate" "(ANSWERS-NOTHING) no gate is resolved: the gate it r
 eq "$(field tk-gate status)" "open" "(ANSWERS-NOTHING) …and reads open"
 hasnt "$(calls)" "bd update tk-subj" "(NOSUBJECT) the bead is never written"
 hasnt "$(calls)" "bd dep" "(NOSUBJECT) …and no edge is touched"
-has "$(cat "$REC_PSC_LOG")" "close --sitting tk-conv --subject tk-subj --outcome dismissed" "(PRCOMMENT) the PR reminder is updated to say the sitting closed"
+eq "$(cat "$REC_PSC_LOG")" "close --sitting tk-conv --subject tk-subj --outcome dismissed" "(PRCOMMENT) the PR reminder is updated to say the visit was dismissed"
+hasnt "$(cat "$REC_PSC_LOG")" "settled offline" "(PRCOMMENT) …and the reason the operator typed never reaches it"
 eq "$(field tk-oconv status)" "in_progress" "(SCOPE) another bead's live sitting is untouched"
 eq "$(field tk-find status)" "open" "(KIND) a bead that tracks the subject but is no conversation is never closed"
 run_dismiss tk-subj

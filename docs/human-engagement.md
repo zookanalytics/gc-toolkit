@@ -223,8 +223,8 @@ these steps:
    misses when another engage or a hand-off landed first, or when a dismiss
    closed the task, since a dismiss keeps the holder and changes the status. A
    bind that misses, or a read-back that finds the task closed, closes the
-   session this engage started. Then engage posts the PR reminder, waits for
-   the reconciler to start the session, and attaches the operator.
+   session this engage started. Then engage waits for the reconciler to start
+   the session, and attaches the operator.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
@@ -234,17 +234,23 @@ racing on a bead with no conversation, or a gate two beads wait on can each
 put two sittings on one bead. The board folds both onto the bead's row, either
 may answer a gate, and the first answer wins.
 
-**The PR reminder.** When the subject carries a PR, engage leaves a comment on
-it saying a sitting engaged, and the sign-off or a dismiss edits that same
-comment in place when the sitting ends (`assets/scripts/pr-sitting-comment.sh`).
-It is keyed by the conversation's id under the marker
-`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it,
-or the marker reminders carried before it, as the city's own.
+**The PR reminder.** When the subject carries a PR, a comment on it says what
+a visit discusses and, once the visit ends, the action taken
+(`assets/scripts/pr-sitting-comment.sh`). The sitting posts it when it names
+its topic, in the title step of its prep, so a conversation that closes before
+then posts nothing. The sign-off, a dismiss or the premise re-check's close
+edits that same comment in place when the visit ends. It then names the last
+topic the sitting posted and the action taken: what the visit did to the PR,
+in the reminder's own words (sent back for rework, retired, its recommended
+work started, or none, and a visit handed back undecided or dismissed says
+so), then the sitting's one-line outcome. It is keyed by the conversation's id
+under the marker `<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post
+that carries it, or the marker reminders carried before it, as the city's own.
 
 A PR comment can be a public record, and no person reads this one before it
-posts. So it never carries the reason a sitting opened with, which is what the
-operator typed to start a private conversation. The outcome, summary and actions
-a close adds go on field by field, each only once
+posts. So nothing the operator typed reaches it: not the words that opened the
+conversation, and not a dismiss's reason. The topic and the one-line outcome,
+which the sitting writes, go on field by field, each only once
 `assets/scripts/rig-mentions.sh` answers that it names no other rig, and a field
 it lists or cannot answer for is left out.
 

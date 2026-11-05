@@ -96,7 +96,8 @@
 #     given none, it is refused with nothing written. --rework says the PR's branch must change: the rework is filed
 #     against that PR's anchor, sourced by this conversation, and refused while
 #     a rework the conversation filed for another ruling is open. --no-rework
-#     says the branch of each such PR stands, and the PR reminder records that.
+#     says the branch of each such PR stands, and the PR reminder shows no
+#     action taken.
 #     --retire says the PR will not land: pr-dispose.sh records the disposition
 #     under <kind> (re-homed, folded, fixed-upstream, duplicate or not-needed)
 #     and closes the PR. Its successor is --successor, the bead that carries
@@ -176,6 +177,7 @@ RETIRE_KIND=""
 SUCCESSOR=""
 PR_PICK=""
 ACCEPT=""
+ACCEPTED=""
 ACCEPT_VARS=()
 WAIT=()
 LEAVE=()
@@ -547,7 +549,7 @@ take_recommendation() {
   [ -z "$out" ] || printf '%s\n' "$out"
   if [ "$rc" -eq 0 ]; then
     echo "took the recommendation: $REC_FORMULA at $SUBJECT, through Accept"
-    ACTIONS+=("took the recommendation: $REC_FORMULA, through Accept")
+    ACCEPTED=yes
     return 0
   fi
   for g in $REC_GATES; do
@@ -563,13 +565,12 @@ take_recommendation() {
   done
   if [ -z "$open" ] && [ -n "$other" ]; then
     echo "another answer reached the recommendation's gate first — $other. The first answer stands, so the recommendation is not taken."
-    ACTIONS+=("left the recommendation untaken: another answer reached its gate first")
     return 0
   fi
   if [ -z "$open" ] && show_row "$SUBJECT" | jq -e '((.metadata // {})["gc.recommended_formula"] // "") == ""
       and ((.metadata // {})["gc.recommended_formula_dispatched"] // "") != ""' >/dev/null 2>&1; then
     echo "the recommendation was already taken: an Accept dispatched $REC_FORMULA at $SUBJECT and recorded it${ACCEPT_VARS[*]:+. That dispatch keeps the vars it was made with, so the --var given here does not reach it}"
-    ACTIONS+=("the recommendation was already taken through Accept")
+    ACCEPTED=yes
     return 0
   fi
   stopped "the recommendation was not taken: gc-helm.sh accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
@@ -641,15 +642,6 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 show_row "$SUBJECT" | jq -e '(.metadata["gc.takeaway"] // "") != ""' >/dev/null 2>&1 \
   || stopped "no headline reads back on $SUBJECT; no gate was resolved and the conversation is not closed"
 
-ACTIONS=()
-routed=""
-i=0
-while [ "$i" -lt "${#WAIT[@]}" ]; do
-  [ "${WAIT[$i]}" = "--waiting-on" ] && { i=$((i + 1)); routed="${routed:+$routed, }${WAIT[$i]}"; }
-  i=$((i + 1))
-done
-[ -n "$routed" ] && ACTIONS+=("routed work to $routed")
-
 if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the
   # conversation replies to. A reply onto a bead that is no human gate holds
@@ -660,7 +652,6 @@ if [ "$RULED" = yes ]; then
     case " $REC_GATES " in *" $g "*) continue ;; esac
     if printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g"; then
       echo "gate $g stays open and owed: the ruling leaves it, and this conversation's reply stays on it"
-      ACTIONS+=("left gate $g owed")
       continue
     fi
     GROW=$(printf '%s' "$GATES_JSON" | jq -c --arg g "$g" '.[] | select(.id == $g)')
@@ -684,7 +675,6 @@ if [ "$RULED" = yes ]; then
     else
       RELEASED=$(printf '%s' "$GATE_WAITERS" | jq -r --arg g "$g" '(.[$g] // []) | join(" ")')
       echo "resolved gate $g: $ANSWER${RELEASED:+ (it held $RELEASED)}"
-      ACTIONS+=("resolved gate $g")
     fi
   done
   [ -z "$UNCLOSED" ] || stopped "the ruling did not close $UNCLOSED; the conversation is not closed, so a re-run resolves it"
@@ -704,9 +694,6 @@ if [ "$RULED" = yes ]; then
     "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
       || stopped "RELEASE FROM held FAILED on $SUBJECT: it still reads as waiting on a person, and mol-polecat-work cancels a run poured at it. The conversation is not closed, so a re-run releases it${ACCEPT:+ and then takes the recommendation}"
   fi
-  ACTIONS+=("ruling: $RULING (released to $ROUTE)")
-  [ -n "$CONSEQUENCE" ] && ACTIONS+=("$CONSEQUENCE")
-  for p in "${STANDS[@]+"${STANDS[@]}"}"; do ACTIONS+=("ruling leaves the branch of $p as it stands"); done
 
   # 5. The recommendation, once nothing holds the subject back.
   [ -z "$ACCEPT" ] || take_recommendation
@@ -724,7 +711,18 @@ if [ "$RULED" = yes ]; then
     [ "$(show_row "$CONVERSATION" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)" = closed ] \
       || stopped "conversation $CONVERSATION did not close; every gate above is answered, and a re-run closes it"
   fi
-  REMINDER_OUTCOME=settled
+  # What the ruling did to the subject's own PR, where the reminder is. A
+  # rework or a retirement that acted on another PR left this one as it was.
+  # A retirement an earlier attempt carried out reads closed now, and is still
+  # what the ruling did.
+  REMINDER_OUTCOME=ruled
+  if [ "$PR_TARGET" = "$SUBJECT" ] && [ "$ACTING" = rework ]; then
+    REMINDER_OUTCOME=rework
+  elif [ "$PR_TARGET" = "$SUBJECT" ] && [ "$PR_ANSWER" = retire ]; then
+    REMINDER_OUTCOME=retired
+  elif [ -n "$ACCEPTED" ]; then
+    REMINDER_OUTCOME=accepted
+  fi
 else
   # Cut short: the gates stay open and owed, with their replies in place, and
   # the conversation goes back to the operator's queue with one write guarded
@@ -735,7 +733,6 @@ else
   # holder alone would reopen it: it stays closed. A dismiss that lands between
   # the read and the write fails the status guard, and the read-back finds the
   # conversation closed.
-  [ -n "$REPLIES" ] && ACTIONS+=("left $(printf '%s' "$REPLIES" | tr '\n' ' ' | sed 's/ *$//') open and owed")
   BACK_AT=""
   if [ "$CONV_STATUS" = closed ]; then
     echo "conversation $CONVERSATION already reads closed, so it stays closed and is not handed back"
@@ -752,7 +749,6 @@ else
     esac
   fi
   if [ "$BACK_AT" = human/open ]; then
-    ACTIONS+=("conversation back in the operator's queue")
     REMINDER_OUTCOME="handed back"
   else
     REMINDER_OUTCOME=""
@@ -760,14 +756,18 @@ else
 fi
 
 # 7. The PR reminder, once the conversation reads closed or back in the queue.
-# Best effort and update-only: a conversation no sitting engaged left no comment,
-# and a cut-short sign-off on one already closed leaves the reminder its closer
-# wrote.
+# Best effort and update-only: a conversation whose sitting named no topic left
+# no comment, and a cut-short sign-off on one already closed leaves the reminder
+# its closer wrote. The reminder says what the visit did in words of its own, so
+# it takes the headline's text after the label the headline opens with,
+# "<outcome> — ", which is at most three words.
 REMINDER=$(pack_script pr-sitting-comment.sh)
 if [ -n "$REMINDER" ] && [ -n "$REMINDER_OUTCOME" ]; then
-  ACTIONS_TEXT=""
-  for a in "${ACTIONS[@]+"${ACTIONS[@]}"}"; do ACTIONS_TEXT="${ACTIONS_TEXT:+$ACTIONS_TEXT; }$a"; done
+  REMINDER_LINE=$OUTCOME
+  case "$OUTCOME" in
+    *" — "*) [ "$(printf '%s\n' "${OUTCOME%%" — "*}" | awk '{ print NF }')" -le 3 ] && REMINDER_LINE=${OUTCOME#*" — "} ;;
+  esac
   "$REMINDER" close --sitting "$CONVERSATION" --subject "$SUBJECT" \
-    --outcome "$REMINDER_OUTCOME" --summary "$OUTCOME" --actions "$ACTIONS_TEXT" || true
+    --outcome "$REMINDER_OUTCOME" --summary "$REMINDER_LINE" || true
 fi
 echo "SIGNED OFF conversation $CONVERSATION on $SUBJECT (${REMINDER_OUTCOME:-already closed})"

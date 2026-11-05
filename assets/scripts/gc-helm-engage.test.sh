@@ -523,8 +523,9 @@ mkdir -p "$TMP/rig/agents/converse-opus" "$TMP/rig/agents/converse-fable" \
          "$TMP/rig-bare" "$TMP/rig-bare/.beads"
 export RIG_PATH="$TMP/rig"
 
-# A recorder standing in for pr-sitting-comment.sh, to prove engage posts the
-# "open" reminder for the bead the conversation tracks.
+# A recorder standing in for pr-sitting-comment.sh, to prove engage posts no
+# reminder: the sitting posts it once it names its topic, after its premise
+# re-check.
 cat > "$TMP/rec-psc" <<'REC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$REC_PSC_LOG"
@@ -625,7 +626,7 @@ has "$CALLED" "bd update tk-conv --if-assignee human --if-status open --unset-me
 bind_write=$(printf '%s\n' "$CALLED" | grep -- '--assignee gc-toolkit/gc-toolkit.tk-conv' || true)
 has "$bind_write" "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
     "(BIND-PINS) …and drops any session pin an earlier sitting left, in the same write"
-has "$(cat "$TMP/psc.log")" "engage --sitting tk-conv --subject tk-subj" "(CONVID-PRCOMMENT) engage posts the open reminder on the bead the conversation tracks"
+eq "$(cat "$TMP/psc.log")" "" "(CONVID-PRCOMMENT) engage posts no reminder on the PR of the bead the conversation tracks"
 hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its prompt and is not kicked"
 hasnt "$OUT" "took the conversation" "(CONVID) an explicit conversation id is not reported as one engage chose"
 has "$OUT" "✓ converse-opus on existing conversation tk-conv for tk-subj" "(CONVID) the summary names the conversation and its bead"
@@ -678,9 +679,7 @@ unset HAVE_CONV
 echo "# --reason files a fresh conversation for a distinct concern, even when one waits"
 reset; run_engage tk-subj --reason "a distinct concern" --no-attach
 eq "$RC" 0 "(REASON-NEW) engaging a bead with a conversation WITH --reason exits 0"
-has "$(cat "$TMP/psc.log")" "engage --sitting tk-new --subject tk-subj" "(REASON-PRCOMMENT) the PR reminder is posted for the new conversation"
-hasnt "$(cat "$TMP/psc.log")" "a distinct concern" "(REASON-PRCOMMENT) …and the words that opened it never reach the PR"
-hasnt "$(cat "$TMP/psc.log")" "--reason" "(REASON-PRCOMMENT) …because the reminder is handed no reason at all"
+eq "$(cat "$TMP/psc.log")" "" "(REASON-PRCOMMENT) engage posts nothing on the PR for the new conversation, so the words that opened it never reach the PR"
 has "$CALLED" "bd create" "(REASON-NEW) …a NEW conversation is filed"
 has "$CALLED" "--title a distinct concern" "(REASON-NEW) …titled with the reason"
 has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and asking it"

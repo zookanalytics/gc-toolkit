@@ -411,9 +411,9 @@ QUEUE_PRIORITY_TOOL="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}"
 # a hermetic test can point them at a fixture.
 STARTERS_TOOL="${GC_HELM_STARTERS_TOOL:-$SCRIPT_DIR/gc-helm-engage-starters.sh}"
 ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
-# Leaves a reminder on the subject's PR that a sitting engaged (and, on dismiss,
-# that it closed). Best-effort and self-silencing when the subject has no PR;
-# overridable so a hermetic test can point it at a fixture.
+# Edits the reminder a sitting left on the subject's PR to say the visit was
+# dismissed. Best-effort and self-silencing when the subject has no PR or no
+# reminder; overridable so a hermetic test can point it at a fixture.
 SITTING_COMMENT_TOOL="${GC_SITTING_COMMENT_TOOL:-$SCRIPT_DIR/pr-sitting-comment.sh}"
 # Ends the run beneath a released anchor through gascity's run cancel;
 # overridable so a hermetic test can point it at a fixture.
@@ -2693,10 +2693,12 @@ cmd_dismiss() {
             closed_n=$((closed_n + 1))
             _dmsg "$PROG: dismiss: $_how conversation $_c — the sitting on $bead ends"
             # A closed sitting updates its PR reminder to say so, if the subject
-            # has a PR. update-only, so a conversation that never engaged (left
-            # no comment) touches nothing; best effort, never failing the dismiss.
+            # has a PR. update-only, so a conversation whose sitting never named
+            # its topic (left no comment) touches nothing; best effort, never
+            # failing the dismiss. The reason stays off: it is the operator's
+            # own words.
             if [ -x "$SITTING_COMMENT_TOOL" ]; then
-                "$SITTING_COMMENT_TOOL" close --sitting "$_c" --subject "$bead" --outcome dismissed --summary "$_dwhy" || true
+                "$SITTING_COMMENT_TOOL" close --sitting "$_c" --subject "$bead" --outcome dismissed || true
             fi
         else
             sitting_failed=1
@@ -4652,14 +4654,6 @@ cmd_engage() {
         engage_abort "$sid" "conversation $CONV reads closed (a dismiss, or a sign-off, closed it while this sitting spawned), so the sitting $sname has nothing to claim and was closed. Engage the subject to open a fresh conversation: $PROG engage $bead"
     fi
     bust_cache
-
-    # Leave a reminder on the subject's PR that this sitting engaged, if it has
-    # a PR. Best effort: pr-sitting-comment.sh self-silences when the subject
-    # has no PR or gh is absent, and its failure must not fail an engage that
-    # already bound its conversation.
-    if [ -x "$SITTING_COMMENT_TOOL" ]; then
-        "$SITTING_COMMENT_TOOL" engage --sitting "$CONV" --subject "$bead" || true
-    fi
 
     # Human summary on stdout; id-heavy provenance on a single always-on [debug]
     # line on stderr — never gated behind a verbosity flag, since re-running to

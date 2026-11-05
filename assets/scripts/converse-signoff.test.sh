@@ -356,12 +356,20 @@ eq "$(field tk-conv close_reason)" "review settled: fix the retry first" "(ONLY-
 eq "$(meta tk-conv gc.work_outcome)" "no-op" "(ONLY-REPLIED) …and gc.work_outcome=no-op stamped before the close"
 has "$OUT" "resolved gate tk-rev" "(ONLY-REPLIED) the resolve is reported"
 has "$OUT" "it held tk-anc" "(ONLY-REPLIED) …with the bead it released"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "close --sitting tk-conv --subject tk-anc --outcome settled --summary review settled: fix the retry first" "(ONLY-REPLIED) the PR reminder says the sitting settled"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling: fix the retry before the merge (released to human)" "(ONLY-REPLIED) …with the ruling among its actions"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "close --sitting tk-conv --subject tk-anc --outcome ruled --summary review settled: fix the retry first" "(ONLY-REPLIED) the PR reminder says the ruling did nothing to the PR, with the headline as the sitting's outcome"
+hasnt "$(grep '^pr-sitting-comment' "$CALLS")" "fix the retry before the merge" "(ONLY-REPLIED) …and the ruling's own words never reach it"
+hasnt "$(grep '^pr-sitting-comment' "$CALLS")" "--actions" "(ONLY-REPLIED) …nor a log of the sign-off's writes"
 case "$(cat "$CALLS")" in
   *"gc-helm takeaway"*"gate resolve tk-rev"*"bd close tk-conv"*"pr-sitting-comment close"*) ok "(ORDER) headline, then the gate, then the close, then the reminder" ;;
   *) bad "(ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
 esac
+acceptance
+run_signoff --conversation tk-conv --outcome "ruled — fix the retry first" "${RULED[@]}"
+eq "$(meta tk-anc gc.takeaway)" "ruled — fix the retry first" "(LABEL) the headline keeps the label the settle skill's form opens it with"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome ruled --summary fix the retry first" "(LABEL) …and the reminder takes the text after it"
+acceptance
+run_signoff --conversation tk-conv --outcome "Sent back: the retry waits on the queue — rework drops the wait" "${RULED[@]}"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--summary Sent back: the retry waits on the queue — rework drops the wait" "(LABEL) an opening longer than a label is kept"
 SIGNED="$(cat "$CALLS")"
 run_signoff --conversation tk-conv --outcome "review settled: fix the retry first" "${RULED[@]}"
 eq "$RC" 0 "(RERUN) a re-run of a finished sign-off exits 0"
@@ -429,7 +437,7 @@ esac
 eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(EPIC-PR-REWORK) the record and headline stay on the epic"
 eq "$(meta tk-mem gc.takeaway)" "" "(EPIC-PR-REWORK) …and the member carries none"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "close --sitting tk-conv --subject tk-epic" "(EPIC-PR-REWORK) the reminder stays the subject's"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "filed ruling-driven rework on tk-mem" "(EPIC-PR-REWORK) …and says the member's PR was sent back"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome ruled --summary the epic takes option B" "(EPIC-PR-REWORK) …and says the ruling did nothing to the epic's own PR, since the rework acted on the member's"
 epic_pr
 run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(EPIC-PR-RETIRE) --retire exits 0"
@@ -442,7 +450,7 @@ epic_pr
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(EPIC-PR-NO-REWORK) --no-rework exits 0"
 has "$OUT" "the ruling leaves the branch of tk-mem as it stands" "(EPIC-PR-NO-REWORK) the member's branch is said to stand"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling leaves the branch of tk-mem as it stands" "(EPIC-PR-NO-REWORK) …in the reminder too"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome ruled" "(EPIC-PR-NO-REWORK) …and the reminder shows no action taken"
 hasnt "$(cat "$CALLS")" "converse-rework" "(EPIC-PR-NO-REWORK) …and nothing is filed"
 epic_pr
 run_signoff --conversation tk-conv --answer tk-mg "${ANSWERED[@]}"
@@ -531,7 +539,7 @@ case "$(cat "$CALLS")" in
   *) bad "(SHARED-PR) the shared gate was resolved before the rework: $(cat "$CALLS")" ;;
 esac
 has "$OUT" "the ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) the other PR stands under the ruling"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) …as the reminder records"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome rework --summary the approach stands; fix the retry" "(SHARED-PR) the reminder on the subject's PR says it was sent back for rework"
 eq "$(meta tk-pr2 gc.takeaway)" "" "(SHARED-PR) the headline stays off the other PR"
 shared_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
 eq "$RC" 1 "(SHARED-PR-RERUN) a sign-off whose close does not land, after resolving the shared gate, stops short"
@@ -670,7 +678,7 @@ has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --r
 has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "bd update tk-conv --set-metadata gc.ruling_consequence=" "(REWORK) the PR it acts on is recorded on the conversation first"
 has "$(grep -v '^lifecycle state' "$CALLS" | sed -n 2p)" "converse-rework --anchor tk-anc" "(REWORK) …then the rework runs, before every other write"
 has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(REWORK) …in the rig of the PR it acts on"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "filed ruling-driven rework on tk-anc" "(REWORK) …and the reminder says so"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome rework --summary settled" "(REWORK) …and the reminder says the PR was sent back for rework"
 acceptance; setm tk-anc merge_result pull_request
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-FAIL) a rework that does not file exits 1"
@@ -681,7 +689,7 @@ eq "$(field tk-conv status)" "in_progress" "(REWORK-FAIL) …and the conversatio
 acceptance; setm tk-anc merge_result pull_request
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(NO-REWORK) --no-rework exits 0"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling leaves the branch of tk-anc as it stands" "(NO-REWORK) …recording that the branch stands"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome ruled" "(NO-REWORK) …and the reminder shows no action taken, since the branch stands"
 
 echo "# two conversations on one PR: each ruling answers its own question"
 # Each sitting's hold filed its own gate on the anchor, under a key that names
@@ -733,7 +741,7 @@ case "$(cat "$CALLS")" in
 esac
 eq "$(merge_held tk-anc)" released "(RETIRE) the gate releases the merge only after the PR is closed"
 eq "$(field tk-conv status)" "closed" "(RETIRE) the conversation is closed"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "retired the PR of tk-anc (not-needed, successor tk-conv)" "(RETIRE) …and the reminder says the PR was retired"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome retired --summary retired: the work moved" "(RETIRE) …and the reminder says the PR was retired"
 open_pr
 run_signoff --conversation tk-conv --outcome "retired: a duplicate" "${RETIRED[@]}" --retire duplicate --successor tk-new
 eq "$RC" 0 "(RETIRE-SUCCESSOR) --retire duplicate --successor exits 0"
@@ -813,7 +821,7 @@ eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STOR
 eq "$(field tk-conv assignee)/$(field tk-conv status)" "human/open" "(CUT-SHORT) the conversation is back in the operator's queue"
 has "$(cat "$CALLS")" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status in_progress --assignee human --status open" "(CUT-SHORT) …by one write guarded on the sitting that held it and the status it read"
 hasnt "$(cat "$CALLS")" "bd close" "(CUT-SHORT) …and nothing is closed"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome handed back" "(CUT-SHORT) the reminder says the conversation was handed back"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome handed back --summary cut short: the rollout question is still owed" "(CUT-SHORT) the reminder says the conversation was handed back, with the headline as the sitting's outcome"
 # The guard misses when another writer reached the conversation first: model it
 # by changing the conversation between the sign-off's read and its write. Another
 # sitting taking it changes the holder. A dismiss closes it and keeps the
@@ -875,7 +883,7 @@ eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT) …and
 eq "$(field tk-conv status)" "closed" "(ACCEPT) the conversation closes"
 eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rec" "(ACCEPT) …keeping its reply onto the gate it took up"
 has "$OUT" "took the recommendation: mol-fix at tk-anc, through Accept" "(ACCEPT) the take is reported"
-has "$(grep '^pr-sitting-comment' "$CALLS")" "took the recommendation: mol-fix, through Accept" "(ACCEPT) …and listed among the reminder's actions"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome accepted --summary took the reaction's mol-fix" "(ACCEPT) …and the reminder says its recommended work started"
 case "$(cat "$CALLS")" in
   *"gc-helm takeaway"*"gc-helm accept"*"bd close tk-conv"*) ok "(ACCEPT-ORDER) headline, then the acceptance, then the close" ;;
   *) bad "(ACCEPT-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
@@ -884,6 +892,7 @@ TAKEN="$(cat "$CALLS")"
 ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT-RERUN) a re-run of a sign-off that took the recommendation exits 0"
 has "$OUT" "the recommendation was already taken" "(ACCEPT-RERUN) …finding it already taken"
+has "$(grep '^pr-sitting-comment' "$CALLS" | tail -n1)" "--outcome accepted" "(ACCEPT-RERUN) …and the reminder still says its recommended work started"
 eq "$(grep -c '^bd close' "$CALLS")" "$(printf '%s\n' "$TAKEN" | grep -c '^bd close')" "(ACCEPT-RERUN) …and closing nothing again"
 
 echo "# the acceptance case in one sitting: the review gate first, then the recommendation"
@@ -986,6 +995,7 @@ recommend; ACCEPT_DOES=other run_signoff --conversation tk-conv --outcome "the r
 eq "$RC" 0 "(ACCEPT-FIRST) a take another answer beat to the gate exits 0"
 has "$OUT" "another answer reached the recommendation's gate first — tk-rec: \"moot: the reaction withdrew its recommendation\"" "(ACCEPT-FIRST) …reporting the answer that stands"
 eq "$(field tk-conv status)" "closed" "(ACCEPT-FIRST) …and the conversation closes"
+has "$(grep '^pr-sitting-comment' "$CALLS" | tail -n1)" "--outcome ruled --summary the reaction withdrew mol-fix" "(ACCEPT-FIRST) …and the reminder says the ruling did nothing to the PR"
 
 echo "# --var hands Accept's writer a var the ruling settled for the dispatch"
 recommend; run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false

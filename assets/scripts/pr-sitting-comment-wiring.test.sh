@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # pr-sitting-comment-wiring.test.sh — proves the sign-off's PR-reminder update
 # reaches the real pr-sitting-comment.sh with arguments it takes, end to end. A
-# sitting's engage posts the reminder in its open shape; converse-signoff.sh,
-# once the conversation reads closed, edits it to say the sitting ended with its
-# summary and actions, and once a cut-short conversation reads back in the
-# operator's queue, edits it to say it was handed back. The engage and dismiss
-# call sites are covered by gc-helm-engage.test.sh and gc-helm-dismiss.test.sh,
-# which own those harnesses.
+# sitting's title step posts the reminder in its open shape; converse-signoff.sh,
+# once the conversation reads closed, edits it to say what the visit discussed
+# and the action taken, and once a cut-short conversation reads back in the
+# operator's queue, edits it to say the visit went back there undecided. The
+# dismiss call site is covered by gc-helm-dismiss.test.sh, which owns that
+# harness, and gc-helm-engage.test.sh proves engage posts nothing.
 #
 # Hermetic: stubs gc, gh and the sign-off's other pack scripts; the candidate
 # root carries the real pr-sitting-comment.sh, pr-post.sh and rig-mentions.sh, so
@@ -124,45 +124,63 @@ chmod +x "$BIN/gh"
 export PATH="$BIN:$PATH" STORE="$TMPD/store" REPO STATE="$TMPD/comments.json" GC_RIG_ROOT="$TMPD/rig"
 unset GC_CITY_PATH 2>/dev/null || true
 
-# fixture: the subject tk-subj with PR 41 and a review gate, and the
-# conversation tk-conv a sitting holds, replying to that gate.
+# fixture [no-topic]: the subject tk-subj with PR 41 and a review gate, and the
+# conversation tk-conv a sitting holds, replying to that gate. The sitting has
+# named its topic, which posted the reminder, unless no-topic is given.
 fixture() {
   rm -rf "$STORE"; mkdir -p "$STORE/b"; printf '[]' > "$STATE"
   jq -n '{id:"tk-subj", issue_type:"task", status:"open", assignee:"", metadata:{pr_number:"41", pr_url:"https://github.com/acme/widgets/pull/41"}, deps:[{type:"blocks", on:"tk-gate"}]}' > "$STORE/b/tk-subj.json"
   jq -n '{id:"tk-gate", issue_type:"gate", await_type:"human", await_id:"review-needs-you.tk-f", status:"open", assignee:"", metadata:{}, deps:[]}' > "$STORE/b/tk-gate.json"
   jq -n '{id:"tk-conv", issue_type:"task", status:"in_progress", assignee:"gc-toolkit/gc-toolkit.tk-conv", metadata:{}, deps:[{type:"tracks", on:"tk-subj"}, {type:"replies-to", on:"tk-gate"}]}' > "$STORE/b/tk-conv.json"
-  ( cd "$TMPD/cwd" && bash "$REMINDER" engage --sitting tk-conv --subject tk-subj ) >/dev/null 2>&1
+  [ "${1:-}" = no-topic ] && return 0
+  ( cd "$TMPD/cwd" && bash "$REMINDER" topic --sitting tk-conv --subject tk-subj --topic "how the retry should work" ) >/dev/null 2>&1
 }
+nl=$'\n'
 
-echo "── a ruled sign-off edits the reminder to say the sitting ended, with its summary and actions ──"
+echo "── a ruled sign-off edits the reminder to say what the visit discussed and the action taken ──"
 fixture
-has "the engage posted the open reminder" "$(jq -r '.[0].body // ""' "$STATE")" "Sitting on tk-conv — open"
-( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "we fix the retry first" \
-    --ruled yes --ruling "fix the retry" --route human --no-wait ) >/dev/null 2>&1
+has "the title step posted the open reminder" "$(jq -r '.[0].body // ""' "$STATE")" "### Under discussion: how the retry should work"
+( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "ruled — we fix the retry first" \
+    --ruled yes --ruling "typed ruling words" --route human --no-wait ) >/dev/null 2>&1
 BODY="$(jq -r '.[0].body // ""' "$STATE")"
-has "the same comment now says the sitting ended, settled" "$BODY" "Sitting on tk-conv — ended (settled)"
-has "the headline is its summary" "$BODY" "Summary: we fix the retry first"
-has "the ruling is among its actions" "$BODY" "ruling: fix the retry (released to human)"
-has "…as is the gate it resolved" "$BODY" "resolved gate tk-gate"
+has "the same comment names the topic discussed, the action taken and the visit" "$BODY" \
+  "### Discussed: how the retry should work${nl}Action taken: none; we fix the retry first.${nl}(visit tk-conv)"
+for gone in "ruled" "typed ruling words" "resolved gate" "Summary" "Actions Taken" "settled" "Sitting on"; do
+  hasnt "…and none of the sign-off's own record reaches it: $gone" "$BODY" "$gone"
+done
 [ "$(jq 'length' "$STATE")" = 1 ] && ok "still one comment on the thread" || bad "still one comment on the thread" "$(cat "$STATE")"
+
+echo "── a headline whose opening is not a short label is kept whole ──"
+fixture
+( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "Sent back: the retry waits on the queue — rework drops the wait" \
+    --ruled yes --ruling "typed ruling words" --route human --no-wait ) >/dev/null 2>&1
+has "the outcome is the whole headline" "$(jq -r '.[0].body // ""' "$STATE")" \
+  "Action taken: none; Sent back: the retry waits on the queue — rework drops the wait."
 
 echo "── what the sign-off hands the reminder meets the real rig-mention check ──"
 fixture
-( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "the same defect on rig-b" \
-    --ruled yes --ruling "fix the retry" --route human --no-wait ) >/dev/null 2>&1
+( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "ruled — the same defect on rig-b" \
+    --ruled yes --ruling "typed ruling words" --route human --no-wait ) >/dev/null 2>&1
 BODY="$(jq -r '.[0].body // ""' "$STATE")"
-has "the comment still says the sitting ended, settled" "$BODY" "Sitting on tk-conv — ended (settled)"
-hasnt "a summary naming another rig is left out" "$BODY" "Summary:"
+has "the comment still says the visit ended, with the action taken" "$BODY" \
+  "### Discussed: how the retry should work${nl}Action taken: none.${nl}(visit tk-conv)"
 hasnt "…so the rig never reaches the PR" "$BODY" "rig-b"
-has "the actions it clears stay" "$BODY" "ruling: fix the retry (released to human)"
 
-echo "── a cut-short sign-off edits it to say the conversation was handed back ──"
+echo "── a cut-short sign-off edits it to say the visit went back to the queue undecided ──"
 fixture
-( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "the rollout question is still owed" --ruled no ) >/dev/null 2>&1
+( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "cut short — the rollout question is still owed" --ruled no ) >/dev/null 2>&1
 BODY="$(jq -r '.[0].body // ""' "$STATE")"
-has "the comment says the sitting ended, handed back" "$BODY" "Sitting on tk-conv — ended (handed back)"
-has "…that the conversation waits in the operator's queue" "$BODY" "conversation back in the operator's queue"
-has "…and which gate is still owed" "$BODY" "left tk-gate open and owed"
+has "the comment says the visit went back undecided, then the sitting's outcome" "$BODY" \
+  "Action taken: none; the visit went back to the operator's queue undecided; the rollout question is still owed."
+hasnt "…and not which gate is still owed" "$BODY" "tk-gate"
+
+echo "── a sign-off on a conversation whose sitting named no topic leaves the PR alone ──"
+fixture no-topic
+( cd "$TMPD/cwd" && bash "$SIGNOFF" --conversation tk-conv --outcome "ruled — we fix the retry first" \
+    --ruled yes --ruling "typed ruling words" --route human --no-wait ) >/dev/null 2>&1
+[ "$(jq 'length' "$STATE")" = 0 ] && ok "nothing is posted" || bad "nothing is posted" "$(cat "$STATE")"
+[ "$(jq -r '.status' "$STORE/b/tk-conv.json")" = closed ] && ok "…though the sign-off closed the conversation" \
+  || bad "…though the sign-off closed the conversation" "$(cat "$STORE/b/tk-conv.json")"
 
 echo
 echo "pr-sitting-comment-wiring: $PASS passed, $FAIL failed"
