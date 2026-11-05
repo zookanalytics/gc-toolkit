@@ -134,9 +134,12 @@ exclude_skill_links() {
 # When git refuses because the move would overwrite a tracked change or an
 # untracked file, the tracked changes are saved as changes, the move is forced,
 # and each change on a path the tip leaves alone is put back, so a forced move
-# drops only what was in its way. A move that still fails ends the run
-# non-zero, so the session does not start and gc reports git's error. Only a
-# linked worktree moves, since a main checkout is the rig's own.
+# drops only what was in its way. A rebase, a git am, or a run of cherry-picks
+# or reverts that a session stopped partway is then quit, so the next session
+# does not start inside it, and a rebase's autostash is saved as autostash. A
+# move that still fails ends the run non-zero, so the session does not start
+# and gc reports git's error. Only a linked worktree moves, since a main
+# checkout is the rig's own.
 sync_worktree() {
     [ "$SYNC" = "--sync" ] || return 0
     [ -f "$WT/.git" ] || return 0
@@ -157,13 +160,15 @@ sync_worktree() {
     save_if_alone head "$HEAD_COMMIT"
     [ "$OWN_COMMIT" = "$HEAD_COMMIT" ] || save_if_alone branch "$OWN_COMMIT"
 
-    move 2>/dev/null && return 0
-    CHANGES=$(GIT_AUTHOR_NAME=worktree-setup GIT_AUTHOR_EMAIL=worktree-setup@localhost \
-        GIT_COMMITTER_NAME=worktree-setup GIT_COMMITTER_EMAIL=worktree-setup@localhost \
-        git -C "$WT" stash create "worktree-setup: tracked changes in $WT before its move") || exit 1
-    [ -z "$CHANGES" ] || save changes "$CHANGES"
-    move -f || exit 1
-    [ -z "$CHANGES" ] || carry_back || exit 1
+    if ! move 2>/dev/null; then
+        CHANGES=$(GIT_AUTHOR_NAME=worktree-setup GIT_AUTHOR_EMAIL=worktree-setup@localhost \
+            GIT_COMMITTER_NAME=worktree-setup GIT_COMMITTER_EMAIL=worktree-setup@localhost \
+            git -C "$WT" stash create "worktree-setup: tracked changes in $WT before its move") || exit 1
+        [ -z "$CHANGES" ] || save changes "$CHANGES"
+        move -f || exit 1
+        [ -z "$CHANGES" ] || carry_back || exit 1
+    fi
+    quit_operation
 }
 
 # save_if_alone <name> <commit> — saves <commit> as <name> when a commit it
@@ -190,6 +195,29 @@ save() {
 carry_back() {
     GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" read-tree -m -u --aggressive "$HEAD_COMMIT" HEAD "$CHANGES" &&
         git -C "$WT" reset -q
+}
+
+# quit_operation — the move keeps the state of a stopped rebase, git am, or run
+# of cherry-picks or reverts, and continuing or aborting it would take the home
+# off the tip. Quitting keeps HEAD, the index and the work tree, and runs only
+# after a move, so a home whose move failed keeps the state for a person to
+# abort. Quitting a rebase would put its autostash on the stash stack, so the
+# autostash is saved as autostash first. rebase --quit refuses a git am
+# session, which keeps its state where a rebase does, so that is quit with
+# am --quit. A quit git refuses fails the run, as a failed move does.
+quit_operation() {
+    REBASE=$(git -C "$WT" rev-parse --path-format=absolute --git-path rebase-merge)
+    [ -d "$REBASE" ] || REBASE=$(git -C "$WT" rev-parse --path-format=absolute --git-path rebase-apply)
+    if [ -f "$REBASE/applying" ]; then
+        git -C "$WT" am --quit || exit 1
+    elif [ -d "$REBASE" ]; then
+        if [ -f "$REBASE/autostash" ]; then
+            save autostash "$(cat "$REBASE/autostash")"
+            rm -f "$REBASE/autostash"
+        fi
+        git -C "$WT" rebase --quit || exit 1
+    fi
+    git -C "$WT" cherry-pick --quit || exit 1
 }
 
 # move [-f] — puts the worktree on its per-target branch at the default tip.

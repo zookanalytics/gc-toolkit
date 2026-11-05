@@ -66,7 +66,15 @@
 #        each tracked change on a path the tip leaves alone, gc's merge and a
 #        deletion alike, is put back unstaged;
 #   (ab) a session's change to a file the tip changes forces the move too: the
-#        tip's file wins and the change is saved, and gc's merge is put back.
+#        tip's file wins and the change is saved, and gc's merge is put back;
+#   (ac) a rebase stopped at an edit is quit once the home moves, with the
+#        commit it stopped on saved as head and its autostash as autostash,
+#        none of it on the stash stack;
+#   (ad) a git am session and a run of cherry-picks stopped partway are quit
+#        too;
+#   (ae) a rebase stopped on a conflict fails the run before the move, keeping
+#        its state;
+#   (af) a quit, or a put-back, git refuses after the move fails the run.
 
 set -euo pipefail
 
@@ -116,6 +124,11 @@ has()       { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (stderr '$1' lacks '$2'
 lacks()     { case "$1" in *"$2"*) bad "$3 ('$1' has '$2')" ;; *) ok "$3" ;; esac; }
 # the run's exit status, captured so an expected failure does not end the suite
 rc_of()     { local rc=0; sh "$SCRIPT" "$@" >>"$TMP/run.log" 2>&1 || rc=$?; echo "$rc"; }
+# ops_of <home> — the stopped operations whose state the home's git dir holds
+ops_of() {
+    local d f; d=$(git -C "$1" rev-parse --absolute-git-dir)
+    for f in rebase-merge rebase-apply sequencer MERGE_HEAD; do [ ! -e "$d/$f" ] || printf '%s ' "$f"; done
+}
 # whether the exclude file git resolves for a checkout carries the Gas City marker
 marker_in() {
     grep -qF "# Gas City worktree infrastructure (local excludes)" \
@@ -564,6 +577,96 @@ eq "$(git -C "$TR" show "$(saved "$TR" "$BR" changes):README.md")" "mine" \
 eq "$(cat "$W/.claude/settings.json")" '{"hooks":"gc","repo":2}' "(ab) and gc's merge put back"
 eq "$(git -C "$W" status --porcelain)" " M .claude/settings.json" "(ab) unstaged, with nothing unmerged"
 eq "$ERR" ""                                 "(ab) printing nothing"
+
+# --- (ac) a rebase a session stopped at an edit, with nothing staged, is quit once
+#          the home moves, so the next session does not start inside it. The
+#          commit it stopped on, which only the per-target branch holds, is saved
+#          as head, and the rebase's autostash as autostash, since quitting would
+#          put it on the stash stack. --------------------------------------------
+P="$TMP/ac"; mkdir -p "$P"; W="$P/agentAC"
+run "$W" agentAC
+BR=$(branch_of "$W")
+echo ac > "$W/ac.txt"; git -C "$W" add ac.txt; git -C "$W" commit -qm ac
+MINE=$(head_of "$W")
+echo dirty > "$W/README.md"
+GIT_SEQUENCE_EDITOR="sed -i.bak 's/^pick/edit/'" git -C "$W" rebase -q -i --autostash HEAD~1 >/dev/null 2>&1 || true
+eq "$(ops_of "$W")" "rebase-merge "          "(ac) the rebase is stopped at its edit"
+STASH=$(cat "$(git -C "$W" rev-parse --path-format=absolute --git-path rebase-merge/autostash)")
+advance_remote ac1.txt
+ERR=$(sync_stderr "$W" agentAC)
+eq "$(head_of "$W")" "$(tip)"                "(ac) the home moves to the tip"
+eq "$(branch_of "$W")" "$BR"                 "(ac) on its own branch"
+eq "$(ops_of "$W")" ""                       "(ac) and the rebase is quit"
+eq "$(saved "$RIG" "$BR" head)" "$MINE"      "(ac) the commit it stopped on is saved as head"
+eq "$(saved "$RIG" "$BR" autostash)" "$STASH" "(ac) its autostash as autostash"
+eq "$(git -C "$RIG" stash list)" ""          "(ac) leaving the stash stack empty"
+eq "$ERR" ""                                 "(ac) printing nothing"
+
+# --- (ad) a git am session and a run of cherry-picks, each stopped partway with
+#          nothing left unmerged, are quit the same way, one after the other in
+#          one home. ------------------------------------------------------------
+P="$TMP/ad"; mkdir -p "$P"; W="$P/agentAD"
+run "$W" agentAD
+BR=$(branch_of "$W")
+echo old > "$W/README.md"; git -C "$W" commit -qam old
+echo new > "$W/README.md"; git -C "$W" commit -qam new
+git -C "$W" format-patch -q -1 -o "$P/patch"
+git -C "$W" reset -q --hard HEAD~2
+git -C "$W" am -q "$P/patch"/*.patch >/dev/null 2>&1 || true
+eq "$(ops_of "$W")" "rebase-apply "          "(ad) git am is stopped on a patch that does not apply"
+advance_remote ad1.txt
+ERR=$(sync_stderr "$W" agentAD)
+eq "$(ops_of "$W"):$(head_of "$W"):$ERR" ":$(tip):" "(ad) the home moves and the session is quit, silently"
+git -C "$W" checkout -q -b ad-pick
+echo p1 > "$W/README.md"; git -C "$W" commit -qam p1
+echo p2 > "$W/ad-p2.txt"; git -C "$W" add ad-p2.txt; git -C "$W" commit -qm p2
+git -C "$W" checkout -q "$BR"
+echo mine > "$W/README.md"; git -C "$W" commit -qam mine
+git -C "$W" cherry-pick ad-pick~1 ad-pick >/dev/null 2>&1 || true
+echo resolved > "$W/README.md"; git -C "$W" add README.md
+eq "$(ops_of "$W")" "sequencer "             "(ad) the run of cherry-picks is stopped at its first pick"
+advance_remote ad2.txt
+ERR=$(sync_stderr "$W" agentAD)
+eq "$(ops_of "$W"):$(head_of "$W"):$ERR" ":$(tip):" "(ad) the home moves and the run is quit, silently"
+
+# --- (ae) a rebase stopped on a conflict keeps its state: git stash create
+#          cannot save unmerged paths, so the run fails before the home moves,
+#          and a person can still abort the rebase. -------------------------------
+P="$TMP/ae"; mkdir -p "$P"; W="$P/agentAE"
+run "$W" agentAE
+echo one > "$W/README.md"; git -C "$W" commit -qam one
+echo two > "$W/README.md"; git -C "$W" commit -qam two
+git -C "$W" rebase -q --onto HEAD~2 HEAD~1 >/dev/null 2>&1 || true
+eq "$(ops_of "$W"):$(git -C "$W" ls-files -u | wc -l | tr -d ' ')" "rebase-merge :3" \
+    "(ae) the rebase is stopped on a conflict"
+BEFORE=$(head_of "$W")
+advance_remote ae1.txt
+ERR=$(sync_stderr "$W" agentAE)
+has "$ERR" "exit 1"                          "(ae) the run fails"
+eq "$(head_of "$W"):$(ops_of "$W")" "$BEFORE:rebase-merge " "(ae) leaving the home and its rebase as they were"
+
+# --- (af) a step git refuses after the move fails the run, as a failed move does,
+#          so the session does not start inside a rebase it could not quit, or
+#          without the changes a forced move could not put back. A stub git
+#          refuses the one command FAIL_GIT names. ----------------------------------
+mkdir -p "$TMP/fail-git"
+printf '#!/bin/sh\ncase " $* " in *" $FAIL_GIT "*) echo "fatal: refused $FAIL_GIT" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' "$(command -v git)" > "$TMP/fail-git/git"
+chmod +x "$TMP/fail-git/git"
+P="$TMP/af"; mkdir -p "$P"; W="$P/agentAF"
+run "$W" agentAF
+echo af > "$W/af.txt"; git -C "$W" add af.txt; git -C "$W" commit -qm af
+GIT_SEQUENCE_EDITOR="sed -i.bak 's/^pick/edit/'" git -C "$W" rebase -q -i HEAD~1 >/dev/null 2>&1 || true
+advance_remote af1.txt
+ERR=$(FAIL_GIT="rebase --quit" PATH="$TMP/fail-git:$PATH" sync_stderr "$W" agentAF)
+has "$ERR" "refused rebase --quit"           "(af) a quit git refuses fails the run with git's reason"
+has "$ERR" "exit 1"                          "(af) so the session does not start"
+eq "$(ops_of "$W")" "rebase-merge "          "(af) inside the rebase, which stays"
+git -C "$W" rebase --quit 2>/dev/null || true
+echo mine > "$W/README.md"; echo mine > "$W/af2.txt"
+advance_remote af2.txt
+ERR=$(FAIL_GIT="read-tree" PATH="$TMP/fail-git:$PATH" sync_stderr "$W" agentAF)
+has "$ERR" "refused read-tree"               "(af) changes git cannot put back after a forced move fail the run"
+has "$ERR" "exit 1"                          "(af) the same way"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
