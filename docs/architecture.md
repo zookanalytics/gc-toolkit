@@ -8,8 +8,8 @@ description: The 30,000-ft guide to gc-toolkit — the boundary between operator
 gc-toolkit delivers the beliefs in [foundation.md](foundation.md) by *composing
 Gas City* — the multi-agent runtime it runs on — rather than by growing bespoke
 machinery beside it. The pack is its workflows: **work, review, merge,
-engagement, feedback, patrol**. Every component belongs to one of them or is a declared
-shared primitive; nothing exists because an incident once happened.
+engagement, feedback, patrol**. Every component belongs to one of them or is a
+declared shared primitive; nothing exists because an incident once happened.
 
 ## Scope
 
