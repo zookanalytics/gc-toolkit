@@ -158,7 +158,7 @@ City behavior that predates it.
   session does not reserve its alias, and a new session under it starts a fresh
   transcript and takes the in-progress work still assigned to the alias.
   `gc session close` releases no claim held under the alias, and
-  `gc session list` leaves a closed session out whatever state it is asked for.
+  `gc session list` with no state filter leaves a closed session out.
 - **A task in a person's queue starts nothing.** Assigned work wakes only the
   session whose identity it carries, and an unassigned, unrouted bead wakes
   nothing, so a task assigned to `human`, which no session carries, starts no
@@ -179,6 +179,9 @@ City behavior that predates it.
 382-431, `internal/beads/bdstore_conditional_release.go` 78-110 and core's
 `orphan-sweep.sh`; read at upstream `1e05ae624` on 2026-10-20 and 2026-10-22
 (specs/tk-0ur8r9p/design.md, "The platform this rides", records each line).
+The session list's default filter, `sessionMatchesFiltersInfo` in
+`internal/session/info_store.go` (286-289 at upstream `9f807760c` and 287-290
+at the fork's `e03752646`), was read on 2026-11-05.
 
 ## Where a question surfaces
 
