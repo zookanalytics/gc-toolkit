@@ -9,9 +9,8 @@
 # local excludes an agent needs (provision_worktree). Called from agent
 # pre_start (agents/*/agent.toml) before the session exists, so the agent
 # starts IN the worktree. An existing worktree is never re-created: it gets
-# whatever provisioning it lacks, and --sync brings it to the default-branch
-# tip unless that would lose a commit or a tracked change, or it sits on a
-# branch that is not its own (sync_worktree).
+# whatever provisioning it lacks, and --sync moves it to the default-branch
+# tip at every start, saving first what the move would lose (sync_worktree).
 #
 # docs/warrants.md, "Agent home provisioning", says why a home is not a
 # `gc worktree` tree.
@@ -119,93 +118,74 @@ exclude_skill_links() {
     done
 }
 
+# A home holds no work of its own, so --sync moves it to the remote default
+# branch's tip at every start, on its per-target branch, whatever a session did
+# to it. What the move would lose is saved first, under
+# refs/gc-toolkit/home-save/<per-target branch>/<UTC time>/, and never on the
+# stash stack, which every worktree of the repository shares, so another
+# session's pop could take it. HEAD's commits are saved as head. The move resets
+# the per-target branch, so when that branch points at another commit than HEAD,
+# its commits are saved as branch. Neither is saved when another branch, a tag
+# or a remote-tracking ref holds every commit it reaches.
+#
+# The move keeps each tracked change and untracked file it does not overwrite.
+# gc writes provider settings into a home before pre_start runs, and in a rig
+# that tracks such a file, gc's merge is a tracked change the session needs.
+# When git refuses because the move would overwrite a tracked change or an
+# untracked file, the tracked changes are saved as changes and the move is
+# forced. A move that still fails ends the run non-zero, so the session does not
+# start and gc reports git's error. Only a linked worktree moves, since a main
+# checkout is the rig's own.
 sync_worktree() {
     [ "$SYNC" = "--sync" ] || return 0
+    [ -f "$WT/.git" ] || return 0
     if ! git -C "$WT" remote get-url origin >/dev/null 2>&1; then
         return 0
     fi
 
     git -C "$WT" fetch origin 2>/dev/null || true
 
-    CURRENT=$(git -C "$WT" symbolic-ref -q --short HEAD 2>/dev/null) || CURRENT=""
-    if [ -n "$CURRENT" ]; then
-        # Fast-forward only, never replay local commits: a `pull --rebase` replays
-        # shed commits onto every fetched tip and parks the worktree mid-rebase.
-        UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || UPSTREAM=""
-        # The merge also succeeds on a branch ahead of its upstream, where it moves
-        # nothing, so a fast-forward ends the sync only when it leaves HEAD at the tip.
-        if [ -n "$UPSTREAM" ] && git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1 && head_at_default_tip; then
-            return 0
-        fi
-        # Any branch but the home's own is someone's work, left as it stands.
-        [ "$CURRENT" = "$(branch_name)" ] || return 0
-    fi
-    move_to_default_tip
-}
-
-head_at_default_tip() {
-    TIP=$(git -C "$WT" rev-parse -q --verify refs/remotes/origin/HEAD 2>/dev/null) || return 1
-    [ "$(git -C "$WT" rev-parse HEAD)" = "$TIP" ]
-}
-
-# A home holds no work of its own, so it moves to the remote default tip unless
-# that would lose something: the tracked tree must be clean, and a detached HEAD's
-# commits must all be reachable from some ref. Reachability, not ancestry of the
-# tip, because a squash merge lands a branch's content under a new sha, so its
-# commits never reach the tip and an ancestry test would hold the home on them
-# for good. An attached HEAD needs no such test, since its branch keeps its
-# commits whatever the worktree does next.
-#
-# The worktree lands on its per-target branch, tracking the default branch, so
-# the next sync takes the fast-forward path. That branch is reset only when every
-# commit it holds is reachable from another ref. When it alone holds one, or
-# another worktree has it checked out, the worktree is detached at the tip
-# instead. A worktree that cannot move safely stays where it is, and one stderr
-# line names it and the reason.
-move_to_default_tip() {
-    DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || DEFAULT_REF=""
-    if [ -z "$DEFAULT_REF" ]; then
-        sync_skipped "origin/HEAD is unset, so there is no default branch to move to"
-        return 0
-    fi
-    TARGET=${DEFAULT_REF#refs/remotes/}
-    if ! DIRTY=$(git -C "$WT" status --porcelain --untracked-files=no 2>/dev/null); then
-        sync_skipped "git status failed"
-        return 0
-    fi
-    if [ -n "$DIRTY" ]; then
-        sync_skipped "it has uncommitted changes to tracked files"
-        return 0
-    fi
-    if ! git -C "$WT" symbolic-ref -q HEAD >/dev/null 2>&1; then
-        if ! ALONE=$(git -C "$WT" rev-list -n 1 HEAD --not --branches --remotes --tags 2>/dev/null) || [ -n "$ALONE" ]; then
-            sync_skipped "its detached HEAD holds commits no ref reaches"
-            return 0
-        fi
-    fi
-
+    DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || {
+        printf 'worktree-setup: cannot sync %s: origin/HEAD is unset\n' "$WT" >&2
+        exit 1
+    }
     BRANCH=$(branch_name)
-    if ! git -C "$WT" show-ref --verify --quiet "refs/heads/$BRANCH" \
-        || ! branch_holds_commits_alone "$BRANCH"; then
-        if GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --track -B "$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
-            return 0
-        fi
-    fi
-    if ERR=$(GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --detach "$DEFAULT_REF" 2>&1); then
-        return 0
-    fi
-    sync_skipped "git checkout $TARGET failed: $(printf '%s\n' "$ERR" | head -n 1)"
+    SAVE="refs/gc-toolkit/home-save/$BRANCH/$(date -u +%Y%m%dT%H%M%SZ)"
+    HEAD_COMMIT=$(git -C "$WT" rev-parse HEAD)
+    OWN_COMMIT=$(git -C "$WT" rev-parse -q --verify "refs/heads/$BRANCH") || OWN_COMMIT=""
+    save_if_alone head "$HEAD_COMMIT"
+    [ "$OWN_COMMIT" = "$HEAD_COMMIT" ] || save_if_alone branch "$OWN_COMMIT"
+
+    move 2>/dev/null && return 0
+    CHANGES=$(GIT_AUTHOR_NAME=worktree-setup GIT_AUTHOR_EMAIL=worktree-setup@localhost \
+        GIT_COMMITTER_NAME=worktree-setup GIT_COMMITTER_EMAIL=worktree-setup@localhost \
+        git -C "$WT" stash create "worktree-setup: tracked changes in $WT before its move") || exit 1
+    [ -z "$CHANGES" ] || save changes "$CHANGES"
+    move -f || exit 1
 }
 
-# True when a commit on the branch is reachable from no other ref, or when that
-# cannot be read.
-branch_holds_commits_alone() {
-    ALONE=$(git -C "$WT" rev-list -n 1 "refs/heads/$1" --not --exclude="$1" --branches --remotes --tags 2>/dev/null) || return 0
-    [ -n "$ALONE" ]
+# save_if_alone <name> <commit> — saves <commit> as <name> when a commit it
+# reaches is held by no branch but the per-target one, no tag and no
+# remote-tracking ref, or when git cannot say.
+save_if_alone() {
+    [ -n "$2" ] || return 0
+    ALONE=$(git -C "$WT" rev-list -n 1 "$2" --not --exclude="$BRANCH" --branches --remotes --tags 2>/dev/null) || ALONE=unread
+    [ -z "$ALONE" ] || save "$1" "$2"
 }
 
-sync_skipped() {
-    printf 'worktree-setup: not syncing %s: %s\n' "$WT" "$1" >&2
+# save <name> <commit> — pins <commit> at $SAVE/<name>. The empty old value
+# makes the ref create-only, so no earlier save is replaced.
+save() {
+    git -C "$WT" update-ref -m "worktree-setup: saved before moving $WT to $DEFAULT_REF" "$SAVE/$1" "$2" "" || exit 1
+}
+
+# move [-f] — puts the worktree on its per-target branch at the default tip.
+# Hooks are off, because a hook's exit status becomes the checkout's, and a move
+# that carried a change over but read as failed would then be forced over it.
+# --no-track leaves the upstream the worktree was created with, since setting it
+# rewrites the repository's config, which every worktree shares.
+move() {
+    GIT_LFS_SKIP_SMUDGE=1 git -c core.hooksPath=/dev/null -C "$WT" checkout -q "$@" --no-track -B "$BRANCH" "$DEFAULT_REF"
 }
 
 branch_name() {
