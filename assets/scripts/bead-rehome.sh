@@ -31,10 +31,7 @@
 # status and assignee this run read before judging it. A caller that read the
 # bead before another actor claimed, assigned or moved it therefore stamps
 # nothing while that change stands, and exits 4, as it does for a pointer that
-# does not stick. When the origin is a task_kind=visit it also gets
-# gc.work_outcome=no-op, for the work-record gate the close runs, from
-# work-outcome.sh: a write of its own that never gates the close and never
-# replaces a work outcome the visit already records.
+# does not stick.
 # An open human gate that blocks the origin holds its close (finalize-gate.sh).
 # A caller that reports its own refusals of the close as human gates names their
 # key with --except-key, and the retry withdraws those gates before it closes,
@@ -47,9 +44,8 @@
 # carries no outcome word, so no quiet period starts; then it closes.
 # A run that stops between steps leaves a state the next run completes, because
 # a resolved gate stays resolved.
-# An already-closed origin is the REPAIR path: pointer + appended note, plus that
-# work outcome when the visit lacks it, with the gates skipped (the close they
-# would guard already happened).
+# An already-closed origin is the REPAIR path: pointer + appended note, with the
+# gates skipped (the close they would guard already happened).
 # Once the origin reads back closed, on either path, the branch it names in
 # metadata.branch is ended on the git remote through branch-end.sh, the way a
 # merge ends a landed branch. That remote write never gates the disposition:
@@ -93,10 +89,6 @@ FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
 # Ends the retired branch on the git remote once the close reads back.
 # Overridable for a test.
 BRANCH_END="${GC_BRANCH_END_TOOL:-$HERE/branch-end.sh}"
-# The one gc.work_outcome stamp a visit gets before it closes, shared with every
-# other visit closer. Exposes work_outcome_noop.
-# shellcheck source=work-outcome.sh
-. "$HERE/work-outcome.sh" || { echo "bead-rehome: cannot source work-outcome.sh from $HERE" >&2; exit 1; }
 # The rule of which human gates still hold a bead, $HUMAN_GATE_JQ, which the
 # retry's withdrawal reads its own gates by. This script reads through bd_at, so
 # it takes the rule and none of the library's store reads.
@@ -117,8 +109,8 @@ Usage:
 
 Under every kind but not-needed the successor is the bead that carries the
 work now. Under not-needed nothing carries it, and the successor is the
-evidence that concluded the bead was unnecessary — typically the visit bead
-from the sitting that ruled. It is required either way.
+evidence that concluded the bead was unnecessary — typically the conversation
+the ruling was given in. It is required either way.
 
 The close is refused unless the evidence holds (see the header): every kind
 needs the origin to be a plain work bead no other session holds;
@@ -414,10 +406,6 @@ if [ -n "$CHECK" ]; then
     exit 0
 fi
 
-# A visit's close runs the work-record gate, so step 1a stamps its work outcome.
-ORIGIN_KIND=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // empty' 2>/dev/null || true)
-PRIOR_WORK_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // empty' 2>/dev/null || true)
-
 if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
         CLOSE_PLAN="already closed — pointer + note only, close reason left as-is"
@@ -425,7 +413,6 @@ if [ -n "$DRY_RUN" ]; then
         CLOSE_PLAN="$REASON"
     fi
     STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
-    [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_WORK_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.work_outcome=no-op"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
     else
@@ -480,15 +467,7 @@ GOT_STORE=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by_s
 if [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$SUCCESSOR_STORE" ]; then
     die "successor pointer did NOT stick on $ORIGIN (read back gc.superseded_by='${GOT_SUCC:-}' gc.superseded_by_store='${GOT_STORE:-}'); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
 fi
-# 1a. A visit's work outcome, for the work-record gate the close runs. It goes
-# through work-outcome.sh as a write of its own, after the gated stamp above, so
-# it never decides whether the visit closes. It runs on the repair path too,
-# where it reaches a closed visit that lacks this key.
-if [ "$ORIGIN_KIND" = "visit" ]; then
-    work_outcome_noop "$ORIGIN" bd_at "$ORIGIN_PATH"
-fi
-
-# 1b. Drop ONLY the wait edge to THIS successor: it would refuse the close,
+# 1a. Drop ONLY the wait edge to THIS successor: it would refuse the close,
 # and gc.superseded_by records the relationship more strongly. Any other
 # blocker is a real hold whose refusal below is correct.
 if [ "$(wait_edge_count "$CHECK_JSON")" -gt 0 ]; then

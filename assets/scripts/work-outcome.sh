@@ -1,9 +1,8 @@
 #!/bin/sh
 # work-outcome.sh — the one gc.work_outcome stamp a conversation gets before it
 # closes. Sourced, never executed, by every script that closes one:
-# converse-signoff.sh (a sitting's sign-off), gc-helm.sh (dismiss) and
-# bead-rehome.sh (a visit origin it re-homes). A rule about this key changes
-# here, once.
+# converse-signoff.sh (a sitting's sign-off) and gc-helm.sh (dismiss). A rule
+# about this key changes here, once.
 #
 # A conversation is a plain task bead, so its close runs the runtime's
 # work-record gate, which wants gc.work_outcome, one of shipped | no-op |
@@ -15,9 +14,8 @@
 # work_outcome_noop <bead> <bd-command>...
 #   Stamps gc.work_outcome=no-op on <bead>, unless the bead already records a
 #   work outcome: that value is another writer's word and is left as it is.
-#   <bd-command> is how the caller reaches its store, `gc bd` or a wrapper such
-#   as bead-rehome.sh's `bd_at <path>`, so the stamp lands in the store the
-#   close does.
+#   <bd-command> is how the caller reaches its store, such as `gc bd`, so the
+#   stamp lands in the store the close does.
 #
 #   The stamp is a write of its own and never rides a caller's precondition
 #   stamp, so a store that refuses the key fails this write alone. A store can

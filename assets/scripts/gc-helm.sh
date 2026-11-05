@@ -4763,7 +4763,6 @@ case "${1:-}" in
     handback)      shift; cmd_handback "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
-    demand)        echo "$PROG: a wait a person must clear is a human gate on the bead that waits: file it with human-gate.sh --subject <bead> --key <key> --message \"<what they must clear>\", or with gc bd gate create --type=human --blocks <bead>. Nothing was filed." >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
     *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, park, priority, dismiss, handback, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

@@ -75,9 +75,9 @@ pre	feedback	^skills/learning-distill/
 pre	doctrine	^skills/
 post	review	^formulas/(mol-review-quorum-signoff|mol-rig-demo)\.toml$
 post	work	^formulas/mol-design-convoy\.toml$
-post	visit	^orders/(gate-visit-sweep|proactive-scan-sling)\.toml$
+post	visit	^orders/proactive-scan-sling\.toml$
 post	shared	^orders/gctk-build\.toml$
-post	visit	^assets/scripts/(converse-|gc-helm|gate-visit|visit-|pr-visit-|tmux-|bead-context|proactive-scan|human-route|takeaway-)
+post	visit	^assets/scripts/(converse-|gc-helm|tmux-|bead-context|proactive-scan|human-route|takeaway-)
 post	work	^assets/scripts/(self-review-check|convoy-seed|submit-branch-gate|load-context-|workspace-setup-|rejected-branch-|salvage-scope|husk-guard|recovery-stamp|work-context|decline-wiring|polecat-escalation|agent-worktree|mol-design-convoy|pool-(nudge|cap|demand)-wiring)
 post	merge	^assets/scripts/(merge-tail|pr-status-label|pr-summary-region|one-anchor-per-pr|refinery-|mr-aware|find-work|unrecorded-direct|downstream-court)
 post	review	^assets/scripts/(review-|demo-deliver|rig-demo-capture|migrate-approval|signoff-gate|check-set-normalize|mol-validate-refuse|mol-rig-demo)
