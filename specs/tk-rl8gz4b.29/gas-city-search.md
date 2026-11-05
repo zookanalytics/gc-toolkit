@@ -1,9 +1,9 @@
 ---
-name: Gas City search for holding new work and seating a mayor
-description: Use when a review or a later change asks what Gas City ships for holding work, listing a queue, lifting a hold, placing a bead or seating a mayor, or when one of the triggers at the end may have fired.
+name: Gas City search for holding new work and seating the po
+description: Use when a review or a later change asks what Gas City ships for holding work, listing a queue, lifting a hold, placing a bead, naming or seating the po, or sequencing a queue, or when one of the triggers at the end may have fired.
 ---
 
-# Gas City search for holding new work and seating a mayor
+# Gas City search for holding new work and seating the po
 
 The placement marker's own design records no search of Gas City. This is the
 search for its replacement ([the design](native-hold-and-po.md)), one section
@@ -15,7 +15,9 @@ main `0b0d96250f66`, the `gastown` pack Gas City pins for a new city at
 `6ebaacba8f5f`. Pages are cited by title, and code by package and symbol. The city
 runs a fork of Gas City, which is not evidence of what Gas City ships. So the
 symbols the design leans on were also found in the installed build at `e03752646`
-and `gc beads list` was run against it, to know the design works here.
+and `gc beads list` was run against it, to know the design works here. The sections
+on the seat's name and on sequencing the queue were read on 2026-11-05 at the same
+Gas City commit, with the installed bd's own help.
 
 ## Holding a bead
 
@@ -108,9 +110,29 @@ and `gc beads list` was run against it, to know the design works here.
 - `hold-lib.sh` and `queue-priority.sh` carry pack semantics Gas City lacks. Priority
   following has its own warrant, and neither gains anything here.
 
-## Seating a mayor
+## The seat's name
 
-**Gas City ships the role as configuration. The design configures it.**
+**Gas City ties no behavior to a seat's name. The design names the seat po.**
+
+- `HoldMayorLabel` and `DispatchHoldLabels` in package beadmeta define the two hold
+  values. Their comment calls them "bd label *values* ..., not role names", which "a
+  role-neutral dispatcher checks for ... without knowing or caring who "mayor" is",
+  and the list is "fixed at the two canonical holds". So the queue keeps
+  `hold:mayor` under a seat of any name, and a label of the pack's own would hold
+  nothing.
+- `validAgentName` in package config accepts `po`.
+- What aims at the literal name `mayor`: `defaultWarmupMailTo` in package warmup,
+  `DefaultCity`'s one agent, the `gc sling mayor` and `gc session attach mayor` the
+  docs teach, and Gas Town's roles' `mayor/`. Under another name each of those reaches
+  no seat. That is this city's state today, since `gc agent list` shows no agent
+  named mayor.
+- Nothing in Gas City aims at `po`. Its one string literal `po` in that tree is a
+  kubectl alias for pods in a test host.
+
+## Seating the po
+
+**Gas City ships a mayor as configuration. The design configures a seat modeled on it,
+under its own name.**
 
 - `DefaultCity` in package config writes one agent, `mayor`, as an always-mode named
   session, with the embedded `prompts/mayor.md`. The
@@ -150,10 +172,11 @@ and `gc beads list` was run against it, to know the design works here.
 ## Paths that would reach the seat
 
 - `ResolveNamedSessionSpecForConfigTarget` and `namedSessionBareName` in package session
-  let a bare `mayor` or `mayor/` resolve to a bound session, so Gas Town's text and the
-  pack's stale default would both reach this seat.
+  let a bare name, such as `po` or `po/`, resolve to a bound session. A bare `mayor`
+  resolves only where an agent has that name, so in this city Gas Town's text and the
+  pack's defaults that name the mayor reach no seat.
 - `defaultWarmupMailTo` in package warmup is `mayor`, and `runStartWarmup` passes no
-  override.
+  override, so the warmup mail never reaches the po.
 - Core's `orphan-sweep` and `spawn-storm-detect` read `GC_ESCALATION_TARGET`, default
   `human`, and name a coordinator only as what a city can choose. `DoltMaintenance`'s
   `alert_to` is empty unless set.
@@ -194,7 +217,7 @@ route a bead to this session config".
 - Gas Town's `check-polecat-health` judges in-progress beads under live polecats.
 - The design adds nothing now, and hands the need to tk-1tfzr71.19.
 
-## The check that the mayor receives only its queue
+## The check that the po receives only its queue
 
 **Gas City ships the seam, and no check for this.**
 
@@ -218,10 +241,28 @@ exposes the rule as flags on a query (`--exclude-label`) and in Go, and these re
 JSON rows they have already read: `bd ready`, `bd blocked` and `bd list` all print `labels`,
 which was checked on live rows.
 
+## Sequencing the queue
+
+**bd ships the fields an order can land on, and no method. The design adds no field.**
+
+- A bead carries bd's priority, P0 to P4, and `bd create` also takes a due date
+  (`--due`) and a date that hides the bead from `bd ready` until then (`--defer`).
+  The pack ranks work that follows a parent by its `priority_shift`, through
+  `queue-priority.sh`.
+- Nothing in Gas City scores or sequences by cost of delay: no symbol or page there
+  names WSJF or cost of delay.
+- WSJF is the sitting's method, so it needs no primitive. Its rulings land on
+  priority, parks and placement order, as ruled. The design writes no due or defer
+  date, and a sitting may read a due date a bead already carries as time criticality.
+
 ## Triggers
 
 The answer changes if one of these ships. None had fired at the commits above.
 
+- `DispatchHoldLabels` takes a configured value: the queue's label can name the po,
+  and the line saying the po works `hold:mayor` goes.
+- A Gas City default aims at a seat by role rather than by the name `mayor`: the
+  design's every-path table is derived again.
 - `gc sling` lifts or refuses a hold: `place` shrinks or goes.
 - Issue 6069 lands: the known warning and the deacon's sentence go.
 - `gc beads list` prints priority and partial errors: the two gaps above close.

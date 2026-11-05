@@ -1,74 +1,90 @@
 ---
-name: Holding new work on Gas City's hold, with a mayor working the queue
-description: Use when building or reviewing the effort that retires the placement marker (tk-rl8gz4b.28), before giving the mayor or mechanik a job, or when a change would write, read or lift a hold on new work.
+name: Holding new work on Gas City's hold, with the po working the queue
+description: Use when building or reviewing the effort that retires the placement marker (tk-rl8gz4b.28), before giving the po or mechanik a job, or when a change would write, read or lift a hold on new work.
 ---
 
-# Holding new work on Gas City's hold, with a mayor working the queue
+# Holding new work on Gas City's hold, with the po working the queue
 
-New work that no epic holds carries Gas City's `hold:mayor` label. The queue is
-one native read, `gc beads list --label hold:mayor`. The mayor is a session the
-operator opens to work that queue, and each sitting starts fresh. Placing a bead
-is one verb, `gc-helm.sh place`, which sets the parent, slings the bead and lifts
-the hold. `placement=pending`, `assets/scripts/placement.sh` and
-`gc-helm.sh unplaced` all go.
+New work that no epic holds carries Gas City's `hold:mayor` label, the platform's
+coordination hold, which the po works in this city. The queue is one native read,
+`gc beads list --label hold:mayor`. The po, for Product Owner, is the operator's
+prioritization partner: a session the operator opens for a sitting, and each sitting
+starts fresh. Its sittings are backlog refinement over the queue and portfolio sync
+over the epics. Both open from the rig's stated target and sequence the work by WSJF,
+worked live with nothing stored. Placing a bead is one verb, `gc-helm.sh place`,
+which sets the parent, slings the bead and lifts the hold. `placement=pending`,
+`assets/scripts/placement.sh` and `gc-helm.sh unplaced` all go.
 
-Every answer below is proposed until the operator approves this design's PR. The
-rulings it rests on are quoted with where they were said, and text from the
-initiative's description (tk-rl8gz4b.28) is named as that. What Gas City ships is
-cited in [the search record](gas-city-search.md), read at the commits named there.
+The operator ruled this design's three questions, the seat's name and charter, and
+its method in conversation tk-lfi5zph on 2026-11-05, and the next section records
+those rulings. Every other answer below is proposed until the operator approves this
+design's PR. The rulings it rests on are quoted with where they were said, and text
+from the initiative's description (tk-rl8gz4b.28) is named as that. What Gas City
+ships is cited in [the search record](gas-city-search.md), read at the commits named
+there.
 
-## What the operator is asked to rule
+## What the operator ruled
 
-**1. Who places routine work?** (`docs/authority-map.md` says no agent does today.)
+The operator kept this design's direction, amended it, and ruled its three questions
+as recommended: "1 - yes PO. 2 - yes. 3 - yes." The quotes in this section are from
+conversation tk-lfi5zph on 2026-11-05.
 
-- *The mayor proposes and the operator rules* (recommended). The mayor brings the
-  queue in pieces that each fit one screen, with a recommendation, and applies
-  each ruling. Nothing starts without the operator's word. The queue waits between
-  sittings, for as long as the operator chooses.
-- *The mayor also places by a rule the operator writes*, such as "a member of an
-  unparked epic when its first reaction says actionable". Work starts with nobody
-  looking. It adds an order to wake the mayor and a stored rule, and a wrong
-  placement costs polecat time and a PR review.
+**The seat is the po, chartered as the prioritization partner.** "Name of po works
+well", and "I prefer 'chartered as the prioritization partner' we have to make sure
+that partner isn't downplayed to something not partner in practice." The vocabulary
+is SAFe's. The operator is the Business Owner, with the veto and the final say. The
+po is the Product Owner. A sitting over the queue is backlog refinement, and a
+sitting over the epics, their parks and their priorities is a portfolio sync.
+[The seat and its charter](#the-seat-and-its-charter) states the charter. The
+operator's direction of 2026-10-31 called this seat the mayor (visit tk-2hdsjmg), and
+this ruling renames it.
 
-The first keeps capacity in the operator's hands, which is what the epic was
-filed for, and it can grow into the second later with nothing rebuilt.
+**WSJF is the sittings' method and vocabulary, and nothing more.** "Yes, adopt WSJF as
+the method / vocabulary not the fields on a bead. 100% agree with your reasons on
+why." No metadata key carries it and no score is stored.
+[How a sitting sequences the work](#how-a-sitting-sequences-the-work) states the
+method.
 
-**2. Does the pile with no first reaction join the queue at cut-over?**
-gc-toolkit's intake is off, so many open beads there have had no first reaction
-and carry no marker. Their count is on tk-hok6w.
+**1. Who places routine work: the po, once the operator agrees.**
+(`docs/authority-map.md` says no agent does today.) The po brings the queue in pieces
+that each fit one screen, with its recommendation for each bead and its reasons, and
+it applies each ruling. Nothing starts without the operator's word, and the queue
+waits between sittings for as long as the operator chooses. That keeps capacity in
+the operator's hands, which is what the epic was filed for. The other option, a
+standing rule under which the po places alone, can grow from this one later with
+nothing rebuilt.
 
-- *One write per bead puts them in the queue* (recommended). It spends no tokens
-  and starts no work. The mayor's batch sort then reads one list, and turning
-  intake back on later reacts only to new beads. Intake stays off, as ruled on
-  2026-10-26. Some stale beads will take a sitting's minute to close.
-- *They stay where they are* until first reactions or a census sitting reach them.
-  The working list stays two lists, and turning intake on then spends a first
-  reaction on each.
+**2. The pile with no first reaction joins the queue at cut-over, one write per
+bead.** gc-toolkit's intake is off, so many open beads there have had no first
+reaction and carry no marker. Their count is on tk-hok6w. The write spends no tokens
+and starts no work. The po's sittings then read one list, and turning intake back on
+later reacts only to new beads. Intake stays off, as ruled on 2026-10-26. Some stale
+beads will take a sitting's minute to close.
 
-**3. Does the witness mail the mayor?** Gas Town's witness escalates by mailing
-`mayor/`, and the witness's target is Gas Town's (visit tk-dbpz6t2).
+**3. The witness keeps filing findings and human gates, and sends the po no patrol
+mail.** Gas Town's witness escalates by mailing `mayor/`, and the witness's target is
+Gas Town's (visit tk-dbpz6t2). This stays a named difference from Gas Town
+([the witness](#the-witness)).
 
-- *Our witness keeps filing findings and human gates* (recommended). The mayor receives
-  no patrol traffic, and this stays a named difference from Gas Town until the
-  operator rules otherwise.
-- *The witness mails the mayor, as Gas Town's does.* The mayor owns escalation
-  handling as well as the queue, and its mailbox takes the patrol traffic the
-  initiative's description names as a symptom: "a mailbox that absorbed escalation
-  storms".
+**The label stays `hold:mayor`,** in the ruling as the sitting recorded it on this
+design's bead. Gas City's dispatcher reads only its two fixed hold values, so a label
+naming the po would hold nothing ([what a held bead is](#what-a-held-bead-is)). One
+line beside the seat in `docs/architecture.md` says that the po works the platform's
+coordination hold here.
 
 ## The seats at landing
 
 | Seat | Owns | Runs |
 |---|---|---|
-| mayor | the placement queue, and nothing else it was not ruled to own | when the operator opens it, fresh each sitting |
+| po | the queue's writes, and each placement, park and priority move the operator agrees to in a sitting; nothing else it was not ruled to own | when the operator opens it, fresh each sitting |
 | mechanik | how the city works, and every town-repo edit | always, with the operator's standing conversation |
 | a converse sitting | one bead's conversation | per conversation |
 | patrols, pools, refinery | what they own today | unchanged |
 
-The operator's words for the first two: "mayor (overseer of all, owner of little)",
-"mechanik (gc-toolkit / Gas City expert)", and "I'd also rather the mayor take
-something over the mechanik who is designed to focus more on gc-toolkit
-effectiveness" (visit tk-2hdsjmg).
+The operator's words for the first two, from when the first was still called the
+mayor: "mayor (overseer of all, owner of little)", "mechanik (gc-toolkit / Gas City
+expert)", and "I'd also rather the mayor take something over the mechanik who is
+designed to focus more on gc-toolkit effectiveness" (visit tk-2hdsjmg).
 
 The operator tabled a per-rig seat in the same visit. Nothing here builds one or
 closes it off: the verb names no seat, and one store's queue is one
@@ -76,11 +92,97 @@ closes it off: the verb names no seat, and one store's queue is one
 pack is the nearest model, a rig-scoped `project-lead` it describes as taking
 project-level scoping out of the mayor.
 
+## The seat and its charter
+
+The po is the operator's prioritization partner. The operator's words, from
+conversation tk-lfi5zph on 2026-11-05 (typos fixed): "The operator is not all
+knowing, the operator is pushing ideas, has unique knowledge, but needs a partner not
+a note taker", and "Operator has veto power, but most of what the operator says is
+what the operator thinks, not some ruling to be blindly followed if you disagree or
+have a reason to be concerned about the direction, surfacing concerns is important.
+Surfacing viable alternatives that should be evaluated in which the po thinks would
+be better, is useful." The po's prompt carries the charter in these terms:
+
+- It brings a recommendation for each piece of work, with its reasons.
+- It says where it disagrees and why, and it raises the concerns it has about a
+  direction, the operator's included.
+- It proposes the viable alternatives it judges better, and recommends one of them.
+- It takes what the operator says as the operator's thinking, to engage with, unless
+  the operator clearly rules. When a ruling goes against its advice, it may say that
+  it still disagrees, and it follows the ruling.
+- It applies a placement, a park or a priority move once the operator agrees to it in
+  the sitting.
+
+SAFe's Product Owner has content authority over the team backlog. Here the operator
+keeps the final say, as SAFe's Business Owner, so the po argues for its order and
+applies each change once the operator agrees (ruling 1).
+
+The operator opens each of its two kinds of sitting:
+
+- **Backlog refinement** works the queue: what to place now, under which epic and at
+  what priority, what to close, and what waits for a later sitting.
+- **Portfolio sync** works the epics: which serve the target, which should park, and
+  what their priorities should be. Work queued under an epic behind a landing, and
+  the follow-ups filed under epics, never pass through the queue, so this sitting is
+  where they are steered. The operator named the need it serves: "priority right now
+  is supposed to be simplifying gc-toolkit's overall surface area and having more to
+  gctk. Yet way too many PRs showing up that don't do that, so prioritization feels
+  lost."
+
+Its writes go through the levers that already exist. A placement is
+`gc-helm.sh place`. A park is `gc-helm.sh park`, and closing the park's gate releases
+it. A priority move is `gc-helm.sh priority`. The authority map's park and priority
+rows already admit a sitting on the operator's ruling. The po also holds a bead with
+`gc bd set-state <id> hold=mayor`, and closes one with its successor through
+`assets/scripts/bead-rehome.sh`. It changes no repo, handles no escalation and runs no
+rig's lifecycle.
+
+## How a sitting sequences the work
+
+A sitting opens from the rig's stated target, which the rig's `AGENTS.md` names.
+gc-toolkit's is the built-once target, whose deletion schedule says what retires and
+in what order. Work that does not serve the target surfaces as a proposal to park it,
+or to leave it held for a later sitting, with the reason. Where a rig names no
+target, the po asks the operator what the rig's work is for before it sequences
+anything there.
+
+The po sequences by WSJF, weighted shortest job first: cost of delay over job size,
+as SAFe defines it. SAFe counts cost of delay as business value, time criticality,
+and risk reduction or opportunity enablement. The operator's framing, "pressing vs
+important vs easy", maps onto it: important is value, pressing is time criticality,
+and easy is job size. A sitting reads each term against the target:
+
+- **Value:** how far the work moves the rig toward its target.
+- **Time criticality:** what waiting costs, such as harm the operator feels now, a
+  date, or other work that waits on this.
+- **Risk reduction or opportunity enablement:** what the work unblocks or makes safe,
+  such as a retirement on the deletion schedule.
+- **Job size:** what the work takes, in polecat runs, review rounds and the
+  operator's time to review it.
+
+The ruling as recorded names value and time criticality. The third term is SAFe's
+own, and this design keeps it so that the sittings use WSJF as SAFe defines it.
+
+The scores are relative and live. The po compares the beads in front of it with one
+another, gives its reasoning in the sitting, and stores no score: no metadata key, and
+no number in a note. A ruling lands on a lever that exists, a placement, a park or a
+priority move, and the note that records it gives the reason in words. The sitting
+gave three reasons for storing nothing, and the operator agreed with them. Time
+criticality moves as time passes, so a stored score goes stale. A field on every bead
+says that everything fits the model. And an order already has its home in priority,
+parks and placement.
+
 ## What a held bead is
 
 A held bead is open and unassigned, with no route and no arm, and it carries
 `hold:mayor`. Gas City keeps such a bead out of the default work query, the hook,
 pool demand and the route-restore sweeps.
+
+The label's value names Gas City's default coordinator, but no code branches on who
+that is. Gas City's own definition calls its two hold values label values that are
+"not role names", and its dispatcher reads only that fixed pair
+([the search record](gas-city-search.md#the-seats-name)). So a label of the pack's
+own, such as one naming the po, would hold nothing, and the po works `hold:mayor`.
 
 Three things about it are choices:
 
@@ -92,7 +194,9 @@ Three things about it are choices:
   open PR removes it. This design follows the documented contract, which costs one
   standing doctor warning until the fix reaches the fork. The deacon's patrol step
   today files a warning or runs its `--fix`, so it names this check as known and does
-  neither. A route a `--fix` writes anyway does nothing while the hold stands, and
+  neither. A route a `--fix` writes anyway is `mayor`, which names no agent in this
+  city, so `check-routed-work-claimable` lists it among its notes as matching no live
+  identity and judges it no failure. It does nothing while the hold stands, and
   `place` clears it.
 - **A create carries the label in its own write** (`--labels hold:mayor`), and a
   bead that already exists takes `gc bd set-state <id> hold=mayor --reason "..."`.
@@ -106,14 +210,20 @@ Three things about it are choices:
   facts because no writer cleared the marker. A hold is lifted by a write, so
   nothing is inferred.
 
-## 1. What keeps the mayor from becoming the dumping ground
+## 1. What keeps the po from becoming the dumping ground
 
-The operator's account: "lots of items naturally did go to the mayor to handle...
-As a mayor, it works well. As the dumping ground of everything, it became a
-problem" (visit tk-2hdsjmg). This design's reading of why: a resident agent with an
-inbox is the easiest thing to send work to. So it removes the properties that made it
-easy, and leaves the prompt only the two paths nothing can refuse.
+The operator's account of why the city's earlier mayor was removed: "lots of items
+naturally did go to the mayor to handle... As a mayor, it works well. As the dumping
+ground of everything, it became a problem" (visit tk-2hdsjmg). This design's reading
+of why: a resident agent with an inbox is the easiest thing to send work to. So it
+removes the properties that made it easy, and leaves the prompt only the two paths
+nothing can refuse.
 
+- **Nothing upstream aims at it.** Gas City's defaults name the mayor: its warmup
+  mail, its default city's one agent, and the `gc sling mayor` and
+  `gc session attach mayor` its docs teach. Gas Town's roles mail `mayor/`. Only a
+  reference that names the po reaches it, so each of those reaches no seat, as it
+  does today.
 - **Nothing is waiting to receive.** The seat is on demand and fresh, so no
   conversation accumulates what it was told. Plain mail wakes nothing. A nudge or a
   `--notify` mail does wake it, because Gas City materializes a named session on a
@@ -121,7 +231,7 @@ easy, and leaves the prompt only the two paths nothing can refuse.
   it is.
 - **It has no route to fill.** It declares `default_sling_formula = ""` and a
   `sling_query` that refuses with a message saying where the work goes, so a plain
-  `gc sling` to the mayor fails at the caller. It needs both, because the city's
+  `gc sling` to the po fails at the caller. It needs both, because the city's
   `[agent_defaults]` gives every agent `mol-polecat-work` and a graph.v2 pour never
   runs the query. `gc sling --on <formula>` pours past the query for the same reason,
   and nothing refuses it.
@@ -129,7 +239,7 @@ easy, and leaves the prompt only the two paths nothing can refuse.
   `docs/authority-map.md` lists.
 - **One check covers every path that leaves a record.** Assignment, mail and
   `gc sling --on` cannot be refused by config, and any writer can set a label. So one
-  doctor check holds one invariant, that the mayor receives nothing but its queue, and
+  doctor check holds one invariant, that the po receives nothing but its queue, and
   a new path shows up as a finding within one sweep of its first use. That is why
   there is one check, not a guard per path. A delivered nudge leaves nothing to read,
   so the check cannot see one.
@@ -140,76 +250,89 @@ easy, and leaves the prompt only the two paths nothing can refuse.
 
 | Path | What it does at landing |
 |---|---|
-| `quota-park-nudge.sh`'s default `mayor/`, which resolves to the seat by bare name once one exists | The default becomes `human`. That reaches nobody who reads it, as today's default does. It is the smallest stopgap for a retiring file, noted on tk-1tfzr71.18. |
-| `gc-terminal-attach.sh`'s default session | The pack sets no default. A terminal opened with no name refuses and says how to name one. `GC_TERMINAL_DEFAULT_SESSION` stays, so the operator can choose a default in the town's config. |
-| Gas City's warmup mail, hard-coded to `mayor` with no config field | Unchanged, because it cannot be re-pointed. It fires only at `gc start` on a failed check, and the same failure prints on stderr and stays in `gc doctor`. The check ignores this sender, and if it shows in the seat's inbox the mayor archives it. |
-| Core's `orphan-sweep` and `spawn-storm-detect`, which go to `GC_ESCALATION_TARGET`, default `human` | Unchanged. The city does not set the variable, and the authority map's new row makes pointing it at the mayor a ruling. |
-| Gas Town's witness, deacon, refinery and polecat, which all mail `mayor/` | The city does not import them. tk-1tfzr71.18 and .19 owe this if they take those roles, and a note on each says so. See ruling 3. |
-| `gc sling mayor "..."`, which Gas City's docs teach | The seat has no formula of its own, so this reaches `sling_query`, which refuses. |
-| `gc sling` to the mayor with a graph.v2 formula, by `--on` or `--formula` | Nothing refuses it. The run's steps route to the seat, which wakes and takes none of them, because its prompt takes no work from the hook. The check names the steps. |
-| Assignment: `gc bd update --assignee`, `first-reaction-dispose.sh --assign` or `--then-assign`, or `gc-helm.sh takeaway --release --assign` | `first-reaction-dispose.sh` refuses the mayor's address. The others wake the seat and the check names them. |
-| `gc mail send` | Delivered, and it wakes nothing. The mayor's prompt treats unread mail as a sign of a path and says whose it is. The check names the sender. |
-| `gc session nudge`, `gc mail send --notify` | These materialize the seat and wake it, which costs one first turn. With nobody attached, its prompt says whose request it is and runs `gc runtime drain-ack`. The check names a `--notify` mail's sender and sees no nudge. |
-| `hold:mayor` set on something that is not new work | The check names it: a bead with an anchor or a landing state. A branch alone does not count, because a run that ended can leave one on a bead the mayor holds again (section 6). |
-| `reconcile-rig-checkouts.sh`'s `RECONCILE_MAYOR_ADDR`, `dolt` maintenance's `alert_to`, `gc convoy --owner mayor` | Unset in this city, or display only. They stay as they are. |
-| The operator typing a request at the mayor | Its prompt answers questions from what it can read. For anything to be done, it files a bead or a human gate, or says whose job it is. |
+| `quota-park-nudge.sh`'s default `mayor/`, and `gc-terminal-attach.sh`'s default session, `gc-toolkit.mayor` | Unchanged. No seat answers to `mayor` here, so each reaches no seat, as it does today. The build edits neither script, so `quota-park-nudge.sh`, which tk-1tfzr71.18 retires, takes no change. `GC_TERMINAL_DEFAULT_SESSION` stays, so the operator can choose a default terminal in the town's config. |
+| Gas City's warmup mail, hard-coded to `mayor` with no config field | Unchanged, and it reaches no seat. It fires only at `gc start` on a failed check, and the same failure prints on stderr and stays in `gc doctor`. |
+| `gc sling mayor "..."` and `gc session attach mayor`, which Gas City's docs teach | They name no agent here, as today. |
+| Core's `orphan-sweep` and `spawn-storm-detect`, which go to `GC_ESCALATION_TARGET`, default `human` | Unchanged. The city does not set the variable, and the authority map's new row makes pointing it at the po a ruling. |
+| Gas Town's witness, deacon, refinery and polecat, which all mail `mayor/` | The city does not import them, and their mail would reach no seat here. tk-1tfzr71.18 and .19 owe a replacement for that mail if they take those roles, and a note on each says so. See ruling 3. |
+| `gc sling po "..."` | The seat has no formula of its own, so this reaches `sling_query`, which refuses. |
+| `gc sling` to the po with a graph.v2 formula, by `--on` or `--formula` | Nothing refuses it. The run's steps route to the seat, which wakes and takes none of them, because its prompt takes no work from the hook. The check names the steps. |
+| Assignment: `gc bd update --assignee`, `first-reaction-dispose.sh --assign` or `--then-assign`, or `gc-helm.sh takeaway --release --assign` | `first-reaction-dispose.sh` refuses the po's address. The others wake the seat and the check names them. |
+| `gc mail send` to the po | Delivered, and it wakes nothing. The po's prompt treats unread mail as a sign of a path and says whose it is. The check names the sender. |
+| `gc session nudge`, `gc mail send --notify` to the po | These materialize the seat and wake it, which costs one first turn. With nobody attached, its prompt says whose request it is and runs `gc runtime drain-ack`. The check names a `--notify` mail's sender and sees no nudge. |
+| `hold:mayor` set on something that is not new work | The check names it: a bead with an anchor or a landing state. A branch alone does not count, because a run that ended can leave one on a bead the po holds again (section 6). |
+| `dolt` maintenance's `alert_to`, `gc convoy --owner mayor` | Unset in this city, or display only. They stay as they are. |
+| The operator typing a request at the po | It engages with what the operator says, as its charter asks. For anything to be done beyond its own writes, it files a bead or a human gate, or says whose job it is. |
+
+A default that names a seat the city lacks has hidden a real problem once. The checkout
+reconciler assigned its alerts to a mayor that did not exist, and a diverged checkout
+went unseen for about a day (tk-dk78ru). That reconciler files a human gate now. The
+defaults above that name the mayor reach no reader today, and this design leaves them
+as they are.
 
 `deacon-`, `refinery-` and `witness-human-gate-wiring.test.sh` keep their assertions.
-Their reason changes: "there is no mayor mailbox to absorb it" becomes that the mayor's mailbox
-is not an escalation channel. "Mail dedups nothing" goes, because `gc mail send`
+Their reason changes: "there is no mayor mailbox to absorb it" becomes that the po's
+mailbox is not an escalation channel. "Mail dedups nothing" goes, because `gc mail send`
 has `--dedup` now.
 
 ### The witness
 
 The later ruling asks which this is: a difference this effort ends, or one that
-stays. It stays, if ruling 3 goes as recommended. The initiative's description says
+stays. It stays, because ruling 3 keeps it. The initiative's description says
 "Escalations stay visits and gates", and `docs/built-once-target.md` gains it among
 the witness's differences from Gas Town:
 
 - **Reason:** Gas Town's witness mails the mayor for emergencies, failures,
   recovered and handed-off orphans and queue health. "Owner of little" rules that
-  load out. The missing dedup cited in the old comments is not the reason, since mail
-  has it now.
-- **What ends it:** an operator ruling that gives the mayor escalation handling.
-- **Owed by tk-1tfzr71.19:** Gas Town's formula addresses `mayor/` literally, and a
-  bare name now resolves to this seat. So taking the role by import would start
-  this mail on its own. A copy must keep findings and human gates, or the import must be
-  ruled.
+  load out of the po. The missing dedup cited in the old comments is not the reason,
+  since mail has it now.
+- **What ends it:** an operator ruling that gives the po escalation handling.
+- **Owed by tk-1tfzr71.19:** Gas Town's formula addresses `mayor/` literally, and that
+  name reaches no seat in this city. So a copy taken by import would send its
+  escalations to no reader. A copy must keep findings and human gates, or the import
+  must be ruled.
 
-### Where the mayor differs from Gas Town's
+### Where the po differs from Gas Town's mayor
 
 A role's default is Gas Town's, and each difference names its reason and what ends
 it (visit tk-dbpz6t2, said of the witness and applied here as this design's own
-reading). The agent shape is the same as Gas Town's: `scope = "city"`,
-`wake_mode = "fresh"`, `work_dir = ".gc/agents/mayor"`, `max_active_sessions = 1`. Each
+reading). The po takes the agent shape of Gas Town's mayor: `scope = "city"`,
+`wake_mode = "fresh"`, `work_dir = ".gc/agents/po"`, `max_active_sessions = 1`. Each
 difference below but the last ends with an operator ruling that gives the seat the job.
 
-| Gas Town's mayor | This city's | Reason |
+| Gas Town's mayor | This city's po | Reason |
 |---|---|---|
-| `mode = "always"` | `mode = "on_demand"` | It has no unattended work, and an always-up session invites sends |
-| Dispatch liberally | Places queue beads only, on a ruling | Owner of little |
+| Named `mayor` | Named `po` | Gas City's defaults and Gas Town's roles aim at the name `mayor`, so a seat that answers to it takes their sends. SAFe's word names the job (ruled 2026-11-05) |
+| The human's point of contact | The operator's prioritization partner, in backlog refinement and portfolio sync | The operator's charter (ruled 2026-11-05) |
+| Dispatch liberally | Places, parks and moves priority once the operator agrees in a sitting | Owner of little, with the final say the operator's (ruling 1) |
 | Fix directly when fast | Changes no repo | The pools do the work, and mechanik edits the town repo |
-| Handles escalations | Files or points | Findings and human gates carry them |
+| Handles escalations | Files or points | Findings and human gates carry them (ruling 3) |
 | Rig wake and sleep | Reads only | The operator's and mechanik's today |
 | `gc handoff` when context fills | No handoff, no carried memory | A resident context is one symptom the record names |
 | `idle_timeout = "1h"` | `sleep_after_idle = "1h"` | An idle kill keeps the conversation key, and `gc session attach` would then resume the old conversation. An idle drain clears the key. This ends when `gc session attach` honors `wake_mode` |
 
 ## 2. What "overseer of all" means at landing
 
-The mayor may read anything and writes only queue acts. It reads inside a sitting,
-when the work or the operator's question calls for it. No schedule makes it read,
-and it reports nothing nobody asked for.
+The po may read anything. It writes only the queue's acts, and the parks and priority
+moves the operator agrees to in a sitting. It reads inside a sitting, when the work or
+the operator's question calls for it. No schedule makes it read, and it reports
+nothing nobody asked for.
 
-- **For the queue:** `gc beads list --label hold:mayor --format=json`, each bead's
-  card with `gc bd show`, the open epics and what holds them, and the `AGENTS.md` of
-  the bead's rig, since a rig can say where a kind of problem goes, as gc-toolkit's
-  does for code its deletion plan retires.
+- **To open a sitting:** the rig's stated target, which the rig's `AGENTS.md` names
+  ([how a sitting sequences the work](#how-a-sitting-sequences-the-work)).
+- **For backlog refinement:** `gc beads list --label hold:mayor --format=json`, each
+  bead's card with `gc bd show`, the open epics and what holds them, and the
+  `AGENTS.md` of the bead's rig, since a rig can say where a kind of problem goes, as
+  gc-toolkit's does for code its deletion plan retires.
+- **For a portfolio sync:** the open epics in each store
+  (`gc bd --rig <rig> list --type epic --status open`), what holds each, their
+  priorities, and the work queued under each.
 - **For the operator's questions:** `gc status`, `gc session list`, `gc rig list`,
   the board, open PRs, any bead.
 
 It starts fresh for each sitting, through `wake_mode = "fresh"` and `on_demand`. A
 detach does not end a sitting, because Gas City keeps a running on-demand session up
-until its idle limit. So a sitting ends when the operator says it is done and the mayor
+until its idle limit. So a sitting ends when the operator says it is done and the po
 runs `gc runtime drain-ack`, or an hour after the operator detaches, through
 `sleep_after_idle`. An attach inside that hour continues the sitting. Both ends drain
 the session, which clears its conversation key, so the next attach is a new
@@ -221,19 +344,20 @@ it was read from the source and not run.
 
 ## 3. Which coordination jobs leave mechanik
 
-Only placement, and it matches the operator's sentence quoted above:
+Placement and the portfolio's levers, which both match the operator's sentence quoted
+above:
 
-- **The placement sitting** moves to the mayor. So does the batch sort in
-  `.gc/agents/mechanik/placement-2026-10-31/`, the method on tk-hok6w's newest
-  Current state block. The sorter's brief becomes a skill written with no rig's
-  details in it.
+- **The placement sitting** moves to the po, as backlog refinement. So does the batch
+  sort in `.gc/agents/mechanik/placement-2026-10-31/`, the method on tk-hok6w's
+  newest Current state block. The sorter's brief becomes the refinement skill,
+  written with no rig's details in it, and it sequences by the method above.
+- **Parks and priority moves** move to the po's portfolio sync, as the ruling of
+  2026-11-05 set out, and each applies once the operator agrees in the sitting. The
+  operator still runs `gc-helm.sh park` and `gc-helm.sh priority` directly, and a
+  converse sitting still applies one that a ruling on its own subject calls for.
 - **tk-rl8gz4b.17 stays mechanik's, smaller.** Its move 1 edits the town repo, which
   only mechanik does, and its timing stays the operator's. Its move 2 ran on
   2026-10-14 and the cut-over below replaces the marker it wrote, so a note says so.
-
-Parks and priority moves are the next candidates, since they are not about
-gc-toolkit's effectiveness. They stay where they are, because the initiative's
-description makes a new ownership an operator ruling and nobody has ruled it.
 
 ## 4. Placing as one act, and how a hold lifts
 
@@ -293,16 +417,18 @@ A bare hand sling of a held bead is not caught when it runs. The check names it 
 its next pass, and `place` finishes it. The work skill tells an agent to use `place`
 for a held bead.
 
-## 5. Whether the mayor may place routine work itself
+## 5. Whether the po may place routine work itself
 
-This is ruling 1 above. At the recommended answer the authority map's rows read as
-follows:
+Ruling 1 settles it: the po places a bead once the operator agrees in a sitting, and
+never on its own. The authority map's rows read as follows:
 
 - **Hold new work:** the same writers, with `hold:mayor` in place of the marker.
-- **Place a held bead:** the operator directly, or the mayor on the operator's ruling
-  in a sitting. The mayor may never place without one.
-- **Close-with-successor:** the mayor joins its callers, on a ruling in a sitting, as
-  converse is today.
+- **Place a held bead:** the operator directly, or the po once the operator agrees to
+  the placement in a sitting. The po may never place without that agreement.
+- **Park a bead, and write a bead's priority:** the rows already admit a sitting on
+  the operator's ruling, and they name the po's portfolio sync among those sittings.
+- **Close-with-successor:** the po joins its callers, on the operator's agreement in a
+  sitting, as converse is today.
 
 ## 6. Who notices a placed bead whose run ended with the bead open
 
@@ -313,11 +439,11 @@ no marker and no inference, that shape no longer exists.
 
 **After tk-1tfzr71.19 retires the sweep, its replacement owes this, as a doctor check
 or a board view.** The shape is: open, no hold, no wait, no landing state, no live run
-by `run-lib.sh`, and a pour's stamp left behind. The mayor reads that list in a
+by `run-lib.sh`, and a pour's stamp left behind. The po reads that list in a
 sitting and holds each bead with
 `gc bd set-state <id> hold=mayor --reason "its run ended"`. That puts it in the one
 queue, where `place` can send it again, since `place` refuses a bead with no hold. The
-mayor is overseeing here and owns nothing new. The note tk-rl8gz4b.30 writes on
+po is overseeing here and owns nothing new. The note tk-rl8gz4b.30 writes on
 tk-1tfzr71.19 carries this.
 
 **The cause stays where it is.** A graph.v2 run does not claim the bead it works, so
@@ -359,10 +485,11 @@ owes nobody an answer:
 The page gains this under Human engagement:
 
 > New work no epic holds is owed to nobody. It carries Gas City's `hold:mayor`, and the
-> mayor, a fresh on-demand session, works that queue with the operator. A hold is the
-> next actor's queue, and a gate is an answer someone owes.
+> po, a fresh on-demand session chartered as the operator's prioritization partner,
+> works that queue with the operator. A hold is the next actor's queue, and a gate is
+> an answer someone owes.
 
-It also lists the mayor's differences from Gas Town's above, and states the witness's
+It also lists the po's differences from Gas Town's mayor above, and states the witness's
 difference in its Patrol section. That section's list arrives with tk-r4c0g67's
 branch, whose line says the difference ends when this design rules. So the unit
 rewrites that line if the branch has landed and writes the paragraph if it has not.
@@ -370,11 +497,12 @@ rewrites that line if the branch has landed and writes the paragraph if it has n
 ## 8. Moving each writer and reader
 
 Each file was checked against `tools/deletion-plan.tsv` at d983f9f50, main once PR #1359
-landed.
+landed, and again at f78ca1f02, main on 2026-11-05. There every file exists, no row
+has moved, and the files that name the marker are the same set.
 
 | File | On the plan | What it does after this |
 |---|---|---|
-| `assets/scripts/first-reaction-dispose.sh` | no (tk-1tfzr71.17 rewrites parts) | Intake writes `set-state hold=mayor` with the reason it already builds and reads the label back. Its note names the queue read. `--assign` and `--then-assign` refuse the mayor's address. |
+| `assets/scripts/first-reaction-dispose.sh` | no (tk-1tfzr71.17 rewrites parts) | Intake writes `set-state hold=mayor` with the reason it already builds and reads the label back. Its note names the queue read. `--assign` and `--then-assign` refuse the po's address. |
 | `formulas/mol-witness-patrol.toml`, `bug-file` | no | `--labels hold:mayor` on the create, with its prose and the suite that pins it, `witness-route.test.sh`. |
 | `formulas/mol-feedback-distiller.toml`, file-and-dispatch and 1b | no | The same, on each `prompt-update` and engineering bead, with `distiller-file-for-placement.test.sh`. |
 | `skills/work/SKILL.md`, `agents/proactive/prompt.template.md`, its `agent.toml` and `PROVENANCE.md`, `formulas/mol-deacon-patrol.toml`'s prose, `skills/learning-distill/SKILL.md` | no | Wording, with the exact commands. The deacon's step gains the known check. |
@@ -384,20 +512,18 @@ landed.
 | `tools/gc-proactive.sh` | no | `(has_dispatch_hold \| not)` in the filter. |
 | `doctor/check-blocked-work-armed` | no | Reads the label on the row it already has, so its second `bd list` and its "could not be read" warning go. |
 | `assets/scripts/liveness-classify.sh`, `-recheck.sh`, `-sweep.sh`, `-sweep-precheck.sh` and their suites | **yes, tk-1tfzr71.19** | The smallest edit that lets `placement.sh` go: the source line drops, the predicate's name swaps, and the line of text a census gate carries names the new read. They gain no behavior, the PR's size line shows these lines against the retiring bead, and a note on it says why. |
-| `assets/scripts/quota-park-nudge.sh` | **yes, tk-1tfzr71.18** | The one-word default above, with its note, and the two places `docs/quota-park-recovery.md` states it. |
 | `assets/scripts/deferred-dispatch.sh` | no (tk-1tfzr71.16 rewrites parts) | Sources `dispatch-path.sh`, and its reconcile leaves a held bead alone, because a sling reads no hold, so a held bead with an arm would pour. `arm` still accepts one, because `place` arms and then lifts. |
-| `assets/scripts/gc-terminal-attach.sh`, its test, `services/helm/README.md`, `services/helm/web/src/terminal/endpoint.ts`'s comment | no | The default path above. |
 | `lifecycle/lifecycle.toml`, `[metadata.placement]` | no | Marked retired by unit 1. The follow-up removes it and adds `placement` to `check-state-space`'s `RETIRED_KEYS`. |
-| `docs/steering.md`, `docs/authority-map.md`, `docs/architecture.md`, `docs/component-model.md`, `docs/feedback-learning.md`, `docs/built-once-target.md`, `docs/human-engagement.md` | no | State what is true after landing. `architecture.md` loses "There is no mayor" and gains the seats. The authority map's human gate row loses "there is no mayor", and says a gate, not the mayor's mailbox, carries what a person owes. |
+| `docs/steering.md`, `docs/authority-map.md`, `docs/architecture.md`, `docs/component-model.md`, `docs/feedback-learning.md`, `docs/built-once-target.md`, `docs/human-engagement.md` | no | State what is true after landing. `architecture.md` gains the seats, with the line beside the po that it works the platform's coordination hold, and its "There is no mayor" sentence becomes that a situation needing a person is a human gate, not mail to the po. The authority map's human gate row loses "there is no mayor", and says a gate, not the po's mailbox, carries what a person owes. |
 | `docs/review-demo.md` | no | Its example of a report command names `gc-helm.sh unplaced` and that verb's suite, so it takes another verb's. |
 | `services/helm/internal/board/derive_test.go` | no | The fixture drops its marker. The board has no reader of it. |
 | `deacon-`, `refinery-` and `witness-human-gate-wiring.test.sh` | no | The comment above. |
 
-Left alone on purpose: `doctor/check-hq-marooned-work/doctor.toml` already names a
-mayor as a city-scoped role, and that stays true. `docs/warrants.md` and
-`docs/gascity/routing-model.md` state Gas City's hold, which does not change.
-`formulas/mol-review.toml`'s "the mayor's" is an example of a claim. `lifecycle.toml`'s
-"the mayor's beads" and `RECONCILE_MAYOR_ADDR` go with tk-1tfzr71.14.
+Left alone on purpose: `docs/warrants.md` and `docs/gascity/routing-model.md` state
+Gas City's hold, which does not change. `formulas/mol-review.toml`'s "the mayor's" is
+an example of a claim. `lifecycle.toml`'s "the mayor's beads" goes with tk-1tfzr71.14,
+which retires the reconciler it describes. `doctor/check-hq-marooned-work/doctor.toml`
+names a mayor among Gas City's city-scoped roles, and unit 3 names the po beside it.
 
 ### The beads already carrying the marker
 
@@ -420,9 +546,9 @@ already placed takes nothing. After landing, every bead also loses the key.
   route takes the bead off `gc-helm.sh unplaced` until landing.
 - **After it merges,** a bead armed behind tk-rl8gz4b.28 runs the pass in every store,
   for anything filed since as well. It runs `place` on a held bead that a live run, a
-  landing state or a route other than the mayor's shows was placed in the window. It
-  unsets the key everywhere and lands the registry change above. If ruling 2 says so,
-  the same bead also holds the pile.
+  landing state or a route other than the `mayor` a `--fix` writes shows was placed in
+  the window. It unsets the key everywhere and lands the registry change above. By
+  ruling 2, the same bead also holds the pile.
 
 These are commands in a bead's description, so the repo gains no migration script.
 
@@ -439,10 +565,10 @@ On demand. The token cost does not decide it:
 - On demand fits how the seat works, since nothing here runs unattended, and held work
   wakes nothing, because Gas City leaves held beads out of wake readiness.
 
-The operator's door is `gc session attach gc-toolkit.mayor`, or bare `mayor`, which is
-the command Gas City documents. An on-demand session materializes on that reference.
-The helm terminal's `?session=` passes its guard once the session has been
-materialized, or from any start if the operator sets `GC_TERMINAL_DEFAULT_SESSION`.
+The operator's door is `gc session attach gc-toolkit.po`, or bare `po`. An on-demand
+session materializes on that reference. The helm terminal's `?session=` passes its
+guard once the session has been materialized, or from any start if the operator sets
+`GC_TERMINAL_DEFAULT_SESSION`.
 
 ## What is ours, and what ends it
 
@@ -450,12 +576,14 @@ materialized, or from any start if the operator sets `GC_TERMINAL_DEFAULT_SESSIO
 |---|---|---|
 | `gc-helm.sh place` | Glue: native writes in a set order, adding no state | `gc sling` lifting a hold, or tk-1tfzr71.24 folding it |
 | `has_dispatch_hold` | Forced: shell readers need Gas City's predicate over JSON rows | A reader moving to Go or to a native filter |
-| `doctor/check-mayor-queue-only` | A feature: the invariant "owner of little" needs in order to hold | An operator ruling that gives the seat more, which changes what it asserts |
-| The mayor's agent, prompt and batch-sort skill | Configuration and prose on a role Gas City ships | Each difference above ends as it says |
+| `doctor/check-po-queue-only` | A feature: the invariant "owner of little" needs in order to hold | An operator ruling that gives the seat more, which changes what it asserts |
+| The po's agent, prompt and refinement skill, carrying the charter and the method | Configuration and prose on Gas City's agent and named-session primitives, modeled on Gas Town's mayor | Each difference above ends as it says |
 | One known doctor warning | Contained debt from Gas City's check | Upstream's fix reaching the fork |
 
-This design adds no pack noun, because `hold:mayor` and the mayor are Gas City's. It
-removes the one pack noun the marker was, which never had a warrant.
+This design adds no pack noun. `hold:mayor` is Gas City's, the po is an agent
+configured from Gas City's agent and named-session primitives, and WSJF stores nothing,
+so no kind of object or state is the pack's own. It removes the one pack noun the
+marker was, which never had a warrant.
 
 ## The units
 
@@ -473,14 +601,15 @@ on each. They run in order, because they share files.
    run and no label; a failed sling leaves the label on; and a second run after a stop
    at any write finishes the job. Placing under a parked epic must arm instead of
    pouring. Steering's "Placing a bead" and the authority map's place row come with it.
-3. **The seat.** `agents/mayor/` with its prompt, carrying the method and the exact
-   commands; the batch-sort skill; the `pack.toml` stanza with `mode = "on_demand"`; the
-   `agent.toml` with its empty `default_sling_formula`, refusing `sling_query`,
-   `sleep_after_idle` and `env`;
-   the default paths in the table; a line in mechanik's prompt
-   saying placement is the mayor's; and `architecture.md`, `built-once-target.md`, §4 of
-   `component-model.md`, and the seed audit's render. The prompt and skill are pack
-   content, so they name no rule that binds only gc-toolkit. The seat takes the
+3. **The seat.** `agents/po/` with its prompt, carrying the charter, the method and the
+   exact commands; the refinement skill; the `pack.toml` stanza with
+   `mode = "on_demand"`; the `agent.toml` with its empty `default_sling_formula`,
+   refusing `sling_query`, `sleep_after_idle` and `env`; a line in mechanik's prompt
+   saying placement and the portfolio sync are the po's; the po in
+   `check-hq-marooned-work`'s list of city-scoped roles; and `architecture.md`,
+   `built-once-target.md`, §4 of `component-model.md`, and the seed audit's render. The
+   prompt and skill are pack content, so they name no rule that binds only gc-toolkit,
+   and a sitting reads its target from the rig's `AGENTS.md`. The seat takes the
    `gh-origin-guard` overlay, as mechanik does, which touches that warrant, so the unit
    re-verifies it. Done when a live probe shows that
    an attach materializes the seat and starts a new conversation with no memory index,
@@ -489,12 +618,13 @@ on each. They run in order, because they share files.
    one turn. The probe also tries `gc sling` to the seat. Without `--on` it should exit
    non-zero, and with `--on` the run pours and the check's first arm names its steps. The
    unit records any result that differs.
-4. **The check.** `doctor/check-mayor-queue-only`, with its invariant in §3 of
+4. **The check.** `doctor/check-po-queue-only`, with its invariant in §3 of
    `component-model.md`. It reports an unheld bead or a run's step routed or assigned to
-   the mayor, unread mail from anyone but `gc-start-warmup`, a held bead that is not new
-   work, and a held bead carrying an arm, an assignee or a live run. It exempts no
-   `human` sender, because an exec order's mail carries that sender too. Done when each
-   arm fails on its fixture and the live city reads clean.
+   the po, unread mail from any sender, a held bead that is not new work, and a held
+   bead carrying an arm, an assignee or a live run. It exempts no sender. Gas City's
+   warmup mail goes to `mayor`, not to this seat, and an exec order's mail carries the
+   `human` sender too. Done when each arm fails on its fixture and the live city reads
+   clean.
 5. **The first pass.** A store-only bead running the first pass above. It waits on the
    four units and runs before the summary task.
 6. **The follow-up.** Filed by unit 5, armed behind `tk-rl8gz4b.28`, and not waited on
@@ -511,9 +641,10 @@ branch was cut at c41d2ea1d. It rewrote much of this ground: `gc-helm.sh`,
 the witness formula and the docs above. Building on the older copies would mean rebuilding
 them, so unit 1 merges origin/main into the integration branch first, and each later unit
 branches from that. The merge brings comments and gate text naming `awaiting_placement` and
-`gc-helm.sh unplaced`, which unit 1 moves with the rest. #1217, #1373 and #1375 edit the
-witness formula or the docs here and add no reader of the marker, so they take no edge, and
-the effort's branch merges main again before its PR. `tk-ssm8qns.12` deletes `hold-lib.sh`
+`gc-helm.sh unplaced`, which unit 1 moves with the rest. #1217 and #1373 edit the witness
+formula or the docs here and add no reader of the marker, so they take no edge, and #1375,
+which did the same, has landed on main. The effort's branch merges main again before its
+PR. `tk-ssm8qns.12` deletes `hold-lib.sh`
 in favor of `gctk bead holds`, and `place` calls whichever is on main when it is built.
 
 ## What this leaves in place
@@ -527,10 +658,13 @@ in favor of `gctk bead holds`, and `place` calls whichever is on main when it is
   `partial_errors`. `gc-helm.sh unplaced` reports this today, and that goes. Nothing acts
   on a bead's absence from the queue, so a short read costs one sitting a look at those
   beads, and the store's failure shows in `gc doctor`. Its rows also carry no priority,
-  so the mayor groups by subject and reads a bead's priority when it discusses that bead.
+  so the po groups by subject and reads a bead's priority when it discusses that bead.
   Its JSON is an array from the direct read and `{"beads": [...], "_cache_age_s": n}`
   through the API, so the prompt's command and the check accept both, and rows from the
   API can lag by that age.
 - **Hand slings:** see section 4.
 - **A nudge to the seat:** it costs one first turn and leaves nothing for the check to
   read. `gc sling --on` to the seat is refused by nothing, and the check names it.
+- **An order that is not stored:** a sitting's order lives only in the rulings it
+  lands, so the next sitting works it out again from the target and the levers' state.
+  That is the method as ruled, and it costs each sitting the time to do it.
