@@ -84,8 +84,7 @@ assumptions:
 | keeper sub-pack | nothing: the built-once shape has no fork | 3.8k / 1.1k | 0 / 0 |
 | **total** | | **114.8k / 151.1k** | **35.0k / 28.5k** |
 
-Human engagement is the workflow §4 calls visit. The keeper is the opt-in
-`packs/gascity-keeper/`.
+The keeper is the opt-in `packs/gascity-keeper/`.
 
 ### Work
 
