@@ -841,10 +841,8 @@ keys = [
 #   lane green), `rework` (a fix unit answering a verdict), `finding` (a review
 #   objection, [metadata.review_findings]), `validation` (a validator pass,
 #   mol-validate.toml), `visit` (a human engagement), `triage-subject` (an
-#   ephemeral-findings bucket), `observation`/`feedback-pattern`/`prompt-update`
-#   (the learning loop), and `upstream-finding` (a problem in software the rig
-#   does not own, filed in bd's deferred status for the operator to take up when
-#   ready, [metadata.upstream_send]). Set once at creation; not cleared.
+#   ephemeral-findings bucket), and `observation`/`feedback-pattern`/
+#   `prompt-update` (the learning loop). Set once at creation; not cleared.
 # fix_target_pool — the pool a rework fix unit routes to, written on the review
 #   child by gate-ensure.sh when a fix pool is configured; read by signoff.sh,
 #   which defaults it to `<rig>.polecat`. Never cleared. A pool name.
@@ -1845,11 +1843,11 @@ keys = ["obs.*", "remedy_class", "eng_bead"]
 #   remedy was filed as. A bead id; neither is cleared.
 
 [metadata.upstream_send]
-# An upstream finding (task_kind=upstream-finding, docs/outbound-sends.md) keeps
-# what it records in its description and its edges, and the external-issue
-# skill files it with no key of its own beyond task_kind. These keys are the
-# ones some upstream findings carry with a command drafted for the other
-# project.
+# An upstream finding (docs/outbound-sends.md) is known by its upstream-finding
+# label, and keeps what it records in its description and its edges. The
+# external-issue skill files it with no metadata key, task_kind included. These
+# keys are the ones some upstream findings carry with a command drafted for the
+# other project.
 keys = ["upstream_send_key", "gh_command", "gh_verb", "gh_target_repo"]
 # upstream_send_key / gh_command / gh_verb / gh_target_repo — RETIRED. Nothing
 #   writes them now. On an upstream finding that carries them, gh_command is a

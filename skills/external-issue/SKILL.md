@@ -47,8 +47,7 @@ Otherwise file one. It lands in the store you are working in:
 
 ```bash
 gc bd create "<project>: <what is wrong, in one line>" -t task --status deferred \
-  -l upstream-finding --metadata '{"task_kind":"upstream-finding"}' \
-  --deps "discovered-from:<your work bead>" --json -d "## What is wrong
+  -l upstream-finding --deps "discovered-from:<your work bead>" --json -d "## What is wrong
 <what you found>
 
 ## Where it was hit
@@ -70,10 +69,10 @@ it. When your work bead lives in another store, leave `--deps` out: the
 description names it. Read the finding back:
 
 ```bash
-gc bd show <finding> --json | jq -r '.[0] | "\(.status) \(.metadata.task_kind // "-") \(any(.labels[]?; . == "upstream-finding"))"'
+gc bd show <finding> --json | jq -r '.[0] | "\(.status) \(any(.labels[]?; . == "upstream-finding"))"'
 ```
 
-It prints `deferred upstream-finding true`.
+It prints `deferred true`.
 
 A create that printed no id may still have filed the finding, because bd saves
 the bead first and a step after that can fail before the id is printed. So run

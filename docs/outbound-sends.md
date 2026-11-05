@@ -39,13 +39,13 @@ create` to.
 
 ## An agent records an upstream finding
 
-The agent files an upstream finding: a bead in the store it works in, carrying
-`task_kind=upstream-finding` and the `upstream-finding` label, created in bd's
-`deferred` status. Its description says what is wrong, where the agent hit it,
-the evidence (a reproduction, the versions involved, links), the project it
-belongs to, and whether it looks like a security flaw. A `discovered-from`
-edge ties it to the work bead where it was hit. When one already covers the
-same problem, the agent adds to its notes instead.
+The agent files an upstream finding: a task in the store it works in, created
+in bd's `deferred` status and carrying the `upstream-finding` label. Its
+description says what is wrong, where the agent hit it, the evidence (a
+reproduction, the versions involved, links), the project it belongs to, and
+whether it looks like a security flaw. A `discovered-from` edge ties it to the
+work bead where it was hit. When one already covers the same problem, the agent
+adds to its notes instead.
 
 Nothing is drafted for the other project, and nothing asks the operator
 anything:
@@ -70,10 +70,13 @@ finding up, so that choice is made once, there, from the policy.
 ## The operator's list
 
 One command lists every upstream finding across the rig stores and the city
-store: `gc beads list --label upstream-finding`. Gas City reports bd's
-deferred status as `open`, so a finding waiting in the list shows as open.
-`--all` adds the closed ones, and each one's close reason says what became of
-it.
+store: `gc beads list --label upstream-finding`. The label is what shows a
+finding there. Nothing counts findings or branches on one, so a finding is none
+of the pack's own kinds and carries no `task_kind`
+([what kind of bead this is](component-model.md#what-kind-of-bead-this-is)).
+Gas City reports bd's deferred status as `open`, so a finding waiting in the
+list shows as open. `--all` adds the closed ones, and each one's close reason
+says what became of it.
 
 ## Picking one up
 

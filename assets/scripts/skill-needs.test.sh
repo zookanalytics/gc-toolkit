@@ -641,7 +641,7 @@ echo "── a problem in software the rig does not own goes through one skill �
 # a section every polecat run carries, and each command is stated there once.
 # The origin guard stays the hard stop, so a run that never loads the skill is
 # still stopped, and the guard's refusal names the skill. The finding is filed
-# whole in one create, already deferred, kinded and labelled, so no reader of
+# whole in one create, already deferred and labelled, so no reader of
 # ready work ever offers it, and nothing in the skill drafts a send or asks the
 # operator anything. A create whose reply was lost may still have filed the
 # finding, so the skill looks again in the stores themselves, which the
@@ -667,12 +667,14 @@ fences=$(grep -c '^ *```' "$OUTBOUND")
 [ "$fences" = 0 ] && ok "the outbound-sends doc holds no command block: each command an agent runs lives in the skill" \
     || bad "the outbound-sends doc holds no command block: each command an agent runs lives in the skill" "$fences fence lines"
 for probe in 'gc beads list --label upstream-finding' '--status deferred' '-l upstream-finding' \
-    '"task_kind":"upstream-finding"' '--deps "discovered-from:' 'isSecurityPolicyEnabled securityPolicyUrl' \
+    '--deps "discovered-from:' 'isSecurityPolicyEnabled securityPolicyUrl' \
     '/private-vulnerability-reporting'; do
     have "the skill gives the command: $probe" "$probe" "$EXTERNAL"
 done
 have "the skill looks for the finding in the stores themselves before it files again" \
     'GC_NO_API=1 gc beads list --label upstream-finding' "$EXTERNAL"
+lacks "the skill gives a finding no pack kind: bd's status, label and edge carry it" 'task_kind' "$EXTERNAL" \
+    "nothing counts findings or branches on one, and a pack kind is a pack noun that needs a warrant (docs/warrants.md)"
 for probe in '--status deferred' 'isSecurityPolicyEnabled' 'private-vulnerability-reporting'; do
     lacks "…and the doc does not: $probe" "$probe" "$OUTBOUND" "each command an agent runs lives only in the skill"
 done

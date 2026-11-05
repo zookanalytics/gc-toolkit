@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the set-aside upstream finding
-description: Use when you need the evidence that bd and Gas City primitives carry an upstream finding set aside for the operator, which upstream symbol each part composes, or why the change adds no script, metadata key or reader code for it.
+description: Use when you need the evidence that bd and Gas City primitives carry an upstream finding set aside for the operator, which upstream symbol each part composes, or why the change adds no script, pack kind, metadata key or reader code for it.
 ---
 
 # Gas City search: an upstream finding set aside for the operator
@@ -8,10 +8,11 @@ description: Use when you need the evidence that bd and Gas City primitives carr
 The change records a problem an agent finds in software the rig does not own as
 an upstream finding, set aside with nothing drafted and nothing asked, gathers
 the findings in one list, and lets the operator take one up in a conversation.
-It alters operational surface: it retires `upstream-finding.sh` and the keys it
-wrote, gives bd's `deferred` status a use in the pack, and adds the task kind
-`upstream-finding` with a label of the same name. Each primitive searched is
-below, with what it covers.
+It alters operational surface: it retires `upstream-finding.sh`, the keys it
+wrote and the task kind it wrote, `upstream-send`, gives bd's `deferred` status
+a use in the pack, and gathers the findings by a label, `upstream-finding`,
+with no pack kind in the retired one's place. Each primitive searched is below,
+with what it covers.
 
 Read at `gastownhall/beads` main 6d713a748 and `gastownhall/gascity` main
 a91df0b85 on 2026-11-05, and at `gastownhall/gascity-packs` main 796d7ecd7 the
@@ -34,12 +35,12 @@ pools' work queries never offer one.
 
 **Filed set aside in one write: `bd create --status`.** Covers it.
 `cmd/bd/create.go` validates `--status` against the built-in statuses, deferred
-among them, and creates the issue in that status, so the kind, the label, the
-status and the edge ride one create. Observed in a scratch store on bd 1.3.2:
-`bd create ... --status deferred -l upstream-finding --metadata
-'{"task_kind":"upstream-finding"}' --deps discovered-from:<work>` read back
-deferred, kinded, labelled and linked; `bd ready` left it out and `bd list
---label upstream-finding` listed it; the work bead it hung from still closed.
+among them, and creates the issue in that status, so the label, the status and
+the edge ride one create. Observed in a scratch store on bd 1.3.2: `bd create
+... --status deferred -l upstream-finding --deps discovered-from:<work>` read
+back deferred, labelled and linked, with no `task_kind`; `bd ready` left it out
+and `bd list --label upstream-finding` listed it; the work bead it hung from
+still closed.
 
 **Where it was hit: bd's `discovered-from` dependency.** Covers it.
 `DepDiscoveredFrom` in `internal/types/types.go` is an association type, apart
@@ -110,12 +111,26 @@ through `bd blocked` (`check-blocked-work-armed`), an arm
 (`check-armed-dispatch-owed`), or a `merge_result` or a retired key
 (`check-state-space`). A finding carries none of them.
 
-**A metadata key.** The finding's content is its description and its edge.
-`task_kind` is the one field a reader decides a pack kind from
-(`docs/component-model.md`, I12), and it gets the new value `upstream-finding`.
-The four keys `upstream-finding.sh` wrote stay registered as retired in
-`lifecycle/lifecycle.toml`, because parked sends that move into the list keep
-their drafted command as a starting draft.
+**A kind for the finding: bd's issue type, or the pack's `task_kind`.**
+Searched as a way to mark a bead as a finding, and not needed. bd ships kinds
+of its own: `typesCmd` in `cmd/bd/types.go` lists the built-in issue types and
+the custom ones a store registers under `types.custom`, the set `bd create
+--type` accepts. The pack names its own kinds in `task_kind`
+(`docs/component-model.md`, I12), and a kind the pack defines is a pack noun
+that needs a warrant (`docs/foundation.md`, boundary 2). A finding needs
+neither. Nothing counts findings or branches on one: the operator's list only
+shows them, which the label already does through `gc beads list --label`
+above, and the skill's read-back checks the status and the label. A custom
+type would also have to be registered in every store a finding can land in,
+for no reader. So a finding is a `task` with no `task_kind`, the label only
+gathers the list, and the change adds no pack noun. The open parked sends that
+move into the list lose their `upstream-send` kind in the move (tk-0sys1v6),
+and the closed ones keep it as history.
+
+**A metadata key.** The finding's content is its description and its edge, and
+the skill's create sets no metadata. The four keys `upstream-finding.sh` wrote
+stay registered as retired in `lifecycle/lifecycle.toml`, because parked sends
+that move into the list keep their drafted command as a starting draft.
 
 ## Limits
 
