@@ -37,7 +37,10 @@
 # skill's supplement command: filed in the PR's rig, holding the anchor's merge,
 # and slung only once that hold reads back, with the mechanik's copy the same
 # command. It pins that a formula's own description, not a doc, says which work
-# the formula fits. It runs each example whose second step depends on its first
+# the formula fits. It pins that a problem in software the rig does not own goes
+# through the external-issue skill, which alone holds that path's commands and
+# files the finding set aside, with no send drafted and no question asked.
+# It runs each example whose second step depends on its first
 # under a gc that refuses the first step, and fails if anything after it runs.
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
 # a blocker in another store, and fails if the arm runs. It runs the premise
@@ -631,6 +634,47 @@ for script in deferred-dispatch.sh gc-bd-watch.sh; do
     [ "$got" = "$ROOT/assets/scripts/$script" ] && [ -x "$got" ] \
         && ok "with the city's binding filled in, the fragment's call resolves to the pack's own $script" \
         || bad "with the city's binding filled in, the fragment's call resolves to the pack's own $script" "resolved '$got'"
+done
+
+echo "── a problem in software the rig does not own goes through one skill ──"
+# It arises rarely, so its procedure is a skill the situation loads rather than
+# a section every polecat run carries, and each command is stated there once.
+# The origin guard stays the hard stop, so a run that never loads the skill is
+# still stopped, and the guard's refusal names the skill. The finding is filed
+# whole in one create, already deferred, kinded and labelled, so no reader of
+# ready work ever offers it, and nothing in the skill drafts a send or asks the
+# operator anything.
+EXTERNAL="$SKILLS/external-issue/SKILL.md"
+OUTBOUND="$REPO/docs/outbound-sends.md"
+ext_desc=$(frontmatter "$EXTERNAL" description)
+[ "$(frontmatter "$EXTERNAL" name)" = external-issue ] && ok "external-issue: name equals its directory" \
+    || bad "external-issue: name equals its directory"
+[ -n "$(frontmatter "$EXTERNAL" compatibility)" ] && ok "external-issue: declares its compatibility" \
+    || bad "external-issue: declares its compatibility"
+case "$ext_desc" in
+    *"bug, gap or vulnerability in software this rig does not own"*"gh write to such a repository was refused"*)
+        ok "external-issue: the description names both occasions" ;;
+    *) bad "external-issue: the description names both occasions" "$ext_desc" ;;
+esac
+for f in "$REPO/template-fragments/polecat-doctrine.template.md" "$REPO/agents/polecat/prompt.template.md" "$REPO/agents/polecat-codex/prompt.template.md"; do
+    lacks "$(basename "$f"): leaves a problem in someone else's software to the skill" 'upstream-finding' "$f" \
+        "this runs on every polecat turn and applies rarely, so it lives in the skill"
+done
+have "the outbound-sends doc links the skill" '../skills/external-issue/SKILL.md' "$OUTBOUND"
+fences=$(grep -c '^ *```' "$OUTBOUND")
+[ "$fences" = 0 ] && ok "the outbound-sends doc holds no command block: each command an agent runs lives in the skill" \
+    || bad "the outbound-sends doc holds no command block: each command an agent runs lives in the skill" "$fences fence lines"
+for probe in 'gc beads list --label upstream-finding' '--status deferred' '-l upstream-finding' \
+    '"task_kind":"upstream-finding"' '--deps "discovered-from:' 'isSecurityPolicyEnabled securityPolicyUrl' \
+    '/private-vulnerability-reporting'; do
+    have "the skill gives the command: $probe" "$probe" "$EXTERNAL"
+done
+for probe in '--status deferred' 'isSecurityPolicyEnabled' 'private-vulnerability-reporting'; do
+    lacks "…and the doc does not: $probe" "$probe" "$OUTBOUND" "each command an agent runs lives only in the skill"
+done
+for probe in 'human-gate.sh' 'escalate.sh' 'gh issue create' 'gh pr create' 'gh issue comment' 'upstream-finding.sh'; do
+    lacks "the skill drafts no send and asks nothing: no $probe" "$probe" "$EXTERNAL" \
+        "a finding is set aside with nothing drafted and no question owed; the send is drafted when the operator picks it up"
 done
 
 echo "── a step that depends on the one before it runs only once that one succeeded ──"
