@@ -475,7 +475,7 @@ _demo_engine_declares() {
       /^[ \t]*(#.*)?$/ { next }
       /^[ \t]*app_reads_city[ \t]*=[ \t]*(true|false)[ \t]*(#.*)?$/ {
         if (seen) { print "line " NR " sets app_reads_city a second time"; bad = 1; exit }
-        seen = 1; val = ($0 ~ /=[ \t]*false/) ? "false" : "true"; next
+        seen = 1; val = ($0 ~ /^[ \t]*app_reads_city[ \t]*=[ \t]*false/) ? "false" : "true"; next
       }
       { print "line " NR " is not app_reads_city = true or false, a comment or a blank line"; bad = 1; exit }
       END { if (bad) exit 1; if (!seen) { print "it does not set app_reads_city"; exit 1 } print val }'); then

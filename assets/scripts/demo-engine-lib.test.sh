@@ -50,14 +50,15 @@
 #               a worktree of a rig whose default branch declares in
 #               demo-capture.toml that its app never reads the city captures,
 #               and the sandbox opens that port and no other; the declaration
-#               is read at origin/HEAD, or origin/main where none is recorded;
-#               a rig that declares nothing there, whatever its worktree commits
-#               or its checkout holds, a declaration that sets anything else, a
-#               server in the rig's checkout, in the city's own repository or in
-#               no rig's repository, a second listener outside any rig, a
-#               listener lsof names no directory for, no listener, no lsof, a
-#               port a city variable names, and a URL with no port each stop the
-#               capture
+#               is read at origin/HEAD, or origin/main where none is recorded,
+#               and its value is the one its line assigns, whatever a comment
+#               after it says; a rig that declares nothing there, whatever its
+#               worktree commits or its checkout holds, a declaration that sets
+#               anything else, a server in the rig's checkout, in the city's own
+#               repository or in no rig's repository, a second listener outside
+#               any rig, a listener lsof names no directory for, no listener, no
+#               lsof, a port a city variable names, and a URL with no port each
+#               stop the capture
 #   (ISOLATION) on a host with sandbox-exec, a terminal capture whose command
 #               reads the city's files, its stores, gc's home and a service on
 #               its loopback, and lists the city's variables, reaches none of
@@ -651,6 +652,14 @@ for cap in video screenshot; do
     capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
     local_refused "$cap" "a default branch whose demo-capture.toml reads '${DECL_TEXTS[$i]//$'\n'/ | }'" "${DECL_WHYS[$i]}"
   done
+
+  echo "# ($cap) LOCAL-APP: the declaration's value is the one its line assigns, whatever a comment after it says"
+  origin_main "$RIGB" "$(decl_commit "$RIGB" 'app_reads_city = true # previously = false')"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  local_refused "$cap" "a default branch whose demo-capture.toml reads 'app_reads_city = true # previously = false'" "sets app_reads_city = true"
+  origin_main "$RIGB" "$(decl_commit "$RIGB" 'app_reads_city = false # = true once the app reads the city')"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) a default branch whose demo-capture.toml reads 'app_reads_city = false # = true once the app reads the city' captures"
   origin_main "$RIGB" "$(decl_commit "$RIGB")"
 
   echo "# ($cap) LOCAL-APP: a server that works in a rig's checkout, in the city's own repository or in no rig's repository, or on a port the city's variables name, keeps the refusal"
