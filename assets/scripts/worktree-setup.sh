@@ -9,8 +9,9 @@
 # local excludes an agent needs (provision_worktree). Called from agent
 # pre_start (agents/*/agent.toml) before the session exists, so the agent
 # starts IN the worktree. An existing worktree is never re-created: it gets
-# whatever provisioning it lacks, and --sync moves it to the default-branch
-# tip at every start, saving first what the move would lose (sync_worktree).
+# whatever provisioning it lacks, and --sync fast-forwards it to the
+# default-branch tip at every start, or fails the start and reports what in
+# the home stopped it (sync_worktree).
 #
 # docs/warrants.md, "Agent home provisioning", says why a home is not a
 # `gc worktree` tree.
@@ -21,6 +22,43 @@ RIG_ROOT="${1:?usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--
 WT="${2:?missing target-dir}"
 AGENT="${3:?missing agent-name}"
 SYNC="${4:-}"
+FINDING="${GC_PATROL_FINDING_TOOL:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/patrol-finding.sh}"
+
+# What gc writes into a home, one gitignore pattern per line: the bead redirect
+# and bd's files beside it, each provider's settings, hooks and skills, runtime
+# state and logs, the per-bead worktrees under the home, the city settings
+# session start stages under .gc/, and the marker the worker-dir prune leaves
+# in a home it keeps. The skill links an ownership manifest records join them
+# (gc_writes). provision_worktree hides each from git status, and sync_worktree
+# counts none of them as an edit.
+GC_WRITES='.beads/redirect
+.beads/hooks/
+.beads/formulas/
+.runtime/
+.logs/
+worktrees/
+__pycache__/
+.claude/
+.codex/
+.gemini/
+.opencode/
+.github/hooks/
+.github/copilot-instructions.md
+state.json
+.agents/skills/.gc-skill-ownership.json
+.gc/
+.beads.gate.lock
+.worktree-stale'
+
+# The provider settings files gc merges its hooks into, Gas City's
+# mergeablePaths. In a rig that tracks one of them, gc's merge is a tracked
+# change in every home, so sync_worktree does not count it as an edit.
+GC_MERGED='.agents/hooks.json
+.claude/settings.json
+.gemini/settings.json
+.codex/hooks.json
+.cursor/hooks.json
+.github/hooks/gascity.json'
 
 # What an agent needs in its worktree beyond the checkout: the bead redirect,
 # submodule config, and the runtime excludes. Every write is skipped when it is
@@ -64,82 +102,57 @@ provision_worktree() {
         printf '%s\n' "$MARKER" >> "$EXCLUDE"
     fi
 
-    append_exclude ".beads/redirect"
-    append_exclude ".beads/hooks/"
-    append_exclude ".beads/formulas/"
-    append_exclude ".runtime/"
-    append_exclude ".logs/"
-    append_exclude "worktrees/"
-    append_exclude "__pycache__/"
-    append_exclude ".claude/"
-    append_exclude ".codex/"
-    append_exclude ".gemini/"
-    append_exclude ".opencode/"
-    append_exclude ".github/hooks/"
-    append_exclude ".github/copilot-instructions.md"
-    append_exclude "state.json"
-    # gc links each skill into .agents/skills/ for Codex and pi, one symlink per
-    # skill, and records each link's name in an ownership manifest beside them.
-    # A person can keep files, links and skills of their own in that directory,
-    # so only the manifest and the names it records are hidden, each by its
-    # exact path. The names come from this worktree's manifest and the rig
-    # checkout's, so a link gc adds later shows until the next run reads it.
-    # Lines are only ever added, so a name gc drops stays hidden.
-    append_exclude ".agents/skills/.gc-skill-ownership.json"
-    exclude_skill_links "$WT"
-    exclude_skill_links "$RIG_ROOT"
-    # Session start stages the city's .gc/settings.json into every Claude
-    # session's work dir, and bd's workspace gate sits beside .beads, outside it.
-    append_exclude ".gc/"
-    append_exclude ".beads.gate.lock"
+    gc_writes | while IFS= read -r PATTERN; do
+        [ -n "$PATTERN" ] || continue
+        grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
+    done
 }
 
-append_exclude() {
-    PATTERN="$1"
-    grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
+# gc_writes — GC_WRITES, then each skill link gc records in the ownership
+# manifest of this worktree and of the rig checkout, one pattern per line.
+gc_writes() {
+    printf '%s\n' "$GC_WRITES"
+    skill_links "$WT"
+    skill_links "$RIG_ROOT"
 }
 
-# exclude_skill_links <checkout> — hides each skill link whose name the
-# ownership manifest in <checkout>/.agents/skills/ records. git reads each
-# line of the exclude file as a pattern, so a name is taken only when it is
-# letters, digits, dots, dashes and underscores, which git matches literally.
-# The match is anchored with \A and \z, because jq's $ also matches before a
-# final newline, and a name ending in one would reach the file as another name.
-# Any other name stays visible rather than risk a pattern that hides a
-# person's file. A missing or unreadable manifest, or no jq, adds nothing.
-exclude_skill_links() {
+# skill_links <checkout> — gc links each skill into .agents/skills/ for Codex
+# and pi, one symlink per skill, and records each link's name in an ownership
+# manifest beside them. A person can keep files, links and skills of their own
+# in that directory, so only the names the manifest records are gc's, each by
+# its exact path. A link gc adds later counts once a run reads it, and the
+# exclude file only gains lines, so a name gc drops stays hidden. git reads
+# each line as a pattern, so a name is taken only when it is letters, digits,
+# dots, dashes and underscores, which git matches literally. The match is
+# anchored with \A and \z, because jq's $ also matches before a final newline,
+# and a name ending in one would reach git as another name. Any other name
+# stays visible rather than risk a pattern that hides a person's file. A
+# missing or unreadable manifest, or no jq, gives no name.
+skill_links() {
     MANIFEST="$1/.agents/skills/.gc-skill-ownership.json"
     [ -f "$MANIFEST" ] || return 0
     NAMES=$(jq -r '.targets | keys[] | select(test("\\A[A-Za-z0-9._-]+\\z") and . != "." and . != "..")' \
         "$MANIFEST" 2>/dev/null) || return 0
-    printf '%s\n' "$NAMES" | while IFS= read -r NAME; do
-        [ -n "$NAME" ] || continue
-        append_exclude ".agents/skills/$NAME"
-    done
+    [ -z "$NAMES" ] || printf '%s\n' "$NAMES" | sed 's#^#.agents/skills/#'
 }
 
-# A home holds no work of its own, so --sync moves it to the remote default
-# branch's tip at every start, on its per-target branch, whatever a session did
-# to it. What the move would lose is saved first, under
-# refs/gc-toolkit/home-save/<per-target branch>/<UTC time>/, and never on the
-# stash stack, which every worktree of the repository shares, so another
-# session's pop could take it. HEAD's commits are saved as head. The move resets
-# the per-target branch, so when that branch points at another commit than HEAD,
-# its commits are saved as branch. Neither is saved when another branch, a tag
-# or a remote-tracking ref holds every commit it reaches.
+# --sync brings a home to the remote default branch's tip at every start. A
+# home is gc's, so what a session leaves in it is a sign of a bug: a session
+# that moved the home, committed in it or edited it. The sync then saves,
+# discards and forces nothing. It reports what it found through
+# patrol-finding.sh, one report per home, and exits non-zero, so the session
+# does not start. The next start that finds the home clean records that the
+# report has cleared.
 #
-# The move keeps each tracked change and untracked file it does not overwrite.
-# gc writes provider settings into a home before pre_start runs, and in a rig
-# that tracks such a file, gc's merge is a tracked change the session needs.
-# When git refuses because the move would overwrite a tracked change or an
-# untracked file, the tracked changes are saved as changes, the move is forced,
-# and each change on a path the tip leaves alone is put back, so a forced move
-# drops only what was in its way. A rebase, a git am, or a run of cherry-picks
-# or reverts that a session stopped partway is then quit, so the next session
-# does not start inside it, and a rebase's autostash is saved as autostash. A
-# move that still fails ends the run non-zero, so the session does not start
-# and gc reports git's error. Only a linked worktree moves, since a main
-# checkout is the rig's own.
+# A home on its own branch fast-forwards to the tip. A detached home whose HEAD
+# the tip contains moves there too, back onto its own branch when that branch
+# fast-forwards to the tip, and otherwise detached at the tip. Anything else
+# fails the start: a commit the tip lacks, a branch not the home's own, a
+# rebase, merge or other operation stopped partway, a change to a tracked file
+# other than gc's merge into a provider settings file, an untracked file gc did
+# not write, and a fast-forward git refuses. A failed fetch leaves the last tip
+# fetched. Only a linked worktree syncs, since a main checkout is the rig's
+# own, and a repository with no origin is left alone.
 sync_worktree() {
     [ "$SYNC" = "--sync" ] || return 0
     [ -f "$WT/.git" ] || return 0
@@ -149,84 +162,145 @@ sync_worktree() {
 
     git -C "$WT" fetch origin 2>/dev/null || true
 
-    DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || {
-        printf 'worktree-setup: cannot sync %s: origin/HEAD is unset\n' "$WT" >&2
-        exit 1
-    }
     BRANCH=$(branch_name)
-    SAVE="refs/gc-toolkit/home-save/$BRANCH/$(date -u +%Y%m%dT%H%M%SZ)"
-    HEAD_COMMIT=$(git -C "$WT" rev-parse HEAD)
-    OWN_COMMIT=$(git -C "$WT" rev-parse -q --verify "refs/heads/$BRANCH") || OWN_COMMIT=""
-    save_if_alone head "$HEAD_COMMIT"
-    [ "$OWN_COMMIT" = "$HEAD_COMMIT" ] || save_if_alone branch "$OWN_COMMIT"
-
-    if ! move 2>/dev/null; then
-        CHANGES=$(GIT_AUTHOR_NAME=worktree-setup GIT_AUTHOR_EMAIL=worktree-setup@localhost \
-            GIT_COMMITTER_NAME=worktree-setup GIT_COMMITTER_EMAIL=worktree-setup@localhost \
-            git -C "$WT" stash create "worktree-setup: tracked changes in $WT before its move") || exit 1
-        [ -z "$CHANGES" ] || save changes "$CHANGES"
-        move -f || exit 1
-        [ -z "$CHANGES" ] || carry_back || exit 1
+    FOUND=""; FIX=""; DETAIL=""
+    if ! DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD) \
+        || ! git -C "$WT" rev-parse -q --verify "$DEFAULT_REF^{commit}" >/dev/null; then
+        found "an origin/HEAD that names no commit, so no default branch to move to" \
+            "set it with git -C '$WT' remote set-head origin --auto"
+        report
     fi
-    quit_operation
-}
+    TIP=${DEFAULT_REF#refs/remotes/}
+    check_operation
+    check_head
+    check_changes
+    [ -z "$FOUND" ] || report
 
-# save_if_alone <name> <commit> — saves <commit> as <name> when a commit it
-# reaches is held by no branch but the per-target one, no tag and no
-# remote-tracking ref, or when git cannot say.
-save_if_alone() {
-    [ -n "$2" ] || return 0
-    ALONE=$(git -C "$WT" rev-list -n 1 "$2" --not --exclude="$BRANCH" --branches --remotes --tags 2>/dev/null) || ALONE=unread
-    [ -z "$ALONE" ] || save "$1" "$2"
-}
-
-# save <name> <commit> — pins <commit> at $SAVE/<name>. The empty old value
-# makes the ref create-only, so no earlier save is replaced.
-save() {
-    git -C "$WT" update-ref -m "worktree-setup: saved before moving $WT to $DEFAULT_REF" "$SAVE/$1" "$2" "" || exit 1
-}
-
-# carry_back — puts back each tracked change the forced move reset on a path the
-# tip leaves alone, as the plain move would have kept it. A three-way read-tree
-# from the commit the home was on takes the saved version of each path only the
-# save changed, deletions included (--aggressive), and leaves each path the tip
-# changed as the tip has it. The reset then puts the index back at the tip, so a
-# change put back is unstaged, as gc's merge is.
-carry_back() {
-    GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" read-tree -m -u --aggressive "$HEAD_COMMIT" HEAD "$CHANGES" &&
-        git -C "$WT" reset -q
-}
-
-# quit_operation — the move keeps the state of a stopped rebase, git am, or run
-# of cherry-picks or reverts, and continuing or aborting it would take the home
-# off the tip. Quitting keeps HEAD, the index and the work tree, and runs only
-# after a move, so a home whose move failed keeps the state for a person to
-# abort. Quitting a rebase would put its autostash on the stash stack, so the
-# autostash is saved as autostash first. rebase --quit refuses a git am
-# session, which keeps its state where a rebase does, so that is quit with
-# am --quit. A quit git refuses fails the run, as a failed move does.
-quit_operation() {
-    REBASE=$(git -C "$WT" rev-parse --path-format=absolute --git-path rebase-merge)
-    [ -d "$REBASE" ] || REBASE=$(git -C "$WT" rev-parse --path-format=absolute --git-path rebase-apply)
-    if [ -f "$REBASE/applying" ]; then
-        git -C "$WT" am --quit || exit 1
-    elif [ -d "$REBASE" ]; then
-        if [ -f "$REBASE/autostash" ]; then
-            save autostash "$(cat "$REBASE/autostash")"
-            rm -f "$REBASE/autostash"
-        fi
-        git -C "$WT" rebase --quit || exit 1
+    if ! ERR=$(fast_forward 2>&1); then
+        found "a fast-forward to $TIP that git refused" "clear what git names below"
+        DETAIL=$ERR
+        report
     fi
-    git -C "$WT" cherry-pick --quit || exit 1
+    "$FINDING" --key "$(report_key)" --scope home-sync --cleared \
+        --message "$WT started clean at $TIP" >/dev/null 2>&1 || true
 }
 
-# move [-f] — puts the worktree on its per-target branch at the default tip.
-# Hooks are off, because a hook's exit status becomes the checkout's, and a move
-# that carried a change over but read as failed would then be forced over it.
-# --no-track leaves the upstream the worktree was created with, since setting it
-# rewrites the repository's config, which every worktree shares.
-move() {
-    GIT_LFS_SKIP_SMUDGE=1 git -c core.hooksPath=/dev/null -C "$WT" checkout -q "$@" --no-track -B "$BRANCH" "$DEFAULT_REF"
+# found <what> <how to clear it> — records one thing that keeps the home from
+# starting.
+found() {
+    FOUND="${FOUND:+$FOUND; }$1"
+    FIX="${FIX:+$FIX; }$2"
+}
+
+# check_operation — a rebase, git am, merge, cherry-pick, revert or bisect that
+# a session left stopped partway.
+check_operation() {
+    OPS=""
+    for STATE in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD sequencer BISECT_LOG; do
+        F=$(git -C "$WT" rev-parse --path-format=absolute --git-path "$STATE") || continue
+        [ ! -e "$F" ] || OPS="${OPS:+$OPS, }$STATE"
+    done
+    [ -z "$OPS" ] || found "a git operation stopped partway ($OPS)" \
+        "finish or abort it, as git -C '$WT' status says"
+}
+
+# check_head — a HEAD the tip does not contain, or a branch not the home's own.
+# The move that clears a commit the tip lacks is also the one a rewrite of the
+# default branch, such as a fork's rebase, asks of every home in the rig.
+check_head() {
+    CURRENT=$(git -C "$WT" symbolic-ref -q --short HEAD) || CURRENT=""
+    if ! git -C "$WT" rev-parse -q --verify 'HEAD^{commit}' >/dev/null; then
+        found "a HEAD that names no commit" \
+            "check out the tip with git -C '$WT' checkout --detach origin/HEAD"
+        return 0
+    fi
+    if [ -n "$CURRENT" ] && [ "$CURRENT" != "$BRANCH" ]; then
+        found "branch $CURRENT checked out, not its own $BRANCH" \
+            "switch it back with git -C '$WT' switch $BRANCH"
+    fi
+    if ! git -C "$WT" merge-base --is-ancestor HEAD "$DEFAULT_REF" 2>/dev/null; then
+        AHEAD=$(git -C "$WT" rev-list --count HEAD --not "$DEFAULT_REF" 2>/dev/null) || AHEAD="?"
+        found "commits $TIP lacks on its HEAD ($AHEAD, newest $(git -C "$WT" rev-parse --short HEAD))" \
+            "keep what they hold elsewhere, then move it with git -C '$WT' checkout --detach origin/HEAD, the step that moves every home of a rig whose default branch was rewritten"
+    fi
+}
+
+# check_changes — a change to a tracked file other than gc's merge into a
+# provider settings file, and an untracked file gc did not write. Each pattern
+# gc writes reaches git as a command-line exclude, which outranks a .gitignore
+# that re-includes one of those paths.
+check_changes() {
+    set --
+    while IFS= read -r P; do
+        [ -z "$P" ] || set -- "$@" ":(exclude)$P"
+    done <<EOF
+$GC_MERGED
+EOF
+    TRACKED=$(git -C "$WT" status --porcelain --untracked-files=no --no-renames -- . "$@") || {
+        TRACKED=""
+        found "git status failing in it" "repair it until git -C '$WT' status runs"
+    }
+    set --
+    while IFS= read -r P; do
+        [ -z "$P" ] || set -- "$@" "--exclude=$P"
+    done <<EOF
+$(gc_writes)
+EOF
+    UNTRACKED=$(git -C "$WT" ls-files --others --exclude-standard --directory --no-empty-directory "$@") || {
+        UNTRACKED=""
+        found "git failing to list its untracked files" "repair it until git -C '$WT' status runs"
+    }
+    [ -z "$TRACKED" ] || found "changes to files git tracks ($(listing "$(printf '%s\n' "$TRACKED" | cut -c4-)"))" \
+        "keep what matters elsewhere and discard the changes with git -C '$WT' reset --hard"
+    [ -z "$UNTRACKED" ] || found "files git does not track ($(listing "$UNTRACKED"))" \
+        "move or remove the untracked files"
+}
+
+# listing <lines> — the first five lines, joined by commas, and how many more.
+listing() {
+    printf '%s\n' "$1" | awk 'NR <= 5 { out = out (NR > 1 ? ", " : "") $0 }
+        END { if (NR > 5) out = out ", and " (NR - 5) " more"; print out }'
+}
+
+# fast_forward — moves the home to the tip, as the checks leave it: on its own
+# branch, or detached on a commit the tip contains. A detached home is done
+# once its HEAD is the tip, since a post-checkout hook's exit status becomes
+# the checkout's after the checkout has moved the home.
+fast_forward() {
+    if [ -n "$CURRENT" ]; then
+        git -C "$WT" merge -q --ff-only "$DEFAULT_REF"
+        return
+    fi
+    if ! git -C "$WT" show-ref --verify --quiet "refs/heads/$BRANCH" \
+        || git -C "$WT" merge-base --is-ancestor "refs/heads/$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
+        GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --track -B "$BRANCH" "$DEFAULT_REF" || true
+    fi
+    at_tip || GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --detach "$DEFAULT_REF" || at_tip
+}
+
+at_tip() {
+    [ "$(git -C "$WT" rev-parse HEAD)" = "$(git -C "$WT" rev-parse "$DEFAULT_REF^{commit}")" ]
+}
+
+# report — files what keeps this home from starting, one report per home, and
+# ends the run non-zero, so the session does not start. A report that does not
+# land still fails the start, and gc keeps the run's output in its error.
+report() {
+    MESSAGE="$WT did not start, because its sync found $FOUND. To clear it, $FIX. The next start that finds it clean clears this report."
+    [ -z "$DETAIL" ] || MESSAGE="$MESSAGE
+
+$DETAIL"
+    "$FINDING" --key "$(report_key)" --scope home-sync --priority 1 \
+        --title "Agent home $AGENT did not start: ${FOUND%%; *}" --message "$MESSAGE" >&2 \
+        || printf 'worktree-setup: the report on %s did not land\n' "$WT" >&2
+    printf 'worktree-setup: %s\n' "$MESSAGE" >&2
+    exit 1
+}
+
+# report_key — the home's report key, from its per-target branch, which names
+# the agent and carries a hash of the home's path.
+report_key() {
+    printf 'home-sync.%s' "$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-')"
 }
 
 branch_name() {
