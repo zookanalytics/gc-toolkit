@@ -279,12 +279,18 @@ What survives the move:
   refuses one. A stopped merge needs nothing, because the move's checkout ends it.
   That checkout also puts a merge's autostash on the stash stack, and no home holds
   a stopped merge. A home whose move fails keeps the operation for a person to
-  abort, and a quit git refuses fails the start (cases (ac) to (af)).
+  abort, and a quit git refuses fails the start (cases (ac) to (af)). A bisect is
+  left in progress, and no home holds one. Its state survives the move, and
+  `git bisect reset` returns the home to where the bisect started. A bisect started
+  on the home's own branch returns it to the tip, where the move put that branch,
+  and one started on a detached home returns it to the commit it was on then.
 - **What Gas City has for either.** Nothing in Gas City clears a stopped operation
   in a tree or carries a tree's changes through a forced checkout. A code search of
   `gastownhall/gascity` at 357c30c631cf finds no `rebase --quit`,
-  `cherry-pick --quit`, `rebase-merge` or `read-tree`, and `stash create` only in
-  the reaper's and the prune's tests and one release-gate note. Its agent-home
+  `cherry-pick --quit` or `read-tree`. It finds `rebase-merge` once, in
+  `scripts/rebase-resolve-lib.sh`, which aborts its own rebase when that rebase
+  stops on something it cannot resolve, and `stash create` only in the reaper's
+  and the prune's tests and one release-gate note. Its agent-home
   cleanup
   (`cleanupClosedBeadAgentHomeWorktrees` in `cmd/gc/agent_home_worktree_cleanup.go`)
   moves a home only when it carries the prune's `.worktree-stale` marker, sits on a
