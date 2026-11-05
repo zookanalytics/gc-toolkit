@@ -2636,6 +2636,9 @@ cmd_dismiss() {
     if [ -z "$bead" ]; then
         current_sitting || exit $?
         bead="$SITTING_SUBJECT"; convs="$SITTING_CONV"
+        # The subject's rig checkout, which the visit's PR comment is drawn
+        # from below. A rig list that does not answer costs only that drawing.
+        path=$(rig_path_for_bead "$bead" 2>/dev/null) || path=""
         echo "$PROG: dismiss: no bead named; inferred the current sitting's conversation $SITTING_CONV on $bead from session state" >&2
     else
         resolve_live_subject "$bead"

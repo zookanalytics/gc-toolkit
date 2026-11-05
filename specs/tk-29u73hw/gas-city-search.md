@@ -94,10 +94,10 @@ Nothing the search found renders a bead on a pull request, so the script keeps
 the part the need leaves: one comment per conversation under its marker, the
 two ids, the title, and, once the conversation closes, the hand-back and the
 comments, laid out under fixed labels. Every gh call is pinned to the origin of
-the checkout the caller runs in, a sitting's worktree of the subject's rig or
-the rig checkout a dismiss names, so the comment reads no rig map, and a PR the
-subject records on another repository is left alone, as main's reminder left
-it. It writes no bead, filters nothing and composes no text of its own beyond
-those labels and the `none recorded` and `none` an empty field reads. It names
-no pack noun, so it takes no warrant
+the checkout the caller runs in, a sitting's worktree of the subject's rig or,
+for a dismiss, the subject's rig checkout, so the comment reads no rig map, and
+a PR the subject records on another repository is left alone, as main's
+reminder left it. It writes no bead, filters nothing and composes no text of
+its own beyond those labels and the `none recorded` and `none` an empty field
+reads. It names no pack noun, so it takes no warrant
 ([review-arch.md](../../docs/review-arch.md#the-checks), check 2).

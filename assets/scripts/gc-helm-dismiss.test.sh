@@ -29,7 +29,8 @@
 #   (STUCK, BLIND, VERIFY) a conversation that will not close, a read that does
 #             not answer, and an id that does not resolve all fail the run
 #   (RIG)     the lookup reads the bead's own rig store
-#   (INFER*)  with no bead named, the conversation this session holds
+#   (INFER*)  with no bead named, the conversation this session holds, its PR
+#             comment drawn from the subject's rig checkout all the same
 #   (STOP-*)  the session that held a closed conversation is stopped after the
 #             close: acked as an operator from outside the sitting, by its own
 #             ack from inside it, as an operator under --operator, and never
@@ -78,6 +79,7 @@ show_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] | {id: .on, dependen
 list_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)'; }
 case "$1 ${2:-}" in
   "rig list")
+    [ -n "${RIGS_DOWN:-}" ] && { echo "rig list: data plane down" >&2; exit 1; }
     jq -n --arg ra "$RA_PATH" '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
                                      {name:"rig-a", path:$ra, prefix:"ra"}]}' ;;
   "session list")
@@ -349,6 +351,10 @@ sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit
 GC_SESSION_ID=gc-60 GC_ALIAS=gc-toolkit/gc-toolkit.ra-conv run_dismiss
 has "$(grep '^list' "$READS")" "$TMP/ra/.beads" "(INFER-RIG) the current-sitting lookup is pinned at the session's own rig"
 eq "$(field ra-conv status)" "closed" "(INFER-RIG) …and finds the conversation there"
+has "$(cat "$REC_PSC_LOG")" "refresh --sitting ra-conv | pwd=$(cd "$RA_PATH" && pwd) | acts=Dismissed by the operator." "(INFER-RIG) …and draws the visit's PR comment from the subject's rig checkout, as prefix+X runs it from the city root"
+fresh; RIGS_DOWN=1 GC_SESSION_ID=gc-toolkit/gc-toolkit.tk-conv run_dismiss
+eq "$RC/$(field tk-conv status)" "0/closed" "(INFER-RIGS-DOWN) a rig list that does not answer still ends the inferred sitting"
+has "$(cat "$REC_PSC_LOG")" "refresh --sitting tk-conv | " "(INFER-RIGS-DOWN) …and the comment is drawn all the same, from where dismiss runs"
 
 echo "# dismiss stops the session that held the conversation it closed"
 # A sitting must not outlive its conversation, and a session viewed in a tab is
