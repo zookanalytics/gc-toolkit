@@ -59,6 +59,11 @@
 #     own docs/review-arch.md and docs/review-triage.md, read the way a review
 #     reads them at its commit, carry the divergence lens and the changes that
 #     make arch mandatory, and the pack's arch skill carries none of that lens.
+#   - The demo method lists a message the rig's app sends people among the
+#     surfaces triage adds it for, even when no screen changes, and such a
+#     message settles need. It shows each message a change adds or alters as
+#     its recipient would see it, from a run of the reviewed commit, beside any
+#     clip of the screens, and its verdict names each message it shows.
 #
 # Hermetic: reads this checkout and a scratch git repository; no gc, store or
 # network.
@@ -338,6 +343,24 @@ hasF "$TMP/evidence" 'Run nothing, and the Verification line says so, with how y
   "…which the Verification line says, with how the reviewer found it"
 hasF "$TMP/verdict.correctness" 'or that no suite touches the diff, and how you found it>' \
   "…in the form the verdict section's Verification line offers"
+
+echo "# the demo method shows each message a change adds or alters, as its recipient sees it"
+DEMO="$ROOT/skills/review-demo/SKILL.md"
+awk '/^### When triage adds it$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.triage"
+hasF "$TMP/demo.triage" "a message the rig's app sends people, such as an email" \
+  "triage adds the demo check for a message the rig's app sends people"
+hasF "$TMP/demo.triage" 'even when no screen changes.' "…even when no screen changes"
+awk '/^### Decide need$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.need"
+hasF "$TMP/demo.need" 'A message the change adds or alters settles need the same way' \
+  "a message the change adds or alters settles need"
+awk '/^### Show each message$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.messages"
+hasF "$TMP/demo.messages" 'as its recipient would see it: the sender, the subject and the body.' \
+  "each message is shown as its recipient would see it, sender, subject and body"
+hasF "$TMP/demo.messages" 'Each comes from a run of the reviewed commit on fixture data.' \
+  "…from a run of the reviewed commit"
+hasF "$TMP/demo.messages" 'beside the clip or the screenshot of any screen the change alters.' \
+  "…beside any clip of the screens"
+hasF "$TMP/verdict.demo" 'names each message it shows, by its subject' "the demo verdict names each message it shows"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
