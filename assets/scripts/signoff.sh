@@ -188,7 +188,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
 U
 }
 
-warn() { echo "signoff: $*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
 VISUAL_FALLBACK=""; REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""; NEEDS_YOU=""
@@ -234,9 +236,6 @@ case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
   *) NEEDS_YOU="$NEEDS_YOU." ;;
 esac
 
-_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=git-lib.sh
 . "$_bd_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 1; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }

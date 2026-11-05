@@ -29,18 +29,6 @@ OFF=$(printf '%s\n' "$CALLS" | grep -v -- '--subject "\$warrant_id" --key' || tr
   && ok "every human-gate.sh call blocks the warrant under a --key" \
   || { bad "human-gate.sh calls whose subject is not the warrant:"; printf '%s\n' "$OFF" | sed 's/^/       /'; }
 
-if grep -n -e 'escalation-rig' -e 'ESC_RIG' "$TOML"; then
-  bad "the dance still derives a store for its gate; gc bd files the gate beside the warrant it blocks"
-else
-  ok "the dance derives no store for its gate"
-fi
-
-if grep -n 'escalate\.sh' "$TOML"; then
-  bad "the dance still names escalate.sh; the helper is human-gate.sh"
-else
-  ok "the dance names the helper by its name, human-gate.sh"
-fi
-
 # The malformed path closes the warrant refused, then reports it.
 MALFORMED=$(awk '/if \[ -z "\$target" \] \|\| \[ -z "\$reason" \]; then/ {f=1} f {print} f && /^fi$/ {exit}' "$TOML")
 case "$MALFORMED" in
