@@ -46,23 +46,25 @@ die() { local p="${0##*/}"; printf '%s: %s\n' "${PROG:-${p%.sh}}" "$1" >&2; exit
 # consume the loop's own driving input, the guard bd_list already carries.
 #
 # It prints and returns what `gc bd ... | grep -a -vE '^gc bd:' | scrub` would.
-# A read with no control byte, so no line break, and no notice at its start is
-# one line that grep keeps and scrub leaves as it is, so only a read carrying
-# either goes through the two. Under pipefail the status is that pipeline's:
-# grep's 1 when no line is left, which an empty read is, else gc's.
+# A read whose only control byte is the newline that ends it, and with no notice
+# at its start, is one line that grep keeps and scrub prints without that
+# newline, so only another read goes through the two. Under pipefail the status
+# is that pipeline's: grep's 1 when no line is left, which an empty read is,
+# else gc's.
 bd_json() {
-  local raw rc=0 st
+  local raw line rc=0 st
   { raw=$(r=0; gc bd "$@" --json </dev/null 2>/dev/null || r=$?; printf .; exit "$r") || rc=$?; } 2>/dev/null
   raw=${raw%.}
-  case "$raw" in
+  if [ -z "$raw" ]; then [[ -o pipefail ]] || return 0; return 1; fi
+  line=${raw%$'\n'}
+  case "$line" in
     *[[:cntrl:]]*|'gc bd:'*)
       printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub
       st=("${PIPESTATUS[@]}")
       [ "${st[2]}" -eq 0 ] || return "${st[2]}"
       [[ -o pipefail ]] || return 0
       [ "${st[1]}" -eq 0 ] || return "${st[1]}" ;;
-    '') [[ -o pipefail ]] || return 0; return 1 ;;
-    *) printf '%s' "$raw"; [[ -o pipefail ]] || return 0 ;;
+    *) printf '%s' "$line"; [[ -o pipefail ]] || return 0 ;;
   esac
   return "$rc"
 }
