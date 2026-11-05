@@ -713,10 +713,11 @@ if [ "$RULED" = yes ]; then
   fi
   # What the ruling did to the subject's own PR, where the reminder is. A
   # rework or a retirement that acted on another PR left this one as it was.
-  # A retirement an earlier attempt carried out reads closed now, and is still
-  # what the ruling did.
+  # A rework or a retirement this ruling recorded for this PR is still what
+  # the ruling did when a re-run finds the PR closed, as it does once the
+  # reworked PR has merged or the retirement has closed it.
   REMINDER_OUTCOME=ruled
-  if [ "$PR_TARGET" = "$SUBJECT" ] && [ "$ACTING" = rework ]; then
+  if [ "$PR_TARGET" = "$SUBJECT" ] && [ "$PR_ANSWER" = rework ]; then
     REMINDER_OUTCOME=rework
   elif [ "$PR_TARGET" = "$SUBJECT" ] && [ "$PR_ANSWER" = retire ]; then
     REMINDER_OUTCOME=retired

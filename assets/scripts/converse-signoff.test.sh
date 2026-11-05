@@ -43,7 +43,8 @@
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
-#             the merge
+#             the merge; the same sign-off run again once the PR has closed
+#             acts on nothing, and its reminder still says what the ruling did
 #   (ANSWER*) a ruling on a turn that does not sign off answers only the gates
 #             it names, after the same rework or retirement, and leaves the
 #             conversation open for the sign-off
@@ -679,6 +680,16 @@ has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "bd update tk-conv --set-
 has "$(grep -v '^lifecycle state' "$CALLS" | sed -n 2p)" "converse-rework --anchor tk-anc" "(REWORK) …then the rework runs, before every other write"
 has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(REWORK) …in the rig of the PR it acts on"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome rework --summary settled" "(REWORK) …and the reminder says the PR was sent back for rework"
+# The same sign-off run again once the rework has landed and the PR merged: the
+# record names the PR, which reads closed, so nothing acts on it again, and the
+# reminder still says what the ruling did.
+setf tk-anc status closed; setm tk-anc merge_result merged
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 0 "(REWORK-RETRY) the same sign-off, run again once the PR has merged, exits 0"
+has "$OUT" "tk-anc, the PR an earlier attempt of this ruling recorded for its --rework, reads closed" "(REWORK-RETRY) …finding the PR closed"
+hasnt "$(cat "$CALLS")" "converse-rework" "(REWORK-RETRY) …filing no second rework"
+has "$(grep '^pr-sitting-comment' "$CALLS" | tail -n1)" "--outcome rework --summary settled" "(REWORK-RETRY) …and the reminder still says the PR was sent back for rework"
 acceptance; setm tk-anc merge_result pull_request
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-FAIL) a rework that does not file exits 1"
@@ -742,6 +753,16 @@ esac
 eq "$(merge_held tk-anc)" released "(RETIRE) the gate releases the merge only after the PR is closed"
 eq "$(field tk-conv status)" "closed" "(RETIRE) the conversation is closed"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome retired --summary retired: the work moved" "(RETIRE) …and the reminder says the PR was retired"
+# The same sign-off run again once pr-facts has consummated the retirement,
+# closing the anchor: nothing is disposed again, and the reminder still says
+# the PR was retired.
+setf tk-anc status closed; setm tk-anc gc.superseded_by tk-conv
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "retired: the work moved" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 0 "(RETIRE-RETRY) the same sign-off, run again once the retirement has closed the PR, exits 0"
+has "$OUT" "tk-anc, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(RETIRE-RETRY) …finding the PR closed"
+hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRE-RETRY) …disposing nothing again"
+has "$(grep '^pr-sitting-comment' "$CALLS" | tail -n1)" "--outcome retired --summary retired: the work moved" "(RETIRE-RETRY) …and the reminder still says the PR was retired"
 open_pr
 run_signoff --conversation tk-conv --outcome "retired: a duplicate" "${RETIRED[@]}" --retire duplicate --successor tk-new
 eq "$RC" 0 "(RETIRE-SUCCESSOR) --retire duplicate --successor exits 0"
