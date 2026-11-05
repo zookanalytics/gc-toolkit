@@ -10,15 +10,34 @@
 # variable after setup. Call counts come from STUB_GC_LOG, where the stub gc logs
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
 #
-# row_meta, the metadata read the library shares with every script that sources
-# it, and bd_gates_open_under_key, the order every writer and reader of one
-# situation's human gates reads them in, are pinned first; they read no store.
+# warn and die, the report every script that sources the library makes, row_meta,
+# the metadata read it shares with them, and bd_gates_open_under_key, the order
+# every writer and reader of one situation's human gates reads them in, are
+# pinned first; they read no store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
 . "$HERE/bd-lib.sh"
+
+# --- warn and die: a script's report, under its name, and die's exit status -----
+LIB="$HERE/bd-lib.sh"
+report() { # <script body> -> the script's stderr and its exit status, one line each
+  mkdir -p "$TMP/report"
+  printf '. "%s"\n%s\n' "$LIB" "$1" > "$TMP/report/thing.sh"
+  bash "$TMP/report/thing.sh" 2>&1; echo "rc=$?"
+}
+eq "$(report 'warn careful now')" "thing: careful now
+rc=0" "warn reports under the script's file name, without .sh, and every word"
+eq "$(report 'PROG=other; warn careful now')" "other: careful now
+rc=0" "…and under \$PROG when the script sets one"
+eq "$(report 'die stopped')" "thing: stopped
+rc=1" "die exits 1 by default"
+eq "$(report 'DIE_STATUS=4; die stopped')" "thing: stopped
+rc=4" "…or the script's own DIE_STATUS"
+eq "$(report 'DIE_STATUS=4; die stopped 7')" "thing: stopped
+rc=7" "…and the status a call gives wins over both"
 
 # --- row_meta: one metadata value off a show row, as a string -----------------
 ROW='[{"id":"tk-m","metadata":{"branch":"polecat/tk-m","pr_number":42,"gc.routed_to":"rig/pool"}}]'

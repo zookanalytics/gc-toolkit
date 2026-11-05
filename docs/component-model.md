@@ -579,10 +579,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
   `mol-dog-shutdown-dance` executes it. Detection and enforcement are one
   workflow, split across two roles because a kill needs due process
   ([authority-map.md](authority-map.md)).
-- **`liveness-sweep` is patrol, not visit.** It replaced two patrol detectors,
-  `detect-stalled-workflows.sh` and `detect-parked-dispositions.sh`, and it
-  files a batch's unnamed waits as one human gate on the rig's standing triage
-  subject. Filing a human gate does not put a component in the visit workflow.
+- **`liveness-sweep` is patrol, not visit.** It files a batch's unnamed waits as
+  one human gate on the rig's standing triage subject. Filing a human gate does
+  not put a component in the visit workflow.
   The deacon and witness patrols reach a human by a longer road:
   `patrol-finding.sh` files the bead, and the first reaction on it decides
   whether a human is owed anything at all.
