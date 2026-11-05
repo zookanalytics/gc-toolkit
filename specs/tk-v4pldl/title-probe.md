@@ -16,13 +16,14 @@ of it. The operator's review then moved them out of the prompt, and
 [The rules read from a skill](#the-rules-read-from-a-skill) measures them where they
 now are.
 
-The names changed after these runs. Every run before
-[The skill under its new name](#the-skill-under-its-new-name) had the skill
+The names changed after these runs. The runs in
+[The rules read from a skill](#the-rules-read-from-a-skill) had the skill
 `gc-toolkit.subject-lines` and the page `docs/subject-lines.md`, and this record
 keeps those names where it describes them. The operator's ruling in sitting
 tk-3jtt9i8 renamed them `gc-toolkit.commit-conventions` and
-`docs/commit-conventions.md` with their rules unchanged, and that section checks
-that the skill still loads under its new name.
+`docs/commit-conventions.md` with their rules unchanged, and
+[The skill under its new name](#the-skill-under-its-new-name) checks that the
+skill still loads under its new name.
 
 ## Authors
 
@@ -738,12 +739,13 @@ differences:
 
 - The harness was rebuilt from that Method, because the scratch that held the
   first one was gone.
-- The cases are six merged PRs whose merge base can print the size table: #1362,
-  #1361, #1358, #1371, #1377 and #1378. At step 4c each gave the kinds of fact
-  the earlier cases gave: the anchor's title and kind, the branch's commit
-  subjects, its `pr_summary` cut to 2,500 characters and its size table. While
-  committing, each gave the bead's title and kind and the first 1,500 characters
-  of the summary, and in the controls only the title and kind.
+- The cases are six of the seven among the sixteen above whose merge base can
+  print the size table: #1362, #1361, #1358, #1371, #1377 and #1378, leaving out
+  #1370. At step 4c each gave the kinds of fact the earlier cases gave: the
+  anchor's title and kind, the branch's commit subjects, its `pr_summary` cut to
+  2,500 characters and its size table. While committing, each gave the bead's
+  title and kind and the first 1,500 characters of the summary, and in the
+  controls only the title and kind.
 - At step 4c, one run a case on Claude and three of the cases on Codex, on this
   repository. While committing, and in each control, three of the cases on
   Claude with no rig rules.
@@ -777,9 +779,9 @@ All six commit subjects carried a type from the table and no scope. Each of
 these runs looked for `docs/commit-conventions.md`, which the fixture with no rig
 rules does not have.
 
-So the load holds under the new name: on both providers, at step 4c and while
-committing, before the line, and not at steps that write no subject line. These
-runs have the limits of the earlier skill runs, with fewer of them.
+So under its new name the skill loads before the line at step 4c on both
+providers and while committing on Claude, and not at steps that write no subject
+line. These runs have the limits of the earlier skill runs, with fewer of them.
 
 ### Cost of the re-check
 
