@@ -101,16 +101,14 @@ PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
+# The one read of a bead's human gates, and the rule of which of them still hold
+# it. Exposes the die this script reports through, and bd_open_human_gates,
+# which reads through _bd_call.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 4; }
 DIE_STATUS=4
 usage_die() { printf '%s: %s\n' "$PROG" "$*" >&2; usage; exit 2; }
 note() { printf '%s: %s\n' "$PROG" "$*" >&2; }
-
-# The one read of a bead's human gates, and the rule of which of them still hold
-# it. Exposes bd_open_human_gates, which reads through _bd_call.
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || die "cannot source bd-lib.sh from $HERE"
 
 usage() {
     cat >&2 <<'EOF'
