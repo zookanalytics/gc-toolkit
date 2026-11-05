@@ -6,7 +6,7 @@ description: Use when a review or a later change asks what Gas City ships for ho
 # Gas City search for holding new work and seating a mayor
 
 The placement marker's own design records no search of Gas City. This is the
-search for its replacement ([the design](native-hold-and-mayor.md)), one section
+search for its replacement ([the design](native-hold-and-po.md)), one section
 per need, each ending in what the design does about it.
 
 Read on 2026-11-01 at Gas City main `cb0cc685d4e4`, Gas City's published packs at
