@@ -126,8 +126,8 @@ Gas City commit, with the installed bd's own help.
   docs teach, and Gas Town's roles' `mayor/`. Under another name each of those reaches
   no seat. That is this city's state today, since `gc agent list` shows no agent
   named mayor.
-- Nothing in Gas City aims at `po`. Its one string literal `po` in that tree is a
-  kubectl alias for pods in a test host.
+- Nothing in Gas City aims at `po`. Its only string literals `po` in that tree are a
+  kubectl alias for pods in a test host and a case in that alias's test.
 
 ## Seating the po
 

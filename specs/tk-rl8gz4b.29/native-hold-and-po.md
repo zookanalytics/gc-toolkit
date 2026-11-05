@@ -315,8 +315,9 @@ difference below but the last ends with an operator ruling that gives the seat t
 
 The po may read anything. It writes only the queue's acts, and the parks and priority
 moves the operator agrees to in a sitting. It reads inside a sitting, when the work or
-the operator's question calls for it. No schedule makes it read, and it reports
-nothing nobody asked for.
+the operator's question calls for it, and no schedule makes it read. It raises in the
+sitting whatever it reads that bears on the work, whether the operator asked or not,
+as [its charter](#the-seat-and-its-charter) says.
 
 - **To open a sitting:** the rig's stated target, which the rig's `AGENTS.md` names
   ([how a sitting sequences the work](#how-a-sitting-sequences-the-work)).
@@ -523,7 +524,7 @@ Left alone on purpose: `docs/warrants.md` and `docs/gascity/routing-model.md` st
 Gas City's hold, which does not change. `formulas/mol-review.toml`'s "the mayor's" is
 an example of a claim. `lifecycle.toml`'s "the mayor's beads" goes with tk-1tfzr71.14,
 which retires the reconciler it describes. `doctor/check-hq-marooned-work/doctor.toml`
-names a mayor among Gas City's city-scoped roles, and unit 3 names the po beside it.
+names a mayor among the city-scoped roles, and unit 3 names the po beside it.
 
 ### The beads already carrying the marker
 
@@ -633,7 +634,7 @@ on each. They run in order, because they share files.
 
 `tk-rl8gz4b.30` also writes the notes this design promises, on tk-1tfzr71.14, .17, .18
 and .19 and on tk-rl8gz4b.17, when it files the units. They wait for the approval, since
-until then every answer here is proposed.
+until then the answers the operator has not ruled are proposed.
 
 **Branches that overlap.** PR #1359 landed on main at d983f9f50, after the integration
 branch was cut at c41d2ea1d. It rewrote much of this ground: `gc-helm.sh`,
