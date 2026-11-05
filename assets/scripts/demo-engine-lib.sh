@@ -60,24 +60,29 @@
 #     --serve-dir given no --port is given a free one, because the sandbox
 #     opens only a port it knows;
 #   - --base-url names this host, whose servers run outside the sandbox, unless
-#     the server there is a rig's own app that never reads the city. It is one
-#     when the URL's port is none that a variable pointing at the city names,
-#     and every process of this user that listens on that port works in a
-#     worktree of a rig that declares its app never reads the city. A rig's
-#     checkout, which holds its store, is no such worktree. Neither is the
-#     city's own repository, which the rig map lists as its hq entry, nor a
-#     directory in no rig's repository. lsof names each listener and its
-#     working directory.
+#     the server there is a rig's own app. It is one when the URL's port is
+#     none that a variable pointing at the city names, and every process of
+#     this user that listens on that port works in a worktree of a rig that
+#     carries no label. A rig's checkout, which holds its store, is no such
+#     worktree. Neither is the city's own repository, which the rig map lists
+#     as its hq entry, nor a directory in no rig's repository. lsof names each
+#     listener and its working directory.
 # A host without sandbox-exec runs no capture at all.
 #
-# A rig declares that its app never reads the city in demo-capture.toml at the
-# root of its repository, with this line:
-#   app_reads_city = false
-# The file holds that line, comments and blank lines, and nothing else. It is
-# read as the rig's default branch carries it, at origin/HEAD as the rig's
-# checkout last fetched it, or at origin/main where the checkout records no
-# origin/HEAD. A change to it counts once it merges, and neither a pull
-# request's own copy nor an uncommitted edit changes what the rig declares.
+# A rig whose app reads the city, as a rig that develops code for a city does,
+# carries a label that keeps its own servers out of every capture's reach. The
+# city sets it in city.toml, among the rig's formula vars:
+#   [rigs.formula_vars]
+#   app_reads_city = "true"
+# mol-rig-demo declares that var, with the default "false", and a capture reads
+# the rig's value with `gc formula show mol-rig-demo --rig <rig> --json`. The
+# label lives outside the rig's repository, so no change the rig reviews can
+# remove it. A label that does not read counts as one: a read that fails, a
+# formula that declares no such var, and a value other than "true" or "false"
+# each keep the refusal. The rig whose repository holds this library, the
+# pack's own source, counts as labelled whatever city.toml says, because the
+# pack's board and scripts read the city. A city that runs the pack from a copy
+# in no rig's repository labels its rig of the pack's source in city.toml.
 #
 #   demo_engine_resolve  Checks that this host has the sandbox and checks Node
 #                        against the engine's floor, finds the engine, checks
@@ -449,57 +454,67 @@ EOF
   [ -z "$common" ] || printf 'ro %s\n' "$common"
 }
 
-# The file at the root of a rig's repository in which the rig declares that its
-# app never reads the city.
-DEMO_ENGINE_DECLARATION=demo-capture.toml
+# The formula var in which city.toml labels a rig whose app reads the city, and
+# the formula that declares it.
+DEMO_ENGINE_LABEL_VAR=app_reads_city
+DEMO_ENGINE_LABEL_FORMULA=mol-rig-demo
 
-# _demo_engine_declares <rig checkout>: true when the rig's default branch
-# carries demo-capture.toml with app_reads_city = false. The branch is
-# origin/HEAD as the checkout last fetched it, or origin/main where the checkout
-# records no origin/HEAD. Otherwise sets _DEMO_ENGINE_UNDECLARED to why, and
-# returns 1.
-_demo_engine_declares() {
-  local ref branch text val
-  ref=$(git -C "$1" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || ref=refs/remotes/origin/main
-  branch=${ref#refs/remotes/}
-  if ! text=$(git -C "$1" cat-file blob "$ref:$DEMO_ENGINE_DECLARATION" 2>/dev/null); then
-    if git -C "$1" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1; then
-      _DEMO_ENGINE_UNDECLARED="its default branch, $branch, carries no $DEMO_ENGINE_DECLARATION"
-    else
-      _DEMO_ENGINE_UNDECLARED="its checkout has no $branch to read $DEMO_ENGINE_DECLARATION from"
-    fi
-    return 1
+# _demo_engine_rig_name <rig checkout>: the name the city's rig map gives the
+# rig with that checkout, or nothing.
+_demo_engine_rig_name() {
+  local tab p n
+  tab=$(printf '\t')
+  printf '%s' "${DEMO_ENGINE_RIG_MAP:-}" | jq -r '.rigs[]? | objects | [(.path // "" | tostring), (.name // "" | tostring)] | @tsv' 2>/dev/null \
+    | while IFS="$tab" read -r p n; do
+        case "$p" in (/*) if [ "$(_demo_engine_canon "$p")" = "$1" ]; then printf '%s\n' "$n"; break; fi ;; esac
+      done
+}
+
+# _demo_engine_labelled <rig checkout>: after _demo_engine_city, true when the
+# rig carries the label that keeps its own servers out of a capture's reach, with
+# _DEMO_ENGINE_LABEL set to why. A label that does not read counts as one.
+# Returns 1 for a rig that carries no label.
+_demo_engine_labelled() {
+  local name res
+  if [ "$1" = "$(_demo_engine_rig_of "$DEMO_ENGINE_LIB_DIR")" ]; then
+    _DEMO_ENGINE_LABEL="which holds this pack's own source, and so counts as labelled"
+    return 0
   fi
-  if ! val=$(printf '%s\n' "$text" | awk '
-      { sub(/\r$/, "") }
-      /^[ \t]*(#.*)?$/ { next }
-      /^[ \t]*app_reads_city[ \t]*=[ \t]*(true|false)[ \t]*(#.*)?$/ {
-        if (seen) { print "line " NR " sets app_reads_city a second time"; bad = 1; exit }
-        seen = 1; val = ($0 ~ /^[ \t]*app_reads_city[ \t]*=[ \t]*false/) ? "false" : "true"; next
-      }
-      { print "line " NR " is not app_reads_city = true or false, a comment or a blank line"; bad = 1; exit }
-      END { if (bad) exit 1; if (!seen) { print "it does not set app_reads_city"; exit 1 } print val }'); then
-    _DEMO_ENGINE_UNDECLARED="its $DEMO_ENGINE_DECLARATION on $branch declares nothing, because $val"
-    return 1
+  name=$(_demo_engine_rig_name "$1")
+  if [ -z "$name" ]; then
+    _DEMO_ENGINE_LABEL="whose label did not read, because the rig map gives that rig no name, so it counts as labelled"
+    return 0
   fi
-  [ "$val" = false ] && return 0
-  _DEMO_ENGINE_UNDECLARED="its $DEMO_ENGINE_DECLARATION on $branch sets app_reads_city = true"
-  return 1
+  res=$(gc formula show "$DEMO_ENGINE_LABEL_FORMULA" --rig "$name" --json 2>/dev/null \
+    | jq -r --arg v "$DEMO_ENGINE_LABEL_VAR" --arg f "$DEMO_ENGINE_LABEL_FORMULA" '
+        if .ok != true then "unread " + ((.error.message // "gc formula show answered no formula") | tostring)
+        else ([.vars[]? | select(.name == $v)][0]) as $d
+          | if $d == null then "unread \($f) declares no \($v)"
+            elif $d.rig_default != null then "rig " + ($d.rig_default | tostring)
+            else "default " + (($d.default // "") | tostring) end
+        end' 2>/dev/null)
+  case "$res" in
+    "rig false"|"default false") return 1 ;;
+    "rig true") _DEMO_ENGINE_LABEL="which city.toml labels as a rig whose app reads the city, with $DEMO_ENGINE_LABEL_VAR = \"true\"" ;;
+    "rig "*|"default "*) _DEMO_ENGINE_LABEL="whose $DEMO_ENGINE_LABEL_VAR reads \"${res#* }\", which is not \"false\", so it counts as labelled" ;;
+    "unread "*) _DEMO_ENGINE_LABEL="whose label did not read, because ${res#unread }, so it counts as labelled" ;;
+    *) _DEMO_ENGINE_LABEL="whose label did not read, because gc formula show $DEMO_ENGINE_LABEL_FORMULA --rig $name answered nothing jq could read, so it counts as labelled" ;;
+  esac
+  return 0
 }
 
 # _demo_engine_local_no <url> <reason>: says why a capture does not reach the
 # server a --base-url on this host names, and returns 1.
 _demo_engine_local_no() {
-  _demo_engine_say "--base-url $1 names a server on this host, which runs outside the capture's sandbox. A capture reaches one only when it is a rig's own app, served from a worktree of a rig that declares in $DEMO_ENGINE_DECLARATION that its app never reads the city. Here $2. Otherwise start the app with --serve or --serve-dir, which run it inside the sandbox, or capture a deployed preview"
+  _demo_engine_say "--base-url $1 names a server on this host, which runs outside the capture's sandbox. A capture reaches one only when it is a rig's own app, served from a worktree of a rig that carries no label saying its app reads the city. Here $2. Otherwise start the app with --serve or --serve-dir, which run it inside the sandbox, or capture a deployed preview"
   return 1
 }
 
 # _demo_engine_local_port <url>: after _demo_engine_city, prints the port of the
-# server a --base-url on this host names, when that server is a rig's own app
-# that never reads the city: the port is none that a variable pointing at the
-# city names, and each process of this user that listens on it works in a
-# worktree of a rig that declares its app never reads the city. Returns 1,
-# having said why, otherwise.
+# server a --base-url on this host names, when that server is a rig's own app:
+# the port is none that a variable pointing at the city names, and each process
+# of this user that listens on it works in a worktree of a rig that carries no
+# label. Returns 1, having said why, otherwise.
 _demo_engine_local_port() {
   local url="$1" port v val pids pid dir checkout="" NL='
 '
@@ -532,12 +547,13 @@ _demo_engine_local_port() {
     esac
     _demo_engine_reach "$dir" >/dev/null 2>&1 \
       || { _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in $dir, in a tree that holds the city's state, as the rig's own checkout holds its store, and not in a worktree of the rig"; return 1; }
-    _demo_engine_declares "$checkout" \
-      || { _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in a worktree of $checkout, and $_DEMO_ENGINE_UNDECLARED"; return 1; }
+    if _demo_engine_labelled "$checkout"; then
+      _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in a worktree of $checkout, $_DEMO_ENGINE_LABEL"; return 1
+    fi
   done <<EOF
 $pids
 EOF
-  _demo_engine_say "--base-url $url is served from a worktree of $checkout, which declares in $DEMO_ENGINE_DECLARATION that its app never reads the city, so the capture reaches port $port and no other loopback port"
+  _demo_engine_say "--base-url $url is served from a worktree of $checkout, which carries no label, so the capture reaches port $port and no other loopback port"
   printf '%s\n' "$port"
 }
 

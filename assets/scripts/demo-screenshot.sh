@@ -41,8 +41,8 @@
 # that reads the city's stores or its API fails there, so a capture shows the
 # reviewed commit on fixture data, or shows the failure, and never live state.
 # The one server outside the sandbox a page capture reaches is a rig's own app
-# that a --base-url on this host names, when the rig declares that its app
-# never reads the city.
+# that a --base-url on this host names, served from a worktree of a rig that
+# carries no label saying its app reads the city.
 # --text and markdown draw a file they are given, as it is, so what they show
 # is what was written to that file.
 #
@@ -78,10 +78,9 @@
 #                server. A port that a server already answers on is refused.
 #   --base-url   drive a deployed preview, or a rig's own app on this host. A
 #                URL on this host is refused, because a server already running
-#                here runs outside the sandbox, unless the server is a rig's own
-#                app that never reads the city: the rig declares so in
-#                demo-capture.toml, and every process that listens on the
-#                URL's port works in a worktree of the rig
+#                here runs outside the sandbox, unless every process that
+#                listens on the URL's port works in a worktree of a rig that
+#                carries no label saying its app reads the city
 #                (demo-engine-lib.sh says the whole rule).
 #                Exactly one of --serve-dir / --serve / --base-url is required.
 #   --selector   capture this element instead of the viewport.

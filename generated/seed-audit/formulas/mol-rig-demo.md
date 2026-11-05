@@ -23,8 +23,8 @@ which attaches the clip to the PR inline and uncommitted.
 Two inputs name the scenario, and the mol needs exactly one: demo_script is a
 ready demo:capture-format script; source_bead is a bead whose work the mol turns
 into a script by following the gc-toolkit.gc-demo-script skill. One input
-names how the rig's app is reached — serve_dir, serve_cmd, or base_url — the
-one rig-specific fact, threaded as a pour var because no rig-to-app map exists.
+names how the rig's app is reached — serve_dir, serve_cmd, or base_url —
+threaded as a pour var because no rig-to-app map exists.
 A per-rig default store is tracked separately; this mol reads the target from
 the pour.
 
@@ -46,7 +46,8 @@ Required vars:
   {{rig_name}}: Rig whose app is demoed. Resolved to a checkout path via `gc rig list`. The app runs from a detached worktree of that checkout at its HEAD.
 
 Optional vars:
-  {{base_url}}: URL of a deployed preview, driven as-is. A URL on this host is refused, because a server already running here runs outside the capture's sandbox, unless the server is a rig's own app that never reads the city: the rig declares so in demo-capture.toml on its default branch, and every process that listens on the URL's port works in a worktree of the rig. One of serve_dir / serve_cmd / base_url. (default=)
+  {{app_reads_city}}: "true" for a rig whose app reads the city, as a rig that develops code for a city does. A city sets it among the rig's [rigs.formula_vars] in city.toml, and every demo capture then keeps that rig's own servers out of its reach. Any value but "false" counts as "true". Captures read it through gc formula show mol-rig-demo --rig <rig> (demo-engine-lib.sh), and this formula's steps do not use it. (default=false)
+  {{base_url}}: URL of a deployed preview, or of the rig's own app already serving on this host from a worktree of the rig, driven as-is. A capture refuses any other server on this host, and the servers of a rig whose app_reads_city is not "false". One of serve_dir / serve_cmd / base_url. (default=)
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{capture_mode}}: walkthrough (default, one continuous recorded take) or proof (one checked screenshot per step). (default=walkthrough)
   {{deliver_pr}}: PR number or URL to deliver the clip to, when no deliver_subject names one. Optional. (default=)
