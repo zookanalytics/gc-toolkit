@@ -238,9 +238,10 @@ bd 1.3.2.
 A copy needs no trigger. It goes as soon as a change gives the fact one shared
 home.
 
-- The script-dir resolution: 11 copies of the loop in 7 files, and 141 of its
-  one-line form in 16 files, 33 of them in `mol-polecat-work.toml`. Carried by
-  tk-c8724xi.
+- The script-dir resolution: the candidate loop in the Claude Code overlays, which
+  gc copies into a session with no template pass, so their text cannot name the
+  binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
+  shell block that runs a pack script, since each block is its own shell.
 - The decline sequence (file the human gate, record the wait, cancel the run,
   drain): 19 copies in step text, 11 of them in `mol-polecat-work.toml` and one
   in the polecat doctrine fragment, with 28 copies of its refusal sentence.
@@ -282,8 +283,6 @@ A restatement needs no trigger either, once the doctrine has its home.
 - Formula step text: 3.7k of the formulas' 8.8k lines are shell inside code
   fences, and step prose restates doctrine the fragments hold. Rule 2 keeps new
   procedures out of step text.
-- tk-c8724xi's census names the sentences restated at each site and carries
-  them.
 
 ### Tests that pin what should not exist
 
@@ -292,8 +291,7 @@ A restatement needs no trigger either, once the doctrine has its home.
   read one too. Trigger: the step's mechanics become one call to a script with
   its own test, as rule 2 requires (P4).
 - Tests that hold two copies equal, and tests that assert a retired name stays
-  retired. Trigger: the copy or the name is gone. Carried by tk-c8724xi and
-  tk-1tfzr71.25.
+  retired. Trigger: the copy or the name is gone. Carried by tk-1tfzr71.25.
 
 ## The deletion schedule
 
@@ -312,7 +310,6 @@ shows its measured net instead.
 |---|---|---|---|
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
 | tk-1tfzr71.33 | the cutover's migration script, the keys only it reads, the PR reminder's old marker | 2,180 | the cutover gate (tk-nly1mqd) |
-| tk-c8724xi | the resolution loops, the doctrine its census names, its comment excess | 11 loops, about 35 restatements, about 150 comment lines | nothing |
 | tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,390 | nothing |
 | tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | nothing |
 
@@ -342,8 +339,8 @@ convoy lands only after the operator approves its design.
 The whole files that tk-kvdomjb and the migration members name come to 65k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
-formulas, deferred dispatch and the sign-off. tk-c8724xi and the page's own
-items below carry the script-dir and decline copies and the step-text tests.
+formulas, deferred dispatch and the sign-off. The page's own items below carry
+the decline copies and the step-text tests.
 Most of the comment and test weight of the code that survives has no bead.
 
 ### 4. The page's own items
@@ -352,7 +349,7 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
+| P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | nothing |
 | P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.12, .19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 

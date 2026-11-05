@@ -5,9 +5,9 @@
 # script files a stamped bead through, the metadata read-back that gates handing
 # such a bead on, the close that unmakes a bead no reader can find, the birth,
 # settle and route of PR-finishing work, the validation pass's work order, the
-# gating-PR read's field set, the per-rig key an order's state lives under, and
-# the pass lock that lets an order run one pass at a time. Sourced, never
-# executed.
+# gating-PR read's field set, the per-rig key an order's state lives under, the
+# pass lock that lets an order run one pass at a time, and warn and die, which a
+# script reports through. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
@@ -31,6 +31,12 @@
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# warn <text...>, die <text> [status] — a script's report on stderr, under $PROG
+# when it sets one and otherwise its file name without .sh. die then exits with
+# the status it is given, else $DIE_STATUS when the script sets one, else 1.
+warn() { local p="${0##*/}"; printf '%s: %s\n' "${PROG:-${p%.sh}}" "$*" >&2; }
+die() { local p="${0##*/}"; printf '%s: %s\n' "${PROG:-${p%.sh}}" "$1" >&2; exit "${2:-${DIE_STATUS:-1}}"; }
 
 # bd_json <gc-bd-args...> — one `gc bd` read as JSON, the `gc bd:` rig-store
 # notice line stripped and control chars scrubbed. The notice (a store can emit
