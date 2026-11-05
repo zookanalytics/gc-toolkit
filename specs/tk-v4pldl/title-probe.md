@@ -16,6 +16,14 @@ of it. The operator's review then moved them out of the prompt, and
 [The rules read from a skill](#the-rules-read-from-a-skill) measures them where they
 now are.
 
+The names changed after these runs. Every run before
+[The skill under its new name](#the-skill-under-its-new-name) had the skill
+`gc-toolkit.subject-lines` and the page `docs/subject-lines.md`, and this record
+keeps those names where it describes them. The operator's ruling in sitting
+tk-3jtt9i8 renamed them `gc-toolkit.commit-conventions` and
+`docs/commit-conventions.md` with their rules unchanged, and that section checks
+that the skill still loads under its new name.
+
 ## Authors
 
 ### Method
@@ -718,6 +726,90 @@ rig        fix(scripts): Restart patrol sessions whose prompt or formula changed
 repo       feat(feedback): capture outside review posts as condensed observations
 none       feat: capture outside review feedback as observations for the distiller
 rig        feat(scripts): Capture outside review feedback as condensed observations
+```
+
+## The skill under its new name
+
+This re-runs the load check of
+[The rules read from a skill](#the-rules-read-from-a-skill) at commit 4edf9a6e2,
+where the skill is `gc-toolkit.commit-conventions` and this repository's page is
+`docs/commit-conventions.md`. The method is that section's, with these
+differences:
+
+- The harness was rebuilt from that Method, because the scratch that held the
+  first one was gone.
+- The cases are six merged PRs whose merge base can print the size table: #1362,
+  #1361, #1358, #1371, #1377 and #1378. At step 4c each gave the kinds of fact
+  the earlier cases gave: the anchor's title and kind, the branch's commit
+  subjects, its `pr_summary` cut to 2,500 characters and its size table. While
+  committing, each gave the bead's title and kind and the first 1,500 characters
+  of the summary, and in the controls only the title and kind.
+- At step 4c, one run a case on Claude and three of the cases on Codex, on this
+  repository. While committing, and in each control, three of the cases on
+  Claude with no rig rules.
+- Claude Code 2.1.318 and codex-cli 0.164.0. In the fixtures `gc`, `bd` and `gh`
+  were stubs that refuse. Two control runs tried `gc` in three calls, and
+  Claude Code's permission check refused each before it ran.
+
+### At step 4c, renamed
+
+| Provider and rig | Runs | Skill loaded before the title | Read the rig's page | Titles with a scope | Median length | Longest | Over 72 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Claude, this repository | 6 | 6 | 6 | 4 | 63.5 | 71 | 0 |
+| Codex, this repository | 3 | 3 | 3 | 2 | 59 | 62 | 0 |
+
+The skill was the first tool call in all 6 Claude runs, and reading its
+`SKILL.md` was the first command in all 3 Codex runs. Every run then read
+`docs/commit-conventions.md`. The scoped titles are the cases whose size table is
+led by a named subsystem, each taking that row's name. #1361, led by `shared`,
+and #1358, with no row, carried none.
+
+### While committing, renamed
+
+| The step's text | Skill loaded | First tool call |
+|---|---:|---:|
+| This branch's implement step, which names the skill | 3 of 3 | 3 of 3 |
+| Core's implement step, which does not | 3 of 3 | 3 of 3 |
+| Control: `preflight-tests`, which writes no subject line | 0 of 3 | |
+| Control: `load-context`, which writes no subject line | 0 of 3 | |
+
+All six commit subjects carried a type from the table and no scope. Each of
+these runs looked for `docs/commit-conventions.md`, which the fixture with no rig
+rules does not have.
+
+So the load holds under the new name: on both providers, at step 4c and while
+committing, before the line, and not at steps that write no subject line. These
+runs have the limits of the earlier skill runs, with fewer of them.
+
+### Cost of the re-check
+
+18 Claude calls for $5.10 and 3 Codex calls, in about two minutes.
+
+### Every line from the re-check
+
+At step 4c:
+
+```
+#1362 claude  security(visit): show tmux picker menu text as written, not as a format
+#1361 claude  refactor: remove the every-run option from run-lib.sh's map verb
+#1358 claude  build: pin CI's actions to commit SHAs and move them to Node 24
+#1371 claude  security(review): keep live city data out of demo captures
+#1377 claude  fix(work): accept the repo's own setup and build when none is declared
+#1378 claude  fix(doctor): read running sessions' environment on macOS
+#1361 codex   feat: remove the unused all option from run-lib map
+#1362 codex   security(visit): prevent shell execution from tmux picker text
+#1371 codex   security(review): isolate demo captures from live city data
+```
+
+While committing:
+
+```
+#1361 branch  refactor: drop map's unused all option from run-lib.sh (tk-298sztl)
+#1362 branch  security: show menu text literally in the tmux pickers (tk-v91dx22)
+#1371 branch  security: sandbox demo captures away from the live city (tk-r9wui2m)
+#1361 core    feat: remove the all option from run-lib's map verb (tk-298sztl)
+#1362 core    security: show tmux picker menu text as written (tk-v91dx22)
+#1371 core    security: keep demo captures from reaching the live city (tk-r9wui2m)
 ```
 
 ## What this cannot show
