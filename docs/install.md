@@ -128,9 +128,14 @@ that does not import the pack itself.
   no-review mark or with a marker the rig declares in
   `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
 - **Demo captures of a rig's own app** — a demo capture runs where the live
-  city cannot be reached. A rig whose app never reads the city declares so in
-  `demo-capture.toml`, and a capture may then reach that app on this host
-  ([skills/demo-capture/SKILL.md](../skills/demo-capture/SKILL.md)).
+  city cannot be reached. A `--base-url` on this host still reaches a rig's own
+  app served from a worktree of the rig, unless the rig is labelled as one
+  whose app reads the city, as a rig that develops code for a city is. Label
+  it in `city.toml` with `app_reads_city = "true"` among the rig's
+  `[rigs.formula_vars]`. The rig that holds this pack's own source counts as
+  labelled without it
+  ([demo-engine-lib.sh](../assets/scripts/demo-engine-lib.sh) states the
+  rule).
 
 ---
 

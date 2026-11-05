@@ -50,10 +50,11 @@ the supervisor and fail against a fixture, and the panel still offers its
 actions.
 
 A running helm service is out of a capture's reach. The board and the scripts
-read the city, so gc-toolkit declares nothing in `demo-capture.toml`, and a
-capture refuses a `--base-url` on this host. The service's verbs would also
-file and close conversations, clear human gates and dispatch work in the live
-city. The verdict says that the board shows fixture data.
+read the city, so the pack counts gc-toolkit, the rig that holds its own
+source, as labelled, and a capture refuses a `--base-url` that a gc-toolkit
+server answers. The service's verbs would also file and close conversations,
+clear human gates and dispatch work in the live city. The verdict says that
+the board shows fixture data.
 
 ## Reports a command prints
 

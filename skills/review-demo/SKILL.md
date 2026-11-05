@@ -114,14 +114,10 @@ reports whether the `gh` it needs is present.
   The app target is the draft's preview, `--base-url <url>`, where one
   deploys. Otherwise serve the reviewed worktree, so the clip shows the
   reviewed commit: `--serve-dir <worktree>/<dir>` for a static build, or
-  `--serve "<command>" --cwd <worktree>` for a dev server. A server already
-  running on this host runs outside the sandbox, so a `--base-url` on this
-  host is refused unless the server is a rig's own app that never reads the
-  city. The rig declares that in `demo-capture.toml` on its default branch,
-  and every process that listens on the URL's port works in a worktree of
-  the rig. Start such an app from `<worktree>`, as the rig's guidance says,
-  so the clip shows the reviewed commit. The capture names why it refuses
-  any other. Exit 0 is a clip
+  `--serve "<command>" --cwd <worktree>` for a dev server. An app the rig's
+  guidance serves on this host is reached with its `--base-url` when it is
+  served from `<worktree>`, unless the city labels the rig as one whose app
+  reads the city. The capture says why it refuses a URL. Exit 0 is a clip
   in which every step's proof held, exit 3 is a clip in which at least one
   step failed its proof, and exit 1 is no clip. The last line names the clip
   and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the

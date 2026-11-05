@@ -76,19 +76,10 @@ demo_engine_cli run demo.md --serve "npm run dev" --port 5173   # spin up a dev 
 demo_engine_cli run demo.md --base-url https://<preview-host>   # drive a deployed preview
 ```
 
-A `--base-url` on this host names a server already running outside the
-sandbox. The capture reaches it only when it is a rig's own app that never
-reads the city:
-
-- the rig declares so on its default branch, in `demo-capture.toml` at the
-  root of its repository, with the line `app_reads_city = false`. A pull
-  request's own copy of the file counts once it merges;
-- every process that listens on the URL's port works in a worktree of that
-  rig, not in the rig's checkout; and
-- no variable that points at the city names that port.
-
-The sandbox then opens that one port. Otherwise the capture refuses the URL and
-says why. Serve the app from a worktree of the rig, as its guidance says.
+A `--base-url` on this host reaches a rig's own app served from a worktree of
+the rig, unless the city labels that rig as one whose app reads the city. Any
+other server on this host is refused, and the refusal says why. Serve that app
+with `--serve` or `--serve-dir` instead, or capture a deployed preview.
 
 Two capture modes come from one script:
 
