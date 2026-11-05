@@ -385,6 +385,67 @@ func pickerCap(t *testing.T) int {
 	return n
 }
 
+// TestFailedStartReachesAConversationGatheredTwice runs the gather through the
+// board for a conversation handed back to the operator's queue with
+// `gc.routed_to=human` on it. The metadata query and the conversation read each
+// admit it, and it is still one conversation: with no row for its subject its
+// own row reads the failure, and with one the failure lands there and the
+// conversation has no second row.
+func TestFailedStartReachesAConversationGatheredTwice(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		epics []*beads.Issue
+		row   string
+		gone  string
+	}{
+		{"its subject has no row", nil, failConv, ""},
+		{"its subject has a row", []*beads.Issue{issue("tk-subj", "the plan", "epic", 2, minsBefore(60), "")}, "tk-subj", failConv},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conv := conversationBead(failConv, "talk the plan over", "human", metaJSON("gc.routed_to", "human"), minsBefore(10))
+			rig := convStore([]*beads.Issue{conv})
+			rig.issues["epic"] = tc.epics
+			hq := hqWith(
+				[]*beads.Issue{sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))},
+				episodeBead("hq-ep1", "s-hq-wisp-f1", "timeout", "resuming session: context deadline exceeded", 1, minsBefore(8)))
+			root, hqName := failCity(t)
+			src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": rig, hqName: hq})
+			res, err := src.Gather(context.Background())
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			if _, ok := anchorsOfKind(res, "human")[failConv]; !ok {
+				t.Fatal("fixture: the metadata query did not admit the conversation")
+			}
+			if _, ok := anchorsOfKind(res, board.KindConversation)[failConv]; !ok {
+				t.Fatal("fixture: the conversation read did not admit it")
+			}
+
+			b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+			rows := map[string]board.Tile{}
+			for _, r := range b.Tiles {
+				rows[r.ID] = r
+			}
+			row, ok := rows[tc.row]
+			if !ok {
+				t.Fatalf("no row for %s among %d", tc.row, len(rows))
+			}
+			if row.SittingState != board.SittingStartFailed || row.SittingStartFailure != "startup timeout" || !row.Held || !row.Owed {
+				t.Errorf("the row reads start failed with the reason: state=%q reason=%q held=%v owed=%v", row.SittingState, row.SittingStartFailure, row.Held, row.Owed)
+			}
+			if !strings.HasPrefix(row.Needs, "start failed (startup timeout): talk the plan over") {
+				t.Errorf("NEEDS leads with the failure, then the conversation's ask: %q", row.Needs)
+			}
+			if _, doubled := rows[tc.gone]; tc.gone != "" && doubled {
+				t.Errorf("the conversation keeps a row beside its subject's")
+			}
+			if got := b.Sittings[0].State; got != board.SittingStartFailed {
+				t.Errorf("the sitting reads %q", got)
+			}
+		})
+	}
+}
+
 // TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain is the
 // whole path. An engaged conversation's sitting fails to start, and Gas City
 // records it as it does: the session closes as failed-create and a timeout

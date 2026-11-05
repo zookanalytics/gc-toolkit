@@ -33,7 +33,11 @@ func TestStartFailedConversationReadsStartFailedWithItsReason(t *testing.T) {
 		epicSubject("tk-subj"),
 	}
 	facts := failedStart("tk-conv", "tk-subj", "setup timeout")
-	subj := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, facts), "tk-subj")
+	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
+	if got := b.Sittings[0].State; got != SittingStartFailed {
+		t.Errorf("the sitting reads start failed too: %q", got)
+	}
+	subj := mustTile(t, b, "tk-subj")
 	if subj.SittingState != SittingStartFailed || subj.SittingStartFailure != "setup timeout" {
 		t.Errorf("state=%q reason=%q, want start-failed with the reason", subj.SittingState, subj.SittingStartFailure)
 	}
@@ -49,7 +53,7 @@ func TestStartFailedConversationReadsStartFailedWithItsReason(t *testing.T) {
 	if subj.RankScore != rankScore(SevElevated, subj.Weight, subj.StaleDays, 0) {
 		t.Errorf("rank_score follows the lifted band: %d", subj.RankScore)
 	}
-	if indexHuman(anchors, facts).inSessionOn("tk-subj") {
+	if indexHuman(anchors, withSittings(anchors, facts)).inSessionOn("tk-subj") {
 		t.Error("a binding to a sitting that never started is not a sitting in session")
 	}
 }
@@ -136,13 +140,21 @@ func TestStartFailedRowStillOffersAccept(t *testing.T) {
 func TestStartFailureOutranksALiveSitting(t *testing.T) {
 	facts := failedStart("tk-conv2", "tk-subj", "never started")
 	facts.OwnerState[sittingAlias("tk-conv1")] = "active"
-	b := BuildBoard([]Anchor{
+	anchors := []Anchor{
 		epicSubject("tk-subj"),
 		conversationAnchor("tk-conv1", "tk-subj", "talk the plan over", sittingAlias("tk-conv1")),
 		failedConversation("tk-conv2", "tk-subj", "settle the rework"),
-	}, fixtureNow, false, nil, facts)
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, withSittings(anchors, facts))
 	if subj := mustTile(t, b, "tk-subj"); subj.SittingState != SittingStartFailed || subj.SittingStartFailure != "never started" {
 		t.Errorf("state=%q reason=%q, want the failure", subj.SittingState, subj.SittingStartFailure)
+	}
+	states := map[string]string{}
+	for _, s := range b.Sittings {
+		states[s.ID] = s.State
+	}
+	if states["tk-conv1"] != SittingInSession || states["tk-conv2"] != SittingStartFailed {
+		t.Errorf("each sitting keeps its own state under the row's roll-up: %v", states)
 	}
 }
 
