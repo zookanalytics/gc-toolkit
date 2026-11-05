@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/decline.sh: a run ends only with its record in
+# Hermetic test for assets/scripts/decline.sh: work ends only with its record in
 # place, so each part runs in order and a part that does not land stops the rest.
+# A step ends with its run. A claim with no run, held on the work bead itself, is
+# handed back with its route cleared when no gate holds it.
 #
-# No live city, Dolt or network: stubs of the three scripts it calls, and of gc.
+# No live city, Dolt or network: stubs of the scripts it calls, and of gc. The
+# claim cases run the real hand-back.sh and the real run-cancel.sh over a gc stub
+# that keeps the beads it is shown, so a decline that asks to cancel a run the
+# claim does not have meets the guard that refuses it.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -81,6 +86,135 @@ for bad_args in "" "--step mol.x" "--reason why" "--step mol.x --reason why --su
   eq "$RC" 2 "usage error for: ${bad_args:-no arguments}"
   eq "$TRACE" "" "and nothing runs for: ${bad_args:-no arguments}"
 done
+
+# --- A claim with no run --------------------------------------------------------
+REAL="$TMP/real"; mkdir -p "$REAL" "$TMP/real-bin"
+cp "$HERE/decline.sh" "$HERE/hand-back.sh" "$HERE/run-cancel.sh" "$HERE/bd-lib.sh" "$REAL/"
+cp "$PACK/human-gate.sh" "$PACK/await-ruling.sh" "$REAL/"
+BEADS="$TMP/beads.json"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/real-bin/gc" <<'GC'
+# The beads this stub is shown live in $BEADS, an object keyed by id. A guarded
+# update that matches applies its status, assignee and metadata edits there, the
+# way bd applies one write whole.
+case "$1 $2" in
+  "hook current") printf '%s\n' "${FAKE_CURRENT:-}"; exit 0 ;;
+  "bd show")
+    jq -e --arg id "$3" 'has($id)' "$BEADS" >/dev/null 2>&1 \
+      || { printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; }
+    jq -c --arg id "$3" '[.[$id]]' "$BEADS"; exit 0 ;;
+  "bd list") printf '[]\n'; exit 0 ;;
+  "bd update")
+    id="$3"; shift 3
+    printf 'UPDATE\n' >> "$LOG"; printf '%s %s\n' "$id" "$*" >> "$ARGS.UPDATE"
+    [ "${FAKE_UPDATE_RC:-0}" = 0 ] || exit "$FAKE_UPDATE_RC"
+    [ -z "${FAKE_UPDATE_NOOP:-}" ] || exit 0
+    prog='.'
+    for a in "$@"; do
+      case "$a" in
+        --if-status=*)   [ "$(jq -r --arg id "$id" '.[$id].status // ""' "$BEADS")" = "${a#*=}" ] || exit 13 ;;
+        --if-assignee=*) [ "$(jq -r --arg id "$id" '.[$id].assignee // ""' "$BEADS")" = "${a#*=}" ] || exit 13 ;;
+      esac
+    done
+    while [ $# -gt 0 ]; do
+      # FAKE_UPDATE_DROP names one edit the store loses, to model a write that
+      # exits 0 and does not land whole.
+      if [ -n "${FAKE_UPDATE_DROP:-}" ] && [ "${1%%=*}" = "$FAKE_UPDATE_DROP" ]; then
+        case "$1" in --set-metadata|--unset-metadata) shift ;; esac
+        shift; continue
+      fi
+      case "$1" in
+        --status=*)       prog="$prog | .[\$id].status = \"${1#*=}\"" ;;
+        --assignee=*)     prog="$prog | .[\$id].assignee = \"${1#*=}\"" ;;
+        --set-metadata)   k="${2%%=*}"; v="${2#*=}"; prog="$prog | .[\$id].metadata[\"$k\"] = \"$v\""; shift ;;
+        --unset-metadata) prog="$prog | del(.[\$id].metadata[\"$2\"])"; shift ;;
+        --append-notes)   shift ;;
+      esac
+      shift
+    done
+    jq --arg id "$id" "$prog" "$BEADS" > "$BEADS.new" && mv "$BEADS.new" "$BEADS"; exit 0 ;;
+  "runtime drain-ack") printf 'DRAIN\n' >> "$LOG"; exit 0 ;;
+esac
+printf 'GC %s\n' "$*" >> "$LOG"
+exit 2
+GC
+chmod +x "$TMP/real-bin/gc"
+
+# claim <status> <assignee> [<gc.step_ref>] -> one bead tk-w, routed to a pool,
+# the way gc bd show prints it
+claim() {
+  jq -nc --arg st "$1" --arg as "$2" --arg ref "${3:-}" '{id: "tk-w", status: $st, assignee: $as,
+    metadata: ({"gc.routed_to": "rig/pool", "gc.execution_routed_to": "rig/pool", "gc.session_id": "sess-me"}
+               + (if $ref == "" then {} else {"gc.step_ref": $ref, "gc.root_bead_id": "r-gone"} end))}'
+}
+run_claim() { # <bead json> <decline args...>
+  : > "$LOG"; rm -f "$ARGS".*
+  jq -nc --argjson b "$1" '{($b.id): $b}' > "$BEADS"; shift
+  OUT=$(PATH="$TMP/real-bin:$PATH" BEADS="$BEADS" GC_SESSION_ID=sess-me GC_SESSION_NAME=hq-me "$REAL/decline.sh" "$@" 2>&1); RC=$?
+  TRACE=$(tr '\n' ' ' < "$LOG")
+}
+now() { jq -r --arg f "$1" '.["tk-w"] | if $f == "status" or $f == "assignee" then .[$f] else .metadata[$f] end // "" | tostring' "$BEADS"; }
+HELD="$(claim in_progress sess-me)"
+GATED_CLAIM=(--step mol.x --reason why --subject tk-w --key k1 --message "the message." --formula mol-f)
+
+FAKE_CURRENT=tk-w run_claim "$HELD" --step mol.x --reason "why it ends"
+eq "$RC" 0 "a claim with no run, no gate: exits 0"
+eq "$TRACE" "UPDATE DRAIN " "a claim with no run, no gate: handed back in one write, then the session drains"
+has "$(args UPDATE)" "--if-status=in_progress --if-assignee=sess-me --status=open --assignee=" "the write is guarded on this session's claim"
+has "$(args UPDATE)" "--set-metadata gc.routed_to=" "the same write clears the route"
+eq "$(now status)|$(now assignee)|$(now gc.routed_to)|$(now gc.session_id)" "open|||" "and reads back open, unassigned, unrouted, with no pin"
+eq "$(now gc.execution_routed_to)" "rig/pool" "and the pool a re-sling pours to stays"
+no "$OUT" "cannot identify" "a claim with no run never asks for a run's cancel"
+
+FAKE_CURRENT=tk-w run_claim "$HELD" "${GATED_CLAIM[@]}"
+eq "$RC" 0 "a claim with no run, with a gate: exits 0"
+eq "$TRACE" "GATE AWAIT DRAIN " "a claim with no run, with a gate: asks, waits, drains, and cancels nothing"
+eq "$(args UPDATE)" "" "and writes no hand-back, since the wait released the claim"
+
+FAKE_CURRENT=tk-w run_claim "$(claim closed sess-me)" --step mol.x --reason why
+eq "$RC" 0 "a claim whose bead is closed: exits 0"
+eq "$TRACE" "DRAIN " "and there is nothing to hand back, so the session only drains"
+
+FAKE_CURRENT=tk-w GATE_RC=1 run_claim "$HELD" "${GATED_CLAIM[@]}"
+eq "$RC" 1 "a claim whose gate does not land: exits 1"
+eq "$TRACE" "GATE " "and nothing follows it, not even the drain"
+has "$OUT" "tk-w is a claim with no run, so it stays with this session" "and it says what this session still holds"
+no "$OUT" "next worker retries" "and names no next worker, since no step goes to one"
+FAKE_CURRENT=tk-w AWAIT_RC=1 run_claim "$HELD" "${GATED_CLAIM[@]}"
+eq "$TRACE" "GATE AWAIT " "a claim whose wait does not land: no drain"
+no "$OUT" "next worker retries" "and names no next worker"
+
+FAKE_CURRENT=tk-w run_claim "$(claim in_progress hq-other)" --step mol.x --reason why
+eq "$RC" 1 "a claim another session now holds: exits 1"
+eq "$TRACE" "UPDATE " "and the refusal is noted, and the session does not drain"
+has "$(args UPDATE)" "Hand-back refused" "the note says the hand-back was refused"
+eq "$(now status)|$(now assignee)" "in_progress|hq-other" "and the other session's claim is left as it was"
+has "$OUT" "was not handed back" "and the decline says so"
+no "$OUT" "next worker retries" "and names no next worker"
+
+FAKE_CURRENT=tk-w FAKE_UPDATE_RC=1 run_claim "$HELD" --step mol.x --reason why
+eq "$RC" 1 "a hand-back the store refuses: exits 1"
+no "$TRACE" "DRAIN" "and the session does not drain"
+has "$OUT" "the claim on tk-w was not handed back" "and the decline says so"
+
+FAKE_CURRENT=tk-w FAKE_UPDATE_NOOP=1 run_claim "$HELD" --step mol.x --reason why
+eq "$RC" 1 "a hand-back that exits 0 and does not read back: exits 1"
+eq "$TRACE" "UPDATE " "and the session does not drain"
+has "$OUT" "did not read back: it shows status in_progress, assignee sess-me and gc.routed_to rig/pool" "and it says what the bead shows"
+FAKE_CURRENT=tk-w FAKE_UPDATE_DROP=--set-metadata run_claim "$HELD" --step mol.x --reason why
+eq "$RC|$TRACE" "1|UPDATE " "a hand-back that reopens the bead and leaves its route: no drain"
+FAKE_CURRENT=tk-w FAKE_UPDATE_DROP=--assignee run_claim "$HELD" --step mol.x --reason why
+eq "$RC|$TRACE" "1|UPDATE " "a hand-back that reopens the bead and leaves its assignee: no drain"
+FAKE_CURRENT=tk-w FAKE_UPDATE_DROP=--status run_claim "$HELD" --step mol.x --reason why
+eq "$RC|$TRACE" "1|UPDATE " "a hand-back that clears the claim and leaves the bead in_progress: no drain"
+
+FAKE_CURRENT=tk-w run_claim "$(claim in_progress sess-me mol.x)" --step mol.x --reason why
+eq "$RC" 1 "a step whose real cancel does not land: exits 1"
+eq "$TRACE" "" "and nothing is handed back, and the session does not drain"
+has "$OUT" "run-cancel.sh did not end the run; NOT draining, so the next worker retries." "and the next worker the step goes to retries"
+FAKE_CURRENT=tk-other run_claim "$HELD" --step mol.x --reason why
+eq "$TRACE" "" "gc hook current names a bead that does not read: a step, never handed back"
+FAKE_CURRENT="" run_claim "$HELD" --step mol.x --reason why
+eq "$TRACE" "" "gc hook current names nothing: nothing is handed back"
 
 echo
 echo "decline: $PASS passed, $FAIL failed"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# decline — end the run this session is executing, having recorded what stops
-# it: the human gate, then the wait, then the run's cancel, then the drain.
+# decline — end the work this session holds, having recorded what stops it: the
+# human gate, then the wait, then the end of the run or the claim, then the drain.
 #
 #   decline.sh --step <ref> --reason "<text>"
 #              [--subject <bead> --key <key> --message "<text>" [--formula <f>]]
@@ -13,18 +13,40 @@
 # so the gate declares no quiet window, and a situation a person answered moot or
 # benign before is asked again.
 #
-# The parts run in that order because a cancelled run with no record behind it
-# leaves work nothing re-offers. A part that does not land stops the sequence and
-# nothing after it runs, so the step stays claimed and the next worker it goes to
-# retries. Gas City's run cancel interrupts the session that holds the step, so
-# this call can end as an interrupted tool call once the cancel has landed.
+# What this session holds is read before anything is written: the bead `gc hook
+# current` names. A bead with a gc.step_ref is a step of a run, and the run ends
+# through run-cancel.sh. A bead with none is a claim with no run, which a claimant
+# with no poured workflow holds on the work bead itself, so nothing is cancelled.
+# A gated decline of such a claim ends once the gate and the wait have landed,
+# and await-ruling.sh has then released the claim. With no gate, the claim is
+# handed back (hand-back.sh) in one write guarded on this session's claim, which
+# also clears gc.routed_to: a release alone would leave the route offering the
+# bead straight back to the pool, and each new claimant would refuse it again
+# until the run building it finishes. gc.execution_routed_to stays, because
+# await-ruling.sh re-slings from it. The write is read back before the drain. A
+# bead already closed holds no claim, so nothing is handed back.
+#
+# The parts run in that order because an end with no record behind it leaves work
+# nothing re-offers. A part that does not land stops the sequence and nothing after
+# it runs, so the session does not drain. A step then stays claimed, and the next
+# worker it goes to retries. A claim with no run stays with this session, which
+# can run this again. Gas City's run cancel interrupts the session that holds the
+# step, so this call can end as an interrupted tool call once the cancel has landed.
 #
 # Callers: mol-polecat-work's step scripts (work-lib.sh's callers).
-# exit: 0 the run is ended and this session drained · 1 a part did not land ·
+# exit: 0 the work is ended and this session drained · 1 a part did not land ·
 #       2 usage, nothing written
 set -uo pipefail
 
 PROG="decline"
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
 
 usage() {
   cat >&2 <<'USAGE'
@@ -81,17 +103,63 @@ fi
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
+# claim_read <bead> -> "<status>|<assignee>|<gc.step_ref>|<gc.routed_to>", or
+# nothing when the bead does not read.
+claim_read() {
+  gc bd show "$1" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub | jq -r --arg id "$1" '
+    if type == "array" and (.[0].id // "") == $id then
+      .[0] | [(.status // ""), (.assignee // ""), (.metadata["gc.step_ref"] // ""), (.metadata["gc.routed_to"] // "")]
+      | map(tostring) | join("|")
+    else empty end' 2>/dev/null
+}
+
+# A claim with no run: what `gc hook current` names reads, and carries no
+# gc.step_ref. Anything this cannot read is a step, whose cancel proves the run
+# is this session's or refuses.
+CLAIM=""; CLAIM_STATUS=""
+HELD=$(gc hook current --id-only </dev/null 2>/dev/null) || HELD=""
+if [ -n "$HELD" ]; then
+  ROW=$(claim_read "$HELD")
+  IFS='|' read -r ROW_STATUS _ ROW_STEP _ <<<"$ROW"
+  if [ -n "$ROW" ] && [ -z "$ROW_STEP" ]; then
+    CLAIM="$HELD"
+    CLAIM_STATUS="$ROW_STATUS"
+  fi
+fi
+if [ -n "$CLAIM" ]; then
+  KEEP="NOT draining: $CLAIM is a claim with no run, so it stays with this session, which can run this again."
+else
+  KEEP="NOT cancelling or draining, so the next worker retries."
+fi
+
 if [ -n "$SUBJECT" ]; then
   [ -z "$FORMULA" ] || MESSAGE="$MESSAGE Then clear this gate: $SUBJECT waits on it, and clearing it re-slings $SUBJECT. To stand down instead, close $SUBJECT first."
   if ! "$SCRIPT_DIR/human-gate.sh" --subject "$SUBJECT" --key "$KEY" --message "$MESSAGE"; then
-    echo "$PROG: human-gate.sh recorded no gate; NOT cancelling or draining, so the next worker retries." >&2
+    echo "$PROG: human-gate.sh recorded no gate; $KEEP" >&2
     exit 1
   fi
   if [ -n "$FORMULA" ] && ! "$SCRIPT_DIR/await-ruling.sh" "$SUBJECT" --key "$KEY" --formula "$FORMULA"; then
-    echo "$PROG: the wait did not land on $SUBJECT; NOT cancelling or draining, so the next worker retries." >&2
+    echo "$PROG: the wait did not land on $SUBJECT; $KEEP" >&2
     exit 1
   fi
 fi
+
+if [ -n "$CLAIM" ]; then
+  if [ -z "$SUBJECT" ] && [ "$CLAIM_STATUS" != closed ]; then
+    if ! "$SCRIPT_DIR/hand-back.sh" "$CLAIM" --set-metadata gc.routed_to="" >&2; then
+      echo "$PROG: the claim on $CLAIM was not handed back; $KEEP" >&2
+      exit 1
+    fi
+    IFS='|' read -r NOW_STATUS NOW_HOLDER _ NOW_ROUTE <<<"$(claim_read "$CLAIM")"
+    if [ "$NOW_STATUS" != open ] || [ -n "$NOW_HOLDER" ] || [ -n "$NOW_ROUTE" ]; then
+      echo "$PROG: the hand-back of $CLAIM did not read back: it shows status ${NOW_STATUS:-unreadable}, assignee ${NOW_HOLDER:-none} and gc.routed_to ${NOW_ROUTE:-none}; $KEEP" >&2
+      exit 1
+    fi
+  fi
+  gc runtime drain-ack
+  exit 0
+fi
+
 if ! "$SCRIPT_DIR/run-cancel.sh" --step "$STEP" --reason "$REASON"; then
   echo "$PROG: run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
   exit 1
