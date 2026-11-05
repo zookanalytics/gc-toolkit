@@ -24,8 +24,9 @@ pool session never receives $GC_BEAD_ID, so a close written against that
 variable writes nothing and still exits 0, leaving the warrant open and
 silent. Every step that touches the warrant re-derives the id in its own
 shell. Pardon-biased: one `alive` verdict ends the dance. EVERY stop path
-either closes the warrant with gc.outcome=pardoned|executed|refused or files
-escalate.sh (--key wedged-<session>) — never both silence and an open claim.
+either closes the warrant with gc.outcome=pardoned|executed|refused or files a
+human gate on the warrant (human-gate.sh --key wedged-<session>) — never both
+silence and an open claim.
 
 Step-close discipline, same as the sibling formulas: when this runs as a
 poured molecule each step closes its own bead via

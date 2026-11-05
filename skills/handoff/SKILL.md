@@ -58,10 +58,13 @@ carry-forward flow. Cycle-recycle is a different flow: it legitimately
 chains `gc handoff` then `gc session reset` for patrol sessions — see
 `docs/cycle-recycle.md`.
 
-(A conversation about one work bead — a converse session holding a visit —
-needs no recycle path here: its carry-forward is the subject bead's
-record. Write the takeaway and a durable note, close the visit, and let
-the session drain; the next visit reconstitutes from the record.)
+(A converse session holds one conversation about one bead, and needs no
+recycle path here: its carry-forward is the subject bead's record and the
+conversation's notes. Write the takeaway and a durable note, then, before
+the session drains, close the conversation through the sign-off, or hand it
+back to the operator's queue with the sign-off's `--ruled no` while the
+decision is still open; the next sitting on it reconstitutes from the
+record.)
 
 ## The carry-forward decision
 

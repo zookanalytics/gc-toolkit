@@ -37,7 +37,7 @@ never stands in for the close.
 ```bash
 gc bd update <epic> --set-metadata epic_ruling=close \
   --set-metadata epic_ruling_reason="<the outcome>" \
-  --set-metadata epic_ruling_evidence=<visit bead of the sitting>
+  --set-metadata epic_ruling_evidence=<the human gate the ruling cleared>
 ```
 
 The fields are registered in
@@ -56,7 +56,7 @@ the doctor check read the hypothesis, the ruling, and its reason.
 | `epic_indicators` | the 1–3 leading indicators |
 | `epic_ruling` | the latest ruling: `continue`, `shift`, or `close` |
 | `epic_ruling_reason` | why the latest ruling was made; on `close`, the outcome |
-| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when, who, and the visit of the sitting that carried the ruling |
+| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when, who, and the human gate whose resolve carried the ruling |
 
 ## Closing an epic: the before-close enforcement
 

@@ -17,6 +17,10 @@
 # anything is filed. The head is read, and the lanes are resolved, in the
 # anchor's rig checkout, whatever directory the sitting runs from, and an anchor
 # whose rig checkout does not resolve refuses too. A git stub answers the read.
+# Over two stores, one per rig, a run with GC_RIG naming the anchor's rig, as
+# converse-signoff.sh runs it, files, edges and dispatches the child there, and
+# a run from the conversation's rig cannot prove the edge and dispatches
+# nothing.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,6 +42,17 @@ cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
+# Two stores: with STUB_STORES_DIR set, each rig keeps its beads and edges in
+# files of its own, and GC_RIG picks the store every write and list acts in, as
+# it picks the store gc bd acts in. A show by id answers from whichever store
+# holds the bead. An edge is added and listed only in a store that holds the
+# bead it is about, so an edge onto another store's bead cannot be proved.
+if [ -n "${STUB_STORES_DIR:-}" ]; then
+  STORE="$STUB_STORES_DIR/${GC_RIG:-none}.json"; DEPS="$STUB_STORES_DIR/${GC_RIG:-none}.deps"
+  [ -f "$STORE" ] || printf '[]\n' > "$STORE"
+  [ -f "$DEPS" ] || : > "$DEPS"
+fi
+in_store() { jq -e --arg id "$1" 'any(.[]; .id == $id)' "$STORE" >/dev/null 2>&1; }
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 if [ "${1:-}" = "sling" ]; then
   # `gc sling [--rig X] <pool> <bead> --on <formula>`: a graph.v2 pour retires
@@ -66,8 +81,13 @@ if [ "${1:-}" = "sling" ]; then
 fi
 # The rig list the SUT finds the anchor's rig checkout in (bead-store.sh): the
 # anc prefix is the rig at STUB_RIG_PATH, unless STUB_RIG_UNLISTED leaves it out.
+# Over two stores it lists rig-a (ra) and rig-b (rb) as well, each at that same
+# checkout, since the run reads only the anchor branch's head there.
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
   if [ -n "${STUB_RIG_UNLISTED:-}" ]; then echo '{"rigs":[]}'
+  elif [ -n "${STUB_STORES_DIR:-}" ]; then
+    printf '{"rigs":[{"name":"anc-rig","prefix":"anc","path":"%s"},{"name":"rig-a","prefix":"ra","path":"%s"},{"name":"rig-b","prefix":"rb","path":"%s"}]}\n' \
+      "${STUB_RIG_PATH:?}" "$STUB_RIG_PATH" "$STUB_RIG_PATH"
   else printf '{"rigs":[{"name":"anc-rig","prefix":"anc","path":"%s"}]}\n' "${STUB_RIG_PATH:?}"; fi
   exit 0
 fi
@@ -81,6 +101,12 @@ bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id) | .priority //= 2]'
 case "${1:-}" in
   show)
     out=$(bead_json "$2")
+    if [ -n "${STUB_STORES_DIR:-}" ] && [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
+      for f in "$STUB_STORES_DIR"/*.json; do
+        o=$(jq -c --arg id "$2" '[.[] | select(.id == $id) | .priority //= 2]' "$f")
+        [ "$(printf '%s' "$o" | jq 'length')" = "0" ] || { out="$o"; break; }
+      done
+    fi
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
       echo '{"error":"no issues found"}'
     else printf '%s\n' "$out"; fi ;;
@@ -138,6 +164,7 @@ case "${1:-}" in
     case "${1:-}" in
       list)
         shift; id="$1"; shift
+        if [ -n "${STUB_STORES_DIR:-}" ] && ! in_store "$id"; then echo "bd: no issue $id in this store (stub)" >&2; exit 1; fi
         dir=""; typ=""
         while [ $# -gt 0 ]; do
           case "$1" in --direction=*) dir="${1#--direction=}" ;; -t) shift; typ="$1" ;; esac
@@ -158,6 +185,9 @@ case "${1:-}" in
         printf '%s]\n' "$out" ;;
       *)
         src="${1:-}"; shift || true
+        if [ -n "${STUB_STORES_DIR:-}" ] && { ! in_store "$src" || ! in_store "${2:-}"; }; then
+          echo "bd: no issue $src or ${2:-} in this store (stub)" >&2; exit 1
+        fi
         [ "${1:-}" = "--blocks" ] && printf '%s|%s|blocks\n' "${2:-}" "$src" >> "$DEPS"
         echo "dep added" ;;
     esac ;;
@@ -269,12 +299,12 @@ eq "$(meta fix-1 anchor_bead)" "anc-1" "child names the anchor"
 eq "$(meta fix-1 branch)" "polecat/anc-1" "child resumes the anchor's branch"
 eq "$(meta fix-1 target)" "main" "child lands where the anchor lands"
 eq "$(meta fix-1 merge_strategy)" "mr" "child is merge_strategy=mr"
-eq "$(meta fix-1 source_ruling_bead)" "vis-1" "child names the ruling's visit as source_ruling_bead"
+eq "$(meta fix-1 source_ruling_bead)" "vis-1" "child names the ruling's conversation as source_ruling_bead"
 eq "$(meta fix-1 source_review_bead)" "" "child carries NO source_review_bead (a ruling has no verdict)"
 eq "$(meta fix-1 existing_pr)" "https://github.com/o/r/pull/42" "child keeps the rework on this PR (existing_pr)"
 eq "$(meta fix-1 pr_number)" "42" "child carries pr_number"
 has "$(meta fix-1 rejection_reason)" "apply the amendment" "rejection_reason carries the ruling"
-has "$(meta fix-1 rejection_reason)" "vis-1" "rejection_reason names the visit"
+has "$(meta fix-1 rejection_reason)" "vis-1" "rejection_reason names the conversation"
 if blocks_anchor fix-1 anc-1; then ok "child blocks the anchor (merge held by the edge)"; else bad "child does NOT block the anchor"; fi
 eq "$(meta fix-1 gc.execution_routed_to)" "gc-toolkit/gc-toolkit.polecat" "child was slung (execution_routed_to read back)"
 has "$OUT" "filed rework fix-1 on anchor anc-1" "reports the filed child"
@@ -308,6 +338,30 @@ OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment di
 eq "$RC" "0" "exit 0 on the re-run"
 eq "$(created)" "1" "still exactly one child (dedup on source_ruling_bead)"
 has "$OUT" "already dispatched" "re-run reports the child is already in flight"
+
+echo "# --- a later ruling of the same conversation is refused while its first rework is open ---"
+# A conversation can rule on a turn that does not sign off and again at its
+# sign-off, and both rulings key their rework on the conversation. The writer
+# adopts the live child with the work order it was filed with, so a later
+# ruling it adopted would never reach the branch.
+reset "$ANCHOR_PR"
+"$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" >/dev/null 2>&1
+: > "$STUB_GC_LOG"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "also rename the section" 2>&1); RC=$?
+eq "$RC" "2" "exit 2 when the conversation's open rework records another ruling"
+eq "$(created)" "1" "…filing no second child"
+has "$OUT" 'fix-1, which records "operator ruling (conversation vis-1): apply the amendment"' "…naming the open rework and what it carries"
+eq "$(grep -c -E '^(bd update|bd dep|bd create|sling)' "$STUB_GC_LOG")" "0" "…with nothing written"
+hasnt "$(meta fix-1 rejection_reason)" "rename the section" "…so the open rework's work order is as it was filed"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "a re-run of the first ruling still adopts its rework"
+eq "$(created)" "1" "…filing no second child"
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-cr.XXXXXX")
+jq -c 'map(if .id == "fix-1" then .status = "closed" else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "also rename the section" 2>&1); RC=$?
+eq "$RC" "0" "once the first rework has landed and closed, the later ruling is filed"
+eq "$(created)" "2" "…as a child of its own"
+has "$(meta fix-2 rejection_reason)" "also rename the section" "…carrying the later ruling"
 
 echo "# --- guard: a non-PR anchor is refused, nothing filed ---"
 reset '[{"id":"anc-1","status":"open","metadata":{"merge_result":"","branch":"polecat/anc-1","target":"main"}}]'
@@ -413,7 +467,7 @@ eq "$(meta rv-c gc.outcome)" "superseded" "the correctness approve is superseded
 eq "$(meta rv-a gc.outcome)" "superseded" "…and the arch approve"
 if green correctness; then bad "correctness still derives green after the ruling"; else ok "correctness no longer derives green"; fi
 if green arch; then bad "arch still derives green after the ruling"; else ok "…nor arch"; fi
-has "$(jq -r '.[] | select(.id == "rv-c") | .notes' "$STUB_STORE")" "operator ruling (converse visit vis-1): superseded (anchor-wide) — rework fix-1" \
+has "$(jq -r '.[] | select(.id == "rv-c") | .notes' "$STUB_STORE")" "operator ruling (conversation vis-1): superseded (anchor-wide) — rework fix-1" \
   "the superseded review names the ruling and the child"
 has "$OUT" "2 standing review(s) superseded" "the run reports the lanes it returned"
 so_sl=$(grep -n '^sling ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
@@ -491,6 +545,37 @@ OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
 unset STUB_SLING_NOPOUR
 eq "$RC" "2" "the writer's exit code is the run's"
 eq "$(meta rv-c gc.outcome)" "recorded" "the approves stand while the child's edge holds the merge for the retry"
+
+echo "# --- two stores: the child is filed, edged and slung in the anchor's own rig ---"
+# The anchor rb-anc lives in rig-b's store, and the ruling's conversation in
+# rig-a's. converse-signoff.sh runs this script with GC_RIG naming the anchor's
+# rig, so the dedup, the create, the blocks edge, the pool and the sling all act
+# in rig-b. Run from the conversation's rig instead, the child lands in rig-a,
+# where no edge onto rb-anc can be added or proved, and nothing is dispatched.
+STORES="$TMP/stores"
+two_stores() {
+  rm -rf "$STORES"; mkdir -p "$STORES"
+  printf '[]\n' > "$STORES/rig-a.json"
+  printf '%s' "$ANCHOR_PR" | jq -c '.[0].id = "rb-anc" | .[0].metadata.branch = "polecat/rb-anc"' > "$STORES/rig-b.json"
+  : > "$STORES/rig-a.deps"; : > "$STORES/rig-b.deps"
+  : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; printf '0' > "$STUB_SEQ"
+}
+in_rig() { jq -r --arg id "$2" 'any(.[]; .id == $id)' "$STORES/$1.json"; }
+rig_meta() { jq -r --arg id "$2" --arg k "$3" 'first(.[] | select(.id == $id) | .metadata[$k]) // ""' "$STORES/$1.json"; }
+two_stores
+OUT=$(GC_RIG=rig-b STUB_STORES_DIR="$STORES" "$SUT" --anchor rb-anc --ruling-bead ra-conv --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "(TWO-STORES) a run pinned to the anchor's rig exits 0"
+eq "$(in_rig rig-b fix-1)/$(in_rig rig-a fix-1)" "true/false" "(TWO-STORES) …filing the child in the anchor's store, not the conversation's"
+if grep -qxF "rb-anc|fix-1|blocks" "$STORES/rig-b.deps"; then ok "(TWO-STORES) …its blocks edge onto the anchor in that store, where the anchor's merge reads it"; else bad "(TWO-STORES) no blocks edge onto rb-anc in rig-b's store"; fi
+eq "$(rig_meta rig-b fix-1 source_ruling_bead)" "ra-conv" "(TWO-STORES) …the conversation in the other rig its provenance"
+eq "$(rig_meta rig-b fix-1 gc.execution_routed_to)" "rig-b/gc-toolkit.polecat" "(TWO-STORES) …and slung to the anchor's rig's pool"
+has "$(grep '^sling ' "$STUB_GC_LOG")" "sling --rig rig-b rig-b/gc-toolkit.polecat fix-1 --on mol-polecat-work" "(TWO-STORES) …through a sling in that rig"
+two_stores
+OUT=$(GC_RIG=rig-a STUB_STORES_DIR="$STORES" "$SUT" --anchor rb-anc --ruling-bead ra-conv --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "2" "(TWO-STORES-AMBIENT) the same run from the conversation's rig exits 2"
+has "$OUT" "work order incomplete (blocks_edge)" "(TWO-STORES-AMBIENT) …the child's blocks edge onto the anchor in another store not provable"
+eq "$(in_rig rig-a fix-1)" "true" "(TWO-STORES-AMBIENT) …because the child landed in the conversation's store"
+eq "$(grep -c '^sling ' "$STUB_GC_LOG")" "0" "(TWO-STORES-AMBIENT) …and nothing is dispatched"
 
 echo
 echo "===================="

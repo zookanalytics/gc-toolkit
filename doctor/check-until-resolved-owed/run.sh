@@ -15,8 +15,8 @@
 # (check-cadence-live/I10 is the direct cause, but a single owed disposition
 # makes the effect concrete), its passes spend their budget before they reach
 # the bead, or the close is stuck. The common stuck case is a legitimate hold:
-# an OPEN visit on the bead holds its close (bead-rehome refuses rather than
-# forcing it), and the remedy is to conclude that visit; the other is a
+# an open human gate on the bead holds its close (bead-rehome refuses rather
+# than forcing it), and the remedy is to clear that gate; the other is a
 # resolve-by edge no longer wanted, removed with `gc bd dep remove`.
 #
 # A bead became owed at the latest of its `until` targets' closes, its `until`
@@ -214,7 +214,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         if [ "$marks" != "-" ]; then
             livework+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed, and it has been owed for ${age}s, but it carries live work ($marks), which the deferred-dispatch reconcile pass never disposes. A person decides: if the work is still wanted, remove the resolve-by edge (gc bd dep remove $cid <target>); if the target's close made it moot, retire the work and dispose $cid by ruling")
         else
-            findings+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed, and it has been owed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not been disposed. The deferred-dispatch reconcile pass disposes an owed \`until\` bead on its next pass, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a disposition owed this long means that order is not firing (check-cadence-live/I10), its passes spend their budget before they reach $cid, or the close is stuck — commonly an open visit on $cid holds it (conclude the visit), or the resolve-by edge is no longer wanted (remove it: gc bd dep remove $cid <target>)")
+            findings+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed, and it has been owed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not been disposed. The deferred-dispatch reconcile pass disposes an owed \`until\` bead on its next pass, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a disposition owed this long means that order is not firing (check-cadence-live/I10), its passes spend their budget before they reach $cid, or the close is stuck — commonly an open human gate on $cid holds it (clear the gate), or the resolve-by edge is no longer wanted (remove it: gc bd dep remove $cid <target>)")
         fi
     done <<< "$rows"
 done <<< "$scopes"

@@ -1,7 +1,7 @@
 #!/bin/sh
 # gc-helm-engage-starters.sh — the starter-seed table for `gc-helm engage`.
 # A starter is the opening message a fresh converse sitting reads when it claims
-# its visit. A seed establishes the TOPIC and the sitting's READINESS to talk;
+# its conversation. A seed establishes the TOPIC and the sitting's READINESS to talk;
 # it does not set an agenda or presume a direction — the operator leads once
 # engaged. The one investigative seed (unstick-a-stall) still names no single
 # cause. A lens brief names a skill the sitting loads and reads the subject
@@ -23,8 +23,8 @@ PROG="gc-helm-engage-starters"
 
 # The seed rows, in menu order. A seed's key is its stable --template token, its
 # label is the one-line menu caption, and its letter is the accelerator engage's
-# consolidated visit/starter prompt reads — numbers there pick existing visits,
-# so a letter never collides with a visit choice. The bodies are emitted by
+# consolidated conversation/starter prompt reads — numbers there pick existing
+# conversations, so a letter never collides with a conversation choice. The bodies are emitted by
 # seed_body below, keyed on the same tokens.
 seed_list() {
     printf '%s\t%s\t%s\n' discuss-broadly "discuss broadly" d
@@ -62,7 +62,7 @@ H
 # lens_body <with-opener> — the raw lens brief, with the literal __SKILL__ and
 # __SUBJECT__ placeholders. The skill's own method carries a final step written
 # for the bead it was built to serve (a review skill ends in a signoff.sh
-# verdict on its review bead), and a sitting holds a visit, not that bead, so
+# verdict on its review bead), and a sitting holds a conversation, not that bead, so
 # the brief keeps the skill's judgment and withholds its final writes. Its last
 # sentence says what to do first: with no opener the lens is the whole
 # assignment, and with one the opener that follows decides.
@@ -73,7 +73,7 @@ skill. Load that skill before you prep, and keep its lens for the whole sitting:
 read and judge __SUBJECT__ and its universe the way the skill does. Use its way
 of reading and judging, not its final step. A review verdict, a sign-off, or any
 other write the skill makes on the bead it was written for is not yours to make,
-because you hold a visit, not that bead. State the skill's judgment in your
+because you hold a conversation, not that bead. State the skill's judgment in your
 framing instead. If no skill by that name is available to you, say so at the top
 of your framing and continue without it.
 H

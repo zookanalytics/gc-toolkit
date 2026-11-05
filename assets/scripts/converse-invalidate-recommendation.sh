@@ -2,27 +2,29 @@
 # converse-invalidate-recommendation.sh — a converse sitting's active strip of a
 # first-reaction recommendation it has judged no longer valid. It removes
 # gc.recommended_formula from the SUBJECT and records why, leaving the subject
-# and its visit open. gc.recommended_formula is the key the operator's Accept
-# reads — the board offers Accept only where it is present — so removing it
-# withdraws Accept while the visit stays for Discuss.
+# and the sitting's conversation open. gc.recommended_formula is the key the
+# operator's Accept reads — the board offers Accept only where it is present,
+# and gc-helm.sh accept refuses a bead without it — so removing it withdraws
+# Accept while the subject stays open for Discuss.
 #
-# This is the durable half of the invalidation rule. A live sitting already
-# suppresses Accept, because the board offers it only on an un-engaged visit, so
-# the strip is what keeps Accept withdrawn once the sitting ends and the visit
-# un-engages: a recommendation the sitting rejected does not return as a
-# one-click action.
+# The board offers Accept on a row a live sitting is discussing too, so the
+# strip is what withdraws it, at once and after the sitting ends: a
+# recommendation the sitting rejected does not stay a one-click action. The
+# human gate that put the recommendation to the operator stays open, and the
+# sitting answers it like any gate the operator rules on.
 #
 # Disposing of the subject is a different act: bead-rehome.sh (a no-work subject)
-# and a PR retire close the subject and its gate, and a closed gate offers no
-# Accept. Use this only where the subject stays open for Discuss.
+# and a PR retire close the subject, and a closed bead offers no Accept. Use
+# this only where the subject stays open for Discuss.
 #
 # gc.recommended_formula has a reader, so the unset is read back and repaired: a
 # key that survives is Accept returning, the exact defect this exists to prevent.
 #
 # Inputs:
 #   $1       the reason: why the recommendation is no longer valid
-#   SUBJECT  the subject bead carrying gc.recommended_formula (environment)
-#   VISIT    the sitting's visit; named in the note when set (environment, optional)
+#   SUBJECT       the subject bead carrying gc.recommended_formula (environment)
+#   CONVERSATION  the sitting's conversation; named in the note when set
+#                 (environment, optional)
 # Exit: 0 stripped, or nothing to strip; 2 usage; 3 subject unreadable;
 #       4 the key survived the unset.
 set -u
@@ -37,7 +39,7 @@ scrub() { tr -d '\000-\037'; }
 
 REASON="${1:-}"
 SUBJECT="${SUBJECT:-}"
-VISIT="${VISIT:-}"
+CONVERSATION="${CONVERSATION:-}"
 
 [ -n "$SUBJECT" ] || { echo "converse-invalidate-recommendation: \$SUBJECT is required" >&2; exit 2; }
 [ -n "$REASON" ]  || { echo "converse-invalidate-recommendation: a reason (why the recommendation is no longer valid) is required (arg 1)" >&2; exit 2; }
@@ -69,7 +71,7 @@ esac
 
 # The record and the act in one write: either both land or neither, so a
 # half-run never strips without its reason or records a reason without the strip.
-NOTE="recommendation invalidated${VISIT:+ (visit $VISIT)}: was '${WAS:-<empty>}'. $REASON. Accept withdrawn; Discuss remains."
+NOTE="recommendation invalidated${CONVERSATION:+ (conversation $CONVERSATION)}: was '${WAS:-<empty>}'. $REASON. Accept withdrawn; Discuss remains."
 gc bd update "$SUBJECT" --unset-metadata gc.recommended_formula --append-notes "$NOTE" \
   || echo "converse-invalidate-recommendation: the strip update returned non-zero on $SUBJECT — verifying by read-back before trusting it" >&2
 

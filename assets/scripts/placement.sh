@@ -11,9 +11,9 @@
 # Sourced (never executed) by the readers that ask whether a bead is in the
 # sitting's queue: gc-helm.sh unplaced, which lists the queue; the liveness
 # classifier (liveness-classify.sh), which names the wait so the sweep does not
-# report it as an unnamed one; the claim-time re-check of a sweep visit
-# (liveness-recheck.sh), which names it so a visit filed before intake held the
-# bead does not keep it on that visit's agenda; the doctor check
+# report it as an unnamed one; the re-check a liveness gate's message carries
+# (liveness-recheck.sh), which names it so a census cut before intake held the
+# bead does not keep it on that gate's agenda; the doctor check
 # check-blocked-work-armed, which owes such a bead no arm; and the proactive
 # scan (tools/gc-proactive.sh), which files no first reaction for it. One
 # definition, no copies: a placed shape added here is read by every one of them

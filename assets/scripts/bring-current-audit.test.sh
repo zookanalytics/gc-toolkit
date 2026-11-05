@@ -19,10 +19,11 @@
 #   dismissal note that says the same ask, or the guard's own ruling told as the
 #   guard's with the entries no triage comment carries. Refuses an anchor with
 #   no record, and any other form.
-# ask: records the question and files ONE visit on the anchor composed from the
-#   entries so far and the question; resolves the anchor through anchor_bead,
-#   then the branch, then the bead itself; refuses an empty question; a visit
-#   that does not land, or a question that does not read back, exits 1.
+# ask: records the question and files ONE human gate on the anchor composed from
+#   the entries so far and the question, with no quiet window; resolves the
+#   anchor through anchor_bead, then the branch, then the bead itself; refuses
+#   an empty question; a gate that does not land, or a question that does not
+#   read back, exits 1.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,15 +36,13 @@ harness_init
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/bring-current-audit.sh"
 SUT="$SD/bring-current-audit.sh"
-cat > "$SD/escalate.sh" <<'ESC'
+cat > "$SD/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
-printf '%s\n' "${GC_ESCALATE_VERDICT_WINDOW-<unset>}" >> "${STUB_ESC_WINDOW_LOG:?}"
 exit "${STUB_ESC_RC:-0}"
 ESC
-chmod +x "$SD/escalate.sh"
+chmod +x "$SD/human-gate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
-export STUB_ESC_WINDOW_LOG="$TMP/esc-window.log"
 export STUB_ESC_RC=0
 
 bead() { # id [extra-metadata]
@@ -226,26 +225,26 @@ eq "$rc" "1" "…the ask form too"
 eq "$rc" "2" "a form other than comment, dismissal or ask is a usage error"
 
 # --- ask ---------------------------------------------------------------------------
-echo "# ask: the question is recorded, and one visit composed from the audit asks it on the anchor"
+echo "# ask: the question is recorded, and one human gate composed from the audit asks it on the anchor"
 ENTRY=$(jq -nc '[{path: "docs/a.md", collided: "c", resolution: "kept both", check: "k", rating: "routine"}]')
 store "[$(bead B2 ",\"conflict_audit\":$(printf '%s' "$ENTRY" | jq -Rc .)"), $(anchorrow AN1)]"
-: > "$STUB_ESC_LOG"; : > "$STUB_ESC_WINDOW_LOG"
+: > "$STUB_ESC_LOG"
 out=$("$SUT" ask --bead B2 --path lib/retry.sh --collided "main deleted the retry loop; the branch extended it" \
   --question "keep the retry loop with the branch's extension, or drop both?" 2>&1); rc=$?
 eq "$rc" "0" "it exits 0"
-has "$out" "visit filed on AN1 (bring-current-question.B2)" "…naming the visit's subject and key"
+has "$out" "human gate filed on AN1 (bring-current-question.B2)" "…naming the gate's subject and key"
 eq "$(meta B2 conflict_question | jq -r '.paths[0] + "|" + .question')" "lib/retry.sh|keep the retry loop with the branch's extension, or drop both?" "the question is recorded on the bead"
 esc=$(cat "$STUB_ESC_LOG")
-has "$esc" "--subject AN1 --key bring-current-question.B2" "the visit is filed on the anchor"
-eq "$(cat "$STUB_ESC_WINDOW_LOG")" "0" "…with escalate.sh's verdict window off, since the caller waits on an open visit"
+has "$esc" "--subject AN1 --key bring-current-question.B2" "the gate is filed on the anchor"
+hasnt "$esc" "--quiet-window" "…declaring no quiet window, since the caller waits on an open gate"
 has "$esc" "PR#7 needs a decision before it can be brought current with main" "…titled by what it needs"
 has "$esc" "Nothing was pushed" "…saying nothing was pushed"
 has "$esc" "The question: keep the retry loop with the branch's extension, or drop both?" "…asking the question"
 has "$esc" "What collided in \`lib/retry.sh\`: main deleted the retry loop; the branch extended it." "…saying what collided"
 has "$esc" "- \`docs/a.md\`, routine. Decided: kept both." "…carrying the entries so far"
 has "$esc" "record the answer in the notes of B2" "…and where the answer goes"
-has "$esc" "when B2 waits on this visit, closing the visit re-slings it" "…how a cancelled run's work comes back"
-has "$esc" "when it is parked for a person, route it back to the polecat pool" "…and how a parked bead does"
+has "$esc" "when B2 waits on this gate, clearing the gate re-slings it" "…how a cancelled run's work comes back"
+has "$esc" "when it is parked for a person, clear the gate and route it back to the polecat pool" "…and how a parked bead does"
 
 echo "# ask: the anchor resolves through the branch, or is the bead itself"
 store "[$(bead B3 | jq -c 'del(.metadata.anchor_bead)'), $(anchorrow AN5)]"
@@ -257,7 +256,7 @@ store "[$(anchorrow AN6 ",\"target\":\"main\"" | jq -c 'del(.metadata.merge_resu
 "$SUT" ask --bead AN6 --path x --collided "c" --question "q" >/dev/null 2>&1
 has "$(cat "$STUB_ESC_LOG")" "--subject AN6 " "an anchor the refinery re-queued asks on itself"
 
-echo "# anchor: the bead ask files its visit on"
+echo "# anchor: the bead ask files its gate on"
 store "[$(bead B2), $(anchorrow AN1)]"
 eq "$("$SUT" anchor --bead B2)" "AN1" "a rework bead's anchor"
 store "[$(bead B3 | jq -c 'del(.metadata.anchor_bead)'), $(anchorrow AN5)]"
@@ -269,19 +268,19 @@ eq "$rc" "1" "an unreadable bead exits 1"
 "$SUT" anchor >/dev/null 2>&1; rc=$?
 eq "$rc" "2" "no --bead is a usage error"
 
-echo "# ask: an empty question, a visit that does not land, or a question that does not read back exits 1"
+echo "# ask: an empty question, a gate that does not land, or a question that does not read back exits 1"
 store "[$(bead B4), $(anchorrow AN1)]"
 : > "$STUB_ESC_LOG"
 "$SUT" ask --bead B4 --path x --collided "c" --question " " >/dev/null 2>&1; rc=$?
 eq "$rc" "1" "an empty question exits 1"
 eq "$(cat "$STUB_ESC_LOG")" "" "…filing nothing"
 STUB_ESC_RC=1 "$SUT" ask --bead B4 --path x --collided "c" --question "q" >/dev/null 2>&1; rc=$?
-eq "$rc" "1" "a visit that does not land exits 1"
+eq "$rc" "1" "a gate that does not land exits 1"
 store "[$(bead B4), $(anchorrow AN1)]"
 : > "$STUB_ESC_LOG"
 STUB_UPDATE_FAIL="B4" "$SUT" ask --bead B4 --path x --collided "c" --question "q" >/dev/null 2>&1; rc=$?
 eq "$rc" "1" "a question that does not read back exits 1"
-eq "$(cat "$STUB_ESC_LOG")" "" "…before any visit is filed"
+eq "$(cat "$STUB_ESC_LOG")" "" "…before any gate is filed"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -9,9 +9,9 @@
 // so the facts [Derive] reads carry no merged-or-closed signal.
 //
 // Beside the one status value, [Held] names what holds an open PR that the city
-// will not clear on its own: an open visit on the PR or its work, review
-// feedback the city has not answered or a review thread the merge waits on, or
-// a blocker no automated actor will clear.
+// will not clear on its own: an open human gate on the PR, review feedback the
+// city has not answered or a review thread the merge waits on, or a blocker no
+// automated actor will clear.
 // Each is a value of the `held:` label family, and more than one can stand.
 // Each names something a person has to act on, so [Derive] reads needs-attention
 // while any stands.
@@ -30,21 +30,21 @@
 // such as the board through the beads library, hands Derive the same raw
 // metadata instead. Derive itself does no I/O. What the two gatherers read
 // about the anchor's work is fixed here, so they read the same beads: the
-// in-flight set over [InFlightStatuses], and the visits on the members
-// [IsWork] accepts.
+// in-flight set over [InFlightStatuses], and the members of it [IsWork]
+// accepts.
 //
 // Derive reads only state the city records: the anchor's holds
-// (merge_hold/rebase_hold), whether an open visit covers it or its review and
-// rework children, whether a blocker it waits on is a person's, the pr-facts.sh
-// posture, the merge cadence's machine verdict and its blocked cause, the merge
-// cadence's count of review threads waiting on the city's answer, the
-// draft-stage markers pr-open.sh records (opened_as_draft, draft_readied), and
-// the anchor's in-flight set — any live bead carrying anchor_bead, the same
-// membership test pr-facts.sh applies in its own arms. It does not read GitHub's
-// merge state: GitHub reports BLOCKED for a required check still running as it
-// does for a wedge, and the merge pass, which reads the branch's rules, is what
-// tells the two apart. It does not consult GitHub's review posture directly —
-// the working -> needs-review flip rests on that live work, which closes as it
+// (merge_hold/rebase_hold), whether an open human gate blocks it, whether a
+// blocker it waits on is a person's, the pr-facts.sh posture, the merge
+// cadence's machine verdict and its blocked cause, the merge cadence's count of
+// review threads waiting on the city's answer, the draft-stage markers
+// pr-open.sh records (opened_as_draft, draft_readied), and the anchor's
+// in-flight set — any live bead carrying anchor_bead, the same membership test
+// pr-facts.sh applies in its own arms. It does not read GitHub's merge state:
+// GitHub reports BLOCKED for a required check still running as it does for a
+// wedge, and the merge pass, which reads the branch's rules, is what tells the
+// two apart. It does not consult GitHub's review posture directly — the working
+// -> needs-review flip rests on that live work, which closes as it
 // hands back, so a sticky changes_requested never traps the value in working
 // after the set empties. Nor does it read GitHub's draft flag: a draft the city
 // opened is known by its markers, and a draft someone else made reads like any
@@ -110,9 +110,9 @@ const (
 type Hold string
 
 const (
-	// HeldVisit: an open visit covers the anchor, or one of its live review or
-	// rework children, the PR's own work in flight. A person answers the visit.
-	HeldVisit Hold = "visit"
+	// HeldGate: an open human gate blocks the anchor ([Facts.OpenHumanGate]).
+	// Only a person clears it.
+	HeldGate Hold = "gate"
 	// HeldReview: review feedback holds the PR and nothing in flight acts on it,
 	// so answering or resolving it falls to a person. It stands for either of two
 	// facts. One is feedback the city has not answered, on any base, approved or
@@ -139,21 +139,16 @@ type Facts struct {
 	MergeHold string
 	// RebaseHold is metadata.rebase_hold: any truthy value is a rebase hold.
 	RebaseHold string
-	// OpenVisit is whether an open visit covers the anchor: a task_kind=visit
-	// bead, open or in_progress, whose subject is the anchor by the shared visit
-	// identity (assets/scripts/visit-identity.sh). That subject is the bead the
-	// visit's tracks edge names, or its gc.continuation_group stamp when it has
-	// no tracks edge. Only a person closes a visit, and the merge pass refuses
-	// the merge while one covers the anchor: its finalize gate
-	// (assets/scripts/finalize-gate.sh) reads visits by the same identity. So it
-	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
-	// flight.
-	OpenVisit bool
-	// WorkVisit is whether an open visit covers the PR's own work in flight: a
-	// member of the anchor's in-flight set that [IsWork] accepts. The work waits
-	// on the person the visit asks, so the visit holds the PR as one on the
-	// anchor does.
-	WorkVisit bool
+	// OpenHumanGate is whether an open human gate blocks the anchor: a bead the
+	// anchor's `blocks` edges reach whose issue_type is gate and whose
+	// await_type is human, in a status other than closed. That is the one reader
+	// rule bd_human_gates applies (assets/scripts/bd-lib.sh). Only a person
+	// clears a human gate, and the merge pass refuses the merge while one blocks
+	// the anchor, through its blocker probe and its finalize gate
+	// (assets/scripts/finalize-gate.sh). So it reads as a hold, as merge_hold and
+	// rebase_hold do, whatever work is in flight. A conversation about the anchor
+	// tracks it and blocks nothing, so it sets nothing here.
+	OpenHumanGate bool
 	// PersonBlocker is whether a live blocker the anchor waits on, a bead its
 	// blocks edge names that has not closed, is a person's to clear: one routed
 	// to a person (gc.routed_to=human), or a decision. No automated actor will
@@ -203,10 +198,9 @@ type Facts struct {
 var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}
 
 // IsWork reports whether a member of the anchor's in-flight set, read by its
-// task_kind and its lowercase status, is the PR's own work in flight, whose
-// visit holds the PR ([Facts.WorkVisit]): a review or rework child, open or
-// in_progress. Those are the children the helm board gathers as rows of their
-// own.
+// task_kind and its lowercase status, is the PR's own work in flight: a review
+// or rework child, open or in_progress. Those are the children the helm board
+// gathers as rows of their own.
 func IsWork(taskKind, status string) bool {
 	switch taskKind {
 	case "review", "rework":
@@ -285,15 +279,15 @@ func Blocked(f Facts) bool {
 		(f.InFlightCount == 0 || f.PRMachineCause == CauseBlocker)
 }
 
-// Held returns what holds the PR, in the order visit, review, blocked, and
+// Held returns what holds the PR, in the order gate, review, blocked, and
 // nothing when the PR is not held. A value stands only while its condition
 // does, so the first derivation after the condition clears leaves it out. The
 // merge freeze and the rebase hold are not among them: they read needs-attention
 // in [Derive] with no held value of their own.
 func Held(f Facts) []Hold {
 	var held []Hold
-	if f.OpenVisit || f.WorkVisit {
-		held = append(held, HeldVisit)
+	if f.OpenHumanGate {
+		held = append(held, HeldGate)
 	}
 	blocked := Blocked(f)
 	if (blocked && f.PRMachineCause == CauseReviewThreads) || unansweredFeedback(f) {

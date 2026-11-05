@@ -10,17 +10,17 @@
 # would false-orphan it.
 # Returning it to the pool re-dispatches finished work AND stamps a recovery, and
 # the downstream crash-loop signal reads that stamp as a RATE off
-# recovered_at/recovered_count, so a bead that keeps arriving here escalates a
-# moot visit every cycle. Dropping such beads from the candidate set before the
-# liveness loop is what stops both the re-dispatch and the escalation.
+# recovered_at/recovered_count, so a bead that keeps arriving here puts a
+# moot question to a person every cycle. Dropping such beads from the candidate
+# set before the liveness loop is what stops both the re-dispatch and the question.
 #
-# Two states name work that is not the pool's to recover:
+# Work in any of these states is not the pool's to recover:
 #   * an in-flight PR      — merge_result is pre_open_gate or pull_request;
-#   * a human gate         — gc.routed_to=human.
-# A visit (task_kind=visit) is routed to human too, and it passes. Its holder is
-# the sitting engaged on it, and Gas City frees no claim routed to human, so a
-# visit whose sitting is gone stays engaged on the board until orphan recovery
-# releases it. Dropping a visit here would leave that recovery unreachable.
+#   * a human route        — gc.routed_to=human;
+#   * a conversation       — a task assigned to `human` or to the alias of its
+#                            sitting, which names the task's own id
+#                            (assets/scripts/conversation.sh, whose shell rule
+#                            this test holds the filter's copy to).
 # pr.machine is NOT one of them: a progressing stamp is written only alongside an
 # anchor merge_result, and unanchoring back to the pool clears merge_result while
 # leaving pr.machine behind, so on a repooled bead it is stale — reading it strands
@@ -28,7 +28,7 @@
 # the first exclusion drops.
 # It is a state exclusion, not a kind exclusion: host-bead-skip keeps every owned
 # bead (no class exempt), and this runs on its result to remove the ones already
-# downstream. A bead carrying neither state is still the pool's to recover.
+# downstream. A bead in none of these states is still the pool's to recover.
 #
 # This test EXECUTES the real filters extracted verbatim from the formula
 # (between the `downstream-court-skip` and `host-bead-skip` markers), so it cannot
@@ -140,21 +140,40 @@ FIX3='[
 eq "$(keep "$FIX3")" "e2,e4" \
    "exact match: drops pull_request and human; keeps pull_request_draft and human-review"
 
-# A visit passes, and every other human gate drops. task_kind matches exactly,
-# so a kind that only resembles visit is still a human gate.
-# v1  visit engage bound to a sitting whose create failed  -> KEEP
-# v2  visit a sitting claimed, then its session closed      -> KEEP
-# h1  human gate carrying another task_kind                -> DROP
-# h2  human gate whose task_kind only resembles visit       -> DROP
-FIX7='[
-  {"id":"v1","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
-  {"id":"v2","status":"in_progress","assignee":"gascity/gc-toolkit.v2","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7","gc.session_id":"hq-wisp-dead","gc.session_name":"s-hq-wisp-dead"}},
-  {"id":"h1","metadata":{"task_kind":"finding","gc.routed_to":"human"}},
-  {"id":"h2","metadata":{"task_kind":"visits","gc.routed_to":"human"}}
-]'
-eq "$(keep "$FIX7")" "v1,v2" \
-   "a visit routed to human passes, bound or claimed; a human gate of any other task_kind drops"
-
+# --- A conversation. ----------------------------------------------------------
+# A task assigned to `human`, or to the alias of its sitting, which names the
+# task's own id, bare or qualified, or its c- fallback. No session carries
+# either owner, so the liveness loop would orphan it. The filter carries its own
+# copy of conversation.sh's rule, since a formula block sources nothing, so each
+# assignee below runs through both and they must agree.
+# shellcheck source=conversation.sh
+. "$ROOT/assets/scripts/conversation.sh"
+NDROP=0; NKEEP=0
+while IFS= read -r a; do
+  [ -n "$a" ] || continue
+  want=kept; conversation_assignee "$a" tk-c1 && want=dropped
+  got=$(keep "$(jq -nc --arg a "$a" '[{id: "tk-c1", issue_type: "task", assignee: $a}]')")
+  if [ -n "$got" ]; then got=kept; else got=dropped; fi
+  [ "$got" = dropped ] && NDROP=$((NDROP + 1)) || NKEEP=$((NKEEP + 1))
+  eq "$got" "$want" "the filter and conversation.sh agree on a task assigned to '$a'"
+done <<'ASSIGNEES'
+human
+tk-c1
+c-tk-c1
+gc-toolkit/gc-toolkit.tk-c1
+gc-toolkit/gc-toolkit.c-tk-c1
+gc-toolkit/tk-c1
+gc-toolkit/gc-toolkit.tk-c2
+rig/gc-toolkit.polecat
+alice
+xtk-c1
+ASSIGNEES
+[ "$NDROP" -gt 0 ] && [ "$NKEEP" -gt 0 ] \
+  && ok "the agreement is not vacuous: $NDROP dropped, $NKEEP kept" \
+  || bad "the agreement is not vacuous" "dropped $NDROP, kept $NKEEP"
+# Only a task is a conversation: a gate or an epic under such an assignee is kept.
+FIX7='[{"id":"g1","issue_type":"gate","assignee":"human"},{"id":"tk-e1","issue_type":"epic","assignee":"gc-toolkit/gc-toolkit.tk-e1"}]'
+eq "$(keep "$FIX7")" "g1,tk-e1" "only a task is a conversation; another type under such an assignee is kept"
 # Empty listing -> empty result (never errors).
 eq "$(keep '[]')" "" "empty listing yields empty result"
 
@@ -202,21 +221,6 @@ FIX6='[
 ]'
 eq "$(pipeline "$FIX6")" "tk-stale-prog" \
    "a stale pr.machine=progressing on an unanchored, pool-routed dead-session bead is KEPT for recovery (not a live court)"
-
-# A visit engage bound to a sitting that never started names its owner only in
-# its assignee, the sitting's runtime name. host-bead-skip keeps it and stamps
-# that owner, and downstream-court-skip lets it through to the liveness loop. A
-# parked visit names no owner, so host-bead-skip drops it, and a human-gated work
-# bead still naming its dead polecat drops here as before.
-FIX8='[
-  {"id":"gc-bound","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
-  {"id":"gc-parked","status":"open","assignee":null,"metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
-  {"id":"tk-gated","status":"open","assignee":null,"metadata":{"gc.routed_to":"human","gc.session_id":"hq-dead"}}
-]'
-eq "$(pipeline "$FIX8")" "gc-bound" \
-   "host-bead-skip | downstream-court-skip keeps the bound visit, drops the parked visit (no owner) and the human-gated work bead"
-eq "$(printf '%s' "$FIX8" | bash "$TMP/hostskip.sh" 2>/dev/null | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "s-hq-wisp-tjt3y" \
-   "the bound visit reaches the loop owned by the sitting engage bound it to"
 
 echo
 echo "downstream-court-skip: $PASS passed, $FAIL failed"

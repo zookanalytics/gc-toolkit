@@ -6,8 +6,8 @@ description: The guidance the demo check reads on gc-toolkit reviews, which the 
 # The demo check on gc-toolkit
 
 gc-toolkit shows a person three kinds of surface, and `demo-screenshot.sh` has a
-kind for each. Every capture runs where the live city cannot be reached, so
-capture each one from the reviewed commit on fixture data.
+kind for each. Capture each one from the reviewed commit, and always use fake
+data or gc-toolkit-only data. A capture is prevented from reaching live data.
 
 ## Scope
 
@@ -49,9 +49,10 @@ the script's start path opens a row's drill panel. The panel's own reads go to
 the supervisor and fail against a fixture, and the panel still offers its
 actions.
 
-A running helm service is out of a capture's reach, because a capture refuses a
-`--base-url` on this host, and its verbs file, dispatch and close visits in the
-live city. The verdict says that the board shows fixture data.
+Capture the board through `helm-fixture`, never through a running helm
+service. A capture refuses a `--base-url` that any gc-toolkit server answers,
+and the service's verbs act on the live city. The verdict says that the board
+shows fixture data.
 
 ## Reports a command prints
 

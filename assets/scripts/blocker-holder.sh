@@ -8,7 +8,11 @@
 #   stuck <bead>         no automated actor holds any live blocker, and this one
 #                        is not routed to a person, so nothing the city runs
 #                        will clear it (blocked, cause blocker)
-#   none                 no live blocker, or only blockers routed to a person
+#   none                 no live blocker, or only blockers a person holds
+#
+# A person holds a blocker routed to a person (gc.routed_to=human), and a human
+# gate, by bd-lib.sh's rule (human_gate): the gate is the hold of the person who
+# must clear it, so it is neither an actor's nor stuck.
 #
 # A live blocker is one whose status is open, in_progress, blocked, deferred,
 # hooked or pinned, a missing status reading open. An automated actor holds it
@@ -33,6 +37,8 @@ PROG="blocker-holder"
 _bh_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=run-lib.sh
 . "${GC_RUN_LIB:-$_bh_dir/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 2; }
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bh_dir/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -63,16 +69,16 @@ rows=$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)
 printf '%s' "$rows" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null 2>&1 \
   || { echo "$PROG: the blockers of $anchor did not read as a list" >&2; exit 2; }
 
-# One line per live blocker not routed to a person: its id, a tab, then the
-# route or claim that marks it, or nothing when neither does.
-marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" '
+# One line per live blocker no person holds: its id, a tab, then the route or
+# claim that marks it, or nothing when neither does.
+marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ"'
   ($live | split(",")) as $ls
   | .[]
   | ((.status // "open") | tostring | ascii_downcase) as $st
   | select($ls | index($st))
   | (((.metadata // {})["gc.routed_to"] // "") | tostring) as $r
   | ((.assignee // "") | tostring) as $a
-  | select($r != "human")
+  | select($r != "human" and (human_gate | not))
   | [ ((.id // "") | tostring),
       (if $r != "" then "routed to " + $r
        elif $a != "" and $a != "human" then "claimed by " + $a

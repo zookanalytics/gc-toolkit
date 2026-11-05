@@ -219,7 +219,7 @@ echo "cycle-recycle hook: pack drift"
 PACK="$SANDBOX/city/rigs/gc-toolkit"
 WATCHED="agents/refinery/prompt.template.md agents/deacon/prompt.template.md
 formulas/mol-refinery-patrol.toml formulas/mol-deacon-patrol.toml
-template-fragments/visit-close.template.md template-fragments/scratch-reclaim.template.md"
+template-fragments/human-gate-withdraw.template.md template-fragments/scratch-reclaim.template.md"
 UNWATCHED="docs/notes.md overlays/cycle-recycle/.claude/settings.json"
 epoch_stamp() { date -d "@$1" '+%Y%m%d%H%M.%S' 2>/dev/null || date -r "$1" '+%Y%m%d%H%M.%S'; }
 # age <file> <seconds ago> — a negative age stamps the file in the future.
@@ -290,7 +290,7 @@ age_pack
 
 # --- 7. a watched file changed after the first prompt: the turn's end recycles -
 for f in agents/refinery/prompt.template.md formulas/mol-refinery-patrol.toml \
-         template-fragments/visit-close.template.md; do
+         template-fragments/human-gate-withdraw.template.md; do
     age "$PACK/$f" 60
     run_drift
     eq "$(drift_verdict)" "recycled" "a turn's end recycles when $f changed"

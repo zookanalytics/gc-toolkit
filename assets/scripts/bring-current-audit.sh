@@ -12,8 +12,8 @@
 # Every message about the round is rendered here from that stored record: the
 # round's account, collapsed in the triage verdict posted on the PR; the ask
 # that opens that verdict and the note on a dismissed approval when the ruling
-# lifts the approval; and the visit that asks for a decision the worker could
-# not make. None is composed from diff shapes alone.
+# lifts the approval; and the human gate that asks for a decision the worker
+# could not make. None is composed from diff shapes alone.
 #
 # AN ENTRY. metadata.conflict_audit on the bead the worker holds is a JSON array
 # of entries, one per path:
@@ -29,8 +29,8 @@
 #
 # A QUESTION. When a conflict cannot be resolved without guessing, the worker
 # pushes nothing. `ask` records the question as metadata.conflict_question and
-# files a visit on the anchor carrying the entries so far and the question. The
-# branch stays as it was last reviewed.
+# files a human gate on the anchor carrying the entries so far and the question.
+# The gate holds the anchor's merge. The branch stays as it was last reviewed.
 #
 # Usage:
 #   bring-current-audit.sh add --bead <id> --path <file> --collided <text>
@@ -42,7 +42,7 @@
 #   bring-current-audit.sh render --anchor <id> --as comment|dismissal|ask
 # add records or replaces the entry for <file>. show prints the bead's entries,
 # or the anchor's stored record, as JSON. anchor prints the bead `ask` files its
-# visit on. render prints a message composed from the anchor's record; ask
+# gate on. render prints a message composed from the anchor's record; ask
 # prints nothing when the ruling keeps the approval.
 # Sourced (BASH_SOURCE != $0), it defines its functions and runs nothing, for
 # bring-current-guard.sh.
@@ -220,7 +220,7 @@ bca_render_record() { # <record-json> <as>
       end' 2>/dev/null
 }
 
-# The visit that asks for a decision: a title line, then the body.
+# The human gate that asks for a decision: a title line, then the body.
 bca_render_question() { # <audit-json> <question-json> <bead> <anchor> <branch> <target> <head> <pr-number> <pr-url>
   jq -rn --argjson audit "$1" --argjson q "$2" --arg bead "$3" --arg anchor "$4" \
     --arg branch "$5" --arg target "$6" --arg head "$7" --arg num "$8" --arg url "$9" "$BCA_RENDER_DEF"'
@@ -235,7 +235,7 @@ bca_render_question() { # <audit-json> <question-json> <bead> <anchor> <branch> 
       + (if ($e | length) > 0
          then "Resolved before the stop, not pushed:\n" + ($e | map("- `\(.path)`, \(.rating). Decided: \(.resolution | sentence)") | join("\n"))
          else "Nothing else was resolved before the stop." end) + "\n\n"
-      + "Your call: answer the question here, and record the answer in the notes of \($bead). Then release it: when \($bead) waits on this visit, closing the visit re-slings it, and when it is parked for a person, route it back to the polecat pool. The worker that resumes it merges \($target) in again with your answer."' 2>/dev/null
+      + "Your call: answer the question here, and record the answer in the notes of \($bead). Then release it: when \($bead) waits on this gate, clearing the gate re-slings it, and when it is parked for a person, clear the gate and route it back to the polecat pool. The worker that resumes it merges \($target) in again with your answer."' 2>/dev/null
 }
 
 bca_usage() {
@@ -330,18 +330,19 @@ bca_cmd_ask() {
   audit=$(bca_meta_json "$row" conflict_audit)
   printf '%s' "$audit" | jq -e 'type == "array"' >/dev/null 2>&1 || audit='[]'
   msg=$(bca_render_question "$audit" "$q" "$bead" "$anchor" "$branch" "$target" "$head" "$num" "$url")
-  [ -n "$msg" ] || { echo "bring-current-audit: the visit could not be composed; nothing filed" >&2; return 1; }
+  [ -n "$msg" ] || { echo "bring-current-audit: the question could not be composed; nothing filed" >&2; return 1; }
   key="bring-current-question.$bead"
-  # The visit is what the caller waits on, so it has to be open. escalate.sh
-  # files nothing for a key a person closed moot or benign inside its verdict
-  # window, and an earlier round's question shares this key, so the window is
-  # off.
-  if ! GC_ESCALATE_VERDICT_WINDOW=0 "$BCA_DIR/escalate.sh" --subject "$anchor" --key "$key" --message "$msg"; then
-    echo "bring-current-audit: the visit on $anchor did not land; the question is recorded on $bead, and nothing is held until a visit asks it" >&2
+  # The human gate is what the caller waits on, so it has to be open. Each
+  # round's question is an event of its own, though an earlier round's shares
+  # this key, so the call declares no quiet window. The gate blocks the anchor,
+  # which holds its merge, and the caller's await-ruling.sh gives the rework
+  # bead its own edge onto it.
+  if ! "$BCA_DIR/human-gate.sh" --subject "$anchor" --key "$key" --message "$msg" >/dev/null; then
+    echo "bring-current-audit: the gate on $anchor did not land; the question is recorded on $bead, and nothing is held until a gate asks it" >&2
     return 1
   fi
   title="${msg%%$'\n'*}"
-  echo "bring-current-audit: visit filed on $anchor ($key): $title"
+  echo "bring-current-audit: human gate filed on $anchor ($key): $title"
 }
 
 bca_cmd_show() {

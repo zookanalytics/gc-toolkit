@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -15,13 +14,13 @@ import (
 // `derive --anchor ID` prints one of working|merging|needs-review|needs-attention
 // and exits 0; 1 on a usage error; 2 when a read did not resolve, so a caller
 // leaves the labels as they are rather than flipping them blind. With --json it
-// prints one object instead, {"status": <that value>, "held": [<visit, review,
+// prints one object instead, {"status": <that value>, "held": [<gate, review,
 // blocked>]}, the held values in prstatus.Held's order and an empty array when
 // nothing holds the PR. pr-status-label.sh calls this and has no derivation of
 // its own, and pr-status-label.test.sh is the acceptance bar. The anchor read
 // goes through gcbd.Show (daemon-first against the supervisor API, falling back
-// to `gc bd`); the in-flight set, the open visits and the anchor's blockers read
-// through `gc bd`. The cli tests pin GC_NO_API, so every read answers from the
+// to `gc bd`); the in-flight set and the anchor's blockers read through `gc
+// bd`. The cli tests pin GC_NO_API, so every read answers from the
 // same `gc bd` stub the shell acceptance drives.
 //
 // The values are decided by prstatus.Derive and prstatus.Held, the package
@@ -57,8 +56,8 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 // returns beside it: the holds, the dated posture, the machine verdict and its
 // blocked cause, the count of review threads waiting on the city's answer, and
 // the draft-stage markers off the anchor, the size of the anchor's in-flight
-// set, whether an open visit covers the anchor or its work, and whether a
-// blocker it waits on is a person's.
+// set, whether an open human gate blocks the anchor, and whether a blocker it
+// waits on is a person's.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	asJSON := false
@@ -115,22 +114,11 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	openVisit, ok := openVisitCovers(client, anchor)
-	if !ok {
-		fmt.Fprintf(stderr, "%s: could not read the open visits on %s; cannot derive a status\n", prStatusProg, anchor)
-		return 2
-	}
-	// A visit on the anchor already holds the PR, so the visits on its work are
-	// read only when none covers the anchor itself.
-	workVisit := false
-	if !openVisit {
-		if workVisit, ok = workOpenVisit(client, rows); !ok {
-			fmt.Fprintf(stderr, "%s: could not read the open visits on the work in flight on %s; cannot derive a status\n", prStatusProg, anchor)
-			return 2
-		}
-	}
-
-	blockers, ok := client.DepList(anchor, "--direction=down", "-t", "blocks", "--json")
+	// The anchor's blockers, one read, answer both holds a person owes: an open
+	// human gate among them, and a live blocker routed to a person or a decision.
+	// A conversation about the anchor tracks it and blocks nothing, so it is not
+	// among them.
+	blockers, ok := client.DepList(anchor, "--type", "blocks", "--json")
 	if !ok {
 		fmt.Fprintf(stderr, "%s: could not read the blockers of %s; cannot derive a status\n", prStatusProg, anchor)
 		return 2
@@ -139,8 +127,7 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	facts := prstatus.Facts{
 		MergeHold:           bead.Meta("merge_hold"),
 		RebaseHold:          bead.Meta("rebase_hold"),
-		OpenVisit:           openVisit,
-		WorkVisit:           workVisit,
+		OpenHumanGate:       openHumanGate(blockers),
 		PersonBlocker:       personBlocker(blockers),
 		PRPosture:           bead.Meta("pr_posture"),
 		PRMachine:           bead.Meta("pr.machine"),
@@ -171,20 +158,19 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// workOpenVisit reports whether an open visit covers the PR's own work among
-// rows, the anchor's in-flight set: a row prstatus.IsWork accepts, by the rule
-// the helm board applies to the same set. A row with no status reads open. ok is
-// false when a visit read does not answer.
-func workOpenVisit(client *gcbd.Client, rows []gcbd.Bead) (covered, ok bool) {
-	for i := range rows {
-		if !prstatus.IsWork(rows[i].Meta("task_kind"), rows[i].StatusLowerOr("open")) {
-			continue
-		}
-		if covered, ok := openVisitCovers(client, rows[i].ID); !ok || covered {
-			return covered, ok
+// openHumanGate reports whether an open human gate is among blockers, the beads
+// the anchor's blocks edges name: a bead whose issue_type is gate and whose
+// await_type is human, in a status other than closed. That is the one reader
+// rule bd_human_gates applies (assets/scripts/bd-lib.sh) and the finalize gate
+// (clause_no_open_human_gate in assets/scripts/finalize-gate.sh) holds the merge
+// on.
+func openHumanGate(blockers []gcbd.Bead) bool {
+	for i := range blockers {
+		if blockers[i].IsHumanGate() && blockers[i].StatusLowerOr("open") != "closed" {
+			return true
 		}
 	}
-	return false, true
+	return false
 }
 
 // personBlocker reports whether a live blocker among blockers, the beads the
@@ -203,72 +189,4 @@ func personBlocker(blockers []gcbd.Bead) bool {
 		}
 	}
 	return false
-}
-
-// openVisitCovers reports whether an open or in_progress visit covers subject by
-// the shared visit identity. It reads from the subject's end, with the two
-// probes clause_no_open_visit in assets/scripts/finalize-gate.sh makes, so the
-// cost follows the subject rather than the number of open visits in the store.
-// The first read lists the beads whose tracks edge names the subject, and a
-// visit among them covers it. The second lists the beads stamped with the
-// subject (gc.continuation_group), and a visit among them covers it only when it
-// has no tracks edge, which its own edge rows tell (visitCovers). open and
-// in_progress are the statuses the finalize gate holds on: a visit waiting for a
-// person, and one a sitting is holding. ok is false when either read does not
-// answer, so the caller derives nothing rather than reading a failed read as no
-// visit.
-func openVisitCovers(client *gcbd.Client, subject string) (covered, ok bool) {
-	trackers, ok := client.DepList(subject, "--direction=up", "-t", "tracks", "--json")
-	if !ok {
-		return false, false
-	}
-	for i := range trackers {
-		if isOpenVisit(&trackers[i]) {
-			return true, true
-		}
-	}
-	stamped, ok := client.List(
-		"--metadata-field", "gc.continuation_group="+subject,
-		"--status", "open,in_progress",
-		"--limit", "0",
-		"--json",
-	)
-	if !ok {
-		return false, false
-	}
-	for i := range stamped {
-		if isOpenVisit(&stamped[i]) && visitCovers(&stamped[i], subject) {
-			return true, true
-		}
-	}
-	return false, true
-}
-
-// isOpenVisit reports whether b is a task_kind=visit bead that is open or
-// in_progress. A row with no status reads open, as the finalize gate reads it.
-func isOpenVisit(b *gcbd.Bead) bool {
-	if b.Meta("task_kind") != "visit" {
-		return false
-	}
-	switch b.StatusLowerOr("open") {
-	case "open", "in_progress":
-		return true
-	}
-	return false
-}
-
-// visitCovers reports whether visit v covers subject by the shared visit
-// identity, visit_covers in assets/scripts/visit-identity.sh: the subject its
-// tracks edge names, or, for a visit with no tracks edge, its
-// gc.continuation_group stamp. A stamp never widens a non-empty edge set, so a
-// stale stamp beside an edge to another bead does not cover subject.
-func visitCovers(v *gcbd.Bead, subject string) bool {
-	if subject == "" {
-		return false
-	}
-	tracked := v.DependsOn("tracks")
-	if len(tracked) == 0 {
-		return v.Meta("gc.continuation_group") == subject
-	}
-	return slices.Contains(tracked, subject)
 }
