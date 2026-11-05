@@ -790,7 +790,6 @@ have "the step table sends a sitting iterating on a document to its skill" '**St
 have "…by name" '`converse-iterate-document` |' "$PROMPT"
 have "the ruling line names the block the worker starts from" 'to the scaffold in the notes of <bead>, the block headed ## Current state (<date>)' "$ITERATE"
 have "…and the sign-off files the rework" '--route human --no-wait --rework' "$ITERATE"
-have "every section of the document gets a verb" 'keep, cut, rewrite or add' "$ITERATE"
 have "a self-review that starts fresh finds the block through the worker's notes" "so your work bead's notes name this block" "$ITERATE"
 have "a block on another bead leaves the next sitting its name" "name that bead in the subject's record" "$ITERATE"
 fenced_block "$ITERATE" '--append-notes "$SCAFFOLD"' | fill_block >"$CH/block"
@@ -805,6 +804,12 @@ for sh_ in $shells; do
         ok "($sh_) converse-iterate-document: the block lands dated, carrying the worker's rules and no open question"
     else
         bad "($sh_) converse-iterate-document: the block lands dated, carrying the worker's rules and no open question" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    if [ "$rc" -eq 0 ] && grep -qxF 'It gives the direction of each change, and the words are yours to write, except words it marks exact, which go in as they stand.' "$CH/notes" \
+        && grep -qxF 'A section it does not name stays as it is, apart from what a WHOLE DOCUMENT line changes in it.' "$CH/notes"; then
+        ok "($sh_) converse-iterate-document: the block leaves the worker the words, and a section it does not name as it is"
+    else
+        bad "($sh_) converse-iterate-document: the block leaves the worker the words, and a section it does not name as it is" "exit $rc, notes: $(head -c 400 "$CH/notes")"
     fi
     sed 's/^x$/the `echo ran` and $HOME stay as written/' "$CH/block" >"$CH/literal-block"
     rc=$(run_chain "$run" "$CH/literal-block")

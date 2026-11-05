@@ -33,20 +33,42 @@ the model.
   do one structured rework. It has run cleanly twice. I recommend adding it to the
   converse sittings' standing instructions once native gates land." The operator
   answered "Sure".
+- The review of this PR, #1394, on 2026-11-05 (review 5788158846). On the rule that
+  a rewrite quotes the operator's words: "Unless explicitly offered as it should say
+  exactly XYZ, operator guidance is usually directional substance vs quotes to be
+  taken directly. Your goal is to take the operators guidance, push back where you
+  disagree then ultimately deliver something better than either could do alone,
+  while ensuring the operators direction is captured." On the template's keep line:
+  "Not sure we need to say all keep areas". On its rewrite line: "Operator and
+  converse won't settle exact wording, except where exact wording is super
+  important like say a goal", and "for something like change all references to X
+  to be Y, that won't be specific lines but an overall guidance to the document."
 
-Everything below that is not in quotes is this bead's reading, and none of it has
-been ruled on.
+Everything below that is not in quotes is this bead's reading. The review sets the
+direction of the scaffold's form, and the rest has not been ruled on.
 
 ## Decisions
 
-**The scaffold is a `## Current state` block with no open question.** It gives each
-section of the document a verb, carries the substance of each rewrite, and opens
-with the rules the worker follows for what it leaves open. It composes the block
+**The scaffold is a `## Current state` block with no open question.** It names only
+what changes, by section or once for the whole document, and gives each change the
+direction and substance the worker writes the text from, with exact words only
+where the wording itself was settled, as for a goal. It opens with the rules the
+worker follows for what it leaves open, the wording included. It composes the block
 the records skill already defines, whose newest copy a sitting already primes from.
 The table under Evidence says what showed the need for each part. Cost: a sitting
-writes more at the end, up to about 8 KB in the runs below. The operator's sketch
-says "file", and this is a block in the subject's notes, because a sitting writes
-no files.
+writes more at the end, up to about 8 KB in the runs below. The block sits in the
+subject's notes because a sitting writes no files, and the notes are what the
+rework's reviewers and the next sitting read.
+
+**A sitting designs the document with the operator.** It reads the operator's
+guidance for its intent, pushes back where it disagrees, and proposes what would
+serve the direction better, so a ruling records the direction it sets, and a
+quote of the operator is evidence of the ruling, not text for the document. This
+is the review's direction, put in the words the pack's standards already use for a
+sketch and a ruling: a sketch "shows what they want, not the shape it must take"
+(the `work-quality-base` fragment), and a standing ruling is read "for its intent"
+(the `operator-profile` fragment). Cost: the worker writes more of the text, so a
+reading of a direction is a choice the worker lists for the re-review.
 
 **The big picture lives on the subject's notes.** Dated rulings land as they are
 made, and the newest block says what is in force. A spec the rework maintains
@@ -64,7 +86,7 @@ and the options for that were:
 
 | Home | When it loads | Result |
 |---|---|---|
-| Text in the converse prompt, the literal reading of "standing instructions" | Every sitting in every rig, at every turn | 25 of the 246 conversations filed across the city's stores since 2026-10-15, as visit beads then, ended in a ruling rework on a design or docs PR, 13 of 104 of them in this rig's store, so most sittings would carry it unused |
+| Text in the converse prompt | Every sitting in every rig, at every turn | 25 of the 246 conversations filed across the city's stores since 2026-10-15, as visit beads then, ended in a ruling rework on a design or docs PR, 13 of 104 of them in this rig's store, so most sittings would carry it unused |
 | A section of `converse-continue` | Every sitting that reaches step 8 | The same, a little later |
 | An option in the `prs` or `records` skill | Any role that loads them | The loop is a sitting's, and those skills' descriptions keep converse's vocabulary out |
 | A skill the prompt's step table names | Only when a sitting iterates on a document | Chosen |
@@ -74,15 +96,21 @@ reworks whose `source_ruling_bead` names one, and a PR counts as design or docs 
 it changes only markdown, or, like PR #1328, a page with its spec's measuring script.
 Nothing has been filed in a conversation's shape under any other title.
 
-The choice departs from the literal words the operator answered "Sure" to, and it
-follows what the operator wrote on PR #1375 on 2026-11-01, review 5726471751, about
-other text: "I'm not sure this is very token efficient, not so much in content, but
-in where and when it is loaded." Cost: one table row, 205 bytes in each of the three
-converse renders, and one short description line in every agent's skill list.
+This bead reads the operator's "Sure" as direction to make the loop part of what
+every sitting follows. A skill the prompt's step table names does that, and loads
+only where the loop applies, while text in the prompt would cost every sitting
+about 9.5 KB at every turn. It also fits what the operator wrote on PR #1375 on
+2026-11-01, review 5726471751, about other text: "I'm not sure this is very token
+efficient, not so much in content, but in where and when it is loaded." Cost: one
+table row, 205 bytes in each of the three converse renders, one short description
+line in every agent's skill list, and a load that depends on a sitting recognizing
+the case, which the load probe below measures.
 
-**The word stays "scaffold".** It is the operator's. The pack also says "review
-scaffolding" and has `scaffolding-sweep.sh`, which name something else, so the skill
-says what a scaffold is where it first uses the word.
+**The block is called the scaffold.** The word says what the block is to the
+worker: the frame of decisions the text is built on, with the words left to the
+worker. The pack also says "review scaffolding" and has `scaffolding-sweep.sh`,
+which name something else, so the skill says what a scaffold is where it first
+uses the word.
 
 ## Evidence
 
@@ -112,12 +140,13 @@ sittings ran on converse-fable.
 
 | The block carries | What showed the need |
 |---|---|
-| A verb for every section, and a closed set that says so | The first scaffold named the agent class by listing four verbs and did not name `review`. The rework gave `gctk review checks` the agent class. All four review checks approved it, and the audit that opened the next sitting found it, the one deviation in ten items. |
-| The substance of each rewrite, an accepted proposal's text included | The second scaffold's edit 8 named the naming rule tersely. Its worker said "The naming rule (edit 8) needs the operator's exact wording before I apply it across the verb table" and read the sitting's transcript, whose path its own transcript names 27 times. The first scaffold's worker's names it none. |
-| A rule with its test, run on every row | The naming rule's test, "does a native call exist this could be mistaken for, and would its answer ever differ?", let the worker check each verb against `gc --help` and bd's command list and rename one the sitting had not named. |
-| Lines that decide | The second scaffold's edit 2 ended "or defend the residual explicitly", and edit 4 "Reclass or defend each". The worker made those calls, and its self-review then had to correct the window it wrote for edit 2. |
-| Facts to check, not to transcribe | The first scaffold copied "three changed live answers" from an old note, and the design had two. The accepted naming proposal said `arm` reuses gc's word, and Gas City has no dispatch primitive of that name. Both workers re-derived these and said so on the anchor. |
-| Each choice of form, listed on the bead | Both workers listed theirs on the anchor. A review reads them there, because `mol-review` prints `gc bd show` of the anchor as it gathers. |
+| Only what changes, with a keep only where a worker could reasonably change the section | On this PR the operator wrote "Not sure we need to say all keep areas". A keep line names no change, and one rule, that a section the block does not name stays as it is, covers every such section at once. |
+| A closed set that says so | The first scaffold named the agent class by listing four verbs and did not name `review`. The rework gave `gctk review checks` the agent class. All four review checks approved it, and the audit that opened the next sitting found it, the one deviation in ten items. |
+| The direction and substance of each change, an accepted proposal's substance included, and exact words only where they were settled | The second scaffold's edit 8 named the naming rule tersely. Its worker said "The naming rule (edit 8) needs the operator's exact wording before I apply it across the verb table" and read the sitting's transcript, whose path its own transcript names 27 times. The first scaffold's worker's names it none. What that worker lacked was the rule's substance. On this PR the operator called their guidance "directional substance vs quotes to be taken directly", with exact wording settled only "where exact wording is super important like say a goal". |
+| A change across the whole document as one line, and a test for a rule that needs one | The naming rule's test, "does a native call exist this could be mistaken for, and would its answer ever differ?", let the worker check each verb against `gc --help` and bd's command list and rename one the sitting had not named. A rename needs no test, and on this PR the operator called one "an overall guidance to the document", not specific lines. |
+| Lines that settle the direction and leave the words | The second scaffold's edit 2 ended "or defend the residual explicitly", and edit 4 "Reclass or defend each". The worker made those calls, and its self-review then had to correct the window it wrote for edit 2. The words are the worker's, because on this PR the operator asked to "leave open the ability for a little interpretation". |
+| Facts to check, not to copy | The first scaffold copied "three changed live answers" from an old note, and the design had two. The accepted naming proposal said `arm` reuses gc's word, and Gas City has no dispatch primitive of that name. Both workers re-derived these and said so on the anchor. |
+| Each choice of form or reading, listed on the bead | Both workers listed their choices of form on the anchor. A review reads them there, because `mol-review` prints `gc bd show` of the anchor as it gathers. With the words left to the worker, a direction read one way where it could be read another is a choice of the same kind. |
 | A stop through a human gate | The runs' blocks said a stop "says so on this bead". The polecat doctrine holds that a run ending needs a gate behind it, so the block says that. No run had to stop. |
 | Self-review against the block, with the worker's notes naming it | The first rework's self-review did this of its own accord. The block asks for it, because no review check compares a rework with its scaffold. A self-review session starts fresh and workspace-setup clears the `rejection_reason` that names the block, so it finds the block through the worker's notes. Both workers had written that note unasked. |
 | The commit its line references read at | Both scaffolds named it, and the audit's line references read at the rework's head. |
@@ -176,10 +205,11 @@ runs.
 N2 is the one miss. It is a document with one plain change, and the skill says such
 a ruling needs none of this. All nine N2 runs took that path whether or not they
 loaded it: no block, and where a run reached the sign-off, a one-line ruling. So a
-load there costs one read of the skill's 7.8 KB and changes nothing.
+load there cost one read of the skill, 7.8 KB then and 9.5 KB now, and changed
+nothing.
 
 The load cases ran on the skill's first two texts, and the description and table
-row that decide a load are the same in all three texts below.
+row that decide a load have not changed since.
 
 The send case hands a sitting a five-section page and five settled rulings, one an
 accepted proposal and one in the operator's words, then "Yes, send it." Base is the
@@ -201,6 +231,12 @@ each gate's resolve reason, and workspace-setup clears `rejection_reason` once i
 merge concludes, so decisions carried only there leave the rework's record. This
 measures the sitting's half. The worker's half is the runs above.
 
+The answer to the review on this PR changed the block's form after these runs. It
+names only what changes, and each change carries its direction and substance, with
+exact words only where they were settled. That text is unprobed. The columns for a
+verb on every section and for accepted text with the operator's words measured the
+form it replaced, and the other three measure parts the current form keeps.
+
 ## Limits
 
 - **Four rounds on three documents, under one operator, within one week.** Nothing
@@ -214,6 +250,8 @@ measures the sitting's half. The worker's half is the runs above.
   first turn to the last, though most of that was the sitting and its subagents
   working, at 10 and 5 operator turns.
 - **No worker below Opus was measured.** Opus is the tier the operator named.
+- **The current text is unprobed.** No run above has written the block's current
+  form or worked from it.
 - **A document at `pre_open_gate` has no route here.** `converse-rework.sh` refuses
   any anchor not at `pull_request`, and no run met this case.
 - **The rework route moves with the review rebuild.** `rework-child.sh`, which

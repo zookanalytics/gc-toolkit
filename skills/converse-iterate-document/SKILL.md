@@ -9,7 +9,7 @@ A sitting writes no files, so it changes a document by sending work. A worker
 sent on a short ruling makes every call the ruling left open, the operator
 redlines those calls at the next gate, and each round costs a whole re-review.
 So settle the calls here with the operator, item by item, and then send one
-rework that carries the decisions as content, for a worker to transcribe. The
+rework that carries the decisions, for a worker to write the text from. The
 block of notes that carries them is the scaffold.
 
 This applies when the operator wants a document's content changed and more than
@@ -26,6 +26,14 @@ found, at the top of every call below.
 
 ## Settle it, one item at a time
 
+You and the operator design the document together. Their guidance shows what
+they want, not the shape it must take, so read it for its intent, as you read a
+sketch or a standing ruling, and take their words as the text only where they
+offer them as exact, as for a goal. Bring your own view, push back where you
+think their direction is wrong, and propose what would serve it better, so the
+document beats what either of you would write alone and still carries their
+direction.
+
 - **Start from a read of the document.** Send it to a read-only subagent where
   one is offered, so the conclusions reach the thread and the file does not. Ask
   for findings with line references at the commit it read. When the subject's
@@ -39,11 +47,12 @@ found, at the top of every call below.
   what comes next, and you say so when the whole has moved, so the operator can
   stay on the item in front of them.
 - **Check a claim before you offer it.** A proposal the operator accepts becomes
-  a decision the worker transcribes. Read what another system does or cannot do
-  at a named commit, and send a call the document rests on to a subagent charged
-  with breaking it.
+  a decision the rework carries. Read what another system does or cannot do at a
+  named commit, and send a call the document rests on to a subagent charged with
+  breaking it.
 - **Record each ruling on the subject when it lands (step 6),** opening with
-  `$(date -u +%Y-%m-%d)`, in the operator's words where they gave them.
+  `$(date -u +%Y-%m-%d)`: the direction it sets and why. A quote of the operator
+  there is the evidence of what they ruled, not text for the document.
 
 ## Where the big picture lives between sittings
 
@@ -65,16 +74,26 @@ scaffold, the rework's whole brief. A worker who reads only the block, the
 document and the sources the block cites must be able to finish with no call the
 operator would want to make. Read each line that way:
 
-- **Every section gets a verb:** keep, cut, rewrite or add. A closed set says it
-  is closed, and says what becomes of whatever it does not name.
-- **A rewrite carries its substance:** what the section must say, with the
-  operator's words quoted where they gave them. Copy an accepted proposal's text
-  in, because "as recommended" sends the worker to a transcript.
-- **A rule states its test.** A rule for the whole document names the test each
-  row or sentence must pass and a line to copy the register from, and the worker
-  runs it on each one.
-- **A line decides.** "Consider", "as appropriate" and "X or Y" with both open
-  hand the worker a call. Take that call back to the operator.
+- **Name only what changes:** cut, rewrite or add, by section or once for the
+  whole document. The block's rules keep every other section as it is, so name a
+  section to keep only where a worker could reasonably change it, such as one a
+  whole-document line seems to reach, or one the operator kept against a
+  proposal to cut it.
+- **A closed set says it is closed,** and says what becomes of whatever it does
+  not name.
+- **A change carries its direction:** what the section must say and why, with
+  enough substance that the worker needs no transcript. The words are the
+  worker's, except words the operator offered as exact, as for a goal, which go
+  in quoted and marked exact. An accepted proposal goes in by its substance,
+  because "as recommended" sends the worker to a transcript, and by its text only
+  where the operator accepted that text.
+- **A change across the whole document is one line** under `WHOLE DOCUMENT`,
+  such as a term renamed everywhere, with no line references. A rule the worker
+  applies by judgment adds the test each row or sentence must pass, and a rule of
+  style a line to copy the register from.
+- **A line settles its direction.** It can leave the words to the worker, but
+  not what the document decides. "Consider", "as appropriate" and "X or Y" with
+  both open hand the worker that call, so take it back to the operator.
 - **A fact nobody has settled goes under `VERIFY`,** with where to read it and
   where the document states it.
 
@@ -93,16 +112,18 @@ $(cat <<'BLOCK'
 This block is the rework's scaffold: decisions, not questions, settled against <the files> at <the commit>.
 Where a file's text and this block disagree, this block wins.
 Its facts are yours to check: re-derive each count, line reference and claim about another system, and where one is false, write what is true and say so in a note on this bead.
-Where it names a thing and leaves the form open, take the smallest form that carries the decided content and list each choice in that note, because the re-review reads this bead.
+It gives the direction of each change, and the words are yours to write, except words it marks exact, which go in as they stand.
+A section it does not name stays as it is, apart from what a WHOLE DOCUMENT line changes in it.
+Where it leaves a form open, take the smallest form that carries the decision. In that note, list each form you chose and each direction you read one way where it could be read another, because the re-review reads this bead.
 Self-review starts fresh and reads the branch against this block, line by line, so your work bead's notes name this block.
 A point this block and its sources cannot settle goes to the operator through a human gate. Never decide it.
 
 Decisions in force:
-WHOLE DOCUMENT: <each rule, its test, and a line to copy the register from>
-<file>, <section> (lines <a>-<b>): keep
+WHOLE DOCUMENT: <each change that runs through the document, such as a rename, with a rule's test or register line where it needs one>
 <file>, <section> (lines <a>-<b>): cut
-<file>, <section> (lines <a>-<b>): rewrite. <what it must say>
-<file>, after <section>: add. <what it must say>
+<file>, <section> (lines <a>-<b>): rewrite. <its direction and substance, with any words settled as exact quoted and marked exact>
+<file>, after <section>: add. <the same, for the new text>
+<file>, <section> (lines <a>-<b>): keep. <only for a section a worker could reasonably change, and why it stays>
 OTHER FILES: <each other file the decisions reach, with the same verbs, and what the PR's summary must say>
 VERIFY: <each fact nobody has settled, where to read it, and where the document states it>
 
