@@ -263,9 +263,10 @@ and the change that fires the trigger deletes it.
 - The PR reminder's old marker. Trigger: no open PR carries one. Carried by
   tk-1tfzr71.45.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
-  files: the bare `superseded_by` key, the `gc.proactive_reaction=1` proof and
-  PR bodies older than the managed region, among others. Trigger: no store or
-  open PR holds the shape. Each goes with the member that rewrites its reader.
+  files: the bare `superseded_by` key, the
+  `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
+  among others. Trigger: no store or open PR holds the shape. Each goes with the
+  member that rewrites its reader.
 
 ### Doctrine restated per call site
 
