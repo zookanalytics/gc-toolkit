@@ -142,7 +142,7 @@ run
 eq "$RC" 0 "the block survives the refusal rather than aborting the sweep"
 hasnt "$LOG" 'bd create' "nothing is filed"
 eq "$LEDGER" "" "nothing is ledgered"
-has "$ERR" "escalate this wedged session" "and the block says to escalate instead"
+has "$ERR" "report this wedged session as a deacon finding through patrol-finding.sh" "and the block says to file a finding instead"
 
 echo
 echo "passed: $PASS   failed: $FAIL"

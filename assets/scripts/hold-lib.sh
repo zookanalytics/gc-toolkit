@@ -3,17 +3,21 @@
 # and by which blocker. Sourced, never executed.
 #
 # A bead is held when it, or one of its parent-child ancestors, has a `blocks`
-# edge onto a bead that is still open. A park and a prerequisite hold the same
-# way, so nothing here tells them apart. One kind of blocker is the exception: a
-# demand gate on an ancestor does not hold the bead, because the operator ruled
-# that waiting on their decision is not a hold. A demand gate is the gate
-# `gc-helm.sh demand` files, and it names the bead it gates in `gc.demand_for`.
-# A demand gate on the bead itself still holds it. A visit holds nothing, since
-# it links to its subject by a `tracks` edge.
+# edge onto a blocker that is still open. A park, a prerequisite and a human
+# gate all hold this way. A blocker on a parent is a wait of the whole, which
+# bd's cascade carries to every part, so a wait that belongs to one part goes on
+# that part (the shape law, docs/component-model.md). A conversation holds
+# nothing, since it links to its subject by a `tracks` edge.
 #
 # Where bd's own cascade decides the same question, this follows it: a blocker
 # that is closed or pinned holds nothing, and an ancestor that is closed or
-# pinned neither holds the bead nor passes on a hold from further up.
+# pinned neither holds the bead nor passes on a hold from further up. A human
+# gate is the one blocker read otherwise. It is open in every status but closed,
+# pinned included, by bd-lib.sh's rule of which human gates still hold
+# ($HUMAN_GATE_JQ). bd counts a pinned blocker as none, so bd can report a bead
+# ready while a pinned human gate holds it or one of its ancestors. A reader
+# that takes bd's readiness for a bead asks hold_holds_ready for the holds bd
+# did not count.
 #
 # A hold holds work that has not started. A bead whose work has started is in
 # flight: it carries a branch, a merge_result or a rejection_reason. A hold on
@@ -46,7 +50,10 @@
 # hold-lib.fixture.json, the cases a copy of it in another language must agree
 # with.
 #
-# A caller sources it beside itself:
+# A caller sources bd-lib.sh first, for the human gate rule the defs build on,
+# then this file, both from beside itself:
+#   # shellcheck source=bd-lib.sh
+#   . "$SCRIPTS_DIR/bd-lib.sh" || { echo "$PROG: cannot source bd-lib.sh" >&2; exit 1; }
 #   # shellcheck source=hold-lib.sh
 #   . "$SCRIPTS_DIR/hold-lib.sh" || { echo "$PROG: cannot source hold-lib.sh" >&2; exit 1; }
 # then builds the graph the predicate reads, and applies the defs the way the
@@ -69,8 +76,12 @@ scrub() { tr -d '\000-\037'; }
 # never asked for, so it holds the bead as an unread one does.
 HOLD_MAX_DEPTH=16
 
+# The defs build on bd-lib.sh's human gate rule, so without it the source fails
+# rather than let a pinned human gate hold nothing.
+[ -n "${HUMAN_GATE_JQ:-}" ] || { echo "hold-lib.sh: source bd-lib.sh first; a hold reads a human gate by its \$HUMAN_GATE_JQ" >&2; return 1; }
+
 # shellcheck disable=SC2016,SC2034  # jq source, its $names are jq's; read by the scripts that source this file
-HOLD_JQ='
+HOLD_JQ="$HUMAN_GATE_JQ"'
   # The edges a bead carries, as {to, type}, from either shape bd prints them
   # in: a listing gives {depends_on_id, type}, a show gives {id, dependency_type}.
   def hold_edges:
@@ -83,9 +94,9 @@ HOLD_JQ='
   def hold_blocker_ids: [ hold_edges[] | select(.type == "blocks") | .to ] | unique;
   # Closed or pinned. bd counts neither as a blocker, and its cascade stops at either.
   def hold_done: ((.status // "") | tostring) as $s | ($s == "closed" or $s == "pinned");
-  # A demand gate: filed for a pending operator decision, naming the bead it gates.
-  def hold_is_demand_gate:
-    (.metadata // {}) | if type == "object" then ((.["gc.demand_for"] // "") | tostring | test("[^[:space:]]")) else false end;
+  # Whether a blocker still holds: a human gate until a person resolves it
+  # (open_human_gate), any other blocker until it is done.
+  def hold_blocker_open: if human_gate then open_human_gate("") else (hold_done | not) end;
   # Why the bead is in flight, as a reader prints it, or "" when it is not.
   def hold_flight_why:
     (.metadata // {}) | if type == "object" then
@@ -129,26 +140,31 @@ HOLD_JQ='
                 | select(. as $i | $g | has($i) | not) ] | unique | join(",");
 
   # What holds this bead over $g, nearest first, one entry per blocker:
-  # {by, title, on, unread}. by is the blocker, on is the bead whose edge it
-  # sits on, and unread marks one with no row: a blocker on the bead itself
-  # that the store did not return, or an ancestor past the depth cap, which is
-  # its own entry with by and on both naming it. An absent ancestor, and an
-  # absent blocker on an ancestor, hold nothing.
+  # {by, title, on, unread, human}. by is the blocker, on is the bead whose edge
+  # it sits on, human marks a blocker that is a human gate, and unread marks one
+  # with no row: a blocker on the bead itself that the store did not return, or
+  # an ancestor past the depth cap, which is its own entry with by and on both
+  # naming it. An absent ancestor, and an absent blocker on an ancestor, hold
+  # nothing.
   def hold_holds($g):
     [ hold_chain($g) as $c
       | if $c.bead == null then
-          (if hold_absent($g; $c.id) then empty else {by: $c.id, title: "", on: $c.id, unread: true} end)
+          (if hold_absent($g; $c.id) then empty else {by: $c.id, title: "", on: $c.id, unread: true, human: false} end)
         elif $c.ancestor and ($c.bead | hold_done) then empty
         else
           ($c.bead | hold_blocker_ids[]) as $x | ($g[$x] // null) as $t
           | if $t == null then
-              (if $c.ancestor and hold_absent($g; $x) then empty else {by: $x, title: "", on: $c.id, unread: true} end)
-            elif ($t | hold_done) then empty
-            elif $c.ancestor and ($t | hold_is_demand_gate) then empty
-            else {by: $x, title: (($t.title // "") | tostring), on: $c.id, unread: false} end
+              (if $c.ancestor and hold_absent($g; $x) then empty else {by: $x, title: "", on: $c.id, unread: true, human: false} end)
+            elif ($t | hold_blocker_open | not) then empty
+            else {by: $x, title: (($t.title // "") | tostring), on: $c.id, unread: false, human: ($t | human_gate)} end
         end ]
     | reduce .[] as $h ([]; if any(.[]; .by == $h.by) then . else . + [$h] end);
   def hold_held($g): (hold_holds($g) | length) > 0;
+  # What holds a bead bd reports ready: the human gates on it and on its
+  # ancestors. A reader that takes the readiness bd reports takes the answer bd
+  # gives for every other blocker, an edge bd cannot resolve included, and bd
+  # counts a pinned human gate as no blocker at all.
+  def hold_holds_ready($g): [ hold_holds($g)[] | select(.human) ];
 
   # One hold as a reader prints it, for the bead whose id is $self.
   def hold_label($self):
@@ -157,17 +173,16 @@ HOLD_JQ='
        (if .unread then "\(.by) (unreadable)" elif .title != "" then "\(.by) \"\(.title)\"" else .by end)
        + (if .on != $self then " on ancestor \(.on)" else "" end)
      end) | gsub("[[:cntrl:]]"; " ");
-  # Every hold on this bead in one line: the nearest, then how many more. Empty
-  # when nothing holds it.
-  def hold_summary($g):
-    ((.id // "") | tostring) as $self | hold_holds($g) as $h
-    | if ($h | length) == 0 then ""
-      else ($h[0] | hold_label($self))
-           + (if ($h | length) > 1 then " (+\(($h | length) - 1) more)" else "" end) end;
+  # A list of holds on the bead whose id is $self, in one line: the nearest,
+  # then how many more. Empty for an empty list.
+  def hold_line($self):
+    if length == 0 then ""
+    else (.[0] | hold_label($self)) + (if length > 1 then " (+\(length - 1) more)" else "" end) end;
+  # Every hold on this bead in one line. Empty when nothing holds it.
+  def hold_summary($g): ((.id // "") | tostring) as $self | hold_holds($g) | hold_line($self);
 
   # When the last hold on this bead released: the latest close among the
-  # blockers on it and, unless it is in flight, on its ancestors. A demand gate
-  # on an ancestor never held it, so its close does not count. Null when none
+  # blockers on it and, unless it is in flight, on its ancestors. Null when none
   # has closed.
   def hold_released_at($g):
     [ hold_chain($g) as $c
@@ -176,7 +191,6 @@ HOLD_JQ='
       | ($c.bead | hold_blocker_ids[]) as $x | ($g[$x] // null) as $t
       | select($t != null)
       | select((($t.status // "") | tostring) == "closed")
-      | select(($c.ancestor and ($t | hold_is_demand_gate)) | not)
       | (($t.closed_at // "") | tostring) | select(. != "") ] | max;
 '
 

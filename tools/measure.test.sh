@@ -6,11 +6,12 @@
 # Covered: each end of a change counted on its own (a file a symlink or a
 # binary replaces, a symlink or a binary a file replaces, a file whose last line
 # repeats its replacing link's target, a plain edit), and the tree count leaving
-# symlinks and binaries out; --pr's size section, measured from the merge base,
-# with a row per subsystem the change touches, the kinds beside the pack, and
-# the lines the change adds to each file the deletion plan lists at the merge
-# base; --pr printing nothing for a merge base that does not carry the tool; and
-# the shape of every row in tools/deletion-plan.tsv.
+# symlinks and binaries out; the repository's own agent instructions counted as
+# docs; --pr's size section, measured from the merge base, with a row per
+# subsystem the change touches, the kinds beside the pack, and the lines the
+# change adds to each file the deletion plan lists at the merge base; --pr
+# printing nothing for a merge base that does not carry the tool; and the shape
+# of every row in tools/deletion-plan.tsv.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,6 +66,16 @@ echo "# the tree count leaves symlinks and binaries out"
 out=$("$SUT" HEAD)
 has "$out" "lines at $(git rev-parse --short HEAD)" "a single ref counts the tree at it"
 eq "$(kind "$out" code)" 10 "only the three text files count: 3, 4 and 3 lines"
+
+echo "# the repository's own agent instructions are docs, beside the pack"
+mkdir -p "$TMP/instructions" && cd "$TMP/instructions" && git init -q
+printf 'one\ntwo\n' > AGENTS.md
+printf '@AGENTS.md\n' > CLAUDE.md
+commit "instructions"
+out=$("$SUT" HEAD)
+eq "$(kind "$out" docs)" 3 "AGENTS.md and CLAUDE.md count as docs"
+eq "$(kind "$out" code)" 0 "…and neither counts as code"
+hasnt "$out" "unplaced" "…so no subsystem row is left to place them"
 
 echo "# --pr: the size section of a change, from its merge base"
 mkdir -p "$TMP/pr" && cd "$TMP/pr" && git init -q

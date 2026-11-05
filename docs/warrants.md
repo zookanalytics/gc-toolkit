@@ -85,6 +85,69 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
   drops its observe-only note.
 
+## Suspended store backup
+
+- **Covers.** `assets/scripts/suspended-store-backup.sh`,
+  `orders/suspended-store-backup.toml`.
+- **Stands in for.** A scheduled backup of a suspended rig's store that inherits
+  the city's endpoint, which Gas City's `mol-dog-backup` order would run if its
+  rig filter read the endpoint origin as well as the suspension.
+- **Evidence.** In `gastownhall/gascity`:
+  - `mol-dog-backup.sh` in the dolt pack it bundles
+    (`examples/bd/dolt/assets/scripts/`) keeps only the rigs whose `suspended` is
+    false. Its comment gives two reasons: a bd call restarts a suspended scope's
+    retired proxy and Dolt, and nothing writes to the scope. An `inherited_city`
+    rig has no rig-local Dolt (`docs/runbooks/managed-city-endpoints.md`), and the
+    design page says a rig sharing the city's proxy root is not stopped on its
+    own and that deliberate touches still reach a suspended rig
+    (`engdocs/design/beads-proxied-local-default.md`, "Suspension is quiescence").
+  - Nothing changes that filter from outside the script. `GC_BACKUP_DATABASES`
+    narrows among the scopes the order already chose. An `OrderOverride` sets an
+    order's scheduling fields and exec env, not its exec
+    (`docs/reference/config.md`). A city's local order of the same name replaces
+    the pack's entirely (`docs/tutorials/07-orders.md`, "Order layering"), which
+    would carry a copy of the whole backup.
+  - A rig-scoped order cannot do it, because the controller skips an order that
+    targets a suspended rig (`orderRigSuspended` in `cmd/gc/order_dispatch.go`).
+  - `gc dolt sync` pushes committed branches to a database's remotes, not to its
+    backup (the dolt pack's `commands/sync/run.sh`). The supervisor's store
+    maintenance snapshots only the city's store, and its backup runner is not
+    wired (`engdocs/contributors/dolt-maintenance.md`).
+  - A search of its issues and pull requests finds no report of a suspended rig's
+    store going without a backup. No pack in `gastownhall/gascity-packs` runs a
+    backup of its own: its one mention of `mol-dog-backup` is Gas Town's patrol
+    reporting that the order may have failed.
+  - No command gives a read of a rig's endpoint origin. `gc rig list --json` and
+    `gc rig status --json` leave it out (`RigListItem` in `cmd/gc/cmd_rig.go`,
+    `RigStatusRig` in `cmd/gc/cmd_status.go`). A writer's dry run prints it only
+    as preview text: `gc rig set-endpoint --dry-run`, whose `--json` form has no
+    field for it (`printRigEndpointDryRun` in `cmd/gc/cmd_rig_endpoint.go`,
+    `rigEndpointJSON` in `cmd/gc/management_json.go`), and the `use-managed` and
+    `use-external` verbs of `gc beads city` (`printCityEndpointDryRun` in
+    `cmd/gc/cmd_beads_city.go`). A doctor warning about a split store names it in
+    passing (`activeBDStore` in `internal/doctor/checks.go`). So the script
+    carries a copy of `beads_config_value` from the bd pack
+    (`examples/bd/assets/scripts/gc-beads-bd.sh`). The dolt pack and
+    `schemas/wisps-composite-index/common.sh` carry the same function because
+    they ship independently, and a test holds the copies equal
+    (`cmd/gc/gc_beads_bd_config_value_test.go`). That test does not reach this
+    copy.
+
+  In `gastownhall/beads`, auto-backup stays off on a shared server, and its
+  documentation says to run `bd backup` explicitly there
+  (`docs/cli-reference/backup.md`), which this pass does. Only `bd backup sync`
+  writes `.beads/dolt-backup-state.json` (`updateDoltBackupState` in
+  `cmd/bd/backup_dolt.go`), the file Gas City's `scanDoltBackupFreshness` and
+  `BulkDeleteSafe` judge (`internal/doctor/checks_bd_backup_freshness.go`).
+  `bd config get` reads a `gc.*` key from the store and not from the file
+  (`IsYamlOnlyKey` in `internal/config/yaml_config.go`), so it cannot report the
+  origin either.
+- **Verified.** 2026-10-31, at `gastownhall/gascity` main 6f5e14c2f,
+  `gastownhall/gascity-packs` main 0b0d96250 and `gastownhall/beads` main
+  6ebaacba8.
+- **Retires when.** `mol-dog-backup` backs up a suspended rig whose store inherits
+  the city's endpoint.
+
 ## Priority following
 
 - **Covers.** `assets/scripts/queue-priority.sh`,
@@ -147,6 +210,51 @@ shares only the word ([authority-map.md](authority-map.md)).
   rig's origin can sit under another owner's account and a city-scope agent
   owns every rig's origin. A token the rigs share also leaves each rig's agents
   free to write to the others' repositories, which the guard refuses.
+
+## Converse reap
+
+- **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
+- **Stands in for.** Ending a manual session that outlives the conversation it
+  held: a stop that did not take, a conversation another path closed, or one a
+  sitting cut short handed back to the operator's queue.
+- **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
+  work closes. It stays until it is closed or drained, and attaching wakes one
+  that sleeps (`cmd/gc/compute_awake_set.go` 432-440, 583-594 and 668-693).
+  No closer the controller runs on its own ends one because its work closed:
+  the stale-session closers exempt a session that has started its
+  conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
+  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3057, 3237 and
+  3500), and the core reaper prunes a session only once it has drained
+  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69 and 1402-1404).
+  A sitting drains itself once its conversation closes, and `gc-helm dismiss`
+  stops the session that held the conversation it closes, so nothing in the
+  controller ends a session either of them missed.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` 1e05ae624, beside a live
+  `gc session list --state closed`.
+- **Retires when.** Gas City ends a manual session once its claimed work has
+  closed.
+
+## Accept's lock
+
+- **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one
+  `flock` file per bead, `accept-<rig>-<bead>.lock`, under the city's
+  `.gc/runtime/packs/gc-toolkit`, held from Accept's live read to its last
+  write.
+- **Stands in for.** A launch that pours once per acceptance across a finished
+  run: a `gc sling` that refuses a second root under a caller's key whatever
+  the first root's status.
+- **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
+  <formula>` launches under a per-bead lock and refuses a second launch of the
+  formula at the bead, exiting 3, only while a root an earlier launch poured is
+  live (`internal/sling/sling_core.go` 544-724, the lock at 563 and the check at
+  589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
+  `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
+  `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
+  launch pours again. No `gc sling` flag checks an earlier root by its title or
+  by a key (`cmd/gc/cmd_sling.go` 145-160).
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main e2671dc4d.
+- **Retires when.** A Gas City launch can refuse a second root under a caller's
+  key whatever the first root's status.
 
 ## Prep worktree staging record
 

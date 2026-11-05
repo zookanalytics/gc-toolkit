@@ -67,13 +67,13 @@ gascity's run cancel
 `assets/scripts/run-cancel.sh` sends it, after resolving the run from the step
 this session holds, and the pack writes no member of the molecule. Nothing
 resumes a cancelled run, so a wait for a person sits on the work bead:
-`assets/scripts/await-ruling.sh` makes the work bead wait on the visit with a
-`blocks` edge and arms its re-sling, and closing the visit pours a fresh run.
-The re-sling fires only for an open, unassigned bead, so the script first
-releases a claim on the work bead that no live worker holds. The visit is
-filed with `escalate.sh`'s verdict window off, because a wait needs an open
-visit and the window files none for a situation a person already closed
-`moot` or `benign`.
+`assets/scripts/human-gate.sh` files a human gate that blocks it, and
+`assets/scripts/await-ruling.sh` reads that `blocks` edge back and arms the
+work bead's re-sling, so clearing the gate pours a fresh run. The re-sling
+fires only for an open, unassigned bead, so the script first releases a claim
+on the work bead that no live worker holds. A decline is an event of its run,
+so its gate is filed with no quiet window, and a situation a person answered
+`moot` or `benign` before is asked again.
 
 The refusal drains only after the cancel lands. A cancel that does not land
 leaves the step claimed by this session, and the step goes back to the pool
@@ -190,7 +190,7 @@ both at once:
   place at the destination path and never committed is still sitting there
   after the merge, and it is what the pack reads. It also blocks its own
   repair: `git merge --ff-only` refuses to clobber untracked files, so the
-  reconciler cannot advance the checkout and files an escalation visit instead,
+  reconciler cannot advance the checkout and files a human gate instead,
   leaving the rig behind *and* holding the stale draft. Because the working
   tree is the deployment, an untracked file **is** a deployed artifact,
   committed or not.
@@ -521,9 +521,9 @@ unverified rather than not at all.
 
 The witness addresses both scopes and resolves at both sites: it files a
 warrant to the city-scoped dog and reads the rig-scoped refinery's queue. Its
-recipes are the `warrant-file` and `refinery-stuck-escalate` blocks in
+recipes are the `warrant-file` and `refinery-stuck-handoff` blocks in
 `formulas/mol-witness-patrol.toml`, which `assets/scripts/witness-route.test.sh`
-and `assets/scripts/refinery-stuck-escalate.test.sh` execute as extracted from
+and `assets/scripts/refinery-stuck-handoff.test.sh` execute as extracted from
 the formula.
 
 ## Refresh procedure

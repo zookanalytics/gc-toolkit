@@ -20,7 +20,8 @@
 # The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
 # city cannot be reached, so a --serve command or a page that reads the city's
 # stores or its API fails there, and the clip shows the app on fixture data, or
-# shows the failure, and never live state.
+# shows the failure, and never live state. The one server outside the sandbox
+# a clip can reach is a rig's app that --base-url names, as below.
 #
 # It FAILS CLOSED. A host with no sandbox, a capture the sandbox refuses, a
 # missing engine, a browser that cannot be installed, a script the linter
@@ -40,9 +41,10 @@
 #                demo clip is an artifact, delivered to a PR, never committed.
 #   --serve-dir  serve a static directory with the engine's built-in server.
 #   --serve      spawn a dev-server command, wait for it, then tear it down.
-#   --base-url   drive a deployed preview. A URL on this host is refused,
-#                because a server already running here runs outside the
-#                sandbox.
+#   --base-url   drive a deployed preview, or an app that a worktree of a rig
+#                serves on this host. Any other server on this host is refused,
+#                as is the app of a rig that city.toml sets to
+#                app_reads_city = "true".
 #                Exactly one of --serve-dir / --serve / --base-url is required;
 #                it is how this rig's app is reached, the one rig-specific input.
 #   --port       port for --serve (default 5173) or --serve-dir (default: a free

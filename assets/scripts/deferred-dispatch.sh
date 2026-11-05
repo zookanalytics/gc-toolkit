@@ -6,15 +6,15 @@
 # records the intent as metadata; `reconcile` (orders/deferred-dispatch.toml,
 # cooldown, scope="rig") performs the sling once nothing holds the bead. A hold
 # is assets/scripts/hold-lib.sh's: an open `blocks` blocker on the bead or on
-# one of its parent-child ancestors, where a demand gate on an ancestor does not
-# count, because waiting on the operator's decision is not a hold, and where a
-# bead in flight (a branch, a merge_result or a rejection_reason) is held only
-# by its own blockers, because a hold holds work that has not started. The pass
-# reads `bd list --ready` as the fast path, and ALSO dispatches an open bead bd
-# holds unready that hold-lib finds not held: the is_blocked flag cascades DOWN
-# parent-child edges, so an armed epic child whose epic waits only on a demand
-# gate, or a re-dispatch of work in flight under a parked epic, never enters
-# `bd --ready`. A held arm stays intact and fires once its hold releases. Status
+# one of its parent-child ancestors, where a bead in flight (a branch, a
+# merge_result or a rejection_reason) is held only by its own blockers, because
+# a hold holds work that has not started. The pass reads `bd list --ready` as
+# the fast path, and ALSO dispatches an open bead bd holds unready that hold-lib
+# finds not held: the is_blocked flag cascades DOWN parent-child edges, so a
+# re-dispatch of work in flight under a parked epic never enters `bd --ready`.
+# A bead bd reports ready is still held by a human gate bd does not count, a
+# pinned one, on it or on an ancestor (hold-lib.sh's hold_holds_ready).
+# A held arm stays intact and fires once its hold releases. Status
 # still gates: a non-open status is set deliberately, and a bead at one is never
 # dispatched. `list` answers "what dispatches are owed?", naming the blocker
 # that holds each held arm; `disarm` withdraws one.
@@ -66,10 +66,10 @@
 # must never read as an empty one.
 #
 # A reconcile pass holds a per-rig pass lock for its whole life, so two passes
-# never sling the same bead. It starts a sling or an escalation only while its
-# pass budget can still cover a sling, so the order's timeout does not kill it
-# mid-sling. The ready beads past the budget wait, still armed, for the next
-# pass, and so do the escalations.
+# never sling the same bead. It starts a sling or an ask for a person only while
+# its pass budget can still cover a sling, so the order's timeout does not kill
+# it mid-sling. The ready beads past the budget wait, still armed, for the next
+# pass, and so do the asks.
 set -u
 
 # >>> control-char-scrub
@@ -158,7 +158,8 @@ DISPOSE_ALLOWANCE_SECS=$((10#$DISPOSE_ALLOWANCE_SECS))
 # order-tracking-sweep order at its stale-after, and the controller watchdog 2m
 # after dispatch on a gc build that does not extend that window to the order's
 # timeout. So a pass takes bd-lib.sh's pass lock before it reads anything and
-# holds it for its whole life, and every gc, escalate.sh and bead-rehome.sh call
+# holds it for its whole life, and every gc, human-gate.sh, gc-helm.sh and
+# bead-rehome.sh call
 # the pass makes runs through pass_child, so nothing a call leaves running holds
 # the lock after it. The order's timeout kills the pass's whole process group,
 # its gc sling with it, and the next pass re-attempts the unconfirmed sling
@@ -178,11 +179,19 @@ LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
 BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
 DRY_RUN=0
 
-# The retry cap hands a stuck dispatch to a person through escalate.sh (one open
-# visit per bead, deduped on the key). Resolve it beside this script; the env
-# override lets the hermetic test point it at a stub.
+# The retry cap hands a stuck dispatch to a person: a human gate on the bead
+# through human-gate.sh (one open gate per bead and key), or a conversation on
+# it through gc-helm.sh open when the bead has open children. Both resolve
+# beside this script; the env overrides let the hermetic test point them at
+# stubs.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
+HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$SCRIPTS_DIR/human-gate.sh}"
+HELM="${GC_HELM_TOOL:-$SCRIPTS_DIR/gc-helm.sh}"
+# A capped bead stays capped from one pass to the next until a person disarms
+# it or clears its count, so every pass that finds it unheld detects the cap
+# again. The gate's call declares a quiet window, so a moot or benign answer
+# stands for a day.
+CAP_QUIET_WINDOW=86400
 
 # The resolved-by consumer disposes a bead whose `until` dep has closed, through
 # bead-rehome so the close carries a successor pointer rather than a bare close.
@@ -201,14 +210,15 @@ UNTIL_KIND="folded"
 # shellcheck source=until-resolved.sh
 . "$SCRIPTS_DIR/until-resolved.sh" 2>/dev/null || UNTIL_RESOLVED_JQ=""
 
+# The rig's state key, the pass lock, pass_child, and the human gate rule the
+# hold reads. Unsourceable, no pass can be held to one at a time, so nothing
+# runs.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # The one definition of a hold. Unsourceable, no arm can be told from a held one,
 # so nothing runs.
 # shellcheck source=hold-lib.sh
 . "$SCRIPTS_DIR/hold-lib.sh" || { echo "$PROG: cannot source hold-lib.sh beside this script" >&2; exit 1; }
-# The rig's state key, the pass lock and pass_child. Unsourceable, no pass can
-# be held to one at a time, so nothing runs.
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # The pass lock is keyed per rig like the order, so two rigs never share one. It
 # lives in the pack state dir the order's env names; the override lets the
 # hermetic test point it at a tmpdir.
@@ -280,8 +290,9 @@ Verbs:
              path already delivered (a merge_result stamp), keeping it on a
              bead closed under the claim whose close no pass has checked.
              Because each sling mints an input convoy, it stops re-slinging
-             and escalates a bead whose dispatch has failed to finalize
-             MAX_SLING_FAILURES times rather than leak a convoy per pass.
+             and asks a person about a bead whose dispatch has failed to
+             finalize MAX_SLING_FAILURES times rather than leak a convoy per
+             pass.
              The same pass disposes every open bead whose `until`
              dependency ("X resolves me") has closed, through bead-rehome, so a
              resolved wait is closed with a successor pointer not re-triaged.
@@ -293,7 +304,7 @@ Verbs:
              Driven by orders/deferred-dispatch.toml (cooldown, scope="rig").
              A pass holds the rig's pass lock for its whole life; one that
              finds it held exits 0 without reading the store. It starts a
-             notice, a sling or an escalation only while
+             notice, a sling or an ask for a person only while
              DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS
              (90) of its DEFERRED_DISPATCH_PASS_BUDGET_SECS (420, 0 = unpaced)
              are left, and a disposal only while
@@ -758,15 +769,17 @@ own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
 # holds the bead, as hold-lib.sh prints it, and is empty for a bead nothing
 # holds. The fifth names the nearest hold again
 # when every hold sits on an ancestor, so the pass can group the arms an
-# ancestor's blocker keeps, and is empty otherwise. A bd-ready bead needs no
-# walk, because bd reports nothing holding it, and a non-open one never
-# dispatches whatever holds it, so the walk covers only the open beads bd holds
-# unready. hold_graph reads all of them at once, one read per generation of
-# ancestors and one for their blockers, so a pass costs the same few reads
-# however large the armed set grows. A walk that cannot read fails the whole
-# enumeration rather than let an unread hold pass for none. The snapshot is
-# cached to all_out so the list and reconcile loops read each bead's fields from
-# it instead of a `bd show` per bead.
+# ancestor's blocker keeps, and is empty otherwise. A non-open bead never
+# dispatches whatever holds it, so the walk covers the open beads. For one bd
+# holds unready every hold the walk finds counts. For one bd reports ready the
+# answer bd gives stands for every blocker but a human gate, because bd counts a
+# pinned human gate as no blocker and the gate still holds, so only the holds of
+# human gates count (hold_holds_ready). hold_graph reads all of them at once,
+# one read per generation of ancestors and one for their blockers, so a pass
+# costs the same few reads however large the armed set grows. A walk that cannot
+# read fails the whole enumeration rather than let an unread hold pass for none.
+# The snapshot is cached to all_out so the list and reconcile loops read each
+# bead's fields from it instead of a `bd show` per bead.
 armed_rows() { # rows_out all_out : "<id>\037<status>\037<bd_ready 0|1>\037<hold>\037<ancestor hold>" per bead; caches the snapshot to all_out
     local out="$1" all_out="$2" all ready_ids seed graph
     # --brief on both reads: this function and its cache consumers use only id,
@@ -789,19 +802,18 @@ armed_rows() { # rows_out all_out : "<id>\037<status>\037<bd_ready 0|1>\037<hold
     # snapshot. The graph reaches jq as a file for the same reason.
     mktemp_tracked || return 1; seed="$REPLY"
     mktemp_tracked || return 1; graph="$REPLY"
-    { printf '%s' "$ready_ids" | scrub; printf '\n'; cat "$all_out"; } | jq -cn '
-        (input | map(.id)) as $ready
-        | [ inputs | .[] | select((.status // "") == "open") | select(.id as $i | $ready | index($i) | not) ]' \
-        > "$seed" 2>/dev/null || return 1
+    jq -c '[ .[] | select((.status // "") == "open") ]' "$all_out" > "$seed" 2>/dev/null || return 1
     hold_graph dd_hold_read "$seed" "$graph" || return 1
     { printf '%s' "$ready_ids" | scrub; printf '\n'; cat "$all_out"; } | jq -rn --slurpfile g "$graph" "$HOLD_JQ"'
         (input | map(.id)) as $ready
         | inputs | .[]
         | (if (.id as $i | $ready | index($i)) then "1" else "0" end) as $r
         | ((.id // "") | tostring) as $self
-        | (if $r == "0" and (.status // "") == "open" then hold_holds($g[0]) else [] end) as $h
+        | (if (.status // "") != "open" then []
+           elif $r == "0" then hold_holds($g[0])
+           else hold_holds_ready($g[0]) end) as $h
         | [ (.id // ""), (.status // ""), $r,
-            (if ($h | length) > 0 then hold_summary($g[0]) else "" end),
+            ($h | hold_line($self)),
             (if ($h | length) > 0 and all($h[]; .on != $self) then ($h[0] | hold_label($self)) else "" end) ]
         | map(tostring) | join("\u001f")' > "$out" 2>/dev/null || return 1
     return 0
@@ -853,11 +865,12 @@ cmd_list() {
         # arm: an OPEN bead a blocker holds (hold-lib.sh) waits on something that
         # can clear, and is shown with the blocker and its title, so a parked bead
         # says why it is parked and what releases it; an OPEN bead nothing holds is
-        # dispatchable now, though bd keeps it out of `--ready` (a demand gate on
-        # an ancestor does that, as does a hold on an ancestor of a bead in
-        # flight), and reconcile slings it anyway; any other live status is
-        # excluded by `--ready` on the status itself, so no blocker closing will
-        # make it dispatchable.
+        # dispatchable now, though bd keeps it out of `--ready` (a hold on an
+        # ancestor of a bead in flight does that), and reconcile slings it
+        # anyway; any other live status is excluded by `--ready` on the status
+        # itself, so no blocker closing will make it dispatchable. A hold is read
+        # ahead of readiness, since a human gate bd does not count holds a bead
+        # bd reports ready.
         if [ "$status" = "closed" ] && [ "$claimed" = 1 ]; then state="CLOSED under the until consumer's claim, its close not yet checked (the arm stays until the next pass checks it, and fires if that check reopens the bead)"
         elif [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
         elif [ "$claimed" = 1 ]; then state="HELD by the until consumer's claim (the next pass gives it back, and the arm fires once it is open)"
@@ -867,14 +880,14 @@ cmd_list() {
                 "$SLUNG_TRYING"*) state="dispatch in flight (attempt not yet confirmed)" ;;
                 *)                state="dispatched (arm pending retirement)" ;;
             esac
-        elif [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then state="CAPPED — $fails sling failures, escalated; disarm or clear $K_FAILS"
+        elif [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then state="CAPPED — $fails sling failures, a person asked; disarm or clear $K_FAILS"
+        elif [ -n "$hold" ]; then state="HELD by $hold"
         elif [ "$ready" = "1" ]; then state="DISPATCHABLE NOW"
         elif [ "$status" != "open" ]; then state="STRANDED — status=$status is never --ready"
-        elif [ -n "$hold" ]; then state="HELD by $hold"
         else
             flight="$(flight_of "$json")"
             if [ -n "$flight" ]; then state="DISPATCHABLE NOW (in flight, $flight: a hold on an ancestor leaves it running, and no blocker of its own is open)"
-            else state="DISPATCHABLE NOW (nothing holds it; bd keeps it out of --ready only for a wait the arm does not count, such as a demand gate on an ancestor)"; fi
+            else state="DISPATCHABLE NOW (no open blocks blocker sits on it or on its ancestors, though bd keeps it out of --ready)"; fi
         fi
         printf '%s -> %s [%s]%s\n' "$id" "${target:-?}" "$state" "${reason:+ — $reason}"
     done < "$rows"
@@ -1289,7 +1302,7 @@ until_recover() {
 # `blocks` blocker of its own, no edge naming a bead this store cannot read, and
 # no live-work mark. Anything else is an expected state, reported and left open,
 # never a pass failure, and so is a bead reopened because something landed on it
-# while the pass held it. A held close (an open visit on the bead; bead-rehome
+# while the pass held it. A held close (an open human gate on the bead; bead-rehome
 # refuses rather than force-closing) is reported, and the bead given back
 # without the pointer bead-rehome stamped, so a later pass retries it. An
 # already-recorded different successor is reported and left to its closer.
@@ -1423,9 +1436,9 @@ reconcile_until() {
                     *) ufailed=$((ufailed + 1)) ;;
                 esac ;;
             5) if fence_release "$id" withdraw; then
-                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open visit on it); the successor pointer bead-rehome stamped is withdrawn, and a later pass retries" >&2
+                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open human gate on it); the successor pointer bead-rehome stamped is withdrawn, and a later pass retries" >&2
                else
-                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open visit on it)" >&2
+                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open human gate on it)" >&2
                    ufailed=$((ufailed + 1))
                fi
                held=$((held + 1)) ;;
@@ -1564,17 +1577,19 @@ reconcile_dispatch() {
         fi
 
         # Not dispatchable. `bd --ready` (the fast path) and a walk that finds
-        # nothing holding an open bead (hold-lib.sh) are the two ways in. A held
-        # bead waits on a blocker that can clear, on it or on an ancestor, and the
-        # arm stays intact for the first pass after the hold releases. An arm an
-        # ancestor's blocker holds is gathered for the pass log below; one its own
-        # blocker holds waits on what it was armed for, and is counted. Any other
-        # live status is excluded by `--ready` on the status itself, so waiting
-        # for it is waiting for something no blocker closing can deliver. Say so
-        # every pass — the arm outlives every session that could remember it, and
-        # a silent count is how it stays lost. A bead in progress under the until
-        # consumer's claim is the exception: the next pass gives it back, open.
-        if [ "$ready" != "1" ]; then
+        # nothing holding an open bead (hold-lib.sh) are the two ways in, and a
+        # bead bd reports ready still waits on a human gate bd does not count. A
+        # held bead waits on a blocker that can clear, on it or on an ancestor,
+        # and the arm stays intact for the first pass after the hold releases. An
+        # arm an ancestor's blocker holds is gathered for the pass log below; one
+        # its own blocker holds waits on what it was armed for, and is counted.
+        # Any other live status is excluded by `--ready` on the status itself, so
+        # waiting for it is waiting for something no blocker closing can deliver.
+        # Say so every pass — the arm outlives every session that could remember
+        # it, and a silent count is how it stays lost. A bead in progress under
+        # the until consumer's claim is the exception: the next pass gives it
+        # back, open.
+        if [ "$ready" != "1" ] || [ -n "$hold" ]; then
             if [ "$status" != "open" ] && [ -n "${UNTIL_FENCE:-}" ] && [ "$assignee" = "$UNTIL_FENCE" ]; then
                 echo "$PROG: HELD $id — it is in progress under the until consumer's claim, which the next pass gives back; its arm fires once it is open" >&2
                 held=$((held + 1)); continue
@@ -1606,27 +1621,41 @@ reconcile_dispatch() {
         # The retry has a budget. Each sling attempt mints an input convoy, so a
         # dispatch that never finalizes must stop re-slinging before it leaks one
         # convoy per pass. The counter (bumped in the stamp write below) is the
-        # memory a bare rollback erases. At the cap, escalate once (escalate.sh
-        # dedups on the key) and leave the arm — never retire an unproven
-        # dispatch — so a person decides rather than reconcile looping forever.
-        # Past the pass budget the escalation waits too: the bead stays capped
-        # and armed, so the next pass files it.
+        # memory a bare rollback erases. At the cap, ask a person once
+        # (human-gate.sh dedups on the key) and leave the arm — never retire an
+        # unproven dispatch — so a person decides rather than reconcile looping
+        # forever. The gate blocks the bead, so the re-sling waits for the
+        # answer as well as for the cleared cap. A bead with an open child is
+        # asked about in a conversation instead: the cap already holds the arm,
+        # and a gate on a parent would pause its unstarted parts over a failed
+        # sling. One read tells, any child that is not closed or pinned, and a
+        # read that fails files the gate. Past the pass budget the ask waits
+        # too: the bead stays capped and armed, so the next pass files it.
         fails="$(meta_of "$json" "$K_FAILS")"
         case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         if [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then
             if [ "$DRY_RUN" = 1 ]; then
-                echo "$PROG: DRY-RUN would escalate capped $id ($fails failed attempts, cap $MAX_SLING_FAILURES) instead of re-slinging"
+                echo "$PROG: DRY-RUN would ask a person about capped $id ($fails failed attempts, cap $MAX_SLING_FAILURES) instead of re-slinging"
             elif ! sling_fits_budget; then
-                [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or escalations this pass"; }
-                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; its escalation waits for the next pass" >&2
+                [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or asks this pass"; }
+                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; asking a person waits for the next pass" >&2
                 esc_left_ids+=("$id")
             else
-                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; escalating and leaving the arm for a person" >&2
-                if [ -x "$ESCALATE" ]; then
-                    pass_child "$ESCALATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
-                      --message "deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry." >/dev/null 2>&1 || true
+                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; asking a person and leaving the arm" >&2
+                cap_msg="deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry."
+                children="$(bd_ list --parent "$id" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub)"
+                if printf '%s' "$children" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+                    if [ -x "$HELM" ]; then
+                        pass_child "$HELM" open "$id" --reason "deferred dispatch has failed $fails times: disarm or re-arm" \
+                          --body "$cap_msg" >/dev/null 2>&1 || true
+                    else
+                        echo "$PROG: WARN gc-helm.sh '$HELM' not executable — capped $id has no conversation; disarm or clear its fail count by hand" >&2
+                    fi
+                elif [ -x "$HUMAN_GATE" ]; then
+                    pass_child "$HUMAN_GATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
+                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg Then clear this gate. It blocks $id, so the retry stays held while the gate is open, and a gate cleared while $id is still armed at the cap is asked again by a later pass." >/dev/null 2>&1 || true
                 else
-                    echo "$PROG: WARN escalate tool '$ESCALATE' not executable — capped $id has no visit; disarm or clear its fail count by hand" >&2
+                    echo "$PROG: WARN human-gate.sh '$HUMAN_GATE' not executable — capped $id has no gate; disarm or clear its fail count by hand" >&2
                 fi
             fi
             capped=$((capped + 1)); continue
@@ -1640,20 +1669,19 @@ reconcile_dispatch() {
         # run: each retire is one write, and a retire the timeout cuts short is
         # made again by the next pass.
         if [ "$DRY_RUN" != 1 ] && ! sling_fits_budget; then
-            [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or escalations this pass"; }
+            [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or asks this pass"; }
             left=$((left + 1)); left_ids+=("$id"); continue
         fi
 
-        # Nothing holds it, but bd keeps it unready through the parent-child
-        # cascade, as it does under an ancestor that waits only on a demand gate,
-        # and over a bead in flight under any held ancestor — say why a not-ready
-        # bead is being slung, so the pass log is legible.
+        # Nothing holds it, but bd keeps it unready, as its parent-child cascade
+        # does over a bead in flight under any held ancestor — say why a
+        # not-ready bead is being slung, so the pass log is legible.
         if [ "$ready" != "1" ]; then
             flight="$(flight_of "$json")"
             if [ -n "$flight" ]; then
                 echo "$PROG: nothing holds $id: it is in flight ($flight), so a hold on an ancestor leaves it running, and no blocker of its own is open. bd keeps it out of --ready all the same — dispatching"
             else
-                echo "$PROG: nothing holds $id: no open blocker sits on it, and any on its ancestors is a demand gate. bd keeps it out of --ready all the same — dispatching"
+                echo "$PROG: nothing holds $id: no open blocks blocker sits on it or on its ancestors. bd keeps it out of --ready all the same — dispatching"
             fi
         fi
 
@@ -1721,9 +1749,9 @@ reconcile_dispatch() {
         for id in "${left_ids[@]}"; do LEFT_SCOPES+=("$id" "sling left for the next pass"); done
     fi
     if [ "$esc_left" -gt 0 ]; then
-        echo "$PROG: left the escalation of $esc_left capped bead(s) for the next pass: ${esc_left_ids[*]}"
-        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$esc_left capped bead(s) left for the next pass to escalate"
-        for id in "${esc_left_ids[@]}"; do LEFT_SCOPES+=("$id" "escalation left for the next pass"); done
+        echo "$PROG: left the ask about $esc_left capped bead(s) for the next pass: ${esc_left_ids[*]}"
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$esc_left capped bead(s) left for the next pass to ask about"
+        for id in "${esc_left_ids[@]}"; do LEFT_SCOPES+=("$id" "ask left for the next pass"); done
     fi
     echo "$PROG: $dispatched dispatched, $retired retired, $held held, $stranded stranded, $assigned assigned, $capped capped, $left left for the next pass, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]

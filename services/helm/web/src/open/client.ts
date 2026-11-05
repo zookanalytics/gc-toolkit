@@ -1,4 +1,4 @@
-// Filing a visit from the board — the client half of POST <mount>/helm/open.
+// Filing a conversation from the board — the client half of POST <mount>/helm/open.
 //
 // WHY THIS IS NOT IN drill/client.ts. That file is the SUPERVISOR client: every
 // type in it comes from gen/supervisor.d.ts, generated from the supervisor's
@@ -13,8 +13,8 @@
 // interface added there for this route fails that test with nothing to pair
 // with. The two shapes below are therefore mirrored here, beside the fetch that
 // reads them, and are deliberately small and flat so hand-mirroring stays
-// cheap. Their Go originals are openResponse and openErrorBody in
-// internal/server/open.go.
+// cheap. Their Go originals are openResponse and the error body in
+// internal/server/actuate.go.
 
 import { SVC_WRITE_HEADERS } from '../svcWrite';
 
@@ -24,11 +24,12 @@ import { SVC_WRITE_HEADERS } from '../svcWrite';
 const OPEN_URL = 'helm/open';
 
 /**
- * What the city did. `filed` is a new visit; `existing` means one was already
- * open on this bead and a second was deliberately NOT created — those must read
- * differently to the operator, or clicking twice would misdescribe the city.
- * `opened` is the honest fallback for a success sentence the server could not
- * classify: the visit exists, the phrasing was just unfamiliar.
+ * What the city did. `filed` is a new conversation in the operator's queue;
+ * `existing` means one was already waiting on this bead and a second was
+ * deliberately NOT created — those must read differently to the operator, or
+ * clicking twice would misdescribe the city. `opened` is the honest fallback for
+ * a success sentence the server could not classify: the conversation exists,
+ * the phrasing was just unfamiliar.
  */
 export type OpenOutcome = 'filed' | 'existing' | 'opened';
 
@@ -36,8 +37,8 @@ export type OpenOutcome = 'filed' | 'existing' | 'opened';
 export interface OpenResult {
   bead: string;
   outcome: OpenOutcome;
-  /** The visit bead's id, when the server's tool named one. */
-  visit?: string;
+  /** The conversation task's id, when the server's tool named one. */
+  conversation?: string;
   /** The tool's own sentence, verbatim. */
   message: string;
 }
@@ -81,11 +82,11 @@ interface OpenErrorBody {
 }
 
 /**
- * File a visit on `bead` and park it on the helm board (gc.routed_to=human);
- * no session is spawned until an operator engages it.
+ * File a conversation on `bead` in the operator's queue; no session is spawned
+ * until an operator engages it.
  *
  * NOTE WHAT THIS DOES NOT DO: it neither starts a sitting nor attaches the
- * operator to one. Engaging the parked visit (the drill panel's Discuss action,
+ * operator to one. Engaging the queued conversation (the drill panel's Discuss action,
  * or `gc-helm engage`) is what spawns the session; in a browser there is no
  * pane to attach to regardless, until the embedded ttyd can be retargeted at
  * the session (tk-rbf9r / tk-xlup8, unapplied). Callers must say so rather than
@@ -107,7 +108,7 @@ export async function openConversation(bead: string, signal?: AbortSignal): Prom
     throw new OpenError(
       0,
       'unavailable',
-      'could not reach the board service — if the request had already been sent, a visit may still have been filed',
+      'could not reach the board service — if the request had already been sent, a conversation may still have been filed',
     );
   }
 

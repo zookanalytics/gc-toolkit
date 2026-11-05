@@ -99,19 +99,27 @@ Every gate runs as the run-tests step's detached job
 Never launch a gate as a background job of your own, and never end your turn
 while one runs: a gate that finishes while you sit idle wakes nothing.
 
-## Escalation
+## Human gates
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+What a person must act on is a human gate on the bead it is about, filed
+through one writer that dedups repeats:
 
 ```bash
-"$(gc {{ .BindingName }} scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$(gc {{ .BindingName }} scripts-dir)/human-gate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
 ```
 
-Escalate what a human must act on; a PR awaiting the operator's approval is
-a HEALTHY resting state worth zero escalations. Most idle wakes escalate
+The gate blocks the bead it names until a person clears it, and a gate on a
+PR's anchor holds its merge. A gate on a bead with open children pauses every
+part of it that has not started, so when only one member waits, name that
+member. A situation with no bead of its own is a patrol finding
+(`patrol-finding.sh --scope refinery-findings`): `human-gate.sh` refuses a
+patrol wisp or a session, and files nothing on a bead it cannot read.
+
+File a gate for what a human must act on; a PR awaiting the operator's
+approval is a HEALTHY resting state worth zero gates. Most idle wakes file
 nothing — log the verdict line and move on.
 
-{{ template "visit-close" . }}
+{{ template "human-gate-withdraw" . }}
 
 {{ template "heartbeat-no-consent-ui" . }}
 

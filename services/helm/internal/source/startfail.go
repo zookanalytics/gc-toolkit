@@ -10,26 +10,25 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
-// This file reads why a visit's sitting failed to start, from the records Gas
-// City keeps of a start in the city store.
+// This file reads why a conversation's sitting failed to start, from the
+// records Gas City keeps of a start in the city store.
 //
 // gc-helm engage spawns a sitting with `gc session new <template> --alias
-// <visit id>`, which makes a manual session (session_origin=manual) whose alias
-// names the visit it was spawned for. Gas City stores the alias qualified, as
-// <rig>/<binding>.<alias>, and engage spawns under `v-<visit id>` when Gas City
-// refuses the bare id as an alias. When the reconciler cannot start the
-// session, its rollback closes the session bead with state=failed-create. Where
-// the start failed on a provider error a person must fix, such as a model not
-// found or a quota exceeded, the rollback writes the error's code to the
-// session bead itself. Where it failed otherwise, the reconciler first leaves a
-// startup-health-episode bead, keyed by the session's name, whose kind and last
-// detail say why. Every other rollback records no cause, such as that of a
-// create rolled back before any start ran.
+// <conversation id>`, which makes a manual session (session_origin=manual)
+// whose alias names the conversation it was spawned for. Gas City stores the
+// alias qualified, as <rig>/<binding>.<alias>, and engage spawns under
+// `c-<conversation id>` when Gas City refuses the bare id as an alias. When the
+// reconciler cannot start the session, its rollback closes the session bead
+// with state=failed-create. Where the start failed on a provider error a person
+// must fix, such as a model not found or a quota exceeded, the rollback writes
+// the error's code to the session bead itself. Where it failed otherwise, the
+// reconciler first leaves a startup-health-episode bead, keyed by the session's
+// name, whose kind and last detail say why. Every other rollback records no
+// cause, such as that of a create rolled back before any start ran.
 //
-// Nothing of this is written on the visit, and the witness's release of the
-// visit's binding removes the only link the visit had to its session. So the
-// read starts from the session side: the failed-create manual sessions, each
-// joined to the open visit its alias names.
+// Nothing of this is written on the conversation. So the read starts from the
+// session side: the failed-create manual sessions, each joined to the open
+// conversation its alias names.
 
 const (
 	sessionIssueType = beads.IssueType("session")
@@ -77,7 +76,7 @@ const startErrorMax = 160
 // keeps the session beads and startup-health episodes of every rig.
 //
 // The reads are best-effort, in the board's usual direction: a read that fails
-// is noted partial, and a visit it could not settle is left unmarked. A failed
+// is noted partial, and a conversation it could not settle is left unmarked. A failed
 // episode read is the one exception. By then the failure itself is
 // established, so the sitting is marked with an unread reason.
 func (s *BeadsSource) markStartFailures(ctx context.Context, st beadStore, r rigRef, g *gatherState, sittings []board.Sitting) {
@@ -100,21 +99,21 @@ func (s *BeadsSource) markStartFailures(ctx context.Context, st beadStore, r rig
 	}
 	newest := map[string]*beads.Issue{}
 	for _, iss := range failed {
-		visit := sessionVisit(decodeMetadata(iss.Metadata), open)
-		if visit == "" {
+		conv := sessionConversation(decodeMetadata(iss.Metadata), open)
+		if conv == "" {
 			continue
 		}
-		if prev, ok := newest[visit]; !ok || iss.CreatedAt.After(prev.CreatedAt) {
-			newest[visit] = iss
+		if prev, ok := newest[conv]; !ok || iss.CreatedAt.After(prev.CreatedAt) {
+			newest[conv] = iss
 		}
 	}
 
 	reasons := map[string]string{}
-	for visit, iss := range newest {
+	for conv, iss := range newest {
 		md := decodeMetadata(iss.Metadata)
 		again, err := spawnedSince(ctx, st, iss, md)
 		if err != nil {
-			g.note(true, []string{"start-failures@" + r.name + ": " + visit + ": " + err.Error()})
+			g.note(true, []string{"start-failures@" + r.name + ": " + conv + ": " + err.Error()})
 			continue
 		}
 		if again {
@@ -122,10 +121,10 @@ func (s *BeadsSource) markStartFailures(ctx context.Context, st beadStore, r rig
 		}
 		reason, err := startFailureReason(ctx, st, md)
 		if err != nil {
-			g.note(true, []string{"start-failure-reason@" + r.name + ": " + visit + ": " + err.Error()})
+			g.note(true, []string{"start-failure-reason@" + r.name + ": " + conv + ": " + err.Error()})
 			reason = reasonUnread
 		}
-		reasons[visit] = reason
+		reasons[conv] = reason
 	}
 	for i := range sittings {
 		if reason, ok := reasons[sittings[i].ID]; ok && open[sittings[i].ID] {
@@ -134,9 +133,10 @@ func (s *BeadsSource) markStartFailures(ctx context.Context, st beadStore, r rig
 	}
 }
 
-// earliest is the first of the visits' filing times, or the zero time when any
-// of them is unknown. A session spawned for a visit was created after the visit
-// was filed, so the earliest open visit bounds the closed sessions worth reading.
+// earliest is the first of the conversations' filing times, or the zero time
+// when any of them is unknown. A session spawned for a conversation was created
+// after the conversation was filed, so the earliest open conversation bounds the
+// closed sessions worth reading.
 func earliest(filed []time.Time) time.Time {
 	var first time.Time
 	for _, t := range filed {
@@ -177,11 +177,11 @@ func failedStarts(ctx context.Context, st beadStore, bound time.Time) ([]*beads.
 	return out, nil
 }
 
-// sessionVisit returns the open visit a session was spawned for, or "". The
-// alias is <rig>/<binding>.<alias>, and a bead id can itself contain a dot, so
-// the alias is tried at each dot boundary after the rig, with the `v-` prefix
-// engage falls back to dropped.
-func sessionVisit(md map[string]string, open map[string]bool) string {
+// sessionConversation returns the open conversation a session was spawned for,
+// or "". The alias is <rig>/<binding>.<alias>, and a bead id can itself contain
+// a dot, so the alias is tried at each dot boundary after the rig, with the
+// `c-` prefix engage falls back to dropped.
+func sessionConversation(md map[string]string, open map[string]bool) string {
 	name := md[mdSessionAlias]
 	if name == "" {
 		name = md[mdSessionAgent]
@@ -190,7 +190,7 @@ func sessionVisit(md map[string]string, open map[string]bool) string {
 		name = name[i+1:]
 	}
 	for name != "" {
-		if id := strings.TrimPrefix(name, "v-"); open[id] {
+		if id := strings.TrimPrefix(name, "c-"); open[id] {
 			return id
 		}
 		i := strings.IndexByte(name, '.')
@@ -202,10 +202,10 @@ func sessionVisit(md map[string]string, open map[string]bool) string {
 	return ""
 }
 
-// spawnedSince reports whether a sitting was spawned for the same visit after
-// the failed one: a session carrying the failed session's alias, created after
-// it. That is the visit engaged again, so the newer session, whatever became of
-// it, is the visit's sitting now. One read covers the sessions still open and
+// spawnedSince reports whether a sitting was spawned for the same conversation
+// after the failed one: a session carrying the failed session's alias, created
+// after it. That is the conversation engaged again, so the newer session,
+// whatever became of it, is the conversation's sitting now. One read covers the sessions still open and
 // one the sessions that have closed, which closed after the failed one was
 // created because they were created after it.
 func spawnedSince(ctx context.Context, st beadStore, failed *beads.Issue, md map[string]string) (bool, error) {

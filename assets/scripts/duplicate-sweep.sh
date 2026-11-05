@@ -214,10 +214,10 @@ CANDS_EOF
 # rework-child.sh files a rework child per source and dispatches it with a
 # mol-polecat-work pour: one per review signoff.sh files for, stamped with the
 # review's id in source_review_bead, and one per ruling converse-rework.sh files
-# for, stamped with the visit's id in source_ruling_bead. A second child of the
+# for, stamped with the ruling conversation's id in source_ruling_bead. A second child of the
 # same source that was never dispatched is a duplicate of the one that was, once
 # that one has landed. The gates are stated for a review; a ruling's child meets
-# each with source_ruling_bead and its visit in their place, and a child naming
+# each with source_ruling_bead and its conversation in their place, and a child naming
 # both keys answers no single source, so it is held. No marker says a child is
 # a twin, so each gate below re-establishes it:
 #   - the population is the OPEN task_kind=rework children naming a
@@ -236,9 +236,10 @@ CANDS_EOF
 #     second, independent proof that it was never dispatched;
 #   - its source is CLOSED. For a review, close_review is signoff.sh's last
 #     write, so no request-changes pass is left that could adopt and dispatch
-#     the twin while this arm closes it. For a ruling, the sitting closes its
-#     visit after the sign-off that files the child, and only a sign-off runs
-#     converse-rework.sh, so no filing is left that could adopt it either;
+#     the twin while this arm closes it. For a ruling, only the conversation's
+#     own sitting runs converse-rework.sh (at its sign-off, or with --answer on
+#     an earlier turn), and a closed conversation has no sitting left, so no
+#     filing is left that could adopt it either;
 #   - a sibling LANDED: another rework child naming the same source and the
 #     same anchor, never disposed itself (no successor pointer, no
 #     duplicate_of), recording no outcome but shipped (scaffolding-sweep's
@@ -310,7 +311,7 @@ while IFS=$'\t' read -r id key src anchor held_flag prior; do
   if [ "$key" = source_review_bead ]; then
     what="review $src"; adopter="signoff.sh may still adopt and dispatch it"
   else
-    what="ruling visit $src"; adopter="its sitting's sign-off may still adopt and dispatch it"
+    what="ruling conversation $src"; adopter="its sitting's sign-off may still adopt and dispatch it"
   fi
 
   if ! CONVOY=$(poured "$id"); then

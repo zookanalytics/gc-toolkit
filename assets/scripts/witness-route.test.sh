@@ -3,7 +3,7 @@
 # which stamps the dog pool's address, and bug-file, which stamps none, because
 # a pack defect is new work and waits for the operator's placement. It also
 # holds every step of the formula to the rule that no address is built without
-# the resolver; refinery-stuck-escalate.test.sh runs the queue read that
+# the resolver; refinery-stuck-handoff.test.sh runs the queue read that
 # resolves.
 #
 # The witness addresses agents at two different scopes, and the qualifier one
@@ -154,7 +154,7 @@ export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"
 run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 hasnt "$LOG" 'bd create' "nothing is filed"
 hasnt "$LOG" 'bd list' "and the dedup query is not even reached"
-has "$OUT" "escalate instead of filing" "the step is told what to do instead"
+has "$OUT" "file a human gate on the bead instead of the warrant" "the step is told what to do instead"
 eq "$RC" 0 "and the patrol step survives the refusal rather than aborting mid-sweep"
 
 echo "# an open warrant for the same target still suppresses a second one"

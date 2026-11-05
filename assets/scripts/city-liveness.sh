@@ -3,7 +3,7 @@
 # `gc rig list --json`: whether a rig is suspended, and whether the city
 # controller is running.
 #
-# Sourced (never executed) by gc-helm.sh (engage's guard) and gc-visit-open.sh
+# Sourced (never executed) by gc-helm.sh (engage's guard) and operator-intake.sh
 # (the note that a report will wait), so the two read the flags the same way
 # and cannot drift. Each caller's enumerate_rigs projects the rig list into
 # $RIGS with RIG_PROJECTION_JQ, and the readers below read $RIGS.

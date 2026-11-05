@@ -16,7 +16,7 @@
 # exists to prevent.
 #
 # A gh call inside a script is invisible to gh-origin-guard, so this resolves and
-# pins the origin itself — the way pr-open.sh and pr-visit-comment.sh do — and
+# pins the origin itself — the way pr-open.sh and pr-sitting-comment.sh do — and
 # refuses a PR that does not live in our own rig origin.
 #
 # Usage:
@@ -86,7 +86,7 @@ scrub() { tr -d '\000-\037'; }
 
 # --- the repository we may write to: our own rig origin ------------------
 # From the subject's rig when a --subject names one, else this rig's root, else
-# the caller's cwd — the same name->path->origin derivation pr-visit-comment.sh
+# the caller's cwd — the same name->path->origin derivation pr-sitting-comment.sh
 # uses. The origin is pinned on every gh write below.
 REPO_DIR=""
 if [ -n "$SUBJECT" ] && command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then

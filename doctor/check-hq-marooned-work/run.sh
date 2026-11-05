@@ -15,10 +15,12 @@
 # residents: a bead routed to a city-scoped agent (resolved from `gc agent list`)
 # is reachable there; a `warrant` label marks city machinery a rig never works; a
 # standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a
-# held-by-design escalation host, not work; a `human` route or a task_kind=visit
-# is an operator-queue decision; a `deacon-ledger` label is a daily digest; a
-# `debt` label or a `gc doctor:` title is a doctor/tech-debt advisory record. An
-# assigned bead is already claimed. What remains is rig work no worker can reach.
+# held-by-design escalation host, not work; a `human` route is an operator-queue
+# decision; a `deacon-ledger` label is a daily digest; a `debt` label or a
+# `gc doctor:` title is a doctor/tech-debt advisory record. An assigned bead is
+# already claimed, and that covers a conversation, which is always assigned: to
+# `human` in the operator's queue or to its sitting's alias. A human gate is a
+# gate, an infra type. What remains is rig work no worker can reach.
 #
 # The HQ store is $city_path/.beads, where city_path is `gc agent list`'s
 # resolution (GC_CITY_PATH is the fallback). Read-only. Exit 0=OK 1=Warning
@@ -203,7 +205,6 @@ rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES"
     .[]? | . as $b
     | (($b.issue_type // "") | tostring) as $t
     | (($b.metadata // {})) as $m
-    | (($m["task_kind"] // "") | tostring) as $tk
     | (($m["gc.routed_to"] // "") | tostring) as $rt
     | (($b.labels // []) | map(tostring)) as $labels
     | (($b.title // "") | tostring) as $title
@@ -214,7 +215,6 @@ rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES"
     | select(($city_routes | index($rtb)) == null)    # not routed to a city-scoped agent that reads the HQ store
     | select(($labels | index("warrant")) == null)    # not a warrant (city machinery a rig never works)
     | select(($b | is_standing_kind) | not)           # not a held-by-design standing record
-    | select($tk != "visit")                          # not an operator-queue converse visit
     | select($rt != "human")                          # not an operator-queue decision routed to a person
     | select(($labels | index("deacon-ledger")) == null)  # not a daily digest
     | select(($labels | index("debt")) == null)       # not a parked tech-debt / advisory record

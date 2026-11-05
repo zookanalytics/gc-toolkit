@@ -23,16 +23,20 @@
 #                     [--about <bead-id>] [--scope <slug>] [--rig <rig>]
 #                     [--dry-run]
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml,
-# the refinery reconcile's assets/scripts/merge-tail-report.sh and
-# assets/scripts/pr-facts.sh, the feedback miner's
+# formulas/mol-refinery-patrol.toml, formulas/mol-dog-shutdown-dance.toml,
+# mol-polecat-work's refusals of a work bead it cannot read, the refinery
+# reconcile's assets/scripts/merge-tail-report.sh and
+# assets/scripts/pr-facts.sh, assets/scripts/rejection-repool.sh for a handoff
+# it cannot read, the hand-off at assets/scripts/escalate.sh for a call about
+# a wisp, a session or a subject that names no bead, the feedback miner's
 # assets/scripts/feedback-miner.sh, and the boot-health order's
 # assets/scripts/boot-health.sh.
-# The visit is not this path's exit. A finding needing the operator's judgment
-# gets there through the reaction's `ruling` or `recommend` disposition, which
-# files a human gate on it, and orders/gate-visit-sweep files that gate's visit.
-# A patrol
-# calls assets/scripts/escalate.sh directly only for an emergency it cannot
-# express as a bead.
+# Filing a finding asks no person anything. A finding needing the operator's
+# judgment gets there through the reaction's `ruling` or `recommend`
+# disposition, which files a human gate on the finding through
+# assets/scripts/human-gate.sh. A patrol files a human gate directly only for an
+# emergency about a bead that cannot wait for a disposition. A situation with no
+# bead of its own comes here, because the helper refuses a patrol wisp.
 # Exit: 0 filed, already tracked, or its clear recorded (or no live bead to
 #       record it on) · 1 could not file/verify · 2 usage ·
 #       3 refused: a live finding in the scope shares the key or the subject
@@ -153,8 +157,8 @@ case "$KEY" in
 esac
 # A wisp names no subject a later pass can match: its patrol burns it when the
 # pass ends and the next pass pours another, so every pass would carry a new
-# --about and file a new bead. The key alone is the identity there, as in
-# escalate.sh's subject-class block, and no tracks edge is drawn to it.
+# --about and file a new bead. The key alone is the identity there, and no
+# tracks edge is drawn to it.
 case "$ABOUT" in
   *-wisp-*) warn "--about $ABOUT is a wisp, which its pass burns; filing on the key alone"; ABOUT="" ;;
 esac

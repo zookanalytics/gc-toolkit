@@ -1,33 +1,51 @@
 #!/usr/bin/env bash
-# Hermetic test for the gc-helm `open` subject-existence gate.
+# Hermetic test for the gc-helm `open` verb: it files a conversation about a
+# bead in the operator's queue.
 #
-# `gc-helm open <bead-id>` resolves the subject (`gc bd show`) BEFORE the
-# gate-visit block, and exits 4 ("verb runtime failure", the documented
-# bead-not-found code) with nothing filed when the id does not resolve. A visit
-# filed on an unresolvable id would park on the helm board with
-# gc.continuation_group=<the typo>, and engaging it would spawn a converse
-# sitting whose prime step (`gc bd show $SUBJECT`) has no bead to read. open is
-# the operator's front door to the visit spine, so a mistyped id files nothing.
-# The gate fails CLOSED on every unhappy reading, because the only alternative
-# is a visit on an unverified subject.
+# A conversation is an ordinary task that tracks the one bead it is about,
+# assigned to `human` while it waits in the operator's queue
+# (assets/scripts/conversation.sh). `gc-helm open <bead-id>` resolves the bead
+# (`gc bd show`) BEFORE it files anything, and exits 4 ("verb runtime failure",
+# the documented bead-not-found code) with nothing filed when the id does not
+# resolve: a conversation on an unresolvable id would wait in the queue with
+# nothing to be about. The gate fails CLOSED on every unhappy reading, because
+# the only alternative is a conversation on an unverified bead.
 #
 # This test runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a
 # stubbed `gc` on PATH — no live city, Dolt, network, or sessions. Covered:
-#   (EXISTS)   a resolvable subject still files the visit: one create carrying
-#              all three stamps, + the tracks edge, exit 0 (the gate does not
-#              break `open`)
-#   (HELD)     an already-open visit short-circuits, exit 0, nothing created
+#   (EXISTS)   a resolvable bead gets a conversation: one create, a task that
+#              tracks the bead and is assigned to `human`, read back as a
+#              conversation, exit 0
+#   (QUEUED)   a conversation already waiting in the queue is joined, exit 0,
+#              nothing created; a new reason is appended to its notes in a
+#              write guarded on its waiting there, and a concern it already
+#              carries is not appended again
+#   (JOIN-*)   a join is reported only once the conversation reads back still
+#              waiting in the queue and carrying the concern: one a dismiss
+#              closed or a sitting took, before the write or after it, is
+#              passed over and the concern filed fresh; a failed append, a note
+#              that did not land, an unread row, or a listing that does not
+#              answer again exits 4
+#   (HELD)     a conversation a sitting holds is not joined: a fresh one is
+#              filed in the queue
+#   (TWO-TRACKS) a task assigned to human that tracks the bead and another is
+#              no conversation: open joins a real one beside it, or files its
+#              own, and never writes to it
+#   (UNREAD)   a candidate whose own row does not read files nothing, exit 4
+#   (OPEN-JSON) --json prints {subject, conversation, filed}
+#   (ALLOWDUP) --allow-duplicate files a fresh conversation beside a queued one
+#   (GATE)     a human gate names the one bead still waiting on it, and the
+#              conversation replies to the gate; several waiting beads, or none,
+#              file nothing and say why
+#   (SHAPE)    a task whose tracks edge did not land is closed, not left behind
 #   (MISSING)  bd show's `{"error": …}` OBJECT answer -> exit 4, NOTHING filed
-#   (SHAPE)    that object shape never crashes jq into a false "found"
 #   (MISMATCH) bd show answering a DIFFERENT bead -> exit 4, nothing filed
-#              (the visit is keyed by the literal id typed, so a near-miss
-#              would file a visit nothing can resolve)
 #   (NORIG)    an id prefix matching no rig -> exit 4 naming the prefix
 #   (DOWN)     an empty answer (wedged data plane) -> exit 4, message says
 #              "could not verify", NOT "bead not found" — different operator move
 #   (CTRLCHR)  control chars in the payload (invalid --json) never read as
 #              "missing" when the bead is really there
-#   (ORDER)    static: the gate precedes the gate-visit block in the source
+#   (ORDER)    static: the existence gate precedes the create in the source
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,18 +64,68 @@ mkdir -p "$TMP/bin"
 
 # --- gc stub ------------------------------------------------------------------
 # One rig (prefix tk). `bd show` answers from $FAKE_SHOW_MODE so each case can
-# pick the exact payload shape the real `bd show` emits for that reading.
-# Every mutating call is appended to $FAKE_CALLS so "nothing was filed" is
-# asserted against the actual argv, not against exit status alone.
+# pick the exact payload shape the real `bd show` emits for that reading; the
+# gate ids tk-gate* read as human gates. Every MUTATING call (create, update,
+# close, dep add) is appended to $FAKE_CALLS so "nothing was filed" is asserted
+# against the actual argv, not against exit status alone; reads are not.
+#   bd dep list <bead> --direction=up --type tracks — the tasks that track the
+#     bead: one row for $FAKE_CONV when set, with assignee $FAKE_CONV_ASSIGNEE
+#     (default human) and status $FAKE_CONV_STATUS (default open), and one for
+#     $FAKE_TWO when set, an older task assigned to human. The bead is recorded,
+#     so the tasks' own rows can name it.
+#   bd show $FAKE_CONV — that conversation's own row as the store reads it
+#     now: its ask $FAKE_CONV_DESC (default "an earlier concern"), its notes
+#     $FAKE_CONV_NOTES (default none) followed by each note an update appended,
+#     and the status and assignee it has now. Those are $FAKE_CONV_NOW_STATUS
+#     and $FAKE_CONV_NOW_ASSIGNEE, which default to the listing's, so a case
+#     can move the conversation out of the queue after open's listing. Once an
+#     update closes it ($FAKE_CLOSE_ON_APPEND), it reads closed.
+#     $FAKE_CONV_UNREADABLE makes the row fail to read.
+#   bd update $FAKE_CONV — checks --if-assignee and --if-status against the
+#     status and assignee the conversation has now, exiting 13 with nothing
+#     written on a mismatch, as bd's guard does, then appends its note.
+#     $FAKE_GUARD_MISS makes the guard miss whatever it reads, as a writer
+#     landing between open's read and its write does; $FAKE_APPEND_FAIL fails
+#     the write (exit 1); $FAKE_APPEND_DROPS answers 0 and keeps no note; and
+#     $FAKE_CLOSE_ON_APPEND closes the conversation just after the append, as a
+#     dismiss landing before open's read-back does.
+#   bd dep list ... --type tracks fails from the $FAKE_TRACKS_FAIL_FROM-th
+#     listing on, when set.
+#   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
+#     gate: $FAKE_WAITERS, a JSON array.
+#   bd list --id <ids> — each named bead's own row, with its edges, for the
+#     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, and
+#     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
+#     id is the conversation a create filed, read back: a task that tracks the
+#     subject its --deps named and carries the assignee it was filed with,
+#     unless $FAKE_SHAPE_BROKEN drops the edge. Its replies-to edges are the
+#     ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left out, as a row
+#     the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
     # This stub's opens are all bead ids, which pass through the resolver with no
-    # PR search; the existence gate and visit lookups run unscoped (the stub
-    # ignores --db), so the path needs no .beads dir and only the prefix mapping
-    # matters here.
+    # PR search; the existence gate and conversation lookups run unscoped (the
+    # stub ignores --db), so the path needs no .beads dir and only the prefix
+    # mapping matters here.
     jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   "bd show")
+    if [ -n "${FAKE_CONV:-}" ] && [ "$3" = "$FAKE_CONV" ]; then
+      [ -z "${FAKE_CONV_UNREADABLE:-}" ] || exit 1
+      _notes="${FAKE_CONV_NOTES:-}"
+      if [ -s "$TMP_NOTES" ]; then _notes="${_notes:+$_notes
+}$(cat "$TMP_NOTES")"; fi
+      _now_st=$(cat "$TMP_NOW_STATUS" 2>/dev/null || printf '%s' "${FAKE_CONV_NOW_STATUS:-${FAKE_CONV_STATUS:-open}}")
+      jq -n --arg i "$3" --arg d "${FAKE_CONV_DESC:-an earlier concern}" --arg n "$_notes" \
+            --arg st "$_now_st" --arg a "${FAKE_CONV_NOW_ASSIGNEE:-${FAKE_CONV_ASSIGNEE:-human}}" \
+        '[{id:$i, title:"an earlier concern", description:$d, notes:$n, status:$st, issue_type:"task", assignee:$a}]'
+      exit 0
+    fi
+    case "$3" in
+      tk-gate*)
+        jq -n --arg i "$3" '[{id:$i, title:"Approve the rollout", description:"Gate on the waiting bead. Approve it or say why not.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]'
+        exit 0 ;;
+    esac
     case "$FAKE_SHOW_MODE" in
       found)     jq -n --arg i "$3" '[{id:$i, title:"a real bead", status:"open"}]' ;;
       # The REAL not-found answer: a bare object, not an array, exit 1.
@@ -73,22 +141,62 @@ case "$1 ${2:-}" in
       ctrlchr)   printf '[{"id":"%s","title":"ctl\002chars","notes":"a\001b"}]\n' "$3" ;;
       # A settled item on the DONE band: it exists, it just closed. No successor,
       # so the resolver passes it through and the closed-subject gate must catch it.
-      closed)    jq -n --arg i "$3" '[{id:$i, title:"a settled demand", status:"closed"}]' ;;
+      closed)    jq -n --arg i "$3" '[{id:$i, title:"a settled bead", status:"closed"}]' ;;
+    esac ;;
+  "bd dep")
+    case "${3:-}" in
+      list)
+        case " $* " in
+          *" --type tracks "*)
+            _tn=$(( $(cat "$TMP_TRACKS_READS" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_tn" > "$TMP_TRACKS_READS"
+            if [ -n "${FAKE_TRACKS_FAIL_FROM:-}" ] && [ "$_tn" -ge "$FAKE_TRACKS_FAIL_FROM" ]; then
+              echo "bd dep list: data plane down" >&2; exit 1
+            fi
+            printf '%s' "$4" > "$TMP_TRACKED"
+            _rows='[]'
+            if [ -n "${FAKE_TWO:-}" ]; then
+              _rows=$(jq -c --arg c "$FAKE_TWO" '. + [{id:$c, issue_type:"task", status:"open", assignee:"human", title:"a task about two beads", created_at:"2026-09-01T00:00:00Z", dependency_type:"tracks"}]' <<< "$_rows")
+            fi
+            if [ -n "${FAKE_CONV:-}" ]; then
+              _rows=$(jq -c --arg c "$FAKE_CONV" --arg a "${FAKE_CONV_ASSIGNEE:-human}" --arg st "${FAKE_CONV_STATUS:-open}" \
+                '. + [{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependency_type:"tracks"}]' <<< "$_rows")
+            fi
+            printf '%s\n' "$_rows" ;;
+          *" --type blocks "*) printf '%s\n' "${FAKE_WAITERS:-[]}" ;;
+          *) printf '[]\n' ;;
+        esac ;;
+      *)
+        printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS"
+        [ "${3:-}" = add ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES" ;;
     esac ;;
   "bd list")
-    # The already-held lookup. $FAKE_VISIT set => one open visit on the subject.
-    # FAKE_VISIT_EDGE=1 emits an edge-only visit instead: the
-    # gc.continuation_group stamp landed EMPTY and only the tracks edge names the
-    # subject. Rendered in the `gc bd list` key pair (.type + .depends_on_id),
-    # which is the shape this call returns.
-    if [ -n "${FAKE_VISIT:-}" ] && [ -n "${FAKE_VISIT_EDGE:-}" ]; then
-      jq -n --arg v "$FAKE_VISIT" --arg s "$FAKE_SUBJECT" \
-        '[{id:$v, metadata:{task_kind:"visit","gc.continuation_group":""},
-           dependencies:[{issue_id:$v, depends_on_id:$s, type:"tracks"}]}]'
-    elif [ -n "${FAKE_VISIT:-}" ]; then
-      jq -n --arg v "$FAKE_VISIT" --arg s "$FAKE_SUBJECT" \
-        '[{id:$v, metadata:{task_kind:"visit","gc.continuation_group":$s}}]'
-    else printf '[]\n'; fi ;;
+    # Each named bead's own row (--id, comma-separated).
+    _ids=""; _prev=""
+    for a in "$@"; do [ "$_prev" = "--id" ] && _ids="$a"; _prev="$a"; done
+    _out='[]'
+    _tracked="$(cat "$TMP_TRACKED" 2>/dev/null || true)"
+    for _id in $(printf '%s' "$_ids" | tr ',' ' '); do
+      case ",${FAKE_LIST_DROPS:-}," in *",$_id,"*) continue ;; esac
+      if [ -n "${FAKE_CONV:-}" ] && [ "$_id" = "$FAKE_CONV" ]; then
+        _row=$(jq -n --arg c "$_id" --arg a "${FAKE_CONV_ASSIGNEE:-human}" --arg st "${FAKE_CONV_STATUS:-open}" --arg s "$_tracked" \
+          '{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z",
+            dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}')
+      elif [ -n "${FAKE_TWO:-}" ] && [ "$_id" = "$FAKE_TWO" ]; then
+        _row=$(jq -n --arg c "$_id" --arg s "$_tracked" \
+          '{id:$c, issue_type:"task", status:"open", assignee:"human", title:"a task about two beads", created_at:"2026-09-01T00:00:00Z",
+            dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}, {issue_id:$c, depends_on_id:"tk-elsewhere", type:"tracks"}]}')
+      else
+        _subj="$(cat "$TMP_SUBJ" 2>/dev/null || true)"
+        _asg="$(cat "$TMP_ASG" 2>/dev/null || true)"
+        _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
+        if [ -n "${FAKE_SHAPE_BROKEN:-}" ]; then _subj=""; fi
+        _row=$(jq -n --arg c "$_id" --arg s "$_subj" --arg a "$_asg" --argjson r "${_reps:-[]}" \
+          '{id:$c, issue_type:"task", status:"open", assignee:$a,
+            dependencies:((if $s == "" then [] else [{issue_id:$c, depends_on_id:$s, type:"tracks"}] end) + $r)}')
+      fi
+      _out=$(jq -c --argjson r "$_row" '. + [$r]' <<< "$_out")
+    done
+    printf '%s\n' "$_out" ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
     # FAKE_CREATE_ERROR models bd REJECTING the create (e.g. a title over the
@@ -96,188 +204,358 @@ case "$1 ${2:-}" in
     if [ -n "${FAKE_CREATE_ERROR:-}" ]; then
       printf '{"error":"%s","schema_version":1}\n' "$FAKE_CREATE_ERROR"; exit 1
     fi
-    jq -n '{id:"tk-visit1"}' ;;
+    _prev=""
+    for a in "$@"; do
+      case "$_prev" in
+        --deps) printf '%s' "${a#tracks:}" > "$TMP_SUBJ" ;;
+        --assignee) printf '%s' "$a" > "$TMP_ASG" ;;
+      esac
+      _prev="$a"
+    done
+    jq -n '{id:"tk-conv1"}' ;;
   "bd update")
-    printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
-  "bd dep")
-    printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
+    printf '%s\n' "bd update ${*:3}" >> "$FAKE_CALLS"
+    if [ -n "${FAKE_CONV:-}" ] && [ "$3" = "$FAKE_CONV" ]; then
+      _id="$3"; shift 3
+      _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""; _note_set=0; _note=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --if-assignee)  _ifa_set=1; _ifa="${2-}"; shift 2 ;;
+          --if-status)    _ifs_set=1; _ifs="${2-}"; shift 2 ;;
+          --append-notes) _note_set=1; _note="${2-}"; shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      [ -z "${FAKE_APPEND_FAIL:-}" ] || exit 1
+      _now_st=$(cat "$TMP_NOW_STATUS" 2>/dev/null || printf '%s' "${FAKE_CONV_NOW_STATUS:-${FAKE_CONV_STATUS:-open}}")
+      _now_as="${FAKE_CONV_NOW_ASSIGNEE:-${FAKE_CONV_ASSIGNEE:-human}}"
+      if [ "$_ifa_set$_ifs_set" != 00 ] && [ -n "${FAKE_GUARD_MISS:-}" ]; then exit 13; fi
+      if [ "$_ifa_set" = 1 ] && [ "$_now_as" != "$_ifa" ]; then exit 13; fi
+      if [ "$_ifs_set" = 1 ] && [ "$_now_st" != "$_ifs" ]; then exit 13; fi
+      if [ "$_note_set" = 1 ] && [ -z "${FAKE_APPEND_DROPS:-}" ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
+      [ -z "${FAKE_CLOSE_ON_APPEND:-}" ] || printf 'closed' > "$TMP_NOW_STATUS"
+    fi ;;
+  "bd close")
+    printf '%s\n' "bd close ${*:3}" >> "$FAKE_CALLS" ;;
 esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
-export FAKE_CALLS="$TMP/calls"
+export FAKE_CALLS="$TMP/calls" TMP_SUBJ="$TMP/subj" TMP_ASG="$TMP/asg" TMP_REPLIES="$TMP/replies" TMP_TRACKED="$TMP/tracked"
+export TMP_NOTES="$TMP/notes" TMP_NOW_STATUS="$TMP/now-status" TMP_TRACKS_READS="$TMP/tracks-reads"
 # Neutralize any inherited helm fixture hook so enumerate_rigs uses the stub.
 unset GC_HELM_FIXTURE || true
 # Keep the cache out of the operator's real cache dir.
 export TMPDIR="$TMP"
 
-# run_open <show-mode> <bead-id> [visit-id] -> sets RC/OUT/ERR/CALLS
+# reset_store — forget the conversation an earlier case filed, the notes an
+# update appended, a close an update made, and the listings counted.
+reset_store() {
+    : > "$FAKE_CALLS"; rm -f "$TMP_SUBJ" "$TMP_ASG" "$TMP_TRACKED" "$TMP_NOTES" "$TMP_NOW_STATUS" "$TMP_TRACKS_READS"
+    : > "$TMP_REPLIES"
+}
+
+# run_open <show-mode> <bead-id> [args...] -> sets RC/OUT/ERR/CALLS
 run_open() {
-    : > "$FAKE_CALLS"
-    export FAKE_SHOW_MODE="$1" FAKE_SUBJECT="$2" FAKE_VISIT="${3:-}" FAKE_VISIT_EDGE="${4:-}"
+    reset_store
+    export FAKE_SHOW_MODE="$1"; _ro_bead="$2"; shift 2
     set +e
-    OUT="$(sh "$SCRIPT" open "$2" 2>"$TMP/err")"; RC=$?
+    OUT="$(sh "$SCRIPT" open "$_ro_bead" "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
 }
 
-# --- (EXISTS) the happy path still works --------------------------------------
+# --- (EXISTS) the happy path ---------------------------------------------------
 # A positive control first: a gate that rejects everything would pass every
 # fail-closed assertion below while breaking the verb outright.
+unset FAKE_CONV FAKE_WAITERS FAKE_SHAPE_BROKEN || true
 run_open found tk-real1
-eq "$RC" "0" "(EXISTS) a resolvable subject exits 0"
+eq "$RC" "0" "(EXISTS) a resolvable bead exits 0"
+CREATE=$(grep '^bd create' <<< "$CALLS" || true)
+[ "$(grep -c '^bd create' <<< "$CALLS" || true)" = 1 ] \
+  && ok "(EXISTS) one create files the conversation" || bad "(EXISTS) one create (calls: $CALLS)"
 # The stub records `$*`, so quoting is flattened — match the argv words.
-grep -q 'bd create .*--title visit: tk-real1' <<< "$CALLS" \
-  && ok "(EXISTS) the visit bead is created" || bad "(EXISTS) visit created (calls: $CALLS)"
-# The three stamps ride the create, so a visit never exists without the keys
-# the already-held guard matches.
-VCREATE=$(grep 'bd create .*--title visit: tk-real1' <<< "$CALLS" || true)
-grep -qF '"gc.routed_to":"human"' <<< "$VCREATE" \
-  && ok "(EXISTS) parked on the helm board (routed_to=human, on the create)" || bad "(EXISTS) routed_to stamp (calls: $CALLS)"
-grep -qF '"gc.continuation_group":"tk-real1"' <<< "$VCREATE" \
-  && ok "(EXISTS) continuation_group stamped with the subject, on the create" || bad "(EXISTS) continuation_group stamp"
-grep -qF '"task_kind":"visit"' <<< "$VCREATE" \
-  && ok "(EXISTS) task_kind=visit stamped, on the create" || bad "(EXISTS) task_kind stamp"
-grep -q 'bd update tk-visit1 .*task_kind=visit' <<< "$CALLS" \
-  && bad "(EXISTS) no second write stamps the visit's identity" "found an update stamping task_kind (calls: $CALLS)" \
-  || ok "(EXISTS) no second write stamps the visit's identity"
-# An ordinary open is about the subject at large, so it carries no topic of its
-# own and converse's fold keys it on the subject.
-grep -qF 'visit_topic' <<< "$CALLS" \
-  && bad "(EXISTS) an ordinary visit carries no topic of its own (calls: $CALLS)" \
-  || ok "(EXISTS) an ordinary visit carries no topic of its own"
-grep -q 'bd dep add tk-visit1 tk-real1 --type=tracks' <<< "$CALLS" \
-  && ok "(EXISTS) tracks edge wired to the subject" || bad "(EXISTS) tracks edge (calls: $CALLS)"
-# A successful open parks the visit on the board and spawns no session, so its
-# message reports the board and the engage action, and gives no spawn, vacuum
-# or attach-via-picker advice.
-grep -q 'parked on the helm board' <<< "$OUT" \
-  && ok "(EXISTS) success message reports a board-parked visit" || bad "(EXISTS) success names the board (out: $OUT)"
-grep -q 'engage tk-visit1' <<< "$OUT" \
+grep -q -- '-t task' <<< "$CREATE" \
+  && ok "(EXISTS) the conversation is an ordinary task" || bad "(EXISTS) task type (calls: $CALLS)"
+grep -q -- '--deps tracks:tk-real1' <<< "$CREATE" \
+  && ok "(EXISTS) it tracks the bead, on the create" || bad "(EXISTS) tracks edge on the create (calls: $CALLS)"
+grep -q -- '--assignee human' <<< "$CREATE" \
+  && ok "(EXISTS) it waits in the operator's queue (assigned to human), on the create" \
+  || bad "(EXISTS) assignee human on the create (calls: $CALLS)"
+grep -qE 'task_kind|gc\.routed_to|gc\.continuation_group' <<< "$CALLS" \
+  && bad "(EXISTS) a conversation carries no pack metadata (calls: $CALLS)" \
+  || ok "(EXISTS) no pack metadata is stamped"
+grep -q '^bd close' <<< "$CALLS" \
+  && bad "(EXISTS) the conversation read back and must not be closed (calls: $CALLS)" \
+  || ok "(EXISTS) the conversation reads back as one and stays open"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(EXISTS) success names the conversation and its bead" || bad "(EXISTS) success sentence (out: $OUT)"
+grep -q "operator's queue" <<< "$OUT" \
+  && ok "(EXISTS) …and says it waits in the operator's queue" || bad "(EXISTS) queue named (out: $OUT)"
+grep -q 'engage tk-real1' <<< "$OUT" \
   && ok "(EXISTS) …and the engage action needed next" || bad "(EXISTS) success points at engage (out: $OUT)"
-grep -qE 'will spawn|vacuum|sessions picker' <<< "$OUT" \
-  && bad "(EXISTS) success still advertises the retired converse pool" || ok "(EXISTS) no retired spawn/vacuum/picker advice"
+grep -qi 'visit' <<< "$OUT$ERR" \
+  && bad "(EXISTS) open's words name no visit (out: $OUT err: $ERR)" || ok "(EXISTS) no retired word in open's output"
 
-# --- (HELD) an existing open visit still short-circuits ------------------------
-run_open found tk-real1 tk-visit0
-eq "$RC" "0" "(HELD) an already-held subject exits 0"
-grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
-  && ok "(HELD) prints the existing visit id" || bad "(HELD) existing visit reported (out: $OUT)"
-grep -q 'engage tk-visit0' <<< "$OUT" \
-  && ok "(HELD) points the operator at engage for the existing visit" || bad "(HELD) points at engage (out: $OUT)"
+# --- (QUEUED) a conversation waiting in the queue is joined -------------------
+export FAKE_CONV=tk-conv0
+run_open found tk-real1
+eq "$RC" "0" "(QUEUED) a bead whose conversation waits in the queue exits 0"
+grep -q 'conversation tk-conv0 is already open' <<< "$OUT" \
+  && ok "(QUEUED) prints the queued conversation's id" || bad "(QUEUED) existing conversation reported (out: $OUT)"
+grep -q 'engage tk-real1' <<< "$OUT" \
+  && ok "(QUEUED) points the operator at engage" || bad "(QUEUED) points at engage (out: $OUT)"
 [ -z "$CALLS" ] \
-  && ok "(HELD) no second visit filed" || bad "(HELD) must not file a second visit (calls: $CALLS)"
+  && ok "(QUEUED) with no new concern, nothing is written" || bad "(QUEUED) wrote something (calls: $CALLS)"
+run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "0" "(QUEUED) a concern that joins a queued conversation exits 0"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(QUEUED) a second concern must join, not file (calls: $CALLS)" \
+  || ok "(QUEUED) a second concern files no second conversation"
+grep -q 'bd update tk-conv0 --if-assignee human --if-status open --append-notes Another concern joined this conversation: the cost question' <<< "$CALLS" \
+  && ok "(QUEUED) the concern is appended to the queued conversation's notes, guarded on its waiting in the queue" \
+  || bad "(QUEUED) the concern joins the conversation's notes under the queue guard (calls: $CALLS)"
+grep -q 'Compare the two options' <<< "$CALLS" \
+  && ok "(QUEUED) …with its body" || bad "(QUEUED) body appended (calls: $CALLS)"
+grep -q 'conversation tk-conv0 is already open' <<< "$OUT" \
+  && ok "(QUEUED) …and reported joined once it reads back" || bad "(QUEUED) join reported (out: $OUT err: $ERR)"
+# The same concern again joins nothing. A caller that asks on every pass while
+# its condition stands, as deferred dispatch's capped arm does, re-sends the
+# words the conversation already carries, in a note an earlier join appended or
+# as the ask it was filed with.
+export FAKE_CONV_NOTES="Another concern joined this conversation: the cost question
 
-# --- (HELDEDGE) an edge-only visit: stamp EMPTY, tracks edge intact -----------
-# A visit records its subject twice, as a tracks edge and as the
-# gc.continuation_group stamp, and the stamp can land empty while the edge
-# holds. Keyed on the stamp alone, this verb would file the duplicate it exists
-# to prevent. This is the OPERATOR's front door, so that duplicate is filed by
-# hand, on a subject a converse session is still holding.
-run_open found tk-real1 tk-visit0 edge
-eq "$RC" "0" "(HELDEDGE) a subject held by an edge-only visit exits 0"
-grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
-  && ok "(HELDEDGE) the existing visit is found via its tracks edge" \
-  || bad "(HELDEDGE) edge-only visit NOT found — the verb would file a duplicate (out: $OUT)"
+Compare the two options."
+run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "0" "(QUEUED) the same concern again exits 0"
 [ -z "$CALLS" ] \
-  && ok "(HELDEDGE) no second visit filed" \
-  || bad "(HELDEDGE) filed a duplicate visit (calls: $CALLS)"
+  && ok "(QUEUED) a concern an earlier join appended is not appended again" \
+  || bad "(QUEUED) the same concern was appended again (calls: $CALLS)"
+unset FAKE_CONV_NOTES
+export FAKE_CONV_DESC="Compare the two options."
+run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+[ -z "$CALLS" ] \
+  && ok "(QUEUED) a concern that is the conversation's own ask is not appended" \
+  || bad "(QUEUED) the conversation's own ask was appended (calls: $CALLS)"
+unset FAKE_CONV_DESC
 
-# --- (OPEN-JSON) --json and stderr NAME which identity matched (no silent no-op)-
-# The shared predicate (visit-identity.sh) reports HOW it matched: a stamp match
-# is "continuation_group", an edge-only match is "tracks", and a bare miss files
-# fresh and reports filed:true. stdout is pure JSON; the fold line is on stderr.
-run_open_json() { # <show-mode> <subject> [visit] [edge]
-    : > "$FAKE_CALLS"
-    export FAKE_SHOW_MODE="$1" FAKE_SUBJECT="$2" FAKE_VISIT="${3:-}" FAKE_VISIT_EDGE="${4:-}"
-    set +e
-    JOUT="$(sh "$SCRIPT" open "$2" --json 2>"$TMP/jerr")"; JRC=$?
-    set -e
-    JERR="$(cat "$TMP/jerr")"; JCALLS="$(cat "$FAKE_CALLS")"
-}
-run_open_json found tk-real1 tk-visit0
-eq "$JRC" "0" "(OPEN-JSON) a held subject exits 0 under --json"
-printf '%s' "$JOUT" | jq -e '.visit == "tk-visit0" and .identity == "continuation_group" and .filed == false and .subject == "tk-real1"' >/dev/null 2>&1 \
-  && ok "(OPEN-JSON) --json names the existing visit and its continuation_group identity, filed:false" \
-  || bad "(OPEN-JSON) --json object wrong for a stamp match (got: ${JOUT:-<nothing>})"
-grep -q 'folded into tk-visit0 (continuation_group)' <<< "$JERR" \
-  && ok "(OPEN-JSON) stderr names the fold and its identity" \
-  || bad "(OPEN-JSON) stderr must name the match (err: $JERR)"
-[ -z "$JCALLS" ] \
-  && ok "(OPEN-JSON) a fold files nothing" || bad "(OPEN-JSON) filed on a fold (calls: $JCALLS)"
-run_open_json found tk-real1 tk-visit0 edge
-printf '%s' "$JOUT" | jq -e '.identity == "tracks" and .filed == false' >/dev/null 2>&1 \
-  && ok "(OPEN-JSON) an edge-only match is named 'tracks'" \
-  || bad "(OPEN-JSON) edge match identity wrong (got: ${JOUT:-<nothing>})"
-run_open_json found tk-real1
-printf '%s' "$JOUT" | jq -e '.filed == true and .identity == "filed" and .visit == "tk-visit1"' >/dev/null 2>&1 \
-  && ok "(OPEN-JSON) a bare miss files fresh and reports filed:true" \
-  || bad "(OPEN-JSON) fresh-file --json wrong (got: ${JOUT:-<nothing>})"
-printf '%s' "$JOUT" | jq -e 'type == "object"' >/dev/null 2>&1 \
-  && ok "(OPEN-JSON) fresh-file stdout is a single JSON object, not human text" \
-  || bad "(OPEN-JSON) fresh-file stdout not clean JSON (got: $JOUT)"
+# --- (JOIN-*) a concern is reported joined only once it reads back in the queue -
+# The listing open chose from can be stale by the time it joins: a sitting can
+# take the conversation, or a dismiss close it, before the write. A conversation
+# that is no longer waiting in the queue cannot receive the concern, so open
+# passes it over and files the concern as a conversation of its own, and a write
+# or read-back that fails fails the open, so the concern is never reported
+# waiting while nothing records it.
+FAKE_APPEND_FAIL=1 run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "4" "(JOIN-FAIL) an append that fails exits 4"
+grep -q 'could not append the new concern to conversation tk-conv0' <<< "$ERR" \
+  && ok "(JOIN-FAIL) …saying the concern did not join" || bad "(JOIN-FAIL) names the failed append (err: $ERR)"
+grep -q 'already open' <<< "$OUT" \
+  && bad "(JOIN-FAIL) …and must not report the conversation waiting (out: $OUT)" \
+  || ok "(JOIN-FAIL) …and reports no conversation waiting with it"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(JOIN-FAIL) …and files nothing beside the failed write (calls: $CALLS)" \
+  || ok "(JOIN-FAIL) …and files nothing beside the failed write"
 
-# --- (ALLOWDUP) --allow-duplicate bypasses the one-visit-per-subject dedup ------
-# engage --reason files a fresh visit for a distinct concern even when the
-# subject already has one; it routes through open with --allow-duplicate, which
-# skips the already-held short-circuit and files the second visit.
-: > "$FAKE_CALLS"
-export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=tk-visit0
-set +e
-OUT="$(sh "$SCRIPT" open tk-real1 --reason "a distinct concern" --allow-duplicate 2>"$TMP/err")"; RC=$?
-set -e
-ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
-eq "$RC" "0" "(ALLOWDUP) open --allow-duplicate on a held subject exits 0"
-grep -q 'bd create .*--title visit: tk-real1 — a distinct concern' <<< "$CALLS" \
-  && ok "(ALLOWDUP) a second visit is filed, carrying the reason" \
-  || bad "(ALLOWDUP) second visit filed (calls: $CALLS)"
+FAKE_CONV_NOW_STATUS=closed run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "0" "(JOIN-CLOSED) a queued conversation a dismiss closed after open's listing exits 0"
+grep -q 'bd update tk-conv0' <<< "$CALLS" \
+  && bad "(JOIN-CLOSED) …and writes nothing onto the closed conversation (calls: $CALLS)" \
+  || ok "(JOIN-CLOSED) …writes nothing onto the closed conversation"
+grep -q 'bd create .*--title the cost question' <<< "$CALLS" \
+  && ok "(JOIN-CLOSED) …and files the concern as a conversation of its own" \
+  || bad "(JOIN-CLOSED) the concern is filed fresh (calls: $CALLS)"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-CLOSED) …reporting the conversation it filed" || bad "(JOIN-CLOSED) reports the fresh conversation (out: $OUT)"
+
+FAKE_CONV_NOW_STATUS=in_progress FAKE_CONV_NOW_ASSIGNEE=gc-toolkit/gc-toolkit.tk-conv0 \
+  run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(JOIN-TAKEN) a queued conversation a sitting took after open's listing exits 0"
+grep -q 'bd update tk-conv0' <<< "$CALLS" \
+  && bad "(JOIN-TAKEN) …and writes nothing onto the sitting's conversation (calls: $CALLS)" \
+  || ok "(JOIN-TAKEN) …writes nothing onto the sitting's conversation"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-TAKEN) …and files the concern in the queue" || bad "(JOIN-TAKEN) files fresh (out: $OUT calls: $CALLS)"
+
+FAKE_GUARD_MISS=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(JOIN-GUARD) a conversation that leaves the queue between open's read and its write exits 0"
+[ "$(grep -c '^bd update tk-conv0' <<< "$CALLS" || true)" = 1 ] \
+  && grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
+  && ok "(JOIN-GUARD) …its one write is the guarded append, which the guard refuses" \
+  || bad "(JOIN-GUARD) one guarded append (calls: $CALLS)"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-GUARD) …and the concern is filed in the queue instead" || bad "(JOIN-GUARD) files fresh (out: $OUT calls: $CALLS)"
+
+FAKE_CLOSE_ON_APPEND=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(JOIN-CLOSED-AFTER) a conversation a dismiss closes after the append exits 0"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-CLOSED-AFTER) …and its read-back sends the concern to a conversation of its own" \
+  || bad "(JOIN-CLOSED-AFTER) files fresh once the read-back reads closed (out: $OUT calls: $CALLS)"
+grep -q 'already open' <<< "$OUT" \
+  && bad "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting (out: $OUT)" \
+  || ok "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting"
+
+FAKE_APPEND_DROPS=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(JOIN-LOST) an append that answers 0 and keeps no note exits 4"
+grep -q 'did not read back in conversation tk-conv0' <<< "$ERR" \
+  && ok "(JOIN-LOST) …saying the concern did not read back" || bad "(JOIN-LOST) names the read-back (err: $ERR)"
+
+FAKE_CONV_UNREADABLE=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read back exits 4"
+grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
+  && ok "(JOIN-UNREAD) …after the guarded append, which an unread row cannot rule out" \
+  || bad "(JOIN-UNREAD) the append is guarded (calls: $CALLS)"
+grep -q 'could not be read back' <<< "$ERR" \
+  && ok "(JOIN-UNREAD) …saying it could not be read back" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
+
+FAKE_CONV_NOW_STATUS=closed run_open found tk-real1
+eq "$RC" "0" "(JOIN-BARE) open with no concern beside a conversation closed after the listing exits 0"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-BARE) …and files a conversation in the queue rather than report the closed one" \
+  || bad "(JOIN-BARE) files fresh (out: $OUT calls: $CALLS)"
+
+FAKE_CONV_NOW_STATUS=closed FAKE_TRACKS_FAIL_FROM=2 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(JOIN-REREAD) a listing that does not answer after a conversation left the queue exits 4"
+grep -q 'could not be read again' <<< "$ERR" \
+  && ok "(JOIN-REREAD) …naming the read" || bad "(JOIN-REREAD) names the re-read (err: $ERR)"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(JOIN-REREAD) …and files nothing it could not check (calls: $CALLS)" \
+  || ok "(JOIN-REREAD) …and files nothing"
+
+# --- (HELD) a conversation a sitting holds is not joined ----------------------
+# A conversation held by a sitting is in that sitting, not in the queue, so a
+# concern opened from the board waits in the queue as its own conversation.
+export FAKE_CONV=tk-conv0 FAKE_CONV_ASSIGNEE=gc-toolkit/gc-toolkit.tk-conv0 FAKE_CONV_STATUS=in_progress
+run_open found tk-real1
+eq "$RC" "0" "(HELD) a bead whose conversation a sitting holds exits 0"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(HELD) a fresh conversation is filed in the queue" || bad "(HELD) fresh conversation (out: $OUT calls: $CALLS)"
+unset FAKE_CONV FAKE_CONV_ASSIGNEE FAKE_CONV_STATUS
+
+# --- (TWO-TRACKS) a task that tracks two beads is no conversation -------------
+# A task assigned to human that tracks the bead and another bead is ordinary
+# work: a conversation tracks exactly one bead (conversation.sh). open neither
+# joins it nor appends a concern to it, and beside a real conversation waiting
+# in the queue it joins that one, though the two-bead task is older.
+export FAKE_TWO=tk-two FAKE_CONV=tk-conv0
+run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(TWO-TRACKS) open beside a two-bead task and a queued conversation exits 0"
+grep -q 'bd update tk-conv0 --if-assignee human --if-status open --append-notes Another concern joined this conversation: the cost question' <<< "$CALLS" \
+  && ok "(TWO-TRACKS) the concern joins the real conversation" \
+  || bad "(TWO-TRACKS) the concern joins the real conversation (calls: $CALLS)"
+grep -q 'tk-two' <<< "$CALLS$OUT" \
+  && bad "(TWO-TRACKS) the two-bead task is never joined or written (out: $OUT calls: $CALLS)" \
+  || ok "(TWO-TRACKS) the two-bead task is neither joined nor written"
+unset FAKE_CONV
+run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(TWO-TRACKS) open beside the two-bead task alone exits 0"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(TWO-TRACKS) …and files a conversation of its own" \
+  || bad "(TWO-TRACKS) a fresh conversation is filed (out: $OUT calls: $CALLS)"
+grep -q 'bd update tk-two' <<< "$CALLS" \
+  && bad "(TWO-TRACKS) …and appends nothing to the two-bead task (calls: $CALLS)" \
+  || ok "(TWO-TRACKS) …and appends nothing to the two-bead task"
+unset FAKE_TWO
+
+# --- (UNREAD) a candidate whose own row does not read is not guessed ----------
+# The inverse listing names a task that tracks the bead, but its own row, which
+# says whether the bead is all it tracks, does not come back. Nothing proves it
+# a conversation or not, so open files nothing and appends nothing.
+export FAKE_CONV=tk-conv0 FAKE_LIST_DROPS=tk-conv0
+run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(UNREAD) a candidate whose own row does not read exits 4"
+[ -z "$CALLS" ] && ok "(UNREAD) nothing is filed or appended" || bad "(UNREAD) wrote something (calls: $CALLS)"
+grep -q 'could not read the conversations on tk-real1' <<< "$ERR" \
+  && ok "(UNREAD) …naming the read" || bad "(UNREAD) names the read (err: $ERR)"
+unset FAKE_CONV FAKE_LIST_DROPS
+
+# --- (OPEN-JSON) --json prints one object -------------------------------------
+run_open found tk-real1 --json
+eq "$RC" "0" "(OPEN-JSON) a fresh file exits 0 under --json"
+printf '%s' "$OUT" | jq -e '.conversation == "tk-conv1" and .subject == "tk-real1" and .filed == true' >/dev/null 2>&1 \
+  && ok "(OPEN-JSON) --json names the conversation filed, filed:true" \
+  || bad "(OPEN-JSON) --json object wrong for a fresh file (got: ${OUT:-<nothing>})"
+export FAKE_CONV=tk-conv0
+run_open found tk-real1 --json
+printf '%s' "$OUT" | jq -e '.conversation == "tk-conv0" and .filed == false' >/dev/null 2>&1 \
+  && ok "(OPEN-JSON) a join names the queued conversation, filed:false" \
+  || bad "(OPEN-JSON) --json object wrong for a join (got: ${OUT:-<nothing>})"
+unset FAKE_CONV
+
+# --- (ALLOWDUP) --allow-duplicate files beside a queued conversation ------------
+# engage passes it for a concern of its own, which is a distinct dialogue even
+# when the bead has a conversation waiting.
+export FAKE_CONV=tk-conv0
+run_open found tk-real1 --reason "a distinct concern" --allow-duplicate
+eq "$RC" "0" "(ALLOWDUP) open --allow-duplicate beside a queued conversation exits 0"
+grep -q 'bd create .*--title a distinct concern' <<< "$CALLS" \
+  && ok "(ALLOWDUP) a second conversation is filed, titled with the reason" \
+  || bad "(ALLOWDUP) second conversation filed (calls: $CALLS)"
 grep -q 'is already open' <<< "$OUT$ERR" \
-  && bad "(ALLOWDUP) still short-circuited on the existing visit" \
-  || ok "(ALLOWDUP) the dedup short-circuit is bypassed"
-# The second visit is about its own concern, so it carries a topic of its own:
-# converse's fold never folds it into the live sitting on the subject, nor that
-# sitting into it. The stamp rides the create, so no sitting claims the visit
-# without it.
-VCREATE=$(grep 'bd create .*--title visit: tk-real1' <<< "$CALLS" || true)
-grep -qF '"visit_topic":"own"' <<< "$VCREATE" \
-  && ok "(ALLOWDUP) the second visit carries visit_topic=own, on the create" \
-  || bad "(ALLOWDUP) visit_topic=own on the create (calls: $CALLS)"
-grep -q 'bd update tk-visit1 .*visit_topic' <<< "$CALLS" \
-  && bad "(ALLOWDUP) no second write stamps the topic (calls: $CALLS)" \
-  || ok "(ALLOWDUP) no second write stamps the topic"
-# CONTROL: without the flag, the same held subject still short-circuits and files
-# nothing — so the bypass is the flag's doing, not the ambient state.
-: > "$FAKE_CALLS"
-set +e
-OUT="$(sh "$SCRIPT" open tk-real1 --reason "a distinct concern" 2>"$TMP/err")"; RC=$?
-set -e
-CALLS="$(cat "$FAKE_CALLS")"
-eq "$RC" "0" "(ALLOWDUP-CONTROL) open without the flag on a held subject exits 0"
-[ -z "$CALLS" ] \
-  && ok "(ALLOWDUP-CONTROL) …and files nothing (dedup still holds by default)" \
-  || bad "(ALLOWDUP-CONTROL) default must still dedup (calls: $CALLS)"
-unset FAKE_VISIT
+  && bad "(ALLOWDUP) still joined the queued conversation" \
+  || ok "(ALLOWDUP) the join is bypassed"
+unset FAKE_CONV
+
+# --- (GATE) a gate names the one bead still waiting on it ---------------------
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"},{"id":"tk-done","status":"closed","dependency_type":"blocks"}]'
+run_open found tk-gate1
+eq "$RC" "0" "(GATE) a gate with one open bead waiting on it exits 0"
+grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" \
+  && ok "(GATE) the conversation tracks the waiting bead, never the gate" \
+  || bad "(GATE) tracks the waiting bead (calls: $CALLS)"
+grep -q -- '--deps tracks:tk-gate1' <<< "$CALLS" \
+  && bad "(GATE) a conversation never tracks a gate (calls: $CALLS)" || ok "(GATE) no tracks edge onto the gate"
+grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(GATE) the conversation replies to the gate" || bad "(GATE) replies-to edge (calls: $CALLS)"
+grep -q -- '--title Approve the rollout' <<< "$CALLS" \
+  && ok "(GATE) its title is what the gate asks" || bad "(GATE) gate's title (calls: $CALLS)"
+grep -q 'Answer the human gate tk-gate1' <<< "$CALLS" \
+  && ok "(GATE) its ask names the gate" || bad "(GATE) ask names the gate (calls: $CALLS)"
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"in_progress"}]'
+run_open found tk-gate1
+eq "$RC" "4" "(GATE-TWO) a gate two open beads wait on exits 4"
+[ -z "$CALLS" ] && ok "(GATE-TWO) nothing filed" || bad "(GATE-TWO) filed something (calls: $CALLS)"
+grep -q 'tk-anchor tk-child' <<< "$ERR" \
+  && ok "(GATE-TWO) names both beads, so the operator names the one they mean" \
+  || bad "(GATE-TWO) names both beads (err: $ERR)"
+export FAKE_WAITERS='[{"id":"tk-done","status":"closed"}]'
+run_open found tk-gate1
+eq "$RC" "4" "(GATE-NONE) a gate nothing waits on exits 4"
+[ -z "$CALLS" ] && ok "(GATE-NONE) nothing filed" || bad "(GATE-NONE) filed something (calls: $CALLS)"
+grep -q 'nothing waits on gate tk-gate1' <<< "$ERR" && grep -q 'tk-done' <<< "$ERR" \
+  && ok "(GATE-NONE) says nothing waits and names the bead it was about" \
+  || bad "(GATE-NONE) message (err: $ERR)"
+grep -q 'gc bd gate resolve tk-gate1' <<< "$ERR" \
+  && ok "(GATE-NONE) …and how to clear the gate" || bad "(GATE-NONE) names the resolve (err: $ERR)"
+unset FAKE_WAITERS
+
+# --- (SHAPE) a task that did not land as a conversation is closed ---------------
+export FAKE_SHAPE_BROKEN=1
+run_open found tk-real1
+eq "$RC" "4" "(SHAPE) a task whose tracks edge did not land exits 4"
+grep -q 'bd close tk-conv1' <<< "$CALLS" \
+  && ok "(SHAPE) the misshapen task is closed, not left behind" || bad "(SHAPE) closed (calls: $CALLS)"
+unset FAKE_SHAPE_BROKEN
 
 # --- (MISSING) a typo must file NOTHING ----------------------------------------
 run_open missing tk-nope1
 eq "$RC" "4" "(MISSING) an unresolvable id exits 4 (verb runtime failure)"
 [ -z "$CALLS" ] \
-  && ok "(MISSING) NO visit bead created, routed, or wired — nothing filed" \
+  && ok "(MISSING) NO conversation created or wired — nothing filed" \
   || bad "(MISSING) filed something for a nonexistent bead (calls: $CALLS)"
 grep -q 'bead not found' <<< "$ERR" \
   && ok "(MISSING) says 'bead not found'" || bad "(MISSING) message (err: $ERR)"
 grep -q "tk-nope1" <<< "$ERR" \
   && ok "(MISSING) names the offending id" || bad "(MISSING) message names the id (err: $ERR)"
-# (SHAPE) the not-found payload is an OBJECT, so a `.[]?|.id` probe would make jq
-# error out rather than answer cleanly. Assert the gate never mistakes that for a
+# The not-found payload is an OBJECT, so a `.[]?|.id` probe would make jq error
+# out rather than answer cleanly. Assert the gate never mistakes that for a
 # resolved subject — i.e. it fails closed on the shape it meets in production.
 grep -q 'filed on' <<< "$OUT" \
-  && bad "(SHAPE) the {\"error\":…} object read as a resolved subject" \
-  || ok "(SHAPE) the {\"error\":…} object never reads as resolved"
-
+  && bad "(MISSING) the {\"error\":…} object read as a resolved subject" \
+  || ok "(MISSING) the {\"error\":…} object never reads as resolved"
 # --- (MISMATCH) resolving to a DIFFERENT bead is not a resolution --------------
 run_open mismatch tk-typo9
 eq "$RC" "4" "(MISMATCH) an answer for another bead exits 4"
@@ -294,7 +572,7 @@ grep -q "prefix 'zz' matches no rig" <<< "$ERR" \
 
 # --- (DOWN) a wedged data plane is not a typo ---------------------------------
 run_open down tk-real1
-eq "$RC" "4" "(DOWN) an empty answer exits 4 (fail closed — no visit on an unverified subject)"
+eq "$RC" "4" "(DOWN) an empty answer exits 4 (fail closed — no conversation on an unverified subject)"
 [ -z "$CALLS" ] && ok "(DOWN) nothing filed" || bad "(DOWN) filed on an unverified subject (calls: $CALLS)"
 grep -q 'could not verify' <<< "$ERR" \
   && ok "(DOWN) says 'could not verify', not 'bead not found'" \
@@ -320,16 +598,16 @@ grep -q 'connection refused' <<< "$ERR" \
 run_open ctrlchr tk-real1
 eq "$RC" "0" "(CTRLCHR) a real bead with control chars in its payload still resolves"
 grep -q 'bd create' <<< "$CALLS" \
-  && ok "(CTRLCHR) the visit is filed normally" || bad "(CTRLCHR) visit filed (err: $ERR)"
+  && ok "(CTRLCHR) the conversation is filed normally" || bad "(CTRLCHR) conversation filed (err: $ERR)"
 
 # --- (CLOSED) a settled DONE-band item is not open work -----------------------
 # The subject EXISTS but has closed, so the existence gate passes and the pick
-# would otherwise mint a fresh "operator pick" visit on it — the loop by which a
-# resolved demand still showing its question gets re-engaged as a new ask. A
+# would otherwise file a fresh "operator pick" conversation on it — the loop by
+# which a settled question gets re-engaged as a new ask. A
 # closed subject here is genuinely settled (a superseded predecessor was already
 # redirected to its live successor), so the pick fails closed and files nothing.
 run_open closed tk-clsd1
-eq "$RC" "4" "(CLOSED) a closed subject exits 4 (no fresh visit on a settled DONE row)"
+eq "$RC" "4" "(CLOSED) a closed subject exits 4 (no fresh conversation on a settled DONE row)"
 grep -q 'is closed' <<< "$ERR" \
   && ok "(CLOSED) the message names the subject as closed" || bad "(CLOSED) message (err: $ERR)"
 if grep -q 'bd create' <<< "$CALLS"; then
@@ -338,41 +616,42 @@ else
   ok "(CLOSED) nothing is filed on a closed subject"
 fi
 
-# --- (ORDER static) the gate precedes the gate-visit block --------------------
+# --- (ORDER static) the existence gate precedes the create ---------------------
 # Placement is the invariant, not just presence: a check that ran after the
-# create would leave behind the visit it exists to refuse.
+# create would leave behind the conversation it exists to refuse.
 # `|| true`: with `pipefail`, a grep that finds NOTHING — exactly the regression
 # this case exists to catch — would otherwise kill the run under `set -e` before
 # it could report, turning a legible failure into a silent early exit.
 GATE_LINE="$(grep -n '# >>> open-subject-exists' "$SCRIPT" | head -n1 | cut -d: -f1 || true)"
-VISIT_LINE="$(awk '/^cmd_open\(\)/{f=1} f && /# >>> gate-visit/{print NR; exit}' "$SCRIPT")"
-if [ -n "$GATE_LINE" ] && [ -n "$VISIT_LINE" ] && [ "$GATE_LINE" -lt "$VISIT_LINE" ]; then
-  ok "(ORDER) the existence gate precedes the gate-visit block (line $GATE_LINE < $VISIT_LINE)"
+CREATE_LINE="$(awk '/^cmd_open\(\)/{f=1} f && /gc bd create -t task/{print NR; exit}' "$SCRIPT")"
+if [ -n "$GATE_LINE" ] && [ -n "$CREATE_LINE" ] && [ "$GATE_LINE" -lt "$CREATE_LINE" ]; then
+  ok "(ORDER) the existence gate precedes the create (line $GATE_LINE < $CREATE_LINE)"
 else
-  bad "(ORDER) gate must precede the gate-visit block (gate=${GATE_LINE:-absent} visit=${VISIT_LINE:-absent})"
+  bad "(ORDER) gate must precede the create (gate=${GATE_LINE:-absent} create=${CREATE_LINE:-absent})"
 fi
 
 # --- (BLURB) --reason / --body say what the sitting is actually for -----------
 # The default wording ("operator pick from the board") is true of the board
 # picker and false of every other caller, and the body is not decoration: it is
-# written at filing time and read at CLAIM time as the converse session's only
-# brief. Two knobs because the default is two — a short title tail and a longer
-# brief — so one flag driving both would bloat titles or starve briefs.
-: > "$FAKE_CALLS"
-export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+# the conversation's ask, written at filing time and read at CLAIM time as the
+# converse session's brief. Two knobs because the default is two — a short
+# title and a longer ask — so one flag driving both would bloat titles or
+# starve asks.
+reset_store
+export FAKE_SHOW_MODE=found
 set +e
 sh "$SCRIPT" open tk-real1 --reason "operator-origin topic intake" \
    --body "Rebuild what context exists, prep, and hold." >/dev/null 2>&1
 set -e
 CALLS="$(cat "$FAKE_CALLS")"
-grep -q 'bd create .*--title visit: tk-real1 — operator-origin topic intake' <<< "$CALLS" \
-  && ok "(BLURB) --reason replaces the title tail" || bad "(BLURB) title tail (calls: $CALLS)"
+grep -q 'bd create .*--title operator-origin topic intake' <<< "$CALLS" \
+  && ok "(BLURB) --reason is the title" || bad "(BLURB) title (calls: $CALLS)"
 grep -q -- '-d Rebuild what context exists' <<< "$CALLS" \
-  && ok "(BLURB) --body becomes the claim-time brief" || bad "(BLURB) body (calls: $CALLS)"
+  && ok "(BLURB) --body becomes the ask" || bad "(BLURB) body (calls: $CALLS)"
 grep -q 'operator pick from the board' <<< "$CALLS" \
   && bad "(BLURB) the stock wording must not survive an override" || ok "(BLURB) no stock wording left over"
 # --reason alone must not leave a stock body contradicting a custom title.
-: > "$FAKE_CALLS"
+reset_store
 set +e
 sh "$SCRIPT" open tk-real1 --reason "operator-origin topic intake" >/dev/null 2>&1
 set -e
@@ -387,19 +666,19 @@ set +e; sh "$SCRIPT" open tk-real1 tk-real2 >/dev/null 2>&1; RC=$?; set -e
 eq "$RC" "2" "(BLURB) two bead-ids is a usage error"
 
 # --- (LONGREASON) a reason past the headline cap yields a bounded title --------
-# open caps the title TAIL at a board headline and keeps the FULL reason in the
+# open caps the title at a board headline and keeps the FULL reason in the
 # body, so a reason longer than bd's title cap still files. The marker sits past
 # the cap: it must be ABSENT from the bounded title and PRESENT in the preserved
 # body.
 LONG_HEAD="$(printf 'A%.0s' $(seq 1 300))"
 LONG_REASON="${LONG_HEAD}ZZTAILZZ"
-: > "$FAKE_CALLS"
-export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+reset_store
+export FAKE_SHOW_MODE=found
 set +e
 sh "$SCRIPT" open tk-real1 --reason "$LONG_REASON" >/dev/null 2>"$TMP/err"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"
-eq "$RC" "0" "(LONGREASON) a reason past the cap still files the visit"
+eq "$RC" "0" "(LONGREASON) a reason past the cap still files the conversation"
 # The stub flattens argv; the title is what sits between `--title ` and ` -d `.
 TITLE="${CALLS#*--title }"; TITLE="${TITLE%% -d *}"
 case "$TITLE" in
@@ -408,19 +687,19 @@ case "$TITLE" in
   *)          bad "(LONGREASON) the title was neither bounded nor ellipsized (title: $TITLE)" ;;
 esac
 case "$CALLS" in
-  *ZZTAILZZ*) ok "(LONGREASON) the full reason is preserved in the visit body" ;;
+  *ZZTAILZZ*) ok "(LONGREASON) the full reason is preserved in the ask" ;;
   *)          bad "(LONGREASON) the full reason was lost from the body (calls: $CALLS)" ;;
 esac
 
 # --- (WIDEREASON) a reason in 4-byte characters still fits bd's byte cap ------
 # bd caps a title at 500 BYTES, so a tail at the codepoint cap overruns it when
 # every character is 4 bytes wide; the headline is cut to a byte budget too.
-: > "$FAKE_CALLS"
+reset_store
 set +e
 sh "$SCRIPT" open tk-real1 --reason "$(printf '\360\237\230\200%.0s' $(seq 1 200))" >/dev/null 2>"$TMP/err"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"
-eq "$RC" "0" "(WIDEREASON) a reason in 4-byte characters still files the visit"
+eq "$RC" "0" "(WIDEREASON) a reason in 4-byte characters still files the conversation"
 TITLE="${CALLS#*--title }"; TITLE="${TITLE%% -d *}"
 TITLE_BYTES=$(printf '%s' "$TITLE" | wc -c)
 if [ "$TITLE_BYTES" -le 500 ]; then
@@ -434,8 +713,8 @@ fi
 # already resolved by this point. open surfaces bd's own message for such a
 # failure, rather than a jq indexing error or a misleading "does it exist?" that
 # blames a missing subject.
-: > "$FAKE_CALLS"
-export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=""
+reset_store
+export FAKE_SHOW_MODE=found
 set +e
 FAKE_CREATE_ERROR='validation failed: title must be 500 characters or less (got 512)' \
   sh "$SCRIPT" open tk-real1 --reason "a short reason" 2>"$TMP/err" >/dev/null; RC=$?
@@ -455,18 +734,30 @@ grep -qi 'cannot index object' <<< "$ERR" \
 # --- (RIGTIMEOUT) the rig-enumeration bound is the pack's one, and tunable -----
 # `gc rig list` can take seconds to answer in a loaded city, and a bound it
 # overruns makes open exit 3 having filed nothing. That is harmless for the
-# board picker, but gc-visit-open.sh's topic path creates the subject bead
-# before open runs, so a timeout there leaves that bead with no visit.
+# board picker, but operator-intake.sh's topic path creates the subject bead
+# before open runs, so a timeout there leaves that bead with no conversation.
 # enumerate_rigs reads through rig-map.sh, bounded by GC_RIG_LIST_TIMEOUT.
 mkdir -p "$TMP/slowbin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/slowbin/gc" <<'SLOW'
 case "$1 ${2:-}" in
   "rig list")  sleep 2; jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   "bd show")   jq -n --arg i "$3" '[{id:$i, title:"a real bead"}]' ;;
-  "bd list")   printf '[]\n' ;;
-  "bd create") printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{id:"tk-visit1"}' ;;
+  "bd list")
+    case " $* " in
+      *" --id "*)
+        _p=""; _c=""; for a in "$@"; do [ "$_p" = --id ] && _c="$a"; _p="$a"; done
+        jq -n --arg c "$_c" --arg s "$(cat "$TMP_SUBJ" 2>/dev/null)" \
+          '[{id:$c, issue_type:"task", status:"open", assignee:"human", dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}]'
+        exit 0 ;;
+    esac
+    printf '[]\n' ;;
+  "bd dep")
+    case "$3" in list) printf '[]\n' ;; *) printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;; esac ;;
+  "bd create")
+    printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
+    _p=""; for a in "$@"; do [ "$_p" = --deps ] && printf '%s' "${a#tracks:}" > "$TMP_SUBJ"; _p="$a"; done
+    jq -n '{id:"tk-conv1"}' ;;
   "bd update") printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
-  "bd dep")    printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
 esac
 exit 0
 SLOW
@@ -483,7 +774,7 @@ PATH="$TMP/slowbin:$PATH" GC_RIG_LIST_TIMEOUT=10 sh "$SCRIPT" open tk-slow1 >/de
 set -e
 eq "$RC" "0" "(RIGTIMEOUT) a generous bound rides out a slow gc rig list"
 grep -q 'bd create' <<< "$(cat "$FAKE_CALLS")" \
-  && ok "(RIGTIMEOUT) and the visit is filed" || bad "(RIGTIMEOUT) visit filed"
+  && ok "(RIGTIMEOUT) and the conversation is filed" || bad "(RIGTIMEOUT) conversation filed"
 
 # --- (RIGWHY) enumerate_rigs names WHICH failure it hit ----------------------
 # Every unhappy reading of `gc rig list` exits 3 having filed nothing, with a
@@ -510,11 +801,26 @@ if [ "$1 ${2:-}" = "rig list" ]; then
   esac
   exit 0
 fi
+case "$1 ${2:-} ${3:-}" in
+  "bd dep list") printf '[]\n'; exit 0 ;;
+esac
+case "$1 ${2:-}" in
+  "bd show") jq -n --arg i "$3" '[{id:$i, title:"a real bead", status:"open"}]'; exit 0 ;;
+  "bd list")
+    case " $* " in
+      *" --id "*)
+        _p=""; _c=""; for a in "$@"; do [ "$_p" = --id ] && _c="$a"; _p="$a"; done
+        jq -n --arg c "$_c" --arg s "$(cat "$TMP_SUBJ" 2>/dev/null)" \
+          '[{id:$c, issue_type:"task", status:"open", assignee:"human", dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}]'
+        exit 0 ;;
+    esac
+    printf '[]\n'; exit 0 ;;
+esac
 printf '%s %s\n' "$1" "${2:-}" >> "$FAKE_CALLS"
 case "$1 ${2:-}" in
-  "bd show") jq -n --arg i "$3" '[{id:$i, title:"a real bead", status:"open"}]' ;;
-  "bd list") printf '[]\n' ;;
-  "bd create") jq -n '{id:"tk-visit9"}' ;;
+  "bd create")
+    _p=""; for a in "$@"; do [ "$_p" = --deps ] && printf '%s' "${a#tracks:}" > "$TMP_SUBJ"; _p="$a"; done
+    jq -n '{id:"tk-conv9"}' ;;
 esac
 exit 0
 RIGSTUB
@@ -582,19 +888,19 @@ grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw
 # --- (RESOLVE) the subject resolver: PR ref / superseded id -> live bead ------
 # A PR reference or a settled (closed and superseded) bead id resolves to the
 # LIVE bead that owns the work, by metadata and the graph and never by a title,
-# before a visit is filed on it. These cases drive the REAL cmd_open over a stub
-# whose `bd show` is id-aware, so a supersede chain and a live bead read
-# differently, and whose `bd list` answers the PR search. They assert the visit
-# is filed on the RESOLVED bead, and that an unresolvable or ambiguous reference
-# files nothing.
+# before a conversation is filed on it. These cases drive the REAL cmd_open over
+# a stub whose `bd show` is id-aware, so a supersede chain and a live bead read
+# differently, and whose `bd list` answers the PR search. They assert the
+# conversation is filed on the RESOLVED bead (its tracks edge), and that an
+# unresolvable or ambiguous reference files nothing.
 mkdir -p "$TMP/resbin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/resbin/gc" <<'RESGC'
 # One rig, prefix tk, with a real .beads store (created below as $RESRIG) so the
 # resolver can pin --db for its cross-store PR search; the stub ignores the --db
 # value and answers by argv pattern. `bd show` branches on the id so a supersede
-# chain and a live bead read differently; `bd list` tells the PR search (which
-# carries `blocked` in --status) apart from the already-held visit lookup (which
-# does not), so neither reads as the other.
+# chain and a live bead read differently; `bd list` answers the PR search (which
+# carries `blocked` in --status) and the read-back of the conversation a create
+# filed (--id).
 case "$1 ${2:-}" in
   "rig list")
     jq -n '{rigs:[{name:"gc-toolkit", path:env.RESRIG, prefix:"tk"}]}' ;;
@@ -615,6 +921,13 @@ case "$1 ${2:-}" in
       *)          printf '{"error":"no issues found"}\n'; exit 1 ;;
     esac ;;
   "bd list")
+    case " $* " in
+      *" --id "*)
+        _p=""; _c=""; for a in "$@"; do [ "$_p" = --id ] && _c="$a"; _p="$a"; done
+        jq -n --arg c "$_c" --arg s "$(cat "$TMP_SUBJ" 2>/dev/null)" \
+          '[{id:$c, issue_type:"task", status:"open", assignee:"human", dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}]'
+        exit 0 ;;
+    esac
     case "$*" in
       # The resolver's PR search carries the full live-status set
       # (open,in_progress,blocked,deferred,hooked,pinned). FAKE_DEFERRED_ROWS
@@ -624,11 +937,15 @@ case "$1 ${2:-}" in
       # narrower set fails RESOLVE-PR-DEFERRED while every other PR case passes.
       *deferred*) printf '%s' "${FAKE_DEFERRED_ROWS:-${FAKE_PR_ROWS:-[]}}" ;;
       *blocked*)  printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
-      *)          printf '%s' "${FAKE_VISIT_ROWS:-[]}" ;;
+      *)          printf '[]' ;;
     esac ;;
-  "bd create") printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{id:"tk-visitR"}' ;;
+  "bd dep")
+    case "$3" in list) printf '[]\n' ;; *) printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;; esac ;;
+  "bd create")
+    printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
+    _p=""; for a in "$@"; do [ "$_p" = --deps ] && printf '%s' "${a#tracks:}" > "$TMP_SUBJ"; _p="$a"; done
+    jq -n '{id:"tk-convR"}' ;;
   "bd update") printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
-  "bd dep")    printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
 esac
 exit 0
 RESGC
@@ -641,11 +958,11 @@ export RESRIG="$TMP/resrig"
 # FAKE_DEFERRED_ROWS is left UNSET by default, so the PR search falls back to
 # FAKE_PR_ROWS for every case but the deferred one, which exports it to model an
 # anchor only a query carrying `deferred` sees.
-export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[]'
+export FAKE_PR_ROWS='[]'
 
 # run_resolve <arg> -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
 run_resolve() {
-    : > "$FAKE_CALLS"
+    reset_store
     set +e
     OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" open "$1" 2>"$TMP/err")"; RC=$?
     set -e
@@ -655,10 +972,10 @@ run_resolve() {
 # (RESOLVE-SUPERSEDE) a closed+superseded id files on the SUCCESSOR, said aloud.
 FAKE_PR_ROWS='[]'; run_resolve tk-pred
 eq "$RC" "0" "(RESOLVE-SUPERSEDE) a closed+superseded id resolves and files"
-grep -q 'gc.continuation_group=tk-succ' <<< "$CALLS" \
-  && ok "(RESOLVE-SUPERSEDE) the visit is filed on the live successor" \
-  || bad "(RESOLVE-SUPERSEDE) continuation_group is the successor (calls: $CALLS)"
-grep -q 'continuation_group=tk-pred' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-succ' <<< "$CALLS" \
+  && ok "(RESOLVE-SUPERSEDE) the conversation is filed on the live successor" \
+  || bad "(RESOLVE-SUPERSEDE) the conversation tracks the successor (calls: $CALLS)"
+grep -q -- '--deps tracks:tk-pred' <<< "$CALLS" \
   && bad "(RESOLVE-SUPERSEDE) filed on the dead predecessor" \
   || ok "(RESOLVE-SUPERSEDE) never files on the predecessor"
 grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
@@ -668,14 +985,14 @@ grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
 # (RESOLVE-CHAIN) a multi-hop chain (head -> mid -> succ) resolves to the end.
 FAKE_PR_ROWS='[]'; run_resolve tk-head
 eq "$RC" "0" "(RESOLVE-CHAIN) a supersede chain resolves and files"
-grep -q 'gc.continuation_group=tk-succ' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-succ' <<< "$CALLS" \
   && ok "(RESOLVE-CHAIN) followed head->mid->succ to the live end" \
   || bad "(RESOLVE-CHAIN) chain not followed to the end (calls: $CALLS)"
 
 # (RESOLVE-LIVE) a live bead id passes through unchanged and unremarked.
 FAKE_PR_ROWS='[]'; run_resolve tk-live1
 eq "$RC" "0" "(RESOLVE-LIVE) a live bead id still files"
-grep -q 'gc.continuation_group=tk-live1' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-live1' <<< "$CALLS" \
   && ok "(RESOLVE-LIVE) filed on the id as given" || bad "(RESOLVE-LIVE) filed elsewhere (calls: $CALLS)"
 grep -qiE 'superseded|PR #' <<< "$ERR" \
   && bad "(RESOLVE-LIVE) a live id must not trigger a redirect note (err: $ERR)" \
@@ -702,7 +1019,7 @@ grep -q 'tk-gone' <<< "$ERR" \
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
 run_resolve 615
 eq "$RC" "0" "(RESOLVE-PR-NUMBER) a PR number resolves and files"
-grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-NUMBER) filed on the bead whose pr_number matches" \
   || bad "(RESOLVE-PR-NUMBER) filed elsewhere (calls: $CALLS)"
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
@@ -712,14 +1029,14 @@ grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
 run_resolve 'https://github.com/o/r/pull/615'
 eq "$RC" "0" "(RESOLVE-PR-URL) a PR URL resolves and files"
-grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-URL) filed on the anchor whose pr_url matches" || bad "(RESOLVE-PR-URL) filed elsewhere (calls: $CALLS)"
 
 # (RESOLVE-PR-URL-DISAMBIG) two beads share a number; the URL pins the repo.
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r1/pull/615"}},{"id":"tk-prbead2","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r2/pull/615"}}]'
 run_resolve 'https://github.com/o/r1/pull/615'
 eq "$RC" "0" "(RESOLVE-PR-URL-DISAMBIG) the URL disambiguates a shared number"
-grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-URL-DISAMBIG) the repo in the URL selects one bead" \
   || bad "(RESOLVE-PR-URL-DISAMBIG) filed elsewhere (calls: $CALLS)"
 
@@ -729,7 +1046,7 @@ grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
 run_resolve 'https://github.com/o/r/pull/615/files'
 eq "$RC" "0" "(RESOLVE-PR-URL-SUBPAGE) a PR subpage URL resolves and files"
-grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-URL-SUBPAGE) filed on the anchor whose canonical pr_url matches" \
   || bad "(RESOLVE-PR-URL-SUBPAGE) filed elsewhere (calls: $CALLS)"
 
@@ -738,7 +1055,7 @@ grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
 run_resolve 'https://github.com/o/r/pull/615?diff=split'
 eq "$RC" "0" "(RESOLVE-PR-URL-QUERY) a PR URL with a query string resolves and files"
-grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-URL-QUERY) filed on the anchor whose canonical pr_url matches" \
   || bad "(RESOLVE-PR-URL-QUERY) filed elsewhere (calls: $CALLS)"
 
@@ -747,7 +1064,7 @@ grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r1/pull/615"}},{"id":"tk-prbead2","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r2/pull/615"}}]'
 run_resolve 'https://github.com/o/r1/pull/615/files'
 eq "$RC" "0" "(RESOLVE-PR-URL-SUBPAGE-DISAMBIG) a subpage URL disambiguates a shared number"
-grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-URL-SUBPAGE-DISAMBIG) the repo in the subpage URL selects one bead" \
   || bad "(RESOLVE-PR-URL-SUBPAGE-DISAMBIG) filed elsewhere (calls: $CALLS)"
 
@@ -774,10 +1091,10 @@ FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"merge_result":"pul
 for REF in 615 'https://github.com/o/r/pull/615'; do
     run_resolve "$REF"
     eq "$RC" "0" "(RESOLVE-PR-REWORK) $REF, recorded by an anchor and its rework, resolves and files"
-    grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+    grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
       && ok "(RESOLVE-PR-REWORK) $REF files on the anchor" \
       || bad "(RESOLVE-PR-REWORK) $REF filed elsewhere (calls: $CALLS)"
-    grep -q 'continuation_group=tk-rework' <<< "$CALLS" \
+    grep -q -- '--deps tracks:tk-rework' <<< "$CALLS" \
       && bad "(RESOLVE-PR-REWORK) $REF filed on the rework" \
       || ok "(RESOLVE-PR-REWORK) $REF never files on the rework"
     grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
@@ -800,7 +1117,7 @@ grep -q 'tk-rework' <<< "$ERR" \
   || ok "(RESOLVE-PR-REWORK-REPOS) no rework is a candidate of its own"
 run_resolve 'https://github.com/o/r2/pull/615'
 eq "$RC" "0" "(RESOLVE-PR-REWORK-REPOS) the URL resolves the shared number"
-grep -q 'gc.continuation_group=tk-prbead2' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-prbead2' <<< "$CALLS" \
   && ok "(RESOLVE-PR-REWORK-REPOS) the URL files on its repo's anchor" \
   || bad "(RESOLVE-PR-REWORK-REPOS) filed elsewhere (calls: $CALLS)"
 
@@ -824,19 +1141,19 @@ FAKE_PR_ROWS='[]'
 export FAKE_DEFERRED_ROWS='[{"id":"tk-defbead","status":"deferred","metadata":{"pr_number":"616","pr_url":"https://github.com/o/r/pull/616"}}]'
 run_resolve 616
 eq "$RC" "0" "(RESOLVE-PR-DEFERRED) a PR anchor in a non-open live state resolves and files"
-grep -q 'gc.continuation_group=tk-defbead' <<< "$CALLS" \
+grep -q -- '--deps tracks:tk-defbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-DEFERRED) filed on the deferred anchor recording the PR" \
   || bad "(RESOLVE-PR-DEFERRED) not filed on the deferred anchor (calls: $CALLS)"
 grep -q 'PR #616 -> tk-defbead' <<< "$ERR" \
   && ok "(RESOLVE-PR-DEFERRED) says which bead it matched" || bad "(RESOLVE-PR-DEFERRED) match not announced (err: $ERR)"
-unset FAKE_PR_ROWS FAKE_VISIT_ROWS FAKE_DEFERRED_ROWS
+unset FAKE_PR_ROWS FAKE_DEFERRED_ROWS
 
 # --- (RESOLVE-PR-UNREADABLE) a store that will not read fails the number CLOSED -
 # A bare PR number is unique only across EVERY live store, so the search must be
 # able to read them all: a per-rig `gc bd list` that errors, or answers with a
 # non-array payload, leaves the candidate set incomplete and the resolution is
 # refused rather than resolved from the stores that answered — otherwise a number
-# an unreadable store also records would open a visit on the wrong anchor. Two
+# an unreadable store also records would open a conversation on the wrong anchor. Two
 # rig stores: rigA does not read, rigB records PR #615. Driven over `open` so
 # "nothing filed" is observable, with a readable-but-EMPTY control proving the
 # refusal keys on unreadability, not merely on a second rig existing.
@@ -863,13 +1180,13 @@ case "\$1 \${2:-}" in
     esac ;;
   "bd show")
     # Reached only if the resolver does NOT refuse an unreadable store: it would
-    # then resolve #615 from rigB and file a visit, so this arm lets that path
+    # then resolve #615 from rigB and file a conversation, so this arm lets that path
     # complete (RC 0, a non-empty CALLS) and the assertions below catch it.
     case "\$3" in
       tk-prbead) jq -n '[{id:"tk-prbead",status:"open",title:"the PR anchor"}]' ;;
       *)         printf '{"error":"no issues found"}\n'; exit 1 ;;
     esac ;;
-  "bd create") printf 'bd create %s\n' "\$*" >> "\$FAKE_CALLS"; jq -n '{id:"tk-visitU"}' ;;
+  "bd create") printf 'bd create %s\n' "\$*" >> "\$FAKE_CALLS"; jq -n '{id:"tk-convU"}' ;;
   "bd update") printf 'bd update %s\n' "\$*" >> "\$FAKE_CALLS" ;;
 esac
 exit 0
@@ -923,7 +1240,7 @@ unset RIGA_ROWS FAKE_PR_ROWS
 # simply absent, so it cannot be pinned with --db and the per-rig read would fall
 # back to the session default store — one store read twice, this rig never read.
 # That leaves the cross-store uniqueness proof silently incomplete, and a number
-# the unread rig also records could open a visit on the wrong anchor. rigA has no
+# the unread rig also records could open a conversation on the wrong anchor. rigA has no
 # .beads dir and is scanned first; rigB records #615 but is never reached.
 mkdir -p "$TMP/noledger/rigA" "$TMP/noledger/rigB/.beads" "$TMP/noledger/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/noledger/bin/gc" <<NOLEDGERGC
@@ -940,7 +1257,7 @@ case "\$1 \${2:-}" in
       tk-prbead) jq -n '[{id:"tk-prbead",status:"open",title:"the PR anchor"}]' ;;
       *)         printf '{"error":"no issues found"}\n'; exit 1 ;;
     esac ;;
-  "bd create") printf 'bd create %s\n' "\$*" >> "\$FAKE_CALLS"; jq -n '{id:"tk-visitN"}' ;;
+  "bd create") printf 'bd create %s\n' "\$*" >> "\$FAKE_CALLS"; jq -n '{id:"tk-convN"}' ;;
   "bd update") printf 'bd update %s\n' "\$*" >> "\$FAKE_CALLS" ;;
 esac
 exit 0
@@ -961,18 +1278,21 @@ unset FAKE_PR_ROWS
 
 # --- (RESOLVE-REACT / RESOLVE-ENGAGE) the resolved subject drives the write ----
 # react and engage resolve the same reference open does, then act on the LIVE
-# bead: react slings it through gc-proactive.sh, engage spawns a sitting on a
-# visit tracking it. These cases drive the REAL verbs over a stub that answers
-# the resolve reads and, for engage, the spawn and bind, and assert the id each
-# verb writes is the RESOLVED one (a supersede chain's successor, or the bead a
-# PR number records), never the reference typed.
+# bead: react slings it through gc-proactive.sh, engage holds a conversation
+# about it in a new sitting. These cases drive the REAL verbs over a stub that
+# answers the resolve reads and, for engage, the conversation lookup, the spawn
+# and the bind, and assert the id each verb writes is the RESOLVED one (a
+# supersede chain's successor, or the bead a PR number records), never the
+# reference typed.
 mkdir -p "$TMP/rebin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rebin/gc" <<'REBIN'
-# `bd show` branches on the id so a supersede chain, a live bead, and the visit
-# read differently; the visit's assignee is served from $VISIT_STATE so the
-# assignee the bind writes is the one the readback sees. `bd list` tells the PR
-# search (carries `blocked` in --status) apart from the visit lookup. `session
-# new` returns a fixed identity; nudge is a no-op. Mutations append to $FAKE_CALLS.
+# `bd show` branches on the id so a supersede chain and a live bead read
+# differently. The conversation tk-convE tracks $FAKE_CONV_SUBJ, waiting in the
+# queue until a bind writes the assignee kept in $CONV_STATE. `bd list` tells
+# the PR search (carries `blocked` in --status) apart from a by-id read, which
+# answers tk-convE's own row with its edges. The
+# session list holds no sitting; `session new` returns a fixed identity, its
+# alias qualified as gascity stores it. Mutations append to $FAKE_CALLS.
 case "$1 ${2:-}" in
   "rig list")
     jq -n '{rigs:[{name:"gc-toolkit", path:env.REBINRIG, prefix:"tk"}]}' ;;
@@ -981,27 +1301,39 @@ case "$1 ${2:-}" in
       tk-pred)   jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
       tk-succ)   jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
       tk-prbead) jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
-      tk-visitE)
-        _a="$(cat "$VISIT_STATE" 2>/dev/null || true)"
-        jq -n --arg a "$_a" '[{id:"tk-visitE", status:"open", assignee:$a, metadata:{"task_kind":"visit"}}]' ;;
+      tk-convE)
+        _a="$(cat "$CONV_STATE" 2>/dev/null || true)"
+        jq -n --arg a "${_a:-human}" --arg s "${FAKE_CONV_SUBJ:-}" '[{id:"tk-convE", issue_type:"task", status:"open", assignee:$a, title:"an earlier concern", dependencies:[{id:$s, dependency_type:"tracks"}]}]' ;;
       *) printf '{"error":"no issues found"}\n'; exit 1 ;;
     esac ;;
   "bd list")
+    _id=""; _p=""
+    for a in "$@"; do [ "$_p" = "--id" ] && _id="$a"; _p="$a"; done
     case "$*" in
       *blocked*) printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
-      *)         printf '%s' "${FAKE_VISIT_ROWS:-[]}" ;;
+      *)
+        if [ "$_id" = tk-convE ]; then
+          _a="$(cat "$CONV_STATE" 2>/dev/null || true)"
+          jq -n --arg a "${_a:-human}" --arg s "${FAKE_CONV_SUBJ:-}" '[{id:"tk-convE", issue_type:"task", status:"open", assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependencies:[{issue_id:"tk-convE", depends_on_id:$s, type:"tracks"}]}]'
+        else printf '[]'; fi ;;
     esac ;;
   "bd dep")
     case "$3" in
-      list) printf '[]\n' ;;
-      *)    printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
+      list)
+        if [ "$4" = "${FAKE_CONV_SUBJ:-}" ] && [ -n "$4" ] && case " $* " in *" --type tracks "*) true ;; *) false ;; esac; then
+          _a="$(cat "$CONV_STATE" 2>/dev/null || true)"
+          jq -n --arg a "${_a:-human}" '[{id:"tk-convE", issue_type:"task", status:"open", assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependency_type:"tracks"}]'
+        else printf '[]\n'; fi ;;
+      *) printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
     esac ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$FAKE_CALLS"
-    _sn="$(printf '%s' "$*" | sed -n 's/.* --assignee \(.*\)$/\1/p')"
-    [ -n "$_sn" ] && printf '%s' "$_sn" > "$VISIT_STATE" ;;
+    _sn="$(printf '%s' "$*" | sed -n 's/.* --assignee \([^ ]*\).*$/\1/p')"
+    [ -n "$_sn" ] && printf '%s' "$_sn" > "$CONV_STATE" ;;
+  "session list")
+    jq -n '{sessions:[]}' ;;
   "session new")
-    jq -n '{session_id:"hq-fake", session_name:"gc-toolkit/converse-opus.tk-visitE"}' ;;
+    jq -n '{session_id:"hq-fake", session_name:"s-hq-fake", alias:"gc-toolkit/gc-toolkit.tk-convE"}' ;;
 esac
 exit 0
 REBIN
@@ -1012,6 +1344,7 @@ printf 'proactive %s\n' "$*" >> "$FAKE_SLING"
 exit 0
 PROACTIVE
 chmod +x "$TMP/rebin/gc-proactive.sh"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/rebin/no-reminder"; chmod +x "$TMP/rebin/no-reminder"
 # A real .beads store for the rig, so the resolver can pin --db for the PR search
 # react/engage run; without it the resolver fails closed before resolving. engage
 # also refuses up front a rig whose checkout carries no converse template
@@ -1019,7 +1352,7 @@ chmod +x "$TMP/rebin/gc-proactive.sh"
 # before it resolves and binds.
 mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-opus"
 export REBINRIG="$TMP/rebinrig"
-export FAKE_SLING="$TMP/slung" VISIT_STATE="$TMP/visit_state"
+export FAKE_SLING="$TMP/slung" CONV_STATE="$TMP/conv_state"
 
 # run_react <arg> — drive the REAL cmd_react; the fake gc-proactive.sh records
 # the `sling` argv so the resolved subject is checked against the slung id.
@@ -1032,18 +1365,19 @@ run_react() {
     ERR="$(cat "$TMP/err")"; SLUNG="$(cat "$FAKE_SLING")"
 }
 # run_engage <arg> — drive the REAL cmd_engage through the spawn/bind path,
-# --no-attach so no session is attached; VISIT_STATE reset so the pre-bind read
-# sees the parked visit unassigned.
+# --no-attach so no session is attached; CONV_STATE reset so the pre-bind read
+# sees the conversation waiting in the queue.
 run_engage() {
-    : > "$FAKE_CALLS"; : > "$VISIT_STATE"
+    : > "$FAKE_CALLS"; : > "$CONV_STATE"
     set +e
-    OUT="$(PATH="$TMP/rebin:$PATH" sh "$SCRIPT" engage "$1" --no-attach 2>"$TMP/err")"; RC=$?
+    OUT="$(PATH="$TMP/rebin:$PATH" GC_SITTING_COMMENT_TOOL="$TMP/rebin/no-reminder" \
+        sh "$SCRIPT" engage "$1" --no-input --no-attach 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
 }
 
 # (RESOLVE-REACT-SUPERSEDE) react slings the successor of a settled id.
-export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[]'
+export FAKE_PR_ROWS='[]'
 run_react tk-pred
 eq "$RC" "0" "(RESOLVE-REACT-SUPERSEDE) react resolves a settled id and slings"
 grep -q 'sling tk-succ' <<< "$SLUNG" \
@@ -1054,7 +1388,7 @@ grep -q 'sling tk-pred' <<< "$SLUNG" \
   || ok "(RESOLVE-REACT-SUPERSEDE) never slings the predecessor"
 
 # (RESOLVE-REACT-PR) react slings the bead a PR number records, not the number.
-export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]' FAKE_VISIT_ROWS='[]'
+export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
 run_react 615
 eq "$RC" "0" "(RESOLVE-REACT-PR) react resolves a PR number and slings"
 grep -q 'sling tk-prbead' <<< "$SLUNG" \
@@ -1064,35 +1398,35 @@ grep -qE 'sling 615( |$)' <<< "$SLUNG" \
   && bad "(RESOLVE-REACT-PR) slung the raw PR number" \
   || ok "(RESOLVE-REACT-PR) never slings the raw PR number"
 
-# (RESOLVE-ENGAGE-SUPERSEDE) engage spawns onto the visit tracking the successor.
-export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-succ"}}]'
+# (RESOLVE-ENGAGE-SUPERSEDE) engage holds the successor's conversation.
+export FAKE_PR_ROWS='[]' FAKE_CONV_SUBJ=tk-succ
 run_engage tk-pred
 eq "$RC" "0" "(RESOLVE-ENGAGE-SUPERSEDE) engage resolves a settled id and binds a sitting"
-grep -q 'visit tk-visitE for tk-succ' <<< "$OUT" \
-  && ok "(RESOLVE-ENGAGE-SUPERSEDE) the sitting holds a visit on the live successor" \
-  || bad "(RESOLVE-ENGAGE-SUPERSEDE) sitting is on the successor (out: $OUT)"
+grep -q 'conversation tk-convE for tk-succ' <<< "$OUT" \
+  && ok "(RESOLVE-ENGAGE-SUPERSEDE) the sitting holds the live successor's conversation" \
+  || bad "(RESOLVE-ENGAGE-SUPERSEDE) sitting is on the successor (out: $OUT err: $ERR)"
 grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
   && ok "(RESOLVE-ENGAGE-SUPERSEDE) announces the redirect before spawning" \
   || bad "(RESOLVE-ENGAGE-SUPERSEDE) redirect announced (err: $ERR)"
-grep -q 'bd update tk-visitE.*--assignee gc-toolkit/converse-opus.tk-visitE' <<< "$CALLS" \
-  && ok "(RESOLVE-ENGAGE-SUPERSEDE) binds the spawned sitting to the successor's visit" \
-  || bad "(RESOLVE-ENGAGE-SUPERSEDE) bound the resolved bead's visit (calls: $CALLS)"
+grep -q 'bd update tk-convE --if-assignee human --if-status open --unset-metadata gc.session_id --unset-metadata gc.session_name --assignee gc-toolkit/gc-toolkit.tk-convE' <<< "$CALLS" \
+  && ok "(RESOLVE-ENGAGE-SUPERSEDE) binds the conversation to the sitting's alias, guarded on the queue and open" \
+  || bad "(RESOLVE-ENGAGE-SUPERSEDE) bound the resolved bead's conversation (calls: $CALLS)"
 
-# (RESOLVE-ENGAGE-PR) engage spawns onto the visit tracking the PR's bead.
-export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-prbead"}}]'
+# (RESOLVE-ENGAGE-PR) engage holds the conversation about the PR's bead.
+export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]' FAKE_CONV_SUBJ=tk-prbead
 run_engage 615
 eq "$RC" "0" "(RESOLVE-ENGAGE-PR) engage resolves a PR number and binds a sitting"
-grep -q 'visit tk-visitE for tk-prbead' <<< "$OUT" \
-  && ok "(RESOLVE-ENGAGE-PR) the sitting holds a visit on the bead recording the PR" \
-  || bad "(RESOLVE-ENGAGE-PR) sitting is on the PR anchor (out: $OUT)"
+grep -q 'conversation tk-convE for tk-prbead' <<< "$OUT" \
+  && ok "(RESOLVE-ENGAGE-PR) the sitting holds the conversation on the bead recording the PR" \
+  || bad "(RESOLVE-ENGAGE-PR) sitting is on the PR anchor (out: $OUT err: $ERR)"
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
   && ok "(RESOLVE-ENGAGE-PR) announces the PR match before spawning" \
   || bad "(RESOLVE-ENGAGE-PR) PR match announced (err: $ERR)"
-unset FAKE_PR_ROWS FAKE_VISIT_ROWS FAKE_SLING VISIT_STATE
+unset FAKE_PR_ROWS FAKE_SLING CONV_STATE FAKE_CONV_SUBJ
 
 # --- (SYNTAX) the shipped script still parses ---------------------------------
 sh -n "$SCRIPT" 2>/dev/null && ok "(SYNTAX) gc-helm.sh parses as POSIX sh" || bad "(SYNTAX) sh -n failed"
 
 echo ""
-echo "gc-helm open subject-existence gate: $PASS passed, $FAIL failed"
+echo "gc-helm open: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

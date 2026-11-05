@@ -28,18 +28,23 @@ func startFailedTiles() []board.Tile {
 	return []board.Tile{
 		{ID: "tk-failed", Rig: "gc-toolkit", Kind: "epic", Title: "the plan", Severity: board.SevElevated,
 			Section: board.SectionGate, Owed: true, Held: true, GroupRoot: "tk-failed",
-			VisitState: board.VisitStartFailed, VisitStartFailure: "startup timeout",
+			SittingState: board.SittingStartFailed, SittingStartFailure: "startup timeout",
 			Frontier: "needs-review · 1 open · in conversation",
 			Needs:    "start failed (startup timeout): talk the plan over", RankScore: 2_001_000},
 		{ID: "tk-parked", Rig: "gc-toolkit", Kind: "epic", Title: "another plan", Severity: board.SevElevated,
 			Section: board.SectionGate, Owed: true, Held: true, GroupRoot: "tk-parked",
-			VisitState: board.VisitParked, Frontier: "needs-review · 1 open · in conversation",
+			SittingState: board.SittingWaiting, Frontier: "needs-review · 1 open · in conversation",
 			Needs: "look at it", RankScore: 2_000_000},
+		{ID: "tk-gated", Rig: "gc-toolkit", Kind: "epic", Title: "a third plan", Severity: board.SevElevated,
+			Section: board.SectionGate, Owed: true, Held: true, WorkHeld: true, GroupRoot: "tk-gated",
+			SittingState: board.SittingWaiting, Frontier: "needs-review · 1 open · held by a human gate",
+			Needs: "rule on it", RankScore: 1_999_000},
 	}
 }
 
-// TestRenderQueueMarksAFailedStart: in the queue a row whose visit's sitting
-// failed to start leads with ✗ where any other held row leads with ●, and the
+// TestRenderQueueMarksAFailedStart: in the queue a row whose conversation's
+// sitting failed to start leads with ✗, where a row whose work a human gate
+// holds leads with ● and a row only a conversation is on leads with ◌, and the
 // trailer says what ✗ means and that the row leads the queue.
 func TestRenderQueueMarksAFailedStart(t *testing.T) {
 	tiles := startFailedTiles()
@@ -51,13 +56,16 @@ func TestRenderQueueMarksAFailedStart(t *testing.T) {
 	if g := glyphOf(got, "tk-failed"); g != "✗" {
 		t.Errorf("a failed start leads with ✗, got %q\n%s", g, got)
 	}
-	if g := glyphOf(got, "tk-parked"); g != "●" {
-		t.Errorf("a parked held row still leads with ●, got %q\n%s", g, got)
+	if g := glyphOf(got, "tk-gated"); g != "●" {
+		t.Errorf("a row whose work a human gate holds still leads with ●, got %q\n%s", g, got)
+	}
+	if g := glyphOf(got, "tk-parked"); g != "◌" {
+		t.Errorf("a row only a conversation waiting for the operator is on leads with ◌, got %q\n%s", g, got)
 	}
 	for _, want := range []string{
 		"start failed (startup timeout)",
-		"✗ the sitting spawned for its visit failed to start",
-		"a visit whose sitting failed to start (✗) leads it",
+		"✗ the sitting spawned for a conversation on this bead failed to start",
+		"a conversation whose sitting failed to start (✗) leads it",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the queue render must carry %q; got:\n%s", want, got)
@@ -78,10 +86,13 @@ func TestRenderTableMarksAFailedStart(t *testing.T) {
 	if !strings.Contains(got, "✗ ▌ tk-failed") {
 		t.Errorf("a family headed by a failed start carries ✗; got:\n%s", got)
 	}
-	if !strings.Contains(got, "◉ ▌ tk-parked") {
-		t.Errorf("a held row that wants a person keeps ◉; got:\n%s", got)
+	if !strings.Contains(got, "◉ ▌ tk-gated") {
+		t.Errorf("a row whose work is held that wants a person keeps ◉; got:\n%s", got)
 	}
-	if !strings.Contains(got, "✗ the sitting spawned for its visit failed to start") {
+	if !strings.Contains(got, "● ▌ tk-parked") {
+		t.Errorf("a conversation-only row that wants a person takes the wants-you ●; got:\n%s", got)
+	}
+	if !strings.Contains(got, "✗ the sitting spawned for a conversation on the row failed to start") {
 		t.Errorf("the family legend explains ✗; got:\n%s", got)
 	}
 }
@@ -114,9 +125,8 @@ func TestPickerCutKeepsAFailedStart(t *testing.T) {
 	anchors := []board.Anchor{
 		{ID: "tk-subj", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
 			Children: []board.Child{{ID: "tk-subj.1", Status: "open"}}},
-		{ID: "tk-vis", Title: "visit: tk-subj — talk the plan over", Kind: "human", Source: "human",
-			Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: now,
-			Metadata: map[string]string{"gc.routed_to": "human", "task_kind": "visit", "gc.continuation_group": "tk-subj"}},
+		{ID: "tk-conv", Title: "talk the plan over", Kind: board.KindConversation, Source: board.KindConversation,
+			Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: now, Subjects: []string{"tk-subj"}, Assignee: "human"},
 	}
 	for i := 0; i < limit+10; i++ {
 		anchors = append(anchors, board.Anchor{
@@ -125,8 +135,7 @@ func TestPickerCutKeepsAFailedStart(t *testing.T) {
 		})
 	}
 	b := board.BuildBoard(anchors, now, false, nil, board.Facts{
-		Visits: map[string]bool{"tk-subj": true},
-		Sittings: []board.Sitting{{ID: "tk-vis", Subject: "tk-subj", Status: "open",
+		Sittings: []board.Sitting{{ID: "tk-conv", Subject: "tk-subj", Status: "open",
 			StartFailure: "never started"}},
 	})
 
@@ -136,8 +145,8 @@ func TestPickerCutKeepsAFailedStart(t *testing.T) {
 	}
 	for _, r := range rows {
 		if r.ID == "tk-subj" {
-			if r.VisitState != board.VisitStartFailed || r.VisitStartFailure != "never started" {
-				t.Errorf("the offered row reads start failed with the reason: %q %q", r.VisitState, r.VisitStartFailure)
+			if r.SittingState != board.SittingStartFailed || r.SittingStartFailure != "never started" {
+				t.Errorf("the offered row reads start failed with the reason: %q %q", r.SittingState, r.SittingStartFailure)
 			}
 			return
 		}

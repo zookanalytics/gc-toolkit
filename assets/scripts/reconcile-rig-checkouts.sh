@@ -15,7 +15,7 @@
 # checkout gets the reset heal. A checkout that is only behind also keeps in
 # place each file the incoming commits stop tracking while the remote's tree
 # ignores it, where the fast-forward would delete it. Each acts only on what it
-# can prove loses nothing, and what none of them heals escalates.
+# can prove loses nothing, and what none of them heals takes the exception path.
 #
 # The rig root must also stay ON the default branch: it is a deploy mirror, and a
 # HEAD parked elsewhere (detached, or a feature/integration branch an agent
@@ -23,7 +23,7 @@
 # directory-imported packs. ff-only cannot see that — a checkout ahead of the
 # default reports "Already up to date" and looks advanced — so this checks the
 # local branch first and surfaces a parked checkout through the same subject bead
-# and escalation, mutating nothing.
+# and human gate, mutating nothing.
 #
 # A checkout that is only behind its remote (HEAD is an ancestor of it) is
 # almost always refused over local changes on the paths the fast-forward
@@ -37,13 +37,15 @@
 # each of them passes:
 #   - its working copy is absent, equals HEAD, equals the remote, or matches a
 #     blob in a remote-tracking ref's history. Any other working copy may be
-#     machine-local config or real work, so the pass escalates instead;
+#     machine-local config or real work, so the pass takes the exception path
+#     instead;
 #   - it has no unmerged entry.
 # Untracked content in the way of what the fast-forward writes blocks it too: a
 # file on a path it writes, a file where it writes a directory, and anything
 # under a directory it replaces with a file. A regular file that already holds
 # the bytes written on its own path is removed before the retry, because the
-# fast-forward writes the same content back; anything else escalates. git's own
+# fast-forward writes the same content back; anything else takes the exception
+# path. git's own
 # listing says what is untracked, and nothing behind a symlink is touched. An
 # ignored file counts like any other: a rig ignores machine-local state, such as
 # its bd config and credentials, so being ignored proves nothing expendable.
@@ -83,16 +85,16 @@
 # window leaves the copy there, and the next pass puts it back before it
 # fetches, since that needs no network. A copy that cannot go back stays there.
 # Once its fast-forward has landed, HEAD no longer tracks its path, so no later
-# keep finds it. While any copy waits there, the rig escalates whatever its
-# fast-forward did, and the escalation resolves only once none does.
+# keep finds it. While any copy waits there, the rig takes the exception path
+# whatever its fast-forward did, and its gate is withdrawn only once none does.
 #
 # A checkout that has diverged is almost always SHA churn from an upstream
 # rebase/squash/force-push: the live rigs/* checkout is a pure deployment mirror
 # (commits are authored in worktrees and the refinery clone, never here), so its
 # tracked content is already fully represented in origin. That case is provably
 # lossless to reset, so the refusal branch tries to auto-heal it. The reset runs
-# only when every check holds, and a check that does not hold escalates with
-# nothing touched:
+# only when every check holds, and a check that does not hold takes the
+# exception path with nothing touched:
 #   - git cherry (patch-id) finds no unique local commit, so a rebased or
 #     squashed commit with a new SHA still matches;
 #   - git log --merges finds no merge commit unique to local — git cherry
@@ -114,12 +116,13 @@
 # ignored file. It also refuses rather than discards a staged change on a path
 # it moves, and keeps one on a path it does not. An untracked collision the
 # checks above cannot see, such as a name that differs only in case on a file
-# system that ignores case, therefore escalates instead of losing content. The
+# system that ignores case, therefore takes the exception path instead of
+# losing content. The
 # report carries each error git gave, with the paths git named, and what the
 # heal had staged and removed. Every other untracked file stays, and the
 # divergence bead closes.
 #
-# When the reset heal stops, its escalation names what stopped it, a line for
+# When the reset heal stops, its human gate names what stopped it, a line for
 # each finding. It also names what the heal would have staged or removed itself,
 # the dirty paths and untracked files that already hold the remote's content,
 # because a reset by hand must clear them too. A person who resets by hand saves
@@ -132,26 +135,24 @@
 #
 # Set RECONCILE_NO_AUTOHEAL=1 to turn off the set-aside heal, the keep and the
 # reset heal. The fast-forward then runs as plain git, which deletes a file the
-# incoming commits stop tracking, and every refusal escalates.
+# incoming commits stop tracking, and every refusal takes the exception path.
 #
 # What no heal resolves takes the exception path: one idempotent bead per
-# blocked rig records why, and escalate.sh raises it so someone actually acts.
+# blocked rig records why, and a human gate on it asks someone to act.
 # That includes a failed read of which paths to keep, since the fast-forward
 # could then delete one, and a kept copy that could not go back on its path.
 # The exception path never touches the checkout.
 #
-# The escalation must never rot silently, which is the whole reason this script
+# The exception must never rot silently, which is the whole reason this script
 # exists: a stalled deploy has to reach someone. So a blocked rig is NOT handed
 # to a fixed agent address — an address no agent holds is a bead nobody works,
 # and a nudge into the void is worse than no safety net. The per-rig bead is the
 # durable, self-healing SUBJECT: it carries the diagnosis and auto-closes when
 # the rig next fast-forwards cleanly with no kept copy waiting aside.
-# escalate.sh then files a board-visible visit that tracks it. escalate.sh
-# proves its route against the live agent set, exits non-zero rather than
-# escalate into the void, and defaults to the human helm board, which resolves
-# in every city. Set RECONCILE_ESCALATION_POOL to a rig-qualified pool to route
-# the visit to a coordination agent instead; a pool that does not resolve falls
-# back to the human board.
+# human-gate.sh files a human gate that blocks it, which the helm board shows
+# to the operator. It files nothing and exits 0 while that gate is open or
+# while the quiet window below holds. It exits non-zero when it could not read
+# the bead's gates, or could not file the gate and read it back.
 #
 # Runs as an exec order (no LLM, no agent, no wisp).
 set -euo pipefail
@@ -159,14 +160,15 @@ set -euo pipefail
 warn() { echo "reconcile-rig-checkouts: $*" >&2; }
 
 SELF_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-ESCALATE_SH="${GC_RECONCILE_ESCALATE_TOOL:-$SELF_DIR/escalate.sh}"
+HUMAN_GATE_SH="${GC_RECONCILE_HUMAN_GATE_TOOL:-$SELF_DIR/human-gate.sh}"
 
-# The store the per-rig subject bead lives in, and whose board shows the visit.
+# The store the per-rig subject bead lives in. Its gate lands beside it.
 RECONCILE_RIG="${RECONCILE_BEAD_RIG:-gc-toolkit}"
-# Operator knob: route the divergence visit to a coordination pool. Unset means
-# escalate.sh's human helm board. RECONCILE_MAYOR_ADDR is the prior name for
-# this knob and is still honored.
-ESC_POOL="${RECONCILE_ESCALATION_POOL:-${RECONCILE_MAYOR_ADDR:-}}"
+# A blocked rig stays blocked from one pass to the next, and each pass detects
+# it again on the same subject bead, so the gate's call declares a quiet window:
+# a person's moot or benign answer stands for a day. A rig that blocks again
+# after a clean sync files on a new subject bead, which no earlier answer mutes.
+QUIET_WINDOW=86400
 # Where a kept path's working copy waits, under the checkout's .git directory,
 # while git fast-forwards: on the checkout's file system and out of git's sight.
 KEPT_DIR=".git/gc-toolkit-reconcile-kept"
@@ -177,57 +179,42 @@ open_bead() {
         | jq -r '.[0].id // empty' 2>/dev/null || true
 }
 
-# Raise a divergence through escalate.sh. A configured pool is tried first —
-# escalate.sh proves it addresses a live agent — and anything unroutable falls
-# back to the human board so the divergence still reaches someone. The exit
-# status is that of the path that ran, so the caller can report a total failure.
-escalate_divergence() {
+# File a divergence as a human gate that blocks its subject bead. The exit status
+# is human-gate.sh's, so the caller can report a total failure.
+gate_divergence() {
     local subject="$1" key="$2" message="$3"
-    if [ -n "$ESC_POOL" ]; then
-        if GC_RIG="$RECONCILE_RIG" "$ESCALATE_SH" \
-                --subject "$subject" --key "$key" --message "$message" --pool "$ESC_POOL"; then
-            return 0
-        fi
-        warn "escalation pool '$ESC_POOL' did not route for $subject — falling back to the human board"
-    fi
-    GC_RIG="$RECONCILE_RIG" "$ESCALATE_SH" \
-        --subject "$subject" --key "$key" --message "$message"
+    "$HUMAN_GATE_SH" --subject "$subject" --key "$key" --quiet-window "$QUIET_WINDOW" \
+        --message "$message" >/dev/null
 }
 
-# Retract the tracking visit for a subject whose divergence has resolved. The
-# subject bead auto-closes on a clean sync, but escalate.sh filed a board-visible
-# visit routed to a human, and a human-routed visit is not auto-claimed — so a
-# self-heal before the operator engages it leaves a moot visit lingering on the
-# board. The subject tracks exactly this one divergence and clears only on a
-# clean sync, so subject-resolved is premise-moot here: close the open visit as
-# moot through the same escalate.sh that filed it (--retract folds the reading
-# onto the subject and stamps gc.outcome=moot via visit-close.sh). Only an
-# unengaged (open) visit is touched; one a human already claimed is theirs. A
-# failure returns non-zero so the caller skips the subject close: bd list defaults
-# away from closed beads and open_bead does not pass --all, so a subject closed
-# after a failed retract cannot be rediscovered to retry, and its human-routed
-# visit would linger. Leaving the subject open on failure is the retry handle —
-# the next patrol re-finds it and retries. Called BEFORE the subject close so the
-# reading folds onto the subject while it is still open.
-retract_visit() {
+# Withdraw the gate on a subject whose divergence has resolved. The subject bead
+# auto-closes on a clean sync, and its gate blocks that close until it is
+# cleared, so a self-heal before the operator answers would otherwise leave a
+# moot gate on the board and the subject open behind it. The subject tracks
+# exactly this one divergence and clears only on a clean sync, so
+# subject-resolved is premise-moot here: human-gate.sh --retract resolves the
+# open gate with a moot: reason. A failure returns non-zero so the caller skips
+# the subject close: bd list defaults away from closed beads and open_bead does
+# not pass --all, so leaving the subject open on failure is the retry handle —
+# the next patrol re-finds it and retries.
+retract_gate() {
     local subject="$1" key="$2" message="$3"
-    if GC_RIG="$RECONCILE_RIG" "$ESCALATE_SH" --retract \
-        --subject "$subject" --key "$key" --message "$message"; then
+    if "$HUMAN_GATE_SH" --retract --subject "$subject" --key "$key" --message "$message" >/dev/null; then
         return 0
     fi
-    warn "could not retract the tracking visit for $subject — leaving its subject open so the next patrol retries"
+    warn "could not withdraw the gate on $subject — leaving its subject open so the next patrol retries"
     return 1
 }
 
 # A rig that advanced or healed, with no kept copy waiting aside, clears its
-# escalation: retract the tracking visit as moot, then close the subject. The
-# close waits on retract_visit, so a failed retract leaves the subject open as
-# the retry handle.
+# exception: withdraw the gate as moot, then close the subject. The close waits
+# on retract_gate, so a failed withdrawal leaves the subject open as the retry
+# handle.
 resolve_subject() {
     local name="$1" reading="$2" bead
     bead=$(open_bead "$name")
     [ -n "$bead" ] || return 0
-    if retract_visit "$bead" "reconcile-diverged-$name" "$reading; the stall this visit tracked is resolved."; then
+    if retract_gate "$bead" "reconcile-diverged-$name" "$reading; the stall this gate asked about is resolved."; then
         gc bd --rig "$RECONCILE_RIG" close "$bead" --reason "$reading" >/dev/null 2>&1 || true
     fi
 }
@@ -821,7 +808,7 @@ while IFS=$'\t' read -r name path; do
     # rebase/squash/force-push, with its content already upstream, and takes
     # the reset heal (see the header). Anything its checks cannot prove — a real
     # divergence, an unreadable status, a local merge, untracked content in the
-    # way — falls through to the escalation path untouched.
+    # way — falls through to the exception path untouched.
     if [ -z "$outcome" ] && [ -z "$parked" ] && [ -z "$behind" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
        && reset_and_advance "$path" "$remote" "$default_branch"; then
         outcome=healed; reading="rigs/$name auto-healed: already-upstream, reset to $remote"
@@ -830,7 +817,7 @@ while IFS=$'\t' read -r name path; do
     # A kept copy still waiting aside is a file the runtime reads on its path.
     # Once its fast-forward has landed, HEAD no longer tracks that path, so no
     # later keep finds it. A move that landed therefore clears a lingering
-    # escalation only when none waits.
+    # exception only when none waits.
     waiting_copies "$path"
     if [ -n "$outcome" ] && [ -z "$waiting_report" ]; then
         if [ "$outcome" = advanced ]; then advanced=$((advanced + 1)); else healed=$((healed + 1)); fi
@@ -842,14 +829,14 @@ while IFS=$'\t' read -r name path; do
     # checkout's blocking changes could not all be set aside or its kept paths
     # could not be read or kept, when the reset heal could not prove a
     # divergence lossless or git refused to reset, and when a kept copy waits
-    # aside. File the subject bead and escalate.
+    # aside. File the subject bead and its human gate.
     blocked=$((blocked + 1))
     nl=$'\n'
     waiting=""
     [ -z "$waiting_report" ] || waiting=$(printf '## Waiting aside\n%s\n\nEach copy above is a working copy the keep moved aside while git fast-forwarded,\nwith its bytes unchanged, and this bead stays open while any of them waits.\nCompare each with what its path holds and keep the one the runtime should read:\nmove what the path holds elsewhere, and the next pass puts the copy back, or\ndelete the copy.' \
         "${waiting_report%"$nl"}")"$nl$nl"
     title="Reconcile: rigs/$name cannot fast-forward to $remote"
-    # The reset a diverged checkout's escalation hands a person. Like the reset
+    # The reset a diverged checkout's gate hands a person. Like the reset
     # heal's own checkout, it refuses rather than loses what is in its way.
     reset_cmd="git -C $path checkout --no-overwrite-ignore -B $default_branch $remote"
     if [ -n "$parked" ]; then
@@ -889,12 +876,13 @@ while IFS=$'\t' read -r name path; do
     else
         bead=$(gc bd --rig "$RECONCILE_RIG" create "$title" \
             -t task -d "$body" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true)
-        [ -n "$bead" ] || { warn "could not file a reconcile bead for rigs/$name — divergence UNTRACKED and UNESCALATED"; continue; }
+        [ -n "$bead" ] || { warn "could not file a reconcile bead for rigs/$name — divergence UNTRACKED and nobody asked"; continue; }
         gc bd --rig "$RECONCILE_RIG" update "$bead" --set-metadata reconcile_rig="$name" >/dev/null 2>&1 || true
     fi
 
     # Make someone hear about it. A failure here is reported, never swallowed —
-    # an unescalated divergence is the exact silent rot this script prevents.
+    # a divergence nobody is asked about is the exact silent rot this script
+    # prevents.
     if [ -n "$parked" ]; then
         msg=$(printf 'rigs/%s is parked off its deploy branch %s — HEAD is on %s, so reconcile cannot advance it and its working tree serves an off-%s build to every directory-imported pack.\nPath: %s\nSubject bead %s carries the full git status and log, and clears when rigs/%s next fast-forwards cleanly.\nRestore it: save any local work elsewhere, then git -C %s checkout %s.' \
             "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$default_branch" "$path" "$bead" "$name" "$path" "$default_branch")
@@ -910,8 +898,8 @@ while IFS=$'\t' read -r name path; do
     fi
     [ -z "$waiting_report" ] || [ -n "$outcome" ] \
         || msg+="${nl}A kept copy also waits under $path/$KEPT_DIR, since it could not go back on its path, and the subject bead names it."
-    if ! escalate_divergence "$bead" "reconcile-diverged-$name" "$msg"; then
-        warn "rigs/$name divergence could NOT be escalated (escalate.sh failed) — subject bead $bead"
+    if ! gate_divergence "$bead" "reconcile-diverged-$name" "$msg"; then
+        warn "rigs/$name divergence could NOT be put to a person (human-gate.sh failed) — subject bead $bead"
     fi
 done <<< "$rigs"
 

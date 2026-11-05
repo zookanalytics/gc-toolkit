@@ -2,7 +2,7 @@
 # converse-invalidate-recommendation.test.sh — the active strip of a first-reaction
 # recommendation (assets/scripts/converse-invalidate-recommendation.sh): a subject
 # carrying gc.recommended_formula has the key removed and the reason appended,
-# leaving the subject and its visit open. This drives the script against a stub gc
+# leaving the subject and its conversation open. This drives the script against a stub gc
 # that records every write and reflects the strip on the next `bd show`.
 #
 # Hermetic: stubs gc, reads the repo only; no city, no network.
@@ -68,12 +68,12 @@ bash -n "$SUT" && ok "converse-invalidate-recommendation.sh: valid bash" || bad 
 echo "── a live recommendation is stripped and the reason recorded, in one write ──"
 : >"$LOG"
 RC=0
-( PATH="$BIN:$PATH" LOG="$LOG" VISIT=v-x SUBJECT=tk-sub bash "$SUT" "a different course is right" ) >/dev/null || RC=$?
+( PATH="$BIN:$PATH" LOG="$LOG" CONVERSATION=tk-c SUBJECT=tk-sub bash "$SUT" "a different course is right" ) >/dev/null || RC=$?
 is "it exits 0" "$RC" "0"
 has "gc.recommended_formula is unset on the subject" \
     'update tk-sub --unset-metadata gc.recommended_formula' "$LOG"
 has "the same write appends the reason and the withdrawn formula" \
-    "--append-notes recommendation invalidated (visit v-x): was 'mol-x'. a different course is right. Accept withdrawn; Discuss remains." "$LOG"
+    "--append-notes recommendation invalidated (conversation tk-c): was 'mol-x'. a different course is right. Accept withdrawn; Discuss remains." "$LOG"
 
 echo "── the strip and the note ride ONE update (record and act are atomic) ──"
 is "exactly one update is written on the happy path" \
@@ -86,7 +86,7 @@ is "exactly one show precedes the write (not one for has() and one for was)" \
 echo "── a subject with no recommendation is a no-op, and writes nothing ──"
 : >"$LOG"
 RC=0
-( PATH="$BIN:$PATH" LOG="$LOG" MODE=empty VISIT=v-x SUBJECT=tk-sub bash "$SUT" "not valid" ) >/dev/null || RC=$?
+( PATH="$BIN:$PATH" LOG="$LOG" MODE=empty CONVERSATION=tk-c SUBJECT=tk-sub bash "$SUT" "not valid" ) >/dev/null || RC=$?
 is "it exits 0 (already Discuss-only)" "$RC" "0"
 hasnt "no unset is written when there is nothing to strip" '--unset-metadata gc.recommended_formula' "$LOG"
 hasnt "no note is written when there is nothing to strip" '--append-notes' "$LOG"
@@ -94,7 +94,7 @@ hasnt "no note is written when there is nothing to strip" '--append-notes' "$LOG
 echo "── a key that survives the unset fails closed (Accept would return) ──"
 : >"$LOG"
 RC=0
-( PATH="$BIN:$PATH" LOG="$LOG" MODE=stubborn VISIT=v-x SUBJECT=tk-sub bash "$SUT" "no longer valid" ) >/dev/null 2>&1 || RC=$?
+( PATH="$BIN:$PATH" LOG="$LOG" MODE=stubborn CONVERSATION=tk-c SUBJECT=tk-sub bash "$SUT" "no longer valid" ) >/dev/null 2>&1 || RC=$?
 is "it exits 4 when the key will not clear" "$RC" "4"
 is "it retried a lone unset before giving up (two updates seen)" \
    "$(grep -c -- '--unset-metadata gc.recommended_formula' "$LOG")" "2"
@@ -102,21 +102,21 @@ is "it retried a lone unset before giving up (two updates seen)" \
 echo "── an unreadable subject is refused, not read as 'nothing to strip' ──"
 : >"$LOG"
 RC=0
-( PATH="$BIN:$PATH" LOG="$LOG" MODE=unreadable VISIT=v-x SUBJECT=tk-sub bash "$SUT" "why" ) >/dev/null 2>&1 || RC=$?
+( PATH="$BIN:$PATH" LOG="$LOG" MODE=unreadable CONVERSATION=tk-c SUBJECT=tk-sub bash "$SUT" "why" ) >/dev/null 2>&1 || RC=$?
 is "it exits 3 on an unreadable subject" "$RC" "3"
 hasnt "nothing is written when the subject cannot be read" '--unset-metadata' "$LOG"
 
-echo "── VISIT is optional: the note omits it when unset ──"
+echo "── CONVERSATION is optional: the note omits it when unset ──"
 : >"$LOG"
 RC=0
 ( PATH="$BIN:$PATH" LOG="$LOG" SUBJECT=tk-sub bash "$SUT" "premise died" ) >/dev/null || RC=$?
-is "it exits 0 without VISIT" "$RC" "0"
-has "the note records the strip with no visit clause" \
+is "it exits 0 without CONVERSATION" "$RC" "0"
+has "the note records the strip with no conversation clause" \
     "--append-notes recommendation invalidated: was 'mol-x'. premise died. Accept withdrawn; Discuss remains." "$LOG"
 
 echo "── every required field is checked (fail closed on a missing one) ──"
-( PATH="$BIN:$PATH" LOG="$LOG" VISIT=v-x bash "$SUT" "reason" >/dev/null 2>&1 ); is "a missing SUBJECT is refused" "$?" "2"
-( PATH="$BIN:$PATH" LOG="$LOG" VISIT=v-x SUBJECT=tk-sub bash "$SUT" >/dev/null 2>&1 ); is "a missing reason is refused" "$?" "2"
+( PATH="$BIN:$PATH" LOG="$LOG" CONVERSATION=tk-c bash "$SUT" "reason" >/dev/null 2>&1 ); is "a missing SUBJECT is refused" "$?" "2"
+( PATH="$BIN:$PATH" LOG="$LOG" CONVERSATION=tk-c SUBJECT=tk-sub bash "$SUT" >/dev/null 2>&1 ); is "a missing reason is refused" "$?" "2"
 
 echo "── the work skill wires this script (doctrine and tool do not drift) ──"
 # Withdrawing a recommendation is an option in the pack-wide work skill, and the

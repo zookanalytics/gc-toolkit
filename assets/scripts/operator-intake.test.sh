@@ -1,0 +1,887 @@
+#!/usr/bin/env bash
+# Hermetic test for operator-intake.sh — the operator's intake.
+# Runs the REAL script (via `sh`, as shipped) with `gc`,
+# `gc-helm.sh` and `gc-proactive.sh` stubbed on PATH — no live city, Dolt,
+# network, or sessions.
+#
+# What the cases are guarding, and why each one was worth a test:
+#
+#   (DIRECT)    --no-react files the conversation NOW, through gc-helm.sh
+#               open — the script never files one of its own.
+#   (SINGLE)    the react path files NO conversation: a reaction that puts the
+#               subject to the operator files a human gate, which reaches the
+#               operator on the board, and a conversation beside it would put
+#               the topic to them twice.
+#   (SHED)      the whole reason the fallback exists. Filing a reaction bead
+#               is fire-and-forget and returns 0 whether or not anything will
+#               ever claim it, so an unguarded react path leaves the
+#               topic routed, unclaimed, and WITHOUT a conversation — filed-looking
+#               and silently forgotten. The script asks `deliverable` up
+#               front, and a "no" must divert to the direct path. (The
+#               shipped tool now always answers yes — the pool is always on
+#               and its cap only queues work — so the "no" arm is exercised
+#               through the stub; the divert mechanism is the contract.)
+#   (RECOVER)   a react path that fails outright still ends in a conversation rather
+#               than a subject bead nobody is coming to.
+#   (RIG)       the default rig is FIXED (gc-toolkit), never inferred from
+#               cwd: this is fired from wherever the operator is sitting, and
+#               a silently varying destination is the worst failure mode an
+#               intake path can have. An unknown --rig files nothing.
+#   (DEADZONE)  a topic filed into a store with no reaction agent — no
+#               proactive pool and no registered converse — parks on the board
+#               with nobody to engage it. The intake refuses such a target
+#               before minting anything, keying on registration so a merely
+#               suspended rig (agents paused, see LIVENESS) still files.
+#   (SUBJECT)   an existing bead is its own subject — no second bead is
+#               minted — and a contradictory --rig/--type is refused rather
+#               than ignored, for a bead id and a PR reference alike. The
+#               --help text is held to the same refusal, since it is where the
+#               operator learns the contract.
+#   (SHAPE)     "dolt-latency" is a topic, "tk-abc12" is a bead id, and the
+#               difference is the RIG PREFIX, not the hyphen. A prefix-shaped
+#               string no ledger answers for must not become a bead literally
+#               titled "tk-abc12".
+#   (TYPE)      a question becomes a decision bead; --type overrides.
+#   (FAILCLOSE) a subject that could not be created files no conversation, and a
+#               missing argument creates nothing at all.
+#   (PARAGRAPH) the topic key exists so the operator can type a PARAGRAPH, and
+#               the popup is sized multi-line to invite one — so a paragraph is
+#               the DESIGNED input, not an edge case. Passing it through as the
+#               title made it the one input guaranteed to fail: `bd create`
+#               refuses a title over 500 bytes, so a 579-character topic filed
+#               nothing at all (hit live). The title is a derived
+#               label; the BODY is where the operator's words have to survive.
+#   (WHY)       a create refused for a stated reason must relay that reason.
+#               Keeping only .id off the response reported every refusal as
+#               "bd create returned no id", which sent the operator looking for
+#               a broken ledger instead of an over-long title.
+#   (ORIGIN)    the origin is recorded as `gc.origin=operator`, on BOTH intake
+#               paths, in the subject's own rig ledger — and never over an
+#               origin already recorded. The prose line in the body says the
+#               same thing to a human and cannot be selected on: it has drifted
+#               across script generations and a --desc-contains sweep for it
+#               matches beads that merely quote it. That key is what
+#               a parked-disposition sweep selects on to decide whether a
+#               parked subject is owed a conversation back once its routed work
+#               lands, so a missing stamp costs the return trip.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$HERE/operator-intake.sh"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-operator-intake-test.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+PASS=0; FAIL=0
+ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
+bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
+eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
+has() { grep -qF -- "$2" <<< "$1" && ok "$3" || bad "$3 (in: $1)"; }
+hasnt() { grep -qF -- "$2" <<< "$1" && bad "$3 (in: $1)" || ok "$3"; }
+# The ledger's title limit is counted in BYTES (a 600-character CJK title is
+# refused as "got 1800"), while bash's ${#var} counts CHARACTERS under a UTF-8
+# locale. Measuring the wrong unit would let a 500-character/1500-byte title
+# pass an assertion the ledger would reject, so measure bytes explicitly.
+bytes() { printf '%s' "$1" | wc -c | tr -d ' '; }
+
+[ -f "$SCRIPT" ] && ok "operator-intake.sh present" || { bad "operator-intake.sh missing at $SCRIPT"; exit 1; }
+
+mkdir -p "$TMP/bin" "$TMP/rigs/gc-toolkit/.beads" "$TMP/rigs/gascity/.beads"
+
+# --- gc stub -----------------------------------------------------------------
+# Two rigs, so "which ledger" is a real question the test can check. Every
+# mutating call is appended to $FAKE_CALLS so "nothing was created" is asserted
+# against the actual argv, not against exit status alone.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+case "$1 ${2:-}" in
+  "rig list")
+    # The HQ row leads, as gc lists it; its running flag is gc's probe of the city
+    # controller, injected via $HQ_RUNNING. Each rig's suspended/running are
+    # injected ONLY when the driving var is set, so the default cases see no flag
+    # (null → unknown → no note) and a liveness case sets exactly the flag it is
+    # exercising.
+    jq -n --arg c "$FAKE_RIGS/city" --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
+          --arg hrun "${HQ_RUNNING-}" \
+          --arg gsusp "${GASCITY_SUSPENDED-}" --arg grun "${GASCITY_RUNNING-}" \
+          --arg tsusp "${GCTK_SUSPENDED-}"    --arg trun "${GCTK_RUNNING-}" \
+      '{rigs:[({name:"mycity", path:$c, prefix:"hq", hq:true}
+               + (if $hrun  != "" then {running:   ($hrun =="true")} else {} end)),
+              ({name:"gc-toolkit", path:$t, prefix:"tk", hq:false}
+               + (if $tsusp != "" then {suspended: ($tsusp=="true")} else {} end)
+               + (if $trun  != "" then {running:   ($trun =="true")} else {} end)),
+              ({name:"gascity",    path:$g, prefix:"gc", hq:false}
+               + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
+               + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
+  "status --json")
+    # The supervisor-aware controller reading the wait-note asks before an HQ
+    # running=false counts. $STATUS_CONTROLLER sets .controller.running
+    # ("true"/"false"); unset prints nothing, a gc status that gave no reading.
+    # Each call is logged to $FAKE_STATUS_CALLS, apart from the mutating calls.
+    printf 'status --json\n' >> "$FAKE_STATUS_CALLS"
+    case "${STATUS_CONTROLLER-}" in
+      true)  printf '{"controller":{"running":true,"pid":7,"mode":"supervisor"}}\n' ;;
+      false) printf '{"controller":{"running":false,"mode":"supervisor"}}\n'; exit 1 ;;
+    esac ;;
+  "agent list")
+    # A reaction roster: proactive + converse for each rig named in
+    # $FAKE_REACTION_RIGS (default: both stub rigs served). A rig ABSENT from
+    # this list has no reaction agent — the dead zone require_reaction_agent
+    # refuses. FAKE_AGENT_LIST_EMPTY models an empty (unreadable) roster and
+    # FAKE_AGENT_LIST_INVALID a nonempty-but-unparseable one — both fail open.
+    [ -n "${FAKE_AGENT_LIST_EMPTY:-}" ] && exit 0
+    [ -n "${FAKE_AGENT_LIST_INVALID:-}" ] && { printf '%s\n' "$FAKE_AGENT_LIST_INVALID"; exit 0; }
+    jq -n --arg rigs "${FAKE_REACTION_RIGS-gc-toolkit gascity}" \
+      '{agents: [ ($rigs | split(" ")[] | select(length>0)) as $r
+                  | {qualified_name:($r+"/gc-toolkit.proactive"), suspended:false, pool:{max:2}},
+                    {qualified_name:($r+"/gc-toolkit.converse"),  suspended:false, pool:{max:2}} ]}' ;;
+  "bd show")
+    # Answers the origin read-back. $FAKE_ORIGIN is the value already on the
+    # bead, so the "never overrule an existing origin" case is a real read of a
+    # real value rather than an assertion about argv.
+    jq -n --arg id "${3:-tk-newsub}" --arg o "${FAKE_ORIGIN:-}" \
+      '[{id:$id, status:"open", metadata:(if $o == "" then {} else {"gc.origin":$o} end)}]' ;;
+  "bd update")
+    printf 'bd update %s\n' "$*" >> "$FAKE_CALLS"
+    [ -n "${FAKE_UPDATE_FAIL:-}" ] && exit 1
+    exit 0 ;;
+  "bd create")
+    printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
+    # The argv line above flattens the title and body into one blob. Record
+    # each as its own exact value too: the title is precisely what this case is
+    # about, and "the paragraph survived verbatim" is an assertion about the
+    # body alone.
+    prev=""; title=""
+    for a in "$@"; do
+      case "$prev" in
+        --title) title="$a"; printf '%s' "$a" > "$FAKE_TITLE" ;;
+        -d)      printf '%s' "$a" > "$FAKE_BODY" ;;
+      esac
+      prev="$a"
+    done
+    # $FAKE_CREATE_ERROR is the .error the ledger states; the default keeps the
+    # original stub's payload for the cases that only care that it failed.
+    if [ -n "${FAKE_CREATE_FAIL:-}" ]; then
+      jq -n --arg e "${FAKE_CREATE_ERROR:-nope}" '{error:$e}'; exit 1
+    fi
+    # A failure that states nothing at all — the caller still owes the operator
+    # a message, so the fallback has to carry one.
+    if [ -n "${FAKE_CREATE_SILENT:-}" ]; then exit 1; fi
+    # THE TITLE CAP, because a stub that accepts what the tool refuses hides the
+    # bug behind a green suite: with the cap left out, "an over-cap paragraph
+    # files" passes against the very script that could not file one. Mirrored
+    # from the live tool — refused over 500 BYTES (a 600-character CJK title is
+    # refused as "got 1800"), exit 1, reason in .error, and no id.
+    tbytes=$(printf '%s' "$title" | wc -c | tr -d ' ')
+    if [ "$tbytes" -gt 500 ]; then
+      jq -n --arg e "validation failed: validation failed for issue : title must be 500 characters or less (got $tbytes)" '{error:$e}'
+      exit 1
+    fi
+    jq -n '{id:"tk-newsub"}' ;;
+esac
+exit 0
+GC
+
+# --- gc-helm.sh stub ----------------------------------------------------------
+# Records the verb and argv; $FAKE_HELM_RC drives the failure cases.
+# $FAKE_HELM_REACT_RC, when set, drives the `react` verb ALONE — so a test can
+# model react returning its already-reacted no-op code (5) while `open` still
+# succeeds, the way the real tools behave for an already-reacted subject.
+cat > "$TMP/bin/gc-helm.sh" <<'HELM'
+#!/usr/bin/env bash
+printf 'helm %s\n' "$*" >> "$FAKE_CALLS"
+# resolve echoes the LIVE bead a reference maps to. FAKE_RESOLVE overrides the
+# result (a PR number or superseded id redirecting to its owner); unset, it
+# echoes the reference unchanged — the resolver's pass-through for a live id.
+if [ "$1" = resolve ]; then
+  echo "${FAKE_RESOLVE:-$2}"
+  exit "${FAKE_RESOLVE_RC:-0}"
+fi
+if [ "$1" = react ] && [ -n "${FAKE_HELM_REACT_RC:-}" ]; then
+  exit "$FAKE_HELM_REACT_RC"
+fi
+exit "${FAKE_HELM_RC:-0}"
+HELM
+
+# --- gc-proactive.sh stub -----------------------------------------------------
+# $FAKE_DELIVERABLE picks the deliverable answer: yes / no.
+cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
+#!/usr/bin/env bash
+printf 'proactive %s\n' "$*" >> "$FAKE_CALLS"
+case "${FAKE_DELIVERABLE:-yes}" in
+  yes) echo "yes: the proactive pool is always on — its cap only queues a routed reaction"; exit 0 ;;
+  no)  echo "no: this pool cannot run it (stub-stated reason) — a routed reaction would sit unclaimed"; exit 1 ;;
+esac
+PRO
+
+chmod +x "$TMP/bin/gc" "$TMP/bin/gc-helm.sh" "$TMP/bin/gc-proactive.sh"
+
+export PATH="$TMP/bin:$PATH"
+export FAKE_CALLS="$TMP/calls"
+export FAKE_TITLE="$TMP/title"
+export FAKE_BODY="$TMP/body"
+export FAKE_RIGS="$TMP/rigs"
+export FAKE_STATUS_CALLS="$TMP/status-calls"
+export GC_HELM_TOOL="$TMP/bin/gc-helm.sh"
+export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
+export TMPDIR="$TMP"
+
+# run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS/STATUS_CALLS
+# RUN_SH names the shell that runs the script; the default is sh, as shipped.
+run() {
+    : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"; : > "$FAKE_STATUS_CALLS"
+    export FAKE_DELIVERABLE="$1"; shift
+    set +e
+    OUT="$("${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
+    set -e
+    ERR="$(cat "$TMP/err")"
+    CALLS="$(cat "$FAKE_CALLS")"
+    STATUS_CALLS="$(cat "$FAKE_STATUS_CALLS")"
+}
+
+# --- (DIRECT) --no-react files the conversation now, via gc-helm.sh open ------------
+# A positive control first: a script that refused everything would satisfy
+# every fail-closed assertion below while delivering nothing.
+run yes "why is dolt wedging under load" --no-react
+eq "$RC" "0" "(DIRECT) --no-react exits 0"
+has "$CALLS" "bd create -t task --title why is dolt wedging under load" "(DIRECT) subject bead created from the topic"
+has "$CALLS" "helm open tk-newsub" "(DIRECT) the conversation is filed through gc-helm.sh open"
+has "$CALLS" "--reason operator-origin topic intake" "(DIRECT) the conversation says what it is actually for"
+has "$CALLS" "--body" "(DIRECT) the claim-time brief is supplied"
+hasnt "$CALLS" "helm react" "(DIRECT) no first reaction is filed"
+has "$OUT" "conversation filed" "(DIRECT) the summary reports a filed conversation"
+has "$OUT" "tk-newsub" "(DIRECT) the summary names the subject id"
+
+# The subject body carries the topic as a durable seed, not just a title —
+# the converse session reads the BODY at claim time.
+has "$CALLS" "-d why is dolt wedging under load" "(DIRECT) the topic is the subject's durable body too"
+
+# --- (SINGLE) the react path files NO conversation ----------------------------------
+run yes "how should we shard the refinery queue"
+eq "$RC" "0" "(SINGLE) the react path exits 0"
+has "$CALLS" "helm react tk-newsub" "(SINGLE) a first reaction is filed for the new subject"
+hasnt "$CALLS" "helm open" "(SINGLE) no conversation is filed — the reaction files it"
+has "$OUT" "nothing waits on you yet" "(SINGLE) the operator is told nothing waits on them yet"
+has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
+
+# --- (SHED) an undeliverable proactive surface diverts to the direct path ----
+run no "what should the deacon do about quota parks"
+eq "$RC" "0" "(SHED) exits 0"
+hasnt "$CALLS" "helm react" "(SHED) nothing is filed for a pool that cannot run it"
+has "$CALLS" "helm open tk-newsub" "(SHED) the conversation is filed directly instead"
+has "$OUT" "conversation filed" "(SHED) the summary reports a filed conversation"
+run no "a topic"
+has "$OUT" "stub-stated reason" "(SHED) the tool's stated reason is relayed verbatim"
+
+# A proactive tool that is missing entirely is the same situation: no reaction
+# is coming, so the conversation must be filed rather than waited for.
+: > "$FAKE_CALLS"
+set +e
+OUT="$(GC_PROACTIVE_TOOL="$TMP/bin/nonexistent.sh" sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "0" "(SHED/missing) a missing gc-proactive.sh still exits 0"
+has "$CALLS" "helm open tk-newsub" "(SHED/missing) the conversation is filed directly"
+
+# --- (RECOVER) a reaction that fails to file still ends in a conversation -----
+run yes "a topic whose reaction fails to file"
+FAKE_HELM_RC=4 run yes "a topic whose reaction fails to file"
+# helm is stubbed to fail for BOTH verbs here, so the run ends in the die() —
+# what matters is that it TRIED the direct path after react failed.
+has "$CALLS" "helm react tk-newsub" "(RECOVER) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(RECOVER) a failed react falls through to filing the conversation"
+has "$ERR" "falling back" "(RECOVER) the fallback is announced, not silent"
+eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
+unset FAKE_HELM_RC
+
+# --- (REACTED) an already-reacting subject files the conversation directly ----
+# react returns its no-op code (5) when the subject already has an open first
+# reaction or a live owner owns it: the guard filed nothing, so no new reaction
+# will put the topic to the operator. operator-intake must NOT trust the skip as
+# a dispatch — it falls through and files the conversation itself, naming the
+# real cause so its ask is accurate rather than reporting a failure to file
+# that did not happen.
+FAKE_HELM_REACT_RC=5 run yes "a topic on an already-reacted subject"
+eq "$RC" "0" "(REACTED) exits 0 — the conversation is filed"
+has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the conversation"
+has "$OUT" "conversation filed" "(REACTED) the summary reports a filed conversation"
+has "$ERR" "already has an open first reaction" "(REACTED) the reason names the no-op skip"
+hasnt "$ERR" "FAILED" "(REACTED) it is NOT reported as a failure to file"
+unset FAKE_HELM_REACT_RC
+
+# --- (DRIVEN) a subject a live workflow drives files the conversation directly
+# react returns its other no-op code (6) when a live workflow already drives the
+# subject: the guard filed nothing because a reaction never races work in
+# flight, so no reaction will put the topic to the operator either. The
+# conversation's ask the converse session reads must name that cause, not the
+# already-reacting one and not a failure to file.
+FAKE_HELM_REACT_RC=6 run yes "a topic on a subject a polecat is building"
+eq "$RC" "0" "(DRIVEN) exits 0 — the conversation is filed"
+has "$CALLS" "helm react tk-newsub" "(DRIVEN) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(DRIVEN) a driven subject falls through to filing the conversation"
+has "$CALLS" "a live workflow already drives the subject" "(DRIVEN) the conversation's ask names the live workflow"
+has "$ERR" "a live workflow already drives subject tk-newsub" "(DRIVEN) the reason names the no-op skip"
+hasnt "$ERR" "already has an open first reaction" "(DRIVEN) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "FAILED" "(DRIVEN) it is NOT reported as a failure to file"
+unset FAKE_HELM_REACT_RC
+
+# --- (ROUTED) a subject already routed or armed files the conversation directly
+# react returns its third no-op code (7) when the subject already has a dispatch
+# path: the guard filed nothing because a reaction never second-guesses a
+# dispatch already decided, so no reaction will put the topic to the operator.
+# The conversation's ask must name that cause, not another skip and not a
+# failure to file.
+FAKE_HELM_REACT_RC=7 run yes "a topic on a subject already routed to a pool"
+eq "$RC" "0" "(ROUTED) exits 0 — the conversation is filed"
+has "$CALLS" "helm react tk-newsub" "(ROUTED) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(ROUTED) a routed subject falls through to filing the conversation"
+has "$CALLS" "the subject is already routed or armed" "(ROUTED) the conversation's ask names the route or arm"
+has "$ERR" "subject tk-newsub is already routed or armed" "(ROUTED) the reason names the no-op skip"
+hasnt "$ERR" "already has an open first reaction" "(ROUTED) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "a live workflow already drives" "(ROUTED) it is NOT reported as a driven subject"
+hasnt "$ERR" "FAILED" "(ROUTED) it is NOT reported as a failure to file"
+unset FAKE_HELM_REACT_RC
+
+# --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
+run no "some cross-cutting topic"
+has "$CALLS" "--db $TMP/rigs/gc-toolkit/.beads" "(RIG) the default rig is gc-toolkit, not inferred from cwd"
+run no "a gascity topic" --rig gascity
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(RIG) --rig retargets the ledger"
+run no "a topic" --rig nosuchrig
+eq "$RC" "2" "(RIG) an unknown rig is a usage error"
+eq "$CALLS" "" "(RIG) an unknown rig creates nothing and files nothing"
+has "$ERR" "unknown rig" "(RIG) the error names the problem"
+# die() takes the exit code as its SECOND argument; a $*-joined message printed
+# it as trailing noise ("… rig-b) 2"). Caught live, not by the
+# substring assertion above — so assert the whole line, not a fragment.
+[[ "$ERR" =~ \)$ ]] && ok "(RIG) the exit code does not leak into the message" \
+    || bad "(RIG) the exit code leaks into the message (got: $ERR)"
+# The env override exists so a differently-shaped city can move the default
+# without editing the script.
+: > "$FAKE_CALLS"
+set +e
+GC_VISIT_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>&1
+set -e
+has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAULT_RIG moves the default"
+
+# --- (LIVENESS) filing into a paused rig is recorded, not refused -------------
+# Suspend means paused processing, not a dead store: gc rig suspend leaves the
+# beads database accessible, so a report filed into a suspended rig, or filed
+# while the city controller is down, is recorded now and triaged once the rig
+# resumes or the controller is back. The intake mints the subject and notes that
+# it will wait — it never refuses, which would deny a rig paused on purpose and
+# filed into to process later.
+export GASCITY_SUSPENDED=true
+run no "a report for a suspended rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) a suspended target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the suspended rig"
+has "$ERR" "suspended" "(LIVENESS) and the note names the suspension"
+has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
+unset GASCITY_SUSPENDED
+
+export HQ_RUNNING=false STATUS_CONTROLLER=false
+run no "a report while the controller is down" --rig gascity
+eq "$RC" "0" "(LIVENESS) a report filed while the controller is down files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the target rig"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the note names the controller"
+has "$ERR" "both report it not running" "(LIVENESS) and the two readings that agree"
+has "$ERR" "gc status" "(LIVENESS) and points at the city's status"
+
+# The same downed controller reached through an existing bead, or a PR
+# reference, waits the same way, so every filing path carries the note.
+run no gc-abc12
+eq "$RC" "0" "(LIVENESS) an existing bead filed while the controller is down files normally"
+has "$CALLS" "helm open gc-abc12" "(LIVENESS) the conversation is filed on the existing bead"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the existing-bead path notes the controller too"
+FAKE_RESOLVE=gc-owner run no 615
+eq "$RC" "0" "(LIVENESS) a PR reference filed while the controller is down files normally"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the PR-reference path notes the controller too"
+unset STATUS_CONTROLLER
+
+# A missed ping that gc status contradicts is no wait at all.
+STATUS_CONTROLLER=true run no "a report when the ping missed" --rig gascity
+eq "$RC" "0" "(LIVENESS) a report filed when gc status contradicts the HQ row files normally"
+has "$STATUS_CALLS" "status --json" "(LIVENESS) after asking gc status"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
+unset HQ_RUNNING
+
+# A suspended rig reached through an existing bead waits the same way as a topic.
+export GASCITY_SUSPENDED=true
+run no gc-abc12
+eq "$RC" "0" "(LIVENESS) an existing bead in a suspended rig files normally"
+has "$ERR" "rig 'gascity' is suspended" "(LIVENESS) and the existing-bead path notes the suspension too"
+has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
+unset GASCITY_SUSPENDED
+
+# A rig row's running=false is what gc reports for an idle rig, and an idle rig
+# is not a down one: the reconciler launches its triage like anywhere else, so
+# the report gets no wait-note. An HQ running=true asks gc status nothing.
+export HQ_RUNNING=true GASCITY_RUNNING=false
+run no "a report for an idle rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) an idle target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the idle rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for an idle rig"
+eq "$STATUS_CALLS" "" "(LIVENESS) and gc status is not asked while the HQ row reads running"
+unset HQ_RUNNING GASCITY_RUNNING
+
+# Explicit-live files with no note — the control that proves the note fires on
+# the paused case, not every case.
+export HQ_RUNNING=true GASCITY_SUSPENDED=false GASCITY_RUNNING=true
+run no "a report for a live rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) an explicitly live rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and the subject lands in that rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for a live rig"
+unset HQ_RUNNING GASCITY_SUSPENDED GASCITY_RUNNING
+
+# A gc that reports neither flag leaves them null: unknown, no note. This is the
+# default-stub path every other case runs on, asserted here explicitly so the
+# note can never harden into a claim about a flag the data plane omits.
+run no "a report when liveness is unknown" --rig gascity
+eq "$RC" "0" "(LIVENESS) an unknown (null) liveness files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and files into the chosen rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
+
+# --- (DEADZONE) a target with no reaction agent is refused, not filed ---------
+# The reported bug: a topic filed into a store with no proactive pool AND no
+# registered converse parks on the board and no session ever engages it. The
+# intake now refuses such a target before minting anything. Registration is the
+# bar, not liveness — a suspended rig (agents registered, paused) still files,
+# per the (LIVENESS) block above.
+export FAKE_REACTION_RIGS="gc-toolkit"      # gascity now has no reaction agent
+run no "a topic for an agentless rig" --rig gascity
+eq "$RC" "3" "(DEADZONE) a rig with no reaction agent is refused (exit 3)"
+eq "$CALLS" "" "(DEADZONE) and nothing is created or filed"
+has "$ERR" "no reaction agent" "(DEADZONE) the message names the problem"
+has "$ERR" "Nothing filed" "(DEADZONE) and states that nothing was filed"
+has "$ERR" "gc-toolkit" "(DEADZONE) and points at a rig that has one"
+
+# The same store reached through an existing bead id (its own rig authoritative)
+# is refused the same way, before any conversation is filed or origin stamped on it.
+run no gc-deadzn1
+eq "$RC" "3" "(DEADZONE) an existing bead in an agentless rig is refused"
+hasnt "$CALLS" "helm open" "(DEADZONE) and no conversation is filed on it"
+hasnt "$CALLS" "bd update" "(DEADZONE) and its origin is not stamped"
+unset FAKE_REACTION_RIGS
+
+# Control: the SAME rig, now with a reaction agent registered, files exactly as
+# before — the refusal keys on the missing agent, not on the rig name.
+run no "a topic for a served rig" --rig gascity
+eq "$RC" "0" "(DEADZONE control) a rig WITH a reaction agent files as today"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE control) and the conversation is filed"
+
+# An unreadable roster refuses nothing: a dead zone is a positive finding only,
+# so a roster gc cannot answer must not strand the operator at a refusal.
+export FAKE_AGENT_LIST_EMPTY=1
+run no "a topic when the roster is unreadable" --rig gascity
+eq "$RC" "0" "(DEADZONE) an unreadable roster files rather than refusing"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the conversation is filed"
+unset FAKE_AGENT_LIST_EMPTY
+
+# The same fail-open must cover a NONEMPTY roster gc cannot parse: malformed
+# JSON, a stray preface line before the JSON, a truncated payload, or valid JSON
+# of the wrong shape all leave the dead-zone finding unprovable, so the intake
+# files rather than refusing. Empty output was the only unreadable case covered
+# before; nonempty-invalid is the reachable degraded-data-plane one.
+for _bad in unparseable preface truncated wrongshape; do
+    case "$_bad" in
+        unparseable) _bad_roster='not json at all' ;;
+        preface)     _bad_roster="$(printf 'gc: reading rig store\n{"agents":[]}')" ;;
+        truncated)   _bad_roster='{"agents":[' ;;
+        wrongshape)  _bad_roster='{"unexpected":true}' ;;
+    esac
+    export FAKE_AGENT_LIST_INVALID="$_bad_roster"
+    run no "a topic when the roster is nonempty-invalid ($_bad)" --rig gascity
+    eq "$RC" "0" "(DEADZONE) a nonempty invalid roster ($_bad) files rather than refusing"
+    has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the conversation is filed ($_bad)"
+    unset FAKE_AGENT_LIST_INVALID
+done
+
+# --- (SUBJECT) an existing bead is its own subject ----------------------------
+run no tk-abc12
+eq "$RC" "0" "(SUBJECT) an existing bead id exits 0"
+hasnt "$CALLS" "bd create" "(SUBJECT) no second bead is minted for an existing subject"
+has "$CALLS" "helm open tk-abc12" "(SUBJECT) the conversation is filed on the bead itself"
+run no tk-abc12 --rig gascity
+eq "$RC" "2" "(SUBJECT) --rig on an existing bead is refused, not ignored"
+eq "$CALLS" "" "(SUBJECT) and files nothing"
+run no tk-abc12 --type decision
+eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
+run no 615 --rig gascity
+eq "$RC" "2" "(SUBJECT) --rig on a PR reference is refused, not ignored"
+eq "$CALLS" "" "(SUBJECT) and files nothing"
+run no 615 --type decision
+eq "$RC" "2" "(SUBJECT) --type on a PR reference is refused"
+
+# --help is where the operator learns this contract, so each flag's entry is
+# held to the refusals above. help_entry prints a flag's line and the
+# deeper-indented lines that continue it, lowercased so the checks ignore case.
+help_entry() {
+    awk -v f="$1" '$1 == f { on = 1; print; next } on && /^   / { print; next } { on = 0 }' <<< "$2" \
+        | tr '[:upper:]' '[:lower:]'
+}
+run no --help
+for flag in --rig --type; do
+    entry="$(help_entry "$flag" "$ERR")"
+    has "$entry" "refused" "(SUBJECT) --help says $flag is refused for an existing bead"
+    hasnt "$entry" "ignored" "(SUBJECT) --help never says $flag is ignored"
+done
+
+# --- (ORIGIN) the origin is recorded as a KEY, not only as prose --------------
+# The description sentence ("Operator-origin intake, filed by …") is for a human
+# to read; it is not a predicate. It has already drifted across two script
+# generations plus one an agent typed by hand, and a --desc-contains sweep for it
+# matches beads that merely QUOTE it. gc.origin=operator is the key a
+# parked-disposition sweep selects on to decide whether a parked subject is
+# owed a conversation back once its routed work lands — without it such a sweep
+# cannot see the subject at all.
+run no "why is dolt wedging under load"
+has "$CALLS" "--metadata {\"gc.origin\":\"operator\"} --db $TMP/rigs/gc-toolkit/.beads" \
+  "(ORIGIN) the created subject carries the key the sweep reads on its create, in its own rig's ledger"
+# The create's key reads back, so the minted subject takes no second write.
+export FAKE_ORIGIN=operator
+run no "why is dolt wedging under load"
+unset FAKE_ORIGIN
+hasnt "$CALLS" "--set-metadata gc.origin=operator" "(ORIGIN) …and a subject whose create carried it takes no second write"
+
+# Both intake paths are the operator asking for a conversation — typing a topic,
+# and pointing at a bead that already exists — so both stamp. Pointing at an
+# existing bead is the path the key would most easily be missed on, since nothing
+# is created there.
+run no tk-abc12
+has "$CALLS" "bd update tk-abc12 --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
+  "(ORIGIN) an existing bead is stamped too, in its own rig's ledger"
+
+# NEVER overrule an origin that is already recorded: this establishes one, it
+# does not decide one. A bead adopted as a subject may have arrived any way.
+export FAKE_ORIGIN=agent
+run no tk-abc12
+unset FAKE_ORIGIN
+hasnt "$CALLS" "gc.origin=operator" "(ORIGIN) a subject that already carries an origin is left exactly as it is"
+has "$CALLS" "helm open tk-abc12" "(ORIGIN) and the conversation is still opened"
+
+# Best-effort, never fatal: the deliverable of this script is the CONVERSATION.
+# A failed stamp costs the automatic return trip, which the backfill can repair;
+# refusing to file the conversation would cost the conversation, which nothing repairs.
+export FAKE_UPDATE_FAIL=1
+run no tk-abc12
+unset FAKE_UPDATE_FAIL
+eq "$RC" "0" "(ORIGIN) a stamp that fails does not fail the intake"
+has "$CALLS" "helm open tk-abc12" "(ORIGIN) the conversation is filed anyway"
+has "$ERR" "could not stamp gc.origin=operator" "(ORIGIN) and the operator is told the return trip will not fire on its own"
+
+# --- (SHAPE) prefix, not hyphen, decides id-vs-topic --------------------------
+run no "dolt-latency"
+has "$CALLS" "bd create" "(SHAPE) a hyphenated word whose prefix matches no rig is a topic"
+has "$CALLS" "--title dolt-latency" "(SHAPE) and keeps its literal text"
+run no "tk-abc12" --topic
+has "$CALLS" "bd create" "(SHAPE) --topic forces a bead-shaped string to be a topic"
+run no "gc-toolkit is slow"
+has "$CALLS" "bd create" "(SHAPE) a multi-word string starting with a rig prefix is still a topic"
+
+# --- (RESOLVE) a PR ref or superseded id resolves to the live owner first -----
+# A bare PR number, a pull URL, and a superseded bead id are subject references,
+# not topics. operator-intake hands them to `gc-helm resolve` before the id-vs-topic
+# split, so a PR number never becomes a topic bead titled with the number and a
+# settled id redirects to its successor before it is stamped. The stub echoes
+# FAKE_RESOLVE as the resolved id.
+FAKE_RESOLVE=tk-owner run no 615
+eq "$RC" "0" "(RESOLVE) a bare PR number resolves and files"
+has "$CALLS" "helm resolve 615" "(RESOLVE) the PR number is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE) no topic bead is minted for a PR number"
+hasnt "$CALLS" "--title 615" "(RESOLVE) nothing is titled with the PR number"
+has "$CALLS" "helm open tk-owner" "(RESOLVE) the conversation is filed on the resolved owner"
+
+FAKE_RESOLVE=tk-owner run no "https://github.com/o/r/pull/615"
+eq "$RC" "0" "(RESOLVE-URL) a pull URL resolves and files"
+has "$CALLS" "helm resolve https://github.com/o/r/pull/615" "(RESOLVE-URL) the URL is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE-URL) no topic bead is minted for a PR URL"
+has "$CALLS" "helm open tk-owner" "(RESOLVE-URL) the conversation is filed on the resolved owner"
+
+FAKE_RESOLVE=tk-succ run no tk-pred
+eq "$RC" "0" "(RESOLVE-SUPERSEDE) a superseded id redirects before it is stamped"
+has "$CALLS" "helm resolve tk-pred" "(RESOLVE-SUPERSEDE) the id is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE-SUPERSEDE) no second bead is minted"
+has "$CALLS" "helm open tk-succ" "(RESOLVE-SUPERSEDE) the conversation is filed on the successor"
+hasnt "$CALLS" "helm open tk-pred" "(RESOLVE-SUPERSEDE) never on the settled predecessor"
+
+# A PR reference the resolver cannot map to a live bead fails closed; it must NOT
+# fall through to minting a topic bead titled with the number.
+unset FAKE_RESOLVE
+FAKE_RESOLVE_RC=4 run no 999
+eq "$RC" "4" "(RESOLVE-MISSING) an unresolvable PR reference fails closed"
+has "$CALLS" "helm resolve 999" "(RESOLVE-MISSING) the resolver was consulted"
+hasnt "$CALLS" "bd create" "(RESOLVE-MISSING) and mints no topic bead"
+unset FAKE_RESOLVE FAKE_RESOLVE_RC
+
+# --- (TYPE) a question is a decision -----------------------------------------
+run no "should the refinery land siblings in one pass?"
+has "$CALLS" "bd create -t decision" "(TYPE) a topic ending in ? becomes a decision bead"
+run no "rework the refinery sibling pass"
+has "$CALLS" "bd create -t task" "(TYPE) everything else is a task"
+run no "should we do this?" --type task
+has "$CALLS" "bd create -t task" "(TYPE) --type overrides the heuristic"
+
+# --- (PARAGRAPH) the designed input: a paragraph, not a phrase ----------------
+# Invoked exactly the way the key does it — `-- "$TOPIC"`, no --no-react — so
+# this exercises the live reproduction rather than a convenient shape.
+PARA_L1="The helm board is slow and the parked conversations show nothing useful at a glance."
+PARA_L2="Jumping into one takes forever to load and the row gives no hint of what it was even about."
+PARA_L3="I want the board to say something at a glance and to open in about a second, and I don't much care how."
+PARA_L4="This is the third time this week it has cost me a real chunk of a morning, so please treat it as real."
+PARA_L5="For reference the last one took about forty minutes of clicking around before I gave up and went to the beads directly."
+PARA_L6="I don't need a design, I need someone to look at it and tell me what it would take."
+PARAGRAPH="$PARA_L1
+$PARA_L2
+$PARA_L3
+$PARA_L4
+$PARA_L5
+$PARA_L6"
+# A positive control on the fixture itself: under the cap it would exercise
+# nothing, and every assertion below would still pass.
+[ "$(bytes "$PARAGRAPH")" -gt 500 ] \
+    && ok "(PARAGRAPH) the fixture exceeds the 500-byte title cap ($(bytes "$PARAGRAPH") bytes)" \
+    || bad "(PARAGRAPH) fixture is $(bytes "$PARAGRAPH") bytes — it must exceed 500 or it tests nothing"
+
+run no -- "$PARAGRAPH"
+TITLE="$(cat "$FAKE_TITLE")"; BODY="$(cat "$FAKE_BODY")"
+eq "$RC" "0" "(PARAGRAPH) an over-cap paragraph files instead of dying at the create"
+has "$CALLS" "helm open tk-newsub" "(PARAGRAPH) the conversation is filed on the new subject"
+has "$OUT" "conversation filed" "(PARAGRAPH) and the operator is told so"
+
+# The title: short enough for the ledger to accept, and still the operator's
+# own opening words rather than a stock label.
+[ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
+    && ok "(PARAGRAPH) the title is within the cap ($(bytes "$TITLE") bytes)" \
+    || bad "(PARAGRAPH) the title is $(bytes "$TITLE") bytes — bd create refuses over 500"
+eq "$(printf '%s' "$TITLE" | wc -l | tr -d ' ')" "0" "(PARAGRAPH) the title is a single line"
+has "$TITLE" "The helm board is slow" "(PARAGRAPH) the title leads with the operator's own words"
+case "$TITLE" in
+    *…) ok "(PARAGRAPH) the cut is marked with an ellipsis" ;;
+    *)  bad "(PARAGRAPH) a truncated title does not say it was cut (got '$TITLE')" ;;
+esac
+
+# The body: the whole point. Every line the operator typed has to be recoverable
+# from the bead, because the converse session reads the BODY at claim time.
+has "$BODY" "$PARA_L1" "(PARAGRAPH) the body keeps the first line verbatim"
+has "$BODY" "$PARA_L2" "(PARAGRAPH) the body keeps the second line verbatim"
+has "$BODY" "$PARA_L3" "(PARAGRAPH) the body keeps the third line verbatim"
+has "$BODY" "$PARA_L4" "(PARAGRAPH) the body keeps the fourth line verbatim"
+has "$BODY" "$PARA_L5" "(PARAGRAPH) the body keeps the fifth line verbatim"
+has "$BODY" "$PARA_L6" "(PARAGRAPH) the body keeps the last line verbatim"
+
+# A topic that already fits is passed through untouched — the cap must not
+# rewrite the ordinary case. Multi-line still collapses: a title with newlines
+# in it renders as garbage on every surface that shows one.
+run no "why is dolt wedging under load"
+eq "$(cat "$FAKE_TITLE")" "why is dolt wedging under load" "(PARAGRAPH) a topic within the cap is used verbatim"
+run no "$(printf 'the board is slow\nand jumping in is slower')"
+eq "$(cat "$FAKE_TITLE")" "the board is slow and jumping in is slower" "(PARAGRAPH) a short multi-line topic collapses to one line"
+# Not `has`: grep -F reads a multi-line pattern as one-per-line ALTERNATIVES, so
+# it would pass on either line by itself — which is the very thing being denied.
+case "$(cat "$FAKE_BODY")" in
+    *"the board is slow"$'\n'"and jumping in is slower"*)
+        ok "(PARAGRAPH) while the body keeps the line break" ;;
+    *)  bad "(PARAGRAPH) the body lost the line break between the two lines" ;;
+esac
+
+# A paragraph in a writing system that does not space its words is one
+# unbroken token: there is no word boundary to cut on, and cutting on the byte
+# would leave half a character and a title the ledger refuses.
+# Built with printf octal escapes rather than python3: a fallback to an ASCII
+# token would silently retarget this case at the one shape it is not about.
+CJK_TOPIC="$(printf '\344\270\255%.0s' $(seq 1 600))"
+eq "$(bytes "$CJK_TOPIC")" "1800" "(PARAGRAPH) the CJK fixture is 600 unbroken 3-byte characters"
+
+# The shell decides what the cap counts. dash counts ${#var} in bytes, but bash
+# counts characters under a UTF-8 locale, and /bin/sh is dash on Debian and
+# bash on macOS. So the cut runs under each of sh, bash and dash that is
+# installed, in a locale where bash is seen to count characters, rather than
+# only under whichever shell sh is on this host.
+CUT_LOCALE=""
+for l in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+    # shellcheck disable=SC2016  # the $(...) and ${#v} are the inner bash's
+    if [ "$(LC_ALL="$l" bash -c 'v=$(printf "\344\270\255"); printf %s "${#v}"' 2>/dev/null)" = 1 ]; then
+        CUT_LOCALE="$l"; break
+    fi
+done
+[ -n "$CUT_LOCALE" ] \
+    && ok "(PARAGRAPH) control: bash counts characters under $CUT_LOCALE" \
+    || bad "(PARAGRAPH) control: no candidate locale makes bash count characters, so the cuts below cannot fail"
+for cut_sh in sh bash dash; do
+    command -v "$cut_sh" >/dev/null 2>&1 || continue
+    LC_ALL="$CUT_LOCALE" RUN_SH="$cut_sh" run no -- "$CJK_TOPIC"
+    TITLE="$(cat "$FAKE_TITLE")"
+    eq "$RC" "0" "(PARAGRAPH) under $cut_sh an unbroken 600-character token files"
+    [ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
+        && ok "(PARAGRAPH) under $cut_sh the token is cut to fit ($(bytes "$TITLE") bytes)" \
+        || bad "(PARAGRAPH) under $cut_sh the token was not cut ($(bytes "$TITLE") bytes)"
+    printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
+        && ok "(PARAGRAPH) under $cut_sh it is still valid UTF-8, with no half character at the cut" \
+        || bad "(PARAGRAPH) under $cut_sh the cut left an incomplete multi-byte character"
+done
+
+# --- (FAILCLOSE) nothing half-filed -------------------------------------------
+: > "$FAKE_CALLS"
+set +e
+OUT="$(FAKE_CREATE_FAIL=1 FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(FAILCLOSE) a subject that cannot be created exits 4"
+hasnt "$CALLS" "helm open" "(FAILCLOSE) and files no conversation"
+has "$ERR" "nothing filed" "(FAILCLOSE) the message says nothing was filed"
+
+# --- (WHY) a stated refusal reaches the operator ------------------------------
+# `bd create --json` says WHY it refused in .error. Keeping only .id off the
+# response threw all of it away and reported every refusal as "returned no id",
+# so the operator was told the ledger returned nothing when in fact it had
+# refused for a stated, fixable reason — and went looking for a broken data
+# plane instead of a long title.
+: > "$FAKE_CALLS"
+set +e
+LEDGER_SAID="validation failed: validation failed for issue : title must be 500 characters or less (got 579)"
+OUT="$(FAKE_CREATE_FAIL=1 FAKE_CREATE_ERROR="$LEDGER_SAID" FAKE_DELIVERABLE=no \
+       sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(WHY) a refused create still exits 4"
+has "$ERR" "$LEDGER_SAID" "(WHY) the ledger's stated reason reaches the operator verbatim"
+hasnt "$ERR" "returned no id" "(WHY) and is not replaced by the generic no-id message"
+has "$ERR" "nothing filed" "(WHY) while still saying nothing was filed"
+hasnt "$CALLS" "helm open" "(WHY) and no conversation is filed on a subject that does not exist"
+
+# A response with no .error at all still has to say something useful rather
+# than nothing — the fallback names the missing id and the exit status.
+: > "$FAKE_CALLS"
+set +e
+FAKE_CREATE_SILENT=1 FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>"$TMP/err"; RC=$?
+set -e
+ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(WHY) a silent create failure exits 4"
+has "$ERR" "no error" "(WHY) a response with no .error says so, rather than reporting nothing"
+
+run no
+eq "$RC" "2" "(FAILCLOSE) no argument is a usage error"
+eq "$CALLS" "" "(FAILCLOSE) and creates nothing"
+run no "a topic" --bogus
+eq "$RC" "2" "(FAILCLOSE) an unknown flag is a usage error"
+eq "$CALLS" "" "(FAILCLOSE) and creates nothing"
+run no "topic one" "topic two"
+eq "$RC" "2" "(FAILCLOSE) two positionals are a usage error (quote the topic)"
+eq "$CALLS" "" "(FAILCLOSE) and create nothing"
+
+# --- (RIGWHY) this script's enumerate_rigs names WHICH failure it hit --------
+# enumerate_rigs reads the rig map through rig-map.sh, which names on stderr why
+# a listing did not read: a non-zero gc exit with gc's own stderr, an empty
+# answer, output that is not JSON, or JSON with no '.rigs' array. A city that
+# answered with no rigs is this script's own sentence. Every case exits 3 having
+# filed nothing.
+#
+# This matters here specifically because the topic path shells out to
+# `gc-helm.sh open`: if the two front doors disagree about why a city has no
+# rigs, the operator gets a different story depending on which one they hit.
+# The bound and its timeout reason are rig-map.sh's, and rig-map.test.sh
+# covers them.
+mkdir -p "$TMP/rigbin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rigbin/gc" <<'RIGSTUB'
+if [ "$1 ${2:-}" = "rig list" ]; then
+  case "${RIGMODE:-}" in
+    exitfail) echo "dial tcp 127.0.0.1:3307: connect: connection refused" >&2; exit 7 ;;
+    empty)    : ;;
+    notjson)  echo "warning: rebuilding stale rig cache" ;;
+    shape)    jq -n '{other:[]}' ;;
+    rigless)  jq -n '{rigs:[]}' ;;
+  esac
+  exit 0
+fi
+printf '%s %s\n' "$1" "${2:-}" >> "$FAKE_CALLS"
+exit 0
+RIGSTUB
+chmod +x "$TMP/rigbin/gc"
+
+# A bead-id-shaped argument is what sends this script down the rig-resolution
+# path in the first place, so drive it with one.
+rigwhy() {
+    : > "$FAKE_CALLS"
+    set +e
+    PATH="$TMP/rigbin:$TMP/bin:$PATH" RIGMODE="$1" sh "$SCRIPT" tk-abc12 >/dev/null 2>"$TMP/rigerr"
+    RIGWHY_RC=$?
+    set -e
+    RIGWHY_ERR="$(cat "$TMP/rigerr")"
+}
+saysv() {
+    rigwhy "$1"
+    has "$RIGWHY_ERR" "$2" "(RIGWHY) $3"
+    eq "$RIGWHY_RC" "3" "(RIGWHY) …and still exits 3 ($3)"
+    eq "$(cat "$FAKE_CALLS")" "" "(RIGWHY) …having filed nothing ($3)"
+}
+saysv exitfail "exited 7"                     "a non-zero gc exit reports the status, not 'returned nothing'"
+saysv exitfail "connection refused"           "…and carries gc's stderr, which the old pipeline discarded"
+saysv empty    "exited 0 but printed nothing" "a silent empty answer is not read as an empty city"
+saysv notjson  "is not JSON"                  "unparseable output says so"
+saysv shape    "no '.rigs' array"             "valid JSON of the wrong shape is a gc contract change"
+saysv rigless  "no rigs in this city"         "a genuinely rigless city is reported as a CITY state"
+
+: > "$TMP/rigmsgs"
+for m in exitfail empty notjson shape rigless; do
+    rigwhy "$m"; printf '%s\n' "$(printf '%s' "$RIGWHY_ERR" | tr '\n' ' ')" >> "$TMP/rigmsgs"
+done
+eq "$(sort -u "$TMP/rigmsgs" | wc -l | tr -d ' ')" "5" \
+   "(RIGWHY-DISTINCT) five causes produce five different sentences"
+
+# MUTATION CHECK (static): enumerate_rigs keeps the read's exit status. Match
+# the ASSIGNMENT line only, bounded to the function body: a check anchored on a
+# comment passes whatever the code does.
+grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw=\$\(/' "$SCRIPT") \
+  && bad "(RIGWHY-EVIDENCE) '|| true' is back — the exit status is discarded again" \
+  || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
+
+# --- (RIGWHY-TRAPS) enumerate_rigs restores the caller's trap table ----------
+# A trap is process-global: one installed inside a helper and left there
+# rewrites how every later line of the caller answers a signal, and outlives
+# the file it was installed to remove. enumerate_rigs reads the map through
+# rig-map.sh, as gc-helm.sh's does, and this asserts it leaves the table alone.
+# The helper is lifted and run directly, with the real rig-map.sh — every real
+# call site is a command substitution whose subshell would hide the residue.
+# Assert the table is unchanged across the call, not that it is empty: a caller
+# can inherit a disposition the helper never touches — a parent that ignores
+# SIGPIPE shows up as `trap -- '' SIGPIPE` — and the invariant is that the
+# helper leaves the table exactly as it found it.
+ENUM="$TMP/enum-helper.sh"
+sed -n '/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
+mkdir -p "$TMP/enumbin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/enumbin/gc" <<'ENUMGC'
+[ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
+exit 0
+ENUMGC
+chmod +x "$TMP/enumbin/gc"
+# The probe sources city-liveness.sh ($2) first, for the projection the helper
+# runs, as the script does, and finds rig-map.sh in $3, as the script finds it
+# beside itself.
+cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
+set -eu
+PROG=probe; RIGS=""; SCRIPT_DIR="$3"
+die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
+. "$2"
+. "$1"
+before="$(trap)"
+enumerate_rigs
+after="$(trap)"
+printf 'RIGS[%s]\n' "$RIGS"
+[ "$before" = "$after" ] && printf 'TRAPDELTA[]\n' \
+  || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
+ENUMPROBE
+ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" "$HERE" 2>&1 || true)"
+has "$EOUT" "RIGS[["  "(RIGWHY-TRAPS) the helper enumerated, through rig-map.sh"
+has "$EOUT" "TRAPDELTA[]" "(RIGWHY-TRAPS) …and left the caller's trap table as it found it"
+eq  "$(find "$ENUMTMP" -name 'gctk-rig-map.*' | wc -l | tr -d ' ')" "0" \
+    "(RIGWHY-TRAPS) …and rig-map.sh removed its stderr capture"
+
+# --- (HELP/SYNTAX) ------------------------------------------------------------
+run yes --help
+eq "$RC" "0" "(HELP) --help exits 0"
+eq "$CALLS" "" "(HELP) --help touches nothing"
+sh -n "$SCRIPT" 2>/dev/null && ok "(SYNTAX) operator-intake.sh parses as POSIX sh" || bad "(SYNTAX) sh -n failed"
+
+echo ""
+echo "operator-intake: $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ] || exit 1

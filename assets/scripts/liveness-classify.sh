@@ -8,13 +8,13 @@
 # sourcing this file or a file carries a classifier def of its own.
 #
 # Sourced (never executed). Usage follows the in-variable jq convention
-# (visit-identity.sh): the classifier builds on visit_identity_subjects
-# (visit-identity.sh), standing_kinds (standing-kinds.sh) and
-# awaiting_placement (placement.sh, which asks has_dispatch_path from
-# dispatch-path.sh), so prepend those defs, then these, and call
-# liveness_classify:
+# (standing-kinds.sh): the classifier builds on open_human_gates and
+# blocked_by_any (bd-lib.sh's $HUMAN_GATE_JQ), conversation (conversation.sh),
+# standing_kinds (standing-kinds.sh) and awaiting_placement (placement.sh,
+# which asks has_dispatch_path from dispatch-path.sh), so prepend those defs,
+# then these, and call liveness_classify:
 #   jq -n --slurpfile ready R --slurpfile live L --slurpfile alive A ... \
-#     "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify'
+#     "$HUMAN_GATE_JQ$CONVERSATION_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify'
 # It emits one {id, title, type, class} row per ready bead.
 #
 # Every input below is required, and jq refuses the program when one is
@@ -22,14 +22,16 @@
 #   $ready $live $alive       slurped `bd ready --unassigned`, the
 #                             open+in_progress listing, and every not-closed
 #                             bead (that listing plus every other non-closed
-#                             status)
+#                             status), the two listings with gates included
 #   $livesessions             every name a live session carries
 #   $livenessknown            false when the session list was unreadable
 #   $unreadable_liveness_covers
-#                             whether a CLAIMED visit still covers its subject
-#                             when the session list was unreadable. The sweep
-#                             passes true, since an unprovable death is not a
-#                             death; the precheck passes false and fails closed.
+#                             whether a conversation a sitting holds still
+#                             covers its subject when the session list was
+#                             unreadable. The sweep passes true, since an
+#                             unprovable death is not a death; the precheck
+#                             passes false and fails closed. A conversation in
+#                             the operator's queue covers either way.
 #   $openprs $worked $husks $preopen_green
 #                             the reads beyond the bead set: open PR urls,
 #                             the ids of the beads live runs work, husk step
@@ -55,20 +57,22 @@
 # it, so its presence dates the last sitting rather than naming a live wait —
 # read as a hold, one conversation exempts a bead from the census forever. The
 # waits a sitting records are edges instead, and every edge shape already has
-# an arm: a `blocks` blocker (what `takeaway --waiting-on` and `demand` write)
-# takes the bead out of the ready set upstream of here, children reach the
-# `gatedparents` arm, `tracks` targets reach the arm below it. `triage.hold`
-# still mutes on presence alone: no agent writes one any more, and the ones on
-# the board name their wait in prose with no edge to discharge.
+# an arm: a `blocks` blocker (what `takeaway --waiting-on` and a human gate
+# write) takes the bead out of the ready set upstream of here, children reach
+# the `gatedparents` arm, `tracks` targets reach the arm below it. A
+# conversation task names its wait through that `tracks` arm while what it
+# tracks is open. `triage.hold` still mutes on presence alone: no agent writes
+# one any more, and the ones on the board name their wait in prose with no edge
+# to discharge.
 #
-# $demanded is the one non-edge read of the bead set, and it exists for one
-# case: gc-helm.sh warns on stderr when a demand's `blocks` edge does not land,
-# and nothing repairs it, so that bead reads ready while a person owes an
-# answer on it.
+# A bead that an open human gate blocks is held by design. bd ready leaves such
+# a bead out, so the arm names one only when the ready read was cut before the
+# gate was filed: the not-closed listing, read after it, carries the bead's
+# blocks edge onto the gate.
 #
 # A bead that waits for placement (placement.sh) is a named wait too: intake
 # held it as new work for the operator's placement sitting, and
-# `gc-helm.sh unplaced` lists it there, so the sweep's triage visit would ask
+# `gc-helm.sh unplaced` lists it there, so the sweep's triage gate would ask
 # the operator the same question a second time. The predicate reads the marker
 # and every shape that places a bead, so a marker left on a bead the sitting
 # already placed names no wait.
@@ -116,31 +120,29 @@ LIVENESS_CLASSIFY_JQ='
   # whether it waits only on pr-open.sh is unknown, and the sweep holds it.
   def pre_open_unread:
     ($preopen_green[(.id // "")] // false) == "unread";
-  # A visit holder is live, or it has none. A claim writes one of assignee /
-  # gc.session_id / gc.session_name; $livesessions holds every name a listed
-  # (live) session carries. No holder is an UNCLAIMED visit, a pending
-  # escalation that still covers. $livenessknown false is an unreadable session
-  # list, where $unreadable_liveness_covers decides.
-  def holder_live:
-    ([ (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "") ]
-     | map(select(. != ""))) as $holders
-    | if ($holders | length) == 0 then true
+  # A conversation that covers its subject. One in the queue of the operator
+  # (`human`) covers it: a person is already asked, as human_side_on below and
+  # the board read it. One a sitting holds covers it while that sitting
+  # lives: its assignee is the alias of the sitting and a listed (live) session
+  # carries that alias, bare or qualified; $livesessions holds every name a
+  # listed session carries. $livenessknown false is an unreadable session list,
+  # where $unreadable_liveness_covers decides for a held one.
+  def conversation_covers:
+    ((.assignee // "") | tostring) as $a
+    | if $a == "human" then true
+      elif $a == "" then false
       elif ($livenessknown | not) then $unreadable_liveness_covers
-      else any($holders[]; . as $h | ($livesessions | index($h)) != null)
+      else any(($a, (.id // ""), "c-" + (.id // "")); . as $n | ($livesessions | index($n)) != null)
       end;
-  # Live-visit subjects: every subject a live visit covers by its shared identity
-  # (tracks edge, gc.continuation_group fallback — the stamp alone has landed
-  # empty on a live visit). visit_identity_subjects is visit-identity.sh.
-  # A ready bead converses when it is one of them, or when its gc.root_bead_id
-  # is: a sitting about a workflow root covers the steps of that workflow.
+  # Conversing subjects: the bead each covering conversation tracks. A ready
+  # bead converses when it is one of them, or when its gc.root_bead_id is: a
+  # sitting about a workflow root covers the steps of that workflow.
   def liveness_classify:
-    ([ ($live[0] // [])[]
-       | select((.metadata.task_kind // "") == "visit")
-       | select(holder_live)
-       | visit_identity_subjects[] ]) as $convgroups
+    ([ ($live[0] // [])[] | select(conversation) | select(conversation_covers)
+       | conversation_subjects[] ]) as $convgroups
     | ([ ($openprs // [])[] | pr_key ] | map(select(. != ""))) as $openkeys
-    | ([ ($alive[0] // [])[]
-       | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
+    | (($alive[0] // []) | open_human_gates) as $humangates
+    | ([ ($alive[0] // [])[] | select(blocked_by_any($humangates)) | .id ] | unique) as $gateheld
     | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
     | ([ ($alive[0] // [])[] | .dependencies[]?
          | select((.type // "") == "parent-child") | (.depends_on_id // empty) ] | unique) as $gatedparents
@@ -151,9 +153,8 @@ LIVENESS_CLASSIFY_JQ='
            elif topology_kind then "topology"
            elif ((.metadata["gc.routed_to"] // "") != "") then "routed-and-claimable"
            elif (($worked | index($b.id)) != null) then "worked"
-           elif ((.metadata.task_kind // "") == "visit") and holder_live then "conversing"
            elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
-           elif (($demanded | index($b.id)) != null) then "held-by-design"
+           elif (($gateheld | index($b.id)) != null) then "held-by-design"
            elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
            elif awaiting_placement then "awaiting-placement"
            elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
@@ -169,4 +170,27 @@ LIVENESS_CLASSIFY_JQ='
            else "unnamed" end) as $class
         | {id, title: (.title // ""), type: (.issue_type // ""), class: $class}
       ];
+'
+
+# The human side already on a subject: an open human gate that blocks it, or a
+# conversation about it, read off one listing that includes gates. It names
+# which ("an open human gate", "a conversation"), or prints "" for neither.
+# liveness-sweep.sh asks it before it files a batch gate or a recurrence on a
+# standing subject, and its precheck asks it the same way, so the two cannot
+# disagree about whether a person is already on the subject. Both pass the
+# listing of every bead not closed ($alive), since a human gate holds in every
+# status but closed. A conversation counts only at open or in_progress, the
+# statuses of the listing the classifier reads conversations from ($live), so
+# the guard and the classifier agree on which conversations stand. It reads no
+# input variable, so it runs apart from the classifier: prepend $HUMAN_GATE_JQ
+# (bd-lib.sh) and $CONVERSATION_JQ (conversation.sh), then
+#   jq -r --arg s <subject> "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' <listing>
+# shellcheck disable=SC2034  # read by the scripts that source this file
+LIVENESS_WAIT_JQ='
+  def human_side_on($s):
+    open_human_gates as $g
+    | if any(.[]; .id == $s and blocked_by_any($g)) then "an open human gate"
+      elif any(.[]; ((.status // "open") as $st | $st == "open" or $st == "in_progress")
+                    and conversation and ((conversation_subjects | index($s)) != null)) then "a conversation"
+      else "" end;
 '

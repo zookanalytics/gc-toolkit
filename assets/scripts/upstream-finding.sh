@@ -4,9 +4,11 @@
 # send is the operator's (docs/outbound-sends.md). An agent that wants one runs
 # the intended `gh` command through this script instead of running it: the
 # command is parked verbatim on a bead as `gh_command`, ready to paste, and a
-# visit asks a human for the send.
+# human gate on that bead asks the operator for the send. The send is the
+# operator's action, so the gate blocks the bead until they clear it, sent or
+# declined.
 #   upstream-finding.sh --message <why this send is warranted>
-#                       [--key <situation-key>] [--pool <converse pool>]
+#                       [--key <situation-key>]
 #                       -- gh <verb> --repo <owner/name> [args...]
 # This script contacts nothing. It runs no `gh`, and it is not a send path a
 # guard can be talked through.
@@ -16,7 +18,7 @@ set -uo pipefail
 
 PROG="upstream-finding"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
+HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$HERE/human-gate.sh}"
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -29,7 +31,7 @@ scrub() { tr -d '\000-\037'; }
 usage() {
   cat >&2 <<'U'
 usage: upstream-finding.sh --message <why this send is warranted>
-                           [--key <situation-key>] [--pool <converse pool>]
+                           [--key <situation-key>]
                            -- gh <verb> --repo <owner/name> [args...]
 
   --message  what the operator is being asked to approve, in their terms: what
@@ -39,8 +41,6 @@ usage: upstream-finding.sh --message <why this send is warranted>
   --key      names the SITUATION: one bead per key, so a re-run of the same
              finding refreshes rather than files again. [A-Za-z0-9._-] only.
              Default: target repo, verb and a digest of the command
-  --pool     converse pool the visit routes to; passed through to escalate.sh,
-             which owns the default and the route check
   --         everything after it is the command, verbatim. It must name its
              target with `--repo <owner/name>`: the operator pastes it in
              their own shell, where an implicit repo resolves somewhere else
@@ -49,12 +49,11 @@ U
 
 warn() { echo "$PROG: $*" >&2; }
 
-MESSAGE=""; KEY=""; POOL_ARG=""; CMD=()
+MESSAGE=""; KEY=""; CMD=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --message) MESSAGE="${2:-}"; shift 2 || { usage; exit 2; } ;;
     --key)     KEY="${2:-}";     shift 2 || { usage; exit 2; } ;;
-    --pool)    POOL_ARG="${2:-}"; shift 2 || { usage; exit 2; } ;;
     -h|--help) usage; exit 2 ;;
     --)        shift; CMD=("$@"); break ;;
     *) warn "unknown argument '$1'"; usage; exit 2 ;;
@@ -347,7 +346,7 @@ if [ -n "$EXISTING" ]; then
     warn "$EXISTING already carries key '$KEY' with a DIFFERENT command, and a human may already be reading it — nothing parked."
     warn "  parked there: $EXISTING_CMD"
     warn "  yours:        $PASTE"
-    warn "  repair: re-run under a new --key, or close $EXISTING first."
+    warn "  repair: re-run under a new --key, or clear its human gate and close $EXISTING first."
     exit 2
   fi
 fi
@@ -370,7 +369,9 @@ $PASTE
 
 Nothing has been sent. A write to a repo the rig does not own is the operator's
 to make, so an agent prepares the command and stops (docs/outbound-sends.md).
-Closing this bead answers the ask either way: sent, or declined."
+A human gate on this bead asks for the send, and it blocks the bead's close.
+Clear the gate with the answer, ruled: sent or ruled: declined, then close this
+bead."
 
   # The command IS the deliverable and the key is what keeps one ask from
   # becoming three, so both ride the create with the rest of the send, and the
@@ -389,9 +390,9 @@ Closing this bead answers the ask either way: sent, or declined."
   fi
 fi
 
-# The visit is how a human hears about it; escalate.sh owns the route, the
-# dedup and the refresh, so a re-run lands on the same visit.
-ESC_MESSAGE="Approve or decline an outbound $VERB on $TARGET (bead $BEAD)
+# The human gate is how the operator hears about it; human-gate.sh files one open
+# gate per bead and key, so a re-run lands on the same gate.
+GATE_MESSAGE="Approve or decline an outbound $VERB on $TARGET (bead $BEAD)
 
 $MESSAGE
 
@@ -400,20 +401,19 @@ Paste this, unedited, to send it:
 $PASTE
 
 Nothing has been sent, and no agent may send it: a write to a repo this rig
-does not own is yours to make (docs/outbound-sends.md). Declining is closing
-$BEAD."
+does not own is yours to make (docs/outbound-sends.md). Once you have sent it,
+or decided not to, clear this gate with ruled: sent or ruled: declined, then
+close $BEAD."
 
-if [ ! -x "$ESCALATE" ]; then
-  warn "no escalate.sh at $ESCALATE — bead $BEAD carries the command but NO ONE HAS BEEN ASKED. File the visit by hand, or set GC_ESCALATE_TOOL."
+if [ ! -x "$HUMAN_GATE" ]; then
+  warn "no human-gate.sh at $HUMAN_GATE — bead $BEAD carries the command but NO ONE HAS BEEN ASKED. File the human gate by hand, or set GC_HUMAN_GATE_TOOL."
   exit 1
 fi
-ESC_ARGS=(--subject "$BEAD" --key "upstream-send-$KEY" --message "$ESC_MESSAGE")
-[ -n "$POOL_ARG" ] && ESC_ARGS+=(--pool "$POOL_ARG")
-if ! ESC_OUT=$("$ESCALATE" "${ESC_ARGS[@]}"); then
-  warn "bead $BEAD carries the command but escalate.sh did not file a visit — NO ONE HAS BEEN ASKED. Re-run this command; it will reuse $BEAD."
+if ! GATE=$("$HUMAN_GATE" --subject "$BEAD" --key "upstream-send-$KEY" --message "$GATE_MESSAGE"); then
+  warn "bead $BEAD carries the command but human-gate.sh did not file a gate — NO ONE HAS BEEN ASKED. Re-run this command; it will reuse $BEAD."
   exit 1
 fi
-printf '%s\n' "$ESC_OUT"
+echo "$PROG: gate ${GATE:-<none>} on $BEAD asks the operator for the send"
 
 if [ -n "$EXISTING" ]; then
   echo "$PROG: $BEAD already carries this send — refreshed the ask, nothing filed twice"

@@ -1,15 +1,19 @@
 ---
 name: Built-once target — the measurements behind it
-description: The derivations behind docs/built-once-target.md at main b09345315 — the baseline table, how each subsystem's built-once estimate was derived from what survives, the whole files each scheduled removal names, the counts behind what has no place in the built-once shape, the pack's growth and the ledger of changes since the migration map, and the net of the branches in flight. Read it to check or re-derive a number the doc states.
+description: The derivations behind docs/built-once-target.md — the re-measure at main d983f9f50 that the page's baseline reads, with its table, the sizes of the scheduled removals and the counts behind what has no place in the built-once shape; and the first measurement at main b09345315, with how each subsystem's built-once estimate was derived from what survives, the pack's growth and the ledger of changes since the migration map, and the net of the branches in flight. Read it to check or re-derive a number the doc states.
 ---
 
 # The measurements behind the built-once target
 
-Every number here was taken at main b09345315 (2026-10-25) unless its row
-names another commit. `tools/measure.sh` produced the tables, and each other
-count comes from the command shown with it, run from the repository root. The
-tool was written in this directory and moved to `tools/` after, and it gives
-every table and net below as it gave them here.
+The doc's baseline is main at d983f9f50 (2026-10-31).
+[Section 7](#7-the-re-measure-at-d983f9f50) derives every number the doc takes
+from that commit, and names the few it does not take there. Sections 1 to 6 are
+the first measurement: every number in them was taken at main b09345315
+(2026-10-25) unless its row names another commit, and the doc's built-once
+estimates are the ones section 2 derives. `tools/measure.sh` produced the
+tables, and each other count comes from the command shown with it, run from the
+repository root. The tool was written in this directory and moved to `tools/`
+after, and it gives every table and net in sections 1 to 6 as it gave them here.
 
 ## 1. The baseline table
 
@@ -330,3 +334,215 @@ Net lines by `measure.sh <merge base> <branch head>`, on 2026-10-26:
 
 The native-gates convoy nets −2,326 across its branches so far. The one-bead
 PR model's branch changes 120 files, adding 4,761 lines and deleting 4,990.
+
+## 7. The re-measure at d983f9f50
+
+Stage 1 of the deletion schedule, the native-gates convoy (tk-iirrmiw) and its
+cutover (tk-o6pd01i), landed on main as d983f9f50 (#1359, 2026-10-31), and that
+commit was main's head when this was measured. The doc's rule is that a change
+completing a stage re-measures the baseline, and tk-1tfzr71.35 carried it. Every
+number in this section was taken at d983f9f50. Where a command names `$C`, it is
+d983f9f50.
+
+### The baseline table
+
+```
+$ tools/measure.sh d983f9f50
+lines at d983f9f50
+
+kind          lines
+code          92610
+flow          14656
+text           7544
+test         151125
+docs          16766
+tooling       15881
+record        72289
+generated      7994
+
+subsystem      code     flow     text     test    total
+merge         14943     1474      130    27210    43757
+board         17481       55        0    20962    38498
+shared        12988      207        0    24532    37727
+visit         11734      280     1901    21269    35184
+patrol         7231     2136      408    16078    25853
+review         7448     2028     1883    11107    22466
+work           4483     2616       17    12710    19826
+doctor         7626       26        0     9436    17088
+gctk           6653        0        0     4841    11494
+keeper          753     2068     1015     1072     4908
+feedback       1142      902      390     1908     4342
+config          128     2864        0        0     2992
+doctrine          0        0     1800        0     1800
+```
+
+Runtime is code, flow and text: 114,810 lines. Pack weight adds tests: 265,935.
+The doc's "human engagement" is still the `visit` row, since component-model §4
+still names that workflow visit. The doc's rows, before it rounds them to 0.1k:
+
+| Row | Runtime | Tests |
+|---|---:|---:|
+| work | 7,116 | 12,710 |
+| review | 11,359 | 11,107 |
+| merge | 16,547 | 27,210 |
+| human engagement | 13,915 | 21,269 |
+| board | 17,536 | 20,962 |
+| patrol | 9,775 | 16,078 |
+| doctor | 7,652 | 9,436 |
+| shared glue | 13,195 | 24,532 |
+| gctk | 6,653 | 4,841 |
+| feedback | 2,434 | 1,908 |
+| config | 2,992 | 0 |
+| doctrine | 1,800 | 0 |
+| keeper sub-pack | 3,836 | 1,072 |
+| **total** | **114,810** | **151,125** |
+
+The tool as it stood at d983f9f50 printed this table with 50 more lines of code,
+in an `unplaced` row: `AGENTS.md` (49) and `CLAUDE.md` (1), which fell through
+to its catch-all kind. The change that made this measurement counts them as
+docs, beside the pack, since they bind work on this repository and the pack does
+not ship them. Neither file existed before 23a00a9bc (2026-10-27), so the tool
+prints the same output before and after that rule for all 28 measurements in
+sections 1 to 6: the six tree counts, the 18 ledger pairs and the four in-flight
+pairs.
+
+Component-model §4 has a row for 115 of the 144 runtime scripts under
+`assets/scripts/`. The other 29, 8,079 lines, are placed by the `post` rules in
+`measure.sh`. The largest are `migrate-visits-to-gates.sh` (1,296), `bd-lib.sh`
+(915), `bead-context.sh` (705), `orphan-dispose.sh` (606) and
+`self-review-check.sh` (450). No rule names `migrate-visits-to-gates.sh`, so the
+script and its test fall to the catch-all `shared` row. The doc's shared glue
+row therefore carries the 2,180 lines that its human engagement section says
+tk-1tfzr71.33 removes.
+
+### What moved since the first measurement
+
+```
+$ tools/measure.sh b09345315 d983f9f50
+net lines from b09345315 to d983f9f50
+
+kind          lines
+code           4699
+flow            488
+text            658
+test           9500
+docs           1759
+tooling        2832
+record        11330
+generated         0
+
+subsystem      code     flow     text     test    total
+shared         2066      -14        0     4824     6876
+board          1897        0        0     2514     4411
+merge           -43       32        6     2016     2011
+review          502       31      250     1130     1913
+gctk            877        0        0      511     1388
+doctor           91       -1        0      523      613
+config           33      492        0        0      525
+work            323       45        0      155      523
+patrol          -40       17       -3      528      502
+doctrine          0        0      142        0      142
+keeper          -31       73        3      -12       33
+feedback          9      -52        7       57       21
+visit          -985     -135      253    -2746    -3613
+```
+
+Pack weight rose by 15,345 lines, or 6.1%: runtime +5,845 and tests +9,500.
+Stage 1's landing nets −2,846 on its own, by
+`tools/measure.sh d983f9f50^ d983f9f50`: runtime +264 and tests −3,110. That net
+includes `migrate-visits-to-gates.sh` and its test, +2,180, which tk-1tfzr71.33
+deletes. The other 47 first-parent commits since b09345315 net +18,191: runtime
++5,581 and tests +12,610. Of the 48, 36 grew the pack, 5 shrank it and 7 left it
+as it was. The five that grew it most, net lines by
+`measure.sh <commit>^ <commit>`:
+
+| Commit | Change | Runtime | Tests | Pack |
+|---|---|---:|---:|---:|
+| 3db3f9838 | feat: A held: label names what holds a PR | +806 | +1,298 | +2,104 |
+| b3034bf9e | fix: The status: label reads merging for an approved PR the city is landing | +831 | +1,157 | +1,988 |
+| ae5c1efcc | fix: Formula git calls that choose a repository name the rig by path | +281 | +1,218 | +1,499 |
+| ec0a1401d | fix: The helm board counts an epic's children by what holds each one | +691 | +690 | +1,381 |
+| f22b7edff | chore: A visit whose sitting failed to start shows as start failed on the board | +464 | +872 | +1,336 |
+
+### The schedule's sizes
+
+Each row of `tools/deletion-plan.tsv` is a whole file a bead retires, and a
+bead's size is those files' lines at d983f9f50:
+
+```
+git diff --numstat "$(git hash-object -t tree /dev/null)" d983f9f50 | awk -F'\t' '
+  NR == FNR { if (!/^#/ && NF) bead[$1] = $2; next }
+  $3 in bead { n[bead[$3]] += $1; if ($3 ~ /\.test\.sh$|_test\.go$/) t[bead[$3]] += $1 }
+  END { for (b in n) print b, n[b], t[b] + 0 }' tools/deletion-plan.tsv - | sort
+```
+
+| Bead | Lines (of which tests) |
+|---|---:|
+| tk-kvdomjb | 241 (100) |
+| tk-1tfzr71.33 | 2,180 (884) |
+| tk-1tfzr71.12 | 3,390 (2,310) |
+| tk-1tfzr71.10 | 2,233 (1,228) |
+| tk-1tfzr71.20 | 10,920 (6,114) |
+| tk-1tfzr71.22 | 10,924 (5,663) |
+| tk-1tfzr71.21 | 15,233 (8,816) |
+| tk-1tfzr71.14 | 2,704 (1,787) |
+| tk-1tfzr71.13 | 1,054 (658) |
+| tk-1tfzr71.15 | 1,175 (602) |
+| tk-1tfzr71.17 | 189 (126) |
+| tk-1tfzr71.18 | 5,815 (3,589) |
+| tk-1tfzr71.19 | 7,869 (4,633) |
+| tk-1tfzr71.25 | 1,488 (900) |
+
+These come to 65,415 lines, 588 of them the wrapper lint rules under
+`tools/lint-learned.d/`, which are tooling. The doc sets them against the gap
+between pack weight and the built-once estimate: 265,935 less 63,500 is 202,435.
+tk-1tfzr71.11, .16, .23 and .24 have no row, since they rewrite parts of files.
+
+Run at b09345315 over the same rows, the command gives the size the doc carried
+there for every bead but two. tk-1tfzr71.33's rows are new in this change, since
+it was filed after the doc was written and its files arrived with the landing.
+tk-kvdomjb's 241 was taken at tk-iirrmiw.1's head, before its hand-offs reached
+main.
+
+### The counts
+
+| Count | Result | Command |
+|---|---|---|
+| copies of the script-dir loop | 11 in 7 files, none in `mol-polecat-work.toml` | `git grep -c -E 'for c in "\$\{GC_(PACK_DIR\|RIG_ROOT):-\}"' $C -- . ':!specs' ':!generated'` |
+| copies of its one-line form | 141 in 16 files, 33 in `mol-polecat-work.toml` | `git grep -c -F 'gc "${b%.}" scripts-dir' $C -- . ':!specs' ':!generated'` |
+| copies of the decline sequence | 19: 11 in `mol-polecat-work.toml`, 5 in `mol-rig-demo.toml`, 2 in `mol-validate.toml`, 1 in the polecat doctrine fragment | `git grep -c -F 'run-cancel.sh" --step' $C -- formulas agents template-fragments packs` |
+| copies of its refusal sentence | 28 in 4 files | `git grep -c -F 'NOT cancelling or draining' $C -- . ':!specs' ':!generated'` |
+| copies of the step-close loop | 10 in 5 formulas | `git grep -c -E 'for STEP in ' $C -- formulas packs` |
+| comment share, runtime shell scripts under `assets/scripts/` | 21,154 of 59,712 lines (35%), shebangs excluded | lines matching `^[[:space:]]*#`, over the code-kind paths there less `demo-screenshot.mjs` |
+| comment share, Go outside tests | 5,963 of 18,196 (33%) | lines matching `^[[:space:]]*//`, over the tracked `*.go` files that are not `*_test.go` |
+| comment share, the key registry | 1,584 of 1,966 (81%) | lines matching `^[[:space:]]*#` in `lifecycle/lifecycle.toml` |
+| comment share, orders | 289 of 440 (66%) | lines matching `^[[:space:]]*#` in `orders/*.toml` |
+| shell inside formula code fences | 3,708 lines of 8,790 | lines between column-0 fence markers in `formulas/*.toml` |
+| tests whose subject is formula step text | 47 files, 16,377 lines; 14 script tests also read a block | each `*.test.sh` outside `tools/` whose text holds both `formulas/` and `# >>>`, split by whether an `X.sh` sits beside `X.test.sh` |
+| "legacy" in runtime code | 74 mentions in 16 files: 43 in `migrate-visits-to-gates.sh`, 31 in the other 15 | `git grep -c -i legacy $C -- assets/scripts doctor formulas services`, keeping the paths `measure.sh` counts as runtime |
+| compatibility pieces, with their tests | `migrate-visits-to-gates.sh` 2,180 (1,296, its test 884); the hand-offs 241 (`escalate.sh` 127, `escalation-rig.sh` 14, its test 100); `molecule-hold.sh` 168 (62, its test 106) | `git show $C:<path> \| wc -l` |
+| commits on the Gas City fork's main that upstream main lacks | 102, with the rig's `origin/main` at e03752646 and `upstream/main` at 7472f2967 | `git -C rigs/gascity rev-list --count upstream/main..origin/main` |
+
+Run at b09345315, each command for a count section 4 also has gives section 4's
+result, apart from the hand-offs, which section 4 took at tk-iirrmiw.1's head,
+and the fork's, which names no commit of this repository. So the two sections
+compare like with like. The percentages here round to the nearest whole percent
+and section 4's round down, so the key registry's move from 79% to 81% is 79.7%
+to 80.6%, and Go's from 32% to 33% is 33.0% to 32.8%.
+
+The loop's fall is ea7b10596, which moved the formulas and prompts onto the
+one-line form and left 5 of 126. At d983f9f50, 7 of the 11 are in the keeper's
+formulas, 2 in overlays' hooks and 2 in tests.
+
+### What this section does not take again
+
+- The built-once estimates. The doc's estimate column and its 64k stand as
+  section 2 derived them at b09345315, so section 2's baseline columns are that
+  commit's sizes. tk-1tfzr71.35 asks for the baseline, and cutting an estimate
+  again is a judgment about what survives, not a measurement.
+- tk-1tfzr71.11's "about 130 blocks in 46 files" is that member's own
+  description. tk-c8724xi's "about 35 restatements" and "about 150 comment lines"
+  are sections 2 and 3 of its census, taken at polecat/tk-xgj6mg7 f3d5fbd0.
+  Neither is a command's output.
+- The native primitives, verified at Gas City upstream main f78779e41 on
+  2026-10-26 (section 4). The doc dates that check.

@@ -5,7 +5,7 @@
 # only gc.execution_routed_to — provenance, not a dispatch path — and one whose
 # route or arm holds only whitespace), every exemption (routed, armed, assigned,
 # worked by a live run, merge anchor, waiting for placement,
-# review/step/workflow/demand metadata, every standing kind,
+# review/step/workflow metadata, every standing kind,
 # decision/epic/infra types), a marked bead placed under an epic, the per-rig
 # labelling, the remedy string, the fail-closed probes (unreadable blocked
 # listing, unreadable runs, unreadable marked listing, a marked listing that
@@ -275,12 +275,18 @@ blocked_store alpha "$(bassigned a-1)"
 eq "$(run_check >/dev/null; echo $?)" "0" "an assigned blocked bead is not flagged (not unrouted-and-remember)"
 clear_stores
 
-for pair in "task_kind=review" "gc.step_ref=mol-x.step" "gc.kind=workflow" "gc.demand_for=a-9"; do
+for pair in "task_kind=review" "gc.step_ref=mol-x.step" "gc.kind=workflow"; do
     k="${pair%%=*}"; v="${pair#*=}"
     blocked_store alpha "$(bmeta a-1 "$k" "$v")"
     eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead carrying $k is not plainly work — not flagged"
     clear_stores
 done
+# A task still carrying a demand's gc.demand_for is plainly work: the key names
+# no exemption any more, and a work bead a human gate blocks needs its arm. A
+# human gate itself is a gate, which the type loop below leaves out.
+blocked_store alpha "$(bmeta a-1 gc.demand_for a-9)"
+eq "$(run_check >/dev/null; echo $?)" "1" "a blocked task carrying a leftover gc.demand_for is plainly work — flagged"
+clear_stores
 
 # A standing record is never dispatched, so blocked-and-unrouted is its resting
 # state, and the arm remedy would sling it to a pool when its blocker closed.

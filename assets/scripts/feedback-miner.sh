@@ -207,7 +207,7 @@ identity() {
     *) slug="" ;;
   esac
   [ -n "$slug" ] || { err "could not resolve owner/name from origin ($url)"; return 1; }
-  self=$(gh api user --jq .login 2>/dev/null)
+  self=$("$PR_POST" acting-login)
   [ -n "$self" ] || { err "could not resolve the login gh posts as"; return 1; }
   printf '%s\t%s\n' "$slug" "$self"
 }

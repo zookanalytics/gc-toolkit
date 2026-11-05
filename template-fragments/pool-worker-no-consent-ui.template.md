@@ -14,10 +14,11 @@ terminal step, never at a prompt.
 **What to do instead — none of these block, and each leaves a durable record a
 pending prompt does not:**
 - **A requirement is unclear, or another agent could answer:** mail the witness
-  (`HELP:`), per Escalation.
+  (`HELP:`), per Blocked work and human gates.
 - **A decision only the operator can make, or work you must decline and cannot
-  close:** file the visit with `escalate.sh`, record the wait on the work bead,
-  then cancel your run and drain, per Escalation. The visit is the release path
-  a human can claim.
+  close:** file the human gate with `human-gate.sh`, record the wait on the
+  work bead, then cancel your run and drain, per Blocked work and human gates.
+  The gate holds the work bead and every part filed under it until a person
+  clears it, and clearing it is the release path.
 - **`/handoff` is operator-initiated** — never proposed via consent UI.
 {{ end }}

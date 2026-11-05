@@ -3,14 +3,17 @@
 #
 # The constraint: a declined run is cancelled, and nothing resumes a cancelled
 # run, so the wait for a person's ruling sits on the WORK bead: a `blocks` edge
-# onto the visit that asks for the ruling, and a deferred-dispatch arm that
-# re-slings the work when the visit closes. A cancel with no recorded wait would
-# leave the work open, unrouted and unarmed, so every way the wait can fail to
-# land exits non-zero.
+# onto the human gate that asks for the ruling, and a deferred-dispatch arm that
+# re-slings the work when the gate is cleared. A cancel with no recorded wait
+# would leave the work open, unrouted and unarmed, so every way the wait can
+# fail to land exits non-zero.
 #
 # What is exercised here:
-#   * the edge: <work> is blocked by the open visit filed under (work, key), and
-#     a visit under another key, another subject or a closed one is not taken;
+#   * the edge: the open human gate under the key among the work bead's gates
+#     is the wait, and a gate under another key, a closed one, or one that
+#     blocks another bead is not taken; a gate filed on --subject gets the work
+#     bead's own edge, read back, and --subject falls back to the work bead's
+#     own gates;
 #   * the arm: the real deferred-dispatch.sh records a re-sling to the pool the
 #     last pour ran on, --on <formula>, after the route keys a pour leaves are
 #     cleared (the arm refuses a routed bead);
@@ -26,14 +29,18 @@
 #     owner the list names, a list that cannot be read, and an open bead under
 #     another assignee are refused before the edge, and a release that does not
 #     land leaves the claim and arms nothing;
-#   * fail-closed: an unreadable bead, a parked bead, no visit, a refused edge,
+#   * fail-closed: an unreadable bead, a parked bead, no gate, a refused edge,
 #     a refused route clear, a refused arm, no pool to re-sling to;
 #   * a closed work bead needs no wait and exits 0;
 #   * usage errors;
 #   * every metadata key the script writes is registered in lifecycle.toml;
-#   * a situation that recurs after its visit closed moot: the real escalate.sh
-#     files nothing inside its verdict window, so the wait cannot land, and
-#     with the window off it files a fresh visit the wait lands on;
+#   * a situation that recurs after a person answered its gate moot: the real
+#     human-gate.sh, called with no quiet window as the decline arms call it,
+#     files a fresh gate the wait lands on, and a declared window would leave
+#     the wait no gate to sit on;
+#   * a wait that lands on a writer's gate while another writer files under the
+#     same key: the real human-gate.sh and this script run interleaved at the
+#     create, and the work bead stays held until a person answers its gate;
 #   * a decline arm later in a mol-polecat-work run, its block taken from the
 #     formula, meets a crashed owner's claim that load-context built over: the
 #     wait lands and the run is cancelled, and a listed owner's claim stops the
@@ -63,18 +70,22 @@ mkdir -p "$TMP/bin"
 
 # --- gc stub over a JSON store and an edge file ("A|type|B": A depends on B). --
 # `bd show` answers an array, or an error object for an unknown id. `bd list`
-# filters on --status= and every --metadata-field k=v. `bd dep list <id>` answers
-# the beads <id> depends on, each with dependency_type and status. `bd dep add`
-# records an edge unless $FAKE_DEP_FAIL is set. `bd update` applies --status,
+# filters on --status= and every --metadata-field k=v. `bd dep list <id>
+# [--type <t>]` answers the beads <id> depends on, each the far bead's row with
+# dependency_type added, or an error object for an unknown id. `bd dep add`
+# records an edge unless $FAKE_DEP_FAIL is set. `bd gate create --type=human
+# --blocks <b> --await-id <k> --title <t> --reason <r>` files an open human gate
+# that <b> waits on, so the real human-gate.sh can run against the store, and
+# runs $FAKE_GATE_CREATE_HOOK once the gate and its edge have landed and before
+# it answers. `bd gate resolve <id> --reason <r>` closes an open gate with that
+# reason, and on a closed gate keeps the first reason and still reports success. `bd update` applies --status,
 # --assignee, --set-metadata, --unset-metadata and --append-notes; it refuses
 # when the id is in $FAKE_UPD_FAIL, and refuses the arm's write (one that sets
 # gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set. `bd unclaim <id>
 # --if-assignee <a>` is bd's compare-and-swap release: it reopens the bead and
 # clears its assignee only while the assignee is <a>, and refuses a closed or
 # unassigned bead; $FAKE_UNCLAIM_FAIL refuses it outright, and
-# $FAKE_UNCLAIM_NOOP answers success and changes nothing. `bd create` files an
-# open bead from --title and --metadata and answers its id, so the real
-# escalate.sh can run against the store. `session list` answers $FAKE_SESSIONS,
+# $FAKE_UNCLAIM_NOOP answers success and changes nothing. `session list` answers $FAKE_SESSIONS,
 # an empty session list when it is unset, and fails when $FAKE_SESSIONS_FAIL is
 # set. `runtime drain-ack` records DRAIN in $FAKE_TRACE. `gc-toolkit scripts-dir`
 # names the pack, $STUB_PACK, as gc does for the binding the city imports it under.
@@ -120,12 +131,15 @@ case "$verb" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list)
-        id="${1:-}"
-        rows=$(awk -F'|' -v a="$id" '$1 == a { print $2 "|" $3 }' "$D")
+        id="${1:-}"; shift || true; want=""
+        while [ $# -gt 0 ]; do case "$1" in --type) shift; want="${1:-}" ;; --type=*) want="${1#--type=}" ;; esac; shift || true; done
+        jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1 \
+          || { printf '{"error":"not found: issue %s","schema_version":1}\n' "$id"; exit 1; }
+        rows=$(awk -F'|' -v a="$id" -v w="$want" '$1 == a && (w == "" || $2 == w) { print $2 "|" $3 }' "$D")
         printf '%s\n' "$rows" | jq -R -s -c --slurpfile s "$S" '
           split("\n") | map(select(length > 0) | split("|")) as $e
           | [ $e[] | . as [$t, $b] | ($s[0][] | select(.id == $b)) as $row
-              | {id: $b, dependency_type: $t, status: ($row.status // "open")} ]' ;;
+              | $row + {dependency_type: $t, status: ($row.status // "open")} ]' ;;
       add)
         [ -n "${FAKE_DEP_FAIL:-}" ] && { echo "bd: refused (stub)" >&2; exit 1; }
         a="${1:-}"; b="${2:-}"; t="blocks"
@@ -178,19 +192,35 @@ case "$verb" in
       jq -c --arg id "$id" 'map(if .id == $id then (.status = "open" | .assignee = "") else . end)' "$S" > "$S.x" && mv "$S.x" "$S"
     fi
     echo "✓ Unclaimed $id" ;;
-  create)
-    title=""; meta="{}"
+  gate)
+    if [ "${1:-}" = resolve ]; then
+      id="${2:-}"; reason=""; shift 2 || true
+      while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
+      jq -c --arg id "$id" --arg r "$reason" 'map(if .id == $id and .status != "closed"
+        then (.status = "closed" | .close_reason = $r | .closed_at = "2026-10-22T00:00:01Z") else . end)' \
+        "$S" > "$S.x" && mv "$S.x" "$S"
+      echo "✓ Gate resolved: $id"
+      exit 0
+    fi
+    [ "${1:-}" = create ] || { echo "gc stub: unsupported 'bd gate $*'" >&2; exit 2; }
+    shift; blocks=""; key=""; title=""; typ=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        --type=*) typ="${1#--type=}" ;;
+        --blocks) shift; blocks="${1:-}" ;;
+        --await-id) shift; key="${1:-}" ;;
         --title) shift; title="${1:-}" ;;
-        --metadata) shift; meta="${1:-}"; [ -n "$meta" ] || meta="{}" ;;
       esac
       shift || true
     done
     n=$(( $(jq 'length' "$S") + 1 ))
-    jq -c --arg id "tk-new$n" --arg t "$title" --argjson m "$meta" \
-      '. + [{"id": $id, "status": "open", "assignee": "", "title": $t, "metadata": $m}]' "$S" > "$S.x" && mv "$S.x" "$S"
-    printf '{"id":"tk-new%s"}\n' "$n" ;;
+    jq -c --arg id "tk-gate$n" --arg t "$title" --arg k "$key" --arg ty "$typ" \
+      '. + [{"id": $id, "status": "open", "assignee": "", "title": $t, "issue_type": "gate",
+             "await_type": $ty, "await_id": $k, "created_at": "2026-10-22T00:00:00Z", "metadata": {}}]' \
+      "$S" > "$S.x" && mv "$S.x" "$S"
+    printf '%s|blocks|tk-gate%s\n' "$blocks" "$n" >> "$D"
+    [ -z "${FAKE_GATE_CREATE_HOOK:-}" ] || "$FAKE_GATE_CREATE_HOOK" >/dev/null
+    printf '{"id":"tk-gate%s"}\n' "$n" ;;
   *) echo "gc stub: unsupported 'bd $verb'" >&2; exit 2 ;;
 esac
 exit 0
@@ -205,19 +235,25 @@ reset() {
   cat > "$FAKE_STORE" <<JSON
 [
  {"id":"tk-work","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"$POOL","branch":"polecat/tk-work"}},
- {"id":"tk-v1","status":"open","assignee":"","metadata":{"task_kind":"visit","escalation_key":"$KEY","gc.continuation_group":"tk-work","gc.routed_to":"human"}},
- {"id":"tk-v0","status":"closed","assignee":"","metadata":{"task_kind":"visit","escalation_key":"$KEY","gc.continuation_group":"tk-work"}},
- {"id":"tk-vx","status":"open","assignee":"","metadata":{"task_kind":"visit","escalation_key":"other-key","gc.continuation_group":"tk-work"}},
- {"id":"tk-vy","status":"open","assignee":"","metadata":{"task_kind":"visit","escalation_key":"$KEY","gc.continuation_group":"tk-elsewhere"}}
+ {"id":"tk-anchor","status":"open","assignee":"","metadata":{}},
+ {"id":"tk-elsewhere","status":"open","assignee":"","metadata":{}},
+ {"id":"tk-v1","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"$KEY","created_at":"2026-10-22T01:00:00Z","metadata":{}},
+ {"id":"tk-v0","status":"closed","assignee":"","issue_type":"gate","await_type":"human","await_id":"$KEY","created_at":"2026-10-21T01:00:00Z","close_reason":"ruled: go ahead","metadata":{}},
+ {"id":"tk-vx","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"other-key","created_at":"2026-10-22T01:00:00Z","metadata":{}},
+ {"id":"tk-vy","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"$KEY","created_at":"2026-10-22T01:00:00Z","metadata":{}},
+ {"id":"tk-va","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"bring-current-question.tk-work","created_at":"2026-10-22T01:00:00Z","metadata":{}}
 ]
 JSON
-  printf 'tk-v1|tracks|tk-work\ntk-v0|tracks|tk-work\n' > "$FAKE_DEPS"
+  printf 'tk-work|blocks|tk-v1\ntk-work|blocks|tk-v0\ntk-work|blocks|tk-vx\ntk-elsewhere|blocks|tk-vy\ntk-anchor|blocks|tk-va\n' > "$FAKE_DEPS"
   : > "$GC_LOG"
 }
 run() { OUT=$("$SCRIPT" "$@" 2>&1); RC=$?; }
 meta() { jq -r --arg i "$1" --arg k "$2" '(.[] | select(.id == $i) | .metadata[$k]) // "<absent>"' "$FAKE_STORE"; }
 field() { jq -r --arg i "$1" --arg f "$2" '(.[] | select(.id == $i) | .[$f]) // ""' "$FAKE_STORE"; }
-blocks_rows() { grep -c '^tk-work|blocks|' "$FAKE_DEPS" | tr -d ' '; }
+# on_v1: how many edges hold the work bead on its own gate tk-v1 (the fixture's
+# one). edge_adds: how many blocks edges the script wrote from the work bead.
+on_v1() { grep -c '^tk-work|blocks|tk-v1$' "$FAKE_DEPS" | tr -d ' '; }
+edge_adds() { grep -c '^bd dep add tk-work ' "$GC_LOG" | tr -d ' '; }
 # claim <status> <assignee> — put the work bead in that claim, with the session
 # pins a hook claim stamps.
 claim() {
@@ -228,16 +264,17 @@ claim() {
 # The session the script runs in, under each of its four names.
 SELF=(GC_SESSION_NAME=pool__polecat-hq-me GC_SESSION_ID=hq-me GC_AGENT=rig/rig.polecat GC_ALIAS=me-alias)
 
-# ── 1. the wait lands: edge onto the right visit, arm to the last pour's pool ─
+# ── 1. the wait lands: the gate under the key, armed to the last pour's pool ─
 reset
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "the wait lands"
-has "$OUT" "tk-work waits on visit tk-v1 ($KEY); closing the visit re-slings it to $POOL --on mol-polecat-work" "the result names the visit, the pool and the formula"
-eq "$(grep -c '^tk-work|blocks|tk-v1$' "$FAKE_DEPS" | tr -d ' ')" 1 "the work bead is blocked by the open visit under its key"
-eq "$(blocks_rows)" 1 "no edge onto a closed visit, another key's or another subject's"
+has "$OUT" "tk-work waits on gate tk-v1 ($KEY); clearing the gate re-slings it to $POOL --on mol-polecat-work" "the result names the gate, the pool and the formula"
+eq "$(on_v1)" 1 "the work bead waits on the open human gate under its key"
+eq "$(edge_adds)" 0 "a gate filed on the work bead already blocks it, so that edge is the wait and none is written"
+hasnt "$OUT" "tk-vy" "a gate under the key that blocks another bead is not taken"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "the re-sling is armed to the pool the last pour ran on"
 eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "the re-sling pours the named formula"
-has "$(meta tk-work gc.dispatch_when_ready_reason)" "tk-v1" "the arm's reason names the visit"
+has "$(meta tk-work gc.dispatch_when_ready_reason)" "tk-v1" "the arm's reason names the gate"
 eq "$(meta tk-work gc.execution_routed_to)" "" "the pour's route stamp is cleared, so the bead advertises no finished pour"
 eq "$(meta tk-work gc.routed_to)" "" "the work bead is unrouted"
 eq "$(meta tk-work branch)" "polecat/tk-work" "the branch record is kept for the re-sling to resume"
@@ -245,14 +282,14 @@ eq "$(meta tk-work branch)" "polecat/tk-work" "the branch record is kept for the
 # ── 2. re-running converges ──────────────────────────────────────────────────
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "a re-run with the wait in place exits 0, though the first run cleared the pour's pool stamp"
-eq "$(blocks_rows)" 1 "a re-run writes no second edge"
+eq "$(edge_adds)" 0 "a re-run writes no edge"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a re-run re-arms to the pool the first run armed"
 reset
 run tk-work --key "$KEY" --formula mol-polecat-work
 run tk-work --key "$KEY" --formula mol-polecat-work --target "$POOL"
 eq "$RC" 0 "a re-run naming the pool re-arms in place"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "the re-arm holds the same target"
-eq "$(blocks_rows)" 1 "the re-arm writes no second edge"
+eq "$(edge_adds)" 0 "the re-arm writes no edge"
 
 # ── 3. --target wins over the pour's stamp ───────────────────────────────────
 reset
@@ -260,15 +297,24 @@ run tk-work --key "$KEY" --formula mol-polecat-work --target gc-toolkit/gc-toolk
 eq "$RC" 0 "--target: the wait lands"
 eq "$(meta tk-work gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat-codex" "--target: armed to the named pool"
 
-# ── 3b. --subject: a visit filed on another bead, such as a rework's anchor ──
+# ── 3b. --subject: a gate filed on another bead, such as a rework's anchor ───
 reset
-jq -c '. + [{"id":"tk-va","status":"open","assignee":"","metadata":{"task_kind":"visit","escalation_key":"bring-current-question.tk-work","gc.continuation_group":"tk-anchor"}}]' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
 run tk-work --key bring-current-question.tk-work --formula mol-polecat-work
-eq "$RC" 1 "--subject absent: the visit on the anchor is not the work bead's, so no wait"
+eq "$RC" 1 "--subject absent: the gate on the anchor blocks only the anchor, so no wait"
+has "$OUT" "file it with human-gate.sh first" "--subject absent: says what to do"
 run tk-work --key bring-current-question.tk-work --subject tk-anchor --formula mol-polecat-work
-eq "$RC" 0 "--subject: the wait lands on the visit filed on the named bead"
-eq "$(grep -c '^tk-work|blocks|tk-va$' "$FAKE_DEPS" | tr -d ' ')" 1 "--subject: the WORK bead, not the subject, is blocked by the visit"
+eq "$RC" 0 "--subject: the wait lands on the gate filed on the named bead"
+eq "$(grep -c '^tk-work|blocks|tk-va$' "$FAKE_DEPS" | tr -d ' ')" 1 "--subject: the work bead gets its own blocks edge onto that gate"
+eq "$(grep -c '^tk-anchor|blocks|tk-va$' "$FAKE_DEPS" | tr -d ' ')" 1 "--subject: the anchor still waits on it, so the gate is about both beads"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "--subject: the work bead is armed"
+run tk-work --key bring-current-question.tk-work --subject tk-anchor --formula mol-polecat-work
+eq "$RC" 0 "--subject: a re-run converges"
+eq "$(grep -c '^tk-work|blocks|tk-va$' "$FAKE_DEPS" | tr -d ' ')" 1 "--subject: a re-run writes no second edge"
+reset
+run tk-work --key "$KEY" --subject tk-anchor --formula mol-polecat-work
+eq "$RC" 0 "--subject whose gates lack the key: the work bead's own gate is the wait"
+has "$OUT" "waits on gate tk-v1" "--subject fallback: names the work bead's gate"
+eq "$(edge_adds)" 0 "--subject fallback: no edge is written onto a gate that already blocks the work bead"
 
 # ── 4. a closed work bead needs no wait ──────────────────────────────────────
 reset
@@ -276,7 +322,7 @@ jq -c 'map(if .id == "tk-work" then .status = "closed" else . end)' "$FAKE_STORE
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "a closed work bead: exit 0"
 has "$OUT" "is closed" "a closed work bead: says why nothing waits"
-eq "$(blocks_rows)" 0 "a closed work bead: no edge"
+eq "$(edge_adds)" 0 "a closed work bead: no edge"
 
 # ── 4b. a claim on the work bead is released before the arm ──────────────────
 # The arm refuses an in_progress bead and reconcile never slings over an
@@ -295,7 +341,7 @@ eq "$(grep -c '^bd unclaim tk-work --if-assignee me-alias$' "$GC_LOG" | tr -d ' 
   "the release is a compare-and-swap on the assignee the script read"
 eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<absent>" \
   "the claim's session pins are dropped, so no orphan sweep restores a pool route from them"
-eq "$(blocks_rows)" 1 "a released claim: one edge onto the visit"
+eq "$(on_v1)" 1 "a released claim: the work bead still waits on its gate"
 
 # A foreign claim is released once the script proves its owner gone: the bead is
 # in_progress, and `gc session list --state all` lists no session under that
@@ -306,7 +352,7 @@ OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$LIVE_LIST" "$SCRIPT" tk-work --key "$KEY"
 eq "$RC" 0 "in_progress under an owner no session lists: the wait lands"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a crashed owner's claim is released"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a crashed owner's claim: the re-sling is armed"
-eq "$(grep -c '^tk-work|blocks|tk-v1$' "$FAKE_DEPS" | tr -d ' ')" 1 "a crashed owner's claim: the work bead waits on the visit"
+eq "$(on_v1)" 1 "a crashed owner's claim: the work bead waits on the gate"
 eq "$(grep -c '^bd unclaim tk-work --if-assignee hq-dead$' "$GC_LOG" | tr -d ' ')" 1 \
   "a crashed owner's claim: the release is a compare-and-swap on that owner"
 eq "$(grep -c '^session list --state all --json$' "$GC_LOG" | tr -d ' ')" 1 \
@@ -326,7 +372,7 @@ for who in hq-live pool__polecat-hq-live rig/rig.hicks rig.hicks hq-nap; do
   eq "$RC" 1 "in_progress under listed owner '$who': exit 1"
   has "$OUT" "under $who, a claim not in this session's name: gc session list still lists that owner" \
     "listed owner '$who': says why the claim is kept"
-  eq "$(blocks_rows)" 0 "listed owner '$who': refused before the edge"
+  eq "$(edge_adds)" 0 "listed owner '$who': refused before the edge"
   eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|$who" "listed owner '$who': the claim is kept"
   eq "$(meta tk-work gc.execution_routed_to)" "$POOL" "listed owner '$who': the route keys are untouched"
 done
@@ -341,7 +387,7 @@ for list in FAIL "" '{"error":"supervisor down"}' '{"sessions":"none"}' '{"sessi
   fi
   eq "$RC" 1 "an unreadable session list ('$list'): exit 1"
   has "$OUT" "gc session list could not be read, so nothing proves that owner gone" "an unreadable session list ('$list'): says why"
-  eq "$(blocks_rows)" 0 "an unreadable session list ('$list'): refused before the edge"
+  eq "$(edge_adds)" 0 "an unreadable session list ('$list'): refused before the edge"
   eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-dead" "an unreadable session list ('$list'): the claim is kept"
 done
 
@@ -351,7 +397,7 @@ OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 1 "open under another assignee no session lists: exit 1"
 has "$OUT" "is open under hq-dead, a claim not in this session's name: an open bead under another assignee is a hand-off" \
   "open under another assignee: says it is a hand-off"
-eq "$(blocks_rows)" 0 "open under another assignee: refused before the edge"
+eq "$(edge_adds)" 0 "open under another assignee: refused before the edge"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|hq-dead" "open under another assignee: left as it was"
 eq "$(grep -c '^session list' "$GC_LOG" | tr -d ' ')" 0 "open under another assignee: no session list is read"
 
@@ -368,11 +414,11 @@ eq "$RC" 1 "a refused release: exit 1"
 has "$OUT" "the claim of hq-me on tk-work was not released" "a refused release: said"
 eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-me" "a refused release: the claim stands"
 eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a refused release: nothing is armed"
-eq "$(blocks_rows)" 1 "a refused release: the edge onto the visit stays"
+eq "$(on_v1)" 1 "a refused release: the edge onto the gate stays"
 OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
 eq "$RC" 0 "after a refused release: a re-run lands the wait"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "after a refused release: the re-run releases the claim"
-eq "$(blocks_rows)" 1 "after a refused release: still one edge"
+eq "$(on_v1)" 1 "after a refused release: still one edge"
 reset; claim open hq-me
 OUT=$(env "${SELF[@]}" FAKE_UNCLAIM_NOOP=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
 eq "$RC" 1 "a release that reports success and changes nothing: the read-back fails it"
@@ -389,18 +435,20 @@ reset
 jq -c 'map(if .id == "tk-work" then .status = "blocked" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 1 "a parked (blocked) work bead cannot be armed: exit 1"
-eq "$(blocks_rows)" 0 "a parked work bead: no edge"
+eq "$(edge_adds)" 0 "a parked work bead: no edge"
 
 reset
 run tk-work --key no-such-key --formula mol-polecat-work
-eq "$RC" 1 "no open visit under the key: exit 1"
-has "$OUT" "file it with escalate.sh first" "no visit: says what to do"
-eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "no visit: nothing armed"
+eq "$RC" 1 "no open gate under the key: exit 1"
+has "$OUT" "file it with human-gate.sh first" "no gate: says what to do"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "no gate: nothing armed"
 
 reset
-OUT=$(FAKE_DEP_FAIL=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
-eq "$RC" 1 "a refused edge: exit 1"
+OUT=$(FAKE_DEP_FAIL=1 "$SCRIPT" tk-work --key bring-current-question.tk-work --subject tk-anchor --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 1 "a refused edge onto a gate filed on another bead: exit 1"
+has "$OUT" "the blocks edge from tk-work onto gate tk-va did not land" "a refused edge: said"
 eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a refused edge: nothing armed after it"
+eq "$(field tk-work status)" "open" "a refused edge: the work bead is left as it was"
 
 reset
 OUT=$(FAKE_UPD_FAIL=tk-work "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
@@ -415,7 +463,7 @@ jq -c 'map(if .id == "tk-work" then .metadata["gc.dispatch_when_ready_slung"] = 
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 1 "an arm deferred-dispatch refuses (a prior sling not yet retired): exit 1"
 has "$OUT" "the re-sling was not armed" "a refused arm: said, with deferred-dispatch's reason"
-eq "$(blocks_rows)" 1 "a refused arm: the edge onto the visit stays"
+eq "$(on_v1)" 1 "a refused arm: the edge onto the gate stays"
 eq "$(meta tk-work gc.execution_routed_to)" "" "a refused arm: the route keys are cleared"
 eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a refused arm: nothing is armed"
 eq "$(meta tk-work resling_target)" "$POOL" "a refused arm: the pool the cleared route named is kept as resling_target"
@@ -427,7 +475,7 @@ eq "$(grep -F -- '--set-metadata gc.execution_routed_to= ' "$GC_LOG" | grep -cF 
 eq "$(meta tk-work gc.dispatch_when_ready_slung)" "<absent>" "the refusal lifted: the marker is retired"
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "the refusal lifted: a re-run without --target exits 0"
-eq "$(blocks_rows)" 1 "the refusal lifted: still one edge"
+eq "$(on_v1)" 1 "the refusal lifted: still one edge"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "the refusal lifted: armed to the pool the cleared route named"
 eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "the refusal lifted: the arm pours mol-polecat-work"
 
@@ -441,7 +489,7 @@ eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "an arm whose write fails
 eq "$(meta tk-work resling_target)" "gc-toolkit/gc-toolkit.polecat-codex" "an arm whose write fails: the --target pool is kept as resling_target"
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "after an arm whose write failed: a re-run without --target exits 0"
-eq "$(blocks_rows)" 1 "after an arm whose write failed: still one edge"
+eq "$(on_v1)" 1 "after an arm whose write failed: still one edge"
 eq "$(meta tk-work gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat-codex" "after an arm whose write failed: armed to the pool the first run was given"
 eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "after an arm whose write failed: the arm pours mol-polecat-work"
 
@@ -449,7 +497,7 @@ reset
 jq -c 'map(if .id == "tk-work" then (.metadata |= del(.["gc.execution_routed_to"])) else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 1 "no pool to re-sling to: exit 1"
-eq "$(blocks_rows)" 0 "no pool: no edge, since nothing could re-sling it"
+eq "$(edge_adds)" 0 "no pool: no edge, since nothing could re-sling it"
 
 reset
 OUT=$(FAKE_SHOW_FAIL=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
@@ -461,8 +509,8 @@ eq "$RC" 1 "an unknown work bead: exit 1"
 reset
 run tk-work --key "$KEY" --formula mol-polecat-work --dry-run
 eq "$RC" 0 "dry run: exit 0"
-has "$OUT" "DRY RUN: tk-work would wait on visit tk-v1" "dry run: names the visit"
-eq "$(blocks_rows)" 0 "dry run: no edge"
+has "$OUT" "DRY RUN: tk-work would wait on gate tk-v1" "dry run: names the gate"
+eq "$(edge_adds)" 0 "dry run: no edge"
 eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "dry run: no arm"
 
 for args in "--key $KEY --formula mol-polecat-work" "tk-work --formula mol-polecat-work" "tk-work --key $KEY" "tk-work --key" "tk-work tk-other --key $KEY --formula f" "tk-work --key {{key}} --formula f" "tk-work --key $KEY --formula f --bogus"; do
@@ -479,51 +527,53 @@ has "$WRITTEN" "resling_target" "the extraction reads the script's writes"
 UNREGISTERED=$(printf '%s\n' "$WRITTEN" | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
 eq "$UNREGISTERED" "" "every metadata key await-ruling.sh writes is registered in lifecycle.toml"
 
-# ── 8. a situation that recurs after a person closed its visit moot ──────────
-# Closing the visit is the "proceed" ruling, so the re-slung run can meet the
-# same situation and escalate under the same key. escalate.sh answers a repeat
-# inside its verdict window from the closed visit and files nothing, which
-# leaves the wait no open visit to sit on. The decline arms that wait run
-# escalate.sh with GC_ESCALATE_VERDICT_WINDOW=0. The real escalate.sh and the
-# real await-ruling.sh run here against one store; the subject's store is left
-# unproven so the visit files under GC_RIG, the store this stub serves.
-printf '#!/usr/bin/env bash\nexit 3\n' > "$TMP/escalation-rig"; chmod +x "$TMP/escalation-rig"
-escalate() { "$HERE/escalate.sh" --subject tk-work --key "$KEY" --message "Branch diverged; closing this visit re-slings tk-work" 2>&1; }
+# ── 8. a situation that recurs after a person answered its gate moot ─────────
+# Clearing the gate is the "proceed" ruling, so the re-slung run can meet the
+# same situation and file under the same key. The decline arms call the helper
+# with no --quiet-window, so a moot answer an hour ago mutes nothing: a fresh
+# gate is filed and the wait lands on it. A declared window would file nothing
+# and leave the wait no open gate to sit on, which is why no decline arm
+# declares one. The real human-gate.sh and the real await-ruling.sh run here
+# against one store.
+CLOSED_AT=$(jq -nr '(now - 3600) | floor | todate')
+gate_for_work() { "$HERE/human-gate.sh" --subject tk-work --key "$KEY" --message "Branch diverged; clearing this gate re-slings tk-work" "$@" 2>&1; }
+open_gates() { jq -r --arg k "$KEY" --rawfile d "$FAKE_DEPS" '
+  ($d | split("\n") | map(select(startswith("tk-work|blocks|")) | split("|")[2])) as $w
+  | [ .[] | select(.id as $i | $w | index($i)) | select(.issue_type == "gate" and .await_id == $k and .status == "open") | .id ]
+  | join(" ")' "$FAKE_STORE"; }
 reset
-CLOSED_AT=$(date -u -r $(( $(date +%s) - 3600 )) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '@'$(( $(date +%s) - 3600 )) +%Y-%m-%dT%H:%M:%SZ)
 jq -c --arg at "$CLOSED_AT" 'map(select(.id != "tk-v1")
-  | if .id == "tk-v0" then (.closed_at = $at | .metadata["gc.outcome"] = "moot") else . end)' \
+  | if .id == "tk-v0" then (.closed_at = $at | .close_reason = "moot: the branch came back") else . end)' \
   "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
-OUT=$(GC_RIG=gc-toolkit GC_ESCALATION_RIG_TOOL="$TMP/escalation-rig" escalate); RC=$?
-eq "$RC" 0 "inside the window: escalate.sh exits 0"
-has "$OUT" "was answered 'moot'" "inside the window: escalate.sh answers from the closed visit"
-open_visits() { jq -r --arg k "$KEY" '[ .[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == "tk-work" and (.status // "open") == "open") | .id ] | join(" ")' "$FAKE_STORE"; }
-eq "$(open_visits)" "" \
-  "inside the window: no open visit is filed"
+grep -v '|tk-v1$' "$FAKE_DEPS" > "$FAKE_DEPS.n" && mv "$FAKE_DEPS.n" "$FAKE_DEPS"
+OUT=$(gate_for_work --quiet-window 86400); RC=$?
+eq "$RC" 0 "with a declared window: human-gate.sh exits 0"
+has "$OUT" "quiet window" "with a declared window: it answers from the moot gate"
+eq "$(open_gates)" "" "with a declared window: no open gate is filed"
 run tk-work --key "$KEY" --formula mol-polecat-work
-eq "$RC" 1 "inside the window: the wait has no open visit to sit on"
-OUT=$(GC_RIG=gc-toolkit GC_ESCALATION_RIG_TOOL="$TMP/escalation-rig" GC_ESCALATE_VERDICT_WINDOW=0 escalate); RC=$?
-eq "$RC" 0 "with the window off: escalate.sh files"
-NEWV=$(open_visits)
-[ -n "$NEWV" ] && [ "$NEWV" != tk-v0 ] && ok "with the window off: a fresh visit is open ($NEWV)" || bad "with the window off: no fresh open visit (got '$NEWV')"
+eq "$RC" 1 "with a declared window: the wait has no open gate to sit on"
+OUT=$(gate_for_work); RC=$?
+eq "$RC" 0 "as the decline arms call it: human-gate.sh files"
+NEWG=$(open_gates)
+[ -n "$NEWG" ] && [ "$NEWG" != tk-v0 ] && ok "as the decline arms call it: a fresh gate is open ($NEWG)" || bad "as the decline arms call it: no fresh open gate (got '$NEWG')"
 run tk-work --key "$KEY" --formula mol-polecat-work
-eq "$RC" 0 "with the window off: the wait lands"
-eq "$(grep -c "^tk-work|blocks|$NEWV\$" "$FAKE_DEPS" | tr -d ' ')" 1 "with the window off: the work bead waits on the fresh visit"
-eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "with the window off: the re-sling is armed"
+eq "$RC" 0 "as the decline arms call it: the wait lands"
+has "$OUT" "waits on gate $NEWG" "as the decline arms call it: the work bead waits on the fresh gate"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "as the decline arms call it: the re-sling is armed"
 
 # ── 9. a decline arm later in the run meets a crashed owner's claim ──────────
 # load-context builds over an in_progress claim whose owner no session lists, and
 # nothing in the run releases it before a later decline arm asks for the wait.
 # The arm is workspace-setup's missing-branch block, read from the formula, and
-# its await-ruling.sh is this script; the escalation it follows and the cancel
-# after it are stubs that record their turn, and the visit is already open.
+# its await-ruling.sh is this script; the gate filing it follows and the cancel
+# after it are stubs that record their turn, and the gate is already open.
 ARM="$TMP/missing-branch-arm.sh"
 awk '/^# >>> workspace-setup-missing-branch-decline$/ {f=1; next} /^# <<< workspace-setup-missing-branch-decline$/ {f=0} f' \
   "$HERE/../../formulas/mol-polecat-work.toml" | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$ARM"
 has "$(cat "$ARM")" 'await-ruling.sh" "$WORK_BEAD_ID" --key polecat-missing-branch' \
   "the missing-branch arm is read from mol-polecat-work.toml"
 mkdir -p "$TMP/pack/assets/scripts"
-for v in escalate:ESCALATE run-cancel:CANCEL; do
+for v in human-gate:GATE run-cancel:CANCEL; do
   printf '#!/usr/bin/env bash\nprintf "%s\\n" >> "$FAKE_TRACE"\n' "${v#*:}" > "$TMP/pack/assets/scripts/${v%%:*}.sh"
 done
 printf '#!/usr/bin/env bash\nprintf "AWAIT\\n" >> "$FAKE_TRACE"\nexec "%s" "$@"\n' "$SCRIPT" > "$TMP/pack/assets/scripts/await-ruling.sh"
@@ -537,20 +587,63 @@ arm() { # <session list> -> "<rc>|<ordered trace>"
 }
 arm_reset() {
   reset; claim in_progress hq-dead
-  jq -c '. + [{"id":"tk-vm","status":"open","assignee":"","metadata":{"task_kind":"visit","escalation_key":"polecat-missing-branch","gc.continuation_group":"tk-work","gc.routed_to":"human"}}]' \
+  jq -c '. + [{"id":"tk-vm","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-missing-branch","created_at":"2026-10-22T02:00:00Z","metadata":{}}]' \
     "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+  printf 'tk-work|blocks|tk-vm\n' >> "$FAKE_DEPS"
 }
 arm_reset
-eq "$(arm "$LIVE_LIST")" "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "a later arm on a crashed owner's claim: the visit, the wait, the cancel, the drain"
-eq "$(grep -c '^tk-work|blocks|tk-vm$' "$FAKE_DEPS" | tr -d ' ')" 1 "a later arm on a crashed owner's claim: the work bead waits on the arm's visit"
+eq "$(arm "$LIVE_LIST")" "1|GATE;AWAIT;CANCEL;DRAIN;" \
+   "a later arm on a crashed owner's claim: the gate, the wait, the cancel, the drain"
+eq "$(grep -c '^tk-work|blocks|tk-vm$' "$FAKE_DEPS" | tr -d ' ')" 1 "a later arm on a crashed owner's claim: the work bead waits on the arm's gate"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a later arm on a crashed owner's claim: the claim is released"
-eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a later arm on a crashed owner's claim: closing the visit re-slings the work"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a later arm on a crashed owner's claim: clearing the gate re-slings the work"
 arm_reset
 jq -c 'map(if .id == "tk-work" then .assignee = "hq-live" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
-eq "$(arm "$LIVE_LIST")" "1|ESCALATE;AWAIT;" \
+eq "$(arm "$LIVE_LIST")" "1|GATE;AWAIT;" \
    "a later arm on a listed owner's claim: the wait does not land, so no cancel and no drain"
 eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-live" "a later arm on a listed owner's claim: the claim is kept"
+
+# ── 10. a wait that lands on a writer's gate while another writer files ──────
+# bd keeps no idempotency at create, so a second writer's gate can appear after a
+# writer's create and before its read-back, and come first by created_at. By then
+# another work bead can already wait on the first writer's gate, because this
+# script adds its edge to the open gate it reads on --subject. The hook runs the
+# real await-ruling.sh at that point of the real human-gate.sh's create, then
+# files the second writer's gate, so the wait is on the gate the writer has just
+# filed and that gate no longer comes first.
+export RACE_KEY=polecat-race
+cat > "$TMP/interleave.sh" <<'HOOK'
+#!/usr/bin/env bash
+"${WAITER:?}" tk-work --key "${RACE_KEY:?}" --subject tk-anchor --formula mol-polecat-work > "${WAITER_LOG:?}" 2>&1
+printf '%s\n' "$?" > "$WAITER_LOG.rc"
+jq -c --arg k "$RACE_KEY" '. + [{"id":"tk-early","status":"open","assignee":"","title":"the other writer","issue_type":"gate","await_type":"human","await_id":$k,"created_at":"2026-10-21T23:59:59Z","metadata":{}}]' \
+  "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+printf 'tk-anchor|blocks|tk-early\n' >> "$FAKE_DEPS"
+HOOK
+chmod +x "$TMP/interleave.sh"
+# gates_holding <bead>: the open gates under the key that hold the bead, by the
+# readers every caller of a bead's gates uses.
+gates_holding() { ( . "$HERE/bd-lib.sh"; bd_human_gates "$1" | bd_gates_open_under_key "$RACE_KEY" | jq -r 'map(.id) | join(" ")' ); }
+reset
+# The stub names a gate by the store's next row.
+WRITER_GATE="tk-gate$(( $(jq 'length' "$FAKE_STORE") + 1 ))"
+FILED=$(WAITER="$SCRIPT" WAITER_LOG="$TMP/waiter.log" FAKE_GATE_CREATE_HOOK="$TMP/interleave.sh" \
+  "$HERE/human-gate.sh" --subject tk-anchor --key "$RACE_KEY" --message "Which base does this rebuild take?" 2>"$TMP/filer.err"); RC=$?
+eq "$RC" 0 "two writers: the filing exits 0"
+eq "$FILED" "$WRITER_GATE" "two writers: stdout names the gate this call filed"
+eq "$(cat "$TMP/waiter.log.rc")" 0 "two writers: the wait landed during the create"
+has "$(cat "$TMP/waiter.log")" "tk-work waits on gate $WRITER_GATE" "two writers: the work bead waits on the gate the writer had just filed"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "two writers: the work bead is armed to re-sling once its gate clears"
+hasnt "$(cat "$GC_LOG")" "bd gate resolve" "two writers: nothing resolves a gate before a person answers"
+eq "$(field "$WRITER_GATE" status)" open "two writers: the gate the work bead waits on stays open"
+eq "$(field tk-early status)" open "two writers: the other writer's gate stays open"
+eq "$(gates_holding tk-work)" "$WRITER_GATE" "two writers: the work bead stays held with no answer from a person"
+eq "$(gates_holding tk-anchor)" "tk-early $WRITER_GATE" "two writers: both gates hold the subject, the first by created_at first"
+gc bd gate resolve "$WRITER_GATE" --reason "ruled: take main" >/dev/null
+eq "$(gates_holding tk-work)" "" "two writers: a person's answer on its gate ends the work bead's wait"
+eq "$(gates_holding tk-anchor)" "tk-early" "two writers: the subject stays held by the gate not yet answered"
+gc bd gate resolve tk-early --reason "ruled: take main" >/dev/null
+eq "$(gates_holding tk-anchor)" "" "two writers: the subject moves once a person has answered both"
 
 echo
 echo "await-ruling.test.sh: $PASS passed, $FAIL failed"

@@ -7,12 +7,12 @@
 # review verdict is left (needs-review), or a blocker stands that the city will
 # not clear on its own (needs-attention). An open PR carries exactly one status
 # value. `held:` names what holds it that the city will not clear on its own: an
-# open visit on the PR or its work (visit), review feedback the city has not
-# answered or a review thread the merge waits on (review), or a blocker no
-# automated actor will clear (blocked). Each is a label of its own, so more than
+# open human gate on the PR (gate), review feedback the city has not answered or
+# a review thread the merge waits on (review), or a blocker no automated actor
+# will clear (blocked). Each is a label of its own, so more than
 # one can stand, and a PR nothing holds carries none. Any held value reads
 # needs-attention. pr-facts.sh's full pass recomputes both for each open PR its
-# paced walk reaches, from the anchor's posture, holds, open visits, blockers,
+# paced walk reaches, from the anchor's posture, holds, human gates, blockers,
 # the merge cadence's verdict and its count of review threads waiting on the
 # city's answer, draft stage and live work. Both come off once the PR merges or closes, where
 # GitHub's own Merged or Closed state takes over: pr-facts.sh clears them when it
@@ -59,7 +59,7 @@ GROUP_COLOR="${GC_PR_STATUS_LABEL_COLOR:-1D76DB}"
 # The controlled `held:` group, the values prstatus.Held names, with a colour of
 # its own so a hold reads apart from the status beside it.
 HELD_PREFIX="held: "
-HELD_VALUES="visit
+HELD_VALUES="gate
 review
 blocked"
 HELD_COLOR="${GC_PR_HELD_LABEL_COLOR:-D93F0B}"
@@ -74,7 +74,7 @@ label_desc() { # <label name> — its GitHub description (GitHub caps these at 1
     "${LABEL_PREFIX}merging")         printf 'Workflow: approved, and the city is landing it; nothing known blocks the merge.' ;;
     "${LABEL_PREFIX}needs-review")    printf 'Workflow: settled at the current head; awaiting a human review or re-review.' ;;
     "${LABEL_PREFIX}needs-attention") printf 'Workflow: a blocker stands that the city will not clear on its own; needs a human.' ;;
-    "${HELD_PREFIX}visit")            printf 'Workflow: an open visit holds the PR or its work in flight; a person answers it.' ;;
+    "${HELD_PREFIX}gate")             printf 'Workflow: an open human gate holds the PR; a person clears it.' ;;
     "${HELD_PREFIX}review")           printf 'Workflow: feedback the city has not answered, or a thread the merge waits on; a person resolves it.' ;;
     "${HELD_PREFIX}blocked")          printf 'Workflow: a blocker no automated actor will clear holds the PR; a person clears it.' ;;
     "$HELD_PREFIX"*)                  printf 'Workflow hold label.' ;;
@@ -91,7 +91,7 @@ is_status_value() { # <value>
 
 is_held_value() { # <value>
   case "$1" in
-    visit|review|blocked) return 0 ;;
+    gate|review|blocked) return 0 ;;
     *) return 1 ;;
   esac
 }

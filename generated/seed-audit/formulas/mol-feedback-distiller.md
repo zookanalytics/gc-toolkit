@@ -51,5 +51,5 @@ Variables:
 Steps (4):
   ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate
   ├── mol-feedback-distiller.judge-and-cluster: Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass [needs: mol-feedback-distiller.load-and-gate]
-  ├── mol-feedback-distiller.file-and-dispatch: File one prompt-update bead per proposal, stamp consumed observations, visit contested rules, drain [needs: mol-feedback-distiller.judge-and-cluster]
+  ├── mol-feedback-distiller.file-and-dispatch: File one prompt-update bead per proposal, stamp consumed observations, gate contested rules, drain [needs: mol-feedback-distiller.judge-and-cluster]
   └── mol-feedback-distiller.workflow-finalize: Finalize workflow [needs: mol-feedback-distiller.file-and-dispatch]

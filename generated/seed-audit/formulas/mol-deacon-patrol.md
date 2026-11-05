@@ -13,15 +13,16 @@ starts/stops agents, never recovers per-rig beads (witness), never writes
 code. A finding becomes one deduped BEAD through
 assets/scripts/patrol-finding.sh, and a proactive first reaction disposes it:
 routed to a pool, held for the operator's placement sitting, held on an edge,
-or escalated to the operator as a visit.
-assets/scripts/escalate.sh is for what a patrol cannot express as a bead.
+or put to the operator as a human gate on the finding.
+assets/scripts/human-gate.sh files a human gate on a bead directly, for an
+emergency about that bead.
 
 Every non-routine ACTION also leaves one line in the incident ledger
 (assets/scripts/gc-deacon-ledger.sh), which is how a shift is reconstructed
 without replaying a transcript. A reading that came back on-track appends
-nothing: a ledger that records every cycle records no signal. escalate.sh
-writes its own `escalation` entry, so a step that escalated owes the ledger
-only what it additionally did by hand.
+nothing: a ledger that records every cycle records no signal. human-gate.sh
+writes its own `escalation` entry for each gate it files, so a step that filed
+one owes the ledger only what it additionally did by hand.
 
 The marked backup-manifest-check block is extracted and executed by
 assets/scripts/dolt-backup-manifest-check.test.sh; keep the markers and

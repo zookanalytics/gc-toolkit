@@ -16,18 +16,18 @@
 # what every test that runs a block carries, whatever its extraction looks
 # like. A comment does not count, because a comment is what a rewrite leaves
 # behind. A longer name that contains the marker's does not count, and neither
-# does a file name that starts with it: `gate-visit.test.sh` names a test, not
-# the gate-visit marker. The check is by name, so a name that several formulas
-# share is covered once a test names it.
+# does a file name that starts with it: `submit-branch-gate.test.sh` names a
+# test, not the submit-branch-gate marker. The check is by name, so a name that
+# several formulas share is covered once a test names it.
 #
 # A formula line that opens with `#` and then `>>>` or `<<<` must read exactly
 # `# >>> <name>` or `# <<< <name>`. Extractors anchor on that shape, so a block
 # marked any other way is extracted by nothing, and this suite reports the line
 # rather than skipping it.
 #
-# Shared-snippet markers in scripts (control-char-scrub, gate-visit's script
-# copies) follow a different convention, one canonical block copied into many
-# hosts, and each has its own suite.
+# Shared-snippet markers in scripts, such as control-char-scrub, follow a
+# different convention, one canonical block copied into many hosts, and each has
+# its own suite.
 #
 # Hermetic: reads tracked files through git ls-files. No gc, no city, no
 # network.

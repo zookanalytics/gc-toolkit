@@ -12,8 +12,8 @@
 #   - a well-formed not-found -> "bead not found"
 #
 # Driven over a stubbed `gc` on PATH — no live city, Dolt, or sessions. The happy
-# path of each verb is proven in its own suite (gc-helm-open/engage/accept.test.sh
-# and gc-helm.test.sh); a failure-mode assertion here is self-validating — it
+# path of each verb is proven in its own suite (gc-helm-open, -engage, -dismiss
+# and -accept.test.sh); a failure-mode assertion here is self-validating — it
 # names a message only verify_subject emits, so it FAILS if the verb never reached
 # verify_subject (a precondition refusing first would carry different words).
 set -u
@@ -41,9 +41,13 @@ export RIG_PATH="$TMP/rig"
 # --- gc stub ------------------------------------------------------------------
 # One rig (prefix tk, no suspended/running flags so engage never refuses on
 # liveness). `bd show` answers from $FAKE_SHOW_MODE so each case picks the exact
-# payload shape the real `bd show` emits for that reading. Every mutating call is
-# appended to $FAKE_CALLS so "nothing was written/dispatched/spawned" is asserted
-# against the actual argv, not exit status alone.
+# payload shape the real `bd show` emits for that reading. The bead has no
+# conversation and no session is live (`bd dep list` and `session list` answer
+# empty), and a conversation `bd create` files reads back as one (`bd list
+# --id`): a task that tracks the bead its --deps named, assigned to `human`.
+# Every mutating call is appended to $FAKE_CALLS so "nothing was
+# written/dispatched/spawned" is asserted against the actual argv, not exit
+# status alone.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "${1:-}" in
   "rig")
@@ -63,22 +67,37 @@ case "${1:-}" in
           # a different error. Existence is unknown, not disproved.
           dberror) printf '{"error":"dial tcp 127.0.0.1:3307: connect: connection refused","schema_version":1}\n'; exit 1 ;;
         esac ;;
-      list)    printf '[]\n' ;;
-      create)  printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{id:"tk-visitX"}' ;;
+      list)
+        _id=""; _prev=""
+        for a in "$@"; do [ "$_prev" = "--id" ] && _id="$a"; _prev="$a"; done
+        if [ -n "$_id" ]; then
+          jq -n --arg c "$_id" --arg s "$(cat "$FAKE_SUBJ" 2>/dev/null)" \
+            '[{id:$c, issue_type:"task", status:"open", assignee:"human", dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}]'
+        else printf '[]\n'; fi ;;
+      create)
+        printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
+        _prev=""
+        for a in "$@"; do [ "$_prev" = "--deps" ] && printf '%s' "${a#tracks:}" > "$FAKE_SUBJ"; _prev="$a"; done
+        jq -n '{id:"tk-convX"}' ;;
       update)  printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
-      dep)     printf 'bd dep %s\n'    "$*" >> "$FAKE_CALLS" ;;
+      dep)
+        if [ "${3:-}" = list ]; then printf '[]\n'
+        else printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS"; fi ;;
       comment) printf 'bd comment %s\n' "$*" >> "$FAKE_CALLS" ;;
     esac ;;
   "sling")   printf 'sling %s\n' "$*" >> "$FAKE_CALLS" ;;
   "session")
-    [ "${2:-}" = "new" ] && { printf 'session new %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{ok:true, session_id:"s1", session_name:"n1"}'; } ;;
+    case "${2:-}" in
+      new)  printf 'session new %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{ok:true, session_id:"s1", session_name:"n1"}' ;;
+      list) jq -n '{sessions:[]}' ;;
+    esac ;;
 esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
-export FAKE_CALLS="$TMP/calls"
+export FAKE_CALLS="$TMP/calls" FAKE_SUBJ="$TMP/subj"
 unset GC_HELM_FIXTURE || true
 export TMPDIR="$TMP"
 
@@ -124,7 +143,7 @@ check_verb() {
     eq "$CALLS" "" "($_label MISSING) nothing written/dispatched/spawned"
 }
 
-check_verb OPEN    "No visit filed."   open    tk-real1
+check_verb OPEN    "No conversation filed." open tk-real1
 check_verb ENGAGE  "Nothing spawned."  engage  tk-real1 --no-attach --model codex
 check_verb DISMISS "Nothing was written." dismiss tk-real1
 check_verb ACCEPT  "Nothing dispatched." accept  tk-real1
@@ -136,7 +155,7 @@ check_verb ACCEPT  "Nothing dispatched." accept  tk-real1
 run_verb found open tk-real1
 eq "$RC" 0 "(OPEN found) a resolvable subject exits 0"
 hasnot "$ERR" "could not verify" "(OPEN found) verify_subject passed"
-has    "$CALLS" "bd create" "(OPEN found) the visit is filed — verify passed"
+has    "$CALLS" "bd create" "(OPEN found) the conversation is filed — verify passed"
 
 run_verb found dismiss tk-real1
 eq "$RC" 0 "(DISMISS found) a resolvable subject exits 0 (no sitting to end)"
