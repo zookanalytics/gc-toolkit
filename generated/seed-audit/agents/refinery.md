@@ -84,8 +84,6 @@ next wisp before burning this one.
   back and keeps the current wisp. A dropped loop wakes nobody.
 - **Never exit a wisp from an intermediate step**; continue, or jump to
   next-iteration to pour and burn.
-- Context recycling is the cycle-recycle Stop hook's job, not a question you
-  ask — it recycles you deterministically past the threshold.
 
 ## Quality-gate fallback
 
@@ -108,12 +106,17 @@ through one writer that dedups repeats:
 "$(gc gc-toolkit scripts-dir)/human-gate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
 ```
 
-The gate blocks the bead it names until a person clears it, and a gate on a
-PR's anchor holds its merge. A gate on a bead with open children pauses every
-part of it that has not started, so when only one member waits, name that
-member. A situation with no bead of its own is a patrol finding
-(`patrol-finding.sh --scope refinery-findings`): `human-gate.sh` refuses a
-patrol wisp or a session, and files nothing on a bead it cannot read.
+
+The gate lands in the store of the bead it names and blocks that bead, so the
+bead leaves the pool's offer until a person clears the gate. A gate on a bead
+with open children pauses every part of it that has not started, so when only
+one member waits, name that member. A situation with no bead of its own is a
+patrol finding: `human-gate.sh` refuses a patrol wisp or a session, and files
+nothing on a bead it cannot read. Context recycling is the cycle-recycle Stop
+hook's job, never something you ask about.
+
+A gate on a PR's anchor holds its merge. A patrol finding here takes
+`patrol-finding.sh --scope refinery-findings`.
 
 File a gate for what a human must act on; a PR awaiting the operator's
 approval is a HEALTHY resting state worth zero gates. Most idle wakes file

@@ -71,9 +71,7 @@ resumes a cancelled run, so a wait for a person sits on the work bead:
 `assets/scripts/await-ruling.sh` reads that `blocks` edge back and arms the
 work bead's re-sling, so clearing the gate pours a fresh run. The re-sling
 fires only for an open, unassigned bead, so the script first releases a claim
-on the work bead that no live worker holds. A decline is an event of its run,
-so its gate is filed with no quiet window, and a situation a person answered
-`moot` or `benign` before is asked again.
+on the work bead that no live worker holds.
 
 The refusal drains only after the cancel lands. A cancel that does not land
 leaves the step claimed by this session, and the step goes back to the pool
@@ -114,6 +112,9 @@ Each kind of pack text names the binding the way its rendering allows:
   with the default `gc-toolkit.`, which an order's pour takes
   ([gascity/packs.md](gascity/packs.md#a-formula-body-gets-no-template-pass)).
   The step drops the dot: `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"`.
+  The gascity-keeper sub-pack's formulas run on this pack's polecats, so they
+  are poured with this pack's binding and write the same line. A keeper script
+  sits under the same directory, at `../../packs/gascity-keeper/assets/scripts`.
 - **A prompt or template fragment** is rendered with the binding:
   `"$(gc {{ .BindingName }} scripts-dir)/foo.sh"`.
 - **A skill** is not rendered, so its examples write
@@ -275,17 +276,15 @@ session starts in its agent home, and an agent can `cd` anywhere between calls.
 The step takes the rig root from `assets/scripts/rig-root.sh`, which prints
 `GC_RIG_ROOT`, else the `gc rig list --json` entry for `GC_RIG`, and passes it
 as `git -C "$RIG_ROOT"` or as a wrapper's own flag
-(`review-workspace.sh add --repo`). One locator line reaches the script through
+(`review-workspace.sh add --repo`). It reaches the script through
 `gc <binding> scripts-dir`, as any step reaches a pack script
 ([above](#step-text-and-skills-reach-pack-scripts-at-runtime)), never through
 the cwd's checkout, and the step refuses to run when the script prints no root,
 because `git -C ""` runs in the cwd. A formula that works one fixed rig, as the
 gascity-keeper's upstream formulas work gascity, passes `--rig <name>`, so the
-pool it was slung to does not choose. Those formulas carry no binding for this
-pack, so their locator line is a loop over candidate directories.
+pool it was slung to does not choose.
 `assets/scripts/formula-worktree-rig.test.sh` and
-`assets/scripts/formula-git-rig.test.sh` run these blocks from a foreign cwd,
-and the latter holds each of these formulas to one locator line.
+`assets/scripts/formula-git-rig.test.sh` run these blocks from a foreign cwd.
 
 ## Patrol agents run a patrol-wisp cycle
 
