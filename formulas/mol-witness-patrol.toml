@@ -901,8 +901,8 @@ landing bead sits in the queue from the moment its integration effort is stood
 up, and find-work leaves it until the effort's beads and its summary task close.
 ```bash
 # >>> refinery-stuck-handoff
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
-: "${SCRIPTS:?human-gate.sh, patrol-finding.sh, resolve-route.sh, bd-lib.sh and hold-lib.sh not found in the pack}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] && . "$SCRIPTS/bd-lib.sh" || SCRIPTS=""
+: "${SCRIPTS:?human-gate.sh, patrol-finding.sh, resolve-route.sh, bd-lib.sh and hold-lib.sh not found in the pack, or bd-lib.sh did not source}"
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an
 # address no agent holds as a valid empty array, which reads exactly like a
@@ -946,7 +946,7 @@ STUCK="$PAST"
 cr_hold_read() { gc bd list --all --include-gates --include-infra --include-templates --id="$1" --json --limit=0; }
 if [ -n "$PAST" ] && [ "$PAST" != "[]" ]; then
   JUDGED=""
-  if . "$SCRIPTS/bd-lib.sh" && . "$SCRIPTS/hold-lib.sh"; then
+  if . "$SCRIPTS/hold-lib.sh"; then
     JUDGED=$(printf '%s' "$PAST" | hold_annotate cr_hold_read) || JUDGED=""
   fi
   if [ -n "$JUDGED" ]; then
@@ -1039,7 +1039,7 @@ if [ "$ROUTE_RC" -eq 0 ] && [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
   # bd gate list prints null with no gates, and [] through a proxied server.
-  GATES=$(gc bd gate list --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" then .[] | select((.await_type // "") == "human" and (.await_id // "") == "witness-refinery-queue" and (.status // "") != "closed") | .id else empty end' 2>/dev/null) || GATES=""
+  GATES=$(gc bd gate list --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' | jq -r "$HUMAN_GATE_JQ"'if type == "array" then .[] | select(open_human_gate("witness-refinery-queue")) | .id else empty end' 2>/dev/null) || GATES=""
   # One {gate, deps} row per gate, deps every bead the gate blocks. A read that
   # failed or answered anything but an array leaves deps null.
   GATE_DEPS=$(while IFS= read -r G; do

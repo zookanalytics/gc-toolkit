@@ -228,7 +228,7 @@ SELF_LOGIN=""
 city_draft() { # <num> <author-login>
   local conv
   [ -n "${2:-}" ] || return 2
-  [ -n "$SELF_LOGIN" ] || SELF_LOGIN=$(gh api --hostname "$ORIGIN_HOST" user --jq '.login' 2>/dev/null)
+  [ -n "$SELF_LOGIN" ] || SELF_LOGIN=$("$PR_POST" acting-login --host "$ORIGIN_HOST")
   [ -n "$SELF_LOGIN" ] || return 2
   [ "$2" = "$SELF_LOGIN" ] || return 1
   conv=$(gh api --hostname "$ORIGIN_HOST" --paginate "repos/$ORIGIN_REPO/issues/$1/timeline?per_page=100" \

@@ -370,9 +370,8 @@ if [ "$RULED" = yes ]; then
   [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
-    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg a "$ANSWER" 'any(.[]; .id == $g and (.issue_type // "") == "gate"
-        and (.await_type // "") == "human"
-        and (((.status // "") | ascii_downcase) != "closed" or (.close_reason // "") == $a))' >/dev/null 2>&1 || continue
+    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg a "$ANSWER" "$HUMAN_GATE_JQ"'any(.[]; .id == $g
+        and (open_human_gate("") or (human_gate and (.close_reason // "") == $a)))' >/dev/null 2>&1 || continue
     WAITERS=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
       | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
       || stopped "the beads that wait on gate $g could not be read, and answering it releases them, so an open PR among them could not be told; nothing was written"
