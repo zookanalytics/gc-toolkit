@@ -40,6 +40,8 @@
 # where the live city cannot be reached. A command, a --serve command or a page
 # that reads the city's stores or its API fails there, so a capture shows the
 # reviewed commit on fixture data, or shows the failure, and never live state.
+# The one server outside the sandbox a page capture can reach is a rig's app
+# that --base-url names, as below.
 # --text and markdown draw a file they are given, as it is, so what they show
 # is what was written to that file.
 #
@@ -73,9 +75,10 @@
 #                command's environment carries the port as PORT, and --port 0
 #                picks a free one, so captures side by side never share a
 #                server. A port that a server already answers on is refused.
-#   --base-url   drive a deployed preview. A URL on this host is refused,
-#                because a server already running here runs outside the
-#                sandbox.
+#   --base-url   drive a deployed preview, or an app that a worktree of a rig
+#                serves on this host. Any other server on this host is refused,
+#                as is the app of a rig that city.toml sets to
+#                app_reads_city = "true".
 #                Exactly one of --serve-dir / --serve / --base-url is required.
 #   --selector   capture this element instead of the viewport.
 #   --full-page  capture the whole scrollable page instead of the viewport.
