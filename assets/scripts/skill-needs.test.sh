@@ -643,7 +643,9 @@ echo "── a problem in software the rig does not own goes through one skill �
 # still stopped, and the guard's refusal names the skill. The finding is filed
 # whole in one create, already deferred, kinded and labelled, so no reader of
 # ready work ever offers it, and nothing in the skill drafts a send or asks the
-# operator anything.
+# operator anything. A create whose reply was lost may still have filed the
+# finding, so the skill looks again in the stores themselves, which the
+# supervisor's cache can lag, before it files a second.
 EXTERNAL="$SKILLS/external-issue/SKILL.md"
 OUTBOUND="$REPO/docs/outbound-sends.md"
 ext_desc=$(frontmatter "$EXTERNAL" description)
@@ -669,6 +671,8 @@ for probe in 'gc beads list --label upstream-finding' '--status deferred' '-l up
     '/private-vulnerability-reporting'; do
     have "the skill gives the command: $probe" "$probe" "$EXTERNAL"
 done
+have "the skill looks for the finding in the stores themselves before it files again" \
+    'GC_NO_API=1 gc beads list --label upstream-finding' "$EXTERNAL"
 for probe in '--status deferred' 'isSecurityPolicyEnabled' 'private-vulnerability-reporting'; do
     lacks "…and the doc does not: $probe" "$probe" "$OUTBOUND" "each command an agent runs lives only in the skill"
 done

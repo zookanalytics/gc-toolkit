@@ -73,8 +73,27 @@ description names it. Read the finding back:
 gc bd show <finding> --json | jq -r '.[0] | "\(.status) \(.metadata.task_kind // "-") \(any(.labels[]?; . == "upstream-finding"))"'
 ```
 
-It prints `deferred upstream-finding true`. A create that printed no id filed
-nothing, so run it again.
+It prints `deferred upstream-finding true`.
+
+A create that printed no id may still have filed the finding, because bd saves
+the bead first and a step after that can fail before the id is printed. So run
+the lookup at the top of this section again before any second create, reading
+the stores themselves. Without `GC_NO_API=1`, gc can answer from the
+supervisor's cache, which may not yet hold a bead filed a moment ago:
+
+```bash
+GC_NO_API=1 gc beads list --label upstream-finding --all
+```
+
+When it lists an open finding under the title you gave yours, that is the one
+you filed: read it back as above, and file nothing more. When it lists none,
+run the create again. When the lookup itself fails, file nothing more, because
+whether the first create landed is unknown. Note the title on your work bead
+instead:
+
+```bash
+gc bd update <your work bead> --append-notes "Upstream finding '<its title>' may not be recorded: its create printed no id, and the lookup that would find it failed."
+```
 
 Whether a report goes out is the operator's call when they pick the finding
 up, and whether it goes as a public issue or a private one follows that
