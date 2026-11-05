@@ -174,6 +174,23 @@ FAKE_CURRENT=tk-w run_claim "$(claim closed sess-me)" --step mol.x --reason why
 eq "$RC" 0 "a claim whose bead is closed: exits 0"
 eq "$TRACE" "DRAIN " "and there is nothing to hand back, so the session only drains"
 
+# A caller that waits on a sibling (work-setup.sh) or a blocker (work-gate.sh)
+# before it declines with no gate: its wait has released the claim and cleared
+# the route and pins, and armed the re-sling, while gc hook current still names
+# the bead.
+RELEASED=$(jq -nc '{id: "tk-w", status: "open", assignee: "", metadata: {"gc.routed_to": "",
+  "gc.execution_routed_to": "rig/pool", "gc.dispatch_when_ready": "rig/pool", "resling_target": "rig/pool"}}')
+FAKE_CURRENT=tk-w run_claim "$RELEASED" --step mol.x --reason why
+eq "$RC|$TRACE" "0|UPDATE DRAIN " "a claim its own wait released, no gate: the hand-back finds it unclaimed, and the session drains"
+has "$(args UPDATE)" "--if-status=open --if-assignee= --status=open" "the write is guarded on the bead holding no claim"
+eq "$(now status)|$(now assignee)|$(now gc.routed_to)" "open||" "and it reads back open, unassigned and unrouted"
+eq "$(now gc.dispatch_when_ready)|$(now resling_target)|$(now gc.execution_routed_to)" "rig/pool|rig/pool|rig/pool" "and the re-sling the wait armed stays"
+
+FAKE_CURRENT=tk-w run_claim "$(claim deferred sess-me)" --step mol.x --reason why --subject tk-w --key k1 --message "the message."
+eq "$RC|$TRACE" "0|GATE DRAIN " "a claim whose gate asks for no wait, as on a parked bead: asks, drains, and cancels nothing"
+eq "$(args UPDATE)" "" "and writes nothing to the bead"
+eq "$(now status)" "deferred" "so the bead stays parked for the person the gate asks"
+
 FAKE_CURRENT=tk-w GATE_RC=1 run_claim "$HELD" "${GATED_CLAIM[@]}"
 eq "$RC" 1 "a claim whose gate does not land: exits 1"
 eq "$TRACE" "GATE " "and nothing follows it, not even the drain"

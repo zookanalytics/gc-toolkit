@@ -17,14 +17,19 @@
 # current` names. A bead with a gc.step_ref is a step of a run, and the run ends
 # through run-cancel.sh. A bead with none is a claim with no run, which a claimant
 # with no poured workflow holds on the work bead itself, so nothing is cancelled.
-# A gated decline of such a claim ends once the gate and the wait have landed,
-# and await-ruling.sh has then released the claim. With no gate, the claim is
-# handed back (hand-back.sh) in one write guarded on this session's claim, which
-# also clears gc.routed_to: a release alone would leave the route offering the
-# bead straight back to the pool, and each new claimant would refuse it again
-# until the run building it finishes. gc.execution_routed_to stays, because
-# await-ruling.sh re-slings from it. The write is read back before the drain. A
-# bead already closed holds no claim, so nothing is handed back.
+# A gated decline of such a claim ends once the gate and its wait have landed,
+# and await-ruling.sh has then released the claim. A gate asked with no wait, as
+# for a parked bead, leaves the bead as it is, this session's name included: a
+# parked bead is not this session's to release (hand-back.sh), and Gas City's
+# drain gives back only an in_progress claim. With no gate, the claim is handed
+# back (hand-back.sh) in one write, made only while the bead shows this session's
+# claim or none. It shows none when the caller's own wait, on a sibling or a
+# blocker, has already released it. The same write clears gc.routed_to: a release
+# alone would leave the route offering the bead straight back to the pool, and
+# each new claimant would refuse it again until the run building it finishes.
+# gc.execution_routed_to stays, because await-ruling.sh re-slings from it. The
+# write is read back before the drain. A bead already closed holds no claim, so
+# nothing is handed back.
 #
 # The parts run in that order because an end with no record behind it leaves work
 # nothing re-offers. A part that does not land stops the sequence and nothing after
