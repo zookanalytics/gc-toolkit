@@ -268,7 +268,11 @@ What the sync counts as gc's own:
   and the fast-forward carries it to the tip unless the tip changes the same
   file. Then git refuses, and the start fails and is reported, which the ruling
   accepted (suite case (t)). A session's edit to one of those files goes
-  unreported the same way.
+  unreported the same way. Because gc merges into such a file again before
+  every start, a restart after clearing what git names meets the same refusal,
+  so the report names the move to make by hand once that is cleared,
+  `git -C <home> merge --ff-only origin/HEAD`, or `checkout --detach origin/HEAD`
+  for a detached home, and the start after it goes through.
 - **A new home.** gc's staging lands in a directory that is not a worktree yet. The
   script moves its contents aside, adds the worktree and moves them back, keeping
   each file the checkout did not bring (cases (e), (f) and (h)).

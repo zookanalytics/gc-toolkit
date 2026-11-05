@@ -53,7 +53,9 @@
 #   (t) in a rig that tracks a provider settings file, gc's merge into it is
 #       no edit, and the home fast-forwards with it; when the tip changes that
 #       file, git refuses the fast-forward, which fails the start with git's
-#       reason;
+#       reason, and the report names the move to make by hand, for a home on
+#       its branch and for a detached one. After that move, and gc's merge
+#       made again, the next start goes through;
 #   (u) a path gc writes that the rig's .gitignore re-includes is no edit
 #       either, and a person's file beside it still fails the start;
 #   (v) a rebase, a merge and a bisect a session left stopped each fail the
@@ -455,7 +457,9 @@ has "$(reported "$W" agentS)" "git -C '$W' switch $BR" "(s) and the switch that 
 #         runs, and a rig can track that file, so the merge is a tracked change
 #         in every home. It is no edit: the home fast-forwards with it, at the
 #         tip and past it. When the tip changes that file, git refuses the
-#         fast-forward, which fails the start with git's reason. Its own
+#         fast-forward, which fails the start with git's reason. gc merges
+#         into the file again before every start, so a restart meets the same
+#         refusal, and the report names the move to make by hand. Its own
 #         remote, whose main tracks .claude/settings.json. --------------------
 TS="$TMP/tsrc"; git init -q -b main "$TS"
 mkdir -p "$TS/.claude"; echo '{"repo":1}' > "$TS/.claude/settings.json"; echo seed > "$TS/README.md"
@@ -466,6 +470,7 @@ TR="$TMP/trig"; git clone -q "$TMP/t.git" "$TR"
 t_advance() { mkdir -p "$(dirname "$TS/$1")"; echo "$2" > "$TS/$1"; git -C "$TS" add -A; git -C "$TS" commit -qm "$1"; git -C "$TS" push -q "$TMP/t.git" main; }
 P="$TMP/t"; mkdir -p "$P"; W="$P/agentT"
 eq "$(rc_of "$TR" "$W" agentT)" "0"          "(t) the home is made"
+BR=$(branch_of "$W")
 echo '{"hooks":"gc","repo":1}' > "$W/.claude/settings.json"
 eq "$(sync_in "$TR" "$W" agentT)" ""         "(t) at the tip, gc's merge does not fail the start"
 t_advance t1.txt t1
@@ -480,6 +485,21 @@ has "$ERR" "a fast-forward to origin/main that git refused" "(t) which the run n
 has "$ERR" ".claude/settings.json"           "(t) with git's reason"
 eq "$(head_of "$W"):$(cat "$W/.claude/settings.json")" "$BEFORE:{\"hooks\":\"gc\",\"repo\":1}" \
     "(t) the home and gc's merge stay as they were"
+has "$(reported "$W" agentT)" "then make the move by hand with git -C '$W' merge --ff-only origin/HEAD" \
+    "(t) the report names the move to make by hand"
+git -C "$W" checkout -q -- .claude/settings.json; git -C "$W" merge -q --ff-only origin/HEAD
+echo '{"hooks":"gc","repo":2}' > "$W/.claude/settings.json"
+eq "$(sync_in "$TR" "$W" agentT)" ""         "(t) after that move, the next start goes through"
+git -C "$W" checkout -q --detach
+t_advance .claude/settings.json '{"repo":3}'
+has "$(sync_in "$TR" "$W" agentT)" "exit 1"  "(t) a detached home's start fails the same way"
+has "$(reported "$W" agentT)" "then make the move by hand with git -C '$W' checkout --detach origin/HEAD" \
+    "(t) and its report names the detached move"
+git -C "$W" checkout -q -- .claude/settings.json; git -C "$W" checkout -q --detach origin/HEAD
+echo '{"hooks":"gc","repo":3}' > "$W/.claude/settings.json"
+eq "$(sync_in "$TR" "$W" agentT)" ""         "(t) after the detached move, the next start goes through"
+eq "$(head_of "$W"):$(branch_of "$W")" "$(git -C "$TMP/t.git" rev-parse main):$BR" \
+    "(t) back on its own branch at the tip"
 
 # --- (u) a path gc writes stays no edit when the rig's .gitignore re-includes
 #         it, as a repository that tracks skills under .claude/skills/ does, so

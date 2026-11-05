@@ -177,7 +177,9 @@ sync_worktree() {
     [ -z "$FOUND" ] || report
 
     if ! ERR=$(fast_forward 2>&1); then
-        found "a fast-forward to $TIP that git refused" "clear what git names below"
+        if [ -n "$CURRENT" ]; then MOVE="merge --ff-only origin/HEAD"; else MOVE="checkout --detach origin/HEAD"; fi
+        found "a fast-forward to $TIP that git refused" \
+            "clear what git names below, then make the move by hand with git -C '$WT' $MOVE, since a file gc writes comes back before the next start's sync"
         DETAIL=$ERR
         report
     fi
