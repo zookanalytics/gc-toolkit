@@ -480,12 +480,16 @@ shares only the word ([authority-map.md](authority-map.md)).
     reaper (`reapClosedBeadWorktrees` in `cmd/gc/bead_worktree_reaper.go`) and
     the worker-dir prune (`pruneAgentHomeWorktreeIfSafe` in
     `cmd/gc/session_worktree_prune.go`) leave a tree with uncommitted changes
-    or with commits no ref holds where it is, and save neither. So the script
-    saves them under `refs/gc-toolkit/home-save/`, since a repository's
-    worktrees all share one stash stack.
+    or with commits no ref holds where it is, and save neither. The agent-home
+    cleanup (`cleanupClosedBeadAgentHomeWorktrees` in
+    `cmd/gc/agent_home_worktree_cleanup.go`) moves a home only when it carries
+    the prune's `.worktree-stale` marker, sits on a branch that names a closed
+    bead and has no uncommitted work. So the script saves what a move would
+    lose under `refs/gc-toolkit/home-save/`, since a repository's worktrees all
+    share one stash stack.
   - The search, and each way this script differs from Gas Town's and why, is
     [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 44e0d11e4625 and
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 357c30c631cf and
   `gastownhall/gascity-packs` main 796d7ecd73cf.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at

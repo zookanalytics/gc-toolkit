@@ -12,7 +12,10 @@ ran read-only on the live city at about 06:20Z, with load near 60. The home
 sync's rule, what gc writes into a home before a session starts, and a second
 census of the homes were read on 2026-11-05 at `gastownhall/gascity` main
 44e0d11e4625 and `gastownhall/gascity-packs` main 796d7ecd73cf, between 07:30Z
-and 08:00Z.
+and 08:00Z. The forced move's putting back and the quit of a stopped operation,
+with the search behind them, were read at about 09:15Z the same day, at
+`gastownhall/gascity` main 357c30c631cf, whose one commit past 44e0d11e4625
+changes only security-scan and build files.
 
 ## What was decided
 
@@ -174,7 +177,9 @@ five tracked changes are still the only ones, all in one rig that tracks
 (see [what gc writes into a home](#what-gc-writes-into-a-home-before-the-session-starts)).
 The same dry run of the move, against a copy of each home's index so nothing was
 locked or written, passes on all 344. So the first start after this lands forces no
-move and saves nothing, and those five merges are carried to the tip.
+move and saves nothing, and those five merges are carried to the tip. A read of the
+344 homes' git directories at 09:12Z found none with a rebase, a `git am`, a run of
+cherry-picks or reverts, a bisect or a merge in progress.
 
 ## What caused the stuck homes
 
@@ -236,7 +241,10 @@ What survives the move:
   carries it to the tip unless the tip changes that same file (case (t)). Then git
   refuses, the change is saved as `changes`, and the forced move brings the tip's
   file (case (u)). That one session starts without gc's merged hooks, and gc merges
-  them in again before the next session starts.
+  them in again before the next session starts. When something else forces the
+  move, such as an untracked file where the tip adds one, or a session's change to
+  a file the tip changes, the merge is put back after the forced move (cases (aa)
+  and (ab)).
 - **A new home.** gc's staging lands in a directory that is not a worktree yet. The
   script moves its contents aside, adds the worktree and moves them back, keeping
   each file the checkout did not bring (cases (e), (f) and (h)).
@@ -254,9 +262,35 @@ What survives the move:
 - **What the move keeps.** The move is a plain `git checkout -B` of the per-target
   branch at the tip, which carries every tracked change and untracked file it does
   not overwrite. When git refuses, because the move would overwrite a tracked change
-  or an untracked file, the tracked changes are saved as `changes` and the move is
-  forced. An untracked file the forced move overwrites is not saved: it sits where
-  the tip adds a file, and the ruling names tracked changes and commits.
+  or an untracked file, the tracked changes are saved as `changes`, the move is
+  forced, and each saved change on a path the tip leaves alone is put back,
+  unstaged, so a forced move drops only what was in its way. A three-way
+  `git read-tree` from the commit the home was on puts them back, by git's own rule
+  for which paths a move may carry, and a reset unstages them. An untracked file the
+  forced move overwrites is not saved: it sits where the tip adds a file, and the
+  ruling names tracked changes and commits.
+- **A stopped operation is quit.** A rebase, a `git am`, or a run of cherry-picks
+  or reverts that a session stopped partway keeps its state through the move, and
+  continuing or aborting it would take the home off the tip. So once the move is
+  made, the script quits it, which keeps HEAD, the index and the work tree, while
+  the saves above hold its commits. A rebase's autostash is saved as `autostash`
+  first, because `git rebase --quit` would put it on the stash stack, and a
+  `git am` session is quit with `git am --quit`, because `git rebase --quit`
+  refuses one. A stopped merge needs nothing, because the move's checkout ends it.
+  That checkout also puts a merge's autostash on the stash stack, and no home holds
+  a stopped merge. A home whose move fails keeps the operation for a person to
+  abort, and a quit git refuses fails the start (cases (ac) to (af)).
+- **What Gas City has for either.** Nothing in Gas City clears a stopped operation
+  in a tree or carries a tree's changes through a forced checkout. A code search of
+  `gastownhall/gascity` at 357c30c631cf finds no `rebase --quit`,
+  `cherry-pick --quit`, `rebase-merge` or `read-tree`, and `stash create` only in
+  the reaper's and the prune's tests and one release-gate note. Its agent-home
+  cleanup
+  (`cleanupClosedBeadAgentHomeWorktrees` in `cmd/gc/agent_home_worktree_cleanup.go`)
+  moves a home only when it carries the prune's `.worktree-stale` marker, sits on a
+  branch that names a closed bead and has no uncommitted work, so it neither
+  carries nor saves a change. Gas Town's script neither quits nor aborts an
+  operation.
 - **Where this departs from the ruling.** The ruling says to save any tracked change
   and then move. Saving and then discarding a tracked change would undo gc's merge in
   a rig that tracks the settings file, at every start, and saving it at every start
@@ -286,8 +320,9 @@ What survives the move:
   such as one onto a per-target branch another worktree has checked out, a home with
   unmerged paths, which `git stash create` cannot save, a home whose HEAD names a
   branch that no longer exists, and an unset `origin/HEAD` each end the run
-  non-zero. The session does not start, and gc reports what the run printed. No home
-  is in any of these shapes today.
+  non-zero, and so does a quit or a putting back that git refuses. The session does
+  not start, and gc reports what the run printed. No home is in any of these shapes
+  today.
 - **Only a linked worktree moves.** A main checkout given as the target keeps its
   branch, because it is the rig's own checkout.
 - **Removed.** Every refusal and its stderr line: a tracked change, a detached HEAD
@@ -295,8 +330,9 @@ What survives the move:
   file in the way. The fast-forward path goes with them, and so does detaching at the
   tip when the per-target branch cannot be reset. Two earlier removals stand, with no
   case behind either: adopting and quarantining orphaned stage directories, which Gas
-  Town's script does not do either, and aborting a rebase or merge at start. A kill
-  mid-stage leaves its directory beside the home.
+  Town's script does not do either, and aborting a rebase or merge at start, which
+  throws away what the operation did. A stopped operation is quit after the move
+  instead. A kill mid-stage leaves its directory beside the home.
 - **Not built.** Anything that removes old saves. A save is made only when a move
   would lose something, and no home would today. A person reads a saved commit with
   `git log <ref>`, and takes a path back with `git checkout <ref> -- <path>`.
@@ -314,6 +350,7 @@ branch name, are left out.
 | Nothing refuses a sync: what the move would lose is saved under a ref, and the move goes ahead | Refuses a home with any change, tracked or untracked, a detached HEAD no branch or remote-tracking ref reaches, or a per-target branch holding a commit the default branch lacks, and exits 1, so the session does not start | A home holds no work of its own, and each refusal is a way for a home to stay stuck | Never by itself |
 | A tracked change the move does not overwrite is carried to the tip | Refused with the rest of a dirty home | gc merges the pack's hooks into a provider settings file before pre_start, and a rig can track that file | gc stops writing into a file a rig tracks |
 | An untracked file never blocks the move, and one in the way of a file the tip adds is replaced | Any untracked file blocks it | gc writes untracked files into a home, such as `.worktree-stale` and its provider settings | Gas City writes nothing untracked into a home |
+| A rebase, `git am`, or run of cherry-picks or reverts that a session stopped is quit once the home moves, keeping HEAD, the index and the work tree | Leaves it in progress whenever it syncs | Continuing or aborting it would take the home off the tip | Never by itself |
 | A failed fetch does not stop a sync, which then moves to the last tip it fetched | Refuses and exits 1 | A slot that cannot reach origin still takes work | A start on a stale tip is found to cost more than a start that fails |
 | A repository with no origin is left alone with no line, and an unset `origin/HEAD` fails the run | Refuses a repository with no origin, and tries `git remote set-head origin --auto` before failing on an unset `origin/HEAD` | No case: all 344 homes have both, and git's fetch sets a missing `origin/HEAD` again | A case appears |
 | The move runs with hooks off and leaves the upstream as it is | The checkout runs the repository's hooks | A hook's exit status becomes the checkout's, which would force a move that had carried a change over | Never by itself |
