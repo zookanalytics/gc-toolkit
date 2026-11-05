@@ -222,7 +222,7 @@ modality delivered, and `--visual-fallback-from` names the one that fits.
 
 When the change adds or alters a message the rig's app sends, the check shows
 each such message as its recipient would see it: the sender, the subject and the
-body. Each comes from a run of the reviewed commit on fixture data. The rig's
+body. Each comes from a run of the reviewed commit. The rig's
 guidance names the run that shows the messages its app sends, such as one whose
 development mail transport writes each message to a file. Where it names none,
 use a run of the reviewed commit's own tests that builds the message. The run

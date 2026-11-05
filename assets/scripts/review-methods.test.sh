@@ -356,8 +356,9 @@ hasF "$TMP/demo.need" 'A message the change adds or alters settles need the same
 awk '/^### Show each message$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.messages"
 hasF "$TMP/demo.messages" 'as its recipient would see it: the sender, the subject and the body.' \
   "each message is shown as its recipient would see it, sender, subject and body"
-hasF "$TMP/demo.messages" 'Each comes from a run of the reviewed commit on fixture data.' \
+hasF "$TMP/demo.messages" 'Each comes from a run of the reviewed commit.' \
   "…from a run of the reviewed commit"
+notF "$TMP/demo.messages" 'fixture' "…and the method assumes no fixture data of its own for that run"
 hasF "$TMP/demo.messages" 'beside the clip or the screenshot of any screen the change alters.' \
   "…beside any clip of the screens"
 hasF "$TMP/verdict.demo" 'names each message it shows, by its subject' "the demo verdict names each message it shows"
