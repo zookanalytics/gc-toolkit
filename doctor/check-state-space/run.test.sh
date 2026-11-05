@@ -59,9 +59,10 @@ for a in "$@"; do
 done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
-# BD_FAIL_KEY fails only the listing narrowed to that metadata key, so one probe
-# can be made unreadable while the others still read.
-[ -n "${BD_FAIL_KEY:-}" ] && [ "$haskey" = "$BD_FAIL_KEY" ] && exit 3
+# BD_FAIL_STATUS fails only the listing of exactly that --status list that no
+# metadata key narrows, so one probe can be made unreadable while the others
+# still read.
+[ -n "${BD_FAIL_STATUS:-}" ] && [ "$status" = "$BD_FAIL_STATUS" ] && [ -z "$haskey" ] && exit 3
 f="$STORES/$name.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
 # scrub first: a fixture may carry raw control bytes (the check's own guard),
 # and real bd filters structured rows in the store, so its filter never sees
@@ -302,10 +303,20 @@ hasnt "$OUT" "a-r10" "a closed visit carrying the stash is history, not a findin
 has "$OUT" "gc bd update a-r11 --unset-metadata gc.outcome_reason" "…and an open visit whose close never landed"
 has "$OUT" "the cutover's migration completes" "…which the finding hands to the migration"
 hasnt "$OUT" "a-r12" "a closed visit carrying its outcome reason is history, not a finding"
-store '[{"id":"a-r4","status":"open","metadata":{}}]'
-OUT=$(BD_FAIL_KEY=stall_root run_check); RC=$?
+# One bead carrying two retired keys is named once for each.
+store '[{"id":"a-r13","status":"blocked","metadata":{"gc.hold_demand":"tk-dem2","gc.outcome_reason":"settled"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bead carrying two retired keys is an ERROR"
+has "$OUT" "gc bd update a-r13 --unset-metadata gc.hold_demand" "…named for the first key"
+has "$OUT" "gc bd update a-r13 --unset-metadata gc.outcome_reason" "…and for the second"
+# The probe reads the other live statuses in one listing; when that listing
+# does not read, the check warns rather than passing, and names no carrier.
+store '[{"id":"a-r4","status":"open","metadata":{}},
+        {"id":"a-r14","status":"in_progress","metadata":{"gc.pr_visit_summary":"we shipped it"}}]'
+OUT=$(BD_FAIL_STATUS=in_progress,blocked,deferred,hooked,pinned run_check); RC=$?
 eq "$RC" "1" "an unreadable retired-key probe warns, never passes"
 has "$OUT" "retired-key check did NOT run" "the warning says the probe did not run"
+hasnt "$OUT" "a-r14" "…and it names no carrier it could not read"
 
 echo
 echo "check-state-space: $PASS passed, $FAIL failed"

@@ -85,6 +85,7 @@ retired_consequence() { # <key> <value>
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }
+retired_json=$(printf '%s\n' "${RETIRED_KEYS[@]}" | jq -R . | jq -cs .)
 
 errors=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -237,33 +238,30 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         fi
     fi
 
-    for rk in "${RETIRED_KEYS[@]}"; do
-        rraw=$(run_bounded gc bd list --db "$rig_path/.beads" \
-            --status open,in_progress,blocked,deferred,hooked,pinned \
-            --has-metadata-key "$rk" --json --limit 0 2>/dev/null); rrc=$?
-        if [ "$rrc" -ne 0 ] || [ -z "$rraw" ]; then
-            warnings+=("$label: could not list live beads carrying the retired key $rk in $rig_path/.beads (rc=$rrc) — the retired-key check did NOT run for this store")
-            continue
-        fi
-        rrows=$(printf '%s' "$rraw" | scrub | jq -r --arg k "$rk" '
+    # The retired keys are read from the open listing above and from one listing
+    # of the other live statuses, so the probe count stays the same however many
+    # keys retire.
+    lraw=$(run_bounded gc bd list --db "$rig_path/.beads" \
+        --status in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null); lrc=$?
+    if [ "$lrc" -ne 0 ] || [ -z "$lraw" ]; then
+        warnings+=("$label: could not list the beads in a live status other than open in $rig_path/.beads (rc=$lrc) — the retired-key check did NOT run for this store")
+    elif ! rrows=$({ printf '%s' "$raw" | scrub; printf '%s' "$lraw" | scrub; } | jq -rs --argjson keys "$retired_json" '
             def clean: tostring | gsub("[[:cntrl:]]"; " ");
-            .[]? | ((.metadata // {})[$k] // "" | clean) as $v
+            (map(.[]?) | .[]) as $b | ($b.metadata // {}) as $m
+            | $keys[] as $k | ($m[$k] // "" | clean) as $v
             | select($v != "")
-            | [((.id // "?") | clean), ((.status // "") | clean), $v] | join("\u001f")' 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            warnings+=("$label: the live-bead listing for the retired key $rk from $rig_path/.beads could not be parsed — the retired-key check did NOT run for this store")
-            continue
+            | [(($b.id // "?") | clean), (($b.status // "") | clean), $k, $v] | join("\u001f")' 2>/dev/null); then
+        warnings+=("$label: the live-bead listing from $rig_path/.beads could not be parsed for retired keys — the retired-key check did NOT run for this store")
+    elif [ -n "$rrows" ]; then
+        if printf '%s\n' "$rrows" > "$ENUM_TMP/retired"; then
+            while IFS=$'\037' read -r id st rk val; do
+                [ -n "$id" ] || continue
+                errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"): gc bd update $id --unset-metadata $rk")
+            done < "$ENUM_TMP/retired"
+        else
+            warnings+=("$label: could not stage the retired-key enumeration (temp-file write failed — e.g. /tmp under disk pressure) — the retired-key check did NOT run for this store")
         fi
-        [ -n "$rrows" ] || continue
-        if ! printf '%s\n' "$rrows" > "$ENUM_TMP/retired"; then
-            warnings+=("$label: could not stage the retired-key enumeration for $rk (temp-file write failed — e.g. /tmp under disk pressure) — the retired-key check did NOT run for this store")
-            continue
-        fi
-        while IFS=$'\037' read -r id st val; do
-            [ -n "$id" ] || continue
-            errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"): gc bd update $id --unset-metadata $rk")
-        done < "$ENUM_TMP/retired"
-    done
+    fi
 
     [ -n "$rows" ] || continue
     if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
