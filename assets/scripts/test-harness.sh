@@ -267,7 +267,7 @@ case "$sub" in
       reopen-source)
         [ -n "${STUB_REOPEN_SOURCE_RC:-}" ] && { echo "gc: simulated reopen-source failure" >&2; exit "${STUB_REOPEN_SOURCE_RC}"; }
         [ -n "${STUB_REOPEN_SOURCE_STALL:-}" ] && stall "$STUB_REOPEN_SOURCE_STALL"
-        tmp=""${S%/*}/.gc-stub.$$""
+        tmp="${S%/*}/.gc-stub.$$"
         jq -c --arg id "$sid" 'map(if .id == $id then
               (.metadata |= (del(.workflow_id) | del(.["gc.session_affinity"]) | del(.["gc.continuation_group"])))
               | .status = "open" | .assignee = ""
@@ -645,7 +645,7 @@ case "$verb" in
         [ "$_bst" = "closed" ] || { echo "gc: cannot close blocked issue $id (blocked by $_b)" >&2; exit 1; }
       done
     fi
-    tmp=""${S%/*}/.gc-stub.$$""
+    tmp="${S%/*}/.gc-stub.$$"
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   dep)
@@ -693,7 +693,7 @@ case "$verb" in
         # it as their B. The dep rows reach jq as a file, never as an argument,
         # since a long dependency list passes the 128 KiB Linux allows any one.
         many=false; [ "${#qids[@]}" -gt 1 ] && many=true
-        if ! out=$(jq -rc --rawfile d "$D" --arg dir "$dir" --arg t "$dtyp" --argjson many "$many" '
+        out=$(jq -rc --rawfile d "$D" --arg dir "$dir" --arg t "$dtyp" --argjson many "$many" '
             . as $store
             | (first($ARGS.positional[] | select(. as $q | any($store[]; .id == $q) | not)) // null) as $missing
             | if $missing != null then "missing:" + $missing
@@ -710,11 +710,11 @@ case "$verb" in
                   else [ $rows[] | {id: .[0], t: .[1]} ] as $want
                     | [ $store[] | . as $row | $want[] | select(.id == $row.id) | ($row + {dependency_type: .t}) ]
                   end
-              end' "$S" --args ${qids[@]+"${qids[@]}"}); then
+              end' "$S" --args ${qids[@]+"${qids[@]}"}) || {
           rc=$?
           [ "${#qids[@]}" -eq 0 ] || { printf '{"error":"not found: issue %s","schema_version":1}\n' "${qids[0]}"; exit 1; }
           exit "$rc"
-        fi
+        }
         case "$out" in
           missing:*) printf '{"error":"not found: issue %s","schema_version":1}\n' "${out#missing:}"; exit 1 ;;
         esac
@@ -839,7 +839,7 @@ case "$verb" in
         gtype=$(jq -r --arg id "$gid" '(.[] | select(.id == $id) | (.issue_type // "")) // "<absent>"' "$S")
         [ "$gtype" = "gate" ] || { echo "Error: $gid is not a gate" >&2; exit 1; }
         case " ${STUB_GATE_RESOLVE_NOOP:-} " in *" $gid "*) echo "✓ Gate resolved: $gid"; exit 0 ;; esac
-        tmp=""${S%/*}/.gc-stub.$$""
+        tmp="${S%/*}/.gc-stub.$$"
         jq -c --arg id "$gid" --arg r "$greason" \
           'map(if .id == $id and ((.status // "open") != "closed") then .status = "closed" | .close_reason = $r else . end)' \
           "$S" > "$tmp" && mv "$tmp" "$S"
