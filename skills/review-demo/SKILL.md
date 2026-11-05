@@ -24,7 +24,8 @@ The anchor `<anchor_bead>` for what the change is for, then the diff at
 draft PR, `<review_pr_url>`, and its preview where the rig's host deploys one.
 The rig's guidance for this check, the reviewed commit's `docs/review-demo.md`,
 which the review formula printed when the commit carries one: a rig names its
-own visual surfaces there, and how to serve its app for a capture.
+own visual surfaces there, how to serve its app for a capture, and how a run of
+its app shows the messages it sends.
 
 ### When it runs
 
@@ -44,12 +45,16 @@ Triage adds `demo` when the diff changes a surface a person looks at:
 - a layout or styling change;
 - a new or changed interactive flow;
 - output a person reads in a terminal, such as a command's report;
-- markdown the city posts on GitHub, such as a review comment or a PR body.
+- markdown the city posts on GitHub, such as a review comment or a PR body;
+- a message the rig's app sends people, such as an email, that the diff adds or
+  whose sender, subject or body it alters, even when no screen changes.
 
 Logic, refactors, internal plumbing, tests, and docs read as text need no
-visual, and triage adds nothing for them. That is the common case. The default
-check set is the baseline, `correctness,triage`, so under it `demo` runs only on
-a diff triage added it to.
+visual, and triage adds nothing for them. That is the common case. A message is
+text in the diff, as a doc is, but its recipient reads the message and never the
+diff, so a diff that changes only a message still adds `demo`. The default check
+set is the baseline, `correctness,triage`, so under it `demo` runs only on a
+diff triage added it to.
 
 ### Decide need
 
@@ -61,6 +66,10 @@ to notice in a capture, needs no visual.
 An explicit request for a visual, in the anchor or from a human on the PR,
 settles need: a visual is needed.
 
+A message the change adds or alters settles need the same way, whatever the
+check decides for the change's screens: the check shows each one, as the
+section Show each message says.
+
 When no visual helps, approve with a one-line note that says why, attach
 nothing, and record `--visual none`.
 
@@ -71,7 +80,7 @@ When a visual helps, pick the cheapest one that conveys the change.
 | Modality | What it shows | Pick it when |
 |---|---|---|
 | `repo-artifact` | a visual the repo already carries: a diagram, an image, or a clip in the diff or named by the change | a committed visual already shows what changed, so nothing needs capturing |
-| `screenshot` | one rendered state of an app page, of a command's output in a terminal, or of markdown as GitHub renders it | a single frame carries the change: a page or a board, a report a command prints, a comment the city posts |
+| `screenshot` | one rendered state of an app page, of a command's output in a terminal, or of markdown as GitHub renders it | a single frame carries the change: a page or a board, a report a command prints, a comment the city posts, a message the app sends |
 | `video` | motion, or a flow across several steps, with narration | the change happens over time: an interaction or a sequence |
 
 Prefer the cheaper modality unless the change needs the richer one. A static
@@ -209,6 +218,30 @@ shows the change is the fallback where it can be produced. Otherwise the note
 stands. The verdict records a delivered fallback as one: `--visual` names the
 modality delivered, and `--visual-fallback-from` names the one that fits.
 
+### Show each message
+
+When the change adds or alters a message the rig's app sends, the check shows
+each such message as its recipient would see it: the sender, the subject and the
+body. Each comes from a run of the reviewed commit on fixture data. The rig's
+guidance names the run that shows the messages its app sends, such as one whose
+development mail transport writes each message to a file. Where it names none,
+use a run of the reviewed commit's own tests that builds the message. The run
+keeps each message for the capture and sends none, so no live mail service
+takes part in it. A committed picture of a message shows what its author
+recorded, not a run of the reviewed commit, so it is no fallback for one.
+
+The modality is the cheapest screenshot that shows a message whole. A
+plain-text message fits a `terminal` capture, either of the command that prints
+it or, with `--text`, of the file the run wrote. A `markdown` capture can carry
+one too. An HTML message is a `page` capture of the HTML the run wrote: serve
+the directory that holds it with `--serve-dir`, start the script at the file,
+and take the capture with `--full-page`. When the capture holds the body alone,
+give the sender and the subject in the delivery's `--body`, as the same run
+produced them. Open each PNG and check that it holds the whole message.
+
+Deliver each message on its own, in a PNG named for it, beside the clip or the
+screenshot of any screen the change alters.
+
 ### Judge what it shows
 
 The visual is evidence: judge what it shows, not what the diff claims.
@@ -223,10 +256,11 @@ correct before you capture again.
 
 ## What blocks
 
-A capture in which the surface errors, a flow breaks, or a step fails against
-what the change claims is a finding against the change. Request changes, and
-name the visual as the evidence. A change that fails is that finding, and the
-clip or the screenshot is its evidence to deliver.
+A capture in which the surface errors, a flow breaks, a step fails against what
+the change claims, or a message differs from what the change claims, such as one
+with a placeholder left unfilled, is a finding against the change. Request
+changes, and name the visual as the evidence. A change that fails is that
+finding, and the clip or the screenshot is its evidence to deliver.
 
 A capture that cannot run for a reason outside the change is not a finding. The
 capture toolchain may not resolve, the rig may have no app to serve, no preview
@@ -237,7 +271,9 @@ those is the note below, and it never blocks.
 
 The formula's one `signoff.sh` call records the verdict and the decision, with
 the check's two flags. `--visual` carries the decision: `none` when no visual is
-needed, otherwise the modality you picked. A fallback adds
+needed, otherwise the modality you picked. A verdict that delivers more than one
+modality, such as a clip of the screens beside a screenshot of each message,
+names the costliest. A fallback adds
 `--visual-fallback-from <the modality that fits>`.
 
 `signoff.sh` refuses a demo verdict without `--visual`, and refuses `none` with
@@ -257,7 +293,9 @@ and where the visual was delivered, or what stopped it. A delivered video's
 sentence also says whether the clip is narrated or silent. A delivered
 repo-artifact's sentence also says where the visual came from, as its delivery
 comment does. A delivered screenshot's sentence also says what it was rendered
-from: the reviewed commit, and any fixture that stands in for live data.
+from: the reviewed commit, and any fixture that stands in for live data. A
+verdict on a change that adds or alters a message names each message it shows,
+by its subject, and each one it could not show, with what stopped it.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
