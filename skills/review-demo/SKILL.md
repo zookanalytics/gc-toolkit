@@ -114,10 +114,10 @@ reports whether the `gh` it needs is present.
   The app target is the draft's preview, `--base-url <url>`, where one
   deploys. Otherwise serve the reviewed worktree, so the clip shows the
   reviewed commit: `--serve-dir <worktree>/<dir>` for a static build, or
-  `--serve "<command>" --cwd <worktree>` for a dev server. An app the rig's
-  guidance serves on this host is reached with its `--base-url` when it is
-  served from `<worktree>`, unless the city labels the rig as one whose app
-  reads the city. The capture says why it refuses a URL. Exit 0 is a clip
+  `--serve "<command>" --cwd <worktree>` for a dev server. When the rig's
+  guidance serves its app on this host from `<worktree>`, give its
+  `--base-url`, unless `city.toml` sets `app_reads_city = "true"` for the rig.
+  The capture refuses any other URL on this host and says why. Exit 0 is a clip
   in which every step's proof held, exit 3 is a clip in which at least one
   step failed its proof, and exit 1 is no clip. The last line names the clip
   and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
