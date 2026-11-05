@@ -44,7 +44,28 @@ die() { local p="${0##*/}"; printf '%s: %s\n' "${PROG:-${p%.sh}}" "$1" >&2; exit
 # that delimits its line still stands; one such line otherwise aborts jq on the
 # whole payload. stdin is /dev/null so a call inside a `while read` loop cannot
 # consume the loop's own driving input, the guard bd_list already carries.
-bd_json() { gc bd "$@" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub; }
+#
+# It prints and returns what `gc bd ... | grep -a -vE '^gc bd:' | scrub` would.
+# A read with no control byte, so no line break, and no notice at its start is
+# one line that grep keeps and scrub leaves as it is, so only a read carrying
+# either goes through the two. Under pipefail the status is that pipeline's:
+# grep's 1 when no line is left, which an empty read is, else gc's.
+bd_json() {
+  local raw rc=0 st
+  { raw=$(r=0; gc bd "$@" --json </dev/null 2>/dev/null || r=$?; printf .; exit "$r") || rc=$?; } 2>/dev/null
+  raw=${raw%.}
+  case "$raw" in
+    *[[:cntrl:]]*|'gc bd:'*)
+      printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub
+      st=("${PIPESTATUS[@]}")
+      [ "${st[2]}" -eq 0 ] || return "${st[2]}"
+      [[ -o pipefail ]] || return 0
+      [ "${st[1]}" -eq 0 ] || return "${st[1]}" ;;
+    '') [[ -o pipefail ]] || return 0; return 1 ;;
+    *) printf '%s' "$raw"; [[ -o pipefail ]] || return 0 ;;
+  esac
+  return "$rc"
+}
 
 # row_meta <show-json> <key> — one metadata value off a `gc bd show --json` row,
 # as a string. A key that is absent and a row that will not parse both read as
@@ -156,9 +177,9 @@ _bd_call() { gc bd "$@"; }
 # cached, so the "could not tell" contract is unchanged: a server error is never
 # served and never stored.
 bd_list() {
-  local raw rc cache_file cached
-  cache_file=$(_bd_cache_file "$@")
-  if cached=$(_bd_cache_hit "$cache_file"); then
+  local raw rc cache_file="" cached
+  [ -z "${GC_RECONCILE_BD_CACHE:-}" ] || cache_file=$(_bd_cache_file "$@")
+  if [ -n "$cache_file" ] && cached=$(_bd_cache_hit "$cache_file"); then
     printf '%s' "$cached"; return 0
   fi
   raw=$(_bd_call list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
@@ -166,8 +187,11 @@ bd_list() {
   # Strip the `gc bd:` rig-store notice (a store can emit it on stdout) with a
   # text-mode grep before scrub removes the newline that delimits its line; one
   # such line otherwise fails the type==array check below and reads as "could
-  # not tell" on every call in a notice-emitting store.
-  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub)
+  # not tell" on every call in a notice-emitting store. A read with no control
+  # byte and no notice at its start is one line the two leave as it is.
+  case "$raw" in
+    *[[:cntrl:]]*|'gc bd:'*) raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub) ;;
+  esac
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
@@ -330,13 +354,13 @@ _bd_store_joined() {
 # that does not resolve is that too, never an empty set.
 _bd_anchor_up() {
   local raw rc cache_file="" cached
-  [ "${2:-}" = --cached ] && cache_file=$(_bd_cache_file dep list "$1" --direction=up)
-  if cached=$(_bd_cache_hit "$cache_file"); then
+  [ "${2:-}" = --cached ] && [ -n "${GC_RECONCILE_BD_CACHE:-}" ] && cache_file=$(_bd_cache_file dep list "$1" --direction=up)
+  if [ -n "$cache_file" ] && cached=$(_bd_cache_hit "$cache_file"); then
     printf '%s' "$cached"; return 0
   fi
   raw=$(_bd_call dep list "$1" --direction=up --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
+  case "$raw" in *[[:cntrl:]]*) raw=$(printf '%s' "$raw" | scrub) ;; esac
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
@@ -353,7 +377,7 @@ _bd_anchor_up() {
 bd_anchor_children() {
   local anchor="${1:-}" statuses="${2:-}" s live="" closed="" rows='[]' up
   [ -n "$anchor" ] && [ -n "$statuses" ] || return 1
-  for s in $(printf '%s' "$statuses" | tr ',' ' '); do
+  for s in ${statuses//,/ }; do
     if [ "$s" = closed ]; then closed=1; else live="${live:+$live,}$s"; fi
   done
   if [ -z "$closed" ]; then
