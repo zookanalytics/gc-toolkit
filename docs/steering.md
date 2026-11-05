@@ -81,6 +81,10 @@ Each writer that files or disposes new work follows the rule.
   bead, it arms the bead's validating closer, whether or not the rule admits
   the bead. Like the first reaction's close exit, it keeps that closer because
   a close shrinks the queue.
+- **A bead held on the landing that ends its job** (the waits skill). The
+  writer that holds it arms its validating closer for when the bead it waits
+  on closes, whether or not the rule admits it, because a close shrinks the
+  queue.
 
 No held bead is ever readable without its marker. The witness and the
 distiller write it in the create, and the first reaction writes it and reads

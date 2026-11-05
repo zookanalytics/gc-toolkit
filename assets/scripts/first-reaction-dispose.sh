@@ -1122,12 +1122,13 @@ fi
 # queue, which placement=pending names and gc-helm.sh unplaced lists. Either
 # way --no-wait says so. A blocked one names its wait as an edge, and a
 # --then-assign rides the same release, so the agent's hook offers the bead
-# once the edge clears. A recommend or a ruling names its human gate as its wait: the subject is waiting on a person,
-# and the gate carries the wait, so --waiting-on records the blocks edge onto
-# it. That edge is the one the gate's create already wrote, and adding it again
-# leaves it single. The release parks the subject and the edge holds it, so it
-# is not offered again until the gate is cleared, and the wait is a graph state
-# doctor/check-wait-is-an-edge reads rather than prose it reports.
+# once the edge clears. A recommend or a ruling names its human gate as its
+# wait: the subject is waiting on a person, and the gate carries the wait, so
+# --waiting-on records the blocks edge onto it. That edge is the one the gate's
+# create already wrote, and adding it again leaves it single. The release parks
+# the subject and the edge holds it, so it is not offered again until the gate
+# is cleared, and the wait is a graph state doctor/check-wait-is-an-edge reads
+# rather than prose it reports.
 #
 # A subject held for placement can carry the stamp a dead pour left
 # (gc.execution_routed_to), which the queue reads as a live pour. The release

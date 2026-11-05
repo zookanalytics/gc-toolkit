@@ -301,9 +301,9 @@ main. Never `--merge direct`.
 - **Close the subject.** A first reaction *advances* the subject; it does not
   finish it. Every exit leaves it open — routed to a pool or assigned to a named
   agent, held on an edge, handed to the validating closer now or once the bead
-  it waits on lands, or waiting on the operator behind its human gate. You DO close `R`, your own reaction bead — that
-  is how the reaction records done, and `first-reaction-dispose.sh` does it for
-  you.
+  it waits on lands, or waiting on the operator behind its human gate. You DO
+  close `R`, your own reaction bead — that is how the reaction records done,
+  and `first-reaction-dispose.sh` does it for you.
 - **Put every subject to the operator.** Both `ruling` and `recommend` put the
   subject to the operator as a human gate, and both are the minority case — a
   genuine fork or policy call (`ruling`), or a determinable action that warrants

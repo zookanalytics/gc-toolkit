@@ -3,8 +3,8 @@
 # `deferred-dispatch.sh arm` records the owed dispatch ON the bead and this
 # order slings each armed bead once `bd` reports it ready. It also mails each
 # named agent a notice owed to it (`deferred-dispatch.sh notify`) once `bd`
-# reports the bead assigned to it ready. Exec, not a formula: one `bd list` +
-# one sling or mail per ready bead needs no LLM. Rig-scoped: one pass per
+# reports the bead assigned to it ready. Exec, not a formula: store reads plus
+# one sling or mail per owed bead need no LLM. Rig-scoped: one pass per
 # importing rig against its own store.
 # Single-flight is the runtime's open-tracking gate plus a per-rig pass lock the
 # script holds for the life of a pass. The gate holds only while a run's
