@@ -459,7 +459,7 @@ live work fall into these groups:
   branch, a worktree, a commit, a review round, a landing target, a PR, a
   landing state, or an outcome.
 - **Owned by another closer:** any `task_kind`, a molecule step or workflow
-  root, a demand, a duplicate diagnosis, a successor pointer
+  root, a duplicate diagnosis, a successor pointer
   (`gc.superseded_by`) that a disposition recorded without its close landing,
   or an issue type outside plain work (task, bug, feature, chore, spike). An
   epic closes on its own ruling.

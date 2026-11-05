@@ -9,7 +9,7 @@
 #   - worked: a live run working it (assets/scripts/run-lib.sh), a branch, a
 #     worktree, a commit, a review round, a landing target, a PR, a landing
 #     state, an outcome;
-#   - owned by another closer: any task_kind (review, visit, rework, finding,
+#   - owned by another closer: any task_kind (review, rework, finding,
 #     validation, a standing record, ...), a molecule step or workflow root, a
 #     duplicate diagnosis, a successor pointer recorded by a disposition whose
 #     close has not landed, or an issue type that is not plain work (an epic

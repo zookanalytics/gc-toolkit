@@ -272,7 +272,7 @@ bd_gates_open_under_key() {
 }
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework
-# child, a finding, a validation pass, a visit) names the anchor in
+# child, a finding, a validation pass) names the anchor in
 # anchor_bead, and that key is what makes it a child. Each child also has an
 # edge onto its anchor, child -> anchor, the side parent-child uses, so the
 # anchor's dependents include it. A pair with no edge is joined with a `related`
@@ -284,8 +284,8 @@ bd_gates_open_under_key() {
 # `gc bd dep list <anchor> --direction=up`, because an anchor_bead query that
 # covers closed has no index to use and reads the whole closed ledger. A
 # dependent is a closed child when its anchor_bead names the anchor. bd keeps
-# one edge per ordered pair, so a child joined by another type (a visit's
-# `tracks` edge) is one too, and a bead moved to another anchor leaves the old
+# one edge per ordered pair, so a child joined by another type (a `tracks`
+# edge) is one too, and a bead moved to another anchor leaves the old
 # one's set with its old edge still in place.
 #
 # The edge answers for the closed children only in a store marked joined:
@@ -469,8 +469,8 @@ bd_anchor_backfill() {
 }
 
 # bd_live_children — the live beads hung on each anchor through anchor_bead:
-# its reviews, validation passes, findings, rework children and visits, in one
-# read of the store. Prints one line per anchor that has any:
+# its reviews, validation passes, findings and rework children, in one read of
+# the store. Prints one line per anchor that has any:
 #   <anchor>\t<child ids, sorted, comma-joined>\t<1 when one is a rework child, else 0>
 # A walking arm compares the id list with what it saw at its last visit, so a
 # child that opened or closed since then shows without a read per anchor.
