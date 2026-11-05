@@ -61,7 +61,12 @@
 #       home stays where it is;
 #   (y) a move git cannot make fails the run with git's reason, so the session
 #       does not start;
-#   (z) a commit whose reach git cannot read is saved.
+#   (z) a commit whose reach git cannot read is saved;
+#   (aa) an untracked file in the way of one the tip adds forces the move, and
+#        each tracked change on a path the tip leaves alone, gc's merge and a
+#        deletion alike, is put back unstaged;
+#   (ab) a session's change to a file the tip changes forces the move too: the
+#        tip's file wins and the change is saved, and gc's merge is put back.
 
 set -euo pipefail
 
@@ -519,6 +524,46 @@ ERR=$(PATH="$TMP/fail-rev-list:$PATH" sync_stderr "$P/agentZ" agentZ)
 eq "$(saved "$RIG" "$BR" head)" "$HELD"      "(z) a commit whose reach git cannot read is saved"
 eq "$(head_of "$P/agentZ")" "$(tip)"         "(z) and the home still moves to the tip"
 eq "$ERR" ""                                 "(z) printing nothing"
+
+# --- (aa) an untracked file in the way of one the tip adds forces the move. Each
+#          tracked change on a path the tip leaves alone is put back, unstaged:
+#          gc's merge, in the rig of (t), which tracks .claude/settings.json, and
+#          a session's deletion. ----------------------------------------------------
+P="$TMP/aa"; mkdir -p "$P"; W="$P/agentAA"
+eq "$(rc_of "$TR" "$W" agentAA)" "0"         "(aa) the home is made"
+BR=$(branch_of "$W")
+echo '{"hooks":"gc","repo":2}' > "$W/.claude/settings.json"
+rm "$W/t1.txt"
+echo mine > "$W/aa.txt"
+t_advance aa.txt aa
+ERR=$(sync_in "$TR" "$W" agentAA)
+eq "$(head_of "$W")" "$(git -C "$TMP/t.git" rev-parse main)" "(aa) the home moves to the tip"
+eq "$(cat "$W/aa.txt")" "aa"                 "(aa) the tip's file replaces the untracked one"
+eq "$(git -C "$TR" show "$(saved "$TR" "$BR" changes):.claude/settings.json")" '{"hooks":"gc","repo":2}' \
+    "(aa) the tracked changes are saved as changes"
+eq "$(cat "$W/.claude/settings.json")" '{"hooks":"gc","repo":2}' "(aa) and gc's merge is put back"
+absent "$W/t1.txt"                           "(aa) as is the deletion"
+eq "$(git -C "$W" status --porcelain)" "$(printf ' M .claude/settings.json\n D t1.txt')" \
+    "(aa) both unstaged, with nothing unmerged"
+eq "$ERR" ""                                 "(aa) printing nothing"
+
+# --- (ab) a session's change to a file the tip changes forces the move too. The
+#          tip's file wins and the change is saved, while gc's merge, on a file
+#          the tip leaves alone, is put back. ---------------------------------------
+P="$TMP/ab"; mkdir -p "$P"; W="$P/agentAB"
+eq "$(rc_of "$TR" "$W" agentAB)" "0"         "(ab) the home is made"
+BR=$(branch_of "$W")
+echo '{"hooks":"gc","repo":2}' > "$W/.claude/settings.json"
+echo mine > "$W/README.md"
+t_advance README.md ab
+ERR=$(sync_in "$TR" "$W" agentAB)
+eq "$(head_of "$W")" "$(git -C "$TMP/t.git" rev-parse main)" "(ab) the home moves to the tip"
+eq "$(cat "$W/README.md")" "ab"              "(ab) with the tip's file"
+eq "$(git -C "$TR" show "$(saved "$TR" "$BR" changes):README.md")" "mine" \
+    "(ab) the session's change to it saved as changes"
+eq "$(cat "$W/.claude/settings.json")" '{"hooks":"gc","repo":2}' "(ab) and gc's merge put back"
+eq "$(git -C "$W" status --porcelain)" " M .claude/settings.json" "(ab) unstaged, with nothing unmerged"
+eq "$ERR" ""                                 "(ab) printing nothing"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

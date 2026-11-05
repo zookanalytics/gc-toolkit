@@ -132,10 +132,11 @@ exclude_skill_links() {
 # gc writes provider settings into a home before pre_start runs, and in a rig
 # that tracks such a file, gc's merge is a tracked change the session needs.
 # When git refuses because the move would overwrite a tracked change or an
-# untracked file, the tracked changes are saved as changes and the move is
-# forced. A move that still fails ends the run non-zero, so the session does not
-# start and gc reports git's error. Only a linked worktree moves, since a main
-# checkout is the rig's own.
+# untracked file, the tracked changes are saved as changes, the move is forced,
+# and each change on a path the tip leaves alone is put back, so a forced move
+# drops only what was in its way. A move that still fails ends the run
+# non-zero, so the session does not start and gc reports git's error. Only a
+# linked worktree moves, since a main checkout is the rig's own.
 sync_worktree() {
     [ "$SYNC" = "--sync" ] || return 0
     [ -f "$WT/.git" ] || return 0
@@ -162,6 +163,7 @@ sync_worktree() {
         git -C "$WT" stash create "worktree-setup: tracked changes in $WT before its move") || exit 1
     [ -z "$CHANGES" ] || save changes "$CHANGES"
     move -f || exit 1
+    [ -z "$CHANGES" ] || carry_back || exit 1
 }
 
 # save_if_alone <name> <commit> — saves <commit> as <name> when a commit it
@@ -177,6 +179,17 @@ save_if_alone() {
 # makes the ref create-only, so no earlier save is replaced.
 save() {
     git -C "$WT" update-ref -m "worktree-setup: saved before moving $WT to $DEFAULT_REF" "$SAVE/$1" "$2" "" || exit 1
+}
+
+# carry_back — puts back each tracked change the forced move reset on a path the
+# tip leaves alone, as the plain move would have kept it. A three-way read-tree
+# from the commit the home was on takes the saved version of each path only the
+# save changed, deletions included (--aggressive), and leaves each path the tip
+# changed as the tip has it. The reset then puts the index back at the tip, so a
+# change put back is unstaged, as gc's merge is.
+carry_back() {
+    GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" read-tree -m -u --aggressive "$HEAD_COMMIT" HEAD "$CHANGES" &&
+        git -C "$WT" reset -q
 }
 
 # move [-f] — puts the worktree on its per-target branch at the default tip.
