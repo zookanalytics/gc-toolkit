@@ -1,6 +1,6 @@
 ---
 name: Gas City search and census for retiring the pack's worktree machinery
-description: What tk-1tfzr71.10 looked for in Gas City before deciding which of the pack's worktree reaper, wrapper and convoy check could go, what the live city showed, and why the work split into a rollout. Read it when judging the home wrapper's warrant, the reaper's cutover, or the per-bead move onto gc worktree.
+description: What tk-1tfzr71.10 looked for in Gas City before deciding which of the pack's worktree reaper, wrapper and convoy check could go, what the live city showed, why the work split into a rollout, and what the home wrapper's sync saves before it moves a home. Read it when judging the home wrapper's warrant or its sync, the reaper's cutover, or the per-bead move onto gc worktree.
 ---
 
 # Gas City search and census for retiring the pack's worktree machinery
@@ -8,7 +8,11 @@ description: What tk-1tfzr71.10 looked for in Gas City before deciding which of 
 Read on 2026-11-01 at `gastownhall/gascity` main 6b90a9fb22ff and
 `gastownhall/gascity-packs` main 0b0d96250f66. The city's deployed `gc` is the
 fork's 1.4.3 at e03752646, which is named only where it is what runs. The census
-ran read-only on the live city at about 06:20Z, with load near 60.
+ran read-only on the live city at about 06:20Z, with load near 60. The home
+sync's rule, what gc writes into a home before a session starts, and a second
+census of the homes were read on 2026-11-05 at `gastownhall/gascity` main
+44e0d11e4625 and `gastownhall/gascity-packs` main 796d7ecd73cf, between 07:30Z
+and 08:00Z.
 
 ## What was decided
 
@@ -16,7 +20,7 @@ ran read-only on the live city at about 06:20Z, with load near 60.
 |---|---|
 | `orders/convoy-check.toml` | Already gone: an earlier change deleted it, so core's `convoy-autoclose-backstop` is the only hourly `gc convoy check`. Nothing to do. |
 | `worktree-reap.sh`, its order, its test | The controller's reaper replaces the worktree pass, in the three stages this bead's description asks for. tk-1tfzr71.40 turned the dry run on, tk-1tfzr71.41 compares and turns reaping on, and tk-1tfzr71.42 deletes the pack's copy, keeping the branch pass as a residual if it still has work to do. |
-| `worktree-setup.sh` | Stays, as agent home provisioning under a warrant. `gc worktree` cannot provision a home. This bead fixes the stuck-slot problem it carried and removes what no case needs. |
+| `worktree-setup.sh` | Stays, as agent home provisioning under a warrant, because `gc worktree` cannot provision a home. Its sync now saves what a move would lose and moves the home to the default branch's tip at every start, so no home stays on an old checkout. It also drops what no case needs. |
 | The per-bead tree | tk-1tfzr71.43 removes it at hand-off, so a tree never reaches the state the controller's reaper refuses, and moves its creation to `gc worktree ensure` where that holds. It waits on tk-1tfzr71.12's `work-setup.sh` and `work-submit.sh`, where those calls will live. tk-1tfzr71.42 waits on it. |
 | `review-workspace.sh reap` | Stays. Review worktrees live under `$TMPDIR`, and the controller's reaper drops anything outside `.gc/worktrees/<rig>/` before any gate, so no dry run is needed to answer this. tk-1tfzr71.22 reshapes reviews. |
 | `scratch-reap.sh`, `build-scratch-reap.sh` | Stay, as the description says. |
@@ -37,7 +41,9 @@ worktree pass, with these differences from the pack's:
 - It runs `git stash list` in each tree. A repository's worktrees share one stash
   stack, so one stash anywhere in a rig holds every tree in that rig
   ([gastownhall/gascity#8093](https://github.com/gastownhall/gascity/issues/8093)
-  reports the same refusal in the sibling prune path, and is open).
+  reports the same refusal in the sibling prune path, and is open). Upstream removed
+  this gate from the reaper and the worker-dir prune on 2026-11-02 (b244d69f5),
+  after the deployed build.
 - It has no 24-hour horizon: a tree older than 10 minutes qualifies as soon as its
   bead closes. It ignores open pull requests and live beads on the branch, which
   loses nothing, because removing a clean tree leaves the branch ref.
@@ -147,63 +153,175 @@ tag reaches:
   most of them 722 commits behind. The fork's main was rewritten after they last
   synced, and a fast-forward cannot follow a rewrite.
 
-Under the old rule all 18 stay where they are for good. Under the new one all 18
-reach the tip at their next session start: each is clean in its tracked files, and
-a dry run of the checkout (`git read-tree -n -u -m HEAD <tip>`) passes on every one. Five more homes carry a tracked change,
-each to `.claude/settings.json`, and none of them is stuck, because a fast-forward
-that does not touch that file still applies. No home was mid-rebase or mid-merge,
-and no stage or orphan directory existed anywhere under `.gc/worktrees/`.
+Under main's rule all 18 stay where they are for good. Each is clean in its tracked
+files, and a dry run of the checkout (`git read-tree -n -u -m HEAD <tip>`) passes on
+every one. Five more homes carry a tracked change, each to `.claude/settings.json`,
+and none of them is stuck, because a fast-forward that does not touch that file
+still applies. No home was mid-rebase or mid-merge, and no stage or orphan directory
+existed anywhere under `.gc/worktrees/`.
 
 A second read at about 09:40Z counted the same 18 and the same five tracked changes.
 Every home's own branch tracks its rig's default branch, and none sits ahead of the
-tip with nothing to pull, which is the shape a rewind to an ancestor leaves. That
-part of the rule moves no home today.
+tip with nothing to pull, which is the shape a rewind to an ancestor leaves.
+
+**Agent homes on 2026-11-05.** The mechanik moved the 18 stuck homes to the tip by
+hand at about 07:25Z, and each was left detached there. The census after it found
+344 homes: 326 on their own branches and those 18 detached at the tip. None was on
+another branch, and none held a commit that no branch, tag or remote-tracking ref
+other than its own branch holds, so the new rule's first pass saves no commit. The
+five tracked changes are still the only ones, all in one rig that tracks
+`.claude/settings.json`, and each is gc's merge of the pack's hooks into that file
+(see [what gc writes into a home](#what-gc-writes-into-a-home-before-the-session-starts)).
+The same dry run of the move, against a copy of each home's index so nothing was
+locked or written, passes on all 344. So the first start after this lands forces no
+move and saves nothing, and those five merges are carried to the tip.
+
+## What caused the stuck homes
+
+Conversation tk-n5lvgu8 traced the stuck slot in this rig through its HEAD reflog and
+a Codex session log, and its notes on tk-1tfzr71.10 record the chain:
+
+1. **A session moved its home.** On 2026-10-15 at 05:33Z a triage review ran
+   `git checkout --detach <commit>` in the home it started in, to run the review
+   script as the reviewed commit had it. The review formula's first step had no
+   checkout of its own then, and it makes one now, so that trigger is gone. Any
+   session can still move its home with a plain git command, because a session
+   works in its home's checkout.
+2. **The sync could not undo it.** The reviewed branch was squash-merged 17 minutes
+   later, and main's rule moves a detached home only when the tip already contains
+   its commit, which a squash merge never makes true.
+3. **Nobody saw it.** The refusal was one stderr line at pre_start, and gc discards
+   a command's output when the command succeeds.
+
+The fix is at the second link: whatever a session did, the next start moves the home
+to the tip, after saving what the move would lose. The third link goes with it.
+Nothing refuses any more, and a move that fails fails the start, which gc reports
+with the command's output (`setupCommandFailure`, from `runSetupCommand` in
+`internal/runtime/tmux/adapter.go`). The first link stays, because a session may
+still move its home, and the next start puts it back.
+
+## What gc writes into a home before the session starts
+
+The ruling asked this rework to check that the move does not undo what gc writes
+into a home before a session starts. This is read for the tmux provider, the session
+runtime this city runs, since `city.toml` sets no `[session] provider`.
+
+1. `Start` in `internal/runtime/tmux/adapter.go` calls `stageStartFiles` before it
+   starts the session. It stages the pack overlays and the agent overlay into the
+   work dir through `StageProviderOverlayDir` (`internal/runtime/staging.go`),
+   which merges the pack's hooks into the provider's settings file, such as
+   `.claude/settings.json`, and copies the hook scripts. Then it stages
+   `CopyFiles`.
+2. `doStartSession` then runs `runPreStart`. Its first command is the agent's own
+   `pre_start`, this script. The commands gc generates for skills and project MCP
+   config come after it (`appendMaterializeSkillsPreStart`,
+   `appendProjectMCPPreStart` append to the list), so what they write lands after
+   the move.
+3. Between sessions, the reconciler stages the overlays and installs hooks into the
+   work dir on its ticks (`prepareTemplateResolution` in
+   `cmd/gc/build_desired_state.go`), and writes a skill catalog snapshot under
+   `.gc/tmp/` for the skills command (`writeSkillSnapshotFile` in
+   `cmd/gc/skill_integration.go`). The worker-dir prune leaves a `.worktree-stale`
+   marker in a home it keeps (`writeWorktreeStaleMarker` in
+   `cmd/gc/session_worktree_prune.go`).
+
+What survives the move:
+
+- **Untracked files.** gc's settings, hook scripts, skill links and snapshot sit
+  under paths the script excludes, and the marker is untracked. The move keeps
+  them, except where the default branch adds a tracked file at the same path,
+  which git's checkout overwrites (suite cases (i) and (v)).
+- **A tracked file gc merges into.** In a rig that tracks `.claude/settings.json`,
+  gc's merge is a tracked change, as in the five homes the census found. The move
+  carries it to the tip unless the tip changes that same file (case (t)). Then git
+  refuses, the change is saved as `changes`, and the forced move brings the tip's
+  file (case (u)). That one session starts without gc's merged hooks, and gc merges
+  them in again before the next session starts.
+- **A new home.** gc's staging lands in a directory that is not a worktree yet. The
+  script moves its contents aside, adds the worktree and moves them back, keeping
+  each file the checkout did not bring (cases (e), (f) and (h)).
 
 ## What the wrapper's change is
 
-- **The sync rule.** A home moves to the default tip unless that loses a tracked
-  change, or a detached HEAD's commits no ref reaches. Ancestry of the tip was the
-  old test, and a squash merge never satisfies it. Reachability is what Gas Town's
-  script and Gas City's reaper both test.
-- **Its own branch.** A home on its own branch moves too when a fast-forward does not
-  bring it to the tip. That covers a branch that has diverged and one ahead of the tip,
-  where the fast-forward succeeds and moves nothing, as it does when the default branch
-  is rewound to an ancestor. The branch is reset when another ref reaches its commits.
-  Otherwise the worktree detaches at the tip and the branch keeps them, so no home can
-  be stuck by a commit on that branch. Any other branch stays as it is.
-- **Removed, with no case behind them.** Adopting and quarantining orphaned stage
-  directories, which Gas Town's script does not do either, and aborting a rebase or
-  merge at start. The census found no such directory and no such home. The abort
-  dates from when sync ran `pull --rebase`, and nothing in the pack does now. A kill
-  mid-stage now leaves its directory beside the home, and a mid-merge home reports
-  through the tracked-change refusal.
-- **Not built.** Anything that makes a slot that cannot move visible to someone. The
-  bead's note allowed for that, but the census leaves no such slot: every stuck home
-  moves under the new rule. The one stderr line a refusal prints stays unread, as
-  before. If a home ever holds a commit no ref reaches, a tracked change that blocks
-  its move, or a branch that is not its own, it stays silently at its old
-  checkout. tk-d3daseg holds the question of whether that needs a signal.
+- **The sync rule.** At every start, a home moves to the default branch's tip on its
+  per-target branch. First it saves what the move would lose under
+  `refs/gc-toolkit/home-save/<per-target branch>/<UTC time>/`: HEAD's commits as
+  `head`, and the per-target branch's as `branch` when that branch points at another
+  commit, because the move resets it. A commit is saved only when no branch, tag or
+  remote-tracking ref other than the per-target branch holds it, which is the set
+  Gas City's own reach test counts (`HasUnreachableCommitsResult` in
+  `internal/git/git.go`). A reach git cannot read is saved anyway.
+- **What the move keeps.** The move is a plain `git checkout -B` of the per-target
+  branch at the tip, which carries every tracked change and untracked file it does
+  not overwrite. When git refuses, because the move would overwrite a tracked change
+  or an untracked file, the tracked changes are saved as `changes` and the move is
+  forced. An untracked file the forced move overwrites is not saved: it sits where
+  the tip adds a file, and the ruling names tracked changes and commits.
+- **Where this departs from the ruling.** The ruling says to save any tracked change
+  and then move. Saving and then discarding a tracked change would undo gc's merge in
+  a rig that tracks the settings file, at every start, and saving it at every start
+  would add a ref per start in each such home. So a tracked change is saved only
+  when the move would overwrite it, and otherwise it moves to the tip with the home.
+  A session's own edit to a tracked file rides along the same way, until the tip
+  changes that file.
+- **Where the saves go.** Gas City has no primitive that keeps what moving a tree
+  would lose. `gc worktree ensure` never moves a tree, and the closed-bead reaper and
+  the worker-dir prune leave a tree with uncommitted changes, or with commits no ref
+  holds, where it is and save nothing. git's stash stack is shared by every worktree
+  of a repository, so another session's pop can take an entry. The deployed reaper
+  also holds every tree of a repository while that repository holds any stash (the
+  census above). Upstream dropped that gate on 2026-11-02, and doctor's
+  nested-worktree prune check still refuses a tree while its repository holds a stash
+  (`internal/doctor/checks_semantic.go`). Gas Town's script refuses instead of
+  saving. So the script pins with `git stash create` and `git update-ref` under its
+  own namespace, as `reconcile-rig-checkouts.sh` pins a rig checkout's local changes
+  under `refs/gc-toolkit/reconcile-set-aside/`.
+- **Hooks off, upstream untouched.** The move runs with `core.hooksPath=/dev/null`,
+  because a hook's exit status becomes the checkout's, and a move that carried a
+  change over but read as failed would then be forced over it. It passes
+  `--no-track`, because setting the upstream rewrites the repository's config, which
+  every worktree of the rig shares, so every start would contend for its lock. The
+  upstream stays as the home's creation set it.
+- **A move that fails fails the start.** A move git cannot make even when forced,
+  such as one onto a per-target branch another worktree has checked out, a home with
+  unmerged paths, which `git stash create` cannot save, a home whose HEAD names a
+  branch that no longer exists, and an unset `origin/HEAD` each end the run
+  non-zero. The session does not start, and gc reports what the run printed. No home
+  is in any of these shapes today.
+- **Only a linked worktree moves.** A main checkout given as the target keeps its
+  branch, because it is the rig's own checkout.
+- **Removed.** Every refusal and its stderr line: a tracked change, a detached HEAD
+  whose commits no ref reaches, a branch that is not the home's own, and an untracked
+  file in the way. The fast-forward path goes with them, and so does detaching at the
+  tip when the per-target branch cannot be reset. Two earlier removals stand, with no
+  case behind either: adopting and quarantining orphaned stage directories, which Gas
+  Town's script does not do either, and aborting a rebase or merge at start. A kill
+  mid-stage leaves its directory beside the home.
+- **Not built.** Anything that removes old saves. A save is made only when a move
+  would lose something, and no home would today. A person reads a saved commit with
+  `git log <ref>`, and takes a path back with `git checkout <ref> -- <path>`.
 
 ## How this copy differs from Gas Town's
 
 Each is a difference from `gastown/assets/scripts/worktree-setup.sh` at
-0b0d96250f66, with its reason and what ends it. The rows cover every difference in
-where a home ends up and whether its session starts. Checks with no case here, such
-as Gas Town's ref-format check on the branch name, are left out.
+796d7ecd73cf, where the script last changed on 2026-10-03, with its reason and what
+ends it. The rows cover every difference in where a home ends up and whether its
+session starts. Checks with no case here, such as Gas Town's ref-format check on the
+branch name, are left out.
 
 | This script | Gas Town's | Why | Ends when |
 |---|---|---|---|
-| A refusal prints a line, exits 0, and the session starts on the checkout it has | Exits 1, so the session does not start | A pool slot that cannot start takes no work, and these homes can carry a tracked `.claude/settings.json` change | Never by itself: a choice to weigh if refusals start to matter |
-| A failed fetch does not stop a sync, which then reads the last tip it fetched | Refuses and exits 1 | The same as the row above: a slot that cannot reach origin still takes work | The exit-1 row above is adopted |
-| A repository with no origin is left alone with no line, and an unset `origin/HEAD` is a refusal | Refuses a repository with no origin, and tries `git remote set-head origin --auto` first | No case: all 317 homes have both | A case appears |
-| Only tracked changes block a sync | Any untracked file blocks it | gc writes untracked files into a home, such as `.worktree-stale` | Gas City writes nothing untracked into a home |
-| Its own branch, when a fast-forward does not bring it to the tip, is reset if another ref reaches its commits, and otherwise the worktree detaches at the tip and the branch keeps them | Refuses and exits 1 whenever that branch holds a commit the default branch lacks | A stuck home silently loses every rule landed after it, and neither move loses a commit | The exit-1 row above is adopted |
-| A home on any other branch stays there, fast-forwarding to that branch's upstream when it can | Switches a clean home to its own branch, and the other branch keeps its commits | No measured reason either way, so this change leaves the script's existing rule alone: no home is on such a branch, and no home's reflog shows one checked out in the last 30 days | A home is found stuck on one, and then Gas Town's rule goes in |
+| Nothing refuses a sync: what the move would lose is saved under a ref, and the move goes ahead | Refuses a home with any change, tracked or untracked, a detached HEAD no branch or remote-tracking ref reaches, or a per-target branch holding a commit the default branch lacks, and exits 1, so the session does not start | A home holds no work of its own, and each refusal is a way for a home to stay stuck | Never by itself |
+| A tracked change the move does not overwrite is carried to the tip | Refused with the rest of a dirty home | gc merges the pack's hooks into a provider settings file before pre_start, and a rig can track that file | gc stops writing into a file a rig tracks |
+| An untracked file never blocks the move, and one in the way of a file the tip adds is replaced | Any untracked file blocks it | gc writes untracked files into a home, such as `.worktree-stale` and its provider settings | Gas City writes nothing untracked into a home |
+| A failed fetch does not stop a sync, which then moves to the last tip it fetched | Refuses and exits 1 | A slot that cannot reach origin still takes work | A start on a stale tip is found to cost more than a start that fails |
+| A repository with no origin is left alone with no line, and an unset `origin/HEAD` fails the run | Refuses a repository with no origin, and tries `git remote set-head origin --auto` before failing on an unset `origin/HEAD` | No case: all 344 homes have both, and git's fetch sets a missing `origin/HEAD` again | A case appears |
+| The move runs with hooks off and leaves the upstream as it is | The checkout runs the repository's hooks | A hook's exit status becomes the checkout's, which would force a move that had carried a change over | Never by itself |
 | Reachability also counts tags | Counts branches and remote-tracking refs | The pack's archive tags pin commits, and Gas City's reaper counts tags too | The tags are gone |
 | The redirect and excludes are completed on every run | Excludes every run, redirect only at creation | A hook failure or a kill can leave a half-built tree | Gas Town's script completes the redirect |
 | Hides only the skill links gc's manifest names under `.agents/skills/`, and adds `.runtime/` and `.beads.gate.lock` | Hides all of `.agents/skills/` | Some repositories track skills there, this one included, and a person's new skill must still show | gc excludes its own links |
 | Keeps a staged directory that loses to a file from ending the run | Recurses and fails | The checkout can bring a file where the stage holds a directory | Gas Town takes the same guard |
-| Does not check that an existing tree belongs to the rig | `validate_existing_worktree` refuses it | No case seen, and a tree whose git metadata is gone must still get its redirect | A case appears |
+| Does not check that an existing tree belongs to the rig, and syncs only a linked worktree | `validate_existing_worktree` refuses a tree of another repository, and treats a main checkout of the rig like a linked worktree | No case of the first, a tree whose git metadata is gone must still get its redirect, and the rig's own checkout keeps its branch | A case appears |
 
 ## Limits of this record
 

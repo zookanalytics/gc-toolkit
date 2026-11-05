@@ -476,10 +476,17 @@ shares only the word ([authority-map.md](authority-map.md)).
     their homes the same way: `pre_start` runs
     `gastown/assets/scripts/worktree-setup.sh`, from which this script descends.
     This pack imports no pack it could call that copy from.
+  - Nothing in Gas City keeps what moving a tree would lose. The closed-bead
+    reaper (`reapClosedBeadWorktrees` in `cmd/gc/bead_worktree_reaper.go`) and
+    the worker-dir prune (`pruneAgentHomeWorktreeIfSafe` in
+    `cmd/gc/session_worktree_prune.go`) leave a tree with uncommitted changes
+    or with commits no ref holds where it is, and save neither. So the script
+    saves them under `refs/gc-toolkit/home-save/`, since a repository's
+    worktrees all share one stash stack.
   - The search, and each way this script differs from Gas Town's and why, is
     [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-01, at `gastownhall/gascity` main 879a71fa0bc5 and
-  `gastownhall/gascity-packs` main 0b0d96250f66.
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 44e0d11e4625 and
+  `gastownhall/gascity-packs` main 796d7ecd73cf.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.
