@@ -476,20 +476,28 @@ shares only the word ([authority-map.md](authority-map.md)).
     their homes the same way: `pre_start` runs
     `gastown/assets/scripts/worktree-setup.sh`, from which this script descends.
     This pack imports no pack it could call that copy from.
-  - Nothing in Gas City keeps what moving a tree would lose. The closed-bead
-    reaper (`reapClosedBeadWorktrees` in `cmd/gc/bead_worktree_reaper.go`) and
-    the worker-dir prune (`pruneAgentHomeWorktreeIfSafe` in
-    `cmd/gc/session_worktree_prune.go`) leave a tree with uncommitted changes
-    or with commits no ref holds where it is, and save neither. The agent-home
-    cleanup (`cleanupClosedBeadAgentHomeWorktrees` in
+  - Nothing in Gas City brings a home to the default tip at each start. The
+    agent-home cleanup (`cleanupClosedBeadAgentHomeWorktrees` in
     `cmd/gc/agent_home_worktree_cleanup.go`) moves a home only when it carries
-    the prune's `.worktree-stale` marker, sits on a branch that names a closed
-    bead and has no uncommitted work. So the script saves what a move would
-    lose under `refs/gc-toolkit/home-save/`, since a repository's worktrees all
-    share one stash stack.
+    the worker-dir prune's `.worktree-stale` marker, sits on a branch that names
+    a closed bead and has no uncommitted work.
+  - Nothing in Gas City brings a failed `pre_start` to a person. The command's
+    output goes into the start's error, which the controller and reconciler log
+    ([Agent](https://docs.gascity.com/reference/config#agent), `pre_start`). Five
+    failed wakes in a row hold the session for five minutes
+    (`defaultMaxWakeAttempts` and `defaultQuarantineDuration` in
+    `cmd/gc/session_types.go`), and a failed pending create also counts toward
+    a startup-health episode (`recordStartupHealthFailure` in
+    `cmd/gc/session_lifecycle_parallel.go`). Nothing sends the alert an episode
+    marks pending (`RecordStartupFailure` in `internal/session/startup_health.go`),
+    the doctor check that lists episodes leaves the error out
+    (`startupHealthEpisodesCheck` in `cmd/gc/doctor_startup_health.go`), and
+    `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
+    So the script reports a home it cannot sync through `patrol-finding.sh`, one
+    report per home, which the next clean start clears.
   - The search, and each way this script differs from Gas Town's and why, is
     [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 357c30c631cf and
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
   `gastownhall/gascity-packs` main 796d7ecd73cf.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
