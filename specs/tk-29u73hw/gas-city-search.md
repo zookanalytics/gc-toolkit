@@ -25,8 +25,8 @@ Gas City already ships for each part of it
   writes it with `bd update --title`.
 - The conversation's comments are the visit's actions. converse-signoff.sh
   writes one for the ruling and one for each act it takes, `gc-helm.sh dismiss`
-  writes one for the dismissal, and the sitting writes one for work it sends,
-  each with `bd comment`.
+  writes one for the dismissal, and the sitting writes one for work it sends
+  and one for a close at its premise re-check, each with `bd comment`.
 - No metadata key, bead kind or lifecycle state is added. `rig-mentions.sh`
   loses `--rig-map`, which only the filter used, so the search its first commit
   recorded for that flag no longer applies.

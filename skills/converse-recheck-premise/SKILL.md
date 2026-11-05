@@ -59,9 +59,11 @@ gc bd gate resolve <gate> --reason "<moot|benign>: <the premise, and what is tru
 When the conversation's own ask dies with it, because the ask was those gates
 or its concern is moot, close the conversation with the record written: the
 reading goes on the subject's notes, the conversation closes with the reading
-as its reason, and the comment on the subject's pull request, where an
-earlier sitting on this conversation posted one, is drawn again to show that
-the visit ended.
+as its reason, and the close is recorded on the conversation as one of the
+visit's actions. The comment on the subject's pull request, where an earlier
+sitting on this conversation posted one, is then drawn again to show that the
+visit ended and lists that action, so write it as one plain sentence that
+names no other rig or its beads.
 Deliberately **no takeaway stamp**, except on a held subject the close
 releases (below): it is the subject's headline of what it NEEDS, and one for a
 conversation that needs nobody spends the attention this exit saves.
@@ -77,6 +79,7 @@ is still owed. Every write is read back, and the conversation closes only
 after them:
 ```bash
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
+ACTION="<what ended the visit, in one plain sentence>"
 STATE=$("$CONV/lifecycle.sh" state "$SUBJECT") \
   && if [ "$STATE" != held ]; then echo "$SUBJECT reads $STATE, so nothing is released"; else
        OPEN=$(gc bd dep list "$SUBJECT" --type blocks --json | jq -er 'if type == "array" then [ .[] | select(.issue_type == "gate" and .await_type == "human" and ((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
@@ -91,6 +94,8 @@ STATE=$("$CONV/lifecycle.sh" state "$SUBJECT") \
   && gc bd update "$CONVERSATION" --set-metadata gc.work_outcome=no-op \
   && { gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" \
        || gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" --force; } \
+  && { gc bd comment "$CONVERSATION" "$ACTION" >/dev/null \
+       || echo "the close was not recorded among the actions of $CONVERSATION"; } \
   && { "$CONV/pr-sitting-comment.sh" refresh --sitting "$CONVERSATION" || true; } \
   && echo "closed $CONVERSATION as $KIND"
 ```

@@ -246,8 +246,9 @@ nothing. Once the conversation closes, those lines stay and the conclusion and
 the actions follow them. The conclusion is the last hand-back recorded on the
 conversation, the text the operator's tab prints when the sitting ends. The
 actions are the conversation's comments. The sign-off writes one for the ruling
-and one for each act it takes, the sitting writes one for work it sends, and a
-dismiss writes one for the dismissal. Each write that changes what the comment
+and one for each act it takes, the sitting writes one for work it sends and one
+for a close at its premise re-check, and a dismiss writes one for the
+dismissal. Each write that changes what the comment
 shows draws it again: the sign-off, a dismiss and the premise re-check's close
 once the conversation reads closed, and a hand-back recorded after the close.
 The comment is keyed by the conversation's id under the marker
