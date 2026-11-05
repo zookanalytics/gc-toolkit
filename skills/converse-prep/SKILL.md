@@ -14,19 +14,21 @@ the subject's pull request.
 ## 3. Title
 
 Name the topic in a few words of your own: what this conversation is
-discussing. It titles your session, and when the subject has a pull request,
-the reminder posts it there as the topic under discussion, where anyone who
-reads the pull request sees it. So write it yourself, not in the operator's
-words, and name no other rig or its beads:
+discussing. It titles your session and the conversation. When the subject has
+a pull request, the comment there that shows this visit carries the
+conversation's title as its topic, where anyone who reads the pull request
+sees it. So write it yourself, not in the operator's words, and name no other
+rig or its beads:
 ```bash
 TOPIC="<topic>"
 gc session rename "$GC_SESSION_ID" "$SUBJECT — $TOPIC"
-"$CONV/pr-sitting-comment.sh" topic --sitting "$CONVERSATION" --subject "$SUBJECT" --topic "$TOPIC"
+gc bd update "$CONVERSATION" --title "$TOPIC" \
+  && "$CONV/pr-sitting-comment.sh" post --sitting "$CONVERSATION" --topic "$TOPIC"
 ```
-Re-run it with the new topic if your focus moves to a different one: when the
-visit ends, the comment keeps the last topic you posted and adds the action
-taken. The reminder is best effort: it posts nothing when the subject has no
-pull request, and it leaves out a topic that names another rig.
+Re-run it with the new topic only when your focus moves to a different one.
+The comment is best effort, and it posts nothing when the subject has no pull
+request. When the visit ends it keeps the topic and adds the conclusion and
+the actions that steps 6–7 record on the conversation.
 
 ## 4. Prime
 

@@ -1638,9 +1638,10 @@ keys = [
 #   marker_keys).
 # gc.pr_visit_summary / gc.pr_visit_actions — RETIRED. They were the closing
 #   text of a visit's PR reminder, stashed on the visit before it closed. The
-#   sign-off passes what the visit did and its one-line outcome to
-#   pr-sitting-comment.sh directly, so nothing writes or reads them, and
-#   doctor/check-state-space lists them in RETIRED_KEYS.
+#   comment pr-sitting-comment.sh draws reads a visit's conclusion and actions
+#   from the conversation itself, its gc.handback and its comments, so nothing
+#   writes or reads them, and doctor/check-state-space lists them in
+#   RETIRED_KEYS.
 # gc.ruling — on a VISIT closed before the cutover, the operator's ruling in its
 #   sitting. Nothing writes it: a ruling is the resolve reason of each gate a
 #   sitting answers, headed `ruled:`, and finding.sh releases a needs-you finding
@@ -1658,8 +1659,10 @@ keys = [
 #   each record replacing the one before, and reads the text back. gc-helm.sh
 #   `engage` reads them once the tab's attach returns on a closed conversation,
 #   and prints the text in the operator's terminal as the sitting's last words.
-#   Absent, the tab says the sitting recorded no hand-back. Never cleared.
-#   Freeform multi-line text.
+#   Absent, the tab says the sitting recorded no hand-back. Once the
+#   conversation reads closed, pr-sitting-comment.sh shows the text word for
+#   word as the visit's conclusion in its comment on the subject's PR. Never
+#   cleared. Freeform multi-line text.
 # gc.ruling_consequence — on a conversation, the open PR each of its rulings'
 #   --rework or --retire acts on: a JSON object from the ruling's answer
 #   (`ruled: <ruling>`) to {act, anchor}, act `rework` or `retire` and anchor

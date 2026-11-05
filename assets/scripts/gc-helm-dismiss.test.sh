@@ -16,8 +16,10 @@
 #   (WORK-OUTCOME, WORK-REFUSED, WORK-KEPT) gc.work_outcome=no-op is stamped in
 #             a write of its own before the close, and never holds it
 #   (ANSWERS-NOTHING, NOSUBJECT) no gate is resolved and the bead is not written
-#   (PRCOMMENT) the PR reminder is updated to say the visit was dismissed, with
-#   none of the operator's words
+#   (PRCOMMENT, PRCOMMENT-RIG) the dismissal is recorded on the conversation as
+#             one of the visit's actions, with none of the operator's words, and
+#             the visit's PR comment is then drawn again from the conversation,
+#             from the subject's rig checkout when dismiss resolved it
 #   (QUEUE, LEFT, IDEM) a bead with no live sitting has nothing to end
 #   (CONVID, GATEID) a conversation id names its own conversation, a gate id the
 #             bead still waiting on it
@@ -131,6 +133,11 @@ case "$1 ${2:-}" in
         "$(grep -c '^bd close' "$CALLS" 2>/dev/null || echo 0)" "${refused:+ | refused}" >> "${DRAINS:-/dev/null}"
     [ -z "$refused" ] || { echo "gc runtime drain-ack: refused by the incarnation rules; nothing acknowledged" >&2; exit 1; }
     exit "${FAKE_DRAIN_RC:-0}" ;;
+  "bd comment")
+    log "$*"
+    [ -n "${COMMENT_REFUSE:-}" ] && exit 1
+    _c=$(cat "$B/$3.comments.json" 2>/dev/null || printf '[]')
+    printf '%s' "$_c" | jq -c --arg t "$4" '. + [{text: $t}]' > "$B/$3.comments.json" ;;
   "bd gate")
     log "$*" ;;
   "bd close")
@@ -161,10 +168,12 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
-# A recorder standing in for pr-sitting-comment.sh.
+# A recorder standing in for pr-sitting-comment.sh. It logs where it ran and
+# the actions the conversation it draws carries by then.
 cat > "$TMP/rec-psc" <<'REC'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$REC_PSC_LOG"
+printf '%s | pwd=%s | acts=%s\n' "$*" "$PWD" \
+    "$(jq -r '[.[].text] | join(";")' "$STORE/b/${3:-none}.comments.json" 2>/dev/null)" >> "$REC_PSC_LOG"
 REC
 chmod +x "$TMP/rec-psc"
 
@@ -228,13 +237,26 @@ hasnt "$(calls)" "bd gate" "(ANSWERS-NOTHING) no gate is resolved: the gate it r
 eq "$(field tk-gate status)" "open" "(ANSWERS-NOTHING) …and reads open"
 hasnt "$(calls)" "bd update tk-subj" "(NOSUBJECT) the bead is never written"
 hasnt "$(calls)" "bd dep" "(NOSUBJECT) …and no edge is touched"
-eq "$(cat "$REC_PSC_LOG")" "close --sitting tk-conv --subject tk-subj --outcome dismissed" "(PRCOMMENT) the PR reminder is updated to say the visit was dismissed"
-hasnt "$(cat "$REC_PSC_LOG")" "settled offline" "(PRCOMMENT) …and the reason the operator typed never reaches it"
+has "$(cat "$REC_PSC_LOG")" "refresh --sitting tk-conv | " "(PRCOMMENT) the visit's comment on the PR is drawn again from the conversation"
+has "$(cat "$REC_PSC_LOG")" "| acts=Dismissed by the operator." "(PRCOMMENT) …once the dismissal is recorded on the conversation as one of the visit's actions"
+hasnt "$(cat "$REC_PSC_LOG") $(grep '^bd comment' "$CALLS")" "settled offline" "(PRCOMMENT) …and the reason the operator typed reaches neither"
 eq "$(field tk-oconv status)" "in_progress" "(SCOPE) another bead's live sitting is untouched"
 eq "$(field tk-find status)" "open" "(KIND) a bead that tracks the subject but is no conversation is never closed"
 run_dismiss tk-subj
 eq "$RC" 0 "(IDEM) a second dismiss exits 0"
 has "$OUT" "no live sitting on tk-subj — nothing to end" "(IDEM) …saying there is nothing to end"
+
+echo "# the comment is drawn from the subject's rig checkout, and a refused record still ends the sitting"
+fresh; bead ra-subj task open ""; bead ra-conv task in_progress gc-toolkit/gc-toolkit.ra-conv; edge ra-conv tracks ra-subj
+sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"rig-a"}]'
+run_dismiss ra-subj
+eq "$(field ra-conv status)" "closed" "(PRCOMMENT-RIG) a dismiss named on a bead in another rig closes its sitting's conversation"
+has "$(cat "$REC_PSC_LOG")" "refresh --sitting ra-conv | pwd=$(cd "$RA_PATH" && pwd) | " "(PRCOMMENT-RIG) …and draws the comment from that rig's checkout, whose origin is the comment's repository"
+fresh; COMMENT_REFUSE=1 run_dismiss tk-subj
+eq "$RC" 0 "(PRCOMMENT-REFUSED) a dismissal the store will not record still exits 0"
+eq "$(field tk-conv status)" "closed" "(PRCOMMENT-REFUSED) …the conversation is closed"
+has "$ERR" "the dismissal was not recorded on tk-conv" "(PRCOMMENT-REFUSED) …saying the record did not land"
+has "$(cat "$REC_PSC_LOG")" "refresh --sitting tk-conv | " "(PRCOMMENT-REFUSED) …and the comment is drawn all the same"
 
 echo "# a bead with no live sitting has nothing to end"
 fresh; jq '.assignee = "human" | .status = "open"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"

@@ -523,9 +523,9 @@ mkdir -p "$TMP/rig/agents/converse-opus" "$TMP/rig/agents/converse-fable" \
          "$TMP/rig-bare" "$TMP/rig-bare/.beads"
 export RIG_PATH="$TMP/rig"
 
-# A recorder standing in for pr-sitting-comment.sh, to prove engage posts no
-# reminder: the sitting posts it once it names its topic, after its premise
-# re-check.
+# A recorder standing in for pr-sitting-comment.sh, to prove engage posts
+# nothing: the sitting posts the visit's comment once it names its topic, after
+# its premise re-check.
 cat > "$TMP/rec-psc" <<'REC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$REC_PSC_LOG"
@@ -626,7 +626,7 @@ has "$CALLED" "bd update tk-conv --if-assignee human --if-status open --unset-me
 bind_write=$(printf '%s\n' "$CALLED" | grep -- '--assignee gc-toolkit/gc-toolkit.tk-conv' || true)
 has "$bind_write" "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
     "(BIND-PINS) …and drops any session pin an earlier sitting left, in the same write"
-eq "$(cat "$TMP/psc.log")" "" "(CONVID-PRCOMMENT) engage posts no reminder on the PR of the bead the conversation tracks"
+eq "$(cat "$TMP/psc.log")" "" "(CONVID-PRCOMMENT) engage posts no comment on the PR of the bead the conversation tracks"
 hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its prompt and is not kicked"
 hasnt "$OUT" "took the conversation" "(CONVID) an explicit conversation id is not reported as one engage chose"
 has "$OUT" "✓ converse-opus on existing conversation tk-conv for tk-subj" "(CONVID) the summary names the conversation and its bead"

@@ -234,25 +234,33 @@ racing on a bead with no conversation, or a gate two beads wait on can each
 put two sittings on one bead. The board folds both onto the bead's row, either
 may answer a gate, and the first answer wins.
 
-**The PR reminder.** When the subject carries a PR, a comment on it says what
-a visit discusses and, once the visit ends, the action taken
-(`assets/scripts/pr-sitting-comment.sh`). The sitting posts it when it names
-its topic, in the title step of its prep, so a conversation that closes before
-then posts nothing. The sign-off, a dismiss or the premise re-check's close
-edits that same comment in place when the visit ends. It then names the last
-topic the sitting posted and the action taken: what the visit did to the PR,
-in the reminder's own words (sent back for rework, retired, its recommended
-work started, or none, and a visit handed back undecided or dismissed says
-so), then the sitting's one-line outcome. It is keyed by the conversation's id
-under the marker `<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post
-that carries it, or the marker reminders carried before it, as the city's own.
+**The visit's comment on its PR.** When the subject carries a PR, a comment on
+it shows the visit. It is a view of the conversation, drawn from the
+conversation's values word for word (`assets/scripts/pr-sitting-comment.sh`).
+While the conversation is open, the comment names the visit and the bead it is
+on, the conversation's id and the subject's, and the visit's topic, which is
+the conversation's title. The sitting writes that title in its own words in
+the title step of its prep, and again only when it moves to a different topic.
+The comment goes up then, so a conversation that closes before then posts
+nothing. Once the conversation closes, those lines stay and the conclusion and
+the actions follow them. The conclusion is the last hand-back recorded on the
+conversation, the text the operator's tab prints when the sitting ends. The
+actions are the conversation's comments. The sign-off writes one for the ruling
+and one for each act it takes, the sitting writes one for work it sends, and a
+dismiss writes one for the dismissal. Each write that changes what the comment
+shows draws it again: the sign-off, a dismiss and the premise re-check's close
+once the conversation reads closed, and a hand-back recorded after the close.
+The comment is keyed by the conversation's id under the marker
+`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it, or
+the marker reminders carried before it, as the city's own.
 
 A PR comment can be a public record, and no person reads this one before it
-posts. So nothing the operator typed reaches it: not the words that opened the
-conversation, and not a dismiss's reason. The topic and the one-line outcome,
-which the sitting writes, go on field by field, each only once
-`assets/scripts/rig-mentions.sh` answers that it names no other rig, and a field
-it lists or cannot answer for is left out.
+posts. Nothing typed to open a conversation reaches it, because that text stays
+on the conversation as its description, and neither does a dismiss's reason.
+The comment shows what the visit writes, so the visit keeps other rigs and
+their beads out of its topic, its closing hand-back and its actions, and detail
+about another rig stays in the thread and in notes, which the comment does not
+show. Nothing filters the comment, so a slip publishes what the visit wrote.
 
 ### The operator's intake
 
@@ -471,7 +479,12 @@ durable trace in one order every time:
    (below), which sends the formula once;
 6. the conversation's close, whose reason is the headline the sitting settled
    on;
-7. the PR reminder.
+7. the comment that shows the visit on the subject's PR, drawn again from the
+   conversation.
+
+As it goes, it records the rework or the retirement, the ruling once the gates
+carry it, and the recommendation taken on the conversation, each a comment in
+plain words, which that comment lists as the visit's actions.
 
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the
