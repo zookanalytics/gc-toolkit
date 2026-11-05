@@ -181,7 +181,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --include-gates --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
@@ -250,9 +250,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
     # The retired keys are read from the open listing above and from one listing
     # of the other live statuses, so the probe count stays the same however many
-    # keys retire.
+    # keys retire. Both listings take --include-gates: bd lists no gate without
+    # it, and a legacy demand's keys sit on a gate.
     lraw=$(run_bounded gc bd list --db "$rig_path/.beads" \
-        --status in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null); lrc=$?
+        --status in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit 0 2>/dev/null); lrc=$?
     if [ "$lrc" -ne 0 ] || [ -z "$lraw" ]; then
         warnings+=("$label: could not list the beads in a live status other than open in $rig_path/.beads (rc=$lrc) — the retired-key check did NOT run for this store")
     elif ! rrows=$({ printf '%s' "$raw" | scrub; printf '%s' "$lraw" | scrub; } | jq -rs --argjson keys "$retired_json" '

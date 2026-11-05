@@ -43,18 +43,20 @@ GC
 # >>> control-char-scrub
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-# Honor the three filters the check relies on: --db, --status (comma list) and
-# --has-metadata-key. A stub that ignored --status would let an in_progress
-# fixture reach the --status=open scan, so the detached-CLAIMED probe (which
-# reads only the non-open statuses) could never be told apart from the open scan,
-# and dropping the --status flag from either query would still pass this test.
-db=""; status=""; haskey=""; prev=""
+# Honor the filters the check relies on: --db, --status (comma list),
+# --has-metadata-key, and --include-gates, without which bd leaves gate rows
+# out. A stub that ignored --status would let an in_progress fixture reach the
+# --status=open scan, so the detached-CLAIMED probe (which reads only the
+# non-open statuses) could never be told apart from the open scan, and dropping
+# the --status flag from either query would still pass this test.
+db=""; status=""; haskey=""; gates=""; prev=""
 for a in "$@"; do
   case "$prev" in
     --db) db="$a" ;;
     --status) status="$a" ;;
     --has-metadata-key) haskey="$a" ;;
   esac
+  [ "$a" = "--include-gates" ] && gates=1
   prev="$a"
 done
 name=$(basename "$(dirname "$db")")
@@ -68,10 +70,11 @@ f="$STORES/$name.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
 # and real bd filters structured rows in the store, so its filter never sees
 # them. An unparseable fixture makes jq exit non-zero, which the check reads as
 # an unreadable store, exactly as a real bd failure would.
-scrub < "$f" | jq -c --arg status "$status" --arg haskey "$haskey" '
+scrub < "$f" | jq -c --arg status "$status" --arg haskey "$haskey" --arg gates "$gates" '
   ($status | if . == "" then null else split(",") end) as $st
   | map(select($st == null or ((.status // "open") as $bst | ($st | index($bst)) != null)))
-  | map(select($haskey == "" or ((.metadata // {}) | has($haskey))))'
+  | map(select($haskey == "" or ((.metadata // {}) | has($haskey))))
+  | map(select($gates != "" or (.issue_type // "") != "gate"))'
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
@@ -329,6 +332,14 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a bead carrying two retired keys is an ERROR"
 has "$OUT" "gc bd update a-r13 --unset-metadata escalation_key" "…named for the first key"
 has "$OUT" "gc bd update a-r13 --unset-metadata visit.recheck" "…and for the second"
+# A legacy demand's keys sit on a gate, and bd lists no gate without
+# --include-gates, so both listings the probe reads take it.
+store '[{"id":"a-g1","status":"open","issue_type":"gate","await_type":"human","metadata":{"gc.demand_for":"a-w1"}},
+        {"id":"a-g2","status":"blocked","issue_type":"gate","await_type":"human","metadata":{"gc.gate_visit":"filed"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a live gate carrying a retired key is an ERROR"
+has "$OUT" "gc bd update a-g1 --unset-metadata gc.demand_for" "…an open gate is named"
+has "$OUT" "gc bd update a-g2 --unset-metadata gc.gate_visit" "…and a gate in another live status"
 # The probe reads the other live statuses in one listing; when that listing
 # does not read, the check warns rather than passing, and names no carrier.
 store '[{"id":"a-r4","status":"open","metadata":{}},
