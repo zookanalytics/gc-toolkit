@@ -1,17 +1,17 @@
 ---
-name: subject-lines
+name: commit-conventions
 description: Use when you are about to write a commit subject or a PR title, such as choosing its conventional-commit type and scope, or naming a branch on the bead title its PR takes.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
-# Subject lines
+# Commit conventions
 
 A commit subject and a PR title are one kind of line: `<type>(<scope>): <what
 changes>`. The squash merge makes the PR title the commit subject on the target,
 so that line is the change's name in the history.
 
 Where a rig sets its own commit rules, its rules come first. Read them before you
-choose: `docs/subject-lines.md` in the repository the change is in, when it has
+choose: `docs/commit-conventions.md` in the repository the change is in, when it has
 that page, and any commit rules its `AGENTS.md`, `CLAUDE.md` or `CONTRIBUTING.md`
 states or names.
 

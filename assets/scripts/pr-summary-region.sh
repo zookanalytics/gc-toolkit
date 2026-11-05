@@ -257,7 +257,7 @@ prs_establish_region() { # <body-file> <section-file> <out-file>
 # own title; each writer appends the bead id. pr-open.sh composes it at create
 # and pr-stack.sh keeps an open PR's title equal to it, so both read the type
 # from here and a title the create wrote is one the refresh already agrees with.
-# The type is the author's: the subject-lines skill has the anchor's title open
+# The type is the author's: the commit-conventions skill has the anchor's title open
 # with the type that says what the branch does, and a title that opens with a
 # recognized type is kept as written, whatever the bead's kind.
 # A conventional-commit PR-title check (which product repos run on every PR)
