@@ -22,9 +22,9 @@ which attaches the clip to the PR inline and uncommitted.
 
 Two inputs name the scenario, and the mol needs exactly one: demo_script is a
 ready demo:capture-format script; source_bead is a bead whose work the mol turns
-into a script by following the gc-toolkit.gc-demo-script skill. One input
-names how the rig's app is reached — serve_dir, serve_cmd, or base_url — the
-one rig-specific fact, threaded as a pour var because no rig-to-app map exists.
+into a script by following the gc-toolkit.gc-demo-script skill. One input,
+serve_dir, serve_cmd or base_url, names how the rig's app is reached. It is a
+pour var because no rig-to-app map exists.
 A per-rig default store is tracked separately; this mol reads the target from
 the pour.
 
@@ -46,7 +46,8 @@ Required vars:
   {{rig_name}}: Rig whose app is demoed. Resolved to a checkout path via `gc rig list`. The app runs from a detached worktree of that checkout at its HEAD.
 
 Optional vars:
-  {{base_url}}: URL of a deployed preview, driven as-is. A URL on this host is refused, because a server already running here runs outside the capture's sandbox. One of serve_dir / serve_cmd / base_url. (default=)
+  {{app_reads_city}}: "true" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture then refuses the rig's servers. Any value but "false" counts as "true". demo-engine-lib.sh reads it, and this formula's steps do not use it. (default=false)
+  {{base_url}}: URL of a deployed preview, or of the rig's app that a worktree of the rig serves on this host, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to "true". One of serve_dir / serve_cmd / base_url. (default=)
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{capture_mode}}: walkthrough (default, one continuous recorded take) or proof (one checked screenshot per step). (default=walkthrough)
   {{deliver_pr}}: PR number or URL to deliver the clip to, when no deliver_subject names one. Optional. (default=)
