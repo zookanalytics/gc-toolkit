@@ -36,7 +36,7 @@
 #   - every loopback port but one, and every Unix socket but the system
 #     resolver's, so the supervisor's API, the Dolt server and the session
 #     server do not answer. The one port is the capture's own server's, or the
-#     port of a rig's own server that a --base-url on this host names, as below.
+#     port of a rig's app that a --base-url on this host names, as below.
 #   - signals to any process outside the sandbox.
 # The CLI also runs without the environment variables that point a command at
 # the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and TMUX_PANE.
@@ -60,29 +60,21 @@
 #     --serve-dir given no --port is given a free one, because the sandbox
 #     opens only a port it knows;
 #   - --base-url names this host, whose servers run outside the sandbox, unless
-#     the server there is a rig's own app. It is one when the URL's port is
-#     none that a variable pointing at the city names, and every process of
-#     this user that listens on that port works in a worktree of a rig that
-#     carries no label. A rig's checkout, which holds its store, is no such
-#     worktree. Neither is the city's own repository, which the rig map lists
-#     as its hq entry, nor a directory in no rig's repository. lsof names each
-#     listener and its working directory.
+#     each process listening on its port works in a worktree of a rig whose
+#     app_reads_city is "false", and no variable that points at the city names
+#     the port. A rig's checkout, which holds its store, and the city's own
+#     repository never count as such a worktree.
 # A host without sandbox-exec runs no capture at all.
 #
-# A rig whose app reads the city, as a rig that develops code for a city does,
-# carries a label that keeps its own servers out of every capture's reach. The
-# city sets it in city.toml, among the rig's formula vars:
+# app_reads_city is a formula var that mol-rig-demo declares with the default
+# "false". A city sets it to "true" in city.toml for each rig whose app reads
+# the city, such as a rig that develops code for a city:
 #   [rigs.formula_vars]
 #   app_reads_city = "true"
-# mol-rig-demo declares that var, with the default "false", and a capture reads
-# the rig's value with `gc formula show mol-rig-demo --rig <rig> --json`. The
-# label lives outside the rig's repository, so no change the rig reviews can
-# remove it. A label that does not read counts as one: a read that fails, a
-# formula that declares no such var, and a value other than "true" or "false"
-# each keep the refusal. The rig whose repository holds this library, the
-# pack's own source, counts as labelled whatever city.toml says, because the
-# pack's board and scripts read the city. A city that runs the pack from a copy
-# in no rig's repository labels its rig of the pack's source in city.toml.
+# It lives outside the rig's repository, so no change the rig reviews can
+# remove it. Any value but "false" counts as "true", and so does a read that
+# fails. The rig that holds this library counts as "true" too, because the
+# pack's board and scripts read the city.
 #
 #   demo_engine_resolve  Checks that this host has the sandbox and checks Node
 #                        against the engine's floor, finds the engine, checks
@@ -454,10 +446,10 @@ EOF
   [ -z "$common" ] || printf 'ro %s\n' "$common"
 }
 
-# The formula var in which city.toml labels a rig whose app reads the city, and
-# the formula that declares it.
-DEMO_ENGINE_LABEL_VAR=app_reads_city
-DEMO_ENGINE_LABEL_FORMULA=mol-rig-demo
+# The formula var that says a rig's app reads the city, and the formula that
+# declares it.
+DEMO_ENGINE_READS_CITY_VAR=app_reads_city
+DEMO_ENGINE_READS_CITY_FORMULA=mol-rig-demo
 
 # _demo_engine_rig_name <rig checkout>: the name the city's rig map gives the
 # rig with that checkout, or nothing.
@@ -470,23 +462,22 @@ _demo_engine_rig_name() {
       done
 }
 
-# _demo_engine_labelled <rig checkout>: after _demo_engine_city, true when the
-# rig carries the label that keeps its own servers out of a capture's reach, with
-# _DEMO_ENGINE_LABEL set to why. A label that does not read counts as one.
-# Returns 1 for a rig that carries no label.
-_demo_engine_labelled() {
+# _demo_engine_reads_city <rig checkout>: after _demo_engine_city, true when the
+# rig's app_reads_city counts as "true", with _DEMO_ENGINE_READS_WHY set to why,
+# and 1 when it reads "false".
+_demo_engine_reads_city() {
   local name res
   if [ "$1" = "$(_demo_engine_rig_of "$DEMO_ENGINE_LIB_DIR")" ]; then
-    _DEMO_ENGINE_LABEL="which holds this pack's own source, and so counts as labelled"
+    _DEMO_ENGINE_READS_WHY="which holds this pack's own source, so its $DEMO_ENGINE_READS_CITY_VAR counts as \"true\""
     return 0
   fi
   name=$(_demo_engine_rig_name "$1")
   if [ -z "$name" ]; then
-    _DEMO_ENGINE_LABEL="whose label did not read, because the rig map gives that rig no name, so it counts as labelled"
+    _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR did not read, because the rig map gives that rig no name, so it counts as \"true\""
     return 0
   fi
-  res=$(gc formula show "$DEMO_ENGINE_LABEL_FORMULA" --rig "$name" --json 2>/dev/null \
-    | jq -r --arg v "$DEMO_ENGINE_LABEL_VAR" --arg f "$DEMO_ENGINE_LABEL_FORMULA" '
+  res=$(gc formula show "$DEMO_ENGINE_READS_CITY_FORMULA" --rig "$name" --json 2>/dev/null \
+    | jq -r --arg v "$DEMO_ENGINE_READS_CITY_VAR" --arg f "$DEMO_ENGINE_READS_CITY_FORMULA" '
         if .ok != true then "unread " + ((.error.message // "gc formula show answered no formula") | tostring)
         else ([.vars[]? | select(.name == $v)][0]) as $d
           | if $d == null then "unread \($f) declares no \($v)"
@@ -495,10 +486,10 @@ _demo_engine_labelled() {
         end' 2>/dev/null)
   case "$res" in
     "rig false"|"default false") return 1 ;;
-    "rig true") _DEMO_ENGINE_LABEL="which city.toml labels as a rig whose app reads the city, with $DEMO_ENGINE_LABEL_VAR = \"true\"" ;;
-    "rig "*|"default "*) _DEMO_ENGINE_LABEL="whose $DEMO_ENGINE_LABEL_VAR reads \"${res#* }\", which is not \"false\", so it counts as labelled" ;;
-    "unread "*) _DEMO_ENGINE_LABEL="whose label did not read, because ${res#unread }, so it counts as labelled" ;;
-    *) _DEMO_ENGINE_LABEL="whose label did not read, because gc formula show $DEMO_ENGINE_LABEL_FORMULA --rig $name answered nothing jq could read, so it counts as labelled" ;;
+    "rig true") _DEMO_ENGINE_READS_WHY="for which city.toml sets $DEMO_ENGINE_READS_CITY_VAR = \"true\"" ;;
+    "rig "*|"default "*) _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR reads \"${res#* }\", which is not \"false\", so it counts as \"true\"" ;;
+    "unread "*) _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR did not read, because ${res#unread }, so it counts as \"true\"" ;;
+    *) _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR did not read, because gc formula show $DEMO_ENGINE_READS_CITY_FORMULA --rig $name answered nothing jq could read, so it counts as \"true\"" ;;
   esac
   return 0
 }
@@ -506,21 +497,17 @@ _demo_engine_labelled() {
 # _demo_engine_local_no <url> <reason>: says why a capture does not reach the
 # server a --base-url on this host names, and returns 1.
 _demo_engine_local_no() {
-  _demo_engine_say "--base-url $1 names a server on this host, which runs outside the capture's sandbox. A capture reaches one only when it is a rig's own app, served from a worktree of a rig that carries no label saying its app reads the city. Here $2. Otherwise start the app with --serve or --serve-dir, which run it inside the sandbox, or capture a deployed preview"
+  _demo_engine_say "--base-url $1 names a server on this host, which runs outside the capture's sandbox. A capture reaches one only when a worktree of a rig whose $DEMO_ENGINE_READS_CITY_VAR is \"false\" serves it, and here $2. Start the app with --serve or --serve-dir instead, which run it inside the sandbox, or capture a deployed preview"
   return 1
 }
 
-# _demo_engine_local_port <url>: after _demo_engine_city, prints the port of the
-# server a --base-url on this host names, when that server is a rig's own app:
-# the port is none that a variable pointing at the city names, and each process
-# of this user that listens on it works in a worktree of a rig that carries no
-# label. Returns 1, having said why, otherwise.
+# _demo_engine_local_port <url>: after _demo_engine_city, prints the port of a
+# --base-url on this host when the rule in this file's header lets a capture
+# reach it. Returns 1, having said why, otherwise.
 _demo_engine_local_port() {
   local url="$1" port v val pids pid dir checkout="" NL='
 '
   port=$(_demo_engine_url_port "$url") || { _demo_engine_local_no "$url" "the URL names no port from 1 to 65535"; return 1; }
-  # A variable names a port as a number in a *PORT variable, or as this host
-  # with a port, in a URL or as host:port.
   while IFS='=' read -r v val; do
     case "$v" in
       *PORT) [ "$val" != "$port" ] || { _demo_engine_local_no "$url" "port $port is the one $v names, which is the city's"; return 1; } ;;
@@ -546,14 +533,14 @@ _demo_engine_local_port() {
       *"$NL$checkout$NL"*) _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in $dir, in the city's own repository"; return 1 ;;
     esac
     _demo_engine_reach "$dir" >/dev/null 2>&1 \
-      || { _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in $dir, in a tree that holds the city's state, as the rig's own checkout holds its store, and not in a worktree of the rig"; return 1; }
-    if _demo_engine_labelled "$checkout"; then
-      _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in a worktree of $checkout, $_DEMO_ENGINE_LABEL"; return 1
+      || { _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in $dir, which holds the city's state, as a rig's checkout holds its store"; return 1; }
+    if _demo_engine_reads_city "$checkout"; then
+      _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in a worktree of $checkout, $_DEMO_ENGINE_READS_WHY"; return 1
     fi
   done <<EOF
 $pids
 EOF
-  _demo_engine_say "--base-url $url is served from a worktree of $checkout, which carries no label, so the capture reaches port $port and no other loopback port"
+  _demo_engine_say "--base-url $url is served from a worktree of $checkout, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\", so the capture reaches port $port and no other loopback port"
   printf '%s\n' "$port"
 }
 
@@ -587,10 +574,10 @@ demo_engine_cli() {
   if [ -d "$pos" ]; then cand="$cand$NL$pos"; elif [ -f "$pos" ]; then files="$files$NL$pos"; fi
   [ -z "${DEMO_ENGINE_BIN:-}" ] || files="$files$NL$DEMO_ENGINE_BIN"
 
-  # The one loopback port the run may reach is its own server's, or the port of
-  # a rig's own app that a --base-url on this host names. Nothing may answer on
-  # its own server's port before the run starts. --serve waits on 5173 when
-  # given no --port, as the engine does.
+  # The one loopback port the run may reach is its own server's, where nothing
+  # may answer before the run starts, or the port of a rig's app that a
+  # --base-url on this host names. --serve waits on 5173 when given no --port,
+  # as the engine does.
   _demo_engine_city || return 1
   if [ -n "$base" ] && _demo_engine_loopback "$base"; then
     if [ -n "$serve$serve_dir" ]; then
