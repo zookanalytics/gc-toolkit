@@ -573,23 +573,26 @@ brief to the branch's current state instead of extending it, put a new
 qualification of its headline beside the headline, and put the round's
 mechanics in the account.
 
-**4. Check the anchor's title.** `pr-open.sh`, `pr-facts.sh` and `merge.sh` read
-the anchor, the open bead that carries a `merge_result` for this branch, which on
-fresh work is this bead. The PR's title is composed from its title: `pr-open.sh`
-writes it at create, `pr-stack.sh` keeps an open PR's title equal to it, and the
-squash merge takes its commit subject from it. Like the summary, it names the
-branch, not this pass. A rework that changed what the branch does, or fresh work
-that ended narrower or broader than what was filed, leaves a title naming work
-the branch does not do. Read it:
+**4. Name the branch on the anchor's title.** `pr-open.sh`, `pr-facts.sh` and
+`merge.sh` read the anchor, the open bead that carries a `merge_result` for this
+branch, which on fresh work is this bead. The PR's title is composed from its
+title: `pr-open.sh` writes it at create, `pr-stack.sh` keeps an open PR's title
+equal to it, and the squash merge takes its commit subject from it. Like the
+summary, it names the branch, not this pass. Read it:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --anchor-only --convoy {{convoy_id}}
 ```
-When it no longer names what the branch does, pass one line of plain words that
-does as `--title` below. Leave out the conventional-commit type and the bead id:
-the PR title adds both. When the title still fits, pass no `--title`. The handoff
-writes it onto the anchor, never onto the PR: the merge cadence composes the PR
-title from the anchor, so a title typed into the PR alone is replaced on its next
-pass.
+A title was filed before the work, so it can name a symptom or work the branch
+does not do, and only you know what the branch turned out to be. Load the skill
+`{{binding_prefix}}commit-conventions` and pass the branch's subject line by it as
+`--title` below: the type, the scope if your rig's rules name scopes, then the
+words, with no bead id, because the PR title adds it.
+`git log --format=%s origin/<target>..HEAD` lists the subjects you committed. A
+title with no type takes one from the bead's kind, which reads `chore:` on a
+task. Leave `--title` out only when the title already opens with the type and
+scope that fit and still names what the branch does. The handoff writes it onto
+the anchor, never onto the PR: the merge cadence composes the PR title from the
+anchor, so a title typed into the PR alone is replaced on its next pass.
 
 **5. Hand off.** This pushes the branch and verifies it on origin, runs the
 bring-current guard, writes the summary and any retitle onto the anchor, writes
@@ -597,7 +600,7 @@ the refinery handoff, wakes the refinery, closes this step, releases the local
 branch, and drains. Pass the anchor the last call printed, when it printed one.
 `--notes` is appended to the bead's notes, never written over them.
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --convoy {{convoy_id}} --base {{base_branch}} --binding-prefix {{binding_prefix}} --anchor "<the anchor it printed, or leave this flag out>" --summary-file "<the summary file>" --title "<the new title, or leave this flag out>" --notes "Implemented: <brief summary>"
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --convoy {{convoy_id}} --base {{base_branch}} --binding-prefix {{binding_prefix}} --anchor "<the anchor it printed, or leave this flag out>" --summary-file "<the summary file>" --title "<type>(<scope>): <what the branch does>" --notes "Implemented: <brief summary>"
 ```
 - Exit 0: handed off and drained. You are gone.
 - Exit 3: nothing is handed off and you must not drain: it names what you owe,

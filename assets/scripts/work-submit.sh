@@ -52,7 +52,8 @@
 # after the handoff can only be reported.
 #
 # --anchor-only prints the anchor and its title, for the caller to judge whether
-# the title still names what the branch does, and writes nothing.
+# the title opens with the type and scope that fit and names what the branch
+# does, and writes nothing.
 #
 # exit: 0 handed off, or halted as asked, and drained · 3 the caller owes something
 # first, nothing handed off, no drain · 1 stopped, and what follows was taken care
@@ -77,7 +78,8 @@ usage: work-submit.sh --convoy <id>|--bead <id> --base <branch> --notes "<text>"
   --notes          appended to the work bead's notes with the handoff
   --anchor         the anchor --anchor-only printed; absent, it is resolved here
   --summary-file   the PR's summary; empty or absent writes none
-  --title          the anchor's new title, in plain words; absent keeps it
+  --title          the anchor's new title: the branch's subject line, with its
+                   type and scope and no bead id; absent keeps it
   --store-only     the beads the run created or routed, for a run with no commit
   --done           with --store-only, the close brief when the record finishes
                    the bead
