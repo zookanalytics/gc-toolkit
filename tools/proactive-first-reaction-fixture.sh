@@ -600,7 +600,7 @@ echo "── the disposition script contract (first-reaction-dispose.sh) ──"
 D="$(cat "$DISPOSE")"
 [ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
-has "the exits are the ones the script accepts"      "actionable|recommend|blocked|until|close|ruling" "$D"
+has "the exits are the ones the script accepts"      "actionable|recommend|blocked|close|ruling" "$D"
 has "the blocked exit names an existing wait"            "--waiting-on"  "$D"
 has "…or files the missing one, deduped by cause"        "--blocker-key" "$D"
 # recommend is the bridge between actionable and ruling: it files the same gate
@@ -617,11 +617,11 @@ has "the completion marker names the reaction bead"      "gc.reacted_by" "$D"
 has "…keyed to the reaction bead passed in"              "reaction-bead" "$D"
 has "the route default lives in the script, once"        "gc-toolkit.polecat" "$D"
 has "the blocked exit refuses a cross-store edge"        "another store" "$D"
-# A bead whose job ends when another lands closes through the until edge alone:
-# a blocks edge only sequences work, and the pass closes no bead on one.
-has "the until exit writes an until edge, not a blocks one" 'type: "until"' "$D"
-has "…every one of them in one write"                    "dep add --file -" "$D"
-has "…and reads it back by its type"                     "-t until"      "$D"
+# A bead whose job ends when another lands waits on it through a blocks edge,
+# and the validating closer checks it once that one closes: nothing closes it
+# unchecked.
+has "the close exit can wait on the bead whose landing ends the job" "--waiting-on (close" "$D"
+absent "…and no exit writes an until edge"                'type: "until"' "$D"
 # Origin does not decide the exit: an operator capture is triaged on its merits
 # like any other bead, and the guardrail (a genuine fork, an irreversible or
 # destructive action, or a policy call goes to a human) lives in the reacting
@@ -716,13 +716,13 @@ has "prompt attributes the takeaway to proactive"     "--by proactive"          
 has "prompt names the actionable exit"                "**actionable**"           "$PM"
 has "prompt names the recommend exit"                 "**recommend**"            "$PM"
 has "prompt names the blocked exit"                   "**blocked**"              "$PM"
-has "prompt names the until exit"                     "**until**"                "$PM"
 has "prompt names the close exit"                     "**close**"                "$PM"
 has "prompt names the ruling exit"                    "**ruling**"               "$PM"
 has "prompt teaches the actionable call"              "--disposition actionable" "$PM"
 has "prompt teaches the recommend call"               "--disposition recommend"  "$PM"
 has "prompt teaches the blocked call"                 "--disposition blocked"    "$PM"
-has "prompt teaches the until call"                   "--disposition until"      "$PM"
+absent "prompt teaches no until exit: nothing closes a bead unchecked" "--disposition until" "$PM"
+has "prompt teaches the close that waits on a landing" "--waiting-on <bead-id>"   "$PM"
 has "prompt teaches the close call"                   "--disposition close"      "$PM"
 has "prompt teaches the ruling call"                  "--disposition ruling"     "$PM"
 absent "prompt teaches no superseded exit: a reaction never closes" "--disposition superseded" "$PM"
