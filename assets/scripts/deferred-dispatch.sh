@@ -179,11 +179,8 @@ LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
 BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
 DRY_RUN=0
 
-# The retry cap hands a stuck dispatch to a person: a human gate on the bead
-# through human-gate.sh (one open gate per bead and key), or a conversation on
-# it through gc-helm.sh open when the bead has open children. Both resolve
-# beside this script; the env overrides let the hermetic test point them at
-# stubs.
+# The helpers the retry cap asks a person through resolve beside this script; the
+# env overrides let the hermetic test point them at stubs.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$SCRIPTS_DIR/human-gate.sh}"
 HELM="${GC_HELM_TOOL:-$SCRIPTS_DIR/gc-helm.sh}"
@@ -1469,7 +1466,7 @@ reconcile_dispatch() {
         return 1; }
 
     local expected processed=0 dispatched=0 retired=0 held=0 stranded=0 assigned=0 capped=0 failed=0 left=0 budget_noted=0 heldf
-    local -a left_ids=() esc_left_ids=()
+    local -a left_ids=() ask_left_ids=()
     expected="$(wc -l < "$rows" | tr -d ' ')"
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; heldf="$REPLY"
 
@@ -1621,16 +1618,16 @@ reconcile_dispatch() {
         # The retry has a budget. Each sling attempt mints an input convoy, so a
         # dispatch that never finalizes must stop re-slinging before it leaks one
         # convoy per pass. The counter (bumped in the stamp write below) is the
-        # memory a bare rollback erases. At the cap, ask a person once
-        # (human-gate.sh dedups on the key) and leave the arm — never retire an
-        # unproven dispatch — so a person decides rather than reconcile looping
-        # forever. The gate blocks the bead, so the re-sling waits for the
-        # answer as well as for the cleared cap. A bead with an open child is
-        # asked about in a conversation instead: the cap already holds the arm,
-        # and a gate on a parent would pause its unstarted parts over a failed
-        # sling. One read tells, any child that is not closed or pinned, and a
-        # read that fails files the gate. Past the pass budget the ask waits
-        # too: the bead stays capped and armed, so the next pass files it.
+        # memory a bare rollback erases. At the cap, ask a person once and leave
+        # the arm — never retire an unproven dispatch — so a person decides
+        # rather than reconcile looping forever. The gate blocks the bead, so the
+        # re-sling waits for the answer as well as for the cleared cap. A bead
+        # with an open child is asked about in a conversation instead: the cap
+        # already holds the arm, and a gate on a parent would pause its unstarted
+        # parts over a failed sling. One read tells, any child that is not closed
+        # or pinned, and a read that fails files the gate. Past the pass budget
+        # the ask waits too: the bead stays capped and armed, so the next pass
+        # files it.
         fails="$(meta_of "$json" "$K_FAILS")"
         case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         if [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then
@@ -1639,7 +1636,7 @@ reconcile_dispatch() {
             elif ! sling_fits_budget; then
                 [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or asks this pass"; }
                 echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; asking a person waits for the next pass" >&2
-                esc_left_ids+=("$id")
+                ask_left_ids+=("$id")
             else
                 echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; asking a person and leaving the arm" >&2
                 cap_msg="deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry."
@@ -1742,16 +1739,16 @@ reconcile_dispatch() {
         !($1 in arms) { order[++n] = $1; arms[$1] = $2; next }
         { arms[$1] = arms[$1] " " $2 }
         END { for (i = 1; i <= n; i++) printf "%s: HELD by %s: %s\n", prog, order[i], arms[order[i]] }' "$heldf"
-    local esc_left="${#esc_left_ids[@]}"
+    local ask_left="${#ask_left_ids[@]}"
     if [ "$left" -gt 0 ]; then
         echo "$PROG: left $left ready bead(s) armed for the next pass: ${left_ids[*]}"
         LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$left ready bead(s) left armed for the next pass"
         for id in "${left_ids[@]}"; do LEFT_SCOPES+=("$id" "sling left for the next pass"); done
     fi
-    if [ "$esc_left" -gt 0 ]; then
-        echo "$PROG: left the ask about $esc_left capped bead(s) for the next pass: ${esc_left_ids[*]}"
-        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$esc_left capped bead(s) left for the next pass to ask about"
-        for id in "${esc_left_ids[@]}"; do LEFT_SCOPES+=("$id" "ask left for the next pass"); done
+    if [ "$ask_left" -gt 0 ]; then
+        echo "$PROG: left the ask about $ask_left capped bead(s) for the next pass: ${ask_left_ids[*]}"
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$ask_left capped bead(s) left for the next pass to ask about"
+        for id in "${ask_left_ids[@]}"; do LEFT_SCOPES+=("$id" "ask left for the next pass"); done
     fi
     echo "$PROG: $dispatched dispatched, $retired retired, $held held, $stranded stranded, $assigned assigned, $capped capped, $left left for the next pass, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
