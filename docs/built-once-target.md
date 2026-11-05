@@ -134,9 +134,8 @@ conversation doctrine. Intake is slung work whose exits are native writes. The
 subsystem owns the converse, first-reaction and mechanik prompts, the converse
 skills, the operator's intake and the terminal surfaces.
 
-The trade: the keys the visit kind left behind, and the migration that still
-reads them, go with the cutover's follow-up (tk-1tfzr71.33). The first reaction
-stops being a bead kind of its own (tk-1tfzr71.17).
+The trade: the first reaction stops being a bead kind of its own
+(tk-1tfzr71.17).
 
 ### Board
 
@@ -259,19 +258,14 @@ and the change that fires the trigger deletes it.
 - The hand-offs at `escalate.sh` and `escalation-rig.sh`, 241 lines with their
   test. Trigger: no open step bead names them, and no session started before the
   cutover still runs. Carried by tk-kvdomjb.
-- `migrate-visits-to-gates.sh`, the cutover's one-shot move of every open visit,
-  2,180 lines with its test, and the keys only it still reads. Trigger: its
-  `--check` passes and the operator clears the cutover gate (tk-nly1mqd). Carried
-  by tk-1tfzr71.33.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
   with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.12.
 - The PR reminder's old marker. Trigger: no open PR carries one. Carried by
-  tk-1tfzr71.33.
+  tk-1tfzr71.45.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
-  files beside the migration's own 43: the bare `superseded_by` key, the
-  `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
-  among others. Trigger: no store or open PR holds the shape. Each goes with the
-  member that rewrites its reader.
+  files: the bare `superseded_by` key, the `gc.proactive_reaction=1` proof and
+  PR bodies older than the managed region, among others. Trigger: no store or
+  open PR holds the shape. Each goes with the member that rewrites its reader.
 
 ### Doctrine restated per call site
 
@@ -311,7 +305,7 @@ shows its measured net instead.
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
-| tk-1tfzr71.33 | the cutover's migration script, the keys only it reads, the PR reminder's old marker | 2,180 | the cutover gate (tk-nly1mqd) |
+| tk-1tfzr71.45 | the PR reminder's old marker | partial files | the open PRs whose reminders carry it (tk-3zlwp6p, tk-r4c0g67) |
 | tk-c8724xi | the resolution loops, the doctrine its census names, its comment excess | 11 loops, about 35 restatements, about 150 comment lines | nothing |
 | tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,390 | nothing |
 | tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | nothing |
@@ -339,7 +333,7 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-kvdomjb and the migration members name come to 65k of
+The whole files that tk-kvdomjb and the migration members name come to 63k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. tk-c8724xi and the page's own

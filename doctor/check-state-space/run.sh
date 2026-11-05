@@ -60,28 +60,38 @@ enum_str=$(printf '%s' "$states_json" | jq -r 'join(", ")')
 HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless_flagged|close_failures|close_escalated|gate_verdict_condemned)$'
 # Keys retired from the metadata registry together with every reader, what a
 # live bead still carrying one leaves undone, and what to do about it. They are
-# read on every live status, because the bead most likely to carry one is a
-# visit, which is in_progress while a sitting holds it. The escalation keys are
-# the visit-era helper's (specs/tk-0ur8r9p/design.md section 2): human-gate.sh
-# writes none of them, so a carrier holds nothing back and means a retired
-# writer is stamping again. gc.hold_demand and the gc.pr_visit_* pair are the
-# visit-era sitting's (section 7): a hold files a human gate its conversation
-# replies to, and the sign-off hands the reminder its text directly.
-# gc.outcome_reason is the visit-era close's (section 10): a conversation's
-# close reason carries that sentence, and the board's sittings card reads it
-# there.
-RETIRED_KEYS=(stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions gc.outcome_reason)
+# read on every live status, because a bead a session holds is in_progress, not
+# open. The escalation keys are the visit-era helper's
+# (specs/tk-0ur8r9p/design.md section 2): human-gate.sh writes none of them, so
+# a carrier holds nothing back and means a retired writer is stamping again.
+# gc.hold_demand and the gc.pr_visit_* pair are the visit-era sitting's
+# (section 7): a hold files a human gate its conversation replies to, and the
+# sign-off hands the reminder its text directly. gc.outcome_reason is the
+# visit-era close's (section 10): a conversation's close reason carries that
+# sentence, and the board's sittings card reads it there. From escalation_key
+# on, the keys are the visit's and the legacy demand's own, and the finding
+# keys that named a visit (section 10).
+RETIRED_KEYS=(
+    stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last
+    gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions gc.outcome_reason
+    escalation_key gc.demand_for gc.gate_visit gc.ruling gc.folded_into
+    visit.recheck sweep.new_ids sweep.carried_ids sweep.pass_at
+    finding.visit finding.ruling_visit
+)
 retired_consequence() { # <key> <value>
+    local inert="so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key"
     case "$1" in
-        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (gc.demand_for=$2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
+        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (a human gate that blocks $2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
         escalation_raised_by|escalation.recurrences|escalation.recurrence_last)
-            printf '%s' "human-gate.sh neither redirects a wisp nor keeps a recurrence tally, so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key" ;;
+            printf '%s' "human-gate.sh neither redirects a wisp nor keeps a recurrence tally, $inert" ;;
         gc.hold_demand)
-            printf '%s' "a sitting's hold filed the demand $2 on this visit, and no sign-off reads the key back to discharge it. The cutover's migration closes the visit and files that demand again as a human gate (specs/tk-0ur8r9p/design.md section 11), so run the migration on this store; on a bead that is no visit, clear the key" ;;
+            printf '%s' "a converse hold files a human gate its conversation replies to, $inert" ;;
         gc.pr_visit_summary|gc.pr_visit_actions)
-            printf '%s' "the sign-off hands the PR reminder its text directly, so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key" ;;
+            printf '%s' "the sign-off hands the PR reminder its text directly, $inert" ;;
         gc.outcome_reason)
-            printf '%s' "the board's sittings card reads a conversation's close reason, so nothing writes or reads the key and it holds nothing back. On an open visit it is a close that never landed, which the cutover's migration completes (specs/tk-0ur8r9p/design.md section 11); on any other bead a retired writer stamped it. Find that writer, then clear the key" ;;
+            printf '%s' "the board's sittings card reads a conversation's close reason, $inert" ;;
+        escalation_key|gc.demand_for|gc.gate_visit|gc.ruling|gc.folded_into|visit.recheck|sweep.new_ids|sweep.carried_ids|sweep.pass_at|finding.visit|finding.ruling_visit)
+            printf '%s' "the key belongs to visits and legacy demands, which human gates and conversations replace, $inert" ;;
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }

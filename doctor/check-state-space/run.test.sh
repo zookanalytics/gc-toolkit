@@ -258,16 +258,16 @@ hasnt "$OUT" "OK:" "it does not forge the clean all-clear line"
 hasnt "$OUT" "a-dp" "the store is not reported clean — the run is non-clean, not a false pass"
 
 # --- 15. a live bead still carrying a retired key ------------------------
-# stall_root was retired with every reader. A visit carrying it is in_progress
-# while a sitting holds it, so the probe reads every live status, not only the
-# open ones the healer-key scan reads.
+# stall_root was retired with every reader. A bead a session holds is
+# in_progress, so the probe reads every live status, not only the open ones the
+# healer-key scan reads.
 store '[{"id":"a-r1","status":"in_progress","metadata":{"task_kind":"visit","stall_root":"root-x"}},
         {"id":"a-r2","status":"closed","metadata":{"task_kind":"visit","stall_root":"root-y"}},
         {"id":"a-r3","status":"open","metadata":{"task_kind":"visit","stall_root":""}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a live bead carrying the retired stall_root key is an ERROR"
 has "$OUT" "a-r1" "it names the in_progress visit, which an open-only scan would miss"
-has "$OUT" "gc.demand_for=root-x" "it names the bead a hold under the key would have gated"
+has "$OUT" "a human gate that blocks root-x" "it names the bead a hold under the key would have gated"
 has "$OUT" "gc bd update a-r1 --unset-metadata stall_root" "it gives the clearing command"
 hasnt "$OUT" "a-r2" "a closed bead carrying it is history, not a finding"
 hasnt "$OUT" "a-r3" "an empty value is a cleared key, not a finding"
@@ -284,11 +284,8 @@ has "$OUT" "gc bd update a-r5 --unset-metadata escalation.recurrences" "it names
 has "$OUT" "gc bd update a-r6 --unset-metadata escalation_raised_by" "…and the in_progress one"
 has "$OUT" "a retired writer stamped it" "…and says what its presence means"
 hasnt "$OUT" "a-r7" "a closed bead carrying one is history, not a finding"
-# The visit-era sitting's keys. gc.hold_demand on an open visit names a hold's
-# demand the cutover's migration files again as a human gate, so the finding
-# names the migration; the reminder stash has no writer and no reader. The
-# visit-era close's gc.outcome_reason has no reader either: on an open visit it
-# is a close that never landed, which the migration completes.
+# The visit-era sitting's keys and the visit-era close's gc.outcome_reason have
+# no writer and no reader, so a live bead carrying one holds nothing back.
 store '[{"id":"a-r8","status":"in_progress","metadata":{"task_kind":"visit","gc.hold_demand":"tk-dem1"}},
         {"id":"a-r9","status":"open","metadata":{"gc.pr_visit_summary":"we shipped it"}},
         {"id":"a-r10","status":"closed","metadata":{"gc.pr_visit_actions":"routed tk-w"}},
@@ -297,22 +294,45 @@ store '[{"id":"a-r8","status":"in_progress","metadata":{"task_kind":"visit","gc.
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a live bead carrying a retired converse key is an ERROR"
 has "$OUT" "gc bd update a-r8 --unset-metadata gc.hold_demand" "it names the held visit and the clearing command"
-has "$OUT" "files that demand again as a human gate" "…and says the migration carries the hold's demand"
+has "$OUT" "a converse hold files a human gate its conversation replies to" "…and says what a hold files instead"
 has "$OUT" "gc bd update a-r9 --unset-metadata gc.pr_visit_summary" "…and the reminder stash on an open bead"
 hasnt "$OUT" "a-r10" "a closed visit carrying the stash is history, not a finding"
-has "$OUT" "gc bd update a-r11 --unset-metadata gc.outcome_reason" "…and an open visit whose close never landed"
-has "$OUT" "the cutover's migration completes" "…which the finding hands to the migration"
+has "$OUT" "gc bd update a-r11 --unset-metadata gc.outcome_reason" "…and the outcome reason on a live visit"
+has "$OUT" "the board's sittings card reads a conversation's close reason" "…and says where the close's sentence is read"
 hasnt "$OUT" "a-r12" "a closed visit carrying its outcome reason is history, not a finding"
+hasnt "$OUT" "migration" "no finding sends a person to a migration"
+# The visit's and the legacy demand's own keys, and the finding keys that named
+# a visit, have no writer and no reader either. Each one on a live bead is a
+# finding, whichever live status the bead is in, and the same key on a closed
+# bead is history.
+RK_VISIT="escalation_key gc.demand_for gc.gate_visit gc.ruling gc.folded_into visit.recheck sweep.new_ids sweep.carried_ids sweep.pass_at finding.visit finding.ruling_visit"
+LIVE_ST=(open in_progress blocked deferred hooked pinned)
+rows=""; n=0
+for k in $RK_VISIT; do
+  n=$((n + 1))
+  rows="$rows$(jq -nc --arg id "a-k$n" --arg st "${LIVE_ST[$(( (n - 1) % 6 ))]}" --arg k "$k" '{id: $id, status: $st, metadata: {($k): "x"}}'),"
+  rows="$rows$(jq -nc --arg id "a-c$n" --arg k "$k" '{id: $id, status: "closed", metadata: {($k): "x"}}'),"
+done
+store "[${rows%,}]"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a live bead carrying a key of the visit or the legacy demand is an ERROR"
+n=0
+for k in $RK_VISIT; do
+  n=$((n + 1))
+  has "$OUT" "gc bd update a-k$n --unset-metadata $k" "…$k on a bead in status ${LIVE_ST[$(( (n - 1) % 6 ))]} is named with its clearing command"
+  hasnt "$OUT" "a-c$n " "…and $k on a closed bead is history"
+done
+has "$OUT" "which human gates and conversations replace" "…and the finding says what replaces the key"
 # One bead carrying two retired keys is named once for each.
-store '[{"id":"a-r13","status":"blocked","metadata":{"gc.hold_demand":"tk-dem2","gc.outcome_reason":"settled"}}]'
+store '[{"id":"a-r13","status":"blocked","metadata":{"escalation_key":"k","visit.recheck":"liveness-recheck.sh"}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a bead carrying two retired keys is an ERROR"
-has "$OUT" "gc bd update a-r13 --unset-metadata gc.hold_demand" "…named for the first key"
-has "$OUT" "gc bd update a-r13 --unset-metadata gc.outcome_reason" "…and for the second"
+has "$OUT" "gc bd update a-r13 --unset-metadata escalation_key" "…named for the first key"
+has "$OUT" "gc bd update a-r13 --unset-metadata visit.recheck" "…and for the second"
 # The probe reads the other live statuses in one listing; when that listing
 # does not read, the check warns rather than passing, and names no carrier.
 store '[{"id":"a-r4","status":"open","metadata":{}},
-        {"id":"a-r14","status":"in_progress","metadata":{"gc.pr_visit_summary":"we shipped it"}}]'
+        {"id":"a-r14","status":"in_progress","metadata":{"gc.ruling":"ship it"}}]'
 OUT=$(BD_FAIL_STATUS=in_progress,blocked,deferred,hooked,pinned run_check); RC=$?
 eq "$RC" "1" "an unreadable retired-key probe warns, never passes"
 has "$OUT" "retired-key check did NOT run" "the warning says the probe did not run"
