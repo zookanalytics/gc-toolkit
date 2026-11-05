@@ -233,11 +233,14 @@ recorded, not a run of the reviewed commit, so it is no fallback for one.
 The modality is the cheapest screenshot that shows a message whole. A
 plain-text message fits a `terminal` capture, either of the command that prints
 it or, with `--text`, of the file the run wrote. A `markdown` capture can carry
-one too. An HTML message is a `page` capture of the HTML the run wrote: serve
-the directory that holds it with `--serve-dir`, start the script at the file,
-and take the capture with `--full-page`. When the capture holds the body alone,
-give the sender and the subject in the delivery's `--body`, as the same run
-produced them. Open each PNG and check that it holds the whole message.
+one too, with the message inside a fenced code block. Outside one, GitHub's
+renderer reads the message as markdown, and a line that opens with a `#` and a
+space, or one above a `--` signature line, shows as a heading. An HTML message
+is a `page` capture of the HTML the run wrote: serve the directory that holds it
+with `--serve-dir`, start the script at the file, and take the capture with
+`--full-page`. When the capture holds the body alone, give the sender and the
+subject in the delivery's `--body`, as the same run produced them. Open each PNG
+and check that it holds the whole message.
 
 Deliver each message on its own, in a PNG named for it, beside the clip or the
 screenshot of any screen the change alters.
