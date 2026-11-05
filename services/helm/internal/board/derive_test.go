@@ -1302,7 +1302,7 @@ func TestSittingsAreOrderedRunningFirst(t *testing.T) {
 func TestSittingOrderIsDeterministic(t *testing.T) {
 	at := time.Date(2026, 8, 1, 5, 0, 0, 0, time.UTC)
 	in := []Sitting{sit("b", "closed", at, at), sit("a", "closed", at, at), sit("c", "closed", at, at)}
-	got := orderSittings(in)
+	got := orderSittings(stampSittings(in, Facts{}))
 	if got[0].ID != "a" || got[1].ID != "b" || got[2].ID != "c" {
 		t.Errorf("equal stamps tie-break by id: got %v", []string{got[0].ID, got[1].ID, got[2].ID})
 	}
@@ -1324,13 +1324,13 @@ func TestCapSittingsKeepsEveryRunningOne(t *testing.T) {
 		in = append(in, sit(fmt.Sprintf("done-%d", i), "closed", at(i), at(i+1)))
 	}
 
-	kept, dropped := CapSittings(orderSittings(in), 2)
+	kept, dropped := CapSittings(BuildBoard(nil, at(10), false, nil, Facts{Sittings: in}).Sittings, 2)
 	if dropped != 3 {
 		t.Errorf("dropped = %d, want 3", dropped)
 	}
 	var running, closed int
 	for _, s := range kept {
-		if s.Status == "closed" {
+		if s.State == SittingClosed {
 			closed++
 		} else {
 			running++
@@ -1369,7 +1369,7 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 
 	// A concluded sitting: the takeaway is the headline, the subject title the topic.
 	concluded := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, Takeaway: takeaway}
-	if got := concluded.Headline(); got != takeaway {
+	if got := sittingHeadline(concluded); got != takeaway {
 		t.Errorf("a takeaway is the headline: got %q, want %q", got, takeaway)
 	}
 	if got := concluded.Topic(); got != subjTitle {
@@ -1378,20 +1378,20 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 
 	// A takeaway still wins when a close reason is also present.
 	both := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, Takeaway: takeaway, OutcomeReason: reason}
-	if got := both.Headline(); got != takeaway {
+	if got := sittingHeadline(both); got != takeaway {
 		t.Errorf("a takeaway wins over the close reason: got %q, want %q", got, takeaway)
 	}
 
 	// A dismissal: no takeaway, but a close reason — the headline is the
 	// reason, so the row reads as a decision instead of the bare topic.
 	dedup := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, OutcomeReason: reason}
-	if got := dedup.Headline(); got != reason {
+	if got := sittingHeadline(dedup); got != reason {
 		t.Errorf("no takeaway but a close reason: the headline is the reason: got %q, want %q", got, reason)
 	}
 
 	// No takeaway, no reason, subject read: the headline is the topic, NOT the conversation's title.
 	bare := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle}
-	if got := bare.Headline(); got != subjTitle {
+	if got := sittingHeadline(bare); got != subjTitle {
 		t.Errorf("no takeaway falls back to the subject title, not the conversation's title: got %q, want %q", got, subjTitle)
 	}
 	if got := bare.Topic(); got != subjTitle {
@@ -1400,7 +1400,7 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 
 	// Subject unread: the last resorts are the conversation's title and the bare id.
 	unread := Sitting{Subject: "tk-anchor", Title: convTitle}
-	if got := unread.Headline(); got != convTitle {
+	if got := sittingHeadline(unread); got != convTitle {
 		t.Errorf("an unread subject falls back to the conversation's title: got %q, want %q", got, convTitle)
 	}
 	if got := unread.Topic(); got != "tk-anchor" {
@@ -1539,7 +1539,7 @@ func TestQueuedChildrenAreNotStranded(t *testing.T) {
 		{ID: "ra-epic.5", Status: "closed"},
 	}
 	conv := conversationAnchor("ra-conv", "ra-epic.1", "settle the rework", sittingAlias("ra-conv"))
-	facts := liveOwners(sittingAlias("ra-conv"))
+	facts := withSittings([]Anchor{conv}, liveOwners(sittingAlias("ra-conv")))
 	epic := func(kids []Child) []Anchor {
 		return []Anchor{{ID: "ra-epic", Title: "Platform foundation", Kind: "epic", Source: "epic",
 			Rig: "rig-a", Prefix: "ra", Priority: ptr(2), Children: kids}, conv}
@@ -1933,7 +1933,7 @@ func TestInReviewBeadIsNotADisposition(t *testing.T) {
 			}}
 	}
 	conv := conversationAnchor("ra-conv", "ra-pr", "settle the rework", sittingAlias("ra-conv"))
-	facts := liveOwners(sittingAlias("ra-conv"))
+	facts := withSittings([]Anchor{conv}, liveOwners(sittingAlias("ra-conv")))
 
 	for _, order := range [][]string{{"merge", "parked"}, {"parked", "merge"}} {
 		t.Run(strings.Join(order, " then "), func(t *testing.T) {
@@ -2004,7 +2004,7 @@ func TestTakeawayRowSpeaksItsState(t *testing.T) {
 	anchors = append(anchors,
 		conversationAnchor("ra-conv", "ra-talk", "what next", sittingAlias("ra-conv")),
 		conversationAnchor("ra-conv2", "ra-asked", "close it or say why not", assigneeHuman))
-	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners(sittingAlias("ra-conv")))
+	b := BuildBoard(anchors, fixtureNow, false, nil, withSittings(anchors, liveOwners(sittingAlias("ra-conv"))))
 
 	cases := []struct {
 		id, frontier, needs string
@@ -2135,12 +2135,13 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 	live.Inflight = map[string][]string{"ra-slung": {"polecat-live"}}
 	// A live sitting holds the conversations on ra-talk and ra-pr-talk, and the
 	// one on ra-asked waits in the operator's queue.
-	conversations := liveOwners(sittingAlias("ra-c1"), sittingAlias("ra-c3"))
-	conversations.human = indexHuman([]Anchor{
+	talks := []Anchor{
 		conversationAnchor("ra-c1", "ra-talk", "what next", sittingAlias("ra-c1")),
 		conversationAnchor("ra-c2", "ra-asked", "close it or say why not", assigneeHuman),
 		conversationAnchor("ra-c3", "ra-pr-talk", "settle the rework", sittingAlias("ra-c3")),
-	}, conversations)
+	}
+	conversations := withSittings(talks, liveOwners(sittingAlias("ra-c1"), sittingAlias("ra-c3")))
+	conversations.human = indexHuman(talks, conversations)
 	cases := []struct {
 		name      string
 		in        stateInput

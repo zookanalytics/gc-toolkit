@@ -1803,6 +1803,9 @@ hasnt "$(cat "$STUB_ESC_LOG")" "--subject BF1 --key merge-blocked-threads" "a th
 has "$(cat "$STUB_ESC_LOG")" "--subject BF2 --key merge-blocked-threads" "…but one a human wrote in counts like any thread"
 has "$(cat "$STUB_ESC_LOG")" "--subject BF3 --key merge-blocked-threads" "…and so does one whose marker text is not the city's own post"
 has "$(cat "$STUB_ESC_LOG")" "--subject BF4 --key merge-blocked-threads" "…and so does one whose answer leaves it open for the operator"
+: > "$STUB_ESC_LOG"
+out=$(STUB_SELF_LOGIN_RC=1 run)
+eq "$(grep -c -- '--key merge-blocked-threads' "$STUB_ESC_LOG")" "0" "with no acting login no thread is put to a person, since the city's own findings cannot be told from anyone's"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# the merge-blocked-approval gate category is retired: every open one is withdrawn, even with no live anchors"
@@ -4177,6 +4180,9 @@ printf '%s' "$(prview 52 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPR
 out=$(STUB_SELF_LOGIN="" run)
 has "$out" "the acting login is unresolved" "an unresolved login is named"
 eq "$(meta P7 pr_posture)" "commented@sha-52" "the standing posture is left holding, never downgraded blind"
+out=$(STUB_SELF_LOGIN_RC=1 run)
+has "$out" "the acting login is unresolved" "…and a login read that fails the way gh fails, its error body on stdout, is no login"
+eq "$(meta P7 pr_posture)" "commented@sha-52" "…so the standing posture is left holding then too"
 
 echo "# identity mismatch records nothing"
 store "[$(anchor I1 30)]"

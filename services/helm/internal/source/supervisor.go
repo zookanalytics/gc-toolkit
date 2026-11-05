@@ -330,11 +330,12 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 	// definition, and so is a conversation a sitting holds — while GET /beads
 	// takes a single status per request and the scan behind the metadata kinds
 	// asks for `open`. Lifting either onto that scan would drop exactly the rows
-	// that make it true. So on this backend a slung bead reads as stranded and
-	// a bead only a held conversation holds reads as unheld: the same shape of
-	// gap it already documents for updated_at, a narrower board rather than a
-	// wrong one. What it must not do is invert the liveness test, which is what
-	// leaving OwnerState empty would do.
+	// that make it true. So on this backend a slung bead reads as stranded, a
+	// bead only a held conversation holds reads as unheld, and a conversation it
+	// does see reads waiting, because a conversation's state comes from its
+	// sitting: the same shape of gap it already documents for updated_at, a
+	// narrower board rather than a wrong one. What it must not do is invert the
+	// liveness test, which is what leaving OwnerState empty would do.
 	owners := sessionStates(ctx, s.gc, g)
 
 	facts := board.Facts{OwnerState: owners}
