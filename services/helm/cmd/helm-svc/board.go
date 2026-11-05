@@ -803,10 +803,12 @@ const (
 	colSubjectMax  = 44
 	colAge         = 7
 	colHeadlineMax = 96
+	// colSittingState fits "start failed", the longest state a sitting prints.
+	colSittingState = 13
 )
 
-// renderSittings writes the conversation record under the ranked table: which
-// sittings are running, and what the recently closed ones concluded.
+// renderSittings writes the conversation record under the ranked table: where
+// each sitting stands, and what the recently closed ones concluded.
 //
 // The ranked table answers what needs doing. This answers what is being talked
 // about, which is a different question and deliberately not ranked against it —
@@ -817,17 +819,8 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 	}
 	shown, dropped := board.CapSittings(sittings, board.DefaultMaxSittings)
 
-	var running, closed int
-	for _, s := range sittings {
-		if s.Status == "closed" {
-			closed++
-		} else {
-			running++
-		}
-	}
-
-	fmt.Fprintf(w, "\nSittings — %d running · %d closed recently\n", running, closed)
-	fmt.Fprint(w, "● still running · AGE is time since it started, or since it ended · HEADLINE is what a closed sitting concluded, or why it closed\n")
+	fmt.Fprintf(w, "\nSittings — %s\n", sittingCounts(sittings))
+	fmt.Fprint(w, "in session = a live session holds it, so you can attach · waiting = open, and no live session holds it, so it waits for you · start failed = the sitting spawned for it failed to start · AGE is time since it started, or since it ended · HEADLINE is what a closed sitting concluded, or why it closed\n")
 
 	// Sized to content for the same reason the ranked table sizes its ID
 	// column: an id loses its meaning when its tail is cut.
@@ -838,22 +831,20 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 		subjW = max(subjW, len([]rune(clip(s.Topic(), colSubjectMax)))+1)
 	}
 
-	fmt.Fprint(w, rpad(" ", colHeld)+rpad("ID", idW)+rpad("RIG", rigW)+
+	fmt.Fprint(w, rpad("STATE", colSittingState)+rpad("ID", idW)+rpad("RIG", rigW)+
 		rpad("SUBJECT", subjW)+rpad("AGE", colAge)+"HEADLINE\n")
 
 	for _, s := range shown {
-		glyph, since := " ", s.ClosedAt
-		if s.Status != "closed" {
-			glyph, since = "●", s.OpenedAt
+		since := s.ClosedAt
+		if s.State != board.SittingClosed {
+			since = s.OpenedAt
 		}
-		// SUBJECT is the topic — the subject bead's title, so the row says what
-		// it is about and not just which id it stands on. HEADLINE is what the
-		// sitting concluded (the takeaway), then its close reason, then that
-		// same topic rather than the conversation's own title. Both are the
-		// model's derivation, shared with the web renderer.
-		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(s.ID, idW)+rpad(s.Rig, rigW)+
+		// STATE and HEADLINE are the values the board derived, the ones the web
+		// renderer prints. SUBJECT is the topic — the subject bead's title, so
+		// the row says what it is about and not just which id it stands on.
+		fmt.Fprint(w, rpad(sittingWord(s.State), colSittingState)+rpad(s.ID, idW)+rpad(s.Rig, rigW)+
 			rpad(clip(s.Topic(), colSubjectMax), subjW)+rpad(shortAge(since, now), colAge)+
-			clip(s.Headline(), colHeadlineMax)+"\n")
+			clip(s.Headline, colHeadlineMax)+"\n")
 	}
 
 	if dropped > 0 {
@@ -861,6 +852,31 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 		// as the whole record.
 		fmt.Fprintf(w, "  … %d older closed sittings not shown (--json on the service carries them all)\n", dropped)
 	}
+}
+
+// sittingWord is a sitting state as a person reads it: `in_session` is "in
+// session" and `start-failed` is "start failed".
+func sittingWord(state string) string {
+	return strings.NewReplacer("_", " ", "-", " ").Replace(state)
+}
+
+// sittingCounts is the record's count line: how many sittings stand in each
+// state, over the whole record rather than the shown rows. A failed start is
+// rare, so it is named only when there is one.
+func sittingCounts(sittings []board.Sitting) string {
+	n := map[string]int{}
+	for _, s := range sittings {
+		n[s.State]++
+	}
+	parts := []string{
+		fmt.Sprintf("%d in session", n[board.SittingInSession]),
+		fmt.Sprintf("%d waiting", n[board.SittingWaiting]),
+	}
+	if c := n[board.SittingStartFailed]; c > 0 {
+		parts = append(parts, fmt.Sprintf("%d start failed", c))
+	}
+	parts = append(parts, fmt.Sprintf("%d closed recently", n[board.SittingClosed]))
+	return strings.Join(parts, " · ")
 }
 
 // shortAge renders how long ago a stamp was, in the coarsest unit that still

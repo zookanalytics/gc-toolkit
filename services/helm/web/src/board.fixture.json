@@ -268,25 +268,27 @@
       "rig": "gc-toolkit",
       "subject": "tk-eemvf",
       "title": "tile density",
-      "status": "in_progress",
       "outcome_reason": "",
       "session": "gc-toolkit__converse-1",
       "opened_at": "2026-08-11T14:40:00Z",
       "takeaway": "",
-      "subject_title": "Attention Canvas — spatial in-canvas operator dashboard"
+      "subject_title": "Attention Canvas — spatial in-canvas operator dashboard",
+      "state": "in_session",
+      "headline": "Attention Canvas — spatial in-canvas operator dashboard"
     },
     {
       "id": "tk-vst02",
       "rig": "gascity",
       "subject": "gt-1a2b3",
       "title": "the convoy is complete",
-      "status": "closed",
       "outcome_reason": "every tracked child has landed; graduate it",
       "session": "gascity__converse-2",
       "opened_at": "2026-08-11T09:12:00Z",
       "closed_at": "2026-08-11T09:48:00Z",
       "takeaway": "every tracked child has landed; the convoy is complete",
-      "subject_title": ""
+      "subject_title": "",
+      "state": "closed",
+      "headline": "every tracked child has landed; the convoy is complete"
     }
   ],
   "partial": true,

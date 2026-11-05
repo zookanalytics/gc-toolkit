@@ -258,7 +258,7 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   what needs a person. A human gate is the human engagement: Gas City's native
   gate (`await_type=human`) on the bead that waits, which any pack, formula or
   person files natively or through `human-gate.sh`, the helper that keeps
-  **exactly one open gate per bead and situation key**. The gate blocks that
+  **one open gate per bead and situation key**. The gate blocks that
   bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
   close, until a person resolves the gate with the answer as its reason, headed
   `ruled:`, `moot:` or `benign:`. A quiet period applies only where a call

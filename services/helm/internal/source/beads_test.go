@@ -2231,6 +2231,9 @@ func TestGatherRecordsSittings(t *testing.T) {
 	if open.Session != "gc-toolkit__converse-1" || open.Subject != "tk-parked" || open.Rig != "gc-toolkit" {
 		t.Errorf("sitting identity: %+v", open)
 	}
+	if open.Assignee != "gc-toolkit/gc-toolkit.tk-sit-open" {
+		t.Errorf("a sitting carries its conversation's holder, which its state reads: %q", open.Assignee)
+	}
 
 	done := got["tk-sit-recent"]
 	if done.Status != "closed" || done.OutcomeReason != "routed the work to the polecat pool" {
@@ -2242,6 +2245,44 @@ func TestGatherRecordsSittings(t *testing.T) {
 	// A conversation no sitting has claimed starts when it was filed.
 	if q := got["tk-queued"]; !q.OpenedAt.Equal(time.Date(2026, 8, 1, 8, 30, 0, 0, time.UTC)) {
 		t.Errorf("an unclaimed conversation starts at its creation: %v", q.OpenedAt)
+	}
+}
+
+// TestGatheredConversationReadsOneStateOnItsRowAndInTheRecord runs the gather
+// through the board. A conversation reaches it as an anchor and as a sitting, from
+// one task, and its row and its sitting read one state, whatever the session list
+// says of the session holding it.
+func TestGatheredConversationReadsOneStateOnItsRowAndInTheRecord(t *testing.T) {
+	for _, tc := range []struct{ name, session, want string }{
+		{"its session is live", "active", board.SittingInSession},
+		{"its session ended", "closed", board.SittingWaiting},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := gatherSittings(t, withGCClient(&fakeGC{sessions: map[string]string{"gc-toolkit/gc-toolkit.tk-sit-open": tc.session}}))
+			b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+
+			states := map[string]string{}
+			for _, s := range b.Sittings {
+				states[s.ID] = s.State
+			}
+			if states["tk-sit-open"] != tc.want {
+				t.Errorf("the sitting held by that session reads %q, want %q", states["tk-sit-open"], tc.want)
+			}
+			if states["tk-queued"] != board.SittingWaiting || states["tk-sit-recent"] != board.SittingClosed {
+				t.Errorf("queued=%q closed=%q", states["tk-queued"], states["tk-sit-recent"])
+			}
+			rows := map[string]string{}
+			for _, row := range b.Tiles {
+				rows[row.ID] = row.SittingState
+			}
+			if rows["tk-parked"] != tc.want {
+				t.Errorf("its subject's row reads %q, want %q", rows["tk-parked"], tc.want)
+			}
+			// tk-asked has no row of its own, so the conversation keeps one.
+			if rows["tk-queued"] != board.SittingWaiting {
+				t.Errorf("the queued conversation's own row reads %q", rows["tk-queued"])
+			}
+		})
 	}
 }
 
