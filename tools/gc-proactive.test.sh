@@ -6,9 +6,9 @@
 # before they hand a bead on.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
-# MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
-# itself. The proactive worker must stand down so a sweep does not file a SECOND
-# visit for a conversation already under way. Two gates are covered here, both
+# MARKED gc.reaction_owned=1, files the ONE conversation, and spawns the sitting
+# itself. The proactive worker must stand down so a sweep does not ask the
+# operator a SECOND time about a conversation already under way. Two gates are covered here, both
 # exercised through the fixture seam (GC_PROACTIVE_FIXTURE), so no live city,
 # Dolt, or gc is needed:
 #   (SCAN-DROP)  scan_precision_filter drops a marked bead from the candidate set
@@ -161,7 +161,7 @@ OUT="$(bash "$SCRIPT" sling tk-intake 2>&1)"; RC=$?
 set -e
 eq "$RC" 3 "(SLING-SKIP) sling of a marked bead exits RC_ALREADY_REACTED (3)"
 has "$OUT" "gc.reaction_owned=1" "(SLING-SKIP) …naming the marker"
-has "$OUT" "file a second" "(SLING-SKIP) …and why (a second visit)"
+has "$OUT" "ask the operator a second time" "(SLING-SKIP) …and why (a second ask)"
 hasnt "$OUT" "would file a reaction bead" "(SLING-SKIP) …nothing dispatched"
 
 echo "# an unmarked bead still proceeds to the dispatch"
@@ -185,7 +185,7 @@ hasnt "$OUT" "would file a reaction bead" "(SUBJECT-ABSENT) …nothing dispatche
 # deferred-dispatch reconcile pass, so the arm is all that sets it apart from
 # raw input. tk-armed carries the record deferred-dispatch.sh arm writes.
 # tk-capped is an arm the reconcile pass stopped retrying at its failure cap,
-# which waits on the visit the cap filed. One more bead per dispatch-path key
+# which waits on the human gate the cap filed. One more bead per dispatch-path key
 # carries only that key. The keys are read from the shared definition, so a key
 # added there is covered here with no edit to this file. tk-blank carries every
 # key with a blank value, which names no queue and no sling target, so it is
