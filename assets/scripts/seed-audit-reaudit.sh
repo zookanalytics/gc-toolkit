@@ -56,7 +56,6 @@ _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SCRIPT_DIR="$_lib_dir"
 
 PROG="seed-audit-reaudit"
-warn()  { echo "$PROG: $*" >&2; }
 usage() { warn "$1"; exit 1; }
 fail()  { warn "$1"; exit 2; }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"

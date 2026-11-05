@@ -36,6 +36,10 @@ default = "0"
 description = "Optional mail address to notify with the report (e.g., human, gascity/gascity-keeper.keeper). Empty = skip mail."
 default = ""
 
+[vars.binding_prefix]
+description = "The binding the city imports gc-toolkit under, with its trailing dot. This sub-pack's formulas run on gc-toolkit's polecats, so gc sling pours them with that binding, and a step drops the dot to call the pack's scripts as gc <binding> scripts-dir prints them."
+default = "gc-toolkit."
+
 [[steps]]
 id = "workspace-setup"
 title = "Set up gc-toolkit worktree (read-only — no branch needed)"
@@ -58,8 +62,7 @@ WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
 # The worktree belongs to this rig's checkout (not the upstream rig step 2
 # fetches), named by path so the session's cwd cannot pick the repo. An empty
 # root would let `git -C ""` follow cwd, so an unresolvable rig fails closed.
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
-OWN_RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+OWN_RIG_ROOT=$("$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh")
 [ -n "$OWN_RIG_ROOT" ] || { echo "workspace-setup: cannot resolve the rig root" >&2; exit 1; }
 git -C "$OWN_RIG_ROOT" fetch --prune origin
 git -C "$OWN_RIG_ROOT" worktree add "$WORKTREE_PATH" --detach "origin/{{base_branch}}"
@@ -70,8 +73,7 @@ gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH"
 
 **2. Fetch upstream rig** (fresh, so the report reflects current upstream):
 ```bash
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
-RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}" --rig "{{upstream_rig}}")
+RIG_ROOT=$("$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" --rig "{{upstream_rig}}")
 [ -n "$RIG_ROOT" ] && git -C "$RIG_ROOT" fetch --prune origin
 ```
 
@@ -155,8 +157,7 @@ fi
 **2. Run the script and capture output:**
 
 ```bash
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
-RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}" --rig "{{upstream_rig}}")
+RIG_ROOT=$("$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" --rig "{{upstream_rig}}")
 REPORT_DIR="$(pwd)/.gc/upstream-gc-sync"
 mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/{{issue}}.md"
