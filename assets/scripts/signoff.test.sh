@@ -83,7 +83,7 @@ case "${1:-}" in
       fi
     fi
     out=$(bead_json "$2")
-    if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
+    if [ "$out" = "[]" ]; then
       echo '{"error":"no issues found"}'
     else printf '%s\n' "$out"; fi ;;
   update)
