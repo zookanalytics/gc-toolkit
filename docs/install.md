@@ -127,6 +127,12 @@ that does not import the pack itself.
   posts on a pull request stays out of review when it opens with gc-toolkit's
   no-review mark or with a marker the rig declares in
   `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
+- **Demo captures of a rig's app** — a demo capture can record a rig's app
+  that a worktree of the rig serves on this host. Setting
+  `app_reads_city = "true"` among a rig's `[rigs.formula_vars]` in `city.toml`
+  turns that off for the rig. Set it for a rig whose app reads the city, such
+  as a rig that develops code for a city. The gc-toolkit rig the city imports
+  the pack from needs no setting.
 
 ---
 

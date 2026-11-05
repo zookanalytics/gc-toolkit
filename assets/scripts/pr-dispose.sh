@@ -47,8 +47,9 @@ PR_POST="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/pr-post.sh"
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-warn() { echo "$PROG: $1" >&2; }
-die()  { echo "$PROG: $1" >&2; exit "${2:-1}"; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # host/owner/repo from a PR url, so every gh call is pinned to the PR's own
 # repository: a bare #NUM names a different pull request per repo per host.

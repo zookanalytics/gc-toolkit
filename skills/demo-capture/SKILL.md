@@ -76,6 +76,11 @@ demo_engine_cli run demo.md --serve "npm run dev" --port 5173   # spin up a dev 
 demo_engine_cli run demo.md --base-url https://<preview-host>   # drive a deployed preview
 ```
 
+A `--base-url` on this host works for a rig's own app running in a worktree of
+that rig, unless `city.toml` sets `app_reads_city = "true"` for the rig.
+Otherwise the capture refuses the URL and says why. Then serve the app with
+`--serve` or `--serve-dir`, or capture a deployed preview.
+
 Two capture modes come from one script:
 
 - **walkthrough** (default) — one continuous recorded take at a human pace with

@@ -242,7 +242,5 @@ does the force-push:
 If a rebase-shaped bead lands at a refinery that does NOT carry the
 gascity overlay (i.e., a refinery in a rig that doesn't import the
 `gascity-keeper` sub-pack), the refinery files a human gate on the bead
-with `human-gate.sh` instead of force-pushing. That preserves PR #17's
-defensive intent for the mis-routed case while keeping the legitimate
-path automated for the intended case.
+with `human-gate.sh` instead of force-pushing.
 {{ end }}

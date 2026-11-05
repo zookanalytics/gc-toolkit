@@ -126,10 +126,11 @@ bead. This is how to write it:
    where the finished work departs from the landing bead's description: work the
    description promised that did not land, work that landed beyond it, and an
    approach that changed.
-4. Stamp it on the landing bead with
-   `gc bd update <landing-bead> --set-metadata pr_summary="$(cat <file>)"`, read
-   it back, and write nothing else there. The formula's write-report step then
-   closes the task, which releases the landing bead to the refinery.
+4. Stamp it on the landing bead, with the whole branch's subject line as its title
+   (the skill `{{ .BindingPrefix }}commit-conventions`):
+   `gc bd update <landing-bead> --title "<subject line>" --set-metadata pr_summary="$(cat <file>)"`.
+   Read both back, and write nothing else there. The formula's write-report step
+   then closes the task, which releases the landing bead to the refinery.
 
 ## Work bead metadata contract
 
@@ -239,7 +240,7 @@ spends a human only when one is required.
 
 File a human gate yourself when no agent can answer: missing credentials,
 external access, or a decision that is the operator's to make. File it before
-any cancel, whatever the reason for it. `human-gate.sh` files exactly one open
+any cancel, whatever the reason for it. `human-gate.sh` files one open
 gate per bead and situation key, on the work bead. The gate holds the work bead
 and every part filed under it: they leave the pool's offer until a person
 clears the gate. Its exit 0 is the release path the operator sees on the board:
@@ -268,9 +269,7 @@ must go on once a person rules, file the human gate first, then run
 `await-ruling.sh`. The gate blocks the work bead, and `await-ruling.sh` reads
 that wait back and arms the work's re-sling, so clearing the gate is the ruling
 to proceed: the next deferred-dispatch pass pours a fresh run. A ruling not to
-proceed closes the work bead first. A decline is an event of your run, so file
-its gate with no quiet window, and a situation a person answered `moot` or
-`benign` before is asked again. When nobody has a decision to make, because
+proceed closes the work bead first. When nobody has a decision to make, because
 the work is finished or a live peer is building it, cancel with no gate:
 
 ```bash

@@ -117,6 +117,10 @@ default = "human"
 description = "Keeper agent address (e.g., gascity/gascity-keeper.keeper) for abort handbacks. Optional; falls back to notify_recipient, but a keeper-aware operator should stamp metadata.requesting_keeper at dispatch."
 default = ""
 
+[vars.binding_prefix]
+description = "The binding the city imports gc-toolkit under, with its trailing dot. This sub-pack's formulas run on gc-toolkit's polecats, so gc sling pours them with that binding, and a step drops the dot to call the pack's scripts as gc <binding> scripts-dir prints them."
+default = "gc-toolkit."
+
 [[steps]]
 id = "workspace-setup"
 title = "Set up gascity worktree, fetch upstream, write safety backup ref"
@@ -143,8 +147,7 @@ worktree walkers discover and prune it:
 ```bash
 # >>> upstream-rebase-worktree-setup
 : "${GC_CITY_PATH:?GC_CITY_PATH must be set; refusing to derive worktree path from /}"
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
-RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}" --rig gascity)
+RIG_ROOT=$("$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" --rig gascity)
 if [ -z "$RIG_ROOT" ]; then
     echo "ERROR: no single rig called gascity resolves in gc rig list --json; refusing to set up the rebase worktree" >&2
     # Keeper-routed abort (see the abort shape in the header).
@@ -304,13 +307,8 @@ carries, the line span where that overlap sits, and the added lines upstream
 does NOT have:
 
 ```bash
-PROBE=""
-for c in "${GC_PACK_DIR:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit/packs/gascity-keeper" \
-         "${GC_RIG_ROOT:-}/packs/gascity-keeper"; do
-    [ -x "$c/assets/scripts/survey-absorption-probe.sh" ] && \
-        { PROBE="$c/assets/scripts/survey-absorption-probe.sh"; break; }
-done
-if [ -n "$PROBE" ]; then
+PROBE="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/../../packs/gascity-keeper/assets/scripts/survey-absorption-probe.sh"
+if [ -x "$PROBE" ]; then
     "$PROBE" --repo "$(pwd)" --upstream {{upstream_remote}}/{{upstream_branch}} \
         --range {{upstream_remote}}/{{upstream_branch}}..{{origin_remote}}/{{upstream_branch}} \
         > /tmp/absorption-{{issue}}.json
@@ -816,14 +814,9 @@ close their own work bead).
   classified `dropped-absorbed` is an absorption the survey missed, and the
   cost of each is one iteration. Omit the section when the count is zero:
   ```bash
-  PROBE=""
-  for c in "${GC_PACK_DIR:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit/packs/gascity-keeper" \
-           "${GC_RIG_ROOT:-}/packs/gascity-keeper"; do
-      [ -x "$c/assets/scripts/survey-absorption-probe.sh" ] && \
-          { PROBE="$c/assets/scripts/survey-absorption-probe.sh"; break; }
-  done
+  PROBE="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/../../packs/gascity-keeper/assets/scripts/survey-absorption-probe.sh"
   SURVEY_LINE=""
-  if [ -n "$PROBE" ]; then
+  if [ -x "$PROBE" ]; then
       AUDIT=$(gc bd show {{issue}} --json | "$PROBE" --audit 2>/dev/null)
       MISSES=$(printf '%s' "$AUDIT" | jq -r '.survey_misses // 0')
       [ "${MISSES:-0}" -gt 0 ] && SURVEY_LINE=$(printf '%s' "$AUDIT" | jq -r \
@@ -872,14 +865,10 @@ gc bd update {{issue}} \
 # the live agent set, so a bare name the refinery's exact-match queue never reads
 # is refused rather than stamped (an unreadable roster returns it UNVERIFIED — a
 # route nobody can check still beats an outage). It lives in gc-toolkit's own
-# pack, reached here through the city's gc-toolkit rig; when it cannot be found at
-# all the handoff falls back to the qualified construction rather than block on a
-# helper this pack does not own.
-POOL_ROUTE=""
-for c in "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts" "${GC_PACK_DIR:-}/../../assets/scripts" "${GC_RIG_ROOT:-}/assets/scripts"; do
-  [ -x "$c/pool-route.sh" ] && { POOL_ROUTE="$c/pool-route.sh"; break; }
-done
-if [ -n "$POOL_ROUTE" ]; then
+# pack; when it cannot be found the handoff falls back to the qualified
+# construction rather than block on a helper this pack does not own.
+POOL_ROUTE="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/pool-route.sh"
+if [ -x "$POOL_ROUTE" ]; then
   REFINERY_TARGET=$("$POOL_ROUTE" gc-toolkit.refinery) || {
     echo "refinery address gc-toolkit.refinery is claimed by no live agent — NOT handing {{issue}} to an address its exact-match queue never reads; leaving it for the next pass" >&2
     gc runtime drain-ack

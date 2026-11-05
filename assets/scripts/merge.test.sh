@@ -65,6 +65,8 @@ fi
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
+# A case that wraps review-checks.sh runs the real one from $TMP, beside this.
+mkdir -p "$TMP"; cp "$HERE/bd-lib.sh" "$TMP/bd-lib.sh"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
   "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh" \
   "$HERE/blocker-holder.sh"
@@ -690,6 +692,13 @@ approved 63
 out=$(STUB_SELF_LOGIN="" "$SUT" 2>&1)
 has "$out" "merge: WARN acting login unresolved; cannot distinguish an external approver from the city's own review" "an unresolved login warns that the approval gate holds every PR"
 has "$out" "PR#63 approval required but the acting login is unresolved; merge held (anchor A3)" "…and holds the approved, green PR"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+echo "# …and so does a login read that fails the way gh fails, its error body on stdout"
+store "[$(anchor A3 63), $(rev A3)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_SELF_LOGIN_RC=1 "$SUT" 2>&1)
+has "$out" "PR#63 approval required but the acting login is unresolved; merge held (anchor A3)" "the error body is no login, so the approved, green PR is held"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 
 echo "# a standing CHANGES_REQUESTED vetoes every candidate"
@@ -2195,7 +2204,11 @@ echo "# without pr-post.sh's definitions, or the acting login, nothing is counte
 store "[$(anchor FT4 404 ',"pr.unanswered_threads":"1@sha-404"'), $(rev FT4), $(anchor FT5 405), $(rev FT5)]"
 printf '%s' "$(prview 405 OPEN BLOCKED)" > "$GH_DIR/pr_view_405.json"
 printf '{"threads":[%s]}\n' "$(fthread t1 false "[$(op_post 'Rename this.')]")" > "$GH_DIR/threads_405.json"
+# The acting login is read through pr-post.sh too, so the stand-in refuses only
+# the definitions and answers every other verb as the real script does.
 mv "$SD/pr-post.sh" "$TMP/pr-post.sh.aside"
+printf '#!/usr/bin/env bash\n[ "${1:-}" = feedback-def ] && exit 1\nexec "%s" "$@"\n' "$TMP/pr-post.sh.aside" > "$SD/pr-post.sh"
+chmod +x "$SD/pr-post.sh"
 out=$("$SUT" 2>&1)
 mv "$TMP/pr-post.sh.aside" "$SD/pr-post.sh"
 eq "$(meta FT4 pr.unanswered_threads)|$(meta FT5 pr.unanswered_threads)" "1@sha-404|<absent>" "with no definitions the pass writes no count"
