@@ -107,15 +107,18 @@ epic's hypothesis, and both layers read it on the epic.
 The Epic Checkpoint closes a Delivery, as one of the ruling's writes, with the
 ruling as the close reason. What stands in the way of that close is bd, which
 refuses to close a bead with an open child or an open blocker such as a park
-unless the close is forced, and the checkpoint does not force it. So the Delivery
-closes once every Story under it has closed and the sitting has released it from
-any park. A child epic that carries a hypothesis of its own is an epic, not a
+unless the close is forced, and the checkpoint does not force it. The sitting
+also holds a landed Delivery's close with a human gate until the operator rules,
+and the ruling answers that gate. So the Delivery closes once every Story under
+it has closed, the ruling has answered its gate, and the sitting has released it
+from any park. A child epic that carries a hypothesis of its own is an epic, not a
 Delivery, and both layers hold it as one.
 
 ## Direction: the checkpoint's machinery
 
 An Epic Checkpoint runs by hand: the operator calls the sitting, and the sitting
-gathers the evidence and makes the ruling's writes
+gathers the evidence and makes the ruling's writes from the
+[`converse-epic-checkpoint`](../skills/converse-epic-checkpoint/SKILL.md) skill
 ([epics.md](epics.md#deliveries-and-epic-checkpoints)). Machinery that does any of
 that for them is not built. It is designed from what those hand runs record.
 Plausibly that is a formula that files the checkpoint sitting and gathers its
