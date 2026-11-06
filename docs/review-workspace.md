@@ -8,8 +8,11 @@ description: Where a review keeps its worktree and scratch on disk, and when tha
 A review reads its pinned commit in a detached worktree and runs there any
 suite its check calls for. It writes its verdict body and its finding set
 beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
-them from there. A quorum lane writes its lane output there too. The reviewer
-may also write logs, probe output, or a second worktree at the base.
+them from there. A quorum lane writes no file: the block that stores its lane
+output on its step bead takes the object inline. It needs no workspace, so a
+lane whose gather failed before making one still records its `blocked` output.
+The reviewer may also write logs, probe output, or a second worktree at the
+base.
 All of it lives in one directory named for the review bead,
 `<dir>/gc-review-<review-bead>`, where `<dir>` is `$TMPDIR`, or `/tmp` when
 `TMPDIR` is unset. `assets/scripts/review-workspace.sh` owns that directory: it

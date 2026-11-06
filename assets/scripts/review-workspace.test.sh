@@ -14,7 +14,8 @@
 # worktree-reap; the formulas' own gather and remove lines, run as a pour fills
 # them in; the formulas' lines that write a review's own files and hand them on,
 # run from a directory standing for the agent's home, which they leave empty;
-# and
+# each quorum lane storing the object it puts in its block, with no file
+# written, after a gather that failed before it made the workspace; and
 # reap's gates — the workspace of a closed review goes, its bead looked up in
 # the store its prefix names; a review that is not closed and a status that
 # cannot be read hold at any age; a bead the ledger no longer has, a name with no
@@ -258,17 +259,29 @@ for f in mol-review mol-review-quorum-signoff; do
     eq "$(grep -A1 -x -- '--notes-file' "$TMP/signoff.args" 2>/dev/null | tail -1)" "$FWS/findings.md" "and the verdict body in the workspace"
     eq "$(grep -A1 -x -- '--findings-file' "$TMP/signoff.args" 2>/dev/null | tail -1)" "$FWS/findings.json" "and the finding set in the workspace"
 done
-# Each lane stores the object it wrote to the workspace the gather printed.
+# Each lane stores the object it puts in its block, in place of the placeholder
+# line, and writes no file. So a lane whose gather failed before it made the
+# review's workspace still records its blocked output: here the gather's fetch
+# asks origin for a branch it does not have.
 QTOML="$ROOT/formulas/mol-review-quorum-signoff.toml"
-eq "$(grep -cF -- '--set-metadata "gc.output_json=' "$QTOML")" "2" "each of the two lanes stores its output in one line"
+STORE_FROM='--set-metadata "gc.output_json='
+eq "$(grep -cF -- "$STORE_FROM" "$QTOML")" "2" "each of the two lanes stores its output in one command"
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fb "$C1" | sed 's|polecat/x|polecat/gone|g')" >/dev/null 2>&1
+eq "$?" "1" "a gather whose fetch fails exits 1"
+if exists "$WS/gc-review-tk-fb"; then bad "before it makes the review's workspace"; else ok "before it makes the review's workspace"; fi
 for n in 1 2; do
     id=codex; [ "$n" = 2 ] && id=claude
-    printf '{"lane_id": "%s", "verdict": "pass"}\n' "$id" > "$FWS/lane-$id.json"
+    # The object carries what the shell would expand in an unquoted body.
+    printf '{\n  "lane_id": "%s",\n  "verdict": "blocked",\n  "summary": "the gather'"'"'s `git fetch` failed in $HOME"\n}\n' "$id" > "$TMP/lane-object"
+    # The command runs from its first line to the line that closes its
+    # here-document's substitution.
+    STORE="$(awk -v want="$n" -v from="$STORE_FROM" 'index($0, from) { k++; on = (k == want) } on { print } on && $0 == ")\"" { on = 0 }' "$QTOML" \
+        | awk -v f="$TMP/lane-object" '$0 == "<your review-quorum.lane.v1 object>" { while ((getline l < f) > 0) print l; next } { print }')"
     : > "$STUB_GC_LOG"
-    LANE_BEAD=tk-lane bash -c "$(grep -F -- '--set-metadata "gc.output_json=' "$QTOML" | sed -n "${n}p" \
-        | sed -e 's|{{lane_one_id}}|codex|g' -e 's|{{lane_two_id}}|claude|g' -e "s|<workspace>|$FWS|g")" 2>/dev/null
-    has "$(cat "$STUB_GC_LOG")" "bd update tk-lane --set-metadata gc.output_json={\"lane_id\":\"$id\",\"verdict\":\"pass\"}" "lane $n stores the object it wrote in the workspace"
+    LANE_BEAD=tk-lane bash -c "$STORE" 2>/dev/null
+    eq "$(cat "$STUB_GC_LOG")" "bd update tk-lane --set-metadata gc.output_json=$(jq -c . "$TMP/lane-object")" "lane $n stores the blocked object in its block, with no workspace"
 done
+eq "$(find "$TMP" -name 'lane-*.json' | wc -l | tr -d ' ')" "0" "and neither lane writes its output to a file"
 eq "$(ls -A "$AGENT_HOME")" "" "no line a review runs leaves a file in the agent's home"
 bash "$SUT" remove --review-bead tk-ff >/dev/null 2>&1
 
