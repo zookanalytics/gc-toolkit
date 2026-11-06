@@ -27,7 +27,9 @@
 # check-blocked-work-armed, which owes one no arm; deferred-dispatch.sh's
 # reconcile, which slings no armed bead while it is held, because a sling reads
 # no hold, and check-armed-dispatch-owed, which owes such an arm no dispatch for
-# the same reason; and the liveness classifier (liveness-classify.sh, which
+# the same reason; check-po-queue-only, which reads a bead routed or assigned to
+# the po as reaching it only when no hold holds it, since a held bead reaches no
+# seat; and the liveness classifier (liveness-classify.sh, which
 # liveness-sweep.sh and its precheck compose) and the re-check a liveness gate's
 # message carries (liveness-recheck.sh), which name the hold as a wait.
 # gc-helm.sh sources it to place a held bead: place reports a bead with no hold

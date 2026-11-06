@@ -141,6 +141,12 @@ nothing. A hold is lifted by a write, so
 the label alone puts a bead in the queue, and nothing is inferred from the
 bead's other fields.
 
+The queue is all the po receives. `doctor/check-po-queue-only` reports
+anything else that reaches it: a bead that no hold holds and that is routed or
+assigned to the po, unread mail to the po, and a bead in the queue that is not
+new work or that an arm, an assignee or a live run already sends (I16 in
+[component-model.md](component-model.md#3-invariants)).
+
 `has_dispatch_hold`, in `assets/scripts/dispatch-path.sh`, is the one test of a
 hold for the pack's shell readers, which test rows they have already read. It
 reads either of Gas City's hold labels, `hold:mayor` and `hold:external`, each
@@ -153,6 +159,9 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
   that gate's agenda as well;
 - `doctor/check-blocked-work-armed` owes a held bead no arm, because its dispatch
   is the route it gets once the sitting places it;
+- `doctor/check-po-queue-only` takes a bead routed or assigned to the po as
+  reaching it only when no hold holds it, because Gas City serves a held bead
+  to no seat;
 - the proactive scan files no first reaction for a held bead, because its next
   move is the sitting's;
 - the deferred-dispatch pass slings no armed bead while it is held, because a

@@ -66,6 +66,8 @@
 # works is not reported stranded.
 # doctor/check-root-advancing takes the run of each stalled root to read
 # whether its work has landed.
+# doctor/check-po-queue-only takes the map of each store that holds a bead in
+# the po's queue, to find a held bead a live run already works.
 # tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
 # and refuses a first reaction to a bead a live run works.
 # until-resolved.sh takes the runs that work a bead it is about to dispose,

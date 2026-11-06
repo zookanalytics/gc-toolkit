@@ -245,6 +245,7 @@ assets/scripts/priority-lib.sh
 assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
+doctor/check-po-queue-only/run.sh
 tools/gc-proactive.sh
 assets/scripts/until-resolved.sh
 assets/scripts/blocker-holder.sh
