@@ -244,8 +244,10 @@ home.
   binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
   shell block that runs a pack script, since each block is its own shell.
 - The decline sequence (file the human gate, cancel the run, drain): two copies
-  in the step text of `mol-validate.toml`, which tk-1tfzr71.22 retires. Every
-  other decline calls `decline.sh`.
+  in the step text of `mol-validate.toml`, which tk-1tfzr71.22 retires. Outside
+  that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
+  its own run, because it restores the review's pool route once the cancel has
+  landed, and tk-1tfzr71.15 converts that restore.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
