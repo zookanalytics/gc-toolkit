@@ -1440,6 +1440,14 @@ case "$sub" in
         exit 0 ;;
       *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;
     esac ;;
+  run)
+    # `run rerun <id> [--failed]`, read back from the call log above.
+    # STUB_RUN_RERUN_RC models GitHub refusing the re-run.
+    v="${1:-}"; shift || true
+    case "$v" in
+      rerun) exit "${STUB_RUN_RERUN_RC:-0}" ;;
+      *) echo "gh run stub: unsupported '$v'" >&2; exit 2 ;;
+    esac ;;
   *) echo "gh stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 STUB

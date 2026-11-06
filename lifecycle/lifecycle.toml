@@ -1191,6 +1191,13 @@ keys = [
   # only when a later head still carries the threads, so the same head never
   # re-files.
   "pr_unengaged_threads",
+  # The head oid at which pr-facts.sh last re-ran the failed jobs of required
+  # checks that timed out, were cancelled or failed to start. It is written
+  # before the re-run, and a later pass at the same head reads it to re-run
+  # nothing and to take a failure there as the re-run's own, which parks only an
+  # approved PR. Absent means no re-run was made; a new head gets one of its
+  # own, and nothing clears the key.
+  "pr_check_rerun",
   # The provenance cutover, mechanics in [posture] above. Written once per
   # anchor; signoff.sh reads it for the same test.
   "pr_provenance_since",
