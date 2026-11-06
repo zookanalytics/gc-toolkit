@@ -330,8 +330,8 @@ Discuss-only. A recommend also records the formula it recommends as
 `gc.recommended_formula`, so the row offers Accept beside Discuss. When the
 reaction judges the action clear and reversible, it routes the subject, holds
 it, or hands it to a validating closer, and puts nothing to the operator. A
-capture that is not a member of an epic is not routed: it waits for the
-operator's placement sitting ([steering.md](steering.md)).
+capture that is not a member of an epic is not routed: it waits, held, for the
+po's backlog refinement with the operator ([steering.md](steering.md)).
 
 The fallback path files a conversation in the operator's queue directly,
 through `gc-helm.sh open`, which is where filing a conversation lives. It

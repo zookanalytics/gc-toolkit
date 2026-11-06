@@ -582,6 +582,11 @@ prerequisite, and the four exclusions above are what such a check encodes.
   and conversations hold. `services/helm` and `orders/helm-build.toml`
   sit there for the same reason: the board is the read half of human
   engagement, and the order exists only to keep it current.
+- **The po is engagement.** The po (`agents/po/`) is the seat the operator
+  opens to place the queue of held new work and to steer the epics, so its
+  product is the operator's steering. It runs no component of its own: its
+  writes are `gc-helm.sh`'s place, park and priority, `gc bd set-state` for a
+  hold, and `bead-rehome.sh` for a close, each placed above.
 - **`reconcile-rig-checkouts` is merge.** A directory-imported pack runs from
   the working tree, so a merged PR does not execute until the checkout syncs.
   The order completes a merge's effect. `doctor/check-pour-text-current` reads

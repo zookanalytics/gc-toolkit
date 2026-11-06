@@ -1,0 +1,26 @@
+# po — the operator's prioritization partner: a named on-demand singleton
+# (stanza in pack.toml) the operator opens for a sitting, backlog refinement
+# over the hold:mayor queue or a portfolio sync over the epics. Its shape is Gas
+# Town's mayor's, and docs/built-once-target.md names each difference.
+scope = "city"
+# Each wake starts a new conversation, so no sitting inherits another's context.
+wake_mode = "fresh"
+work_dir = ".gc/agents/po"
+max_active_sessions = 1
+# Gas Town's mayor takes idle_timeout. Its kill keeps the conversation key, and
+# gc session attach starts a stopped session from that key without reading
+# wake_mode, so the next attach would resume the old conversation. An idle
+# drain clears the key, as gc runtime drain-ack does.
+sleep_after_idle = "1h"
+# The po takes no slung work. The city's [agent_defaults] gives every agent a
+# default formula, so this explicit empty one sends a plain gc sling to
+# sling_query, which refuses it at the caller. A graph.v2 pour, by --on or a
+# default formula, never runs sling_query.
+default_sling_formula = ""
+sling_query = 'echo "the po takes no slung work: send {} to a work pool with gc sling, or hold it for the po with gc bd set-state {} hold=mayor --reason <why>" >&2; exit 1'
+
+[env]
+# A memory file would carry one sitting's context into the next by another
+# route. What a later sitting needs is in the rig's AGENTS.md, which changes
+# through reviewed PRs, and in bead notes.
+CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"

@@ -45,6 +45,11 @@ much as by what it stewards.
   deacon.
 - **Merge cadence and recovery.** The refinery-reconcile order and the
   witness own those loops.
+- **Placement and the portfolio sync.** The po works both with the operator:
+  its backlog refinement places the queue of held new work, and its portfolio
+  sync weighs the epics' parks and priorities. Point the operator to it
+  (`gc session attach gc-toolkit.po`) rather than sorting the queue or
+  moving an epic's park or priority yourself.
 
 The governing principle: **known-open state causes nothing.** If reading a
 status cannot produce a structural change, don't read it — and having read

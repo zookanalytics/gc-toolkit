@@ -1,6 +1,6 @@
 ---
 name: Steering — how the operator steers the city's work
-description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, Gas City's hold:mayor label that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc beads list --label hold:mayor) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, where PR-finishing work ranks and why it never has a parent, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work or PR-finishing work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
+description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, Gas City's hold:mayor label that holds every other bead and the writers that set it, the emergency check, the queue the po's backlog refinement works (gc beads list --label hold:mayor) and how a bead in it is placed. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, where PR-finishing work ranks and why it never has a parent, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work or PR-finishing work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
 ---
 
 # Steering
@@ -20,8 +20,8 @@ sooner or later by a shift of its own ([Priority](#priority)).
 
 **Mandate.** Which beads may enter a work pool and what holds the rest: the
 intake rule, the `hold:mayor` label that holds the rest and the writers that
-set it, the emergency check, the placement sitting's queue, and how a bead is
-placed. How
+set it, the emergency check, the queue the po's backlog refinement works, and
+how a bead is placed. How
 the operator decides when work runs: the steering moves, the state each move
 writes, what that state holds and what it leaves running, and how each move is
 released. The order work queues in: how a bead's priority is derived, where it
@@ -75,7 +75,8 @@ runs its fix (`formulas/mol-deacon-patrol.toml`).
 Each writer that files or disposes new work follows the rule.
 
 - **The first reaction** (`assets/scripts/first-reaction-dispose.sh`). It still
-  reacts to every finding, because its card is the placement sitting's triage.
+  reacts to every finding, because its card is the triage that backlog
+  refinement reads.
   Its actionable exit routes a member, PR-finishing work or a confirmed
   emergency. It holds any other bead with
   `gc bd set-state <bead> hold=mayor --reason "<why it was held>"` and releases
@@ -128,10 +129,13 @@ there. A broken gate counts when it shows as a failing check on main. A latent
 hazard, a doctor finding marked blocking, or a failure on one PR's branch does
 not.
 
-## The placement sitting's queue
+## The queue the po works
 
-`gc beads list --label hold:mayor` lists the queue: every bead carrying the
-label, in every rig's store. It writes nothing. A hold is lifted by a write, so
+The placement sitting is the po's backlog refinement: the operator opens the
+po, the operator's prioritization partner (`gc session attach gc-toolkit.po`),
+and the two work the queue together. `gc beads list --label hold:mayor` lists
+the queue: every bead carrying the label, in every rig's store. It writes
+nothing. A hold is lifted by a write, so
 the label alone puts a bead in the queue, and nothing is inferred from the
 bead's other fields.
 
@@ -158,7 +162,9 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 
 ## Placing a bead
 
-For each bead in the queue, the sitting does one of three things.
+For each bead in the queue, the sitting does one of three things. The po
+applies each once the operator agrees to it, and the operator can apply one
+directly.
 
 - **Place it under an epic.** Its parent is the epic's open Delivery whose aim
   covers it, which `gc bd list --parent <epic> -t epic --limit 0` lists, and
