@@ -38,6 +38,8 @@
 #   (LEAVE)   a gate the ruling leaves owed stays open
 #   (UNCLOSED, HEADLINE) a gate that does not close or a headline that does not
 #             land stops the sign-off before the conversation closes
+#   (ARMED)   a ruling on an armed subject resolves its gate, which is what
+#             lets the arm send it, writes no route and leaves the arm
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
@@ -698,6 +700,14 @@ acceptance; TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settle
 eq "$RC" 1 "(HEADLINE) a headline that does not land exits 1"
 eq "$(field tk-rev status)" "open" "(HEADLINE) …before any gate is resolved"
 eq "$(field tk-conv status)" "in_progress" "(HEADLINE) …or the conversation closed"
+
+echo "# a ruling on an armed subject leaves its arm to send it"
+acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 0 "(ARMED) the sign-off on an armed subject exits 0"
+eq "$(field tk-rev status)" "closed" "(ARMED) …resolving the gate, which is what lets the arm send the subject"
+hasnt "$(cat "$CALLS")" "gc.routed_to" "(ARMED) …writing no route"
+eq "$(meta tk-anc gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(ARMED) …and leaving the arm"
 
 echo "# a ruling on an open PR says whether its branch changes"
 acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
