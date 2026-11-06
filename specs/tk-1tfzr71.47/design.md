@@ -36,6 +36,11 @@ Your ruling is on who moves the pin.
    whenever you want landed work live. Only the command ships. Landed work
    waits until you run it.
 
+Under options 1 and 2, a revert also holds automatic deploys until you resolve
+the gate it files, because main still names the commit the revert took out
+(section 2). Resolving it, once a fix is on main, is one act of yours per
+revert. Under option 3 nothing deploys on its own, so a revert needs no hold.
+
 Under every option, a deploy restarts the pack's idle sessions. Each pinned
 commit lives in its own cache directory, and every pack agent's start-up
 config names that directory, so Gas City sees changed config for each of them.
@@ -270,7 +275,9 @@ and the steps change in one place:
 
 1. Resolve the target: main's head by `git ls-remote <source> refs/heads/main`
    by default, a named commit with `--to <commit>`, or the commit before the
-   last deploy with `--revert`.
+   last deploy with `--revert`. While deploys are held, a run that would
+   deploy main's head refuses, and so does `--revert` ("Reverting a bad
+   revision" below).
 2. Refuse to run when the town's `pack.toml`, `city.toml` or `packs.lock` holds
    an uncommitted change, since step 6 commits those files whole. Fetch the
    town's origin too, and refuse when the town's branch is behind it, since
@@ -313,7 +320,8 @@ equals main's head, it does nothing. When main is ahead, it keeps one open
 bead labeled `deploy` and assigned to the mechanik. On the first pass it files
 the bead with the exact command to run, `gc gc-toolkit deploy`, and nudges the
 mechanik. On a later pass it appends main's new head to the open bead.
-Several landings before the mechanik acts become one deploy.
+Several landings before the mechanik acts become one deploy. A held bead
+(below) is open too, so a pass during a hold only appends.
 
 **The mechanik.** It takes the bead from its hook, runs the command, and
 closes the bead with the deploy commit as its outcome. A failed run leaves the
@@ -328,7 +336,8 @@ finishes the deploy. The bead's description carries the command, so the
 mechanik's prompt gains nothing.
 
 Under option 2, the order runs the command itself. Under option 3, you run
-it. Both keep the command and drop the bead.
+it. Both keep the command and drop the bead, except that under option 2 a
+revert files one to carry its hold (below).
 
 ### How a new revision reaches the controller and live sessions
 
@@ -363,12 +372,45 @@ new content before. The default stays Gas City's own handling.
 
 `gc gc-toolkit deploy --revert` moves the pin back to the previous commit. Its
 clone is still cached, since prune never runs on its own and keeps any clone
-younger than 7 days, so the revert needs no network. If the bad revision broke
-the deploy command, the revert is done by hand: `git revert` the deploy commit
-in the town repo, run `gc import install`, then `gc service restart helm`. The
-fix itself then lands on gc-toolkit's main, and the next deploy carries it. A
-revision that fails to load never deploys, because step 7 restores the old pin
-before anything commits.
+younger than 7 days, so the revert needs no network.
+
+**A revert holds automatic deploys.** Main still names the commit the revert
+took out, so under option 1 the check's next pass would ask for that commit
+again, and under option 2 the order would deploy it again by itself. Before it
+moves the pin, the revert therefore files a human gate on the deploy bead with
+`human-gate.sh`, under the key `deploy-held`, and files the deploy bead first
+when none is open. The gate's message names the rejected commit and says how
+to resume.
+
+While the gate is open, a run of the command that would deploy main's head
+refuses and prints the gate, and so does a second `--revert`, whose previous
+commit is the rejected one. `--to <commit>` still deploys a commit you name.
+Under option 1 the deploy bead is labeled `deploy` and assigned to the
+mechanik, as the check files it. The gate keeps it out of `bd ready`, so the
+mechanik's hook does not offer it, and the check's passes only append main's
+new head to it. Under option 2 the order reads the gate before each run and
+runs nothing while it is open.
+
+Resolving the gate (`bd gate resolve`) is the resume. You resolve it once a
+fix for the rejected commit is on main, or to deploy main as it stands. Under
+option 1 the revert also records a ready-notice for the mechanik on the deploy
+bead (`deferred-dispatch.sh notify`), so the resolution reaches the mechanik,
+and its next run deploys main's head. Under option 2 the bead the revert files
+is the only deploy bead, it has no assignee, and the order closes it with its
+next deploy. Under option 3 nothing deploys on its own, so the revert files no
+hold.
+
+**By hand.** If the bad revision broke the deploy command, the revert is done
+by hand, and the hold still comes first: file the deploy bead if none is open,
+as the revert does, and the same gate on it with `human-gate.sh`. Then
+`git revert` the deploy commit in the town repo, run `gc import install`, push
+the town commit, and run `gc service restart helm`. With the gate filed before
+the pin moves, the next pass of the check, or of the order under option 2,
+finds the hold.
+
+The fix itself then lands on gc-toolkit's main, and the first deploy after the
+gate's resolution carries it. A revision that fails to load never deploys,
+because step 7 restores the old pin before anything commits.
 
 ### Where this departs from upstream
 
@@ -580,6 +622,14 @@ asserts these things:
    new pin stays live and pushed, and the exit names the service. In both
    cases the printed `--to` command, run once the cause is gone, finishes the
    deploy and moves no pin.
+10. A revert holds automatic deploys, by either route. After the command
+    deploys a second commit over the first and `--revert` puts the first back,
+    a pass of the deploy check with main still at the second commit nudges no
+    one and leaves the held bead out of `bd ready`. A run with no `--to`
+    refuses, and so does a second `--revert`. The same holds after the by-hand
+    route. Once the gate is resolved, the next run deploys main's head. These
+    runs may file their bead and gate in a stub store, as long as the command,
+    the check and their reads of the hold are the pack's own.
 
 ### The cutover
 
@@ -634,7 +684,7 @@ Running them in order keeps their shared docs from conflicting.
 |---|---|---|---|
 | 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory, and the commit checked out there, in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. Pack drift compares the recorded commit with the pack's entry in the lock, which it reads again only after the lock's mtime moves. Its tests show that an install that changes nothing, and a re-pin of core or bd, recycle nothing. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
 | 2. Build and check what is deployed | `gc-build.sh` loses `behind_main`. helm's packhealth loses its band. I9 loses LAGGED and UNFETCHED, and its STALE-TEXT gains the cached-revision arm. Also the helm README, the I9 rows in component-model.md and install.md, and the tests. | polecat | unit 1 |
-| 3. Deploy by pin | `gc gc-toolkit deploy`, with each failure's outcome and the run that finishes it, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
+| 3. Deploy by pin | `gc gc-toolkit deploy`, with each failure's outcome and the run that finishes it, and a revert's hold, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
 | 4. Retire the healer | Delete the reconciler, its test and its order, with their deletion-plan rows and the stage B schedule row. Retire `auto_ff_rig_main`. Move the demo engine to a worktree of its rig. Remove `reconcile_rig` and its comment from lifecycle.toml. Sweep the docs in section 6. Count the reconciler's open subjects again. | polecat | unit 3 |
 | 5. Prove it from the cache | The suite in section 7. | polecat | unit 4 |
 | 6. Cut the city over | The town commits in section 7. | mechanik, on a bead assigned to `gc-toolkit.mechanik` | tk-1tfzr71.14, which closes when the effort's PR merges. A ready-notice is armed to the mechanik. |
@@ -643,16 +693,17 @@ Unit 6 is a town bead. It is not on the integration branch, and the landing
 bead does not wait on it. tk-1tfzr71.14's "Done" holds once unit 6 finishes.
 Until then, the merge commit is live in a checkout that nothing advances.
 
-Under option 2, unit 3's order runs the command itself, and unit 3 adds the
-order to authority-map.md's town-repo row. Under option 3, unit 3 ships only
-the command, and unit 6's step 7 becomes your first deploy.
+Under option 2, unit 3's order runs the command itself and reads a revert's
+hold before each run, and unit 3 adds the order to authority-map.md's
+town-repo row. Under option 3, unit 3 ships only the command, whose revert
+then files no hold, and unit 6's step 7 becomes your first deploy.
 
 ## Gas City search
 
 Units 1 and 3 add operational surface: the deploy command, the deploy check
-order and its script, the `deploy` label on one bead, the recorded scripts
-directory and commit in a session's work dir, and a `pre_start` step on
-deacon, mechanik and dog. Units 2 and 4 remove surface. Upstream is
+order and its script, the `deploy` label on one bead, the `deploy-held` key of
+the gate a revert files, the recorded scripts directory and commit in a
+session's work dir, and a `pre_start` step on deacon, mechanik and dog. Units 2 and 4 remove surface. Upstream is
 gastownhall/gascity at `8e75c50aa845`.
 
 - **Moving a pin.** Searched: `gc import install`, `gc import upgrade`,
@@ -679,6 +730,20 @@ gastownhall/gascity at `8e75c50aa845`.
   and bd labels. They cover it. The bead is assigned to the mechanik, found
   again by its label and assignee, and announced by a nudge when filed. No new
   metadata key is needed.
+- **Holding deploys after a revert.** Searched: `gc import` and `gc order`
+  (cli.md). None of their subcommands holds a pin or pauses an order. Also
+  searched the canonical dispatch hold labels, `hold:mayor` and
+  `hold:external` (`DispatchHoldLabels`, internal/beadmeta/hold_labels.go),
+  and bd's human gate, `bd gate create --type=human --blocks <bead>`
+  (`gateCreateCmd`, cmd/bd/gate.go at steveyegge/beads v1.3.2). A hold label
+  names the next actor or an outside condition, and carries no question or
+  answer. The human gate fits, because a person decides when deploys resume,
+  its message carries the rejected commit, and `bd gate resolve` records the
+  answer. A bead the gate blocks leaves `bd ready` (cmd/bd/ready.go) and the
+  hook's offer (`filterUnreadyHookCandidates`, cmd/gc/cmd_hook.go), so the
+  hold composes the gate through `human-gate.sh`. The new surface is the
+  gate's key, `deploy-held`, and the read of that gate that the command, and
+  under option 2 the order, makes before deploying main's head.
 - **A session finding its pack.** Searched: `GC_PACK_DIR`, which is set for
   pack commands, orders and doctor checks but not for sessions (fact 10);
   agent `[env]`, which is not template-expanded; and overlays, which are copied
