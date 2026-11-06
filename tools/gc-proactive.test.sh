@@ -35,8 +35,10 @@
 # subject's route in place and the pool serving it could hand the subject to a
 # worker mid-reaction:
 #   (PATH-SKIP)  sling refuses a bead carrying any dispatch-path key, an arm,
-#                a capped arm and the human park route (exit RC_DISPATCH_PATH)
-#   (PATH-GO)    …while blank keys and an execution stamp still proceed
+#                a capped arm, the human park route and a bead an open human
+#                gate blocks (exit RC_DISPATCH_PATH)
+#   (PATH-GO)    …while blank keys, an execution stamp, a closed gate and open
+#                work still proceed
 #   (PATH-ORDER) a routed bead with an open reaction reports the reaction (exit 3)
 #   (PATH-SWEEP) a sweep skips a bead routed after its read without spending
 #                a cap slot
@@ -246,8 +248,14 @@ done
 #                       which no queue reads
 #   tk-reacting-routed  routed, and an open reaction (tk-r-reacting-routed)
 #                       already tracks it
+#   tk-gated            an open human gate blocks it, as a sitting's hold does
+#   tk-gated-closed     the human gate that blocked it is answered
+#   tk-work-blocked     open work blocks it, and no gate
 jq '(map({key: .id, value: {metadata: .metadata}}) | from_entries)
-    + {"tk-human":             {"metadata": {"gc.routed_to": "human"}},
+    + {"tk-gated":        {"metadata": {}, "dependencies": [{"id": "tk-gate-open", "dependency_type": "blocks", "issue_type": "gate", "await_type": "human", "status": "open"}]},
+       "tk-gated-closed": {"metadata": {}, "dependencies": [{"id": "tk-gate-shut", "dependency_type": "blocks", "issue_type": "gate", "await_type": "human", "status": "closed"}]},
+       "tk-work-blocked": {"metadata": {}, "dependencies": [{"id": "tk-work", "dependency_type": "blocks", "issue_type": "task", "status": "open"}]},
+       "tk-human":             {"metadata": {"gc.routed_to": "human"}},
        "tk-exec-only":         {"metadata": {"gc.execution_routed_to": "gc-toolkit/gc-toolkit.polecat"}},
        "tk-reacting-routed":   {"metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
        "tk-r-reacting-routed": {"status": "open", "metadata": {"task_kind": "reaction", "gc.reaction_subject": "tk-reacting-routed"}}}' \
@@ -270,9 +278,15 @@ for b in tk-armed tk-capped tk-human; do
     hasnt "$OUT" "would file a reaction bead" "(PATH-SKIP) …nothing filed for $b"
 done
 has "$(bash "$SCRIPT" sling tk-human 2>&1 || true)" "gc.routed_to=human" "(PATH-SKIP) the human park route is named as the path"
+set +e
+OUT="$(bash "$SCRIPT" sling tk-gated 2>&1)"; RC=$?
+set -e
+eq "$RC" 5 "(PATH-SKIP) sling of a bead an open human gate blocks exits RC_DISPATCH_PATH (5)"
+has "$OUT" "waits on a person's answer (open human gate tk-gate-open)" "(PATH-SKIP) …naming the gate"
+hasnt "$OUT" "would file a reaction bead" "(PATH-SKIP) …nothing filed for tk-gated"
 
-echo "# blank keys and an execution stamp are no dispatch path"
-for b in tk-blank tk-exec-only; do
+echo "# blank keys, an execution stamp, an answered gate and open work are no dispatch path"
+for b in tk-blank tk-exec-only tk-gated-closed tk-work-blocked; do
     set +e
     OUT="$(bash "$SCRIPT" sling "$b" 2>&1)"; RC=$?
     set -e
@@ -1108,6 +1122,8 @@ case "\$*" in
   "bd show tk-path-gone --json")
       printf '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1 ;;
   "bd show tk-path-empty --json") exit 0 ;;
+  "bd show tk-path-gated --json")
+      printf '[{"id":"tk-path-gated","metadata":{},"dependencies":[{"id":"tk-gate-live","dependency_type":"blocks","issue_type":"gate","await_type":"human","status":"open"}]}]' ;;
   "bd show tk-path-twice --json")
       printf '[{"id":"tk-path-twice","metadata":{}}]\n[{"id":"tk-path-twice","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' ;;
   "bd dep list tk-path-"*" --direction up -t tracks --json") printf '[]' ;;
@@ -1124,6 +1140,12 @@ set -e
 eq "$RC" 5 "(PATH-READS) the live path refuses a routed bead (exit 5)"
 has "$OUT" "already has a dispatch path (gc.routed_to=gc-toolkit/gc-toolkit.polecat)" "(PATH-READS) …naming its route, read through a raw control byte"
 hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction"
+set +e
+OUT="$(show_sling tk-path-gated)"; RC=$?
+set -e
+eq "$RC" 5 "(PATH-READS) the live path refuses a bead an open human gate blocks (exit 5)"
+has "$OUT" "waits on a person's answer (open human gate tk-gate-live)" "(PATH-READS) …naming the gate it read from the bead's row"
+hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction for it"
 set +e
 OUT="$(show_sling tk-path-locked)"; RC=$?
 set -e

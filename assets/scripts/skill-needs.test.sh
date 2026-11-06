@@ -46,11 +46,11 @@
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
 # a blocker in another store, and fails if the arm runs. It runs the premise
 # re-check's moot or benign close under stubs, and fails unless the close
-# releases a held subject that no open human gate still holds, leaves one that
-# a gate holds, and closes the conversation only once every read and write
-# before it has answered. It pins that every skill and formula names a
-# pack skill to load by its catalog name, never by its path, so an agent in any
-# tree loads the installed pack's copy.
+# settles a headline that still waits on a subject nothing holds any more,
+# leaves one that an open blocker holds, and closes the conversation only once
+# every read and write before it has answered. It pins that every skill and
+# formula names a pack skill to load by its catalog name, never by its path, so
+# an agent in any tree loads the installed pack's copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
@@ -481,13 +481,20 @@ have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow
 have "…once the follow-up's own store reads the edge back" '&& gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json' "$SETTLE"
 have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
-have "the prompt gives the retire call, through the sign-off" '--route human --no-wait --retire not-needed' "$PROMPT"
-have "…as the prs skill does" '--route human --no-wait --retire not-needed' "$PRS_SKILL"
+have "the prompt gives the retire call, through the sign-off" '--ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed' "$PROMPT"
+have "…as the prs skill does" '--ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed' "$PRS_SKILL"
 # A gate can hold a merge, so a sitting answers every gate through the sign-off
 # writer, which carries out what the ruling does to the PR first.
 have "the continue step answers a ruling on a turn that does not sign off through the writer" 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$CONTINUE"
 lacks "…and never through a bare gate resolve" 'gc bd gate resolve <gate>' "$CONTINUE" \
     "a bare resolve releases what the gate holds before the ruling's rework or retirement is in place"
+# The hold keeps the subject's arm and route, so an answer that clears its last
+# blocker releases it to them. Before the answer, a ruling that sends the
+# subject elsewhere withdraws both, by the sign-off's own rule and block, which
+# the dispatch-path section below compares whole and runs.
+have "…and first withdraws an arm the ruling does not keep" '"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"' "$CONTINUE"
+have "…and a pool route" 'gc bd update "$SUBJECT" --unset-metadata gc.routed_to' "$CONTINUE"
+have "…by step 7's rule" "by step 7's" "$CONTINUE"
 have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
 # One writer dispatches a recommendation, under the bead's acceptance lock and a
 # token that finds a dispatch an Accept that stopped part way already poured. A
@@ -495,7 +502,7 @@ have "the prompt gives the call that withdraws a recommendation" 'converse-inval
 have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh" accept <bead>' "$WORK_SKILL"
 lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
     "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
-have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --route human --no-wait --accept' "$SETTLE"
+have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --no-wait --accept' "$SETTLE"
 have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
 have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
 for f in "$PROMPT" "$SETTLE"; do
@@ -866,7 +873,7 @@ echo "── a sitting iterating on a document writes one scaffold and names it 
 have "the step table sends a sitting iterating on a document to its skill" '**Steps 5–8, when the operator is iterating on a document**' "$PROMPT"
 have "…by name" '`converse-iterate-document` |' "$PROMPT"
 have "the ruling line names the block the worker starts from" 'to the scaffold in the notes of <bead>, the block headed ## Current state (<date>)' "$ITERATE"
-have "…and the sign-off files the rework" '--route human --no-wait --rework' "$ITERATE"
+have "…and the sign-off files the rework" '--no-wait --rework' "$ITERATE"
 have "a self-review that starts fresh finds the block through the worker's notes" "so your work bead's notes name this block" "$ITERATE"
 have "a block on another bead leaves the next sitting its name" "name that bead in the subject's record" "$ITERATE"
 fenced_block "$ITERATE" '--append-notes "$SCAFFOLD"' | fill_block >"$CH/block"
@@ -908,12 +915,12 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: an earlier block of the same date does not pass for one that did not land" "exit $rc"
     fi
 done
-echo "── a moot or benign close releases a subject a cut-short hold left at held ──"
-# A cut-short sitting leaves its subject held, and the next sitting's premise
-# re-check can find the conversation moot and close it. The block runs as
-# written, its placeholders filled, under stubs: gc answers the subject's
-# blocks edges from RL_GATES, and lifecycle.sh answers the state from a file
-# that a transition rewrites.
+echo "── a moot or benign close settles a headline that waits on nothing ──"
+# A cut-short sitting leaves its hold's headline on the subject, and the next
+# sitting's premise re-check can find the conversation moot and close it. The
+# block runs as written, its placeholders filled, under stubs: gc answers the
+# subject's row from RL_ROW and its blocks edges from RL_GATES, and exits
+# RL_SHOW_RC and RL_DEPS_RC after printing them.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
@@ -921,90 +928,250 @@ cat >"$RL/bin/gc" <<'STUB'
 #!/usr/bin/env bash
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
-    "bd dep list") printf '%s\n' "$RL_GATES" ;;
+    "bd show "*)
+        [ -z "${RL_SHOW_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
+        printf '%s\n' "$RL_ROW"; exit "${RL_SHOW_RC:-0}" ;;
+    "bd dep list") printf '%s\n' "$RL_GATES"; exit "${RL_DEPS_RC:-0}" ;;
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
 STUB
-cat >"$RL/pack/assets/scripts/lifecycle.sh" <<'STUB'
-#!/usr/bin/env bash
-printf 'lifecycle %s\n' "$*" >>"$RL_DIR/log"
-case "$1" in
-    state) [ -z "${RL_STATE_DOWN:-}" ] || exit 2; cat "$RL_DIR/state" ;;
-    transition) [ -z "${RL_REFUSE:-}" ] || exit 1; echo unanchored >"$RL_DIR/state" ;;
-esac
-STUB
 cat >"$RL/pack/assets/scripts/gc-helm.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'gc-helm %s\n' "$*" >>"$RL_DIR/log"
+[ -z "${RL_TAKEAWAY_FAIL:-}" ] || exit 1
 STUB
 cat >"$RL/pack/assets/scripts/pr-sitting-comment.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >>"$RL_DIR/log"
 STUB
 chmod +x "$RL/bin/gc" "$RL/pack/assets/scripts/"*.sh
-fenced_block "$RECHECK" 'lifecycle.sh" transition "$SUBJECT" --to unanchored' | fill_block >"$RL/block"
+fenced_block "$RECHECK" 'replaced the headline of $SUBJECT' | fill_block >"$RL/block"
 [ -s "$RL/block" ] && ok "the premise re-check's close is found" \
-    || bad "the premise re-check's close is found" "no fenced bash block holds its release in $RECHECK"
-# run_release <shell> <state> <gates-json> [NAME=VALUE...] — one run of the
-# close from a subject in <state>; prints its status.
+    || bad "the premise re-check's close is found" "no fenced bash block replaces the headline in $RECHECK"
+# run_release <shell> <row-json> <gates-json> [NAME=VALUE...] — one run of the
+# close on a subject whose row is <row-json>; prints its status.
 run_release() {
-    local run=$1 state=$2 gates=$3
+    local run=$1 row=$2 gates=$3
     shift 3
     : >"$RL/log"
-    printf '%s\n' "$state" >"$RL/state"
-    (cd "$TMP/away" && env -u BASH_ENV -u ENV RL_DIR="$RL" RL_GATES="$gates" "$@" CONV="$RL/pack/assets/scripts" \
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV RL_DIR="$RL" RL_ROW="$row" RL_GATES="$gates" "$@" CONV="$RL/pack/assets/scripts" \
         SUBJECT=tk-x CONVERSATION=tk-v PATH="$RL/bin:$PATH" $run "$RL/block" >"$RL/out" 2>&1)
     echo $?
 }
-NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-t","issue_type":"gate","await_type":"timer","status":"open"},{"id":"tk-w","issue_type":"task","status":"open"}]'
-ONE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
+WAITING='[{"id":"tk-x","metadata":{"gc.takeaway":"holding — x","gc.takeaway_settled":""}}]'
+SETTLED='[{"id":"tk-x","metadata":{"gc.takeaway":"ruled: x","gc.takeaway_settled":"1"}}]'
+NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-w","issue_type":"task","status":"closed"}]'
+GATE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
+WORK_HOLDS='[{"id":"tk-w","issue_type":"task","status":"open"}]'
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
-    rc=$(run_release "$run" held "$NONE_HOLDS")
+    rc=$(run_release "$run" "$WAITING" "$NONE_HOLDS")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;lifecycle transition tk-x --to unanchored --expect held --route human;lifecycle state tk-x;"*"gc bd close tk-v --reason x: x;"*)
-            ok "($sh_) recheck close: a held subject nothing still holds is released, its headline replaced, before the conversation closes" ;;
-        *) bad "($sh_) recheck close: a held subject nothing still holds is released, its headline replaced, before the conversation closes" "exit $rc, calls: $calls" ;;
+        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+            ok "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" ;;
+        *) bad "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" "exit $rc, calls: $calls" ;;
     esac
-    rc=$(run_release "$run" held "$ONE_HOLDS")
+    for held_by in "$GATE_HOLDS|an open human gate" "$WORK_HOLDS|open work"; do
+        gates=${held_by%%|*}; what=${held_by#*|}
+        rc=$(run_release "$run" "$WAITING" "$gates")
+        calls=$(tr '\n' ';' <"$RL/log")
+        case "$rc:$calls" in
+            *"gc-helm takeaway"*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
+            0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject $what still holds keeps its headline, and the conversation closes" ;;
+            *) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
+        esac
+    done
+    rc=$(run_release "$run" "$SETTLED" '[]')
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        *"lifecycle transition"*|*"gc-helm takeaway"*) bad "($sh_) recheck close: a held subject another open human gate holds stays held" "exit $rc, calls: $calls" ;;
-        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a held subject another open human gate holds stays held, and the conversation closes" ;;
-        *) bad "($sh_) recheck close: a held subject another open human gate holds stays held" "exit $rc, calls: $calls" ;;
-    esac
-    rc=$(run_release "$run" unanchored '[]')
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        *"lifecycle transition"*|*"gc-helm takeaway"*|*"bd dep list"*) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
-        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject that is not held is not written, and the conversation closes" ;;
-        *) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
+        *"gc-helm takeaway"*) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
+        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a settled headline is not written, and the conversation closes" ;;
+        *) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
     esac
     case "$rc:$calls" in
         0:*"gc bd close tk-v --reason x: x;gc bd comment tk-v x;pr-sitting-comment refresh --sitting tk-v;"*)
             ok "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" ;;
         *) bad "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" "exit $rc, calls: $calls" ;;
     esac
-    rc=$(run_release "$run" unanchored '[]' RL_COMMENT_REFUSE=1)
+    rc=$(run_release "$run" "$SETTLED" '[]' RL_COMMENT_REFUSE=1)
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls:$(cat "$RL/out")" in
         0:*"gc bd close tk-v "*"pr-sitting-comment refresh --sitting tk-v;"*"the close was not recorded among the actions of tk-v"*)
             ok "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" ;;
         *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
-    for stop in "RL_REFUSE=1|a release that does not land|$NONE_HOLDS" "RL_STATE_DOWN=1|a state that does not read|$NONE_HOLDS" \
-        "RL_NONE=1|a gate listing that does not read|{\"error\":\"no issue found\"}"; do
+    for stop in "RL_TAKEAWAY_FAIL=1|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
+        "RL_NONE=1|a blocker listing that does not read|{\"error\":\"no issue found\"}"; do
         IFS='|' read -r setting what gates <<EOF
 $stop
 EOF
-        rc=$(run_release "$run" held "$gates" "$setting")
+        rc=$(run_release "$run" "$WAITING" "$gates" "$setting")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
             0:*|*"bd close"*|*"bd update"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
             *) ok "($sh_) recheck close: $what closes nothing" ;;
+        esac
+    done
+    # A read is an answer only when gc exits 0 and the subject's read is its own
+    # row, alone. Anything else could be read as a settled headline or as no
+    # blocker, so the close writes nothing and stops.
+    TWICE=$(printf '%s' "$WAITING" | jq -c '. + .')
+    OTHER=$(printf '%s' "$WAITING" | jq -c '.[0].id = "tk-y"')
+    for stop in "[]|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers no row" \
+        "$TWICE|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers two rows" \
+        "$OTHER|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers another bead's row" \
+        "$WAITING|RL_SHOW_RC=1|RL_DEPS_RC=0|a subject read that exits non-zero, whatever it printed," \
+        "$WAITING|RL_SHOW_RC=0|RL_DEPS_RC=1|a blocker listing that exits non-zero, whatever it printed,"; do
+        IFS='|' read -r row show_rc deps_rc what <<EOF
+$stop
+EOF
+        rc=$(run_release "$run" "$row" "$NONE_HOLDS" "$show_rc" "$deps_rc")
+        calls=$(tr '\n' ';' <"$RL/log")
+        case "$rc:$calls" in
+            0:*|*"bd close"*|*"bd update"*|*"gc-helm takeaway"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
+            *) ok "($sh_) recheck close: $what closes nothing" ;;
+        esac
+    done
+done
+echo "── every answer to a gate settles the subject's dispatch path first ──"
+# The hold leaves the subject's arm and route in place, and the writer leaves
+# them too, so an answer that clears the subject's last blocker releases the
+# subject to them. The sign-off (step 7) and a turn's --answer (step 8) settle
+# that path by one procedure, the same read and the same withdrawal, run before
+# the answer. Compared whole, the two copies cannot drift apart.
+DP_READ_MARK='"arm: '
+DP_WITHDRAW_MARK='carries no arm and no pool route"'
+for pair in "$DP_READ_MARK|read" "$DP_WITHDRAW_MARK|withdrawal"; do
+    mark=${pair%|*}; what=${pair##*|}
+    fenced_block "$SETTLE" "$mark" >"$TMP/dp-settle"
+    fenced_block "$CONTINUE" "$mark" >"$TMP/dp-continue"
+    if [ -s "$TMP/dp-settle" ] && cmp -s "$TMP/dp-settle" "$TMP/dp-continue"; then
+        ok "the continue step settles the dispatch path with the sign-off's own $what"
+    else
+        bad "the continue step settles the dispatch path with the sign-off's own $what" \
+            "$(diff "$TMP/dp-settle" "$TMP/dp-continue" 2>&1 | head -4 | tr '\n' ' ')"
+    fi
+done
+withdraw_at=$(grep -nF "$DP_WITHDRAW_MARK" "$CONTINUE" | head -1 | cut -d: -f1)
+answer_at=$(grep -nF 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$CONTINUE" | head -1 | cut -d: -f1)
+if [ -n "$withdraw_at" ] && [ -n "$answer_at" ] && [ "$withdraw_at" -lt "$answer_at" ]; then
+    ok "…and withdraws the path before its --answer call"
+else
+    bad "…and withdraws the path before its --answer call" "withdrawal at line ${withdraw_at:-none}, answer at line ${answer_at:-none}"
+fi
+# The blocks run as written, their placeholders filled, under stubs over one
+# subject's row in $DP/row.json: gc reads and unsets its metadata, the disarm
+# drops its arm, and the writer's --answer logs the arm and route the answer
+# would release the subject to. DP_SHOW_EMPTY answers the read with [],
+# DP_SHOW_RC makes it exit with that status after printing the row,
+# DP_UPDATE_REFUSE refuses the update, and DP_UPDATE_LOST accepts it and
+# writes nothing.
+DP="$TMP/dispatch"
+mkdir -p "$DP/bin" "$DP/pack/assets/scripts"
+cat >"$DP/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+printf 'gc %s\n' "$*" >>"$DP_DIR/log"
+case "$1 ${2:-}" in
+    "bd show")
+        [ -z "${DP_SHOW_EMPTY:-}" ] || { printf '[]\n'; exit 0; }
+        cat "$DP_DIR/row.json"; exit "${DP_SHOW_RC:-0}" ;;
+    "bd update")
+        [ -z "${DP_UPDATE_REFUSE:-}" ] || exit 1
+        [ -z "${DP_UPDATE_LOST:-}" ] || exit 0
+        k=""; p=""
+        for a in "$@"; do [ "$p" = "--unset-metadata" ] && k="$a"; p="$a"; done
+        [ -z "$k" ] || { jq -c --arg k "$k" '.[0].metadata |= del(.[$k])' "$DP_DIR/row.json" >"$DP_DIR/row.tmp" \
+            && mv "$DP_DIR/row.tmp" "$DP_DIR/row.json"; } ;;
+esac
+exit 0
+STUB
+cat >"$DP/pack/assets/scripts/deferred-dispatch.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'deferred-dispatch.sh %s\n' "$*" >>"$DP_DIR/log"
+[ "${1:-}" = disarm ] || exit 2
+jq -c '.[0].metadata |= with_entries(select(.key | startswith("gc.dispatch_when_ready") | not))' "$DP_DIR/row.json" >"$DP_DIR/row.tmp" \
+    && mv "$DP_DIR/row.tmp" "$DP_DIR/row.json"
+STUB
+cat >"$DP/pack/assets/scripts/converse-signoff.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'converse-signoff.sh %s\n' "$*" >>"$DP_DIR/log"
+jq -r '.[0].metadata | "answered with arm \(.["gc.dispatch_when_ready"] // "none") route \(.["gc.routed_to"] // "none")"' "$DP_DIR/row.json" >>"$DP_DIR/log"
+STUB
+chmod +x "$DP/bin/gc" "$DP/pack/assets/scripts/"*.sh
+fenced_block "$CONTINUE" "$DP_WITHDRAW_MARK" | fill_block >"$DP/withdraw"
+fenced_block "$CONTINUE" 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' | fill_block >"$DP/answer"
+# dp_seed <metadata-json> — a store whose subject tk-x carries that metadata,
+# and an empty log.
+dp_seed() { jq -cn --argjson m "$1" '[{id: "tk-x", metadata: $m}]' >"$DP/row.json"; : >"$DP/log"; }
+# run_dp <shell> <block> [NAME=VALUE...] — one run of <block> over the store as
+# it stands; prints its status.
+run_dp() {
+    local run=$1 block=$2
+    shift 2
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV DP_DIR="$DP" "$@" CONV="$DP/pack/assets/scripts" \
+        SUBJECT=tk-x CONVERSATION=tk-v PATH="$DP/bin:$PATH" $run "$block" >"$DP/out" 2>&1)
+    echo $?
+}
+POOLED='{"gc.dispatch_when_ready":"rig-a/old-pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]","gc.routed_to":"rig-a/old-pool","gc.takeaway":"holding — x"}'
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    # A ruling on a turn that does not sign off sends the subject to another
+    # pool: the continue step withdraws the old arm and route, then answers,
+    # and the answer releases the subject to neither.
+    dp_seed "$POOLED"
+    rc=$(run_dp "$run" "$DP/withdraw")
+    out=$(cat "$DP/out")
+    rc2=$(run_dp "$run" "$DP/answer")
+    calls=$(tr '\n' ';' <"$DP/log")
+    case "$rc:$rc2:$calls" in
+        0:0:*"deferred-dispatch.sh disarm tk-x --reason x;"*"gc bd update tk-x --unset-metadata gc.routed_to;"*"converse-signoff.sh --conversation tk-v --answer x "*"answered with arm none route none;")
+            ok "($sh_) dispatch path: a turn's ruling that sends the subject elsewhere answers only once its old arm and pool route are gone" ;;
+        *) bad "($sh_) dispatch path: a turn's ruling that sends the subject elsewhere answers only once its old arm and pool route are gone" "exit $rc/$rc2, calls: $calls" ;;
+    esac
+    has "$out" "tk-x carries no arm and no pool route" "($sh_) dispatch path: …and the withdrawal says so"
+    for keep in '{"gc.routed_to":"human"}|a human route' '{}|no arm and no route'; do
+        meta=${keep%%|*}; what=${keep#*|}
+        dp_seed "$meta"
+        rc=$(run_dp "$run" "$DP/withdraw")
+        calls=$(tr '\n' ';' <"$DP/log")
+        case "$rc:$calls:$(cat "$DP/out")" in
+            *"deferred-dispatch.sh"*|*"bd update"*) bad "($sh_) dispatch path: a subject with $what is left as it is" "exit $rc, calls: $calls" ;;
+            0:*"carries no arm and no pool route"*) ok "($sh_) dispatch path: a subject with $what is left as it is, and the withdrawal says so" ;;
+            *) bad "($sh_) dispatch path: a subject with $what is left as it is" "exit $rc, calls: $calls, out: $(cat "$DP/out")" ;;
+        esac
+    done
+    [ "$(jq -r '.[0].metadata["gc.routed_to"]' "$DP/row.json" 2>/dev/null)" = null ] \
+        && ok "($sh_) dispatch path: …and nothing is written to it" \
+        || bad "($sh_) dispatch path: …and nothing is written to it" "row: $(cat "$DP/row.json")"
+    dp_seed '{"gc.routed_to":"human"}'
+    run_dp "$run" "$DP/withdraw" >/dev/null
+    eq "$(jq -r '.[0].metadata["gc.routed_to"]' "$DP/row.json")" human "($sh_) dispatch path: a human route stays"
+    # A withdrawal that does not land, or a subject read that is not its own
+    # row alone, prints no success line and exits non-zero, so the sitting
+    # answers nothing. A read that does not answer writes nothing at all.
+    for stop in "DP_UPDATE_REFUSE=1|an update the store refuses|" \
+        "DP_UPDATE_LOST=1|an update that writes nothing|tk-x still carries route rig-a/old-pool" \
+        "DP_SHOW_EMPTY=1|a subject read that answers no row|" \
+        "DP_SHOW_RC=1|a subject read that exits non-zero, whatever it printed,|"; do
+        IFS='|' read -r setting what says <<EOF
+$stop
+EOF
+        dp_seed "$POOLED"
+        rc=$(run_dp "$run" "$DP/withdraw" "$setting")
+        calls=$(tr '\n' ';' <"$DP/log")
+        out=$(cat "$DP/out")
+        case "$rc:$out" in
+            0:*|*"carries no arm and no pool route"*) bad "($sh_) dispatch path: $what clears nothing for the answer" "exit $rc, out: $out" ;;
+            *) ok "($sh_) dispatch path: $what clears nothing for the answer" ;;
+        esac
+        [ -z "$says" ] || has "$out" "$says" "($sh_) dispatch path: …and names what is left"
+        case "$setting:$calls" in
+            DP_SHOW_*:*"deferred-dispatch.sh"*|DP_SHOW_*:*"bd update"*) bad "($sh_) dispatch path: …$what writes nothing" "calls: $calls" ;;
+            DP_SHOW_*) ok "($sh_) dispatch path: …and writes nothing" ;;
         esac
     done
 done

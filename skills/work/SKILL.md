@@ -111,39 +111,31 @@ a polecat pool is `mol-polecat-work`.
 
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
-  which a sitting's sign-off `--route <pool>` also writes when it releases a
-  held subject, has the pool claim the bead itself. An arm
+  has the pool claim the bead itself. An arm
   (`deferred-dispatch.sh arm`) has the deferred-dispatch pass sling the bead
   once nothing holds it. Send it one way, and disarm an armed bead before you
   send it another. Any two start two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
-  blocker closes, and it ends the run on a bead that carries a `merge_result`,
-  `held` included, as finished. Release the wait (the waits skill), then send.
+  blocker closes, and it ends the run on a bead that carries a `merge_result`
+  as finished. Release the wait (the waits skill), then send.
 
 ### In a sitting, decide which bead carries the work
 
-The sign-off's `--route` says where the subject itself goes once its wait is
-released (the converse-settle step). Sign off by the case that fits:
+Sign off by the case that fits (the converse-settle step):
 
-- **The subject is the work.** Sign off with
-  `--ruled yes --route human --no-wait`, then send the subject:
-  `gc sling <rig>/<pool> <subject> --on <formula>`. The sling clears that human
-  route. Never sign off with `--route <rig>/<pool>` here: it routes the subject
-  raw as well, a second dispatch. When the formula is the one the subject
-  recommends, add `--accept` to the same sign-off and send nothing yourself
-  (Take a recommendation, below).
+- **The subject is the work.** Sign off with `--ruled yes --no-wait`, then send
+  the subject: `gc sling <rig>/<pool> <subject> --on <formula>`. When the
+  formula is the one the subject recommends, add `--accept` to the same sign-off
+  and send nothing yourself (Take a recommendation, below).
 - **New work carries it, and the subject waits for it.** File the work, send
-  it, and sign off with `--ruled yes --route human --waiting-on <the work>`.
-  Never sign off with `--route <rig>/<pool>` here: that pool would claim the
-  subject itself once the work lands, with nothing left on it to build.
+  it, and sign off with `--ruled yes --waiting-on <the work>`.
 - **New work decomposes an epic subject.** File it as the subject's member,
-  with `--parent <subject>`, send it, and sign off with
-  `--ruled yes --route human --no-wait`. Leave it out of `--waiting-on`, which
-  names a dependency only: the epic already waits on its members, and bd
-  refuses a `blocks` edge from a parent to its own descendant. When the sitting
-  also sent a dependency, name that one with `--waiting-on` in place of
-  `--no-wait`.
+  with `--parent <subject>`, send it, and sign off with `--ruled yes --no-wait`.
+  Leave it out of `--waiting-on`, which names a dependency only: the epic
+  already waits on its members, and bd refuses a `blocks` edge from a parent to
+  its own descendant. When the sitting also sent a dependency, name that one
+  with `--waiting-on` in place of `--no-wait`.
 
 ## Send a bead to a named agent
 

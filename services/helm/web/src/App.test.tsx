@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App, resolveDrillTarget } from './App';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
@@ -268,6 +268,10 @@ beforeEach(() => {
       return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
     }),
   );
+  // The page warns when its board is old by the clock, and the fixture boards
+  // are dated, so the clock reads the shared board's own stamp: each test sees
+  // a fresh board unless it moves the clock itself.
+  vi.setSystemTime(Date.parse(BOARD.generated_at));
 });
 
 afterEach(() => {
@@ -276,6 +280,7 @@ afterEach(() => {
   // Collapse state persists to localStorage, which a jsdom shares across the
   // tests in this file; clear it so one test's fold does not leak into the next.
   localStorage.clear();
+  vi.useRealTimers();
 });
 
 // A fixed region by its accessible name — the owed cover-sheet, the sittings
@@ -1912,4 +1917,244 @@ it('omits the rig filter when the board holds a single rig', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
   expect(screen.queryByRole('combobox', { name: 'filter by rig' })).toBeNull();
+});
+
+// The board's age. A page whose reads stop landing keeps showing its last
+// board, so once no poll has replaced it the page says how old it is, and a poll
+// never drops the read it is waiting for. These tests run the clock by hand: the
+// fake timers drive the poll and the read deadline, and each board read waits
+// for the test to answer it.
+
+type BoardRead = {
+  signal: AbortSignal;
+  answer: (board: Board) => void;
+  fail: (status: number) => void;
+};
+
+// Each board read waits until the test answers or fails it, and keeps the signal
+// it was sent with, so a test can see whether the page dropped it. Every other
+// request is a 404, as in the shared stub.
+function holdBoardReads(): BoardRead[] {
+  const reads: BoardRead[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!new URL(url, 'http://localhost/').pathname.endsWith('/helm')) {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      const signal = init?.signal as AbortSignal;
+      return new Promise<Response>((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        // A body that is already read, so an answer needs no I/O for the fake
+        // clock to drive.
+        reads.push({
+          signal,
+          answer: (board) => resolve({ ok: true, status: 200, json: async () => board } as Response),
+          fail: (status) => resolve({ ok: false, status, json: async () => ({}) } as Response),
+        });
+      });
+    }),
+  );
+  return reads;
+}
+
+// Fakes the timers and the date, starting the clock `ms` after the shared
+// board's stamp.
+function startClock(ms: number): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+  vi.setSystemTime(Date.parse(BOARD.generated_at) + ms);
+}
+
+// Moves the clock on, running the timers it passes and the reads they settle.
+async function tick(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+const banner = (): HTMLElement | null => screen.queryByRole('alert');
+
+it('says how old the board is once no poll has replaced it, above the rows it keeps', async () => {
+  // 100s old when it lands: a working page shows a board up to the 45s cache
+  // window, a poll and a build old, so this one carries no warning.
+  startClock(100_000);
+  const reads = holdBoardReads();
+  render(<App />);
+  reads[0].answer(BOARD);
+  await tick(0);
+  expect(screen.getByText('Attention Canvas')).toBeTruthy();
+  expect(banner()).toBeNull();
+
+  // The next poll's read does not land, and the board passes the cache window
+  // plus two polls.
+  await tick(30_000);
+  expect(reads).toHaveLength(2);
+  expect(banner()?.textContent).toBe(
+    'This board is 2 minutes old. No newer board has reached this page.',
+  );
+  expect(document.querySelector('main')?.firstElementChild).toBe(banner());
+  expect(screen.getByText('Attention Canvas')).toBeTruthy();
+});
+
+it('puts a failed read in the banner, and takes it down when a read lands', async () => {
+  startClock(0);
+  const reads = holdBoardReads();
+  render(<App />);
+  reads[0].answer(BOARD);
+  await tick(0);
+  expect(banner()).toBeNull();
+
+  await tick(30_000);
+  reads[1].fail(502);
+  await tick(0);
+  expect(banner()?.textContent).toBe(
+    'This board is 30 seconds old. The last read failed: board request failed: HTTP 502',
+  );
+  expect(screen.getByText('Attention Canvas')).toBeTruthy();
+
+  await tick(30_000);
+  reads[2].answer({ ...BOARD, generated_at: new Date().toISOString() });
+  await tick(0);
+  expect(banner()).toBeNull();
+});
+
+// A build slower than the poll interval used to be dropped by the next poll and
+// asked for again, so a page behind a slow build never received a board.
+it('lets a slow read land rather than dropping it on the next poll', async () => {
+  startClock(0);
+  const reads = holdBoardReads();
+  render(<App />);
+  reads[0].answer(BOARD);
+  await tick(0);
+
+  await tick(30_000);
+  expect(reads).toHaveLength(2);
+  await tick(30_000);
+  expect(reads).toHaveLength(2);
+  expect(reads[1].signal.aborted).toBe(false);
+
+  reads[1].answer({ ...BOARD, generated_at: '2026-08-21T19:15:00Z' });
+  await tick(0);
+  expect(screen.getByText(/generated 2026-08-21T19:15:00Z/)).toBeTruthy();
+});
+
+it('drops a read that never answers, says so, and asks again on a later poll', async () => {
+  startClock(0);
+  const reads = holdBoardReads();
+  render(<App />);
+  reads[0].answer(BOARD);
+  await tick(0);
+
+  await tick(30_000);
+  expect(reads).toHaveLength(2);
+  await tick(59_999);
+  expect(reads[1].signal.aborted).toBe(false);
+  expect(banner()).toBeNull();
+
+  await tick(1);
+  expect(reads[1].signal.aborted).toBe(true);
+  expect(banner()?.textContent).toContain(
+    'The last read failed: the board did not answer within 60 seconds',
+  );
+
+  await tick(30_000);
+  expect(reads).toHaveLength(3);
+});
+
+// The tab left open overnight: the machine slept with a read in flight, so no
+// timer ran and nothing landed. Shown again, the page says how old its board is
+// at once and reads again without waiting on the read that went to sleep.
+it('reads again the moment its tab is shown, and warns until that read lands', async () => {
+  startClock(0);
+  const reads = holdBoardReads();
+  let visibility: DocumentVisibilityState = 'visible';
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+  try {
+    render(<App />);
+    reads[0].answer(BOARD);
+    await tick(0);
+    await tick(30_000);
+    expect(reads).toHaveLength(2);
+
+    visibility = 'hidden';
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(reads).toHaveLength(2);
+
+    vi.setSystemTime(Date.parse(BOARD.generated_at) + 22 * 3_600_000);
+    visibility = 'visible';
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(reads).toHaveLength(3);
+    expect(reads[1].signal.aborted).toBe(true);
+    // Once the dropped read settles, the banner still names no failure.
+    await tick(0);
+    expect(banner()?.textContent).toBe(
+      'This board is 22 hours old. No newer board has reached this page.',
+    );
+
+    reads[2].answer({ ...BOARD, generated_at: new Date().toISOString() });
+    await tick(0);
+    expect(banner()).toBeNull();
+    expect(screen.getByText('Attention Canvas')).toBeTruthy();
+  } finally {
+    delete (document as { visibilityState?: DocumentVisibilityState }).visibilityState;
+  }
+});
+
+// An action on a row asks for the board at once, so the row shows what the
+// action did. A read already in flight began before the action, so the
+// action's read replaces it. The read it drops raises no failure, and the next
+// poll waits on the replacement.
+it('replaces the read in flight when an action lands, and waits on the replacement', async () => {
+  startClock(0);
+  const reads = holdBoardReads();
+  const readBoard = globalThis.fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!new URL(url, 'http://localhost/').pathname.endsWith('/helm/accept')) {
+        return readBoard(input, init);
+      }
+      const body = JSON.stringify({ bead: 'tk-rec', verb: 'accept', message: 'accept: dispatched' });
+      return Promise.resolve({ ok: true, status: 200, text: async () => body } as Response);
+    }),
+  );
+  const board: Board = {
+    ...BOARD,
+    total: 1,
+    sittings: [],
+    tiles: [
+      tile({
+        id: 'tk-rec',
+        kind: 'decision',
+        title: 'a recommendation to accept',
+        severity: 'ELEVATED',
+        section: 'gate',
+        acceptable: true,
+        accept_formula: 'mol-supersede',
+      }),
+    ],
+  };
+  render(<App />);
+  reads[0].answer(board);
+  await tick(0);
+  await tick(30_000);
+  expect(reads).toHaveLength(2);
+
+  fireEvent.click(screen.getByRole('button', { name: /accept ▸ mol-supersede/i }));
+  await tick(0);
+  expect(reads).toHaveLength(3);
+  expect(reads[1].signal.aborted).toBe(true);
+  expect(banner()).toBeNull();
+
+  await tick(30_000);
+  expect(reads).toHaveLength(3);
+  reads[2].answer({ ...board, generated_at: '2026-08-21T19:15:00Z' });
+  await tick(0);
+  expect(screen.getByText(/generated 2026-08-21T19:15:00Z/)).toBeTruthy();
 });
