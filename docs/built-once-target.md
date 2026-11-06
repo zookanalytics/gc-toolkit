@@ -346,7 +346,6 @@ convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| B | tk-1tfzr71.14 | the rig checkout healer; the operator rules at its design | 2,704 |
 | B | tk-1tfzr71.13 | the duplicate sweep and the successor keys | 1,054 |
 | B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
@@ -356,7 +355,7 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-kvdomjb and the migration members name come to 63k of
+The whole files that tk-kvdomjb and the migration members name come to 60k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry

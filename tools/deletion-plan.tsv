@@ -81,9 +81,6 @@ assets/scripts/review-dismissal.test.sh	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/doctor.toml	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.sh	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.test.sh	tk-1tfzr71.21
-assets/scripts/reconcile-rig-checkouts.sh	tk-1tfzr71.14
-assets/scripts/reconcile-rig-checkouts.test.sh	tk-1tfzr71.14
-orders/reconcile-rig-checkouts.toml	tk-1tfzr71.14
 assets/scripts/duplicate-sweep.sh	tk-1tfzr71.13
 assets/scripts/duplicate-sweep.test.sh	tk-1tfzr71.13
 doctor/check-routed-work-claimable/doctor.toml	tk-1tfzr71.15
