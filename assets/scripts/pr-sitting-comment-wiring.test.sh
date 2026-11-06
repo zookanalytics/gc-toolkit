@@ -166,14 +166,13 @@ awk '
 [ -s "$TMPD/title-step.sh" ] && ok "converse-prep's title step is found" \
   || bad "converse-prep's title step is found" "no fenced bash block in $PREP runs pr-sitting-comment.sh post"
 
-# fixture [no-topic] [open-pr] [no-pr | link-only] [zsh]: the subject tk-subj
-# with PR 41, recorded as pr_number and pr_url, and a review gate, and the
-# conversation tk-conv a sitting holds, replying to that gate and opened with
-# $OPENER. Unless no-topic is given, the sitting's title step has run, under
-# bash, or under zsh as a Codex sitting's shell runs it; -f keeps a zsh
-# startup file from putting the real gh ahead of the stub. open-pr makes the
-# subject an open PR the ruling must answer for. no-pr records no PR on the
-# subject, and link-only records it as pr_url alone.
+# fixture [no-topic] [open-pr] [no-pr] [zsh]: the subject tk-subj with PR 41,
+# recorded as pr_number and pr_url, and a review gate, and the conversation
+# tk-conv a sitting holds, replying to that gate and opened with $OPENER.
+# Unless no-topic is given, the sitting's title step has run, under bash, or
+# under zsh as a Codex sitting's shell runs it; -f keeps a zsh startup file
+# from putting the real gh ahead of the stub. open-pr makes the subject an open
+# PR the ruling must answer for, and no-pr records no PR on the subject.
 fixture() {
   rm -rf "$STORE" "$GCTK_LOG"; mkdir -p "$STORE/b"; printf '[]' > "$STATE"
   local a mr="" topic=yes run=bash pr='{"pr_number":"41","pr_url":"https://github.com/acme/widgets/pull/41"}'
@@ -182,7 +181,6 @@ fixture() {
       no-topic) topic="" ;;
       open-pr) mr=pull_request ;;
       no-pr) pr='{}' ;;
-      link-only) pr='{"pr_url":"https://github.com/acme/widgets/pull/41"}' ;;
       zsh) run="zsh -f" ;;
     esac
   done
@@ -212,11 +210,7 @@ fixture
 has "the comment shows the visit, the bead it is on and the topic" "$(body)" "$OPEN_LINES"
 hasnt "…and not the words the visit opened with" "$(body)" "$OPENER"
 
-echo "── the title step reads the subject's PR from its link, and passes none for a subject without one ──"
-fixture link-only
-[ "$(titled)" = "session|title|--subject|tk-subj|--pr|41|--topic|$TOPIC|" ] \
-  && ok "a PR recorded only as its link is passed as its number" \
-  || bad "a PR recorded only as its link is passed as its number" "$(titled)"
+echo "── the title step passes no PR for a subject without one ──"
 fixture no-pr
 [ "$(titled)" = "session|title|--subject|tk-subj|--pr||--topic|$TOPIC|" ] \
   && ok "a subject with no PR passes an empty --pr, which gctk reads as no PR" \

@@ -24,7 +24,7 @@ sees it. So write it yourself, not in the operator's words, and name no other
 rig or its beads:
 ```bash
 TOPIC="<topic>"
-PR=$(gc bd show "$SUBJECT" --json | jq -r '.[0].metadata as $m | ($m.pr_number // "" | tostring) as $n | if $n != "" then $n else (($m.pr_url // "") | split("/pull/") | if length > 1 then ((.[1] | capture("^(?<d>[0-9]+)") | .d) // "") else "" end) end')
+PR=$(gc bd show "$SUBJECT" --json | jq -r '.[0].metadata.pr_number // "" | tostring')
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
