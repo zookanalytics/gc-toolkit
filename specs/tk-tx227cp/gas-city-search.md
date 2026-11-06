@@ -19,7 +19,9 @@ park route when its gate is withdrawn is a `--route ""` write through
 lifecycle.sh. Neither adds surface.
 
 The search found nothing that re-runs a check. Gas City's own PR monitor counts
-a timed-out or cancelled check as a failed one and mints repair work for it.
+a timed-out check as a failed one and mints repair work for it. It counts a
+cancelled check as pending, though a job that runs past its timeout ends
+cancelled, and it mints repair work for that PR only from GitHub's merge state.
 bd's `gh:run` gate waits on a run and escalates a cancelled one to a person,
 which is the behavior this change replaces. No published pack re-runs a check.
 The record is bd's own primitive, a metadata key on the bead.
@@ -41,11 +43,18 @@ The record is bd's own primitive, a metadata key on the bead.
   [GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor)
   config "declares how one repository/base-branch set is monitored and where
   durable repair work should be routed when readiness fails". In package
-  `internal/githubmonitor`, `checkFailed` counts a check concluded `CANCELED`,
-  `TIMED_OUT`, `STARTUP_FAILURE`, `ACTION_REQUIRED` or `STALE` as failed, the
-  same as `FAILURE`, and `classifyPullRequest` then reads the PR as
-  `checks_failed`, actionable, which routes repair work to the monitor's
-  `repair_route`. It cannot tell a timeout from a code failure. Nothing in
+  `internal/githubmonitor`, `checkFailed` counts a check concluded `TIMED_OUT`,
+  `STARTUP_FAILURE`, `ACTION_REQUIRED` or `STALE` as failed, the same as
+  `FAILURE`, and `classifyPullRequest` then reads the PR as `checks_failed`,
+  actionable, which routes repair work to the monitor's `repair_route`. It
+  cannot tell a timeout from a code failure. Its list also names `CANCELED`,
+  but `client.go` reads the checks from GraphQL's `statusCheckRollup`, whose
+  `CheckConclusionState` spells a cancellation `CANCELLED`. So `checkFailed`
+  misses a cancelled check and `checkPending` counts it as pending. Such a PR
+  reaches repair work only through its merge state: `classifyPullRequest` reads
+  `UNSTABLE` as `checks_failed` and `BLOCKED` as `blocked`, both actionable. A
+  job that runs past its `timeout-minutes` ends `CANCELLED`, as test-macos did
+  at its 45-minute cap in attempt 1 of run 42114792210. Nothing in
   `internal/githubmonitor/client.go` or `cmd/gc/cmd_github.go` calls GitHub's
   re-run endpoint: neither names `rerun` or `actions/runs`.
 - **Webhook rules.** A
@@ -84,6 +93,15 @@ it runs, but the arm needs no wait: the re-run's new attempt takes the failed
 row's place in the PR's status check rollup, so a pass during it reads the check
 pending. A gate closes when its run ends and does not say which head was
 re-run, which is the one thing the arm reads.
+
+The arm does wait before it re-runs, while the failed check's run still has a
+job queued or running, because GitHub re-runs a run's failed jobs only once the
+whole run is done. A
+[GitHub community request](https://github.com/orgs/community/discussions/73156)
+to re-run failed jobs "while workflow is still running" says "we still have to
+wait for _all_ jobs in a workflow to finish", and the reply on it says "It's
+not something we are doing right now". The rollup the arm already reads shows
+each of the run's jobs, so that wait needs no gate either.
 
 ## Warrants
 
