@@ -2090,6 +2090,8 @@ it('reads again the moment its tab is shown, and warns until that read lands', a
     });
     expect(reads).toHaveLength(3);
     expect(reads[1].signal.aborted).toBe(true);
+    // Once the dropped read settles, the banner still names no failure.
+    await tick(0);
     expect(banner()?.textContent).toBe(
       'This board is 22 hours old. No newer board has reached this page.',
     );
@@ -2101,4 +2103,58 @@ it('reads again the moment its tab is shown, and warns until that read lands', a
   } finally {
     delete (document as { visibilityState?: DocumentVisibilityState }).visibilityState;
   }
+});
+
+// An action on a row asks for the board at once, so the row shows what the
+// action did. A read already in flight began before the action, so the
+// action's read replaces it. The read it drops raises no failure, and the next
+// poll waits on the replacement.
+it('replaces the read in flight when an action lands, and waits on the replacement', async () => {
+  startClock(0);
+  const reads = holdBoardReads();
+  const readBoard = globalThis.fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!new URL(url, 'http://localhost/').pathname.endsWith('/helm/accept')) {
+        return readBoard(input, init);
+      }
+      const body = JSON.stringify({ bead: 'tk-rec', verb: 'accept', message: 'accept: dispatched' });
+      return Promise.resolve({ ok: true, status: 200, text: async () => body } as Response);
+    }),
+  );
+  const board: Board = {
+    ...BOARD,
+    total: 1,
+    sittings: [],
+    tiles: [
+      tile({
+        id: 'tk-rec',
+        kind: 'decision',
+        title: 'a recommendation to accept',
+        severity: 'ELEVATED',
+        section: 'gate',
+        acceptable: true,
+        accept_formula: 'mol-supersede',
+      }),
+    ],
+  };
+  render(<App />);
+  reads[0].answer(board);
+  await tick(0);
+  await tick(30_000);
+  expect(reads).toHaveLength(2);
+
+  fireEvent.click(screen.getByRole('button', { name: /accept ▸ mol-supersede/i }));
+  await tick(0);
+  expect(reads).toHaveLength(3);
+  expect(reads[1].signal.aborted).toBe(true);
+  expect(banner()).toBeNull();
+
+  await tick(30_000);
+  expect(reads).toHaveLength(3);
+  reads[2].answer({ ...board, generated_at: '2026-08-21T19:15:00Z' });
+  await tick(0);
+  expect(screen.getByText(/generated 2026-08-21T19:15:00Z/)).toBeTruthy();
 });
