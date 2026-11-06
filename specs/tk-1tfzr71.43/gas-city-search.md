@@ -16,6 +16,7 @@ Read on 2026-11-06 at `gastownhall/gascity` main 005135c33b1f and
 | Remove the tree at hand-off | `work-submit.sh` removes the tree with `git worktree remove`, never forced, once the push is verified, the hand-off written and the step closed. It then deletes the local branch and clears `work_dir`. |
 | Create it with `gc worktree ensure` and remove it with `gc worktree cleanup` | Does not fit. `cleanup` removes only a tree merged into the base it was made from, and at hand-off the branch is pushed but unmerged. `ensure` alone would move every tree out of the agent homes and write provenance that nothing reads. `work-setup.sh` keeps `git worktree add`, as core's own variants do. |
 | The target page's row | Goes, with the schedule row, from `docs/built-once-target.md`. |
+| Keep a tree that holds another checkout | `work-submit.sh` walks every directory under the tree and keeps the tree when a `.git` sits below its own, or when a directory cannot be read. git's removal would delete such a checkout, and nothing in Gas City looks for one first. |
 
 ## What Gas City provides, and where it stops
 
@@ -68,6 +69,44 @@ by `ensure` from `origin/main`, with one commit pushed to origin's branch:
 | `ensure` for a second bead on a branch the first tree holds | refused, with git's own `is already used by worktree at '<path>'` on stderr, rolled back |
 | `ensure` with a path under a registered worktree | refused, `is inside registered worktree` |
 | `git worktree remove` of the pushed tree | removed |
+
+## A checkout inside the tree
+
+`git worktree remove` without force refuses a tree with a change, an untracked
+file or a submodule, and deletes everything else under it, ignored paths
+included (git-worktree(1), `remove`). A checkout under an ignored path goes with
+them. Probed with git 2.56.0 in scratch repositories: a linked worktree of a
+second repository under an ignored `nested/` lost its uncommitted file, and that
+repository kept a prunable registration. A clone under an ignored
+`clone/deep/repo` lost its unpushed commit. In both, the tree's
+`git status --porcelain` was empty and its repository's `git worktree list` named
+nothing under it, so a guard built on either read cannot see them. A symlink
+under the tree is unlinked and its target kept.
+
+Gas City removes trees the same way, and does not look under one first.
+`Cleanup` reads `StatusPorcelain` and calls `WorktreeRemove(spec.Path, false)`.
+Gate 6 of `reapClosedBeadWorktrees` (`cmd/gc/bead_worktree_reaper.go`) reads
+`HasUncommittedWork`, a bare `git status --porcelain` in `internal/git/git.go`,
+and calls `WorktreeRemove(worktreePath, false)`. A tree the hand-off keeps for a
+checkout inside it is therefore the controller reaper's once its bead closes,
+and the checkout is safe only until then. That gap is the engine's to close, and
+it is filed as work on Gas City.
+
+git marks another repository by what is on disk: `git clean` refuses "untracked
+nested git repositories (directories with a .git subdirectory)" unless given a
+second `-f` (git-clean(1)). The hand-off reads the same mark. It walks the tree
+with `find -P . -path ./.git -prune -o -name .git -print -quit`, which finds a
+`.git` file or directory at any depth below the tree's own and follows no
+symlink, as git's removal follows none. A hit keeps the tree, and so does a
+non-zero exit, because a directory the walk could not read can hold one.
+`git clean -ndX` finds the same checkouts, but it names each in a translated
+sentence, "Would skip repository <path>" in English and "Würde Repository <path>
+überspringen" in German, which a script would have to parse in every locale. The
+walk replaces a read of the tree's own repository's worktree list, which saw
+only that repository's linked worktrees. Over a tree of this repository, 1,249
+tracked files, it took 25 ms. The census of validation pass tk-qqhbpb0 found no
+`.git` below the top of any of the host's 62 per-bead trees, so on those trees
+the walk keeps none that the plain removal would take.
 
 ## What reads `work_dir` once the tree is gone
 
