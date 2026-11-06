@@ -180,8 +180,9 @@ Neither is built. Today the operator records the contract on the epic, and
 ## Deliveries and Epic Checkpoints
 
 The Delivery is built from what bd and the pack already do with a child epic,
-and the Epic Checkpoint runs by hand. The operator records each
-ruling on the epic, and the pack checks that an epic closes only on the close
+and the Epic Checkpoint runs by hand, as a sitting on the epic that follows the
+[`converse-epic-checkpoint`](../skills/converse-epic-checkpoint/SKILL.md) skill.
+The operator records each ruling on the epic, and the pack checks that an epic closes only on the close
 ruling with its outcome or on a disposition
 ([epic-stewardship.md](epic-stewardship.md)). Nothing
 prompts an evaluation when work lands, so one happens when the operator calls a
