@@ -132,10 +132,12 @@ and how the effort's branch is brought current.
 The recipe's branch cut is a push, and a converse sitting never pushes, so a
 sitting does not run it. When the subject's recommendation is
 `mol-design-convoy`, the sign-off's `--accept` takes it (Take a recommendation,
-below), and that formula's run cuts the branch. Any other effort goes to the mechanik as a bead in the effort's rig that names
-the effort's beads and what it delivers,
-`gc bd --rig <rig> create "<title>" -t task -d "<description>" --json`, sent to
-the mechanik as a named agent's bead (A named agent takes an assignee, above).
+below), and that formula's run cuts the branch. Any other effort goes to the
+mechanik as a bead in the effort's rig that names the effort's beads and what
+it delivers. File it with
+`gc bd --rig <rig> create "<title>" -t task -d "<description>" --json`, then
+send it to the mechanik as a named agent's bead (A named agent takes an
+assignee, above).
 
 ## Take a recommendation
 
