@@ -993,7 +993,9 @@ echo "── an Epic Checkpoint gates what its ruling closes, records it, and cl
 # never forced, because bd refuses a close over an open child or a live blocker.
 # The sign-off records the PR a retirement acts on under the words of its ruling,
 # so each gate on a PR's anchor is answered under that PR's own ruling, and the
-# final sign-off reaches none of those PRs.
+# final sign-off reaches none of those PRs. A park's gate can hold other beads,
+# so a release closes it only once nothing else waits on it, and never closes a
+# blocker that is not a park's own gate.
 have "the step table sends a checkpoint sitting to its skill" '**Steps 4–8, at an Epic Checkpoint, when the operator rules continue, shift or close on an epic, or the subject is a Delivery that has landed**' "$PROMPT"
 have "…by name" '`converse-epic-checkpoint` |' "$PROMPT"
 have "the prompt names the closes a checkpoint's ruling makes" \
@@ -1035,6 +1037,13 @@ have "…as an epic under the epic, opening with its aim" \
     'gc bd create "Delivery: <what it lands>" -t epic --parent "$EPIC"' "$CHECKPOINT"
 have "the next priority uses the steering move" '"$CONV/gc-helm.sh" priority "$EPIC" <P0-P4>' "$CHECKPOINT"
 have "…and so does the park" '"$CONV/gc-helm.sh" park "$EPIC"' "$CHECKPOINT"
+have "an unpark releases the epic by write 3's release step" \
+    "A ruling that unparks the epic releases it from its park instead, by write 3's release step with \`\"\$EPIC\"\` as the bead." "$CHECKPOINT_JOINED"
+have "…which takes only the epic's edge off a gate another bead waits on" 'gc bd dep remove "$EPIC" <park>' "$CHECKPOINT"
+have "the release lists what else waits on the park, and says so when nothing does" \
+    'if length == 0 then "nothing else waits on it" else .[] end' "$CHECKPOINT"
+have "…and never closes a blocker that is not a park's own gate" \
+    "A blocker that is not a park's own gate never closes here" "$CHECKPOINT_JOINED"
 fenced_block "$CHECKPOINT" '--append-notes "$RECORD"' | fill_block >"$CH/block"
 [ -s "$CH/block" ] && ok "the checkpoint record's block is found" \
     || bad "the checkpoint record's block is found" "no fenced bash block holds its append in $CHECKPOINT"

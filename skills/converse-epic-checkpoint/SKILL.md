@@ -194,17 +194,27 @@ operator first, in one of the ways write 5 settles an item. A bead whose PR was
 retired stays open until the refinery's next pass over that PR completes the
 retirement, so the close waits for that pass.
 
-Then release the bead from each open blocker still on it, such as a park. This
-lists them:
+Then release the bead from its park, if it has one. A park is the one `blocks`
+edge `gc-helm.sh park` gives a bead, onto a gate of its own or onto an existing
+bead it was parked behind, and another bead can be parked behind the same gate.
+This lists the bead's open blockers, among them its park:
 ```bash
-gc bd dep list <bead> --direction=down -t blocks --json | jq -r '.[] | select(.status != "closed") | "\(.id) [\(.issue_type)] \(.title)"'
+gc bd dep list <bead> --direction=down -t blocks --json | jq -r '.[] | select(.status != "closed") | "\(.id) [\(.issue_type)\(if (.await_type // "") != "" then " awaiting " + .await_type else "" end)] \(.title)"'
 ```
-A park's gate that holds only this bead closes, which starts nothing because
-nothing under the bead is open:
-`gc bd close <gate> --reason "<the ruling, one line>"`. A gate that also holds
-other beads, which `gc bd dep list <gate> --direction=up -t blocks` lists,
-stays open, and only this bead's edge comes off:
-`gc bd dep remove <bead> <gate>`.
+This lists every other bead still waiting on the park, or says that nothing else
+does. It always prints a line, so one that prints nothing has not answered: run
+it again before either write below.
+```bash
+gc bd dep list <park> --direction=up -t blocks --json | jq -r --arg b <bead> '[.[] | select(.id != $b and .status != "closed") | "\(.id) [\(.status)] \(.title)"] | if length == 0 then "nothing else waits on it" else .[] end'
+```
+A park's own gate, a gate with no await type, closes once that list says
+`nothing else waits on it`, or once the ruling also releases each bead it lists:
+`gc bd close <gate> --reason "<the ruling, one line>"`. Otherwise only this
+bead's edge comes off, and the park holds the rest:
+`gc bd dep remove <bead> <park>`. A blocker that is not a park's own gate never
+closes here: a park behind an existing bead releases this bead by its edge
+alone, and a gate awaiting a person clears only by an answer. Nothing under the
+bead is open, so the release starts nothing.
 
 Then close the bead through the close gate, with the ruling as its reason:
 ```bash
@@ -245,9 +255,11 @@ with no parent takes a P-value, and one under a parent takes a shift
 "$CONV/gc-helm.sh" park "$EPIC" "<the ruling, and what releases the park>"
 ```
 A park the ruling makes states the ruling in its gate's title, as above. A
-ruling that unparks the epic closes its park's gate instead:
-`gc bd close <gate> --reason "<the ruling, one line>"`. A ruling that names no
-change to either leaves it as it is.
+ruling that unparks the epic releases it from its park instead, by write 3's
+release step with `"$EPIC"` as the bead. Its park's gate closes only when
+nothing else waits on it or the ruling also releases what does, and otherwise
+only the epic's edge comes off: `gc bd dep remove "$EPIC" <park>`. A ruling
+that names no change to either leaves it as it is.
 
 **5. On close, settle the epic's other open work before anything is
 released.** bd refuses to close the epic while any child of it is open, and it
@@ -288,8 +300,8 @@ three ways:
 
 **6. On close, close each other Delivery, then the epic,** the way write 3
 closes a bead. A Delivery's close reason is the ruling. The epic's park is
-released before the epic closes, because its own edge to the park's gate is a
-live blocker. The close gate passes the epic once write 2 has recorded the close
+released before the epic closes, because its own edge to the park is a live
+blocker. The close gate passes the epic once write 2 has recorded the close
 ruling with its outcome, and so does the doctor invariant that reads it after
 the close.
 
