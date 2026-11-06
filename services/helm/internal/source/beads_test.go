@@ -1688,9 +1688,9 @@ func TestReadIssuePrefix(t *testing.T) {
 
 // --- the cross-anchor joins (tk-134d7) --------------------------------------
 
-// joinStore is a store whose ordinary beads carry the markers the three joins
-// read: an open VISIT naming its subject, a workflow ROOT pointing at its input
-// convoy, and that root's STEP carrying the session name.
+// joinStore is a store whose ordinary beads carry the markers the joins read:
+// a workflow ROOT pointing at its input convoy, and that root's STEP carrying
+// the session name.
 func joinStore() *fakeStore {
 	st := populatedStore()
 	st.issues["task"] = append(st.issues["task"],

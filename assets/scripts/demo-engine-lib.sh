@@ -33,9 +33,10 @@
 #     each rig checkout in the city's rig map. A directory's listing and a file's
 #     contents are denied, and their metadata is not, because node resolves a
 #     path by reading the metadata of each directory above it.
-#   - every loopback port but the one the capture's own server listens on, and
-#     every Unix socket but the system resolver's, so the supervisor's API, the
-#     Dolt server and the session server do not answer.
+#   - every loopback port but one, and every Unix socket but the system
+#     resolver's, so the supervisor's API, the Dolt server and the session
+#     server do not answer. The one port is the capture's own server's, or the
+#     port of a rig's app that a --base-url on this host names, as below.
 #   - signals to any process outside the sandbox.
 # The CLI also runs without the environment variables that point a command at
 # the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and TMUX_PANE.
@@ -58,8 +59,22 @@
 #     engine would capture that server, which runs outside the sandbox. A
 #     --serve-dir given no --port is given a free one, because the sandbox
 #     opens only a port it knows;
-#   - --base-url names this host, whose servers run outside the sandbox.
+#   - --base-url names this host, whose servers run outside the sandbox, unless
+#     each process listening on its port works in a worktree of a rig whose
+#     app_reads_city is "false", and no variable that points at the city names
+#     the port. A rig's checkout, which holds its store, and the city's own
+#     repository never count as such a worktree.
 # A host without sandbox-exec runs no capture at all.
+#
+# app_reads_city is a formula var that mol-rig-demo declares with the default
+# "false". A city sets it to "true" in city.toml for each rig whose app reads
+# the city, such as a rig that develops code for a city:
+#   [rigs.formula_vars]
+#   app_reads_city = "true"
+# It lives outside the rig's repository, so no change the rig reviews can
+# remove it. Any value but "false" counts as "true", and so does a read that
+# fails. The rig that holds this library counts as "true" too, because the
+# pack's board and scripts read the city.
 #
 #   demo_engine_resolve  Checks that this host has the sandbox and checks Node
 #                        against the engine's floor, finds the engine, checks
@@ -236,6 +251,27 @@ _demo_engine_loopback() {
   return 1
 }
 
+# _demo_engine_url_port <url>: prints the TCP port the URL names, or the port
+# its http or https scheme implies, or returns 1 when it names no port from 1 to
+# 65535.
+_demo_engine_url_port() {
+  local scheme="" h p=""
+  case "$1" in *://*) scheme=$(printf '%s' "${1%%://*}" | tr '[:upper:]' '[:lower:]') ;; esac
+  h="${1#*://}"
+  h="${h%%/*}"; h="${h%%\?*}"; h="${h%%#*}"; h="${h##*@}"
+  case "$h" in
+    \[*\]:*) p="${h##*\]:}" ;;
+    \[*) ;;
+    *:*) p="${h##*:}" ;;
+  esac
+  if [ -z "$p" ]; then
+    case "$scheme" in http) p=80 ;; https) p=443 ;; *) return 1 ;; esac
+  fi
+  case "$p" in ''|*[!0-9]*|0*|??????*) return 1 ;; esac
+  [ "$p" -le 65535 ] || return 1
+  printf '%s\n' "$p"
+}
+
 # _demo_engine_canon <path>: the path as the sandbox matches it, with every
 # symlink resolved, or nothing when it does not exist.
 _demo_engine_canon() {
@@ -339,7 +375,8 @@ EOF
 }
 
 # _demo_engine_city: reads where the live city keeps its state into
-# _DEMO_ENGINE_RIGS, each rig checkout its rig map lists, and
+# _DEMO_ENGINE_RIGS, each rig checkout its rig map lists, _DEMO_ENGINE_HQ, the
+# checkout of the map's hq entry, which is the city's own repository, and
 # _DEMO_ENGINE_PLACES, each of its directories, one canonical path per line.
 # Returns 1, having said why, when gc does not read a city registry, or when a
 # city is known and its rig map does not read, because the cities or the rig
@@ -351,12 +388,28 @@ _demo_engine_city() {
     _demo_engine_say "the city's rig map did not read, so the rig checkouts to keep out of the capture's reach are unknown; $DEMO_ENGINE_LIB_DIR/rig-map.sh says why"
     return 1
   fi
-  _DEMO_ENGINE_RIGS=""
+  _DEMO_ENGINE_RIGS=""; _DEMO_ENGINE_HQ=""
   if [ -n "${DEMO_ENGINE_RIG_MAP:-}" ]; then
     _DEMO_ENGINE_RIGS=$(printf '%s' "$DEMO_ENGINE_RIG_MAP" | jq -r '.rigs[]? | objects | .path // empty' 2>/dev/null \
       | while IFS= read -r p; do case "$p" in (/*) _demo_engine_canon "$p" ;; esac; done)
+    _DEMO_ENGINE_HQ=$(printf '%s' "$DEMO_ENGINE_RIG_MAP" | jq -r '.rigs[]? | objects | select(.hq == true) | .path // empty' 2>/dev/null \
+      | while IFS= read -r p; do case "$p" in (/*) _demo_engine_canon "$p" ;; esac; done)
   fi
   _DEMO_ENGINE_PLACES=$(_demo_engine_city_places "$_DEMO_ENGINE_RIGS")
+}
+
+# _demo_engine_rig_of <dir>: after _demo_engine_city, the canonical checkout of
+# the rig whose repository holds the directory, or nothing.
+_demo_engine_rig_of() {
+  local common p
+  [ -n "${_DEMO_ENGINE_RIGS:-}" ] && command -v git >/dev/null 2>&1 || return 0
+  common=$(_demo_engine_canon "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")
+  [ -n "$common" ] || return 0
+  while IFS= read -r p; do
+    if [ -n "$p" ] && [ "$common" = "$p/.git" ]; then printf '%s\n' "$p"; return 0; fi
+  done <<EOF
+$_DEMO_ENGINE_RIGS
+EOF
 }
 
 # _demo_engine_reach <dir>: after _demo_engine_city, what a run that reads and
@@ -366,20 +419,14 @@ _demo_engine_city() {
 # said why, when the directory holds one of the city's directories, or lies in
 # one in no rig's worktree.
 _demo_engine_reach() {
-  local d top common="" gd="" match="" p
+  local d top common="" gd="" checkout p
   d=$(_demo_engine_canon "$1"); [ -n "$d" ] || return 0
   top="$d"
-  if [ -n "${_DEMO_ENGINE_RIGS:-}" ] && command -v git >/dev/null 2>&1; then
-    common=$(_demo_engine_canon "$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")
-    while IFS= read -r p; do [ -z "$common" ] || [ "$common" != "$p/.git" ] || match=1; done <<EOF
-$_DEMO_ENGINE_RIGS
-EOF
-    if [ -n "$match" ]; then
-      top=$(_demo_engine_canon "$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)"); [ -n "$top" ] || top="$d"
-      gd=$(_demo_engine_canon "$(git -C "$d" rev-parse --path-format=absolute --git-dir 2>/dev/null)")
-    else
-      common=""
-    fi
+  checkout=$(_demo_engine_rig_of "$d")
+  if [ -n "$checkout" ]; then
+    common="$checkout/.git"
+    top=$(_demo_engine_canon "$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)"); [ -n "$top" ] || top="$d"
+    gd=$(_demo_engine_canon "$(git -C "$d" rev-parse --path-format=absolute --git-dir 2>/dev/null)")
   fi
   while IFS= read -r p; do
     [ -n "$p" ] || continue
@@ -397,6 +444,104 @@ EOF
   printf 'rw %s\n' "$top"
   [ -z "$gd" ] || printf 'rw %s\n' "$gd"
   [ -z "$common" ] || printf 'ro %s\n' "$common"
+}
+
+# The formula var that says a rig's app reads the city, and the formula that
+# declares it.
+DEMO_ENGINE_READS_CITY_VAR=app_reads_city
+DEMO_ENGINE_READS_CITY_FORMULA=mol-rig-demo
+
+# _demo_engine_rig_name <rig checkout>: the name the city's rig map gives the
+# rig with that checkout, or nothing.
+_demo_engine_rig_name() {
+  local tab p n
+  tab=$(printf '\t')
+  printf '%s' "${DEMO_ENGINE_RIG_MAP:-}" | jq -r '.rigs[]? | objects | [(.path // "" | tostring), (.name // "" | tostring)] | @tsv' 2>/dev/null \
+    | while IFS="$tab" read -r p n; do
+        case "$p" in (/*) if [ "$(_demo_engine_canon "$p")" = "$1" ]; then printf '%s\n' "$n"; break; fi ;; esac
+      done
+}
+
+# _demo_engine_reads_city <rig checkout>: after _demo_engine_city, true when the
+# rig's app_reads_city counts as "true", with _DEMO_ENGINE_READS_WHY set to why,
+# and 1 when it reads "false".
+_demo_engine_reads_city() {
+  local name res
+  if [ "$1" = "$(_demo_engine_rig_of "$DEMO_ENGINE_LIB_DIR")" ]; then
+    _DEMO_ENGINE_READS_WHY="which holds this pack's own source, so its $DEMO_ENGINE_READS_CITY_VAR counts as \"true\""
+    return 0
+  fi
+  name=$(_demo_engine_rig_name "$1")
+  if [ -z "$name" ]; then
+    _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR did not read, because the rig map gives that rig no name, so it counts as \"true\""
+    return 0
+  fi
+  res=$(gc formula show "$DEMO_ENGINE_READS_CITY_FORMULA" --rig "$name" --json 2>/dev/null \
+    | jq -r --arg v "$DEMO_ENGINE_READS_CITY_VAR" --arg f "$DEMO_ENGINE_READS_CITY_FORMULA" '
+        if .ok != true then "unread " + ((.error.message // "gc formula show answered no formula") | tostring)
+        else ([.vars[]? | select(.name == $v)][0]) as $d
+          | if $d == null then "unread \($f) declares no \($v)"
+            elif $d.rig_default != null then "rig " + ($d.rig_default | tostring)
+            else "default " + (($d.default // "") | tostring) end
+        end' 2>/dev/null)
+  case "$res" in
+    "rig false"|"default false") return 1 ;;
+    "rig true") _DEMO_ENGINE_READS_WHY="for which city.toml sets $DEMO_ENGINE_READS_CITY_VAR = \"true\"" ;;
+    "rig "*|"default "*) _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR reads \"${res#* }\", which is not \"false\", so it counts as \"true\"" ;;
+    "unread "*) _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR did not read, because ${res#unread }, so it counts as \"true\"" ;;
+    *) _DEMO_ENGINE_READS_WHY="whose $DEMO_ENGINE_READS_CITY_VAR did not read, because gc formula show $DEMO_ENGINE_READS_CITY_FORMULA --rig $name answered nothing jq could read, so it counts as \"true\"" ;;
+  esac
+  return 0
+}
+
+# _demo_engine_local_no <url> <reason>: says why a capture does not reach the
+# server a --base-url on this host names, and returns 1.
+_demo_engine_local_no() {
+  _demo_engine_say "--base-url $1 names a server on this host, which runs outside the capture's sandbox. A capture reaches one only when a worktree of a rig whose $DEMO_ENGINE_READS_CITY_VAR is \"false\" serves it, and here $2. Start the app with --serve or --serve-dir instead, which run it inside the sandbox, or capture a deployed preview"
+  return 1
+}
+
+# _demo_engine_local_port <url>: after _demo_engine_city, prints the port of a
+# --base-url on this host when the rule in this file's header lets a capture
+# reach it. Returns 1, having said why, otherwise.
+_demo_engine_local_port() {
+  local url="$1" port v val pids pid dir checkout="" NL='
+'
+  port=$(_demo_engine_url_port "$url") || { _demo_engine_local_no "$url" "the URL names no port from 1 to 65535"; return 1; }
+  while IFS='=' read -r v val; do
+    case "$v" in
+      *PORT) [ "$val" != "$port" ] || { _demo_engine_local_no "$url" "port $port is the one $v names, which is the city's"; return 1; } ;;
+    esac
+    case "$val" in
+      *:*)
+        if _demo_engine_loopback "$val" && [ "$(_demo_engine_url_port "$val")" = "$port" ]; then
+          _demo_engine_local_no "$url" "port $port is the one $v names, which is the city's"; return 1
+        fi ;;
+    esac
+  done < <(env | sed -n -E '/^(GC|GT|BEADS|BD|DOLT)_[A-Za-z0-9_]*=/p')
+  command -v lsof >/dev/null 2>&1 \
+    || { _demo_engine_local_no "$url" "lsof, which names the processes that listen on port $port, is not on PATH"; return 1; }
+  pids=$(lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)
+  [ -n "$pids" ] || { _demo_engine_local_no "$url" "no process of yours listens on port $port, so nothing shows whose server answers there"; return 1; }
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    dir=$(lsof -a -nP -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)
+    [ -n "$dir" ] || { _demo_engine_local_no "$url" "lsof names no working directory for process $pid, which listens on port $port"; return 1; }
+    checkout=$(_demo_engine_rig_of "$dir")
+    [ -n "$checkout" ] || { _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in $dir, which is in no rig's repository"; return 1; }
+    case "$NL${_DEMO_ENGINE_HQ:-}$NL" in
+      *"$NL$checkout$NL"*) _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in $dir, in the city's own repository"; return 1 ;;
+    esac
+    _demo_engine_reach "$dir" >/dev/null 2>&1 \
+      || { _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in $dir, which holds the city's state, as a rig's checkout holds its store"; return 1; }
+    if _demo_engine_reads_city "$checkout"; then
+      _demo_engine_local_no "$url" "process $pid, which listens on port $port, works in a worktree of $checkout, $_DEMO_ENGINE_READS_WHY"; return 1
+    fi
+  done <<EOF
+$pids
+EOF
+  _demo_engine_say "--base-url $url is served from a worktree of $checkout, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\", so the capture reaches port $port and no other loopback port"
+  printf '%s\n' "$port"
 }
 
 demo_engine_cli() {
@@ -429,12 +574,17 @@ demo_engine_cli() {
   if [ -d "$pos" ]; then cand="$cand$NL$pos"; elif [ -f "$pos" ]; then files="$files$NL$pos"; fi
   [ -z "${DEMO_ENGINE_BIN:-}" ] || files="$files$NL$DEMO_ENGINE_BIN"
 
-  # The one loopback port the run may reach is its own server's, and nothing may
-  # answer there before the run starts. --serve waits on 5173 when given no
-  # --port, as the engine does.
+  # The one loopback port the run may reach is its own server's, where nothing
+  # may answer before the run starts, or the port of a rig's app that a
+  # --base-url on this host names. --serve waits on 5173 when given no --port,
+  # as the engine does.
+  _demo_engine_city || return 1
   if [ -n "$base" ] && _demo_engine_loopback "$base"; then
-    _demo_engine_say "--base-url $base names a server on this host, which runs outside the capture's sandbox and can read the live city; start the app with --serve or --serve-dir, which run it inside the sandbox, or capture a deployed preview"
-    return 1
+    if [ -n "$serve$serve_dir" ]; then
+      _demo_engine_say "--base-url $base and --serve or --serve-dir each name an app to capture; give one"
+      return 1
+    fi
+    open=$(_demo_engine_local_port "$base") || return 1
   fi
   if [ -n "$serve$serve_dir" ]; then
     if [ -z "$port" ] && [ -z "$serve" ]; then
@@ -456,7 +606,6 @@ demo_engine_cli() {
 
   # The city's directories, and each directory the run reads and writes, as
   # _demo_engine_reach widens it.
-  _demo_engine_city || return 1
   places="$_DEMO_ENGINE_PLACES"
   while IFS= read -r d; do
     [ -n "$d" ] || continue

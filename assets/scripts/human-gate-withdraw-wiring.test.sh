@@ -33,6 +33,16 @@ for role in witness deacon refinery proactive mechanik; do
   fi
 done
 
+# The roles whose prompts tell them when to file a gate say what the gate holds
+# from one fragment.
+for role in witness deacon refinery; do
+  if grep -qE '\{\{-? *template "human-gate-holds" \. *-?\}\}' "$ROOT/agents/$role/prompt.template.md"; then
+    ok "$role composes human-gate-holds"
+  else
+    bad "$role does not compose human-gate-holds, so nothing tells it what a gate holds"
+  fi
+done
+
 # A prompt that still includes the fragment's old name renders nothing there,
 # so its role loses the instruction without an error.
 STALE=$(grep -lE '\{\{-? *template "visit-close"' "$ROOT"/agents/*/prompt.template.md "$ROOT"/template-fragments/*.template.md 2>/dev/null || true)

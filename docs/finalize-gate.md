@@ -25,7 +25,7 @@ read of a bead's human gates is defined once, as `bd_human_gates` in
 
 ## What it checks
 
-`finalize-gate.sh check <bead-id>`:
+`finalize-gate.sh check <bead-id> [--except-key <situation-key>] [--as-disposed]`:
 
 - exit 0 — every clause passed; the bead may be finalized (no output).
 - exit 1 — a clause refuses; the one-line reason is on stdout for the caller to log.
@@ -36,8 +36,7 @@ read of a bead's human gates is defined once, as `bd_human_gates` in
 An open human gate that blocks this bead refuses the bead's finalization. A human
 gate is Gas City's native bead for a wait a person must clear (`issue_type=gate`,
 `await_type=human`). A bead's human gates are the human gates its `blocks` edges
-reach, open and closed alike, by the one reader rule every reader of them
-follows:
+reach, open and closed alike:
 
 - `gc bd dep list <bead> --type blocks --json` returns each bead the given bead
   depends on through a `blocks` edge, with its type, status, await type, await
@@ -74,18 +73,30 @@ An epic that carries a hypothesis (`epic_hypothesis`) refuses finalization until
 it is ruled close with its outcome recorded (`epic_ruling=close` and
 `epic_ruling_reason`). A continue or shift ruling keeps an epic open, so it holds
 the epic as an absent ruling does, and so does a value outside the enum. An epic
-with no hypothesis predates the model, and a disposed epic (`gc.superseded_by`)
-carries a recorded terminal reason, so both pass. A non-epic bead is untouched
-([epic-stewardship.md](epic-stewardship.md)). The clause reads the bead itself
-(`gc bd show`), so that read runs for every finalize, epic or not. The
-`--except-key` exception excepts a human gate, so it never releases an epic this
-clause holds.
+with no hypothesis has nothing to rule on, so it passes. It is a Delivery, which
+carries an aim and closes at its epic's checkpoint
+([epics.md](epics.md#deliveries-and-epic-checkpoints)), or an incomplete Epic,
+which is fixed by recording its hypothesis
+([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
+Epic is compatibility debt
+([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
+epic (`gc.superseded_by`) carries a recorded terminal reason, so it passes too. A
+non-epic bead is untouched ([epic-stewardship.md](epic-stewardship.md)). The
+clause reads the bead itself (`gc bd show`), so that read runs for every
+finalize, epic or not. The `--except-key` exception excepts a human gate, so it
+never releases an epic this clause holds.
 
 Neither finalize path wired today reaches an undisposed epic: `merge.sh`
 finalizes merge anchors, and `bead-rehome.sh` stamps the disposition before it
 runs the gate. A bare `gc bd close` runs no gate, and the doctor invariant I15
 (`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
 without its ruling.
+
+`--as-disposed` reads the bead as carrying that disposition. `bead-rehome.sh
+--check` under `--except-key` writes nothing, so it runs ahead of the stamp, and
+it asks this way so that its answer is the one the close will get. Only this
+clause reads a disposition, so the option releases no human gate, and a bead that
+does not read still refuses.
 
 ## Fail closed
 
@@ -110,7 +121,9 @@ below exists to see a gate filed after the first check.
   so a hold leaves an open, pointed, findable bead — the same shape a refused
   close leaves. The release is to clear the gate, then re-run.
   `bead-rehome.sh --except-key <situation-key>` hands the key to the gate's
-  exception, and `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
+  exception, and with `--check` it reads the gate, with `--as-disposed`, and what
+  else would hold the close, writing nothing, which is how `stand-down.sh` stops
+  before its first write. `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
   it retries a pre-recorded PR-close disposition. The retry then closes in three
   steps:
   1. It reads what would hold the close: the gate, and the bead's live blockers

@@ -65,6 +65,8 @@ fi
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
+# A case that wraps review-checks.sh runs the real one from $TMP, beside this.
+mkdir -p "$TMP"; cp "$HERE/bd-lib.sh" "$TMP/bd-lib.sh"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
   "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh" \
   "$HERE/blocker-holder.sh"
