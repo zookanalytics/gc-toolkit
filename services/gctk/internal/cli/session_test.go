@@ -223,6 +223,10 @@ func TestSessionTitle(t *testing.T) {
 
 	t.Run("a draft sent within the wait: nudged once the box is empty", func(t *testing.T) {
 		r := newTitleRig(t)
+		// The box empties on the third read, so the wait has to outlast three
+		// reads of the pane, which a loaded host stretches past the rig's
+		// short wait.
+		titleDraftWait = 3 * time.Second
 		r.screens(draftClaudeBox, draftClaudeBox, emptyClaudeBox)
 		stdout, _, code := r.run("--topic", "x")
 		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 1 {
