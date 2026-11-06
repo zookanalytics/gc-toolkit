@@ -14,9 +14,13 @@
 # declarations, session_origin=named) whose provider is the interactive one
 # (default "claude"), which is what separates mechanik from the claude-watch
 # singletons (deacon, witness, refinery) and from the ephemeral claude pool
-# workers (polecat, converse). Today that predicate selects mechanik; a
-# converse sitting inherits it the moment its reshape makes it a configured
-# named conversational session, with no change here.
+# workers (polecat, converse). Standing also means its named session's mode,
+# metadata.configured_named_mode, is "always": an on-demand seat such as the po
+# ends a sitting at its idle limit, and a pin holds off that drain for as long
+# as it stands. A bead that records no mode stays a target. Today that predicate
+# selects mechanik; a converse sitting inherits it the moment its reshape makes
+# it a configured named conversational session in "always" mode, with no change
+# here.
 #
 # DUAL MODE, ONE PREDICATE:
 #   pin-keepalive.sh --check   the condition order's CHECK. Read-only. Decides
@@ -199,11 +203,12 @@ $1"; fi
 # A candidate is conversational (provider match) and named (non-empty alias, a
 # cheap pre-filter — a pool instance has no canonical alias); its session bead
 # then confirms configured_named_session=true (the authoritative "standing
-# named" gate) and reports pin_awake. Read-only: no writes, no pins.
+# named" gate), that configured_named_mode is "always" or unrecorded, and
+# reports pin_awake. Read-only: no writes, no pins.
 enumerate_targets() {
     TARGETS=""
     ENUM_STATUS=ok
-    local sess cand id alias b cns pin
+    local sess cand id alias b cns mode pin
     sess="$(bounded gc session list "${CITY_FLAG[@]}" --json 2>/dev/null | scrub)"
     if ! printf '%s' "$sess" | jq -e '(.sessions // empty) | type == "array"' >/dev/null 2>&1; then
         ENUM_STATUS=list_fail
@@ -223,8 +228,9 @@ enumerate_targets() {
             continue
         fi
         cns="$(printf '%s' "$b" | jq -r '(if type=="array" then .[0] else . end) | .metadata.configured_named_session // ""' 2>/dev/null)"
+        mode="$(printf '%s' "$b" | jq -r '(if type=="array" then .[0] else . end) | .metadata.configured_named_mode // ""' 2>/dev/null)"
         pin="$(printf '%s' "$b" | jq -r '(if type=="array" then .[0] else . end) | .metadata.pin_awake // ""' 2>/dev/null)"
-        if [ "$cns" = "true" ] && [ "$pin" != "true" ]; then
+        if [ "$cns" = "true" ] && { [ -z "$mode" ] || [ "$mode" = "always" ]; } && [ "$pin" != "true" ]; then
             add_target "$alias"
         fi
     done <<EOF
