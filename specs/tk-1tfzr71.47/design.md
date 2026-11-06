@@ -41,11 +41,25 @@ the gate it files, because main still names the commit the revert took out
 (section 2). Resolving it, once a fix is on main, is one act of yours per
 revert. Under option 3 nothing deploys on its own, so a revert needs no hold.
 
-Under every option, a deploy restarts the pack's idle sessions. Each pinned
-commit lives in its own cache directory, and every pack agent's start-up
-config names that directory, so Gas City sees changed config for each of them.
-Sessions that hold work or that you are attached to restart once they are
-free. A deploy that covers several landings restarts each session once.
+Under every option, a deploy changes every pack agent's start-up config,
+because each pinned commit lives in its own cache directory and that config
+names the directory. Left to itself, Gas City would then restart the mechanik,
+the refinery, the witness and the deacon in place, in the middle of a task when
+one is working. It holds one back only while you are attached to it, while it
+waits on an answer or while it is pinned awake (`gc session pin`), and for at
+most 30 seconds while it is busy, or 2 minutes when its activity cannot be
+read. The work a session holds does not hold it back. Under option 1, the
+mechanik would restart in the middle of the deploy it is running.
+
+So the deploy command has Gas City accept the change (`gc reload --soft`), and
+a deploy restarts no session that is working. One that Gas City reads as idle
+can still restart, when the controller reloads the new pin before the
+command's request reaches it. Each session takes the new revision when it next
+starts. The witness, the deacon and the refinery recycle at the end of their
+next turn, through the pack's own drift check. Each new pool worker starts on
+it, and the mechanik takes it at its next restart. Until then, a session's
+prompt and hooks come from the revision it started from, while the scripts its
+steps call come from the new one, as they come from the checkout today.
 
 One change reaches you directly. Once this lands, rig checkouts stop advancing
 on their own, and that includes the checkout of the Gas City fork you build gc
@@ -140,15 +154,32 @@ read at main `6dfa90898`. The city's installed gc is the fork build
    (internal/runtime/fingerprint.go) hashes the command, `pre_start`,
    `session_setup`, the session setup script, the overlay directory as a path
    string, config-derived copy-file paths, and an allow-list of env keys. A
-   session whose stored hash differs has drifted. `armConfigDrift`
-   (cmd/gc/reconcile_arms_drift.go) defers a drifted session that is attached,
-   pinned, waiting on an interaction or holding open assigned work. It restarts
-   a named session in place, and it drains any other session. The legacy
-   reconciler fences its drift drain on live work the same way
-   (`configDriftSeatHasLiveWork`, cmd/gc/session_reconciler.go).
-   `gc reload --soft` accepts the drift in place of the drains: each open
-   session's recorded hash is updated, and queued drift drains are canceled
-   (cmd/gc/cmd_reload.go).
+   session whose stored hash differs has drifted. The v2 reconciler
+   (`armConfigDrift`, cmd/gc/reconcile_arms_drift.go) and the legacy one (the
+   drift block in `reconcileSessionBeadsTracedWithNamedDemand`,
+   cmd/gc/session_reconciler.go) handle a drifted session alike. A session
+   that is attached, or whose attach cannot be read, waits. A named session
+   pinned awake is never restarted by drift. Any other named session is
+   restarted in place, and only its use holds it back: a pending interaction
+   holds it, recent activity (output within 2 minutes) holds it for at most 30
+   seconds, and activity that cannot be read holds it for at most 2 minutes,
+   each counted from the controller's first sight of the drift
+   (`driftDeferStep` and `driftBoundedDefer`,
+   cmd/gc/reconcile_effect_restart.go; `shouldDeferNamedSessionConfigDrift`,
+   session_reconciler.go). Its open work is not read: `driftNeeds` reads no
+   work for a named restart, and the legacy restart comes before the work
+   check that guards only an ordinary session. An ordinary session is drained
+   instead, and its drain waits while it has a pending interaction or open
+   assigned work, which the drain's claim fence reads again
+   (`configDriftSeatHasLiveWork`). `gc reload --soft` accepts the drift: it
+   records the reloaded config's hash as each open session's own, and it
+   cancels queued drift drains (cmd/gc/cmd_reload.go). The legacy reconciler
+   applies that acceptance in the tick that runs the reload, ahead of the
+   tick's drift checks, and also after a reload that found no change
+   (`legacyTickPhases` and `softReloadPending`, cmd/gc/city_runtime.go). Under
+   v2, an open soft reload accepts each drifted session in the baseline arm,
+   which comes before the drift arm (`armBaseline`,
+   cmd/gc/reconcile_arms_baseline.go; cmd/gc/reconcile_soft_reload.go).
 9. **Import scope.** A city-level import gives the pack's non-city agents to
    every rig that declares no import of that binding
    (`expandCityImportedAgentsForRigs` and `rigDeclaresImportBinding`,
@@ -285,10 +316,18 @@ and the steps change in one place:
 3. Replace the current pin with the target in every import whose source is
    gc-toolkit's repository, the sub-pack's import included, in `pack.toml` and
    `city.toml`.
-4. Run `gc import install`. It fetches the target into the cache, writes the
-   lock and validates the composed config (fact 5).
-5. Verify. `gc import check` passes, both lock entries name the target, and
-   `gc gc-toolkit scripts-dir` prints a directory inside the target's clone.
+4. Run `gc import install`, and `gc reload --soft` as soon as it returns.
+   Install fetches the target into the cache, writes the lock and validates
+   the composed config (fact 5). The soft reload has Gas City accept the
+   changed start-up config of every session, so that no working session
+   restarts for the deploy ("How a new revision reaches the controller and
+   live sessions", below). Every install the command runs is followed by a
+   soft reload.
+5. Verify. The soft reload succeeded, `gc import check` passes, both lock
+   entries name the target, and `gc gc-toolkit scripts-dir` prints a
+   directory inside the target's clone. A refused soft reload is a failed
+   verification, because Gas City would then restart the named sessions,
+   under option 1 the mechanik running this command among them.
 6. Commit the three files to the town repo as one signed commit, and push it
    to the town's origin, as other town commits are. Its message lists
    `git log --oneline <old>..<new>` from the target's clone. Then restart each
@@ -296,9 +335,9 @@ and the steps change in one place:
    section 4).
 7. If step 4 or 5 fails, or step 6's commit does, the town's HEAD has not
    moved. The command restores the three files from it, runs
-   `gc import install` again, and exits non-zero with the reason: the old pin
-   runs again. The old clone is still in the cache, so the restore needs no
-   network.
+   `gc import install` and `gc reload --soft` again, and exits non-zero with
+   the reason: the old pin runs again. The old clone is still in the cache,
+   so the restore needs no network.
 8. Once the commit is made, the new pin stays. The command restarts the
    services even when the push fails, so helm runs the revision the agents
    run. When the push or a restart fails, it exits non-zero, saying that the
@@ -355,18 +394,47 @@ revert files one to carry its hold (below).
 3. Each pack agent's `pre_start` names `{{.ConfigDir}}/assets/scripts/...`,
    and each overlay patch names a directory in the pack. All of those now
    resolve inside the new clone, so every pack session's config fingerprint
-   changes (facts 7 and 8). Gas City restarts idle named sessions in place. It
-   drains idle pool sessions, and the pool starts fresh ones from the new
-   revision. It defers sessions that are attached or holding work until they
-   are free. Under the reconciler, the pack's directory never moved, so a
-   landing restarted only the sessions whose config text changed.
+   changes (facts 7 and 8). Gas City's own handling would restart every named
+   session in place, the mechanik, the refinery, the witness and the deacon,
+   with no read of the work it holds, and a working one within 30 seconds.
+   Under option 1 that includes the mechanik in the middle of its own deploy,
+   with the new pin live and the town commit not yet made. The soft reload in
+   step 4 keeps that from happening: Gas City records the new config as each
+   open session's own, so no working session restarts for the deploy.
+   Under the reconciler, the pack's directory never moved, so a landing
+   restarted only the sessions whose config text changed. Under the pin, those
+   too wait for their next start.
 4. A running molecule keeps the step text it was poured with. That is true
    today as well (I9, section 4).
 
-If the canary shows that these restarts disrupt work, the command adds
-`gc reload --soft` after step 4. Gas City then accepts the drift (fact 8), and
-sessions take the new revision at their next start, as they took a checkout's
-new content before. The default stays Gas City's own handling.
+**The soft reload and the controller's own reload.** The watcher sees the
+lock that install writes and wakes the controller too (fact 6), so the
+controller can reload the new pin before the soft reload reaches it. A named
+session that Gas City then reads as idle, with no output for 2 minutes, nobody
+attached and no answer awaited, restarts at once, and an idle pool session's
+drain can begin. The soft reload cancels a drain that has not finished, and
+the command does nothing more about the idle case, which is Gas City's ordinary
+handling of an idle session and which the canary watches (section 7). A working
+named session's restart comes no sooner than 30 seconds after the controller
+first sees the drift (fact 8), and the soft reload is requested as soon as
+install returns. Install fetches a new commit's clone before it writes the
+lock (`walkImport`, internal/packman/install.go), and after the write it only
+checks the cache and validates the composed config (`doImportInstall`).
+Validating the city's config with `gc config show --validate` took under half
+a second when timed on 2026-11-06. The request therefore reaches the
+controller well inside the 30 seconds, and both reconcilers apply the
+acceptance ahead of their drift checks (fact 8).
+
+**When sessions take the new revision.** Each session takes it at its next
+start, as it took a checkout's new content before. Each new pool worker starts
+on it. The witness, the deacon and the refinery recycle at the end of their
+next turn, through pack drift, which unit 1 points at the pack's entry in the
+lock (section 4). The mechanik takes it at its next restart. Until a session
+restarts, its prompt and hooks come from the revision it started from, and
+every `gc gc-toolkit scripts-dir` call it makes resolves to the new one. The
+soft reload also accepts any other change to the city's config that has not
+yet restarted a session, and that change, too, reaches each session at its
+next start.
 
 ### Reverting a bad revision
 
@@ -410,7 +478,7 @@ option 3 nothing deploys on its own, so the revert files no hold.
 by hand, and the hold still comes first: file the deploy bead if none is open,
 as the revert does, the same gate on it with `human-gate.sh`, and under
 option 1 the same notice. Then `git revert` the deploy commit in the town repo,
-run `gc import install`, push the town commit, and run
+run `gc import install` and `gc reload --soft`, push the town commit, and run
 `gc service restart helm`. With the gate filed before the pin moves, the next
 pass of the check, or of the order under option 2, finds the hold.
 
@@ -432,6 +500,14 @@ because step 7 restores the old pin before anything commits.
   contributors point `source` at a local clone (fact 11), which is what the
   city does today. That flow needs a person to keep the clone current, and the
   reconciler was the pack's stand-in for that person.
+- **A deploy accepts the drift it causes.** Upstream leaves changed start-up
+  config to its reconciler, which restarts a drifted named session in place
+  whatever work it holds (fact 8). Every deploy here drifts every pack
+  session, because each pin is a new cache directory, so the command follows
+  each install with `gc reload --soft`, and the patrols take the new revision
+  through pack drift at the end of a turn. Once Gas City holds a named
+  session's drift restart for the work it holds, the soft reload can go, and
+  Gas City's own handling restarts each session.
 
 ## 3. Which imports stay, and how the cutover goes
 
@@ -619,15 +695,19 @@ asserts these things:
    and pinning back to the first resolves with no fetch.
 8. A file written into the clone makes `gc config show` fail with "local
    worktree changes", which is the contract section 4 relies on.
-9. The deploy command, run against the scratch city, rewrites every pin. On a
-   forced verification failure, and on a commit its signing program refuses,
-   it restores the previous pin and leaves the town's HEAD where it was. When
-   the town's origin, a bare repository in scratch, refuses the push, the new
-   pin stays live and committed, the service restart still runs, and the exit
-   names the unpushed commit. When the service restart is made to fail, the
-   new pin stays live and pushed, and the exit names the service. In both
-   cases the printed `--to` command, run once the cause is gone, finishes the
-   deploy and moves no pin.
+9. The deploy command, run against the scratch city, rewrites every pin and
+   follows each install with a soft reload. The suite runs no controller, so
+   its runs answer `gc reload` with a stub that records each call and can be
+   made to refuse. What a controller does with the request is the canary's to
+   watch (the cutover's step 7). On a forced verification failure, on a
+   refused soft reload, and on a commit its signing program refuses, the
+   command restores the previous pin, runs the soft reload again and leaves
+   the town's HEAD where it was. When the town's origin, a bare repository in
+   scratch, refuses the push, the new pin stays live and committed, the service
+   restart still runs, and the exit names the unpushed commit. When the service
+   restart is made to fail, the new pin stays live and pushed, and the exit
+   names the service. In both cases the printed `--to` command, run once the
+   cause is gone, finishes the deploy and moves no pin.
 10. A revert holds automatic deploys, by either route. After the command
     deploys a second commit over the first and `--revert` puts the first back,
     a pass of the deploy check with main still at the second commit nudges no
@@ -641,7 +721,10 @@ asserts these things:
 ### The cutover
 
 The mechanik runs the cutover on a town bead (unit 6), each step as one town
-commit:
+commit. It follows each step's `gc import install` with `gc reload --soft`, as
+a deploy does (section 2), because moving an import from the checkout to the
+clone changes the start-up config of every agent that import loads, its own
+included:
 
 1. **Precondition.** The effort's merge commit `M` is live:
    `git -C rigs/gc-toolkit merge-base --is-ancestor M HEAD` succeeds, and
@@ -666,12 +749,16 @@ commit:
    then a board read.
 7. **The first deploy.** When main moves past `C`, the deploy check files its
    bead and the mechanik deploys. Watch which sessions restart and when. The
-   watching is the canary for section 2's restart note.
+   mechanik's run should finish in the session that started it, no working
+   session should restart, and the witness, the deacon and the refinery should
+   each recycle at the end of a turn. The watching is the canary for section
+   2's soft reload.
 
 ### Revert
 
-Before step 6, any step reverts with `git revert` of its town commit and
-`gc import install`. After step 6, the revert also restarts the helm service.
+Before step 6, any step reverts with `git revert` of its town commit,
+`gc import install` and `gc reload --soft`. After step 6, the revert also
+restarts the helm service.
 Reverting every step returns the city to a path import of the checkout at `C`.
 Nothing advances that checkout, so a landing after `C` goes live only if
 someone runs `git -C rigs/gc-toolkit merge --ff-only origin/main` by hand.
@@ -689,9 +776,9 @@ Running them in order keeps their shared docs from conflicting.
 
 | Unit | What it changes | Who | Waits on |
 |---|---|---|---|
-| 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory, and the commit checked out there, in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. Pack drift compares the recorded commit with the pack's entry in the lock, which it reads only once the lock has been written since the session started. Its tests show that an install that changes nothing, and a re-pin of core or bd, recycle nothing. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
+| 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory, and the commit checked out there, in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. Pack drift compares the recorded commit with the pack's entry in the lock, which it reads only once the lock has been written since the session started. Pack drift is how the patrols take a deploy, since the deploy's soft reload restarts no session (section 2). Its tests show that a moved pin recycles a patrol once, and that an install that changes nothing, and a re-pin of core or bd, recycle nothing. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
 | 2. Build and check what is deployed | `gc-build.sh` loses `behind_main`. helm's packhealth loses its band. I9 loses LAGGED and UNFETCHED, and its STALE-TEXT gains the cached-revision arm. Also the helm README, the I9 rows in component-model.md and install.md, and the tests. | polecat | unit 1 |
-| 3. Deploy by pin | `gc gc-toolkit deploy`, with each failure's outcome and the run that finishes it, and a revert's hold, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
+| 3. Deploy by pin | `gc gc-toolkit deploy`, with the soft reload after each install, each failure's outcome and the run that finishes it, and a revert's hold, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
 | 4. Retire the healer | Delete the reconciler, its test and its order, with their deletion-plan rows and the stage B schedule row. Retire `auto_ff_rig_main`. Move the demo engine to a worktree of its rig. Remove `reconcile_rig` and its comment from lifecycle.toml. Sweep the docs in section 6. Count the reconciler's open subjects again. | polecat | unit 3 |
 | 5. Prove it from the cache | The suite in section 7. | polecat | unit 4 |
 | 6. Cut the city over | The town commits in section 7. | mechanik, on a bead assigned to `gc-toolkit.mechanik` | tk-1tfzr71.14, which closes when the effort's PR merges. A ready-notice is armed to the mechanik. |
@@ -763,14 +850,17 @@ and 4 remove surface. Upstream is gastownhall/gascity at `8e75c50aa845`.
   (section 4). `pre_start` is the one place Gas City renders `{{.ConfigDir}}`
   and runs a command at a session's start, so the record is written there.
 - **A running session learning that a deploy happened.** Searched: the
-  config-drift handling and `gc reload --soft` (fact 8). Drift restarts the
-  session from outside it. Pack drift lets a patrol recycle at its own safe
-  point. Its signal under the pin is the pack's entry in `packs.lock`, which
-  is Gas City's record of the deployed revision. A `stat` tells whether the
-  file was written since the session started, and only then is the entry read
-  and its commit compared with the session's, because every install rewrites
-  the file (fact 2). The canary in section 7 watches how each patrol role
-  restarts on the first deploy. If Gas City's drift handling restarts every
-  patrol by itself, pack drift no longer earns its place, and unit 6 appends
-  that observation to tk-1tfzr71.18, the member that re-derives the pack's
+  config-drift handling and `gc reload --soft` (fact 8). Drift restarts a
+  named session from outside it, whatever it is doing, so the deploy accepts
+  the drift with the soft reload, and a patrol learns of the deploy from pack
+  drift instead, which recycles it at the end of a turn, its own safe point.
+  Its signal under the pin is the pack's entry in `packs.lock`, which is Gas
+  City's record of the deployed revision. A `stat` tells whether the file was
+  written since the session started, and only then is the entry read and its
+  commit compared with the session's, because every install rewrites the file
+  (fact 2). The canary in section 7 watches that no working session restarts
+  and that each patrol recycles at the end of a turn. Once Gas City holds a
+  named session's drift restart for the work it holds, its own handling can
+  replace the soft reload and pack drift, and unit 6 appends what the canary
+  shows to tk-1tfzr71.18, the member that re-derives the pack's
   session-lifecycle machinery against the controller's.
