@@ -139,8 +139,8 @@ grep -q "__CLEANUP_DONE__" <<< "$C_OUT" \
   && ok "(C) already-removed path -> execution reaches disposal" \
   || bad "(C) already-removed path aborted before disposal"
 
-# (D) Empty work_dir (no workspace yet, a graph.v2 step or root) -> the `-n` guard skips the
-#     body entirely; the block is a no-op and never aborts.
+# (D) Empty work_dir (no workspace yet, a graph.v2 step or root) -> the `-n`
+#     guard skips the body entirely; the block is a no-op and never aborts.
 D_OUT=""; D_RC=0
 D_OUT="$(run_cleanup 1 "" "$RIG")" || D_RC=$?
 eq "$D_RC" "0" "(D) empty work_dir -> block exits 0 (guard skips body)"

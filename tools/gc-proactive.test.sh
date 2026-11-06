@@ -8,9 +8,9 @@
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE conversation, and spawns the sitting
 # itself. The proactive worker must stand down so a sweep does not ask the
-# operator a SECOND time about a conversation already under way. Two gates are covered here, both
-# exercised through the fixture seam (GC_PROACTIVE_FIXTURE), so no live city,
-# Dolt, or gc is needed:
+# operator a SECOND time about a conversation already under way. Two gates are
+# covered here, both exercised through the fixture seam (GC_PROACTIVE_FIXTURE),
+# so no live city, Dolt, or gc is needed:
 #   (SCAN-DROP)  scan_precision_filter drops a marked bead from the candidate set
 #   (SCAN-KEEP)  …while an unmarked raw input bead is still a candidate
 #   (SLING-SKIP) sling refuses a marked bead as a no-op (exit RC_ALREADY_REACTED)

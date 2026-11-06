@@ -89,9 +89,9 @@ J
 # blocks edges; an earlier build (closed) by a blocks edge and a duplicate it
 # answered (closed) by an until edge. The closed ones' ids sort before the open
 # ones', so only an open-first order lists the build first. A review's inbound
-# `related` edge, a conversation's `tracks` edge and a child's `parent-child` edge also
-# point at it, and none of those waits on it. The build carries a body the read
-# must never surface.
+# `related` edge, a conversation's `tracks` edge and a child's `parent-child`
+# edge also point at it, and none of those waits on it. The build carries a body
+# the read must never surface.
 bead "$R_TK" tk-design <<'J'
 {"id":"tk-design","title":"the design","status":"closed","issue_type":"task","metadata":{}}
 J

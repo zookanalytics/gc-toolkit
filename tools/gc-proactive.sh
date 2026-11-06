@@ -757,8 +757,9 @@ cmd_demand() {
 #     files the ONE conversation, and spawns the sitting itself. The marker is
 #     set in the create write, so the scan never sees the subject unmarked;
 #     dropping it here keeps a sweep from asking the operator a SECOND time
-#     about a subject whose conversation is under way. reaction_absent_guard refuses it too, and a reaction
-#     that reaches one anyway stands down (agents/proactive/prompt.template.md).
+#     about a subject whose conversation is under way. reaction_absent_guard
+#     refuses it too, and a reaction that reaches one anyway stands down
+#     (agents/proactive/prompt.template.md).
 #   - a dispatch path (has_dispatch_path, assets/scripts/dispatch-path.sh) — a
 #     gc.routed_to a pool queue serves, or a gc.dispatch_when_ready arm the
 #     deferred-dispatch order slings once the bead's own blockers close.

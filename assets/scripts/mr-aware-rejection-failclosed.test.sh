@@ -10,9 +10,9 @@
 #      bash and in zsh, the shells an agent pastes the block into.
 #   2. FAIL CLOSED when rejection-repool.sh is missing: the block repools
 #      nothing by hand, and ends the turn.
-#   3. A repool that stops short but leaves an armed dispatch or a human gate (exit 2)
-#      ends the arm as a landed one does. One that recorded nothing (exit 1 or
-#      3) ends the turn.
+#   3. A repool that stops short but leaves an armed dispatch or a human gate
+#      (exit 2) ends the arm as a landed one does. One that recorded nothing
+#      (exit 1 or 3) ends the turn.
 #   4. The block reads no bead of its own, and the row rejection-repool.sh
 #      prints is captured, not echoed into the cycle log.
 #   5. Neither rejection arm deletes a branch. The rebuild the repool dispatches
@@ -141,8 +141,8 @@ for i in 1 2; do
   eq "$(run "$i" '{}' "$TMP/rig" 1)" "1|${CALL}DRAIN;" \
      "block $i: repool exit 1 (usage) -> drain"
 
-  # (5) A repool that could read no row files a patrol finding and exits 2. The arm ends
-  #     as a landed one does, with no read of its own.
+  # (5) A repool that could read no row files a patrol finding and exits 2. The
+  #     arm ends as a landed one does, with no read of its own.
   eq "$(run "$i" - "$TMP/rig" 2)" "0|$CALL" \
      "block $i: no row from the repool (exit 2) -> the arm ends normally, no bd show"
 
