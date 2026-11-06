@@ -168,13 +168,14 @@ the rule in
   file is one backslash, `\$` stops the formula from parsing, and a backslash
   at the end of a line joins the next line to it. A suite that extracts a
   region with awk reads the raw file, so a backslash in the region tests text
-  the agent never runs, and `lease-heartbeat.test.sh` asserts its regions hold
-  none.
+  the agent never runs.
 - **A rendered var is raw text.** A pour writes each `{{var}}` into the step as
-  it stands, so a var that holds a command, quotes and all, reaches the block
-  through a quoted heredoc, never inside quotes. The test command in
-  `formulas/mol-polecat-work.toml` arrives that way, and
-  `lease-heartbeat.test.sh` runs it rendered.
+  it stands, so a var that holds a command, quotes and line breaks and all,
+  reaches the block through a quoted heredoc, never inside quotes or on a line of
+  a format that reads line by line. The check commands in
+  `formulas/mol-polecat-work.toml` arrive that way, and `rig-checks.test.sh`
+  renders the step's own calls and runs them with both quote kinds, several lines
+  and a here-document of the command's own.
 
 ## Marker-fenced blocks
 
@@ -193,8 +194,7 @@ each file needing it carries as a copy.
   name, and most fail on an empty extraction, so renaming or duplicating a
   marker changes its suite in the same diff.
 - **Only the region is tested.** Lines in the same code fence outside the
-  markers run untested, unless the suite reads past the closing marker as
-  `lease-heartbeat.test.sh` does.
+  markers run untested.
 - **Copies change together.** A helper's suite, such as
   `control-char-scrub.test.sh` or `doctor-budget.test.sh`, finds its copies by
   sweeping named directories, executes one, and fails when another differs
