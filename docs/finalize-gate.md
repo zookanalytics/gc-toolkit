@@ -80,21 +80,22 @@ which is fixed by recording its hypothesis
 ([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
 Epic is compatibility debt
 ([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
-epic (`gc.superseded_by`) carries a recorded terminal reason, so it passes too. A
+epic (its duplicates or supersedes edge) carries a recorded terminal reason, so it passes too. A
 non-epic bead is untouched ([epic-stewardship.md](epic-stewardship.md)). The
 clause reads the bead itself (`gc bd show`), so that read runs for every
 finalize, epic or not. The `--except-key` exception excepts a human gate, so it
 never releases an epic this clause holds.
 
 Neither finalize path wired today reaches an undisposed epic: `merge.sh`
-finalizes merge anchors, and `bead-rehome.sh` stamps the disposition before it
-runs the gate. A bare `gc bd close` runs no gate, and the doctor invariant I15
+finalizes merge anchors, and `bead-rehome.sh` asks the gate about the bead as
+its disposition will leave it. A bare `gc bd close` runs no gate, and the doctor invariant I15
 (`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
 without its ruling.
 
-`--as-disposed` reads the bead as carrying that disposition. `bead-rehome.sh
---check` under `--except-key` writes nothing, so it runs ahead of the stamp, and
-it asks this way so that its answer is the one the close will get. Only this
+`--as-disposed` reads the bead as carrying that disposition. `bead-rehome.sh`
+asks before it writes anything, the close and its read-only `--check` under
+`--except-key` alike, so it asks this way so that its answer is the one the
+close will get. Only this
 clause reads a disposition, so the option releases no human gate, and a bead that
 does not read still refuses.
 
@@ -117,9 +118,9 @@ below exists to see a gate filed after the first check.
   `--match-head-commit` does not catch one raised between validation and the
   merge; the terminal re-assert does.
 - **Close** — `assets/scripts/bead-rehome.sh`. The sanctioned close-with-successor
-  path runs the gate before the close. The successor pointer is already stamped,
-  so a hold leaves an open, pointed, findable bead — the same shape a refused
-  close leaves. The release is to clear the gate, then re-run.
+  path runs the gate before it writes anything, so a hold leaves the bead as it
+  was, open and unclosed, the same shape a refused close leaves. The release is
+  to clear the gate, then re-run.
   `bead-rehome.sh --except-key <situation-key>` hands the key to the gate's
   exception, and with `--check` it reads the gate, with `--as-disposed`, and what
   else would hold the close, writing nothing, which is how `stand-down.sh` stops

@@ -71,7 +71,7 @@ The board is `helm-svc board` (services/helm). This script renders no
 board. open, engage and react take the subject as a bead id, a PR number
 or URL, or a superseded bead id, and resolve it to the LIVE bead that owns the
 work by metadata and the graph — a PR number/URL to its anchor, a
-closed+superseded id along gc.superseded_by to its successor — never an id
+closed+superseded id along its supersedes edge to its successor — never an id
 scraped from a title. A live bead recording a PR in pr_number/pr_url stands
 for the anchor it names in anchor_bead, if any. An unresolvable or ambiguous
 reference is refused, naming what it could not resolve; nothing is filed.
@@ -471,6 +471,33 @@ need_human_gate_jq() {
     exit 3
 }
 
+# need_disposition_jq — load $DISPOSITION_JQ, the one reading of the successor a
+# disposed bead names through its duplicates or supersedes edge, from bd-lib.sh
+# the same way need_human_gate_jq loads its rule. Loaded on first use.
+DISPOSITION_JQ=""
+need_disposition_jq() {
+    [ -n "$DISPOSITION_JQ" ] && return 0
+    DISPOSITION_JQ=$(bash -c '. "$1" >/dev/null 2>&1 && printf "%s" "$DISPOSITION_JQ"' gc-helm \
+        "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" 2>/dev/null) || DISPOSITION_JQ=""
+    [ -n "$DISPOSITION_JQ" ] && return 0
+    echo "$PROG: could not read the disposition rule (\$DISPOSITION_JQ) from ${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}; it needs bash on PATH. Nothing was written." >&2
+    exit 3
+}
+
+# disposed_to_of <bead-id> — the bead <bead-id> names as its canonical or
+# successor, read from its `gc bd list` row in the store its id prefix names, so
+# an edge into another rig's store counts. Prints nothing when it names none or
+# the row does not read.
+disposed_to_of() {
+    need_disposition_jq
+    _dt_path=$(rig_path_for_bead "$1")
+    _dt_db=""; [ -n "$_dt_path" ] && [ -d "$_dt_path/.beads" ] && _dt_db="$_dt_path/.beads"
+    # shellcheck disable=SC2086  # ${_dt_db:+--db "$_dt_db"} expands to 0 or 2 space-free fields
+    gc bd list --id "$1" --all ${_dt_db:+--db "$_dt_db"} --json --limit 0 2>/dev/null | grep -av '^gc bd:' | scrub \
+        | jq -r --arg b "$1" "$DISPOSITION_JQ"'
+            if type == "array" then ([ .[] | objects | select((.id // "") == $b) ] | first // {} | disposed_to) else empty end' 2>/dev/null || true
+}
+
 # bd_rows <gc-bd-args...> — one `gc bd` read that must answer a JSON array,
 # printed scrubbed with the `gc bd:` rig-store notice stripped. Returns 1 on a
 # read that failed or answered anything else, so "none" and "could not read"
@@ -647,7 +674,7 @@ rig_db_for_session() {
 # ── Subject resolver: an operator reference to the live bead it owns ──
 # The operator supplies a subject by reading it off whatever is in front of
 # them — a PR, a board row, a bead whose title cites its lineage. A PR/bead
-# title legitimately names OTHER beads (`gc.supersedes`), so an id scraped from
+# title legitimately names OTHER beads (the beads it superseded), so an id scraped from
 # one opens the wrong bead: the settled predecessor of a fold, or nothing. The
 # fix is a deterministic resolver keyed on structured metadata and the graph,
 # never on title text, so a PR number or a superseded id cannot open a dead
@@ -666,7 +693,7 @@ rig_db_for_session() {
 #                                            one's anchor_bead, or the bead
 #                                            itself when it names none (never a
 #                                            title)
-#   closed + gc.superseded_by            ->  followed to the live successor
+#   closed + a duplicates/supersedes edge ->  followed to the live successor
 #   live bead id                         ->  unchanged
 RESOLVED_SUBJECT=""
 resolve_live_subject() {
@@ -801,12 +828,12 @@ _resolve_pr_reference() {
 }
 
 # _resolve_superseded_reference <bead-id> — follow a settled disposition
-# (status closed + gc.superseded_by) to its live successor and set
-# RESOLVED_SUBJECT. bead-rehome.sh stamps gc.superseded_by (+ the legacy bare
-# key) alongside gc.superseded_by_store; the successor is read cross-ledger by
-# its rig-unique id, so that store hint is not needed to find it. A live bead,
-# or one that does not resolve, passes through unchanged for the caller's
-# existence gate; a cycle is refused (exit 4) rather than guessed.
+# (status closed + the duplicates or supersedes edge bead-rehome.sh records) to
+# its live successor and set RESOLVED_SUBJECT. The edge is read off the bead's
+# list row, which carries one into another rig's store, and the successor is
+# read cross-ledger by its rig-unique id. A live bead, or one that does not
+# resolve, passes through unchanged for the caller's existence gate; a cycle is
+# refused (exit 4) rather than guessed.
 _resolve_superseded_reference() {
     _ss_orig="$1"; _ss_cur="$1"; _ss_seen=" $1 "; _ss_hops=0
     while [ "$_ss_hops" -le 24 ]; do
@@ -817,13 +844,15 @@ _resolve_superseded_reference() {
             # The reference ITSELF does not resolve: pass it through unchanged so
             # the caller's existence gate reports a clean not-found.
             [ "$_ss_cur" = "$_ss_orig" ] && { RESOLVED_SUBJECT="$_ss_orig"; return 0; }
-            # A SUCCESSOR we followed does not resolve (a broken or cross-store
-            # pointer). Refuse — never fall back to opening the settled predecessor.
-            echo "$PROG: $_ss_orig is superseded by $_ss_cur, which does not resolve (a broken or cross-store pointer). Refusing to open the settled predecessor; pass the live bead id directly. Nothing filed." >&2
+            # A SUCCESSOR we followed does not resolve (a broken edge, or one onto
+            # a store no rig names). Refuse — never fall back to opening the
+            # settled predecessor.
+            echo "$PROG: $_ss_orig is superseded by $_ss_cur, which does not resolve (a broken edge, or one onto a store no rig names). Refusing to open the settled predecessor; pass the live bead id directly. Nothing filed." >&2
             exit 4
         fi
         _ss_status=$(printf '%s' "$_ss_this" | jq -r '.status // ""' 2>/dev/null) || _ss_status=""
-        _ss_succ=$(printf '%s' "$_ss_this" | jq -r '(.metadata["gc.superseded_by"] // .metadata.superseded_by // "")' 2>/dev/null) || _ss_succ=""
+        _ss_succ=""
+        [ "$_ss_status" != "closed" ] || _ss_succ=$(disposed_to_of "$_ss_cur")
         if [ "$_ss_status" = "closed" ] && [ -n "$_ss_succ" ]; then
             case "$_ss_seen" in
                 *" $_ss_succ "*)
@@ -1061,8 +1090,8 @@ cmd_takeaway() {
     # --release is two acts welded into one flag: PARK the anchor (reopen,
     # unassign, stamp the route) and END the run beneath it. The park
     # is correct for an anchor still standing and destructive for one already
-    # disposed — a bead closed by a fold carries gc.superseded_by and a
-    # close_reason naming its carrier, and `--status=open` there makes work
+    # disposed — a bead closed by a fold names its carrier through its
+    # supersedes edge, and `--status=open` there makes work
     # whose disposition landed visible as open in every reader of open beads.
     # The run's end is the half a disposed anchor still needs: a fold that lands
     # AFTER the pour leaves the run going either way, and gascity's autoclose
@@ -1089,11 +1118,7 @@ cmd_takeaway() {
         fi
         if [ "$anchor_status" = "closed" ]; then
             release_park=""
-            superseded=$(printf '%s' "$anchor_json" \
-                | jq -r --arg b "$bead" \
-                    'if type == "array"
-                     then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | ((.metadata // {})["gc.superseded_by"] // "")
-                     else empty end' 2>/dev/null || true)
+            superseded=$(disposed_to_of "$bead")
             echo "$PROG: takeaway: $bead is closed${superseded:+, superseded by $superseded} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route stamp). The run beneath it is still ended." >&2
         fi
     fi

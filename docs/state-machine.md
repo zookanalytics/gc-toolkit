@@ -353,7 +353,7 @@ login, which has no review queue to return to. A `needs-you` finding holds that
 review open until the operator clears the human gate holding its question with
 a reason headed `ruled:` and the work the ruling calls for lands, while the
 others let it clear. A re-home hands the question on to the bead its
-`gc.superseded_by` names, and a gate cleared `moot:` or `benign:` releases
+supersedes edge names, and a gate cleared `moot:` or `benign:` releases
 nothing. Such a finding stays open until its anchor closes, and the review it
 holds stays changes-requested until the operator's own approval replaces it. A
 sitting cut short leaves the gate open, so the later sitting that rules on the
@@ -974,22 +974,18 @@ review's result set.
 - **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
   close-with-successor writer): a bead that duplicates another or was fixed
   upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
-  gates its own evidence — the named successor resolves and is closed or shipped
-  in the same store AND the origin recorded no work (`work_outcome=no-op` or no
-  work-product key at all), unless the origin carries the operator's
-  pre-recorded PR-close disposition for that kind and successor — and holds on
-  anything it cannot establish. Converse and operator dispositions use the same
-  writer, and so does `duplicate-sweep.sh` (cadence arm 10). The sweep reads
-  the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
-  duplicate dispatch: polecats never close work beads, so the bead has no other
-  way out. It checks the same evidence before it calls the writer. It also
-  closes an unmarked rework twin: an open rework child that was never
-  dispatched (no dispatch metadata, no convoy tracking it) whose source is
-  closed (the review it answers, or the conversation a ruling's child answers) and
-  whose same-source, same-anchor sibling landed. That twin would otherwise hold
-  its anchor forever; the sweep records `gc.work_outcome=no-op` on it before the
-  close. A first reaction never closes a bead: it hands a confident no-op to the
-  validating closer (`mol-validate-close`).
+  gates its own evidence — the named successor resolves in the same store, and
+  under `fixed-upstream` it is closed or shipped, AND the origin recorded no work
+  (`work_outcome=no-op` or no work-product key at all), unless the origin carries
+  the operator's pre-recorded PR-close disposition for that kind and successor —
+  and holds on anything it cannot establish. A duplicate closes at once, whatever
+  state its canonical is in, because the canonical carries the work. Converse and
+  operator dispositions use the same writer, and so does a polecat whose work
+  bead duplicates another: that close is the one a polecat makes on its work
+  bead, before it declines its run. A never-dispatched rework twin, an open
+  rework child whose same-source sibling landed, holds its anchor until a person
+  or a sitting closes it the same way. A first reaction never closes a bead: it
+  hands a confident no-op to the validating closer (`mol-validate-close`).
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -1116,32 +1112,38 @@ reads only from the push's own start.
 ## Disposition
 
 A close that is not a landing must say so from the store the bead lived in:
-`assets/scripts/bead-rehome.sh` closes the bead with `gc.superseded_by` +
-`gc.superseded_by_store` (and stamps the inverse `gc.supersedes*` on the
-successor), so a sound disposition and a careless false close are
-distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
-`duplicate` — say the work relocated, and the pointer names the bead that
-carries it now. The fifth, `not-needed`, says nothing carries it: the bead
-was not needed, and the pointer names the evidence that concluded so,
-typically the conversation of the sitting that ruled, or the human gate its
-ruling answered. The pointer is required
-under every kind, because it is the whole of that distinction. The kind is
-read from the close reason, which opens with the kind's phrase and the
-successor, as in `not needed, per <successor> in <store>`. When the pointer is
-added after an earlier close, a `Disposition recorded` note carries that reason
-instead. The read side searches every store before concluding a close was
-false. Consumers: the mechanik/converse close paths
-(`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
-cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), `stand-down.sh` (a person's ruling that work a human gate holds will
-not go on), `preexisting-failure.sh` (a pre-existing-failure gate follows a
-closed tracker's pointer to the live bead that carries its failure, and a
-`not-needed` close ends that chain), and any patrol judging a closed bead.
+`assets/scripts/bead-rehome.sh` closes the bead and records its successor in
+bd's own edge from it, so a sound disposition and a careless false close are
+distinguishable on read. The edge is `duplicates` under `duplicate`, which
+`bd show` renders as DUPLICATE OF, and `supersedes` under every other kind. It
+lives in the bead's own store, and it may name a bead in another rig's store,
+which bd keeps unverified: `gc bd list --json` returns such an edge and `gc bd
+show` leaves it out, so `bd-lib.sh`'s `$DISPOSITION_JQ`, the one reading of a
+disposition, reads the list row where the far end can be another store's. Four
+kinds — `re-homed`, `folded`, `fixed-upstream`, `duplicate` — say the work
+relocated, and the edge names the bead that carries it now. The fifth,
+`not-needed`, says nothing carries it: the bead was not needed, and the edge
+names the evidence that concluded so, typically the conversation of the
+sitting that ruled, or the human gate its ruling answered. The successor is
+required under every kind, because it is the whole of that distinction. The
+kind's phrase and the successor ride the close as an appended note, as in
+`Disposition <time>: not needed, per <successor> in <store>`, because bd's
+guarded close sets no close reason; when the edge is added after an earlier
+close, a `Disposition recorded` note carries them instead. The read side
+searches every store before concluding a close was false. Consumers: the
+mechanik/converse close paths
+(`template-fragments/bead-disposition.template.md`), `stand-down.sh` (a
+person's ruling that work a human gate holds will not go on),
+`preexisting-failure.sh` (a pre-existing-failure gate follows a closed
+tracker's edge to the live bead that carries its failure, and a `not-needed`
+close ends that chain), the doctor's I5 and I15, the board's subject resolver,
+and any patrol judging a closed bead.
 
 `bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and
-`duplicate` it re-establishes that the successor is closed or shipped in the
-same store and that the origin recorded no work, unless the origin carries the
-operator's pre-recorded PR-close disposition for that kind and successor.
+`duplicate` it re-establishes that the successor is in the same store and that
+the origin recorded no work, and under `fixed-upstream` that the successor is
+closed or shipped, unless the origin carries the operator's pre-recorded
+PR-close disposition for that kind and successor.
 Under `re-homed`, `folded` and `not-needed` it applies only the checks every
 kind gets: the origin is not a review bead, a step bead or a workflow root, and
 no other session holds it in progress. The judgment that the bead should close
@@ -1149,10 +1151,13 @@ is the caller's. A hand disposition, by the mechanik, converse or the operator,
 judges the bead itself. An automated caller proves its own case before it
 calls, and [authority-map.md](authority-map.md) records the power in its
 Close-with-successor row. Whoever judges, `bead-rehome.sh` stays the one
-writer of the pointer and the close. It stamps the pointer in one write bd
-applies only while the bead still has the status and assignee its gates read,
-so a caller whose gates passed before another actor claimed the bead stamps
-nothing while that claim holds.
+writer of the close and its edge. The close is bd's checked close, in one write
+bd applies only while the bead still has the status and assignee its gates
+read, and the edge goes on once it lands, so a caller whose gates passed before
+another actor claimed or closed the bead writes nothing. `bd duplicate` and
+`bd supersede` write the same edges, but they close past an open human gate and
+an open child, and refuse a successor in another store, so the pack closes
+through the writer instead.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,
@@ -1198,11 +1203,11 @@ INTENT on the still-open anchor — `assets/scripts/pr-dispose.sh` stamps
 optional `_store` naming the intended `bead-rehome.sh` invocation — and closes
 the PR. `pr-facts.sh`'s close arm reads that marker when the PR reaches CLOSED
 and runs `bead-rehome.sh` to consummate the terminal close, so `bead-rehome.sh`
-stays the sole writer of `gc.superseded_by` and the disposition reaches the
+stays the sole writer of the disposition edge and the disposition reaches the
 same terminal state through the same verb. The same consummation disposes the
 branch's parked rebase and rework children BEFORE it closes the anchor: a rework
 child holds a `blocks` edge on the anchor, so an open one refuses the anchor's
-own non-force close and would strand it open with its pointer already stamped.
+own non-force close and would strand it open.
 Each exists only to carry a branch the closed PR will never merge, so an open,
 unheld one is closed through `bead-rehome.sh` as `not-needed` against the
 anchor's successor — clearing that hold and leaving no husk to re-offer to a
@@ -1220,7 +1225,7 @@ disposed anchor, and the consummation runs it for its own anchor just before the
 close, so the close is not refused and put to a person over scaffolding that arm 9
 would retire later in the same pass. It closes every
 `task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
-non-merged anchor (`gc.superseded_by` or `gc.pr_close_disposition_kind`
+non-merged anchor (its disposition edge or `gc.pr_close_disposition_kind`
 present) as `gc.outcome=moot`, reworks before the findings they block, so no
 close is refused by a blocker still open in the same pass. A bead an operator
 froze (`rebase_hold`) is left standing, like a frozen child.

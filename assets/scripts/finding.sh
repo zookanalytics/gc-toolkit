@@ -1313,7 +1313,7 @@ cmd_shed_orphaned() {
 # resolve). A gate also clears without a ruling: `moot:` when its premise went,
 # `benign:` when it needs nobody, or a reason with no head, and none of those
 # answers the question. A gate re-homed onto another (bead-rehome.sh records
-# gc.superseded_by) hands the question to that gate, which answers only once it
+# its supersedes edge) hands the question to that gate, which answers only once it
 # has closed `ruled:` itself. An open gate, a close that rules nothing and names
 # no successor, a successor that is not a human gate, a row that will not read,
 # and a hand-off back to a gate already passed all answer nothing, so the
@@ -1332,7 +1332,7 @@ ruled_gate() { # <gate-id>
       printf '%s\n' "$g"
       return 0
     fi
-    g=$(printf '%s' "$row" | jq -r '(.[0].metadata["gc.superseded_by"] // "") | tostring' 2>/dev/null)
+    g=$(printf '%s' "$row" | jq -r "$DISPOSITION_JQ"'.[0] | disposed_to' 2>/dev/null)
   done
   return 1
 }

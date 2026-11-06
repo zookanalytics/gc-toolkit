@@ -2,7 +2,8 @@
 # finalize-gate.sh — the composable "may this bead be finalized?" precondition set.
 #
 # Finalizing a bead is the terminal, hard-to-reverse act on it: merging its PR
-# (merge.sh) or closing the bead (bead-rehome.sh). This gate is the single place
+# (merge.sh) or closing the bead with its successor (bead-rehome.sh, which asks
+# before it writes anything). This gate is the single place
 # that answers, for one bead, whether every precondition for that act holds. It
 # is a SET of independent clauses run in order; the first to refuse stops the set
 # and names why. The clauses are no-open-human-gate and epic-ruling-recorded (a
@@ -33,11 +34,12 @@
 # blocks the bead, so the caller withdraws those gates before it closes
 # (bead-rehome.sh).
 #
-# One reading, also named by the caller: --as-disposed reads the bead as carrying
-# a disposition pointer (gc.superseded_by). bead-rehome.sh stamps that pointer
-# before it runs this gate, so its --check, which writes nothing, asks about the
-# bead as the close will leave it. Only the epic clause reads a pointer, so this
-# releases no human gate, and a read that fails still refuses.
+# One reading, also named by the caller: --as-disposed reads the bead as naming
+# its successor, through the duplicates or supersedes edge bead-rehome.sh
+# records once the close lands. bead-rehome.sh asks before it writes anything,
+# so it asks about the bead as the close will leave it. Only the epic clause
+# reads a disposition, so this releases no human gate, and a read that fails
+# still refuses.
 #
 # FAIL CLOSED. A gate read that does not answer with a JSON array refuses the
 # finalization: an unreadable probe is never an all-clear, because the act it
@@ -108,11 +110,13 @@ clause_no_open_human_gate() {
 # CLOSED: an unreadable probe refuses.
 #
 # Neither finalize path wired today reaches an undisposed epic. merge.sh
-# finalizes merge anchors, and bead-rehome.sh stamps the epic's disposition before
-# it runs the gate, which this clause passes. Its --check, ahead of that stamp, asks
-# with <as-disposed> set. The clause therefore holds only a gate-running close that
-# reaches an undisposed epic. A bare `gc bd close` runs no gate, and
-# doctor/check-epic-closed-implies-ruled (I15) reports it after the fact.
+# finalizes merge anchors, and bead-rehome.sh, which disposes of the epic, asks
+# with <as-disposed> set. The clause therefore holds only a gate-running close
+# that reaches an undisposed epic. A bare `gc bd close` runs no gate, and
+# doctor/check-epic-closed-implies-ruled (I15) reports it after the fact. The
+# disposition is read off the `gc bd show` row, which carries the edge onto a
+# successor in the epic's own store; an edge into another rig's store reaches
+# this clause only through <as-disposed>.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     _fgr_as_disposed="${2:-}"
@@ -133,11 +137,11 @@ clause_epic_ruling_recorded() {
     # decode to a real newline and split the read across lines, dropping the
     # ruling and falsely holding; the disposition and ruling are id/enum values
     # with any newline stripped likewise. A reason of whitespace alone is absent.
-    _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r '
+    _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r "$DISPOSITION_JQ"'
         if type != "array" then error("not an array")
         else [ (.[0].issue_type // .[0].type // ""),
                (.[0].metadata.epic_hypothesis // "" | tostring | length > 0 | tostring),
-               (.[0].metadata["gc.superseded_by"] // "" | tostring | gsub("[\\n\\r]"; " ")),
+               (.[0] | disposed_to | gsub("[\\n\\r]"; " ")),
                (.[0].metadata.epic_ruling // "" | tostring | gsub("[\\n\\r]"; " ")),
                (.[0].metadata.epic_ruling_reason // "" | tostring | test("\\S") | tostring) ]
              | join("\u001f") end' 2>/dev/null) || {
@@ -152,9 +156,9 @@ clause_epic_ruling_recorded() {
     # nothing to rule on, so it passes. It is a Delivery, which carries an aim
     # and closes at its epic's checkpoint, or an incomplete Epic, which is fixed
     # by recording its hypothesis (docs/epics.md). The pass for an incomplete
-    # Epic is compatibility debt (docs/built-once-target.md). A disposition
-    # pointer (bead-rehome's gc.superseded_by) is a recorded terminal reason, so
-    # it passes too.
+    # Epic is compatibility debt (docs/built-once-target.md). A disposition, the
+    # duplicates or supersedes edge bead-rehome.sh records, is a recorded
+    # terminal reason, so it passes too.
     [ "$_fgr_hashyp" = true ] || return 0
     [ -n "$_fgr_disposed$_fgr_as_disposed" ] && return 0
     # Only the close ruling, with its outcome recorded, releases the epic. A

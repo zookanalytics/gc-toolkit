@@ -6,7 +6,8 @@
 # stewarded epic not ruled closed, allows (exit 0) otherwise, and fails closed
 # (exit 1) on an unreadable probe. A gate filed under the --except-key situation
 # passes only while no person is assigned it. --as-disposed reads the bead as
-# carrying a disposition pointer, which only the ruling clause reads.
+# naming its successor through a disposition edge, which only the ruling clause
+# reads.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/finalize-gate-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -202,10 +203,14 @@ store "[$(epic_bead E3b open '{}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E3b 2>/dev/null); rc=$?
 eq "$rc" 0 "an epic with no hypothesis is not held by the ruling clause: exit 0"
 
-# 22. A disposed epic (gc.superseded_by) is exempt — a recorded terminal reason.
-store "[$(epic_bead E3c open '{"epic_hypothesis":"h","gc.superseded_by":"s-1"}')]"; : > "$STUB_DEPS"
+# 22. A disposed epic (its supersedes edge onto a successor, on the show row)
+# is exempt — a recorded terminal reason. The retired successor key alone is not.
+store '[{"id":"E3c","status":"open","assignee":"","title":"E3c","description":"","notes":"","issue_type":"epic","metadata":{"epic_hypothesis":"h"},"dependencies":[{"id":"s-1","dependency_type":"supersedes"}]}]'; : > "$STUB_DEPS"
 out=$("$SUT" check E3c 2>/dev/null); rc=$?
 eq "$rc" 0 "a disposed epic is not held by the ruling clause: exit 0"
+store "[$(epic_bead E3k open '{"epic_hypothesis":"h","gc.superseded_by":"s-1"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E3k 2>/dev/null); rc=$?
+eq "$rc" 1 "an epic carrying only the retired gc.superseded_by key is held: exit 1"
 
 # 23. The clause is epic-only: a plain work bead with no ruling may finalize.
 store "[$(work W1 open)]"; : > "$STUB_DEPS"

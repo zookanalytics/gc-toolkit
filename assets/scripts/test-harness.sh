@@ -579,9 +579,10 @@ case "$verb" in
     # edges, as it refuses a `dep` write from that id. --parent <id> rides the
     # create as bd writes it, a parent-child edge onto <id> beside .parent, and
     # -p/--priority sets the priority the row is born at; a create that names
-    # none is read at bd's default P2.
+    # none is read at bd's default P2. -t/--type sets the issue_type it is born
+    # with, bd's default task when none is named.
     title="${1:-}"; shift || true
-    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""; ctype="task"
     while [ $# -gt 0 ]; do
       case "$1" in
         --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
@@ -597,6 +598,8 @@ case "$verb" in
         --parent=*) cparent="${1#--parent=}" ;;
         -p|--priority) shift; cprio="${1:-}" ;;
         --priority=*) cprio="${1#--priority=}" ;;
+        -t|--type) shift; ctype="${1:-task}" ;;
+        --type=*) ctype="${1#--type=}" ;;
       esac
       shift || true
     done
@@ -610,7 +613,7 @@ case "$verb" in
     # naming the id wins, as the shell loop it replaces let the last one win).
     [ -n "$cmeta" ] || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     out=$(jq -rc --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
-      --arg par "$cparent" --arg pr "$cprio" \
+      --arg par "$cparent" --arg pr "$cprio" --arg ty "$ctype" \
       --argjson m "$cmeta" --arg dk "${STUB_DROP_KEYS:-}" '
       ("new-" + ((length + 1) | tostring)) as $id
       | ([$dk | splits("[ \t\n]+")] | map(select(startswith($id + ":")))
@@ -619,7 +622,7 @@ case "$verb" in
            then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
            else $m end) as $meta
       | (if ($drop | index("status")) then "open" else $st end) as $status
-      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}
+      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: $ty, metadata: $meta}
               + (if $par == "" then {} else {parent: $par} end)
               + (if $pr == "" then {} else {priority: ($pr | ltrimstr("P") | ltrimstr("p") | tonumber)} end)]),
         $id' "$S" 2>/dev/null) \

@@ -228,7 +228,7 @@ A pull request in flight is retired, not stopped (the prs skill).
 
 The message is that nothing will be built for this bead. The writer closes it,
 and nothing downstream picks it up. An open human gate that blocks the bead
-holds that close: the writer records the pointer and exits 5, and the same call
+holds that close: the writer records nothing and exits 5, and the same call
 closes the bead once each such gate is cleared. In a sitting, close a subject
 only on the operator's agreement, and run the writer after the sign-off, which
 answers the gates the ruling settles.
@@ -243,10 +243,17 @@ gc bd update <bead> --set-metadata gc.work_outcome=no-op \
 
 Under `not-needed` the successor is the evidence that ruled the work out, such
 as the conversation where it was decided. Under `duplicate`, `folded`, `re-homed` and
-`fixed-upstream` it is the bead that carries the work now. The writer stamps
-the pointer, reads it back and only then closes, so never close the bead by
-hand: a close that names no successor reads as a careless one. On a bead
-already closed by hand, the same writer adds the missing pointer.
+`fixed-upstream` it is the bead that carries the work now. The writer closes the
+bead through bd's checked close and records the successor in bd's own edge,
+`duplicates` under `duplicate` and `supersedes` otherwise, so never close the
+bead by hand: a close that names no successor reads as a careless one. On a bead
+already closed by hand, the same writer adds the missing edge.
+
+- A bead that duplicates another closes at once, whatever state its canonical
+  is in, because the canonical carries the work: `--kind duplicate` needs the
+  two in one store and a bead that did no work of its own. `fixed-upstream`
+  needs the fix closed or shipped. A duplicate close records the canonical, so
+  `bd show` names it under DUPLICATE OF.
 
 - It fits a bead with no work in flight: unassigned, no branch or PR still in
   flight to a pool, and not a review, step or workflow bead. A bead with an open

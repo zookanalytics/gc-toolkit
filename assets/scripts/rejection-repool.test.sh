@@ -306,8 +306,8 @@ eq "$(meta "$(kids_of tk-g)" existing_pr)" "https://github.com/o/r/pull/8" "the 
 eq "$(meta tk-g existing_pr)" "<absent>" "the convoy keeps only its own pr_url"
 
 echo "# a convoy whose row names its kind as type, not issue_type, is never poured"
-# The pack's other convoy checks read .issue_type // .type (gate-ensure.sh,
-# duplicate-sweep.sh), and so does this one.
+# The pack's other convoy check reads .issue_type // .type (work-submit.sh),
+# and so does this one.
 grad
 store "$(jq -c 'map(if .id == "tk-g" then (del(.issue_type) | .type = "convoy") else . end)' "$STUB_STORE")"
 run_pour tk-g --reason "$REASON"

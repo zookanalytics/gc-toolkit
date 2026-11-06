@@ -937,11 +937,10 @@ has "$(deps)" "tk-ancR|blocks|$RXFU2" "…and gated behind the anchor"
 
 # A bead another writer hangs discovered-from on the finding is not its
 # follow-up. scaffolding-sweep.sh files a disposed anchor's carried-forward bug
-# that way, born superseding the finding, and the bug takes its own route to a
-# first reaction. The deferral files a stamped follow-up of its own and leaves
-# the bug unarmed and ungated.
+# that way, and the bug takes its own route to a first reaction. The deferral
+# files a stamped follow-up of its own and leaves the bug unarmed and ungated.
 RB=$(upsert_r carried "skip a carried-forward bug")
-RBB=$(gc bd create "carried forward" -t bug --deps "discovered-from:$RB" --metadata "{\"gc.supersedes\":\"$RB\"}" --json | jq -r '.id')
+RBB=$(gc bd create "carried forward" -t bug --deps "discovered-from:$RB" --json | jq -r '.id')
 eq "$(followups "$RB")" "$RBB" "(fixture) a carried-forward bug hangs discovered-from on the finding"
 defer_r "$RB"; rc=$?
 RBFU=$(meta "$RB" 'finding.follow_up')
@@ -1260,8 +1259,9 @@ for why in "moot: the comment was withdrawn" "benign: nothing to decide" "cleare
 done
 
 # A gate re-homed onto another hands the question on: bead-rehome.sh records the
-# successor as gc.superseded_by, and close-answered follows it to the gate that
-# holds the question, which releases the finding only once it is ruled on.
+# successor in the gate's supersedes edge, and close-answered follows it to the
+# gate that holds the question, which releases the finding only once it is ruled
+# on.
 : > "$STUB_DEPS"
 store '[{"id":"tk-ancF2","status":"open","assignee":"","title":"ancF2","notes":"","metadata":{"merge_result":"pull_request"}},
         {"id":"gF1","status":"open","assignee":"","title":"keep the flag?","notes":"","issue_type":"gate","await_type":"human","await_id":"flag","metadata":{}},
@@ -1269,7 +1269,8 @@ store '[{"id":"tk-ancF2","status":"open","assignee":"","title":"ancF2","notes":"
 printf 'gF1|blocks|tk-ancF2\n' > "$STUB_DEPS"
 FF2=$(human_finding tk-ancF2 "docs/f.md" "keep this flag or drop it?" 64)
 "$SUT" set-disposition --finding "$FF2" --anchor tk-ancF2 --disposition needs-you --visit gF1 >/dev/null
-set_row gF1 '.status = "closed" | .close_reason = "re-homed" | .metadata["gc.superseded_by"] = "gF3"'
+set_row gF1 '.status = "closed" | .close_reason = "re-homed"'
+gc bd dep add gF1 gF3 --type supersedes >/dev/null
 "$SUT" close-answered --anchor tk-ancF2
 eq "$(bstatus "$FF2")" "open" "a finding whose gate was re-homed to one still open stays open"
 set_row gF3 '.status = "closed" | .close_reason = "ruled: drop the flag"'
@@ -1287,11 +1288,14 @@ store '[{"id":"tk-ancG","status":"open","assignee":"","title":"ancG","notes":"",
 printf 'gG1|blocks|tk-ancG\n' > "$STUB_DEPS"
 FG=$(human_finding tk-ancG "docs/g.md" "which name do we ship?" 65)
 "$SUT" set-disposition --finding "$FG" --anchor tk-ancG --disposition needs-you --visit gG1 >/dev/null
-set_row gG1 '.status = "closed" | .close_reason = "re-homed" | .metadata["gc.superseded_by"] = "bugG"'
+set_row gG1 '.status = "closed" | .close_reason = "re-homed"'
+gc bd dep add gG1 bugG --type supersedes >/dev/null
 "$SUT" close-answered --anchor tk-ancG
 eq "$(bstatus "$FG")" "open" "a hand-off to a bead that is not a human gate releases nothing"
-set_row gG1 '.metadata["gc.superseded_by"] = "gG2"'
-set_row gG2 '.status = "closed" | .close_reason = "re-homed" | .metadata["gc.superseded_by"] = "gG1"'
+gc bd dep remove gG1 bugG >/dev/null
+gc bd dep add gG1 gG2 --type supersedes >/dev/null
+set_row gG2 '.status = "closed" | .close_reason = "re-homed"'
+gc bd dep add gG2 gG1 --type supersedes >/dev/null
 "$SUT" close-answered --anchor tk-ancG
 eq "$(bstatus "$FG")" "open" "…and neither does a hand-off that comes back to a gate already passed"
 : > "$STUB_DEPS"

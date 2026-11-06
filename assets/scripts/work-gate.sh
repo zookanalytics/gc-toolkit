@@ -153,7 +153,7 @@ case "$STATUS" in
     # leaves the assignee empty and stamps no merge_result, so the reason carries
     # what the bead records about its close.
     [ -z "$MERGED" ] || refuse "$FINISHED_NOTE" "$FINISHED_CANCEL" "$MERGED"
-    HOW=$(printf '%s' "$WORK_ROW" | jq -r '.[0] | [(.metadata["gc.superseded_by"] // "" | tostring | select(length > 0) | "superseded by " + .), (.metadata["gc.outcome"] // "" | tostring | select(length > 0) | "outcome " + .), (.close_reason // "" | tostring | gsub("[[:space:]]+"; " ") | select(length > 0) | "close reason: " + .[0:200])] | join("; ")')
+    HOW=$(printf '%s' "$WORK_ROW" | jq -r "$DISPOSITION_JQ"'.[0] | [(disposed_to | select(length > 0) | "superseded by " + .), (.metadata["gc.outcome"] // "" | tostring | select(length > 0) | "outcome " + .), (.close_reason // "" | tostring | gsub("[[:space:]]+"; " ") | select(length > 0) | "close reason: " + .[0:200])] | join("; ")')
     refuse "Closed before claim; run cancelled with nothing asked" "closed before claim" "already closed${HOW:+ ($HOW)}; its work is done or was ruled unnecessary" ;;
   open|in_progress)
     if [ -n "$OWNER" ] && ! work_is_self "$OWNER"; then

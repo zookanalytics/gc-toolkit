@@ -32,9 +32,10 @@
 #     parked-children drop honors too. Its blocks edge keeps the anchor open
 #     until the operator lifts the hold.
 #
-# The disposed signal is read from the ANCHOR: a non-empty gc.superseded_by (the
-# pointer bead-rehome.sh stamps and reads back) or a gc.pr_close_disposition_kind
-# (the intent pr-dispose.sh records before the PR closes). Neither is ever
+# The disposed signal is read from the ANCHOR: the duplicates or supersedes edge
+# that names its successor (which bead-rehome.sh records with the close) or a
+# gc.pr_close_disposition_kind (the intent pr-dispose.sh records before the PR
+# closes). Neither is ever
 # stamped on a landing, so a merged anchor's leftover scaffolding is out of scope
 # (that is finding.sh close-answered's, keyed on the fix landing); a merged
 # anchor is skipped explicitly as a backstop.
@@ -56,8 +57,8 @@
 # is carried forward instead. A bug bead takes its objection, and the finding
 # closes through bead-rehome.sh pointed at that bug. The bug carries no
 # anchor_bead, so it reaches a first reaction like any discovered work, and it
-# is born with gc.supersedes=<finding>, so a retry finds it rather than filing
-# a twin. A human finding that names a file but records no comment id, or sits
+# is born with a discovered-from edge onto the finding, so a retry finds it
+# rather than filing a twin. A human finding that names a file but records no comment id, or sits
 # on an anchor that records no PR, can never be checked and is carried forward
 # the same way. One whose PR comments do not read this pass is left for the
 # next.
@@ -82,7 +83,6 @@ scrub() { tr -d '\000-\037'; }
 
 # Scaffolding is dispatched into any of these; closed ones need no sweeping.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
-ALL_STATUSES="$LIVE_STATUSES,closed"
 
 ANCHOR_ONLY=""
 while [ $# -gt 0 ]; do
@@ -99,7 +99,7 @@ done
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
-# The sanctioned close with a successor pointer, for a finding carried forward.
+# The sanctioned close with a successor, for a finding carried forward.
 REHOME="$_bd_lib_dir/bead-rehome.sh"
 # </dev/null on every call inside the candidate loop: that loop is fed by a
 # heredoc, and a child inheriting its stdin would consume the rows behind it.
@@ -192,22 +192,23 @@ finding_scope() {
 # carry_forward <finding> <anchor> <disposition> <why> — file the bug bead that
 # takes this finding's objection, or find the one an earlier pass filed, then
 # close the finding through bead-rehome.sh pointed at it. Returns 0 once the
-# finding reads back closed with that pointer, leaving the bug's id in CF_BUG.
+# finding reads back closed naming it, leaving the bug's id in CF_BUG.
 carry_forward() {
-  local f="$1" a="$2" disp="$3" why="$4" frow rows bug title desc meta crow
+  local f="$1" a="$2" disp="$3" why="$4" frow rows bug title desc crow
   CF_BUG=""
   frow=$(bd_show "$f") || return 1
-  rows=$(bd_list --metadata-field "gc.supersedes=$f" --status="$ALL_STATUSES") || return 1
-  bug=$(printf '%s' "$rows" | jq -r --arg f "$f" '
-    [ .[] | select(((.metadata["gc.supersedes"] // "") | tostring) == $f) | .id ] | .[0] // empty' 2>/dev/null)
+  # The bug an earlier pass filed is the one born discovered-from this finding.
+  rows=$(bd_json dep list "$f" --direction=up --type discovered-from) || return 1
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  bug=$(printf '%s' "$rows" | jq -r '
+    [ .[] | select(((.issue_type // "") | tostring) == "bug") | .id ] | .[0] // empty' 2>/dev/null)
   if [ -z "$bug" ]; then
     title=$(row_field "$frow" title | sed -E 's/^finding\[[^]]*\]: //')
     [ -n "$title" ] || title="Review objection carried forward from finding $f"
     desc=$(printf '%s\n\nCarried forward from finding %s when anchor %s was disposed (%s). %s Closing the PR does not answer it, so it stands here as work of its own: judge it against the current target branch, and close it if the code no longer has the problem.' \
       "$(row_field "$frow" description)" "$f" "$a" "$disp" "$why")
-    meta=$(jq -nc --arg f "$f" '{"gc.supersedes": $f}')
     bug=$(printf '%s' "$desc" | gc bd create "$title" -t bug --body-file - --deps "discovered-from:$f" \
-            --metadata "$meta" --json 2>/dev/null \
+            --json 2>/dev/null \
           | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
     [ -n "$bug" ] || return 1
   fi
@@ -216,7 +217,7 @@ carry_forward() {
   "$REHOME" --origin "$f" --successor "$bug" --kind re-homed --note "$why" </dev/null >/dev/null 2>&1
   crow=$(bd_show "$f") || return 1
   [ "$(row_field "$crow" status | tr '[:upper:]' '[:lower:]')" = "closed" ] \
-    && [ "$(row_meta "$crow" gc.superseded_by)" = "$bug" ]
+    && [ "$(printf '%s' "$crow" | jq -r "$DISPOSITION_JQ"'.[0] | disposed_to' 2>/dev/null)" = "$bug" ]
 }
 
 # --- the live scaffolding population, in close order ---------------------------
@@ -290,10 +291,12 @@ while IFS="$US" read -r sid anchor kind hold fsrc fcid fpath; do
   # somehow also present.
   [ "$AMR" = "merged" ] && { held=$((held + 1)); continue; }
 
-  SUPERSEDED=$(row_meta "$AROW" gc.superseded_by)
+  # The anchor's list row carries an edge onto a successor in another rig's
+  # store, which its show row leaves out.
+  SUPERSEDED=$(bd_disposed_to "$anchor" || true)
   DISP_KIND=$(row_meta "$AROW" gc.pr_close_disposition_kind)
   disposed=""
-  [ -n "$SUPERSEDED" ] && disposed="superseded_by=$SUPERSEDED"
+  [ -n "$SUPERSEDED" ] && disposed="superseded by $SUPERSEDED"
   case "$DISP_KIND" in
     re-homed|folded|fixed-upstream|duplicate|not-needed)
       disposed="${disposed:+$disposed, }pr_close_disposition=$DISP_KIND" ;;

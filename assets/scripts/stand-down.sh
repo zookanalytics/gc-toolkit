@@ -27,8 +27,9 @@
 #      landing, as not-needed. The bead's branch ends with the close, as any
 #      disposition's does.
 #
-# The evidence the pointer names is the gate that carries the ruling, unless
-# --successor names other evidence, such as a sitting's conversation. A gate this
+# The evidence the close names, through its supersedes edge, is the gate that
+# carries the ruling, unless --successor names other evidence, such as a
+# sitting's conversation. A gate this
 # bead leaves carries no ruling, so it cannot be the evidence.
 #
 # Nothing is written, and the exit is 1, for a bead whose close this cannot
@@ -40,7 +41,7 @@
 #     it, and an answer once this bead has closed releases the rest;
 #   * anything bead-rehome.sh --check refuses: another open human gate, a gate
 #     assigned to a person, another live blocker, an open child, a claim, or a
-#     pointer to other evidence.
+#     disposition already naming other evidence.
 #
 # A step that does not land exits 1 and names what has landed. Re-running
 # converges: the arm stays gone, an answered gate stays answered and still names
@@ -157,10 +158,8 @@ for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   fi
 done
 
-# The evidence: what the caller names, then a pointer an earlier run stamped, then
-# the gate that carries the ruling, which reads closed once an earlier run or
-# another person answered it.
-[ -n "$SUCCESSOR" ] || SUCCESSOR=$(row_meta "$WORK_JSON" gc.superseded_by)
+# The evidence: what the caller names, then the gate that carries the ruling,
+# which reads closed once an earlier run or another person answered it.
 [ -n "$SUCCESSOR" ] || SUCCESSOR=$(printf '%s' "$OPEN_GATES" | jq -r '.[0].id // empty' 2>/dev/null)
 [ -n "$SUCCESSOR" ] || SUCCESSOR=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" \
   '[ .[] | select(((.await_id // "") | tostring) == $k) ] | last | .id // empty' 2>/dev/null)

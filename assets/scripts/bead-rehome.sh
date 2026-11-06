@@ -1,68 +1,76 @@
 #!/usr/bin/env bash
-# bead-rehome — the ONE writer that closes a bead with a successor pointer, for
-# every actor. The pointer (gc.superseded_by + _store) is the only thing that
-# distinguishes a sound disposition from a careless close where the question
-# gets asked, so it is stamped and READ BACK before the close; this script would
-# rather leave the origin OPEN than close it unpointed.
+# bead-rehome — the one writer that closes a bead with a successor, for every
+# actor. The successor is recorded in bd's own edge from the closed bead:
+# `duplicates` onto the canonical under --kind duplicate, `supersedes` onto the
+# bead that carries the work, or under not-needed onto the evidence that ruled it
+# out. The edge lives in the origin's store and may name a bead in another rig's
+# store, which bd keeps unverified and `gc bd list` returns. Readers take it
+# through bd-lib.sh's $DISPOSITION_JQ.
+#
+# The close is bd's checked close, written as one `gc bd update --status=closed`
+# that bd applies only while the origin still has the status and assignee this
+# run read before judging it. bd refuses it while a live blocker or an open
+# child holds the origin, and the finalize gate (finalize-gate.sh), asked before
+# any write, holds it while an open human gate blocks the origin. bd's update
+# leaves out two refusals its `bd close` makes, a pinned bead and a bead
+# assigned to anyone but the actor, so the writer reads those off the origin
+# first. So a close that is held, refused or raced writes nothing. The edge goes
+# on once the close has landed. `bd duplicate` and `bd supersede` record the same edge, but they close
+# unchecked, past a gate and an open child, record no reason, and refuse a
+# successor in another store (specs/tk-1tfzr71.13/gas-city-search.md). bd's
+# update sets no close reason, so the disposition's prose rides the same write
+# as an appended note.
+#
 # The close is gated on EVIDENCE the script re-establishes itself:
-#   (a) EVERY kind — origin is not a review, step, or workflow bead; origin is
+#   (a) EVERY kind: the origin is not a review, step or workflow bead, and it is
 #       not in_progress under another actor.
-#   (b) the evidence kinds fixed-upstream|duplicate ALSO — they claim the
-#       origin's work is already delivered elsewhere, so the successor resolves
-#       in the SAME store and is closed or work_outcome=shipped, and the origin
-#       did no work (gc.work_outcome=no-op, accepted even with a work-product
-#       key a rebase/rework twin leaves behind, or no work_outcome and none of
-#       branch/work_dir/gc.work_dir/pr_number/pr_url/merge_result/
-#       gc.work_commit — so an origin with unlanded work is refused). An origin
-#       carrying the operator's pre-recorded PR-close disposition for this kind
-#       and successor (pr-dispose.sh) is a ruling already made, and (b) does not
-#       re-judge it.
-#   The judgment kinds re-homed|folded|not-needed are held to (a) only, and a
-#   non-closed merge_result does not bar them, because the judgment is the
-#   caller's. A hand disposition judges the bead itself, and an automated
-#   caller proves its own case before it calls (docs/authority-map.md,
-#   Close-with-successor).
-# --check evaluates those gates for the given origin/successor/kind and exits
-# 0 (eligible) or non-zero (refused, with the reason on stderr), writing
-# nothing.
-# Writes, in order: pointer on the origin (verified), a populated close reason
-# (kind + successor + store), a best-effort back-pointer on the successor. The
-# pointer goes on in one write bd applies only while the origin still has the
-# status and assignee this run read before judging it. A caller that read the
-# bead before another actor claimed, assigned or moved it therefore stamps
-# nothing while that change stands, and exits 4, as it does for a pointer that
-# does not stick.
-# An open human gate that blocks the origin holds its close (finalize-gate.sh).
+#   (b) fixed-upstream and duplicate also: the origin did no work
+#       (gc.work_outcome=no-op, accepted even beside a work-product key a
+#       rebase or rework twin leaves behind, or no work_outcome and none of
+#       branch, work_dir, gc.work_dir, pr_number, pr_url, merge_result or
+#       gc.work_commit), so an origin with unlanded work is refused, and the
+#       successor is in the same store. Under fixed-upstream the successor is
+#       also closed or work_outcome=shipped: the fix has landed. A duplicate
+#       closes at once, open canonical or closed, because the canonical carries
+#       the work. An origin carrying the operator's pre-recorded PR-close
+#       disposition for this kind and successor (pr-dispose.sh) is a ruling
+#       already made, and (b) does not re-judge it.
+#   The judgment kinds re-homed, folded and not-needed are held to (a) only, and
+#   a non-closed merge_result does not bar them, because the judgment is the
+#   caller's (docs/authority-map.md, Close-with-successor).
+# --check evaluates those gates and exits 0 (eligible) or non-zero (refused,
+# with the reason on stderr), writing nothing.
+#
+# A `blocks` edge from the origin onto its successor is a wait the disposition
+# ends, and bd keeps one edge per pair of beads, so it is dropped just before the
+# close and put back when the close does not land.
 # A caller that reports its own refusals of the close as human gates names their
-# key with --except-key, and the retry withdraws those gates before it closes,
-# in three steps: it reads what would hold the close (the finalize gate; the
-# origin's live blockers and open children; and the template, the pin and the
-# assignee an unforced `bd close` refuses, which lets the close through only for
-# an origin no one is assigned or one assigned to exactly the actor it runs as),
-# and stops there when anything but its own unassigned gates under the key
-# would; it resolves each of those gates with a reason that names the retry and
-# carries no outcome word, so no quiet period starts; then it closes.
-# A run that stops between steps leaves a state the next run completes, because
-# a resolved gate stays resolved. With --except-key, --check also reads what
-# would hold the close, and reads the origin as the close will leave it, disposed,
-# so a caller that answers those gates itself, such as stand-down.sh, can stop
-# before its first write.
-# An already-closed origin is the REPAIR path: pointer + appended note, with the
-# gates skipped (the close they would guard already happened).
+# key with --except-key. The retry reads what would hold the close: the origin's
+# live blockers and open children, and the template, the pin and the assignee
+# an unforced close refuses, which lets the close through only for an origin no
+# one is assigned or one assigned to exactly the actor it runs as. When anything
+# but its own unassigned gates under the key would hold it, nothing is written.
+# Otherwise it resolves those gates with a reason that names the retry and
+# carries no outcome word, so no quiet period starts, and then closes. A run
+# that stops after the withdrawal leaves a state the next run completes,
+# because a resolved gate stays resolved. With --except-key, --check reads the
+# same holds, so a caller that answers those gates itself, such as
+# stand-down.sh, can stop before its first write.
+# An already-closed origin is the REPAIR path: it gains the edge and an
+# appended note, with the gates skipped (the close they would guard already
+# happened).
 # Once the origin reads back closed, on either path, the branch it names in
 # metadata.branch is ended on the git remote through branch-end.sh, the way a
 # merge ends a landed branch. That remote write never gates the disposition:
 # when the branch cannot be ended the close stands, and a warning names the
 # branch and the command that ends it. The bead's notes record the outcome.
-# Also drops an origin->successor `blocks` wait edge on the way: `bd close`
-# refuses a blocked issue, and a disposed bead is not waiting on its successor.
-# Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
-# writes only the canonical gc.-prefixed pair.
-# Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
-# pr-facts.sh (a PR closed with a pre-recorded disposition, and that branch's
-# parked rework children), stand-down.sh (a person's ruling that work a human
-# gate holds will not go on), scaffolding-sweep.sh (a finding a disposed PR leaves
-# unanswered, closed onto the bug that carries it).
+# The writer records no outcome of its own on the origin: the outcome is its
+# closer's word.
+# Callers: converse dispositions, operator re-homes, pr-facts.sh (a PR closed
+# with a pre-recorded disposition, and that branch's parked rework children),
+# stand-down.sh (a person's ruling that work a human gate holds will not go
+# on), scaffolding-sweep.sh (a finding a disposed PR leaves unanswered, closed
+# onto the bug that carries it).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -76,16 +84,19 @@ scrub() { tr -d '\000-\037'; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
-# The composable "may this bead be finalized?" precondition set. An open human
-# gate that blocks the origin holds its close, the same precondition merge.sh
-# applies to a merge (docs/finalize-gate.md). Overridable for a test.
+# The composable "may this bead be finalized?" precondition set, asked before
+# anything is written. An open human gate that blocks the origin holds its
+# close, a pinned one included, which bd's own close does not count, the same
+# precondition merge.sh applies to a merge (docs/finalize-gate.md). Overridable
+# for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
 # Ends the retired branch on the git remote once the close reads back.
 # Overridable for a test.
 BRANCH_END="${GC_BRANCH_END_TOOL:-$HERE/branch-end.sh}"
 # The rule of which human gates still hold a bead, $HUMAN_GATE_JQ, which the
-# retry's withdrawal reads its own gates by. This script reads through bd_at, so
-# it takes the rule and none of the library's store reads.
+# retry's withdrawal reads its own gates by, and the reading of a disposition,
+# $DISPOSITION_JQ. This script reads through bd_at, so it takes the rules and
+# none of the library's store reads.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "bead-rehome: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
 
@@ -101,6 +112,9 @@ Usage:
                  [--origin-store rig:<name>] [--successor-store rig:<name>] \
                  [--except-key <situation-key>] [--check] [--dry-run]
 
+Closes the origin and records its successor in bd's own edge from it:
+`duplicates` under --kind duplicate, `supersedes` under every other kind.
+
 Under every kind but not-needed the successor is the bead that carries the
 work now. Under not-needed nothing carries it, and the successor is the
 evidence that concluded the bead was unnecessary — typically the conversation
@@ -108,21 +122,24 @@ the ruling was given in. It is required either way.
 
 The close is refused unless the evidence holds (see the header): every kind
 needs the origin to be a plain work bead no other session holds;
-fixed-upstream and duplicate additionally need the successor closed or shipped
-in the same store and the origin to have done no work, unless the origin
-carries the operator's pre-recorded PR-close disposition for that kind and
-successor.
+fixed-upstream and duplicate additionally need the origin to have done no work
+and the successor in the same store, and fixed-upstream needs the successor
+closed or shipped, unless the origin carries the operator's pre-recorded
+PR-close disposition for that kind and successor.
+
+The close is bd's checked close, applied only while the origin still has the
+status and assignee this run judged: a live blocker, an open human gate, an
+open child or a change since the read refuses it, and then nothing is written.
 
 --check evaluates that evidence and exits 0 (eligible) or non-zero (refused,
 reason on stderr) without writing anything. With --except-key it also reads what
-would hold the close, as the close itself does once its pointer is stamped.
+would hold the close.
 
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
-An already-closed origin gains the pointer and an appended note (repair path),
+An already-closed origin gains the edge and an appended note (repair path),
 with the evidence gates skipped.
 
-An open human gate that blocks the origin holds the close (finalize-gate.sh).
 --except-key is for the caller that reports its own refusals of this close as
 human gates through human-gate.sh: it names the situation key that caller files
 them under. A gate under that key that no person is assigned does not hold the
@@ -130,6 +147,12 @@ retry it asks for, and the retry resolves it just before the close, because an
 open gate makes the close refuse the bead it blocks. A gate assigned to a
 person still holds, and so does every gate under any other key, every other
 live blocker and every open child: then nothing is resolved or closed.
+
+Exit: 0 disposed (or already recorded) · 1 --check refused · 2 a store does not
+resolve · 3 the origin or successor does not exist · 4 a write did not land: the
+origin changed since it was judged, or its edge did not write after the close ·
+5 the close is held or refused · 6 the origin already names another successor ·
+7 the evidence refuses the close · 64 usage
 U
     exit "${1:-1}"
 }
@@ -154,11 +177,11 @@ done
 [ -n "$SUCCESSOR" ] || die "--successor is required (try --help)" 64
 [ -n "$KIND" ]      || die "--kind is required (try --help)" 64
 
-# The kind shapes the close reason, so it is a closed set. All but one say the
-# work RELOCATED and the successor carries it now; under not-needed nothing
+# The kind shapes the edge and the note, so it is a closed set. All but one say
+# the work RELOCATED and the successor carries it now; under not-needed nothing
 # carries it and the successor is the evidence that concluded the bead was
-# unnecessary. The pointer is required under both readings — an unpointed close
-# is indistinguishable from a careless one whatever ended the bead.
+# unnecessary. The successor is required under both readings: a close that
+# names nothing is indistinguishable from a careless one whatever ended the bead.
 case "$KIND" in
     re-homed|folded|fixed-upstream|duplicate|not-needed) ;;
     *) die "--kind must be one of re-homed|folded|fixed-upstream|duplicate|not-needed (got '$KIND')" 64 ;;
@@ -187,7 +210,7 @@ store_path() { # rig:<name> -> repo path, empty when unresolvable
     return 0
 }
 
-# The id-prefix derivation lives in bead-store.sh, so a stamped pointer and the
+# The id-prefix derivation lives in bead-store.sh, so an edge's far end and the
 # destructive gates that read one place the same id in the same store.
 store_for_bead() { # bead id -> rig:<name> via prefix; empty when unresolved
     local name
@@ -221,52 +244,55 @@ bd_at() {
     fi
 }
 
-bead_json() {
-    bd_at "$1" show "$2" --json 2>/dev/null | scrub || true
+# bead_row <repo-path> <id> — the bead's `gc bd list` row as a one-element
+# array, the shape every read below takes. The list row, unlike `show`, carries
+# an edge onto a bead in another store. Gates, infrastructure beads and
+# templates are listed too, so no bead reads as absent for its type. Empty when
+# the store does not hold the bead or does not answer.
+bead_row() {
+    bd_at "$1" list --id "$2" --all --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null \
+        | grep -a -vE '^gc bd:' | scrub \
+        | jq -c --arg id "$2" '[ .[]? | select(((.id // "") | tostring) == $id) ] | select(length == 1)' 2>/dev/null || true
 }
 
-# The successor is checked first and hardest: a pointer to a bead that does
-# not exist reads as a resolved disposition and resolves to nothing.
-SUCC_JSON=$(bead_json "$SUCCESSOR_PATH" "$SUCCESSOR")
-SUCC_ID=$(printf '%s' "$SUCC_JSON" | jq -r '.[0].id // empty' 2>/dev/null || true)
-[ -n "$SUCC_ID" ] \
-    || die "successor $SUCCESSOR does not exist in $SUCCESSOR_STORE ($SUCCESSOR_PATH/.beads) — nothing stamped, origin $ORIGIN untouched" 3
+# The successor is checked first and hardest: an edge onto a bead that does not
+# exist reads as a resolved disposition and resolves to nothing.
+SUCC_JSON=$(bead_row "$SUCCESSOR_PATH" "$SUCCESSOR")
+[ -n "$SUCC_JSON" ] \
+    || die "successor $SUCCESSOR does not exist in $SUCCESSOR_STORE ($SUCCESSOR_PATH/.beads) — nothing written, origin $ORIGIN untouched" 3
 
-ORIGIN_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
-ORIGIN_ID=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].id // empty' 2>/dev/null || true)
-[ -n "$ORIGIN_ID" ] \
-    || die "origin $ORIGIN does not exist in $ORIGIN_STORE ($ORIGIN_PATH/.beads) — nothing stamped" 3
+ORIGIN_JSON=$(bead_row "$ORIGIN_PATH" "$ORIGIN")
+[ -n "$ORIGIN_JSON" ] \
+    || die "origin $ORIGIN does not exist in $ORIGIN_STORE ($ORIGIN_PATH/.beads) — nothing written" 3
 
 ORIGIN_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
 # The status and assignee the gates below judge, as the store holds them. The
-# stamp (step 1) is conditional on both.
+# close is conditional on both.
 JUDGED_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | tostring' 2>/dev/null || true)
 JUDGED_ASSIGNEE=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].assignee // "") | tostring' 2>/dev/null || true)
-# gc.superseded_by is a FLAT dotted key: bracket access, never .metadata.gc.x.
-PRIOR_SUCC=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.superseded_by"] // .[0].metadata.superseded_by // empty' 2>/dev/null || true)
-PRIOR_STORE=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.superseded_by_store"] // .[0].metadata.superseded_by_store // empty' 2>/dev/null || true)
 
-# Does the origin carry a `blocks` edge naming the successor as its blocker?
-# Unparseable answers 0: a probe that cannot read the graph must not claim an
-# edge exists.
-wait_edge_count() {
-    local n
-    n=$(printf '%s' "$1" | jq -r --arg s "$SUCCESSOR" \
-        '[.[0].dependencies[]? | select((.id // "") == $s and ((.dependency_type // "") == "blocks"))] | length' \
-        2>/dev/null || true)
-    case "$n" in ''|*[!0-9]*) n=0 ;; esac
-    printf '%s' "$n"
-}
+case "$KIND" in
+    duplicate) EDGE_TYPE=duplicates ;;
+    *)         EDGE_TYPE=supersedes ;;
+esac
 
-# The branch a bead names in metadata.branch; empty when it names none or the
-# answer does not parse.
-origin_branch() {
-    printf '%s' "$1" | jq -r '(.[0].metadata.branch // "") | tostring' 2>/dev/null || true
-}
-
-# A recorded disposition to a DIFFERENT successor is somebody else's decision.
+# The edge the origin already carries onto the successor, by type, or empty.
+# bd keeps one edge per pair, so its type decides what the disposition does.
+PAIR_TYPE=$(printf '%s' "$ORIGIN_JSON" | jq -r --arg s "$SUCCESSOR" \
+    '[.[0].dependencies[]? | select(((.depends_on_id // "") | tostring) == $s) | ((.type // "") | tostring)] | .[0] // ""' \
+    2>/dev/null || true)
+# A disposition the origin already records, onto another bead, is somebody
+# else's decision.
+PRIOR_SUCC=$(printf '%s' "$ORIGIN_JSON" | jq -r "$DISPOSITION_JQ"' .[0] | disposed_to' 2>/dev/null || true)
 if [ -n "$PRIOR_SUCC" ] && [ "$PRIOR_SUCC" != "$SUCCESSOR" ]; then
-    die "origin $ORIGIN already records a successor pointer to $PRIOR_SUCC (${PRIOR_STORE:-store unrecorded}); refusing to overwrite another disposition — reconcile the two by hand" 6
+    die "origin $ORIGIN already names $PRIOR_SUCC as its successor (a duplicates or supersedes edge); refusing to record another disposition over it — reconcile the two by hand" 6
+fi
+case "$PAIR_TYPE" in
+    ''|blocks|duplicates|supersedes) ;;
+    *) die "origin $ORIGIN already joins $SUCCESSOR by a '$PAIR_TYPE' edge, and bd keeps one edge per pair of beads, so the $EDGE_TYPE edge cannot be recorded beside it. Remove it with gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR, then re-run this close" 6 ;;
+esac
+if [ -n "$PAIR_TYPE" ] && [ "$PAIR_TYPE" != blocks ] && [ "$PAIR_TYPE" != "$EDGE_TYPE" ]; then
+    die "origin $ORIGIN already names $SUCCESSOR through a '$PAIR_TYPE' edge, which records another kind of disposition than --kind $KIND; refusing to rewrite it — reconcile the two by hand" 6
 fi
 
 case "$KIND" in
@@ -333,10 +359,10 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
         GATE_REASON="$ORIGIN is in_progress under $assignee, who is judging it"; return 1
     fi
 
-    # (b) The evidence kinds assert a specific claim — this bead's work is
-    # already delivered elsewhere — so they carry the burden of proving it.
-    # The judgment kinds (re-homed, folded, not-needed) carry the caller's
-    # judgment, which this script does not re-judge, so a non-closed
+    # (b) The evidence kinds assert a specific claim, that this bead's work is
+    # carried or already delivered elsewhere, so they carry the burden of
+    # proving it. The judgment kinds (re-homed, folded, not-needed) carry the
+    # caller's judgment, which this script does not re-judge, so a non-closed
     # merge_result does not bar them: the converse retire path disposes an
     # in-flight anchor through here on the operator's ruling. An origin
     # carrying the operator's pre-recorded PR-close disposition for this kind
@@ -350,11 +376,15 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
         fixed-upstream|duplicate)
             [ "$SUCCESSOR_STORE" = "$ORIGIN_STORE" ] \
                 || { GATE_REASON="a $KIND close needs the successor $SUCCESSOR in the same store as $ORIGIN ($ORIGIN_STORE); it is $SUCCESSOR_STORE. Judge a cross-store successor by hand"; return 1; }
-            local sstatus soutcome
-            sstatus=$(printf '%s' "$SUCC_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-            soutcome=$(printf '%s' "$SUCC_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""' 2>/dev/null || true)
-            if [ "$sstatus" != "closed" ] && [ "$soutcome" != "shipped" ]; then
-                GATE_REASON="a $KIND close needs the successor $SUCCESSOR closed or work_outcome=shipped; it is ${sstatus:-unreadable} and has not shipped"; return 1
+            # A fix upstream has to have landed. A duplicate's canonical carries
+            # the work whatever its state, so the duplicate closes at once.
+            if [ "$KIND" = fixed-upstream ]; then
+                local sstatus soutcome
+                sstatus=$(printf '%s' "$SUCC_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
+                soutcome=$(printf '%s' "$SUCC_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""' 2>/dev/null || true)
+                if [ "$sstatus" != "closed" ] && [ "$soutcome" != "shipped" ]; then
+                    GATE_REASON="a $KIND close needs the successor $SUCCESSOR closed or work_outcome=shipped; it is ${sstatus:-unreadable} and has not shipped"; return 1
+                fi
             fi
             # Origin did no work, proved positively. work_outcome=no-op is the
             # explicit statement and is accepted even beside a work-product key,
@@ -381,21 +411,20 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
     return 0
 }
 
-# What holds a close besides the origin's own gates under --except-key, read and
-# not written, for the close and for --check alike. <origin-row> is a `bd show`
-# answer. It sets OWN_GATES, the ids of those gates, and at most one of:
-# HOLD_UNREAD, the read that did not answer, so nothing proves the close clear;
-# HELD_BY, the other live blockers and the open child that hold it; and
-# CLOSE_GUARD, what an unforced `bd close` would refuse on.
+# What holds the close, read and not written, for the close and for --check
+# alike. <origin-row> is a bead_row answer. It sets OWN_GATES, the ids of the
+# origin's own gates under --except-key, and at most one of: HOLD_UNREAD, the
+# read that did not answer, so nothing proves the close clear; HELD_BY, the
+# other live blockers and the open child that hold it; and CLOSE_GUARD, what an
+# unforced close would refuse on. The wait edge onto the successor holds
+# nothing here, because the close drops it first.
 except_key_holds() { # <origin-row>
     OWN_GATES=""; HOLD_UNREAD=""; HELD_BY=""; CLOSE_GUARD=""
     local blk_json other_blockers kids_json open_kid
     # Which of the gates are open is bd-lib.sh's open_human_gate rule. Every other
     # live blocker and every open child holds the close, and with one standing
-    # the gates stay open and nothing closes, as a held close leaves it. Any other
-    # blocker that is closed or pinned holds nothing, as in bd. The close has
-    # already dropped its wait edge onto the successor by now, and --check, which
-    # writes nothing, reads past that edge.
+    # the gates stay open and nothing closes. Any other blocker that is closed or
+    # pinned holds nothing, as in bd.
     blk_json=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
     if ! printf '%s' "$blk_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
         HOLD_UNREAD="its blockers did not read, so whether anything besides its own [$EXCEPT_KEY] gates holds the close is unknown"
@@ -403,7 +432,7 @@ except_key_holds() { # <origin-row>
     fi
     OWN_GATES=$(printf '%s' "$blk_json" | jq -r --arg k "$EXCEPT_KEY" "$HUMAN_GATE_JQ"'
         .[] | select(open_human_gate($k) and ((.assignee // "") | tostring) == "") | .id' 2>/dev/null || true)
-    other_blockers=$(printf '%s' "$blk_json" | jq -r --arg k "$EXCEPT_KEY" --arg dropped "${CHECK:+$SUCCESSOR}" "$HUMAN_GATE_JQ"'
+    other_blockers=$(printf '%s' "$blk_json" | jq -r --arg k "$EXCEPT_KEY" --arg dropped "$SUCCESSOR" "$HUMAN_GATE_JQ"'
         [ .[] | select(((.status // "open") | tostring) as $st | $st != "closed" and $st != "pinned")
               | select((open_human_gate($k) and ((.assignee // "") | tostring) == "") | not)
               | select((.id // "") != $dropped)
@@ -419,24 +448,30 @@ except_key_holds() { # <origin-row>
         [ -z "$open_kid" ] || HELD_BY="${HELD_BY:+$HELD_BY and }open child $open_kid"
         return 0
     fi
-    # bd's unforced close also refuses a template, a pinned bead, and a bead
-    # assigned to anyone but the actor the close runs as, whatever its
-    # status. Withdrawing the gates ahead of a close bd then refuses would
-    # take the question away from the person it asks, and the caller's next
-    # refused retry would file it again. So these are read off the origin's
-    # row before anything is resolved, and any of them holds the close with
-    # the gates open. bd compares the assignee with the --actor it is given
-    # and with no other name of this session, so only an origin no one is
-    # assigned, or one assigned to exactly $ACTOR, goes on to the close.
-    CLOSE_GUARD=$(printf '%s' "$1" | jq -r --arg actor "$ACTOR" --arg who "${ACTOR:-the actor bd defaults to}" '.[0]
+    # Withdrawing the gates ahead of a close that is then refused would take
+    # the question away from the person it asks, and the caller's next refused
+    # retry would file it again, so the close's own guards are read here too.
+    CLOSE_GUARD=$(close_guard "$1")
+    return 0
+}
+
+# close_guard <origin-row> — what bd's unforced `bd close` refuses on whatever
+# the bead's status, printed, or nothing: a template, a pinned bead, and a bead
+# assigned to anyone but the actor the close runs as. The guarded update this
+# writer closes through refuses a template and applies bd's blocker and child
+# policy, but not the pin or the assignee, so these are read off the origin's
+# row before anything is written, and any of them holds the close. bd compares the assignee with the --actor it is given
+# and with no other name of this session, so only an origin no one is
+# assigned, or one assigned to exactly $ACTOR, goes on to the close.
+close_guard() {
+    printf '%s' "$1" | jq -r --arg actor "$ACTOR" --arg who "${ACTOR:-the actor bd defaults to}" '.[0]
         | ((.assignee // "") | tostring) as $as
         | if (.is_template // false) == true then "it is a template, which bd never closes"
           elif ((.status // "") | tostring | ascii_downcase) == "pinned" or (.pinned // false) == true
             then "it is pinned, which bd closes only by force"
           elif $as != "" and $as != $actor
             then "it is assigned to \($as), and bd closes an assigned bead only for its assignee, while this close runs as \($who)"
-          else empty end' 2>/dev/null || true)
-    return 0
+          else empty end' 2>/dev/null || true
 }
 
 if [ "$ORIGIN_STATUS" != "closed" ]; then
@@ -445,16 +480,16 @@ if [ "$ORIGIN_STATUS" != "closed" ]; then
             echo "bead-rehome: --check refused: $GATE_REASON" >&2
             exit 1
         fi
-        die "$GATE_REASON — nothing stamped, $ORIGIN untouched" 7
+        die "$GATE_REASON — nothing written, $ORIGIN untouched" 7
     fi
 fi
 if [ -n "$CHECK" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
-        echo "bead-rehome: --check: $ORIGIN is already closed — the repair path adds the pointer only, no close is gated"
+        echo "bead-rehome: --check: $ORIGIN is already closed — the repair path adds the edge only, no close is gated"
     else
         if [ -n "$EXCEPT_KEY" ]; then
-            # The close stamps its pointer before it runs this gate, and a pointer is
-            # what the gate takes as a stewarded epic's terminal reason.
+            # The gate reads the origin as the close will leave it, disposed,
+            # which is how a stewarded epic's disposition passes it.
             FG_REASON=""
             if ! FG_REASON=$("$FINALIZE_GATE" check "$ORIGIN" --except-key "$EXCEPT_KEY" --as-disposed 2>/dev/null); then
                 echo "bead-rehome: --check refused: the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}" >&2
@@ -474,17 +509,27 @@ if [ -n "$CHECK" ]; then
     exit 0
 fi
 
+# The branch a bead names in metadata.branch; empty when it names none or the
+# answer does not parse.
+origin_branch() {
+    printf '%s' "$1" | jq -r '(.[0].metadata.branch // "") | tostring' 2>/dev/null || true
+}
+
 if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
-        CLOSE_PLAN="already closed — pointer + note only, close reason left as-is"
+        CLOSE_PLAN="already closed — edge + note only, the close left as it is"
     else
-        CLOSE_PLAN="$REASON"
+        CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\""
     fi
-    STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
-    if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
-        EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
+    if [ "$PRIOR_SUCC" = "$SUCCESSOR" ]; then
+        EDGE_PLAN="none ($ORIGIN already names $SUCCESSOR)"
     else
-        EDGE_PLAN="none ($ORIGIN carries no wait edge to $SUCCESSOR)"
+        EDGE_PLAN="$ORIGIN $EDGE_TYPE $SUCCESSOR, in $ORIGIN_STORE"
+    fi
+    if [ "$PAIR_TYPE" = blocks ] && [ "$ORIGIN_STATUS" != "closed" ]; then
+        WAIT_PLAN="drop the 'blocked by $SUCCESSOR' wait edge just before the close, and put it back if the close does not land"
+    else
+        WAIT_PLAN="none ($ORIGIN carries no wait edge to $SUCCESSOR)"
     fi
     PLAN_BRANCH=$(origin_branch "$ORIGIN_JSON")
     if [ -n "$PLAN_BRANCH" ]; then
@@ -500,151 +545,141 @@ if [ -n "$DRY_RUN" ]; then
     else
         GATE_PLAN="none (no --except-key)"
     fi
-    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     %s\n  edge:      %s\n  gates:     %s\n  close:     %s\n  branch:    %s\n  actor:     %s\n' \
+    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  wait:      %s\n  gates:     %s\n  close:     %s\n  edge:      %s\n  branch:    %s\n  actor:     %s\n' \
         "$ORIGIN" "${ORIGIN_STATUS:-unknown}" "$ORIGIN_STORE" \
-        "$SUCCESSOR" "$SUCCESSOR_STORE" "$STAMP_PLAN" \
-        "$EDGE_PLAN" "$GATE_PLAN" "$CLOSE_PLAN" "$BRANCH_PLAN" "${ACTOR:-<bd default>}"
+        "$SUCCESSOR" "$SUCCESSOR_STORE" "$WAIT_PLAN" "$GATE_PLAN" \
+        "$CLOSE_PLAN" "$EDGE_PLAN" "$BRANCH_PLAN" "${ACTOR:-<bd default>}"
     exit 0
 fi
 
-# 1. Stamp the pointer and prove it landed: the close below is gated on the
-# read-back, not on an exit status. Both keys go in one update, which bd applies
-# only while the origin still has the status and assignee the gates above
-# judged. bd holds a claimed bead
-# against another actor's assignment and close, never against a metadata write,
-# so without that condition a caller whose gates passed before another actor
-# claimed the bead would point it under that claim. With it, a claim, an
-# assignment or a status change that lands after the gates' read makes bd write
-# nothing (exit 13), and the caller stamps nothing: while a bead is claimed,
-# only a caller the gates accept as its holder can point it. The stamp still
-# lands on a bead this actor cannot close under, because bd's close guard holds
-# only the close.
-STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
-            --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
-JUDGED=(--if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE")
-STAMP_RC=0
-bd_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" "${STAMP_META[@]}" >/dev/null 2>&1 || STAMP_RC=$?
-if [ "$STAMP_RC" = 13 ]; then
-    if [ -n "$JUDGED_ASSIGNEE" ]; then JUDGED_HOLDER="under $JUDGED_ASSIGNEE"; else JUDGED_HOLDER="and unassigned"; fi
-    die "$ORIGIN is no longer $JUDGED_STATUS $JUDGED_HOLDER, as this run read it before judging it: a claim, an assignment or a status change landed since, so nothing is stamped and $ORIGIN is not closed. Re-run to judge it as it stands now" 4
-fi
+RERUN="re-run this call once it is cleared"
 
-CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
-GOT_SUCC=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null || true)
-GOT_STORE=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by_store"] // empty' 2>/dev/null || true)
-if [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$SUCCESSOR_STORE" ]; then
-    die "successor pointer did NOT stick on $ORIGIN (read back gc.superseded_by='${GOT_SUCC:-}' gc.superseded_by_store='${GOT_STORE:-}'); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
-fi
-# 1a. Drop ONLY the wait edge to THIS successor: it would refuse the close,
-# and gc.superseded_by records the relationship more strongly. Any other
-# blocker is a real hold whose refusal below is correct.
-if [ "$(wait_edge_count "$CHECK_JSON")" -gt 0 ]; then
-    bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 || true
-    # `bd dep remove` reports success for an edge that never existed; read the
-    # graph back instead.
-    if [ "$(wait_edge_count "$(bead_json "$ORIGIN_PATH" "$ORIGIN")")" -gt 0 ]; then
-        echo "bead-rehome: WARN could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge; while it stands the close below is refused — clear it with: gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR" >&2
-    else
-        printf 'bead-rehome: dropped the wait edge (%s blocked by %s) — a disposed bead is not waiting on its successor; gc.superseded_by is the record\n' \
-            "$ORIGIN" "$SUCCESSOR"
+# record_edge — write the disposition edge on the origin, which has closed.
+# Same-type re-add is a no-op in bd, so a re-run that finds it written is safe.
+record_edge() {
+    [ "$PRIOR_SUCC" = "$SUCCESSOR" ] && return 0
+    local err=""
+    if ! err=$(bd_at "$ORIGIN_PATH" dep add "$ORIGIN" "$SUCCESSOR" --type "$EDGE_TYPE" 2>&1 >/dev/null); then
+        printf '%s\n' "$err" >&2
+        die "$ORIGIN is closed, but its $EDGE_TYPE edge onto $SUCCESSOR did not write, so nothing names its successor yet. Re-run this call, which records the edge on a closed bead" 4
     fi
-fi
+    return 0
+}
 
-# 2. The prose carrier: `bd show` renders the close reason, not metadata, so
-# the reason is what a human reads. On an already-closed origin the reason
-# cannot be rewritten; append the disposition note instead (never --notes,
-# which replaces).
 if [ "$ORIGIN_STATUS" = "closed" ]; then
-    PRIOR_NOTES=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)
-    case "$PRIOR_NOTES" in
-        *"Disposition recorded"*"$SUCCESSOR"*)
-            printf 'bead-rehome: %s already records this disposition (gc.superseded_by=%s in %s) — nothing to do\n' \
-                "$ORIGIN" "$SUCCESSOR" "$SUCCESSOR_STORE" ;;
-        *)
-            bd_at "$ORIGIN_PATH" update "$ORIGIN" \
-                --append-notes "Disposition recorded $(date -u +%Y-%m-%dT%H:%MZ): $REASON. (Pointer added after the close; the close reason above predates it.)" \
-                >/dev/null 2>&1 \
-                || echo "bead-rehome: WARN could not append the disposition note to $ORIGIN; the pointer metadata is recorded" >&2 ;;
-    esac
-    printf 'bead-rehome: %s was ALREADY closed in %s — pointer recorded (gc.superseded_by=%s in %s).\n' \
-        "$ORIGIN" "$ORIGIN_STORE" "$SUCCESSOR" "$SUCCESSOR_STORE"
-    printf 'bead-rehome: its close reason is unchanged and may still be bare; bd show renders the reason, not the pointer, so the appended note is what a reader sees.\n'
+    # The repair path: the close happened earlier, so the edge and a note record
+    # the disposition now. A note says when it was recorded, because the close
+    # it explains predates it.
+    if [ "$PRIOR_SUCC" = "$SUCCESSOR" ]; then
+        printf 'bead-rehome: %s already records this disposition (%s %s) — nothing to do\n' \
+            "$ORIGIN" "$EDGE_TYPE" "$SUCCESSOR"
+    else
+        # A wait onto the successor that a forced close left behind ends with
+        # the disposition, and bd keeps one edge per pair.
+        if [ "$PAIR_TYPE" = blocks ]; then
+            bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 \
+                || die "could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge, which stands where the $EDGE_TYPE edge goes; nothing recorded. Clear it with gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR, then re-run this call" 4
+        fi
+        record_edge
+        bd_at "$ORIGIN_PATH" update "$ORIGIN" \
+            --append-notes "Disposition recorded $(date -u +%Y-%m-%dT%H:%MZ): $REASON. (Recorded after the close.)" \
+            >/dev/null 2>&1 \
+            || echo "bead-rehome: WARN could not append the disposition note to $ORIGIN; its $EDGE_TYPE edge onto $SUCCESSOR is recorded" >&2
+        printf 'bead-rehome: %s was ALREADY closed in %s — its successor is recorded now (%s %s).\n' \
+            "$ORIGIN" "$ORIGIN_STORE" "$EDGE_TYPE" "$SUCCESSOR"
+    fi
 else
-    # Finalize gate: an open human gate that blocks this bead holds its close,
-    # the same precondition merge.sh applies to a merge (docs/finalize-gate.md).
-    # The successor pointer is already stamped, so a hold here leaves an OPEN,
-    # pointed, findable bead — the shape a refused close below also leaves. The
-    # release is to clear the gate, then re-run this close.
-    FG_ARGS=(check "$ORIGIN")
+    # What holds the close is read before anything is written, so a held close
+    # writes nothing. The finalize gate holds it on an open human gate, and
+    # reads the origin as the close will leave it, disposed, which is how a
+    # stewarded epic's disposition passes it. The release is to clear the gate,
+    # then re-run this close.
+    FG_ARGS=(check "$ORIGIN" --as-disposed)
     if [ -n "$EXCEPT_KEY" ]; then FG_ARGS+=(--except-key "$EXCEPT_KEY"); fi
     if ! FG_REASON=$("$FINALIZE_GATE" "${FG_ARGS[@]}" 2>/dev/null); then
-        echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}." >&2
-        echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
-        exit 5
+        die "the close of $ORIGIN is held: ${FG_REASON:-finalize gate refused (fail-closed)}. Nothing is recorded; clear what holds it, then re-run this close" 5
     fi
-    # The retry's own gates. The finalize gate excepted the open human gates
-    # under the caller's key that no person is assigned, but bd still refuses to
-    # close a bead they block, so they are resolved just before the close. That
-    # happens only once nothing else would refuse it. The reason names the retry
-    # and carries no outcome word, because the close has not landed yet: no quiet
-    # period starts.
+    GUARD=$(close_guard "$ORIGIN_JSON")
+    [ -z "$GUARD" ] \
+        || die "bd would refuse the close of $ORIGIN: $GUARD. Nothing is recorded" 5
+    # The retry's own gates, and what else would hold the close once they go.
     if [ -n "$EXCEPT_KEY" ]; then
-        except_key_holds "$CHECK_JSON"
+        except_key_holds "$ORIGIN_JSON"
         [ -z "$HOLD_UNREAD" ] \
-            || die "pointer IS recorded on $ORIGIN, but $HOLD_UNREAD; nothing was resolved or closed. Re-run this close." 5
-        if [ -n "$HELD_BY" ]; then
-            echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held by $HELD_BY, so its own [$EXCEPT_KEY] gates stay open and nothing closes." >&2
-            echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
-            exit 5
-        fi
-        if [ -n "$CLOSE_GUARD" ]; then
-            echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but bd would refuse its close: $CLOSE_GUARD. Its own [$EXCEPT_KEY] gates stay open and nothing closes." >&2
-            echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
-            exit 5
-        fi
+            || die "$HOLD_UNREAD; nothing was resolved or closed. Re-run this close." 5
+        [ -z "$HELD_BY" ] \
+            || die "$ORIGIN is held by $HELD_BY, so its own [$EXCEPT_KEY] gates stay open and nothing closes; $RERUN" 5
+        [ -z "$CLOSE_GUARD" ] \
+            || die "bd would refuse the close of $ORIGIN: $CLOSE_GUARD. Its own [$EXCEPT_KEY] gates stay open and nothing closes" 5
+    fi
+
+    # The wait onto the successor ends with the disposition, and bd refuses to
+    # close a bead it blocks. It goes just before the close, and back when the
+    # close does not land, so a held close leaves the wait as it was.
+    WAIT_DROPPED=""
+    if [ "$PAIR_TYPE" = blocks ]; then
+        bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 \
+            || die "could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge, and while it stands bd refuses the close; nothing closed. Clear it with gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR, then re-run this close" 5
+        WAIT_DROPPED=1
+    fi
+    restore_wait() {
+        [ -n "$WAIT_DROPPED" ] || return 0
+        bd_at "$ORIGIN_PATH" dep add "$ORIGIN" "$SUCCESSOR" --type blocks >/dev/null 2>&1 \
+            || echo "bead-rehome: WARN the '$ORIGIN blocked by $SUCCESSOR' wait edge was dropped for the close and did not go back; restore it with gc bd --db $ORIGIN_PATH/.beads dep add $ORIGIN $SUCCESSOR --type blocks" >&2
+    }
+
+    # The withdrawal: the gates the caller filed under its key ask for this
+    # retry, and bd refuses the close while one blocks the origin. Nothing else
+    # holds the close by now. The reason names the retry and carries no outcome
+    # word, because the close has not landed yet: no quiet period starts.
+    if [ -n "$EXCEPT_KEY" ]; then
         GATE_REASON="Withdrawn by bead-rehome.sh just before it retries the close this gate reported: $REASON"
         for GATE in $OWN_GATES; do
             bd_at "$ORIGIN_PATH" gate resolve "$GATE" --reason "$GATE_REASON" >/dev/null 2>&1 || true
-            GATE_STATUS=$(bead_json "$ORIGIN_PATH" "$GATE" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-            [ "$GATE_STATUS" = "closed" ] \
-                || die "pointer IS recorded on $ORIGIN, but its gate $GATE [$EXCEPT_KEY] did not resolve (status reads '${GATE_STATUS:-unreadable}'), and while it is open bd refuses the close; nothing closed. Re-run this close." 5
+            GATE_STATUS=$(bead_row "$ORIGIN_PATH" "$GATE" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
+            if [ "$GATE_STATUS" != "closed" ]; then
+                restore_wait
+                die "the gate $GATE [$EXCEPT_KEY] on $ORIGIN did not resolve (status reads '${GATE_STATUS:-unreadable}'), and while it is open bd refuses the close; nothing closed. Re-run this close." 5
+            fi
             printf 'bead-rehome: withdrew the gate %s [%s] on %s before the close it asked for\n' "$GATE" "$EXCEPT_KEY" "$ORIGIN"
         done
     fi
-    # Deliberately NOT --force: the same flag overrides a foreign assignee and
-    # an open-children hold. A refusal leaves an OPEN, pointed, findable bead.
-    CLOSE_ERR=""
-    if ! CLOSE_ERR=$(bd_at "$ORIGIN_PATH" close "$ORIGIN" --reason "$REASON" 2>&1); then
-        echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close was refused:" >&2
+
+    # The close: bd's checked close, never --force, which would also override a
+    # foreign assignee and an open child. It lands only while the origin still
+    # has the status and assignee the gates judged, so a claim, an assignment or
+    # a status change since that read, a second closer's included, writes nothing
+    # (exit 13). The note rides the same write.
+    CLOSE_RC=0; CLOSE_ERR=""
+    CLOSE_ERR=$(bd_at "$ORIGIN_PATH" update "$ORIGIN" \
+        --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" --status=closed \
+        --append-notes "Disposition $(date -u +%Y-%m-%dT%H:%MZ): $REASON." 2>&1 >/dev/null) || CLOSE_RC=$?
+    if [ "$CLOSE_RC" = 13 ]; then
+        restore_wait
+        if [ -n "$JUDGED_ASSIGNEE" ]; then JUDGED_HOLDER="under $JUDGED_ASSIGNEE"; else JUDGED_HOLDER="and unassigned"; fi
+        die "$ORIGIN is no longer $JUDGED_STATUS $JUDGED_HOLDER, as this run read it before judging it: a claim, an assignment, a status change or another close landed since, so nothing is recorded and $ORIGIN is not closed by this run. Re-run to judge it as it stands now" 4
+    elif [ "$CLOSE_RC" != 0 ]; then
+        restore_wait
         printf '%s\n' "$CLOSE_ERR" >&2
-        echo "bead-rehome: the disposition is legible either way — the bead is open, pointed, and findable. Judge the refusal, then finish it:" >&2
-        echo "  gc bd --db $ORIGIN_PATH/.beads close $ORIGIN --reason \"$REASON\"" >&2
-        exit 5
+        die "the close of $ORIGIN was refused, as printed above, so nothing is recorded and it stays open. Judge the refusal; $RERUN" 5
     fi
+    record_edge
+    printf 'bead-rehome: %s closed in %s — %s (%s %s)\n' "$ORIGIN" "$ORIGIN_STORE" "$REASON" "$EDGE_TYPE" "$SUCCESSOR"
 fi
 
-# 3. Back-pointer on the successor, best-effort: a failure here does not undo
-# a fully-recorded disposition.
-bd_at "$SUCCESSOR_PATH" update "$SUCCESSOR" \
-    --set-metadata gc.supersedes="$ORIGIN" \
-    --set-metadata gc.supersedes_store="$ORIGIN_STORE" >/dev/null 2>&1 \
-    || echo "bead-rehome: WARN could not write the back-pointer on $SUCCESSOR ($SUCCESSOR_STORE); the forward pointer on $ORIGIN is recorded and is the one that matters" >&2
-
-[ "$ORIGIN_STATUS" = "closed" ] \
-    || printf 'bead-rehome: %s closed in %s — %s\n' "$ORIGIN" "$ORIGIN_STORE" "$REASON"
-
-# 4. End the branch the retired bead names on the git remote, the way a merge
-# ends a landed one. Only once the bead reads back closed: until then it still
-# owns its branch. branch-end.sh holds the remote write and its guards. It keeps
-# a branch a live owner names, pins the tip, and deletes only the tip it
-# checked. The disposition is complete before this runs, so a branch it cannot
-# end costs a warning, never the close.
-RETIRED_BRANCH=$(origin_branch "$CHECK_JSON")
+# End the branch the retired bead names on the git remote, the way a merge ends
+# a landed one. Only once the bead reads back closed: until then it still owns
+# its branch. branch-end.sh holds the remote write and its guards. It keeps a
+# branch a live owner names, pins the tip, and deletes only the tip it checked.
+# The disposition is complete before this runs, so a branch it cannot end costs
+# a warning, never the close.
+RETIRED_BRANCH=$(origin_branch "$ORIGIN_JSON")
 if [ -n "$RETIRED_BRANCH" ]; then
     # Quoted for a paste: a branch name may carry shell metacharacters.
     END_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN")
     END_CMD="${END_CMD% }"
-    FINAL_STATUS=$(bead_json "$ORIGIN_PATH" "$ORIGIN" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
+    FINAL_JSON=$(bead_row "$ORIGIN_PATH" "$ORIGIN")
+    FINAL_STATUS=$(printf '%s' "$FINAL_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
     if [ "$FINAL_STATUS" != "closed" ]; then
         echo "bead-rehome: WARN $ORIGIN did not read back closed (status '${FINAL_STATUS:-unreadable}'), so its branch $RETIRED_BRANCH was left on the git remote; once it reads closed, end it with: $END_CMD" >&2
     else
@@ -658,12 +693,11 @@ if [ -n "$RETIRED_BRANCH" ]; then
                  echo "bead-rehome: WARN the close stands, but branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC); end it with: $END_CMD" >&2
                  END_NOTE="Branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC: $(printf '%s' "$END_OUT" | tail -1)). End it with: $END_CMD" ;;
         esac
-        # The bead records what became of its branch. pr-facts.sh and
-        # duplicate-sweep.sh run this script for its exit status and drop its
-        # output, so the note is what a later reader finds. A re-run that reaches
-        # the same outcome adds nothing.
+        # The bead records what became of its branch. pr-facts.sh runs this
+        # script for its exit status and drops its output, so the note is what a
+        # later reader finds. A re-run that reaches the same outcome adds nothing.
         if [ -n "$END_NOTE" ]; then
-            case "$(printf '%s' "$CHECK_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
+            case "$(printf '%s' "$FINAL_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
                 *"$END_NOTE"*) ;;
                 *) bd_at "$ORIGIN_PATH" update "$ORIGIN" --append-notes "$END_NOTE" >/dev/null 2>&1 \
                        || echo "bead-rehome: WARN could not record the branch's outcome on $ORIGIN: $END_NOTE" >&2 ;;
