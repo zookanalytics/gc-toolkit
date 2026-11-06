@@ -34,6 +34,16 @@
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
 #             another is no conversation engage takes, and a candidate whose
 #             own row does not read starts nothing
+#   (CLOSED-*) a conversation id that names a closed conversation is said to
+#             be closed, with when and the first line of its hand-back after
+#             the header, before any prompt. With no input it starts nothing
+#             and names the subject's engage. On a terminal engage goes on as an
+#             engage of its subject: Enter files a new conversation whose ask
+#             names the closed one, a number takes a listed one, and the model
+#             is asked once. A closed subject starts nothing either way, and a
+#             conversation that closes while a prompt waits is refused as closed
+#   (NOT-OPEN-CONV) an id the bead's listing holds as no open conversation has
+#             a refusal of its own
 #   (CUT-SHORT) a session still holding the alias of a conversation back in
 #             the queue is closed first, so the new sitting can take the alias
 #   (GATE)    a gate names the one bead waiting on it; the conversation engage
@@ -149,15 +159,18 @@ conv_row() {
   _title="an earlier concern"; [ "$1" = tk-conv2 ] && _title="a second concern"
   _also=""
   if [ "$1" = tk-two ]; then _created="2026-09-01T00:00:00Z"; _title="a task about two beads"; _also="tk-elsewhere"; fi
-  # $ST/<id>.meta (a JSON object) and $ST/<id>.reason seed the metadata and
-  # the close reason a closed sitting leaves, such as its hand-back.
+  # $ST/<id>.meta (a JSON object), $ST/<id>.reason and $ST/<id>.closed_at seed
+  # the metadata, the close reason and the close time a closed sitting leaves,
+  # such as its hand-back.
   _meta=$(cat "$ST/$1.meta" 2>/dev/null || true); [ -n "$_meta" ] || _meta='{}'
   jq -n --arg c "$1" --arg a "$(asg_of "$1")" --arg st "$(stat_of "$1")" --arg s "$(subj_of "$1")" \
         --arg t "$_title" --arg cr "$_created" --arg shape "$2" --arg x "$_also" --argjson r "${_reps:-[]}" \
-        --argjson md "$_meta" --arg why "$(cat "$ST/$1.reason" 2>/dev/null || true)" '
+        --argjson md "$_meta" --arg why "$(cat "$ST/$1.reason" 2>/dev/null || true)" \
+        --arg cat "$(cat "$ST/$1.closed_at" 2>/dev/null || true)" '
     ([$s] + (if $x == "" then [] else [$x] end)) as $tracked
     | {id:$c, issue_type:"task", status:$st, assignee:$a, title:$t, created_at:$cr, metadata:$md}
     + (if $why == "" then {} else {close_reason:$why} end)
+    + (if $cat == "" then {} else {closed_at:$cat} end)
     + (if $shape == "show"
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
@@ -283,8 +296,9 @@ case "$1 ${2:-}" in
       tk-gate)
         jq -n '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]' ;;
       *)
-        jq -n --arg i "$id" --arg t "${SUBJ_TITLE:-the subject under engagement}" \
-          '[{id:$i, title:$t, status:"open", issue_type:"task", priority:2, assignee:""}]' ;;
+        # $SUBJ_STATUS is the status every other bead reads, open by default.
+        jq -n --arg i "$id" --arg t "${SUBJ_TITLE:-the subject under engagement}" --arg st "${SUBJ_STATUS:-open}" \
+          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:""}]' ;;
     esac ;;
   "bd list")
     _id=""; _prev=""
@@ -321,6 +335,15 @@ case "$1 ${2:-}" in
               if [ -n "${CONV_FILED_AFTER:-}" ]; then
                 _n=$(( $(cat "$ST/tracks-reads" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$ST/tracks-reads"
                 [ "$_n" -le "$CONV_FILED_AFTER" ] || _ids="tk-conv"
+              fi
+              # $CLOSE_AT_TRACKS_READ: a sign-off closes tk-conv just before the
+              # listing that many in answers, as one can while the operator sits
+              # at a prompt.
+              if [ -n "${CLOSE_AT_TRACKS_READ:-}" ]; then
+                _cn=$(( $(cat "$ST/close-reads" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_cn" > "$ST/close-reads"
+                if [ "$_cn" -ge "$CLOSE_AT_TRACKS_READ" ]; then
+                  printf 'closed' > "$ST/tk-conv.status"; printf '2026-11-06T01:02:03Z' > "$ST/tk-conv.closed_at"
+                fi
               fi
               _rows='[]'
               for c in $_ids; do
@@ -556,7 +579,7 @@ export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 reset() {
     : > "$CALLS"; : > "$SPAWNED"; : > "$POLLS"; : > "$TMP/psc.log"
     rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
-    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name '*.meta' -o -name '*.reason' -o -name '*.unread' -o -name spawned-alias -o -name tracks-reads -o -name live-polls \) -delete
+    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name '*.meta' -o -name '*.reason' -o -name '*.closed_at' -o -name '*.unread' -o -name spawned-alias -o -name tracks-reads -o -name close-reads -o -name live-polls \) -delete
     printf '1700000000' > "$TMP/clock"
     : > "$STATE_DIR/replies"; : > "$STATE_DIR/live"
     for _l in ${LIVE_SITTINGS:-}; do printf '%s %s\n' "${_l%%=*}" "${_l#*=}" >> "$STATE_DIR/live"; done
@@ -804,12 +827,104 @@ hasnt "$CALLED" "session new" "(CUT-SHORT-STUCK) …spawning nothing"
 has "$OUT" "gc session close gc-60" "(CUT-SHORT-STUCK) …and naming the session to close by hand"
 unset LIVE_SITTINGS
 
-echo "# a closed explicit conversation is refused without spawning"
-reset; printf 'closed' > "$STATE_DIR/tk-conv.status"
+# closed_conv <id> — seed a conversation its sitting's sign-off closed: still
+# held by the sitting's alias, closed at a known time, and carrying the
+# hand-back the sign-off recorded, a header naming the subject and then the body.
+closed_conv() {
+    printf 'gc-toolkit/gc-toolkit.%s' "$1" > "$STATE_DIR/$1.assignee"
+    printf 'closed' > "$STATE_DIR/$1.status"
+    printf '2026-11-05T06:53:09Z' > "$STATE_DIR/$1.closed_at"
+    jq -n '{"gc.handback": "tk-subj — the subject under engagement\n\nSettled: the rewording rides the queued rework.\nNothing further is owed here."}' > "$STATE_DIR/$1.meta"
+}
+
+echo "# a closed conversation is said to be closed before any prompt, and asked nothing, engage starts nothing"
+reset; closed_conv tk-conv
 run_engage tk-conv --no-attach
-eq "$RC" 4 "(CLOSED) engaging a closed conversation exits 4"
-hasnt "$CALLED" "session new" "(CLOSED) …and spawns nothing"
-has "$OUT" "is not an open conversation about tk-subj" "(CLOSED) …saying it is not open"
+eq "$RC" 4 "(CLOSED-NOINPUT) engaging a closed conversation with no input exits 4"
+has "$OUT" "tk-conv closed at 2026-11-05T06:53:09Z" "(CLOSED-NOINPUT) …saying it closed, and when"
+has "$OUT" 'its hand-back reads "Settled: the rewording rides the queued rework."' "(CLOSED-NOINPUT) …and the first line of its hand-back after the header"
+has "$OUT" "engage its subject to open a fresh one: gc-helm engage tk-subj" "(CLOSED-NOINPUT) …naming the subject's engage"
+hasnt "$OUT" "is not an open conversation" "(CLOSED-NOINPUT) …which is not the refusal of an id that is no open conversation"
+hasnt "$CALLED" "bd update" "(CLOSED-NOINPUT) …writing nothing"
+hasnt "$CALLED" "bd create" "(CLOSED-NOINPUT) …filing nothing"
+hasnt "$CALLED" "session new" "(CLOSED-NOINPUT) …and starting no sitting"
+reset; closed_conv tk-conv
+run_engage_tty '1\n\n\n' tk-conv --no-input --no-attach
+eq "$RC" 4 "(CLOSED-NOPROMPT) the same refusal on a terminal with --no-input exits 4"
+has "$OUT" "tk-conv closed at 2026-11-05T06:53:09Z" "(CLOSED-NOPROMPT) …saying it closed"
+hasnt "$OUT" "›" "(CLOSED-NOPROMPT) …with no prompt before it"
+
+echo "# on a terminal, a closed conversation leaves engage on its subject, and a new conversation names it"
+reset; closed_conv tk-conv
+set +e
+OUT="$(printf '\n\n\n' | GC_HELM_ASSUME_TTY=1 sh "$SCRIPT" engage tk-conv --no-attach 2>&1)"; RC=$?
+set -e
+CALLED="$(cat "$CALLS")"
+eq "$RC" 0 "(CLOSED-TTY) engaging a closed conversation on a terminal exits 0"
+case "$OUT" in
+  *"tk-conv closed at 2026-11-05T06:53:09Z"*"Enter = a new one, continuing tk-conv"*)
+    ok "(CLOSED-TTY) …saying it closed, and when, before its first prompt" ;;
+  *) bad "(CLOSED-TTY) the close should be said before the first prompt (out: $OUT)" ;;
+esac
+has "$OUT" "Engaging tk-subj instead" "(CLOSED-TTY) …and going on as an engage of its subject"
+eq "$(printf '%s\n' "$OUT" | grep -c 'Model —')" 1 "(CLOSED-TTY) …asking for the model once"
+has "$CALLED" "--deps tracks:tk-subj" "(CLOSED-TTY) Enter files a new conversation on the subject"
+has "$CALLED" "The operator engaged conversation tk-conv on tk-subj, which closed at 2026-11-05T06:53:09Z, to take it up again." "(CLOSED-TTY) …whose ask names the closed conversation"
+has "$CALLED" "gc bd show tk-conv prints its close reason" "(CLOSED-TTY) …and says how its sitting reads what that one settled"
+has "$CALLED" "session new converse-opus --alias tk-new" "(CLOSED-TTY) …and the operator lands in a sitting on it"
+eq "$(asg tk-new)" "gc-toolkit/gc-toolkit.tk-new" "(CLOSED-TTY) …bound to the new conversation"
+eq "$(cat "$STATE_DIR/tk-conv.status")" "closed" "(CLOSED-TTY) …while the closed conversation stays closed"
+reset; closed_conv tk-conv
+run_engage_tty 'lets revisit the scope\n\n\n' tk-conv --no-attach
+eq "$RC" 0 "(CLOSED-TTY-OPENER) a typed opener in place of a closed conversation exits 0"
+has "$CALLED" "--title lets revisit the scope" "(CLOSED-TTY-OPENER) …filing a new conversation titled with the opener"
+case "$CALLED" in
+  *"-d The operator engaged conversation tk-conv on tk-subj"*"lets revisit the scope --deps tracks:tk-subj"*)
+    ok "(CLOSED-TTY-OPENER) …whose ask names the closed conversation ahead of the opener" ;;
+  *) bad "(CLOSED-TTY-OPENER) the ask should name the closed conversation, then the opener (calls: $CALLED)" ;;
+esac
+export HAVE_CONV=2
+reset; closed_conv tk-conv
+run_engage_tty '\n\n\n' tk-conv --no-attach
+has "$OUT" "[1] tk-conv2" "(CLOSED-TTY-LISTED) the subject's open conversations are listed"
+hasnt "$OUT" "] tk-conv —" "(CLOSED-TTY-LISTED) …and the closed one is not among them"
+has "$OUT" "Enter = a new one, continuing tk-conv" "(CLOSED-TTY-LISTED) …with Enter still a new conversation"
+has "$CALLED" "--deps tracks:tk-subj" "(CLOSED-TTY-LISTED) …so Enter files one"
+hasnt "$CALLED" "--alias tk-conv2" "(CLOSED-TTY-LISTED) …rather than taking the listed one"
+reset; closed_conv tk-conv
+run_engage_tty '1\n\n' tk-conv --no-attach
+has "$CALLED" "session new converse-opus --alias tk-conv2" "(CLOSED-TTY-PICK) a number takes a listed conversation"
+hasnt "$CALLED" "bd create" "(CLOSED-TTY-PICK) …filing nothing"
+unset HAVE_CONV
+
+echo "# a closed conversation on a closed subject starts nothing, on a terminal or not"
+reset; closed_conv tk-conv
+SUBJ_STATUS=closed run_engage_tty '\n\n\n' tk-conv --no-attach
+eq "$RC" 4 "(CLOSED-SUBJECT) a closed conversation on a closed subject exits 4 on a terminal"
+has "$OUT" "tk-conv closed at 2026-11-05T06:53:09Z" "(CLOSED-SUBJECT) …saying the conversation closed"
+has "$OUT" "Its subject tk-subj is closed too" "(CLOSED-SUBJECT) …and that its subject is closed too"
+hasnt "$OUT" "›" "(CLOSED-SUBJECT) …before any prompt"
+hasnt "$CALLED" "bd create" "(CLOSED-SUBJECT) …filing nothing"
+reset; closed_conv tk-conv
+SUBJ_STATUS=closed run_engage tk-conv --no-attach
+eq "$RC" 4 "(CLOSED-SUBJECT-NOINPUT) …and with no input exits 4"
+hasnt "$OUT" "gc-helm engage tk-subj" "(CLOSED-SUBJECT-NOINPUT) …naming no engage of a subject that takes no new conversation"
+
+echo "# one that closes while the operator answers a prompt is refused as closed"
+reset; CLOSE_AT_TRACKS_READ=2 run_engage_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 4 "(CLOSED-RACE) a picked conversation that closed before engage held it exits 4"
+has "$OUT" "tk-conv closed at 2026-11-06T01:02:03Z" "(CLOSED-RACE) …saying it closed, and when"
+has "$OUT" "engage its subject to open a fresh one: gc-helm engage tk-subj" "(CLOSED-RACE) …naming the subject's engage"
+hasnt "$CALLED" "session new" "(CLOSED-RACE) …and starting no sitting"
+
+echo "# an id that is no open conversation about the bead keeps a refusal of its own"
+export HAVE_CONV=0
+reset; run_engage tk-conv --no-attach
+eq "$RC" 4 "(NOT-OPEN-CONV) a conversation the bead's listing does not hold exits 4"
+has "$OUT" "tk-conv is not an open conversation about tk-subj" "(NOT-OPEN-CONV) …saying it is no open conversation about the bead"
+hasnt "$OUT" "closed" "(NOT-OPEN-CONV) …and nothing of a close, which it never read"
+hasnt "$CALLED" "session new" "(NOT-OPEN-CONV) …and starting no sitting"
+unset HAVE_CONV
 
 echo "# engage pointed at a gate takes the one bead still waiting on it, and the conversation replies to the gate"
 export GATE_WAITERS='[{"id":"tk-subj","status":"open","dependency_type":"blocks"},{"id":"tk-done","status":"closed","dependency_type":"blocks"}]'
