@@ -41,10 +41,8 @@ Hard rules, in force for every step:
   because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: each step closes its own bead through
-assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,
-gc.step_ref) — never a GC_*BEAD_ID env var, which does not track the current
-step. No shell variable survives from one block to the next, so each block
-names the values it uses. A review held with no poured workflow follows these
+assets/scripts/claim-close.sh. No shell variable survives from one block to the
+next, so each block names the values it uses. A review held with no poured workflow follows these
 steps as its description says.
 """
 formula = "mol-review"
@@ -132,12 +130,7 @@ fi
 ```
 When it exits 1, end the run with the route left empty:
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
-for STEP in load-dispatch review verdict-and-drain; do
-  "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
-done
-gc runtime drain-ack
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" --step mol-review.load-dispatch --reason "the review's record is incomplete; reviewing nothing" && gc runtime drain-ack
 ```
 A claimant holding the review with no poured workflow has no steps to close.
 It hands the bead back instead, then drains: the pack's
@@ -182,13 +175,22 @@ echo "== The review's worktree: $WT"
 # <<< review-gather
 ```
 A block that exits non-zero here, other than the refusal in part 1, ends the
-run as the verdict step's failure arm does.
+run and returns the review to the pool, because the next claim may get through.
+Closing this step would advance the graph into `review` with nothing gathered, so
+append what failed to the review bead's notes, then cancel the run, which can
+interrupt that call: `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" --step mol-review.load-dispatch --reason "the gather failed: <what failed>"`.
+Only once the run has ended, restore the bead's route, so the run and the route
+never offer the review together, and drain:
+```bash
+POOL=$(gc bd show "{{review_bead}}" --json | jq -r '.[0].metadata.review_pool // empty')
+[ -n "$POOL" ] && gc bd update "{{review_bead}}" --set-metadata gc.routed_to="$POOL"
+gc runtime drain-ack
+```
 
 **3. Close this step bead so the graph advances.** Non-terminal step, no
-drain — the same session carries on into `review`:
+drain: the same session then takes `review` with `gc hook --claim --json`.
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.load-dispatch --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review.load-dispatch
 ```
 
 **Exit criteria:** the record checked, the anchor, the PR and the rig's
@@ -229,11 +231,7 @@ none.
 printed, at `{{reviewed_oid}}`: `git diff --stat origin/{{review_base}}...HEAD`,
 then the diff itself. The method decides what you read and run there, which
 findings block, the lines it adds to the verdict envelope in part 5, and the
-flags the verdict call passes. Run nothing it does not call for. A long
-command runs under the claim-lease keepalive, so a reviewer whose lease would
-lapse during it does not read as dead: `lease-heartbeat.sh <the bead_id your gc
-hook --claim returned for this step> -- <command>`, from the pack's scripts
-load-dispatch printed.
+flags the verdict call passes. Run nothing it does not call for.
 
 <!-- >>> review-subagents -->
 The check's method may hand part of the reading to subagents, where your
@@ -343,10 +341,10 @@ verdict with no finding writes `[]`. The out-of-scope bugs from part 4 stay out
 of it; they are their own beads already.
 
 **6. Close this step bead so the graph advances.** Non-terminal step, no
-drain — the same session carries on into `verdict-and-drain`:
+drain: the same session then takes `verdict-and-drain` with `gc hook --claim
+--json`.
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.review --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review.review
 ```
 
 **Exit criteria:** the check's method applied, every finding located and every
@@ -395,12 +393,12 @@ or force-push) is different: signoff refuses the verdict, closes the review
 bead itself `gc.outcome=superseded` and exits 0 — there is nothing here to
 append and nothing to restore, and gate-ensure pours a fresh review at the live
 head next pass. "already closed" is not a failure either: this dispatch was
-recorded or retired before you judged it, so drop the verdict, close the chain
+recorded or retired before you judged it, so drop the verdict, close this step
 and drain. Any other failure, in this order: append `findings.md` and
 `findings.json` to the review bead
-(`gc bd update "{{review_bead}}" --append-notes ...`); close the step chain
-forward with part 3's step-close loop; then — only after the chain is closed —
-restore the bead's claimability from the dispatch-stamped pool and drain:
+(`gc bd update "{{review_bead}}" --append-notes ...`); close this step with
+part 3's claim-close.sh call; then, only after the step is closed, restore the
+bead's claimability from the dispatch-stamped pool and drain:
 ```bash
 POOL=$(gc bd show "{{review_bead}}" --json | jq -r '.[0].metadata.review_pool // empty')
 [ -n "$POOL" ] && gc bd update "{{review_bead}}" --set-metadata gc.routed_to="$POOL"
@@ -414,21 +412,15 @@ unrecorded verdict is recoverable; a hand-rolled one is not. The review's
 workspace stays where it is, and the reviewer who claims the bead next gets
 the same worktree back from load-dispatch's gather block.
 
-**3. Close this workflow's step chain, remove the workspace, then drain.**
-Terminal step: it still closes its own bead — that is how a graph.v2 step
-advances, and skipping it leaves an open assigned step bead that re-pools a
-fresh worker every cycle, indefinitely. Forward order is mandatory (each step
-blocks the next); close only through step-close.sh, which resolves by
-(gc.root_bead_id, gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead
-after a claim. Never close `workflow-finalize` (the control-dispatcher's):
+**3. Close this step, remove the workspace, then drain.** Terminal step: it
+still closes its own bead, because that is how a graph.v2 step advances, and
+skipping it leaves an open assigned step bead that re-pools a fresh worker every
+cycle, indefinitely. Never close `workflow-finalize` (the
+control-dispatcher's):
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$SC" ] || SC=""
-: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
-for STEP in load-dispatch review verdict-and-drain; do
-  "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
-done
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review.verdict-and-drain || exit 1
 # >>> review-workspace-remove
-"$(dirname "$SC")/review-workspace.sh" remove --review-bead "{{review_bead}}"
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-workspace.sh" remove --review-bead "{{review_bead}}"
 # <<< review-workspace-remove
 gc runtime drain-ack
 ```
@@ -437,8 +429,8 @@ gc runtime drain-ack
 touch the anchor. Done means gone.
 
 **Exit criteria:** exactly one signoff.sh call succeeded (or findings are
-appended and, after the chain closed, the bead's route is restored so the
-pool can re-claim it), step chain closed forward, the workspace removed unless
+appended and, after this step closed, the bead's route is restored so the
+pool can re-claim it), this step closed, the workspace removed unless
 the bead went back to the pool, drain acknowledged.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
