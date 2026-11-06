@@ -28,8 +28,7 @@ calls for, passed the way step 7 passes it, and the next is the subject's
 headline with each wait this turn routed. A ruling that takes the subject's
 recommendation names the recommendation's gate with `--answer` and adds
 `--accept`, so Accept's writer answers that gate and sends the formula, as at
-the sign-off (step 7). A subject that reads held is released by that writer
-before it sends the formula. The `--answer` call resolves only the gates it
+the sign-off (step 7). The `--answer` call resolves only the gates it
 names, leaves the conversation open, and exits non-zero when it stopped short.
 Until it exits 0, do not tell the operator the ruling is in place:
 ```bash

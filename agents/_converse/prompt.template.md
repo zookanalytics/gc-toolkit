@@ -324,7 +324,7 @@ Rules:
   names the bead that carries the work instead:
 
   ```bash
-  "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --route human --no-wait --retire not-needed
+  "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed
   ```
 
   A non-closed `merge_result` such as `pull_request` or `pre_open_gate` does

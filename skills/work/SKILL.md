@@ -74,15 +74,14 @@ the target's `default_sling_formula`, which for a polecat pool is
 
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
-  which a sitting's sign-off `--route <pool>` also writes when it releases a
-  held subject, has the pool claim the bead itself. An arm
+  has the pool claim the bead itself. An arm
   (`deferred-dispatch.sh arm`) has the deferred-dispatch pass sling the bead
   once nothing holds it. Send it one way, and disarm an armed bead before you
   send it another. Any two start two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
-  blocker closes, and it ends the run on a bead that carries a `merge_result`,
-  `held` included, as finished. Release the wait (the waits skill), then send.
+  blocker closes, and it ends the run on a bead that carries a `merge_result`
+  as finished. Release the wait (the waits skill), then send.
 - **A named agent takes an assignee.** The mechanik, deacon, witness,
   refinery and keeper are named agents, and the assignee is what the
   controller and the pack's notice read to give one a turn
@@ -91,24 +90,20 @@ the target's `default_sling_formula`, which for a polecat pool is
   prints, then tell it with
   `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`.
 
-In a sitting, the sign-off's `--route` says where the subject itself goes once
-its wait is released (the converse-settle step), so first decide which bead
-carries the work:
+In a sitting, first decide which bead carries the work (the converse-settle
+step):
 
-- **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
-  then send the subject: `gc sling <rig>/<pool> <subject> --on <formula>`. The
-  sling clears that human route. `--route <rig>/<pool>` would route the
-  subject raw as well, a second dispatch. When the formula is the one the
-  subject recommends, take the recommendation instead (below): `--accept` on
-  the same sign-off sends it, and you send nothing yourself.
+- **The subject is the work.** Sign off with `--ruled yes --no-wait`, then
+  send the subject: `gc sling <rig>/<pool> <subject> --on <formula>`. When the
+  formula is the one the subject recommends, take the recommendation instead
+  (below): `--accept` on the same sign-off sends it, and you send nothing
+  yourself.
 - **New work carries it, and the subject waits for it.** File the work, send
-  it, and sign off with `--ruled yes --route human --waiting-on <the work>`.
-  The board shows the subject as a ruling in flight until the work lands, then
-  as settled. A `--route <rig>/<pool>` here would have that pool claim the
-  subject itself once the work lands, a conversation seed no worker can close.
+  it, and sign off with `--ruled yes --waiting-on <the work>`. The board shows
+  the subject as a ruling in flight until the work lands, then as settled.
 - **New work decomposes an epic subject.** It is the subject's member: file it
   with `--parent <subject>`, send it, and sign off with
-  `--ruled yes --route human --no-wait`. `--waiting-on` names a dependency
+  `--ruled yes --no-wait`. `--waiting-on` names a dependency
   only, because bd refuses a `blocks` edge from a parent to its own
   descendant, and containment already carries the wait. When the sitting also
   sent a dependency, name that one with `--waiting-on` in place of `--no-wait`.

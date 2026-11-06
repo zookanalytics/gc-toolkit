@@ -45,9 +45,9 @@
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
 # a blocker in another store, and fails if the arm runs. It runs the premise
 # re-check's moot or benign close under stubs, and fails unless the close
-# releases a held subject that no open human gate still holds, leaves one that
-# a gate holds, and closes the conversation only once every read and write
-# before it has answered. It pins that every skill and formula names a
+# settles a headline that still waits on a subject nothing holds any more,
+# leaves one that an open blocker holds, and closes the conversation only once
+# every read and write before it has answered. It pins that every skill and formula names a
 # pack skill to load by its catalog name, never by its path, so an agent in any
 # tree loads the installed pack's copy.
 #
@@ -463,8 +463,8 @@ have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow
 have "…once the follow-up's own store reads the edge back" '&& gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json' "$SETTLE"
 have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
-have "the prompt gives the retire call, through the sign-off" '--route human --no-wait --retire not-needed' "$PROMPT"
-have "…as the prs skill does" '--route human --no-wait --retire not-needed' "$PRS_SKILL"
+have "the prompt gives the retire call, through the sign-off" '--ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed' "$PROMPT"
+have "…as the prs skill does" '--ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed' "$PRS_SKILL"
 # A gate can hold a merge, so a sitting answers every gate through the sign-off
 # writer, which carries out what the ruling does to the PR first.
 have "the continue step answers a ruling on a turn that does not sign off through the writer" 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$CONTINUE"
@@ -477,7 +477,7 @@ have "the prompt gives the call that withdraws a recommendation" 'converse-inval
 have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh" accept <bead>' "$WORK_SKILL"
 lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
     "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
-have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --route human --no-wait --accept' "$SETTLE"
+have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --no-wait --accept' "$SETTLE"
 have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
 have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
 for f in "$PROMPT" "$SETTLE"; do
@@ -839,7 +839,7 @@ echo "── a sitting iterating on a document writes one scaffold and names it 
 have "the step table sends a sitting iterating on a document to its skill" '**Steps 5–8, when the operator is iterating on a document**' "$PROMPT"
 have "…by name" '`converse-iterate-document` |' "$PROMPT"
 have "the ruling line names the block the worker starts from" 'to the scaffold in the notes of <bead>, the block headed ## Current state (<date>)' "$ITERATE"
-have "…and the sign-off files the rework" '--route human --no-wait --rework' "$ITERATE"
+have "…and the sign-off files the rework" '--no-wait --rework' "$ITERATE"
 have "a self-review that starts fresh finds the block through the worker's notes" "so your work bead's notes name this block" "$ITERATE"
 have "a block on another bead leaves the next sitting its name" "name that bead in the subject's record" "$ITERATE"
 fenced_block "$ITERATE" '--append-notes "$SCAFFOLD"' | fill_block >"$CH/block"
@@ -881,12 +881,11 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: an earlier block of the same date does not pass for one that did not land" "exit $rc"
     fi
 done
-echo "── a moot or benign close releases a subject a cut-short hold left at held ──"
-# A cut-short sitting leaves its subject held, and the next sitting's premise
-# re-check can find the conversation moot and close it. The block runs as
-# written, its placeholders filled, under stubs: gc answers the subject's
-# blocks edges from RL_GATES, and lifecycle.sh answers the state from a file
-# that a transition rewrites.
+echo "── a moot or benign close settles a headline that waits on nothing ──"
+# A cut-short sitting leaves its hold's headline on the subject, and the next
+# sitting's premise re-check can find the conversation moot and close it. The
+# block runs as written, its placeholders filled, under stubs: gc answers the
+# subject's row from RL_ROW and its blocks edges from RL_GATES.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
@@ -894,86 +893,87 @@ cat >"$RL/bin/gc" <<'STUB'
 #!/usr/bin/env bash
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
+    "bd show "*)
+        [ -z "${RL_SHOW_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
+        printf '%s\n' "$RL_ROW" ;;
     "bd dep list") printf '%s\n' "$RL_GATES" ;;
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
 STUB
-cat >"$RL/pack/assets/scripts/lifecycle.sh" <<'STUB'
-#!/usr/bin/env bash
-printf 'lifecycle %s\n' "$*" >>"$RL_DIR/log"
-case "$1" in
-    state) [ -z "${RL_STATE_DOWN:-}" ] || exit 2; cat "$RL_DIR/state" ;;
-    transition) [ -z "${RL_REFUSE:-}" ] || exit 1; echo unanchored >"$RL_DIR/state" ;;
-esac
-STUB
 cat >"$RL/pack/assets/scripts/gc-helm.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'gc-helm %s\n' "$*" >>"$RL_DIR/log"
+[ -z "${RL_TAKEAWAY_FAIL:-}" ] || exit 1
 STUB
 cat >"$RL/pack/assets/scripts/pr-sitting-comment.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >>"$RL_DIR/log"
 STUB
 chmod +x "$RL/bin/gc" "$RL/pack/assets/scripts/"*.sh
-fenced_block "$RECHECK" 'lifecycle.sh" transition "$SUBJECT" --to unanchored' | fill_block >"$RL/block"
+fenced_block "$RECHECK" 'replaced the headline of $SUBJECT' | fill_block >"$RL/block"
 [ -s "$RL/block" ] && ok "the premise re-check's close is found" \
-    || bad "the premise re-check's close is found" "no fenced bash block holds its release in $RECHECK"
-# run_release <shell> <state> <gates-json> [NAME=VALUE...] — one run of the
-# close from a subject in <state>; prints its status.
+    || bad "the premise re-check's close is found" "no fenced bash block replaces the headline in $RECHECK"
+# run_release <shell> <row-json> <gates-json> [NAME=VALUE...] — one run of the
+# close on a subject whose row is <row-json>; prints its status.
 run_release() {
-    local run=$1 state=$2 gates=$3
+    local run=$1 row=$2 gates=$3
     shift 3
     : >"$RL/log"
-    printf '%s\n' "$state" >"$RL/state"
-    (cd "$TMP/away" && env -u BASH_ENV -u ENV RL_DIR="$RL" RL_GATES="$gates" "$@" CONV="$RL/pack/assets/scripts" \
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV RL_DIR="$RL" RL_ROW="$row" RL_GATES="$gates" "$@" CONV="$RL/pack/assets/scripts" \
         SUBJECT=tk-x CONVERSATION=tk-v PATH="$RL/bin:$PATH" $run "$RL/block" >"$RL/out" 2>&1)
     echo $?
 }
-NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-t","issue_type":"gate","await_type":"timer","status":"open"},{"id":"tk-w","issue_type":"task","status":"open"}]'
-ONE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
+WAITING='[{"id":"tk-x","metadata":{"gc.takeaway":"holding — x","gc.takeaway_settled":""}}]'
+SETTLED='[{"id":"tk-x","metadata":{"gc.takeaway":"ruled: x","gc.takeaway_settled":"1"}}]'
+NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-w","issue_type":"task","status":"closed"}]'
+GATE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
+WORK_HOLDS='[{"id":"tk-w","issue_type":"task","status":"open"}]'
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
-    rc=$(run_release "$run" held "$NONE_HOLDS")
+    rc=$(run_release "$run" "$WAITING" "$NONE_HOLDS")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;lifecycle transition tk-x --to unanchored --expect held --route human;lifecycle state tk-x;"*"gc bd close tk-v --reason x: x;"*)
-            ok "($sh_) recheck close: a held subject nothing still holds is released, its headline replaced, before the conversation closes" ;;
-        *) bad "($sh_) recheck close: a held subject nothing still holds is released, its headline replaced, before the conversation closes" "exit $rc, calls: $calls" ;;
+        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+            ok "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" ;;
+        *) bad "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" "exit $rc, calls: $calls" ;;
     esac
-    rc=$(run_release "$run" held "$ONE_HOLDS")
+    for held_by in "$GATE_HOLDS|an open human gate" "$WORK_HOLDS|open work"; do
+        gates=${held_by%%|*}; what=${held_by#*|}
+        rc=$(run_release "$run" "$WAITING" "$gates")
+        calls=$(tr '\n' ';' <"$RL/log")
+        case "$rc:$calls" in
+            *"gc-helm takeaway"*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
+            0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject $what still holds keeps its headline, and the conversation closes" ;;
+            *) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
+        esac
+    done
+    rc=$(run_release "$run" "$SETTLED" '[]')
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        *"lifecycle transition"*|*"gc-helm takeaway"*) bad "($sh_) recheck close: a held subject another open human gate holds stays held" "exit $rc, calls: $calls" ;;
-        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a held subject another open human gate holds stays held, and the conversation closes" ;;
-        *) bad "($sh_) recheck close: a held subject another open human gate holds stays held" "exit $rc, calls: $calls" ;;
-    esac
-    rc=$(run_release "$run" unanchored '[]')
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        *"lifecycle transition"*|*"gc-helm takeaway"*|*"bd dep list"*) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
-        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject that is not held is not written, and the conversation closes" ;;
-        *) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
+        *"gc-helm takeaway"*) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
+        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a settled headline is not written, and the conversation closes" ;;
+        *) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
     esac
     case "$rc:$calls" in
         0:*"gc bd close tk-v --reason x: x;gc bd comment tk-v x;pr-sitting-comment refresh --sitting tk-v;"*)
             ok "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" ;;
         *) bad "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" "exit $rc, calls: $calls" ;;
     esac
-    rc=$(run_release "$run" unanchored '[]' RL_COMMENT_REFUSE=1)
+    rc=$(run_release "$run" "$SETTLED" '[]' RL_COMMENT_REFUSE=1)
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls:$(cat "$RL/out")" in
         0:*"gc bd close tk-v "*"pr-sitting-comment refresh --sitting tk-v;"*"the close was not recorded among the actions of tk-v"*)
             ok "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" ;;
         *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
-    for stop in "RL_REFUSE=1|a release that does not land|$NONE_HOLDS" "RL_STATE_DOWN=1|a state that does not read|$NONE_HOLDS" \
-        "RL_NONE=1|a gate listing that does not read|{\"error\":\"no issue found\"}"; do
+    for stop in "RL_TAKEAWAY_FAIL=1|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
+        "RL_NONE=1|a blocker listing that does not read|{\"error\":\"no issue found\"}"; do
         IFS='|' read -r setting what gates <<EOF
 $stop
 EOF
-        rc=$(run_release "$run" held "$gates" "$setting")
+        rc=$(run_release "$run" "$WAITING" "$gates" "$setting")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
             0:*|*"bd close"*|*"bd update"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
