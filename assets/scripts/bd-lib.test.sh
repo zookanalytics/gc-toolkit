@@ -10,15 +10,34 @@
 # variable after setup. Call counts come from STUB_GC_LOG, where the stub gc logs
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
 #
-# row_meta, the metadata read the library shares with every script that sources
-# it, and bd_gates_open_under_key, the order every writer and reader of one
-# situation's human gates reads them in, are pinned first; they read no store.
+# warn and die, the report every script that sources the library makes, row_meta,
+# the metadata read it shares with them, and bd_gates_open_under_key, the order
+# every writer and reader of one situation's human gates reads them in, are
+# pinned first; they read no store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
 . "$HERE/bd-lib.sh"
+
+# --- warn and die: a script's report, under its name, and die's exit status -----
+LIB="$HERE/bd-lib.sh"
+report() { # <script body> -> the script's stderr and its exit status, one line each
+  mkdir -p "$TMP/report"
+  printf '. "%s"\n%s\n' "$LIB" "$1" > "$TMP/report/thing.sh"
+  bash "$TMP/report/thing.sh" 2>&1; echo "rc=$?"
+}
+eq "$(report 'warn careful now')" "thing: careful now
+rc=0" "warn reports under the script's file name, without .sh, and every word"
+eq "$(report 'PROG=other; warn careful now')" "other: careful now
+rc=0" "…and under \$PROG when the script sets one"
+eq "$(report 'die stopped')" "thing: stopped
+rc=1" "die exits 1 by default"
+eq "$(report 'DIE_STATUS=4; die stopped')" "thing: stopped
+rc=4" "…or the script's own DIE_STATUS"
+eq "$(report 'DIE_STATUS=4; die stopped 7')" "thing: stopped
+rc=7" "…and the status a call gives wins over both"
 
 # --- row_meta: one metadata value off a show row, as a string -----------------
 ROW='[{"id":"tk-m","metadata":{"branch":"polecat/tk-m","pr_number":42,"gc.routed_to":"rig/pool"}}]'
@@ -134,7 +153,7 @@ LIVE=open,in_progress,blocked,deferred,hooked,pinned
 unset GC_RECONCILE_BD_CACHE
 
 # One anchor in every shape a child can take: closed children with the edge, a
-# visit joined by its tracks edge, an open review filed without the edge, a
+# validation pass joined by a tracks edge, an open review filed without the edge, a
 # closed review filed without it, a convoy tracking the anchor, and a bead moved
 # to another anchor that still carries its old edge.
 store '[
@@ -142,7 +161,7 @@ store '[
   {"id":"tk-two","status":"open","metadata":{"merge_result":"pull_request"}},
   {"id":"tk-r1","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-r2","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
-  {"id":"tk-vis","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"visit"}},
+  {"id":"tk-vis","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"validation"}},
   {"id":"tk-bare","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-cbare","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-cv","status":"open","metadata":{}},
@@ -170,7 +189,7 @@ mark_store; reset_log
 kids=$(bd_anchor_children tk-anc "$ALL"); rc=$?
 eq "$rc" 0 "marked: bd_anchor_children reads the anchor"
 eq "$(ids_of "$kids")" "tk-bare,tk-r1,tk-r2,tk-vis" \
-  "marked: the live children whatever their edge, and the closed dependents naming the anchor (a tracks-joined visit is one; a convoy and a moved bead are not)"
+  "marked: the live children whatever their edge, and the closed dependents naming the anchor (a tracks-joined validation pass is one; a convoy and a moved bead are not)"
 eq "$(printf '%s' "$kids" | jq -r '[ .[] | select(.id == "tk-bare") | .status ] | .[0]')" "open" \
   "marked: an open review filed without the edge is read, so it holds its lane"
 eq "$(printf '%s' "$kids" | jq -r '[ .[] | select(.id == "tk-cbare") ] | length')" "0" \
@@ -250,7 +269,7 @@ store '[
   {"id":"tk-old","status":"open","metadata":{"merge_result":"pull_request"}},
   {"id":"tk-o1","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"review"}},
   {"id":"tk-new","status":"open","metadata":{"task_kind":"rework"}},
-  {"id":"tk-vv","status":"open","metadata":{"task_kind":"visit"}}
+  {"id":"tk-vv","status":"open","metadata":{"task_kind":"validation"}}
 ]'
 printf '%s\n' 'tk-vv|tracks|tk-old' > "$STUB_DEPS"
 reset_log
@@ -298,7 +317,7 @@ store '[
   {"id":"tk-o2","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"finding"}},
   {"id":"tk-o3","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"rework"}},
   {"id":"tk-ok","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"review"}},
-  {"id":"tk-ov","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"visit"}},
+  {"id":"tk-ov","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"validation"}},
   {"id":"tk-cv","status":"open","metadata":{}}
 ]'
 printf '%s\n' 'tk-ok|related|tk-old' 'tk-ov|tracks|tk-old' 'tk-cv|tracks|tk-old' 'tk-o2|blocks|tk-old' > "$STUB_DEPS"
@@ -314,7 +333,7 @@ out=$(bd_anchor_backfill tk-old); rc=$?
 eq "$rc:$(printf '%s\n' "$out" | paste -sd, -)" "0:tk-o1,tk-o2,tk-o3" "backfill joins them and names them"
 eq "$(dep_adds)" 1 "…in one write"
 eq "$(edges)" "tk-cv|tracks|tk-old tk-o1|related|tk-old tk-o2|blocks|tk-old tk-o2|related|tk-old tk-o3|related|tk-old tk-ok|related|tk-old tk-ov|tracks|tk-old" \
-  "…each child on the pair once, the visit left on its tracks edge"
+  "…each child on the pair once, the one joined by tracks left on that edge"
 out=$(bd_anchor_backfill tk-old); rc=$?
 eq "$rc:$out" "0:" "a second backfill joins nothing"
 # bd refuses the one-transaction write when one pair is refused; each pair is

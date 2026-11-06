@@ -127,6 +127,12 @@ that does not import the pack itself.
   posts on a pull request stays out of review when it opens with gc-toolkit's
   no-review mark or with a marker the rig declares in
   `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
+- **Demo captures of a rig's app** — a demo capture can record a rig's app
+  that a worktree of the rig serves on this host. Setting
+  `app_reads_city = "true"` among a rig's `[rigs.formula_vars]` in `city.toml`
+  turns that off for the rig. Set it for a rig whose app reads the city, such
+  as a rig that develops code for a city. The gc-toolkit rig the city imports
+  the pack from needs no setting.
 
 ---
 
@@ -220,7 +226,7 @@ The pack's checks, and what a failure means:
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
-| `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (`gc.superseded_by`); a closed epic with no hypothesis predates stewardship and is exempt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
+| `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (`gc.superseded_by`); a closed epic with no hypothesis, a Delivery or an incomplete Epic that owes one, is exempt, and the incomplete Epic's exemption is compatibility debt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` is present and the pre-commit hook that regenerates it is wired (warn-only) | a fresh clone before its first render, or `core.hooksPath` not set to `assets/hooks` |
 | `check-recycle-capable` | cycle-recycle can fire: the Stop and UserPromptSubmit events reach the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, its `--drift` sees a changed pack file, and no refinery defer guard is latched | the wiring stopped passing the hook its stdin, the transcript shape moved under the measurement or the drift check, or an uncommitted tracked file has latched the refinery's git-op guard |

@@ -781,7 +781,7 @@ eq "$(field tk-rec status)" "open" "(SLING-REFUSED) …and the recommendation's 
 # REAL gc-helm.sh accept over the same store. The sign-off runs the pack
 # scripts beside it, so it runs as a link in a stub pack, where they stand in:
 # the headline writes gc.takeaway, the lifecycle writer is the stub above, and
-# the PR reminder records nothing.
+# the writer of the visit's PR comment does nothing.
 mkdir -p "$TMP/rig/assets/scripts" "$TMP/cwd"
 cat > "$TMP/rig/assets/scripts/gc-helm.sh" <<H
 #!/usr/bin/env bash

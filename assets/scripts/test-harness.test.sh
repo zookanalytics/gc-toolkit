@@ -215,7 +215,7 @@ store '[{"id":"tk-anc","status":"open","assignee":"","title":"a","notes":"","met
 gc bd create "review" -t task --metadata '{"task_kind":"review"}' --deps "blocks:tk-anc" --json >/dev/null
 eq "$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | join(",")')" "new-3" \
   "create --deps blocks:<id>: the new bead blocks <id>"
-gc bd create "visit" -t task --deps "tracks:tk-sub" --json >/dev/null
+gc bd create "conversation" -t task --deps "tracks:tk-sub" --json >/dev/null
 eq "$(gc bd dep list new-4 --direction=down -t tracks --json | jq -r '[.[].id] | join(",")')" "tk-sub" \
   "create --deps tracks:<id>: the new bead tracks <id>"
 gc bd create "waits" -t task --deps "tk-sub" --json >/dev/null

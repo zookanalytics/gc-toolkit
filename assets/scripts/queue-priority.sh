@@ -529,8 +529,8 @@ cmd_move() {
     fi
 
     # The live beads of every class, among them every bead that can follow the
-    # moved one: a gate filed under a parent, as a legacy demand gate is,
-    # follows that parent like any member.
+    # moved one: a gate filed under a parent follows that parent like any
+    # member.
     local listing raw one status out
     mktemp_tracked || return 1; listing="$REPLY"
     raw="$(qp_list --status=open,in_progress,blocked,deferred,hooked)" \

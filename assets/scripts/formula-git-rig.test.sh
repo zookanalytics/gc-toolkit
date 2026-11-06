@@ -499,34 +499,17 @@ has "$(cat "$MN/gc.log")" "runtime drain-ack" "miner/mine-and-file: the session 
 # --- 7. One rig-root lookup. -----------------------------------------------------
 # rig-root.sh holds the lookup, so a fix to it lands once. In the formulas whose
 # git calls name a rig by path no block reads the roster for a rig's path
-# itself, every block finds rig-root.sh by one locator line, and the line after
-# each locator calls it. The pack's own formulas ask gc for the pack, as every
-# step that runs a pack script does. The gascity-keeper's formulas carry no
-# binding for this pack, so theirs is the loop their other lookups of the
-# pack's scripts use. The refinery scripts that resolve the rig themselves run
-# the rig-root.sh beside them. rig-root.test.sh proves the lookup.
+# itself, and the refinery scripts that resolve the rig themselves run the
+# rig-root.sh beside them. rig-root.test.sh proves the lookup, and
+# pack-self-location.test.sh how a block reaches the script.
 echo "── one rig-root lookup ──"
-LOCATOR='RR="$(b='"'"'{{binding_prefix}}'"'"'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""'
-KEEPER_LOCATOR='RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done'
-SITES=0
 for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$POLECAT_TOML" "$SYNC_TOML"; do
-  name="${f##*/}"
-  want="$LOCATOR"
-  case "$f" in "$ROOT"/packs/gascity-keeper/*) want="$KEEPER_LOCATOR" ;; esac
-  eq "$(grep -c 'rig list --json[[:space:]]*|' "$f" || true)" 0 "$name: no block reads the roster for a rig's path itself"
-  LINES=$(grep -E '^[[:space:]]*RR=' "$f" | sed 's/^[[:space:]]*//' || true)
-  n=$(printf '%s\n' "$LINES" | awk 'NF { n++ } END { print n + 0 }')
-  [ "$n" -ge 1 ] && ok "$name: $n block(s) find rig-root.sh" || bad "$name: blocks find rig-root.sh" "none"
-  eq "$(printf '%s\n' "$LINES" | sort -u)" "$want" "$name: every block finds rig-root.sh by the one locator line"
-  CALLS=$(awk 'f { sub(/^[[:space:]]*/, ""); print; f = 0 } /^[[:space:]]*RR=/ { f = 1 }' "$f")
-  eq "$(printf '%s\n' "$CALLS" | grep -cF '$("${RR:?rig-root.sh not found in the pack}"' || true)" "$n" "$name: the line after each locator calls rig-root.sh"
-  SITES=$((SITES + n))
+  eq "$(grep -c 'rig list --json[[:space:]]*|' "$f" || true)" 0 "${f##*/}: no block reads the roster for a rig's path itself"
 done
 for b in gather reason rebase prprep miner-1 miner-2; do
-  grep -qF '"${RR:?rig-root.sh not found in the pack}"' "$TMP/$b.sh" && ok "$b: the block resolves its rig through rig-root.sh" \
+  grep -qF '/rig-root.sh"' "$TMP/$b.sh" && ok "$b: the block resolves its rig through rig-root.sh" \
     || bad "$b: the block resolves its rig through rig-root.sh"
 done
-echo "($SITES blocks in all)"
 for s in direct-merge-push.sh refinery-workspace.sh; do
   eq "$(grep -c 'rig list --json' "$HERE/$s" || true)" 0 "$s: reads no roster itself"
   eq "$(grep -c '"$SCRIPTS_DIR/rig-root.sh"' "$HERE/$s" || true)" 1 "$s: resolves the rig through the rig-root.sh beside it"
