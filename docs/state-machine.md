@@ -649,12 +649,11 @@ needs phrase.
 `prstatus.Read` gathers through it. The label's value counts them, the board's
 row names them, and `gc-helm engage` on the PR offers each, beside every other
 reason `prstatus.Reasons` gives, through `gctk pr-status derive --json`. Each
-bead walks for itself, and
-the walks of one call share their reads: each bead is read once, and its edges a
-level at a time. So a PR reads the same on the board, which walks a rig's PRs
-together, as on its label and at engage, which walk it alone. A walk is bounded,
-and one that passes its bound reads as a read that did not answer, for that bead
-alone.
+bead walks for itself, and the walks of one call share their reads: each bead is
+read once, and its edges a level at a time. So a PR reads the same on the board,
+which walks a rig's PRs together, as on its label and at engage, which walk it
+alone. A walk is bounded, and one that passes its bound reads as a read that did
+not answer, for that bead alone.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
 anchor, its in-flight set, its blockers or the walk from them do not read,

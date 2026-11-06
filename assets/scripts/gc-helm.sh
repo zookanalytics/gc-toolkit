@@ -3649,20 +3649,19 @@ EOF
 # choice of a conversation the subject already has, of a gate or blocker that
 # holds it, and the starter of a new conversation. The subject's open
 # conversations are listed numbered with their state, and what holds the subject
-# follows, unless the engage was pointed at a gate already: each gate and blocker
-# on the same numbers, and the PR's own review threads or blocked verdict
-# unnumbered, since engaging the subject is how a person acts on them. The
-# starter seeds follow, each keyed by its letter. The single reply resolves as: a
-# number takes that conversation (a live sitting is attached to, any other is
-# held in a fresh sitting) or engages that gate or blocker; a seed letter opens a
-# new conversation on that
-# seed; any other text opens a new conversation with that text as its opener;
-# Enter takes the default, which attaches to a live sitting, takes a conversation
-# from the queue, or files one. Numbers and letters never collide, so both live
-# in one prompt. Sets ENGAGE_CONV_CHOICE to a conversation id, "new", or "" for
-# the default, and ENGAGE_HOLD_CHOICE to a gate or blocker picked; on "new" it also sets
-# ENGAGE_STARTER_BODY (the conversation's ask; empty = blank) and
-# ENGAGE_STARTER_TAIL (a short title).
+# follows, unless the engage was pointed at a gate already: each gate and
+# blocker on the same numbers, and the PR's own review threads or blocked
+# verdict unnumbered, since engaging the subject is how a person acts on them.
+# The starter seeds follow, each keyed by its letter. The single reply resolves
+# as: a number takes that conversation (a live sitting is attached to, any other
+# is held in a fresh sitting) or engages that gate or blocker; a seed letter
+# opens a new conversation on that seed; any other text opens a new conversation
+# with that text as its opener; Enter takes the default, which attaches to a
+# live sitting, takes a conversation from the queue, or files one. Numbers and
+# letters never collide, so both live in one prompt. Sets ENGAGE_CONV_CHOICE to
+# a conversation id, "new", or "" for the default, and ENGAGE_HOLD_CHOICE to a
+# gate or blocker picked; on "new" it also sets ENGAGE_STARTER_BODY (the
+# conversation's ask; empty = blank) and ENGAGE_STARTER_TAIL (a short title).
 engage_prompt_conversation_or_starter() {
     ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""; ENGAGE_CONV_CHOICE=""; ENGAGE_HOLD_CHOICE=""
     _epv_i=0; _epv_map=""; _epv_hmap=""; _epv_convs=0
@@ -4238,10 +4237,10 @@ cmd_engage() {
 
     # Interactive decision for a SUBJECT, in one prompt: take one of its
     # conversations, engage a gate or blocker that holds it, or open a new one
-    # (blank, on a seed, or with a typed opener). An explicit conversation id names
-    # its own conversation, and a pre-filled --reason/--template already chose a
-    # new one. An engage that asks nothing names what holds the bead instead,
-    # unless it was pointed at a conversation or a gate.
+    # (blank, on a seed, or with a typed opener). An explicit conversation id
+    # names its own conversation, and a pre-filled --reason/--template already
+    # chose a new one. An engage that asks nothing names what holds the bead
+    # instead, unless it was pointed at a conversation or a gate.
     if [ "$engage_interactive" = 1 ] && [ -z "$named_conv" ] && [ "$starter_prefilled" = 0 ]; then
         engage_prompt_conversation_or_starter "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
         case "$ENGAGE_CONV_CHOICE" in

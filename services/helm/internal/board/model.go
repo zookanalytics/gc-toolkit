@@ -588,14 +588,13 @@ type Tile struct {
 	// Phase is this bead's liveness in the shared status vocabulary — `working`,
 	// `merging`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
-	// [prstatus.Derive] names: on a merge anchor, from the facts its PRPhase
-	// reads ([Anchor.PR]), and on any other bead, from its holds, the open human
-	// gates that hold it and the live-workflow signal standing over it. A merge
-	// anchor whose PR has no answer reads its liveness as any other bead does.
-	// A bead's board liveness and its
-	// GitHub `status:` label come from that one core. A row WITH child tiles then
-	// takes their rolled-up state in place of that per-bead value
-	// ([aggregatePhases]): an epic's frontier is its children's frontier.
+	// [prstatus.Derive] names: on a merge anchor, from the facts its PRPhase reads
+	// ([Anchor.PR]), and on any other bead, from its holds, the open human gates
+	// that hold it and the live-workflow signal standing over it. A merge anchor
+	// whose PR has no answer reads its liveness as any other bead does. A bead's
+	// board liveness and its GitHub `status:` label come from that one core. A row
+	// WITH child tiles then takes their rolled-up state in place of that per-bead
+	// value ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
 	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
 	// round-trip value and is never rolled up. Phase equals it on a merge anchor

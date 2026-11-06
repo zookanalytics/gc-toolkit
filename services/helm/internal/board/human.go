@@ -253,9 +253,9 @@ func SessionEnded(state string) bool {
 // humanIndex holds, for each bead, the open human gates that hold it and the
 // open conversations that track it, read off the gate and conversation anchors
 // the gather admitted and off the gates among a merge anchor's
-// [Anchor.PRReasons], and which
-// of them a live sitting holds or answers. [BuildBoard] builds it once, before
-// it derives any tile, so a row's held fact and the fold read one index.
+// [Anchor.PRReasons], and which of them a live sitting holds or answers.
+// [BuildBoard] builds it once, before it derives any tile, so a row's held fact
+// and the fold read one index.
 type humanIndex struct {
 	// gates maps a bead id to the open human gates whose Subjects name it, and,
 	// on a merge anchor, the ones behind the beads it waits on.

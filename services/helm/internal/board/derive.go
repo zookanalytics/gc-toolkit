@@ -1128,12 +1128,12 @@ func demand(b Blocker) bool {
 // A recorded blocked verdict is read by [prstatus.Blocked], the rule the row's
 // phase and the status: label read it by, over the PR's facts ([Anchor.PR]). It
 // reads blocked while that rule counts it, and progressing once it does not: a
-// verdict at a head the posture has left, or one whose cause city work in flight
-// is acting on, is the next merge pass's to replace. A closed row's recorded
-// verdict travels unchanged, and a live PR whose facts have no answer cannot
-// tell, so its recorded verdict reads unknown. The owed rule and
-// the needs phrase read this axis, so a row's place in the operator's queue and
-// its chip come from the one rule.
+// verdict at a head the posture has left, or one whose cause city work in
+// flight is acting on, is the next merge pass's to replace. A closed row's
+// recorded verdict travels unchanged, and a live PR whose facts have no answer
+// cannot tell, so its recorded verdict reads unknown. The owed rule and the
+// needs phrase read this axis, so a row's place in the operator's queue and its
+// chip come from the one rule.
 //
 // Any other verdict is read off the bead, with ONE live upgrade: an open
 // pool-routed blocker means an actor is due to act whatever the last gate pass

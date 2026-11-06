@@ -275,7 +275,8 @@ first, and outranks a takeaway. Those are the gates on the anchor and the ones
 behind a bead it waits on, such as a rework, which the beads source reads for
 each live merge anchor through `prstatus.Read`, the definition behind the PR's
 `held:` labels (`board.Anchor.PR`, `board.Anchor.PRReasons`). The supervisor
-backend reads none, because its beads carry no await type. The owed clock is the earliest `updated_at` among the row's open gates and owed
+backend reads none, because its beads carry no await type. The owed clock is the
+earliest `updated_at` among the row's open gates and owed
 conversations. A bead that carries `gc.recommended_formula` and that no open
 gate under the key `first-reaction` blocks has its own `blocks` listing read
 too, which returns a closed gate with its close reason: that is how the board
@@ -675,7 +676,8 @@ the posture was read at, and nothing is in flight on the anchor unless its cause
 is `blocker`. The work in flight is the anchor's in-flight set, every bead
 carrying its `anchor_bead` at a live status, which `prstatus.Read` gathers for the
 board as it does for `gctk pr-status derive`. A PR whose facts did not read
-cannot tell, so its recorded `blocked` reads `unknown`. A cause outside the vocabulary holds wherever it was
+cannot tell, so its recorded `blocked` reads `unknown`. A cause outside the
+vocabulary holds wherever it was
 recorded, because the derivation cannot name it. Any other recorded `blocked`
 reads `progressing`, because the next merge pass replaces it, so the row is not
 owed and its `needs` does not call it blocked. The row's phase reads the verdict
@@ -1025,7 +1027,7 @@ healthy.
 |---|---|
 | unset (default) | beads library if this binary can actually OPEN a rig store; otherwise the HTTP API, with a log line naming the consequence |
 | `beads` | force the library; **fatal** if no store can be opened, rather than a quiet downgrade |
-| `supervisor` | force the HTTP API (accepting `stale_days = 0`, no human gates, no held conversations or sittings, no PR phase or held value, and unresolved waiting edges) |
+| `supervisor` | force the HTTP API (accepting `stale_days = 0`, no human gates, no held conversations or sittings, no in-flight join, no PR phase or held value, and unresolved waiting edges) |
 
 **The test is an OPEN, not a path check** (tk-4cqtv). Resolving
 `<city>/rigs/*/.beads` is not enough to know this backend can serve: a binary
