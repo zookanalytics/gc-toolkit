@@ -20,15 +20,16 @@ it in this skill's FROM column.
 ## 1. Read the queue against the target
 
 Open from the target of each rig the queue reaches, which the rig's `AGENTS.md`
-states (your prompt's "Opening a sitting"). Then list the queue, grouped by rig:
+states (your prompt's "The rig's target"). Then list the queue, grouped by rig,
+with each bead's priority:
 
 ```bash
 gc beads list --label hold:mayor --format=json \
-  | jq -r '(if type == "array" then . else .beads end)[] | "\(.id)\t\(.title)"' | sort
+  | jq -r '(if type == "array" then . else .beads end)[] | "\(.id)\tP\(.priority // "-")\t\(.title)"' | sort
 ```
 
 Read the open epics of each rig the queue reaches, with what holds each, since
-most dispositions name one (your prompt's "What you read").
+most dispositions name one (your prompt's "Reads").
 
 ## 2. Propose one disposition for each bead
 
@@ -72,7 +73,7 @@ that does not settle it, propose `ask` or say that your confidence is low.
 ## 3. Sequence what you would place
 
 Order the beads you propose to place by WSJF against the rig's target, as your
-prompt's "How a sitting sequences the work" says: value, time criticality, and
+prompt's "Sequencing: WSJF" says: value, time criticality, and
 risk reduction or opportunity enablement, over job size. Compare them with one
 another and recommend each bead's priority, or its shift under its parent, with
 the reasoning in words. Store no score.

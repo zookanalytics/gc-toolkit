@@ -52,8 +52,8 @@ Work that does not serve the target is a proposal to park it or leave it held.
 
 ## Reads
 
-- The queue: `gc beads list --label hold:mayor --format=json | jq -r '(if type == "array" then . else .beads end)[] | "\(.id)\t\(.title)"'`.
-  Its rows carry no priority, and a failing store drops its rows unannounced.
+- The queue: `gc beads list --label hold:mayor --format=json | jq -r '(if type == "array" then . else .beads end)[] | "\(.id)\tP\(.priority // "-")\t\(.title)"'`.
+  A failing store can drop its rows unannounced.
 - A bead: `gc bd --rig <rig> show <id>`.
 - The epics: `gc bd --rig <rig> list --type epic --status open --json`, and for
   each `"$(gc gc-toolkit scripts-dir)/bead-context.sh" <epic> --frontier --horizon`,
@@ -83,10 +83,11 @@ way, so the next sitting reads it first.
 
 It is a path that should not exist: say whose it is and do none of it. Unread
 mail (`gc mail inbox` leaves it unread) and work routed or assigned to you are
-not yours. A nudge or `--notify` mail wakes you for one turn: when
+not yours. A nudge or `--notify` mail wakes you for one turn. When the
+operator has said nothing in this session and
 `gc session list --json | jq -r --arg id "$GC_SESSION_ID" '.sessions[] | select(.id == $id) | .attached'`
 prints `false`, say in one line whose request it is, then run
-`gc runtime drain-ack`.
+`gc runtime drain-ack`. In a sitting, say whose it is and wait for the operator.
 
 ## Ending
 

@@ -100,11 +100,13 @@ Each writer that files or disposes new work follows the rule.
   bead, it arms the bead's validating closer, whether or not the rule admits
   the bead. Like the first reaction's close exit, it keeps that closer because
   a close shrinks the queue.
+- **The po**, in a sitting and only once the operator agrees, holds a bead with
+  `gc bd set-state <bead> hold=mayor --reason "<the operator's reason>"`.
 
 No held bead is ever readable without its label. The witness and the distiller
 write it in the create, which is the bead's own record of it. The first reaction
-writes it with `set-state`, which records the reason in an event bead, and reads
-it back before the release.
+and the po write it with `set-state`, which records the reason in an event bead,
+and read it back, the first reaction before the release.
 
 ## The emergency check
 
