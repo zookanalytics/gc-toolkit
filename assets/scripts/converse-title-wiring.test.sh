@@ -178,7 +178,7 @@ outer_title() { O -u display-message -p -t "=$1:" '#{pane_title}' 2>/dev/null; }
 outer_shows() { [ "$(outer_title "$1")" = "$2" ]; }
 
 FIRST="tk-test — the sitting's first topic"
-LATER="tk-test — the sitting's next topic"
+LATER="tk-test #41 — the sitting's next topic"
 O new-session -d -s keep -x 90 -y 26 'sleep 600' >/dev/null 2>&1
 outer on "$SIT"
 if wait_for attached "$SIT"; then
@@ -190,9 +190,9 @@ if wait_for attached "$SIT"; then
     fi
     T select-pane -t "=$SIT:" -T "$LATER" >/dev/null 2>&1
     if wait_for outer_shows on "$LATER"; then
-        ok "(CARRY) …and a later title"
+        ok "(CARRY) …and a later title, whose PR number keeps its #"
     else
-        bad "(CARRY) …and a later title (got '$(outer_title on)')"
+        bad "(CARRY) …and a later title, whose PR number keeps its # (got '$(outer_title on)')"
     fi
 else
     bad "(CARRY) a client attached to the sitting"
