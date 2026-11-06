@@ -169,7 +169,7 @@ bead. This is how to write it:
 |---|---|---|
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
-| `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
+| `target` | you (submit) / caller | landing branch; `work-submit.sh` resolves it in submit step 5's hand-off call |
 | `pr_summary` | you (submit), or an effort's summary task | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed; a summary task stamps its landing bead |
 | `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
@@ -195,10 +195,12 @@ stands on a branch some OTHER open bead anchors, and every reader that matters
 for the merge — enumerates anchors by `merge_result` and reads that bead. A
 write aimed at the claimed bead lands, errors nowhere, and is never read.
 
-Submit step 4b resolves it: the open bead on this branch that carries a
+`work-submit.sh` resolves it: the open bead on this branch that carries a
 `merge_result`. While none does, a convoy's rebuild child has the convoy it
-names as its `anchor_bead` for its anchor. Write to the anchor what the
-anchor's readers read, and to your claimed bead everything else.
+names as its `anchor_bead` for its anchor. Submit step 4's `--anchor-only` call
+prints it, and step 5's hand-off call takes it as `--anchor`, or resolves it
+again when that flag is left out. Write to the anchor what the anchor's readers
+read, and to your claimed bead everything else.
 
 ## Beads: what you close and what you never close
 
