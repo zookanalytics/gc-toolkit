@@ -44,7 +44,17 @@ attach = true
 # session_live after every start of the session with GC_TMUX_SOCKET naming the
 # city's tmux server, and re-applies a changed value without a restart. The
 # `=<name>:` target matches the session exactly.
-session_live = ['tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on']
+# The second entry passes the sitting's pane title on to the terminal of a
+# client attached to it, so the operator's tab shows the sitting's title. The
+# sitting sets that title with `gctk session title`, which has Claude Code or
+# Codex name its own session, and each draws that name as its terminal title,
+# which tmux keeps as the pane title (#T). set-titles is a session option too,
+# so the entry reaches the sitting's session alone and leaves the server's
+# global value as it is.
+session_live = [
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on',
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#T"',
+]
 # Empty on purpose, and empty is not what protects a sitting. A sitting runs as
 # a manual (spawn-on-engagement) session, never pool_managed, and all three
 # claim backstops gate governs() on pool_managed (gascity idle_nudge.go,
