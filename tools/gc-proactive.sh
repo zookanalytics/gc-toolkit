@@ -48,8 +48,8 @@ FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 REACTION_KIND="first-reaction"
 # Set by cmd_sling when it skips a bead as a no-op, else empty: "reacted" when
 # a reaction is already open for the subject or a live owner owns its reaction,
-# "dispatch-path" when the subject already has a route or an arm,
-# "live-workflow" when a live workflow already drives it. cmd_scan's --sling loop
+# "dispatch-path" when the subject already has a route or an arm, or an open
+# human gate blocks it, "live-workflow" when a live workflow already drives it. cmd_scan's --sling loop
 # reads it in-process to keep a skip from spending the cap; the `sling` CLI verb
 # in main() translates it to RC_ALREADY_REACTED, RC_DISPATCH_PATH or
 # RC_LIVE_WORKFLOW so a cross-process caller (gc-helm react, operator-intake) can
@@ -291,6 +291,9 @@ reaction_absent_guard() {
 # pool queue serves, or a deferred-dispatch arm. scan_precision_filter keeps
 # such a bead out of every sweep, and this guard holds the same line for a bead
 # named to the sling directly, the way gc-helm react and operator-intake name one.
+# A bead an open human gate blocks is refused the same way: the person's answer
+# decides what happens to it, as a converse sitting's ruling does to the bead
+# it holds, and `bd ready` keeps every such bead out of the sweeps.
 # Filing a reaction leaves the subject's route in place, so a routed subject
 # stays claimable for the whole reaction. The pool its route names can hand it
 # to a worker mid-reaction, and the disposition then acts on a bead that worker
@@ -299,8 +302,8 @@ reaction_absent_guard() {
 # is no safer: the deferred-dispatch reconcile pass slings the bead once nothing
 # holds it and reads no reaction, so the bead can be dispatched twice.
 #
-# Returns 0 when the bead has no dispatch path, 1 when it has one, and 2 when
-# its metadata cannot be read. A failed read is not proof that it has none, so
+# Returns 0 when the bead has no dispatch path and no open human gate blocks it,
+# 1 when it has one or a gate blocks it, and 2 when its row cannot be read. A failed read is not proof that it has none, so
 # the caller fails closed on 2. The live read takes only one JSON array holding
 # one row as an answer, so an empty answer fails it even when gc exits 0, and
 # two answers fail it too. bd's not-found error is no exception:
@@ -308,29 +311,40 @@ reaction_absent_guard() {
 # bead deleted since, and nothing may be filed for it. The read comes from the
 # fixture under test (beads.json), live otherwise.
 sling_dispatch_path_guard() {
-    local bead="$1" meta paths
-    local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its metadata could not be read) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
+    local bead="$1" row paths gates
+    local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its row could not be read) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
     if [ -n "$FIXTURE" ]; then
         [ -f "$FIXTURE/beads.json" ] || return 0
-        meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null)" \
+        row="$(jq -c --arg id "$bead" '.[$id] // {}' "$FIXTURE/beads.json" 2>/dev/null)" \
             || { log "$unreadable"; return 2; }
     else
         local db; db="$(rig_beads_db)"
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        meta="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+        row="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
             | jq -cs 'if length == 1 and (.[0] | type) == "array" and (.[0] | length) == 1
-                      then (.[0][0].metadata // {}) else error("unreadable") end' 2>/dev/null)" \
+                      then .[0][0] else error("unreadable") end' 2>/dev/null)" \
             || { log "$unreadable"; return 2; }
     fi
     # Each key is asked on its own through the shared predicate, so the log can
     # name the path it found without a second definition of one.
-    paths="$(printf '%s' "$meta" | jq -r "$DISPATCH_PATH_JQ"'
-        . as $m | [ dispatch_path_keys[] as $k
+    paths="$(printf '%s' "$row" | jq -r "$DISPATCH_PATH_JQ"'
+        (.metadata // {}) as $m | [ dispatch_path_keys[] as $k
                     | select({metadata: {($k): $m[$k]}} | has_dispatch_path)
                     | "\($k)=\($m[$k])" ] | join(", ")' 2>/dev/null)" \
         || { log "$unreadable"; return 2; }
-    [ -n "$paths" ] || return 0
-    log "$PROG: sling: $bead already has a dispatch path ($paths) — not filing a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File a conversation directly (gc-helm open), or react once that route or arm is cleared."
+    if [ -n "$paths" ]; then
+        log "$PROG: sling: $bead already has a dispatch path ($paths) — not filing a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File a conversation directly (gc-helm open), or react once that route or arm is cleared."
+        return 1
+    fi
+    # `bd show` gives each blocker's type, await type and status beside the edge.
+    gates="$(printf '%s' "$row" | jq -r '[ (.dependencies // [])[]
+        | select(((.dependency_type // .type // "") | tostring) == "blocks")
+        | select(((.issue_type // "") | tostring) == "gate" and ((.await_type // "") | tostring) == "human")
+        | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+        | ((.id // .depends_on_id // "") | tostring) ] | join(", ")' 2>/dev/null)" \
+        || { log "$unreadable"; return 2; }
+    [ -n "$gates" ] || return 0
+    log "$PROG: sling: $bead waits on a person's answer (open human gate $gates) — not filing a first reaction. That answer decides what happens to it, and a reaction would race the ruling. File a conversation directly (gc-helm open), or react once the gate is answered."
     return 1
 }
 
@@ -423,7 +437,8 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       is already open or a live owner owns it,
                                       $RC_LIVE_WORKFLOW already driven by a live
                                       workflow, $RC_DISPATCH_PATH already routed
-                                      or armed (each a no-op, nothing filed), 1
+                                      or armed, or waiting on a person's answer
+                                      (each a no-op, nothing filed), 1
                                       error, including a <bead> its own store
                                       does not prove present.
        $PROG deliverable [<pool-target>] [<bead>]

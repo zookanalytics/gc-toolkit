@@ -338,11 +338,12 @@ through `gc-helm.sh open`, which is where filing a conversation lives. It
 runs on `--no-react`, when `tools/gc-proactive.sh deliverable` answers that
 the proactive pool is not registered, is suspended or is capped at zero slots,
 and when the reaction would file nothing: the subject already has an open
-first reaction or a live owner owns it, a live workflow already drives it, or
-it is already routed or armed. A react path that could not deliver would leave
-a routed reaction bead nobody picks up and no conversation at all, the one
-outcome this channel exists to prevent. A roster the deliverable check cannot
-read answers yes, because absence of evidence is not evidence the pool is gone.
+first reaction or a live owner owns it, a live workflow already drives it, it
+is already routed or armed, or an open human gate blocks it. A react path that
+could not deliver would leave a routed reaction bead nobody picks up and no
+conversation at all, the one outcome this channel exists to prevent. A roster
+the deliverable check cannot read answers yes, because absence of evidence is
+not evidence the pool is gone.
 
 **The intake stamps `gc.origin=operator` on the subject**, on both paths and
 never over an origin already recorded. It is a fact the reaction weighs, not a

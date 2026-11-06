@@ -4,13 +4,14 @@
 # (blocked plainly-work bead with neither route nor arm, including one carrying
 # only gc.execution_routed_to — provenance, not a dispatch path — and one whose
 # route or arm holds only whitespace), every exemption (routed, armed, assigned,
-# worked by a live run, merge anchor, waiting for placement,
-# review/step/workflow metadata, every standing kind,
+# worked by a live run, merge anchor, waiting for placement, held by a converse
+# sitting's gate, review/step/workflow metadata, every standing kind,
 # decision/epic/infra types), a marked bead placed under an epic, the per-rig
 # labelling, the remedy string, the fail-closed probes (unreadable blocked
 # listing, unreadable runs, unreadable marked listing, a marked listing that
-# fails after printing its rows, unreadable rig list), a raw control byte in a
-# listing's row, and the quiet paths (empty store, all-armed store).
+# fails after printing its rows, unreadable gate listing, unreadable rig list),
+# a raw control byte in a listing's row, and the quiet paths (empty store,
+# all-armed store).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -54,6 +55,12 @@ case "$sub" in
             [ "$name" = "${BD_FAIL_MARKED:-}" ] && exit 3
             f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
             if [ "$name" = "${BD_PARTIAL_MARKED:-}" ]; then exit 3; fi ;;
+          # `list --type gate` is the read of the store's live gates; each one is
+          # logged, and BD_FAIL_GATES names a store whose listing fails.
+          *" --type gate "*)
+            printf '%s\n' "$name" >> "$STORES/gates.calls"
+            [ "$name" = "${BD_FAIL_GATES:-}" ] && exit 3
+            f="$STORES/$name.gates.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
           *) echo "stub bd: unexpected list: $*" >&2; exit 2 ;;
         esac ;;
   *) printf '[]'; exit 0 ;;
@@ -75,7 +82,11 @@ run_check() {
     RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
 }
 blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blocked.json"; }
-clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls"; }
+clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls" "$TMP/stores/gates.calls"; }
+gates_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.gates.json"; }
+gate_reads() { if [ -f "$TMP/stores/gates.calls" ]; then wc -l < "$TMP/stores/gates.calls" | tr -d ' '; else echo 0; fi; }
+# hgate <id> <key> — an open human gate filed under <key>.
+hgate() { printf '{"id":"%s","status":"open","issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "$2"; }
 marked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.marked.json"; }
 marked_reads() { if [ -f "$TMP/stores/marked.calls" ]; then wc -l < "$TMP/stores/marked.calls" | tr -d ' '; else echo 0; fi; }
 
@@ -102,6 +113,36 @@ eq "$RC" "1" "a blocked plainly-work bead with no dispatch path warns (exit 1)"
 has "$OUT" "no dispatch path" "the headline names the defect"
 has "$OUT" "alpha bead a-1" "the finding names the rig and bead"
 has "$OUT" "deferred-dispatch.sh arm a-1" "the finding names the arm remedy for that bead"
+clear_stores
+
+# --- a converse sitting's hold: its ruling decides the dispatch --------------
+# The hold's gate is a human gate under conversation.<id>, and the sign-off
+# sends or keeps the bead once the operator rules, so the bead owes no arm.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a blocked bead a converse sitting's gate holds is not flagged"
+eq "$(gate_reads)" "1" "…judged on one read of the store's live gates"
+clear_stores
+# Any other human gate keeps the rule: clearing it is the ruling to proceed,
+# and an arm is what sends the work then.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 polecat-blocked)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a blocked bead another human gate holds is flagged"
+has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
+clear_stores
+# A gate listing that does not read cannot rule a sitting out, so the
+# candidate is warned as unverifiable and never flagged.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1)"
+OUT=$(BD_FAIL_GATES=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable gate listing warns (exit 1)"
+has "$OUT" "whether a converse sitting's gate holds it could not be read" "…naming what could not be read"
+hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and flags nothing"
+clear_stores
+# A store with no candidate reads no gates.
+blocked_store alpha "$(barmed a-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an armed blocked bead is not flagged"
+eq "$(gate_reads)" "0" "…and no gate listing is read for a store with no candidate"
 clear_stores
 
 # gc.execution_routed_to is execution provenance, not a dispatch path. When NO
