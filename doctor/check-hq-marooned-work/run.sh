@@ -53,6 +53,15 @@ INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate"
     printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from marooned work."
     exit 1
 }
+# Which human gates still hold the bead they block, from the one rule every
+# reader of a gate shares. Exposes $HUMAN_GATE_JQ. An unsourceable one warns:
+# without it a bead that waits on a person's answer would read as marooned work.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether the HQ store holds marooned work"
+    printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a bead that waits on a person's answer cannot be told from marooned work."
+    exit 1
+}
 
 findings=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -232,15 +241,16 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# The open human gates, read only when a bead could be marooned: a bead one
-# blocks waits on a person's answer and is not marooned. `bd list` hides gates,
-# so they are a listing of their own, and a candidate it cannot clear is warned,
-# not flagged, when that listing fails.
+# The human gates that still hold by the shared rule (open_human_gates), read
+# only when a bead could be marooned: a bead one blocks waits on a person's
+# answer and is not marooned. `bd list` hides gates, so they are a listing of
+# their own, in bd's default scope, every status but closed, so the rule alone
+# decides which gates hold. A candidate it cannot clear is warned, not flagged,
+# when that listing fails.
 gates=" "; gates_ok=1
 if [ -n "$rows" ]; then
-    read_to "$WORK/gates.json" gc bd list --db "$STORE" --type gate --include-gates \
-        --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0; grc=$?
-    if [ "$grc" -eq 0 ] && gate_ids=$(jq -er 'if type == "array" then [ .[] | select(((.await_type // "") | tostring) == "human") | .id ] | join(" ") else error("not an array") end' "$WORK/gates.json" 2>/dev/null); then
+    read_to "$WORK/gates.json" gc bd list --db "$STORE" --type gate --include-gates --json --limit 0; grc=$?
+    if [ "$grc" -eq 0 ] && gate_ids=$(jq -er "$HUMAN_GATE_JQ"'if type == "array" then open_human_gates | join(" ") else error("not an array") end' "$WORK/gates.json" 2>/dev/null); then
         gates=" $gate_ids "
     else
         gates_ok=0

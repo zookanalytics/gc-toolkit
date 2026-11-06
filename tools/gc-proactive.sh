@@ -91,6 +91,12 @@ PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # shellcheck source=../assets/scripts/placement.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/placement.sh" \
     || { printf '%s: cannot source assets/scripts/placement.sh from the pack\n' "$PROG" >&2; exit 1; }
+# The one rule of which human gates still hold the bead they block, shared with
+# every reader of a gate. Exposes $HUMAN_GATE_JQ, which sling_dispatch_path_guard
+# applies. This script's own die and scrub, defined below, replace the library's.
+# shellcheck source=../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/bd-lib.sh" \
+    || { printf '%s: cannot source assets/scripts/bd-lib.sh from the pack\n' "$PROG" >&2; exit 1; }
 # The one resolver of a bead id to the store that owns it, and of whether that
 # store holds the bead (docs/bead-store-resolution.md). subject_present_guard
 # asks it.
@@ -338,11 +344,11 @@ sling_dispatch_path_guard() {
         log "$PROG: sling: $bead already has a dispatch path ($paths) — not filing a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File a conversation directly (gc-helm open), or react once that route or arm is cleared."
         return 1
     fi
-    # `bd show` gives each blocker's type, await type and status beside the edge.
-    gates="$(printf '%s' "$row" | jq -r '[ (.dependencies // [])[]
+    # `bd show` gives each blocker's own row beside the edge, so the shared rule
+    # (open_human_gate) judges each blocker as it stands.
+    gates="$(printf '%s' "$row" | jq -r "$HUMAN_GATE_JQ"'[ (.dependencies // [])[]
         | select(((.dependency_type // .type // "") | tostring) == "blocks")
-        | select(((.issue_type // "") | tostring) == "gate" and ((.await_type // "") | tostring) == "human")
-        | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+        | select(open_human_gate(""))
         | ((.id // .depends_on_id // "") | tostring) ] | join(", ")' 2>/dev/null)" \
         || { log "$unreadable"; return 2; }
     [ -n "$gates" ] || return 0

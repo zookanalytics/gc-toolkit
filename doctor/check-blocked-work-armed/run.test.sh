@@ -55,10 +55,12 @@ case "$sub" in
             [ "$name" = "${BD_FAIL_MARKED:-}" ] && exit 3
             f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
             if [ "$name" = "${BD_PARTIAL_MARKED:-}" ]; then exit 3; fi ;;
-          # `list --type gate` is the read of the store's live gates; each one is
-          # logged, and BD_FAIL_GATES names a store whose listing fails.
+          # `list --type gate` is the read of the store's gates; each one and its
+          # arguments are logged, and BD_FAIL_GATES names a store whose listing
+          # fails.
           *" --type gate "*)
             printf '%s\n' "$name" >> "$STORES/gates.calls"
+            printf '%s\n' "$*" >> "$STORES/gates.args"
             [ "$name" = "${BD_FAIL_GATES:-}" ] && exit 3
             f="$STORES/$name.gates.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
           *) echo "stub bd: unexpected list: $*" >&2; exit 2 ;;
@@ -82,11 +84,12 @@ run_check() {
     RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
 }
 blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blocked.json"; }
-clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls" "$TMP/stores/gates.calls"; }
+clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls" "$TMP/stores/gates.calls" "$TMP/stores/gates.args"; }
 gates_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.gates.json"; }
 gate_reads() { if [ -f "$TMP/stores/gates.calls" ]; then wc -l < "$TMP/stores/gates.calls" | tr -d ' '; else echo 0; fi; }
-# hgate <id> <key> — an open human gate filed under <key>.
-hgate() { printf '{"id":"%s","status":"open","issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "$2"; }
+# hgate <id> <key> [<status>] — a human gate filed under <key>, open unless
+# <status> says otherwise.
+hgate() { printf '{"id":"%s","status":"%s","issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "${3:-open}" "$2"; }
 marked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.marked.json"; }
 marked_reads() { if [ -f "$TMP/stores/marked.calls" ]; then wc -l < "$TMP/stores/marked.calls" | tr -d ' '; else echo 0; fi; }
 
@@ -128,6 +131,21 @@ clear_stores
 blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 polecat-blocked)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked bead another human gate holds is flagged"
+has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
+clear_stores
+# Which gates hold is the rule every reader of a gate shares (bd-lib.sh's
+# open_human_gate): every status but closed. The listing is bd's default
+# scope, which leaves out only closed gates, so the check passes no status set
+# of its own, and a closed gate in the listing holds nothing.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1 deferred)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a sitting's gate in any status but closed holds the bead"
+has "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--type gate" "…judged on the store's gate listing"
+hasnt "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--status" "…read from bd's default scope, with no status set of the check's own"
+clear_stores
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1 closed)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a sitting's closed gate holds nothing, so the bead is flagged"
 has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
 clear_stores
 # A gate listing that does not read cannot rule a sitting out, so the

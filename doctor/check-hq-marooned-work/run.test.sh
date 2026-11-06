@@ -58,9 +58,11 @@ name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
 [ "$name" = "${BD_SILENT_STORE:-}" ] && exit 0
 case "$sub" in
-  # `list --type gate` is the read of the store's live gates; GATES_FAIL fails it.
+  # `list --type gate` is the read of the store's gates; GATES_FAIL fails it, and
+  # each one's arguments are logged.
   list) case " $* " in
-          *" --type gate "*) [ -z "${GATES_FAIL:-}" ] || exit 3
+          *" --type gate "*) printf '%s\n' "$*" >> "$STORES/gates.args"
+                             [ -z "${GATES_FAIL:-}" ] || exit 3
                              f="$STORES/$name.gates.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
           *) f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
         esac ;;
@@ -145,6 +147,22 @@ hasnt "$OUT" "ok-held" "…and not named"
 store "$B_HELD"; gates "$G_TIMER"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a bead only a gate of another kind blocks is still flagged"
+has "$OUT" "ok-held" "…and named"
+# Which gates hold is the rule every reader of a gate shares (bd-lib.sh's
+# open_human_gate): every status but closed. The listing is bd's default
+# scope, which leaves out only closed gates, so the check passes no status set
+# of its own, and a closed gate in the listing holds nothing.
+G_HUMAN_DEFERRED='{"id":"hq-g1","status":"deferred","issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
+G_HUMAN_CLOSED='{"id":"hq-g1","status":"closed","issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
+rm -f "$TMP/stores/gates.args"
+store "$B_HELD"; gates "$G_HUMAN_DEFERRED"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a bead a human gate in any status but closed blocks is not flagged"
+has "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--type gate" "…judged on the store's gate listing"
+hasnt "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--status" "…read from bd's default scope, with no status set of the check's own"
+store "$B_HELD"; gates "$G_HUMAN_CLOSED"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bead only a closed human gate blocks is flagged"
 has "$OUT" "ok-held" "…and named"
 store "$B_HELD"; gates "$G_HUMAN"
 OUT=$(GATES_FAIL=1 run_check); RC=$?
