@@ -79,7 +79,15 @@ read at main `6dfa90898`. The city's installed gc is the fork build
    constraints of every import that names one source, and it refuses two
    different `sha:` pins with "incompatible pinned versions"
    (`mergeConstraints`, internal/packman/install.go). One source string
-   therefore resolves to one commit across the whole city.
+   therefore resolves to one commit across the whole city. Every install
+   rewrites the whole file. `WriteLockfile` (internal/packman/lockfile.go)
+   renames a new file over the old one without comparing them, and writes one
+   `[packs."<source>"]` table per remote source, holding its `version`,
+   `commit` and `fetched` time. `doImportInstall` (cmd/gc/cmd_import.go) calls
+   it on every run, and so does the `packv2-import-state` doctor fix that
+   re-pins core and bd (`importStateDoctorCheck.Fix`,
+   cmd/gc/import_state_doctor_check.go). The file's mtime therefore moves
+   whether or not any pin changed.
 3. **The cache.** A remote import resolves to
    `$GC_HOME/cache/repos/<sha256 of clone URL and commit>`
    (`GlobalRepoCacheRoot`, internal/config/implicit.go; `RepoCacheKey`,
@@ -401,8 +409,8 @@ reconciler's last pass. Section 7 gives the order.
 | `gc-build.sh`'s `behind_main` | A fetch of origin into the pack's own repository every 30 minutes (`:293`), counted against HEAD (`:298`). The helm board bands its PACK rows on it. | **Retirement.** Under the pin, it would fetch into a clone that Gas City shares across cities and validates on every load. Its premise is gone too: a checkout parked off main cannot happen when the served code is always exactly the pin. Deploy lag shows as the open deploy bead. `FETCH_TTL`, the `origin-fetch-at` marker, the record's `behind_main` field and helm's `BehindMain` band retire with it. |
 | I9's LAGGED and UNFETCHED (`doctor/check-pour-text-current`) | Each rig checkout's lag behind its origin ref, and that ref's fetch time, against the reconciler's 15-minute cadence. | **Retirement.** They measure whether the reconciler is keeping up, and nothing advances a checkout any more. |
 | I9's STALE-TEXT | The formula a running molecule was poured from (`gc.formula_source`), dated by `git log` in the checkout that owns the path (`:314`). | **The cached revision.** A source under a cache clone never changes in place, so staleness becomes "the deployed revision's copy differs from the poured one". The check compares the poured file with the same path under its own `GC_PACK_DIR`. The checkout arm stays for a city that imports by path. |
-| The overlays' hooks | The gh-origin-guard PreToolUse command in all three overlays, `patrol-continue.sh`'s ledger (`:118-120`), `work-context.sh`'s `run-lib.sh` (`:97-99`) and `cycle-recycle.sh`'s `scratch-reap.sh` (`:268-270`). Each takes its script from the first of `$GC_RIG_ROOT` and `$GC_CITY_PATH/rigs/gc-toolkit` that holds it, and the guard exits 0 when neither does. `work-context.sh` tries `$GC_RUN_LIB` and `$GC_PACK_DIR` first, and nothing sets either one for a session. | **The revision the session started from.** `worktree-setup.sh`, which runs as `pre_start` with its path under `{{.ConfigDir}}`, records its own scripts directory in the work dir. The hooks read that record. deacon, mechanik and dog do not run `worktree-setup.sh`, so each gains a `pre_start` step that writes the same record. `gh-origin-guard-codex.sh` copies the overlay's guard command into the Codex home, so the Codex agents take the change with it. A session with no record, such as one started before unit 1 went live, asks `gc gc-toolkit scripts-dir` instead. A per-hook `gc gc-toolkit scripts-dir` would be a Gas City query on every Bash call, which the operator ruled out: "Any query to gas city is expensive if done often, so it needs to be a push change vs a pull to check if anything changed" (converse sitting tk-vu6faf2, 2026-11-05, recorded in observation tk-dbsf5cu). |
-| `cycle-recycle.sh`'s pack drift | The mtimes of the role's prompt, patrol formula and fragments in the checkout, against the session's first prompt (`:95-111`). | **The lock.** A deploy writes the city's `packs.lock`, so its mtime later than the session's start means the pin moved under the session. That is one `stat`, with no query. Under a path import, the recorded directory's mtimes keep today's check. |
+| The overlays' hooks | The gh-origin-guard PreToolUse command in all three overlays, `patrol-continue.sh`'s ledger (`:118-120`), `work-context.sh`'s `run-lib.sh` (`:97-99`) and `cycle-recycle.sh`'s `scratch-reap.sh` (`:268-270`). Each takes its script from the first of `$GC_RIG_ROOT` and `$GC_CITY_PATH/rigs/gc-toolkit` that holds it, and the guard exits 0 when neither does. `work-context.sh` tries `$GC_RUN_LIB` and `$GC_PACK_DIR` first, and nothing sets either one for a session. | **The revision the session started from.** `worktree-setup.sh`, which runs as `pre_start` with its path under `{{.ConfigDir}}`, records its own scripts directory in the work dir, with the commit checked out there (`git rev-parse HEAD`). The hooks read that record. deacon, mechanik and dog do not run `worktree-setup.sh`, so each gains a `pre_start` step that writes the same record. `gh-origin-guard-codex.sh` copies the overlay's guard command into the Codex home, so the Codex agents take the change with it. A session with no record, such as one started before unit 1 went live, asks `gc gc-toolkit scripts-dir` instead. A per-hook `gc gc-toolkit scripts-dir` would be a Gas City query on every Bash call, which the operator ruled out: "Any query to gas city is expensive if done often, so it needs to be a push change vs a pull to check if anything changed" (converse sitting tk-vu6faf2, 2026-11-05, recorded in observation tk-dbsf5cu). |
+| `cycle-recycle.sh`'s pack drift | The mtimes of the role's prompt, patrol formula and fragments in the checkout, against the session's first prompt (`:95-111`). | **The pack's entry in the lock.** The session's record (the row above) holds the commit the session started from, because the cache directory's name is a hash and does not give the commit back. A check `stat`s the city's `packs.lock`. Only when the file is newer than the check's last read does it read the pack's `[packs."<source>"]` entry again and compare that `commit` with the recorded one. Drift is a different commit. The mtime alone proves nothing, because every install rewrites the file and a re-pin of core or bd changes it too (fact 2). A check stays one `stat`, plus a local file read after a write, with no query. Under a path import, the recorded directory's mtimes keep today's check. |
 | The demo engine's own-source rule | `_demo_engine_rig_of` treats the rig whose repository holds the pack's directory as one whose app reads the city (`:404-412`). | **No code change.** The clone belongs to no rig, so the rule finds nothing. The town already sets `app_reads_city = "true"` on the gc-toolkit rig. install.md's line that the rig the pack is imported from "needs no setting" changes to say a URL import needs the setting. |
 
 **Git history in the cache.** The clone is a full clone (fact 3), so a script
@@ -592,7 +600,7 @@ Running them in order keeps their shared docs from conflicting.
 
 | Unit | What it changes | Who | Waits on |
 |---|---|---|---|
-| 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. Pack drift reads the lock's mtime. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
+| 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory, and the commit checked out there, in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. Pack drift compares the recorded commit with the pack's entry in the lock, which it reads again only after the lock's mtime moves. Its tests show that an install that changes nothing, and a re-pin of core or bd, recycle nothing. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
 | 2. Build and check what is deployed | `gc-build.sh` loses `behind_main`. helm's packhealth loses its band. I9 loses LAGGED and UNFETCHED, and its STALE-TEXT gains the cached-revision arm. Also the helm README, the I9 rows in component-model.md and install.md, and the tests. | polecat | unit 1 |
 | 3. Deploy by pin | `gc gc-toolkit deploy`, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
 | 4. Retire the healer | Delete the reconciler, its test and its order, with their deletion-plan rows and the stage B schedule row. Retire `auto_ff_rig_main`. Move the demo engine to a worktree of its rig. Remove `reconcile_rig` and its comment from lifecycle.toml. Sweep the docs in section 6. Count the reconciler's open subjects again. | polecat | unit 3 |
@@ -611,9 +619,9 @@ the command, and unit 6's step 7 becomes your first deploy.
 
 Units 1 and 3 add operational surface: the deploy command, the deploy check
 order and its script, the `deploy` label on one bead, the recorded scripts
-directory in a session's work dir, and a `pre_start` step on deacon, mechanik
-and dog. Units 2 and 4 remove surface. Upstream is gastownhall/gascity at
-`8e75c50aa845`.
+directory and commit in a session's work dir, and a `pre_start` step on
+deacon, mechanik and dog. Units 2 and 4 remove surface. Upstream is
+gastownhall/gascity at `8e75c50aa845`.
 
 - **Moving a pin.** Searched: `gc import install`, `gc import upgrade`,
   `gc import add --version`, `gc pack fetch`, and registry releases with
@@ -648,8 +656,11 @@ and dog. Units 2 and 4 remove surface. Upstream is gastownhall/gascity at
 - **A running session learning that a deploy happened.** Searched: the
   config-drift handling and `gc reload --soft` (fact 8). Drift restarts the
   session from outside it. Pack drift lets a patrol recycle at its own safe
-  point. Its signal under the pin is `packs.lock`, which is Gas City's record
-  of the deployed revision, read with one `stat`. The canary in section 7
+  point. Its signal under the pin is the pack's entry in `packs.lock`, which
+  is Gas City's record of the deployed revision. A `stat` tells when the file
+  was last written, and only then is the entry read and its commit compared
+  with the session's, because every install rewrites the file (fact 2). The
+  canary in section 7
   watches how each patrol role restarts on the first deploy. If Gas City's
   drift handling restarts every patrol by itself, pack drift no longer earns
   its place, and unit 6 appends that observation to tk-1tfzr71.18, the member
