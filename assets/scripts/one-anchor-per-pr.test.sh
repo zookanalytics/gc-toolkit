@@ -419,7 +419,7 @@ cv||integration/cv|2026-07-01T00:00:00Z||convoy
 A
 eq "$(resolve3 rv-2 integration/cv '[{"id":"rv-2","metadata":{"task_kind":"rework","anchor_bead":"cv","source_review_bead":"tk-review"}}]')" "|rv-2|" \
    "(5h) a review's rework of a convoy never anchors the convoy"
-eq "$(resolve3 ru-1 integration/cv '[{"id":"ru-1","metadata":{"task_kind":"rework","anchor_bead":"cv","source_ruling_bead":"tk-visit"}}]')" "|ru-1|" \
+eq "$(resolve3 ru-1 integration/cv '[{"id":"ru-1","metadata":{"task_kind":"rework","anchor_bead":"cv","source_ruling_bead":"tk-conv"}}]')" "|ru-1|" \
    "(5h) a ruling's rework of a convoy never anchors the convoy"
 # (5i) work-submit.sh resolves the summary's anchor with the same block, so a
 #      polecat stamps its summary on the bead this landing anchors. One text,

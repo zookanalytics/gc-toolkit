@@ -19,7 +19,7 @@
 # pr-facts.sh the first time it reads the PR). With no cutover known, every
 # post under that login is the city's own. Two purpose markers that only the
 # city has written count as the mark too: the write-back reply marker and the
-# visit-comment marker.
+# sitting reminder's marker, <!-- gc:sitting:<task> -->.
 #
 # A post that informs rather than asks is not for review, and is never feedback,
 # whoever posted it. It says so at its start: its body opens with the no-review

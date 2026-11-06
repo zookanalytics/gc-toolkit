@@ -410,11 +410,10 @@ grep -q '^bd update' <<< "$CALLS" && bad "(AGAIN) an update was sent for the bod
 # The bead already waits on a gate titled with the text. A plain gate, with no
 # await type and no metadata, is the park. For each other kind the park files a
 # gate of its own:
-#   tk-dg   a demand gate: await_type=human and gc.demand_for
-#   tk-hg   a human gate whose demand stamp has not landed: await_type=human
+#   tk-hg   a human gate: await_type=human
 #   tk-mg   a gate another writer stamped: gc.blocker_key, no await type
 KT="$(jq -r '.title' <<< "$(row tk-dg)")"
-for k in tk-dg tk-hg tk-mg; do
+for k in tk-hg tk-mg; do
   reset_store
   add_gate tk-hg "$KT" human '{}'
   add_gate tk-mg "$KT" "" '{"gc.blocker_key":"loose-task-scope"}'

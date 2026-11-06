@@ -30,23 +30,12 @@
 #   (q) the successor is required under EVERY kind, `not-needed` included —
 #       the kind where nothing carries the work forward is where dropping the
 #       pointer looks reasonable, and it is exactly as unreadable there;
-#   (r) a task_kind=visit origin records gc.work_outcome=no-op for the
-#       work-record gate the close runs, and no gc.outcome;
-#   (s) a non-visit origin records NO gc.outcome either;
-#   (t) an outcome the visit already carries is left as it was, while
-#       gc.work_outcome=no-op still lands before the close;
-#   (u) an already-closed visit missing its work outcome is repaired with it;
+#   (s) a re-home writes no outcome of its own: neither gc.outcome nor
+#       gc.work_outcome;
 #   (x) an open human gate on the origin holds the close at the finalize gate;
 #   (y) --except-key reaches that gate, and nothing is excepted without it, and
 #       --check under it reads what would hold the close, writing nothing, with the
 #       gate asked about the origin as the close will leave it;
-#   (z) an already-closed visit that records an outcome is repaired with
-#       gc.work_outcome=no-op, and its outcome is left as it was;
-#   (aa) a store that refuses gc.work_outcome still re-homes and closes the
-#       visit — the key is a write of its own, never a precondition;
-#   (ab) a dropped gc.work_outcome is read back and written again before the
-#       close;
-#   (ac) a work outcome the visit already records is never written over;
 #   (ad) once the close reads back, the branch the bead names in metadata.branch
 #       goes to branch-end.sh with the bead's rig and id, once, after the close;
 #   (ae) a branch-end that cannot end the branch leaves the close standing: exit
@@ -314,11 +303,6 @@ case "$sub" in
             | if $tpl == "true" then .is_template = true else . end]'
     ;;
   update)
-    # FAKE_BD_REFUSE_WORK_OUTCOME refuses any update naming gc.work_outcome,
-    # writing nothing: the store or gate that rejects the key.
-    if [ -n "${FAKE_BD_REFUSE_WORK_OUTCOME:-}" ]; then
-      case " $* " in *" gc.work_outcome="*) echo "refused: gc.work_outcome" >&2; exit 1 ;; esac
-    fi
     # FAKE_UPDATE_LOG, when set, gets each update's bead id and arguments.
     [ -z "${FAKE_UPDATE_LOG:-}" ] || printf '%s %s\n' "$id" "$*" >> "$FAKE_UPDATE_LOG"
     # FAKE_BD_CLAIM_BEFORE_STAMP="<status> <assignee>" lands another actor's
@@ -355,16 +339,7 @@ case "$sub" in
         --set-metadata)
           # FAKE_BD_DROP_META simulates a write that reports success and does
           # not persist — the case the read-back guard exists for.
-          # FAKE_BD_DROP_WORK_OUTCOME_ONCE drops the first gc.work_outcome key
-          # an update carries, landing its other keys; later ones land.
-          drop=""
-          [ -z "${FAKE_BD_DROP_META:-}" ] || drop=1
-          case "$2" in gc.work_outcome=*)
-            if [ -n "${FAKE_BD_DROP_WORK_OUTCOME_ONCE:-}" ] && [ ! -e "$DB/.work-dropped" ]; then
-              : > "$DB/.work-dropped"; drop=1
-            fi ;;
-          esac
-          [ -n "$drop" ] || printf 'm.%s\n' "$2" >> "$f"
+          [ -n "${FAKE_BD_DROP_META:-}" ] || printf 'm.%s\n' "$2" >> "$f"
           shift 2 ;;
         --append-notes)
           printf 'notes=%s\n' "$2" >> "$f"; shift 2 ;;
@@ -704,119 +679,16 @@ eq "$rc" 0 "--dry-run succeeds over a wait edge"
 has "$(cat "$TMP/out")" "drop the 'blocked by al-succ15' wait edge" "--dry-run names the edge it would drop"
 eq "$(grep -c '^dep\.al-succ15=' "$TMP/rigs/alpha/.beads/al-origin15")" 1 "--dry-run does not drop it"
 
-# --- (r) a visit origin records its work outcome, and no outcome pair -------
-# A visit's close runs the work-record gate, so it gets gc.work_outcome=no-op.
-# The outcome pair a sitting's board row read is written by nothing here.
-mkbead alpha open al-visit1
-printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit1"
-mkbead beta open bt-vsucc1
-rc=0; run --origin al-visit1 --successor bt-vsucc1 --kind not-needed --note "premise fixed by bt-vsucc1" || rc=$?
-eq "$rc" 0 "a visit re-home succeeds"
-eq "$(field alpha status al-visit1)" closed "the visit is closed"
-eq "$(field alpha m.gc.outcome al-visit1)" "" "no gc.outcome is stamped on the visit"
-eq "$(field alpha m.gc.outcome_reason al-visit1)" "" "no gc.outcome_reason is stamped on the visit"
-has "$(field alpha reason al-visit1)" "premise fixed by bt-vsucc1" "the close reason carries the note"
-eq "$(field alpha m.gc.work_outcome al-visit1)" no-op "gc.work_outcome records no-op, since a visit ships no commit"
-
-# --- (s) a non-visit origin records NO outcome either ---------------------
-# A work bead or task carries its disposition in the pointer and the close
-# reason, so re-homing one invents no outcome.
+# --- (s) a re-home writes no outcome of its own ---------------------------
+# A bead carries its disposition in the pointer and the close reason, so
+# re-homing one invents no outcome: the outcome a bead records is its
+# closer's word.
 mkbead alpha open al-task1
 mkbead beta open bt-tsucc1
 rc=0; run --origin al-task1 --successor bt-tsucc1 --kind re-homed || rc=$?
-eq "$rc" 0 "a non-visit re-home succeeds"
-eq "$(field alpha m.gc.outcome al-task1)" "" "a non-visit origin gets no gc.outcome"
-
-# --- (t) an outcome the visit already records is left as it was -----------
-# A visit a sitting closed and that is later re-homed already carries the word
-# the sitting signed off with; the re-home writes no outcome over it.
-mkbead alpha open al-visit2
-printf 'm.task_kind=visit\nm.gc.outcome=dismissed\n' >> "$TMP/rigs/alpha/.beads/al-visit2"
-mkbead beta open bt-vsucc2
-rc=0; run --origin al-visit2 --successor bt-vsucc2 --kind folded --dry-run || rc=$?
-has "$(cat "$TMP/out")" "gc.work_outcome=no-op" "--dry-run plans the work outcome for a visit that already has an outcome"
-case "$(cat "$TMP/out")" in
-    *"gc.outcome="*) bad "--dry-run plans no gc.outcome (got '$(cat "$TMP/out")')" ;;
-    *) ok "--dry-run plans no gc.outcome" ;;
-esac
-rc=0; run --origin al-visit2 --successor bt-vsucc2 --kind folded || rc=$?
-eq "$rc" 0 "a visit that already has an outcome still re-homes"
-eq "$(field alpha m.gc.outcome al-visit2)" dismissed "the sitting's own outcome word is not overwritten"
-# gc.work_outcome is not the sitting's word: a visit ships no commit, so the
-# work-record gate the close runs wants no-op whatever outcome it records.
-eq "$(field alpha m.gc.work_outcome al-visit2)" no-op "gc.work_outcome records no-op on a visit that already had an outcome"
-FIRST=$(grep -m1 -e '^m\.gc\.work_outcome=' -e '^status=closed$' "$TMP/rigs/alpha/.beads/al-visit2" || true)
-eq "${FIRST%%=*}" m.gc.work_outcome "gc.work_outcome lands before the close the work-record gate checks"
-
-# --- (u) an already-closed visit missing its work outcome is repaired -----
-# The repair path stamps the work outcome the same as the live close does, and
-# no outcome pair.
-mkbead alpha closed al-visit3
-printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit3"
-mkbead beta open bt-vsucc3
-rc=0; run --origin al-visit3 --successor bt-vsucc3 --kind duplicate || rc=$?
-eq "$rc" 0 "an already-closed visit missing its work outcome is repaired"
-eq "$(field alpha status al-visit3)" closed "it stays closed"
-eq "$(field alpha m.gc.outcome al-visit3)" "" "no outcome is stamped on the closed visit"
-eq "$(field alpha m.gc.work_outcome al-visit3)" no-op "the repair stamps gc.work_outcome=no-op on the closed visit"
-
-# --- (z) a closed visit with an outcome still gains the work outcome -------
-# A visit closed with its outcome but without gc.work_outcome lacks the field
-# the work-record gate reads. The repair adds it and leaves the outcome alone.
-mkbead alpha closed al-visit6
-printf 'm.task_kind=visit\nm.gc.outcome=folded\nm.gc.outcome_reason=the sitting folded it\n' >> "$TMP/rigs/alpha/.beads/al-visit6"
-mkbead beta open bt-vsucc6
-rc=0; run --origin al-visit6 --successor bt-vsucc6 --kind folded || rc=$?
-eq "$rc" 0 "an already-closed visit with an outcome is repaired"
-eq "$(field alpha status al-visit6)" closed "it stays closed"
-eq "$(field alpha m.gc.work_outcome al-visit6)" no-op "the repair stamps gc.work_outcome=no-op beside the recorded outcome"
-eq "$(field alpha m.gc.outcome al-visit6)" folded "the recorded outcome word is untouched"
-eq "$(field alpha m.gc.outcome_reason al-visit6)" "the sitting folded it" "the recorded headline is untouched"
-
-# --- (aa) a store that refuses gc.work_outcome still re-homes the visit ----
-# The key the gate only warns about never rides the pointer write, so a store
-# that rejects it fails that write alone: the gated stamp lands and the visit
-# closes.
-mkbead alpha open al-visit7
-printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit7"
-mkbead beta open bt-vsucc7
-rc=0; FAKE_BD_REFUSE_WORK_OUTCOME=1 run --origin al-visit7 --successor bt-vsucc7 --kind folded || rc=$?
-eq "$rc" 0 "a visit re-homes though the store refuses gc.work_outcome"
-eq "$(field alpha status al-visit7)" closed "…and it closes"
-eq "$(field alpha m.gc.superseded_by al-visit7)" bt-vsucc7 "…carrying its pointer"
-eq "$(field alpha m.gc.work_outcome al-visit7)" "" "…with the refused key unrecorded"
-
-# --- (ab) a dropped gc.work_outcome is repaired before the close ----------
-# The store lands the write's other keys and drops this one while exiting 0,
-# so only the work-outcome read-back catches the drop, before the close.
-mkbead alpha open al-visit8
-printf 'm.task_kind=visit\nm.gc.outcome=folded\nm.gc.outcome_reason=the sitting folded it\n' >> "$TMP/rigs/alpha/.beads/al-visit8"
-mkbead beta open bt-vsucc8
-rm -f "$TMP/rigs/alpha/.beads/.work-dropped"
-rc=0; FAKE_BD_DROP_WORK_OUTCOME_ONCE=1 run --origin al-visit8 --successor bt-vsucc8 --kind folded || rc=$?
-eq "$rc" 0 "a visit whose work-outcome write was dropped still re-homes"
-[ -e "$TMP/rigs/alpha/.beads/.work-dropped" ] && ok "…after the store dropped the first write" \
-    || bad "…after the store dropped the first write (the drop never fired, so this case proves nothing)"
-eq "$(field alpha m.gc.work_outcome al-visit8)" no-op "the dropped work outcome is written again and lands"
-FIRST=$(grep -m1 -e '^m\.gc\.work_outcome=' -e '^status=closed$' "$TMP/rigs/alpha/.beads/al-visit8" || true)
-eq "${FIRST%%=*}" m.gc.work_outcome "…before the close the work-record gate checks"
-rm -f "$TMP/rigs/alpha/.beads/.work-dropped"
-
-# --- (ac) a work outcome the visit already records is left as it is --------
-# Another writer's value is not rewritten, and the dry run does not plan it.
-mkbead alpha open al-visit9
-printf 'm.task_kind=visit\nm.gc.work_outcome=abandoned\n' >> "$TMP/rigs/alpha/.beads/al-visit9"
-mkbead beta open bt-vsucc9
-rc=0; run --origin al-visit9 --successor bt-vsucc9 --kind folded --dry-run || rc=$?
-case "$(cat "$TMP/out")" in
-    *"gc.work_outcome="*) bad "--dry-run plans no gc.work_outcome over a recorded one (got '$(cat "$TMP/out")')" ;;
-    *) ok "--dry-run plans no gc.work_outcome over a recorded one" ;;
-esac
-rc=0; run --origin al-visit9 --successor bt-vsucc9 --kind folded || rc=$?
-eq "$rc" 0 "a visit that records a work outcome still re-homes"
-eq "$(field alpha status al-visit9)" closed "…and closes"
-eq "$(grep -c '^m\.gc\.work_outcome=' "$TMP/rigs/alpha/.beads/al-visit9")" 1 "…with nothing written over its work outcome"
-eq "$(field alpha m.gc.work_outcome al-visit9)" abandoned "…which still reads as it was"
+eq "$rc" 0 "a re-home succeeds"
+eq "$(field alpha m.gc.outcome al-task1)" "" "the origin gets no gc.outcome"
+eq "$(field alpha m.gc.work_outcome al-task1)" "" "…and no gc.work_outcome"
 
 # --- (gate-b) unlanded work: refused under an evidence kind ---------------
 # merge_result names in-flight work, so an evidence kind (which claims the origin

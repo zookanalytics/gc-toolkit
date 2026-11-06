@@ -68,7 +68,7 @@ case "${1:-}" in
       '($d | split(",")) as $drop | with_entries(select(.key as $k | $drop | index($k) | not))')
     tmp=$(mktemp)
     # The real `gc bd create` stamps --metadata (a JSON object) atomically; model
-    # it so the visit carries the identity the create sets, not only what a
+    # it so the filed bead carries the identity the create sets, not only what a
     # follow-up update writes.
     jq -c --arg id "up-$n" --arg t "$title" --arg d "$body" --argjson m "$meta" \
       '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":$m,"notes":""}]' \
