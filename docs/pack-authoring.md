@@ -176,9 +176,7 @@ the commands and the control flow of the procedures its blocks hold, and fails
 a step the change makes heavier in either count. A new step fails when it holds
 a procedure at all. A block the change leaves alone, or moves without editing
 it, weighs nothing, so a step that only gains single calls passes, and so does
-one that trades a procedure for a call. `tools/lint-step-text.in-flight` names
-the branches whose formula changes were built before the rule, and a step made
-heavier only by lines one of them adds draws a warning instead of a failure.
+one that trades a procedure for a call.
 
 ## A landed pack change is confirmed on the deployed checkout
 
