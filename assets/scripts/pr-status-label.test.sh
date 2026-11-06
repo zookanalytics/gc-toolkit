@@ -207,6 +207,33 @@ printf 'tk-v|tracks|tk-a\ntk-r|tracks|tk-a\n' > "$STUB_DEPS"
 eq "$("$SUT" derive --anchor tk-a)" "merging" "a bead that tracks the anchor does not hold the PR"
 : > "$STUB_DEPS"
 
+# The held: gate value reads the human gates that hold the PR through its open
+# blocks edges, so a gate on a rework the anchor waits on holds it as one on the
+# anchor does, and a person can find it from the PR.
+RW_ROW='{"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}'
+UNAPPROVED='{"id":"tk-a","status":"open","metadata":{"pr_posture":"review_required@abc@t"}}'
+store "[$UNAPPROVED, $RW_ROW, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"]}' "an open gate on the rework the anchor waits on holds the PR"
+store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-t\",\"status\":\"open\",\"metadata\":{}}, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-t|blocks|tk-rw\ntk-g|blocks|tk-t\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"]}' "…however far behind it the gate sits"
+store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-g\",\"status\":\"closed\",\"issue_type\":\"gate\",\"await_type\":\"human\",\"metadata\":{}}]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[]}' "resolving the gate clears the hold"
+store "[$UNAPPROVED, {\"id\":\"tk-rw\",\"status\":\"closed\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"tk-a\"}}, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-review","held":[]}' "a gate behind a closed blocker holds nothing"
+store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-c\",\"status\":\"open\",\"assignee\":\"human\",\"metadata\":{}}]"
+printf 'tk-rw|blocks|tk-a\ntk-c|tracks|tk-rw\ntk-c|tracks|tk-a\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[]}' "a conversation tracking the rework or the anchor holds nothing"
+store "[$UNAPPROVED, $RW_ROW, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+out=$(STUB_SHOW_FAIL_ON=tk-rw "$SUT" derive --anchor tk-a 2>/dev/null); rc=$?
+eq "$rc" "2" "a walk that does not read leaves the caller's labels alone"
+eq "$out" "" "…printing no value"
+: > "$STUB_DEPS"
+
 # The gate read is scoped to the anchor, the way the finalize gate reads it: the
 # beads its blocks edges reach. It never lists visits, or every gate, in the store.
 : > "$STUB_GC_LOG"
@@ -359,6 +386,24 @@ resetlog
 eq "$(pv_labels 71)" "status: working" "the gate cleared => held: gate comes off, and the PR reads working again"
 : > "$STUB_DEPS"
 
+# held: gate — so does one on the rework the anchor waits on, and the status and
+# the label come off with it once a person resolves it.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","metadata":{}}]'
+printf 'tk-k|blocks|tk-a\ntk-g|blocks|tk-k\n' > "$STUB_DEPS"
+pv 72 '[{"name":"status: working"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "status: working"
+eq "$(pv_labels 72)" "held: gate,status: needs-attention" "a human gate on the rework the anchor waits on => held: gate, and status: needs-attention"
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","metadata":{}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "held: gate,status: needs-attention"
+eq "$(pv_labels 72)" "status: working" "…and resolving it takes held: gate off"
+: > "$STUB_DEPS"
+
 # held: blocked — a live blocker routed to a person, which no automated actor clears.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}},
         {"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"}}]'
@@ -432,25 +477,25 @@ eq "$(pv_labels 74)" "bug,held: blocked,held: gate,held: review,status: needs-at
 # the merge freeze reads needs-attention with no held value, and a stale held:
 # label comes off.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","merge_hold":"true"}}]'
-pv 75 '[{"name":"held: visit"},{"name":"status: needs-attention"}]'
+pv 75 '[{"name":"held: gate"},{"name":"status: needs-attention"}]'
 resetlog
-"$SUT" reconcile --anchor tk-a --pr 75 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
-eq "$(pv_labels 75)" "status: needs-attention" "the merge freeze => needs-attention, and a stale held: visit from before the cutover comes off"
+"$SUT" reconcile --anchor tk-a --pr 75 --repo "$REPO" --current-labels "held: gate,status: needs-attention"
+eq "$(pv_labels 75)" "status: needs-attention" "the merge freeze => needs-attention, and a stale held: gate comes off"
 
 # a held: label of a value the writer does not derive comes off, as a status:
 # one does; a label that only looks like one is a human's and stays.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]'
-pv 76 '[{"name":"held: legal"},{"name":"held:visit"},{"name":"release held: legal"},{"name":"on hold"}]'
+pv 76 '[{"name":"held: legal"},{"name":"held:legal"},{"name":"release held: legal"},{"name":"on hold"}]'
 resetlog
-"$SUT" reconcile --anchor tk-a --pr 76 --repo "$REPO" --current-labels "held: legal,held:visit,release held: legal,on hold"
-eq "$(pv_labels 76)" "held:visit,on hold,release held: legal,status: needs-review" "every label under the held: prefix is the writer's; one carrying it mid-name, or no space, is left alone"
+"$SUT" reconcile --anchor tk-a --pr 76 --repo "$REPO" --current-labels "held: legal,held:legal,release held: legal,on hold"
+eq "$(pv_labels 76)" "held:legal,on hold,release held: legal,status: needs-review" "every label under the held: prefix is the writer's; one carrying it mid-name, or no space, is left alone"
 
 # a derivation that cannot answer leaves both families as they are.
 store '[]'
-pv 77 '[{"name":"held: visit"},{"name":"status: needs-attention"}]'
+pv 77 '[{"name":"held: gate"},{"name":"status: needs-attention"}]'
 resetlog
-"$SUT" reconcile --anchor tk-missing --pr 77 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
-eq "$(pv_labels 77)" "held: visit,status: needs-attention" "reconcile leaves both families as they are when the anchor does not resolve"
+"$SUT" reconcile --anchor tk-missing --pr 77 --repo "$REPO" --current-labels "held: gate,status: needs-attention"
+eq "$(pv_labels 77)" "held: gate,status: needs-attention" "reconcile leaves both families as they are when the anchor does not resolve"
 hasnt "$(ghlog)" "pr edit" "…and writes nothing"
 
 # set writes the status: value alone and leaves the held: labels to reconcile.
@@ -479,7 +524,7 @@ resetlog
 "$SUT" clear --pr 62 --repo "$REPO" --current-labels "bug"
 hasnt "$(ghlog)" "pr edit" "clear writes nothing on a PR with no status: label"
 
-pv 64 '[{"name":"status: needs-attention"},{"name":"held: visit"},{"name":"held: blocked"},{"name":"bug"}]'
+pv 64 '[{"name":"status: needs-attention"},{"name":"held: gate"},{"name":"held: blocked"},{"name":"bug"}]'
 resetlog
 "$SUT" clear --pr 64 --repo "$REPO"
 eq "$(pv_labels 64)" "bug" "clear takes every held: label off with the status: label"

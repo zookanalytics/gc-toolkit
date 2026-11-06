@@ -75,8 +75,10 @@ the target's `default_sling_formula`, which for a polecat pool is
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
   which a sitting's sign-off `--route <pool>` also writes when it releases a
-  held subject, has the pool claim the bead itself. Send it one way. Both start
-  two workers on one branch.
+  held subject, has the pool claim the bead itself. An arm
+  (`deferred-dispatch.sh arm`) has the deferred-dispatch pass sling the bead
+  once nothing holds it. Send it one way, and disarm an armed bead before you
+  send it another. Any two start two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`,
@@ -171,7 +173,9 @@ The message is that work already sent should stop, or go somewhere else.
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
   stops the run beneath the bead and leaves the bead open, unassigned and
   routed to no pool, with that sentence as its headline. When the bead now
-  waits on something, pass `--waiting-on <bead>` in place of `--no-wait`.
+  waits on something, pass `--waiting-on <bead>` in place of `--no-wait`. It
+  leaves a deferred-dispatch arm in place, and an armed bead goes out again once
+  nothing holds it, so disarm one first (the waits skill).
 - **Send it elsewhere.** The same release names where it goes, in one write:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For a named agent, pass `--assign <named-agent>` in place of
@@ -218,6 +222,10 @@ already closed by hand, the same writer adds the missing pointer.
   nothing downstream checks it again.
 - Disarm an armed bead first, so a wait released before the close lands cannot
   send it: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
+- A person's ruling that work a human gate holds will not go on takes one writer,
+  which runs all of this in order: `"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>"`
+  (the waits skill). In a sitting it runs before the sign-off, with
+  `--successor <conversation>` (the converse-settle step).
 - A bead that needs no work only once another bead lands is not closed now.
   Give it an `until` edge to that bead instead (the waits skill), and it is
   closed once that bead closes.

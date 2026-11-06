@@ -54,7 +54,7 @@ TMP="$(cd "$TMP" && pwd -P)"
 # The pack's content: every directory whose files an agent, an order or a
 # pack command runs or reads. Suites are left out, since a fixture may lay out
 # a city on purpose.
-DIRS="formulas agents skills template-fragments assets/scripts doctor tools lifecycle orders commands"
+DIRS="formulas agents skills template-fragments assets/scripts doctor tools lifecycle orders commands packs/gascity-keeper"
 ( cd "$ROOT" && for d in $DIRS; do [ -d "$d" ] && find "$d" -type f; done ) \
   | grep -v -E '\.test\.sh$|/lint-learned\.d/' | LC_ALL=C sort > "$TMP/files"
 scanned=$(grep -c . "$TMP/files" || true)
@@ -96,7 +96,7 @@ scan "no loop tries GC_PACK_DIR or rigs/gc-toolkit as a candidate" \
   'for c in "${GC_PACK_DIR:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do' 'for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do'
 scan "no text an agent session runs reads GC_PACK_DIR, which gc sets only for orders and pack commands" \
   '\$\{?GC_PACK_DIR' '[ -x "${GC_PACK_DIR:-}/assets/scripts/human-gate.sh" ]' "$RESOLVED" \
-  '^(formulas|agents|skills|template-fragments)/'
+  '^(packs/gascity-keeper/)?(formulas|agents|skills|template-fragments)/'
 
 # A loop over any candidate list that probes for a pack file is the same guess
 # whatever its candidates are named.
@@ -121,7 +121,7 @@ else bad "no loop probes candidate directories for a pack file" "$(printf '%s\n'
 echo "── 2. each kind of text names the binding its rendering carries ──"
 FORMULA_FORM="\$(b='{{binding_prefix}}'; gc \"\${b%.}\" scripts-dir)"
 calls=0; wrong=""
-for f in "$ROOT"/formulas/*.toml; do
+for f in "$ROOT"/formulas/*.toml "$ROOT"/packs/gascity-keeper/formulas/*.toml; do
   while IFS= read -r line; do
     calls=$((calls + 1))
     case "$line" in
@@ -137,7 +137,7 @@ done
 # A formula that names the var declares it with a default, which an order's
 # pour takes (formula-binding-prefix-default.test.sh holds the default).
 undeclared=""
-for f in "$ROOT"/formulas/*.toml; do
+for f in "$ROOT"/formulas/*.toml "$ROOT"/packs/gascity-keeper/formulas/*.toml; do
   grep -qF "$FORMULA_FORM" "$f" || continue
   grep -Eq '^\[vars\.binding_prefix\][[:blank:]]*$' "$f" || undeclared="$undeclared ${f##*/}"
 done
@@ -146,7 +146,7 @@ done
 
 wrong=""
 while IFS= read -r f; do
-  case "$f" in agents/*.template.md|template-fragments/*.template.md) ;; *) continue ;; esac
+  case "$f" in agents/*.template.md|template-fragments/*.template.md|packs/gascity-keeper/*.template.md) ;; *) continue ;; esac
   while IFS= read -r hit; do
     case "$hit" in
       *'gc {{ .BindingName }} scripts-dir'*|*'gc <binding> scripts-dir'*) ;;
@@ -163,15 +163,22 @@ done)
 [ -z "$wrong" ] && ok "every skill call writes <binding> for the agent to fill in" \
   || bad "every skill call writes <binding> for the agent to fill in" "$(printf '%s\n' "$wrong" | head -10)"
 
+# The gascity-keeper sub-pack's formulas run on gc-toolkit's polecats, so a step
+# reaches the sub-pack's own script under the pack gc names.
+PROBE_LINE=$(grep -h -m1 '^PROBE=' "$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml")
+PROBE_PATH=${PROBE_LINE#*scripts-dir)}; PROBE_PATH=${PROBE_PATH%%\"*}
+[ -x "$ROOT/assets/scripts$PROBE_PATH" ] && ok "a keeper step's path to its own script names a file under the pack" \
+  || bad "a keeper step's path to its own script names a file under the pack" "assets/scripts$PROBE_PATH"
+
 echo "── 3. a formula's resolver takes the directory gc names, and nothing else ──"
 # The lines under test are the formulas' own: one that resolves the directory
 # under a probe, and one that resolves a script's path.
-DIR_LINE=$(grep -h -m1 -E "^SCRIPTS=\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\) && \[ -x \"\\\$SCRIPTS/human-gate\.sh\" \] \|\| SCRIPTS=\"\"\$" "$ROOT/formulas/mol-polecat-work.toml" || true)
-PATH_LINE=$(grep -h -m1 -E "^SC=\"\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\)/step-close\.sh\" && \[ -x \"\\\$SC\" \] \|\| SC=\"\"\$" "$ROOT/formulas/mol-polecat-work.toml" || true)
-[ -n "$DIR_LINE" ] && ok "mol-polecat-work carries a directory resolver under a human-gate.sh probe" \
-  || bad "mol-polecat-work carries a directory resolver under a human-gate.sh probe" "no such line"
-[ -n "$PATH_LINE" ] && ok "mol-polecat-work carries a step-close.sh path resolver" \
-  || bad "mol-polecat-work carries a step-close.sh path resolver" "no such line"
+DIR_LINE=$(grep -h -m1 -E "^SCRIPTS=\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\) && \[ -x \"\\\$SCRIPTS/human-gate\.sh\" \] \|\| SCRIPTS=\"\"\$" "$ROOT"/formulas/*.toml || true)
+PATH_LINE=$(grep -h -m1 -E "^SC=\"\\\$\(b='\{\{binding_prefix\}\}'; gc \"\\\$\{b%\.\}\" scripts-dir\)/claim-close\.sh\" && \[ -x \"\\\$SC\" \] \|\| SC=\"\"\$" "$ROOT"/formulas/*.toml || true)
+[ -n "$DIR_LINE" ] && ok "a formula carries a directory resolver under a human-gate.sh probe" \
+  || bad "a formula carries a directory resolver under a human-gate.sh probe" "no such line"
+[ -n "$PATH_LINE" ] && ok "a formula carries a claim-close.sh path resolver" \
+  || bad "a formula carries a claim-close.sh path resolver" "no such line"
 
 # gc answers `kit scripts-dir` with STUB_PACK, which is empty for a gc that
 # succeeds and prints nothing, and refuses every other binding the way the
@@ -185,8 +192,8 @@ exit 1
 STUB
 chmod +x "$TMP/bin/gc"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/human-gate.sh"
-printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/step-close.sh"
-chmod +x "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/step-close.sh"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/pack/assets/scripts/claim-close.sh"
+chmod +x "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/claim-close.sh"
 # Every place the old lookup tried holds the scripts too, so a line that still
 # guessed would find one: the rig root, the city's rigs/gc-toolkit, and the
 # git checkout the line runs in.
@@ -215,8 +222,8 @@ if [ -n "$DIR_LINE" ]; then
   eq_ "$(STUB_PACK='' resolve kit. "$DIR_LINE" SCRIPTS)" "" "a gc that answers nothing resolves nothing"
 fi
 if [ -n "$PATH_LINE" ]; then
-  eq_ "$(resolve kit. "$PATH_LINE" SC)" "$TMP/pack/assets/scripts/step-close.sh" "the path form resolves the pack's own script"
-  eq_ "$(resolve other. "$PATH_LINE" SC)" "" "the path form resolves nothing for an unknown binding, never a bare /step-close.sh"
+  eq_ "$(resolve kit. "$PATH_LINE" SC)" "$TMP/pack/assets/scripts/claim-close.sh" "the path form resolves the pack's own script"
+  eq_ "$(resolve other. "$PATH_LINE" SC)" "" "the path form resolves nothing for an unknown binding, never a bare /claim-close.sh"
 fi
 
 echo "── 4. a city that imports the pack from git reaches the pack's scripts in its cache ──"
@@ -273,6 +280,8 @@ else
   else
     bad "the poured step finds the pack's scripts in the fetched copy, and sources its bd-lib.sh from there" "got '$GOT'"
   fi
+  [ -x "$KIT$PROBE_PATH" ] && ok "a keeper step's path to its own script names a file in the fetched copy" \
+    || bad "a keeper step's path to its own script names a file in the fetched copy" "$KIT$PROBE_PATH"
   # gc registers a pack's commands only for a city-level import, so a city
   # that imports the pack only in a rig has no gc kit scripts-dir.
   if IN_CITY="$RIG_ONLY" in_city gc import install >"$TMP/install-rig-only.out" 2>&1; then

@@ -47,8 +47,10 @@
 # run works, and self-review-check.sh and gascity-keeper's rebase-check.sh take
 # the bead their check loop's run works, which is the bead they certify.
 # work-tree-holder.sh takes the bead each claimed step's run works when it asks
-# whether a live session is working a tree. gate-ensure.sh takes the runs
-# poured over a review, live or not, to judge whether a pour still drives it.
+# whether a live session is working a tree, work-gate.sh takes the runs that work its
+# bead, to refuse a second run of its formula, and work-setup.sh takes the runs that
+# work a bead whose tree holds a branch, to tell a sibling from a tree left behind.
+# gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
 # gc-helm.sh ends the live runs beneath an anchor it releases, and its park
 # survey applies run_rows to the listing it reads to find a bead's workflows.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
@@ -156,12 +158,15 @@ run_lib() {
 # run_lib_read <reader> <bd args...> — one read, printed only when it is a JSON
 # array of objects. The `gc bd:` notice a store can print on stdout is dropped
 # while the newline that ends its line still stands, then the read is
-# scrubbed, as bd-lib.sh's bd_json does.
+# scrubbed, as bd-lib.sh's bd_json does. A read with no control byte and no
+# notice at its start is one line the two leave as it is.
 run_lib_read() {
     local reader="$1" raw
     shift
     raw="$("$reader" "$@" </dev/null 2>/dev/null)" || return 1
-    raw="$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)"
+    case "$raw" in
+        *[[:cntrl:]]*|'gc bd:'*) raw="$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)" ;;
+    esac
     printf '%s' "$raw" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null 2>&1 || return 1
     printf '%s' "$raw"
 }

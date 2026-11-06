@@ -27,7 +27,8 @@
 #     reads this one owned marker, not any lane-specific stamp, and the pre-sling
 #     stamp is the unproven state so a crash there recovers as a re-sling;
 #   * every OTHER arm that must NOT sling: held by a blocker on it or on an
-#     ancestor (hold-lib.sh), assigned, sling failed;
+#     ancestor (hold-lib.sh), assigned, sling failed, an arm disarmed after the
+#     pass listed it, and one whose re-read does not answer;
 #   * the hold: an armed child of a parked epic, one two levels down, one whose
 #     epic waits on a task and one whose epic waits on a human gate are held and
 #     named with the blocker's title in list, and the pass log names each such
@@ -383,35 +384,23 @@ case "${1:-}" in
         echo "Error: precondition failed for $id: status/assignee changed" >&2; exit 13
       fi
     fi
-    tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
-    cp "$STORE" "$tmp"
-    # A status that leaves closed takes the close with it, as bd's reopen does.
-    if [ "$new_st" != "-" ]; then
-      jq -c --arg id "$id" --arg s "$new_st" \
-        'map(if .id == $id then ((if .status == "closed" and $s != "closed" then del(.close_reason) else . end) | .status = $s) else . end)' \
-        "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    if [ "$new_who" != "-" ]; then
-      jq -c --arg id "$id" --arg a "$new_who" 'map(if .id == $id then .assignee = $a else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    for kv in ${sets[@]+"${sets[@]}"}; do
-      k="${kv%%=*}"; v="${kv#*=}"
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
-        'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    for k in ${unsets[@]+"${unsets[@]}"}; do
-      jq -c --arg id "$id" --arg k "$k" \
-        'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    if [ "$note_mode" = "append" ]; then
-      jq -c --arg id "$id" --arg n "$note" \
-        'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
-        "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    elif [ "$note_mode" = "replace" ]; then
-      jq -c --arg id "$id" --arg n "$note" \
-        'map(if .id == $id then .notes = $n else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    mv "$tmp" "$STORE"
+    # One jq pass lands the whole update, in bd's order: the status (one that
+    # leaves closed takes the close with it, as bd's reopen does), the
+    # assignee, each --set-metadata k=v split at its first =, each
+    # --unset-metadata, then the notes, appended or replaced.
+    tmp="$STORE.$$"
+    jq -c --arg id "$id" --arg st "$new_st" --arg who "$new_who" --arg mode "$note_mode" --arg n "$note" \
+       --argjson ns "${#sets[@]}" '
+      ($ARGS.positional[:$ns] | map(split("=") as $p | if ($p | length) <= 1 then [., .] else [$p[0], ($p[1:] | join("="))] end)) as $sets
+      | $ARGS.positional[$ns:] as $unsets
+      | map(if .id == $id then
+          (if $st != "-" then ((if .status == "closed" and $st != "closed" then del(.close_reason) else . end) | .status = $st) else . end)
+          | (if $who != "-" then .assignee = $who else . end)
+          | reduce $sets[] as [$k, $v] (.; .metadata[$k] = $v)
+          | reduce $unsets[] as $k (.; .metadata |= del(.[$k]))
+          | (if $mode == "append" then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n)
+             elif $mode == "replace" then .notes = $n else . end)
+        else . end)' "$STORE" --args ${sets[@]+"${sets[@]}"} ${unsets[@]+"${unsets[@]}"} > "$tmp" && mv "$tmp" "$STORE"
     [ -z "$held" ] || [ -z "${STUB_UPDATE_HOLD_AFTER:-}" ] || hold_update
     echo "updated $id"
     ;;
@@ -511,7 +500,10 @@ fi
 if [ "${1:-}" = "bd" ]; then
     shift
     printf '%s\n' "$*" >> "${STUB_BD_LOG:-/dev/null}"
-    VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@"
+    # The bd stub runs in this process rather than a second bash's.
+    export VIA_GC_BD=1
+    . "${0%/*}/bd" "$@"
+    exit
 fi
 if [ "${1:-}" = "sling" ]; then
     shift
@@ -1319,7 +1311,7 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "a bulk pass over four arms held out of --ready is a clean pass"
 eq "$(slings)" "4" "all four arms nothing holds dispatch in one pass"
 eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead dep-list call — the N+1 is gone"
-eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead show call — fields come from the cached snapshot"
+eq "$(grep -c '^show' "$STUB_BD_LOG")" "4" "reconcile makes one show per sling, re-reading its arm, and none per arm: fields come from the cached snapshot"
 # Five bounded reads, none per-bead: armed all + armed ready + one armed
 # blocker-status batch (these four arms are all cascade-held), plus the until
 # consumer's one whole-store candidate scan (no until candidates here, so it
@@ -1327,6 +1319,43 @@ eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead show cal
 # earlier pass left unchecked.
 eq "$(arm_list_reads)" "5" "the whole set costs a bounded read count, not one per bead"
 eq "$(notice_list_reads)" "1" "and a pass that owes no notice reads the notice listing once"
+
+echo "# an arm disarmed after the pass listed it is not slung"
+NO_ARM_B1='map(if .id == "b-1" then (.metadata |= del(.["gc.dispatch_when_ready"], .["gc.dispatch_when_ready_args"])) else . end)'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true}]'
+out="$(STUB_RACE_AT='--ready' STUB_RACE_JQ="$NO_ARM_B1" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "an arm withdrawn mid-pass is a clean pass"
+eq "$(slings)" "0" "the pass that listed it does not sling it"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "and stamps no marker on it"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "and counts no attempt"
+has "$out" "withdrawn b-1" "the pass log says so"
+
+echo "# …which is what makes it safe to answer a gate once the arm is gone"
+# The order stand-down.sh writes in: the arm goes, then the gate closes. Both land
+# after the pass's first listing and before it reads what holds the bead, so the
+# hold read finds nothing, and only the arm's re-read stops the sling.
+GATED_B1='[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"g-b1","dependency_type":"blocks"}]},
+ {"id":"g-b1","status":"open","issue_type":"gate","await_type":"human","assignee":"","metadata":{},"notes":""}]'
+GATE_CLOSED_B1='map(if .id == "g-b1" then .status = "closed" else . end)'
+store "$GATED_B1"
+out="$(STUB_RACE_AT='--ready' STUB_RACE_JQ="$NO_ARM_B1 | $GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "a disarm then an answer, both inside the pass's reads, sling nothing"
+has "$out" "withdrawn b-1" "the arm's re-read is what stops it"
+store "$GATED_B1"
+out="$(STUB_RACE_AT='--ready' STUB_RACE_JQ="$GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "control: an answer with no disarm, in the same window, slings the bead"
+
+echo "# a re-read of the arm that does not answer leaves it armed for the next pass"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true}]'
+: > "$TMP/show-fails-reread"
+out="$(STUB_SHOW_FAIL_WHEN="$TMP/show-fails-reread" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a pass whose re-read failed does not read as clean"
+eq "$(slings)" "0" "it slings nothing"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm stands"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "and carries no marker"
+has "$out" "could not re-read the arm on b-1" "the pass log says so"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "the next pass slings it"
 
 # The same bound with ancestors: four arms under one parked epic cost one more
 # read, for the epic, however many arms sit under it.
@@ -1559,8 +1588,8 @@ echo "# until: a bead a session is bound to is live work"
 live_case "session-bound" '{"gc.session_name":"rig__polecat-1"}' "gc.session_name=rig__polecat-1"
 echo "# until: a bead with a worktree is live work"
 live_case "worktree" '{"work_dir":"/tmp/wt/g-1"}' "work_dir=/tmp/wt/g-1"
-echo "# until: a visit is closed by its own closers, never by this pass"
-live_case "visit" '{"task_kind":"visit"}' "task_kind=visit"
+echo "# until: a review is closed by its own closers, never by this pass"
+live_case "review" '{"task_kind":"review"}' "task_kind=review"
 echo "# until: a workflow step is closed by its molecule"
 live_case "step" '{"gc.root_bead_id":"r-1","gc.step_ref":"mol-polecat-work.implement"}' "gc.root_bead_id=r-1"
 echo "# until: a parked bead is somebody's judgement in progress"

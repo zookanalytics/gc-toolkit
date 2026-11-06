@@ -84,23 +84,22 @@ assumptions:
 | keeper sub-pack | nothing: the built-once shape has no fork | 3.8k / 1.1k | 0 / 0 |
 | **total** | | **114.8k / 151.1k** | **35.0k / 28.5k** |
 
-Human engagement is the workflow §4 calls visit. The keeper is the opt-in
-`packs/gascity-keeper/`.
+The keeper is the opt-in `packs/gascity-keeper/`.
 
 ### Work
 
 `mol-polecat-work` extends core's `mol-polecat-base` and overrides only what
-differs: the per-bead worktree that `gc worktree` provisions, the self-review
-loop over `gctk rig` records, and the push and handoff. Each step closes
+differs: load-context's refusals, the per-bead worktree that `gc worktree`
+provisions, the pre-flights and the self-review loop over `gctk rig` records, and
+the push and handoff, each for the reason its warrant gives. Each step closes
 through `gc hook current`, and a decline is one call. Work owns the work branch
 and the handoff write. Priority following stays under its warrant, and deferred
 dispatch shrinks to the residuals tk-1tfzr71.16 keeps under warrants: sling on
 unblock, and close on an `until` edge.
 
-The trade: load-context becomes core's, so a pack refinement of it waits for
-upstream or carries a warrant of its own. The duplicate-dispatch gate is in the
-fork's load-context and not in upstream's. Until upstream takes it, keeping the
-gate keeps a fork commit or a warranted override.
+The trade: `implement` is core's, so a pack refinement of it goes in the polecat
+doctrine or waits for upstream. A step inherited from core declares no
+continuation group, so a session may take `implement` fresh.
 
 ### Review
 
@@ -134,9 +133,8 @@ conversation doctrine. Intake is slung work whose exits are native writes. The
 subsystem owns the converse, first-reaction and mechanik prompts, the converse
 skills, the operator's intake and the terminal surfaces.
 
-The trade: the keys the visit kind left behind, and the migration that still
-reads them, go with the cutover's follow-up (tk-1tfzr71.33). The first reaction
-stops being a bead kind of its own (tk-1tfzr71.17).
+The trade: the first reaction stops being a bead kind of its own
+(tk-1tfzr71.17).
 
 ### Board
 
@@ -158,7 +156,8 @@ controller's closed-bead worktree reaper, and the dolt pack's orders. The
 pack's patrols carry only judgment: the witness's HELP-mail triage, salvage and
 watch on the refinery's queue, and the deacon running `gc doctor` from an
 order. Patrol owns the warranted Dolt reclaim and suspended-store backup, and the
-scratch reapers that no native reaper covers.
+reapers no native one covers: scratch, the review workspaces outside
+`.gc/worktrees/`, and the `polecat/<bead-id>` refs of landed work.
 
 The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
@@ -198,8 +197,9 @@ PR posts with their provenance mark, the gh write guard under its warrant, and
 the seed audit.
 
 The trade: per-site read-backs give way to one bd-durability warrant
-(tk-1tfzr71.11), and step-close, the worktree wrapper and the hand-off shims
-give way to native calls.
+(tk-1tfzr71.11), and step-close and the hand-off shims give way to native calls.
+The wrapper that provisions an agent's home stays under its warrant, because
+`gc worktree` binds a tree to one bead and a home outlives every bead.
 
 ### gctk
 
@@ -243,8 +243,9 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| `worktree-reap.sh`, `worktree-setup.sh` | the controller's closed-bead worktree reaper, `gc worktree` | tk-1tfzr71.10 |
-| `step-close.sh` | `gc hook current` | tk-1tfzr71.12 |
+| `worktree-reap.sh` | the controller's closed-bead worktree reaper | tk-1tfzr71.42 |
+| the work flow's `git worktree add` for a per-bead tree | `gc worktree ensure` and `cleanup` | tk-1tfzr71.43 |
+| `step-close.sh` | `gc hook current` | tk-1tfzr71.39 |
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
@@ -255,14 +256,14 @@ bd 1.3.2.
 A copy needs no trigger. It goes as soon as a change gives the fact one shared
 home.
 
-- The script-dir resolution: 11 copies of the loop in 7 files, and 141 of its
-  one-line form in 16 files, 33 of them in `mol-polecat-work.toml`. Carried by
-  tk-c8724xi.
+- The script-dir resolution: the candidate loop in the Claude Code overlays, which
+  gc copies into a session with no template pass, so their text cannot name the
+  binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
+  shell block that runs a pack script, since each block is its own shell.
 - The decline sequence (file the human gate, record the wait, cancel the run,
   drain): 19 copies in step text, 11 of them in `mol-polecat-work.toml` and one
   in the polecat doctrine fragment, with 28 copies of its refusal sentence.
   Carried by tk-qitjxcm (P3).
-- The step-close loop: 10 copies in 5 formulas. It goes with step-close.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
@@ -276,19 +277,20 @@ and the change that fires the trigger deletes it.
 - The hand-offs at `escalate.sh` and `escalation-rig.sh`, 241 lines with their
   test. Trigger: no open step bead names them, and no session started before the
   cutover still runs. Carried by tk-kvdomjb.
-- `migrate-visits-to-gates.sh`, the cutover's one-shot move of every open visit,
-  2,180 lines with its test, and the keys only it still reads. Trigger: its
-  `--check` passes and the operator clears the cutover gate (tk-nly1mqd). Carried
-  by tk-1tfzr71.33.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
-  with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.12.
+  with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.39.
 - The PR reminder's old marker. Trigger: no open PR carries one. Carried by
-  tk-1tfzr71.33.
+  tk-1tfzr71.45.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
-  files beside the migration's own 43: the bare `superseded_by` key, the
+  files: the bare `superseded_by` key, the
   `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
   among others. Trigger: no store or open PR holds the shape. Each goes with the
   member that rewrites its reader.
+- The pass for an incomplete Epic, an epic that is not a Delivery and carries no
+  hypothesis, in the close gate's `clause_epic_ruling_recorded` and I15's
+  `exempt-nohyp` arm. Each is one line that passes every epic with no hypothesis.
+  Trigger: every live Epic carries its hypothesis, and every closed one carries a
+  hypothesis or a disposition (tk-wmwcdlc.5). Carried by tk-wmwcdlc.6.
 
 ### Doctrine restated per call site
 
@@ -299,8 +301,6 @@ A restatement needs no trigger either, once the doctrine has its home.
 - Formula step text: 3.7k of the formulas' 8.8k lines are shell inside code
   fences, and step prose restates doctrine the fragments hold. Rule 2 keeps new
   procedures out of step text.
-- tk-c8724xi's census names the sentences restated at each site and carries
-  them.
 
 ### Tests that pin what should not exist
 
@@ -309,8 +309,7 @@ A restatement needs no trigger either, once the doctrine has its home.
   read one too. Trigger: the step's mechanics become one call to a script with
   its own test, as rule 2 requires (P4).
 - Tests that hold two copies equal, and tests that assert a retired name stays
-  retired. Trigger: the copy or the name is gone. Carried by tk-c8724xi and
-  tk-1tfzr71.25.
+  retired. Trigger: the copy or the name is gone. Carried by tk-1tfzr71.25.
 
 ## The deletion schedule
 
@@ -328,10 +327,10 @@ shows its measured net instead.
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
-| tk-1tfzr71.33 | the cutover's migration script, the keys only it reads, the PR reminder's old marker | 2,180 | the cutover gate (tk-nly1mqd) |
-| tk-c8724xi | the resolution loops, the doctrine its census names, its comment excess | 11 loops, about 35 restatements, about 150 comment lines | nothing |
-| tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,390 | nothing |
-| tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | nothing |
+| tk-1tfzr71.45 | the PR reminder's old marker | partial files | the open PRs whose reminders carry it (tk-3zlwp6p, tk-r4c0g67) |
+| tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
+| tk-1tfzr71.43 | the per-bead tree left behind at hand-off, and its `git worktree add` | partial files | tk-1tfzr71.12 |
+| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41), and tk-1tfzr71.43 |
 
 ### 3. The lanes
 
@@ -356,11 +355,11 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-kvdomjb and the migration members name come to 65k of
+The whole files that tk-kvdomjb and the migration members name come to 63k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
-formulas, deferred dispatch and the sign-off. tk-c8724xi and the page's own
-items below carry the script-dir and decline copies and the step-text tests.
+formulas, deferred dispatch and the sign-off. The page's own items below carry
+the decline copies and the step-text tests.
 Most of the comment and test weight of the code that survives has no bead.
 
 ### 4. The page's own items
@@ -369,8 +368,8 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
-| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.12, .19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
+| P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | nothing |
+| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
 ## The rules

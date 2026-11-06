@@ -29,7 +29,7 @@ LINE='GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'
 
 echo "# every copy is the one line"
 git -C "$ROOT" grep -l -F -e '# >>> gctk-bin' -- formulas skills assets/scripts ':!*.test.sh' > "$TMP/files"
-eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/self-review-check.sh formulas/mol-polecat-work.toml formulas/mol-refinery-patrol.toml " \
+eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/rig-checks.sh assets/scripts/self-review-check.sh formulas/mol-refinery-patrol.toml " \
   "the block sits in the files that call gctk directly"
 while IFS= read -r f; do
   awk '/# >>> gctk-bin$/ {f = 1; n++; next} /# <<< gctk-bin$/ {f = 0; next} f {print n "\t" $0}' "$ROOT/$f" > "$TMP/copies"
@@ -39,8 +39,8 @@ while IFS= read -r f; do
     eq "$body" "$LINE" "$f: copy $n is the one line"
   done < "$TMP/copies"
 done < "$TMP/files"
-eq "$(grep -c -F -x -e '# >>> gctk-bin' "$ROOT/formulas/mol-polecat-work.toml")" 3 \
-  "mol-polecat-work carries it in workspace-setup, preflight-tests and self-review"
+eq "$(grep -c -F -x -e '# >>> gctk-bin' "$HERE/rig-checks.sh")" 1 \
+  "rig-checks.sh, which mol-polecat-work's steps call, carries it"
 
 echo "# the line resolves as stated"
 printf '%s\nprintf "%%s" "$GCTK"\n' "$LINE" > "$TMP/line.sh"

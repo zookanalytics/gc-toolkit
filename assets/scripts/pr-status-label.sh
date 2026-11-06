@@ -7,9 +7,9 @@
 # review verdict is left (needs-review), or a blocker stands that the city will
 # not clear on its own (needs-attention). An open PR carries exactly one status
 # value. `held:` names what holds it that the city will not clear on its own: an
-# open human gate on the PR (gate), review feedback the city has not answered or
-# a review thread the merge waits on (review), or a blocker no automated actor
-# will clear (blocked). Each is a label of its own, so more than
+# open human gate on the PR or behind a bead it waits on (gate), review feedback
+# the city has not answered or a review thread the merge waits on (review), or a
+# blocker no automated actor will clear (blocked). Each is a label of its own, so more than
 # one can stand, and a PR nothing holds carries none. Any held value reads
 # needs-attention. pr-facts.sh's full pass recomputes both for each open PR its
 # paced walk reaches, from the anchor's posture, holds, human gates, blockers,
@@ -43,7 +43,9 @@
 set -u
 
 PROG="pr-status-label"
-warn() { echo "$PROG: $*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # The controlled `status:` group. One label per value; the prefix groups them on
 # the list apart from human triage labels, following Rust `S-`/Kubernetes

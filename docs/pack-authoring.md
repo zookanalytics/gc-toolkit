@@ -26,24 +26,23 @@ lifecycle are [gascity/agent-types.md](gascity/agent-types.md). Each component's
 is its row in [component-model.md](component-model.md) §4, and how work moves
 end to end is [architecture.md](architecture.md).
 
-## A step closes through `step-close.sh`
+## A step closes through `claim-close.sh`
 
 A graph.v2 step advances only by closing its own step bead, and neither
 environment spelling the upstream bodies use names that bead reliably
 ([gascity/packs.md](gascity/packs.md#a-v2-step-advances-by-closing-its-own-step-bead-not-by-drain-ack)).
-So every pack formula step closes through
-`assets/scripts/step-close.sh --step <formula>.<step-id> --convoy {{convoy_id}}`
-instead. It resolves the target from the store by (`metadata."gc.root_bead_id"`,
-`metadata."gc.step_ref"`) — the molecule and the step. A pool agent wears one
-assignee across every run it makes, so only that pair names exactly one bead;
-the assignee corroborates the match and never identifies it alone. `--convoy`
-names the molecule as the live workflow root poured over the formula's input
-convoy. A formula with no input convoy leaves it off, and the script derives
-the molecule, first from the `gc.session_id` stamp a claim leaves on the step.
-It refuses to write at all when it cannot prove which bead is yours. The pack's
-hardened detector `tools/lint-learned.d/step-close-env-id.sh` holds the
-line, flagging any step that closes a bead on an id read from the
-environment.
+Gas City's `gc hook current --id-only` reads back the bead this session last
+claimed, so every pack formula step closes through
+`assets/scripts/claim-close.sh --step <formula>.<step-id>`. It writes to that bead
+and no other, once the bead shows it is the step named and this session's, which
+is the check upstream's `mol-do-work` and `mol-polecat-commit` write into their
+step text. So a close re-run after the claim moved on refuses, rather than
+closing the next step unrun, and a pool agent's one assignee across every run it
+makes decides nothing. A step closes itself and no other, then the same session
+takes the next with `gc hook --claim --json`. A step inherited from core names no
+close, so the agent's prompt carries the call. The pack's hardened detector
+`tools/lint-learned.d/step-close-env-id.sh` holds the line, flagging any step
+that closes a bead on an id read from the environment.
 
 Mirror the canonical bodies' outcome set — pass, plus `gc.outcome=fail`
 with `gc.failure_class=transient|hard` and a `gc.failure_reason` — and their
@@ -64,16 +63,16 @@ assigned back to its pool
 A molecule's lifecycle is gascity's, so the refusal ends the run through
 gascity's run cancel
 ([gascity/packs.md](gascity/packs.md#a-run-is-cancelled-through-the-supervisor-api)).
-`assets/scripts/run-cancel.sh` sends it, after resolving the run from the step
-this session holds, and the pack writes no member of the molecule. Nothing
+`assets/scripts/run-cancel.sh` sends it, after naming the run from the step this
+session holds, and the pack writes no member of the molecule. Nothing
 resumes a cancelled run, so a wait for a person sits on the work bead:
 `assets/scripts/human-gate.sh` files a human gate that blocks it, and
 `assets/scripts/await-ruling.sh` reads that `blocks` edge back and arms the
 work bead's re-sling, so clearing the gate pours a fresh run. The re-sling
 fires only for an open, unassigned bead, so the script first releases a claim
-on the work bead that no live worker holds. A decline is an event of its run,
-so its gate is filed with no quiet window, and a situation a person answered
-`moot` or `benign` before is asked again.
+on the work bead that no live worker holds. A ruling not to proceed goes through
+`assets/scripts/stand-down.sh`, which removes the re-sling's arm before it
+answers the gate, then closes the work bead.
 
 The refusal drains only after the cancel lands. A cancel that does not land
 leaves the step claimed by this session, and the step goes back to the pool
@@ -86,7 +85,9 @@ names it. Step text from an earlier version of these formulas requires
 `assets/scripts/molecule-hold.sh` to exist before it resolves the pack's
 scripts, and calls it to decline. That script hands the call to
 `run-cancel.sh --step` unchanged, so such a run ends through gascity's run
-cancel like any other.
+cancel like any other. The same text calls `step-close.sh`,
+`work-tree-holder.sh` and `lease-heartbeat.sh`, which stay for it until no open
+step bead names them.
 
 ## Step text and skills reach pack scripts at runtime
 
@@ -114,6 +115,9 @@ Each kind of pack text names the binding the way its rendering allows:
   with the default `gc-toolkit.`, which an order's pour takes
   ([gascity/packs.md](gascity/packs.md#a-formula-body-gets-no-template-pass)).
   The step drops the dot: `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"`.
+  The gascity-keeper sub-pack's formulas run on this pack's polecats, so they
+  are poured with this pack's binding and write the same line. A keeper script
+  sits under the same directory, at `../../packs/gascity-keeper/assets/scripts`.
 - **A prompt or template fragment** is rendered with the binding:
   `"$(gc {{ .BindingName }} scripts-dir)/foo.sh"`.
 - **A skill** is not rendered, so its examples write
@@ -275,17 +279,15 @@ session starts in its agent home, and an agent can `cd` anywhere between calls.
 The step takes the rig root from `assets/scripts/rig-root.sh`, which prints
 `GC_RIG_ROOT`, else the `gc rig list --json` entry for `GC_RIG`, and passes it
 as `git -C "$RIG_ROOT"` or as a wrapper's own flag
-(`review-workspace.sh add --repo`). One locator line reaches the script through
+(`review-workspace.sh add --repo`). It reaches the script through
 `gc <binding> scripts-dir`, as any step reaches a pack script
 ([above](#step-text-and-skills-reach-pack-scripts-at-runtime)), never through
 the cwd's checkout, and the step refuses to run when the script prints no root,
 because `git -C ""` runs in the cwd. A formula that works one fixed rig, as the
 gascity-keeper's upstream formulas work gascity, passes `--rig <name>`, so the
-pool it was slung to does not choose. Those formulas carry no binding for this
-pack, so their locator line is a loop over candidate directories.
+pool it was slung to does not choose.
 `assets/scripts/formula-worktree-rig.test.sh` and
-`assets/scripts/formula-git-rig.test.sh` run these blocks from a foreign cwd,
-and the latter holds each of these formulas to one locator line.
+`assets/scripts/formula-git-rig.test.sh` run these blocks from a foreign cwd.
 
 ## Patrol agents run a patrol-wisp cycle
 
