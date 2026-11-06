@@ -34,8 +34,8 @@
 # does not land the script exits 1, and the caller does not drain: its step
 # stays claimed, so whichever worker the step goes to next retries the cancel.
 #
-# Callers: decline.sh; the decline arms of mol-review, mol-validate and
-# mol-rig-demo; molecule-hold.sh (--step, for step text that names that script);
+# Callers: decline.sh; mol-review's failed gather and mol-validate's decline
+# arms; molecule-hold.sh (--step, for step text that names that script);
 # orphan-dispose.sh (--ended); gc-helm.sh takeaway --release.
 # exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 set -uo pipefail

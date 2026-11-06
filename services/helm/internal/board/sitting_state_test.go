@@ -42,7 +42,7 @@ func TestEachSittingCarriesOneState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.sitting.ID = "tk-conv"
 			tc.facts.Sittings = []Sitting{tc.sitting}
-			if got := BuildBoard(nil, fixtureNow, false, nil, tc.facts).Sittings[0].State; got != tc.want {
+			if got := buildBoard(nil, fixtureNow, false, nil, tc.facts).Sittings[0].State; got != tc.want {
 				t.Errorf("state = %q, want %q", got, tc.want)
 			}
 		})
@@ -89,7 +89,7 @@ func TestRowRollsUpFromItsSittingsStates(t *testing.T) {
 					anchors = append(anchors, conversationAnchor(s.ID, s.Subject, "an ask", s.Assignee))
 				}
 			}
-			b := BuildBoard(anchors, fixtureNow, false, nil, Facts{
+			b := buildBoard(anchors, fixtureNow, false, nil, Facts{
 				Sittings:   tc.sittings,
 				OwnerState: map[string]string{sittingAlias("tk-a"): "active", sittingAlias("tk-b"): "active"},
 			})
@@ -109,7 +109,7 @@ func TestRowRollsUpFromItsSittingsStates(t *testing.T) {
 	// The record decides, whatever the anchor of the same conversation says.
 	// The gather builds both from one task, so this pins that the row has no
 	// second reading to fall out of step with.
-	b := BuildBoard([]Anchor{epicSubject("tk-subj"), conversationAnchor("tk-a", "tk-subj", "an ask", assigneeHuman)},
+	b := buildBoard([]Anchor{epicSubject("tk-subj"), conversationAnchor("tk-a", "tk-subj", "an ask", assigneeHuman)},
 		fixtureNow, false, nil, Facts{Sittings: []Sitting{live("tk-a")}, OwnerState: liveOwners(sittingAlias("tk-a")).OwnerState})
 	row := mustTile(t, b, "tk-subj")
 	if row.SittingState != SittingInSession || row.Owed {
@@ -118,7 +118,7 @@ func TestRowRollsUpFromItsSittingsStates(t *testing.T) {
 
 	// A gather that builds no record, as the supervisor backend's does, reads no
 	// conversation in session, whoever it is assigned to.
-	b = BuildBoard([]Anchor{epicSubject("tk-subj"), conversationAnchor("tk-a", "tk-subj", "an ask", sittingAlias("tk-a"))},
+	b = buildBoard([]Anchor{epicSubject("tk-subj"), conversationAnchor("tk-a", "tk-subj", "an ask", sittingAlias("tk-a"))},
 		fixtureNow, false, nil, liveOwners(sittingAlias("tk-a")))
 	if row = mustTile(t, b, "tk-subj"); row.SittingState != SittingWaiting || !row.Owed {
 		t.Errorf("with no record the row reads waiting: state=%q owed=%v", row.SittingState, row.Owed)
@@ -128,7 +128,7 @@ func TestRowRollsUpFromItsSittingsStates(t *testing.T) {
 // TestARowOnlyAGateHoldsWaits: the roll-up of no sittings on a held row is
 // waiting, because a human gate waits for the operator and no sitting is on it.
 func TestARowOnlyAGateHoldsWaits(t *testing.T) {
-	row := mustTile(t, BuildBoard([]Anchor{epicSubject("tk-subj"), gateAnchor("tk-g", "an ask", "tk-subj")},
+	row := mustTile(t, buildBoard([]Anchor{epicSubject("tk-subj"), gateAnchor("tk-g", "an ask", "tk-subj")},
 		fixtureNow, false, nil, Facts{}), "tk-subj")
 	if !row.Held || row.SittingState != SittingWaiting {
 		t.Errorf("held=%v state=%q, want held and waiting", row.Held, row.SittingState)
@@ -140,7 +140,7 @@ func TestARowOnlyAGateHoldsWaits(t *testing.T) {
 // none can. The caller's record is left unstamped.
 func TestSittingStateAndHeadlineRideTheWire(t *testing.T) {
 	in := []Sitting{{ID: "tk-a", Subject: "tk-subj", SubjectTitle: "the topic", Title: "the ask", Status: "in_progress", Assignee: "tk-a"}}
-	b := BuildBoard(nil, fixtureNow, false, nil, Facts{Sittings: in, OwnerState: liveOwners("tk-a").OwnerState})
+	b := buildBoard(nil, fixtureNow, false, nil, Facts{Sittings: in, OwnerState: liveOwners("tk-a").OwnerState})
 	if in[0].State != "" || in[0].Headline != "" {
 		t.Errorf("the gather's record was written through: %+v", in[0])
 	}
@@ -203,7 +203,7 @@ func TestAConversationReadsTheSameHoweverItWasAdmitted(t *testing.T) {
 					st.facts.Sittings = []Sitting{st.sitting}
 					read := func(admitted ...Anchor) string {
 						t.Helper()
-						raw, err := json.Marshal(BuildBoard(append(admitted, sub.anchors...), fixtureNow, false, nil, st.facts))
+						raw, err := json.Marshal(buildBoard(append(admitted, sub.anchors...), fixtureNow, false, nil, st.facts))
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -277,7 +277,7 @@ func TestRowAndListAgreeOnAConversationAdmittedTwice(t *testing.T) {
 			conv.Metadata = map[string]string{mdRoutedTo: routedHuman}
 			twin := conversationTwin(conv, "human")
 
-			b := BuildBoard([]Anchor{twin, conv}, fixtureNow, false, nil, tc.facts)
+			b := buildBoard([]Anchor{twin, conv}, fixtureNow, false, nil, tc.facts)
 			if got := b.Sittings[0].State; got != tc.want {
 				t.Errorf("the list reads %q, want %q", got, tc.want)
 			}
@@ -289,7 +289,7 @@ func TestRowAndListAgreeOnAConversationAdmittedTwice(t *testing.T) {
 				t.Errorf("its own row: owed=%v section=%q needs=%q, want owed=%v section=%q needs=%q", row.Owed, row.Section, row.Needs, tc.owed, tc.section, tc.needs)
 			}
 
-			b = BuildBoard([]Anchor{twin, conv, epicSubject("tk-subj")}, fixtureNow, false, nil, tc.facts)
+			b = buildBoard([]Anchor{twin, conv, epicSubject("tk-subj")}, fixtureNow, false, nil, tc.facts)
 			if got := b.Sittings[0].State; got != tc.want {
 				t.Errorf("beside a subject's row the list reads %q, want %q", got, tc.want)
 			}
@@ -309,7 +309,7 @@ func TestRowAndListAgreeOnAConversationAdmittedTwice(t *testing.T) {
 	t.Run("closed", func(t *testing.T) {
 		twin := Anchor{ID: "tk-conv", Kind: "human", Source: "human", Title: "talk the plan over",
 			ClosedAt: fixtureNow.Add(-time.Hour), Metadata: map[string]string{mdRoutedTo: routedHuman}}
-		b := BuildBoard([]Anchor{twin}, fixtureNow, false, nil, Facts{
+		b := buildBoard([]Anchor{twin}, fixtureNow, false, nil, Facts{
 			Sittings: []Sitting{{ID: "tk-conv", Subject: "tk-subj", Status: "closed", Assignee: assigneeHuman, ClosedAt: fixtureNow.Add(-time.Hour)}},
 		})
 		if got := b.Sittings[0].State; got != SittingClosed {

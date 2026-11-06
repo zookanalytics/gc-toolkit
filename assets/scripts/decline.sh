@@ -38,7 +38,9 @@
 # can run this again. Gas City's run cancel interrupts the session that holds the
 # step, so this call can end as an interrupted tool call once the cancel has landed.
 #
-# Callers: mol-polecat-work's step scripts (work-lib.sh's callers).
+# Callers: mol-polecat-work's step scripts (work-lib.sh's callers); the decline
+# arms of mol-rig-demo and mol-review's short-record refusal; the polecat
+# doctrine's decline.
 # exit: 0 the work is ended and this session drained · 1 a part did not land ·
 #       2 usage, nothing written
 set -uo pipefail
