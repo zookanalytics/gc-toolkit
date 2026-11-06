@@ -455,7 +455,7 @@ since_format = "RFC 3339 UTC"
 # so the pack attaches a conversation or a finding with `tracks` — which
 # carries the structure without making the child unclaimable — and reserves
 # parent-child for decomposition that should inherit the block. A `*_key` value
-# (finding.key, gc.blocker_key, upstream_send_key) is a dedup identity for
+# (finding.key, gc.blocker_key) is a dedup identity for
 # finding the one existing bead per cause, not a wait; any wait it carries is a
 # separate blocks edge. A human gate carries its situation key as its await id,
 # and that gate is itself the wait.
@@ -838,9 +838,8 @@ keys = [
 #   lane green), `rework` (a fix unit answering a verdict), `finding` (a review
 #   objection, [metadata.review_findings]), `validation` (a validator pass,
 #   mol-validate.toml), `triage-subject` (an
-#   ephemeral-findings bucket), `observation`/`feedback-pattern`/`prompt-update`
-#   (the learning loop), and `upstream-send` (a parked outbound command). Set
-#   once at creation; not cleared.
+#   ephemeral-findings bucket), and `observation`/`feedback-pattern`/
+#   `prompt-update` (the learning loop). Set once at creation; not cleared.
 # fix_target_pool — the pool a rework fix unit routes to, written on the review
 #   child by gate-ensure.sh when a fix pool is configured; read by signoff.sh,
 #   which defaults it to `<rig>.polecat`. Never cleared. A pool name.
@@ -1837,16 +1836,19 @@ keys = ["obs.*", "remedy_class", "eng_bead"]
 #   remedy was filed as. A bead id; neither is cleared.
 
 [metadata.upstream_send]
-# A parked outbound command for a repo the rig does not own, filed by
-# upstream-finding.sh (task_kind=upstream-send) for the operator to run
-# (docs/outbound-sends.md). upstream_send_key dedups; the gh_* keys carry the
-# command and its target so the operator pastes exactly what was found.
+# An upstream finding (docs/outbound-sends.md) is known by its upstream-finding
+# label, and keeps what it records in its description and its edges. The
+# external-issue skill files it with no metadata key, task_kind included. These
+# keys are the ones some upstream findings carry with a command drafted for the
+# other project.
 keys = ["upstream_send_key", "gh_command", "gh_verb", "gh_target_repo"]
-# upstream_send_key — the caller's dedup handle; a second finding on the same key
-#   reuses the parked bead. Read back after the stamp; not cleared.
-# gh_command — the full shell command to paste (the deliverable), read to catch a
-#   divergent re-file. gh_verb / gh_target_repo — the action and the repo slug,
-#   provenance not read back. All strings; not cleared.
+# upstream_send_key / gh_command / gh_verb / gh_target_repo — RETIRED. Nothing
+#   writes them now. On an upstream finding that carries them, gh_command is a
+#   drafted command, gh_target_repo and gh_verb its target and action, and
+#   upstream_send_key a situation key nothing reads. The conversation that picks
+#   the finding up may start from the draft, after it has read the project's
+#   security policy. Registered so that they read as known, not as strays.
+#   Strings; never cleared.
 
 [metadata.patrol_bookkeeping]
 # Rig-stamps and recovery bookkeeping the patrols write on beads they touch.
