@@ -700,8 +700,10 @@ of them has closed. Work routed with neither recording, a sibling named only in
 the takeaway's prose, is invisible to both.
 
 **So routed work is filed beside the subject.** A dependency the subject waits
-on is a sibling, taking the subject's own parent when one applies, and the
-sign-off's `takeaway --waiting-on <work>` then takes. Work that genuinely
+on sits beside it, under the subject's own parent when one applies, or under
+the nearest open bead above that parent once it has closed
+(`assets/scripts/converse-parent.sh`), and the sign-off's
+`takeaway --waiting-on <work>` then takes. Work that genuinely
 decomposes an epic subject is the one exception: it is the epic's member, and
 containment carries the wait. Routed work already filed as a child stays where
 it is, and both readers handle it.

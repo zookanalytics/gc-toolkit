@@ -196,14 +196,31 @@ The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
 controller's stall handling or to Gas Town's dance (tk-1tfzr71.18 and .19).
 
-One of the witness's differences from Gas Town's witness stays by the
-operator's ruling. Gas Town's witness mails the mayor about emergencies, failures,
-recovered and handed-off orphans and queue health, and this one files findings
-and human gates instead, because the po owns little and takes none of that
-load. An operator ruling that gives the po escalation handling ends it. Gas
-Town's formula addresses `mayor/` by name, which reaches no seat in this city,
-so a copy taken by import would send its escalations to no reader. Such a copy
-keeps findings and human gates, or the import is ruled (tk-1tfzr71.19).
+The witness's target is Gas Town's witness. Each remaining difference names its
+reason and what ends it:
+
+- **The spacing.** Its `next-iteration` defers the next wisp an hour, so Gas
+  City's reassignment restart starts the next pass once the hour has passed. Gas
+  Town's asks for that hour through `idle_timeout = "1h"`, which Gas City does
+  not apply to an always-on session, so there its passes run back to back. This
+  ends when Gas City gives an always-on patrol an idle interval.
+- **Reading our anchors, PR states and conversations.** Our pipeline writes them.
+  This ends as tk-1tfzr71.20 and .22 land.
+- **Findings and human gates in place of mayor mail.** Gas Town's witness mails
+  the mayor about emergencies, failures, recovered and handed-off orphans and
+  queue health. This one files findings and human gates instead, because the po
+  owns little and takes none of that load, and the operator ruled at
+  tk-rl8gz4b.29's design that it stays. This ends when an operator ruling gives
+  the po escalation handling. Gas Town's formula addresses `mayor/` by name,
+  which reaches no seat in this city, so a copy taken by import would send its
+  escalations to no reader. Such a copy keeps findings and human gates, or the
+  import is ruled (tk-1tfzr71.19).
+- **No stuck-polecat check.** The liveness sweep covers it. This ends when
+  tk-1tfzr71.19 retires the sweep.
+- **The nudge order.** Gas Town's deacon does this through a command and a step
+  we do not carry. This ends when we take Gas Town's deacon or Gas City closes
+  issue #4090 with a fix that also reaches a session stopped short of
+  `next-iteration`.
 
 ### Doctor
 
