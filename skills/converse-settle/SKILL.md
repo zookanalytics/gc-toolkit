@@ -122,20 +122,35 @@ operator, in the sign-off, which gate it was and what that answer said,
 instead of claiming your own.
 
 **On `--ruled yes`, the sign-off follows which bead carries the work** (the
-`work` skill says why). First read the subject's dispatch path, its arm and
-its route. The hold kept both, so once its gate is resolved and nothing else
-holds the subject, an arm sends it and a pool route has that pool claim it:
+`work` skill says why). First settle the subject's dispatch path, its arm and
+its route, as every answer to a gate on it does first, a turn's `--answer`
+(step 8) included. The hold kept both, and the writer leaves them as they are,
+so once the gate is answered and nothing else holds the subject, an arm sends
+it and a pool route has that pool claim it. Read them:
 ```bash
-gc bd show "$SUBJECT" --json | jq -r '.[0].metadata | "arm: \(.["gc.dispatch_when_ready"] // "none") \(.["gc.dispatch_when_ready_args"] // "") route: \(.["gc.routed_to"] // "none")"'
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | "arm: \(.["gc.dispatch_when_ready"] // "none") \(.["gc.dispatch_when_ready_args"] // "") route: \(.["gc.routed_to"] // "none")" else error("unread") end'
 ```
-When the ruling sends the subject where its arm or route already sends it, by
-the same method, sign off with `--ruled yes --no-wait` and send nothing
-yourself. Under any other ruling, remove that path before the sign-off: disarm
-an arm with
-`"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "<the ruling, one line>"`,
-and clear a pool route with `gc bd update "$SUBJECT" --unset-metadata gc.routed_to`.
-A `human` route sends the subject to no pool, so it stays. Then take the case
-that fits. The cases:
+When the ruling leaves the subject to go where its arm or route already sends
+it, by the same method, keep them: sign off with `--ruled yes --no-wait` and
+send nothing yourself. Under any other ruling, one that sends it elsewhere or
+nowhere, withdraw them before the answer, with or without `--accept`. The block
+disarms an arm and clears a pool route, and keeps a `human` route, which sends
+the subject to no pool. It reads the subject back, and prints its
+`carries no arm and no pool route` line only once neither is left:
+```bash
+WHY="<the ruling, one line>"
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
+  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
+  && ROW=$(gc bd show "$SUBJECT" --json) \
+  && LEFT=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | [ ((.["gc.dispatch_when_ready"] // "") | tostring | select(. != "") | "arm " + .), ((.["gc.routed_to"] // "") | tostring | select(. != "" and . != "human") | "route " + .) ] | join(", ") else error("unread") end') \
+  && if [ -z "$LEFT" ]; then echo "$SUBJECT carries no arm and no pool route"; else echo "$SUBJECT still carries $LEFT"; false; fi
+```
+Without that line, answer nothing: fix what the block printed and re-run it.
+Then take the case that fits. The cases:
 - **The subject is the work.** Sign off with `--ruled yes --no-wait`,
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
   The formula the subject recommends is never sent this way; take it as the

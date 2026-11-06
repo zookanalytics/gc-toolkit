@@ -49,6 +49,9 @@
 #   (ANSWER*) a ruling on a turn that does not sign off answers only the gates
 #             it names, after the same rework or retirement, and leaves the
 #             conversation open for the sign-off
+#   (ANSWER-ROUTE) the writer leaves a routed, armed subject's route and arm as
+#             they are, and the continue step's own withdrawal, run before the
+#             answer, leaves none for the answer to release the subject to
 #   (CUT-SHORT*) the hand-back is one write guarded on the holder and the
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
@@ -194,6 +197,7 @@ case "$1 ${2:-}" in
         --assignee)     _r=$(printf '%s' "$_r" | jq --arg v "$2" '.assignee = $v'); shift 2 ;;
         --status)       _r=$(printf '%s' "$_r" | jq --arg v "$2" '.status = $v'); shift 2 ;;
         --append-notes) _r=$(printf '%s' "$_r" | jq --arg v "$2" '.notes = ((.notes // "") + $v)'); shift 2 ;;
+        --unset-metadata) _r=$(printf '%s' "$_r" | jq --arg k "$2" 'del(.metadata[$k])'); shift 2 ;;
         *) shift ;;
       esac
     done
@@ -306,6 +310,15 @@ cat > "$S/pr-sitting-comment.sh" <<'P'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
 P
+# The sign-off never disarms. A sitting's own block does, before an answer that
+# sends the subject elsewhere, and (ANSWER-ROUTE) runs that block from the
+# continue step over this store.
+cat > "$S/deferred-dispatch.sh" <<'DD'
+#!/usr/bin/env bash
+printf 'deferred-dispatch %s\n' "$*" >> "$CALLS"
+[ "$1" = disarm ] || exit 2
+gc bd update "$2" --unset-metadata gc.dispatch_when_ready --unset-metadata gc.dispatch_when_ready_args >/dev/null
+DD
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
@@ -841,6 +854,35 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 0 "(ANSWER) the sign-off that follows exits 0"
 has "$OUT" "gate tk-rev was already cleared before this sign-off" "(ANSWER) …reading the answered gate as already cleared"
 eq "$(field tk-two status)/$(field tk-conv status)" "closed/closed" "(ANSWER) …and answering the gate left open before it closes the conversation"
+# A routed, armed subject whose only blocker is the sitting's gate, and a
+# ruling on a turn that does not sign off that sends it to another pool. The
+# hold kept the old route and arm and the writer leaves them, so its answer
+# alone would release the subject to the old pool. The continue step withdraws
+# both first, with its own block from skills/converse-continue/SKILL.md.
+routed_hold() {
+    fresh; bead tk-anc; setm tk-anc gc.routed_to rig-a/old-pool; setm tk-anc gc.dispatch_when_ready rig-a/old-pool
+    gate tk-rev conversation.tk-conv; edge tk-anc blocks tk-rev
+    conv tk-conv tk-anc; edge tk-conv replies-to tk-rev
+}
+routed_hold
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
+eq "$RC/$(field tk-rev status)/$(meta tk-anc gc.routed_to)" "0/closed/rig-a/old-pool" \
+    "(ANSWER-ROUTE) the writer answers a routed subject's last gate and leaves its route, so the sitting withdraws it first"
+awk '/^```bash[ \t]*$/ { inb = 1; buf = ""; hit = 0; next }
+     inb && /^```[ \t]*$/ { if (hit) { printf "%s", buf; exit } inb = 0; next }
+     inb { buf = buf $0 "\n"; if (index($0, "carries no arm and no pool route\"")) hit = 1 }' \
+    "$HERE/../../skills/converse-continue/SKILL.md" | sed 's#<[^>]*>#x#g' > "$TMP/withdraw.sh"
+[ -s "$TMP/withdraw.sh" ] && ok "(ANSWER-ROUTE) the continue step's withdrawal is found" \
+    || bad "(ANSWER-ROUTE) the continue step's withdrawal is found"
+routed_hold
+set +e
+WOUT="$(cd "$TMP/cwd" && CONV="$S" SUBJECT=tk-anc CONVERSATION=tk-conv bash "$TMP/withdraw.sh" 2>&1)"; WRC=$?
+set -e
+eq "$WRC" 0 "(ANSWER-ROUTE) the continue step's withdrawal exits 0"
+has "$WOUT" "tk-anc carries no arm and no pool route" "(ANSWER-ROUTE) …and says neither is left"
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
+eq "$RC/$(field tk-rev status)/$(field tk-conv status)" "0/closed/in_progress" "(ANSWER-ROUTE) the answer that follows resolves the gate and leaves the conversation open"
+eq "$(meta tk-anc gc.routed_to)/$(meta tk-anc gc.dispatch_when_ready)" "/" "(ANSWER-ROUTE) …with no old route or arm left to release the subject to"
 open_pr
 run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
 eq "$RC" 2 "(ANSWER-OPEN-PR) an answer on an open PR that says nothing of the PR exits 2"

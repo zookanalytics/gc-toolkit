@@ -111,7 +111,9 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 A converse sitting holds a bead with a human gate and writes nothing else the
 pass reads, so an armed bead keeps its arm through the hold. The gate holds it
 as any blocker does, and the arm sends it once the gate is resolved, unless the
-sitting's ruling disarms it first (the converse-settle step).
+sitting's ruling sends it elsewhere. Then the sitting disarms it before it
+answers the gate, at the sign-off or on a turn that does not sign off (the
+converse-settle and converse-continue steps).
 
 A person who rules that armed work a human gate holds will not go on runs
 `stand-down.sh <bead> --key <situation-key> --ruling "<why>"`. Answering the gate

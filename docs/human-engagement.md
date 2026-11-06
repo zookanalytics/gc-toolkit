@@ -464,7 +464,12 @@ its conversation does not reply to yet, the sitting adds the reply and reads
 it back, so the graph records which conversation answered which gate. Before it
 resolves a gate, it names every bead the answer releases, read from the gate's
 `blocks` dependents, so an answer that releases a bead beyond the subject is
-given knowingly. The record and the headline go on the subject alone: a rework
+given knowingly. It also settles the subject's dispatch path first, at the
+sign-off and on a turn that does not sign off alike. The hold kept the
+subject's arm and route, and an answer that clears the subject's last blocker
+releases it to them, so a ruling that sends the subject anywhere else
+withdraws both before the answer, and a `human` route, which sends it to no
+pool, stays. The record and the headline go on the subject alone: a rework
 child waiting on its anchor's bring-current gate, or a member of an epic whose
 gate the epic's sitting answers, reads the answer in the gate's resolve
 reason, through its own `blocks` edge. A gate with no tie to the subject takes
