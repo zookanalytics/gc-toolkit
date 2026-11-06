@@ -121,7 +121,9 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
 # resolve change nothing; CLOSE_STUCK=<id> makes its close change nothing;
 # EARLIER_ANSWER=<reason> closes the gate with that reason inside the resolve
-# call, before the sign-off's own answer. A bead's comments are kept in
+# call, before the sign-off's own answer; LOSE_UPDATE=<id> answers an update of
+# that bead with exit 0 and keeps nothing, as bd does when a degraded server or a
+# racing legacy writer loses it. A bead's comments are kept in
 # $STORE/b/<id>.comments.json, and each one added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
@@ -188,6 +190,7 @@ case "$1 ${2:-}" in
   "bd update")
     log "$*"
     _id="$3"; shift 3
+    [ -n "${LOSE_UPDATE:-}" ] && [ "$_id" = "$LOSE_UPDATE" ] && exit 0
     _r=$(row "$_id")
     _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""
     _args=("$@")
@@ -722,6 +725,25 @@ acceptance; TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settle
 eq "$RC" 1 "(HEADLINE) a headline that does not land exits 1"
 eq "$(field tk-rev status)" "open" "(HEADLINE) …before any gate is resolved"
 eq "$(field tk-conv status)" "in_progress" "(HEADLINE) …or the conversation closed"
+# (HEADLINE-LOST) the real gc-helm.sh in place of the stub, over a store that
+# loses the headline's update while the subject carries an earlier sitting's
+# headline. takeaway reads its own stamp back before it exits 0, so the
+# sign-off stops before any gate is resolved, and the earlier headline does not
+# pass for this one.
+acceptance
+setm tk-anc gc.takeaway "the sitting before this one parked it"
+setm tk-anc gc.takeaway_at "2026-11-01T09:00:00Z"
+setm tk-anc gc.takeaway_by converse
+mv "$S/gc-helm.sh" "$TMP/gc-helm.stub"; ln -s "$HERE/gc-helm.sh" "$S/gc-helm.sh"
+LOSE_UPDATE=tk-anc TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+rm -f "$S/gc-helm.sh"; mv "$TMP/gc-helm.stub" "$S/gc-helm.sh"
+eq "$RC" 1 "(HEADLINE-LOST) a headline whose update exits 0 and lands nothing stops the sign-off"
+has "$(cat "$CALLS")" "bd update tk-anc --set-metadata gc.takeaway=settled" "(HEADLINE-LOST) …after the real takeaway wrote it"
+has "$OUT" "the store does not hold it" "(HEADLINE-LOST) …which its read of its own stamp finds lost"
+hasnt "$(cat "$CALLS")" "gate resolve" "(HEADLINE-LOST) …so no gate is resolved"
+eq "$(field tk-rev status)" "open" "(HEADLINE-LOST) …the gate stays open and owed"
+hasnt "$(cat "$CALLS")" "bd close tk-conv" "(HEADLINE-LOST) …and the conversation is not closed"
+eq "$(meta tk-anc gc.takeaway)" "the sitting before this one parked it" "(HEADLINE-LOST) …while the subject still carries the earlier headline"
 
 echo "# a held subject is released on a ruling"
 acceptance; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route gc-toolkit/gc-toolkit.polecat --no-wait

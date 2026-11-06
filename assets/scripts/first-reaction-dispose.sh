@@ -1123,8 +1123,10 @@ fi
 #
 # A subject held for placement can carry the stamp a dead pour left
 # (gc.execution_routed_to), which the queue reads as a live pour. The release
-# clears it and fails when it survives on a held bead, so this exit stops before
-# its landed proof rather than record a hold the sitting cannot see.
+# clears it in the update that carries the headline, which gc-helm.sh reads back
+# before it exits 0. A release that did not land fails, with the stamp still on
+# the held bead, so this exit stops before its landed proof rather than record a
+# hold the sitting cannot see.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable)

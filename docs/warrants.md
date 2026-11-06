@@ -231,10 +231,18 @@ shares only the word ([authority-map.md](authority-map.md)).
     refused or failed issue and exits non-zero, a guard mismatch included, and
     in `gastownhall/gascity`, `cmd/gc/cmd_bd.go` passes bd's exit status
     through and turns bd's silent fallback to the on-disk store into exit 4.
+  - What one read can show: `cmd/bd/update.go` applies an update's field,
+    label and metadata edits as "one atomic operation", so they land or are
+    lost together, and a key the update alone wrote reading back shows the whole
+    update landed. `updateClaimPostcondition` in
+    `internal/storage/dolt/issue_operations.go` gives `verifiedUpdate` nothing
+    to re-read for an update that edits metadata (`hasNonCoordinationPatch`), so
+    no flag makes bd verify such an update itself.
 - **Verified.** 2026-11-06, at `gastownhall/beads` main 8c3eb30f3 and
   `gastownhall/gascity` main 005135c33. At beads v1.3.2 (9b65b9e19), the bd
-  build the city runs, the `verifiedUpdate` comment, the NEXUS#92 note and the
-  unverified cross-prefix edge read the same. Re-verify on every bd upgrade.
+  build the city runs, the `verifiedUpdate` comment, the NEXUS#92 note, the
+  unverified cross-prefix edge, the one atomic operation and the metadata
+  exclusion read the same. Re-verify on every bd upgrade.
 - **Retires when.** bd re-reads an ordinary update in server mode and its
   NEXUS#92 hazard note is gone, and `bd dep add` refuses a target that another
   database holds.

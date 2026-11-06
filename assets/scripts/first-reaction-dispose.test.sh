@@ -220,18 +220,14 @@ esac
 # file stands in for gc.execution_routed_to; a run that does not opt in
 # (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm does not depend on this
 # clear: a plain arm lands whether or not the stamp is set. FAKE_HELM_KEEPS_STAMP
-# models a clear that does not land. gc-helm.sh then fails the release (exit 4)
-# when the stamp is all that places the bead. That is a bead intake marked
-# placement=pending, released with no route or assignee. Everywhere else it warns
-# and exits 0.
+# leaves the stamp set behind a release that exits 0, as a pour that stamps it
+# again after the release landed would. gc-helm.sh clears the stamp in the update
+# it reads back through its own headline stamp, so a release whose update did
+# not land exits 4, which FAKE_HELM_FAILS models.
 case " $* " in
   *" --release "*)
-    if [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ]; then
-      if [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ]; then
-        : > "$FAKE_EXEC_ROUTED_FILE"
-      elif [ "$(cat "$FAKE_STATE.placement" 2>/dev/null)" = pending ]; then
-        case " $* " in *" --route "*|*" --assign "*) ;; *) exit 4 ;; esac
-      fi
+    if [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ] && [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ]; then
+      : > "$FAKE_EXEC_ROUTED_FILE"
     fi ;;
 esac
 exit 0
@@ -416,6 +412,38 @@ hasnt "UPDATE bd update $R" "$LOG" "(ACTPOOL) …and the reaction bead stays ope
 has "address it with --assign" "$ERR" "(ACTPOOL) …and the refusal names the named-agent address before the operator"
 has "only when the next move is the operator's" "$ERR" "(ACTPOOL) …keeping the operator's exits for the operator's own move"
 unset FAKE_POOL_DEAD
+
+# real_helm_run <args...> — run with the real gc-helm.sh in place of the stub.
+# This fake's `bd update` keeps none of the keys a takeaway writes, so the real
+# release exits 0 and lands nothing: the lost whole update a degraded server or
+# a racing legacy writer leaves (docs/warrants.md, "bd write durability"). A run
+# cancel it reaches is logged as RUNCANCEL, and its board cache sits under $TMP.
+printf '#!/usr/bin/env bash\nprintf "RUNCANCEL %%s\\n" "$*" >> "$FAKE_LOG"\n' > "$TMP/run-cancel"
+chmod +x "$TMP/run-cancel"
+real_helm_run() {
+  local _tmpdir="${TMPDIR:-}"
+  export GC_HELM_TOOL="$HERE/gc-helm.sh" GC_RUN_CANCEL_TOOL="$TMP/run-cancel" TMPDIR="$TMP"
+  run "$@"
+  export GC_HELM_TOOL="$TMP/helm"; unset GC_RUN_CANCEL_TOOL
+  if [ -n "$_tmpdir" ]; then export TMPDIR="$_tmpdir"; else unset TMPDIR; fi
+}
+
+# (ACTLOST) the real gc-helm.sh loses the release's update, over a subject
+# carrying an earlier sitting's headline, an old route and assignee, and the
+# session pins of the executor that held it. takeaway reads its stamp back
+# before it exits 0, so the exit stops before its landed proof and leaves R
+# open, and a re-run resumes.
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"status":"open","assignee":"gc-toolkit__proactive-hq-dead","metadata":{"gc.takeaway":"the sitting before this one parked it","gc.takeaway_at":"2026-11-01T09:00:00Z","gc.takeaway_by":"converse","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_name":"gc-toolkit__proactive-hq-dead","gc.session_id":"gc-dead-session"}}]'
+real_helm_run tk-sub --disposition actionable --reason "states a done condition and a branch" \
+    --takeaway "routed to the polecat pool" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+unset FAKE_SHOW_JSON
+eq "$RC" "4" "(ACTLOST) a release whose update exits 0 and lands nothing fails the actionable exit"
+has "UPDATE bd update tk-sub --set-metadata gc.takeaway=routed to the polecat pool" "$LOG" \
+    "(ACTLOST) …after the real gc-helm.sh wrote the release"
+has "the store does not hold it" "$ERR" "(ACTLOST) …which its read of its own stamp finds lost"
+hasnt "RUNCANCEL" "$LOG" "(ACTLOST) …so no run is ended"
+hasnt "gc.reacted_by" "$LOG" "(ACTLOST) …no landed proof is stamped"
+hasnt "UPDATE bd update $R" "$LOG" "(ACTLOST) …and the reaction bead stays open, for a re-run to resume"
 
 : > "$FAKE_LOG"; RC=0
 OUT="$(GC_RIG=gc-toolkit "$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --reaction-bead "$R" 2>"$TMP/err")" || RC=$?
@@ -632,13 +660,11 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
     "(BLKARM) …and the arm lands"
 before '^DEFERRED arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, which is the last write"
 
-# Control: a release that leaves the pour stamp set still lets the plain arm land.
-# The coupled surface is gc-helm.sh takeaway --release: on a bead nothing holds
-# for placement, here a member its parent places, it WARNS on a surviving
-# gc.execution_routed_to and returns 0 rather than failing, because no arm or
-# reconcile guard reads that stamp. The stub returns 0 with the stamp still set to
-# model exactly that path, so this control exercises the real release, not a state
-# the real flow cannot reach — and dispose runs on to arm the plain dispatch.
+# Control: a pour stamp still set after a release that exits 0 still lets the
+# plain arm land. gc-helm.sh takeaway --release clears the stamp in the update it
+# reads back, so a stamp set after a zero exit was written after the release
+# landed, here on a member its parent places. No arm or reconcile guard reads
+# that stamp, so dispose runs on to arm the plain dispatch.
 printf 'gc-toolkit/gc-toolkit.proactive' > "$FAKE_EXEC_ROUTED_FILE"
 export FAKE_HELM_KEEPS_STAMP=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
@@ -648,11 +674,10 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
     "(BLKARM) a stamp left set does NOT refuse the plain arm — provenance, not a live queue"
 unset FAKE_HELM_KEEPS_STAMP
 
-# Contract: the arm is downstream of a release that SUCCEEDED. A genuine release
-# failure — not a surviving stamp gc-helm only warns on, but gc-helm exiting
-# non-zero because a write it owed did not land — dies before the arm, so a bead
-# whose disposition only half-wrote is never armed to auto-resume from that
-# state, and no landed proof or closed R says otherwise.
+# Contract: the arm is downstream of a release that SUCCEEDED. A release failure,
+# gc-helm exiting non-zero because its update was refused or did not read back,
+# dies before the arm, so a bead whose disposition did not land is never armed to
+# auto-resume from that state, and no landed proof or closed R says otherwise.
 export FAKE_HELM_FAILS=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
@@ -1660,8 +1685,8 @@ unset FAKE_HELM_FAILS
 #                  and a blocks edge is not
 #   (INTAKEANCHOR) PR-finishing work (anchor_bead) is routed
 #   (INTAKEMARK)   a marker that does not land stops the exit before the release
-#   (INTAKESTAMP)  a pour stamp the release cannot clear from a held subject
-#                  stops the exit before its landed proof
+#   (INTAKESTAMP)  a held subject's release that did not land, its pour stamp
+#                  still set, stops the exit before its landed proof
 #   (INTAKEBLK)    an unplaced blocked subject's edge lands and nothing is armed
 #   (INTAKEDRY)    a dry run names the hold and writes nothing
 #   (INTAKEUNREAD) an unreadable subject proves no membership, so it is held
@@ -1709,21 +1734,23 @@ hasnt "UPDATE bd update $R" "$LOG" "(INTAKEMARK) …and the reaction bead open f
 unset FAKE_DROP_PLACEMENT
 
 # (INTAKESTAMP) a held subject still carries a dead pour's stamp, and the release
-# cannot clear it. gc-helm.sh fails the release, because placement.sh reads the
-# stamp as a live pour and the queue would not list the bead. The exit stops
-# there, before its landed proof, so the reaction is not recorded done over a hold
-# the sitting cannot see, and R stays open for a re-run.
-export FAKE_EXEC_ROUTED_FILE="$TMP/exec_routed" FAKE_HELM_KEEPS_STAMP=1
-printf 'gc-toolkit/gc-toolkit.polecat' > "$FAKE_EXEC_ROUTED_FILE"
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-eq "$RC" "4" "(INTAKESTAMP) a held subject whose pour stamp survives the release fails the exit"
-has "HELM takeaway tk-sub t --by proactive --release --no-wait" "$LOG" "(INTAKESTAMP) …at the release"
+# that clears it does not land, so the stamp stays and placement.sh reads it as a
+# live pour, which keeps the bead out of the queue. The real gc-helm.sh reads its
+# update back and fails the release. The exit stops there, before its landed
+# proof, so the reaction is not recorded done over a hold the sitting cannot see,
+# and R stays open for a re-run.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+real_helm_run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "4" "(INTAKESTAMP) a held subject whose release did not land, its pour stamp still set, fails the exit"
+has "UPDATE bd update tk-sub --set-metadata gc.takeaway=t " "$LOG" "(INTAKESTAMP) …at the release"
+has "UPDATE bd update tk-sub --set-metadata placement=pending" "$LOG" "(INTAKESTAMP) …after intake marked it held"
 has "gc-helm.sh takeaway failed on tk-sub" "$ERR" "(INTAKESTAMP) …naming the release that failed"
 hasnt "gc.reacted_by" "$LOG" "(INTAKESTAMP) …with no landed proof"
 hasnt "UPDATE bd update $R" "$LOG" "(INTAKESTAMP) …and the reaction bead open for a re-run"
-# Control: the same stamp on a member is no hold, so the release warns and exits
-# 0, and the reaction lands.
+# Control: on a member, a stamp still set after a release that exits 0 is no
+# hold, so the reaction lands. gc-helm.sh clears the stamp in the update it reads
+# back, so a stamp set after a zero exit was written after the release landed.
+export FAKE_EXEC_ROUTED_FILE="$TMP/exec_routed" FAKE_HELM_KEEPS_STAMP=1
 printf 'gc-toolkit/gc-toolkit.polecat' > "$FAKE_EXEC_ROUTED_FILE"
 export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"

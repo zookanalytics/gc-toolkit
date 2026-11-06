@@ -137,8 +137,9 @@ first-reaction/proactive worker stands down rather than file a second
 conversation; engage files the one conversation itself.
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
-stamps gc.takeaway (+_at/+_by) in one
-update; --release also reopens/unassigns/clears the route and ends the run
+stamps gc.takeaway (+_at/+_by) in one update and reads the stamp back before
+anything follows it, exiting 4 with nothing repaired when the store does not
+hold it; --release also reopens/unassigns/clears the route and ends the run
 beneath the anchor through gascity's run cancel. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
 only the run's end runs; --route <rig>/<agent> releases it TO a pool instead of
@@ -1210,9 +1211,10 @@ cmd_takeaway() {
 
     # Build args with `set --` ($text/$by contain spaces); --release rides the
     # SAME update so stamp + release stay one Dolt write.
+    takeaway_at=$(iso_now)
     set --
     set -- "$@" --set-metadata "gc.takeaway=$text" \
-               --set-metadata "gc.takeaway_at=$(iso_now)" \
+               --set-metadata "gc.takeaway_at=$takeaway_at" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=$no_wait"
     # --release retires the pour's routing on the anchor: gc.routed_to takes the
@@ -1234,14 +1236,48 @@ cmd_takeaway() {
     # route its stamp does not match — the shape doctor/executor-identity-residue
     # reports on an open, routed bead — and a gc.session_id left behind is the
     # stale pin the runtime's orphan recovery resolves an owner from. Every pair
-    # rides the one update, which bd writes in one transaction, so its exit says
-    # whether all of them landed (the bd-durability block of bd-lib.sh).
+    # rides the one update, which bd applies as one atomic operation, so the
+    # pairs land together or not at all.
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee="$assign" \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
                --unset-metadata gc.session_name --unset-metadata gc.session_id
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
+    # An update can exit 0 and still be lost under a degraded server or a racing
+    # legacy writer (docs/warrants.md, "bd write durability"), and what follows a
+    # zero exit here cannot be taken back: the run's end below, and the close a
+    # caller makes on it, as when first-reaction-dispose.sh closes its reaction
+    # or converse-signoff.sh resolves gates and closes the conversation. So the
+    # stamp is read back once before them, every key of it, and a row that will
+    # not read is a miss. The stamp's time is this call's alone, so a stamp an
+    # earlier call left with the same text does not pass for it. The release
+    # rides the same atomic update, so the stamp reading back shows the release
+    # landed too, and the release's own fields are not compared: a claim that
+    # follows the release, such as a pool's on the route it names, rewrites the
+    # status, the assignee and the session pins, and is no lost write. On a miss
+    # the verb repairs nothing and does nothing after the update, so a re-run
+    # writes the whole update again.
+    stamp_row=$(row_now "$bead")
+    stamp_missed=""
+    if [ -z "$stamp_row" ]; then
+        stamp_missed="nothing shows that the store holds it, because $bead did not answer a read after it"
+    elif ! stamp_keys=$(printf '%s' "$stamp_row" | jq -r --arg t "$text" --arg at "$takeaway_at" --arg by "$by" --arg s "$no_wait" '
+            def str: if type == "string" then . else tojson end;
+            (.metadata // {}) as $m
+            | [ ["gc.takeaway", $t], ["gc.takeaway_at", $at], ["gc.takeaway_by", $by], ["gc.takeaway_settled", $s] ]
+            | map(select(($m[.[0]] | str) != .[1])
+                  | "\(.[0]) reads \(if $m[.[0]] == null then "nothing" else ($m[.[0]] | str | @json) end), not \(.[1] | @json)")
+            | join("; ")' 2>/dev/null); then
+        stamp_missed="nothing shows that the store holds it, because the row $bead answered would not parse"
+    elif [ -n "$stamp_keys" ]; then
+        stamp_missed="the store does not hold it: $stamp_keys"
+    fi
+    if [ -n "$stamp_missed" ]; then
+        bust_cache
+        printf '%s\n' "$PROG: takeaway: the update on $bead exited 0, but $stamp_missed. ${release_park:+The release rides the same update, so it is not taken as landed either. }Nothing was repaired, and nothing after the update was done: no wait edge, no run's end. Re-run this call." >&2
+        exit 4
+    fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
     # <blocker>", so the edge lands on <bead> — what the board reads. Only the

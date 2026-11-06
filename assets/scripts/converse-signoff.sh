@@ -14,7 +14,8 @@
 #      the conversation lives in, and the PR it acts on is recorded on the
 #      conversation before it acts, so a re-run of the same ruling acts on the
 #      same PR even once that PR has closed;
-#   2. writes the subject's headline (gc-helm.sh takeaway) and reads it back;
+#   2. writes the subject's headline through gc-helm.sh takeaway, which reads it
+#      back before it exits 0;
 #   3. resolves each open gate the conversation replies to with
 #      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
 #      resolves a closed gate without changing it and reports success either
@@ -758,13 +759,14 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 
 # 2. The headline. An ARRAY, not a string: this city runs zsh, which does not
 # word-split an unquoted parameter, so "${WAIT[@]}" is what passes each flag as
-# its own argument, and nothing when it is empty.
+# its own argument, and nothing when it is empty. The resolves, the release and
+# the close below cannot be undone, so they wait on the headline reading back
+# (docs/warrants.md, "bd write durability"). gc-helm.sh takeaway reads back the
+# stamp it wrote, its time included, before it exits 0, so its exit carries
+# that read. A read here could not tell this headline from one an earlier
+# sitting left.
 "$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
   || stopped "the headline did not land on $SUBJECT (gc-helm.sh takeaway refused it)${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
-# The resolves, the release and the close below cannot be undone, so the
-# headline is read back before them (docs/warrants.md, "bd write durability").
-show_row "$SUBJECT" | jq -e '(.metadata["gc.takeaway"] // "") != ""' >/dev/null 2>&1 \
-  || stopped "no headline reads back on $SUBJECT; no gate was resolved and the conversation is not closed"
 
 if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the
