@@ -471,7 +471,7 @@ eq "$RC" 4 "(LATE) a gate filed between the live read and the resolve exits 4"
 has "$OUT" "tk-late" "(LATE) …naming the late gate"
 eq "$(field tk-rec status)" "open" "(LATE) …and the recommendation's gate is reopened"
 eq "$(field tk-rec close_reason)" "" "(LATE) …its close and reason cleared"
-has "$OUT" "is open again, back on the board" "(LATE) …and read back as open"
+has "$OUT" "is open again, back on the board" "(LATE) …and says it is back on the board"
 eq "$(slings)" 0 "(LATE) …nothing is slung"
 eq "$(meta tk-anc gc.recommended_formula)" "mol-fix" "(LATE) …and the recommendation stays"
 

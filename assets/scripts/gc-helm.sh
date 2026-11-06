@@ -2273,7 +2273,8 @@ current_sitting() {
 # attach path prints them once the sitting's session has ended and the
 # operator's tab is back at a shell, where nothing of the pane survives. The
 # takeaway is the board's one-line headline; this is the hand-back whole.
-# gc.handback and gc.handback_at land in one write, and the text is read back.
+# gc.handback and gc.handback_at land in one write, whose exit says whether they
+# landed.
 cmd_handback() {
     bead=""
     while [ $# -gt 0 ]; do
@@ -2298,17 +2299,10 @@ cmd_handback() {
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
     handback_at=$(iso_now)
-    # One repair write, because a write that exits 0 can still read back without
-    # its value (the store behaviour meta_now guards against on the takeaway).
-    handback_ok=""
-    for _hb_try in 1 2; do
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.handback=$handback_text" \
-            --set-metadata "gc.handback_at=$handback_at" >/dev/null 2>&1 || true
-        if [ "$(meta_now "$bead" gc.handback)" = "$handback_text" ]; then handback_ok=1; break; fi
-    done
-    if [ -z "$handback_ok" ]; then
-        echo "$PROG: handback: the hand-back did not read back on $bead, so its tab would print an older one, or none. Re-run it." >&2
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    if ! gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.handback=$handback_text" \
+        --set-metadata "gc.handback_at=$handback_at" >/dev/null 2>&1; then
+        echo "$PROG: handback: the store refused the hand-back on $bead, so its tab would print an older one, or none. Re-run it." >&2
         exit 4
     fi
     echo "$PROG: handback: recorded on $bead at $handback_at"
@@ -2677,46 +2671,30 @@ accept_token_root() {
 # dispatched <formula>, and withdraw the recommendation, in one write:
 # gc.recommended_formula_dispatched=<formula> records the dispatch, and
 # stripping gc.recommended_formula — the key the board's Accept derivation
-# reads — ends the acceptance, so no later Accept dispatches it again. Both
-# writes are read back and retried once. Returns non-zero when the
-# recommendation still reads live or the record did not stick; the gate's
-# answer still names the acceptance then, so the next Accept finishes the
-# record without a second dispatch.
+# reads — ends the acceptance, so no later Accept dispatches it again. Returns
+# the write's exit: non-zero when the store refused it, and the gate's answer
+# still names the acceptance then, so the next Accept finishes the record
+# without a second dispatch.
 accept_mark_dispatched() {
     _amd_subj="$1"; _amd_formula="$2"; _amd_tok="$3"
     gc bd update "$_amd_subj" \
         --set-metadata "gc.recommended_formula_dispatched=$_amd_formula" \
         --unset-metadata gc.recommended_formula \
         --append-notes "Accept dispatched $_amd_formula (acceptance $_amd_tok)${accept_reason:+: $accept_reason}; gc.recommended_formula withdrawn." \
-        >/dev/null 2>&1 || true
-    _amd_live=$(meta_now "$_amd_subj" gc.recommended_formula)
-    if [ -n "$_amd_live" ]; then
-        gc bd update "$_amd_subj" --unset-metadata gc.recommended_formula >/dev/null 2>&1 || true
-        _amd_live=$(meta_now "$_amd_subj" gc.recommended_formula)
-    fi
-    _amd_mark=$(meta_now "$_amd_subj" gc.recommended_formula_dispatched)
-    if [ "$_amd_mark" != "$_amd_formula" ]; then
-        gc bd update "$_amd_subj" --set-metadata "gc.recommended_formula_dispatched=$_amd_formula" >/dev/null 2>&1 || true
-        _amd_mark=$(meta_now "$_amd_subj" gc.recommended_formula_dispatched)
-    fi
-    [ -z "$_amd_live" ] && [ "$_amd_mark" = "$_amd_formula" ]
+        >/dev/null 2>&1
 }
 
 # accept_reopen <why> <gate>... — put the recommendation's gate back on the
-# board, open and owed, from Accept's own accepted close, and read each back as
-# open. bd's reopen clears the close and its reason and blocks again what the
-# gate blocked. Returns 0 once every gate reads open; ACCEPT_REOPEN_LEFT names
-# the ones that do not.
+# board, open and owed, from Accept's own accepted close. bd's reopen clears the
+# close and its reason and blocks again what the gate blocked, and it exits 0 on
+# a gate already open. Returns 0 once every reopen exits 0; ACCEPT_REOPEN_LEFT
+# names the gates whose reopen the store refused.
 ACCEPT_REOPEN_LEFT=""
 accept_reopen() {
     _ar_why="$1"; shift; ACCEPT_REOPEN_LEFT=""
     for _ar_g in "$@"; do
-        gc bd reopen "$_ar_g" --reason "$_ar_why" >/dev/null 2>&1 || true
-    done
-    for _ar_g in "$@"; do
-        if [ "$(row_now "$_ar_g" | jq -r '.status // ""' 2>/dev/null)" != "open" ]; then
-            ACCEPT_REOPEN_LEFT="${ACCEPT_REOPEN_LEFT:+$ACCEPT_REOPEN_LEFT }$_ar_g"
-        fi
+        gc bd reopen "$_ar_g" --reason "$_ar_why" >/dev/null 2>&1 \
+            || ACCEPT_REOPEN_LEFT="${ACCEPT_REOPEN_LEFT:+$ACCEPT_REOPEN_LEFT }$_ar_g"
     done
     [ -z "$ACCEPT_REOPEN_LEFT" ]
 }
@@ -2727,7 +2705,7 @@ accept_reopen_said() {
     if [ -z "$ACCEPT_REOPEN_LEFT" ]; then
         printf '%s' " The recommendation's gate $* is open again, back on the board."
     else
-        printf '%s' " $ACCEPT_REOPEN_LEFT did not read back open after its reopen, so it reads answered while nothing is dispatched. Reopen it by hand: gc bd reopen <id>."
+        printf '%s' " The store refused the reopen of $ACCEPT_REOPEN_LEFT, so it reads answered while nothing is dispatched. Reopen it by hand: gc bd reopen <id>."
     fi
 }
 
@@ -2793,9 +2771,11 @@ accept_input() {
 }
 
 # accept_record <token> <formula> <gate>... — record the acceptance's dispatch
-# input on each gate as gc.acceptance, before the resolve that names the token,
-# and read each back. Returns 0 once every gate reads it back; ACCEPT_RECORD_LEFT
-# names the ones that do not.
+# input on each gate as gc.acceptance, before the resolve that names the token.
+# The resolve cannot be run again, and a finish reads the input off the gate,
+# so each record is read back before it (docs/warrants.md, "bd write
+# durability"; this sh script cannot source bd-lib.sh's helper). Returns 0 once
+# every gate reads it back; ACCEPT_RECORD_LEFT names the ones that do not.
 ACCEPT_RECORD_LEFT=""
 accept_record() {
     _arc_tok="$1"; _arc_formula="$2"; shift 2; ACCEPT_RECORD_LEFT=""
@@ -2805,8 +2785,8 @@ accept_record() {
         return 1
     fi
     for _arc_g in "$@"; do
-        gc bd update "$_arc_g" --set-metadata "gc.acceptance=$_arc_in" >/dev/null 2>&1 || true
-        if ! row_now "$_arc_g" | jq -e --arg want "$_arc_in" '
+        if ! gc bd update "$_arc_g" --set-metadata "gc.acceptance=$_arc_in" >/dev/null 2>&1 \
+            || ! row_now "$_arc_g" | jq -e --arg want "$_arc_in" '
                 ((.metadata // {})["gc.acceptance"] // null)
                 | (if type == "string" then (fromjson? // null) else . end) == ($want | fromjson)' >/dev/null 2>&1; then
             ACCEPT_RECORD_LEFT="${ACCEPT_RECORD_LEFT:+$ACCEPT_RECORD_LEFT }$_arc_g"
@@ -3048,7 +3028,7 @@ cmd_accept() {
         case "$root_state" in
             found\ *)
                 if ! accept_mark_dispatched "$bead" "$formula" "$tok"; then
-                    echo "$PROG: accept: acceptance $tok already dispatched $formula at $bead (root ${root_state#found }), but the record did not stick (gc.recommended_formula still reads live). The next Accept finishes the record without a second dispatch: $PROG accept $bead" >&2
+                    echo "$PROG: accept: acceptance $tok already dispatched $formula at $bead (root ${root_state#found }), but the store refused the record. The next Accept finishes the record without a second dispatch: $PROG accept $bead" >&2
                     exit 4
                 fi
                 echo "$PROG: accept: acceptance $tok had already dispatched $formula at $bead (root ${root_state#found }); recorded it, slinging nothing${accept_vars:+. That root keeps the vars it was poured with, so the --var given here does not reach it}"
@@ -3098,9 +3078,10 @@ cmd_accept() {
     # step while step 5 withdraws the recommendation. The acceptance is that
     # answer, and step 3 read back that no other open human gate blocks the
     # bead, so Accept releases it here, routed to human, as a sitting's
-    # sign-off releases a subject that takes its recommendation. A release that
-    # does not read back leaves the acceptance unfinished, for the next Accept
-    # to finish.
+    # sign-off releases a subject that takes its recommendation. The sling
+    # cannot be undone, so the release is read back before it (docs/warrants.md,
+    # "bd write durability"), and one that does not read back leaves the
+    # acceptance unfinished, for the next Accept to finish.
     held_row=$(row_now "$bead")
     if [ -z "$held_row" ]; then
         echo "$PROG: accept: could not read $bead back after its acceptance ($tok) to tell whether it reads held, so nothing is dispatched yet. The next Accept finishes it once the store answers: $PROG accept $bead" >&2
@@ -3149,7 +3130,7 @@ cmd_accept() {
 
     # Step 5: record the dispatch, withdrawing the recommendation.
     if ! accept_mark_dispatched "$bead" "$formula" "$tok"; then
-        echo "$PROG: accept: dispatched $formula at $bead (acceptance $tok), but the record did not stick (gc.recommended_formula still reads live). The next Accept finishes the record without a second dispatch: $PROG accept $bead" >&2
+        echo "$PROG: accept: dispatched $formula at $bead (acceptance $tok), but the store refused the record. The next Accept finishes the record without a second dispatch: $PROG accept $bead" >&2
         exit 4
     fi
     bust_cache
