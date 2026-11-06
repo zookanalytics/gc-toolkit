@@ -169,9 +169,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main 37bd09351,
-  `gastownhall/gascity-packs` main dac12a4a8 and `gastownhall/beads` main
-  2ef4df339 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main 879a71fa0,
+  `gastownhall/gascity-packs` main 0b0d96250 and `gastownhall/beads` main
+  062fe1e0d (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority), with bd 1.3.2
   (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,

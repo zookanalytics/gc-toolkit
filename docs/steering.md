@@ -8,8 +8,10 @@ description: How the operator steers the city's work, deciding which work runs a
 The operator steers the city's capacity by deciding which work runs, and when.
 New work reaches a work pool once the operator has placed it, and not on its
 own. An epic is an ordinary bead, and each move acts on a bead and everything
-under it, with no logic for epics alone. A park holds work under a bead that
-has not started and leaves work already in flight running. Which work it holds,
+under it, with no logic for epics alone. A Delivery, the level an epic may land
+through ([epics.md](epics.md#deliveries-and-epic-checkpoints)), is an epic under an
+epic, so what this page says of an epic holds for it. A park holds work under a
+bead that has not started and leaves work already in flight running. Which work it holds,
 and which it does not, is [below](#what-a-park-holds). A priority decides the
 order work queues in, and work under a bead follows the bead's priority, moved
 sooner or later by a shift of its own ([Priority](#priority)).
@@ -28,8 +30,8 @@ work among them.
 **Boundaries.** The design that decides how work is steered by epic, with the
 alternatives it rejected and the units that build it, is
 [specs/tk-rl8gz4b.2/steer-by-epic.md](../specs/tk-rl8gz4b.2/steer-by-epic.md);
-this page states what runs. What an epic is, what it carries, and when it
-closes, is [epics.md](epics.md). How a pool claims routed work, and how bd's
+this page states what runs. What an epic or a Delivery is, what it carries, and
+when it closes, is [epics.md](epics.md). How a pool claims routed work, and how bd's
 blocked flag cascades and a pool reads it, is
 [gascity/routing-model.md](gascity/routing-model.md). The hold, the demand and
 the shape law a park follows are invariant I1 in
@@ -42,7 +44,8 @@ may route, arm or hold a bead, or make each steering move, is
 
 A bead may be routed or armed to a work pool only when one of these holds:
 
-- it is a member of an epic, which means it has a parent-child parent;
+- it is a member of an epic, or of a Delivery under one, which means it has a
+  parent-child parent;
 - it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
 - it is an emergency, a red main or a broken gate, checked rather than asserted;
 - the operator routed it, through a sitting, a hand sling or an Accept;
@@ -145,10 +148,12 @@ was cleared. The same definition serves the queue's other readers:
 
 For each bead in the queue, the sitting does one of three things.
 
-- **Place it under an epic.** Give it the epic as its parent
-  (`gc bd update <bead> --parent <epic>`), then route it to its pool
-  (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the epic holds it from
-  then on, through bd's parent-child cascade.
+- **Place it under an epic.** Give it as its parent the epic's open Delivery
+  whose aim covers it, which `gc bd list --parent <epic> -t epic --limit 0` lists,
+  and otherwise the epic itself ([epics.md](epics.md#deliveries-and-epic-checkpoints)):
+  `gc bd update <bead> --parent <delivery-or-epic>`. Then route it to its pool
+  (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the Delivery or the epic
+  holds it from then on, through bd's parent-child cascade.
 - **Route it on its own.** Route it to its pool with the same sling, and give it
   no parent.
 - **Close it**, when the work is not wanted.
@@ -308,7 +313,8 @@ So a bead's priority decides where it queues.
 A bead's priority is the priority of the bead it follows, plus its own shift,
 kept within P0 to P4 at each level.
 
-- A member follows its parent. A member with several parents follows the most
+- A member follows its parent, so a Story under a Delivery follows the Delivery,
+  and the Delivery follows its epic. A member with several parents follows the most
   urgent one, the parent with the lowest P-number.
 - PR-finishing work, a bead carrying `anchor_bead`, follows its anchor. Once
   the anchor's PR is approved, it runs at P0 whatever its shift
@@ -328,7 +334,7 @@ The shift is a signed integer in the key `priority_shift`: +1 is one level
 later, -1 is one level sooner, and absent or empty reads as 0. Shifts add up
 through levels, and each level stops at P0 and P4. Under a P1 epic, a member
 with no shift queues at P1, a member at shift -1 at P0, and a member at shift +2
-at P3. Under a P0 epic, a feature at shift -1 stays at P0, and a task under it
+at P3. Under a P0 epic, a Delivery at shift -1 stays at P0, and a Story under it
 at shift +1 queues at P1. A shift that is not a signed integer makes its bead
 unreadable, and every bead that follows it, so no writer computes a priority
 from it.
