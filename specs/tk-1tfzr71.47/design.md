@@ -329,7 +329,10 @@ and the steps change in one place:
    entries name the target, and `gc gc-toolkit scripts-dir` prints a
    directory inside the target's clone. A refused soft reload is a failed
    verification, because Gas City would then restart the named sessions,
-   under option 1 the mechanik running this command among them.
+   under option 1 the mechanik running this command among them. So is a soft
+   reload that exits 0 with a warning that it did not accept some session's
+   drift (`softReloadAcceptanceResult.warnings`, cmd/gc/soft_reload.go),
+   since Gas City then restarts or drains that session as fact 8 says.
 6. Commit the three files to the town repo as one signed commit, and push it
    to the town's origin, as other town commits are. Its message lists
    `git log --oneline <old>..<new>` from the target's clone. Then restart each
@@ -424,8 +427,16 @@ lock (`walkImport`, internal/packman/install.go), and after the write it only
 checks the cache and validates the composed config (`doImportInstall`).
 Validating the city's config with `gc config show --validate` took under half
 a second when timed on 2026-11-06. The request therefore reaches the
-controller well inside the 30 seconds, and both reconcilers apply the
-acceptance ahead of their drift checks (fact 8).
+controller well inside the 30 seconds. The controller takes it at once, on a
+goroutine of its own (`handleReloadRequest`, cmd/gc/city_runtime.go), and the
+next tick's reload applies the acceptance ahead of that tick's drift checks
+(fact 8). The city's controller runs the legacy reconciler, as its boot
+warning says, and that reconciler restarts a drifted session only inside a
+tick, so the acceptance comes first. Under v2 the planner runs apart from the
+tick, on a goroutine of its own (`planner.run`, cmd/gc/reconcile_planner.go,
+which `plannerRuntime.start` starts), so a working named session can still
+restart first when the tick in progress at the request runs on past those 30
+seconds.
 
 **When sessions take the new revision.** Each session takes it at its next
 start, as it took a checkout's new content before. Each new pool worker starts
@@ -707,11 +718,12 @@ asserts these things:
 9. The deploy command, run against the scratch city, rewrites every pin and
    follows each install with a soft reload. The suite runs no controller, so
    its runs answer `gc reload` with a stub that records each call and can be
-   made to refuse. What a controller does with the request is the canary's to
-   watch (the cutover's step 7). On a forced verification failure, on a
-   refused soft reload, and on a commit its signing program refuses, the
-   command restores the previous pin, runs the soft reload again and leaves
-   the town's HEAD where it was. When the town's origin, a bare repository in
+   made to refuse, or to warn that it did not accept a session's drift. What
+   a controller does with the request is the canary's to watch (the cutover's
+   step 7). On a forced verification failure, on a soft reload that refuses
+   or warns, and on a commit its signing program refuses, the command
+   restores the previous pin, runs the soft reload again and leaves the
+   town's HEAD where it was. When the town's origin, a bare repository in
    scratch, cannot be reached, a run refuses at step 2 and moves no pin, and
    so does a `--revert`. When the origin refuses the push, the new pin stays
    live and committed, the service restart still runs, and the exit names the
