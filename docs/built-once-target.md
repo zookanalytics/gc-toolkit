@@ -157,7 +157,8 @@ controller's closed-bead worktree reaper, and the dolt pack's orders. The
 pack's patrols carry only judgment: the witness's HELP-mail triage, salvage and
 watch on the refinery's queue, and the deacon running `gc doctor` from an
 order. Patrol owns the warranted Dolt reclaim and suspended-store backup, and the
-scratch reapers that no native reaper covers.
+reapers no native one covers: scratch, the review workspaces outside
+`.gc/worktrees/`, and the `polecat/<bead-id>` refs of landed work.
 
 The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
@@ -180,8 +181,9 @@ PR posts with their provenance mark, the gh write guard under its warrant, and
 the seed audit.
 
 The trade: per-site read-backs give way to one bd-durability warrant
-(tk-1tfzr71.11), and step-close, the worktree wrapper and the hand-off shims
-give way to native calls.
+(tk-1tfzr71.11), and step-close and the hand-off shims give way to native calls.
+The wrapper that provisions an agent's home stays under its warrant, because
+`gc worktree` binds a tree to one bead and a home outlives every bead.
 
 ### gctk
 
@@ -225,7 +227,8 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| `worktree-reap.sh`, `worktree-setup.sh` | the controller's closed-bead worktree reaper, `gc worktree` | tk-1tfzr71.10 |
+| `worktree-reap.sh` | the controller's closed-bead worktree reaper | tk-1tfzr71.42 |
+| the work flow's `git worktree add` for a per-bead tree | `gc worktree ensure` and `cleanup` | tk-1tfzr71.43 |
 | `step-close.sh` | `gc hook current` | tk-1tfzr71.12 |
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
@@ -311,7 +314,8 @@ shows its measured net instead.
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
 | tk-1tfzr71.45 | the PR reminder's old marker | partial files | the open PRs whose reminders carry it (tk-3zlwp6p, tk-r4c0g67) |
 | tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,390 | nothing |
-| tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | nothing |
+| tk-1tfzr71.43 | the per-bead tree left behind at hand-off, and its `git worktree add` | partial files | tk-1tfzr71.12 |
+| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41), and tk-1tfzr71.43 |
 
 ### 3. The lanes
 
