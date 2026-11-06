@@ -1250,14 +1250,14 @@ cmd_takeaway() {
     # caller makes on it, as when first-reaction-dispose.sh closes its reaction
     # or converse-signoff.sh resolves gates and closes the conversation. So the
     # stamp is read back once before them, every key of it, and a row that will
-    # not read is a miss. The stamp's time is this call's alone, so a stamp an
-    # earlier call left with the same text does not pass for it. The release
-    # rides the same atomic update, so the stamp reading back shows the release
-    # landed too, and the release's own fields are not compared: a claim that
-    # follows the release, such as a pool's on the route it names, rewrites the
-    # status, the assignee and the session pins, and is no lost write. On a miss
-    # the verb repairs nothing and does nothing after the update, so a re-run
-    # writes the whole update again.
+    # not read is a miss. The stamp carries this call's time to the second, so a
+    # stamp an earlier call left with the same text passes for it only when that
+    # call wrote it in the same second. The release rides the same atomic update,
+    # so the stamp reading back shows the release landed too, and the release's
+    # own fields are not compared: a claim that follows the release, such as a
+    # pool's on the route it names, rewrites the status, the assignee and the
+    # session pins, and is no lost write. On a miss the verb repairs nothing and
+    # does nothing after the update, so a re-run writes the whole update again.
     stamp_row=$(row_now "$bead")
     stamp_missed=""
     if [ -z "$stamp_row" ]; then

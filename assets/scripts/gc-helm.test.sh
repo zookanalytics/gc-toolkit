@@ -804,7 +804,7 @@ eq "$(wc -l < "$TMP/deps" | tr -d ' ')|$(wc -l < "$FAKE_CANCELS" | tr -d ' ')" "
 #                each stamp key that did not land, repairs nothing and ends no run
 #   (LOSTWAIT)   a headline whose update is lost wires no wait edge
 #   (LOSTSAME)   an earlier stamp with the same text, author and disposition does
-#                not pass for this call's, because its time is this call's alone
+#                not pass for this call's, because it carries an earlier time
 #   (LOSTUNREAD) a bead that does not answer the read is a miss
 #   (CLAIMED)    a release that landed and a pool claimed at once is no lost
 #                write: the claim rewrites the status, the assignee and the pins,
@@ -866,7 +866,7 @@ FAKE_UPDATE_LOST=1 sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" 
    >/dev/null 2>"$TMP/lerr" || LSRC=$?
 eq "$LSRC" "4" "(LOSTSAME) a lost update over an earlier stamp with the same text, author and disposition still fails"
 grep -q 'gc.takeaway_at reads "2026-11-01T09:00:00Z"' "$TMP/lerr" \
-  && ok "(LOSTSAME) …on the stamp's time, which is this call's alone" \
+  && ok "(LOSTSAME) …on the stamp's time, which an earlier call wrote" \
   || bad "(LOSTSAME) the time is not what told the write apart (stderr: $(cat "$TMP/lerr"))"
 grep -q 'gc.takeaway reads' "$TMP/lerr" \
   && bad "(LOSTSAME) the matching headline was reported as a miss (stderr: $(cat "$TMP/lerr"))" \
