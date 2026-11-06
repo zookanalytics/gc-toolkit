@@ -791,6 +791,7 @@ cat >"$RL/bin/gc" <<'STUB'
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
     "bd dep list") printf '%s\n' "$RL_GATES" ;;
+    "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
 STUB
@@ -850,6 +851,18 @@ for sh_ in $shells; do
         *"lifecycle transition"*|*"gc-helm takeaway"*|*"bd dep list"*) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
         0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject that is not held is not written, and the conversation closes" ;;
         *) bad "($sh_) recheck close: a subject that is not held is not written" "exit $rc, calls: $calls" ;;
+    esac
+    case "$rc:$calls" in
+        0:*"gc bd close tk-v --reason x: x;gc bd comment tk-v x;pr-sitting-comment refresh --sitting tk-v;"*)
+            ok "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" ;;
+        *) bad "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" "exit $rc, calls: $calls" ;;
+    esac
+    rc=$(run_release "$run" unanchored '[]' RL_COMMENT_REFUSE=1)
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls:$(cat "$RL/out")" in
+        0:*"gc bd close tk-v "*"pr-sitting-comment refresh --sitting tk-v;"*"the close was not recorded among the actions of tk-v"*)
+            ok "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" ;;
+        *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
     for stop in "RL_REFUSE=1|a release that does not land|$NONE_HOLDS" "RL_STATE_DOWN=1|a state that does not read|$NONE_HOLDS" \
         "RL_NONE=1|a gate listing that does not read|{\"error\":\"no issue found\"}"; do

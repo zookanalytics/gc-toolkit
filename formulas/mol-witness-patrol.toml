@@ -371,7 +371,7 @@ temp file, never --argjson (ARG_MAX):
 SESSIONS_RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
 trap 'rm -f "$SESSIONS_RAW" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
+gc session list --json > "$SESSIONS_RAW" 2>/dev/null || true
 # The session list is the map's only source. A non-object, or an object with
 # no .sessions array, is the READ failing, which is a different fact from a
 # city that reports no sessions.
@@ -430,17 +430,18 @@ so it outlives this wisp, which next-iteration burns; a cycle that trips the
 same way lands on that bead as another occurrence.
 
 An owner that resolves `absent` against a POPULATED map is never grounds for
-the fail safe. Closed sessions are excluded from `gc session list` on every
-path by design, so a bead naming a session that has since closed always
-resolves absent and `--state=closed` never returns a row. That is permanent,
-not drift, and it is the orphan signal the classification below prescribes.
+the fail safe. The map reads `gc session list` with no state filter, which
+leaves closed sessions out on every route, so a bead naming a session that has
+since closed always resolves absent. That is permanent, not drift, and it is
+the orphan signal the classification below prescribes.
 A map that omits sessions you can name is the steady state this step is built
 to read.
 
 The map holds no closed session, and the classification below orphans
 `absent` and `closed` alike. Closed sessions are recorded as session beads in
-the city store, a set that grows with every session the city runs, so a map
-that held them would cost a whole-history scan on every rig each cycle.
+the city store, a set that grows with every session the city runs, and
+`--state all` or `--state closed` lists that whole history, so a map that held
+them would cost a whole-history scan on every rig each cycle.
 Closed keys would also keep the map populated when the session list comes
 back empty, and that cycle would no longer trip `liveness map empty`.
 

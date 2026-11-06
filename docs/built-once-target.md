@@ -134,9 +134,8 @@ conversation doctrine. Intake is slung work whose exits are native writes. The
 subsystem owns the converse, first-reaction and mechanik prompts, the converse
 skills, the operator's intake and the terminal surfaces.
 
-The trade: the keys the visit kind left behind, and the migration that still
-reads them, go with the cutover's follow-up (tk-1tfzr71.33). The first reaction
-stops being a bead kind of its own (tk-1tfzr71.17).
+The trade: the first reaction stops being a bead kind of its own
+(tk-1tfzr71.17).
 
 ### Board
 
@@ -158,7 +157,8 @@ controller's closed-bead worktree reaper, and the dolt pack's orders. The
 pack's patrols carry only judgment: the witness's HELP-mail triage, salvage and
 watch on the refinery's queue, and the deacon running `gc doctor` from an
 order. Patrol owns the warranted Dolt reclaim and suspended-store backup, and the
-scratch reapers that no native reaper covers.
+reapers no native one covers: scratch, the review workspaces outside
+`.gc/worktrees/`, and the `polecat/<bead-id>` refs of landed work.
 
 The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
@@ -181,8 +181,9 @@ PR posts with their provenance mark, the gh write guard under its warrant, and
 the seed audit.
 
 The trade: per-site read-backs give way to one bd-durability warrant
-(tk-1tfzr71.11), and step-close, the worktree wrapper and the hand-off shims
-give way to native calls.
+(tk-1tfzr71.11), and step-close and the hand-off shims give way to native calls.
+The wrapper that provisions an agent's home stays under its warrant, because
+`gc worktree` binds a tree to one bead and a home outlives every bead.
 
 ### gctk
 
@@ -226,7 +227,8 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| `worktree-reap.sh`, `worktree-setup.sh` | the controller's closed-bead worktree reaper, `gc worktree` | tk-1tfzr71.10 |
+| `worktree-reap.sh` | the controller's closed-bead worktree reaper | tk-1tfzr71.42 |
+| the work flow's `git worktree add` for a per-bead tree | `gc worktree ensure` and `cleanup` | tk-1tfzr71.43 |
 | `step-close.sh` | `gc hook current` | tk-1tfzr71.12 |
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
@@ -260,19 +262,20 @@ and the change that fires the trigger deletes it.
 - The hand-offs at `escalate.sh` and `escalation-rig.sh`, 241 lines with their
   test. Trigger: no open step bead names them, and no session started before the
   cutover still runs. Carried by tk-kvdomjb.
-- `migrate-visits-to-gates.sh`, the cutover's one-shot move of every open visit,
-  2,180 lines with its test, and the keys only it still reads. Trigger: its
-  `--check` passes and the operator clears the cutover gate (tk-nly1mqd). Carried
-  by tk-1tfzr71.33.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
   with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.12.
 - The PR reminder's old marker. Trigger: no open PR carries one. Carried by
-  tk-1tfzr71.33.
+  tk-1tfzr71.45.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
-  files beside the migration's own 43: the bare `superseded_by` key, the
+  files: the bare `superseded_by` key, the
   `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
   among others. Trigger: no store or open PR holds the shape. Each goes with the
   member that rewrites its reader.
+- The pass for an incomplete Epic, an epic that is not a Delivery and carries no
+  hypothesis, in the close gate's `clause_epic_ruling_recorded` and I15's
+  `exempt-nohyp` arm. Each is one line that passes every epic with no hypothesis.
+  Trigger: every live Epic carries its hypothesis, and every closed one carries a
+  hypothesis or a disposition (tk-wmwcdlc.5). Carried by tk-wmwcdlc.6.
 
 ### Doctrine restated per call site
 
@@ -309,9 +312,10 @@ shows its measured net instead.
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
-| tk-1tfzr71.33 | the cutover's migration script, the keys only it reads, the PR reminder's old marker | 2,180 | the cutover gate (tk-nly1mqd) |
+| tk-1tfzr71.45 | the PR reminder's old marker | partial files | the open PRs whose reminders carry it (tk-3zlwp6p, tk-r4c0g67) |
 | tk-1tfzr71.12, head of lane A | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh`, the work formula's copies of core's steps | 3,390 | nothing |
-| tk-1tfzr71.10, head of lane B | the worktree reaper and wrapper | 2,233 | nothing |
+| tk-1tfzr71.43 | the per-bead tree left behind at hand-off, and its `git worktree add` | partial files | tk-1tfzr71.12 |
+| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41), and tk-1tfzr71.43 |
 
 ### 3. The lanes
 
@@ -336,7 +340,7 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-kvdomjb and the migration members name come to 65k of
+The whole files that tk-kvdomjb and the migration members name come to 63k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry

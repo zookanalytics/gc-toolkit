@@ -115,7 +115,8 @@ asks() { # <reader> <predicate>
         && ok "(READERS) $1 asks $2" \
         || bad "(READERS) $1 asks $2"
 }
-for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh; do
+for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh \
+         assets/scripts/stand-down.sh; do
     sources "$r"; asks "$r" has_dispatch_path
 done
 for r in assets/scripts/deferred-dispatch.sh doctor/check-armed-dispatch-owed/run.sh \

@@ -21,16 +21,18 @@
 # react only to input that has none, and the doctor checks
 # check-blocked-work-armed, which flags blocked work that has none, and
 # check-step-terminal, which counts a step as offerable only when it has one.
-# The readers that leave a held bead alone source it too: the proactive scan,
-# which files no first reaction for one; check-blocked-work-armed, which owes
-# one no arm; deferred-dispatch.sh's reconcile, which slings no armed bead while
-# it is held, because a sling reads no hold, and check-armed-dispatch-owed, which
-# owes such an arm no dispatch for the same reason; and the liveness classifier
-# (liveness-classify.sh, which liveness-sweep.sh and its precheck compose) and
-# the re-check a liveness gate's message carries (liveness-recheck.sh), which
-# name the hold as a wait. One definition, no copies: a key or a label added
-# here is read by every one of them at once, and dispatch-path.test.sh fails
-# when a reader stops sourcing this file or tests the keys or the labels itself.
+# stand-down.sh asks it after a release, because the bead is about to go ready
+# and must have none. The readers that leave a held bead alone source it too:
+# the proactive scan, which files no first reaction for one;
+# check-blocked-work-armed, which owes one no arm; deferred-dispatch.sh's
+# reconcile, which slings no armed bead while it is held, because a sling reads
+# no hold, and check-armed-dispatch-owed, which owes such an arm no dispatch for
+# the same reason; and the liveness classifier (liveness-classify.sh, which
+# liveness-sweep.sh and its precheck compose) and the re-check a liveness gate's
+# message carries (liveness-recheck.sh), which name the hold as a wait. One
+# definition, no copies: a key or a label added here is read by every one of
+# them at once, and dispatch-path.test.sh fails when a reader stops sourcing
+# this file or tests the keys or the labels itself.
 #
 # Usage follows the in-variable jq convention (standing-kinds.sh): prepend the
 # defs to a jq program, e.g.
