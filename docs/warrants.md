@@ -213,11 +213,16 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 - **Covers.** `gctk bead`'s `--verify` (`services/gctk/internal/cli/bead.go`)
   and the read it makes, `Verify` in `services/gctk/internal/gcbd/verify.go`,
-  which `gctk lifecycle` calls for a transition too: the one place the pack
-  reads a bd write back. Each script that confirms a write through it names
-  this entry, and `git grep -n "bd write durability"` lists them. The
+  which `gctk lifecycle` calls for a transition too: the read a script
+  confirms a bd write through. Each script that confirms a write through it
+  names this entry, and `git grep -n "bd write durability"` lists them. The
   `bd-durability` block of `assets/scripts/bd-lib.sh` holds the read that the
-  callers in code the deletion plan retires still make.
+  callers in code the deletion plan retires still make. `human-gate.sh`,
+  `await-ruling.sh`, `decline.sh`, `store-only-exit.sh`, `patrol-finding.sh`,
+  `pr-dispose.sh` and `pr-sitting-comment.sh` still read their own writes
+  back, and so do the `waits`, `converse-hold`, `converse-iterate-document`
+  and `converse-recheck-premise` skills and the mechanik's recipe for an
+  integration effort (`agents/mechanik/prompt.template.md`).
 - **Stands in for.** A bd write whose exit status settles whether it landed. bd
   would re-read an ordinary update under a degraded Dolt server, as it re-reads
   a claim, and `bd dep add` would refuse a target that another database holds.

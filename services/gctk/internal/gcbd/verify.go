@@ -17,8 +17,8 @@ import (
 // under a degraded Dolt server, or beside a legacy write path, may not stay
 // written. bd re-reads only a claim, or a guarded update that writes nothing
 // but the status and the assignee. Verify is the read the pack makes in that
-// gap, before an act that cannot be undone or run again, and it is the one
-// place that read lives.
+// gap, before an act that cannot be undone or run again, through `gctk bead
+// --verify` from a script and through `gctk lifecycle` for a transition.
 //
 // A write is confirmed by its witness: what the bead must read back carrying
 // for the write to count as landed. bd applies one update, one close, one

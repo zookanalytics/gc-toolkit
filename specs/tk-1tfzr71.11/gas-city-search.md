@@ -13,7 +13,7 @@ bb61aadbf.
 
 | The need | Outcome |
 |---|---|
-| Confirm a bd write before an act that cannot be undone or run again | `gctk bead <verb> ... --verify` runs the write through `gc bd` and reads it back with one authoritative `gc bd list --id`. Every read-back the pack makes outside code the deletion plan retires goes through it, from shell, from formula steps, and from Go, where `gctk lifecycle` calls the same function (gcbd's `Verify`). |
+| Confirm a bd write before an act that cannot be undone or run again | `gctk bead <verb> ... --verify` runs the write through `gc bd` and reads it back with one authoritative `gc bd list --id`. Every read-back this change moves goes through it, from shell, from formula steps, and from Go, where `gctk lifecycle` calls the same function (gcbd's `Verify`). |
 | A read that does not mistake a later actor for a lost write | The read confirms the write's witness, not every field it wrote. An update's witness is the metadata keys it sets, else the other fields it writes, and `--verify-key` names the keys instead, as a release does, because a pool's claim right after it rewrites the status, the assignee and the session pins. |
 | A refused write | Its exit is passed through: bd's 1, 13 and the others, and `gc bd`'s 4. |
 | A write that exits 0 and does not read back | Exit 3, which neither bd nor `gc bd` uses. bd exits 1, 2 (a read past its row cap), 13 (`ExitGuardMismatch`), 14 (`ExitMigrationFrozen`), 75 (`LockHeldExitCode`) and 130, and `gc bd` adds 4 (`bdSilentFallbackExitCode`). gctk's own usage refusal is 2. |
@@ -63,6 +63,6 @@ bb61aadbf.
   tree, which gctk cannot import, and no `gc` command reaches it.
 
 Neither covers the need, so the command composes `gc bd` for the write and
-`gc bd list` for the read, and holds only the comparison. It is the one place
-to delete once bd re-reads an ordinary update, the retirement trigger the
-warrant names.
+`gc bd list` for the read, and holds only the comparison. It and the reads
+scripts still make themselves are what to delete once bd re-reads an ordinary
+update, the retirement trigger the warrant names.

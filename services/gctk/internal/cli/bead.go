@@ -3,7 +3,7 @@ package cli
 // `gctk bead` runs one bd write through `gc bd` and, asked with --verify, reads
 // the write back before it answers, so a caller about to act in a way that
 // cannot be undone gates the act on one exit status. The read is
-// gcbd.Verify, the one place the pack reads a write back (docs/warrants.md,
+// gcbd.Verify, which gctk lifecycle makes for a transition too (docs/warrants.md,
 // "bd write durability"). A write's exit settles every other case: a refused
 // or failed write exits non-zero, and this command passes that exit through.
 

@@ -13,7 +13,7 @@ supervisor's API (`internal/gcbd`).
 
 | Command | What it does | Documented in |
 |---|---|---|
-| `bead` | one bd write through `gc bd` (an update, a close, a create, a dependency added or removed) and, with `--verify`, the write read back before it answers: the one place the pack reads a write back, under the "bd write durability" warrant in `docs/warrants.md` | `gctk bead --help`, `internal/cli/bead.go`, `internal/gcbd/verify.go` |
+| `bead` | one bd write through `gc bd` (an update, a close, a create, a dependency added or removed) and, with `--verify`, the write read back before it answers: the read a script confirms a write through, under the "bd write durability" warrant in `docs/warrants.md` | `gctk bead --help`, `internal/cli/bead.go`, `internal/gcbd/verify.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares | `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
 | `pr-status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `internal/cli/prstatus.go`, `prstatus` |
