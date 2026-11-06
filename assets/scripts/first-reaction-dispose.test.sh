@@ -50,26 +50,21 @@ case "$1 ${2:-}" in
       *" --append-notes "*) [ -n "${FAKE_NOTES_FAILS:-}" ] && exit 1 ;;
       *" --status=closed "*) [ -n "${FAKE_CLOSE_FAILS:-}" ] && exit 1 ;;
     esac
-    # Model read-after-write for gc.recommended_formula so the script's read-back
-    # guard can be exercised: apply the set/unset to the state file a later
-    # `bd show` reflects. FAKE_DROP_RECO models a silent drop — the update still
-    # reports success but the key does not move: =once drops only the first
-    # recommendation write (so a retry lands), any other value drops them all.
+    # Model read-after-write for gc.recommended_formula so the script's read
+    # before the act can be exercised: apply the set/unset to the state file a
+    # later `bd show` reflects. FAKE_DROP_RECO models a write a degraded store
+    # loses (docs/warrants.md, "bd write durability"): the update reports
+    # success and the key does not move.
     _prev=""; _reco_set=""; _reco_unset=""
     for _a in "$@"; do
       case "$_prev" in
         --set-metadata)   case "$_a" in
                             gc.recommended_formula=*) _reco_set="${_a#gc.recommended_formula=}" ;;
                             # Intake's marker, read back by the script before it
-                            # releases the bead. FAKE_DROP_PLACEMENT models a
-                            # silent drop: =once drops the first write only.
+                            # releases the bead. FAKE_DROP_PLACEMENT models the
+                            # same lost write.
                             placement=*)
-                              case "${FAKE_DROP_PLACEMENT:-}" in
-                                once) if [ -e "$FAKE_STATE.placement-dropped" ]; then printf '%s' "${_a#placement=}" > "$FAKE_STATE.placement"
-                                      else : > "$FAKE_STATE.placement-dropped"; fi ;;
-                                ?*)   : ;;
-                                *)    printf '%s' "${_a#placement=}" > "$FAKE_STATE.placement" ;;
-                              esac ;;
+                              [ -n "${FAKE_DROP_PLACEMENT:-}" ] || printf '%s' "${_a#placement=}" > "$FAKE_STATE.placement" ;;
                             # The notice the real deferred-dispatch.sh records,
                             # which its own notice listing reads back below.
                             gc.notify_when_ready=*) printf '%s' "${_a#gc.notify_when_ready=}" > "$FAKE_STATE.notice" ;;
@@ -79,21 +74,14 @@ case "$1 ${2:-}" in
                             gc.notify_when_ready) rm -f "$FAKE_STATE.notice" ;;
                           esac ;;
         # An emergency's P0, read back before its route. FAKE_DROP_PRIORITY
-        # models a priority write that reports success and does not move.
+        # models the same lost write.
         --priority) [ -n "${FAKE_DROP_PRIORITY:-}" ] || printf '%s' "$_a" > "$FAKE_STATE.priority" ;;
       esac
       _prev="$_a"
     done
-    if [ -n "$_reco_set" ] || [ -n "$_reco_unset" ]; then
-      _drop=""
-      case "${FAKE_DROP_RECO:-}" in
-        once) [ -e "$FAKE_STATE.dropped" ] || { _drop=1; : > "$FAKE_STATE.dropped"; } ;;
-        ?*)   _drop=1 ;;
-      esac
-      if [ -z "$_drop" ]; then
-        [ -n "$_reco_set" ]   && printf '%s' "$_reco_set" > "$FAKE_STATE"
-        [ -n "$_reco_unset" ] && : > "$FAKE_STATE"
-      fi
+    if { [ -n "$_reco_set" ] || [ -n "$_reco_unset" ]; } && [ -z "${FAKE_DROP_RECO:-}" ]; then
+      [ -n "$_reco_set" ]   && printf '%s' "$_reco_set" > "$FAKE_STATE"
+      [ -n "$_reco_unset" ] && : > "$FAKE_STATE"
     fi ;;
   "bd create")
     printf 'CREATE %s\n' "$*" >> "$FAKE_LOG"
@@ -355,7 +343,7 @@ R="tk-react"   # the reaction bead the worker holds
 # Reset per run, then seed the recommendation state from the fixture so the first
 # `bd show` matches FAKE_SHOW_JSON and later writes mutate it from there.
 run() {
-  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.dropped" "$FAKE_STATE.placement" "$FAKE_STATE.placement-dropped" "$FAKE_STATE.priority" \
+  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.placement" "$FAKE_STATE.priority" \
     "$FAKE_STATE.assignee" "$FAKE_STATE.notice" "$FAKE_STATE.mailbox"
   printf '%s' "${FAKE_SHOW_JSON:-$DEFAULT_SHOW}" \
     | jq -r '(.[0].metadata // {})["gc.recommended_formula"] // ""' > "$FAKE_STATE" 2>/dev/null || : > "$FAKE_STATE"
@@ -1061,43 +1049,33 @@ before '^GATE --subject' 'gc.recommended_formula=mol-new' "(RECOORDER) …and st
 unset FAKE_SHOW_JSON
 
 # ── The recommendation must land before the act (read-back guard) ─────────────
-# gc.recommended_formula is presence-sensitive downstream, so a silently dropped
-# write is a wrong operator affordance, not a cosmetic miss. An update reports
-# success without proving this one key moved, so the exit reads it back, retries
-# the lone set/unset once, and refuses before the act if it is still wrong —
-# nothing else has been written, so the command re-runs.
+# gc.recommended_formula is presence-sensitive downstream, so a write that did
+# not land is a wrong operator affordance, not a cosmetic miss. The act after it
+# cannot be undone, so the exit reads the key back once and refuses before the
+# act if it is wrong — nothing else has been written, so the command re-runs.
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 
-# A set that silently drops and never recovers: the release is withheld, so the
+# A set the store loses: the release is withheld, so the
 # reaction is not recorded done over a gate that offers only Discuss. The gate is
 # filed before the set, and a re-run finds it and sets the recommendation again.
 export FAKE_DROP_RECO=1
 run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-x — Accept or Discuss" \
     --recommended-formula mol-x --reaction-bead "$R"
-eq "$RC" "4" "(RECOGUARD) a silently dropped recommendation set refuses the exit"
+eq "$RC" "4" "(RECOGUARD) a recommendation set that did not land refuses the exit"
 hasnt "HELM takeaway" "$LOG" "(RECOGUARD) …the release is withheld"
 has "did not land" "$ERR" "(RECOGUARD) …and the refusal names the key that did not land"
 has "The gate tk-gate1 is filed" "$ERR" "(RECOGUARD) …saying the gate is already filed"
 hasnt "UPDATE bd update $R" "$LOG" "(RECOGUARD) …and the reaction bead is left open for the re-offer"
 unset FAKE_DROP_RECO
 
-# The same drop, but the lone retry lands it: the act proceeds.
-export FAKE_DROP_RECO=once
-run tk-sub --disposition recommend --reason "operator authority" \
-    --takeaway "recommend: execute via mol-x — Accept or Discuss" \
-    --recommended-formula mol-x --reaction-bead "$R"
-eq "$RC" "0" "(RECOGUARD) a set that lands on the retry lets the act proceed"
-has "HELM takeaway tk-sub" "$LOG" "(RECOGUARD) …the act runs once the recommendation is confirmed"
-unset FAKE_DROP_RECO
-
-# A stale-clear that silently drops and never recovers: the act is withheld, so a
+# A stale-clear the store loses: the act is withheld, so a
 # Discuss-only retry never leaves a superseded Accept executable.
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.recommended_formula":"mol-old"}}]'
 export FAKE_DROP_RECO=1
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
     --takeaway "needs a ruling: which default" --reaction-bead "$R"
-eq "$RC" "4" "(RECOGUARD) a silently dropped stale-clear refuses the exit"
+eq "$RC" "4" "(RECOGUARD) a stale-clear that did not land refuses the exit"
 hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so the superseded Accept is never left executable"
 hasnt "GATE " "$LOG" "(RECOGUARD) …and no gate is filed beside the older recommendation"
 has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the stale key that did not clear"
@@ -1721,17 +1699,13 @@ eq "$RC" "0" "(INTAKEANCHOR) PR-finishing work's actionable exit succeeds"
 has "--release --route gc-toolkit/gc-toolkit.polecat --no-wait" "$LOG" "(INTAKEANCHOR) …and it is routed"
 hasnt "placement=pending" "$LOG" "(INTAKEANCHOR) …unmarked"
 
-export FAKE_SHOW_JSON="$UNPLACED" FAKE_DROP_PLACEMENT=always
+export FAKE_SHOW_JSON="$UNPLACED" FAKE_DROP_PLACEMENT=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "4" "(INTAKEMARK) a marker that does not land stops the exit"
 has "placement=pending did not land" "$ERR" "(INTAKEMARK) …naming the write that missed"
 hasnt "HELM takeaway" "$LOG" "(INTAKEMARK) …before the release, so the bead is not left unrouted without its marker"
 hasnt "gc.reacted_by" "$LOG" "(INTAKEMARK) …with no landed proof"
 hasnt "UPDATE bd update $R" "$LOG" "(INTAKEMARK) …and the reaction bead open for a re-run"
-export FAKE_DROP_PLACEMENT=once
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-eq "$RC" "0" "(INTAKEMARK) a marker that lands on the retry lets the exit through"
-has "HELM takeaway tk-sub t --by proactive --release --no-wait" "$LOG" "(INTAKEMARK) …and the bead is released"
 unset FAKE_DROP_PLACEMENT
 
 # (INTAKESTAMP) a held subject still carries a dead pour's stamp, and the release

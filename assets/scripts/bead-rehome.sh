@@ -507,8 +507,9 @@ if [ -n "$DRY_RUN" ]; then
     exit 0
 fi
 
-# 1. Stamp the pointer and prove it landed: the close below is gated on the
-# read-back, not on an exit status. Both keys go in one update, which bd applies
+# 1. Stamp the pointer and prove it landed. The close below cannot be undone, so
+# it is gated on a read-back of the stamp as well as on the stamp's exit
+# (docs/warrants.md, "bd write durability"). Both keys go in one update, which bd applies
 # only while the origin still has the status and assignee the gates above
 # judged. bd holds a claimed bead
 # against another actor's assignment and close, never against a metadata write,
@@ -527,6 +528,8 @@ bd_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" "${STAMP_META[@]}" >/dev/nu
 if [ "$STAMP_RC" = 13 ]; then
     if [ -n "$JUDGED_ASSIGNEE" ]; then JUDGED_HOLDER="under $JUDGED_ASSIGNEE"; else JUDGED_HOLDER="and unassigned"; fi
     die "$ORIGIN is no longer $JUDGED_STATUS $JUDGED_HOLDER, as this run read it before judging it: a claim, an assignment or a status change landed since, so nothing is stamped and $ORIGIN is not closed. Re-run to judge it as it stands now" 4
+elif [ "$STAMP_RC" != 0 ]; then
+    die "the store refused the successor pointer on $ORIGIN (gc bd update exited $STAMP_RC); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
 fi
 
 CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
