@@ -18,6 +18,10 @@
 #   (NOARG)    no conversation id is refused (exit 2)
 #   (MISSING)  a conversation that does not resolve exits 4 through
 #              verify_subject
+#   (CONCLUSION) a hand-back recorded on a closed conversation is the visit's
+#              conclusion, so the visit's PR comment is drawn again; one recorded
+#              while the conversation is open, or one that does not land, draws
+#              nothing
 set -u
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gc-helm.sh"
@@ -57,7 +61,7 @@ case "${1:-} ${2:-}" in
           meta=$(printf '%s' "$meta" | jq --arg k "${f##*/}" --rawfile v "$f" '. + {($k): $v}')
         done
         if [ "$id" = tk-conv ]; then
-          jq -n --argjson m "$meta" '[{id:"tk-conv", title:"talk it over", issue_type:"task", status:"in_progress",
+          jq -n --argjson m "$meta" --arg s "${CONV_STATUS:-in_progress}" '[{id:"tk-conv", title:"talk it over", issue_type:"task", status:$s,
               assignee:"gc-toolkit/gc-toolkit.tk-conv", dependencies:[{id:"tk-subj", dependency_type:"tracks"}], metadata:$m}]'
         else
           jq -n --argjson m "$meta" '[{id:"tk-task", title:"a bead", issue_type:"task", status:"in_progress", assignee:"s1", metadata:$m}]'
@@ -84,13 +88,20 @@ chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
 export CALLS="$TMP/calls" META="$TMP/meta" DROPPED="$TMP/dropped"
+# A recorder standing in for pr-sitting-comment.sh.
+cat > "$TMP/rec-psc" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$REC_PSC_LOG"
+REC
+chmod +x "$TMP/rec-psc"
+export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 unset GC_HELM_FIXTURE || true
 export TMPDIR="$TMP"
 
 # run_handback <stdin-text> <args…> -> RC / OUT (stdout+stderr) / CALLED
 run_handback() {
     _in="$1"; shift
-    : > "$CALLS"; rm -f "$DROPPED"
+    : > "$CALLS"; : > "$REC_PSC_LOG"; rm -f "$DROPPED"
     RC=0
     OUT="$(printf '%s' "$_in" | sh "$SCRIPT" handback "$@" 2>&1)" || RC=$?
     CALLED="$(cat "$CALLS")"
@@ -157,6 +168,19 @@ run_handback "$HB1" tk-gone
 eq "$RC" 4 "(MISSING) a conversation that does not resolve exits 4"
 has "$OUT" "bead not found" "(MISSING) …reported by the shared subject check"
 eq "$CALLED" "" "(MISSING) …and writes nothing"
+
+echo "── a hand-back recorded once the conversation has closed draws the visit's PR comment again ──"
+rm -f "$META"/*
+run_handback "$HB2" tk-conv
+eq "$(cat "$REC_PSC_LOG")" "" "(CONCLUSION) a hand-back on an open conversation draws nothing, since an open visit's comment shows no conclusion"
+CONV_STATUS=closed run_handback "$HB2" tk-conv
+eq "$RC" 0 "(CONCLUSION) a hand-back on a closed conversation exits 0"
+eq "$(stored gc.handback)" "$HB2" "(CONCLUSION) …and is recorded"
+eq "$(cat "$REC_PSC_LOG")" "refresh --sitting tk-conv" "(CONCLUSION) …then the visit's PR comment is drawn again from the conversation"
+rm -f "$META"/*
+CONV_STATUS=closed DROP_WRITES=5 run_handback "$HB1" tk-conv
+eq "$RC" 4 "(CONCLUSION) a hand-back that never reads back exits 4"
+eq "$(cat "$REC_PSC_LOG")" "" "(CONCLUSION) …and draws nothing"
 
 echo
 echo "gc-helm handback: $PASS passed, $FAIL failed"
