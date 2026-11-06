@@ -228,16 +228,21 @@ these steps:
    session this engage started. Then engage waits for the reconciler to start
    the session, and attaches the operator.
 
-**Engage offers the gates that hold the bead.** It reads the open human gates
-reached from the bead through its open `blocks` edges (`gctk pr-status gates`,
-`prstatus.HoldingGates`), the reader the PR's `held: gate` label and the board's
-row read, so a gate on a rework the anchor waits on is offered from the PR. The
-prompt lists them after the bead's conversations, and picking one engages it as
+**Engage offers what holds the bead.** It reads the reasons
+`gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
+the one definition the PR's `held:` labels and the board's row read: each open
+human gate reached from the bead through its open `blocks` edges, so a gate on a
+rework or a review the anchor waits on is offered from the PR, each blocker the
+bead waits on that a person has to clear, and the PR's own review threads or
+blocked verdict. The prompt lists them under "Held by" after the bead's
+conversations. A gate or a blocker takes a number, and picking one engages it as
 if it were named, except that a gate several beads wait on takes the bead it was
-picked from when that bead is one of them. An engage that asks nothing, as
-`--no-input`, the tmux picker and the board's route do, names each and how to
-engage it, and an engage pointed at a gate or a conversation does not look for
-others. A conversation on the bead answers none of them until it replies to one.
+picked from when that bead is one of them. The PR's own threads and verdict take
+none, because engaging the PR is how a person acts on them. An engage that asks
+nothing, as `--no-input`, the tmux picker and the board's route do, names each
+and how to engage it, and an engage pointed at a gate or a conversation does not
+look for others. A conversation on the bead answers no gate until it replies to
+one.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a

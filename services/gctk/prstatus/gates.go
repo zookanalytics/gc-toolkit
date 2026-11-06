@@ -7,15 +7,17 @@ import (
 	"strings"
 )
 
-// Blocker is the far end of one `blocks` edge, in the fields [HoldingGates]
-// reads of it. A caller fills it from its own read of the store, and passes the
-// status and the issue type as they read, in any case.
+// Blocker is the far end of one `blocks` edge, in the fields [HoldingGates] and
+// [IsPersonBlocker] read of it. A [Store] fills it from its own read, and passes
+// the status and the issue type as they read, in any case. RoutedTo is the far
+// bead's metadata.gc.routed_to.
 type Blocker struct {
 	ID        string
 	Title     string
 	Status    string
 	IssueType string
 	AwaitType string
+	RoutedTo  string
 }
 
 // open reports whether the blocker still blocks: any status but closed, a
@@ -29,6 +31,20 @@ func (b Blocker) open() bool { return !strings.EqualFold(b.Status, "closed") }
 // one reader rule bd_human_gates applies in assets/scripts/bd-lib.sh.
 func IsHumanGate(issueType, awaitType string) bool {
 	return strings.EqualFold(issueType, "gate") && awaitType == "human"
+}
+
+// IsPersonBlocker reports whether a blocker is a person's to clear and not a
+// human gate: a live blocker routed to a person (gc.routed_to=human), or a
+// decision. No automated actor will clear it, so it holds a PR as held: blocked.
+// A human gate is never one, whatever its route, because held: gate is what
+// counts it. A blocker with no status reads open, and only a closed one is not
+// live. The helm board asks it of any bead's blockers, for the rows that ask a
+// person for something.
+func IsPersonBlocker(b Blocker) bool {
+	if !b.open() || IsHumanGate(b.IssueType, b.AwaitType) {
+		return false
+	}
+	return b.RoutedTo == "human" || strings.EqualFold(b.IssueType, "decision")
 }
 
 // ReadBlockers answers the `blocks` edges of each bead it is given: for each id,
@@ -71,10 +87,10 @@ var ErrWalkBound = errors.New("the blocks edges run past the walk's bound")
 // it, while the other roots still answer. A read that fails returns nothing and
 // its error, because a bead no read reached proves nothing about any root.
 //
-// This is the one reader of the human gates that hold a bead. [Facts.OpenHumanGate]
-// is whether it finds any, so the `held: gate` label and the helm board's PR row
-// read it, and `gctk pr-status gates` is how gc-helm.sh engage lists the gates
-// to offer.
+// This is the one reader of the human gates that hold a bead. [Read] gathers
+// [Facts.Gates] through it, so the `held: gate` label, the helm board's PR row
+// and what gc-helm.sh engage offers all read its answer. The merge pass asks it
+// too, for the blockers it would otherwise call stuck.
 func HoldingGates(roots []string, read ReadBlockers) (map[string][]Blocker, error) {
 	var walks []*gateWalk
 	named := make(map[string]bool, len(roots))
