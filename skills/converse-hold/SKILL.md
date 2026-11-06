@@ -85,8 +85,8 @@ attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh` enumerate anchors by
 that state, and `held` drops it from all three.
 
 Never park a live conversation: the writer's `--release` clears the
-assignee and route, and the only place it belongs is a stand-down
-ruling, written as
+assignee and route, and the only place it belongs is a ruling that
+stops the work and keeps the bead, written as
 `gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`. It parks
 the anchor AND cancels the run beneath it through gascity, and `--no-wait`
 records that the ruling ended the wait rather than moving it.
