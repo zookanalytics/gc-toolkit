@@ -20,11 +20,12 @@
 # escalates once, then recovers as in (d) and keeps a local change the
 # fast-forward does not touch, while a clean copy of a file the incoming
 # commits delete leaves with them; (i) a rig parked off the default branch is
-# escalated once, left untouched and not counted advanced, and recovers as in
-# (d) once back on it; (j) a recovered rig whose gate withdrawal fails keeps
-# its subject open until a later withdrawal succeeds; (k) a rig whose fetch
-# fails is skipped, with nothing touched or filed; (l) no escalation tells a
-# person to run git reset --hard or --keep.
+# escalated once, left untouched and not counted advanced, has its bead's
+# description rewritten on the next pass to what that pass read, and recovers
+# as in (d) once back on it; (j) a recovered rig whose gate withdrawal fails
+# keeps its subject open until a later withdrawal succeeds; (k) a rig whose
+# fetch fails is skipped, with nothing touched or filed; (l) no escalation
+# tells a person to run git reset --hard or --keep.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -357,8 +358,14 @@ eq "$KAPPA_OUT" "reconcile-rig-checkouts: 0 advanced, 1 blocked" "a parked rig i
 body_has kappa '^rigs/kappa is parked off main — its live checkout HEAD is on integration/seed\.$' \
   && ok "the parked escalation names the branch the HEAD is on" \
   || bad "the parked escalation names the branch the HEAD is on (got '$(body_for kappa)')"
+# Another commit on the parked branch changes what the next pass reads, and the
+# open bead's description is rewritten to it rather than left as first filed.
+echo seed2 > "$TMP/kappa/seed2.txt"; git -C "$TMP/kappa" add -A; git -C "$TMP/kappa" commit -qm seed-two
 bash "$SCRIPT" >/dev/null
 eq "$(open_count kappa)" "1" "a parked rig does not duplicate its bead on the next pass"
+body_has kappa '^[0-9a-f]+ seed-two$' \
+  && ok "the next pass rewrites the open bead's description to what it read" \
+  || bad "the next pass rewrites the open bead's description to what it read (got '$(body_for kappa)')"
 KAPPA_BEAD="$(bead_for kappa)"
 git -C "$TMP/kappa" checkout -q main
 bash "$SCRIPT" >/dev/null
