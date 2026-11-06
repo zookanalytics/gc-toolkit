@@ -885,7 +885,7 @@ no_thread_blocks() {
   [ "$n" = 0 ] && NTB_WHY="No review thread blocks PR#$1's merge: none it counts is left unresolved."
   return 0
 }
-# withdraw_stale_gates <anchor> <num> <head-oid> <base> <recorded-target> <merge-state>
+# withdraw_stale_gates <anchor> <num> <head-oid> <base> <recorded-target> <merge-state> <route>
 # — withdraw this script's merge-path gates on an open PR's anchor once the
 # situation each asked about is gone. An open one holds the merge, and through
 # takeaway_is_holding the merge-in and red-check dispatch, so a gate that
@@ -900,8 +900,10 @@ no_thread_blocks() {
 #   pr-abandoned.<num>                   once the PR is open again, as this
 #                                        anchor back in pull_request reads it
 #   pr-fix-noncode|capped|unmoved.<num>  once GitHub reads the PR mergeable with
-#                                        its checks passing; the park's route
-#                                        to human stays for a person to clear
+#                                        its checks passing; the anchor's
+#                                        <route>, while it is still the park
+#                                        sentinel the red-check arm wrote with
+#                                        the gate, is cleared first
 #   pr-comments.<num>.*                  never: nothing this script reads says
 #                                        its feedback was answered, so its gate
 #                                        waits for the person who answers it
@@ -909,7 +911,7 @@ no_thread_blocks() {
 # under the key moot. A key with an open gate a person is assigned is left to
 # them. A gate read that does not answer withdraws nothing this pass.
 withdraw_stale_gates() {
-  local id="$1" num="$2" head="$3" base="$4" rtarget="$5" mstate="$6" gates keys key who why at
+  local id="$1" num="$2" head="$3" base="$4" rtarget="$5" mstate="$6" route="$7" gates keys key who why at
   [ -x "$HUMAN_GATE" ] || return 0
   if ! gates=$(bd_open_human_gates "$id"); then
     echo "$PROG: $id — PR#$num's human gates did not read; no stale gate is withdrawn this pass" >&2
@@ -936,7 +938,7 @@ withdraw_stale_gates() {
         why="PR#$num is open again and its anchor is back in pull_request, so the rework-or-close decision is made." ;;
       "pr-fix-noncode.$num"|"pr-fix-capped.$num"|"pr-fix-unmoved.$num")
         case "$mstate" in
-          CLEAN|HAS_HOOKS) why="GitHub reads PR#$num mergeable with its checks passing ($mstate), so the red check this gate parked is gone. Its anchor stays routed to human until a person clears gc.routed_to." ;;
+          CLEAN|HAS_HOOKS) why="GitHub reads PR#$num mergeable with its checks passing ($mstate), so the red check this gate parked is gone." ;;
         esac ;;
     esac
     [ -n "$why" ] || continue
@@ -944,6 +946,21 @@ withdraw_stale_gates() {
       echo "$PROG: $id — its $key gate is assigned to $who, who is left to clear it: $why"
       continue
     fi
+    # The red-check arm parks the anchor with this gate and the park route in
+    # one step, so the route goes with the gate while it is still that
+    # sentinel. It is cleared first, because the open gate is what brings a
+    # later pass back to retry a clear that did not land.
+    case "$key" in
+      "pr-fix-noncode.$num"|"pr-fix-capped.$num"|"pr-fix-unmoved.$num")
+        if [ "$route" = human ]; then
+          if ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request --route "" >/dev/null 2>&1; then
+            echo "$PROG: $id — its stale $key gate stays open: the anchor's park route did not clear, and the next pass tries both again" >&2
+            continue
+          fi
+          route=""
+          why="$why The anchor's park route is cleared with it."
+        fi ;;
+    esac
     if "$HUMAN_GATE" --retract --subject "$id" --key "$key" --message "$why" >/dev/null 2>&1; then
       echo "$PROG: $id — withdrew its stale $key gate: $why"
     else
@@ -2122,7 +2139,8 @@ MP_EOF
   # it, which read the anchor's open gates (withdraw_stale_gates).
   if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ] && [ "$state" = OPEN ]; then
     withdraw_stale_gates "$id" "$num" "$head_oid" "$base" \
-      "$(printf '%s' "$row" | jq -r '(.metadata.merged_target // "") | tostring')" "$merge_state"
+      "$(printf '%s' "$row" | jq -r '(.metadata.merged_target // "") | tostring')" "$merge_state" \
+      "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')"
   fi
 
   # --- status label: project the human-attention axis onto the PR list ----------
@@ -3603,11 +3621,14 @@ $CBODY"
   # the anchor is parked rather than sent a second. The non-code exclusion keeps
   # a code-fixer off a failure no code change can clear — a timeout, a
   # cancellation, a startup failure, an action-required gate, or a
-  # deploy/preview platform (matched by name) — which is likewise parked. Each
+  # deploy/preview platform (matched by name). A deploy-type check is parked.
+  # Any other non-code failure is first re-run once per head where it can be,
+  # and then parks only an approved PR, as the non-code branch below says. Each
   # park writes the stand-down this arm already honors, gc.routed_to=human,
   # through lifecycle.sh in one update with the takeaway the board shows as what
   # the person owes, so the next pass stands the anchor down on its own and the
-  # fixer is never re-offered.
+  # fixer is never re-offered. Once GitHub reads the PR mergeable,
+  # withdraw_stale_gates withdraws the park's gate and clears its route.
   RC_FIX_ATTEMPT_CAP=3
   RC_DEPLOY_CHECK_RE="vercel|netlify|deploy"
   case "$merge_state" in
@@ -3632,7 +3653,8 @@ $CBODY"
         if [ "$REQ_STATE" = "known" ] && [ -n "$REQ_CONTEXTS" ]; then
           rc_rollup=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json statusCheckRollup 2>/dev/null)
           rc_req_json=$(printf '%s\n' "$REQ_CONTEXTS" | jq -Rs 'split("\n") | map(select(length > 0))' 2>/dev/null)
-          # One entry per failing required check, tagged { name, url, code }.
+          # One entry per failing required check, tagged { name, url, code,
+          # deploy, retry, runs }.
           # `failed` is the superset that holds the merge (any terminal failure);
           # `code` narrows it to a genuine code failure a polecat can fix — a
           # conclusion FAILURE, or a status context in state FAILURE/ERROR — and
@@ -3640,10 +3662,21 @@ $CBODY"
           # non-code too). Everything else failing (timeout, cancellation,
           # startup failure, action-required, deploy) is a non-code cause no code
           # change clears. The split below routes a fixer only when a code
-          # failure is present and parks otherwise. A CheckRun carries detailsUrl,
-          # a StatusContext targetUrl; either may be absent.
+          # failure is present, and otherwise takes the non-code branch. A
+          # CheckRun carries detailsUrl, a StatusContext targetUrl; either may be
+          # absent. `retry` says the check can be re-run: it is not deploy-type,
+          # and each of its failed rows timed out, was cancelled or failed to
+          # start, in a GitHub Actions run its URL names. `runs` holds the ids
+          # of those runs.
           rc_fail_json=$(printf '%s' "$rc_rollup" | jq -c --argjson req "${rc_req_json:-[]}" --arg deploy "$RC_DEPLOY_CHECK_RE" '
             def name_of: (.name // .context // "");
+            def run_of:
+              ((.detailsUrl // .targetUrl // "") | tostring
+               | capture("/actions/runs/(?<r>[0-9]+)") | .r) // "";
+            def retryable:
+              ((.conclusion // "") | tostring | ascii_upcase) as $c
+              | ($c == "TIMED_OUT" or $c == "CANCELLED" or $c == "STARTUP_FAILURE")
+                and (run_of != "");
             def failed:
               if ((.conclusion // "") | tostring | length) > 0
                 then ((.conclusion | ascii_upcase) as $c
@@ -3666,7 +3699,10 @@ $CBODY"
                 | if ($bad | length) > 0
                   then { name: $c,
                          url: (($bad[0].detailsUrl // $bad[0].targetUrl // "") | tostring),
-                         code: ((([ $runs[] | select(code_failed) ] | length) > 0) and ($isdeploy | not)) }
+                         code: ((([ $runs[] | select(code_failed) ] | length) > 0) and ($isdeploy | not)),
+                         deploy: $isdeploy,
+                         retry: (($isdeploy | not) and all($bad[]; retryable)),
+                         runs: ([ $bad[] | run_of | select(. != "") ] | unique) }
                   else empty end ]' 2>/dev/null)
           rc_nfail=$(printf '%s' "$rc_fail_json" | jq 'length' 2>/dev/null)
           case "$rc_nfail" in ''|*[!0-9]*) rc_nfail=0 ;; esac
@@ -3679,14 +3715,71 @@ $CBODY"
             if [ "$rc_ncode" -eq 0 ]; then
               # Non-code exclusion: every failing required check is a cause no
               # code change can clear (timeout, cancellation, startup failure,
-              # action-required, or a deploy-type check). Park the anchor to a
-              # human rather than send a polecat to fix nothing.
+              # action-required, or a deploy-type check), so no polecat is sent.
+              # A failing deploy-type check parks the anchor to a human. Any
+              # other such failure may clear on a second run: GitHub cancels a
+              # job that runs past its timeout, which a slow runner can make it
+              # do. So when every failing check can be re-run (`retry`), the
+              # refinery re-runs the failed jobs of each one's run, once per
+              # head. It records the head in pr_check_rerun before the re-run,
+              # so no later pass at that head re-runs again. The re-run's new
+              # attempt takes the failed row's place in the rollup, so a pass
+              # while it runs reads the check pending and does not come here for
+              # it. A non-code failure at a head already re-run is the re-run's
+              # own. That failure, a re-run that did not go through, and a
+              # failure no re-run reaches each park an approved PR, by the rule
+              # review-verdict.sh defines, the one the merge lands on. A PR
+              # nobody approved cannot land however green its checks are, so it
+              # is never parked for a non-code failure: it waits for its review
+              # with no gate. Reviews that did not read, or an unresolved acting
+              # login, prove no approval, so nothing parks and the next pass
+              # reads them again.
               rc_allnames=$(printf '%s' "$rc_fail_json" | jq -r 'map(.name) | join(" ")' 2>/dev/null)
+              rc_rerun_note=""
+              if [ "$(printf '%s' "$rc_fail_json" | jq '[ .[] | select(.deploy) ] | length' 2>/dev/null)" = 0 ]; then
+                rc_runs=$(printf '%s' "$rc_fail_json" | jq -r 'if all(.[]; .retry) then ([ .[].runs[] ] | unique | join(" ")) else "" end' 2>/dev/null)
+                rc_rerun_at=$(printf '%s' "$row" | jq -r '(.metadata.pr_check_rerun // "") | tostring' 2>/dev/null)
+                if [ -n "$rc_runs" ] && [ -n "$head_oid" ] && [ "$rc_rerun_at" != "$head_oid" ]; then
+                  if ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                       --set "pr_check_rerun=$head_oid" >/dev/null; then
+                    echo "$PROG: WARN $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause, but the record of a re-run at head $head_oid did not land; nothing re-run or parked (retry next pass)" >&2
+                    skipped=$((skipped + 1)); continue
+                  fi
+                  rc_rerun_bad=""
+                  for rc_run in $rc_runs; do
+                    gh run rerun "$rc_run" --repo "$ORIGIN_REPO_Q" --failed >/dev/null 2>&1 || rc_rerun_bad="$rc_rerun_bad $rc_run"
+                  done
+                  if [ -z "$rc_rerun_bad" ]; then
+                    echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause; re-ran the failed jobs of run(s) $rc_runs at head $head_oid (nothing parked)"
+                    continue
+                  fi
+                  echo "$PROG: WARN $id — PR#$num the re-run of the failed jobs of run(s)$rc_rerun_bad at head $head_oid did not go through" >&2
+                  rc_rerun_note=" The refinery's re-run of the failed jobs of run(s)$rc_rerun_bad at head $head_oid did not go through."
+                elif [ -n "$rc_runs" ] && [ -n "$head_oid" ]; then
+                  rc_rerun_note=" The refinery re-ran the failed jobs once at head $head_oid, and they failed again."
+                fi
+                rc_approval=""
+                if [ -n "$SELF_LOGIN" ] && [ -n "$revs_raw" ]; then
+                  rc_lifted=$(printf '%s' "$row" | jq -r '(.metadata.bring_current_lifted_at // "") | tostring' 2>/dev/null)
+                  rc_approval=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" --arg lifted "$rc_lifted" "$REVIEW_VERDICT_DEF"'
+                    review_verdict($self; $lifted)
+                    | if .veto == "" and .approver != "" then "approved" else "unapproved" end' 2>/dev/null)
+                fi
+                case "$rc_approval" in
+                  approved) : ;;
+                  unapproved)
+                    echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause; no approval stands, so nothing is parked and the PR waits for its review"
+                    skipped=$((skipped + 1)); continue ;;
+                  *)
+                    echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause, but its reviews could not be read to prove an approval; nothing parked (retry next pass)" >&2
+                    skipped=$((skipped + 1)); continue ;;
+                esac
+              fi
               if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
-                   --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure, then clear its gate and gc.routed_to" >/dev/null; then
+                   --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure; the park lifts once it is green" >/dev/null; then
                 human_gate "$id" "pr-fix-noncode.$num" \
-                  "PR#$num ($live_url) has failing required check(s) ($rc_allnames) that are non-code causes — a timeout, cancellation, startup failure, or a deploy-type check — which no code change can fix. Parked to a human: re-run the check or fix the infrastructure, then clear this gate and gc.routed_to to re-engage the auto-fixer, or merge once it is green."
+                  "PR#$num ($live_url) has failing required check(s) ($rc_allnames) whose cause no code change can fix: a timeout, a cancellation, a startup failure, an action-required check or a deploy-type check.$rc_rerun_note Parked to a human: re-run the check(s) or fix the infrastructure. Once GitHub reads the PR mergeable, this gate is withdrawn and the anchor's park route is cleared."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause; parked to human (no fixer dispatched)"
               else

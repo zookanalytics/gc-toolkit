@@ -2736,18 +2736,29 @@ out=$(run)
 eq "$(bstatus SGb3)" "closed" "merge-blocked-threads is withdrawn once every thread is resolved"
 has "$(creason SGb3)" "none it counts is left unresolved" "…saying so"
 
-echo "# …and, once GitHub reads the PR mergeable, every thread and red-check gate"
+echo "# …and, once GitHub reads the PR mergeable, every thread and red-check gate, with the park route"
 : > "$STUB_DEPS"
-store "[$(anchor SG2 602), $(hgate SGb2 SG2 merge-blocked-threads), $(hgate SGk2 SG2 pr-fix-capped.602), $(hgate SGn2 SG2 pr-fix-noncode.602), $(hgate SGm2 SG2 pr-fix-unmoved.602 open operator), $(hgate SGc2 SG2 pr-comments.602.1.2)]"
+store "[$(anchor SG2 602 ',"gc.routed_to":"human","gc.takeaway":"PR#602 parked"'), $(hgate SGb2 SG2 merge-blocked-threads), $(hgate SGk2 SG2 pr-fix-capped.602), $(hgate SGn2 SG2 pr-fix-noncode.602), $(hgate SGm2 SG2 pr-fix-unmoved.602 open operator), $(hgate SGc2 SG2 pr-comments.602.1.2)]"
 printf '%s' "$(prview 602 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_602.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
 eq "$(bstatus SGb2)" "closed" "merge-blocked-threads is withdrawn once the PR reads mergeable"
 has "$(creason SGb2)" "GitHub reads it mergeable (CLEAN)" "…saying why"
 eq "$(bstatus SGk2)/$(bstatus SGn2)" "closed/closed" "…and so are the red-check parks' gates"
-has "$(creason SGk2)" "stays routed to human until a person clears gc.routed_to" "…which say the park's route stays"
+eq "$(meta SG2 gc.routed_to)" "" "…and the park route the red-check arm wrote with them is cleared"
+has "$(creason SGk2)" "The anchor's park route is cleared with it." "…which the first of them withdrawn says"
 eq "$(bstatus SGm2)" "open" "…but not one a person is assigned"
 eq "$(bstatus SGc2)" "open" "…nor the feedback gate"
+
+echo "# …a park route that does not clear keeps its red-check gate open for the next pass"
+: > "$STUB_DEPS"
+store "[$(anchor SG5 605 ',"gc.routed_to":"human","gc.takeaway":"PR#605 parked"'), $(hgate SGn5 SG5 pr-fix-noncode.605)]"
+printf '%s' "$(prview 605 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_605.json"
+out=$(STUB_DROP_KEYS="SG5:gc.routed_to" run)
+eq "$(meta SG5 gc.routed_to)/$(bstatus SGn5)" "human/open" "the gate stays open while the route did not clear"
+has "$out" "its stale pr-fix-noncode.605 gate stays open: the anchor's park route did not clear" "…and the pass says so"
+out=$(run)
+eq "$(meta SG5 gc.routed_to)/$(bstatus SGn5)" "/closed" "the next pass clears the route and withdraws the gate"
 
 echo "# …an early arm withdraws nothing, and an unread gate list withdraws nothing"
 : > "$STUB_DEPS"
@@ -6075,56 +6086,121 @@ out=$(run)
 hasnt "$out" "reaped moot rework child RW6" "no required contexts -> green cannot be proven -> left open"
 eq "$(bstatus RW6)" "open" "the child is left open"
 
-# ---- non-code / infra exclusion: a failure no code change can fix parks -------
+# ---- non-code / infra exclusion: a failure no code change can fix -----------
 # The arm routes a fixer only at a GENUINE code failure. A required check that
 # timed out, was cancelled, failed to start, or is a deploy-type platform is a
-# non-code cause — a code-fix polecat would fix nothing — so the anchor is
-# parked to a human (gc.routed_to=human, the stand-down the arm already honors,
-# with the takeaway the board shows as what the person owes, both in one
-# lifecycle.sh update) and a pr-fix-noncode gate is filed. A park whose write
-# does not read back files no gate. no_rework counts only new REWORK children,
-# which the human-gate stub's gate-N ids never are.
+# non-code cause, and a code-fix polecat would fix nothing. A timeout,
+# cancellation or startup failure in a GitHub Actions run is re-run once per
+# head, its head recorded on the anchor first. A failure at a head already
+# re-run, or one no re-run reaches, parks an approved PR to a human
+# (gc.routed_to=human, the stand-down the arm already honors, with the takeaway
+# the board shows as what the person owes, both in one lifecycle.sh update) and
+# files a pr-fix-noncode gate, while an unapproved PR is never parked. A
+# deploy-type check parks either way. A park whose write does not read back
+# files no gate. no_rework counts only new REWORK children, which the
+# human-gate stub's gate-N ids never are.
 no_rework() { jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE"; }
+# A required check's rollup row: <check> concluded <conclusion> in GitHub
+# Actions run <run>, whose job URL names the run.
+ncrow() { printf '{"name":"%s","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/zook/gc-toolkit/actions/runs/%s/job/9%s"}' "$1" "$2" "$3" "$3"; }
+ncdesc() { jq -r --arg k "pr-fix-noncode.$1" '[ .[] | select((.await_id // "") == $k) | .description ] | .[0] // ""' "$STUB_STORE"; }
+reruns() { grep -cxF "run rerun $1 --repo github.com/zook/gc-toolkit --failed" "$STUB_GH_LOG"; }
 
-echo "# a TIMED_OUT required check parks to a human and dispatches no fixer"
+echo "# a TIMED_OUT required check is re-run once at its head, and nothing is parked"
 printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
 store "[$(anchor NC1 110)]"
-printf '%s' "$(prview 110 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"TIMED_OUT"}]')" > "$GH_DIR/pr_view_110.json"
-: > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
+printf '%s' "$(prview 110 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test TIMED_OUT 7110)]")" > "$GH_DIR/pr_view_110.json"
+approve 110
+: > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
 out=$(run)
-has "$out" "non-code cause; parked to human" "the timeout is named a non-code cause and parked"
+has "$out" "re-ran the failed jobs of run(s) 7110 at head sha-110 (nothing parked)" "the timed-out check's run is re-run, and the pass says so"
+eq "$(reruns 7110)" "1" "…once, its failed jobs only, on the origin repo"
+eq "$(meta NC1 pr_check_rerun)" "sha-110" "…recorded at that head on the anchor"
+eq "$(meta NC1 'gc.routed_to')" "" "…and the anchor is not parked"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.110" "…and no gate is filed"
+eq "$(no_rework)" "0" "no fixer is dispatched at a non-code failure"
+
+echo "# …a pass at the same head re-runs nothing, and the re-run's failure parks the approved PR"
+: > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
+out=$(run)
+eq "$(reruns 7110)" "0" "a second pass at the same head re-runs nothing"
+has "$out" "non-code cause; parked to human" "…the failure at a head already re-run parks the approved PR"
 eq "$(meta NC1 'gc.routed_to')" "human" "the anchor is parked to a human"
 has "$(meta NC1 'gc.takeaway')" "PR#110 has a required check failing for a non-code cause" "…with a takeaway naming what the person owes"
+has "$(meta NC1 'gc.takeaway')" "the park lifts once it is green" "…and saying the park lifts on its own"
 eq "$(meta NC1 'gc.takeaway_settled')" "" "…left unsettled, because a person still owes it"
 eq "$(grep '^bd update NC1 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#110' || true)" "1" "…written in the same update as the route"
 eq "$(no_rework)" "0" "no fixer is dispatched at a non-code failure"
 has "$(cat "$STUB_ESC_LOG")" "--subject NC1 --key pr-fix-noncode.110" "a non-code park files its gate"
-# An open human gate on the anchor holds this arm, so the release the person is
-# told names the gate beside the route.
-has "$(meta NC1 'gc.takeaway')" "then clear its gate and gc.routed_to" "…and the takeaway's release names the gate as well as the route"
-has "$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-noncode.110") | .description ] | .[0] // ""' "$STUB_STORE")" \
-  "clear this gate and gc.routed_to to re-engage the auto-fixer" "…as the gate's message does"
+has "$(ncdesc 110)" "The refinery re-ran the failed jobs once at head sha-110, and they failed again." "…which says the re-run failed too"
+has "$(ncdesc 110)" "this gate is withdrawn and the anchor's park route is cleared" "…and that the park lifts once the PR reads mergeable"
 eq "$(meta NC1 merge_result)" "pull_request" "the anchor keeps gating (the merge still waits)"
 
-echo "# …a park whose route does not read back files no gate and retries next pass"
+echo "# …an unapproved PR gets the same one re-run, and its failure at that head parks nothing"
+store "[$(anchor NC7 116)]"
+printf '%s' "$(prview 116 OPEN BLOCKED MERGEABLE ",\"statusCheckRollup\":[$(ncrow test CANCELLED 7116)]")" > "$GH_DIR/pr_view_116.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
+out=$(run)
+eq "$(reruns 7116)" "1" "an unapproved PR's cancelled check is re-run"
+out=$(run)
+eq "$(reruns 7116)" "1" "…once"
+has "$out" "no approval stands, so nothing is parked and the PR waits for its review" "…and its failure at the re-run head parks nothing"
+eq "$(meta NC7 'gc.routed_to')" "" "…the anchor stays unrouted"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.116" "…and no gate is filed"
+eq "$(no_rework)" "0" "…and no fixer is dispatched"
+
+echo "# …a re-run GitHub refuses parks the approved PR in the same pass, and the head stays recorded"
+store "[$(anchor NC8 117)]"
+printf '%s' "$(prview 117 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test TIMED_OUT 7117)]")" > "$GH_DIR/pr_view_117.json"
+approve 117
+: > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
+out=$(STUB_RUN_RERUN_RC=1 run)
+eq "$(reruns 7117)" "1" "the re-run is tried"
+has "$out" "the re-run of the failed jobs of run(s) 7117 at head sha-117 did not go through" "…its refusal is reported"
+eq "$(meta NC8 'gc.routed_to')" "human" "…and the approved PR parks at once"
+has "$(ncdesc 117)" "re-run of the failed jobs of run(s) 7117 at head sha-117 did not go through" "…with a gate naming the refused re-run"
+eq "$(meta NC8 pr_check_rerun)" "sha-117" "…and the head stays recorded, so no later pass at it re-runs"
+
+echo "# …a re-run record that does not land re-runs and parks nothing"
+store "[$(anchor NC9 118)]"
+printf '%s' "$(prview 118 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test TIMED_OUT 7118)]")" > "$GH_DIR/pr_view_118.json"
+approve 118
+: > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
+out=$(STUB_DROP_KEYS="NC9:pr_check_rerun" run)
+has "$out" "the record of a re-run at head sha-118 did not land; nothing re-run or parked (retry next pass)" "a record that did not land is reported"
+eq "$(reruns 7118)" "0" "…and nothing is re-run without it"
+eq "$(meta NC9 'gc.routed_to')" "" "…or parked"
+
+echo "# …a failure no re-run reaches, a timeout with no Actions run named, parks an approved PR"
+echo "#   and a park whose route does not read back files no gate and retries next pass"
 store "[$(anchor NC6 115)]"
 printf '%s' "$(prview 115 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"TIMED_OUT"}]')" > "$GH_DIR/pr_view_115.json"
-: > "$STUB_ESC_LOG"
+approve 115
+: > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
 out=$(STUB_DROP_KEYS="NC6:gc.routed_to" run)
+hasnt "$(cat "$STUB_GH_LOG")" "run rerun" "a check whose URL names no Actions run is not re-run"
 has "$out" "parking the anchor to human did not land (retry next pass)" "a write that reported success without landing the route is not a park"
 hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.115" "…so no gate is filed for a park that did not happen"
 eq "$(no_rework)" "0" "…and no fixer is dispatched either"
 
-echo "# …CANCELLED and STARTUP_FAILURE park the same way"
-store "[$(anchor NC2 111)]"
-printf '%s' "$(prview 111 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"CANCELLED"}]')" > "$GH_DIR/pr_view_111.json"
+echo "# …STARTUP_FAILURE is re-run the same way, and a new head gets a re-run of its own"
+store "[$(anchor NC2 111 ',"pr_check_rerun":"sha-older"')]"
+printf '%s' "$(prview 111 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test STARTUP_FAILURE 7111)]")" > "$GH_DIR/pr_view_111.json"
+: > "$STUB_GH_LOG"
 out=$(run)
-eq "$(meta NC2 'gc.routed_to')" "human" "a cancelled required check parks"
-eq "$(no_rework)" "0" "…and dispatches no fixer"
+eq "$(reruns 7111)" "1" "a startup failure at a head not yet re-run is re-run"
+eq "$(meta NC2 pr_check_rerun)" "sha-111" "…and the record moves to that head"
+eq "$(meta NC2 'gc.routed_to')" "" "…and nothing is parked"
+
+echo "# …an ACTION_REQUIRED check is not re-run, and parks an approved PR"
 store "[$(anchor NC3 112)]"
-printf '%s' "$(prview 112 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"STARTUP_FAILURE"}]')" > "$GH_DIR/pr_view_112.json"
+printf '%s' "$(prview 112 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test ACTION_REQUIRED 7112)]")" > "$GH_DIR/pr_view_112.json"
+approve 112
+: > "$STUB_GH_LOG"
 out=$(run)
-eq "$(meta NC3 'gc.routed_to')" "human" "a startup-failure required check parks"
+eq "$(reruns 7112)" "0" "a check that asks for an action is not re-run"
+eq "$(meta NC3 'gc.routed_to')" "human" "…and the approved PR parks"
+hasnt "$(ncdesc 112)" "re-ran" "…with a gate that claims no re-run"
 eq "$(no_rework)" "0" "…and dispatches no fixer"
 
 echo "# …a deploy-type required check (Vercel) FAILURE parks — the name marks it non-code, FAILURE notwithstanding"
@@ -6136,6 +6212,13 @@ out=$(run)
 eq "$(meta NC4 'gc.routed_to')" "human" "a deploy-type FAILURE parks rather than routing a code-fixer"
 eq "$(no_rework)" "0" "…and dispatches no fixer"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-fix-noncode.113" "…and files the non-code park gate"
+echo "# …and a deploy-type check that timed out in an Actions run parks too, unapproved and with no re-run"
+store "[$(anchor NC10 119)]"
+printf '%s' "$(prview 119 OPEN BLOCKED MERGEABLE ",\"statusCheckRollup\":[$(ncrow Vercel TIMED_OUT 7119)]")" > "$GH_DIR/pr_view_119.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(reruns 7119)" "0" "a deploy-type check is never re-run"
+eq "$(meta NC10 'gc.routed_to')" "human" "…and it parks the PR though nobody approved it"
 
 echo "# …a genuine code FAILURE still dispatches, even alongside a non-code failure, naming only the code check"
 store "[$(anchor NC5 114)]"
