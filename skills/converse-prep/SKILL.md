@@ -8,12 +8,47 @@ description: Converse's session titling and subject prime.
 Each tool call starts a fresh shell, so set `CONV`, `CONVERSATION` and
 `SUBJECT` literally, from what step 1 found, at the top of every call below.
 Run these only after step 2's premise re-check holds — a conversation that
-closes at step 2 must not have moved the operator's session title.
+closes at step 2 must not have moved the operator's session title or posted on
+the subject's pull request.
 
 ## 3. Title
 
-`gc session rename "$GC_SESSION_ID" "$SUBJECT — <topic>"`.
-Re-run it if your focus moves to a different subject.
+Name the topic in a few words of your own: what this conversation is
+discussing. It titles your session and the conversation. `gctk session title`
+sets the session's title, `$SUBJECT #<PR> — <topic>`, in Gas City and on your
+terminal, which the operator's tab shows. `#<PR>` is the subject's pull
+request, and it is left out while the subject has none. When the subject has
+a pull request, the comment there that shows this visit carries the
+conversation's title as its topic, where anyone who reads the pull request
+sees it. So write it yourself, not in the operator's words, and name no other
+rig or its beads:
+```bash
+TOPIC="<topic>"
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+PR=$(gc bd show "$SUBJECT" --json | grep -av '^gc bd:' | scrub \
+  | jq -er 'if type == "array" and length == 1 then .[0].metadata.pr_number // "" | tostring else error("not one bead") end') \
+  || { echo "$SUBJECT did not read, so whether it has a pull request is unknown; nothing is titled" >&2; exit 1; }
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" session title --subject "$SUBJECT" --pr "$PR" --topic "$TOPIC"
+gc bd update "$CONVERSATION" --title "$TOPIC" \
+  && "$CONV/pr-sitting-comment.sh" post --sitting "$CONVERSATION" --topic "$TOPIC"
+```
+When the subject does not read, the block stops before it titles anything and
+says so, because a subject it could not read may still have a pull request.
+Run it again. Otherwise re-run it with the new topic only when your focus
+moves to a different one.
+The re-run also shows a pull request opened for the subject since then. The
+comment is best effort, and it posts nothing when the subject has no pull
+request. When the visit ends it keeps the topic and adds the conclusion and
+the actions that steps 6–7 record on the conversation.
 
 ## 4. Prime
 

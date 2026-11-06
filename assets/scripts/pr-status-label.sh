@@ -7,9 +7,9 @@
 # review verdict is left (needs-review), or a blocker stands that the city will
 # not clear on its own (needs-attention). An open PR carries exactly one status
 # value. `held:` names what holds it that the city will not clear on its own: an
-# open human gate on the PR (gate), review feedback the city has not answered or
-# a review thread the merge waits on (review), or a blocker no automated actor
-# will clear (blocked). Each is a label of its own, so more than
+# open human gate on the PR or behind a bead it waits on (gate), review feedback
+# the city has not answered or a review thread the merge waits on (review), or a
+# blocker no automated actor will clear (blocked). Each is a label of its own, so more than
 # one can stand, and a PR nothing holds carries none. Any held value reads
 # needs-attention. pr-facts.sh's full pass recomputes both for each open PR its
 # paced walk reaches, from the anchor's posture, holds, human gates, blockers,
@@ -182,13 +182,14 @@ ensure_labels() { # uses ORIGIN_*
 # The values are computed by one Go package, services/gctk/prstatus, exported so
 # the helm board derives the same per-bead state from it, so a bead's PR labels
 # and its board liveness cannot disagree. `gctk pr-status derive --anchor ID`
-# prints working|merging|needs-review|needs-attention, and with --json one object
-# carrying that status and the held values, {"status": ..., "held": [...]}. It
-# exits 0 on success and 2 when a read did not resolve. There is deliberately no
-# shell reimplementation: a second code path is the divergence this shared
-# package exists to remove, and the board has no shell to fall back to. When
-# gctk cannot answer, the caller leaves the labels as they are, because a failed
-# read is not a state.
+# prints working|merging|needs-review|needs-attention, and with --json one
+# object carrying that status, the held values and the reasons behind them,
+# {"status": ..., "held": [...], "reasons": [...]}, of which this script reads
+# the first two. It exits 0 on success and 2 when a read did not resolve. There
+# is deliberately no shell reimplementation: a second code path is the
+# divergence this shared package exists to remove, and the board has no shell to
+# fall back to. When gctk cannot answer, the caller leaves the labels as they
+# are, because a failed read is not a state.
 #
 # The binary is resolved as lifecycle.sh resolves it — an explicit $GCTK_BIN,
 # else the city's deployed build — and, as there, it is not compared against the

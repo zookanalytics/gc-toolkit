@@ -33,7 +33,7 @@ func TestStartFailedConversationReadsStartFailedWithItsReason(t *testing.T) {
 		epicSubject("tk-subj"),
 	}
 	facts := failedStart("tk-conv", "tk-subj", "setup timeout")
-	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
+	b := buildBoard(anchors, fixtureNow, false, nil, facts)
 	if got := b.Sittings[0].State; got != SittingStartFailed {
 		t.Errorf("the sitting reads start failed too: %q", got)
 	}
@@ -62,13 +62,13 @@ func TestStartFailedConversationReadsStartFailedWithItsReason(t *testing.T) {
 // keeps a row of its own, which waits for the operator. A failed start marks
 // that row, keeps it owed, and lifts it to ELEVATED.
 func TestStartFailedOwnRowStaysInTheQueue(t *testing.T) {
-	control := mustTile(t, BuildBoard([]Anchor{conversationAnchor("tk-conv", "tk-plain", "talk the plan over", assigneeHuman)},
+	control := mustTile(t, buildBoard([]Anchor{conversationAnchor("tk-conv", "tk-plain", "talk the plan over", assigneeHuman)},
 		fixtureNow, false, nil, Facts{}), "tk-conv")
 	if control.SittingState != SittingWaiting || !control.Owed {
 		t.Fatalf("fixture: a conversation's own row waits for the operator; got state=%q owed=%v", control.SittingState, control.Owed)
 	}
 
-	row := mustTile(t, BuildBoard([]Anchor{failedConversation("tk-conv", "tk-plain", "talk the plan over")},
+	row := mustTile(t, buildBoard([]Anchor{failedConversation("tk-conv", "tk-plain", "talk the plan over")},
 		fixtureNow, false, nil, failedStart("tk-conv", "tk-plain", "startup timeout")), "tk-conv")
 	if row.SittingState != SittingStartFailed || row.SittingStartFailure != "startup timeout" {
 		t.Errorf("the conversation's own row reads start failed: state=%q reason=%q", row.SittingState, row.SittingStartFailure)
@@ -93,7 +93,7 @@ func TestStartFailedLeadsTheQueue(t *testing.T) {
 				UpdatedAt: daysAgo(30 + i), Metadata: map[string]string{"gc.routed_to": "human"},
 			})
 		}
-		return OperatorQueue(BuildBoard(anchors, fixtureNow, false, nil, facts).Tiles)
+		return OperatorQueue(buildBoard(anchors, fixtureNow, false, nil, facts).Tiles)
 	}
 
 	queue := build(failedConversation("tk-conv", "tk-subj", "talk the plan over"), failedStart("tk-conv", "tk-subj", "startup timeout"))
@@ -127,7 +127,7 @@ func TestStartFailedRowStillOffersAccept(t *testing.T) {
 		}, gatesFor("tk-subj", rec)...)
 		facts := failedStart("tk-conv", "tk-subj", "startup timeout")
 		facts.Sittings[0].Status = tc.status
-		row := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, facts), "tk-subj")
+		row := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, facts), "tk-subj")
 		if row.SittingState != SittingStartFailed || !row.Acceptable {
 			t.Errorf("%s: state=%q acceptable=%v, want start-failed and Accept", tc.name, row.SittingState, row.Acceptable)
 		}
@@ -145,7 +145,7 @@ func TestStartFailureOutranksALiveSitting(t *testing.T) {
 		conversationAnchor("tk-conv1", "tk-subj", "talk the plan over", sittingAlias("tk-conv1")),
 		failedConversation("tk-conv2", "tk-subj", "settle the rework"),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, withSittings(anchors, facts))
+	b := buildBoard(anchors, fixtureNow, false, nil, withSittings(anchors, facts))
 	if subj := mustTile(t, b, "tk-subj"); subj.SittingState != SittingStartFailed || subj.SittingStartFailure != "never started" {
 		t.Errorf("state=%q reason=%q, want the failure", subj.SittingState, subj.SittingStartFailure)
 	}
@@ -164,7 +164,7 @@ func TestStartFailureOutranksALiveSitting(t *testing.T) {
 func TestClosedSubjectIsNeverMarked(t *testing.T) {
 	closed := epicSubject("tk-subj")
 	closed.ClosedAt = daysAgo(1)
-	b := BuildBoard([]Anchor{failedConversation("tk-conv", "tk-subj", "talk the plan over"), closed}, fixtureNow, false, nil,
+	b := buildBoard([]Anchor{failedConversation("tk-conv", "tk-subj", "talk the plan over"), closed}, fixtureNow, false, nil,
 		failedStart("tk-conv", "tk-subj", "startup timeout"))
 	if subj := mustTile(t, b, "tk-subj"); subj.SittingState == SittingStartFailed || subj.Owed {
 		t.Errorf("a DONE row is never marked or owed: state=%q owed=%v", subj.SittingState, subj.Owed)
@@ -190,7 +190,7 @@ func TestStartFailedRowClustersOnWhatItReads(t *testing.T) {
 		}
 		anchors = append(anchors, epicSubject(id), conv)
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
+	b := buildBoard(anchors, fixtureNow, false, nil, facts)
 
 	failed := mustTile(t, b, "tk-a")
 	if failed.SittingState != SittingStartFailed || failed.ClusterKey != "" {

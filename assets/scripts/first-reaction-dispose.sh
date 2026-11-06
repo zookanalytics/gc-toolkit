@@ -23,15 +23,14 @@
 #               or assign the bead to the named agent whose work it is, whose
 #               hook offers it once the wait lifts, and arm the notice that
 #               tells the agent then.
-#   until       the bead's whole job ends once another bead lands, such as the
-#               bead that retires its code -> an `until` edge onto that bead in
-#               the SAME store, and nothing that routes, arms, places or blocks
-#               the bead. The deferred-dispatch pass closes it once that bead
-#               closes, and it closes only a pure wait (live-work.sh).
-#   close       there is nothing to do -> hand the bead to a validating-closer
-#               pool (mol-validate-close), which re-checks the call and closes
-#               the bead or asks the operator. A first reaction never closes a
-#               bead. Run from inside a live reaction workflow
+#   close       there is nothing to do, now or once another bead lands -> hand
+#               the bead to a validating-closer pool (mol-validate-close), which
+#               re-checks the call and closes the bead or asks the operator. A
+#               first reaction never closes a bead. When the bead's whole job
+#               ends once another bead in the SAME store lands, such as the bead
+#               that retires its code (--waiting-on), the bead waits on that
+#               bead through a `blocks` edge and the closer is armed for when it
+#               closes. Run from inside a live reaction workflow
 #               (--after-workflow), the closer is deferred until that workflow
 #               closes, so it is the bead's sole dispatch surface rather than a
 #               second one stacked on the reaction.
@@ -120,10 +119,8 @@ Usage:
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
                             [--then-route <rig>/<agent> [--emergency <check>] | --then-assign <named-agent>]
-  first-reaction-dispose.sh <bead> --disposition until --reason "<why its job ends there>" --takeaway "<headline>"
-                            (--until <bead-id>)...
   first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
-                            [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
+                            [--route <rig>/<agent>] [(--waiting-on <bead-id>)... | --after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
   first-reaction-dispose.sh <bead> --stand-down --reaction-bead <R>
   common: [--reaction-bead <R>] [--by <who>] [--db <path>] [--dry-run]
@@ -143,13 +140,21 @@ Usage:
   fails closed when the target cannot be rig-qualified. On close it is the
   validating-closer pool that runs mol-validate-close, which re-checks the
   no-work conclusion and closes the bead or asks the operator.
+  --waiting-on (close, one or more) names a bead in the subject's store whose
+  landing ends the subject's job, such as the bead that retires its code. The
+  closer is then DEFERRED: the bead waits on each through a `blocks` edge, and
+  a deferred dispatch is armed, so the reconcile pass slings
+  mol-validate-close once they have all closed, and the closer checks that
+  their landing did end the job. A bead in another store is refused, because
+  a `blocks` edge holds nothing across stores: a person closes the subject
+  once it lands instead (--disposition ruling asks them).
   --after-workflow (close) names the live workflow this close runs inside — a
   frozen mol-first-reaction molecule's own root. The closer is then DEFERRED,
   not slung now: the bead is held on that root and a deferred dispatch is
   armed, so the reconcile pass slings mol-validate-close once the root closes
-  and the bead is the sole live workflow's target. Omit it to sling the closer
-  immediately (a reaction bead, which is not a workflow on the subject, or an
-  operator running this by hand).
+  and the bead is the sole live workflow's target. Omit both to sling the
+  closer immediately (a reaction bead, which is not a workflow on the subject,
+  or an operator running this by hand).
   --blocker files (once) the bead the subject is waiting on, when the wait is
   not a bead yet; --blocker-key dedups repeats of one recurring cause onto
   that single bead instead of one bead per instance.
@@ -181,14 +186,6 @@ Usage:
   --then-assign (blocked) assigns the held bead to a named agent in the same
   release. Its hook offers the bead once the wait lifts, and the notice
   deferred-dispatch.sh notify arms tells the agent then, not before.
-  --until (until, one or more) names a bead whose landing ends this one's job,
-  such as the bead that retires its code. The exit releases the bead with no
-  route, arm, placement or blocks edge, then writes an until edge onto every
-  --until bead in one write and reads each back, so the deferred-dispatch pass
-  closes the bead once every --until bead has closed. A bead in another store is
-  refused: the edge does not read back, and the pass never sees that bead
-  close, so a person closes this one once it lands (--disposition ruling asks
-  them).
   ruling and recommend put the subject to the operator as a native human gate:
   the script files it with human-gate.sh under the key first-reaction, the
   takeaway as its title, and the gate blocks the subject. One open gate stands
@@ -211,7 +208,6 @@ ASSIGN=""; THEN_ASSIGN=""; EMERGENCY=""; EMERGENCY_SET=""
 DB=""; DRY=""; AFTER_WORKFLOW=""; RECOMMENDED_FORMULA=""; REACTION_BEAD=""
 STAND_DOWN=""
 WAITING=""          # space-separated bead ids
-UNTIL=""            # space-separated bead ids, each the target of an until edge
 FLAGS_GIVEN=""      # each flag by name, for the stand-down's check of what it takes
 
 while [ $# -gt 0 ]; do
@@ -238,8 +234,6 @@ while [ $# -gt 0 ]; do
         --emergency=*) EMERGENCY="${1#--emergency=}"; EMERGENCY_SET=1; shift ;;
         --waiting-on)   shift; [ $# -gt 0 ] || usage_die "--waiting-on needs a bead id"; WAITING="$WAITING $1"; shift ;;
         --waiting-on=*) WAITING="$WAITING ${1#--waiting-on=}"; shift ;;
-        --until)   shift; [ $# -gt 0 ] || usage_die "--until needs a bead id"; UNTIL="$UNTIL $1"; shift ;;
-        --until=*) UNTIL="$UNTIL ${1#--until=}"; shift ;;
         --blocker)   shift; [ $# -gt 0 ] || usage_die "--blocker needs a title"; BLOCKER_TITLE="$1"; shift ;;
         --blocker=*) BLOCKER_TITLE="${1#--blocker=}"; shift ;;
         --blocker-key)   shift; [ $# -gt 0 ] || usage_die "--blocker-key needs a value"; BLOCKER_KEY="$1"; shift ;;
@@ -277,9 +271,9 @@ if [ -n "$STAND_DOWN" ]; then
         || usage_die "--stand-down needs --reaction-bead <R>: a subject that takes no reaction is answered by closing R"
 else
     case "$DISPOSITION" in
-        actionable|recommend|blocked|until|close|ruling) : ;;
-        "") usage_die "needs --disposition actionable|recommend|blocked|until|close|ruling" ;;
-        *)  usage_die "unknown disposition '$DISPOSITION' (actionable|recommend|blocked|until|close|ruling)" ;;
+        actionable|recommend|blocked|close|ruling) : ;;
+        "") usage_die "needs --disposition actionable|recommend|blocked|close|ruling" ;;
+        *)  usage_die "unknown disposition '$DISPOSITION' (actionable|recommend|blocked|close|ruling)" ;;
     esac
     [ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
     [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
@@ -301,8 +295,8 @@ same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
 
 case "$DISPOSITION" in
     actionable)
-        [ -z "$WAITING$BLOCKER_TITLE$UNTIL$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
-            || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--until/--then-route/--then-assign/--after-workflow/--recommended-formula belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
+            || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--then-route/--then-assign/--after-workflow/--recommended-formula belong to the other exits)"
         # A bead goes to a pool by gc.routed_to or to a named agent by assignee,
         # never both. The agent's hook offers the bead by its assignee whatever
         # the route, and a pool's claim and Gas City's pool demand count both
@@ -327,28 +321,44 @@ case "$DISPOSITION" in
     close)
         # close routes to a validating closer, so it takes --route like
         # actionable; the closer re-checks the no-work call and closes the bead.
+        # --waiting-on names the beads whose landing ends the subject's job: the
+        # subject waits on them, and the closer is deferred until they close.
         # --after-workflow names the live workflow this close is performed from
         # (a frozen first-reaction molecule's own root): the closer is deferred
         # until that root closes, so it is poured as the bead's sole dispatch
         # surface, never a second one stacked on the live reaction. A reaction
-        # bead is not a workflow on the subject, so it slings the closer now.
-        [ -z "$WAITING$BLOCKER_TITLE$UNTIL$THEN_ROUTE$ASSIGN$THEN_ASSIGN$RECOMMENDED_FORMULA$EMERGENCY" ] \
-            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--until/--then-route/--assign/--then-assign/--recommended-formula/--emergency belong to the other exits)"
+        # bead is not a workflow on the subject, so it slings the closer now
+        # unless --waiting-on names what it waits for.
+        [ -z "$BLOCKER_TITLE$THEN_ROUTE$ASSIGN$THEN_ASSIGN$RECOMMENDED_FORMULA$EMERGENCY" ] \
+            || usage_die "close takes --route, --waiting-on and --after-workflow only (--blocker/--then-route/--assign/--then-assign/--recommended-formula/--emergency belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
             *) usage_die "cannot rig-qualify the closer target '$ROUTE': set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody." ;;
         esac
         if [ -n "$AFTER_WORKFLOW" ]; then
+            [ -z "$WAITING" ] \
+                || usage_die "--after-workflow and --waiting-on both name what the closer waits for; pass --after-workflow for the reaction root a frozen molecule runs inside, or --waiting-on for the beads whose landing ends $BEAD's job, not both"
             [ -z "$REACTION_BEAD" ] \
                 || usage_die "--after-workflow names a frozen reaction molecule's root; a reaction bead ($REACTION_BEAD) is not a workflow on $BEAD, so its close slings the closer now. Drop --after-workflow."
             [ "$AFTER_WORKFLOW" != "$BEAD" ] || usage_die "--after-workflow $AFTER_WORKFLOW is the bead itself"
             same_store "$AFTER_WORKFLOW" "$BEAD" \
                 || usage_die "--after-workflow $AFTER_WORKFLOW is in another store than $BEAD; the gating hold is a blocks edge, which holds nothing across stores (component-model I1)."
         fi
+        for w in $WAITING; do
+            [ "$w" != "$BEAD" ] || usage_die "--waiting-on $w is the bead itself"
+            same_store "$w" "$BEAD" \
+                || usage_die "--waiting-on $w is in another store than $BEAD; the hold is a blocks edge, which holds nothing across stores (component-model I1), so the closer would run before $w lands. A person closes $BEAD once $w lands instead: put that to the operator with --disposition ruling."
+        done
+        # The arm is part of this exit's write-back when the closer waits, and
+        # with no tool to record it the exit cannot land, so it does not start.
+        if [ -n "$WAITING$AFTER_WORKFLOW" ]; then
+            [ -x "$DEFERRED" ] \
+                || die "a deferred close needs $DEFERRED to arm the validating closer for when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
+        fi
         ;;
     blocked)
-        [ -z "$ROUTE$ASSIGN$UNTIL$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route/--then-assign (--route/--assign/--until/--after-workflow/--recommended-formula belong to the other exits)"
+        [ -z "$ROUTE$ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route/--then-assign (--route/--assign/--after-workflow/--recommended-formula belong to the other exits)"
         [ -z "$THEN_ROUTE" ] || [ -z "$THEN_ASSIGN" ] \
             || usage_die "--then-route and --then-assign both name where $BEAD goes once its wait lifts; pass --then-route for a pool or --then-assign for a named agent, not both"
         [ -n "$WAITING" ] || [ -n "$BLOCKER_TITLE" ] \
@@ -380,22 +390,6 @@ case "$DISPOSITION" in
                 || die "--then-assign needs $DEFERRED to arm the notice that tells $THEN_ASSIGN when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
         fi
         ;;
-    until)
-        # The deferred-dispatch pass closes the subject once every --until bead
-        # has closed, and only while the subject is a pure wait: open,
-        # unassigned, no route, no arm, and no open blocks blocker of its own
-        # (live-work.sh). So this exit takes no flag that would route, arm,
-        # assign or hold the subject.
-        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA$EMERGENCY" ] \
-            || usage_die "until takes --until only (--route/--assign/--waiting-on/--blocker/--then-route/--then-assign/--after-workflow/--recommended-formula/--emergency belong to the other exits): the pass that closes $BEAD once its --until beads land leaves a routed, armed, assigned or blocked bead open"
-        [ -n "$UNTIL" ] \
-            || usage_die "until needs --until <bead-id>: the bead whose landing ends this one's job, written as an until edge"
-        for u in $UNTIL; do
-            [ "$u" != "$BEAD" ] || usage_die "--until $u is the bead itself"
-            same_store "$u" "$BEAD" \
-                || usage_die "--until $u is in another store than $BEAD. An until edge onto it does not read back, so the pass that would close $BEAD never sees $u close. A person closes $BEAD once $u lands instead: put that to the operator with --disposition ruling."
-        done
-        ;;
     recommend|ruling)
         # Both put the subject to the operator and hold it there on the human
         # gate this script files, which blocks it. They differ only in whether
@@ -403,8 +397,8 @@ case "$DISPOSITION" in
         # --recommended-formula (it is the disposition that stamps the key the
         # board's Accept reads); ruling REJECTS it (the operator's judgment
         # names no worker-runnable action, so the gate is Discuss-only).
-        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$UNTIL$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$EMERGENCY" ] \
-            || usage_die "$DISPOSITION takes --recommended-formula on recommend and nothing else; --route/--assign/--waiting-on/--blocker/--until/--then-route/--then-assign/--after-workflow/--emergency belong to the other exits"
+        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$EMERGENCY" ] \
+            || usage_die "$DISPOSITION takes --recommended-formula on recommend and nothing else; --route/--assign/--waiting-on/--blocker/--then-route/--then-assign/--after-workflow/--emergency belong to the other exits"
         # In codepoints, as gc-helm.sh takeaway checks it.
         tlen=$(printf '%s' "$TAKEAWAY" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//' | jq -Rsr 'length' 2>/dev/null || true)
         case "$tlen" in ''|*[!0-9]*) tlen=${#TAKEAWAY} ;; esac
@@ -789,9 +783,10 @@ if [ -n "$DRY" ]; then
                         _p0=""; [ "$ADMIT" = emergency ] && _p0=" at P0"
                         printf 'would arm a dispatch to %s%s for when the wait lifts\n' "$THEN_ROUTE" "$_p0"
                     fi ;;
-        until)      printf 'would close %s once each of these lands, through an until edge onto it and no route, arm, placement or blocks edge:%s\n' "$BEAD" "$UNTIL" ;;
         close)      if [ -n "$AFTER_WORKFLOW" ]; then
                         printf 'would hold %s on %s, then arm a deferred dispatch to validating closer %s (mol-validate-close) for when %s closes\n' "$BEAD" "$AFTER_WORKFLOW" "$ROUTE" "$AFTER_WORKFLOW"
+                    elif [ -n "$WAITING" ]; then
+                        printf 'would wait %s on:%s, then arm a deferred dispatch to validating closer %s (mol-validate-close) for when the wait lifts\n' "$BEAD" "$WAITING" "$ROUTE"
                     else
                         printf 'would sling %s to validating closer %s (mol-validate-close)\n' "$BEAD" "$ROUTE"
                     fi ;;
@@ -839,8 +834,8 @@ TARGET=""
 case "$DISPOSITION" in
     actionable) TARGET="${ASSIGN:-$ROUTE}" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
-    until)      TARGET="$(printf '%s' "${UNTIL# }" | tr -s ' ' ',')" ;;
-    close)      TARGET="$ROUTE" ;;
+    close)      TARGET="$ROUTE"
+                [ -z "$WAITING" ] || TARGET="$TARGET once $(printf '%s' "${WAITING# }" | tr -s ' ' ',') closes" ;;
 esac
 if [ -n "$POOL_TARGET" ]; then
     case "$DISPOSITION:$ADMIT" in
@@ -961,34 +956,45 @@ notify_assignee() { # <named-agent>
 # there as the workflow's member, not via a raw pool route — a raw route runs
 # mol-polecat-work, which never closes a bead.
 #
+# --waiting-on names the beads whose landing ends the bead's job, such as the
+# bead that retires its code. Its close is owed once they land, and the closer
+# checks that their landing did end the job, so that sling is DEFERRED: the bead
+# is held on each of them and a deferred dispatch is armed, and the
+# deferred-dispatch reconcile pass slings mol-validate-close once they have all
+# closed and bd reports the bead ready.
 # --after-workflow names the live reaction workflow a frozen molecule's close
 # runs inside. The closer must be the bead's SOLE dispatch surface, never a
 # second workflow stacked on the still-live reaction
 # (docs/reference/specs/formula-spec-v2.md §3, "one live dispatch surface per
-# unit of work"). So that sling is DEFERRED: the bead is held on the reaction's
-# own workflow root and a deferred dispatch is armed, and the deferred-dispatch
-# reconcile pass slings mol-validate-close once that root closes and bd reports
-# the bead ready. A reaction bead is no workflow on the subject, and an operator
-# by hand has none, so with --after-workflow absent the closer is slung now.
+# unit of work"). So that sling is DEFERRED the same way, held on the reaction's
+# own workflow root. A reaction bead is no workflow on the subject, and an
+# operator by hand has none, so with neither flag the closer is slung now.
 #
 # The closer validates a claim, so the claim travels with the bead: --reason
 # (why there is no work, and the counter-case for keeping the bead open) is
 # appended to the subject's notes as its close brief, beside the reaction's
-# card, before anything can dispatch the closer that reads it.
+# card, before anything can dispatch the closer that reads it. A brief written
+# for a bead that waits names the beads it is held on.
 if [ "$DISPOSITION" = "close" ]; then
-    gc_bd update "$BEAD" --append-notes "## Close brief (first reaction, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+    HELD_ON=""
+    [ -z "$WAITING" ] || HELD_ON="held on $(printf '%s' "${WAITING# }" | tr -s ' ' ','), "
+    gc_bd update "$BEAD" --append-notes "## Close brief (first reaction, ${HELD_ON}$(date -u +%Y-%m-%dT%H:%M:%SZ))
 $REASON" >/dev/null 2>&1 \
         || die "could not append the close brief to $BEAD's notes; the validating closer reads it there, so nothing was dispatched. Clear the cause and re-run this command."
-    if [ -n "$AFTER_WORKFLOW" ]; then
-        # Gate the deferred dispatch: hold the bead on the live reaction root so
-        # reconcile does not sling until it closes. The hold is a REQUIRED write.
-        # Reconcile dispatches from `bd list --ready`, so a bead left unheld reads
-        # ready and mol-validate-close slings beside the still-live reaction, the
-        # two-live-surfaces shape this exit exists to prevent (formula-spec-v2 §3).
-        # A hold that does not land therefore fails closed: refuse to arm, and let
-        # the documented re-run resume.
-        gc_bd dep add "$BEAD" "$AFTER_WORKFLOW" -t blocks >/dev/null 2>&1 \
-            || die "could not hold $BEAD on the reaction root $AFTER_WORKFLOW; refusing to arm the closer dispatch ungated (reconcile would sling mol-validate-close beside the live reaction). Clear the cause and re-run this command."
+    if [ -n "$WAITING$AFTER_WORKFLOW" ]; then
+        # Gate the deferred dispatch: hold the bead on what it waits for so
+        # reconcile does not sling until that closes. The hold is a REQUIRED
+        # write. Reconcile dispatches from `bd list --ready`, so a bead left
+        # unheld reads ready and mol-validate-close slings at once: before the
+        # landing it waits on, or beside the still-live reaction, the
+        # two-live-surfaces shape (formula-spec-v2 §3). A hold that does not
+        # land therefore fails closed: refuse to arm, and let the documented
+        # re-run resume. bd keeps one edge type per pair of beads, so an edge of
+        # another type onto the same bead refuses this one.
+        for h in $WAITING $AFTER_WORKFLOW; do
+            gc_bd dep add "$BEAD" "$h" -t blocks >/dev/null 2>&1 \
+                || die "could not hold $BEAD on $h; refusing to arm the closer dispatch ungated (reconcile would sling mol-validate-close before $h closes). bd keeps one edge type per pair of beads, so an edge of another type $BEAD already has onto $h refuses this one: remove it with gc bd dep remove $BEAD $h${DB:+ --db $DB}. Clear the cause and re-run this command."
+        done
         # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
         "$DEFERRED" arm "$BEAD" --target "$ROUTE" --sling-arg --on --sling-arg mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
             || die "could not arm the validating-closer dispatch on $BEAD (deferred-dispatch arm --on mol-validate-close failed). Clear the cause and re-run this command."
@@ -1116,16 +1122,13 @@ fi
 # queue, which placement=pending names and gc-helm.sh unplaced lists. Either
 # way --no-wait says so. A blocked one names its wait as an edge, and a
 # --then-assign rides the same release, so the agent's hook offers the bead
-# once the edge clears. An until one says --no-wait too: its until edge, written
-# after the release, holds nothing, and a --waiting-on blocks edge onto the same
-# bead would make bd refuse it. The release leaves the bead open, unassigned and
-# unrouted, the pure wait the deferred-dispatch pass closes. A recommend or a
-# ruling names its human gate as its wait: the subject is waiting on a person,
-# and the gate carries the wait, so --waiting-on records the blocks edge onto
-# it. That edge is the one the gate's create already wrote, and adding it again
-# leaves it single. The release parks the subject and the edge holds it, so it
-# is not offered again until the gate is cleared, and the wait is a graph state
-# doctor/check-wait-is-an-edge reads rather than prose it reports.
+# once the edge clears. A recommend or a ruling names its human gate as its
+# wait: the subject is waiting on a person, and the gate carries the wait, so
+# --waiting-on records the blocks edge onto it. That edge is the one the gate's
+# create already wrote, and adding it again leaves it single. The release parks
+# the subject and the edge holds it, so it is not offered again until the gate
+# is cleared, and the wait is a graph state doctor/check-wait-is-an-edge reads
+# rather than prose it reports.
 #
 # A subject held for placement can carry the stamp a dead pour left
 # (gc.execution_routed_to), which the queue reads as a live pour. The release
@@ -1140,7 +1143,6 @@ case "$DISPOSITION" in
     blocked)
         for w in $WAITING; do set -- "$@" --waiting-on "$w"; done
         if [ -n "$THEN_ASSIGN" ]; then set -- "$@" --assign "$THEN_ASSIGN"; fi ;;
-    until) set -- "$@" --no-wait ;;
     recommend|ruling) set -- "$@" --waiting-on "$GATE" ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. Clear the cause and re-run this command."
@@ -1185,50 +1187,6 @@ if [ -n "$HOLD_WAITS" ]; then
             die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-deferred-dispatch.sh arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
         fi
     fi
-fi
-
-# ── The until exit's edges, after the release ─────────────────────────
-# Each --until bead's landing ends the subject's job, and an until edge onto it
-# says so to the deferred-dispatch pass, which closes the subject once every
-# until target it reads has closed (skills/waits). So the edges land in one
-# write: bd commits a `dep add --file` as one transaction, and the first edge it
-# refuses rolls the whole set back. Written one at a time, they would let the
-# pass close the subject between two writes, once the targets written so far
-# had closed, while a target not yet written was still open.
-# The edges are also what make the pass select the subject, so they are written
-# after the release. The release reads the subject's status and then writes
-# status open and no assignee, with no condition on that write. A close the pass
-# made between the read and the write would be undone, and the successor
-# pointer that close left reads as live work to every later pass, so none of
-# them would close the subject again. After the edges this exit writes only the
-# landed proof, which moves neither the status nor the assignee. A subject that
-# already carried an until edge when the release ran is not covered by this
-# order, and neither is a re-run after the edges landed: the pass can select
-# the subject during the release.
-# The add's answer is not taken as the edges: bd keeps one edge type per pair
-# of beads, so a blocks edge the subject already has onto one of them refuses
-# its until edge, and with it the whole write, and a target the store does not
-# hold leaves nothing to read. So each edge is read back by its type, and a
-# missing one fails the exit before the landed proof, so a re-run resumes it.
-if [ "$DISPOSITION" = "until" ]; then
-    UNTIL_ADD_ERR=""
-    UNTIL_EDGES=$(jq -nc --arg from "$BEAD" --arg to "$UNTIL" \
-        '$to | split(" ")[] | select(length > 0) | {from: $from, to: ., type: "until"}') \
-        || die "could not compose the until edges for $BEAD (jq failed). The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
-    _err=$(printf '%s\n' "$UNTIL_EDGES" | gc_bd dep add --file - 2>&1 >/dev/null) \
-        || UNTIL_ADD_ERR=$(printf '%s' "${_err:-exited non-zero}" | tr '\n' ' ')
-    UNTIL_HELD=$(gc_bd dep list "$BEAD" --direction=down -t until --json 2>/dev/null | scrub \
-        | jq -r 'if type == "array" then (.[]? | select(((.dependency_type // .type) // "") == "until") | (.id // empty)) else empty end' 2>/dev/null || printf '')
-    MISSING=""
-    for u in $UNTIL; do
-        case " $(printf '%s' "$UNTIL_HELD" | tr '\n' ' ') " in
-            *" $u "*) : ;;
-            *) MISSING="$MISSING $u" ;;
-        esac
-    done
-    [ -z "$MISSING" ] \
-        || die "the until disposition on $BEAD did not land: no until edge onto${MISSING} reads back (gc bd dep list $BEAD --direction=down -t until${DB:+ --db $DB})${UNTIL_ADD_ERR:+, and bd answered: $UNTIL_ADD_ERR}. bd keeps one edge type per pair of beads, so a blocks edge $BEAD has onto one of those beads refuses its until edge, and the one write that carries every until edge then lands none: remove that blocks edge with gc bd dep remove $BEAD <bead>${DB:+ --db $DB}. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
-    note "the until edge onto each of${UNTIL} reads back on $BEAD"
 fi
 
 # --assign and --then-assign told the release who the bead goes to, and that

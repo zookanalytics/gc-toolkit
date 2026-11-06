@@ -64,6 +64,67 @@ shares only the word ([authority-map.md](authority-map.md)).
   re-verification.
 - A change that retires a noun removes its entry.
 
+## The work formula's overrides
+
+- **Covers.** `formulas/mol-polecat-work.toml`, `assets/scripts/work-gate.sh`,
+  `assets/scripts/work-setup.sh`, `assets/scripts/work-enter.sh`,
+  `assets/scripts/rig-checks.sh`, `assets/scripts/work-submit.sh`,
+  `assets/scripts/work-lib.sh`, `assets/scripts/decline.sh`.
+- **Stands in for.** Steps of core's polecat base and Gas Town's polecat formula
+  that would do what the pack needs. The formula overrides five steps and inherits
+  `implement`. Each override differs for a reason of its own:
+  - `load-context` refuses a bead that is finished, parked, blocked or in another
+    live run, and ends the run by cancelling it with what releases the work on the
+    work bead. Upstream's has no such gate. `gc sling` keeps one live run of a
+    formula on a bead, and the gate reads the same record for what gets past it, a
+    forced relaunch and a claimant with no poured workflow, so it adds no key and
+    writes nothing to let a run through.
+  - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
+    rebases and force-pushes under an open PR, and waits behind a sibling.
+  - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
+    from one base shares one recorded run, and keys a tracker on a stamp. Core's
+    runs each command raw per polecat and matches trackers by title.
+  - `self-review` is a bounded check loop over those records, where Gas Town's is
+    one inline step.
+  - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
+    exit, which are nouns of the merge and review subsystems. Once the handoff is
+    written it removes the run's worktree with its local branch, as core's own
+    variants remove theirs. Gas Town's detaches the tree and deletes the branch, so
+    once a squash merge deletes origin's branch the tree sits on commits no ref
+    reaches, and the controller's reaper never removes it.
+- **Evidence.** In `gastownhall/gascity`:
+  - `internal/bootstrap/packs/core/formulas/mol-polecat-base.toml`: its
+    `load-context` has no duplicate-dispatch gate, its `preflight-tests` runs
+    `{{test_command}}` raw, and its `workspace-setup` is a placeholder each
+    variant overrides with a tree of its own. `mol-polecat-commit.toml` and
+    `mol-scoped-work.toml` cut theirs with `git worktree add` and remove them with
+    `git worktree remove` once the work is pushed.
+  - `internal/worktree/worktree.go`, the owner `gc worktree` runs: `Cleanup`
+    removes a tree only when its HEAD is merged into the base given, and
+    `verifyProvenance` requires that base to be the one the tree was made from, so
+    `gc worktree cleanup` cannot remove a tree at the handoff, before the merge.
+    `rejectRegisteredWorktreeAncestor` refuses a path inside a registered worktree,
+    so `gc worktree ensure` cannot make a tree inside an agent's home. The search
+    is [specs/tk-1tfzr71.43/gas-city-search.md](../specs/tk-1tfzr71.43/gas-city-search.md).
+  - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
+    whole, so an inherited step cannot gain metadata, and a step that needs
+    `gc.continuation_group` must be overridden. The base declares none.
+  - `internal/sling/sling_core.go`, `checkLegacySourceWorkflowConflict`, and
+    `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
+    live root of one formula on one bead is refused, unless `--force` skips the
+    lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
+  In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
+  `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
+  branch, and at the handoff detaches the tree and deletes its branch.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main bfd72756e and
+  `gastownhall/gascity-packs` main e3cb468bb.
+- **Retires when.** A step at a time. `load-context`: core's gate refuses finished
+  and parked work and ends a run by cancelling it. `workspace-setup`: the
+  refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
+  `preflight-tests` and `self-review`: Gas City ships a record of a check per
+  commit. `submit-and-exit`: `tk-1tfzr71.20` moves the merge onto GitHub's branch
+  rules.
+
 ## Dolt reclaim
 
 - **Covers.** `assets/scripts/dolt-reclaim.sh`, `orders/dolt-reclaim.toml`,
@@ -169,9 +230,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main 37bd09351,
-  `gastownhall/gascity-packs` main dac12a4a8 and `gastownhall/beads` main
-  2ef4df339 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c,
+  `gastownhall/gascity-packs` main 796d7ecd7 and `gastownhall/beads` main
+  6d713a748 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority), with bd 1.3.2
   (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
@@ -199,8 +260,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main 37bd09351 and
-  `gastownhall/gascity-packs` main dac12a4a8, and against GitHub's *Managing
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main a91df0b85 and
+  `gastownhall/gascity-packs` main 796d7ecd7, and against GitHub's *Managing
   your personal access tokens* page, read the same day.
 - **Retires when.** Gas City ships per-agent write scoping. A GitHub
   fine-grained token covers only part of the origin rule. GitHub refuses it a
@@ -219,18 +280,17 @@ shares only the word ([authority-map.md](authority-map.md)).
   sitting cut short handed back to the operator's queue.
 - **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
   work closes. It stays until it is closed or drained, and attaching wakes one
-  that sleeps (`cmd/gc/compute_awake_set.go` 432-440, 583-594 and 668-693).
+  that sleeps (`cmd/gc/compute_awake_set.go` 443-451, 594-605 and 679-704).
   No closer the controller runs on its own ends one because its work closed:
   the stale-session closers exempt a session that has started its
   conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
-  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3057, 3237 and
-  3500), and the core reaper prunes a session only once it has drained
-  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69 and 1402-1404).
+  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3164, 3345 and
+  3608), and the core reaper prunes a session only once it has drained
+  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 118 and 1588-1590).
   A sitting drains itself once its conversation closes, and `gc-helm dismiss`
   stops the session that held the conversation it closes, so nothing in the
   controller ends a session either of them missed.
-- **Verified.** 2026-10-26, at `gastownhall/gascity` 1e05ae624, beside a live
-  `gc session list --state closed`.
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c.
 - **Retires when.** Gas City ends a manual session once its claimed work has
   closed.
 
@@ -246,13 +306,14 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go` 544-724, the lock at 563 and the check at
-  589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
-  `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
+  live (`internal/sling/sling_core.go`, the lock at 621 and the check at 647,
+  `checkLegacySourceWorkflowConflict`, which reads the live roots at 1857; the
+  terminal-root skip in `internal/sling/sling_attachment.go` 326;
+  and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
   `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
-  by a key (`cmd/gc/cmd_sling.go` 145-160).
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main e2671dc4d.
+  by a key (`cmd/gc/cmd_sling.go` 146-161).
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -368,9 +429,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37,
-  `gastownhall/gascity-packs` main 5bf643ca55bd with the packs Gas City
-  bundles at 66c672b5ed00, and `gastownhall/beads` main e46de42b3c59.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main 74d62eb1e0c0,
+  `gastownhall/gascity-packs` main e3cb468bbc65, and `gastownhall/beads` main
+  8c3eb30f30f7.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -415,10 +476,11 @@ shares only the word ([authority-map.md](authority-map.md)).
   `assets/scripts/pr-post.sh`, which reads a thread's posts through
   `live_comments` in `assets/scripts/review-dismissal.sh` and sets aside a post
   carrying the reaction the write-back in `assets/scripts/pr-facts.sh` marks a
-  handled post with (`WB_RESOLVED_REACTION`). Its readers:
-  `unansweredFeedback` in package `services/gctk/prstatus`,
-  `gctk pr-status derive` in `services/gctk/internal/cli/prstatus.go`, and
-  `phaseFacts` in the helm board's `services/helm/internal/board/derive.go`.
+  handled post with (`WB_RESOLVED_REACTION`). Its reader is package
+  `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
+  `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
+  `gctk pr-status derive` in `services/gctk/internal/cli/prstatus.go` and for the
+  helm board's beads source in `services/helm/internal/source/beads.go`.
 - **Stands in for.** A record of a pull request's review threads kept on the
   bead whose pull request it is, which says whether review feedback still
   waits on an answer.
@@ -442,10 +504,63 @@ shares only the word ([authority-map.md](authority-map.md)).
     `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
     keeps no record of it.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 with
-  the `gastown` pack it bundles at 66c672b5ed00, `gastownhall/gascity-packs`
-  main 5bf643ca55bd, and `gastownhall/beads` main e46de42b3c59.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main 74d62eb1e0c0,
+  `gastownhall/gascity-packs` main e3cb468bbc65, and `gastownhall/beads` main
+  8c3eb30f30f7.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
   GitHub's review thread events. The count then moves onto that record.
+
+## Agent home provisioning
+
+- **Covers.** `assets/scripts/worktree-setup.sh`.
+- **Stands in for.** A Gas City owner for the worktree an agent's sessions start
+  in, which `gc worktree ensure` would be if it provisioned a tree for an agent
+  rather than for a bead.
+- **Evidence.**
+  - In `gastownhall/gascity`, `gc worktree ensure` requires `--bead`,
+    `--store-ref` and `--generation`. Its postcondition is "the bead's uniquely
+    named branch checked out on an attached HEAD", on a path that is a direct
+    child of `--root`
+    ([gc worktree](https://docs.gascity.com/reference/cli#gc-worktree)). A home
+    serves many beads and outlives each of them. `Ensure` in
+    `internal/worktree/worktree.go` verifies an existing tree and never moves it,
+    and it writes no bead redirect and no excludes, so a home would still need
+    this script for all of that.
+  - Nothing else provisions one. `work_dir` and `pre_start` are the agent's own
+    config ([Agent](https://docs.gascity.com/reference/config#agent)), and the
+    daemon's `auto_prune_worker_dir` and `auto_reap_closed_bead_worktrees` only
+    remove trees. No formula in the core pack calls `gc worktree`:
+    `mol-polecat-commit` and `mol-scoped-work` cut their per-bead trees with
+    `git worktree add`.
+  - In `gastownhall/gascity-packs`, Gas Town's own polecat and refinery provision
+    their homes the same way: `pre_start` runs
+    `gastown/assets/scripts/worktree-setup.sh`, from which this script descends.
+    This pack imports no pack it could call that copy from.
+  - Nothing in Gas City brings a home to the default tip at each start. The
+    agent-home cleanup (`cleanupClosedBeadAgentHomeWorktrees` in
+    `cmd/gc/agent_home_worktree_cleanup.go`) moves a home only when it carries
+    the worker-dir prune's `.worktree-stale` marker, sits on a branch that names
+    a closed bead and has no uncommitted work.
+  - Nothing in Gas City brings a failed `pre_start` to a person. The command's
+    output goes into the start's error, which the controller and reconciler log
+    ([Agent](https://docs.gascity.com/reference/config#agent), `pre_start`). Five
+    failed wakes in a row hold the session for five minutes
+    (`defaultMaxWakeAttempts` and `defaultQuarantineDuration` in
+    `cmd/gc/session_types.go`), and a failed pending create also counts toward
+    a startup-health episode (`recordStartupHealthFailure` in
+    `cmd/gc/session_lifecycle_parallel.go`). Nothing sends the alert an episode
+    marks pending (`RecordStartupFailure` in `internal/session/startup_health.go`),
+    the doctor check that lists episodes leaves the error out
+    (`startupHealthEpisodesCheck` in `cmd/gc/doctor_startup_health.go`), and
+    `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
+    So the script reports a home it cannot sync through `patrol-finding.sh`, one
+    report per home, which the next clean start clears.
+  - The search, and each way this script differs from Gas Town's and why, is
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
+  `gastownhall/gascity-packs` main 796d7ecd73cf.
+- **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
+  the default branch, or Gas Town's agents stop running a script of their own at
+  `pre_start`.

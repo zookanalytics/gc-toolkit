@@ -1,0 +1,20 @@
+# witness-nudge — give a witness whose patrol pass stopped its next turn.
+# A pass ends at next-iteration, which leaves the next wisp assigned and deferred
+# an hour, and the controller's reassignment restart runs the next pass once the
+# hour has passed. A session that ends its turn short of that step still holds its
+# patrol wisp in progress, gets no restart, and sits idle at its prompt. Every 5m,
+# city-wide: read the session list once, and nudge each witness whose pane has
+# printed nothing, and which has had no nudge, for 11 minutes, and which holds
+# its patrol wisp in progress. A witness waiting out its deferred next pass holds
+# none and is left alone. `timeout` is under the interval, so a pass ends before
+# the next one starts. `idempotent` keeps a contended store from skipping the
+# order: a repeat nudges nothing, because the first nudge restarts the quiet clock.
+# See docs/patrol-continue.md.
+[order]
+description = "Nudge a witness whose patrol pass stopped with its wisp in progress, so the pass takes its next turn"
+trigger = "cooldown"
+interval = "5m"
+exec = "$PACK_DIR/assets/scripts/witness-nudge.sh"
+scope = "city"
+timeout = "240s"
+idempotent = true

@@ -1294,9 +1294,6 @@ set_row gG1 '.metadata["gc.superseded_by"] = "gG2"'
 set_row gG2 '.status = "closed" | .close_reason = "re-homed" | .metadata["gc.superseded_by"] = "gG1"'
 "$SUT" close-answered --anchor tk-ancG
 eq "$(bstatus "$FG")" "open" "…and neither does a hand-off that comes back to a gate already passed"
-# A finding that records its ruling as finding.ruling_bead is ruled, whatever
-# its gate reads: the migration records it for a finding whose question a
-# person ruled on before its gate existed.
 : > "$STUB_DEPS"
 store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request"}}]'
 FR=$(human_finding tk-ancR "docs/r.md" "keep the old name?" 66)

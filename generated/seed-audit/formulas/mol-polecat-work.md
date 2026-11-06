@@ -1,39 +1,36 @@
 Formula: mol-polecat-work
-Description: Polecat work lifecycle — feature-branch variant. Extends the core
-mol-polecat-base with worktree/branch setup, affected-aware self-review, and
-the refinery handoff. Run by every polecat in the city; the agent prompt
-carries the doctrine, this file carries the mechanics.
+Description: Polecat work lifecycle: the feature-branch variant. It extends core's
+mol-polecat-base and overrides the steps it really changes, each for the reason
+docs/warrants.md gives under "The work formula's overrides". `implement` is
+core's. A step text here calls a tested script and passes it the step's own
+facts. Run by every polecat in the city; the agent prompt carries the doctrine,
+this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
-push branch, hand the bead to the refinery -> close own step
-chain -> drain. A run whose whole product is store work has no branch to
-push and takes submit-and-exit's store-only arm instead, which releases the
-bead and names the disposition for whoever owns the close. A bead its record
-finishes goes to its validating closer, mol-validate-close.
-NEVER close the work bead: the refinery closes an anchor on a
-verified merge, and closes a rework hand-back landed-on-branch, both from
-merge-push. ALWAYS close your own step beads through
-assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
-own bead, and step-close.sh resolves it from the (gc.root_bead_id,
-gc.step_ref) pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead
-after a claim, and a pool assignee names every molecule the slot ever ran.
-workflow-finalize is the control-dispatcher's — never close it.
+push branch, hand the bead to the refinery -> close this step -> drain. A run
+whose whole product is store work has no branch to push and takes
+submit-and-exit's store-only exit instead, which releases the bead and names the
+disposition for whoever owns the close. A bead its record finishes goes to its
+validating closer, mol-validate-close.
+NEVER close the work bead: the refinery closes an anchor on a verified merge, and
+closes a rework hand-back landed-on-branch, both from merge-push. ALWAYS close
+your own step through assets/scripts/claim-close.sh: a graph.v2 step advances
+only by closing its own bead. workflow-finalize is the control-dispatcher's;
+never close it.
 
-Two distinct branch questions: {{base_branch}} is what the worktree is
-poured FROM (on a rework child, the reviewed branch — by design);
-metadata.target is where the work LANDS. submit-and-exit resolves the
-landing target once and fails closed; the marked submit-* blocks are
-extracted and executed by assets/scripts/submit-branch-gate.test.sh — run it
-after any edit here.
+Two distinct branch questions: {{base_branch}} is what the worktree is poured
+FROM (on a rework child, the reviewed branch, by design); metadata.target is
+where the work LANDS. work-submit.sh resolves the landing target once and fails
+closed.
 
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a
 separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
-submit-and-exit resolves it once, in step 4b, and the summary follows it.
+work-submit.sh resolves it once, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
-attempt bounced with the branch intact — resume it by bringing the branch
-current with MERGE (never rebase or force-push), don't redo the work.
+attempt bounced with the branch intact: resume it by bringing the branch current
+with MERGE (never rebase or force-push), don't redo the work.
 
 
 Variables:

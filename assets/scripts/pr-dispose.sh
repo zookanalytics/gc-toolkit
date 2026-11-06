@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # pr-dispose — record a deliberate PR-close disposition on the OPEN anchor, then
 # close the PR, so the refinery's pr-facts.sh consummates the terminal close
-# through bead-rehome.sh instead of filing a rework-or-close visit that re-asks
-# a decision already made.
+# through bead-rehome.sh instead of filing a rework-or-close human gate that
+# re-asks a decision already made.
 #
 # It stamps three metadata keys naming the intended bead-rehome invocation —
 # gc.pr_close_disposition_kind, gc.pr_close_disposition_successor, and an
@@ -71,7 +71,7 @@ usage: pr-dispose.sh --anchor <bead-id> --successor <bead-id>
 
 Records a deliberate supersede/not-planned PR-close disposition on the OPEN
 anchor and closes the PR; the refinery's pr-facts.sh then closes the anchor
-through bead-rehome.sh instead of filing a rework-or-close visit.
+through bead-rehome.sh instead of filing a rework-or-close human gate.
 
   --anchor          the open work bead the PR gates (merge_result=pull_request)
   --successor       the carrier of the work, or (not-needed) the evidence

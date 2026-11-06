@@ -781,7 +781,7 @@ eq "$(field tk-rec status)" "open" "(SLING-REFUSED) …and the recommendation's 
 # REAL gc-helm.sh accept over the same store. The sign-off runs the pack
 # scripts beside it, so it runs as a link in a stub pack, where they stand in:
 # the headline writes gc.takeaway, the lifecycle writer is the stub above, and
-# the PR reminder records nothing.
+# the writer of the visit's PR comment does nothing.
 mkdir -p "$TMP/rig/assets/scripts" "$TMP/cwd"
 cat > "$TMP/rig/assets/scripts/gc-helm.sh" <<H
 #!/usr/bin/env bash
@@ -795,7 +795,7 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/rig/assets/scripts/pr-sitting-com
 chmod +x "$TMP/rig/assets/scripts/"*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh bead-store.sh rig-map.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh; do
     ln -s "$HERE/$_lib" "$TMP/rig/assets/scripts/$_lib"
 done
 SIGNOFF="$TMP/rig/assets/scripts/converse-signoff.sh"

@@ -83,7 +83,7 @@ sitting stands*, below): `start-failed` when one failed to start
 (`sitting_start_failure` says why; see *A sitting that failed to start*, below),
 `in_session` when a live session holds one, `waiting` on any other
 held row, and empty on a row nothing holds. `work_held` refines `held`: it is
-true when an open human gate blocks the bead or an acceptance an earlier Accept
+true when an open human gate holds the bead or an acceptance an earlier Accept
 left unfinished keeps it, so the operator's answer is required before the work
 can move. A held row where it is false only has a conversation on it, which
 blocks nothing, and the boards mark it apart: ◌ in both terminal views, except
@@ -270,8 +270,13 @@ gate's title, or `N× — a · b` over several. A conversation not in session ma
 its bead owed, one in the operator's queue or one whose sitting's session has
 closed, and a row no gate holds shows its conversation's title, or "in
 conversation" while a sitting holds the conversation. A merge anchor keeps its
-own PR needs, whose `asking` already names the gate that blocks it. The owed
-clock is the earliest `updated_at` among the row's open gates and owed
+own PR needs, whose `asking` names each open human gate that holds it, oldest
+first, and outranks a takeaway. Those are the gates on the anchor and the ones
+behind a bead it waits on, such as a rework, which the beads source reads for
+each live merge anchor through `prstatus.Read`, the definition behind the PR's
+`held:` labels (`board.Anchor.PR`, `board.Anchor.PRReasons`). The supervisor
+backend reads none, because its beads carry no await type. The owed clock is the
+earliest `updated_at` among the row's open gates and owed
 conversations. A bead that carries `gc.recommended_formula` and that no open
 gate under the key `first-reaction` blocks has its own `blocks` listing read
 too, which returns a closed gate with its close reason: that is how the board
@@ -618,7 +623,7 @@ field would be lying on a normal day.
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from a human gate's edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
-| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open human gate on the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's demand blockers |
+| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held` over the facts `prstatus.Read` gathers, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's blockers a person has to clear. `null` too on a PR whose facts did not read |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
@@ -645,7 +650,7 @@ is the discriminator: an anchor also blocks on ordinary prerequisites and on the
 human gate that makes it `asking`, and no pool will claim either.
 
 **Whose move.** A row is owed by the operator when the machine axis is blocked,
-when an open `blocks` edge to a human gate means the city is asking, or when the
+when an open human gate holds the anchor, so the city is asking, or when the
 cadence is `settled` and GitHub is holding the merge for a human review — one
 never given, or a standing `changes_requested` the city has reworked as far as it
 can. GitHub keeps the veto standing across pushes and the city never dismisses
@@ -669,8 +674,10 @@ A recorded `blocked` verdict reads `blocked` only while it holds the PR by the
 rule the `status:` label applies, `prstatus.Blocked`: it was recorded at the head
 the posture was read at, and nothing is in flight on the anchor unless its cause
 is `blocker`. The work in flight is the anchor's in-flight set, every bead
-carrying its `anchor_bead` at a live status, which the beads source reads as
-`gctk pr-status derive` does. A cause outside the vocabulary holds wherever it was
+carrying its `anchor_bead` at a live status, which `prstatus.Read` gathers for the
+board as it does for `gctk pr-status derive`. A PR whose facts did not read
+cannot tell, so its recorded `blocked` reads `unknown`. A cause outside the
+vocabulary holds wherever it was
 recorded, because the derivation cannot name it. Any other recorded `blocked`
 reads `progressing`, because the next merge pass replaces it, so the row is not
 owed and its `needs` does not call it blocked. The row's phase reads the verdict
@@ -930,7 +937,7 @@ queued conversations are filtered out of client-side, and whose parent-child and
 blocked beads, so they cost no request of their own.
 
 **The `gc` CLI (`internal/source/gccli.go`) — for the one fact no bead carries.**
-`gc session list --state all --json` for session liveness (the gate that tells
+`gc session list --json` for session liveness (the gate that tells
 work in flight from an abandoned husk). This is the same read `gc-helm.sh`
 makes, so the two boards agree on liveness by construction rather than by two
 derivations. The work bead a root's run works — the other half of the
@@ -989,7 +996,10 @@ while it is `open`, and with no sitting to read a state from, that conversation
 reads `waiting` whoever it is assigned to. And the supervisor's bead carries no
 `await_type`, so the backend can tell no human gate from any other gate and
 folds none: a board served from it shows no human gate at all until the API
-carries the field.
+carries the field. For the same reason it cannot read what holds a PR
+(`prstatus.Read` follows `blocks` edges to the human gates), so a merge anchor it
+serves carries no PR phase and no held value, and reads its liveness as any other
+bead does.
 
 **Costs of the library backend, paid at build time, not per request:** the
 module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
@@ -1017,7 +1027,7 @@ healthy.
 |---|---|
 | unset (default) | beads library if this binary can actually OPEN a rig store; otherwise the HTTP API, with a log line naming the consequence |
 | `beads` | force the library; **fatal** if no store can be opened, rather than a quiet downgrade |
-| `supervisor` | force the HTTP API (accepting `stale_days = 0`, no human gates, no held conversations or sittings, no in-flight join, and unresolved waiting edges) |
+| `supervisor` | force the HTTP API (accepting `stale_days = 0`, no human gates, no held conversations or sittings, no in-flight join, no PR phase or held value, and unresolved waiting edges) |
 
 **The test is an OPEN, not a path check** (tk-4cqtv). Resolving
 `<city>/rigs/*/.beads` is not enough to know this backend can serve: a binary
@@ -1459,7 +1469,8 @@ is a read. Each shells out to the matching `gc-helm.sh` verb:
   recommendation the operator has already decided (Accept/Discuss flow,
   tk-hsm4d9). It refuses while another human gate blocks the bead.
 - **engage** spawns a Discuss sitting bound to the bead's conversation
-  (`--no-input --no-attach`).
+  (`--no-input --no-attach`). Its message also names each open human gate that
+  holds the bead and how to engage it, since that sitting answers none of them.
 - **dismiss** ends the sitting: it closes the conversation a live sitting holds,
   and answers no gate.
 

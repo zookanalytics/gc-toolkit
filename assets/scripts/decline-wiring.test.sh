@@ -14,23 +14,23 @@
 #     disposers do not ship. molecule-hold.sh ships only as the name that step
 #     text from an earlier version of a formula calls: it hands the call to
 #     run-cancel.sh and reads or writes no bead itself;
-#   * OWN STEP: every run-cancel.sh --step call names the step it sits in, so a
-#     decline cancels the run this shell is executing and no other;
-#   * OPEN GATE: every await-ruling.sh call follows a human-gate.sh filing that
-#     declares no quiet window, or bring-current-audit.sh's ask, because a wait
-#     needs an open gate and a quiet window files none for a situation a person
-#     already answered moot or benign;
-#   * ORDER, executed: workspace-setup's missing-branch arm files the gate,
-#     records the wait, cancels, then drains, and stops at the first part that
-#     does not land;
-#   * WITHDRAWN WORK, executed: the self-review and submit-and-exit entry gates
-#     cancel the run when the work bead was closed mid-run, fall through when it
-#     is open, and do not drain when the cancel does not land. A close that
-#     landed the work (gc.work_outcome=shipped, or merge_result=merged) is not a
-#     withdrawal: submit-and-exit closes its chain with outcome pass instead.
+#   * OWN STEP: every run-cancel.sh or decline.sh --step call in a formula names
+#     the step it sits in, so a decline cancels the run this shell is executing
+#     and no other;
+#   * OPEN GATE: every await-ruling.sh call in a formula follows a human-gate.sh
+#     filing that declares no quiet window, or bring-current-audit.sh's ask,
+#     because a wait needs an open gate and a quiet window files none for a
+#     situation a person already answered moot or benign;
+#   * STAND-DOWN: a gate that arms a re-sling tells a person how to rule the other
+#     way, through stand-down.sh under the gate's own key, and nothing tells them
+#     to close a bead the gate blocks, which bd refuses. bring-current-audit.sh's
+#     ask is the one that does not, because its gate asks how to resolve a conflict.
+#     The skills a person's ruling reaches give the command;
 #
-# No live city, Dolt, or network: the blocks are extracted verbatim from the
-# formulas and run against a fake `gc` and stub scripts.
+# decline.test.sh holds the order of a decline, and work-setup.test.sh,
+# work-enter.test.sh, work-submit.test.sh and mol-rig-demo-capture-arm.test.sh
+# each arm that calls it. No live city, Dolt, or network: this suite reads the
+# pack's formulas, prompts, skills and scripts.
 #
 # run-tests-scope: tree
 set -uo pipefail
@@ -71,7 +71,7 @@ esac
 
 # --- 2. Each cancel names the step it sits in. ----------------------------------
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-polecat-work mol-validate mol-rig-demo; do
+  for f in mol-review mol-validate mol-rig-demo; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 path = sys.argv[1]
@@ -80,7 +80,7 @@ formula = d.get("formula", "")
 bad = []
 calls = 0
 for st in d.get("steps", []):
-    for m in re.finditer(r'run-cancel\.sh"? --step "?([^"` ,]+)', st.get("description", "")):
+    for m in re.finditer(r'(?:run-cancel|decline)\.sh"? --step "?([^"` ,]+)', st.get("description", "")):
         ref = m.group(1)
         if not ref.startswith(formula + "."):
             continue
@@ -91,8 +91,8 @@ print("%d|%s" % (calls, "; ".join(bad)))
 PY
 )
     case "$out" in
-      0\|*) bad "$f: no run-cancel.sh --step call found" ;;
-      *\|) ok "$f: each of its ${out%%|*} run-cancel.sh --step calls names the step it sits in" ;;
+      0\|*) bad "$f: no run-cancel.sh or decline.sh --step call found" ;;
+      *\|) ok "$f: each of its ${out%%|*} run-cancel.sh and decline.sh --step calls names the step it sits in" ;;
       *) bad "$f: a cancel names another step: ${out#*|}" ;;
     esac
   done
@@ -109,7 +109,7 @@ fi
 # too: merge-push makes a convoy's rebuild child, and work whose zero-diff check
 # cannot run, wait on a gate.
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-polecat-work mol-validate mol-rig-demo mol-refinery-patrol; do
+  for f in mol-validate mol-rig-demo mol-refinery-patrol; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
@@ -142,136 +142,74 @@ PY
 else
   echo "skip - open-gate check: $TOML_PY"
 fi
-# The same rule over the prose a worker declines by hand from.
-FRAG_WAITS=0; FRAG_BAD=""
-while IFS= read -r frag; do
-  out=$(awk -v f="$frag" '
-    /human-gate\.sh" --subject/ || /"\$BCA" ask/ { filer = $0 }
-    /await-ruling\.sh" "/ {
-      n++
-      if (filer == "") bad = bad f ": a wait with no human gate filed before it; "
-      else if (filer ~ /human-gate\.sh"/ && filer ~ /--quiet-window/) bad = bad f ": the filing before a wait declares a quiet window; "
-    }
-    END { printf "%d|%s", n, bad }' "$ROOT/$frag")
-  FRAG_WAITS=$((FRAG_WAITS + ${out%%|*})); FRAG_BAD="$FRAG_BAD${out#*|}"
-done < <(git -C "$ROOT" grep -l 'await-ruling.sh" "' -- 'template-fragments/*.md' 'agents/*' 'skills/*' 2>/dev/null)
-if [ "$FRAG_WAITS" -eq 0 ]; then
-  bad "no fragment, prompt or skill shows a wait; the doctrine's decline recipe is expected to"
-elif [ -z "$FRAG_BAD" ]; then
-  ok "each of the $FRAG_WAITS waits in fragments, prompts and skills follows a filing with no quiet window"
+
+# --- 2c. A wait says how to rule the other way. ---------------------------------
+# bd refuses to close a bead an open gate blocks, and clearing the gate re-slings
+# armed work, so the one way to rule that it will not go on is stand-down.sh.
+CLOSE_FIRST=$(git -C "$ROOT" grep -n -E 'closes the work bead first|close \$[A-Z_]+,? (first|then clear)' \
+  -- 'formulas/*.toml' 'template-fragments/*.md' 'agents/*' 'skills/*' 'assets/scripts/await-ruling.sh' \
+  'assets/scripts/decline.sh' 'assets/scripts/work-*.sh' ':!assets/scripts/*.test.sh' 2>/dev/null || true)
+eq "$CLOSE_FIRST" "" "nothing tells a person to close a bead before they clear the gate that blocks it"
+grep -q 'stand-down\.sh' "$ROOT/template-fragments/polecat-doctrine.template.md" \
+  && ok "the doctrine names stand-down.sh for a ruling not to proceed" \
+  || bad "the doctrine does not name stand-down.sh for a ruling not to proceed"
+skill_has() { # <skill> <text> <label>: a phrase may wrap across lines there
+  local text
+  text=$(tr '\n' ' ' < "$ROOT/skills/$1/SKILL.md" | tr -s ' ')
+  case "$text" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2')" ;; esac
+}
+skill_has waits '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the waits skill gives the stand-down's command"
+skill_has waits 'Never answer the gate first and close afterwards' "the waits skill rules out answering the gate first"
+skill_has waits '--successor <the bead that records the ruling>' "the waits skill gives the evidence a gate that holds another bead needs"
+skill_has waits 'Never remove that edge yourself first' "the waits skill rules out taking an armed bead off a gate by hand"
+skill_has work '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the work skill gives the stand-down's command"
+skill_has work 'It leaves a deferred-dispatch arm in place' "the work skill says a stop that keeps the bead leaves its arm"
+skill_has converse-settle '/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"' "the converse-settle step gives the stand-down's command, with the conversation as its evidence"
+skill_has converse-settle 'Stand it down first' "the converse-settle step stands the subject down before the sign-off"
+skill_has converse-settle 'add `--leave <gate>` to the sign-off' "the converse-settle step keeps a gate's other bead waiting through the sign-off"
+# mol-polecat-work's step scripts file their gates through decline.sh, which ends
+# the message of each gate that arms a re-sling with the stand-down under that
+# gate's own key (decline.test.sh holds the sentence). So no work script arms a
+# gate's re-sling itself, apart from bring-current-audit.sh's question.
+OWN_WAITS=$(git -C "$ROOT" grep -n -E 'await-ruling\.sh" "\$[A-Z_]+" --key ' \
+  -- 'assets/scripts/work-*.sh' ':!assets/scripts/*.test.sh' 2>/dev/null | grep -v -F -- '--key "bring-current-question.' || true)
+eq "$OWN_WAITS" "" "mol-polecat-work's scripts arm a gate's re-sling only through decline.sh, apart from the bring-current question"
+if TOML_PY="$(tomllib_python)"; then
+  f=mol-refinery-patrol
+  out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+import re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+text = "\n".join(st.get("description", "") for st in d.get("steps", []))
+checked, bad = 0, []
+def judge(key, message):
+    global checked
+    checked += 1
+    if not re.search(r"stand-down\.sh \$[A-Z_]+ --key " + re.escape(key) + r" --ruling ", message):
+        bad.append(key)
+for key in set(re.findall(r'await-ruling\.sh" "\$[A-Z_]+" --key (\S+) ', text)):
+    # The GATE_MESSAGE loop below judges the first. bring-current-audit.sh composes
+    # the second's text, which asks how to resolve a conflict: a stand-down leaves
+    # that gate open while it also holds the anchor.
+    if key == '"$GATE_KEY"' or key.startswith('"bring-current-question.'):
+        continue
+    messages = [l for l in text.split("\n") if "--key %s --message" % key in l]
+    if not messages:
+        bad.append(key + " has no message")
+    for message in messages:
+        judge(key, message)
+for key, message in re.findall(r'GATE_KEY=([a-z-]+)\n\s*AWAIT=1\n\s*GATE_MESSAGE="([^\n]*)', text):
+    judge(key, message)
+print("%d|%s" % (checked, "; ".join(bad)))
+PY
+)
+  case "$out" in
+    0\|*) bad "$f: no gate that arms a re-sling was found" ;;
+    *\|) ok "$f: the ${out%%|*} gate messages that offer a stop name stand-down.sh under their own keys" ;;
+    *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
+  esac
 else
-  bad "$FRAG_BAD"
+  echo "skip - stand-down wiring check: $TOML_PY"
 fi
-
-# --- Fakes for the executed blocks. -------------------------------------------
-# gc: `runtime drain-ack` records DRAIN; `bd show` answers $FAKE_SHOW;
-# `gc-toolkit scripts-dir` names the pack, $STUB_PACK; every other call exits 0. The pack stubs record their verb and argv and exit with a
-# code the case controls.
-mkdir -p "$TMP/bin" "$TMP/pack/assets/scripts"
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-case "$1 ${2:-}" in
-  "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
-  "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
-  "bd show") printf '%s\n' "${FAKE_SHOW:-[]}"; exit 0 ;;
-esac
-exit 0
-GC
-for v in human-gate:GATE await-ruling:AWAIT run-cancel:CANCEL step-close:STEPCLOSE; do
-  name="${v%%:*}"; verb="${v#*:}"
-  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"
-    printf 'printf %s >> "$FAKE_LOG"\n' "'$verb\\n'"
-    printf 'printf %s "$*" >> "$TMP_ARGS/%s"\n' "'%s\\n'" "$name"
-    printf 'exit "${FAKE_%s_RC:-0}"\n' "$verb"; } > "$TMP/pack/assets/scripts/$name.sh"
-done
-chmod +x "$TMP/bin/gc" "$TMP/pack/assets/scripts/"*.sh
-export PATH="$TMP/bin:$PATH" STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" TMP_ARGS="$TMP/args"
-mkdir -p "$TMP_ARGS"
-
-# A block comes out with {{binding_prefix}} rendered as the pour renders it:
-# the binding the city imports the pack under plus a dot, gc-toolkit. here.
-extract() { # <formula> <marker>
-  awk -v m="$2" '
-    $0 ~ ("# >>> " m "$") {f=1; next}
-    $0 ~ ("# <<< " m "$") {f=0}
-    f' "$ROOT/formulas/$1.toml" | sed 's|{{binding_prefix}}|gc-toolkit.|g'
-}
-# run <block-file> [VAR=value...] -> "<rc>|<ordered verb log>"
-run() {
-  local block="$1"; shift
-  : > "$TMP/log"; rm -f "$TMP_ARGS"/*
-  local rc=0
-  env FAKE_LOG="$TMP/log" "$@" bash "$block" > "$TMP/out" 2>&1 || rc=$?
-  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
-}
-args() { cat "$TMP_ARGS/$1" 2>/dev/null; }
-
-# --- 3. The missing-branch arm, in order. ----------------------------------------
-extract mol-polecat-work workspace-setup-missing-branch-decline \
-  | sed 's|{{convoy_id}}|tk-cv|g' > "$TMP/missing.sh"
-[ -s "$TMP/missing.sh" ] && ok "missing-branch arm extracted" || bad "missing-branch arm extraction EMPTY"
-set -- WORK_BEAD_ID=tk-work BRANCH=polecat/tk-work CLAIMED_STEP_BEAD_ID=st-setup
-eq "$(run "$TMP/missing.sh" "$@")" "1|GATE;AWAIT;CANCEL;DRAIN;" \
-   "missing branch: gate, wait, cancel, drain, exit 1"
-has "$(args human-gate)" "--subject tk-work --key polecat-missing-branch" "missing branch: the gate blocks the work bead under its key"
-has "$(args human-gate)" "clearing it re-slings tk-work" "missing branch: the gate says clearing it re-slings the work"
-hasnt "$(args human-gate)" "--quiet-window" "missing branch: the gate declares no quiet window"
-eq "$(args await-ruling)" "tk-work --key polecat-missing-branch --formula mol-polecat-work" \
-   "missing branch: the work bead waits on that gate"
-has "$(args run-cancel)" "--step mol-polecat-work.workspace-setup --bead st-setup" \
-   "missing branch: the cancel names this step and its claimed bead"
-eq "$(run "$TMP/missing.sh" "$@" FAKE_GATE_RC=1)" "1|GATE;" \
-   "missing branch: no gate, so no wait, no cancel, no drain"
-eq "$(run "$TMP/missing.sh" "$@" FAKE_AWAIT_RC=1)" "1|GATE;AWAIT;" \
-   "missing branch: no wait, so no cancel, no drain"
-eq "$(run "$TMP/missing.sh" "$@" FAKE_CANCEL_RC=1)" "1|GATE;AWAIT;CANCEL;" \
-   "missing branch: a cancel that did not land is not drained"
-
-# --- 4. Withdrawn work. --------------------------------------------------------
-extract mol-polecat-work self-review-withdrawn-work > "$TMP/review.sh"
-extract mol-polecat-work submit-withdrawn-work | sed 's|{{convoy_id}}|tk-cv|g' > "$TMP/submit.sh"
-[ -s "$TMP/review.sh" ] && ok "self-review gate extracted" || bad "self-review gate extraction EMPTY"
-[ -s "$TMP/submit.sh" ] && ok "submit gate extracted" || bad "submit gate extraction EMPTY"
-CLOSED='[{"id":"tk-work","status":"closed","metadata":{"gc.step_ref":"self-review.iteration.2"}}]'
-OPEN='[{"id":"tk-work","status":"open","metadata":{"gc.step_ref":"self-review.iteration.2"}}]'
-
-eq "$(run "$TMP/review.sh" WORK_BEAD_ID=tk-work CLAIMED_ITER_BEAD=it-2 WORK_JSON="$CLOSED" FAKE_SHOW="$CLOSED")" \
-   "1|CANCEL;DRAIN;" "self-review: a work bead closed mid-run cancels the run, drains, exits 1"
-has "$(args run-cancel)" "--step self-review.iteration.2 --bead it-2" \
-   "self-review: the cancel names the iteration this session claimed"
-has "$(args run-cancel)" "tk-work was closed while its run was mid-flight" "self-review: the reason names the withdrawn work"
-eq "$(run "$TMP/review.sh" WORK_BEAD_ID=tk-work CLAIMED_ITER_BEAD=it-2 WORK_JSON="$OPEN" FAKE_SHOW="$OPEN")" \
-   "0|" "self-review: open work falls through to the review"
-eq "$(run "$TMP/review.sh" WORK_BEAD_ID=tk-work CLAIMED_ITER_BEAD=it-2 WORK_JSON="$CLOSED" FAKE_SHOW="$CLOSED" FAKE_CANCEL_RC=1)" \
-   "1|CANCEL;" "self-review: a cancel that did not land is not drained"
-
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW="$CLOSED")" \
-   "1|CANCEL;DRAIN;" "submit: a work bead closed mid-run cancels the run, drains, exits 1"
-has "$(args run-cancel)" "--step mol-polecat-work.submit-and-exit --bead st-submit" \
-   "submit: the cancel names this step and its claimed bead"
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW="$OPEN")" \
-   "0|" "submit: open work falls through to the handoff"
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='{"error":"store down"}')" \
-   "0|" "submit: an unreadable work bead is not read as withdrawn"
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW="$CLOSED" FAKE_CANCEL_RC=1)" \
-   "1|CANCEL;" "submit: a cancel that did not land is not drained"
-
-# A close that landed the work: the step was offered again after its handoff, so
-# it closes its chain with outcome pass rather than cancelling a delivered run.
-CHAIN="STEPCLOSE;STEPCLOSE;STEPCLOSE;STEPCLOSE;STEPCLOSE;DRAIN;"
-SHIPPED='[{"id":"tk-work","status":"closed","metadata":{"gc.work_outcome":"shipped","merge_result":"merged"}}]'
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW="$SHIPPED")" \
-   "0|$CHAIN" "submit: a work bead closed as shipped closes the chain and drains, exits 0"
-has "$(args step-close)" "--step mol-polecat-work.submit-and-exit --convoy tk-cv --outcome pass" \
-    "submit: a shipped close records this step as passed, in its own molecule"
-eq "$(args run-cancel)" "" "submit: a shipped close cancels nothing"
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"merge_result":"merged"}}]')" \
-   "0|$CHAIN" "submit: a merge closed before gc.work_outcome was stamped is a landed close too"
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"gc.work_outcome":"shipped"}}]')" \
-   "0|$CHAIN" "submit: a rework hand-back closed as shipped is a landed close"
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"merge_result":"pull_request"}}]')" \
-   "1|CANCEL;DRAIN;" "submit: a bead closed with its PR still open was withdrawn, so the run is cancelled"
-eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"gc.work_outcome":"no-op"}}]')" \
-   "1|CANCEL;DRAIN;" "submit: a no-op close was withdrawn, so the run is cancelled"
 
 echo
 echo "decline-wiring.test.sh: $PASS passed, $FAIL failed"

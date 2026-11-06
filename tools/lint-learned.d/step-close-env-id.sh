@@ -8,7 +8,7 @@
 # COMMAND lines where `bd close <env-id>` or `bd update <env-id> …
 # --status=closed` takes a GC_*BEAD_ID variable. Not flagged: non-closing
 # writes, prose, specs/ (dated records), generated/ (render duplicates).
-# Fix: close through assets/scripts/step-close.sh --step <formula>.<step-id>.
+# Fix: close through assets/scripts/claim-close.sh --step <formula>.<step-id>.
 # Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
 # be scanned.
 
@@ -47,7 +47,7 @@ for f in "$@"; do
         grep -qE "$CMD_SHAPE" <<< "$body"; rc=$?
         [ "$rc" -le 1 ] || cannot_scan "$f"
         [ "$rc" -eq 0 ] || continue
-        echo "$f:$no: closes a bead on an id from the environment — \$GC_TRIGGER_BEAD_ID goes stale across \`gc hook --claim\` (closes another session's bead) and \$GC_BEAD_ID is unset in steps (closes nothing); use assets/scripts/step-close.sh --step <formula>.<step-id> (learned rule: step-close-env-id)"
+        echo "$f:$no: closes a bead on an id from the environment — \$GC_TRIGGER_BEAD_ID goes stale across \`gc hook --claim\` (closes another session's bead) and \$GC_BEAD_ID is unset in steps (closes nothing); use assets/scripts/claim-close.sh --step <formula>.<step-id> (learned rule: step-close-env-id)"
         found=1
     done <<< "$hits"
 done

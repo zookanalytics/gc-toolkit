@@ -656,9 +656,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    cite code the target branch already carries, so its finding is carried
    forward to a bug bead of its own through `bead-rehome.sh` instead; the PR's
    inline comments are read once per anchor that carries such a candidate. It
-   leaves `task_kind=review` to review-sweep, `task_kind=visit` to the human
-   side, and a `rebase_hold` freeze to the operator, and never closes the anchor
-   itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
+   leaves `task_kind=review` to review-sweep, a human gate or a conversation to
+   the human side, and a `rebase_hold` freeze to the operator, and never closes
+   the anchor itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
    while a human gate on the anchor is open — which clearing the machine
    scaffolding here lets land once none is. Arm 7 runs this same sweep with `--anchor` for
    the one anchor whose PR-close disposition it is consummating, just before
@@ -908,26 +908,13 @@ each rig checkout:
 `--ff-only` mutates nothing on divergence, on a local change to a path the
 incoming commits rewrite, or on untracked content in the way of what they write,
 and `--no-overwrite-ignore` makes that include an ignored file, which git
-otherwise overwrites. A refusal gets one heal first, and each heal acts only
-when nothing is lost. A checkout that is only behind sets aside the local
-changes on those paths and fast-forwards, when each working copy is absent,
-committed, upstream or on a pushed branch. It pins the staged and working-tree
-state first, under `refs/gc-toolkit/reconcile-set-aside/<UTC time>`, and leaves
-a dirty path the fast-forward does not rewrite, such as local bd config, as it
-is. Untracked content in the way of the fast-forward, an ignored file included,
-goes only when it is a file that already holds the incoming bytes on its own
-path. A file the incoming commits stop tracking while the remote's tree
-ignores it, such as bd config a repository stops tracking, stays in place
-untracked where the fast-forward would delete it: pinned first when it is
-modified, its working copy waits under `.git/gc-toolkit-reconcile-kept` while
-git fast-forwards and goes back on its path unchanged. A copy that cannot go
-back, because other content was written on its path meanwhile, waits there, and
-the rig stays escalated until none waits. A diverged checkout resets to the remote
-when its content is provably upstream, with
-`git checkout --no-overwrite-ignore -B`, which refuses rather than overwrites
-or deletes untracked content in its way, ignored or not. Anything else files
-one idempotent human gate per blocked rig (via `human-gate.sh`, on the rig's
-subject bead and carrying what blocked it and `git status`). Once the rig
-fast-forwards cleanly with no kept copy waiting aside, the gate is withdrawn
+otherwise overwrites. A file the incoming commits delete leaves the working
+tree with them when its copy is unmodified, so a change that stops tracking a
+file a live checkout still needs, such as machine-local config, removes an
+unmodified copy of it there. A checkout whose HEAD is off its default branch is
+not fast-forwarded. A refused fast-forward and a checkout off its default
+branch each file one idempotent human gate per blocked rig (via
+`human-gate.sh`, on the rig's subject bead and carrying what git refused and
+`git status`). Once the rig fast-forwards cleanly, the gate is withdrawn
 `moot:` and the subject bead closes. The 15-minute window is also the exposure behind
 component-model I9, watched by `doctor/check-pour-text-current`.

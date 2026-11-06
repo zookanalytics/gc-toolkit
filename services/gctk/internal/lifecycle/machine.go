@@ -53,9 +53,9 @@ var (
 	ClosedStates = []string{"merged"}
 
 	// ParkRoute is the one route value no pool claims, so it parks the bead for
-	// a person — the sentinel a visit or an operator hold leaves. A detached
-	// state may rest on it, and a transition that finds it leaves it alone
-	// rather than retracting a bead a person still owns.
+	// a person — the sentinel an operator hold or a hand-back to a person
+	// leaves. A detached state may rest on it, and a transition that finds it
+	// leaves it alone rather than retracting a bead a person still owns.
 	ParkRoute = "human"
 
 	// ExitSets are the writes leaving a state makes, in lifecycle.toml's

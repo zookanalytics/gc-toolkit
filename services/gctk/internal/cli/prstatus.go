@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,22 +11,23 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
-// `gctk pr-status` is the derivation assets/scripts/pr-status-label.sh reaches.
-// `derive --anchor ID` prints one of working|merging|needs-review|needs-attention
-// and exits 0; 1 on a usage error; 2 when a read did not resolve, so a caller
-// leaves the labels as they are rather than flipping them blind. With --json it
-// prints one object instead, {"status": <that value>, "held": [<gate, review,
-// blocked>]}, the held values in prstatus.Held's order and an empty array when
-// nothing holds the PR. pr-status-label.sh calls this and has no derivation of
-// its own, and pr-status-label.test.sh is the acceptance bar. The anchor read
-// goes through gcbd.Show (daemon-first against the supervisor API, falling back
-// to `gc bd`); the in-flight set and the anchor's blockers read through `gc
-// bd`. The cli tests pin GC_NO_API, so every read answers from the
-// same `gc bd` stub the shell acceptance drives.
+// `gctk pr-status` is how the shell asks what holds a PR and where it stands:
+// assets/scripts/pr-status-label.sh for the PR's labels, and gc-helm.sh engage
+// for what holds the bead it engages. `derive --anchor ID` prints one of
+// working|merging|needs-review|needs-attention and exits 0; 1 on a usage error;
+// 2 when a read did not resolve, so a caller leaves the labels as they are
+// rather than flipping them blind. With --json it prints one object instead,
+// {"status": <that value>, "held": [<gate, review, blocked>], "reasons":
+// [{"held", "id", "title"}]}: the held values in prstatus.Held's order, and each
+// thing behind them in prstatus.Reasons' order, the id empty where the PR's own
+// review threads or blocked verdict hold it. Both lists are empty arrays when
+// nothing holds the PR. pr-status-label.sh and engage call this and decide
+// nothing themselves.
 //
-// The values are decided by prstatus.Derive and prstatus.Held, the package
-// exported for the helm board to derive the same per-bead state: one code path,
-// so a bead's PR labels and its board liveness cannot disagree.
+// prstatus.Read gathers the facts through gcbdStore and decides nothing here
+// either: the helm board asks the same package through its own store, so the
+// labels, engage and the board read one definition. The cli tests pin GC_NO_API,
+// so every read answers from the same `gc bd` stub the shell acceptance drives.
 
 // prStatusProg is the name warnings carry: the script whose derivation this is,
 // because its callers grep those lines and the language behind the command is
@@ -38,118 +40,76 @@ const prStatusUsage = `usage: gctk pr-status derive --anchor <anchor-id> [--json
 // PRStatus dispatches the subcommand's verbs, returning a process exit code so
 // the surface stays testable in-process.
 func PRStatus(args []string, stdout, stderr io.Writer) int {
-	verb := ""
-	if len(args) > 0 {
-		verb = args[0]
-	}
-	switch verb {
-	case "derive":
+	if len(args) > 0 && args[0] == "derive" {
 		return prStatusDerive(args[1:], stdout, stderr)
-	default:
-		fmt.Fprint(stderr, prStatusUsage)
-		return 1
 	}
+	fmt.Fprint(stderr, prStatusUsage)
+	return 1
 }
 
-// prStatusDerive gathers the facts the city records about the anchor and prints
-// the state prstatus.Derive returns, and with --json the values prstatus.Held
-// returns beside it: the holds, the dated posture, the machine verdict and its
-// blocked cause, the count of review threads waiting on the city's answer, and
-// the draft-stage markers off the anchor, the size of the anchor's in-flight
-// set, whether an open human gate blocks the anchor, and whether a blocker it
-// waits on is a person's.
-func prStatusDerive(args []string, stdout, stderr io.Writer) int {
+// prStatusArgs reads derive's flags, --anchor and --json. It returns false after
+// saying what is wrong.
+func prStatusArgs(args []string, asJSON *bool, stderr io.Writer) (string, bool) {
 	anchor := ""
-	asJSON := false
-	var missing string
-	next := func(i int) (string, int) {
-		if i+1 < len(args) {
-			return args[i+1], i + 2
-		}
-		missing = args[i]
-		return "", len(args)
-	}
-	for i := 0; i < len(args); {
-		switch args[i] {
-		case "--anchor":
-			anchor, i = next(i)
-		case "--json":
-			asJSON = true
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--anchor":
+			if i+1 == len(args) {
+				fmt.Fprintf(stderr, "%s: flag %s needs a value\n", prStatusProg, args[i])
+				return "", false
+			}
 			i++
+			anchor = args[i]
+		case args[i] == "--json":
+			*asJSON = true
 		default:
 			fmt.Fprintf(stderr, "%s: unknown argument '%s'\n", prStatusProg, args[i])
-			return 1
+			return "", false
 		}
-	}
-	if missing != "" {
-		fmt.Fprintf(stderr, "%s: flag %s needs a value\n", prStatusProg, missing)
-		return 1
 	}
 	if anchor == "" {
 		fmt.Fprintf(stderr, "%s: derive needs --anchor\n", prStatusProg)
+		return "", false
+	}
+	return anchor, true
+}
+
+// prStatusDerive prints the state prstatus.Derive returns for the facts
+// prstatus.Read gathers about the anchor, and with --json the values
+// prstatus.Held and prstatus.Reasons return beside it.
+func prStatusDerive(args []string, stdout, stderr io.Writer) int {
+	asJSON := false
+	anchor, ok := prStatusArgs(args, &asJSON, stderr)
+	if !ok {
 		return 1
 	}
-
-	client := gcbd.New()
-	bead := client.Show(anchor)
-	if bead == nil {
-		fmt.Fprintf(stderr, "%s: anchor %s does not resolve; cannot derive a status\n", prStatusProg, anchor)
+	facts, err := prstatus.Read([]string{anchor}, gcbdStore{gcbd.New()})
+	f, answered := facts[anchor]
+	if err != nil || !answered {
+		if errors.Is(err, prstatus.ErrUnresolved) {
+			fmt.Fprintf(stderr, "%s: anchor %s does not resolve; cannot derive a status\n", prStatusProg, anchor)
+		} else {
+			fmt.Fprintf(stderr, "%s: could not read what holds %s: %v; cannot derive a status\n", prStatusProg, anchor, err)
+		}
 		return 2
 	}
-
-	// The anchor's in-flight set: every bead carrying anchor_bead, any
-	// task_kind, at one of prstatus.InFlightStatuses, the statuses the helm board
-	// reads the same set over. metadata-field selection lists non-closed by
-	// default; the explicit --status keeps it robust, one comma list because a
-	// repeated flag drops earlier values, and --limit 0 so the client-side field
-	// filter sees every candidate.
-	rows, ok := client.List(
-		"--metadata-field", "anchor_bead="+anchor,
-		"--status", strings.Join(prstatus.InFlightStatuses, ","),
-		"--limit", "0",
-		"--json",
-	)
-	if !ok {
-		fmt.Fprintf(stderr, "%s: could not read the in-flight set for %s; cannot derive a status\n", prStatusProg, anchor)
-		return 2
-	}
-
-	// The anchor's blockers, one read, answer both holds a person owes: an open
-	// human gate among them, and a live blocker routed to a person or a decision.
-	// A conversation about the anchor tracks it and blocks nothing, so it is not
-	// among them.
-	blockers, ok := client.DepList(anchor, "--type", "blocks", "--json")
-	if !ok {
-		fmt.Fprintf(stderr, "%s: could not read the blockers of %s; cannot derive a status\n", prStatusProg, anchor)
-		return 2
-	}
-
-	facts := prstatus.Facts{
-		MergeHold:           bead.Meta("merge_hold"),
-		RebaseHold:          bead.Meta("rebase_hold"),
-		OpenHumanGate:       openHumanGate(blockers),
-		PersonBlocker:       personBlocker(blockers),
-		PRPosture:           bead.Meta("pr_posture"),
-		PRMachine:           bead.Meta("pr.machine"),
-		PRMachineCause:      bead.Meta("pr.machine_cause"),
-		PRUnansweredThreads: bead.Meta("pr.unanswered_threads"),
-		OpenedAsDraft:       bead.Meta("opened_as_draft"),
-		DraftReadied:        bead.Meta("draft_readied"),
-		InFlightCount:       len(rows),
-	}
-	state := prstatus.Derive(facts)
+	state := prstatus.Derive(f)
 	if !asJSON {
 		fmt.Fprintf(stdout, "%s\n", state)
 		return 0
 	}
-	held := prstatus.Held(facts)
+	held, reasons := prstatus.Held(f), prstatus.Reasons(f)
 	if held == nil {
 		held = []prstatus.Hold{}
 	}
+	if reasons == nil {
+		reasons = []prstatus.Reason{}
+	}
 	raw, err := json.Marshal(struct {
-		Status prstatus.State  `json:"status"`
-		Held   []prstatus.Hold `json:"held"`
-	}{state, held})
+		Status  prstatus.State    `json:"status"`
+		Held    []prstatus.Hold   `json:"held"`
+		Reasons []prstatus.Reason `json:"reasons"`
+	}{state, held, reasons})
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: could not encode the derivation of %s: %v\n", prStatusProg, anchor, err)
 		return 2
@@ -158,35 +118,86 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// openHumanGate reports whether an open human gate is among blockers, the beads
-// the anchor's blocks edges name: a bead whose issue_type is gate and whose
-// await_type is human, in a status other than closed. That is the one reader
-// rule bd_human_gates applies (assets/scripts/bd-lib.sh) and the finalize gate
-// (clause_no_open_human_gate in assets/scripts/finalize-gate.sh) holds the merge
-// on.
-func openHumanGate(blockers []gcbd.Bead) bool {
-	for i := range blockers {
-		if blockers[i].IsHumanGate() && blockers[i].StatusLowerOr("open") != "closed" {
-			return true
+// gcbdStore is the [prstatus.Store] gctk reads through. An anchor's row comes
+// from gcbd.Show, which prefers the supervisor API. Its in-flight set comes from
+// one `gc bd list` per anchor, whose metadata filter matches a key against one
+// value. A level of `blocks` edges comes from one `gc bd show` of every bead in
+// it, whose rows carry each edge's far bead whole.
+type gcbdStore struct{ client *gcbd.Client }
+
+// Beads returns the row of each id gcbd.Show reads. One it cannot read is left
+// out, which prstatus.Read reports as an anchor that does not resolve.
+func (s gcbdStore) Beads(ids []string) (map[string]prstatus.Row, error) {
+	out := make(map[string]prstatus.Row, len(ids))
+	for _, id := range ids {
+		if b := s.client.Show(id); b != nil {
+			out[id] = prstatus.Row{ID: id, Metadata: metadataOf(b)}
 		}
 	}
-	return false
+	return out, nil
 }
 
-// personBlocker reports whether a live blocker among blockers, the beads the
-// anchor's blocks edges name, is a person's to clear: one routed to a person, or
-// a decision. A blocker with no status reads open, and only a closed one is not
-// live. It is the helm board's demand test (board.demand), so the board's asking
-// row and the label read one rule.
-func personBlocker(blockers []gcbd.Bead) bool {
-	for i := range blockers {
-		b := &blockers[i]
-		if b.StatusLowerOr("open") == "closed" {
-			continue
+// Anchored lists, for each id, the beads carrying anchor_bead=<id> at any of
+// statuses: one comma list, because a repeated --status keeps only the last, and
+// --limit 0, so the filter sees every candidate.
+func (s gcbdStore) Anchored(ids []string, statuses []string) (map[string][]prstatus.Row, error) {
+	out := make(map[string][]prstatus.Row, len(ids))
+	for _, id := range ids {
+		rows, ok := s.client.List(
+			"--metadata-field", "anchor_bead="+id,
+			"--status", strings.Join(statuses, ","),
+			"--limit", "0",
+			"--json",
+		)
+		if !ok {
+			return nil, fmt.Errorf("the in-flight set of %s did not read", id)
 		}
-		if b.Meta("gc.routed_to") == "human" || b.IssueTypeString() == "decision" {
-			return true
+		out[id] = []prstatus.Row{}
+		for i := range rows {
+			out[id] = append(out[id], prstatus.Row{ID: rows[i].ID, Metadata: metadataOf(&rows[i])})
 		}
 	}
-	return false
+	return out, nil
+}
+
+// Blockers reads the `blocks` edges of every id in one client.Blockers. It is
+// also the read the merge pass walks to the gates that hold its blockers.
+func (s gcbdStore) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
+	edges, ok := s.client.Blockers(ids)
+	if !ok {
+		return nil, fmt.Errorf("the blocks edges of %s did not read", strings.Join(ids, " "))
+	}
+	out := make(map[string][]prstatus.Blocker, len(ids))
+	for _, id := range ids {
+		out[id] = asBlockers(edges[id])
+	}
+	return out, nil
+}
+
+// metadataOf renders each of a bead's metadata values as the scripts read it,
+// `(.metadata[k] // "") | tostring`.
+func metadataOf(b *gcbd.Bead) map[string]string {
+	out := make(map[string]string, len(b.Metadata))
+	for k := range b.Metadata {
+		out[k] = b.Meta(k)
+	}
+	return out
+}
+
+// asBlockers projects `blocks` rows onto what the definition reads of them. A
+// row with no status reads open.
+func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
+	out := make([]prstatus.Blocker, 0, len(rows))
+	for i := range rows {
+		b := &rows[i]
+		out = append(out, prstatus.Blocker{
+			ID:        b.ID,
+			Title:     b.Title,
+			Status:    b.StatusLowerOr("open"),
+			IssueType: b.IssueTypeString(),
+			AwaitType: b.AwaitType,
+			RoutedTo:  b.Meta("gc.routed_to"),
+		})
+	}
+	return out
 }

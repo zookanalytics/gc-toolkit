@@ -10,8 +10,9 @@
 # command from every template and replays it the same way against a private
 # tmux server whose global detach-on-destroy is off.
 #
-#   (WIRED) every converse-<model> template carries the same one session_live
-#           command, and it names the session by the {{.Session}} placeholder
+#   (WIRED) every converse-<model> template carries the same session_live
+#           commands, one of which sets detach-on-destroy, and that one names
+#           the session by the {{.Session}} placeholder
 #   (SET)   the command sets the option on the sitting's session alone: a
 #           session whose name the sitting's name prefixes keeps no value of its
 #           own, and the server's global value is left as it is
@@ -91,18 +92,21 @@ else:
 }
 
 CMD=""
+ALL=""
 for SITTING in "${SITTINGS[@]}"; do
     NAME="$(basename "$(dirname "$SITTING")")"
     LIVE="$(session_live "$SITTING")"
-    if [ "$(printf '%s\n' "$LIVE" | grep -c .)" != "1" ]; then
-        bad "(WIRED) $NAME carries one session_live command (got: ${LIVE:-none})"
+    OWN="$(printf '%s\n' "$LIVE" | grep -F -e 'detach-on-destroy')"
+    if [ "$(printf '%s\n' "$OWN" | grep -c .)" != "1" ]; then
+        bad "(WIRED) $NAME carries one session_live command that sets detach-on-destroy (got: ${LIVE:-none})"
         continue
     fi
     if [ -z "$CMD" ]; then
-        CMD="$LIVE"
-        ok "(WIRED) $NAME carries one session_live command"
+        CMD="$OWN"
+        ALL="$LIVE"
+        ok "(WIRED) $NAME carries one session_live command that sets detach-on-destroy"
     else
-        eq "$LIVE" "$CMD" "(WIRED) $NAME carries the same session_live command as the others"
+        eq "$LIVE" "$ALL" "(WIRED) $NAME carries the same session_live commands as the others"
     fi
 done
 case "$CMD" in

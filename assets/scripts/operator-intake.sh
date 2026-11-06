@@ -48,7 +48,7 @@ PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 
 # The default rig — deliberately NOT inferred from cwd: a wrong-but-FIXED
 # default is discoverable, a wrong-and-VARYING one is not.
-DEFAULT_RIG="${GC_VISIT_DEFAULT_RIG:-gc-toolkit}"
+DEFAULT_RIG="${GC_INTAKE_DEFAULT_RIG:-gc-toolkit}"
 
 usage() {
     cat >&2 <<'EOF'
@@ -64,7 +64,7 @@ the operator draws it off the board and `gc-helm engage` spawns a converse
 sitting on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
-                 override with GC_VISIT_DEFAULT_RIG). Refused with exit 2 for
+                 override with GC_INTAKE_DEFAULT_RIG). Refused with exit 2 for
                  a bead id, a PR number, or a PR URL, because an existing
                  bead's own rig is authoritative.
   --no-react     Skip the proactive first reaction and file the conversation now.
