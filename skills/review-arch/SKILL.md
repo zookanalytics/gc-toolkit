@@ -80,7 +80,7 @@ mechanism a reader learns from the code, or a reason no reader would get wrong.
 When the document leans on a spec for standing practice, such as how the system
 is set up, the finding asks the document to drop the link. Moving that practice
 into a living doc is a follow-up, filed the way `mol-review` files a finding the
-change did not cause.
+change did not cause, under the token `<the spec's path>: standing practice`.
 
 When the diff adds or changes the architecture document, the verdict body adds
 a line naming the parts of the standard its lines were held to:
