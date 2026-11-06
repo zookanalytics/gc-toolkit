@@ -16,8 +16,7 @@ import (
 // is where the operator already looks, so the seam is surfaced there.
 //
 // The fields are what the build order writes; Severity and Detail are derived
-// by [DerivePackHealth] so the dashboard and the CLI cannot disagree about what
-// a row means.
+// by [DerivePackHealth] so the dashboard renders what the derivation says.
 type PackBuild struct {
 	Component string `json:"component"`
 
@@ -58,7 +57,7 @@ type PackBuild struct {
 	// checkout parked off-main reads perfectly current on those while it serves
 	// code main has moved past; this is the one field that sees that gap. It is
 	// off the wire because the drift it signals is spoken by Detail, which the
-	// dashboard and the CLI both render, so no consumer needs the raw count.
+	// dashboard renders, so no consumer needs the raw count.
 	BehindMain int `json:"-"`
 
 	Severity Severity `json:"severity"`

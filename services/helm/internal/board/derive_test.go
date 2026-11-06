@@ -1270,7 +1270,7 @@ func sit(id, status string, opened, closed time.Time) Sitting {
 	return Sitting{ID: id, Status: status, OpenedAt: opened, ClosedAt: closed}
 }
 
-// TestSittingsAreOrderedRunningFirst pins the one order both renderers spend:
+// TestSittingsAreOrderedRunningFirst pins the one order every surface spends:
 // running sittings ahead of finished ones, the longest-running first, then the
 // most recently closed.
 func TestSittingsAreOrderedRunningFirst(t *testing.T) {

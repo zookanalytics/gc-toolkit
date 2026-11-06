@@ -1683,8 +1683,9 @@ const (
 // SectionOrder is the order a surface reads the bands in — most-pressing first.
 // Review and gate are the operator's own moves and lead; stalled is the loudest
 // health signal under them; active is the city working normally; cleanup and
-// done are the quiet tail. A renderer iterates this, never an ad-hoc list, so
-// the CLI and the dashboard cannot present the bands in two different orders.
+// done are the quiet tail. A surface reads the bands in this order, never in an
+// ad-hoc one: the dashboard mirrors it, and [sectionRank] orders a family's
+// members by it.
 var SectionOrder = []string{
 	SectionReview, SectionGate, SectionStalled, SectionActive, SectionCleanup, SectionDone,
 }
@@ -2521,10 +2522,10 @@ func wrapperAsk(a Anchor, t Tile, f Facts) foldedAsk {
 }
 
 // keepWrapper states a wrapper's ask on its own row, kept because no live row
-// of a bead it concerns carries it. The ask is the NEEDS — the only prose
-// column the CLI board prints — and the TITLE names the wrapper's kind and the
-// beads it concerns, so a surface that prints both columns (the web board
-// renders title beside needs) does not repeat one sentence in each. A
+// of a bead it concerns carries it. The ask is the NEEDS, and the TITLE names
+// the wrapper's kind and the beads it concerns, so a surface that prints both
+// columns (the web board renders title beside needs) does not repeat one
+// sentence in each. A
 // conversation's own row is Held, in session or waiting, and its WorkHeld
 // stays false, because a conversation blocks nothing.
 func keepWrapper(t *Tile, a Anchor, fa foldedAsk) {
@@ -2640,8 +2641,8 @@ func tagClusters(tiles []Tile) {
 // A family is one top-level anchor and every tile that hangs off it by a
 // parent-child or a `blocks` edge. Grouping by family is the board's primary
 // axis; the attention band orders and highlights WITHIN a family. The grouping
-// key is derived once here, shared by both renderers, so the CLI table and the
-// dashboard cannot each invent their own split — exactly as [Section] is.
+// key is derived once here, so the dashboard does not invent its own split —
+// exactly as [Section] is.
 
 // assignGroupRoots stamps [Tile.GroupRoot] and [Tile.GroupParent] on every tile.
 // GroupRoot is the id of the top-most tile its edges climb to, or its own id when
@@ -2917,8 +2918,7 @@ func (s Sitting) running() bool { return s.State != SittingClosed }
 // One row leads the queue whatever its age: a conversation whose sitting
 // failed to start ([SittingStartFailed]). The operator asked for that
 // conversation and it never began, and by age the row sorts among the newest,
-// at the tail, below the rows tmux-pick-helm.sh offers off the head of the
-// queue.
+// at the tail, below every row a reader of the queue's head sees first.
 //
 // Apply it STABLY and after the dedup. A bead admitted under two kinds carries
 // the same id in both rows and ties every test below, so only the rank order

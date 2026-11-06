@@ -782,4 +782,3 @@ func TestTakeawayRowsDoNotCluster(t *testing.T) {
 		}
 	}
 }
-

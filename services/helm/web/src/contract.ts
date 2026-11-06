@@ -244,8 +244,8 @@ export interface Tile {
    * `'active'` (healthy in-flight), `'cleanup'` (a finished or empty row to
    * dispose of), or `'done'` (the anchor itself closed). Orthogonal to
    * `severity`'s how-badly. A surface groups by this and reads the bands in the
-   * order model.go's `SectionOrder` fixes; it is on the wire so the CLI and this
-   * app cannot each invent their own split. The Go type is a plain string, so an
+   * order model.go's `SectionOrder` fixes; it is on the wire so this app does
+   * not invent its own split. The Go type is a plain string, so an
    * unknown value is representable even though this union is not exhaustive here.
    */
   section: string;
