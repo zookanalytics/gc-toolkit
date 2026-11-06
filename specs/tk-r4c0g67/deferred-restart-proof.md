@@ -82,6 +82,16 @@ holding a patrol wisp in progress:
 Afterwards the session was active and idle, held one patrol wisp in progress, and took
 no further restart.
 
+## The step's defer and the reconcile's listing
+
+The proof deferred to an RFC3339 date, because five minutes has no compact form. The
+step's own form ran later that day on the same build, against a throwaway ephemeral
+molecule in one rig's store, unassigned and under a title no reader takes.
+`gc bd update <id> --defer=+1h` read back `deferred`, with `defer_until` one hour after
+the write. The startup reconcile's deferred listing
+(`gc bd list --status=deferred --type=molecule --include-infra`) returned it, and its
+open listing did not. The molecule was then burned.
+
 ## What it does not show
 
 - No model ran the new step's text here. [The ending probe](ending-probe.md) covers how

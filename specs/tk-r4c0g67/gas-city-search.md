@@ -112,9 +112,9 @@ The backstop was read on 2026-10-31 and the pace on 2026-11-05 and 11-06:
   an always-on session, how the controller reads an assigned patrol wisp as wake
   demand and treats bd's deferred status, and the marker the reassignment restart
   compares.
-- bd at its upstream release `v1.3.4` (gastownhall/beads `a60c4c3a0`): `--defer` and
-  the wake of an expired defer. The city runs bd 1.3.2 (`9b65b9e19`), which carries
-  the same code.
+- bd at its upstream release `v1.3.4` (gastownhall/beads commit `7ef2fd05e`):
+  `--defer` and the wake of an expired defer. The city runs bd 1.3.2
+  (`9b65b9e19`), which carries the same code.
 - The Gas Town pack at `cb6a612882b8`, the pin that Gas City at `d1a150cac8f8`
   bundles, every published pack at packs main `0b0d96250f66`, with the history of
   Gas Town's `next-iteration`, and the Gas Town pack at packs `66897e7132c9`
