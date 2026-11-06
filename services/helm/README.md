@@ -800,15 +800,21 @@ terminal section each print the state's word, and none derives it. Each list's
 count line splits the open sittings into in session and waiting, and names failed
 starts when there are any.
 
-### The headline a sitting closed on
+### A sitting's headline
 
-A sitting's headline is its takeaway, else its close reason, else its subject's
-title (`headline` on the wire, derived by `board.sittingHeadline`), and every
-surface prints it as it stands. The close reason is the conversation task's own
-(`outcome_reason` on the wire): the headline a sign-off settled on, the
-operator's dismissal, or the reading a premise re-check closed it with. It is
-per-sitting and never rewritten, so it is attributable with no inference at
-all. An open sitting has none.
+A sitting's headline is its takeaway, else its close reason, else its
+conversation's own title (`headline` on the wire, derived by
+`board.sittingHeadline`), and every surface prints it as it stands. The title
+says what the conversation asks, while the subject cell already shows the topic,
+so two conversations on one bead read as two asks. A title that says nothing of
+the ask gives way to the subject's title: an empty one, or the
+`operator pick from the board` that `gc-helm.sh open` writes when its caller
+names neither a reason nor a gate.
+
+The close reason is the conversation task's own (`outcome_reason` on the wire):
+the headline a sign-off settled on, the operator's dismissal, or the reading a
+premise re-check closed it with. It is per-sitting and never rewritten, so it
+is attributable with no inference at all. An open sitting has none.
 
 `gc.takeaway` is the harder half, and it is why `Sitting.takeaway` is not a
 copy. **The takeaway lives on the SUBJECT, and each sitting overwrites the last

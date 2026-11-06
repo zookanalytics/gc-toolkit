@@ -53,6 +53,11 @@ const (
 	// assigneeHuman is a conversation's assignee while it waits in the
 	// operator's queue.
 	assigneeHuman = "human"
+	// boardPickTitle is the title gc-helm.sh's open gives a conversation when
+	// its caller names neither a reason nor a gate, as a pick off the board
+	// does. It says how the conversation was filed and nothing of what it
+	// asks, so a sitting's headline passes over it ([sittingHeadline]).
+	boardPickTitle = "operator pick from the board"
 )
 
 // acceptAnswer is an Accept's answer on the recommendation's gate: the close

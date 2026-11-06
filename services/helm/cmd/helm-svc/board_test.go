@@ -74,10 +74,42 @@ func TestRenderSittingsShowsBothHalves(t *testing.T) {
 	}
 }
 
-// TestRenderSittingsFallsBackToTheSubjectTitle: a sitting that left no
-// attributable takeaway and no close reason shows the subject's title — the
-// topic — as its headline, never the conversation's own title. Only a subject
-// the gather could not read at all drops to the conversation's title.
+// TestRenderSittingsHeadlineIsWhatTheConversationAsks: a sitting that left no
+// attributable takeaway and no close reason shows its conversation's own title,
+// what it asks, as its headline, while the SUBJECT column shows the topic. So
+// two conversations on one subject render as two different rows rather than as
+// the topic twice.
+func TestRenderSittingsHeadlineIsWhatTheConversationAsks(t *testing.T) {
+	const (
+		topic = "every live epic states a hypothesis or becomes ordinary flow"
+		ask1  = "the triage clusters: state a hypothesis for each one kept"
+		ask2  = "the closed epics: record the close ruling each one lacks"
+	)
+	var buf bytes.Buffer
+	renderSittings(&buf, builtSittings([]board.Sitting{
+		{ID: "tk-ask1", Rig: "gc-toolkit", Subject: "tk-anchor", SubjectTitle: topic, Title: ask1,
+			Status: "open", Assignee: "human", OpenedAt: minsAgo(60)},
+		{ID: "tk-ask2", Rig: "gc-toolkit", Subject: "tk-anchor", SubjectTitle: topic, Title: ask2,
+			Status: "open", Assignee: "human", OpenedAt: minsAgo(60)},
+	}), renderNow)
+	out := buf.String()
+
+	row1, row2 := sittingRow(t, out, "tk-ask1"), sittingRow(t, out, "tk-ask2")
+	if !strings.HasSuffix(row1, ask1) || !strings.HasSuffix(row2, ask2) {
+		t.Errorf("each sitting's headline is its conversation's ask:\n%s", out)
+	}
+	if strings.HasSuffix(row1, topic) || strings.HasSuffix(row2, topic) {
+		t.Errorf("a conversation that names its ask does not repeat the topic as its headline:\n%s", out)
+	}
+	if strings.Replace(row1, "tk-ask1", "", 1) == strings.Replace(row2, "tk-ask2", "", 1) {
+		t.Errorf("two asks on one subject read as the same row but for the id:\n%s", out)
+	}
+}
+
+// TestRenderSittingsFallsBackToTheSubjectTitle: the stock title a pick off the
+// board leaves says how the conversation was filed and nothing of what it asks,
+// so a sitting under it shows the subject's title, the topic, as its headline.
+// Only a subject the gather could not read at all drops to that title.
 func TestRenderSittingsFallsBackToTheSubjectTitle(t *testing.T) {
 	var buf bytes.Buffer
 	renderSittings(&buf, builtSittings([]board.Sitting{{
@@ -88,11 +120,11 @@ func TestRenderSittingsFallsBackToTheSubjectTitle(t *testing.T) {
 	}}), renderNow)
 	out := buf.String()
 
-	if !strings.Contains(out, "helm returns the raw script path") {
-		t.Errorf("no takeaway falls back to the subject title (the topic):\n%s", out)
+	if !strings.HasSuffix(sittingRow(t, out, "tk-bare"), "helm returns the raw script path") {
+		t.Errorf("a board pick's headline falls back to the subject title (the topic):\n%s", out)
 	}
 	if strings.Contains(out, "operator pick from the board") {
-		t.Errorf("the conversation's title must not be the headline once the subject has one:\n%s", out)
+		t.Errorf("a board pick's stock title is not the headline once the subject has one:\n%s", out)
 	}
 
 	// Only an unreadable subject — no title at all — drops to the conversation's title.

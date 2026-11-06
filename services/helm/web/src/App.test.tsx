@@ -112,7 +112,7 @@ const SITTINGS: Sitting[] = [
     takeaway: '',
     subject_title: 'the attention-canvas epic topic',
     state: 'in_session',
-    headline: 'the attention-canvas epic topic',
+    headline: 'what the canvas owes the operator',
   },
   {
     id: 'tk-vst02',
@@ -1143,13 +1143,13 @@ it('shows where each sitting stands and what the recently closed ones concluded'
   expect(within(section).getByText(/1 in session · 0 waiting · 1 closed recently/)).toBeTruthy();
   expect(within(section).queryByText('outcome')).toBeNull();
 
-  const live = within(section).getByText('tk-vst01').closest('tr') as HTMLElement;
+  const live = within(section).getByText('tk-vst01').closest('tr') as HTMLTableRowElement;
   expect(within(live).getByText('in session')).toBeTruthy();
   expect(within(live).getByText('40m')).toBeTruthy();
-  // No takeaway: the headline is the subject's title (the topic), not the
-  // conversation's own title. The topic also labels the subject cell.
-  expect(within(live).getAllByText(/the attention-canvas epic topic/).length).toBeGreaterThan(0);
-  expect(within(live).queryByText(/what the canvas owes the operator/)).toBeNull();
+  // No takeaway: the headline is the conversation's own title, what it asks,
+  // and the subject's title (the topic) labels the subject cell.
+  expect(live.cells[5].textContent).toBe('what the canvas owes the operator');
+  expect(live.cells[3].textContent).toBe('the attention-canvas epic topic');
 
   const done = within(section).getByText('tk-vst02').closest('tr') as HTMLElement;
   expect(within(done).getByText('closed')).toBeTruthy();

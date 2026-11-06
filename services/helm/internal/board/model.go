@@ -676,7 +676,10 @@ type Sitting struct {
 	// Subject is the bead this conversation is about: the one bead its
 	// `tracks` edge names.
 	Subject string `json:"subject"`
-	Title   string `json:"title"`
+	// Title is the conversation task's own title: what the conversation asks,
+	// in the words of whoever filed it, or [boardPickTitle] when the filing
+	// named no ask.
+	Title string `json:"title"`
 	// Status is the conversation task's own status, and Assignee is who holds
 	// it: `human` while it waits in the operator's queue, a sitting's alias
 	// while a sitting holds it. Neither says whether anyone is on the
@@ -737,8 +740,8 @@ type Sitting struct {
 	// conversation is about. It is read in the same batch as the takeaway
 	// (source.attributeTakeaways), so a row can say what it concerns even when
 	// nothing was concluded on it. Empty when the subject could not be read,
-	// which the [Topic] and [Headline] helpers fall back on the id or the
-	// conversation's title for. It carries the whole title; a renderer clips it
+	// which [Sitting.Topic] falls back on the id for and [sittingHeadline] on
+	// the conversation's title. It carries the whole title; a renderer clips it
 	// to its column.
 	SubjectTitle string `json:"subject_title"`
 
@@ -748,8 +751,10 @@ type Sitting struct {
 	// against the session list, which the wire does not carry. A row's
 	// [Tile.SittingState] rolls up from it and every surface prints it.
 	State string `json:"state"`
-	// Headline is what this sitting concluded, or failing that what it is about
-	// ([sittingHeadline]). Every surface prints it as it stands.
+	// Headline is what this sitting concluded or why it closed, or failing
+	// those what its conversation asks, or what it is about when the
+	// conversation's title does not say ([sittingHeadline]). Every surface
+	// prints it as it stands.
 	Headline string `json:"headline"`
 }
 
@@ -764,19 +769,25 @@ func (s Sitting) Topic() string {
 	return s.Subject
 }
 
-// sittingHeadline is what a sitting CONCLUDED, or failing that what it is ABOUT.
-// The takeaway is the conversation's own one-line conclusion and wins whenever
-// one was attributed. A closed sitting that left no takeaway shows its close
-// reason next, the sentence naming why it closed, such as the operator's
-// dismissal, so the row reads as a decision rather than a blank. Without either
-// the row shows the subject's title — the topic — and the conversation's own
-// title is the last resort, for a subject the gather could not read at all.
+// sittingHeadline is what a sitting CONCLUDED, or failing that what its
+// conversation ASKS. The takeaway is the conversation's own one-line conclusion
+// and wins whenever one was attributed. A closed sitting that left no takeaway
+// shows its close reason next, the sentence naming why it closed, such as the
+// operator's dismissal, so the row reads as a decision rather than a blank.
+// Without either the row shows the conversation's own title, which says what
+// it asks, so two conversations on one subject read as two asks rather than as
+// the topic twice. A title that says nothing of the ask, an empty one or
+// [boardPickTitle], gives way to the subject's title, and is the last resort
+// only for a subject the gather could not read at all.
 func sittingHeadline(s Sitting) string {
 	if s.Takeaway != "" {
 		return s.Takeaway
 	}
 	if s.OutcomeReason != "" {
 		return s.OutcomeReason
+	}
+	if s.Title != "" && s.Title != boardPickTitle {
+		return s.Title
 	}
 	if s.SubjectTitle != "" {
 		return s.SubjectTitle
