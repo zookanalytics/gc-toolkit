@@ -233,7 +233,7 @@ func TestSessionTitle(t *testing.T) {
 		r := newTitleRig(t)
 		r.screens("  Do you want to proceed?\n ❯ 1. Yes\n   2. No\n")
 		stdout, _, code := r.run("--topic", "x")
-		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || !strings.Contains(stdout, "skipped the /rename nudge") {
+		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || !strings.Contains(stdout, "skipped the /rename nudge: no input box was on screen") {
 			t.Fatalf("exit %d, nudges %q, stdout %q", code, r.calls("gc|session|nudge|"), stdout)
 		}
 	})

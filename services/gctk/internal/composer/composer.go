@@ -12,6 +12,13 @@
 // (codex-rs/tui/src/bottom_pane/chat_composer.rs at openai/codex
 // rust-v0.164.0). Without the attributes an empty box with a placeholder reads
 // as one holding a draft, so the capture this package reads keeps them.
+//
+// Read departs from paneShowsDrainedComposer in one case. Gas City's reader
+// asks only whether a box is drained, so a row with Claude Code's glyph that
+// no rules frame is read there by the text after the glyph, as a Codex row
+// is. Claude Code draws its box between rules, so such a row is a menu's
+// cursor, such as a permission menu's, or a message of the transcript, and
+// Read reports no box.
 package composer
 
 import (
@@ -56,11 +63,13 @@ type prompt struct {
 	pasteMarker string
 }
 
+// claudePrompt opens Claude Code's input row (DefaultReadyPromptPrefix).
+const claudePrompt = "❯ "
+
 // prompts are the input rows Read knows, Gas City's stagedDraftMarkers:
-// Claude Code's "❯ " (DefaultReadyPromptPrefix) and Codex's "› "
-// (codexPromptPrefix).
+// Claude Code's claudePrompt and Codex's "› " (codexPromptPrefix).
 var prompts = []prompt{
-	{prefix: "❯ ", pasteMarker: "[Pasted text #"},
+	{prefix: claudePrompt, pasteMarker: "[Pasted text #"},
 	{prefix: "› ", pasteMarker: "[Pasted Content "},
 }
 
@@ -68,8 +77,9 @@ var prompts = []prompt{
 // capture-pane with CaptureArgs. The live box is the last row that opens with
 // a provider's prompt glyph, because both providers draw earlier messages with
 // the same glyph above it. Claude Code frames its box with full-width rules,
-// and every row between them is the draft. A Codex box holds text when its
-// row does after the glyph.
+// and every row between them is the draft, so a row with its glyph that no
+// rules frame is no box. A Codex box holds text when its row does after the
+// glyph.
 func Read(capture string) State {
 	lines := strings.Split(strings.TrimRight(capture, "\n"), "\n")
 	for i, line := range lines {
@@ -109,6 +119,9 @@ func Read(capture string) State {
 			return Empty
 		}
 	}
+	if prefix == claudePrompt {
+		return Absent
+	}
 	if strings.TrimSpace(remainder(lines[live], prefix)) != "" {
 		return Holding
 	}
@@ -121,12 +134,11 @@ func Read(capture string) State {
 // framed by rules, and neither is the "❯ 1. Yes" cursor of a permission menu.
 // It reports false when no framed box is on screen (readClaudeInput).
 func claudeInput(lines []string) ([]string, bool) {
-	const claude = "❯ "
 	for i := len(lines) - 1; i >= 1; i-- {
-		if !isRule(lines[i-1]) || !matchesPrompt(lines[i], claude) {
+		if !isRule(lines[i-1]) || !matchesPrompt(lines[i], claudePrompt) {
 			continue
 		}
-		rows := []string{remainder(lines[i], claude)}
+		rows := []string{remainder(lines[i], claudePrompt)}
 		for _, line := range lines[i+1:] {
 			if isRule(line) {
 				return rows, true

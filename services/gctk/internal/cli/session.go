@@ -27,15 +27,17 @@ import (
 // command renames the session in Gas City, then has `gc session nudge` type
 // /rename <title> into the session, delivered at once.
 //
-// The typing never lands on a message a person is writing. Gas City's nudge
+// The typing is kept off a message a person is writing. Gas City's nudge
 // types whatever the input box holds: with a client attached it types onto the
 // text and submits the two as one message, and with none attached it clears
 // the text first (nudgeSession in internal/runtime/tmux/tmux.go at
 // gastownhall/gascity 9f807760c). So the command reads the box first, and
-// types only into an empty one (internal/composer). It reads the agent's pane
-// through the tmux server the command runs under, the one $TMUX names, because
-// no gc command returns the text attributes that tell a placeholder from a
-// draft.
+// nudges only once a read finds it empty (internal/composer). The read and the
+// nudge's paste are two steps, so a key a person presses between them still
+// meets the nudge; only a nudge mode that refuses a box holding text would
+// close that gap. The command reads the agent's pane through the tmux server
+// it runs under, the one $TMUX names, because no gc command returns the text
+// attributes that tell a placeholder from a draft.
 
 const sessionUsage = `usage:
   gctk session title --topic <words> [--subject <bead-id>]
@@ -53,11 +55,12 @@ gc session rename sets the title on the session's record, which gc session
 list and the board show. For a Claude Code or Codex session, gc session nudge
 then types "/rename <title>" into the session's input box, delivered at once,
 and the agent runs it, so its terminal title shows the title. The nudge is
-typed only into an empty input box. While the box holds text, such as a
-message a person is writing, the command waits up to 3s for it to empty, then
-skips the nudge. It also skips the nudge for another provider, and for a
-session whose pane it cannot read through the tmux server $TMUX names. Each
-line it prints says what it did: renamed, nudged, or skipped and why.
+typed only once a read of the input box finds it empty. While the box holds
+text, such as a message a person is writing, the command waits up to 3s for it
+to empty, then skips the nudge. It also skips the nudge for another provider,
+and for a session whose pane it cannot read through the tmux server $TMUX
+names. Each line it prints says what it did: renamed, nudged, or skipped and
+why.
 
 exit: 0 renamed; the nudge was delivered, queued, or skipped as printed
       1 the rename failed, and nothing else was done

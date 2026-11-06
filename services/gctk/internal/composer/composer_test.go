@@ -108,8 +108,9 @@ func TestRead(t *testing.T) {
 			want: Empty,
 		},
 		{
-			// A permission menu replaces the box; its cursor row is no draft
-			// to type behind, and no box to type into.
+			// A permission menu replaces the box. Its cursor row opens with
+			// the glyph, but no rules frame it, so there is no box to type
+			// into.
 			name: "claude permission menu",
 			capture: capture(
 				claudeRuleTrue,
@@ -119,7 +120,21 @@ func TestRead(t *testing.T) {
 				" ❯ 1. Yes",
 				"   2. No",
 			),
-			want: Holding,
+			want: Absent,
+		},
+		{
+			// A dialog drawn in the box's place leaves only the transcript's
+			// glyph rows, which no rules frame.
+			name: "claude transcript glyph with a dialog in the box's place",
+			capture: capture(
+				"❯ an earlier message",
+				"",
+				"⏺ a reply",
+				claudeRuleTrue,
+				" Background tasks",
+				"   1 shell running",
+			),
+			want: Absent,
 		},
 		{
 			name: "claude staged paste",

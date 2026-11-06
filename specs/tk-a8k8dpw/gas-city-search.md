@@ -10,7 +10,7 @@ reached only Gas City's session record, so the sitting's pane and the
 operator's tab showed the title Claude Code generates for itself. This change
 adds `gctk session title --subject <bead-id> --topic <words> [--session
 <id-or-alias>]`. It renames the session in Gas City, then types `/rename
-<title>` into the session's input box, but only into an empty one. Each
+<title>` into the session's input box, once a read finds the box empty. Each
 converse template also sets `set-titles on` with `set-titles-string '#T'` on
 the sitting's own tmux session, so tmux hands the pane title to the attached
 client. A gctk command is operational surface, so the arch check asks what Gas
@@ -145,6 +145,10 @@ let the command drop its port and type through Gas City alone:
 - a nudge mode that refuses to paste onto a box that holds text while a client
   is attached, or waits for it to empty;
 - the input box's state on a gc command or API endpoint.
+
+The first would also close a gap the command leaves. Its read and the nudge's
+paste are two steps, so a key a person presses between them still meets the
+nudge.
 
 This record names the gap only. Sending it upstream is the operator's call.
 
