@@ -162,10 +162,11 @@ waits on:
 Each gate on a PR's anchor is answered on a call of its own, under that PR's
 own ruling: the checkpoint's ruling and what it does to that PR, naming the PR.
 The sign-off records the PR a retirement acts on under the words of its ruling,
-so a re-run of the call recovers its own PR. Two calls under the same words read
-as one ruling run twice, and the second would retire the first PR again and
-answer the second PR's gate with that PR left standing, free to merge. A PR the
-ruling retires, with `--pr-anchor` naming it so that no other PR is the target:
+so a re-run of the call recovers its own PR. Two calls under the same words
+share one record, and without `--pr-anchor` the second acts on the first PR
+again and answers the second PR's gate with that PR left standing, free to
+merge. A PR the ruling retires, with `--pr-anchor` naming it so that no other PR
+is the target:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <the gate on its anchor> \
   --ruling "<the ruling, one line>; it retires PR #<number> (<its anchor>)" --pr-anchor <its anchor> \
