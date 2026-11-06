@@ -40,7 +40,9 @@
 # unread too.
 #
 # Readers: deferred-dispatch.sh slings an armed bead only when nothing holds it,
-# and its `list` and pass log name the blocker that does.
+# and its `list` and pass log name the blocker that does. gc-helm.sh's place
+# slings a bead it places only when nothing holds it, and arms one that a
+# blocker holds, through a bash child, since that script is POSIX sh.
 # doctor/check-armed-dispatch-owed counts no held arm as owed. The refinery's
 # find-work (mol-refinery-patrol.toml) takes no bead something holds, the
 # witness's check-refinery (mol-witness-patrol.toml) counts no held bead as a

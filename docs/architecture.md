@@ -302,7 +302,7 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, dismiss, accept, park and priority, and the
+  engage, react, takeaway, dismiss, accept, park, priority and place, and the
   read-only verb resolve. Accept clears a first reaction's recommendation gate
   and nothing else, under the bead's acceptance lock, and is offered only while
   no other human gate blocks the bead. `gc beads list --label hold:mayor` lists

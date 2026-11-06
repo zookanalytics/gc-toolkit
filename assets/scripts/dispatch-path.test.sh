@@ -92,6 +92,17 @@ for case in '{}' '{"labels":null}' '{"labels":[]}' '{"labels":["learning","human
     eq "$(held "$case")" "false" "(HOLD) $case is not held"
 done
 
+spellings() { printf '%s' "$1" | jq -c --arg h "$2" "$DISPATCH_PATH_JQ"'dispatch_hold_spellings($h)' 2>/dev/null; }
+eq "$(spellings '{"labels":["learning","hold:mayor"]}' hold:mayor)" '["hold:mayor"]' \
+   "(SPELLING) a lift removes hold:mayor as the bead spells it"
+eq "$(spellings '{"labels":["Hold:Mayor"," hold:mayor","hold:external"]}' hold:mayor)" '["Hold:Mayor"," hold:mayor"]' \
+   "(SPELLING) every spelling Gas City reads as the hold is named, verbatim, and no other hold"
+eq "$(spellings '{"labels":["hold:mayor"]}' hold:external)" '[]' \
+   "(SPELLING) a hold the bead does not carry has no spelling"
+for case in '{}' '{"labels":null}' '{"labels":["hold:mayorx","hold"]}' '{"labels":"hold:mayor"}'; do
+    eq "$(spellings "$case" hold:mayor)" '[]' "(SPELLING) $case spells no hold"
+done
+
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the definition in prose
 # but no longer calls it still fails. The liveness classifier is applied by the
@@ -116,7 +127,7 @@ asks() { # <reader> <predicate>
         || bad "(READERS) $1 asks $2"
 }
 for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh \
-         assets/scripts/stand-down.sh; do
+         assets/scripts/stand-down.sh assets/scripts/gc-helm.sh; do
     sources "$r"; asks "$r" has_dispatch_path
 done
 for r in assets/scripts/deferred-dispatch.sh doctor/check-armed-dispatch-owed/run.sh \
@@ -126,9 +137,10 @@ for r in assets/scripts/deferred-dispatch.sh doctor/check-armed-dispatch-owed/ru
 done
 for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh assets/scripts/deferred-dispatch.sh \
          doctor/check-armed-dispatch-owed/run.sh assets/scripts/liveness-classify.sh \
-         assets/scripts/liveness-recheck.sh; do
+         assets/scripts/liveness-recheck.sh assets/scripts/gc-helm.sh; do
     asks "$r" has_dispatch_hold
 done
+asks assets/scripts/gc-helm.sh dispatch_hold_spellings
 
 echo "# no private copies"
 # A copy is a jq def of the keys or the predicate, or one file that tests both

@@ -34,6 +34,9 @@
 #              warned about, and Accept clears the gate
 #   (PARENT)   a recommendation on a bead with an open child is accepted as on
 #              any bead
+#   (PLACE, PLACE-FINISH) an Accept on a bead held for placement lifts its
+#              hold:mayor after the sling and before the record, and the finish
+#              of an acceptance stopped after its sling lifts it once
 #   (HELD, HELD-FAIL, HELD-FINISH) a bead a sitting's hold left at held is
 #              released to unanchored after Accept's answer and before its
 #              sling; a release that does not land slings nothing and leaves the
@@ -233,6 +236,7 @@ case "$1 ${2:-}" in
         --set-metadata)   _k="${2%%=*}"; _v="${2#*=}"; _r=$(printf '%s' "$_r" | jq --arg k "$_k" --arg v "$_v" '.metadata[$k] = $v'); shift 2 ;;
         --unset-metadata) _r=$(printf '%s' "$_r" | jq --arg k "$2" 'del(.metadata[$k])'); shift 2 ;;
         --append-notes)   _r=$(printf '%s' "$_r" | jq --arg n "$2" '.notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n)'); shift 2 ;;
+        --remove-label)   _r=$(printf '%s' "$_r" | jq --arg l "$2" '.labels = [ (.labels // [])[] | select(. != $l) ]'); shift 2 ;;
         *) shift ;;
       esac
     done
@@ -539,6 +543,26 @@ has "$OUT" "an earlier Accept left unfinished ($T)" "(HELD-FINISH) …under its 
 eq "$(meta tk-anc merge_result)" "" "(HELD-FINISH) …releasing the bead"
 eq "$(slings)" 1 "(HELD-FINISH) …and slinging once"
 has "$(grep '^sling ' "$CALLS")" "--title mol-fix accept:$T" "(HELD-FINISH) …titled with the acceptance's token"
+
+echo "# an Accept on a bead held for placement lifts its hold"
+# placement_hold <id> — the bead as intake holds new work: hold:mayor, beside a
+# label of its own.
+placement_hold() { jq '.labels = ["learning", "hold:mayor"]' "$STORE/b/$1.json" > "$STORE/b/$1.tmp" && mv "$STORE/b/$1.tmp" "$STORE/b/$1.json"; }
+rec; placement_hold tk-anc
+run_accept tk-anc
+eq "$RC" 0 "(PLACE) an Accept on a held bead exits 0"
+eq "$(jq -c '.labels' "$STORE/b/tk-anc.json")" '["learning"]' "(PLACE) its hold is lifted and its other labels stay"
+case "$(cat "$CALLS")" in
+  *"sling tk-anc"*"bd update tk-anc --remove-label hold:mayor"*"bd update tk-anc --set-metadata gc.recommended_formula_dispatched=mol-fix"*) ok "(PLACE) the lift comes after the sling and before the record" ;;
+  *) bad "(PLACE) the lift is out of order (calls: $(cat "$CALLS"))" ;;
+esac
+rec; placement_hold tk-anc; STOP_AT=after-sling run_accept tk-anc
+eq "$(jq -c '.labels' "$STORE/b/tk-anc.json")" '["learning","hold:mayor"]' "(PLACE-FINISH) an Accept stopped after its sling leaves the hold on"
+SL_BEFORE="$(slings)"; run_accept tk-anc
+eq "$RC" 0 "(PLACE-FINISH) the next Accept finishes it"
+eq "$(slings)" "$SL_BEFORE" "(PLACE-FINISH) …slinging nothing"
+eq "$(jq -c '.labels' "$STORE/b/tk-anc.json")" '["learning"]' "(PLACE-FINISH) …and lifting the hold"
+eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(PLACE-FINISH) …before it records the dispatch"
 
 echo "# a recommendation on a bead with an open child is accepted as on any bead"
 fresh; bead tk-par mol-fix; bead tk-kid; edge tk-kid parent-child tk-par

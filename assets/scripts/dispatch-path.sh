@@ -29,9 +29,13 @@
 # no hold, and check-armed-dispatch-owed, which owes such an arm no dispatch for
 # the same reason; and the liveness classifier (liveness-classify.sh, which
 # liveness-sweep.sh and its precheck compose) and the re-check a liveness gate's
-# message carries (liveness-recheck.sh), which name the hold as a wait. One
-# definition, no copies: a key or a label added here is read by every one of
-# them at once, and dispatch-path.test.sh fails when a reader stops sourcing
+# message carries (liveness-recheck.sh), which name the hold as a wait.
+# gc-helm.sh sources it to place a held bead: place reports a bead with no hold
+# that a route or an arm already dispatches as placed, and refuses one that
+# another hold also holds. place, and takeaway and accept when they send a bead
+# on, lift `hold:mayor` by removing the spellings dispatch_hold_spellings names.
+# One definition, no copies: a key or a label added here is read by every one
+# of them at once, and dispatch-path.test.sh fails when a reader stops sourcing
 # this file or tests the keys or the labels itself.
 #
 # Usage follows the in-variable jq convention (standing-kinds.sh): prepend the
@@ -62,4 +66,11 @@ DISPATCH_PATH_JQ='
     any((.labels // [])[]?;
         (tostring | gsub("^[[:space:]]+|[[:space:]]+$"; "") | ascii_downcase) as $l
         | any(dispatch_hold_labels[]; . == $l));
+  # The labels on this bead that spell the dispatch hold $hold, one of
+  # dispatch_hold_labels, as has_dispatch_hold reads them: each label that,
+  # trimmed and in any case, is $hold. bd removes a label by its exact text, so
+  # a write that lifts the hold removes each of these. Reads .labels only.
+  def dispatch_hold_spellings($hold):
+    [ (.labels // [])[]? | tostring
+      | select((gsub("^[[:space:]]+|[[:space:]]+$"; "") | ascii_downcase) == $hold) ];
 '

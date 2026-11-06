@@ -50,8 +50,8 @@ it wait, or leave it for placement.
   on the default branch's head. Critical work the operator wants run now goes
   through the operator's own routing. Any other bead carries Gas City's
   `hold:mayor` label from its create and no route or arm, and the operator's
-  placement sitting places it. `gc beads list --label hold:mayor` lists every
-  bead that waits so, in every rig.
+  placement sitting places it (below). `gc beads list --label hold:mayor` lists
+  every bead that waits so, in every rig.
 
 Writer:
 
@@ -74,6 +74,18 @@ Writer: `gc sling <rig>/<pool> <bead> --on <formula>`. With no `--on` it pours
 the target's `default_sling_formula`, which for a polecat pool is
 `mol-polecat-work`.
 
+- **A held bead is placed, never slung.** A bead carrying `hold:mayor` waits
+  for the operator's placement, and a sling reads no hold, so it would start
+  the work with the label left on and the bead still in the queue. Once the
+  operator has placed it, carry that out with
+  `"$(gc <binding> scripts-dir)/gc-helm.sh" place <bead> --under <parent>`,
+  where the parent is the epic, or its open Delivery whose aim covers the bead,
+  or with `--standalone` for no parent. It sets the parent, settles the
+  priority, slings the bead to its rig's polecat pool, or arms it while a park
+  or a blocker holds it, and then lifts the hold. `--route <rig>/<pool>` and
+  `--on <formula>` send it elsewhere, and `--shift <±n>` ranks it against its
+  parent. Running it again after a failure finishes the placement without a
+  second run.
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
   which a sitting's sign-off `--route <pool>` also writes when it releases a

@@ -152,26 +152,75 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 - the deferred-dispatch pass slings no armed bead while it is held, because a
   sling reads no hold, and `deferred-dispatch.sh list` names the label that
   holds the arm, so `doctor/check-armed-dispatch-owed` owes that arm no
-  dispatch.
+  dispatch;
+- `gc-helm.sh place` refuses a bead that `hold:external` also holds, because a
+  placement lifts only `hold:mayor`.
 
 ## Placing a bead
 
 For each bead in the queue, the sitting does one of three things.
 
-- **Place it under an epic.** Give it as its parent the epic's open Delivery
-  whose aim covers it, which `gc bd list --parent <epic> -t epic --limit 0` lists,
-  and otherwise the epic itself ([epics.md](epics.md#deliveries-and-epic-checkpoints)):
-  `gc bd update <bead> --parent <delivery-or-epic>`. Then route it to its pool
-  (`gc sling <rig>/gc-toolkit.polecat <bead>`), then lift its hold
-  (`gc bd update <bead> --remove-label hold:mayor`). A park on the Delivery or the
-  epic holds it from then on, through bd's parent-child cascade.
-- **Route it on its own.** Route it to its pool with the same sling and lift its
-  hold the same way, and give it no parent.
+- **Place it under an epic.** Its parent is the epic's open Delivery whose aim
+  covers it, which `gc bd list --parent <epic> -t epic --limit 0` lists, and
+  otherwise the epic itself ([epics.md](epics.md#deliveries-and-epic-checkpoints)):
+  `gc-helm.sh place <bead> --under <delivery-or-epic>`. A park on the Delivery
+  or the epic holds it from then on, through bd's parent-child cascade.
+- **Place it on its own**, with no parent, at its own priority:
+  `gc-helm.sh place <bead> --standalone`.
 - **Close it**, when the work is not wanted. Nothing reads the label on a closed
   bead.
 
-A sling reads no hold, so the route comes first: a sling that fails leaves the
-bead held, in the queue. The bead leaves the queue when its hold is lifted.
+```
+gc-helm.sh place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]
+gc-helm.sh place <bead-id> --standalone [--route <rig>/<pool>] [--on <formula>]
+```
+
+A sling reads no hold, and no write of Gas City's both sends a bead and lifts
+its hold, so `place` runs the writes in one order and reads each one back:
+
+1. It refuses a closed bead, PR-finishing work (`anchor_bead`), a bead that
+   `hold:external` also holds, a bead whose status is not open, a parent that
+   is closed or not in the bead's store, and `--standalone` on a bead that has
+   a parent. A bead with no `hold:mayor` is refused, or reported as already
+   placed when a live run, a route, an arm or an assignee shows its dispatch.
+2. It clears any route, since the `--fix` of Gas City's `hold-label-routed-to`
+   check writes one and `deferred-dispatch.sh arm` refuses a routed bead. With
+   `--under` it removes a relates-to link between the bead and the parent,
+   which bd refuses beside a parent edge, sets the parent, and moves `--shift`
+   through `queue-priority.sh move`.
+3. It settles the bead's priority, because a pour copies it once
+   ([Settle](#settle)).
+4. It dispatches the bead to `--route`, or else to the polecat pool of the
+   bead's rig, on `--on`, or else on that pool's default formula. While a
+   blocker holds the bead or a parent above it, such as a park, it arms the
+   dispatch (`deferred-dispatch.sh arm`), so the run starts once nothing holds
+   the bead. Otherwise it slings.
+5. It lifts the hold, with a note saying where the bead went, in one write:
+   `gc bd update <bead> --remove-label hold:mayor --append-notes "Placed ..."`.
+
+The dispatch comes before the lift, so a dispatch that fails leaves the bead
+held, in the queue. A run cut off between the two goes on with the hold still
+on its bead, and the next `place` finishes the lift. Running `place` again
+after a stop at any write finishes the placement without a second run: it
+dispatches nothing once an assignee, a `merge_result` or a live run shows a
+dispatch, and `gc sling` refuses a second live run of one formula at one bead.
+
+A hold also lifts these ways:
+
+- `gc-helm.sh takeaway --release` with `--route` or `--assign`, and
+  `gc-helm.sh accept`, lift it in the write that sends the bead on, because
+  sending a held bead on is a placement and Gas City serves no bead a hold
+  label holds, assigned or not.
+- `gc bd update <bead> --remove-label hold:mayor` lifts it by hand. A bead
+  given an `until` edge onto the bead that retires its code takes this write
+  too. A bead lifted with nothing else written is raw input again, so the
+  proactive scan reacts to it when intake is on, and the liveness sweep names it
+  until then.
+- A close leaves the label on a closed bead, which nothing reads.
+
+`gc bd set-state` cannot lift a hold, because it refuses an empty value. A bead
+slung by hand while it is held runs with its label on, and `place` finishes
+it.
 
 ## A park
 

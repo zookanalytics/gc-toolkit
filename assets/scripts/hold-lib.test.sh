@@ -230,6 +230,7 @@ echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the library in prose but
 # no longer calls it still fails.
 READERS="assets/scripts/deferred-dispatch.sh
+assets/scripts/gc-helm.sh
 doctor/check-armed-dispatch-owed/run.sh
 doctor/check-refinery-patrol-live/run.sh
 formulas/mol-refinery-patrol.toml
