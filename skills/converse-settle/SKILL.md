@@ -74,11 +74,15 @@ then post the sign-off as the thread's last word. `converse-signoff.sh` writes
 the trace in one order every time: the ruling's rework or the PR's retirement,
 the subject's headline, the answer on each gate the conversation replies to,
 the release of a `held` subject, the subject's recommendation when the ruling
-takes it, the conversation's close, and the PR reminder. You tell it
-what this sitting settled. `--ruled yes` resolves each open gate the
-conversation replies to with `ruled: <the ruling>`, except each one a
-`--leave` names, which the ruling leaves owed with its reply in place, and
-`--route` is where a `held` subject is released to, chosen as below.
+takes it, the conversation's close, and the comment that shows the visit on
+the subject's pull request. It records the ruling and each act it takes on the
+conversation as the visit's actions, which that comment lists once the visit
+ends, so the ruling reaches the pull request as you write it: keep other rigs
+and their beads out of it. You tell it what this sitting settled.
+`--ruled yes` resolves each open gate the conversation replies to with
+`ruled: <the ruling>`, except each one a `--leave` names, which the ruling
+leaves owed with its reply in place, and `--route` is where a `held` subject is
+released to, chosen as below.
 `--ruled no` answers nothing: it leaves every gate open and owed and hands the
 conversation back to the operator's queue, which is the low-context path in
 the prompt's Rules. What is waiting on the subject is yours to state: one
@@ -215,7 +219,10 @@ with its recommendation.>
 A converse is about its one subject; name another bead only where the
 conversation's substance genuinely leads there, and then as a plain
 sentence. Record it on the conversation just before you post it (the
-prompt's **Record each hand-back on the conversation, then post it**):
+prompt's **Record each hand-back on the conversation, then post it**). It is
+also the visit's conclusion: the comment on the subject's pull request shows
+it word for word once the visit ends, so name no other rig or its beads in it,
+as the topic does:
 ```bash
 "$CONV/gc-helm.sh" handback "$CONVERSATION" <<'HANDBACK'
 <the sign-off as you post it>
@@ -229,8 +236,15 @@ message.
 The sling runs only once the create returned the bead's id:
 ```bash
 WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
-  && gc sling <rig>/<pool> "$WORK" --on <formula>
+  && gc sling <rig>/<pool> "$WORK" --on <formula> \
+  && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
 ```
+The last line records the dispatch as one of the visit's actions, and the
+comment on the subject's pull request lists it once the visit ends. Record
+any other act this sitting takes on the subject's universe the same way, once
+it lands, such as the follow-up armed below, in one plain sentence that names
+no other rig or its beads. Detail about another rig stays in the thread and in
+notes, which that comment does not show.
 File it beside the subject, not under it: work the subject waits on is a
 dependency, and that is the default. Add `--parent <epic>` to the create only
 when the work belongs to that epic. The subject's own parent,

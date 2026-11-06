@@ -410,14 +410,15 @@ eq "$(guard '[]')" "0|session list unreadable" \
 eq "$(guard_map "$SESSIONS_LIVE" | jq -cS .)" \
    '{"gc-toolkit--gc-toolkit__polecat-1-pool":"active","gc-toolkit/gc-toolkit.furiosa":"active","hq-3rk8v":"active","hq-fjnq1":"active"}' \
    "(Z) the map is exactly the listed sessions' identities"
-# (Z) And the guard reads nothing else. Closed sessions are session beads in
-#     the city store, a set that grows with every session the city runs. A
-#     read of them here would run on every rig each cycle, and their keys would
-#     keep an empty session list from tripping 'liveness map empty'.
+# (Z) And the guard reads nothing else, with no state filter. Closed sessions
+#     are session beads in the city store, a set that grows with every session
+#     the city runs, and `--state all` lists them. A read of them here would run
+#     on every rig each cycle, and their keys would keep an empty session list
+#     from tripping 'liveness map empty'.
 : > "$STUB_CALL_LOG"
 guard "$SESSIONS_LIVE" >/dev/null
-eq "$(sort -u "$STUB_CALL_LOG")" "session list --state=all --json" \
-   "(Z) the guard's only gc call is the session list"
+eq "$(sort -u "$STUB_CALL_LOG")" "session list --json" \
+   "(Z) the guard's only gc call is the session list, open sessions only"
 
 # (Y) The builder dying behind a source that read fine. Normalizing the inputs
 #     makes this rare, so it is injected rather than waited for: a jq that
@@ -466,7 +467,7 @@ grep -qF 'MAP_TRIP` is the entire test' "$TOML" \
 grep -qF 'resolves `absent` against a POPULATED map is never grounds' "$TOML" \
   && ok "(AC) prose rules out an absent owner as fail-safe grounds" \
   || bad "(AC) prose must rule out an absent owner as fail-safe grounds"
-grep -qF 'never returns a row' "$TOML" \
+grep -qF 'leaves closed sessions out on every route' "$TOML" \
   && ok "(AC) prose records that closed sessions are excluded by design" \
   || bad "(AC) prose must record that closed sessions are excluded by design"
 
