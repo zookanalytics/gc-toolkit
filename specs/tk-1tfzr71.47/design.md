@@ -312,7 +312,9 @@ and the steps change in one place:
 2. Refuse to run when the town's `pack.toml`, `city.toml` or `packs.lock` holds
    an uncommitted change, since step 6 commits those files whole. Fetch the
    town's origin too, and refuse when the town's branch is behind it, since
-   step 6's push would then be refused after the new pin is live.
+   step 6's push would then be refused after the new pin is live. A fetch that
+   fails refuses as well, because the command cannot then tell whether the
+   branch is behind. Every run needs the town's origin, `--revert` included.
 3. Replace the current pin with the target in every import whose source is
    gc-toolkit's repository, the sub-pack's import included, in `pack.toml` and
    `city.toml`.
@@ -440,7 +442,10 @@ next start.
 
 `gc gc-toolkit deploy --revert` moves the pin back to the previous commit. Its
 clone is still cached, since prune never runs on its own and keeps any clone
-younger than 7 days, so the revert needs no network.
+younger than 7 days, so the revert fetches no pack: install takes a cached
+`sha:` pin with no network (facts 1 and 3, trial 7). The command still fetches
+the town's origin in step 2 and pushes to it in step 6, so with the origin
+unreachable it refuses at step 2, and the revert is done by hand (below).
 
 **A revert holds automatic deploys.** Main still names the commit the revert
 took out, so under option 1 the check's next pass would ask for that commit
@@ -474,13 +479,17 @@ main's head. Under option 2 the bead the revert files is the only deploy bead,
 it has no assignee, and the order closes it with its next deploy. Under
 option 3 nothing deploys on its own, so the revert files no hold.
 
-**By hand.** If the bad revision broke the deploy command, the revert is done
-by hand, and the hold still comes first: file the deploy bead if none is open,
-as the revert does, the same gate on it with `human-gate.sh`, and under
-option 1 the same notice. Then `git revert` the deploy commit in the town repo,
-run `gc import install` and `gc reload --soft`, push the town commit, and run
-`gc service restart helm`. With the gate filed before the pin moves, the next
-pass of the check, or of the order under option 2, finds the hold.
+**By hand.** If the bad revision broke the deploy command, or the town's
+origin cannot be reached, the revert is done by hand, and the hold still comes
+first: file the deploy bead if none is open, as the revert does, the same gate
+on it with `human-gate.sh`, and under option 1 the same notice. Then
+`git revert` the deploy commit in the town repo, run `gc import install` and
+`gc reload --soft`, and run `gc service restart helm`. None of these needs the
+network. Push the town commit once the origin answers:
+`gc gc-toolkit deploy --to <commit>`, naming the commit the pin went back to,
+pushes it and moves no pin ("A run converges"). With the gate filed before the
+pin moves, the next pass of the check, or of the order under option 2, finds
+the hold.
 
 The fix itself then lands on gc-toolkit's main, and the first deploy after the
 gate's resolution carries it. A revision that fails to load never deploys,
@@ -703,11 +712,13 @@ asserts these things:
    refused soft reload, and on a commit its signing program refuses, the
    command restores the previous pin, runs the soft reload again and leaves
    the town's HEAD where it was. When the town's origin, a bare repository in
-   scratch, refuses the push, the new pin stays live and committed, the service
-   restart still runs, and the exit names the unpushed commit. When the service
-   restart is made to fail, the new pin stays live and pushed, and the exit
-   names the service. In both cases the printed `--to` command, run once the
-   cause is gone, finishes the deploy and moves no pin.
+   scratch, cannot be reached, a run refuses at step 2 and moves no pin, and
+   so does a `--revert`. When the origin refuses the push, the new pin stays
+   live and committed, the service restart still runs, and the exit names the
+   unpushed commit. When the service restart is made to fail, the new pin
+   stays live and pushed, and the exit names the service. In both cases the
+   printed `--to` command, run once the cause is gone, finishes the deploy and
+   moves no pin.
 10. A revert holds automatic deploys, by either route. After the command
     deploys a second commit over the first and `--revert` puts the first back,
     a pass of the deploy check with main still at the second commit nudges no
