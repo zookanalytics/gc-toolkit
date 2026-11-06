@@ -1270,9 +1270,9 @@ cmd_takeaway() {
         exit 4
     fi
     # A route asked for on a closed anchor is refused: the useful writes stand,
-    # and the exit is non-zero so no caller reads it as "released to that pool". Routing a disposed bead is
-    # the resurrection in its purest form — the pool claims it and cuts a
-    # branch for superseded work.
+    # and the exit is non-zero so no caller reads it as "released to that pool".
+    # Routing a disposed bead is the resurrection in its purest form — the pool
+    # claims it and cuts a branch for superseded work.
     if [ -n "$route" ] && [ -z "$release_park" ]; then
         echo "$PROG: takeaway: $bead is closed, so it was NOT routed to '$route' — a pool that claimed it would work a bead whose disposition landed. The headline and the run's end are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
         exit 4

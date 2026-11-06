@@ -55,10 +55,10 @@ The subject is the effort's landing bead. Its steps:
 | Step | What it does |
 |---|---|
 | `load-context` | Read the subject and its recommendation card for the design topic and intended implementation. Resolve `design_gated` (var, default `true`). |
-| `seed-branch` | Cut `integration/<subject-id>` from the default branch with one create-only push from the rig's checkout, and record it on the subject: `branch` names the integration branch and `target` the default branch, read back. |
-| `file-design` | File the design child with the integration branch as its `target` in its create, under the subject's epic when it has one, make the subject wait on it by a `blocks` edge, and read both back. |
-| `file-implementation` | File one implementation child the same way, which builds the initiative per the design and lands with no PR of its own. `design_gated=true`: also hold it behind the design child by a `blocks` edge, read back. |
-| `file-summary` | File the summary task beside the subject, under the subject's epic when it has one, with no `target`. It waits on each child by a `blocks` edge, and the subject waits on it. The three edges are read back. |
+| `seed-branch` | Cut `integration/<subject-id>` from the default branch with one create-only push from the rig's checkout, and record it on the subject: `branch` names the integration branch and `target` the default branch. |
+| `file-design` | File the design child with the integration branch as its `target` in its create, under the subject's epic when it has one, make the subject wait on it by a `blocks` edge. |
+| `file-implementation` | File one implementation child the same way, which builds the initiative per the design and lands with no PR of its own. `design_gated=true`: also hold it behind the design child by a `blocks` edge. |
+| `file-summary` | File the summary task beside the subject, under the subject's epic when it has one, with no `target`. It waits on each child by a `blocks` edge, and the subject waits on it. |
 | `dispatch` | Read every target and edge of the setup back. Then hand the subject to the refinery, assigned with the notice that assignment owes, and dispatch the work: sling the design child, `--merge mr` when design-gated; arm the implementation child behind the design (`design_gated=true`) or sling it now, in parallel (`design_gated=false`); and arm the summary task to the polecat pool on `mol-polecat-report`. Then close the step chain and drain. |
 
 Nothing is handed over or dispatched until the whole setup reads back. The

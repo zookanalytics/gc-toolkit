@@ -13,8 +13,8 @@
 #   1. It removes the arm, and any notice owed, through deferred-dispatch.sh
 #      disarm, and reads the arm back, as it reads back each step before the
 #      close, which cannot be undone (docs/warrants.md, "bd write durability").
-#      The reconcile pass reads an arm again just
-#      before it slings, so a pass that reads the gate closed reads the arm gone.
+#      The reconcile pass reads an arm again just before it slings, so a pass
+#      that reads the gate closed reads the arm gone.
 #   2. It ends the run beneath the bead and clears the bead's route and session
 #      pins through gc-helm.sh takeaway --release --no-wait, and reads back that
 #      the bead has no dispatch path, because a bare release reads back no route.

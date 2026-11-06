@@ -509,17 +509,16 @@ fi
 
 # 1. Stamp the pointer and prove it landed. The close below cannot be undone, so
 # it is gated on a read-back of the stamp as well as on the stamp's exit
-# (docs/warrants.md, "bd write durability"). Both keys go in one update, which bd applies
-# only while the origin still has the status and assignee the gates above
-# judged. bd holds a claimed bead
-# against another actor's assignment and close, never against a metadata write,
-# so without that condition a caller whose gates passed before another actor
-# claimed the bead would point it under that claim. With it, a claim, an
-# assignment or a status change that lands after the gates' read makes bd write
-# nothing (exit 13), and the caller stamps nothing: while a bead is claimed,
-# only a caller the gates accept as its holder can point it. The stamp still
-# lands on a bead this actor cannot close under, because bd's close guard holds
-# only the close.
+# (docs/warrants.md, "bd write durability"). Both keys go in one update, which
+# bd applies only while the origin still has the status and assignee the gates
+# above judged. bd holds a claimed bead against another actor's assignment and
+# close, never against a metadata write, so without that condition a caller
+# whose gates passed before another actor claimed the bead would point it under
+# that claim. With it, a claim, an assignment or a status change that lands
+# after the gates' read makes bd write nothing (exit 13), and the caller stamps
+# nothing: while a bead is claimed, only a caller the gates accept as its holder
+# can point it. The stamp still lands on a bead this actor cannot close under,
+# because bd's close guard holds only the close.
 STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
             --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
 JUDGED=(--if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE")
