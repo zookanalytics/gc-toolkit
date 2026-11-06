@@ -39,8 +39,9 @@ file: rulings land on their beads.
 A sitting opens from the target the rig's `AGENTS.md` states:
 `gc rig list --json | jq -r '.rigs[] | "\(.name)\t\(.path)"'`, then read
 `<path>/AGENTS.md`. When it states none, ask the operator what the rig's work is
-for. Once they state it and agree, file the work that writes it there as the
-rig's target, which a normal PR reviews, so no later sitting asks again:
+for. When they state it, or state a new one, and agree, file the work that
+writes it there as the rig's target, which a normal PR reviews, so no later
+sitting asks again:
 `gc bd --rig <rig> create "docs: state the rig's target in AGENTS.md" -t task -d "<their words>" --json`,
 then `gc sling <rig>/{{ .BindingPrefix }}polecat <bead>`.
 

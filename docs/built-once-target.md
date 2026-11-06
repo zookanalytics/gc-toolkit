@@ -195,8 +195,8 @@ The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
 controller's stall handling or to Gas Town's dance (tk-1tfzr71.18 and .19).
 
-The witness keeps one difference from Gas Town's witness, by the operator's
-ruling. Gas Town's witness mails the mayor about emergencies, failures,
+One of the witness's differences from Gas Town's witness stays by the
+operator's ruling. Gas Town's witness mails the mayor about emergencies, failures,
 recovered and handed-off orphans and queue health, and this one files findings
 and human gates instead, because the po owns little and takes none of that
 load. An operator ruling that gives the po escalation handling ends it. Gas
