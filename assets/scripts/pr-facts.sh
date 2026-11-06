@@ -3671,7 +3671,7 @@ $CBODY"
           # queued or running, by any row of the rollup.
           rc_fail_json=$(printf '%s' "$rc_rollup" | jq -c --argjson req "${rc_req_json:-[]}" --arg deploy "$RC_DEPLOY_CHECK_RE" '
             def name_of: (.name // .context // "");
-            def run_of:
+            def actions_run_id:
               ((.detailsUrl // .targetUrl // "") | tostring
                | capture("/actions/runs/(?<r>[0-9]+)") | .r) // "";
             def unfinished:
@@ -3680,7 +3680,7 @@ $CBODY"
             def retryable:
               ((.conclusion // "") | tostring | ascii_upcase) as $c
               | ($c == "TIMED_OUT" or $c == "CANCELLED" or $c == "STARTUP_FAILURE")
-                and (run_of != "");
+                and (actions_run_id != "");
             def failed:
               if ((.conclusion // "") | tostring | length) > 0
                 then ((.conclusion | ascii_upcase) as $c
@@ -3696,12 +3696,12 @@ $CBODY"
                 then ((.state | ascii_upcase) as $s | $s == "FAILURE" or $s == "ERROR")
               else false end;
             (.statusCheckRollup // []) as $r
-            | ([ $r[] | select(type == "object") | select(unfinished) | run_of | select(. != "") ] | unique) as $live
+            | ([ $r[] | select(type == "object") | select(unfinished) | actions_run_id | select(. != "") ] | unique) as $live
             | [ $req[] as $c
                 | ($c | ascii_downcase | test($deploy)) as $isdeploy
                 | ( [ $r[] | select(type == "object") | select(name_of == $c) ] ) as $runs
                 | ( [ $runs[] | select(failed) ] ) as $bad
-                | ( [ $bad[] | run_of | select(. != "") ] | unique ) as $ids
+                | ( [ $bad[] | actions_run_id | select(. != "") ] | unique ) as $ids
                 | if ($bad | length) > 0
                   then { name: $c,
                          url: (($bad[0].detailsUrl // $bad[0].targetUrl // "") | tostring),
