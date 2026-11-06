@@ -640,20 +640,22 @@ back that no other open human gate blocks the bead, slings the formula titled
 `gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
 another reached first stands, and Accept slings nothing. A gate filed in the
 meantime, or a sling that poured no root, reopens the recommendation's gate. A
-run that stopped after its resolve leaves an unfinished acceptance, which the board keeps owed and the next Accept finishes under the
-same token, slinging only when no root carries the token. That sling carries
-the vars the acceptance recorded, whoever finishes it: the board's Accept
-passes none, and a run given vars other than the recorded ones dispatches
-nothing. The lock's warrant is in [warrants.md](warrants.md).
+run that stopped after its resolve leaves an unfinished acceptance, which the
+board keeps owed and the next Accept finishes under the same token, slinging
+only when no root carries the token. That sling carries the vars the
+acceptance recorded, whoever finishes it: the board's Accept passes none, and
+a run given vars other than the recorded ones dispatches nothing. The lock's
+warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
 out of step 3 and runs `gc-helm.sh accept` at step 4, once the ruling's other
-writes have landed. Under the lock, that run finishes an acceptance the board's Accept left unfinished
-instead of sending the formula again, and a board Accept that runs after the
-sitting's finds the recommendation dispatched. Gas City's launch lock refuses
-a second pour only while the first root is live, so a sling of the sitting's
-own would pour the formula again once the stopped Accept's root had finished.
+writes have landed. Under the lock, that run finishes an acceptance the
+board's Accept left unfinished instead of sending the formula again, and a
+board Accept that runs after the sitting's finds the recommendation
+dispatched. Gas City's launch lock refuses a second pour only while the first
+root is live, so a sling of the sitting's own would pour the formula again
+once the stopped Accept's root had finished.
 A var the ruling settles for the dispatch, such as a design convoy's
 `design_gated` ([design-convoy.md](design-convoy.md)), rides the sign-off's
 `--var` to Accept's sling. The sign-off refuses `--accept`, writing nothing,

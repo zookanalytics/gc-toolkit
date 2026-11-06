@@ -103,8 +103,8 @@ nothing and prints one WARN line naming the landing.
 A sitting that holds a bead for an operator decision writes no state. The human
 gate it files blocks the bead, so `bd ready` leaves the bead out until the gate
 is resolved, and the board reads the open gate as the bead's hold
-(docs/human-engagement.md). The bead keeps the state, the route and any
-deferred-dispatch arm it carried.
+([human-engagement.md](human-engagement.md#the-sitting)). The bead keeps the
+state, the route and any deferred-dispatch arm it carried.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so

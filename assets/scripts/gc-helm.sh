@@ -240,16 +240,16 @@ that no open human gate blocks the bead, slings the formula titled
 gc.recommended_formula. An answer another reached first stands, and Accept
 slings nothing. A gate filed in the meantime, or a sling that poured no root,
 reopens the gate. A run that stopped after its resolve leaves an unfinished
-acceptance, which the next Accept finishes under the same token, slinging only when no root carries the
-token, and slinging the vars the acceptance recorded. A sitting takes a
-recommendation through this verb too: its sign-off's --accept runs it with
---conversation naming the sitting's own conversation, which Accept then does
-not warn of as a live sitting on the bead, and with a --var for each var the
-operator's ruling settled for the dispatch, such as mol-design-convoy's
-design_gated=false. Each --var rides the sling. A run that finishes an
-acceptance slings the vars that acceptance was made with and refuses a --var
-that differs from them, and a root an earlier run already poured under the
-token keeps the vars it was poured with.
+acceptance, which the next Accept finishes under the same token, slinging
+only when no root carries the token, and slinging the vars the acceptance
+recorded. A sitting takes a recommendation through this verb too: its
+sign-off's --accept runs it with --conversation naming the sitting's own
+conversation, which Accept then does not warn of as a live sitting on the
+bead, and with a --var for each var the operator's ruling settled for the
+dispatch, such as mol-design-convoy's design_gated=false. Each --var rides
+the sling. A run that finishes an acceptance slings the vars that acceptance
+was made with and refuses a --var that differs from them, and a root an
+earlier run already poured under the token keeps the vars it was poured with.
 EOF
 }
 
@@ -3086,15 +3086,16 @@ accept_vars_said() {
 # formula and each --var) and reads it back, resolves the gate with
 # `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
 # back that no open human gate blocks the bead, slings the formula titled
-# `<formula> accept:<token>`, and records the dispatch. The first answer to reach the gate wins: a sitting's
-# ruling, a filer's withdrawal or a person's resolve stands, and Accept slings
-# nothing and reopens nothing. A gate filed in the meantime, or a sling that
-# poured no root under the token, reopens the gate from Accept's own close. A
-# run that stopped after its resolve leaves the gate closed with its answer
-# beside the recommendation, an unfinished acceptance, which the next run
-# finishes under the same token: it records the dispatch when a root carries
-# the token, and otherwise takes the read-back, the sling and the record,
-# slinging the vars the gate records under the token.
+# `<formula> accept:<token>`, and records the dispatch. The first answer to
+# reach the gate wins: a sitting's ruling, a filer's withdrawal or a person's
+# resolve stands, and Accept slings nothing and reopens nothing. A gate filed
+# in the meantime, or a sling that poured no root under the token, reopens the
+# gate from Accept's own close. A run that stopped after its resolve leaves
+# the gate closed with its answer beside the recommendation, an unfinished
+# acceptance, which the next run finishes under the same token: it records the
+# dispatch when a root carries the token, and otherwise takes the read-back,
+# the sling and the record, slinging the vars the gate records under the
+# token.
 # An acceptance dispatches the input it was accepted with whoever finishes it,
 # so a finishing run given a --var that differs from that input dispatches
 # nothing, and one given none, as the board's Accept is, slings the recorded

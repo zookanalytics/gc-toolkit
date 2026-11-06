@@ -47,9 +47,9 @@
 # re-check's moot or benign close under stubs, and fails unless the close
 # settles a headline that still waits on a subject nothing holds any more,
 # leaves one that an open blocker holds, and closes the conversation only once
-# every read and write before it has answered. It pins that every skill and formula names a
-# pack skill to load by its catalog name, never by its path, so an agent in any
-# tree loads the installed pack's copy.
+# every read and write before it has answered. It pins that every skill and
+# formula names a pack skill to load by its catalog name, never by its path, so
+# an agent in any tree loads the installed pack's copy.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case

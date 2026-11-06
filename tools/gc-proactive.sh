@@ -49,12 +49,13 @@ REACTION_KIND="first-reaction"
 # Set by cmd_sling when it skips a bead as a no-op, else empty: "reacted" when
 # a reaction is already open for the subject or a live owner owns its reaction,
 # "dispatch-path" when the subject already has a route or an arm, or an open
-# human gate blocks it, "live-workflow" when a live workflow already drives it. cmd_scan's --sling loop
-# reads it in-process to keep a skip from spending the cap; the `sling` CLI verb
-# in main() translates it to RC_ALREADY_REACTED, RC_DISPATCH_PATH or
-# RC_LIVE_WORKFLOW so a cross-process caller (gc-helm react, operator-intake) can
-# tell the no-op from a dispatch, name its cause, and file its own conversation
-# rather than wait for a reaction that is already in flight or never ran.
+# human gate blocks it, "live-workflow" when a live workflow already drives it.
+# cmd_scan's --sling loop reads it in-process to keep a skip from spending the
+# cap; the `sling` CLI verb in main() translates it to RC_ALREADY_REACTED,
+# RC_DISPATCH_PATH or RC_LIVE_WORKFLOW so a cross-process caller (gc-helm
+# react, operator-intake) can tell the no-op from a dispatch, name its cause,
+# and file its own conversation rather than wait for a reaction that is
+# already in flight or never ran.
 SLING_SKIPPED=""
 # Exit codes the `sling` CLI verb uses for those skips — distinct from a
 # dispatch (0) and an error (1), so a caller that needs a NEW reaction can
@@ -303,13 +304,14 @@ reaction_absent_guard() {
 # holds it and reads no reaction, so the bead can be dispatched twice.
 #
 # Returns 0 when the bead has no dispatch path and no open human gate blocks it,
-# 1 when it has one or a gate blocks it, and 2 when its row cannot be read. A failed read is not proof that it has none, so
-# the caller fails closed on 2. The live read takes only one JSON array holding
-# one row as an answer, so an empty answer fails it even when gc exits 0, and
-# two answers fail it too. bd's not-found error is no exception:
-# subject_present_guard has proven the bead present, so a not-found here is a
-# bead deleted since, and nothing may be filed for it. The read comes from the
-# fixture under test (beads.json), live otherwise.
+# 1 when it has one or a gate blocks it, and 2 when its row cannot be read. A
+# failed read is not proof that it has none, so the caller fails closed on 2.
+# The live read takes only one JSON array holding one row as an answer, so an
+# empty answer fails it even when gc exits 0, and two answers fail it too.
+# bd's not-found error is no exception: subject_present_guard has proven the
+# bead present, so a not-found here is a bead deleted since, and nothing may be
+# filed for it. The read comes from the fixture under test (beads.json), live
+# otherwise.
 sling_dispatch_path_guard() {
     local bead="$1" row paths gates
     local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its row could not be read) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
