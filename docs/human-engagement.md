@@ -435,7 +435,9 @@ reads the reply back, so a resumed or handed-off conversation knows the gate
 it owes. Without that need it files nothing: a conversation does not
 freeze its subject, and a PR keeps moving while the operator and the sitting
 talk. An unanchored subject that a gate blocks moves to `held` and back through
-`lifecycle.sh`, because a held bead must carry a live edge. A hold does not use
+`lifecycle.sh`, because a held bead must carry a live edge. A subject armed for
+deferred dispatch stays unanchored, since `held` would cost it its arm
+([state-machine.md](state-machine.md#the-machine)). A hold does not use
 `gc session wait --sleep`, which sets a wait hold the controller then drains,
 destroying an attached operator's pane.
 
