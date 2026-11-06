@@ -19,11 +19,22 @@ The plan is the deletion schedule in
 page's rule 1 links the whole files each scheduled bead retires. A problem found
 in that code is not a new fix. Append it to the notes of the bead that retires
 the code, so the retirement carries it. A problem that already has a bead of its
-own waits on that retirement: give it an `until` edge to the retiring bead (the
-`gc-toolkit.waits` skill), which closes it once the retirement lands, and send it
-nowhere. A first reaction does that through its `until` exit. A problem that
-hurts the operator now gets the smallest stopgap that stops the harm, and no new
-test suite.
+own waits on that retirement and is sent nowhere else: give it a close brief, a
+`blocks` edge onto the retiring bead, and an arm for the validating closer, which
+checks it once the retirement lands and closes it or asks a person:
+
+```bash
+gc bd update <bead> --append-notes "## Close brief (held on <retiring-bead>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+<what the retirement removes, and what to check once it lands>"
+gc bd dep add <bead> <retiring-bead> --type=blocks
+gc bd dep list <bead> --direction=down -t blocks
+"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" arm <bead> --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close --reason "waits for <retiring-bead>; the validating closer checks it once that closes"
+```
+
+Arm it only once the edge reads back, as the `gc-toolkit.waits` skill says. A
+first reaction does the same through its close exit, with
+`--waiting-on <retiring-bead>`. A problem that hurts the operator now gets the
+smallest stopgap that stops the harm, and no new test suite.
 
 ## A change that adds operational surface shows its Gas City search
 

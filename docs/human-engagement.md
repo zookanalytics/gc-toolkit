@@ -195,6 +195,8 @@ these steps:
    starts nothing, so the operator engages the one they mean. With none, it
    says nothing waits on the gate, names any closed bead the gate was about,
    and starts nothing, and the operator clears the gate.
+   Picked from the gates offered on a bead (below), the gate takes that bead
+   when it is one of those waiting.
 2. **It reads the bead's conversations:** the open tasks that track the bead
    in the conversation shape, with the session list saying which of their
    sittings are live.
@@ -225,6 +227,17 @@ these steps:
    bind that misses, or a read-back that finds the task closed, closes the
    session this engage started. Then engage waits for the reconciler to start
    the session, and attaches the operator.
+
+**Engage offers the gates that hold the bead.** It reads the open human gates
+reached from the bead through its open `blocks` edges (`gctk pr-status gates`,
+`prstatus.HoldingGates`), the reader the PR's `held: gate` label and the board's
+row read, so a gate on a rework the anchor waits on is offered from the PR. The
+prompt lists them after the bead's conversations, and picking one engages it as
+if it were named, except that a gate several beads wait on takes the bead it was
+picked from when that bead is one of them. An engage that asks nothing, as
+`--no-input`, the tmux picker and the board's route do, names each and how to
+engage it, and an engage pointed at a gate or a conversation does not look for
+others. A conversation on the bead answers none of them until it replies to one.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
@@ -435,7 +448,9 @@ reads the reply back, so a resumed or handed-off conversation knows the gate
 it owes. Without that need it files nothing: a conversation does not
 freeze its subject, and a PR keeps moving while the operator and the sitting
 talk. An unanchored subject that a gate blocks moves to `held` and back through
-`lifecycle.sh`, because a held bead must carry a live edge. A hold does not use
+`lifecycle.sh`, because a held bead must carry a live edge. A subject armed for
+deferred dispatch stays unanchored, since `held` would cost it its arm
+([state-machine.md](state-machine.md#the-machine)). A hold does not use
 `gc session wait --sleep`, which sets a wait hold the controller then drains,
 destroying an attached operator's pane.
 
@@ -517,6 +532,18 @@ ruled on open. It is answered through the same script with `--answer <gate>`,
 which runs steps 1 to 3 for the gates it names, and step 5 when the ruling
 takes the recommendation, and stops there, leaving the conversation open for
 the sign-off.
+
+A ruling is not an approval. The merge counts only an Approve review on GitHub
+from an account other than the city's (the merge condition in
+[state-machine.md](state-machine.md)), and nothing the sign-off writes is one.
+So when a ruling leaves an open PR standing with no such review, the headline
+ends by saying the PR still needs the operator's Approve on GitHub, and keeps
+saying so after the operator approves, until the PR merges or another headline
+replaces it. The sitting also passes on a line the sign-off prints with the
+PR's link. A PR whose reviews cannot be read counts as needing one, and on a
+host with neither `timeout` nor `gtimeout` no PR's reviews can be. A PR with an
+approval and a standing request for changes needs no Approve, and its line
+names whose request holds the merge.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in

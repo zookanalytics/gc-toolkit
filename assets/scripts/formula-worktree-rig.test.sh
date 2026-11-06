@@ -272,7 +272,7 @@ review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
 # review_remove: the verdict step's remove line, run from the same foreign cwd.
 review_remove() {
   review_render "$(cat "$TMP/review-rm.tmpl")" correctness "$OID" > "$D/review-rm.sh"
-  ( cd "$D/cwd" && TMPDIR="$D/tmp" SC="$ROOT/assets/scripts/step-close.sh" \
+  ( cd "$D/cwd" && TMPDIR="$D/tmp" STUB_PACK="$ROOT" \
       bash "$D/review-rm.sh" ) >>"$D/out" 2>&1 || true
 }
 

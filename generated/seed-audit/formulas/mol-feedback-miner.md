@@ -40,13 +40,8 @@ beads a run, and a run filing many is a smell that the distinction is being
 skipped. The outside capture has no such distinction: it files one observation
 per outside post, so its count follows how much outside review the window saw.
 
-Every step closes its own bead through `assets/scripts/step-close.sh --step
-<step-id>` (resolved into `$SC` at the top of each shell block) — never any
-other way, and never on an id read from the environment; the helper resolves
-by (gc.root_bead_id, gc.step_ref) and refuses when it cannot prove which
-molecule it is executing (then, and only then, pass `--root <root_bead_id>`
-from your own `gc hook --claim --json`; the `--bead <bead_id>` from that same
-claim is a hint inside that root, never a way to establish one).
+Every step closes its own bead through `assets/scripts/claim-close.sh --step
+<step-id>` (resolved into `$SC` at the top of each shell block).
 
 
 Variables:

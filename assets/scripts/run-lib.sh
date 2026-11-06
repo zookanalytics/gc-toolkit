@@ -47,8 +47,10 @@
 # run works, and self-review-check.sh and gascity-keeper's rebase-check.sh take
 # the bead their check loop's run works, which is the bead they certify.
 # work-tree-holder.sh takes the bead each claimed step's run works when it asks
-# whether a live session is working a tree. gate-ensure.sh takes the runs
-# poured over a review, live or not, to judge whether a pour still drives it.
+# whether a live session is working a tree, work-gate.sh takes the runs that work its
+# bead, to refuse a second run of its formula, and work-setup.sh takes the runs that
+# work a bead whose tree holds a branch, to tell a sibling from a tree left behind.
+# gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
 # gc-helm.sh ends the live runs beneath an anchor it releases, and its park
 # survey applies run_rows to the listing it reads to find a bead's workflows.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
@@ -65,8 +67,6 @@
 # whether its work has landed.
 # tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
 # and refuses a first reaction to a bead a live run works.
-# until-resolved.sh takes the runs that work a bead it is about to dispose,
-# which live-work.sh judges.
 # blocker-holder.sh takes the runs that work each live blocker of an anchor
 # that no route or claim marks, to tell one a live run works from one nothing
 # does.

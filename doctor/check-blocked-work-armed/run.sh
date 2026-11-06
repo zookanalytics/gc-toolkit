@@ -60,19 +60,27 @@
 
 set -u
 
-# The issue types a pool claims and works — so blocked-and-unrouted-and-unarmed
-# is this anti-pattern only for these. An allowlist, not the complement of an
-# exclude set: `bd` accepts many types this check must never flag as pool work,
-# and enumerating them to exclude is a list that silently admits every type it
-# forgets. `bd ready`'s own infra/topology exclusions (merge-request, gate,
-# molecule, rig, agent, role, message, session, convoy, issue-type step, spec,
-# event, convergence, ...), `decision` (a person answers it, not a pool — arming
-# it would sling a human's question at a polecat), the container types (`epic`,
-# `milestone`, `story`, whose leaf children are the routed work), and any custom
-# type a rig adds are all not-pool-work by naming what IS. A type this check has
-# never heard of is left alone rather than mistaken for work. doctor.toml names
-# the same set.
-WORK_TYPES=" bug feature task chore spike "
+# The issue types a pool claims and works, so blocked, unrouted and unarmed is
+# this anti-pattern only for these. Gas City's pool serves the beads routed or
+# assigned to it, and leaves out epic even then. This check reads beads nobody
+# routed, and its remedy arms one to be slung, so it names what IS work and
+# leaves every other type alone:
+#   - epic: Gas City's routed pool-demand query passes --exclude-type=epic
+#     (PoolDemandServeRulesForQuery), and gc sling refuses an epic. Its
+#     children are the routed work.
+#   - milestone: bd describes it as marking the completion of related issues,
+#     with no work of its own.
+#   - decision: a person settles it. bd defines it as an architecture decision
+#     record, and the pack's own agents file one as a question for a person,
+#     so arming one would sling a person's question to a polecat.
+#   - the bookkeeping types `bd ready` or Gas City's Ready() leaves out (gate,
+#     molecule, merge-request, convoy, step, session, message, ...), and the
+#     records Gas City and bd keep that neither leaves out (spec, convergence,
+#     event).
+#   - a type this list has never heard of, such as one a rig adds. A list of
+#     the types that are not work would admit every type it forgot.
+# doctor.toml names the same set.
+WORK_TYPES=" bug feature task chore spike story "
 
 # The standing kinds, from the one definition shared with the liveness sweep and
 # the proactive scan. Exposes $STANDING_KINDS_JQ. An unsourceable one warns:

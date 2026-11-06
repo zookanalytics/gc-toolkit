@@ -5,9 +5,11 @@
 # blocker holds the anchor, so they reach one answer. It prints one line:
 #   actor <bead> <how>   an automated actor holds this live blocker, so the merge
 #                        waits on work the city is doing (progressing)
-#   stuck <bead>         no automated actor holds any live blocker, and this one
-#                        is not routed to a person, so nothing the city runs
-#                        will clear it (blocked, cause blocker)
+#   stuck <bead>...      no automated actor holds any live blocker, and these are
+#                        not routed to a person, so nothing the city runs will
+#                        clear them. The merge pass records blocked, cause
+#                        blocker, for the first that no open human gate holds
+#                        (prstatus.HoldingGates)
 #   none                 no live blocker, or only blockers a person holds
 #
 # A person holds a blocker routed to a person (gc.routed_to=human), and a human
@@ -20,13 +22,15 @@
 #   - a route: gc.routed_to names a pool or an agent, anything but human;
 #   - a claim: an assignee other than human. The refinery holds a rework handed
 #     back to it this way until the rework lands on its branch;
+#   - an arm: gc.dispatch_when_ready names where the deferred-dispatch pass slings
+#     it once nothing holds it, whatever it waits on until then;
 #   - a live run working it (run-lib.sh). A graph.v2 pour leaves the bead it
 #     works open, unassigned and unrouted, so its run is the only mark. The
 #     gc.execution_routed_to stamp the pour leaves outlives the run, so it is no
 #     mark.
 # One actor is enough: any blocker an actor holds answers actor, before a stuck
-# one is named. Routes and claims come from the one listing of blockers, and a
-# blocker's runs are read only when it carries neither.
+# one is named. Routes, claims and arms come from the one listing of blockers, and
+# a blocker's runs are read only when it carries none of them.
 #
 # Usage: blocker-holder.sh --anchor <id>
 # Exit: 0 answered · 1 usage · 2 a read did not resolve or its lines did not
@@ -69,8 +73,8 @@ rows=$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)
 printf '%s' "$rows" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null 2>&1 \
   || { echo "$PROG: the blockers of $anchor did not read as a list" >&2; exit 2; }
 
-# One line per live blocker no person holds: its id, a tab, then the route or
-# claim that marks it, or nothing when neither does.
+# One line per live blocker no person holds: its id, a tab, then the route, claim
+# or arm that marks it, or nothing when none does.
 marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ"'
   ($live | split(",")) as $ls
   | .[]
@@ -78,10 +82,12 @@ marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ"
   | select($ls | index($st))
   | (((.metadata // {})["gc.routed_to"] // "") | tostring) as $r
   | ((.assignee // "") | tostring) as $a
+  | (((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring) as $armed
   | select($r != "human" and (human_gate | not))
   | [ ((.id // "") | tostring),
       (if $r != "" then "routed to " + $r
        elif $a != "" and $a != "human" then "claimed by " + $a
+       elif $armed != "" then "armed to " + $armed
        else "" end) ]
   | map(gsub("[\t\n]"; " ")) | @tsv') \
   || { echo "$PROG: could not read the routes and claims of the blockers of $anchor" >&2; exit 2; }
@@ -127,7 +133,7 @@ while IFS=$'\t' read -r id _; do
     printf 'actor %s worked by run %s\n' "$id" "$root"
     exit 0
   fi
-  [ -n "$stuck" ] || stuck="$id"
+  stuck="${stuck:+$stuck }$id"
 done <"$marks_file"
 [ "$read_lines" -eq "$lines" ] \
   || { echo "$PROG: read $read_lines of the $lines blockers of $anchor" >&2; exit 2; }

@@ -229,7 +229,7 @@ a hypothesis of its own is an epic, not a Delivery, and
 **Each bd type keeps its own meaning.** A bd type is used only with its own
 semantics, or not at all. So a Story is typed by its work, one of the types the
 pack counts as plain work
-([deferred-dispatch.md](deferred-dispatch.md#the-resolved-by-consumer-until)). It
+([`check-blocked-work-armed`](../doctor/check-blocked-work-armed/run.sh)). It
 may be bd's `feature`, and `feature` never types a container. `milestone` stays
 reserved for a marker that holds no work, which is what bd says it is.
 

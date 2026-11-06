@@ -68,8 +68,8 @@ Each writer that files or disposes new work follows the rule.
   route. The blocked exit's `--then-route` arms a dispatch only for a bead the
   rule admits. Any other bead it marks, and arms nothing, while its wait still
   lands as a `blocks` edge. The close exit keeps its validating closer, because a
-  close shrinks the queue. The until exit routes, arms and marks nothing, because
-  its bead closes once the bead that ends its job lands. Work that is a named
+  close shrinks the queue, whether it slings the closer now or arms it for when
+  the bead that ends its job lands (`--waiting-on`). Work that is a named
   agent's own (`--assign`, `--then-assign`) is not pool work, so the rule does
   not read it.
 - **The witness** files mail about a pack defect as a bug marked
@@ -84,6 +84,10 @@ Each writer that files or disposes new work follows the rule.
   bead, it arms the bead's validating closer, whether or not the rule admits
   the bead. Like the first reaction's close exit, it keeps that closer because
   a close shrinks the queue.
+- **A bead held on the landing that ends its job** (the waits skill). The
+  writer that holds it arms its validating closer for when the bead it waits
+  on closes, whether or not the rule admits it, because a close shrinks the
+  queue.
 
 No held bead is ever readable without its marker. The witness and the
 distiller write it in the create, and the first reaction writes it and reads

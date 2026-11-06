@@ -785,10 +785,12 @@ if grep -q -e '--set-metadata' "$SCRIPT"; then bad "the script writes a metadata
 
 # --- the clause a decline message carries ------------------------------------------
 # Each message names the command with its own key, and that text runs as written.
-CLAUSE=$(grep -o -e 'run \$SCRIPTS/stand-down\.sh \$WORK_BEAD_ID --key polecat-branch-divergence --ruling '"'"'<why>'"'" "$ROOT/formulas/mol-polecat-work.toml" | head -1)
-[ -n "$CLAUSE" ] && ok "the formula carries the clause" || bad "the formula carries the clause"
+# decline.sh writes it into the message of each gate the work scripts file with a
+# re-sling.
+CLAUSE=$(grep -o -e 'run \$SCRIPT_DIR/stand-down\.sh \$SUBJECT --key \$KEY --ruling '"'"'<why>'"'" "$ROOT/assets/scripts/decline.sh" | head -1)
+[ -n "$CLAUSE" ] && ok "decline.sh carries the clause" || bad "decline.sh carries the clause"
 fresh; patch 'map(if .id == "tk-g" then .await_id = "polecat-branch-divergence" else . end)'
-OUT=$(SCRIPTS="$HERE" WORK_BEAD_ID=tk-w bash -c "${CLAUSE#run }" 2>&1); RC=$?
+OUT=$(SCRIPT_DIR="$HERE" SUBJECT=tk-w KEY=polecat-branch-divergence bash -c "${CLAUSE#run }" 2>&1); RC=$?
 eq "$RC" 0 "the clause runs as written"
 eq "$(field tk-w status)" closed "…and closes the work"
 eq "$(field tk-g close_reason)" "ruled: <why>" "…and answers the gate"

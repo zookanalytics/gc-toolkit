@@ -64,6 +64,53 @@ shares only the word ([authority-map.md](authority-map.md)).
   re-verification.
 - A change that retires a noun removes its entry.
 
+## The work formula's overrides
+
+- **Covers.** `formulas/mol-polecat-work.toml`, `assets/scripts/work-gate.sh`,
+  `assets/scripts/work-setup.sh`, `assets/scripts/work-enter.sh`,
+  `assets/scripts/rig-checks.sh`, `assets/scripts/work-submit.sh`,
+  `assets/scripts/work-lib.sh`, `assets/scripts/decline.sh`.
+- **Stands in for.** Steps of core's polecat base and Gas Town's polecat formula
+  that would do what the pack needs. The formula overrides five steps and inherits
+  `implement`. Each override differs for a reason of its own:
+  - `load-context` refuses a bead that is finished, parked, blocked or in another
+    live run, and ends the run by cancelling it with what releases the work on the
+    work bead. Upstream's has no such gate. `gc sling` keeps one live run of a
+    formula on a bead, and the gate reads the same record for what gets past it, a
+    forced relaunch and a claimant with no poured workflow, so it adds no key and
+    writes nothing to let a run through.
+  - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
+    rebases and force-pushes under an open PR, and waits behind a sibling.
+  - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
+    from one base shares one recorded run, and keys a tracker on a stamp. Core's
+    runs each command raw per polecat and matches trackers by title.
+  - `self-review` is a bounded check loop over those records, where Gas Town's is
+    one inline step.
+  - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
+    exit, which are nouns of the merge and review subsystems.
+- **Evidence.** In `gastownhall/gascity`:
+  - `internal/bootstrap/packs/core/formulas/mol-polecat-base.toml`: its
+    `load-context` has no duplicate-dispatch gate, and its `preflight-tests` runs
+    `{{test_command}}` raw.
+  - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
+    whole, so an inherited step cannot gain metadata, and a step that needs
+    `gc.continuation_group` must be overridden. The base declares none.
+  - `internal/sling/sling_core.go`, `checkLegacySourceWorkflowConflict`, and
+    `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
+    live root of one formula on one bead is refused, unless `--force` skips the
+    lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
+  In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
+  `workspace-setup`, `self-review` and `submit-and-exit`, and rebases a rejected
+  branch.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main f26113c98 and
+  `gastownhall/gascity-packs` main 796d7ecd7.
+- **Retires when.** A step at a time. `load-context`: core's gate refuses finished
+  and parked work and ends a run by cancelling it. `workspace-setup`:
+  `tk-1tfzr71.43` moves its worktree to `gc worktree`, and the refinery's rework
+  machinery goes (`tk-1tfzr71.20`), which ends the merge resume. `preflight-tests`
+  and `self-review`: Gas City ships a record of a check per commit. `submit-and-exit`:
+  `tk-1tfzr71.20` moves the merge onto GitHub's branch rules.
+
 ## Dolt reclaim
 
 - **Covers.** `assets/scripts/dolt-reclaim.sh`, `orders/dolt-reclaim.toml`,
@@ -199,8 +246,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main 37bd09351 and
-  `gastownhall/gascity-packs` main dac12a4a8, and against GitHub's *Managing
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main a91df0b85 and
+  `gastownhall/gascity-packs` main 796d7ecd7, and against GitHub's *Managing
   your personal access tokens* page, read the same day.
 - **Retires when.** Gas City ships per-agent write scoping. A GitHub
   fine-grained token covers only part of the origin rule. GitHub refuses it a
@@ -245,13 +292,14 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go` 544-724, the lock at 563 and the check at
-  589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
-  `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
+  live (`internal/sling/sling_core.go`, the lock at 621 and the check at 647,
+  `checkLegacySourceWorkflowConflict`, which reads the live roots at 1857; the
+  terminal-root skip in `internal/sling/sling_attachment.go` 326;
+  and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
   `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
-  by a key (`cmd/gc/cmd_sling.go` 145-160).
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main e2671dc4d.
+  by a key (`cmd/gc/cmd_sling.go` 146-161).
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -367,9 +415,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37,
-  `gastownhall/gascity-packs` main 5bf643ca55bd with the packs Gas City
-  bundles at 66c672b5ed00, and `gastownhall/beads` main e46de42b3c59.
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1,
+  `gastownhall/gascity-packs` main 0b0d96250f66 with the packs Gas City
+  bundles at cb6a612882b8, and `gastownhall/beads` main 6ebaacba8f5f.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -441,9 +489,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
     keeps no record of it.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-10-28, at `gastownhall/gascity` main b25b49f33e37 with
-  the `gastown` pack it bundles at 66c672b5ed00, `gastownhall/gascity-packs`
-  main 5bf643ca55bd, and `gastownhall/beads` main e46de42b3c59.
+- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1 with
+  the `gastown` pack it bundles at cb6a612882b8, `gastownhall/gascity-packs`
+  main 0b0d96250f66, and `gastownhall/beads` main 6ebaacba8f5f.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
