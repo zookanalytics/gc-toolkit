@@ -538,7 +538,7 @@ bead_conversations() {
 # reads when gc answers from the supervisor. Returns 1 when the list did not
 # answer, which proves no sitting live and none gone.
 live_sittings() {
-    _ls_raw=$(gc session list --state all --json 2>/dev/null) || return 1
+    _ls_raw=$(gc session list --json 2>/dev/null) || return 1
     printf '%s' "$_ls_raw" | scrub | jq -ce '
         if type == "object" and ((.sessions // null) | type) == "array"
         then [ .sessions[] | objects
@@ -627,7 +627,7 @@ rig_db_for_session() {
     if [ -z "$_srig" ]; then
         _sids=$(session_identities)
         [ -n "$_sids" ] || return 0
-        _srig=$(gc session list --state all --json 2>/dev/null | scrub \
+        _srig=$(gc session list --json 2>/dev/null | scrub \
             | jq -r --arg ids "$_sids" '
                 ($ids | split("\n") | map(select(. != ""))) as $me
                 | [ .sessions[]? | objects | . as $s
@@ -2559,7 +2559,7 @@ sitting_session_of() {
     _sso_sn=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.session_name"] // ""' 2>/dev/null || true)
     _sso_as=$(printf '%s' "$1" | jq -r '.assignee // ""' 2>/dev/null || true)
     [ -n "$_sso_sid$_sso_sn$_sso_as" ] || return 0
-    gc session list --state all --json 2>/dev/null | scrub | jq -r \
+    gc session list --json 2>/dev/null | scrub | jq -r \
         --arg id "$_sso_sid" --arg sn "$_sso_sn" --arg as "$_sso_as" --arg me "$(session_identities)" '
         ($me | split("\n") | map(select(. != ""))) as $mine
         | if type == "object" and ((.sessions // null) | type) == "array" then
@@ -4291,7 +4291,7 @@ cmd_engage() {
         _start_seen=0; _start_told=0; _start_shown=""; _start_tick=30
         start_state=""; start_waited=0
         while :; do
-            start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
+            start_state=$(gc session list --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
                 if type == "object" and ((.sessions // null) | type) == "array"
                 then (first(.sessions[] | select((.id // "") == $id)
                             | if (.state // "") == "" then "closed" else .state end)
@@ -4555,7 +4555,7 @@ cmd_engage() {
         # listing that does not answer with a sessions array names no holder
         # and proves none gone.
         _ah_list_ok=1
-        _ah_holder=$(gc session list --state all --json 2>/dev/null | scrub | jq -er --arg c "$CONV" "$CONVERSATION_JQ"'
+        _ah_holder=$(gc session list --json 2>/dev/null | scrub | jq -er --arg c "$CONV" "$CONVERSATION_JQ"'
             if (type == "object" and ((.sessions // null) | type) == "array")
             then ([ .sessions[]
                     | select((.closed // false) == false)
@@ -4622,7 +4622,7 @@ cmd_engage() {
     # The alias the session's claim runs as. A gc whose spawn JSON names none is
     # asked through the session list.
     if [ -z "$salias" ]; then
-        salias=$(gc session list --state all --json 2>/dev/null | scrub \
+        salias=$(gc session list --json 2>/dev/null | scrub \
             | jq -r --arg id "$sid" '[ .sessions[]? | objects | select((.id // "") == $id) | .alias // empty ] | first // empty' 2>/dev/null || true)
     fi
     [ -n "$salias" ] || engage_abort "$sid" "spawned $sname, but its alias could not be read, so conversation $CONV has no name to be bound to. The sitting holds nothing and was closed; re-run: $PROG engage $bead"
