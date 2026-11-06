@@ -9,9 +9,10 @@
 // so the facts [Derive] reads carry no merged-or-closed signal.
 //
 // Beside the one status value, [Held] names what holds an open PR that the city
-// will not clear on its own: an open human gate on the PR, review feedback the
-// city has not answered or a review thread the merge waits on, or a blocker no
-// automated actor will clear.
+// will not clear on its own: an open human gate on the PR or behind a bead it
+// waits on, which [HoldingGates] reads, review feedback the city has not answered
+// or a review thread the merge waits on, or a blocker no automated actor will
+// clear.
 // Each is a value of the `held:` label family, and more than one can stand.
 // Each names something a person has to act on, so [Derive] reads needs-attention
 // while any stands.
@@ -34,7 +35,7 @@
 // accepts.
 //
 // Derive reads only state the city records: the anchor's holds
-// (merge_hold/rebase_hold), whether an open human gate blocks it, whether a
+// (merge_hold/rebase_hold), whether an open human gate holds it, whether a
 // blocker it waits on is a person's, the pr-facts.sh posture, the merge
 // cadence's machine verdict and its blocked cause, the merge cadence's count of
 // review threads waiting on the city's answer, the draft-stage markers
@@ -110,8 +111,8 @@ const (
 type Hold string
 
 const (
-	// HeldGate: an open human gate blocks the anchor ([Facts.OpenHumanGate]).
-	// Only a person clears it.
+	// HeldGate: an open human gate holds the anchor ([Facts.OpenHumanGate]). Only
+	// a person clears it.
 	HeldGate Hold = "gate"
 	// HeldReview: review feedback holds the PR and nothing in flight acts on it,
 	// so answering or resolving it falls to a person. It stands for either of two
@@ -139,13 +140,12 @@ type Facts struct {
 	MergeHold string
 	// RebaseHold is metadata.rebase_hold: any truthy value is a rebase hold.
 	RebaseHold string
-	// OpenHumanGate is whether an open human gate blocks the anchor: a bead the
-	// anchor's `blocks` edges reach whose issue_type is gate and whose
-	// await_type is human, in a status other than closed. That is the one reader
-	// rule bd_human_gates applies (assets/scripts/bd-lib.sh). Only a person
-	// clears a human gate, and the merge pass refuses the merge while one blocks
-	// the anchor, through its blocker probe and its finalize gate
-	// (assets/scripts/finalize-gate.sh). So it reads as a hold, as merge_hold and
+	// OpenHumanGate is whether [HoldingGates] finds an open human gate that holds
+	// the anchor, on the anchor itself or behind a bead it waits on. Only a person
+	// clears a human gate. While one stands the merge is refused, whether by the
+	// gate on the anchor, through the merge pass's blocker probe and its finalize
+	// gate (assets/scripts/finalize-gate.sh), or by the open blocker the gate
+	// holds, through that same probe. So it reads as a hold, as merge_hold and
 	// rebase_hold do, whatever work is in flight. A conversation about the anchor
 	// tracks it and blocks nothing, so it sets nothing here.
 	OpenHumanGate bool

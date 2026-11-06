@@ -41,6 +41,12 @@
 #   (HELD, HELD-FAIL) a held subject is released on a ruling, and a release
 #             that fails stops the sign-off before the close, so the
 #             conversation stays open and its re-run releases the subject
+#   (HOLD*)   the hold skill's step-3 block, which writes held: it moves an
+#             unarmed unanchored subject to held, leaves an armed or an
+#             anchored subject's state alone, and writes nothing when the
+#             subject does not read
+#   (ARMED)   a ruling on an armed unanchored subject releases nothing and
+#             writes no route, whatever --route says, and leaves the arm
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
@@ -674,6 +680,53 @@ SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "settled" --r
 eq "$RC" 0 "(HELD-FAIL) the re-run, once the release lands, exits 0"
 eq "$(grep -c '^lifecycle transition tk-anc --to unanchored' "$CALLS")" 2 "(HELD-FAIL) …trying the release again"
 eq "$(field tk-conv status)" "closed" "(HELD-FAIL) …and then closing the conversation"
+
+echo "# the hold's step 3 moves an unarmed subject to held and leaves an armed one alone"
+# held writes a merge_result, and the deferred-dispatch pass retires an arm on
+# any merge_result, so an armed subject stays unanchored behind its gate. The
+# hold skill's own step-3 block runs here against the stub pack, its gate
+# placeholder filled.
+HOLD_SKILL="$HERE/../../skills/converse-hold/SKILL.md"
+awk '/^```/ { if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 } else if ($0 ~ /^```bash/) inb = 1; next }
+     inb { buf = buf $0 "\n"; if (index($0, "--to held")) hit = 1 }' "$HOLD_SKILL" \
+  | sed -e 's#<the gate that holds the subject>#tk-rev#' > "$TMP/hold-step3"
+if [ -s "$TMP/hold-step3" ]; then ok "(HOLD) the hold skill's step-3 block is found"; else bad "(HOLD) the hold skill's step-3 block is found in $HOLD_SKILL"; fi
+# hold_step3 [subject] -> RC, OUT, from a cwd outside any checkout.
+hold_step3() {
+    set +e
+    OUT="$(cd "$TMP/cwd" && CONV="$S" SUBJECT="${1:-tk-anc}" NEED="Build it now?" bash "$TMP/hold-step3" 2>&1)"; RC=$?
+    set -e
+}
+acceptance; hold_step3
+eq "$RC" 0 "(HOLD) the step on an unarmed unanchored subject exits 0"
+has "$(cat "$CALLS")" "gc-helm takeaway tk-anc holding — Build it now? --by converse --waiting-on tk-rev" "(HOLD) …writing the headline"
+has "$(cat "$CALLS")" "lifecycle transition tk-anc --to held --route human" "(HOLD) …and moving the subject to held"
+acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat; setm tk-anc gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
+hold_step3
+eq "$RC" 0 "(HOLD-ARMED) the step on an armed unanchored subject exits 0"
+has "$(cat "$CALLS")" "gc-helm takeaway tk-anc holding — Build it now? --by converse --waiting-on tk-rev" "(HOLD-ARMED) …writing the headline"
+hasnt "$(cat "$CALLS")" "lifecycle transition" "(HOLD-ARMED) …and no transition, so the subject stays unanchored"
+eq "$(meta tk-anc gc.dispatch_when_ready) $(meta tk-anc gc.dispatch_when_ready_args)" 'gc-toolkit/gc-toolkit.polecat ["--on","mol-polecat-work"]' "(HOLD-ARMED) …and the arm stays as it was"
+acceptance; SUBJECT_LC_STATE=pull_request hold_step3
+eq "$RC" 0 "(HOLD-ANCHORED) the step on an anchored subject exits 0"
+hasnt "$(cat "$CALLS")" "lifecycle transition" "(HOLD-ANCHORED) …and leaves its anchor state alone"
+acceptance; SHOW_DOWN=tk-anc hold_step3
+[ "$RC" -ne 0 ] && ok "(HOLD-UNREAD) the step on a subject that does not read exits non-zero" || bad "(HOLD-UNREAD) the step on a subject that does not read exits non-zero (got 0)"
+eq "$(cat "$CALLS")" "" "(HOLD-UNREAD) …before any write"
+acceptance; hold_step3 tk-gone
+[ "$RC" -ne 0 ] && ok "(HOLD-UNREAD) the step on a subject the store does not hold exits non-zero" || bad "(HOLD-UNREAD) the step on a subject the store does not hold exits non-zero (got 0)"
+eq "$(cat "$CALLS")" "" "(HOLD-UNREAD) …before any write"
+
+echo "# a ruling on an armed unanchored subject releases nothing and writes no route"
+for armed_route in human gc-toolkit/gc-toolkit.polecat; do
+    acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat
+    run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route "$armed_route" --no-wait
+    eq "$RC" 0 "(ARMED) --route $armed_route: the sign-off on an armed subject exits 0"
+    eq "$(field tk-rev status)" "closed" "(ARMED) …resolving the gate, which is what lets the arm send the subject"
+    hasnt "$(cat "$CALLS")" "lifecycle transition" "(ARMED) …running no transition"
+    hasnt "$(cat "$CALLS")" "gc.routed_to" "(ARMED) …writing no route"
+    eq "$(meta tk-anc gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(ARMED) …and leaving the arm"
+done
 
 echo "# a ruling on an open PR says whether its branch changes"
 acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
