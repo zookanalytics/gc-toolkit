@@ -89,9 +89,10 @@ The keeper is the opt-in `packs/gascity-keeper/`.
 ### Work
 
 `mol-polecat-work` extends core's `mol-polecat-base` and overrides only what
-differs: load-context's refusals, the per-bead worktree that `gc worktree`
-provisions, the pre-flights and the self-review loop over `gctk rig` records, and
-the push and handoff, each for the reason its warrant gives. Each step closes
+differs: load-context's refusals, the per-bead worktree, cut with git and removed
+at the handoff as core's own variants cut and remove theirs, the pre-flights and
+the self-review loop over `gctk rig` records, and the push and handoff, each for
+the reason its warrant gives. Each step closes
 through `gc hook current`, and a decline is one call. Work owns the work branch
 and the handoff write. Priority following stays under its warrant, and deferred
 dispatch shrinks to the residual tk-1tfzr71.16 keeps under a warrant: sling on
@@ -227,7 +228,6 @@ bd 1.3.2.
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
 | `worktree-reap.sh` | the controller's closed-bead worktree reaper | tk-1tfzr71.42 |
-| the work flow's `git worktree add` for a per-bead tree | `gc worktree ensure` and `cleanup` | tk-1tfzr71.43 |
 | `step-close.sh` | `gc hook current` | tk-1tfzr71.39 |
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
@@ -312,8 +312,7 @@ shows its measured net instead.
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
 | tk-1tfzr71.45 | the PR reminder's old marker | partial files | the open PRs whose reminders carry it (tk-3zlwp6p, tk-r4c0g67) |
 | tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
-| tk-1tfzr71.43 | the per-bead tree left behind at hand-off, and its `git worktree add` | partial files | tk-1tfzr71.12 |
-| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41), and tk-1tfzr71.43 |
+| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41) |
 
 ### 3. The lanes
 
