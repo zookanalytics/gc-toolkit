@@ -269,9 +269,12 @@ no other rig or its beads. Detail about another rig stays in the thread and in
 notes, which that comment does not show.
 File it beside the subject, not under it: work the subject waits on is a
 dependency, and that is the default. Add `--parent <epic>` to the create only
-when the work belongs to that epic. The subject's own parent,
-`"$CONV/converse-parent.sh" "$SUBJECT"`, applies only when the new work serves
-the same epic. Work that genuinely decomposes an epic subject is the one
+when the work belongs to that epic. The subject's parent, as
+`"$CONV/converse-parent.sh" "$SUBJECT"` prints it, applies only when the new
+work serves the same epic. It is the subject's own parent, or the nearest open
+bead above it once that parent has closed. When it is a Delivery whose aim does
+not cover the work, the work goes under that Delivery's epic (the `work`
+skill). Work that genuinely decomposes an epic subject is the one
 exception. It is the subject's member, created with `--parent "$SUBJECT"`, and
 it gets no `--waiting-on`, because bd refuses a `blocks` edge from a parent to
 its own descendant. Run the create as `gc bd --rig <rig> create` when the

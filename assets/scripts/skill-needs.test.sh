@@ -459,6 +459,22 @@ have "…and gives that member no --waiting-on" \
 lacks "…and keeps no blanket rule against filing under the subject" \
     'Never file it under the subject' "$SETTLE" \
     "an epic subject's decomposition is filed as its member"
+# An epic may land through Deliveries, each an epic under it whose description
+# opens with an Aim: line (docs/epics.md). Work under an epic goes into the open
+# Delivery whose aim covers it, so the filer lists those first. A Delivery is
+# filed by the operator's aim alone, and goes to no pool. A follow-up never goes
+# under a closed parent, where it would follow no priority and sit under no open
+# row, so the parent lookup gives the nearest open ancestor.
+have "the work skill lists an epic's open Deliveries before filing under it" \
+    'gc bd list --parent <epic> -t epic --limit 0 --json' "$WORK_SKILL"
+have "…files a Delivery as an epic under its epic" \
+    'gc bd create "Delivery: <what it lands>" -t epic --parent <epic>' "$WORK_SKILL"
+have "…only by the operator's decision that aims it" \
+    "A Delivery is filed only by the decision that aims it, and that decision is the" "$WORK_SKILL"
+have "…and says the parent lookup climbs past a closed parent" \
+    'This prints that parent, or the nearest open bead above it once' "$WORK_SKILL"
+have "the settle step says the same of the subject's parent" \
+    "It is the subject's own parent, or the nearest open" "$SETTLE"
 have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
 have "…once the follow-up's own store reads the edge back" '&& gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json' "$SETTLE"
 have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
