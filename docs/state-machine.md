@@ -76,9 +76,6 @@ stateDiagram-v2
   refused_false_completion --> [*]: human
   abandoned --> [*]: human
   retargeted --> [*]: human
-
-  UN --> held: the converse hold — a sitting holds for an operator decision
-  held --> UN: the ruling landed, or nothing holds it any more
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
@@ -103,15 +100,11 @@ there until the checkout fetches it, so the transition fetches that branch into
 `GC_RIG_ROOT`, or a target git does not accept as a branch name, it fetches
 nothing and prints one WARN line naming the landing.
 
-`held` is the one human state a sitting writes rather than the refinery, and it
-is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
-each enumerate anchors by their gating state, so moving a live anchor to `held`
-to record a conversation would drop it from all three for as long as the hold
-lasts. An anchor already carries a state and a reader; an unanchored subject
-carried neither, which is what the state exists to fix. A subject armed for
-deferred dispatch (`gc.dispatch_when_ready`) does not enter it: the hold's gate
-already holds that bead, and `deferred-dispatch.sh` retires an arm on any
-`merge_result`.
+A sitting that holds a bead for an operator decision writes no state. The human
+gate it files blocks the bead, so `bd ready` leaves the bead out until the gate
+is resolved, and the board reads the open gate as the bead's hold
+([human-engagement.md](human-engagement.md#the-sitting)). The bead keeps the
+state, the route and any deferred-dispatch arm it carried.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
@@ -119,8 +112,8 @@ the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
 entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
 still at `status=open`.
 
-The route exception is `park_route` (`human`), the sentinel a hold leaves for
-a person. No pool claims that value, so a transition
+The route exception is `park_route` (`human`), the sentinel that parks a bead
+for a person. No pool claims that value, so a transition
 that finds it leaves it in place. Any other route on a detached anchor is pool demand
 for work that is already in the merge queue. A worker claims it, the claim moves
 the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
@@ -187,8 +180,6 @@ transition into a closed state writes none.
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | handed_off → poured | `mol-refinery-patrol` merge-push, through `assets/scripts/await-ruling.sh` | the zero-diff check could not run three patrols in a row: a human gate names git's error and blocks the bead, which waits on it unassigned and armed, until clearing the gate pours a fresh `mol-polecat-work` run on it |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
-| unanchored → held | `skills/converse-hold`, a converse sitting's hold, via `lifecycle.sh`, only beside a human gate that blocks the bead | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off; `gc-helm.sh accept`, before it dispatches the recommendation; `skills/converse-recheck-premise`, a moot or benign close; each via `lifecycle.sh`; or human | the ruling landed; Accept's answer read back; or the premise re-check found the conversation moot or benign, and no open human gate still holds the bead |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
 routed rework child that blocks the anchor, with the reviewer's findings and the

@@ -64,31 +64,30 @@ visit's actions. The comment on the subject's pull request, where an earlier
 sitting on this conversation posted one, is then drawn again to show that the
 visit ended and lists that action, so write it as one plain sentence that
 names no other rig or its beads.
-Deliberately **no takeaway stamp**, except on a held subject the close
-releases (below): it is the subject's headline of what it NEEDS, and one for a
+Deliberately **no takeaway stamp**, except over a headline that waits on
+nothing (below): it is the subject's headline of what it NEEDS, and one for a
 conversation that needs nobody spends the attention this exit saves.
 
-An earlier sitting on this conversation may have held and been cut short. Its
-hold moved an unanchored subject to `held`, and a cut-short sign-off leaves it
-there, so the close first reads the subject's state. A held subject that no
-open human gate still holds goes back to `unanchored`, routed to `human` as
-Accept routes its release. Its headline is replaced with the reading, because
-the hold's headline names a question that no longer stands. A held subject
-that another open human gate still holds stays held, since that gate's answer
-is still owed. Every write is read back, and the conversation closes only
-after them:
+An earlier sitting on this conversation may have held and been cut short,
+leaving its hold's headline on the subject, waiting on the gates this close
+has resolved. So the close first reads the subject and what still blocks it.
+A headline that still waits, one with no `gc.takeaway_settled`, on a subject
+that no open blocker holds is replaced with the reading, settled, because it
+names a question that no longer stands. A subject that another open blocker
+still holds keeps its headline, since that wait is still owed. A read counts
+only when `gc` exits 0 and answers in its shape: the subject's own row, alone,
+and a list of its blockers. Every write is read back, and the conversation
+closes only after them:
 ```bash
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
 ACTION="<what ended the visit, in one plain sentence>"
-STATE=$("$CONV/lifecycle.sh" state "$SUBJECT") \
-  && if [ "$STATE" != held ]; then echo "$SUBJECT reads $STATE, so nothing is released"; else
-       OPEN=$(gc bd dep list "$SUBJECT" --type blocks --json | jq -er 'if type == "array" then [ .[] | select(.issue_type == "gate" and .await_type == "human" and ((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
-         && if [ -n "$OPEN" ]; then echo "$SUBJECT stays held: $OPEN still holds it"; else
-              "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
-                && "$CONV/lifecycle.sh" transition "$SUBJECT" --to unanchored --expect held --route human \
-                && [ "$("$CONV/lifecycle.sh" state "$SUBJECT")" = unanchored ] \
-                && echo "released $SUBJECT from held"
-            fi
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
+  && DEPS=$(gc bd dep list "$SUBJECT" --type blocks --json) \
+  && OPEN=$(printf '%s\n' "$DEPS" | jq -er 'if type == "array" then [ .[] | select(((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
+  && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
+       "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
+         && echo "replaced the headline of $SUBJECT, which waited on nothing"
      fi \
   && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \
   && gc bd update "$CONVERSATION" --set-metadata gc.work_outcome=no-op \
@@ -103,11 +102,11 @@ When it prints its `closed` line, drain (the prompt's **How this thread
 ends**). **Post nothing** — no framing, no sign-off, not even "this turned out
 to be fine".
 
-No `closed` line means the close stopped short: the subject's state or its
-gates did not read, or a write did not read back. The conversation stays open
-under this sitting, and a held subject whose questions are answered would
-otherwise wait on nothing a person can see. So say in the thread what the
-block printed, fix what it names, and re-run the block. The gates cleared
+No `closed` line means the close stopped short: the subject or its blockers
+did not read, or a write did not read back. The conversation stays open under
+this sitting, and a subject whose questions are answered would otherwise keep
+a headline that waits on nothing. So say in the thread what the block printed,
+fix what it names, and re-run the block. The gates cleared
 above stay cleared, and each write in the block is safe to repeat.
 
 The exit is gated on being *named*: if you cannot point at the stamp

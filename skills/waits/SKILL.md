@@ -167,9 +167,9 @@ limits arming too (the work skill).
   with `ruled:` when the person decided, approved or acted, `moot:` when the
   premise no longer holds, and `benign:` when it holds but needs nobody. In a
   sitting, the sign-off's `--ruled yes` resolves the gates its conversation
-  replies to and releases a `held` bead (the converse-settle step), and its
-  `--answer` resolves the gates a ruling settles on a turn that does not sign
-  off (the converse-continue step).
+  replies to (the converse-settle step), and its `--answer` resolves the gates
+  a ruling settles on a turn that does not sign off (the converse-continue
+  step).
 - **A wait a person owed, when they rule the work will not go on:**
   `"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>"`,
   with the gate's `await_id` as the key. It removes the arm, ends the run beneath

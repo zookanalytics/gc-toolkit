@@ -343,11 +343,12 @@ through `gc-helm.sh open`, which is where filing a conversation lives. It
 runs on `--no-react`, when `tools/gc-proactive.sh deliverable` answers that
 the proactive pool is not registered, is suspended or is capped at zero slots,
 and when the reaction would file nothing: the subject already has an open
-first reaction or a live owner owns it, a live workflow already drives it, or
-it is already routed or armed. A react path that could not deliver would leave
-a routed reaction bead nobody picks up and no conversation at all, the one
-outcome this channel exists to prevent. A roster the deliverable check cannot
-read answers yes, because absence of evidence is not evidence the pool is gone.
+first reaction or a live owner owns it, a live workflow already drives it, it
+is already routed or armed, or an open human gate blocks it. A react path that
+could not deliver would leave a routed reaction bead nobody picks up and no
+conversation at all, the one outcome this channel exists to prevent. A roster
+the deliverable check cannot read answers yes, because absence of evidence is
+not evidence the pool is gone.
 
 **The intake stamps `gc.origin=operator` on the subject**, on both paths and
 never over an origin already recorded. It is a fact the reaction weighs, not a
@@ -452,9 +453,9 @@ own, so the merge waits for both rulings. The sitting replies to its gate and
 reads the reply back, so a resumed or handed-off conversation knows the gate
 it owes. Without that need it files nothing: a conversation does not
 freeze its subject, and a PR keeps moving while the operator and the sitting
-talk. An unanchored subject that a gate blocks moves to `held` and back through
-`lifecycle.sh`, because a held bead must carry a live edge. A subject armed for
-deferred dispatch stays unanchored, since `held` would cost it its arm
+talk. The gate is what holds the subject: bd reads the subject as blocked while
+the gate is open, and the hold writes no lifecycle state or route, so the
+subject keeps its state, its route and any deferred-dispatch arm
 ([state-machine.md](state-machine.md#the-machine)). A hold does not use
 `gc session wait --sleep`, which sets a wait hold the controller then drains,
 destroying an attached operator's pane.
@@ -468,7 +469,12 @@ its conversation does not reply to yet, the sitting adds the reply and reads
 it back, so the graph records which conversation answered which gate. Before it
 resolves a gate, it names every bead the answer releases, read from the gate's
 `blocks` dependents, so an answer that releases a bead beyond the subject is
-given knowingly. The record and the headline go on the subject alone: a rework
+given knowingly. It also settles the subject's dispatch path first, at the
+sign-off and on a turn that does not sign off alike. The hold kept the
+subject's arm and route, and an answer that clears the subject's last blocker
+releases it to them, so a ruling that sends the subject anywhere else
+withdraws both before the answer, and a `human` route, which sends it to no
+pool, stays. The record and the headline go on the subject alone: a rework
 child waiting on its anchor's bring-current gate, or a member of an epic whose
 gate the epic's sitting answers, reads the answer in the gate's resolve
 reason, through its own `blocks` edge. A gate with no tie to the subject takes
@@ -494,13 +500,12 @@ durable trace in one order every time:
 2. the subject's headline;
 3. `ruled: <the ruling>` on each open gate the conversation replies to that the
    ruling answers, each read back, with an earlier answer reported;
-4. the release of a `held` subject;
-5. the subject's recommendation, when the ruling takes it (`--accept`): the
+4. the subject's recommendation, when the ruling takes it (`--accept`): the
    recommendation's gate, which step 3 leaves, is answered by Accept's writer
    (below), which sends the formula once;
-6. the conversation's close, whose reason is the headline the sitting settled
+5. the conversation's close, whose reason is the headline the sitting settled
    on;
-7. the comment that shows the visit on the subject's PR, drawn again from the
+6. the comment that shows the visit on the subject's PR, drawn again from the
    conversation.
 
 As it goes, it records the rework or the retirement, the ruling once the gates
@@ -534,7 +539,7 @@ the operator something to read or answer posts the hand-back and leaves the
 conversation open. A gate the operator rules on during such a turn is answered
 at once, so a dismiss that ends the sitting later leaves nothing the operator
 ruled on open. It is answered through the same script with `--answer <gate>`,
-which runs steps 1 to 3 for the gates it names, and step 5 when the ruling
+which runs steps 1 to 3 for the gates it names, and step 4 when the ruling
 takes the recommendation, and stops there, leaving the conversation open for
 the sign-off.
 
@@ -640,32 +645,27 @@ while another Accept holds it. On an open gate it records the acceptance's
 dispatch input on the gate (`gc.acceptance`: its token, the formula and each
 var) and reads it back, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
-back that no other open human gate blocks the bead, releases a bead that reads
-`held` to `unanchored`, slings the formula titled `<formula> accept:<token>`,
-and records the dispatch by stripping `gc.recommended_formula` beside
-`gc.recommended_formula_dispatched`. A sitting's hold moves an unanchored
-subject to `held` while the operator owes the answer of a gate that blocks it,
-and mol-polecat-work's load-context cancels a run poured at a bead that still
-reads `held`, so the release comes before the sling. An answer another reached
-first stands, and Accept slings nothing. A gate filed in the meantime, or a
-sling that poured no root, reopens the recommendation's gate. A run that
-stopped after its resolve, or whose release did not land, leaves an unfinished
-acceptance, which the board keeps owed and the next Accept finishes under the
-same token, slinging only when no root carries the token. That sling carries
-the vars the acceptance recorded, whoever finishes it: the board's Accept
-passes none, and a run given vars other than the recorded ones dispatches
-nothing. The lock's warrant is in [warrants.md](warrants.md).
+back that no other open human gate blocks the bead, slings the formula titled
+`<formula> accept:<token>`, and records the dispatch by stripping
+`gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
+another reached first stands, and Accept slings nothing. A gate filed in the
+meantime, or a sling that poured no root, reopens the recommendation's gate. A
+run that stopped after its resolve leaves an unfinished acceptance, which the
+board keeps owed and the next Accept finishes under the same token, slinging
+only when no root carries the token. That sling carries the vars the
+acceptance recorded, whoever finishes it: the board's Accept passes none, and
+a run given vars other than the recorded ones dispatches nothing. The lock's
+warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
 out of its `ruled:` answers and runs `gc-helm.sh accept` once the ruling's other
-writes have landed and a `held` subject is released, because mol-polecat-work's
-load-context cancels a run poured at a bead that still reads `held`. Under the
-lock, that run finishes an acceptance the board's Accept left unfinished
-instead of sending the formula again, and a board Accept that runs after the
-sitting's finds the recommendation dispatched. Gas City's launch lock refuses
-a second pour only while the first root is live, so a sling of the sitting's
-own would pour the formula again once the stopped Accept's root had finished.
+writes have landed. Under the lock, that run finishes an acceptance the
+board's Accept left unfinished instead of sending the formula again, and a
+board Accept that runs after the sitting's finds the recommendation
+dispatched. Gas City's launch lock refuses a second pour only while the first
+root is live, so a sling of the sitting's own would pour the formula again
+once the stopped Accept's root had finished.
 A var the ruling settles for the dispatch, such as a design convoy's
 `design_gated` ([design-convoy.md](design-convoy.md)), rides the sign-off's
 `--var` to Accept's sling. The sign-off refuses `--accept`, writing nothing,
@@ -674,9 +674,7 @@ recommendation's gate is one under the key `first-reaction` that blocks the
 subject: a gate under that key on an epic's member asks the member's
 recommendation, which Accept on the epic never answers. So the sign-off also
 refuses `--accept` unless the ruling answers one of the subject's own gates
-under the key, and each gate Accept would answer there. An
-`--answer` turn releases nothing of its own, so Accept's writer releases a
-subject that reads `held` before its sling.
+under the key, and each gate Accept would answer there.
 
 ## How a parked subject comes back
 
@@ -840,11 +838,11 @@ output, only the reading appended to its subject: the premise re-check's moot or
 benign close. The sign-off exists because an unanswered framing left in a
 vanishing thread reads as a crash; where no framing was ever posted there is
 no question to abandon. An earlier sitting on the same conversation may have
-held and been cut short, leaving its subject `held`, which only a ruling's
-sign-off, an Accept, this close or a person moves back. So the close reads
-the subject's state first. A held subject that no open human gate still holds
-goes back to `unanchored`, routed to `human`, and the reading replaces the
-hold's headline. The conversation closes only once those writes read back.
+held and been cut short, leaving its hold's headline on the subject, waiting
+on the gates this close resolves. So the close reads the subject first. A
+headline that still waits, on a subject no open blocker holds any more, is
+replaced with the reading, settled. The conversation closes only once those
+writes read back.
 
 *A restart is not an ending.* A wake that reaches a session mid-hold gets its
 conversation back from `gc hook --claim` as an existing assignment. Draining
