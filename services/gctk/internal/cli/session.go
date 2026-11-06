@@ -8,10 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 	"unicode"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/composer"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
 
@@ -27,17 +25,14 @@ import (
 // command renames the session in Gas City, then has `gc session nudge` type
 // /rename <title> into the session, delivered at once.
 //
-// The typing is kept off a message a person is writing. Gas City's nudge
-// types whatever the input box holds: with a client attached it types onto the
-// text and submits the two as one message, and with none attached it clears
-// the text first (nudgeSession in internal/runtime/tmux/tmux.go at
-// gastownhall/gascity 9f807760c). So the command reads the box first, and
-// nudges only once a read finds it empty (internal/composer). The read and the
-// nudge's paste are two steps, so a key a person presses between them still
-// meets the nudge; only a nudge mode that refuses a box holding text would
-// close that gap. The command reads the agent's pane through the tmux server
-// it runs under, the one $TMUX names, because no gc command returns the text
-// attributes that tell a placeholder from a draft.
+// The nudge types into whatever the input box holds (nudgeSession in
+// internal/runtime/tmux/tmux.go at gastownhall/gascity 9f807760c). With a
+// client attached it types onto the text there and submits the two as one
+// message, and with none attached it clears the text first. So a /rename that
+// lands while a person is typing in the session joins their draft. The command
+// does not read the box first, and accepts that case: a session takes its
+// title when it starts and when its focus moves, and rarely while a person is
+// typing into it.
 
 const sessionUsage = `usage:
   gctk session title --topic <words> [--subject <bead-id>] [--pr <n>]
@@ -59,14 +54,13 @@ read, which is empty when there is none.
 
 gc session rename sets the title on the session's record, which gc session
 list and the board show. For a Claude Code or Codex session, gc session nudge
-then types "/rename <title>" into the session's input box, delivered at once,
-and the agent runs it, so its terminal title shows the title. The nudge is
-typed only once a read of the input box finds it empty. While the box holds
-text, such as a message a person is writing, the command waits up to 3s for it
-to empty, then skips the nudge. It also skips the nudge for another provider,
-and for a session whose pane it cannot read through the tmux server $TMUX
-names. Each line it prints says what it did: renamed, nudged, or skipped and
-why.
+then types "/rename <title>" into the session's input box at once, and the
+agent runs it, so its terminal title shows the title. The nudge does not wait
+for the input box to empty. A /rename that lands while a person is typing in
+the session joins their draft: with a client attached, Gas City types it onto
+the draft and submits the two together, and with none attached, it clears the
+box first. The command skips the nudge for another provider. Each line it
+prints says what it did: renamed, nudged, queued, or skipped and why.
 
 exit: 0 renamed; the nudge was delivered, queued, or skipped as printed
       1 the rename failed, and nothing else was done
@@ -81,21 +75,6 @@ const (
 	sessionExitUsage       = 2
 	sessionExitNudgeFailed = 3
 )
-
-// titleDraftWait bounds the wait for an input box that holds text to empty,
-// and titleDraftPoll is the pause between two reads of it. A person about to
-// send a message sends it within a few seconds; one still writing keeps the
-// box full past them, and the title can wait for the next rename.
-var (
-	titleDraftWait = 3 * time.Second
-	titleDraftPoll = 250 * time.Millisecond
-)
-
-// agentPaneFormat marks each pane of a session the way Gas City's tmux runtime
-// does (TmuxAgentPaneMarkerFormat in internal/runtime/tmux_agent_pane.go at
-// gastownhall/gascity 9f807760c): "agent" for the pane the agent runs in,
-// "orphan" for a session whose agent pane is gone, and "pane" for any other.
-const agentPaneFormat = "#{?#{==:#{@gc_agent},#{session_id}},agent,#{?#{@gc_agent_session},orphan,pane}}\t#{pane_id}"
 
 type titleOpts struct {
 	topic, subject, pr, session string
@@ -213,12 +192,7 @@ func sessionTitle(o titleOpts, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "renamed %s to %q\n", id, title)
 
-	pane, why := titlePane(id)
-	if why != "" {
-		fmt.Fprintf(stdout, "skipped the /rename nudge: %s\n", why)
-		return sessionExitDone
-	}
-	if why := awaitEmptyInput(pane); why != "" {
+	if why := renameSkip(id); why != "" {
 		fmt.Fprintf(stdout, "skipped the /rename nudge: %s\n", why)
 		return sessionExitDone
 	}
@@ -234,7 +208,7 @@ func sessionTitle(o titleOpts, stdout, stderr io.Writer) int {
 	}
 	_ = json.Unmarshal([]byte(strings.TrimSpace(out)), &nudged)
 	if nudged.Queued {
-		fmt.Fprintf(stdout, "queued the /rename nudge: Gas City types it into %s when it can, after this command read the input box\n", id)
+		fmt.Fprintf(stdout, "queued the /rename nudge: Gas City types it into %s when it can\n", id)
 		return sessionExitDone
 	}
 	outcome := nudged.Outcome
@@ -245,86 +219,20 @@ func sessionTitle(o titleOpts, stdout, stderr io.Writer) int {
 	return sessionExitDone
 }
 
-// titlePane finds the tmux pane whose input box takes the /rename: the agent
-// pane of session id, on the tmux server $TMUX names. why says why there is
-// none to type into.
-func titlePane(id string) (pane tmuxPane, why string) {
+// renameSkip says why session id takes no typed /rename, or "" when it runs an
+// agent whose /rename gctk knows.
+func renameSkip(id string) string {
 	b := gcbd.New().Show(id)
 	if b == nil {
-		return pane, fmt.Sprintf("session %s could not be read, so its provider is unknown", id)
+		return fmt.Sprintf("session %s could not be read, so its provider is unknown", id)
 	}
 	switch family := providerFamily(b); family {
 	case "claude", "codex":
+		return ""
 	case "":
-		return pane, fmt.Sprintf("session %s records no provider", id)
+		return fmt.Sprintf("session %s records no provider", id)
 	default:
-		return pane, fmt.Sprintf("provider %s has no /rename command gctk knows", family)
-	}
-	name := b.Meta("session_name")
-	if name == "" {
-		return pane, fmt.Sprintf("session %s records no runtime session name", id)
-	}
-	socket, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
-	if socket == "" {
-		return pane, "this command does not run under tmux ($TMUX is unset), so the input box cannot be read"
-	}
-	pane.socket = socket
-	out, errText, code := runSplit("tmux", "-S", socket, "list-panes", "-s", "-t", "="+name+":", "-F", agentPaneFormat)
-	if code != 0 {
-		return pane, fmt.Sprintf("tmux session %s is not on the tmux server at %s%s", name, socket, detail(errText, ""))
-	}
-	var marked, all []string
-	orphan := false
-	for _, row := range strings.Split(strings.TrimSpace(out), "\n") {
-		mark, paneID, ok := strings.Cut(row, "\t")
-		if !ok {
-			continue
-		}
-		all = append(all, paneID)
-		switch mark {
-		case "agent":
-			marked = append(marked, paneID)
-		case "orphan":
-			orphan = true
-		}
-	}
-	switch {
-	case len(marked) == 1:
-		pane.id = marked[0]
-	case len(marked) == 0 && !orphan && len(all) == 1:
-		pane.id = all[0]
-	default:
-		return pane, fmt.Sprintf("tmux session %s has no one pane that is the agent's", name)
-	}
-	return pane, ""
-}
-
-// tmuxPane names one pane on one tmux server.
-type tmuxPane struct {
-	socket, id string
-}
-
-// awaitEmptyInput reads the pane's input box until it is empty, for up to
-// titleDraftWait, and says why it gave up when it does.
-func awaitEmptyInput(p tmuxPane) string {
-	deadline := time.Now().Add(titleDraftWait)
-	for {
-		args := append([]string{"-S", p.socket, "capture-pane", "-t", p.id}, composer.CaptureArgs...)
-		out, errText, code := runSplit("tmux", args...)
-		if code != 0 {
-			return "the input box could not be read" + detail(errText, "")
-		}
-		state := composer.Read(out)
-		if state == composer.Empty {
-			return ""
-		}
-		if !time.Now().Add(titleDraftPoll).Before(deadline) {
-			if state == composer.Holding {
-				return fmt.Sprintf("the input box still held text after %s, such as a message being written", titleDraftWait)
-			}
-			return fmt.Sprintf("no input box was on screen after %s, such as while a dialog is open", titleDraftWait)
-		}
-		time.Sleep(titleDraftPoll)
+		return fmt.Sprintf("provider %s has no /rename command gctk knows", family)
 	}
 }
 

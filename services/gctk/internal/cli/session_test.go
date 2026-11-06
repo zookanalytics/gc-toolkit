@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // titleGCStub answers the three gc calls `gctk session title` makes: `session
@@ -30,45 +28,26 @@ case "$1 $2" in
 esac
 `
 
-// titleTmuxStub answers `list-panes` with $STUB_PANES, failing when
-// $STUB_PANES_RC is set, and each `capture-pane` with the next file of
-// $STUB_CAPTURES, a directory of captures named 1, 2, ..., repeating the last
-// once they run out. It logs like titleGCStub.
+// titleTmuxStub logs a call like titleGCStub and fails it, so a read of the
+// session's pane would show in the log rather than reach a real tmux server.
 const titleTmuxStub = `#!/bin/sh
 { printf 'tmux|'; for a in "$@"; do printf '%s|' "$a"; done; echo; } >> "$STUB_LOG"
-for a in "$@"; do
-  case "$a" in
-    list-panes)
-      [ -z "$STUB_PANES_RC" ] || { echo "can't find session" >&2; exit "$STUB_PANES_RC"; }
-      printf '%s\n' "$STUB_PANES"; exit 0 ;;
-    capture-pane)
-      n=$(cat "$STUB_CAPTURES/next" 2>/dev/null || echo 1)
-      f="$STUB_CAPTURES/$n"
-      if [ -f "$f" ]; then echo $((n + 1)) > "$STUB_CAPTURES/next"; else f="$STUB_CAPTURES/$((n - 1))"; fi
-      cat "$f"; exit 0 ;;
-  esac
-done
-echo "unsupported: $*" >&2; exit 2
+exit 1
 `
 
 const (
-	emptyClaudeBox = "────────────────────────────────────────\n\x1b[39m❯\u00a0\x1b[2mTry \"write a test for <filepath>\"\n────────────────────────────────────────\n"
-	draftClaudeBox = "────────────────────────────────────────\n\x1b[39m❯\u00a0half a message\n────────────────────────────────────────\n"
-	emptyCodexBox  = "• PONG\n\n\x1b[1m›\x1b[0m \x1b[2mExplain this codebase\x1b[22m\n\n  gpt-5.5 low · /tmp/probe\n"
-	claudeBead     = `[{"id":"tk-s1","metadata":{"provider":"claude","session_name":"s-tk-s1"}}]`
-	codexBead      = `[{"id":"tk-s1","metadata":{"provider":"codex","session_name":"s-tk-s1"}}]`
+	claudeBead = `[{"id":"tk-s1","metadata":{"provider":"claude","session_name":"s-tk-s1"}}]`
+	codexBead  = `[{"id":"tk-s1","metadata":{"provider":"codex","session_name":"s-tk-s1"}}]`
 )
 
 type titleRig struct {
-	t        *testing.T
-	log      string
-	captures string
+	t   *testing.T
+	log string
 }
 
-// newTitleRig puts the stubs first on PATH, names a tmux server in $TMUX and
-// shortens the wait for an input box to empty. The defaults are a Claude
-// session tk-s1 whose one agent pane shows an empty input box, a rename and a
-// nudge that succeed, and a caller whose own session is tk-s1.
+// newTitleRig puts the stubs first on PATH. The defaults are a Claude session
+// tk-s1, a rename and a nudge that succeed, and a caller whose own session is
+// tk-s1.
 func newTitleRig(t *testing.T) *titleRig {
 	t.Helper()
 	bin := t.TempDir()
@@ -77,36 +56,17 @@ func newTitleRig(t *testing.T) *titleRig {
 			t.Fatal(err)
 		}
 	}
-	r := &titleRig{t: t, log: filepath.Join(t.TempDir(), "log"), captures: t.TempDir()}
+	r := &titleRig{t: t, log: filepath.Join(t.TempDir(), "log")}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("STUB_LOG", r.log)
-	t.Setenv("STUB_CAPTURES", r.captures)
-	t.Setenv("TMUX", "/tmp/tmux-test/city,123,0")
 	t.Setenv("GC_SESSION_ID", "tk-s1")
 	t.Setenv("STUB_RENAME_OUT", `{"schema_version":"1","ok":true,"command":"session rename","action":"rename","session_id":"tk-s1","title":"x"}`)
 	t.Setenv("STUB_RENAME_RC", "0")
 	t.Setenv("STUB_RENAME_ERR", "")
 	t.Setenv("STUB_SESSION_BEAD", claudeBead)
-	t.Setenv("STUB_PANES", "agent\t%7")
-	t.Setenv("STUB_PANES_RC", "")
 	t.Setenv("STUB_NUDGE_OUT", `{"schema_version":"1","ok":true,"session_id":"tk-s1","delivery":"immediate","queued":false,"outcome":"delivered"}`)
 	t.Setenv("STUB_NUDGE_RC", "0")
-	r.screens(emptyClaudeBox)
-	wait, poll := titleDraftWait, titleDraftPoll
-	titleDraftWait, titleDraftPoll = 300*time.Millisecond, 20*time.Millisecond
-	t.Cleanup(func() { titleDraftWait, titleDraftPoll = wait, poll })
 	return r
-}
-
-// screens sets what successive captures of the pane show.
-func (r *titleRig) screens(captures ...string) {
-	r.t.Helper()
-	os.Remove(filepath.Join(r.captures, "next"))
-	for i, c := range captures {
-		if err := os.WriteFile(filepath.Join(r.captures, strconv.Itoa(i+1)), []byte(c), 0o644); err != nil {
-			r.t.Fatal(err)
-		}
-	}
 }
 
 // calls returns the logged calls whose program and leading arguments are
@@ -173,102 +133,41 @@ func TestSessionTitleUsage(t *testing.T) {
 }
 
 func TestSessionTitle(t *testing.T) {
-	t.Run("renames, then types /rename into an empty input box", func(t *testing.T) {
+	t.Run("renames, then types /rename at once, reading no pane", func(t *testing.T) {
 		r := newTitleRig(t)
 		stdout, stderr, code := r.run("--subject", "tk-a8k8dpw", "--topic", "converse tab title from its topic")
 		if code != sessionExitDone {
 			t.Fatalf("exit %d, stderr %q", code, stderr)
 		}
 		title := "tk-a8k8dpw — converse tab title from its topic"
-		if got := r.calls("gc|session|rename|"); len(got) != 1 || got[0] != "gc|session|rename|tk-s1|"+title+"|--json|" {
-			t.Fatalf("rename calls = %q", got)
+		want := []string{
+			"gc|session|rename|tk-s1|" + title + "|--json|",
+			"gc|bd|show|tk-s1|",
+			"gc|session|nudge|tk-s1|--delivery|immediate|/rename " + title + "|--json|",
 		}
-		if got := r.calls("gc|session|nudge|"); len(got) != 1 || got[0] != "gc|session|nudge|tk-s1|--delivery|immediate|/rename "+title+"|--json|" {
-			t.Fatalf("nudge calls = %q", got)
+		got := r.calls("")
+		if len(got) != len(want) {
+			t.Fatalf("calls = %q, want %q", got, want)
 		}
-		capture := r.calls("tmux|-S|/tmp/tmux-test/city|capture-pane|-t|%7|")
-		if len(capture) != 1 {
-			t.Fatalf("the agent pane was captured %d times, want once: %q", len(capture), r.calls("tmux|"))
-		}
-		for _, want := range []string{"renamed tk-s1 to \"" + title + "\"", "nudged tk-s1: /rename delivered"} {
-			if !strings.Contains(stdout, want) {
-				t.Fatalf("stdout %q lacks %q", stdout, want)
+		for i := range want {
+			if !strings.HasPrefix(got[i], want[i]) {
+				t.Fatalf("call %d = %q, want %q", i, got[i], want[i])
 			}
 		}
-	})
-
-	t.Run("a draft that stays: no nudge", func(t *testing.T) {
-		r := newTitleRig(t)
-		r.screens(draftClaudeBox)
-		stdout, _, code := r.run("--topic", "x")
-		if code != sessionExitDone {
-			t.Fatalf("exit %d, want %d", code, sessionExitDone)
-		}
-		if got := r.calls("gc|session|nudge|"); len(got) != 0 {
-			t.Fatalf("typed into a draft: %q", got)
-		}
-		if !strings.Contains(stdout, "skipped the /rename nudge: the input box still held text") {
-			t.Fatalf("stdout %q does not report the skip", stdout)
-		}
-		if n := len(r.calls("tmux|-S|/tmp/tmux-test/city|capture-pane|")); n < 2 {
-			t.Fatalf("the box was read %d times; a draft is waited on", n)
-		}
-	})
-
-	t.Run("a draft sent within the wait: nudged once the box is empty", func(t *testing.T) {
-		r := newTitleRig(t)
-		// The box empties on the third read, so the wait has to outlast three
-		// reads of the pane, which a loaded host stretches past the rig's
-		// short wait.
-		titleDraftWait = 3 * time.Second
-		r.screens(draftClaudeBox, draftClaudeBox, emptyClaudeBox)
-		stdout, _, code := r.run("--topic", "x")
-		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 1 {
-			t.Fatalf("exit %d, nudges %q, stdout %q", code, r.calls("gc|session|nudge|"), stdout)
-		}
-	})
-
-	t.Run("no input box on screen: no nudge", func(t *testing.T) {
-		r := newTitleRig(t)
-		r.screens("  Do you want to proceed?\n ❯ 1. Yes\n   2. No\n")
-		stdout, _, code := r.run("--topic", "x")
-		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || !strings.Contains(stdout, "skipped the /rename nudge: no input box was on screen") {
-			t.Fatalf("exit %d, nudges %q, stdout %q", code, r.calls("gc|session|nudge|"), stdout)
+		for _, line := range []string{"renamed tk-s1 to \"" + title + "\"", "nudged tk-s1: /rename delivered"} {
+			if !strings.Contains(stdout, line) {
+				t.Fatalf("stdout %q lacks %q", stdout, line)
+			}
 		}
 	})
 
 	t.Run("a codex session takes the same /rename", func(t *testing.T) {
 		r := newTitleRig(t)
 		t.Setenv("STUB_SESSION_BEAD", codexBead)
-		r.screens(emptyCodexBox)
 		if _, stderr, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 1 {
 			t.Fatalf("exit %d, stderr %q, nudges %q", code, stderr, r.calls("gc|session|nudge|"))
 		}
 	})
-
-	// A Codex draft can leave nothing after the glyph on the composer's first
-	// row, and Gas City's nudge would submit it with the /rename joined on.
-	for _, tc := range []struct{ name, capture string }{
-		{"blank first row, text below", "\x1b[1m›\x1b[0m \n  unfinished operator message\n\n  ? for shortcuts\n"},
-		{"later row a bare glyph", "\x1b[1m›\x1b[0m hello\n  ›\n\n  ? for shortcuts\n"},
-		{"scrolled to a blank row", "\x1b[1m›\x1b[0m" + strings.Repeat(" ", 78) + "\x1b[2m↑\x1b[22m\n  a later line\n\n  ? for shortcuts\n"},
-	} {
-		t.Run("a codex draft with "+tc.name+": no nudge", func(t *testing.T) {
-			r := newTitleRig(t)
-			t.Setenv("STUB_SESSION_BEAD", codexBead)
-			r.screens(tc.capture)
-			stdout, _, code := r.run("--topic", "x")
-			if code != sessionExitDone {
-				t.Fatalf("exit %d, want %d", code, sessionExitDone)
-			}
-			if got := r.calls("gc|session|nudge|"); len(got) != 0 {
-				t.Fatalf("typed into a draft: %q", got)
-			}
-			if !strings.Contains(stdout, "skipped the /rename nudge: the input box still held text") {
-				t.Fatalf("stdout %q does not report the skip", stdout)
-			}
-		})
-	}
 
 	t.Run("a wrapped provider whose builtin is claude", func(t *testing.T) {
 		r := newTitleRig(t)
@@ -278,15 +177,24 @@ func TestSessionTitle(t *testing.T) {
 		}
 	})
 
-	t.Run("another provider: renamed, no nudge, no pane read", func(t *testing.T) {
+	t.Run("another provider: renamed, no nudge", func(t *testing.T) {
 		r := newTitleRig(t)
 		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s1","metadata":{"provider":"gemini","session_name":"s-tk-s1"}}]`)
 		stdout, _, code := r.run("--topic", "x")
-		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || len(r.calls("tmux|")) != 0 {
+		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 {
 			t.Fatalf("exit %d, calls %q", code, r.calls(""))
 		}
-		if !strings.Contains(stdout, "provider gemini has no /rename command") {
+		if !strings.Contains(stdout, "skipped the /rename nudge: provider gemini has no /rename command") {
 			t.Fatalf("stdout %q", stdout)
+		}
+	})
+
+	t.Run("a session that records no provider: renamed, no nudge", func(t *testing.T) {
+		r := newTitleRig(t)
+		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s1","metadata":{"session_name":"s-tk-s1"}}]`)
+		stdout, _, code := r.run("--topic", "x")
+		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || !strings.Contains(stdout, "skipped the /rename nudge: session tk-s1 records no provider") {
+			t.Fatalf("exit %d, stdout %q, calls %q", code, stdout, r.calls(""))
 		}
 	})
 
@@ -302,9 +210,6 @@ func TestSessionTitle(t *testing.T) {
 		}
 		if got := r.calls("gc|bd|show|tk-s9|"); len(got) != 1 {
 			t.Fatalf("the session bead read = %q, want tk-s9", r.calls("gc|bd|"))
-		}
-		if got := r.calls("tmux|-S|/tmp/tmux-test/city|list-panes|-s|-t|=s-tk-s9:|"); len(got) != 1 {
-			t.Fatalf("pane lookup = %q", r.calls("tmux|"))
 		}
 		if got := r.calls("gc|session|nudge|tk-s9|"); len(got) != 1 {
 			t.Fatalf("nudge calls = %q", r.calls("gc|session|nudge|"))
@@ -323,8 +228,8 @@ func TestSessionTitle(t *testing.T) {
 		if !strings.Contains(stderr, "session not found") {
 			t.Fatalf("stderr %q does not carry gc's error", stderr)
 		}
-		if got := r.calls("gc|session|nudge|"); len(got) != 0 || len(r.calls("tmux|")) != 0 {
-			t.Fatalf("ran past a failed rename: %q", r.calls(""))
+		if got := r.calls(""); len(got) != 1 {
+			t.Fatalf("ran past a failed rename: %q", got)
 		}
 	})
 
@@ -341,26 +246,6 @@ func TestSessionTitle(t *testing.T) {
 		r := newTitleRig(t)
 		t.Setenv("STUB_NUDGE_OUT", `{"ok":true,"queued":true,"outcome":"queued"}`)
 		if stdout, _, code := r.run("--topic", "x"); code != sessionExitDone || !strings.Contains(stdout, "queued the /rename nudge") {
-			t.Fatalf("exit %d, stdout %q", code, stdout)
-		}
-	})
-
-	t.Run("no tmux server named: no pane read, no nudge", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("TMUX", "")
-		stdout, _, code := r.run("--topic", "x")
-		if code != sessionExitDone || len(r.calls("tmux|")) != 0 || len(r.calls("gc|session|nudge|")) != 0 {
-			t.Fatalf("exit %d, calls %q", code, r.calls(""))
-		}
-		if !strings.Contains(stdout, "$TMUX is unset") {
-			t.Fatalf("stdout %q", stdout)
-		}
-	})
-
-	t.Run("a session not on this tmux server", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("STUB_PANES_RC", "1")
-		if stdout, _, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || !strings.Contains(stdout, "is not on the tmux server") {
 			t.Fatalf("exit %d, stdout %q", code, stdout)
 		}
 	})
@@ -397,38 +282,6 @@ func TestSessionTitleItems(t *testing.T) {
 			}
 			if want := "renamed tk-s1 to \"" + tc.title + "\""; !strings.Contains(stdout, want) {
 				t.Fatalf("stdout %q lacks %q", stdout, want)
-			}
-		})
-	}
-}
-
-func TestTitlePaneChoice(t *testing.T) {
-	cases := []struct {
-		name, panes, want string // want "" = no pane, so no nudge
-	}{
-		{"the marked agent pane among a person's splits", "pane\t%3\nagent\t%7\npane\t%9", "%7"},
-		{"one unmarked pane", "pane\t%4", "%4"},
-		{"unmarked splits: none is known to be the agent's", "pane\t%3\npane\t%4", ""},
-		{"the agent pane is gone", "orphan\t%3", ""},
-		{"two marked panes", "agent\t%3\nagent\t%4", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := newTitleRig(t)
-			t.Setenv("STUB_PANES", tc.panes)
-			if _, _, code := r.run("--topic", "x"); code != sessionExitDone {
-				t.Fatalf("exit %d", code)
-			}
-			captured := r.calls("tmux|-S|/tmp/tmux-test/city|capture-pane|-t|")
-			nudges := r.calls("gc|session|nudge|")
-			if tc.want == "" {
-				if len(captured) != 0 || len(nudges) != 0 {
-					t.Fatalf("read or typed into a pane: %q %q", captured, nudges)
-				}
-				return
-			}
-			if len(captured) != 1 || !strings.HasPrefix(captured[0], "tmux|-S|/tmp/tmux-test/city|capture-pane|-t|"+tc.want+"|") || len(nudges) != 1 {
-				t.Fatalf("captured %q, nudges %q; want pane %s", captured, nudges, tc.want)
 			}
 		})
 	}
