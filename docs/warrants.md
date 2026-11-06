@@ -116,8 +116,8 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main d5b26f881 and
-  `gastownhall/gascity-packs` main 796d7ecd7.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main bfd72756e and
+  `gastownhall/gascity-packs` main e3cb468bb.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
   and parked work and ends a run by cancelling it. `workspace-setup`: the
   refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
