@@ -66,7 +66,11 @@ case "$1 $2" in
     ONE='{"children":[{"id":"tk-work"}]}'
     printf '%s\n' "${FAKE_CONVOY:-$ONE}"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
-  "session list") printf '%s' "${FAKE_SESSIONS:-}"; exit 0 ;;
+  # With --state all, gc lists every session the city ever closed, so a dead
+  # owner would read as live: the owner check reads the default listing.
+  "session list")
+    case " $* " in *" --state"*) echo "gc stub: the owner check asked for closed sessions too" >&2; exit 2 ;; esac
+    printf '%s' "${FAKE_SESSIONS:-}"; exit 0 ;;
   "bd show")
     if [ -n "${FAKE_SHOW_OUT+x}" ]; then printf '%s' "$FAKE_SHOW_OUT"; exit "${FAKE_SHOW_RC:-1}"; fi
     cat "$FAKE_ROW_FILE"; exit 0 ;;

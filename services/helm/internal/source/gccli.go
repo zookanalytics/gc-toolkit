@@ -156,7 +156,7 @@ func (g *gcExec) Sessions(ctx context.Context) (map[string]string, error) {
 			State       string `json:"state"`
 		} `json:"sessions"`
 	}
-	if err := g.run(ctx, &payload, "session", "list", "--state", "all", "--json"); err != nil {
+	if err := g.run(ctx, &payload, "session", "list", "--json"); err != nil {
 		return nil, err
 	}
 	out := make(map[string]string, len(payload.Sessions)*2)

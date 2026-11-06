@@ -930,7 +930,7 @@ queued conversations are filtered out of client-side, and whose parent-child and
 blocked beads, so they cost no request of their own.
 
 **The `gc` CLI (`internal/source/gccli.go`) — for the one fact no bead carries.**
-`gc session list --state all --json` for session liveness (the gate that tells
+`gc session list --json` for session liveness (the gate that tells
 work in flight from an abandoned husk). This is the same read `gc-helm.sh`
 makes, so the two boards agree on liveness by construction rather than by two
 derivations. The work bead a root's run works — the other half of the

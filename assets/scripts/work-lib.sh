@@ -98,7 +98,7 @@ work_is_self() {
 # An assignee is any of the forms a claim writes: the session name, the session
 # id, or the agent address, which is a session's alias or the end of one.
 work_owner_listed() {
-  gc session list --state all --json </dev/null 2>/dev/null | scrub | jq -r --arg o "$1" '
+  gc session list --json </dev/null 2>/dev/null | scrub | jq -r --arg o "$1" '
     if type == "object" and (.sessions | type) == "array" and all(.sessions[]; type == "object") then
       [ .sessions[] | select(((.alias // "") == $o) or ((.alias // "") | endswith($o))
                              or ((.session_name // "") == $o) or ((.id // "") == $o)) ] | length

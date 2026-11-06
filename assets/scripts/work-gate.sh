@@ -24,8 +24,9 @@
 #
 # Owner liveness gates only the in-flight case. An idle pool worker between
 # claims looks identical to an abandoned one, so an in_progress bead is a conflict
-# only while `gc session list --state all` lists its owner, and a list that cannot
-# be read proves nobody gone.
+# only while `gc session list` lists its owner. That listing holds every session
+# that has not closed, asleep ones included, and a list that cannot be read
+# proves nobody gone.
 #
 # This workflow never claims its work bead, so the assignee cannot show a run in
 # flight. The run's root does (run-lib.sh), and `gc sling` judges the same record

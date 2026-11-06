@@ -183,20 +183,22 @@ would write.
 dismiss is the operator's explicit "end this sitting". It closes the
 conversation a live sitting holds on the subject, with a reason naming the
 dismissal, and answers nothing: every human gate the conversation replies to
-stays open and owed, for its filer or the next sitting. It then stops the
-converse session that held the conversation with `gc runtime drain-ack`, so
-the controller ends the session outside this process: the session dismiss runs
-in acks itself, last, and any other is acked as an operator. --operator says
-the caller is outside the sitting even when it runs under the sitting's
-identity to infer the subject, as prefix+X does, so every session is acked as
-an operator and none acks itself. A session that will not stop is left to
-converse-reap, which closes any converse session whose conversation reads
-closed. The close falls back to --force when bd refuses an operator closing a
-conversation its sitting holds. A conversation the verb could not account for
-aborts the run, which exits 4. It writes nothing to the subject. A subject with
-no live sitting has nothing to end, and dismiss says so and writes nothing; a
-conversation id names its own conversation, which dismiss closes whoever holds
-it.
+stays open and owed, for its filer or the next sitting. It records the
+dismissal as one of the visit's actions, a comment on the conversation that
+carries no reason, and draws the comment that shows the visit on the subject's
+PR again. It then stops the converse session that held the conversation with
+`gc runtime drain-ack`, so the controller ends the session outside this
+process: the session dismiss runs in acks itself, last, and any other is acked
+as an operator. --operator says the caller is outside the sitting even when it
+runs under the sitting's identity to infer the subject, as prefix+X does, so
+every session is acked as an operator and none acks itself. A session that
+will not stop is left to converse-reap, which closes any converse session
+whose conversation reads closed. The close falls back to --force when bd
+refuses an operator closing a conversation its sitting holds. A conversation
+the verb could not account for aborts the run, which exits 4. It writes
+nothing to the subject. A subject with no live sitting has nothing to end, and
+dismiss says so and writes nothing; a conversation id names its own
+conversation, which dismiss closes whoever holds it.
 
 dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
 current sitting from session state: the one open conversation assigned to this
@@ -209,11 +211,13 @@ guess a subject, and name the explicit-id form as the fix.
 handback records the hand-back a converse sitting is posting, each framing and
 the sign-off, on its conversation. The text is read from stdin and stamped as
 gc.handback with gc.handback_at, replacing the one recorded before, then read
-back. engage runs its attach as a child, so when the tab's tmux client exits,
-engage reads the conversation. A closed conversation prints how it closed and
-the latest hand-back; a conversation still open prints the command that
-re-attaches. A bead that is not a conversation is refused, and so is an empty
-stdin.
+back. A hand-back recorded once the conversation has closed is the visit's
+conclusion, so it also draws the comment that shows the visit on the subject's
+PR again. engage runs its attach as a child, so when the tab's tmux client
+exits, engage reads the conversation. A closed conversation prints how it
+closed and the latest hand-back; a conversation still open prints the command
+that re-attaches. A bead that is not a conversation is refused, and so is an
+empty stdin.
 
 accept answers a first reaction's recommendation (gc.recommended_formula on
 the bead) by clearing the human gate that put it to the operator, the gate
@@ -411,9 +415,10 @@ QUEUE_PRIORITY_TOOL="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}"
 # a hermetic test can point them at a fixture.
 STARTERS_TOOL="${GC_HELM_STARTERS_TOOL:-$SCRIPT_DIR/gc-helm-engage-starters.sh}"
 ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
-# Leaves a reminder on the subject's PR that a sitting engaged (and, on dismiss,
-# that it closed). Best-effort and self-silencing when the subject has no PR;
-# overridable so a hermetic test can point it at a fixture.
+# Draws the comment that shows a visit on its subject's PR again from the
+# conversation, after a dismiss closes it or a hand-back is recorded on a closed
+# one. Best-effort and self-silencing when the subject has no PR or the visit no
+# comment; overridable so a hermetic test can point it at a fixture.
 SITTING_COMMENT_TOOL="${GC_SITTING_COMMENT_TOOL:-$SCRIPT_DIR/pr-sitting-comment.sh}"
 # Ends the run beneath a released anchor through gascity's run cancel;
 # overridable so a hermetic test can point it at a fixture.
@@ -533,7 +538,7 @@ bead_conversations() {
 # reads when gc answers from the supervisor. Returns 1 when the list did not
 # answer, which proves no sitting live and none gone.
 live_sittings() {
-    _ls_raw=$(gc session list --state all --json 2>/dev/null) || return 1
+    _ls_raw=$(gc session list --json 2>/dev/null) || return 1
     printf '%s' "$_ls_raw" | scrub | jq -ce '
         if type == "object" and ((.sessions // null) | type) == "array"
         then [ .sessions[] | objects
@@ -622,7 +627,7 @@ rig_db_for_session() {
     if [ -z "$_srig" ]; then
         _sids=$(session_identities)
         [ -n "$_sids" ] || return 0
-        _srig=$(gc session list --state all --json 2>/dev/null | scrub \
+        _srig=$(gc session list --json 2>/dev/null | scrub \
             | jq -r --arg ids "$_sids" '
                 ($ids | split("\n") | map(select(. != ""))) as $me
                 | [ .sessions[]? | objects | . as $s
@@ -2532,6 +2537,13 @@ cmd_handback() {
         exit 4
     fi
     echo "$PROG: handback: recorded on $bead at $handback_at"
+    # Once the conversation has closed, its hand-back is the visit's conclusion,
+    # which the comment that shows the visit on the subject's PR carries, so the
+    # comment is drawn again. Best effort, never failing the record.
+    if [ -x "$SITTING_COMMENT_TOOL" ] \
+        && [ "$(row_now "$bead" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)" = closed ]; then
+        "$SITTING_COMMENT_TOOL" refresh --sitting "$bead" || true
+    fi
 }
 
 # sitting_session_of <conversation-row> — the live converse session holding a
@@ -2547,7 +2559,7 @@ sitting_session_of() {
     _sso_sn=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.session_name"] // ""' 2>/dev/null || true)
     _sso_as=$(printf '%s' "$1" | jq -r '.assignee // ""' 2>/dev/null || true)
     [ -n "$_sso_sid$_sso_sn$_sso_as" ] || return 0
-    gc session list --state all --json 2>/dev/null | scrub | jq -r \
+    gc session list --json 2>/dev/null | scrub | jq -r \
         --arg id "$_sso_sid" --arg sn "$_sso_sn" --arg as "$_sso_as" --arg me "$(session_identities)" '
         ($me | split("\n") | map(select(. != ""))) as $mine
         | if type == "object" and ((.sessions // null) | type) == "array" then
@@ -2624,6 +2636,9 @@ cmd_dismiss() {
     if [ -z "$bead" ]; then
         current_sitting || exit $?
         bead="$SITTING_SUBJECT"; convs="$SITTING_CONV"
+        # The subject's rig checkout, which the visit's PR comment is drawn
+        # from below. A rig list that does not answer costs only that drawing.
+        path=$(rig_path_for_bead "$bead" 2>/dev/null) || path=""
         echo "$PROG: dismiss: no bead named; inferred the current sitting's conversation $SITTING_CONV on $bead from session state" >&2
     else
         resolve_live_subject "$bead"
@@ -2692,11 +2707,19 @@ cmd_dismiss() {
         if [ -n "$_c_row" ] && [ "$(printf '%s' "$_c_row" | jq -r '.status // ""' 2>/dev/null)" = "closed" ]; then
             closed_n=$((closed_n + 1))
             _dmsg "$PROG: dismiss: $_how conversation $_c — the sitting on $bead ends"
-            # A closed sitting updates its PR reminder to say so, if the subject
-            # has a PR. update-only, so a conversation that never engaged (left
-            # no comment) touches nothing; best effort, never failing the dismiss.
+            # The dismissal is one of the visit's actions, recorded on the
+            # conversation without the operator's reason, which is their own
+            # words. The comment that shows the visit on the subject's PR is then
+            # drawn again from the conversation, from the subject's rig checkout
+            # when this run resolved it, because the comment's repository is the
+            # origin of the checkout it runs in. Both are best effort and never
+            # fail the dismiss, and a conversation whose sitting never named its
+            # topic has no comment to draw.
+            gc bd comment "$_c" "Dismissed by the operator." >/dev/null 2>&1 \
+                || echo "$PROG: dismiss: the dismissal was not recorded on $_c, so the visit's comment on the PR will not list it" >&2
             if [ -x "$SITTING_COMMENT_TOOL" ]; then
-                "$SITTING_COMMENT_TOOL" close --sitting "$_c" --subject "$bead" --outcome dismissed --summary "$_dwhy" || true
+                ( if [ -n "${path:-}" ] && [ -d "$path" ]; then cd "$path" || exit 0; fi
+                  "$SITTING_COMMENT_TOOL" refresh --sitting "$_c" ) || true
             fi
         else
             sitting_failed=1
@@ -4268,7 +4291,7 @@ cmd_engage() {
         _start_seen=0; _start_told=0; _start_shown=""; _start_tick=30
         start_state=""; start_waited=0
         while :; do
-            start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
+            start_state=$(gc session list --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
                 if type == "object" and ((.sessions // null) | type) == "array"
                 then (first(.sessions[] | select((.id // "") == $id)
                             | if (.state // "") == "" then "closed" else .state end)
@@ -4532,7 +4555,7 @@ cmd_engage() {
         # listing that does not answer with a sessions array names no holder
         # and proves none gone.
         _ah_list_ok=1
-        _ah_holder=$(gc session list --state all --json 2>/dev/null | scrub | jq -er --arg c "$CONV" "$CONVERSATION_JQ"'
+        _ah_holder=$(gc session list --json 2>/dev/null | scrub | jq -er --arg c "$CONV" "$CONVERSATION_JQ"'
             if (type == "object" and ((.sessions // null) | type) == "array")
             then ([ .sessions[]
                     | select((.closed // false) == false)
@@ -4599,7 +4622,7 @@ cmd_engage() {
     # The alias the session's claim runs as. A gc whose spawn JSON names none is
     # asked through the session list.
     if [ -z "$salias" ]; then
-        salias=$(gc session list --state all --json 2>/dev/null | scrub \
+        salias=$(gc session list --json 2>/dev/null | scrub \
             | jq -r --arg id "$sid" '[ .sessions[]? | objects | select((.id // "") == $id) | .alias // empty ] | first // empty' 2>/dev/null || true)
     fi
     [ -n "$salias" ] || engage_abort "$sid" "spawned $sname, but its alias could not be read, so conversation $CONV has no name to be bound to. The sitting holds nothing and was closed; re-run: $PROG engage $bead"
@@ -4652,20 +4675,6 @@ cmd_engage() {
         engage_abort "$sid" "conversation $CONV reads closed (a dismiss, or a sign-off, closed it while this sitting spawned), so the sitting $sname has nothing to claim and was closed. Engage the subject to open a fresh conversation: $PROG engage $bead"
     fi
     bust_cache
-
-    # Leave a reminder on the subject's PR that this sitting engaged, if it has
-    # a PR. Best effort: pr-sitting-comment.sh self-silences when the subject
-    # has no PR or gh is absent, and its failure must not fail an engage that
-    # already bound its conversation. (The reason is passed conditionally
-    # because /bin/sh word-splits ${x:+...}, which would break a multi-word
-    # reason.)
-    if [ -x "$SITTING_COMMENT_TOOL" ]; then
-        if [ -n "$engage_reason" ]; then
-            "$SITTING_COMMENT_TOOL" engage --sitting "$CONV" --subject "$bead" --reason "$engage_reason" || true
-        else
-            "$SITTING_COMMENT_TOOL" engage --sitting "$CONV" --subject "$bead" || true
-        fi
-    fi
 
     # Human summary on stdout; id-heavy provenance on a single always-on [debug]
     # line on stderr — never gated behind a verbosity flag, since re-running to
