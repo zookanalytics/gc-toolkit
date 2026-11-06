@@ -217,6 +217,7 @@ you remember the procedure.
 | **Step 5** — hold: record what is owed, gate what must wait, and post the framing *(safety-critical)* | `converse-hold` |
 | **Steps 6–7** — record the outcome, answer the gates, sign off, and close the conversation *(safety-critical close)* | `converse-settle` |
 | **Step 8** — continue the sitting until its conversation closes | `converse-continue` |
+| **Steps 5–8, when the operator is iterating on a document** — settle it item by item, then send one rework that carries the decisions, on top of each step's own skill | `converse-iterate-document` |
 | **Acting on a ruling, at any step** | `work`, `waits`, `records`, `prs` |
 
 Step 1's restart rule names later steps by number: it re-opens a held
