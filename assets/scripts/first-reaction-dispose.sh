@@ -25,7 +25,7 @@
 #               tells the agent then.
 #   until       the bead's whole job ends once another bead lands, such as the
 #               bead that retires its code -> an `until` edge onto that bead in
-#               the SAME store, and nothing that routes, arms, places or blocks
+#               the SAME store, and nothing that routes, arms, holds or blocks
 #               the bead. The deferred-dispatch pass closes it once that bead
 #               closes, and it closes only a pure wait (live-work.sh).
 #   close       there is nothing to do -> hand the bead to a validating-closer
@@ -43,10 +43,11 @@
 # pool route and the blocked exit's --then-route reach a pool only for a bead
 # that may enter one: a member of an epic (it has a parent), PR-finishing work
 # (it carries anchor_bead), or an emergency whose failing check --emergency
-# names and main's own checks confirm, which is routed at P0. Any other bead is marked
-# placement=pending and left unrouted, for the operator's placement sitting
-# (gc-helm.sh unplaced lists it). A named agent's own work (--assign,
-# --then-assign) is not pool work, so the rule does not read it.
+# names and main's own checks confirm, which is routed at P0. Any other bead is held
+# with Gas City's hold:mayor label and left unrouted, for the operator's placement
+# sitting (`gc beads list --label hold:mayor` lists it). A named agent's own work
+# (--assign, --then-assign) is not pool work, so the rule does not read it. The
+# po is no such agent: it takes no work by assignment, and both refuse it.
 #
 # ruling and recommend file a native human gate through human-gate.sh, under the
 # key first-reaction, that blocks the subject: the subject waits for the
@@ -158,9 +159,9 @@ Usage:
   land fails the exit before the landed proof, so a re-run resumes it.
   Intake decides whether the actionable route and the --then-route arm are
   written at all. Only a member of an epic, PR-finishing work (anchor_bead)
-  or a confirmed emergency reaches a pool. Any other bead is marked
-  placement=pending and left unrouted, with no arm, for the operator's
-  placement sitting.
+  or a confirmed emergency reaches a pool. Any other bead is held with Gas
+  City's hold:mayor label (gc bd set-state <id> hold=mayor) and left
+  unrouted, with no arm, for the operator's placement sitting.
   --emergency <check> (actionable, or blocked with --then-route) claims the
   bead is a red main or a broken gate, and names the check on main whose
   failure it is about: a check run's name or a commit status's context. The
@@ -174,16 +175,19 @@ Usage:
   route is stamped. A town-repo edit (city.toml, packs.lock) is mechanik's, so
   it takes --assign gc-toolkit.mechanik. Refused unless the agent is a
   registered named session whose hook reads this bead's store
-  (tools/gc-proactive.sh assignable). The agent is then told, because under
+  (tools/gc-proactive.sh assignable), and never the po, which takes no work
+  by assignment: its queue is the new work intake holds with hold:mayor.
+  The agent is then told, because under
   wake_mode = "resume" nothing else wakes an idle named session for a new
   assignee: deferred-dispatch.sh notify mails it the bead id at once when bd
   reports the bead ready, and otherwise arms the notice to go when bd does.
   --then-assign (blocked) assigns the held bead to a named agent in the same
-  release. Its hook offers the bead once the wait lifts, and the notice
+  release, held to the same test as --assign. Its hook offers the bead once
+  the wait lifts, and the notice
   deferred-dispatch.sh notify arms tells the agent then, not before.
   --until (until, one or more) names a bead whose landing ends this one's job,
   such as the bead that retires its code. The exit releases the bead with no
-  route, arm, placement or blocks edge, then writes an until edge onto every
+  route, arm, hold or blocks edge, then writes an until edge onto every
   --until bead in one write and reads each back, so the deferred-dispatch pass
   closes the bead once every --until bead has closed. A bead in another store is
   refused: the edge does not read back, and the pass never sees that bead
@@ -428,6 +432,21 @@ case "$DISPOSITION" in
         ;;
 esac
 
+# ── The po takes no work by assignment ───────────────────────────────
+# Its queue is the new work intake holds with hold:mayor, which it places, and a
+# bead handed to it as its own work is the dumping ground that queue keeps it
+# from becoming. So neither --assign nor --then-assign may name it, bare or
+# qualified.
+for _who in "$ASSIGN" "$THEN_ASSIGN"; do
+    [ -n "$_who" ] || continue
+    case "${_who##*/}" in
+        po|*.po)
+            _flag=--assign; _route=--route
+            [ "$_who" = "$THEN_ASSIGN" ] && [ -n "$THEN_ASSIGN" ] && { _flag=--then-assign; _route=--then-route; }
+            usage_die "$_flag $_who names the po, which takes no work by assignment: its queue is the new work intake holds with hold:mayor. Pass $_route for the pool that would build $BEAD, and intake holds it for placement when no epic holds it, or pass $_flag for the named agent whose work it is." ;;
+    esac
+done
+
 # ── Pin the store, do not let the cwd choose it ──────────────────────
 # This runs from a pool worktree, where .beads is gitignored, so an unpinned
 # up-walk overshoots to whatever ledger it finds first. Two of the writes
@@ -548,9 +567,9 @@ fi
 # does not read it, and the close exit's validating closer shrinks the queue
 # rather than adding work to it.
 #
-# A bead the rule does not admit is held for placement: marked placement=pending
-# and left unrouted, with no arm, until the operator's placement sitting places
-# it under an epic or routes it on its own. An unreadable subject proves no
+# A bead the rule does not admit is held for placement: it carries hold:mayor and
+# is left unrouted, with no arm, until the operator's placement sitting places it
+# under an epic or routes it on its own. An unreadable subject proves no
 # membership, so it is held too.
 POOL_TARGET=""
 case "$DISPOSITION" in
@@ -773,7 +792,7 @@ if [ -n "$DRY" ]; then
                         printf 'would release %s to named agent %s (assignee, no route)\n' "$BEAD" "$ASSIGN"
                         printf 'would tell %s about %s once bd reports it ready, at once if it already does (deferred-dispatch.sh notify)\n' "$ASSIGN" "$BEAD"
                     elif [ -z "$ADMIT" ]; then
-                        printf 'would hold %s for placement (placement=pending, unrouted): %s\n' "$BEAD" "$HOLD_WHY"
+                        printf 'would hold %s for placement (hold:mayor, unrouted): %s\n' "$BEAD" "$HOLD_WHY"
                     elif [ "$ADMIT" = emergency ]; then
                         printf 'would release %s to %s at P0: %s\n' "$BEAD" "$ROUTE" "$ADMIT_WHY"
                     else
@@ -784,12 +803,12 @@ if [ -n "$DRY" ]; then
                     [ -z "$THEN_ASSIGN" ] \
                         || printf 'would tell %s about %s once bd reports it ready, at once if it already does (deferred-dispatch.sh notify)\n' "$THEN_ASSIGN" "$BEAD"
                     if [ -n "$THEN_ROUTE" ] && [ -z "$ADMIT" ]; then
-                        printf 'would hold %s for placement (placement=pending) and arm no dispatch to %s: %s\n' "$BEAD" "$THEN_ROUTE" "$HOLD_WHY"
+                        printf 'would hold %s for placement (hold:mayor) and arm no dispatch to %s: %s\n' "$BEAD" "$THEN_ROUTE" "$HOLD_WHY"
                     elif [ -n "$THEN_ROUTE" ]; then
                         _p0=""; [ "$ADMIT" = emergency ] && _p0=" at P0"
                         printf 'would arm a dispatch to %s%s for when the wait lifts\n' "$THEN_ROUTE" "$_p0"
                     fi ;;
-        until)      printf 'would close %s once each of these lands, through an until edge onto it and no route, arm, placement or blocks edge:%s\n' "$BEAD" "$UNTIL" ;;
+        until)      printf 'would close %s once each of these lands, through an until edge onto it and no route, arm, hold or blocks edge:%s\n' "$BEAD" "$UNTIL" ;;
         close)      if [ -n "$AFTER_WORKFLOW" ]; then
                         printf 'would hold %s on %s, then arm a deferred dispatch to validating closer %s (mol-validate-close) for when %s closes\n' "$BEAD" "$AFTER_WORKFLOW" "$ROUTE" "$AFTER_WORKFLOW"
                     else
@@ -1060,12 +1079,15 @@ The card in $BEAD's notes carries the evidence. Clearing this gate makes $BEAD r
 fi
 
 # ── Intake's write, before the act ───────────────────────────────────
-# A held bead carries placement=pending before the release leaves it unrouted,
-# so it is never open and unrouted without the marker that puts it in the
-# sitting's queue. A confirmed emergency carries P0 before its route or its arm,
-# so it is never claimable at the priority it was filed at. Either write carries
-# a note saying what intake found, and either is read back: one that did not
-# land stops the exit before the act, with no landed proof, so a re-run resumes.
+# A held bead carries hold:mayor before the release leaves it unrouted, so it is
+# never open and unrouted without the label that puts it in the sitting's queue.
+# The hold is Gas City's, written with gc bd set-state, which records the reason
+# in an event bead and sets the label in one write. A note beside it says what
+# intake found and names the queue's read. A confirmed emergency carries P0
+# before its route or its arm, so it is never claimable at the priority it was
+# filed at, and its note rides the same write. Each write is read back: one that
+# did not land stops the exit before the act, with no landed proof, so a re-run
+# resumes.
 # subject_now <jq-path> answers "v:<value>" from a readable subject and "u:"
 # from anything else, so an unreadable subject never reads as a write that
 # landed.
@@ -1076,29 +1098,36 @@ subject_now() {
 }
 if [ -n "$POOL_TARGET" ]; then
     INTAKE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    INTAKE_NOTE=""
     if [ -z "$ADMIT" ]; then
-        set -- --set-metadata "placement=pending" --append-notes "## Intake (first reaction, $INTAKE_AT)
-Held for placement instead of reaching $POOL_TARGET: $HOLD_WHY. The operator's placement sitting places it under an epic or routes it on its own; gc-helm.sh unplaced lists it."
-        WANT="v:pending"; WHAT="placement=pending"; NOW_PATH=".metadata.placement"
+        HOLD_REASON="Held for placement instead of reaching $POOL_TARGET: $HOLD_WHY."
+        INTAKE_NOTE="## Intake (first reaction, $INTAKE_AT)
+$HOLD_REASON The operator's placement sitting places it under an epic or routes it on its own; gc beads list --label hold:mayor lists it."
+        set -- set-state "$BEAD" hold=mayor --reason "$HOLD_REASON"
+        WANT="v:true"; WHAT="the hold:mayor label"; NOW_PATH='(.labels // []) | index("hold:mayor") != null'
     elif [ "$ADMIT" = emergency ]; then
-        set -- --priority 0 --append-notes "## Intake (first reaction, $INTAKE_AT)
+        set -- update "$BEAD" --priority 0 --append-notes "## Intake (first reaction, $INTAKE_AT)
 Routed to $POOL_TARGET at P0 as an emergency: $ADMIT_WHY."
         WANT="v:0"; WHAT="priority P0"; NOW_PATH=".priority"
     else
         set --
     fi
     if [ $# -gt 0 ]; then
-        gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
+        gc_bd "$@" >/dev/null 2>&1 \
             || die "could not write $WHAT on $BEAD (does it exist${DB:+ in $DB}?), so it was not released. Nothing else was written by this step; clear the cause and re-run this command."
         if [ "$(subject_now "$NOW_PATH")" != "$WANT" ]; then
             if [ "$ADMIT" = emergency ]; then
                 gc_bd update "$BEAD" --priority 0 >/dev/null 2>&1 || true
             else
-                gc_bd update "$BEAD" --set-metadata "placement=pending" >/dev/null 2>&1 || true
+                gc_bd "$@" >/dev/null 2>&1 || true
             fi
             _got="$(subject_now "$NOW_PATH")"
             [ "$_got" = "$WANT" ] \
-                || die "$WHAT did not land on $BEAD (it read back as '$_got', want '$WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The release is withheld, so $BEAD is not left unrouted without its marker or routed at the wrong priority. Clear the cause and re-run this command."
+                || die "$WHAT did not land on $BEAD (it read back as '$_got', want '$WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The release is withheld, so $BEAD is not left unrouted without its hold or routed at the wrong priority. Clear the cause and re-run this command."
+        fi
+        if [ -n "$INTAKE_NOTE" ]; then
+            gc_bd update "$BEAD" --append-notes "$INTAKE_NOTE" >/dev/null 2>&1 \
+                || die "$BEAD carries hold:mayor, but intake's note saying why did not land, so it was not released. Clear the cause and re-run this command; the hold is already set, so a re-run writes only the note."
         fi
         note "intake wrote $WHAT on $BEAD"
     fi
@@ -1113,8 +1142,8 @@ fi
 # waiting on this bead? An actionable one is not waiting on a bead: it is
 # moving, and the pool its route names, or the agent it is assigned to, will
 # take it. Held for placement, it is released with no route into the sitting's
-# queue, which placement=pending names and gc-helm.sh unplaced lists. Either
-# way --no-wait says so. A blocked one names its wait as an edge, and a
+# queue, which its hold:mayor label puts it in and
+# `gc beads list --label hold:mayor` lists. Either way --no-wait says so. A blocked one names its wait as an edge, and a
 # --then-assign rides the same release, so the agent's hook offers the bead
 # once the edge clears. An until one says --no-wait too: its until edge, written
 # after the release, holds nothing, and a --waiting-on blocks edge onto the same
@@ -1126,11 +1155,6 @@ fi
 # leaves it single. The release parks the subject and the edge holds it, so it
 # is not offered again until the gate is cleared, and the wait is a graph state
 # doctor/check-wait-is-an-edge reads rather than prose it reports.
-#
-# A subject held for placement can carry the stamp a dead pour left
-# (gc.execution_routed_to), which the queue reads as a live pour. The release
-# clears it and fails when it survives on a held bead, so this exit stops before
-# its landed proof rather than record a hold the sitting cannot see.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable)

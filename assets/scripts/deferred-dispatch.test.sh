@@ -979,6 +979,31 @@ eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a blocked armed bead keeps i
 hasnt "$out" "HELD by b-0" "an arm its own blocker holds gets no line of its own in the pass log"
 has "$out" "1 held" "summary counts it as held"
 
+# A hold label is Gas City's: the bead's next actor is not a worker, and bd's
+# readiness does not read the label, so the bead reports ready. A sling reads no
+# hold either, so the pass must leave the arm for when a write lifts the label.
+# arm still accepts the bead, because placing one arms it and then lifts the hold.
+echo "# reconcile withholds a bead a hold label holds"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning","hold:mayor"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "an armed bead a hold label holds is not an error"
+eq "$(slings)" "0" "a ready bead carrying hold:mayor is NOT slung, since no sling reads a hold"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "…and it keeps its record for when the hold is lifted"
+has "$out" "1 held" "summary counts it as held"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by its hold:mayor label]' "list names the label that holds the arm"
+store '[{"id":"b-1","status":"open","assignee":"","labels":[" Hold:External"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "0" "Gas City's other hold label, in another case, holds the arm too"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["hold:mayor"],"metadata":{},"notes":"","_ready":true}]'
+out="$("$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm accepts a bead a hold label holds"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "…and records its dispatch"
+has "$out" "b-1 is HELD by its hold:mayor label" "…naming the label it waits on, not an all-clear"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning","hold:po"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "1" "a bead whose hold is lifted, or whose label only resembles one, is slung"
+
 store '[{"id":"b-1","status":"open","assignee":"someone/else","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "a ready bead someone holds is NOT slung out from under them"
@@ -1681,9 +1706,10 @@ store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""},
  {"id":"a-1","issue_type":"task","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":""}]'
-# hold-lib.sh and bd-lib.sh go beside the copy, because without either the
-# script exits before any verb, so until-resolved.sh is the one library missing.
-mkdir -p "$TMP/lonely"; cp "$SUT" "$TMP/lonely/deferred-dispatch.sh"; cp "$HERE/hold-lib.sh" "$HERE/bd-lib.sh" "$TMP/lonely/"
+# hold-lib.sh, bd-lib.sh and dispatch-path.sh go beside the copy, because without
+# any of them the script exits before any verb, so until-resolved.sh is the one
+# library missing.
+mkdir -p "$TMP/lonely"; cp "$SUT" "$TMP/lonely/deferred-dispatch.sh"; cp "$HERE/hold-lib.sh" "$HERE/bd-lib.sh" "$HERE/dispatch-path.sh" "$TMP/lonely/"
 out="$("$TMP/lonely/deferred-dispatch.sh" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a pass that cannot read the guard fails"
 eq "$(rehomes)" "0" "and disposes nothing"

@@ -48,9 +48,10 @@ it wait, or leave it for placement.
   emergency, or when the operator routed it in a sitting, by hand or by Accept.
   An emergency is a red main or a broken gate, confirmed by a check that failed
   on the default branch's head. Critical work the operator wants run now goes
-  through the operator's own routing. Any other bead carries
-  `placement=pending` in its create and no route or arm, and the operator's
-  placement sitting places it.
+  through the operator's own routing. Any other bead carries Gas City's
+  `hold:mayor` label from its create and no route or arm, and the operator's
+  placement sitting places it. `gc beads list --label hold:mayor` lists every
+  bead that waits so, in every rig.
 
 Writer:
 
@@ -58,8 +59,9 @@ Writer:
 gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json
 ```
 
-Add `--parent <epic>` when an epic applies, and
-`--metadata '{"placement":"pending"}'` when intake holds the bead. The
+Add `--parent <epic>` when an epic applies, and `--labels hold:mayor` when
+intake holds the bead. A bead that already exists is held with
+`gc bd set-state <id> hold=mayor --reason "<why it waits for placement>"`. The
 description is the contract the worker reads.
 
 ## Send a bead to a pool on a formula

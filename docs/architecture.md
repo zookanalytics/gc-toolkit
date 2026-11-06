@@ -303,10 +303,10 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
   engage, react, takeaway, dismiss, accept, park and priority, and the
-  read-only verbs resolve and unplaced. Accept clears a first reaction's
-  recommendation gate and nothing else, under the bead's acceptance lock, and
-  is offered only while no other human gate blocks the bead. `gc-helm.sh unplaced` lists the placement
-  sitting's queue ([steering.md](steering.md)). Everything works without the
+  read-only verb resolve. Accept clears a first reaction's recommendation gate
+  and nothing else, under the bead's acceptance lock, and is offered only while
+  no other human gate blocks the bead. `gc beads list --label hold:mayor` lists
+  the placement sitting's queue ([steering.md](steering.md)). Everything works without the
   board: it spends no state, so it can never be wrong for longer than one
   render.
 

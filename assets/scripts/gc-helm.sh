@@ -1,12 +1,11 @@
 #!/bin/sh
-# gc-helm.sh — the helm verbs: the WRITE verbs, and the read-only resolve and
-# unplaced.
+# gc-helm.sh — the helm verbs: the WRITE verbs, and the read-only resolve.
 # Job: write the operator-facing state the helm board renders, and the
 # operator's steering moves. The board itself is `helm-svc board`
 # (services/helm); this script renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
 # write verbs open, engage, react, takeaway, park, priority, dismiss, handback,
-# accept, and the read-only resolve and unplaced. open, engage and react take a
+# accept, and the read-only resolve. open, engage and react take a
 # <subject> (a bead id, a PR number or URL, or a superseded id) and resolve it to
 # the live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
@@ -14,16 +13,15 @@
 # open), helm-svc's POST routes via GC_HELM_OPEN_TOOL (open, engage, accept,
 # dismiss — open's stderr/stdout sentences are parsed by
 # services/helm/internal/server, guarded by open_parity_test.go), converse
-# (takeaway, handback) and the proactive worker (takeaway), the placement
-# sitting (unplaced), operators by hand (park, priority).
+# (takeaway, handback) and the proactive worker (takeaway), operators by hand
+# (park, priority).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable, no city root or flock for Accept's lock — each failure names
 # its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route, or a takeaway headline or disposition, that will not stamp / a
-# pour stamp a release leaves on a bead held for placement / an unplaced list
-# missing a store that did not answer / a priority move that did not read
-# back / an Accept refused or held by another Accept on the bead),
+# priority move that did not read back / an Accept refused or held by another
+# Accept on the bead),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own conversation
@@ -65,7 +63,6 @@ Usage:
   gc-helm handback <conversation-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its conversation, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of; each --var rides the sling, a var the operator settled for this dispatch
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
-  gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
 The board is `helm-svc board` (services/helm). This script renders no
 board. open, engage and react take the subject as a bead id, a PR number
@@ -300,19 +297,6 @@ blocks_edge_reads_back() {
           | select(((.id // .depends_on_id // "") | tostring) == $d) ] | length > 0' >/dev/null 2>&1
 }
 
-# stamp_hides_placement — given a `bd show --json` answer on stdin whose row
-# carries gc.execution_routed_to, print 1 when that stamp is all that keeps the
-# bead out of the placement queue (placement.sh's awaiting_placement holds for
-# the row without it) and 0 when it is not. An answer that is not a row prints 1,
-# because nothing then shows the stamp hides nothing.
-stamp_hides_placement() {
-    shp_v=$(jq -r "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
-        if type == "array" and length > 0
-        then (.[0] | del(.metadata["gc.execution_routed_to"]) | if awaiting_placement then "1" else "0" end)
-        else "1" end' 2>/dev/null) || shp_v=1
-    case "$shp_v" in 0) printf '0' ;; *) printf '1' ;; esac
-}
-
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
 # enforce the shared ≤TAKEAWAY_MAX cap; sets HEADLINE. One gate for two verbs:
 # a park gate's TITLE is a one-line headline as a takeaway stamp is, so a cap
@@ -384,17 +368,6 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=work-outcome.sh
 . "${GC_WORK_OUTCOME_LIB:-$SCRIPT_DIR/work-outcome.sh}" \
     || { echo "$PROG: cannot source work-outcome.sh from $SCRIPT_DIR" >&2; exit 3; }
-# The one definition of a bead that waits for placement, shared with the
-# liveness classifier and check-blocked-work-armed, and the dispatch path it
-# reads, shared with the proactive scan and the doctor checks: unplaced lists
-# exactly the beads that predicate admits. Expose $PLACEMENT_JQ and
-# $DISPATCH_PATH_JQ.
-# shellcheck source=dispatch-path.sh
-. "${GC_DISPATCH_PATH_LIB:-$SCRIPT_DIR/dispatch-path.sh}" \
-    || { echo "$PROG: cannot source dispatch-path.sh from $SCRIPT_DIR" >&2; exit 3; }
-# shellcheck source=placement.sh
-. "${GC_PLACEMENT_LIB:-$SCRIPT_DIR/placement.sh}" \
-    || { echo "$PROG: cannot source placement.sh from $SCRIPT_DIR" >&2; exit 3; }
 # The one reader of a run's link to the bead it works: the release finds the
 # runs beneath an anchor, and the park survey the workflows poured for a bead.
 # Exposes run_lib and $RUN_JQ.
@@ -1244,10 +1217,9 @@ cmd_takeaway() {
     # execution provenance, not a live dispatch path: deferred-dispatch's reconcile
     # keys idempotency on its own gc.dispatch_when_ready_slung marker, and arm
     # refuses on a live route (gc.routed_to) or that marker, so neither reads
-    # gc.execution_routed_to. The placement queue does read it: placement.sh counts
-    # it as a live pour, which places a bead, so a finished pour's stamp left on a
-    # bead held for placement keeps that bead out of the queue. The release drops
-    # it, and its read-back below fails the verb when that is the stamp's effect.
+    # gc.execution_routed_to. No queue reads it either, a held bead's included,
+    # since a hold is its label. The release drops it, and its read-back below
+    # warns when it survives.
     #
     # The park unassigns the bead, or assigns it to the --assign agent, so the
     # identity the last executor stamped goes with the old assignee:
@@ -1366,33 +1338,24 @@ cmd_takeaway() {
     fi
     # The pour stamp is read back too: gc.execution_routed_to names the pool the
     # pour dispatched this bead to, and a release ends that pour. Clear it, retry a
-    # lone unset, and if it still survives, ask placement.sh whether the stamp is
-    # all that keeps the bead out of the placement queue. On a bead held for
-    # placement it is, because the queue reads the stamp as a live pour, so that
-    # miss fails the verb below. On any other bead no reader misreads the stamp: no
+    # lone unset, and if it still survives, warn: no reader misreads the stamp. No
     # arm or reconcile guard reads it (reconcile keys on its own
-    # gc.dispatch_when_ready_slung marker). That miss warns and the release stands,
+    # gc.dispatch_when_ready_slung marker), and a bead held for placement is in the
+    # queue by its hold label, whatever the stamp says. The release stands,
     # because first-reaction-dispose's --then-route arm runs right after this
     # release, and a failure here would skip the arm.
-    exec_missed=""; exec_hides=""
+    exec_missed=""
     if [ -n "$release_park" ]; then
         exec_got=$(meta_now "$bead" gc.execution_routed_to)
         if [ -n "$exec_got" ]; then
             echo "$PROG: takeaway: gc.execution_routed_to on $bead read back as '$exec_got', expected empty — repairing" >&2
             # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
             gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.execution_routed_to >/dev/null 2>&1 || true
-            # One read answers both questions, whether the stamp survived and
-            # whether it hides a bead held for placement, so the two answers
-            # cannot come from different states of the bead.
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            exec_row=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub) || exec_row=""
-            exec_got=$(printf '%s' "$exec_row" \
-                | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.execution_routed_to"] // "") else "" end' 2>/dev/null) || exec_got=""
+            exec_got=$(meta_now "$bead" gc.execution_routed_to)
             if [ -z "$exec_got" ]; then
                 echo "$PROG: takeaway: the execution-stamp repair landed on $bead" >&2
             else
                 exec_missed=1
-                exec_hides=$(printf '%s' "$exec_row" | stamp_hides_placement)
             fi
         fi
     fi
@@ -1491,17 +1454,10 @@ cmd_takeaway() {
         echo "$PROG: takeaway: $bead still carries gc.session_id='$sid_got' after release — a stale orphan-recovery pin, so the runtime resolves a dead owner for a bead nobody holds. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_id" >&2
         exit 4
     fi
-    # A surviving pour stamp fails the verb where it hides a bead held for
-    # placement: placement.sh reads it as a live pour, so gc-helm.sh unplaced does
-    # not list the bead and the placement sitting is never shown it. On any other
-    # bead the stamp WARNS and the release stands, for the --then-route arm that
-    # runs next.
+    # A surviving pour stamp WARNS and the release stands, for the --then-route
+    # arm that runs next.
     if [ -n "$exec_missed" ]; then
-        if [ "$exec_hides" = 1 ]; then
-            echo "$PROG: takeaway: $bead is held for placement but still carries gc.execution_routed_to='$exec_got' after release. placement.sh reads that stamp as a live pour, so gc-helm.sh unplaced does not list $bead and the placement sitting is never shown it. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
-            exit 4
-        fi
-        echo "$PROG: takeaway: $bead still carries gc.execution_routed_to='$exec_got' after release — provenance a finished pour left. No arm or reconcile guard reads it (deferred-dispatch keys on gc.dispatch_when_ready_slung), and $bead is not held for placement, where the queue would read it as a live pour, so the release stands. Clear it by hand if you want it gone: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
+        echo "$PROG: takeaway: $bead still carries gc.execution_routed_to='$exec_got' after release — provenance a finished pour left. No arm or reconcile guard reads it (deferred-dispatch keys on gc.dispatch_when_ready_slung), and a hold is read from its label, so the release stands. Clear it by hand if you want it gone: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
     fi
     # A route asked for on a closed anchor is refused the same way a route that
     # would not stamp is: the useful writes stand, and the exit is non-zero so
@@ -1877,95 +1833,6 @@ cmd_resolve() {
     case "$resolve_ref" in "") echo "$PROG: resolve needs <bead-id|pr-number|pr-url>" >&2; usage; exit 2 ;; esac
     resolve_live_subject "$resolve_ref"
     printf '%s\n' "$RESOLVED_SUBJECT"
-}
-
-# ── Verb: unplaced (read-only) ───────────────────────────────────────
-# The placement sitting's queue: every live bead in the city's stores that waits
-# for placement, by placement.sh's one definition. Intake marks such a bead
-# placement=pending when it holds new work for the operator (docs/steering.md),
-# and a parent, a route, an arm, an assignee or a live pour each places it,
-# whether or not its marker was cleared. Like resolve it files nothing. Rows come
-# in the order bd offers ready work, priority then age. A suspended rig's store
-# is skipped and named, because reading it would start its Dolt server. A store
-# that does not answer is named on stderr and the verb exits 4 after printing
-# the rest, so a partial queue never reads as the whole one. --json prints one
-# object: the rows as beads, the suspended rigs it skipped, and the rigs whose
-# store did not answer. A skip exits 0, because a suspended rig is the
-# operator's choice and not a failure, so a caller learns of it from skipped.
-UNPLACED_ROW_JQ='
-  select(awaiting_placement)
-  | {id, rig: $rig, title: (.title // ""), type: (.issue_type // ""),
-     priority: (.priority // 2), status: (.status // ""), created_at: (.created_at // ""),
-     takeaway: ((.metadata // {})["gc.takeaway"] // "")}'
-cmd_unplaced() {
-    up_json=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --json) up_json=1; shift ;;
-            -h|--help) usage; exit 0 ;;
-            *) echo "$PROG: unplaced: unknown argument '$1' (usage: gc-helm unplaced [--json])" >&2; exit 2 ;;
-        esac
-    done
-    enumerate_rigs
-    # up_skipped and up_unread hold one rig per line.
-    up_lines=""; up_unread=""; up_skipped=""
-    up_scopes=$(printf '%s' "$RIGS" | jq -r '.[] | select((.path // "") != "")
-        | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)] | join("\u001f")' 2>/dev/null || true)
-    up_us=$(printf '\037')
-    while IFS="$up_us" read -r up_name up_path up_susp; do
-        [ -n "$up_path" ] || continue
-        [ -d "$up_path/.beads" ] || continue
-        if [ "$up_susp" = "true" ]; then
-            echo "$PROG: unplaced: rig ${up_name:-$up_path} is suspended, so its store was not read; any bead waiting there is not listed" >&2
-            up_skipped="$up_skipped${up_name:-$up_path}
-"
-            continue
-        fi
-        # bd's own exit status, not scrub's: a read that prints an array and then
-        # fails has not answered for its store.
-        up_rc=0
-        up_raw=$(gc bd list --db "$up_path/.beads" --metadata-field placement=pending \
-            --status=open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null) || up_rc=$?
-        up_raw=$(printf '%s' "$up_raw" | scrub)
-        if [ "$up_rc" -ne 0 ] || ! printf '%s' "$up_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            echo "$PROG: unplaced: the store of rig ${up_name:-$up_path} ($up_path/.beads) did not answer, so its beads are missing from this list" >&2
-            up_unread="$up_unread${up_name:-$up_path}
-"
-            continue
-        fi
-        up_rig_lines=$(printf '%s' "$up_raw" | jq -c --arg rig "$up_name" "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[] | '"$UNPLACED_ROW_JQ" 2>/dev/null) || {
-            echo "$PROG: unplaced: the beads of rig ${up_name:-$up_path} could not be read as rows, so they are missing from this list" >&2
-            up_unread="$up_unread${up_name:-$up_path}
-"
-            continue
-        }
-        [ -n "$up_rig_lines" ] && up_lines="$up_lines$up_rig_lines
-"
-    done <<EOF
-$up_scopes
-EOF
-    up_rows=$(printf '%s' "$up_lines" | jq -cs 'sort_by(.priority, .created_at, .id)' 2>/dev/null) || up_rows='[]'
-    if [ -n "$up_json" ]; then
-        printf '%s' "$up_rows" | jq -c --arg skipped "$up_skipped" --arg unread "$up_unread" '
-            def rigs: split("\n") | map(select(. != ""));
-            {beads: ., skipped: ($skipped | rigs), unread: ($unread | rigs)}' \
-            || { echo "$PROG: unplaced: the queue could not be printed as JSON" >&2; exit 4; }
-    else
-        up_n=$(printf '%s' "$up_rows" | jq 'length' 2>/dev/null || echo 0)
-        if [ "$up_n" -eq 0 ]; then
-            echo "unplaced: no bead waits for placement"
-        else
-            echo "unplaced: $up_n bead(s) wait for placement"
-            printf '%s' "$up_rows" | jq -r '.[]
-                | "\(.id)\tP\(.priority)\t\(.type)\t\(.rig)\t\(.created_at | .[0:10])\t\(.title)"
-                  + (if .takeaway != "" then "\n\t\(.takeaway)" else "" end)'
-        fi
-    fi
-    if [ -n "$up_unread" ]; then
-        echo "$PROG: unplaced: this list is partial; unread: $(printf '%s' "$up_unread" | tr '\n' ' ' | sed 's/ $//')" >&2
-        exit 4
-    fi
-    return 0
 }
 
 # verify_subject <bead-id> <verb> <nothing-clause> [<subject-ref>] — resolve a
@@ -4755,7 +4622,6 @@ case "${1:-}" in
     engage)        shift; cmd_engage "$@" ;;
     react)         shift; cmd_react "$@" ;;
     resolve)       shift; cmd_resolve "$@" ;;
-    unplaced)      shift; cmd_unplaced "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     park)          shift; cmd_park "$@" ;;
     priority)      shift; cmd_priority "$@" ;;
@@ -4765,5 +4631,5 @@ case "${1:-}" in
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     demand)        echo "$PROG: a wait a person must clear is a human gate on the bead that waits: file it with human-gate.sh --subject <bead> --key <key> --message \"<what they must clear>\", or with gc bd gate create --type=human --blocks <bead>. Nothing was filed." >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, park, priority, dismiss, handback, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, park, priority, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

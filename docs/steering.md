@@ -1,6 +1,6 @@
 ---
 name: Steering — how the operator steers the city's work
-description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, where PR-finishing work ranks and why it never has a parent, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work or PR-finishing work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
+description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, Gas City's hold:mayor label that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc beads list --label hold:mayor) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, where PR-finishing work ranks and why it never has a parent, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work or PR-finishing work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
 ---
 
 # Steering
@@ -17,8 +17,9 @@ sooner or later by a shift of its own ([Priority](#priority)).
 ## Scope
 
 **Mandate.** Which beads may enter a work pool and what holds the rest: the
-intake rule, the `placement=pending` marker and the writers that set it, the
-emergency check, the placement sitting's queue, and how a bead is placed. How
+intake rule, the `hold:mayor` label that holds the rest and the writers that
+set it, the emergency check, the placement sitting's queue, and how a bead is
+placed. How
 the operator decides when work runs: the steering moves, the state each move
 writes, what that state holds and what it leaves running, and how each move is
 released. The order work queues in: how a bead's priority is derived, where it
@@ -51,8 +52,18 @@ A bead may be routed or armed to a work pool only when one of these holds:
   finds files there that the `gc` binary moved, a route the operator made
   standing ([refinery-merge-cadence.md](refinery-merge-cadence.md)).
 
-Every other bead waits for placement. A bead held this way carries
-`placement=pending` and no route and no arm, so no pool is offered it.
+Every other bead waits for placement. A bead held this way is open and
+unassigned, carries Gas City's `hold:mayor` label, and has no route and no arm.
+Gas City keeps a bead carrying the label out of its default work query, the
+hook, pool demand and the route-restore sweeps, so no pool is offered it. The
+label names Gas City's default coordinator, and no code branches on who that
+is.
+
+A held bead carries no route, as Gas City's hold conventions have a pack that
+parks on a hold clear it. Gas City's `hold-label-routed-to` doctor check wants
+the route to equal the label's value, and Gas City's issue 6069 reports that
+check as a bug. So it warns on every held bead, and the deacon's patrol neither
+files that warning nor runs its fix (`formulas/mol-deacon-patrol.toml`).
 
 ## The writers that hold new work
 
@@ -61,19 +72,21 @@ Each writer that files or disposes new work follows the rule.
 - **The first reaction** (`assets/scripts/first-reaction-dispose.sh`). It still
   reacts to every finding, because its card is the placement sitting's triage.
   Its actionable exit routes a member, PR-finishing work or a confirmed
-  emergency. It marks any other bead `placement=pending` and releases it with no
-  route. The blocked exit's `--then-route` arms a dispatch only for a bead the
-  rule admits. Any other bead it marks, and arms nothing, while its wait still
-  lands as a `blocks` edge. The close exit keeps its validating closer, because a
-  close shrinks the queue. The until exit routes, arms and marks nothing, because
-  its bead closes once the bead that ends its job lands. Work that is a named
-  agent's own (`--assign`, `--then-assign`) is not pool work, so the rule does
-  not read it.
-- **The witness** files mail about a pack defect as a bug marked
-  `placement=pending` and routed to no pool (`formulas/mol-witness-patrol.toml`,
-  the `bug-file` block).
+  emergency. It holds any other bead with
+  `gc bd set-state <bead> hold=mayor --reason "<why it was held>"` and releases
+  it with no route. The blocked exit's `--then-route` arms a dispatch only for a
+  bead the rule admits. Any other bead it holds, and arms nothing, while its wait
+  still lands as a `blocks` edge. The close exit keeps its validating closer,
+  because a close shrinks the queue. The until exit routes, arms and holds
+  nothing, because its bead closes once the bead that ends its job lands. Work
+  that is a named agent's own (`--assign`, `--then-assign`) is not pool work, so
+  the rule does not read it. Neither flag may name the po, which takes no work by
+  assignment.
+- **The witness** files mail about a pack defect as a bug carrying `hold:mayor`
+  from its create and routed to no pool (`formulas/mol-witness-patrol.toml`, the
+  `bug-file` block).
 - **The feedback distiller** files each prompt-update and engineering bead
-  marked `placement=pending` and routed to no pool
+  carrying `hold:mayor` from its create and routed to no pool
   (`formulas/mol-feedback-distiller.toml`, the file-and-dispatch step). The
   operator still reviews each one at its PR once a polecat builds it.
 - **The store-only exit** of `mol-polecat-work`
@@ -82,15 +95,10 @@ Each writer that files or disposes new work follows the rule.
   the bead. Like the first reaction's close exit, it keeps that closer because
   a close shrinks the queue.
 
-No held bead is ever readable without its marker. The witness and the
-distiller write it in the create, and the first reaction writes it and reads
+No held bead is ever readable without its label. The witness and the distiller
+write it in the create, which is the bead's own record of it. The first reaction
+writes it with `set-state`, which records the reason in an event bead, and reads
 it back before the release.
-
-A first reaction's subject can still carry `gc.execution_routed_to`, the stamp
-a pour leaves, after the pour's workflow has ended. The queue reads that stamp
-as a live pour, so the release that holds the bead clears it. When the stamp
-survives on a held bead, `gc-helm.sh takeaway` fails the release, and the first
-reaction stops without recording its disposition, so a re-run finishes the hold.
 
 ## The emergency check
 
@@ -117,45 +125,45 @@ not.
 
 ## The placement sitting's queue
 
-`gc-helm.sh unplaced` lists the queue. It reads every rig store the city has,
-skips a suspended rig's store and says so, and orders the beads by priority,
-then age. It writes nothing. When a store does not answer, it names that store
-and exits 4 after printing the rest. A skipped rig leaves the exit at 0,
-because a suspended rig is the operator's choice. `--json` prints one object
-for a caller: the queue as `beads`, the suspended rigs it skipped as `skipped`,
-and the rigs whose store did not answer as `unread`, so a caller can tell a
-partial queue from the whole one.
+`gc beads list --label hold:mayor` lists the queue: every bead carrying the
+label, in every rig's store. It writes nothing. A hold is lifted by a write, so
+the label alone puts a bead in the queue, and nothing is inferred from the
+bead's other fields.
 
-`assets/scripts/placement.sh` is the one definition of a bead in the queue: it
-carries `placement=pending`, and nothing has placed it since. A parent, a route,
-an arm, an assignee or a live pour each places a bead, whether or not the marker
-was cleared. The same definition serves the queue's other readers:
+`has_dispatch_hold`, in `assets/scripts/dispatch-path.sh`, is the one test of a
+hold for the pack's shell readers, which test rows they have already read. It
+reads either of Gas City's hold labels, `hold:mayor` and `hold:external`, each
+trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 
-- the liveness sweep names such a bead's wait, so it does not report the bead as
+- the liveness sweep names a held bead's wait, so it does not report the bead as
   an unnamed wait;
 - the re-check a liveness gate's message carries (`liveness-recheck.sh`) names
   the same wait, so a census cut before intake held the bead does not put it on
   that gate's agenda as well;
-- `doctor/check-blocked-work-armed` owes such a bead no arm, because its
-  dispatch is the route the sitting gives it;
-- the proactive scan files no first reaction for such a bead, because its next
-  move is the sitting's.
+- `doctor/check-blocked-work-armed` owes a held bead no arm, because its dispatch
+  is the route it gets once the sitting places it;
+- the proactive scan files no first reaction for a held bead, because its next
+  move is the sitting's;
+- the deferred-dispatch pass slings no armed bead while it is held, because a
+  sling reads no hold, and `deferred-dispatch.sh list` names the label that
+  holds the arm.
 
 ## Placing a bead
 
 For each bead in the queue, the sitting does one of three things.
 
 - **Place it under an epic.** Give it the epic as its parent
-  (`gc bd update <bead> --parent <epic>`), then route it to its pool
-  (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the epic holds it from
-  then on, through bd's parent-child cascade.
-- **Route it on its own.** Route it to its pool with the same sling, and give it
-  no parent.
-- **Close it**, when the work is not wanted.
+  (`gc bd update <bead> --parent <epic>`), route it to its pool
+  (`gc sling <rig>/gc-toolkit.polecat <bead>`), then lift its hold
+  (`gc bd update <bead> --remove-label hold:mayor`). A park on the epic holds it
+  from then on, through bd's parent-child cascade.
+- **Route it on its own.** Route it with the same sling and lift its hold the
+  same way, and give it no parent.
+- **Close it**, when the work is not wanted. Nothing reads the label on a closed
+  bead.
 
-A placed bead leaves the queue as soon as it has a parent or a route. Clearing
-the marker (`gc bd update <bead> --unset-metadata placement`) keeps the bead's
-record honest, and nothing waits on it.
+A sling reads no hold, so the route comes first: a sling that fails leaves the
+bead held, in the queue. The bead leaves the queue when its hold is lifted.
 
 ## A park
 

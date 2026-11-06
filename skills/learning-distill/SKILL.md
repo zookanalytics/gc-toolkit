@@ -129,7 +129,8 @@ pattern bead of its own, and stamp each member onto its cluster. A proposal
 from the set rests on a cluster, never on one member, and lands as one of two
 things: a `review-rubric` amendment, or a change to the correctness method
 itself (`skills/review-correctness/SKILL.md`), filed as an engineering bead
-for placement. It is never one tactical rule per observation. Judgment 2
+held for placement (`-l hold:mayor` on its create, as the distiller formula's
+step 1b files it). It is never one tactical rule per observation. Judgment 2
 weighs a cluster's recurrence by its distinct `obs.provenance`, as it does
 any pattern's.
 

@@ -78,18 +78,13 @@ PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # shellcheck source=../assets/scripts/standing-kinds.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/standing-kinds.sh" \
     || { printf '%s: cannot source assets/scripts/standing-kinds.sh from the pack\n' "$PROG" >&2; exit 1; }
-# The one definition of a dispatch path, shared with the doctor checks. Exposes
+# The one definition of a dispatch path and of a dispatch hold, shared with the
+# doctor checks, deferred-dispatch.sh and the liveness classifier. Exposes
 # $DISPATCH_PATH_JQ, which scan_precision_filter and sling_dispatch_path_guard
 # apply.
 # shellcheck source=../assets/scripts/dispatch-path.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/dispatch-path.sh" \
     || { printf '%s: cannot source assets/scripts/dispatch-path.sh from the pack\n' "$PROG" >&2; exit 1; }
-# The one definition of a bead that waits for placement, shared with gc-helm.sh
-# unplaced, the liveness classifier and doctor/check-blocked-work-armed. Exposes
-# $PLACEMENT_JQ, which scan_precision_filter applies after $DISPATCH_PATH_JQ.
-# shellcheck source=../assets/scripts/placement.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/placement.sh" \
-    || { printf '%s: cannot source assets/scripts/placement.sh from the pack\n' "$PROG" >&2; exit 1; }
 # The one resolver of a bead id to the store that owns it, and of whether that
 # store holds the bead (docs/bead-store-resolution.md). subject_present_guard
 # asks it.
@@ -770,14 +765,14 @@ cmd_demand() {
 #     escalated, not on a first reaction. sling_dispatch_path_guard refuses
 #     the same beads, so a bead routed or armed after this read still gets no
 #     reaction.
-#   - waits for placement (awaiting_placement, assets/scripts/placement.sh) —
+#   - a dispatch hold (has_dispatch_hold, assets/scripts/dispatch-path.sh) —
 #     intake held it as new work for the operator's placement sitting
-#     (docs/steering.md), so its next move is the sitting's. The witness and the
-#     feedback distiller file their beads marked and unrouted, with no takeaway,
+#     (docs/steering.md) with hold:mayor, so its next move is the sitting's, or
+#     hold:external names an actor outside this store. The witness and the
+#     feedback distiller file their beads held and unrouted, with no takeaway,
 #     so no other clause drops them. A reaction would only triage the bead again,
 #     and its close exit could close a proposal before the operator reads it.
-#     A marked bead that something has placed since is not in the queue, and
-#     the other clauses judge it.
+#     Once a write lifts the hold, the other clauses judge the bead.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -785,11 +780,11 @@ scan_precision_filter() {
     # than raw input. Kept as one list so the review-lane keys and the
     # implementation-anchor keys share a single source of truth.
     markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
-    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
+    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
         map(select(
             ((.metadata["gc.reaction_owned"] // "") == "")
             and (has_dispatch_path | not)
-            and (awaiting_placement | not)
+            and (has_dispatch_hold | not)
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
             and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)

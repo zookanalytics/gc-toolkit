@@ -39,7 +39,8 @@ happened is ended through Gas City's run cancel, as the pack's decline does
 doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
 rather than restating it. What holds an armed bead is defined once, in
-`assets/scripts/hold-lib.sh`, and this doc says how the pass applies it.
+`assets/scripts/hold-lib.sh`, with a hold label beside it in
+`assets/scripts/dispatch-path.sh`, and this doc says how the pass applies them.
 
 ## Arm it instead of remembering it
 
@@ -283,6 +284,14 @@ never dispatched), and an assignee still keeps the pass off the bead. The
 pass reads each generation of ancestors in one listing and their blockers in
 one more, so its cost does not grow with the number of armed beads under a
 held epic.
+
+A hold label holds an arm too. An open bead carrying one of Gas City's hold
+labels, `hold:mayor` or `hold:external` (`has_dispatch_hold` in
+`dispatch-path.sh`), names a next actor that is not a worker. bd's readiness
+does not read the label and a sling reads no hold, so the pass leaves the arm
+until a write lifts the label, and `list` shows it as
+`HELD by its hold:mayor label`. `arm` still records an arm on a held bead, and
+it fires once the hold is lifted.
 
 A held arm keeps its record. Releasing the hold, by closing a park's gate or
 by the prerequisite landing, needs no re-arm: the first pass after it

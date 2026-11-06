@@ -13,7 +13,11 @@
 # finds not held: the is_blocked flag cascades DOWN parent-child edges, so a
 # re-dispatch of work in flight under a parked epic never enters `bd --ready`.
 # A bead bd reports ready is still held by a human gate bd does not count, a
-# pinned one, on it or on an ancestor (hold-lib.sh's hold_holds_ready).
+# pinned one, on it or on an ancestor (hold-lib.sh's hold_holds_ready). An open
+# bead carrying one of Gas City's hold labels is held too (has_dispatch_hold,
+# dispatch-path.sh): a sling reads no hold, so slinging it would pour work the
+# label keeps from every pool. `arm` still accepts such a bead, because placing
+# one arms it and then lifts the hold.
 # A held arm stays intact and fires once its hold releases. Status
 # still gates: a non-open status is set deliberately, and a bead at one is never
 # dispatched. `list` answers "what dispatches are owed?", naming the blocker
@@ -216,6 +220,22 @@ UNTIL_KIND="folded"
 # so nothing runs.
 # shellcheck source=hold-lib.sh
 . "$SCRIPTS_DIR/hold-lib.sh" || { echo "$PROG: cannot source hold-lib.sh beside this script" >&2; exit 1; }
+# The one definition of a dispatch hold, the label hold a sling does not read,
+# shared with the proactive scan and the doctor checks. Unsourceable, no arm can
+# be told from a label-held one, so nothing runs.
+# shellcheck source=dispatch-path.sh
+. "$SCRIPTS_DIR/dispatch-path.sh" || { echo "$PROG: cannot source dispatch-path.sh beside this script" >&2; exit 1; }
+# A label hold as the pass log and `list` name it: "its <label> label" for an
+# open bead carrying one, empty for any other bead. It reads before hold-lib.sh's
+# holds, because no blocker closing lifts a label.
+# shellcheck disable=SC2016  # a jq program: $-names are jq's, not the shell's
+DD_LABEL_HOLD_JQ='
+  def label_hold:
+    if (.status // "") == "open" and has_dispatch_hold
+    then "its " + ([(.labels // [])[]? | tostring | select({labels: [.]} | has_dispatch_hold)][0]
+                   | gsub("[[:cntrl:]]"; " ")) + " label"
+    else "" end;
+'
 # The pass lock is keyed per rig like the order, so two rigs never share one. It
 # lives in the pack state dir the order's env names; the override lets the
 # hermetic test point it at a tmpdir.
@@ -487,7 +507,7 @@ hold_of() { # id seed_file graph_file -> summary on stdout
     printf '%s' "$row" | scrub | jq -c --arg id "$id" '[ .[]? | select(.id == $id) ]' > "$seed" 2>/dev/null || return 1
     jq -e 'length == 1' "$seed" >/dev/null 2>&1 || return 1
     hold_graph dd_hold_read "$seed" "$graph" || return 1
-    jq -r --slurpfile g "$graph" "$HOLD_JQ"'.[0] | hold_summary($g[0])' "$seed" 2>/dev/null
+    jq -r --slurpfile g "$graph" "$HOLD_JQ$DISPATCH_PATH_JQ$DD_LABEL_HOLD_JQ"'.[0] | label_hold as $l | if $l != "" then $l else hold_summary($g[0]) end' "$seed" 2>/dev/null
 }
 
 # --- disarm ------------------------------------------------------------------
@@ -801,16 +821,17 @@ armed_rows() { # rows_out all_out : "<id>\037<status>\037<bd_ready 0|1>\037<hold
     mktemp_tracked || return 1; graph="$REPLY"
     jq -c '[ .[] | select((.status // "") == "open") ]' "$all_out" > "$seed" 2>/dev/null || return 1
     hold_graph dd_hold_read "$seed" "$graph" || return 1
-    { printf '%s' "$ready_ids" | scrub; printf '\n'; cat "$all_out"; } | jq -rn --slurpfile g "$graph" "$HOLD_JQ"'
+    { printf '%s' "$ready_ids" | scrub; printf '\n'; cat "$all_out"; } | jq -rn --slurpfile g "$graph" "$HOLD_JQ$DISPATCH_PATH_JQ$DD_LABEL_HOLD_JQ"'
         (input | map(.id)) as $ready
         | inputs | .[]
         | (if (.id as $i | $ready | index($i)) then "1" else "0" end) as $r
         | ((.id // "") | tostring) as $self
-        | (if (.status // "") != "open" then []
+        | label_hold as $l
+        | (if (.status // "") != "open" or $l != "" then []
            elif $r == "0" then hold_holds($g[0])
            else hold_holds_ready($g[0]) end) as $h
         | [ (.id // ""), (.status // ""), $r,
-            ($h | hold_line($self)),
+            (if $l != "" then $l else ($h | hold_line($self)) end),
             (if ($h | length) > 0 and all($h[]; .on != $self) then ($h[0] | hold_label($self)) else "" end) ]
         | map(tostring) | join("\u001f")' > "$out" 2>/dev/null || return 1
     return 0
@@ -1575,11 +1596,14 @@ reconcile_dispatch() {
 
         # Not dispatchable. `bd --ready` (the fast path) and a walk that finds
         # nothing holding an open bead (hold-lib.sh) are the two ways in, and a
-        # bead bd reports ready still waits on a human gate bd does not count. A
-        # held bead waits on a blocker that can clear, on it or on an ancestor,
-        # and the arm stays intact for the first pass after the hold releases. An
+        # bead bd reports ready still waits on a human gate bd does not count, or
+        # on a hold label (label_hold), which bd's readiness does not read and
+        # no sling reads either. A held bead waits on a blocker that can clear,
+        # on it or on an ancestor, or on a write that lifts its label, and the
+        # arm stays intact for the first pass after the hold releases. An
         # arm an ancestor's blocker holds is gathered for the pass log below; one
-        # its own blocker holds waits on what it was armed for, and is counted.
+        # its own blocker holds waits on what it was armed for, and is counted, as
+        # is one its label holds.
         # Any other live status is excluded by `--ready` on the status itself, so
         # waiting for it is waiting for something no blocker closing can deliver.
         # Say so every pass — the arm outlives every session that could remember
