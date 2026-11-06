@@ -664,11 +664,11 @@ anchor's `pr_url` names, so a write that records the key on an anchor with no
 against origin.
 
 An open human gate holds the anchor through its `blocks` edge onto it, read by
-the one reader rule every reader of a bead's human gates makes (`bd_human_gates`
-in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept to the gates
-whose await type is human). The merge pass's finalize gate (`finalize-gate.sh`)
-refuses the merge while one is open on the anchor, and the labels count each
-human gate on the anchor that is not closed, one a person has claimed included.
+`bd_human_gates` in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept
+to the gates whose await type is human. The merge pass's finalize gate
+(`finalize-gate.sh`) refuses the merge while one is open on the anchor, and the
+labels count each human gate on the anchor that is not closed, one a person has
+claimed included.
 A conversation about the anchor tracks it and blocks nothing, so it holds no
 label.
 
@@ -1107,7 +1107,8 @@ distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
 `duplicate` — say the work relocated, and the pointer names the bead that
 carries it now. The fifth, `not-needed`, says nothing carries it: the bead
 was not needed, and the pointer names the evidence that concluded so,
-typically the conversation of the sitting that ruled. The pointer is required
+typically the conversation of the sitting that ruled, or the human gate its
+ruling answered. The pointer is required
 under every kind, because it is the whole of that distinction. The kind is
 read from the close reason, which opens with the kind's phrase and the
 successor, as in `not needed, per <successor> in <store>`. When the pointer is
@@ -1117,7 +1118,8 @@ false. Consumers: the mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
 twins), the deferred-dispatch reconcile pass (`deferred-dispatch.sh`, the closer
-of a bead its `until` dependency resolved), `preexisting-failure.sh` (a
+of a bead its `until` dependency resolved), `stand-down.sh` (a person's ruling
+that work a human gate holds will not go on), `preexisting-failure.sh` (a
 pre-existing-failure gate follows a closed tracker's pointer to the live bead
 that carries its failure, and a `not-needed` close ends that chain), and any
 patrol judging a closed bead.

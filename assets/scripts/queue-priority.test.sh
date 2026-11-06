@@ -676,10 +676,10 @@ eq "$(prio tk-w1)" 0 "(RULES) a parked epic's member takes the new priority whil
 eq "$(prio tk-s1a)" 0 "(RULES) and so does its workflow"
 eq "$(prio tk-w2)" 0 "(RULES) a member at shift -1 under a P0 epic stays at P0"
 
-# A gate filed under a parent, as a legacy demand gate is, is a member, and a
-# move on that parent re-ranks it as settle computes it.
+# A gate filed under a parent is a member, and a move on that parent re-ranks
+# it as settle computes it.
 reset_store
-jq -c '. + [{"id":"tk-gd","status":"open","issue_type":"gate","priority":1,"metadata":{"gc.demand_for":"tk-w2"},
+jq -c '. + [{"id":"tk-gd","status":"open","issue_type":"gate","priority":1,"metadata":{},
   "dependencies":[{"issue_id":"tk-gd","depends_on_id":"tk-e1","type":"parent-child"}]}]' \
   "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
 helm priority tk-e1 P0

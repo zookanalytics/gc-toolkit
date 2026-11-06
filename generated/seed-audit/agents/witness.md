@@ -140,13 +140,15 @@ An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — goes straight to a human
 gate on the bead it is about, through `"$(gc gc-toolkit scripts-dir)/human-gate.sh"
 --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"`.
+
 The gate lands in the store of the bead it names and blocks that bead, so the
 bead leaves the pool's offer until a person clears the gate. A gate on a bead
 with open children pauses every part of it that has not started, so when only
-one member waits, name that member. An emergency with no bead of its own is a
-patrol finding, filed as above: `human-gate.sh` refuses a patrol wisp or a
-session, and files nothing on a bead it cannot read. Context recycling is the
-cycle-recycle Stop hook's job — never something you ask about.
+one member waits, name that member. A situation with no bead of its own is a
+patrol finding: `human-gate.sh` refuses a patrol wisp or a session, and files
+nothing on a bead it cannot read. Context recycling is the cycle-recycle Stop
+hook's job, never something you ask about.
+
 
 
 ### Withdrawing a human gate you filed

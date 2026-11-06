@@ -96,7 +96,7 @@ eq "$(decide "$(ago 21660)" '1' 'true')" "2 0" "just outside it is not"
 
 echo "# an unusable timestamp is UNKNOWN, and unknown never escalates"
 # The read failing is a different fact from the recoveries being close
-# together, and only the second one is grounds for a visit.
+# together, and only the second one is grounds for a finding.
 eq "$(decide 'not-a-date' '1' 'true')" "2 0" "an unparseable recovered_at does not escalate"
 eq "$(decide '' '3' 'true')" "4 0" "a count with no timestamp does not escalate"
 eq "$(cat "$TMP/err")" "" "and neither path leaks an error"

@@ -21,8 +21,8 @@
 #   * a deferred-dispatch arm that re-slings the work through <formula> once bd
 #     reports it ready. Clearing the gate is the "proceed" ruling: the edge
 #     clears and the next reconcile pass pours a fresh molecule. A ruling not to
-#     proceed closes the work bead first, and a closed bead's arm retires
-#     without a sling.
+#     proceed goes through stand-down.sh, which removes the arm before it answers
+#     the gate, because bd refuses to close a bead the open gate blocks.
 # The gate has to be open. A caller files it through human-gate.sh with no
 # --quiet-window, so a situation a person answered moot or benign before is
 # asked again rather than answered from the closed gate, which would leave the
@@ -212,10 +212,10 @@ elif [ "$STATUS" = in_progress ]; then
   RELEASE=reopen
 fi
 
-# The open human gate under the key, read by the one reader rule: among the
-# subject's gates first, then among the work bead's own. Two stand when racing
-# writers both kept theirs, and the first is taken, in the order human-gate.sh's
-# dedup reads them in (bd-lib.sh's bd_gates_open_under_key).
+# The open human gate under the key: among the subject's gates first, then among
+# the work bead's own. Two stand when racing writers both kept theirs, and the
+# first is taken, in the order human-gate.sh's dedup reads them in (bd-lib.sh's
+# bd_gates_open_under_key).
 open_gate_under_key() { # <bead> -> the id, or nothing; non-zero on a failed read
   local gates
   gates=$(bd_human_gates "$1") || return 1

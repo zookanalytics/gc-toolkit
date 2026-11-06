@@ -1344,7 +1344,6 @@ printf 'proactive %s\n' "$*" >> "$FAKE_SLING"
 exit 0
 PROACTIVE
 chmod +x "$TMP/rebin/gc-proactive.sh"
-printf '#!/bin/sh\nexit 0\n' > "$TMP/rebin/no-reminder"; chmod +x "$TMP/rebin/no-reminder"
 # A real .beads store for the rig, so the resolver can pin --db for the PR search
 # react/engage run; without it the resolver fails closed before resolving. engage
 # also refuses up front a rig whose checkout carries no converse template
@@ -1370,8 +1369,7 @@ run_react() {
 run_engage() {
     : > "$FAKE_CALLS"; : > "$CONV_STATE"
     set +e
-    OUT="$(PATH="$TMP/rebin:$PATH" GC_SITTING_COMMENT_TOOL="$TMP/rebin/no-reminder" \
-        sh "$SCRIPT" engage "$1" --no-input --no-attach 2>"$TMP/err")"; RC=$?
+    OUT="$(PATH="$TMP/rebin:$PATH" sh "$SCRIPT" engage "$1" --no-input --no-attach 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
 }
