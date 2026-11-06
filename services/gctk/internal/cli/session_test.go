@@ -105,6 +105,7 @@ func TestSessionTitleUsage(t *testing.T) {
 		{"flag twice", []string{"--topic", "x", "--topic", "y"}, "tk-s1"},
 		{"flag with no value", []string{"--topic"}, "tk-s1"},
 		{"newline in topic", []string{"--topic", "one\ntwo"}, "tk-s1"},
+		{"newline in subject", []string{"--topic", "x", "--subject", "tk-1\ntwo"}, "tk-s1"},
 		{"no session to default to", []string{"--topic", "x"}, ""},
 		{"PR given as #<n>", []string{"--topic", "x", "--pr", "#41"}, "tk-s1"},
 		{"PR given as its link", []string{"--topic", "x", "--pr", "https://github.com/acme/widgets/pull/41"}, "tk-s1"},
@@ -177,6 +178,14 @@ func TestSessionTitle(t *testing.T) {
 		}
 	})
 
+	t.Run("a provider whose name holds codex is codex, as Gas City reads it", func(t *testing.T) {
+		r := newTitleRig(t)
+		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s1","metadata":{"provider":"my-codex","session_name":"s-tk-s1"}}]`)
+		if _, _, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 1 {
+			t.Fatalf("exit %d, nudges %q", code, r.calls("gc|session|nudge|"))
+		}
+	})
+
 	t.Run("another provider: renamed, no nudge", func(t *testing.T) {
 		r := newTitleRig(t)
 		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s1","metadata":{"provider":"gemini","session_name":"s-tk-s1"}}]`)
@@ -194,6 +203,15 @@ func TestSessionTitle(t *testing.T) {
 		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s1","metadata":{"session_name":"s-tk-s1"}}]`)
 		stdout, _, code := r.run("--topic", "x")
 		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || !strings.Contains(stdout, "skipped the /rename nudge: session tk-s1 records no provider") {
+			t.Fatalf("exit %d, stdout %q, calls %q", code, stdout, r.calls(""))
+		}
+	})
+
+	t.Run("a session bead that cannot be read: renamed, no nudge", func(t *testing.T) {
+		r := newTitleRig(t)
+		t.Setenv("STUB_SESSION_BEAD", "")
+		stdout, _, code := r.run("--topic", "x")
+		if code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 0 || !strings.Contains(stdout, "skipped the /rename nudge: session tk-s1 could not be read") {
 			t.Fatalf("exit %d, stdout %q, calls %q", code, stdout, r.calls(""))
 		}
 	})
@@ -246,6 +264,14 @@ func TestSessionTitle(t *testing.T) {
 		r := newTitleRig(t)
 		t.Setenv("STUB_NUDGE_OUT", `{"ok":true,"queued":true,"outcome":"queued"}`)
 		if stdout, _, code := r.run("--topic", "x"); code != sessionExitDone || !strings.Contains(stdout, "queued the /rename nudge") {
+			t.Fatalf("exit %d, stdout %q", code, stdout)
+		}
+	})
+
+	t.Run("a nudge that reports no outcome is reported as sent", func(t *testing.T) {
+		r := newTitleRig(t)
+		t.Setenv("STUB_NUDGE_OUT", `{"ok":true,"queued":false}`)
+		if stdout, _, code := r.run("--topic", "x"); code != sessionExitDone || !strings.Contains(stdout, "nudged tk-s1: /rename sent") {
 			t.Fatalf("exit %d, stdout %q", code, stdout)
 		}
 	})
