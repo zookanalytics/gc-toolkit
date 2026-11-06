@@ -69,12 +69,12 @@ func TestActuateRoutesRunTheirVerb(t *testing.T) {
 }
 
 // accept's sling-failure path exits 1 (gc-helm.sh cmd_accept). The route reports
-// it as a verb failure (422) with the script's sentence, not a 5xx — the visit is
-// left open and retry or Discuss is the move.
+// it as a verb failure (422) with the script's sentence, not a 5xx — the
+// recommendation's gate is open again and retry or Discuss is the move.
 func TestAcceptSlingFailureExitOneIsVerbFailed(t *testing.T) {
 	f := &fakeActuator{res: ToolResult{
 		ExitCode: 1,
-		Stderr:   "gc-helm: accept: 'gc sling ... --on mol-x' failed for tk-abc12 — the visit is left open for retry or Discuss. Nothing dismissed.\n",
+		Stderr:   "gc-helm: accept: 'gc sling ... --on mol-x' failed for tk-abc12 and poured no root. The recommendation's gate tk-g1 is open again, back on the board.\n",
 	}}
 	rr := serveOpen(t, f, actuateReq("accept", `{"bead":"tk-abc12"}`))
 	if rr.Code != http.StatusUnprocessableEntity {
@@ -84,7 +84,7 @@ func TestAcceptSlingFailureExitOneIsVerbFailed(t *testing.T) {
 	if got.Reason != reasonVerbFailed {
 		t.Errorf("reason = %q, want %q", got.Reason, reasonVerbFailed)
 	}
-	if !strings.Contains(got.Error, "left open for retry") {
+	if !strings.Contains(got.Error, "is open again") {
 		t.Errorf("error = %q, want the script's sentence", got.Error)
 	}
 	if strings.HasPrefix(got.Error, "gc-helm:") {
@@ -175,9 +175,10 @@ func TestActuateRoutesShareTheWriteMiddleware(t *testing.T) {
 	}
 }
 
-// The in-process gate keys on the subject (bead): every write verb mutates its
-// visit, so a double-clicked Accept collapses AND an Accept racing a Dismiss on
-// one subject is held. The refusal names the verb already running.
+// The in-process gate keys on the subject (bead): every write verb acts on what
+// the bead's conversations and gates hold, so a double-clicked Accept collapses
+// AND an Accept racing a Dismiss on one subject is held. The refusal names the
+// verb already running.
 func TestActuationGateSerializesWritesPerSubject(t *testing.T) {
 	g := newActuationGate()
 	if ok, _ := g.enter("tk-abc12", "accept"); !ok {
@@ -200,8 +201,9 @@ func TestActuationGateSerializesWritesPerSubject(t *testing.T) {
 }
 
 // A successful parity write drops the cached board, exactly as open does: accept
-// dismisses a visit and slings, dismiss closes one, so the row the operator acted
-// on changes and the next refresh must re-gather rather than serve the stale TTL.
+// clears a gate and slings, dismiss closes a conversation, so the row the
+// operator acted on changes and the next refresh must re-gather rather than
+// serve the stale TTL.
 func TestActuateSuccessInvalidatesTheBoardCache(t *testing.T) {
 	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: accept: dispatched mol-x at tk-abc12\n"}}
 	s := New(newFake(), time.Minute, WithActuator(f))

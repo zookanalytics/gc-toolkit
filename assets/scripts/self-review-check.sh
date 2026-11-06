@@ -142,7 +142,7 @@ resolve_budget() {
 
 # The witness address, derived from the molecule's pool route (…/<prefix>polecat
 # -> …/<prefix>witness). The witness is the escalation first responder; it
-# triages the handed-back bead and promotes it to a human visit if needed.
+# triages the handed-back bead and puts it to a person through a human gate if needed.
 resolve_witness() {
 	local route="$1"
 	case "$route" in

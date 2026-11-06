@@ -23,15 +23,13 @@ func TestDerive(t *testing.T) {
 		{"rebase hold", Facts{RebaseHold: "true"}, NeedsAttention},
 		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
 		{"needs-attention outranks working (hold + live work)", Facts{MergeHold: "true", InFlightCount: 2}, NeedsAttention},
-		{"open visit on the anchor", Facts{OpenVisit: true}, NeedsAttention},
-		{"open visit on an approved PR", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, NeedsAttention},
-		{"open visit outranks live work", Facts{OpenVisit: true, InFlightCount: 2}, NeedsAttention},
+		{"open human gate on the anchor", Facts{OpenHumanGate: true}, NeedsAttention},
+		{"open human gate on an approved PR", Facts{OpenHumanGate: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, NeedsAttention},
+		{"open human gate outranks live work", Facts{OpenHumanGate: true, InFlightCount: 2}, NeedsAttention},
 		{"a hold outranks an approval", Facts{MergeHold: "true", PRPosture: "approved@oid@t"}, NeedsAttention},
 
 		// Whatever Held names is a thing a person has to act on, so it holds the PR
-		// as a visit on the anchor does, whatever is in flight beside it.
-		{"an open visit on the PR's rework, the rework in flight", Facts{WorkVisit: true, InFlightCount: 1}, NeedsAttention},
-		{"an open visit on the work of an approved PR", Facts{WorkVisit: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t", InFlightCount: 1}, NeedsAttention},
+		// as a human gate on the anchor does, whatever is in flight beside it.
 		{"a blocker a person owes", Facts{PersonBlocker: true}, NeedsAttention},
 		{"a blocker a person owes on an approved PR with work in flight", Facts{PersonBlocker: true, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
 		{"review feedback the city has not answered, nothing in flight", Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "1@oid"}, NeedsAttention},
@@ -117,7 +115,7 @@ func TestBlocked(t *testing.T) {
 	}
 }
 
-// Held names each thing that holds the PR, in the order visit, review, blocked,
+// Held names each thing that holds the PR, in the order gate, review, blocked,
 // and leaves out a value whose condition no longer stands. Any value means
 // Derive reads needs-attention; the holds that carry no value (merge_hold and
 // rebase_hold) read needs-attention with Held empty.
@@ -144,9 +142,8 @@ func TestHeld(t *testing.T) {
 		{"the merge freeze carries no held value", Facts{MergeHold: "true"}, nil},
 		{"the rebase hold carries no held value", Facts{RebaseHold: "true"}, nil},
 
-		{"an open visit on the anchor", Facts{OpenVisit: true}, []Hold{HeldVisit}},
-		{"an open visit on the PR's rework", Facts{WorkVisit: true, InFlightCount: 1}, []Hold{HeldVisit}},
-		{"a visit on the anchor and one on its work are one value", Facts{OpenVisit: true, WorkVisit: true}, []Hold{HeldVisit}},
+		{"an open human gate on the anchor", Facts{OpenHumanGate: true}, []Hold{HeldGate}},
+		{"…whatever is in flight beside it", Facts{OpenHumanGate: true, InFlightCount: 1}, []Hold{HeldGate}},
 
 		{"an unresolved required thread, nothing in flight", threads, []Hold{HeldReview}},
 		{"the thread verdict with a fix in flight", func() Facts { f := threads; f.InFlightCount = 1; return f }(), nil},
@@ -163,7 +160,6 @@ func TestHeld(t *testing.T) {
 		{"feedback still waiting to be routed", with(unanswered, func(f *Facts) { f.PRPosture = "commented@oid@t" }), nil},
 		{"a count read at a head the posture has left", with(unanswered, func(f *Facts) { f.PRPosture = "review_required@new@t" }), nil},
 		{"a count recorded with no head", with(unanswered, func(f *Facts) { f.PRUnansweredThreads = "1" }), nil},
-		{"a visit on the work the feedback waits on", with(unanswered, func(f *Facts) { f.WorkVisit = true; f.InFlightCount = 1 }), []Hold{HeldVisit}},
 
 		{"a blocker no automated actor holds", stuck, []Hold{HeldBlocked}},
 		{"the stuck blocker holds whatever is in flight", func() Facts { f := stuck; f.InFlightCount = 2; return f }(), []Hold{HeldBlocked}},
@@ -171,9 +167,9 @@ func TestHeld(t *testing.T) {
 		{"a blocker a person owes", Facts{PersonBlocker: true}, []Hold{HeldBlocked}},
 		{"a stuck blocker beside one a person owes is one value", func() Facts { f := stuck; f.PersonBlocker = true; return f }(), []Hold{HeldBlocked}},
 
-		{"a visit and a person's blocker stand together", Facts{OpenVisit: true, PersonBlocker: true}, []Hold{HeldVisit, HeldBlocked}},
-		{"a visit on the work beside the thread verdict", func() Facts { f := threads; f.WorkVisit = true; return f }(), []Hold{HeldVisit, HeldReview}},
-		{"every value at once", func() Facts { f := threads; f.OpenVisit = true; f.PersonBlocker = true; return f }(), []Hold{HeldVisit, HeldReview, HeldBlocked}},
+		{"a human gate and a person's blocker stand together", Facts{OpenHumanGate: true, PersonBlocker: true}, []Hold{HeldGate, HeldBlocked}},
+		{"a human gate beside the thread verdict", func() Facts { f := threads; f.OpenHumanGate = true; return f }(), []Hold{HeldGate, HeldReview}},
+		{"every value at once", func() Facts { f := threads; f.OpenHumanGate = true; f.PersonBlocker = true; return f }(), []Hold{HeldGate, HeldReview, HeldBlocked}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Held(tc.f)
@@ -248,8 +244,8 @@ func TestSplitDated(t *testing.T) {
 	}
 }
 
-// The PR's own work in flight, whose visit holds the PR, is a review or rework
-// child that is open or in_progress. Any other kind in the in-flight set, or a
+// The PR's own work in flight is a review or rework child that is open or
+// in_progress. Any other kind in the in-flight set, or a
 // review or rework child at another live status, counts in flight and holds
 // nothing.
 func TestIsWork(t *testing.T) {

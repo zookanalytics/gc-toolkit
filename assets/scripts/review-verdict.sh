@@ -33,7 +33,7 @@
 # ruling lifted the approval, so a later round whose ruling keeps the approval
 # leaves the line where it was.
 #
-# Usage follows the in-variable jq convention (visit-identity.sh): prepend the
+# Usage follows the in-variable jq convention (standing-kinds.sh): prepend the
 # defs to a jq program over the review list, e.g.
 #   jq -s --arg self "$SELF_LOGIN" "$REVIEW_VERDICT_DEF"' review_verdict($self)'
 # No comment inside the program may carry an apostrophe: the program is one

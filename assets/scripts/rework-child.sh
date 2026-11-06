@@ -103,13 +103,14 @@ bd_json show "$ANCHOR" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 
 POOL=$("$SCRIPT_DIR/pool-route.sh" "$POOL_NAME") \
   || fail "the rework child would route to '$POOL_NAME', which no live pool claims; nothing filed"
 
-# The source key is the dedup key: a review bead or a visit id names one review of
-# one anchor, or one sitting's ruling, and only a rework child carries it. A live
+# The source key is the dedup key: a review bead names one review of one anchor,
+# and a conversation id the rulings of one conversation, which
+# converse-rework.sh files one at a time. Only a rework child carries it. A live
 # child is adopted when it names this anchor, or names none: a child filed before
 # children carried the anchor_bead role marker has only the key, and adoption
 # stamps the marker. A live child of the same source on another anchor refuses
-# the filing before any write, as when one visit is signed off twice against
-# different subjects: adopting it would re-stamp it onto this anchor while its
+# the filing before any write, as when one source's ruling already has a live
+# child on another anchor: adopting it would re-stamp it onto this anchor while its
 # blocks edge still holds the other one, and filing beside it would give the
 # source two live children. When more than one live
 # child carries the key on this anchor, the one already dispatched wins: a prior

@@ -8,10 +8,11 @@
 # or arm, whether --pool names the pool or the default does; the pour proved by
 # its own stamp and never by the one the last pour left; a failed sling armed
 # for a retry, an exit-0 pour that does not read back never armed, and neither
-# routed bare; and a visit on every other way the repool stops short. The real
+# routed bare; a human gate on the handoff for every other way the repool stops
+# short, and a patrol finding naming a handoff it could not read. The real
 # lifecycle.sh (through a gctk built from this tree), pool-route.sh and
-# deferred-dispatch.sh run against the harness store, and escalate.sh is a stub
-# that records its argv.
+# deferred-dispatch.sh run against the harness store, and human-gate.sh and
+# patrol-finding.sh are stubs that record their argv.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,14 +27,19 @@ harness_init
 ESC_STUB='#!/usr/bin/env bash
 printf "%s\n" "$*" >> "${STUB_ESC_LOG:?}"
 exit "${STUB_ESC_RC:-0}"'
+PF_STUB='#!/usr/bin/env bash
+printf "%s\n" "$*" >> "${STUB_PF_LOG:?}"
+exit 0'
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh" \
   "$HERE/deferred-dispatch.sh"
-printf '%s\n' "$ESC_STUB" > "$SD/escalate.sh"; chmod +x "$SD/escalate.sh"
+printf '%s\n' "$ESC_STUB" > "$SD/human-gate.sh"; chmod +x "$SD/human-gate.sh"
+printf '%s\n' "$PF_STUB" > "$SD/patrol-finding.sh"; chmod +x "$SD/patrol-finding.sh"
 # The same SUT beside a deferred-dispatch.sh whose arm does not land.
 SD_NOARM="$TMP/scripts-noarm"
 mk_sut_dir "$SD_NOARM" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh"
-printf '%s\n' "$ESC_STUB" > "$SD_NOARM/escalate.sh"; chmod +x "$SD_NOARM/escalate.sh"
+printf '%s\n' "$ESC_STUB" > "$SD_NOARM/human-gate.sh"; chmod +x "$SD_NOARM/human-gate.sh"
+printf '%s\n' "$PF_STUB" > "$SD_NOARM/patrol-finding.sh"; chmod +x "$SD_NOARM/patrol-finding.sh"
 printf '#!/usr/bin/env bash\necho "deferred-dispatch: arm refused (stub)" >&2\nexit 1\n' > "$SD_NOARM/deferred-dispatch.sh"
 chmod +x "$SD_NOARM/deferred-dispatch.sh"
 # A gc whose sling exits 0 and stamps nothing, the shape of a pour whose own
@@ -47,7 +53,7 @@ READFAIL="$TMP/bin-readfail"; mkdir -p "$READFAIL"
 printf '#!/usr/bin/env bash\nif [ "${1:-}" = sling ]; then "%s/gc" "$@"; rc=$?; : > "%s/slung"; exit $rc; fi\n[ "${1:-} ${2:-}" = "bd show" ] && [ -e "%s/slung" ] && exit 1\nexec "%s/gc" "$@"\n' "$BIN" "$TMP" "$TMP" "$BIN" > "$READFAIL/gc"
 chmod +x "$READFAIL/gc"
 
-export STUB_ESC_LOG="$TMP/esc.log"
+export STUB_ESC_LOG="$TMP/esc.log" STUB_PF_LOG="$TMP/pf.log"
 export GC_RIG="gc-toolkit"
 ROUTE="gc-toolkit/gc-toolkit.polecat"
 REASON="Conflicts with main at abc123; resume in prepare_mode=merge"
@@ -61,7 +67,7 @@ work() { # [extra-metadata-fields]
 }
 reset() { # [extra-metadata-fields]
   store "[$(work "${1:-}")]"
-  : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"; rm -f "$TMP/slung"
+  : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"; : > "$STUB_PF_LOG"; rm -f "$TMP/slung"
   export STUB_SLING_FAIL="" STUB_UPDATE_FAIL="" STUB_SHOW_FAIL="" STUB_AGENTS="" STUB_ESC_RC=""
 }
 # $out is stderr and stdout together; $TMP/stdout holds stdout alone.
@@ -70,7 +76,7 @@ run()  { _run "$SD/rejection-repool.sh" "$@"; }
 run_noarm() { _run "$SD_NOARM/rejection-repool.sh" "$@"; }
 stdout_meta() { jq -r --arg k "$1" '(.[0].metadata[$k] // "<absent>") | tostring' "$TMP/stdout" 2>/dev/null; }
 slings() { grep -c '^sling ' "$STUB_GC_LOG" || true; }
-visits() { wc -l < "$STUB_ESC_LOG" | tr -d ' '; }
+gates() { wc -l < "$STUB_ESC_LOG" | tr -d ' '; }
 no_bare_route() { # <label>
   case "$(meta tk-w gc.routed_to)" in
     ""|"<absent>") ok "$1" ;;
@@ -110,7 +116,7 @@ else
   bad "the release lands before the pour (update line '$first_update', sling line '$first_sling')"
 fi
 eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "a proved pour arms nothing"
-eq "$(visits)" "0" "a proved pour files no visit"
+eq "$(gates)" "0" "a proved pour files no gate"
 eq "$(wc -l < "$TMP/stdout" | tr -d ' ')" "1" "stdout is one line"
 eq "$(jq -r '.[0].id' "$TMP/stdout" 2>/dev/null)" "tk-w" "stdout is the bead's row"
 eq "$(stdout_meta rejection_reason)" "<absent>" "the row is the read before the release: no rejection_reason yet"
@@ -289,7 +295,7 @@ eq "$(meta tk-g rejection_reason)" "<absent>" "the convoy records no rejection o
 eq "$(bassignee tk-g)" "" "the convoy is released: no assignee"
 eq "$(meta tk-g merge_result)" "<absent>" "the convoy is unanchored until the child's work lands"
 eq "$(meta "$CHILD" gc.dispatch_when_ready)" "<absent>" "a proved pour arms nothing"
-eq "$(visits)" "0" "a proved pour files no visit"
+eq "$(gates)" "0" "a proved pour files no gate"
 eq "$(jq -r '.[0].id' "$TMP/stdout" 2>/dev/null)" "tk-g" "stdout is the convoy's row as read before the release"
 
 echo "# a convoy with a live PR hands it to its rebuild child"
@@ -337,7 +343,7 @@ ARMED=$(jq -r '[.[] | select((.metadata["gc.dispatch_when_ready"] // "") != "") 
 eq "$ARMED" "$CHILD" "the deferred dispatch is armed on the rebuild child, never the convoy"
 eq "$(meta "$CHILD" gc.dispatch_when_ready)" "$ROUTE" "the arm targets the proved route"
 eq "$(meta "$CHILD" gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "the arm replays the pour"
-eq "$(visits)" "0" "an armed retry files no visit"
+eq "$(gates)" "0" "an armed retry files no gate"
 # The reconcile pass replays an arm as one gc sling of the armed bead, with the
 # target and the args the arm recorded (sling_bead in deferred-dispatch.sh).
 export STUB_SLING_FAIL=""
@@ -436,15 +442,15 @@ for answer in "inconclusive|exit 0: gc sling: pre-check inconclusive:" \
   end_runs "$CHILD"
   : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"
   STUB_PREVIEW="$kind" run_pour tk-g --reason "$REASON2"
-  eq "$rc" 2 "a preview answering $kind -> visit, exit 2"
+  eq "$rc" 2 "a preview answering $kind -> gate, exit 2"
   eq "$(slings)" "0" "nothing is poured ($kind)"
   eq "$(grep -c "^bd update $CHILD" "$STUB_GC_LOG" || true)" "0" "the child is not released ($kind)"
   eq "$(meta "$CHILD" rejection_reason)" "$REASON" "nothing is written to the child ($kind)"
   eq "$(meta "$CHILD" gc.dispatch_when_ready)" "<absent>" "nothing is armed ($kind)"
-  has "$(cat "$STUB_ESC_LOG")" "a live rebuild cannot be told from a finished one" "the visit names the unanswered preview ($kind)"
+  has "$(cat "$STUB_ESC_LOG")" "a live rebuild cannot be told from a finished one" "the gate names the unanswered preview ($kind)"
   said="${answer#*|}"
-  has "$(cat "$STUB_ESC_LOG")" "${said//@/$CHILD}" "the visit carries gc's exit and its own words ($kind)"
-  has "$(cat "$STUB_ESC_LOG")" "gc sling $ROUTE $CHILD --on mol-polecat-work --dry-run" "the visit names the preview that finishes it ($kind)"
+  has "$(cat "$STUB_ESC_LOG")" "${said//@/$CHILD}" "the gate carries gc's exit and its own words ($kind)"
+  has "$(cat "$STUB_ESC_LOG")" "gc sling $ROUTE $CHILD --on mol-polecat-work --dry-run" "the gate names the preview that finishes it ($kind)"
 done
 
 echo "# whether the found child is armed or live is never read from a show of the child"
@@ -462,13 +468,13 @@ run_showfail tk-g --reason "$REASON"
 eq "$rc" 0 "a child a live run works on stands as the rebuild when its own read fails"
 eq "$(slings)" "0" "nothing is poured again"
 eq "$(meta tk-c1 rejection_reason)" "<absent>" "its work order is not rewritten"
-eq "$(visits)" "0" "no visit is filed"
+eq "$(gates)" "0" "no gate is filed"
 grad
 store "$(jq -c --arg r "$ROUTE" '. + [{"id":"tk-c1","status":"open","assignee":"","title":"rebuild","issue_type":"task","priority":1,"metadata":{"task_kind":"rework","anchor_bead":"tk-g","branch":"integration/tk-g","target":"main","priority_shift":-1,"gc.dispatch_when_ready":$r}}]' "$STUB_STORE")"
 run_showfail tk-g --reason "$REASON"
 eq "$rc" 2 "an armed child whose own read fails is still left to its arm: exit 2"
 eq "$(slings)" "0" "the repool pours nothing beside the arm"
-eq "$(visits)" "0" "the arm carries it, so no visit is filed"
+eq "$(gates)" "0" "the arm carries it, so no gate is filed"
 
 echo "# a convoy's review or ruling rework is not its rebuild child"
 grad
@@ -483,10 +489,10 @@ echo "# a convoy that names no target files nothing"
 store '[{"id":"tk-g","status":"open","assignee":"","notes":"","title":"g","issue_type":"convoy","priority":1,"metadata":{"branch":"integration/tk-g","graduation":true,"merge_strategy":"mr"}}]'
 : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"
 run_pour tk-g --reason "$REASON"
-eq "$rc" 2 "a visit carries it: exit 2"
+eq "$rc" 2 "a gate carries it: exit 2"
 eq "$(kids_of tk-g)" "" "no rebuild child is filed"
 eq "$(slings)" "0" "nothing is poured"
-has "$(cat "$STUB_ESC_LOG")" "names no branch or no target" "the visit names what is missing"
+has "$(cat "$STUB_ESC_LOG")" "names no branch or no target" "the gate names what is missing"
 
 echo "# the stamp the last pour left proves nothing, and an exit-0 pour is not poured again"
 # The bead starts with gc.execution_routed_to naming this very pool. A pour that
@@ -500,9 +506,9 @@ eq "$(slings)" "1" "it was poured once"
 eq "$(meta tk-w gc.execution_routed_to)" "<absent>" "the stale stamp was cleared before the pour"
 eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "an exit-0 pour is never armed for a retry"
 no_bare_route "an unproved pour is never routed bare"
-eq "$(visits)" "1" "a visit carries it instead"
-has "$(cat "$STUB_ESC_LOG")" "after gc sling exited 0" "the visit says the sling succeeded"
-has "$(cat "$STUB_ESC_LOG")" "check that no mol-polecat-work workflow is live on it" "the visit asks for the live-workflow check before any re-pour"
+eq "$(gates)" "1" "a gate carries it instead"
+has "$(cat "$STUB_ESC_LOG")" "after gc sling exited 0" "the gate says the sling succeeded"
+has "$(cat "$STUB_ESC_LOG")" "check that no mol-polecat-work workflow is live on it" "the gate asks for the live-workflow check before any re-pour"
 
 echo "# a read that fails after an exit-0 pour is not poured again"
 reset
@@ -510,8 +516,8 @@ PATH="$READFAIL:$PATH" run tk-w --reason "$REASON"
 eq "$rc" 2 "an unreadable stamp after an exit-0 pour exits 2"
 eq "$(slings)" "1" "it was poured once"
 eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "nothing is armed to pour it again"
-eq "$(visits)" "1" "a visit carries it"
-has "$(cat "$STUB_ESC_LOG")" "check that no mol-polecat-work workflow is live on it" "the visit asks for the live-workflow check"
+eq "$(gates)" "1" "a gate carries it"
+has "$(cat "$STUB_ESC_LOG")" "check that no mol-polecat-work workflow is live on it" "the gate asks for the live-workflow check"
 
 echo "# a failed sling is armed for a retry"
 reset
@@ -523,27 +529,27 @@ eq "$(meta tk-w gc.dispatch_when_ready)" "$ROUTE" "the retry is armed to the pro
 eq "$(meta tk-w gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "the arm replays the pour"
 no_bare_route "a failed sling is never routed bare"
 has "$out" "armed a deferred dispatch" "the run says the arm carries it"
-eq "$(visits)" "0" "an armed retry files no visit"
+eq "$(gates)" "0" "an armed retry files no gate"
 eq "$(wc -l < "$TMP/stdout" | tr -d ' ')" "1" "stdout is still the one row: the arm's own output goes to stderr"
 
-echo "# an arm that does not land files the visit"
+echo "# an arm that does not land files the gate"
 reset
 export STUB_SLING_FAIL=1
 run_noarm tk-w --reason "$REASON"
-eq "$rc" 2 "a visit carries the bead: exit 2"
-eq "$(visits)" "1" "one visit"
+eq "$rc" 2 "a gate carries the bead: exit 2"
+eq "$(gates)" "1" "one gate"
 esc=$(cat "$STUB_ESC_LOG")
 has "$esc" "--subject tk-w --key rejection-repool-failed" "filed on the bead under its situation key"
-has "$esc" "gc sling $ROUTE tk-w --on mol-polecat-work" "the visit names the pour that finishes it"
-has "$esc" "rejection reason: $REASON)" "the visit carries the reason"
-has "$esc" "--message A rejected handoff may never be rebuilt:" "the visit leads with the stake"
-no_bare_route "no bare route behind the visit either"
+has "$esc" "gc sling $ROUTE tk-w --on mol-polecat-work" "the gate names the pour that finishes it"
+has "$esc" "rejection reason: $REASON)" "the gate carries the reason"
+has "$esc" "--message A rejected handoff may never be rebuilt:" "the gate leads with the stake"
+no_bare_route "no bare route behind the gate either"
 
 echo "# nothing recorded: exit 3"
 reset
 export STUB_SLING_FAIL=1 STUB_ESC_RC=1
 run_noarm tk-w --reason "$REASON"
-eq "$rc" 3 "no arm and no visit -> exit 3"
+eq "$rc" 3 "no arm and no gate -> exit 3"
 has "$out" "NOTHING dispatches tk-w" "the run says nothing carries the bead"
 
 echo "# the pool route is proved before any pour"
@@ -556,10 +562,10 @@ for pool_args in "" "--pool gc-toolkit.polecat"; do
   # shellcheck disable=SC2086 # $pool_args is the flag and its value, or nothing
   run tk-w --reason "$REASON" $pool_args
   how="${pool_args:-the default pool}"
-  eq "$rc" 2 "an unclaimed pool ($how) -> visit, exit 2"
+  eq "$rc" 2 "an unclaimed pool ($how) -> gate, exit 2"
   eq "$(slings)" "0" "nothing is poured to a pool nobody claims ($how)"
   eq "$(meta tk-w rejection_reason)" "$REASON" "the reason is recorded for whoever finishes it ($how)"
-  has "$(cat "$STUB_ESC_LOG")" "no live pool claims 'gc-toolkit.polecat'" "the visit names the missing pool ($how)"
+  has "$(cat "$STUB_ESC_LOG")" "no live pool claims 'gc-toolkit.polecat'" "the gate names the missing pool ($how)"
   eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "nothing is armed to an unproved route ($how)"
   no_bare_route "no route is stamped in its place ($how)"
 done
@@ -589,13 +595,13 @@ echo "# a bare route is refused before any pour or arm"
 # so a pour to the bare name could never read back as proved.
 reset
 GC_RIG="" run tk-w --reason "$REASON"
-eq "$rc" 2 "a bare route -> visit, exit 2"
+eq "$rc" 2 "a bare route -> gate, exit 2"
 eq "$(slings)" "0" "nothing is poured to a bare name"
 eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "nothing is armed to a bare name"
 eq "$(meta tk-w rejection_reason)" "$REASON" "the release stands for whoever finishes it"
 no_bare_route "the bare name is not stamped as a route either"
-has "$(cat "$STUB_ESC_LOG")" "the bare 'gc-toolkit.polecat'" "the visit names the bare route"
-has "$(cat "$STUB_ESC_LOG")" "gc sling <rig>/gc-toolkit.polecat tk-w --on mol-polecat-work" "the visit names the rig-qualified pour that finishes it"
+has "$(cat "$STUB_ESC_LOG")" "the bare 'gc-toolkit.polecat'" "the gate names the bare route"
+has "$(cat "$STUB_ESC_LOG")" "gc sling <rig>/gc-toolkit.polecat tk-w --on mol-polecat-work" "the gate names the rig-qualified pour that finishes it"
 reset
 GC_RIG="" run tk-w --reason "$REASON" --pool gc-toolkit.polecat
 eq "$rc" 2 "a bare --pool with GC_RIG unset is refused the same way"
@@ -605,20 +611,22 @@ echo "# a refused release pours nothing"
 reset
 export STUB_UPDATE_FAIL="tk-w"
 run tk-w --reason "$REASON"
-eq "$rc" 2 "a refused transition -> visit, exit 2"
+eq "$rc" 2 "a refused transition -> gate, exit 2"
 eq "$(slings)" "0" "nothing is poured onto a bead the release did not reach"
 eq "$(meta tk-w rejection_reason)" "<absent>" "the refused release wrote nothing"
-has "$(cat "$STUB_ESC_LOG")" "lifecycle transition did not land or did not verify" "the visit names the refused release"
+has "$(cat "$STUB_ESC_LOG")" "lifecycle transition did not land or did not verify" "the gate names the refused release"
 eq "$(jq -r '.[0].id' "$TMP/stdout" 2>/dev/null)" "tk-w" "the row read before the refused release is still on stdout"
 
 echo "# an unreadable bead pours nothing"
 reset
 export STUB_SHOW_FAIL=1
 run tk-w --reason "$REASON"
-eq "$rc" 2 "an unreadable bead -> visit, exit 2"
+eq "$rc" 2 "an unreadable bead -> patrol finding, exit 2"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "no write"
 eq "$(slings)" "0" "no pour"
-has "$(cat "$STUB_ESC_LOG")" "it could not be read" "the visit names the unreadable bead"
+eq "$(cat "$STUB_ESC_LOG")" "" "no human gate: a bead no read reaches cannot be blocked"
+has "$(cat "$STUB_PF_LOG")" "it could not be read" "the patrol finding names the unreadable bead"
+has "$(cat "$STUB_PF_LOG")" "--key rejection-repool-unread.tk-w" "…under a key naming the bead"
 eq "$(wc -c < "$TMP/stdout" | tr -d ' ')" "0" "no row on stdout"
 
 echo "---"

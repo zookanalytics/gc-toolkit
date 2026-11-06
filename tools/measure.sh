@@ -54,7 +54,7 @@ kind	generated	^generated/|/dist/|/gen/|(^|/)package-lock\.json$|(^|/)go\.sum$
 kind	record	^specs/
 kind	tooling	^tools/|^\.github/|^\.[^/]*$|(^|/)\.gitkeep$
 kind	test	\.test\.(sh|ts|tsx)$|_test\.go$|/testdata/|/fixture/|\.fixture\.json$|\.stub\.sh$|^assets/scripts/test-harness\.sh$|(^|/)vitest\.config\.ts$
-kind	docs	^docs/|(^|/)README\.md$|(^|/)PROVENANCE\.md$|^LICENSE$
+kind	docs	^docs/|(^|/)README\.md$|(^|/)PROVENANCE\.md$|^LICENSE$|^(AGENTS|CLAUDE)\.md$
 kind	text	prompt\.template\.md$|(^|/)template-fragments/|^skills/
 kind	flow	\.toml$|\.json$|^overlays/|namepool\.txt$
 kind	code	.

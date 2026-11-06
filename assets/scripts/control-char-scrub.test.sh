@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # control-char-scrub.test.sh — regression test for the one control-character
-# scrubber and every copy of it (precedent: gate-visit.test.sh).
+# scrubber and every copy of it.
 #
 # Formula bodies and pack scripts have no include mechanism, so the scrubber
 # lives as marker-delimited copies (# >>> control-char-scrub / # <<<). This
@@ -50,7 +50,7 @@ hosts() {
 }
 
 echo "── 1. the canonical block ──"
-CANON_HOST="$SDIR/escalate.sh"
+CANON_HOST="$SDIR/human-gate.sh"
 BLOCK="$(extract "$CANON_HOST")"
 if [ -n "$BLOCK" ]; then ok "block present in $(basename "$CANON_HOST")"
 else bad "block present in $(basename "$CANON_HOST")" "no marked block"; fi

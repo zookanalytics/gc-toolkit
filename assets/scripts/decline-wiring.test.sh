@@ -2,9 +2,10 @@
 # Hermetic wiring test for how the pack's formulas decline work.
 #
 # A molecule's lifecycle is gascity's. A worker that declines its work cancels
-# its run through run-cancel.sh (gascity's run cancel), after it files the visit
-# and records the wait on the work bead where a person must rule. No formula
-# holds a molecule, de-routes another step, or retires a molecule by hand.
+# its run through run-cancel.sh (gascity's run cancel), after it files the human
+# gate and records the wait on the work bead where a person must rule. No
+# formula holds a molecule, de-routes another step, or retires a molecule by
+# hand.
 #
 # What is exercised here:
 #   * NO PACK LIFECYCLE: no formula, doctrine fragment or agent prompt calls
@@ -15,11 +16,16 @@
 #     run-cancel.sh and reads or writes no bead itself;
 #   * OWN STEP: every run-cancel.sh --step call names the step it sits in, so a
 #     decline cancels the run this shell is executing and no other;
-#   * OPEN VISIT: every await-ruling.sh call follows an escalation that runs
-#     with escalate.sh's verdict window off, or bring-current-audit.sh's ask,
-#     because a wait needs an open visit and the window files none for a
-#     situation a person already closed moot or benign;
-#   * ORDER, executed: workspace-setup's missing-branch arm files the visit,
+#   * OPEN GATE: every await-ruling.sh call follows a human-gate.sh filing that
+#     declares no quiet window, or bring-current-audit.sh's ask, because a wait
+#     needs an open gate and a quiet window files none for a situation a person
+#     already answered moot or benign;
+#   * STAND-DOWN: a gate that arms a re-sling tells a person how to rule the other
+#     way, through stand-down.sh under the gate's own key, and nothing tells them
+#     to close a bead the gate blocks, which bd refuses. bring-current-audit.sh's
+#     ask is the one that does not, because its gate asks how to resolve a conflict.
+#     The skills a person's ruling reaches give the command;
+#   * ORDER, executed: workspace-setup's missing-branch arm files the gate,
 #     records the wait, cancels, then drains, and stops at the first part that
 #     does not land;
 #   * WITHDRAWN WORK, executed: the self-review and submit-and-exit entry gates
@@ -46,6 +52,7 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
+hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
@@ -98,14 +105,14 @@ else
   echo "skip - own-step check: $TOML_PY"
 fi
 
-# --- 2b. A wait sits on an open visit. ------------------------------------------
-# escalate.sh files nothing for a situation a person closed moot or benign inside
-# its verdict window, and the wait needs an open visit. So the escalation each
-# await-ruling.sh call follows runs with GC_ESCALATE_VERDICT_WINDOW set, or is
-# bring-current-audit.sh's ask, which turns the window off itself
+# --- 2b. A wait sits on an open gate. -------------------------------------------
+# human-gate.sh files nothing for a situation a person answered moot or benign
+# inside a quiet window the call declares, and the wait needs an open gate. So
+# the filing each await-ruling.sh call follows declares no --quiet-window, or is
+# bring-current-audit.sh's ask, which declares none itself
 # (bring-current-audit.test.sh holds it to that). The refinery's patrol is read
 # too: merge-push makes a convoy's rebuild child, and work whose zero-diff check
-# cannot run, wait on a visit.
+# cannot run, wait on a gate.
 if TOML_PY="$(tomllib_python)"; then
   for f in mol-polecat-work mol-validate mol-rig-demo mol-refinery-patrol; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
@@ -121,34 +128,34 @@ for st in d.get("steps", []):
         waits += 1
         filer = None
         for j in range(i - 1, -1, -1):
-            if re.search(r'escalate\.sh" --subject', lines[j]) or re.search(r'"\$BCA" ask', lines[j]):
+            if re.search(r'human-gate\.sh" --subject', lines[j]) or re.search(r'"\$BCA" ask', lines[j]):
                 filer = lines[j]
                 break
         if filer is None:
-            bad.append("%s: a wait with no escalation before it" % st["id"])
-        elif 'escalate.sh"' in filer and "GC_ESCALATE_VERDICT_WINDOW=" not in filer:
-            bad.append("%s: the escalation before a wait keeps the verdict window" % st["id"])
+            bad.append("%s: a wait with no human gate filed before it" % st["id"])
+        elif 'human-gate.sh"' in filer and "--quiet-window" in filer:
+            bad.append("%s: the filing before a wait declares a quiet window" % st["id"])
 print("%d|%s" % (waits, "; ".join(bad)))
 PY
 )
     case "$out" in
       0\|) ok "$f: no wait to check" ;;
-      *\|) ok "$f: each of its ${out%%|*} waits follows an escalation with the verdict window off" ;;
+      *\|) ok "$f: each of its ${out%%|*} waits follows a filing with no quiet window" ;;
       *) bad "$f: ${out#*|}" ;;
     esac
   done
 else
-  echo "skip - open-visit check: $TOML_PY"
+  echo "skip - open-gate check: $TOML_PY"
 fi
 # The same rule over the prose a worker declines by hand from.
 FRAG_WAITS=0; FRAG_BAD=""
 while IFS= read -r frag; do
   out=$(awk -v f="$frag" '
-    /escalate\.sh" --subject/ || /"\$BCA" ask/ { filer = $0 }
+    /human-gate\.sh" --subject/ || /"\$BCA" ask/ { filer = $0 }
     /await-ruling\.sh" "/ {
       n++
-      if (filer == "") bad = bad f ": a wait with no escalation before it; "
-      else if (filer ~ /escalate\.sh"/ && filer !~ /GC_ESCALATE_VERDICT_WINDOW=/) bad = bad f ": the escalation before a wait keeps the verdict window; "
+      if (filer == "") bad = bad f ": a wait with no human gate filed before it; "
+      else if (filer ~ /human-gate\.sh"/ && filer ~ /--quiet-window/) bad = bad f ": the filing before a wait declares a quiet window; "
     }
     END { printf "%d|%s", n, bad }' "$ROOT/$frag")
   FRAG_WAITS=$((FRAG_WAITS + ${out%%|*})); FRAG_BAD="$FRAG_BAD${out#*|}"
@@ -156,7 +163,7 @@ done < <(git -C "$ROOT" grep -l 'await-ruling.sh" "' -- 'template-fragments/*.md
 if [ "$FRAG_WAITS" -eq 0 ]; then
   bad "no fragment, prompt or skill shows a wait; the doctrine's decline recipe is expected to"
 elif [ -z "$FRAG_BAD" ]; then
-  ok "each of the $FRAG_WAITS waits in fragments, prompts and skills follows an escalation with the verdict window off"
+  ok "each of the $FRAG_WAITS waits in fragments, prompts and skills follows a filing with no quiet window"
 else
   bad "$FRAG_BAD"
 fi
@@ -174,12 +181,11 @@ case "$1 ${2:-}" in
 esac
 exit 0
 GC
-for v in escalate:ESCALATE await-ruling:AWAIT run-cancel:CANCEL step-close:STEPCLOSE; do
+for v in human-gate:GATE await-ruling:AWAIT run-cancel:CANCEL step-close:STEPCLOSE; do
   name="${v%%:*}"; verb="${v#*:}"
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"
     printf 'printf %s >> "$FAKE_LOG"\n' "'$verb\\n'"
     printf 'printf %s "$*" >> "$TMP_ARGS/%s"\n' "'%s\\n'" "$name"
-    printf 'printf %s "${GC_ESCALATE_VERDICT_WINDOW-<unset>}" >> "$TMP_ARGS/%s.window"\n' "'%s\\n'" "$name"
     printf 'exit "${FAKE_%s_RC:-0}"\n' "$verb"; } > "$TMP/pack/assets/scripts/$name.sh"
 done
 chmod +x "$TMP/bin/gc" "$TMP/pack/assets/scripts/"*.sh
@@ -204,25 +210,86 @@ run() {
 }
 args() { cat "$TMP_ARGS/$1" 2>/dev/null; }
 
+# --- 2c. A wait says how to rule the other way. ---------------------------------
+# bd refuses to close a bead an open gate blocks, and clearing the gate re-slings
+# armed work, so the one way to rule that it will not go on is stand-down.sh.
+CLOSE_FIRST=$(git -C "$ROOT" grep -n -E 'closes the work bead first|close \$[A-Z_]+,? (first|then clear)' \
+  -- 'formulas/*.toml' 'template-fragments/*.md' 'agents/*' 'skills/*' 'assets/scripts/await-ruling.sh' 2>/dev/null || true)
+eq "$CLOSE_FIRST" "" "nothing tells a person to close a bead before they clear the gate that blocks it"
+grep -q 'stand-down\.sh' "$ROOT/template-fragments/polecat-doctrine.template.md" \
+  && ok "the doctrine names stand-down.sh for a ruling not to proceed" \
+  || bad "the doctrine does not name stand-down.sh for a ruling not to proceed"
+skill_has() { # <skill> <text> <label>: a phrase may wrap across lines there
+  local text
+  text=$(tr '\n' ' ' < "$ROOT/skills/$1/SKILL.md" | tr -s ' ')
+  case "$text" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2')" ;; esac
+}
+skill_has waits '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the waits skill gives the stand-down's command"
+skill_has waits 'Never answer the gate first and close afterwards' "the waits skill rules out answering the gate first"
+skill_has waits '--successor <the bead that records the ruling>' "the waits skill gives the evidence a gate that holds another bead needs"
+skill_has waits 'Never remove that edge yourself first' "the waits skill rules out taking an armed bead off a gate by hand"
+skill_has work '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the work skill gives the stand-down's command"
+skill_has work 'It leaves a deferred-dispatch arm in place' "the work skill says a stop that keeps the bead leaves its arm"
+skill_has converse-settle '/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"' "the converse-settle step gives the stand-down's command, with the conversation as its evidence"
+skill_has converse-settle 'Stand it down first' "the converse-settle step stands the subject down before the sign-off"
+skill_has converse-settle 'add `--leave <gate>` to the sign-off' "the converse-settle step keeps a gate's other bead waiting through the sign-off"
+if TOML_PY="$(tomllib_python)"; then
+  for f in mol-polecat-work mol-refinery-patrol; do
+    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+import re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+text = "\n".join(st.get("description", "") for st in d.get("steps", []))
+checked, bad = 0, []
+def judge(key, message):
+    global checked
+    checked += 1
+    if not re.search(r"stand-down\.sh \$[A-Z_]+ --key " + re.escape(key) + r" --ruling ", message):
+        bad.append(key)
+for key in set(re.findall(r'await-ruling\.sh" "\$[A-Z_]+" --key (\S+) ', text)):
+    # The GATE_MESSAGE loop below judges the first. bring-current-audit.sh composes
+    # the second's text, which asks how to resolve a conflict: a stand-down leaves
+    # that gate open while it also holds the anchor.
+    if key == '"$GATE_KEY"' or key.startswith('"bring-current-question.'):
+        continue
+    messages = [l for l in text.split("\n") if "--key %s --message" % key in l]
+    if not messages:
+        bad.append(key + " has no message")
+    for message in messages:
+        judge(key, message)
+for key, message in re.findall(r'GATE_KEY=([a-z-]+)\n\s*AWAIT=1\n\s*GATE_MESSAGE="([^\n]*)', text):
+    judge(key, message)
+print("%d|%s" % (checked, "; ".join(bad)))
+PY
+)
+    case "$out" in
+      0\|*) bad "$f: no gate that arms a re-sling was found" ;;
+      *\|) ok "$f: the ${out%%|*} gate messages that offer a stop name stand-down.sh under their own keys" ;;
+      *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
+    esac
+  done
+else
+  echo "skip - stand-down wiring check: $TOML_PY"
+fi
+
 # --- 3. The missing-branch arm, in order. ----------------------------------------
 extract mol-polecat-work workspace-setup-missing-branch-decline \
   | sed 's|{{convoy_id}}|tk-cv|g' > "$TMP/missing.sh"
 [ -s "$TMP/missing.sh" ] && ok "missing-branch arm extracted" || bad "missing-branch arm extraction EMPTY"
 set -- WORK_BEAD_ID=tk-work BRANCH=polecat/tk-work CLAIMED_STEP_BEAD_ID=st-setup
-eq "$(run "$TMP/missing.sh" "$@")" "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "missing branch: visit, wait, cancel, drain, exit 1"
-has "$(args escalate)" "--key polecat-missing-branch" "missing branch: the visit's key"
-has "$(args escalate)" "closing it re-slings tk-work" "missing branch: the visit says closing it re-slings the work"
-eq "$(args escalate.window)" "0" "missing branch: the visit is filed with escalate.sh's verdict window off"
+eq "$(run "$TMP/missing.sh" "$@")" "1|GATE;AWAIT;CANCEL;DRAIN;" \
+   "missing branch: gate, wait, cancel, drain, exit 1"
+has "$(args human-gate)" "--subject tk-work --key polecat-missing-branch" "missing branch: the gate blocks the work bead under its key"
+has "$(args human-gate)" "clearing it re-slings tk-work" "missing branch: the gate says clearing it re-slings the work"
+hasnt "$(args human-gate)" "--quiet-window" "missing branch: the gate declares no quiet window"
 eq "$(args await-ruling)" "tk-work --key polecat-missing-branch --formula mol-polecat-work" \
-   "missing branch: the work bead waits on that visit"
+   "missing branch: the work bead waits on that gate"
 has "$(args run-cancel)" "--step mol-polecat-work.workspace-setup --bead st-setup" \
    "missing branch: the cancel names this step and its claimed bead"
-eq "$(run "$TMP/missing.sh" "$@" FAKE_ESCALATE_RC=1)" "1|ESCALATE;" \
-   "missing branch: no visit, so no wait, no cancel, no drain"
-eq "$(run "$TMP/missing.sh" "$@" FAKE_AWAIT_RC=1)" "1|ESCALATE;AWAIT;" \
+eq "$(run "$TMP/missing.sh" "$@" FAKE_GATE_RC=1)" "1|GATE;" \
+   "missing branch: no gate, so no wait, no cancel, no drain"
+eq "$(run "$TMP/missing.sh" "$@" FAKE_AWAIT_RC=1)" "1|GATE;AWAIT;" \
    "missing branch: no wait, so no cancel, no drain"
-eq "$(run "$TMP/missing.sh" "$@" FAKE_CANCEL_RC=1)" "1|ESCALATE;AWAIT;CANCEL;" \
+eq "$(run "$TMP/missing.sh" "$@" FAKE_CANCEL_RC=1)" "1|GATE;AWAIT;CANCEL;" \
    "missing branch: a cancel that did not land is not drained"
 
 # --- 4. Withdrawn work. --------------------------------------------------------

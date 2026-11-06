@@ -13,11 +13,11 @@
 #     Either the order is not running (check-cadence-live/I10 is the direct cause
 #     there, but a single owed arm makes the effect concrete) or the dispatch is
 #     stuck. A hold is the one reconcile slings on, assets/scripts/hold-lib.sh's:
-#     an open `blocks` blocker on the bead or on a parent-child ancestor, a
-#     demand gate on an ancestor aside. So an arm a park holds, by an edge of its
-#     own or its epic's, is not owed: a park leaves the arm intact and its status
-#     open, and the arm fires when the park releases. A bead in flight (a branch,
-#     a merge_result or a rejection_reason) is held by its own blockers alone, so
+#     an open `blocks` blocker on the bead or on a parent-child ancestor. So an
+#     arm a park or a human gate holds, by an edge of its own or its epic's, is
+#     not owed: the blocker leaves the arm intact and its status open, and the
+#     arm fires when the blocker closes. A bead in flight (a branch, a
+#     merge_result or a rejection_reason) is held by its own blockers alone, so
 #     its arm is owed under a parked epic, where reconcile slings it.
 #     check-blocked-work-armed asks blocked work for a dispatch path and nothing
 #     more, and an arm is one, so an arm that never fires is this check's to see.
@@ -65,6 +65,15 @@ set -u
     printf '  - %s\n' "assets/scripts/order-cadence.sh could not be sourced from this pack, so the window an owed arm is judged by cannot be computed."
     exit 1
 }
+# The rule of which human gates still hold, which the definition of a hold
+# below builds on. Unsourceable, a held arm cannot be told from an owed one, so
+# the check warns.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether owed deferred dispatches are firing"
+    printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a held arm cannot be told from an owed one."
+    exit 1
+}
 # The one definition of a hold, which reconcile also reads. Unsourceable, a held
 # arm cannot be told from an owed one, so the check warns.
 # shellcheck source=../../assets/scripts/hold-lib.sh
@@ -81,8 +90,9 @@ K_FAILS="gc.dispatch_when_ready_fail_count"
 
 # The retry cap, read exactly as deferred-dispatch.sh reads it (same env
 # override, same non-numeric fallback): once an arm's sling failures reach it,
-# the reconcile pass files a visit through escalate.sh and stops re-slinging, so
-# a capped arm is already surfaced to a person — not a silent stall to re-report.
+# the reconcile pass asks a person, with a human gate through human-gate.sh or a
+# conversation on a bead with open children, and stops re-slinging, so a capped
+# arm is already surfaced to a person — not a silent stall to re-report.
 MAX_SLING_FAILURES="${GC_MAX_DISPATCH_SLING_FAILURES:-3}"
 case "$MAX_SLING_FAILURES" in ''|*[!0-9]*) MAX_SLING_FAILURES=3 ;; esac
 

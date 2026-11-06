@@ -8,8 +8,10 @@ description: How the operator steers the city's work, deciding which work runs a
 The operator steers the city's capacity by deciding which work runs, and when.
 New work reaches a work pool once the operator has placed it, and not on its
 own. An epic is an ordinary bead, and each move acts on a bead and everything
-under it, with no logic for epics alone. A park holds work under a bead that
-has not started and leaves work already in flight running. Which work it holds,
+under it, with no logic for epics alone. A Delivery, the level an epic may land
+through ([epics.md](epics.md#deliveries-and-epic-checkpoints)), is an epic under an
+epic, so what this page says of an epic holds for it. A park holds work under a
+bead that has not started and leaves work already in flight running. Which work it holds,
 and which it does not, is [below](#what-a-park-holds). A priority decides the
 order work queues in, and work under a bead follows the bead's priority, moved
 sooner or later by a shift of its own ([Priority](#priority)).
@@ -28,8 +30,8 @@ work among them.
 **Boundaries.** The design that decides how work is steered by epic, with the
 alternatives it rejected and the units that build it, is
 [specs/tk-rl8gz4b.2/steer-by-epic.md](../specs/tk-rl8gz4b.2/steer-by-epic.md);
-this page states what runs. What an epic is, what it carries, and when it
-closes, is [epics.md](epics.md). How a pool claims routed work, and how bd's
+this page states what runs. What an epic or a Delivery is, what it carries, and
+when it closes, is [epics.md](epics.md). How a pool claims routed work, and how bd's
 blocked flag cascades and a pool reads it, is
 [gascity/routing-model.md](gascity/routing-model.md). The hold, the demand and
 the shape law a park follows are invariant I1 in
@@ -42,7 +44,8 @@ may route, arm or hold a bead, or make each steering move, is
 
 A bead may be routed or armed to a work pool only when one of these holds:
 
-- it is a member of an epic, which means it has a parent-child parent;
+- it is a member of an epic, or of a Delivery under one, which means it has a
+  parent-child parent;
 - it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
 - it is an emergency, a red main or a broken gate, checked rather than asserted;
 - the operator routed it, through a sitting, a hand sling or an Accept;
@@ -133,9 +136,9 @@ was cleared. The same definition serves the queue's other readers:
 
 - the liveness sweep names such a bead's wait, so it does not report the bead as
   an unnamed wait;
-- the claim-time re-check of a sweep visit (`liveness-recheck.sh`) names the
-  same wait, so a visit filed before intake held the bead does not put it on
-  that sitting's agenda as well;
+- the re-check a liveness gate's message carries (`liveness-recheck.sh`) names
+  the same wait, so a census cut before intake held the bead does not put it on
+  that gate's agenda as well;
 - `doctor/check-blocked-work-armed` owes such a bead no arm, because its
   dispatch is the route the sitting gives it;
 - the proactive scan files no first reaction for such a bead, because its next
@@ -145,10 +148,12 @@ was cleared. The same definition serves the queue's other readers:
 
 For each bead in the queue, the sitting does one of three things.
 
-- **Place it under an epic.** Give it the epic as its parent
-  (`gc bd update <bead> --parent <epic>`), then route it to its pool
-  (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the epic holds it from
-  then on, through bd's parent-child cascade.
+- **Place it under an epic.** Give it as its parent the epic's open Delivery
+  whose aim covers it, which `gc bd list --parent <epic> -t epic --limit 0` lists,
+  and otherwise the epic itself ([epics.md](epics.md#deliveries-and-epic-checkpoints)):
+  `gc bd update <bead> --parent <delivery-or-epic>`. Then route it to its pool
+  (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the Delivery or the epic
+  holds it from then on, through bd's parent-child cascade.
 - **Route it on its own.** Route it to its pool with the same sling, and give it
   no parent.
 - **Close it**, when the work is not wanted.
@@ -175,9 +180,10 @@ gc-helm.sh park <bead-id> --waiting-on <bead-id>
 The text form files a gate of its own and makes the bead wait on it. The gate is
 `issue_type=gate`, titled with the text, which says why the bead is parked and
 what releases it. The text is required. It is one line of at most 140
-characters, refused over the cap rather than cut, the rule a demand's title
-follows. `--body` is the gate's description. The gate carries no await type, no
-`gc.demand_for` and no hold marker, so no sweep closes or visits it. It is filed
+characters, refused over the cap rather than cut, the rule a takeaway headline
+follows. `--body` is the gate's description. The gate carries no await type and
+no hold marker: it is a plain blocker that pauses the bead, not a human gate,
+and no sweep closes it. It is filed
 in the bead's own store, because bd resolves an edge only within one store, and
 it is born with the bead's edge in one write. Who parked the bead, and when, are
 the gate's creator and creation time. Re-running the text form with the same
@@ -186,8 +192,9 @@ description, which is how the detail of a park is corrected.
 
 `--waiting-on` parks the bead behind a bead that already exists and files no
 gate. Naming another park's gate parks one more bead for the same reason.
-Naming a task parks the bead until the task closes. A park takes one form or the
-other, never both.
+Naming a task parks the bead until the task closes, and naming a human gate
+parks it until a person clears the gate. A park takes one form or the other,
+never both.
 
 Either form reads the edge back off the bead before it reports success, and then
 prints what the park holds and what it leaves running.
@@ -196,10 +203,6 @@ prints what the park holds and what it leaves running.
 
 - a bead in flight, because its own edge would hold its merge and its close
   (next section);
-- a demand gate as the bead to wait on. A demand gate is a wait on the
-  operator's decision, and the operator ruled that such a wait does not hold
-  armed work. The refusal names the text form, whose gate can name the decision
-  the park waits for;
 - a closed bead to park or to wait on, a bead in another store to wait on, and
   one of the bead's own parts to wait on, since each edge would hold nothing or
   bd refuses it.
@@ -310,7 +313,8 @@ So a bead's priority decides where it queues.
 A bead's priority is the priority of the bead it follows, plus its own shift,
 kept within P0 to P4 at each level.
 
-- A member follows its parent. A member with several parents follows the most
+- A member follows its parent, so a Story under a Delivery follows the Delivery,
+  and the Delivery follows its epic. A member with several parents follows the most
   urgent one, the parent with the lowest P-number.
 - PR-finishing work, a bead carrying `anchor_bead`, follows its anchor. Once
   the anchor's PR is approved, it runs at P0 whatever its shift
@@ -330,7 +334,7 @@ The shift is a signed integer in the key `priority_shift`: +1 is one level
 later, -1 is one level sooner, and absent or empty reads as 0. Shifts add up
 through levels, and each level stops at P0 and P4. Under a P1 epic, a member
 with no shift queues at P1, a member at shift -1 at P0, and a member at shift +2
-at P3. Under a P0 epic, a feature at shift -1 stays at P0, and a task under it
+at P3. Under a P0 epic, a Delivery at shift -1 stays at P0, and a Story under it
 at shift +1 queues at P1. A shift that is not a signed integer makes its bead
 unreadable, and every bead that follows it, so no writer computes a priority
 from it.
@@ -481,8 +485,8 @@ stops partway, leaves a record that a later pass settles again and that no
 return to the other rank reads as settled. `pr-facts.sh` settles the work of an
 anchor it moves out of `pull_request` in the pass that moves it, and the next
 full pass settles an anchor that another writer moved, such as a repool through
-`rejection-repool.sh`. A finding or a visit carries `anchor_bead` too, but no
-pool claims it, so that settle leaves it as it is.
+`rejection-repool.sh`. A finding carries `anchor_bead` too, but no pool claims
+it, so that settle leaves it as it is.
 
 ### The pass
 

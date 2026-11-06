@@ -58,17 +58,44 @@ enum_str=$(printf '%s' "$states_json" | jq -r 'join(", ")')
 
 # Keys deleted from the metadata registry along with their healer writers.
 HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless_flagged|close_failures|close_escalated|gate_verdict_condemned)$'
-# Keys retired from the metadata registry together with every reader, and what a
-# live bead still carrying one leaves undone. They are read on every live status,
-# because the bead most likely to carry one is a visit, which is in_progress
-# while a sitting holds it.
-RETIRED_KEYS=(stall_root)
+# Keys retired from the metadata registry together with every reader, what a
+# live bead still carrying one leaves undone, and what to do about it. They are
+# read on every live status, because a bead a session holds is in_progress, not
+# open. The escalation keys are the visit-era helper's
+# (specs/tk-0ur8r9p/design.md section 2): human-gate.sh writes none of them, so
+# a carrier holds nothing back and means a retired writer is stamping again.
+# gc.hold_demand and the gc.pr_visit_* pair are the visit-era sitting's
+# (section 7): a hold files a human gate its conversation replies to, and the
+# sign-off hands the reminder its text directly. gc.outcome_reason is the
+# visit-era close's (section 10): a conversation's close reason carries that
+# sentence, and the board's sittings card reads it there. From escalation_key
+# on, the keys are the visit's and the legacy demand's own, and the finding
+# keys that named a visit (section 10).
+RETIRED_KEYS=(
+    stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last
+    gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions gc.outcome_reason
+    escalation_key gc.demand_for gc.gate_visit gc.ruling gc.folded_into
+    visit.recheck sweep.new_ids sweep.carried_ids sweep.pass_at
+    finding.visit finding.ruling_visit
+)
 retired_consequence() { # <key> <value>
+    local inert="so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key"
     case "$1" in
-        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (gc.demand_for=$2), takeaway and held state on $2, and no sign-off reads the key back to discharge them" ;;
-        *) printf '%s' "nothing reads it" ;;
+        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (a human gate that blocks $2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
+        escalation_raised_by|escalation.recurrences|escalation.recurrence_last)
+            printf '%s' "human-gate.sh neither redirects a wisp nor keeps a recurrence tally, $inert" ;;
+        gc.hold_demand)
+            printf '%s' "a converse hold files a human gate its conversation replies to, $inert" ;;
+        gc.pr_visit_summary|gc.pr_visit_actions)
+            printf '%s' "the sign-off hands the PR reminder its text directly, $inert" ;;
+        gc.outcome_reason)
+            printf '%s' "the board's sittings card reads a conversation's close reason, $inert" ;;
+        escalation_key|gc.demand_for|gc.gate_visit|gc.ruling|gc.folded_into|visit.recheck|sweep.new_ids|sweep.carried_ids|sweep.pass_at|finding.visit|finding.ruling_visit)
+            printf '%s' "the key belongs to visits and legacy demands, which human gates and conversations replace, $inert" ;;
+        *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }
+retired_json=$(printf '%s\n' "${RETIRED_KEYS[@]}" | jq -R . | jq -cs .)
 
 errors=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -154,7 +181,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --include-gates --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
@@ -221,33 +248,31 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         fi
     fi
 
-    for rk in "${RETIRED_KEYS[@]}"; do
-        rraw=$(run_bounded gc bd list --db "$rig_path/.beads" \
-            --status open,in_progress,blocked,deferred,hooked,pinned \
-            --has-metadata-key "$rk" --json --limit 0 2>/dev/null); rrc=$?
-        if [ "$rrc" -ne 0 ] || [ -z "$rraw" ]; then
-            warnings+=("$label: could not list live beads carrying the retired key $rk in $rig_path/.beads (rc=$rrc) — the retired-key check did NOT run for this store")
-            continue
-        fi
-        rrows=$(printf '%s' "$rraw" | scrub | jq -r --arg k "$rk" '
+    # The retired keys are read from the open listing above and from one listing
+    # of the other live statuses, so the probe count stays the same however many
+    # keys retire. Both listings take --include-gates: bd lists no gate without
+    # it, and a legacy demand's keys sit on a gate.
+    lraw=$(run_bounded gc bd list --db "$rig_path/.beads" \
+        --status in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit 0 2>/dev/null); lrc=$?
+    if [ "$lrc" -ne 0 ] || [ -z "$lraw" ]; then
+        warnings+=("$label: could not list the beads in a live status other than open in $rig_path/.beads (rc=$lrc) — the retired-key check did NOT run for this store")
+    elif ! rrows=$({ printf '%s' "$raw" | scrub; printf '%s' "$lraw" | scrub; } | jq -rs --argjson keys "$retired_json" '
             def clean: tostring | gsub("[[:cntrl:]]"; " ");
-            .[]? | ((.metadata // {})[$k] // "" | clean) as $v
+            (map(.[]?) | .[]) as $b | ($b.metadata // {}) as $m
+            | $keys[] as $k | ($m[$k] // "" | clean) as $v
             | select($v != "")
-            | [((.id // "?") | clean), ((.status // "") | clean), $v] | join("\u001f")' 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            warnings+=("$label: the live-bead listing for the retired key $rk from $rig_path/.beads could not be parsed — the retired-key check did NOT run for this store")
-            continue
+            | [(($b.id // "?") | clean), (($b.status // "") | clean), $k, $v] | join("\u001f")' 2>/dev/null); then
+        warnings+=("$label: the live-bead listing from $rig_path/.beads could not be parsed for retired keys — the retired-key check did NOT run for this store")
+    elif [ -n "$rrows" ]; then
+        if printf '%s\n' "$rrows" > "$ENUM_TMP/retired"; then
+            while IFS=$'\037' read -r id st rk val; do
+                [ -n "$id" ] || continue
+                errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"): gc bd update $id --unset-metadata $rk")
+            done < "$ENUM_TMP/retired"
+        else
+            warnings+=("$label: could not stage the retired-key enumeration (temp-file write failed — e.g. /tmp under disk pressure) — the retired-key check did NOT run for this store")
         fi
-        [ -n "$rrows" ] || continue
-        if ! printf '%s\n' "$rrows" > "$ENUM_TMP/retired"; then
-            warnings+=("$label: could not stage the retired-key enumeration for $rk (temp-file write failed — e.g. /tmp under disk pressure) — the retired-key check did NOT run for this store")
-            continue
-        fi
-        while IFS=$'\037' read -r id st val; do
-            [ -n "$id" ] || continue
-            errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"). Discharge that by hand, then clear the key: gc bd update $id --unset-metadata $rk")
-        done < "$ENUM_TMP/retired"
-    done
+    fi
 
     [ -n "$rows" ] || continue
     if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
@@ -257,7 +282,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     while IFS=$'\037' read -r kind id val extra; do
         [ -n "$kind" ] || continue
         case "$kind" in
-            badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a declared state ($enum_str) — an unknown state has no handler and every reader defaults differently on it; surface it via escalate.sh, never invent a reading") ;;
+            badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a declared state ($enum_str) — an unknown state has no handler and every reader defaults differently on it; surface it with human-gate.sh, never invent a reading") ;;
             openclosed) errors+=("$label bead $id: OPEN with merge_result=$val — a closed-only state on an open bead means the close half of the transition was lost or a landed anchor was reopened") ;;
             detachedroute)    errors+=("$label bead $id: merge_result=$val carries gc.routed_to=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states), driven by the merge cadence and offered to no pool, so any route but the \"$park_route\" park is demand for work already in the merge queue; the claim it invites moves the anchor out of \`--status=open\`, where merge.sh and pr-facts.sh both stop seeing it") ;;
             detachedassignee) errors+=("$label bead $id: merge_result=$val carries assignee=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states) and rests unheld; a holder here is a second driver racing the cadence on one anchor") ;;

@@ -86,6 +86,15 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 
+# The rule of which human gates still hold, which the definition of a hold
+# below builds on. Unsourceable, a held bead cannot be told from a waiting one,
+# so nothing is checked.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "refinery patrol liveness undetermined (I14) — cannot read what holds a queued bead"
+    detail "assets/scripts/bd-lib.sh could not be sourced from this pack, so a held bead cannot be told from one waiting to be taken; no refinery was checked."
+    exit 1
+}
 # The one definition of a hold, which find-work also reads. Unsourceable, a held
 # bead cannot be told from a waiting one, so nothing is checked.
 # shellcheck source=../../assets/scripts/hold-lib.sh

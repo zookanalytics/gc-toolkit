@@ -30,8 +30,8 @@
 # One filed and never dispatched, because an earlier run stopped between its
 # create and its sling, is adopted and slung. One someone holds, routes or parks
 # is reported and left alone, and so is one armed for a deferred dispatch
-# (gc.dispatch_when_ready). A run that declined it waits on a visit that way,
-# and the arm re-slings it once the visit closes, so a sling from here would
+# (gc.dispatch_when_ready). A run that declined it waits on a human gate that
+# way, and the arm re-slings it once the gate closes, so a sling from here would
 # step past the person's ruling. A dedup query that does not answer files
 # nothing, because an unreadable answer cannot be told from no bead, and it
 # reads the store itself, never a pass's memo, since a memo taken before this
@@ -56,7 +56,6 @@ _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SCRIPT_DIR="$_lib_dir"
 
 PROG="seed-audit-reaudit"
-warn()  { echo "$PROG: $*" >&2; }
 usage() { warn "$1"; exit 1; }
 fail()  { warn "$1"; exit 2; }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
