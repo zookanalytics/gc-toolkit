@@ -243,10 +243,9 @@ home.
   gc copies into a session with no template pass, so their text cannot name the
   binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
   shell block that runs a pack script, since each block is its own shell.
-- The decline sequence (file the human gate, record the wait, cancel the run,
-  drain): 19 copies in step text, 11 of them in `mol-polecat-work.toml` and one
-  in the polecat doctrine fragment, with 28 copies of its refusal sentence.
-  Carried by tk-qitjxcm (P3).
+- The decline sequence (file the human gate, cancel the run, drain): two copies
+  in the step text of `mol-validate.toml`, which tk-1tfzr71.22 retires. Every
+  other decline calls `decline.sh`.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
@@ -342,7 +341,7 @@ The whole files that tk-kvdomjb and the migration members name come to 63k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry
-the decline copies and the step-text tests.
+the step-text tests.
 Most of the comment and test weight of the code that survives has no bead.
 
 ### 4. The page's own items
@@ -351,7 +350,6 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | nothing |
 | P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
