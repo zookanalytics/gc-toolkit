@@ -57,6 +57,8 @@ names() {
 # scan <root> — each citation in the tree at <root> that gives a step or part
 # number to another text, as `<file>:<line>: <the line>`. Returns 2 when git
 # cannot list the tree's files, which must never read as a tree with none.
+# awk reads bytes (LC_ALL=C): under a UTF-8 locale, macOS awk can cut the
+# carried text inside a multibyte character and stop on it.
 scan() {
   local root="$1" alts listed
   alts="$(names "$root")" || return 2
@@ -65,7 +67,7 @@ scan() {
       ':(exclude)generated/' ':(exclude)specs/' ":(exclude)$SELF")"
   case $? in 0|1) ;; *) return 2 ;; esac
   [ -n "$listed" ] || return 0
-  ( cd "$root" && printf '%s\n' "$listed" | tr '\n' '\0' | xargs -0 awk -v names="$alts" '
+  ( cd "$root" && printf '%s\n' "$listed" | tr '\n' '\0' | LC_ALL=C xargs -0 awk -v names="$alts" '
     BEGIN {
       N = "(step|part)s?[ -]?[0-9]"
       POSS = "[a-z0-9_.)`-]+(\047s|\047|\342\200\231s)[[:space:]]+(own[[:space:]]+)?" N
@@ -162,7 +164,9 @@ re-open it at steps 3–4 and then step 5.
 step 1 of 3 runs first.
 the next step: run it, then a two-step check.
 `work-submit.sh --anchor-only` prints it.
-the `warrant-file` block of recover-orphaned-beads.
+the `demo-block` block of recover-orphaned-beads.
+a line that cuts inside a dash — and then fifty-eight bytes of plain ascii text follow it.
+the line after it carries the cut text.
 a re-run, step 2 of this list, comes after.
 the merge-push step closes it.
 then submit.
@@ -171,7 +175,10 @@ EOF
 printf 'the formula'"'"'s step 2b carries it.\n' >"$FIX/generated/render.md"
 printf 'the formula'"'"'s step 2b carries it.\n' >"$FIX/specs/record.md"
 git -C "$FIX" add -A
-OUT="$(scan "$FIX")"; RC=$?
+# A UTF-8 locale where the host has one, so a scan that reads characters, not
+# bytes, fails on the line that cuts inside a dash.
+U8="$(locale -a 2>/dev/null | grep -i -m1 -E '^(c|en_us)\.utf-?8$' || true)"
+OUT="$(LC_ALL="${U8:-C}" scan "$FIX")"; RC=$?
 eq "$RC" 0 "the scan reads a fixture tree"
 want="$(grep -n ' cited$' "$FIX/docs/cases.md" | cut -d: -f1 | paste -sd' ' -)"
 got="$(printf '%s\n' "$OUT" | sed -n 's#^docs/cases\.md:\([0-9]*\):.*#\1#p' | paste -sd' ' -)"
