@@ -112,14 +112,14 @@ esac
      operator's placement sitting, which places it under an epic or routes it
      on its own.
    - **Disposition** — the exit step 4 takes (`actionable`, `recommend`,
-     `blocked`, `until`, `close`, or `ruling`), and one line on why. Decide it
-     here, while the bead is in front of you.
+     `blocked`, `close`, or `ruling`), and one line on why. Decide it here,
+     while the bead is in front of you.
    ```bash
    gc bd update "$SUBJECT" --append-notes "# First reaction · <one-line what-this-is>
 ## Understanding
 ...
 ## Disposition
-<actionable|recommend|blocked|until|close|ruling> — <why>"
+<actionable|recommend|blocked|close|ruling> — <why>"
    ```
 4. **Perform the disposition — ONE of these exits, each triaged on its merits**
    and biased toward moving work forward:
@@ -140,18 +140,17 @@ esac
      but you want the operator to trigger it.
    - **blocked** — the bead cannot move until something else does: hold it on
      the blocker as an edge.
-   - **until** — the bead's whole job ends once another bead lands, such as the
-     bead that retires its code. The exit records that as an `until` edge, and
-     the deferred-dispatch pass closes the subject once that bead closes, so the
-     exit routes, arms and places nothing. The bead must be in the subject's
-     store, since the pass cannot see a bead in another store close. When it is
-     not, a person closes the subject once that bead lands, so put that to the
-     operator as a `ruling`.
    - **close** — a confident no-op, nothing left to do and nothing the operator
      needs to see: you verified the thing is already fixed with nothing left to
      merge, or the bead should not exist (a duplicate, or fixed upstream). Route
      it to a validating closer, which re-checks the call and closes the bead or
-     escalates. A first reaction never closes a bead itself.
+     escalates. A first reaction never closes a bead itself. When the bead's
+     whole job ends once another bead lands, such as the bead that retires its
+     code, the close waits on that bead (`--waiting-on`), and the closer checks
+     the bead once that one closes. The bead it waits on must be in the
+     subject's store, since a `blocks` edge holds nothing across stores. When
+     it is not, a person closes the subject once that bead lands, so put that
+     to the operator as a `ruling`.
    - **ruling** — the operator's judgment is the next move and you have no action
      to offer: a genuine fork with several reasonable directions, an
      irreversible or destructive action, or a policy call. Put it to the operator
@@ -246,17 +245,17 @@ esac
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
 
-   # until — the subject's job ends once another bead lands. The exit writes an
-   # until edge onto that bead and releases the subject with no route, arm or
-   # hold, the pure wait the deferred-dispatch pass closes once it lands.
-   "$DISPOSE" "$SUBJECT" --disposition until --reaction-bead <R> --by proactive --reason "<why its job ends when that bead lands>" --takeaway "<headline>" --until <bead-id>
-
    # close — hand a confident no-op to the validating closer (mol-validate-close
    # on this rig's polecat pool; --route names another). --reason is the
    # closer's brief: why there is no work, the successor that carries it when
    # there is one, and the counter-case for keeping the bead open, so the closer
    # can disagree.
    "$DISPOSE" "$SUBJECT" --disposition close --reaction-bead <R> --by proactive --reason "<why there is no work, and the counter-case for keeping it open>" --takeaway "<headline>"
+   # The subject's job ends once another bead lands, such as the bead that
+   # retires its code: the exit holds the subject on that bead and arms the
+   # closer for when it closes, so --reason says what that landing fixes and
+   # what the closer should check once it has.
+   "$DISPOSE" "$SUBJECT" --disposition close --reaction-bead <R> --by proactive --reason "<what that landing fixes, and what to check once it has>" --takeaway "<headline>" --waiting-on <bead-id>
 
    # ruling — a fork, an irreversible action, or a policy call; Discuss-only.
    # The script files the human gate itself (human-gate.sh, key
@@ -270,11 +269,11 @@ esac
 
    The script exits non-zero when the route never stamped, the `hold:mayor`
    label, its note or an emergency's P0 never landed, the human gate never
-   filed, the wait never became a `blocks` edge, the `until` edge never read
-   back, the `--then-route` dispatch never armed, or the closer never slung. It
-   leaves `R` open then. A subject in that state is not routed, not held, or
-   held with nothing to route it once the wait lifts, so fix what its message
-   names and re-run the same call before you drain.
+   filed, the wait never became a `blocks` edge, the `--then-route` dispatch or
+   the closer's arm never landed, or the closer never slung. It leaves `R` open
+   then. A subject in that state is not routed, not held, or held with nothing to
+   route it once the wait lifts, so fix what its message names and re-run the
+   same call before you drain.
 5. **Drain.** `first-reaction-dispose.sh` closed `R` when the write-back landed;
    the reaction is done.
    ```bash
@@ -304,11 +303,10 @@ main. Never `--merge direct`.
 
 - **Close the subject.** A first reaction *advances* the subject; it does not
   finish it. Every exit leaves it open — routed to a pool or assigned to a named
-  agent, held on an edge, left on an `until` edge for the deferred-dispatch pass
-  to close, handed to the validating closer, or waiting on the operator behind
-  its human gate. You DO close `R`, your own reaction bead — that
-  is how the reaction records done, and `first-reaction-dispose.sh` does it for
-  you.
+  agent, held on an edge, handed to the validating closer now or once the bead
+  it waits on lands, or waiting on the operator behind its human gate. You DO
+  close `R`, your own reaction bead — that is how the reaction records done,
+  and `first-reaction-dispose.sh` does it for you.
 - **Put every subject to the operator.** Both `ruling` and `recommend` put the
   subject to the operator as a human gate, and both are the minority case — a
   genuine fork or policy call (`ruling`), or a determinable action that warrants

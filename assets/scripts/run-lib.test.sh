@@ -247,7 +247,6 @@ doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 doctor/check-po-queue-only/run.sh
 tools/gc-proactive.sh
-assets/scripts/until-resolved.sh
 assets/scripts/blocker-holder.sh
 assets/scripts/store-only-exit.sh"
 while IFS= read -r r; do
@@ -280,11 +279,10 @@ for d in agents assets doctor formulas lifecycle orders overlays packs services 
     done <<< "$(grep -rlE "$DEF_RE" "$ROOT/$d" 2>/dev/null)"
 done
 eq "${COPIES# }" "" "(NO-COPY) no file outside run-lib.sh defines its own run defs"
-# The key a root names its input convoy in is read here alone. live-work.sh
-# lists it among the marks of live work, lifecycle.toml registers it, and the
-# helm board's Go copy reads it under its fixture test. Tests and fixtures carry
-# it as data.
-KEY_ALLOW=" assets/scripts/live-work.sh lifecycle/lifecycle.toml services/helm/internal/source/facts.go "
+# The key a root names its input convoy in is read here alone. lifecycle.toml
+# registers it, and the helm board's Go copy reads it under its fixture test.
+# Tests and fixtures carry it as data.
+KEY_ALLOW=" lifecycle/lifecycle.toml services/helm/internal/source/facts.go "
 KEY_READS=""
 for d in agents assets commands doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

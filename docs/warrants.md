@@ -87,11 +87,25 @@ shares only the word ([authority-map.md](authority-map.md)).
   - `self-review` is a bounded check loop over those records, where Gas Town's is
     one inline step.
   - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
-    exit, which are nouns of the merge and review subsystems.
+    exit, which are nouns of the merge and review subsystems. Once the handoff is
+    written it removes the run's worktree with its local branch, as core's own
+    variants remove theirs. Gas Town's detaches the tree and deletes the branch, so
+    once a squash merge deletes origin's branch the tree sits on commits no ref
+    reaches, and the controller's reaper never removes it.
 - **Evidence.** In `gastownhall/gascity`:
   - `internal/bootstrap/packs/core/formulas/mol-polecat-base.toml`: its
-    `load-context` has no duplicate-dispatch gate, and its `preflight-tests` runs
-    `{{test_command}}` raw.
+    `load-context` has no duplicate-dispatch gate, its `preflight-tests` runs
+    `{{test_command}}` raw, and its `workspace-setup` is a placeholder each
+    variant overrides with a tree of its own. `mol-polecat-commit.toml` and
+    `mol-scoped-work.toml` cut theirs with `git worktree add` and remove them with
+    `git worktree remove` once the work is pushed.
+  - `internal/worktree/worktree.go`, the owner `gc worktree` runs: `Cleanup`
+    removes a tree only when its HEAD is merged into the base given, and
+    `verifyProvenance` requires that base to be the one the tree was made from, so
+    `gc worktree cleanup` cannot remove a tree at the handoff, before the merge.
+    `rejectRegisteredWorktreeAncestor` refuses a path inside a registered worktree,
+    so `gc worktree ensure` cannot make a tree inside an agent's home. The search
+    is [specs/tk-1tfzr71.43/gas-city-search.md](../specs/tk-1tfzr71.43/gas-city-search.md).
   - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
     whole, so an inherited step cannot gain metadata, and a step that needs
     `gc.continuation_group` must be overridden. The base declares none.
@@ -100,16 +114,16 @@ shares only the word ([authority-map.md](authority-map.md)).
     live root of one formula on one bead is refused, unless `--force` skips the
     lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
-  `workspace-setup`, `self-review` and `submit-and-exit`, and rebases a rejected
-  branch.
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main f26113c98 and
+  `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
+  branch, and at the handoff detaches the tree and deletes its branch.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main d5b26f881 and
   `gastownhall/gascity-packs` main 796d7ecd7.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
-  and parked work and ends a run by cancelling it. `workspace-setup`:
-  `tk-1tfzr71.43` moves its worktree to `gc worktree`, and the refinery's rework
-  machinery goes (`tk-1tfzr71.20`), which ends the merge resume. `preflight-tests`
-  and `self-review`: Gas City ships a record of a check per commit. `submit-and-exit`:
-  `tk-1tfzr71.20` moves the merge onto GitHub's branch rules.
+  and parked work and ends a run by cancelling it. `workspace-setup`: the
+  refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
+  `preflight-tests` and `self-review`: Gas City ships a record of a check per
+  commit. `submit-and-exit`: `tk-1tfzr71.20` moves the merge onto GitHub's branch
+  rules.
 
 ## Dolt reclaim
 
@@ -249,7 +263,7 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Verified.** 2026-11-06, at `gastownhall/gascity` main 005135c33 and
   `gastownhall/gascity-packs` main 796d7ecd7. The config reference's new
   `[github]` table declares pull-request monitors and scopes no agent's writes.
-  GitHub's *Managing your personal access tokens* page was read on 2026-10-26.
+  GitHub's *Managing your personal access tokens* page was read on 2026-11-05.
 - **Retires when.** Gas City ships per-agent write scoping. A GitHub
   fine-grained token covers only part of the origin rule. GitHub refuses it a
   write outside its one owner's selected repositories, so a stranger's

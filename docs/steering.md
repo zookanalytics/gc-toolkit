@@ -83,10 +83,10 @@ Each writer that files or disposes new work follows the rule.
   it with no route. The blocked exit's `--then-route` arms a dispatch only for a
   bead the rule admits. Any other bead it holds, and arms nothing, while its wait
   still lands as a `blocks` edge. The close exit keeps its validating closer,
-  because a close shrinks the queue. The until exit routes, arms and holds
-  nothing, because its bead closes once the bead that ends its job lands. Work
-  that is a named agent's own (`--assign`, `--then-assign`) is not pool work, so
-  the rule does not read it. Neither flag may name the po, which takes no work by
+  because a close shrinks the queue, whether it slings the closer now or arms it
+  for when the bead that ends its job lands (`--waiting-on`). Work that is a
+  named agent's own (`--assign`, `--then-assign`) is not pool work, so the rule
+  does not read it. Neither flag may name the po, which takes no work by
   assignment.
 - **The witness** files mail about a pack defect as a bug carrying `hold:mayor`
   from its create and routed to no pool (`formulas/mol-witness-patrol.toml`, the
@@ -100,6 +100,10 @@ Each writer that files or disposes new work follows the rule.
   bead, it arms the bead's validating closer, whether or not the rule admits
   the bead. Like the first reaction's close exit, it keeps that closer because
   a close shrinks the queue.
+- **A bead that waits on the landing that ends its job** (the waits skill). The
+  writer that sets the wait arms its validating closer for when the bead it
+  waits on closes, whether or not the rule admits it, because a close shrinks
+  the queue.
 - **The po**, in a sitting and only once the operator agrees, holds a bead with
   `gc bd set-state <bead> hold=mayor --reason "<the operator's reason>"`.
 
@@ -231,10 +235,11 @@ A hold also lifts these ways:
   sending a held bead on is a placement and Gas City serves no bead a hold
   label holds, assigned or not.
 - `gc bd update <bead> --remove-label hold:mayor` lifts it by hand. A bead
-  given an `until` edge onto the bead that retires its code takes this write
-  too. A bead lifted with nothing else written is raw input again, so the
-  proactive scan reacts to it when intake is on, and the liveness sweep names it
-  until then.
+  that waits on the bead that retires its code, through a `blocks` edge and its
+  validating closer's arm, takes this write too, because deferred dispatch fires
+  a held bead's arm only once its hold lifts. A bead lifted with nothing else
+  written is raw input again, so the proactive scan reacts to it when intake is
+  on, and the liveness sweep names it until then.
 - A close leaves the label on a closed bead, which nothing reads.
 
 `gc bd set-state` cannot lift a hold, because it refuses an empty value. A bead
