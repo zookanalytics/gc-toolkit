@@ -215,8 +215,9 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also a bead in flight that bd keeps unready only through a held
-  ancestor (see below) — reading the arm once more, so that an arm disarmed since
-  the pass's listing is not sent, then stamping its own
+  ancestor (see below) — reading the bead once more, so that an arm disarmed
+  since the pass's listing is not sent and one a hold label has held since then
+  keeps its arm, then stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;

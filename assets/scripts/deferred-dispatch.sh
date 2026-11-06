@@ -996,7 +996,7 @@ reconcile_dispatch() {
     expected="$(wc -l < "$rows" | tr -d ' ')"
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; heldf="$REPLY"
 
-    local id status ready hold via json fresh target args_json assignee slung rc merge_result fails flight
+    local id status ready hold via json fresh fresh_hold target args_json assignee slung rc merge_result fails flight
     while IFS=$'\037' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
@@ -1195,9 +1195,12 @@ reconcile_dispatch() {
         # withdrawn this dispatch. That is what lets stand-down.sh answer a bead's
         # gate with a ruling not to proceed: it disarms first, so a pass that read
         # the gate closed reads the arm gone here, and a pass that read the gate open
-        # holds the bead above. This is one read per sling, so it does not grow with
-        # the armed set. A read that does not answer leaves the bead armed for the
-        # next pass.
+        # holds the bead above. The same read is tested for a hold label by the rule
+        # the listing applies (label_hold), because a label set since then holds the
+        # bead as one in the listing does: no sling reads it, so the arm stays, with
+        # no marker and no attempt counted, for the write that lifts the label. This
+        # is one read per sling, so it does not grow with the armed set. A read that
+        # does not answer leaves the bead armed for the next pass.
         if ! fresh="$(show_bead "$id")" || [ -z "$fresh" ]; then
             echo "$PROG: WARN could not re-read the arm on $id before slinging it — leaving armed, not slinging" >&2
             failed=$((failed + 1)); continue
@@ -1205,6 +1208,14 @@ reconcile_dispatch() {
         if [ -z "$(meta_of "$fresh" "$K_TARGET")" ]; then
             echo "$PROG: withdrawn $id — its arm was removed after this pass listed it; not slinging"
             retired=$((retired + 1)); continue
+        fi
+        if ! fresh_hold="$(printf '%s' "$fresh" | jq -r "$DISPATCH_PATH_JQ$DD_LABEL_HOLD_JQ"'label_hold' 2>/dev/null)"; then
+            echo "$PROG: WARN could not read the hold labels on $id before slinging it — leaving armed, not slinging" >&2
+            failed=$((failed + 1)); continue
+        fi
+        if [ -n "$fresh_hold" ]; then
+            echo "$PROG: held $id — $fresh_hold was set after this pass listed it; not slinging, and its arm stays"
+            held=$((held + 1)); continue
         fi
 
         # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying

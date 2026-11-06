@@ -1098,6 +1098,25 @@ store "$GATED_B1"
 out="$(STUB_RACE_AT='--ready' STUB_RACE_JQ="$GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "1" "control: an answer with no disarm, in the same window, slings the bead"
 
+echo "# a hold label set after the pass listed the arm holds it as the listing's would"
+# The label lands at the arm's re-read, after the listing that found it unheld:
+# the re-read applies the listing's own rule, so the arm waits for the lift.
+labels_of() { jq -c --arg id "$1" '(.[] | select(.id == $id) | .labels) // []' "$STUB_STORE"; }
+add_label_b1() { printf 'map(if .id == "b-1" then .labels = ((.labels // []) + ["%s"]) else . end)' "$1"; }
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning"],"metadata":{'"$A1"'},"notes":"","_ready":true}]'
+out="$(STUB_RACE_AT='show b-1' STUB_RACE_JQ="$(add_label_b1 hold:mayor)" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a hold set mid-pass is a clean pass"
+eq "$(slings)" "0" "the pass that listed the bead unheld does not sling it"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "its arm stays"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "and carries no marker"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "and counts no attempt"
+eq "$(labels_of b-1)" '["learning","hold:mayor"]' "and the hold stays on"
+has "$out" "held b-1 — its hold:mayor label was set after this pass listed it" "the pass log names the label"
+has "$out" "1 held" "summary counts it as held"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning"],"metadata":{'"$A1"'},"notes":"","_ready":true}]'
+out="$(STUB_RACE_AT='show b-1' STUB_RACE_JQ="$(add_label_b1 hold:po)" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "control: a label set in the same window that only resembles a hold is slung"
+
 echo "# a re-read of the arm that does not answer leaves it armed for the next pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true}]'
 : > "$TMP/show-fails-reread"
