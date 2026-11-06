@@ -42,7 +42,8 @@ case "$1 $2" in
   "bd --db")
     # gc bd --db <store> list ... --assignee=<alias> ...: the witness's
     # in-progress patrol wisps. Every witness holds one unless STUB_WAITING
-    # names its alias; STUB_BD_FAIL names one whose read fails, and
+    # names its alias; STUB_OTHER_ONLY names one that holds only another
+    # molecule in progress, STUB_BD_FAIL one whose read fails, and
     # STUB_BD_GARBAGE one whose read prints no list.
     printf '%s\n' "$*" >> "$BD_LOG"
     a=""
@@ -50,6 +51,9 @@ case "$1 $2" in
     case " ${STUB_BD_FAIL:-} " in *" $a "*) exit 1 ;; esac
     case " ${STUB_BD_GARBAGE:-} " in *" $a "*) echo 'not json'; exit 0 ;; esac
     case " ${STUB_WAITING:-} " in *" $a "*) echo '[]'; exit 0 ;; esac
+    case " ${STUB_OTHER_ONLY:-} " in *" $a "*)
+      printf '[{"id":"w-2","title":"some-other-molecule","status":"in_progress","assignee":"%s"}]\n' "$a"; exit 0 ;;
+    esac
     printf '[{"id":"w-1","title":"mol-witness-patrol","status":"in_progress","assignee":"%s"},{"id":"w-2","title":"some-other-molecule","status":"in_progress","assignee":"%s"}]\n' "$a" "$a"
     ;;
   *) echo "unexpected gc call: $*" >&2; exit 64 ;;
@@ -129,6 +133,8 @@ eq "$(count "$NUDGES")" 0 "a quiet witness holding no patrol wisp in progress is
 eq "$RC" 0 "waiting out the hour is a clean pass"
 has "$OUT" "waiting out its next pass" "the pass says why it left the witness alone"
 has "$OUT" "1 checked, 0 nudged" "the summary counts it"
+export STUB_OTHER_ONLY="$W"; run; unset STUB_OTHER_ONLY
+eq "$(count "$NUDGES")" 0 "a witness holding only another molecule in progress is not nudged"
 
 echo "--- a witness whose wisps cannot be read"
 export STUB_BD_FAIL="$W"; run; unset STUB_BD_FAIL
@@ -151,6 +157,7 @@ STUB_RIGS='{"rigs":[{"name":"gc-toolkit","path":"/rigs/gc-toolkit"},{"name":"rig
 STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 900)" "" -)"); run
 eq "$(count "$NUDGES")" 0 "a row with no rig nudges nothing"
 eq "$RC" 1 "and fails the pass"
+eq "$(count "$RIGREADS")" 0 "and reads no rig map"
 eq "$(count "$BDREADS")" 0 "and reads no store"
 STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 900)" "")")
 
