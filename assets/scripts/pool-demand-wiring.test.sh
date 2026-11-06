@@ -93,13 +93,14 @@ for TOML in "${TOMLS[@]}"; do
 done
 
 # A converse sitting is never demand-served. `gc-helm engage` spawns it as a
-# manual session bound to one visit, and the sitting adopts that visit through
-# `gc hook --claim`. min_active_sessions = 0 keeps the controller from starting a
-# sitting with no visit behind it, and a scale_check would hand the template a
-# demand count to spawn sittings from. A custom work_query is the other way to
-# break it: every claim candidate, the visit engage assigned included, comes from
-# the work query's output (gascity tryHookClaim), so a query that does not return
-# that visit leaves the sitting nothing to adopt.
+# manual session bound to one conversation, and the sitting adopts that
+# conversation through `gc hook --claim`. min_active_sessions = 0 keeps the
+# controller from starting a sitting with no conversation behind it, and a
+# scale_check would hand the template a demand count to spawn sittings from. A
+# custom work_query is the other way to break it: every claim candidate, the
+# conversation engage assigned included, comes from the work query's output
+# (gascity tryHookClaim), so a query that does not return that conversation
+# leaves the sitting nothing to adopt.
 SITTINGS=("$ROOT"/agents/converse-*/agent.toml)
 if [ -s "${SITTINGS[0]}" ]; then
   for SITTING in "${SITTINGS[@]}"; do
@@ -112,8 +113,8 @@ if [ -s "${SITTINGS[0]}" ]; then
       && ok "$NAME: no scale_check, so no demand count spawns a sitting" \
       || bad "$NAME: a scale_check gives the controller demand to spawn sittings from"
     [ -z "$(block "$SITTING" work_query)" ] \
-      && ok "$NAME: no work_query, so the claim returns the visit engage assigned" \
-      || bad "$NAME: a custom work_query replaces the claim query a sitting adopts its visit through"
+      && ok "$NAME: no work_query, so the claim returns the conversation engage assigned" \
+      || bad "$NAME: a custom work_query replaces the claim query a sitting adopts its conversation through"
   done
 else
   bad "no converse-<model> sitting template under $ROOT/agents"

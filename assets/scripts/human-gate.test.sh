@@ -508,9 +508,9 @@ eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message]
 eq "$(creates)" 0 "  ... with no gate on the session bead"
 
 echo "# two sessions reported under one key file a finding about each"
-# The old script's visit tracked a subject it could read and deduped on it, so
-# the finding is about the session, and --distinct keeps patrol-finding.sh from
-# refusing the second session's report as a sibling of the first.
+# Each report is about its own session, so the finding names that session, and
+# --distinct keeps patrol-finding.sh from refusing the second session's report
+# as a sibling of the first.
 reset "$(task tk-w),$(session hq-s1),$(session hq-s2)"; : > "$STUB_PF_LOG"
 "$HSUT/escalate.sh" --subject hq-s1 --key session-stuck --message m >/dev/null 2>&1
 "$HSUT/escalate.sh" --subject hq-s2 --key session-stuck --message m >/dev/null 2>&1

@@ -139,8 +139,8 @@ grep -q "__CLEANUP_DONE__" <<< "$C_OUT" \
   && ok "(C) already-removed path -> execution reaches disposal" \
   || bad "(C) already-removed path aborted before disposal"
 
-# (D) Empty work_dir (visit / graph.v2 step or root) -> the `-n` guard skips the
-#     body entirely; the block is a no-op and never aborts.
+# (D) Empty work_dir (no workspace yet, a graph.v2 step or root) -> the `-n`
+#     guard skips the body entirely; the block is a no-op and never aborts.
 D_OUT=""; D_RC=0
 D_OUT="$(run_cleanup 1 "" "$RIG")" || D_RC=$?
 eq "$D_RC" "0" "(D) empty work_dir -> block exits 0 (guard skips body)"
@@ -150,8 +150,8 @@ grep -q "__CLEANUP_DONE__" <<< "$D_OUT" \
 
 # (E) OWNED=0 must not remove anything — the store guard refused ownership, so
 #     the worktree is not the witness's to delete.
-E_OUT=""; E_RC=0
-E_OUT="$(run_cleanup 0 "$LIVE_E" "$RIG")" || E_RC=$?
+E_RC=0
+( run_cleanup 0 "$LIVE_E" "$RIG" ) >/dev/null || E_RC=$?
 eq "$E_RC" "0" "(E) OWNED=0 -> block exits 0"
 [ -d "$LIVE_E" ] \
   && ok "(E) OWNED=0 -> worktree left intact (OWNED gate preserved)" \

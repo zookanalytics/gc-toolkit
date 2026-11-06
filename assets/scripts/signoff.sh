@@ -1230,8 +1230,8 @@ ensure_validation_pass
 close_review
 # A rework child now stands on the anchor, so the city holds the ball until it
 # lands. Reconcile rather than assert a value: the child reads working on an
-# unapproved PR and merging on an approved one, and an open visit still reads
-# needs-attention.
+# unapproved PR and merging on an approved one, and an open human gate on the
+# anchor still reads needs-attention.
 [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
   --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
 if [ "$FIX_STATE" = in-flight ]; then
