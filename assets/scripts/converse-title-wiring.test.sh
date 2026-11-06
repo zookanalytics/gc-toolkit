@@ -164,13 +164,17 @@ eq "$(T show-options -t "=$SIT:" -v set-titles 2>&1)" "on" \
 ###############################################################################
 # outer <name> <session> — an outer session whose pane runs a client attached
 # to <session> on the sitting's server. The client names an xterm terminal,
-# whose terminfo every host carries and which tmux sets titles on.
+# whose terminfo every host carries and which tmux sets titles on. The command
+# goes to tmux as separate arguments, which tmux runs without the default
+# shell: zsh takes the word "=<session>" for a command to look up, and exits.
 outer() {
     O new-session -d -s "$1" -x 90 -y 26 \
-        "env -u TMUX -u TMUX_PANE TERM=xterm-256color tmux -L $SOCK attach-session -t =$2" >/dev/null 2>&1
+        env -u TMUX -u TMUX_PANE TERM=xterm-256color tmux -L "$SOCK" attach-session -t "=$2" >/dev/null 2>&1
 }
 attached() { grep -qxF -- "$1" < <(T list-clients -F '#{client_session}' 2>/dev/null); }
-outer_title() { O display-message -p -t "=$1:" '#{pane_title}' 2>/dev/null; }
+# outer_title reads with -u: tmux prints a title's em dash as "_" to a client
+# whose locale is not UTF-8.
+outer_title() { O -u display-message -p -t "=$1:" '#{pane_title}' 2>/dev/null; }
 outer_shows() { [ "$(outer_title "$1")" = "$2" ]; }
 
 FIRST="tk-test — the sitting's first topic"
