@@ -377,11 +377,11 @@ run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     export FAKE_TOPIC="$topic" TMPDIR="$TMP/tmpfiles"
     # Drafts are durable by design now, so the test must own the directory or
     # a run would write into the operator's real XDG state.
-    export GC_VISIT_DRAFT_DIR="${DRAFT_DIR_OVERRIDE:-$TMP/drafts}"
+    export GC_INTAKE_DRAFT_DIR="${DRAFT_DIR_OVERRIDE:-$TMP/drafts}"
     # The rig cache is OFF by default so each case fetches the FAKE_RIGS_JSON it
     # set — a shared cache would serve one case's rigs to the next. The dedicated
     # CACHE case sets RIG_CACHE_TTL_OVERRIDE to exercise the cache path.
-    export GC_VISIT_RIG_CACHE_TTL="${RIG_CACHE_TTL_OVERRIDE:-0}"
+    export GC_INTAKE_RIG_CACHE_TTL="${RIG_CACHE_TTL_OVERRIDE:-0}"
     : > "$CALLS"; : > "$TMUX_CALLS"; : > "$GUM_CALLS"
     # The stubs are prepended for THIS call only: the live half below needs the
     # real tmux and the real gum, and a global override would hand it the stubs.
@@ -757,13 +757,13 @@ FAKE_HOME="$TMP/fakehome"; mkdir -p "$FAKE_HOME"
     export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux-dd.log" GUM_CALLS="$TMP/gum.log"
     export FAKE_TOPIC="where does this land" TMPDIR="$TMP/tmpfiles"
     export HOME="$FAKE_HOME"
-    unset GC_VISIT_DRAFT_DIR GC_PACK_STATE_DIR XDG_STATE_HOME
+    unset GC_INTAKE_DRAFT_DIR GC_PACK_STATE_DIR XDG_STATE_HOME
     : > "$TMUX_CALLS"
     PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
     wait_for says_ge 1 "$TMUX_CALLS"
 )
 ddpath=$(sed -n "s/.*> '\([^']*\)'.*/\1/p" "$TMP/tmux-dd.log" | head -1)
-case "$ddpath" in "$FAKE_HOME"/.local/state/gc/visit-drafts/draft-*)
+case "$ddpath" in "$FAKE_HOME"/.local/state/gc/intake-drafts/draft-*)
     ok "DRAFTDIR: with no override the draft lands in XDG state, off the shared /tmp" ;;
   *) bad "DRAFTDIR: the draft landed at '${ddpath:-none}'" ;; esac
 
@@ -794,7 +794,7 @@ else
     (
         export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux-rs.log" GUM_CALLS="$TMP/gum.log"
         export FAKE_TOPIC="a press that has to fall back" TMPDIR="$SHAREDTMP"
-        export GC_VISIT_DRAFT_DIR="$NOWRITE"
+        export GC_INTAKE_DRAFT_DIR="$NOWRITE"
         : > "$TMUX_CALLS"; : > "$CALLS"
         PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
         # The unwritable dir says once in the foreground (the fallback warning)
@@ -806,7 +806,7 @@ else
     [ -e "$SHAREDTMP/draft-unrelated" ] \
         && ok "REAPSCOPE: an unrelated stale draft-* in the shared temp root survives the fallback" \
         || bad "REAPSCOPE: the fallback reaper deleted a file this script does not own"
-    has "$(cat "$TMP/tmux-rs.log")" "gc-visit-drafts" \
+    has "$(cat "$TMP/tmux-rs.log")" "gc-intake-drafts" \
         "REAPSCOPE: ...because the fallback is a script-owned subdirectory, and the message names it"
     has "$(cat "$TMP/calls.log")" "argv=[a press that has to fall back]" \
         "REAPSCOPE: ...and the press still files"
@@ -839,7 +839,7 @@ has "$fcalls" "display-message -c gc-toolkit__probe -C -d 0 gc intake: filing" \
 CFG_HANG="$TMP/cfg-hang"; mkcfg "$CFG_HANG" '#!/bin/sh
 sleep 60'
 if command -v timeout >/dev/null 2>&1; then
-    GC_VISIT_INTAKE_TIMEOUT=1 run_handler "$CFG_HANG" "a topic that wedges"
+    GC_INTAKE_TIMEOUT=1 run_handler "$CFG_HANG" "a topic that wedges"
     has "$(cat "$TMP/tmux.log")" "gc intake FAILED (rc=124)" "TIMEOUT: a wedged intake is reported, not left hanging"
     has "$(cat "$TMP/tmux.log")" "timed out after 1s" "TIMEOUT: the message says what happened"
 else
@@ -1041,7 +1041,7 @@ if [ -n "$LIVE_TERM" ]; then
     tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
     tmux -L "$SOCKET" new-session -d -x 100 -y 30 'sleep 600' >/dev/null 2>&1
     tmux -L "$SOCKET" set-environment -g CALLS "$CANCEL_CALLS" >/dev/null 2>&1
-    tmux -L "$SOCKET" set-environment -g GC_VISIT_DRAFT_DIR "$CANCEL_DRAFTS" >/dev/null 2>&1
+    tmux -L "$SOCKET" set-environment -g GC_INTAKE_DRAFT_DIR "$CANCEL_DRAFTS" >/dev/null 2>&1
     GC_TMUX_SOCKET="$SOCKET" sh "$BINDINGS" "$LIVE_CFG" >/dev/null 2>&1
     {   sleep 1.5
         printf '\002'; sleep 0.4; printf 'a'

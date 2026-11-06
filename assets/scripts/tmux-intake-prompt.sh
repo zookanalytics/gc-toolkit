@@ -9,7 +9,7 @@
 # offered untagged. The hq store is withheld because it runs no reaction pool,
 # though its bead ids stay valid subjects. The rig set is read
 # from `gc rig list --json`, whose cost is the per-rig liveness probe, and is
-# cached for GC_VISIT_RIG_CACHE_TTL seconds so a burst of presses opens the
+# cached for GC_INTAKE_RIG_CACHE_TTL seconds so a burst of presses opens the
 # picker without re-paying that wait. A second popup then runs `gum write`
 # (multi-line by design — command-prompt is single-line and its response is
 # re-parsed as a tmux command); the submitted text goes through a
@@ -22,49 +22,49 @@
 # path keeps it and names its path (this key's whole purpose is
 # that a thought is never lost). Esc cannot be recovered: gum never emits an
 # unsubmitted buffer, so every cancel says that it discarded. Drafts live
-# outside /tmp by default and are reaped after GC_VISIT_DRAFT_KEEP_DAYS.
+# outside /tmp by default and are reaped after GC_INTAKE_DRAFT_KEEP_DAYS.
 # The slow intake half is backgrounded; display-message carries its in-flight
 # notice and then its outcome.
 set -eu
 
 CONFIGDIR="${1:?missing config-dir}"
 
-INTAKE="${GC_VISIT_OPEN_TOOL:-$CONFIGDIR/assets/scripts/operator-intake.sh}"
+INTAKE="${GC_INTAKE_TOOL:-$CONFIGDIR/assets/scripts/operator-intake.sh}"
 
 # Seconds to let the intake run before calling it stuck. See the bound below.
-INTAKE_TIMEOUT="${GC_VISIT_INTAKE_TIMEOUT:-300}"
+INTAKE_TIMEOUT="${GC_INTAKE_TIMEOUT:-300}"
 
 # Seconds to cache the rig set. `gc rig list --json` costs a per-rig liveness
 # probe, and asking the operator to pick a rig FIRST would pay it before the
 # popup opens; caching it lets a burst of presses reuse one lookup. The
 # suspended tag can go stale within the window, but the intake validates the
 # actual target, so the staleness is bounded and benign. 0 disables the cache.
-RIG_CACHE_TTL="${GC_VISIT_RIG_CACHE_TTL:-900}"
+RIG_CACHE_TTL="${GC_INTAKE_RIG_CACHE_TTL:-900}"
 case "$RIG_CACHE_TTL" in ''|*[!0-9]*) RIG_CACHE_TTL=900 ;; esac
 
 # Draft dir precedence: override/test seam, pack state dir, XDG state (real
 # disk, not the shared tmpfs), /tmp last and announced.
-DRAFT_DIR="${GC_VISIT_DRAFT_DIR:-}"
+DRAFT_DIR="${GC_INTAKE_DRAFT_DIR:-}"
 if [ -z "$DRAFT_DIR" ]; then
     if [ -n "${GC_PACK_STATE_DIR:-}" ]; then
-        DRAFT_DIR="$GC_PACK_STATE_DIR/visit-drafts"
+        DRAFT_DIR="$GC_PACK_STATE_DIR/intake-drafts"
     elif [ -n "${XDG_STATE_HOME:-}" ]; then
-        DRAFT_DIR="$XDG_STATE_HOME/gc/visit-drafts"
+        DRAFT_DIR="$XDG_STATE_HOME/gc/intake-drafts"
     elif [ -n "${HOME:-}" ]; then
-        DRAFT_DIR="$HOME/.local/state/gc/visit-drafts"
+        DRAFT_DIR="$HOME/.local/state/gc/intake-drafts"
     else
-        DRAFT_DIR="${TMPDIR:-/tmp}/gc-visit-drafts"
+        DRAFT_DIR="${TMPDIR:-/tmp}/gc-intake-drafts"
     fi
 fi
 
 # Drafts are reaped on a window of days, never on exit.
-DRAFT_KEEP_DAYS="${GC_VISIT_DRAFT_KEEP_DAYS:-14}"
+DRAFT_KEEP_DAYS="${GC_INTAKE_DRAFT_KEEP_DAYS:-14}"
 
 # Popup geometry: percentages scale with the client; the textarea fits a
 # 24-row terminal under the border + gum chrome.
-POPUP_W="${GC_VISIT_POPUP_WIDTH:-80%}"
-POPUP_H="${GC_VISIT_POPUP_HEIGHT:-50%}"
-INPUT_H="${GC_VISIT_INPUT_HEIGHT:-8}"
+POPUP_W="${GC_INTAKE_POPUP_WIDTH:-80%}"
+POPUP_H="${GC_INTAKE_POPUP_HEIGHT:-50%}"
+INPUT_H="${GC_INTAKE_INPUT_HEIGHT:-8}"
 
 # gum's own hint line names the submit/newline keys; the header carries only
 # what it omits.
@@ -244,7 +244,7 @@ drop_draft() { rm -f "$DRAFT_FILE"; }
 # itself: the reaper deletes draft-* in whatever this names, and the shared
 # root would put other tools' files inside its reach.
 if ! mkdir -p "$DRAFT_DIR" 2>/dev/null || ! [ -w "$DRAFT_DIR" ]; then
-    DRAFT_DIR="${TMPDIR:-/tmp}/gc-visit-drafts"
+    DRAFT_DIR="${TMPDIR:-/tmp}/gc-intake-drafts"
     say 10000 "gc intake: draft dir is not writable — falling back to $(short "$DRAFT_DIR") for this press"
     mkdir -p "$DRAFT_DIR" 2>/dev/null || true
 fi

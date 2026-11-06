@@ -224,8 +224,8 @@ body()   { jq -r --arg id "$1" '(.[] | select(.id==$id) | .description) // ""' "
 title()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .title) // ""' "$STUB_STORE"; }
 btype()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .issue_type) // ""' "$STUB_STORE"; }
 findings() { jq --arg k "$1" '[.[] | select(.metadata["finding.key"] == $k)] | length' "$STUB_STORE"; }
-# put_bead <id> <status> — a bead that is not a finding: the fix or the visit a
-# held finding waits on, or the subject one is about.
+# put_bead <id> <status> — a bead that is not a finding: the fix or the human
+# gate a held finding waits on, or the subject one is about.
 put_bead() {
   local tmp
   tmp=$(mktemp "$TMP/store.XXXXXX")
@@ -627,42 +627,42 @@ done
 # key with another subject. The exact match cannot see either, and each would
 # be a twin with its own first reaction. A new bead that shares either half
 # with a live finding in its scope is refused, and those findings are listed.
-SIT="21 open witness-refinery-queue visits carry malformed groups"
+SIT="21 open witness-refinery-queue gates carry malformed groups"
 reset
-"$SUT" --scope witness-findings --key stale-malformed-visits --about tk-visit \
-  --title "$SIT" --message "21 visits, retract skips them" >/dev/null 2>&1
+"$SUT" --scope witness-findings --key stale-malformed-gates --about tk-gate \
+  --title "$SIT" --message "21 gates, retract skips them" >/dev/null 2>&1
 eq "$(beads)" "1" "(sibling) the first report files its bead"
 
 # The subject half: a new key over the same subject.
-OUT=$("$SUT" --scope witness-findings --key witness-refinery-queue-malformed-visits --about tk-visit \
-        --title "$SIT" --message "21 visits, retract skips them" 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key witness-refinery-queue-malformed-gates --about tk-gate \
+        --title "$SIT" --message "21 gates, retract skips them" 2>&1); RC=$?
 eq "$RC" "3" "(sibling/subject) a new key over a live finding's subject exits 3"
 eq "$(beads)" "1" "(sibling/subject) and files nothing"
 has "$OUT" "refusing to file a new bead" "(sibling/subject) says it refused"
-has "$OUT" "fnd-1 [open] --key stale-malformed-visits --about tk-visit — $SIT" "(sibling/subject) lists the live finding with the key and subject to re-run with"
+has "$OUT" "fnd-1 [open] --key stale-malformed-gates --about tk-gate — $SIT" "(sibling/subject) lists the live finding with the key and subject to re-run with"
 has "$OUT" "--distinct" "(sibling/subject) names the override for a different situation"
 eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(sibling/subject) a refused filing slings no reaction"
 
 # Re-run with the listed key and subject: the report is an occurrence there.
-OUT=$("$SUT" --scope witness-findings --key stale-malformed-visits --about tk-visit \
-        --title "$SIT" --message "21 visits, still skipped" 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key stale-malformed-gates --about tk-gate \
+        --title "$SIT" --message "21 gates, still skipped" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/re-run) the listed key and subject land"
 eq "$(beads)" "1" "(sibling/re-run) still one bead"
 eq "$(meta fnd-1 'finding.occurrences')" "2" "(sibling/re-run) counted as an occurrence on it"
 
 # The key half: the same key over another subject, or over none.
-OUT=$("$SUT" --scope witness-findings --key stale-malformed-visits --about tk-handoff \
-        --title "$SIT" --message "21 visits" 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key stale-malformed-gates --about tk-handoff \
+        --title "$SIT" --message "21 gates" 2>&1); RC=$?
 eq "$RC" "3" "(sibling/key) the live key over another subject exits 3"
-has "$OUT" "fnd-1 [open] --key stale-malformed-visits --about tk-visit" "(sibling/key) lists the finding holding the key"
-OUT=$("$SUT" --scope witness-findings --key stale-malformed-visits \
-        --title "$SIT" --message "21 visits" 2>&1); RC=$?
+has "$OUT" "fnd-1 [open] --key stale-malformed-gates --about tk-gate" "(sibling/key) lists the finding holding the key"
+OUT=$("$SUT" --scope witness-findings --key stale-malformed-gates \
+        --title "$SIT" --message "21 gates" 2>&1); RC=$?
 eq "$RC" "3" "(sibling/key) the live key with no subject exits 3"
 eq "$(beads)" "1" "(sibling/key) neither files a bead"
 
 # --distinct files it: the caller compared and the situation is another one.
-OUT=$("$SUT" --scope witness-findings --key witness-salvage-refused --about tk-visit --distinct \
-        --title "tk-visit salvage refused" --message "no worktree" 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key witness-salvage-refused --about tk-gate --distinct \
+        --title "tk-gate salvage refused" --message "no worktree" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/--distinct) exit 0"
 eq "$(beads)" "2" "(sibling/--distinct) files its own bead beside the live one"
 has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-2" "(sibling/--distinct) and slings its reaction"
@@ -670,7 +670,7 @@ has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-2" "(sibling/--distinct) and sling
 # Only a live finding in the same scope is a sibling, and only one that shares
 # a half: another patrol's finding, a closed one, or one that shares neither key
 # nor subject files as before.
-OUT=$("$SUT" --scope deacon-findings --key dolt-visit-lag --about tk-visit \
+OUT=$("$SUT" --scope deacon-findings --key dolt-gate-lag --about tk-gate \
         --title "dolt lag" --message "lag" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/scope) another scope's finding on the subject is no sibling"
 eq "$(beads)" "3" "(sibling/scope) it files"
@@ -680,8 +680,8 @@ eq "$RC" "0" "(sibling/neither half) a new key over a new subject files"
 eq "$(beads)" "4" "(sibling/neither half) as its own bead"
 gc bd close fnd-1 >/dev/null 2>&1
 gc bd close fnd-2 >/dev/null 2>&1
-OUT=$("$SUT" --scope witness-findings --key witness-legacy-visits --about tk-visit \
-        --title "$SIT" --message "21 visits" 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key witness-legacy-gates --about tk-gate \
+        --title "$SIT" --message "21 gates" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/closed) a closed finding on the subject is no sibling"
 eq "$(beads)" "5" "(sibling/closed) it files"
 
@@ -695,11 +695,11 @@ eq "$(beads)" "2" "(sibling/no subject) both file"
 # A held sibling is still a live record of the situation, so it is listed, after
 # the unheld one.
 reset
-"$SUT" --scope witness-findings --key k-first --about tk-visit --title "$SIT" --message m >/dev/null 2>&1
+"$SUT" --scope witness-findings --key k-first --about tk-gate --title "$SIT" --message m >/dev/null 2>&1
 put_bead fix-1 open
 hold fnd-1 blocked fix-1
-"$SUT" --scope witness-findings --key k-second --about tk-visit --distinct --title "$SIT" --message m >/dev/null 2>&1
-OUT=$("$SUT" --scope witness-findings --key k-third --about tk-visit --title "$SIT" --message m 2>&1); RC=$?
+"$SUT" --scope witness-findings --key k-second --about tk-gate --distinct --title "$SIT" --message m >/dev/null 2>&1
+OUT=$("$SUT" --scope witness-findings --key k-third --about tk-gate --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "3" "(sibling/held) a held sibling still refuses the filing"
 has "$OUT" "fnd-1 [blocked]" "(sibling/held) the held finding is listed"
 FIRST=$(printf '%s\n' "$OUT" | grep -m1 '^  fnd-' | sed 's/^  \(fnd-[0-9]*\).*/\1/')
@@ -708,16 +708,16 @@ eq "$FIRST" "fnd-2" "(sibling/held) the unheld finding is listed first"
 # The sibling lookup itself cannot be read: fail CLOSED, as the exact lookup
 # does, rather than read a failed listing as "no sibling" and file the twin.
 reset
-"$SUT" --scope witness-findings --key k-live --about tk-visit --title "$SIT" --message m >/dev/null 2>&1
+"$SUT" --scope witness-findings --key k-live --about tk-gate --title "$SIT" --message m >/dev/null 2>&1
 export STUB_LIST_FAIL_FIELD=finding.scope
-OUT=$("$SUT" --scope witness-findings --key k-new --about tk-visit --title "$SIT" --message m 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key k-new --about tk-gate --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "1" "(sibling/unreadable) fails closed on an unreadable sibling lookup"
 eq "$(beads)" "1" "(sibling/unreadable) files nothing"
 has "$OUT" "sibling lookup failed" "(sibling/unreadable) says the lookup failed"
-OUT=$("$SUT" --scope witness-findings --key k-live --about tk-visit --title "$SIT" --message m 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key k-live --about tk-gate --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "0" "(sibling/unreadable) an exact repeat never reaches the sibling lookup"
 eq "$(meta fnd-1 'finding.occurrences')" "2" "(sibling/unreadable) and lands on its bead"
-OUT=$("$SUT" --scope witness-findings --key k-other --about tk-visit --distinct --title "$SIT" --message m 2>&1); RC=$?
+OUT=$("$SUT" --scope witness-findings --key k-other --about tk-gate --distinct --title "$SIT" --message m 2>&1); RC=$?
 eq "$RC" "0" "(sibling/unreadable) --distinct skips the lookup"
 eq "$(beads)" "2" "(sibling/unreadable) and files"
 

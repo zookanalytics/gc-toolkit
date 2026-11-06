@@ -165,9 +165,9 @@ scrub() { tr    -d '$KEEP_TAB'; }
 $BLOCK
 # <<< control-char-scrub"
     probe "passes a portable snippet in another fence" 0 \
-        "# >>> gate-visit
+        "# >>> liveness-lookup
 V=\$(gc bd show \"\$V\" --json | tr -d '$CNTRL')
-# <<< gate-visit"
+# <<< liveness-lookup"
     probe "passes the shape quoted in a comment" 0 \
         "# prose citing tr -d '$ALL_C0' as an example"
     probe "passes a non-control tr -d" 0 "z=\$(printf x | tr -d '[:space:]')"
@@ -191,9 +191,9 @@ $BLOCK
 rows=\$(gc bd show z --json | scrub | jq .)
 offered=\$(gc bd ready --json | $RETIRED | jq .)"
     probe "flags a retired name inside another fence" 1 \
-        "# >>> gate-visit
+        "# >>> liveness-lookup
 V=\$(gc bd show \"\$V\" --json | $RETIRED)
-# <<< gate-visit"
+# <<< liveness-lookup"
     probe "passes a retired name quoted in a comment" 0 \
         "# prose naming $RETIRED as the helper the consolidation replaced"
     probe "passes a longer identifier that merely contains one" 0 \
@@ -226,9 +226,9 @@ $BLOCK
 # <<< control-char-scrub
 x=\$(gc bd show z --json | scrub | jq .)"
     probe "passes | scrub inside another fence" 0 \
-        "# >>> gate-visit
+        "# >>> liveness-lookup
 V=\$(gc bd show \"\$V\" --json | scrub)
-# <<< gate-visit"
+# <<< liveness-lookup"
     # The detector's own canonical constant must agree with the block, or it
     # would police a byte set the pack does not use.
     DET_CANON="$(sed -n 's/^CANON="\(.*\)"$/\1/p' "$DETECTOR")"

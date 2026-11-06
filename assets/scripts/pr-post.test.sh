@@ -117,10 +117,10 @@ run GH_OUT="" -- reply --host github.com --thread PRRT_abc --body "x"
 eq "$RC" 1 "a mutation that answers nothing is a failure"
 
 echo "# edit: a conversation comment rewritten in place, marked"
-run -- edit --repo github.com/o/r --comment 991 --body "### Visit tk-v — closed"
+run -- edit --repo github.com/o/r --comment 991 --body "### Sitting on tk-c — ended"
 eq "$RC" 0 "edit exits 0"
 has "$(argv)" "$(printf 'api\n--method\nPATCH\nrepos/o/r/issues/comments/991\n--hostname\ngithub.com\n-f\n')" "it is a PATCH of issues/comments/<id> on the --repo host"
-has "$(argv)" "$(printf 'body=### Visit tk-v — closed\n\n%s' "$MARK")" "the new body carries the mark"
+has "$(argv)" "$(printf 'body=### Sitting on tk-c — ended\n\n%s' "$MARK")" "the new body carries the mark"
 
 echo "# file-comment: a review comment on a whole file of the diff, marked"
 run GH_OUT='{"id":4242}' -- file-comment --repo github.com/o/r --pr 12 --commit abc123 --path assets/scripts/x.sh --body "Finding from the codex review"

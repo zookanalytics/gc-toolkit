@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # converse-parent.sh — read a subject's OWN parent, so everything a sitting
 # files lands as a SIBLING of the subject rather than a child. beads refuses a
-# `blocks` edge from a parent to its own descendant, so a demand or work bead
+# `blocks` edge from a parent to its own descendant, so a gate or work bead
 # filed under the subject could never gate it; giving it the subject's parent
 # (or no parent, when the subject has none) is what lets the edge carry the
 # wait. A parent-child edge is stored on the child, so it is read off the

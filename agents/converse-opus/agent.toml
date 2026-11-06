@@ -10,7 +10,7 @@
 # so the pool execution backstop never governs it and a pane held open for a
 # conversation is not reaped by a no-nudge drain.
 # Session-ending mechanics (what ends a held sitting when no clock does, and how
-# its session ends with its visit) are documented in docs/human-engagement.md,
+# its session ends with its conversation) are documented in docs/human-engagement.md,
 # which links the Gas City facts beneath them; read that before tuning.
 scope = "rig"
 provider = "claude"
