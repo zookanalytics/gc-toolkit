@@ -230,10 +230,10 @@ name the formula and why you chose it.
 - **Stop it.**
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
   stops the run beneath the bead and leaves the bead open, unassigned and
-  routed to no pool, with that sentence as its headline. When the bead now
-  waits on something, pass `--waiting-on <bead>` in place of `--no-wait`. The
-  release leaves a deferred-dispatch arm in place, and an armed bead goes out
-  again once nothing holds it, so disarm it first (the waits skill).
+  routed to no pool, with that sentence as its headline. It leaves a
+  deferred-dispatch arm in place, and an armed bead goes out again once nothing
+  holds it, so disarm it first (the waits skill). When the bead now waits on
+  something, pass `--waiting-on <bead>` in place of `--no-wait`.
 - **Send it elsewhere.** Name where it goes in the same release:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For a named agent, pass `--assign <named-agent>` in place of
