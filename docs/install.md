@@ -10,12 +10,12 @@ converse-fable and converse-codex sittings — declared in its own `pack.toml`.
 It imports nothing: there are no gastown prerequisites, no transitive imports,
 and no agent patches to wire.
 
-The host needs `flock(1)` on the `PATH` the controller runs orders with. The
-merge cadence (`refinery-reconcile`) and `deferred-dispatch` each take a
-per-rig pass lock with it and refuse to run a pass without one, so on a host
-that lacks it nothing merges and no armed dispatch fires. Linux distributions
-ship it in util-linux; on macOS, run `brew install flock`.
-`check-cadence-live` reports it missing (see [Verification](#5-verification)).
+The host needs:
+
+- `flock`, on the `PATH` the controller runs orders with. Linux distributions
+  ship it in util-linux; on macOS, run `brew install flock`.
+- `timeout` or `gtimeout`, from coreutils. Linux distributions ship it; on
+  macOS, run `brew install coreutils`.
 
 Covered here:
 
