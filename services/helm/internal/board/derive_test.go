@@ -781,7 +781,7 @@ func TestHeldAnchorIsNotStranded(t *testing.T) {
 }
 
 // TestTakeawayWinsNeeds: the LLM headline replaces the deterministic phrase, and
-// its internal whitespace is collapsed so it cannot break the terminal table.
+// its internal whitespace is collapsed so it reads as one line.
 func TestTakeawayWinsNeeds(t *testing.T) {
 	a := Anchor{ID: "tk-parked", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
 		Takeaway: "  needs a  decision\n  from the operator ", TakeawayAt: "2026-06-01T00:00:00Z", TakeawayBy: "host"}

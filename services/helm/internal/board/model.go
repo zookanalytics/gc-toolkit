@@ -737,7 +737,7 @@ type Sitting struct {
 	// (source.attributeTakeaways), so a row can say what it concerns even when
 	// nothing was concluded on it. Empty when the subject could not be read,
 	// which [sittingHeadline] falls back on the conversation's title for. It
-	// carries the whole title; a renderer clips it to its column.
+	// carries the whole title.
 	SubjectTitle string `json:"subject_title"`
 
 	// State is where this sitting stands: SittingInSession, SittingWaiting,

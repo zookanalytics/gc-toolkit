@@ -11,12 +11,12 @@
 # <subject> (a bead id, a PR number or URL, or a superseded id) and resolve it to
 # the live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
-# Callers: operator-intake.sh (react, resolve,
-# open), helm-svc's POST routes via GC_HELM_OPEN_TOOL (open, engage, accept,
-# dismiss — open's stderr/stdout sentences are parsed by
-# services/helm/internal/server, guarded by open_parity_test.go), converse
-# (takeaway, handback) and the proactive worker (takeaway), the placement
-# sitting (unplaced), operators by hand (park, priority).
+# Callers: operator-intake.sh (react, resolve, open), helm-svc's POST routes
+# via GC_HELM_OPEN_TOOL (open, engage, accept, dismiss — open's stderr/stdout
+# sentences are parsed by services/helm/internal/server, guarded by
+# open_parity_test.go), converse (takeaway, handback) and the proactive worker
+# (takeaway), the placement sitting (unplaced), operators by hand (park,
+# priority).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable, no city root or flock for Accept's lock — each failure names
 # its own operator move),

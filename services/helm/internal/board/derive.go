@@ -800,7 +800,8 @@ func frontier(a Anchor, r rollup, held, workHeld bool, takeaway string, waitingO
 }
 
 // collapseWS mirrors jq's `gsub("[[:space:]]+";" ") | gsub("^ | $";"")`: a
-// takeaway is free prose and a stray newline would break the terminal table.
+// takeaway is free prose, and a stray newline would break the one-line
+// headline the board shows.
 var wsRun = regexp.MustCompile(`\s+`)
 
 func collapseWS(s string) string {
@@ -847,9 +848,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	// with the same trade. The takeaway is not stale here — it is the ruling —
 	// but NEEDS answers "what does this row want from me", and what a ruled row
 	// wants is to be closed or re-opened, not re-read. The ruling itself stays
-	// on the wire in `takeaway`, where nothing truncates it; in the terminal
-	// table it was the column's longest cells (n=20 over the 140-char cap on
-	// the 2026-08-23 board, max 1343) and the least actionable.
+	// on the wire in `takeaway`, where nothing truncates it.
 	//
 	// Only while the row has no roll-up. A ruled row with children reports the
 	// takeaway and is banded by those children, so the two halves of it agree.
@@ -973,7 +972,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	}
 }
 
-// agePhrase renders whole days as the terminal table's age idiom. It exists so
+// agePhrase renders whole days as a short age, `today` or `3d ago`. It exists so
 // the DONE band answers "when" without a timestamp column: the row's own
 // closed_at is on the wire for anything that wants the instant.
 func agePhrase(days int) string {
@@ -3005,9 +3004,9 @@ func CityOverview(tiles []Tile) []Tile {
 	return out
 }
 
-// DefaultMaxRows mirrors gc-helm.sh's GC_HELM_MAX_ROWS=50. DefaultMaxDone is the
-// separate budget for the terminal band, which the overview groups into its own
-// closed-anchor families.
+// DefaultMaxRows is the row cap `helm-svc board --json` applies when no --limit
+// is given. DefaultMaxDone is the separate budget for the terminal band, which
+// the overview groups into its own closed-anchor families.
 const (
 	DefaultMaxRows = 50
 	DefaultMaxDone = 10
