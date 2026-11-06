@@ -59,7 +59,9 @@ starts. The witness, the deacon and the refinery recycle at the end of their
 next turn, through the pack's own drift check. Each new pool worker starts on
 it, and the mechanik takes it at its next restart. Until then, a session's
 prompt and hooks come from the revision it started from, while the scripts its
-steps call come from the new one, as they come from the checkout today.
+steps call come from the new one, as they come from the checkout today. Its
+hooks' scripts move to the new one too if a prune removes the old revision
+from Gas City's cache first (section 4).
 
 One change reaches you directly. Once this lands, rig checkouts stop advancing
 on their own, and that includes the checkout of the Gas City fork you build gc
@@ -116,8 +118,8 @@ read at main `6dfa90898`. The city's installed gc is the fork build
    (`ensureRepoInCacheLocked`, internal/packman/cache.go). cli.md's
    `gc import prune` says the cache "is keyed by (source, commit), so commit
    churn accumulates stale clones". Prune keeps every clone a city's lock
-   names and every clone modified in the last 7 days, and it deletes nothing
-   without `--apply`.
+   names and every clone modified in the last `--keep-days` days, 7 by
+   default, and it deletes nothing without `--apply`.
 4. **The loader validates the clone and never fetches.** On load, the
    clone's HEAD must equal the locked commit, and `git status --porcelain`
    (ignored files excluded) must be empty. Otherwise the load fails with
@@ -444,19 +446,23 @@ on it. The witness, the deacon and the refinery recycle at the end of their
 next turn, through pack drift, which unit 1 points at the pack's entry in the
 lock (section 4). The mechanik takes it at its next restart. Until a session
 restarts, its prompt and hooks come from the revision it started from, and
-every `gc gc-toolkit scripts-dir` call it makes resolves to the new one. The
-soft reload also accepts any other change to the city's config that has not
-yet restarted a session, and that change, too, reaches each session at its
-next start.
+every `gc gc-toolkit scripts-dir` call it makes resolves to the new one. A
+prune can remove the old revision's clone before then, and the session's hooks
+then take their scripts from the new one as well (section 4). The soft reload
+also accepts any other change to the city's config that has not yet restarted
+a session, and that change, too, reaches each session at its next start.
 
 ### Reverting a bad revision
 
 `gc gc-toolkit deploy --revert` moves the pin back to the previous commit. Its
-clone is still cached, since prune never runs on its own and keeps any clone
-younger than 7 days, so the revert fetches no pack: install takes a cached
-`sha:` pin with no network (facts 1 and 3, trial 7). The command still fetches
-the town's origin in step 2 and pushes to it in step 6, so with the origin
-unreachable it refuses at step 2, and the revert is done by hand (below).
+clone is still cached unless a prune has removed it. Nothing runs
+`gc import prune` on its own, in Gas City or in this design (section 4), and a
+prune keeps any clone younger than 7 days unless it is given a shorter
+`--keep-days`. With the clone cached, the revert fetches no pack: install
+takes a cached `sha:` pin with no network (facts 1 and 3, trial 7). The command
+still fetches the town's origin in step 2 and pushes to it in step 6, so with
+the origin unreachable it refuses at step 2, and the revert is done by hand
+(below).
 
 **A revert holds automatic deploys.** Main still names the commit the revert
 took out, so under option 1 the check's next pass would ask for that commit
@@ -496,7 +502,8 @@ first: file the deploy bead if none is open, as the revert does, the same gate
 on it with `human-gate.sh`, and under option 1 the same notice. Then
 `git revert` the deploy commit in the town repo, run `gc import install` and
 `gc reload --soft`, and run `gc service restart helm`. None of these needs the
-network. Push the town commit once the origin answers:
+network while the previous commit's clone is cached. Push the town commit once
+the origin answers:
 `gc gc-toolkit deploy --to <commit>`, naming the commit the pin went back to,
 pushes it and moves no pin ("A run converges"). With the gate filed before the
 pin moves, the next pass of the check, or of the order under option 2, finds
@@ -578,9 +585,35 @@ reconciler's last pass. Section 7 gives the order.
 | `gc-build.sh`'s `behind_main` | A fetch of origin into the pack's own repository every 30 minutes (`:293`), counted against HEAD (`:298`). The helm board bands its PACK rows on it. | **Retirement.** Under the pin, it would fetch into a clone that Gas City shares across cities and validates on every load. Its premise is gone too: a checkout parked off main cannot happen when the served code is always exactly the pin. Deploy lag shows as the open deploy bead. `FETCH_TTL`, the `origin-fetch-at` marker, the record's `behind_main` field and helm's `BehindMain` band retire with it. |
 | I9's LAGGED and UNFETCHED (`doctor/check-pour-text-current`) | Each rig checkout's lag behind its origin ref, and that ref's fetch time, against the reconciler's 15-minute cadence. | **Retirement.** They measure whether the reconciler is keeping up, and nothing advances a checkout any more. |
 | I9's STALE-TEXT | The formula a running molecule was poured from (`gc.formula_source`), dated by `git log` in the checkout that owns the path (`:314`). | **The cached revision.** A source under a cache clone never changes in place, so staleness becomes "the deployed revision's copy differs from the poured one". The check compares the poured file with the same path under its own `GC_PACK_DIR`. The checkout arm stays for a city that imports by path. |
-| The overlays' hooks | The gh-origin-guard PreToolUse command in all three overlays, `patrol-continue.sh`'s ledger (`:118-120`), `work-context.sh`'s `run-lib.sh` (`:97-99`) and `cycle-recycle.sh`'s `scratch-reap.sh` (`:268-270`). Each takes its script from the first of `$GC_RIG_ROOT` and `$GC_CITY_PATH/rigs/gc-toolkit` that holds it, and the guard exits 0 when neither does. `work-context.sh` tries `$GC_RUN_LIB` and `$GC_PACK_DIR` first, and nothing sets either one for a session. | **The revision the session started from.** `worktree-setup.sh`, which runs as `pre_start` with its path under `{{.ConfigDir}}`, records its own scripts directory in the work dir, with the commit checked out there (`git rev-parse HEAD`). The hooks read that record. deacon, mechanik and dog do not run `worktree-setup.sh`, so each gains a `pre_start` step that writes the same record. `gh-origin-guard-codex.sh` copies the overlay's guard command into the Codex home, so the Codex agents take the change with it. A session with no record, such as one started before unit 1 went live, asks `gc gc-toolkit scripts-dir` instead. A per-hook `gc gc-toolkit scripts-dir` would be a Gas City query on every Bash call, which the operator ruled out: "Any query to gas city is expensive if done often, so it needs to be a push change vs a pull to check if anything changed" (converse sitting tk-vu6faf2, 2026-11-05, recorded in observation tk-dbsf5cu). |
+| The overlays' hooks | The gh-origin-guard PreToolUse command in all three overlays, `patrol-continue.sh`'s ledger (`:118-120`), `work-context.sh`'s `run-lib.sh` (`:97-99`) and `cycle-recycle.sh`'s `scratch-reap.sh` (`:268-270`). Each takes its script from the first of `$GC_RIG_ROOT` and `$GC_CITY_PATH/rigs/gc-toolkit` that holds it, and the guard exits 0 when neither does. `work-context.sh` tries `$GC_RUN_LIB` and `$GC_PACK_DIR` first, and nothing sets either one for a session. | **The revision the session started from.** `worktree-setup.sh`, which runs as `pre_start` with its path under `{{.ConfigDir}}`, records its own scripts directory in the work dir, with the commit checked out there (`git rev-parse HEAD`). The hooks read that record. deacon, mechanik and dog do not run `worktree-setup.sh`, so each gains a `pre_start` step that writes the same record. `gh-origin-guard-codex.sh` copies the overlay's guard command into the Codex home, so the Codex agents take the change with it. A session with no record, such as one started before unit 1 went live, asks `gc gc-toolkit scripts-dir` instead. So does a session whose recorded directory is gone, as it is once a prune removes that clone (below the table). The hook that finds it gone writes the answer into the record in place of the directory and keeps the recorded commit, which pack drift compares (the row below), so the session asks once after a prune, not at every hook. Only when that query fails as well does a hook do what it does today when no location holds its script, and the guard then lets the call through. A per-hook `gc gc-toolkit scripts-dir` would be a Gas City query on every Bash call, which the operator ruled out: "Any query to gas city is expensive if done often, so it needs to be a push change vs a pull to check if anything changed" (converse sitting tk-vu6faf2, 2026-11-05, recorded in observation tk-dbsf5cu). |
 | `cycle-recycle.sh`'s pack drift | The mtimes of the role's prompt, patrol formula and fragments in the checkout, against the session's first prompt (`:95-111`). | **The pack's entry in the lock.** The session's record (the row above) holds the commit the session started from, because the cache directory's name is a hash and does not give the commit back. Every check reads the pack's `[packs."<source>"]` entry in the city's `packs.lock` and compares that `commit` with the recorded one. Drift is a different commit. The file's mtime proves nothing, because every install rewrites the file and a re-pin of core or bd changes it too (fact 2). No time the session can read gates the comparison either. `pre_start` runs with the paths of the controller's last config load (facts 6 and 7), so the lock can name the new revision before the session records the old one, and before its first prompt. The deploy's soft reload then accepts that session's drift (fact 8), and only this comparison recycles it. A check reads the record and the lock, two local files, and makes no query. Under a path import, the recorded directory's mtimes keep today's check. |
 | The demo engine's own-source rule | `_demo_engine_rig_of` treats the rig whose repository holds the pack's directory as one whose app reads the city (`:404-412`). | **No code change.** The clone belongs to no rig, so the rule finds nothing. The town already sets `app_reads_city = "true"` on the gc-toolkit rig. install.md's line that the rig the pack is imported from "needs no setting" changes to say a URL import needs the setting. |
+
+**A prune under a running session.** Nothing runs `gc import prune` on its
+own, in Gas City or in this design. Each deploy leaves the replaced revision's
+clone in the cache, where it stays until someone runs
+`gc import prune --apply` (fact 3). A prune keeps every clone that the lock of
+a registered city, or of the current one, pins, and any other clone whose
+directory is younger than `--keep-days`, which is 7 by default and turns the
+age check off at 0 (`pruneReferencedCacheKeys`, cmd/gc/cmd_import_prune.go;
+`classifyPruneEntries`, internal/packman/prune.go). It reads no session. A
+session that started from a revision a deploy has since replaced can therefore
+outlive its clone. The mechanik and the converse sittings have no idle timeout
+(`idle_timeout = "0"`), and no drift check recycles them, so they are the
+sessions that run longest on a replaced revision. Once a session's clone is
+gone, its hooks take their scripts from the deployed revision through the
+fallback in the hooks row, which is the mix of revisions its steps' scripts
+already run in (section 2). Its skills do not come back that way. Every pack
+agent's sessions run in a work dir apart from the agent's scope root, and for
+such a session Gas City links the pack's skills into the work dir from the
+clone it starts from, through a `pre_start` command Gas City adds itself
+(`appendMaterializeSkillsPreStart`, cmd/gc/skill_integration.go). Only the
+session's next start links them again, because the supervisor's pass re-links
+each agent's scope root alone (`runStage1SkillMaterialization`,
+cmd/gc/skill_supervisor.go). A prune that removes the clone therefore leaves
+those links pointing at nothing until the session restarts, as a prune already
+does to core's skills once a gc upgrade has moved core's pin. The pack writes
+none of those links.
 
 **Git history in the cache.** The clone is a full clone (fact 3), so a script
 may read its history with commands that write nothing, such as `git log`,
@@ -746,6 +779,16 @@ asserts these things:
     `cycle-recycle.sh --drift <role>` check reports drift. With the record and
     the lock naming one commit, a lock rewritten by an install that changes
     nothing, or by a re-pin of core or bd, reports none.
+12. A session's hooks outlive its clone. After the command deploys a second
+    commit over the first, `gc import prune --apply --keep-days 0` removes the
+    first commit's clone, which no lock pins any more. The prune runs under the
+    suite's scratch `GC_HOME`, so it reads only the scratch city's registry,
+    lock and cache. In a work dir whose record names the removed clone's
+    scripts directory, the guard command prints its deny object for a `gh`
+    write aimed at a repository other than origin, which a guard falling
+    through to `exit 0` would not print. The record then names the second
+    clone's directory and still holds the first commit, so pack drift reports
+    drift.
 
 ### The cutover
 
@@ -805,7 +848,7 @@ Running them in order keeps their shared docs from conflicting.
 
 | Unit | What it changes | Who | Waits on |
 |---|---|---|---|
-| 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory, and the commit checked out there, in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. Pack drift compares the recorded commit with the pack's entry in the lock at every check. Pack drift is how the patrols take a deploy, since the deploy's soft reload restarts no session (section 2). Its tests show that a moved pin recycles a patrol once, that a lock naming a new commit recycles it at the first check even when the lock was written before the transcript's first record, and that an install that changes nothing, and a re-pin of core or bd, recycle nothing. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
+| 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory, and the commit checked out there, in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. A hook whose recorded directory is gone, as after a prune, asks `gc gc-toolkit scripts-dir`, writes the answer into the record and keeps the recorded commit. Pack drift compares the recorded commit with the pack's entry in the lock at every check. Pack drift is how the patrols take a deploy, since the deploy's soft reload restarts no session (section 2). Its tests show that a moved pin recycles a patrol once, that a lock naming a new commit recycles it at the first check even when the lock was written before the transcript's first record, and that an install that changes nothing, and a re-pin of core or bd, recycle nothing. They also show that a hook whose recorded directory is gone runs its script from the deployed revision, the guard included, and that the record keeps its commit. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
 | 2. Build and check what is deployed | `gc-build.sh` loses `behind_main`. helm's packhealth loses its band. I9 loses LAGGED and UNFETCHED, and its STALE-TEXT gains the cached-revision arm. Also the helm README, the I9 rows in component-model.md and install.md, and the tests. | polecat | unit 1 |
 | 3. Deploy by pin | `gc gc-toolkit deploy`, with the soft reload after each install, each failure's outcome and the run that finishes it, and a revert's hold, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
 | 4. Retire the healer | Delete the reconciler, its test and its order, with their deletion-plan rows and the stage B schedule row. Retire `auto_ff_rig_main`. Move the demo engine to a worktree of its rig. Remove `reconcile_rig` and its comment from lifecycle.toml. Sweep the docs in section 6. Count the reconciler's open subjects again. | polecat | unit 3 |
@@ -878,6 +921,11 @@ and 4 remove surface. Upstream is gastownhall/gascity at `8e75c50aa845`.
   calling it from a hook is the per-hook query the operator ruled out
   (section 4). `pre_start` is the one place Gas City renders `{{.ConfigDir}}`
   and runs a command at a session's start, so the record is written there.
+  Also searched `gc import prune` for a way to keep the clone a running session
+  started from. It keeps only the clones a city's lock pins and those younger
+  than `--keep-days`, and it reads no session (section 4). So a hook whose
+  recorded directory is gone asks `gc gc-toolkit scripts-dir` once, as a
+  session with no record does, and writes the answer into the record.
 - **A running session learning that a deploy happened.** Searched: the
   config-drift handling and `gc reload --soft` (fact 8). Drift restarts a
   named session from outside it, whatever it is doing, so the deploy accepts
@@ -888,9 +936,9 @@ and 4 remove surface. Upstream is gastownhall/gascity at `8e75c50aa845`.
   compares its commit with the session's. It compares commits because every
   install rewrites the file (fact 2), and it reads the entry at every check
   because a session can start from the old revision after the lock names the
-  new one (section 4). The canary in section 7 watches that no working session restarts
-  and that each patrol recycles at the end of a turn. Once Gas City holds a
-  named session's drift restart for the work it holds, its own handling can
-  replace the soft reload and pack drift, and unit 6 appends what the canary
-  shows to tk-1tfzr71.18, the member that re-derives the pack's
+  new one (section 4). The canary in section 7 watches that no working session
+  restarts and that each patrol recycles at the end of a turn. Once Gas City
+  holds a named session's drift restart for the work it holds, its own handling
+  can replace the soft reload and pack drift, and unit 6 appends what the
+  canary shows to tk-1tfzr71.18, the member that re-derives the pack's
   session-lifecycle machinery against the controller's.
