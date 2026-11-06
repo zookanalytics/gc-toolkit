@@ -126,11 +126,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not list closed epics in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
     fi
-    # A closed epic is judged only once it has entered stewardship — i.e. carries
-    # a recorded hypothesis. One closed without a hypothesis predates the model
-    # (there is no ruling to expect of an epic the stewardship contract never
-    # reached), so it is exempt, which also keeps this a forward regression
-    # detector: a store of pre-stewardship epics reports clean.
+    # A closed epic is judged only once it carries a recorded hypothesis. One
+    # closed without a hypothesis has nothing to rule on, so it is exempt. It is a
+    # Delivery, whose epic carries the ruling, or an incomplete Epic, which is
+    # fixed by recording its hypothesis (docs/epics.md). The exemption for an
+    # incomplete Epic is compatibility debt (docs/built-once-target.md).
     # bd returns an {"error":...} object when a query does not resolve
     # (bead-context.sh). Iterating it with `.[]?` would yield zero rows at exit 0
     # and report the store OK; `error` on a non-array aborts jq non-zero, caught
@@ -152,7 +152,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         # gate applies the same predicate.
         | (if ($ruling == "close" and $reasoned) then "ruled"
            elif $disposed != "" then "exempt-disposed"
-           elif $hyp == "" then "exempt-legacy"
+           elif $hyp == "" then "exempt-nohyp"
            elif $ruling == "close" then "noreason"
            elif ($ruling == "continue" or $ruling == "shift") then "nonterminal"
            else "unruled" end) as $verdict
@@ -166,7 +166,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not stage the closed-epic enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
         continue
     fi
-    n_disposed=0; n_legacy=0
+    n_disposed=0; n_nohyp=0
     while IFS=$'\037' read -r kind id ruling; do
         [ -n "$kind" ] || continue
         # Recording the ruling on the closed epic clears the finding; no reopen is
@@ -181,14 +181,14 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             nonterminal)
                 errors+=("$label epic $id: CLOSED on the non-terminal ruling '$ruling' — continue and shift keep an epic open, and it closes only on the close ruling (docs/epics.md). $remedy") ;;
             exempt-disposed) n_disposed=$((n_disposed + 1)) ;;
-            exempt-legacy)   n_legacy=$((n_legacy + 1)) ;;
+            exempt-nohyp)    n_nohyp=$((n_nohyp + 1)) ;;
         esac
     done < "$ENUM_TMP/rows"
     if [ "$n_disposed" -gt 0 ]; then
         notes+=("$label: $n_disposed closed epic(s) carry gc.superseded_by (retired into a successor), so they were not judged")
     fi
-    if [ "$n_legacy" -gt 0 ]; then
-        notes+=("$label: $n_legacy closed epic(s) predate epic stewardship (no recorded hypothesis), so no ruling is expected of them")
+    if [ "$n_nohyp" -gt 0 ]; then
+        notes+=("$label: $n_nohyp closed epic(s) carry no recorded hypothesis, so there is no ruling to read: Deliveries, or incomplete Epics that owed one")
     fi
 done < "$ENUM_TMP/scopes"
 

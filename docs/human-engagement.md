@@ -101,8 +101,11 @@ the seam the pack builds at each.
   not do: one open gate per bead and situation key, a quiet period after a
   `moot` or `benign` answer for a call that declares `--quiet-window`, the
   message as the gate's description, and `--retract`, which resolves the
-  filer's own gate as moot once the situation has gone. Every reader finds a
-  bead's human gates one way, through the bead's `blocks` edges
+  filer's own gate as moot once the situation has gone. Two writers in the
+  same instant can each file, because bd keeps no idempotency at create. Both
+  gates then stand, and the bead moves once a person has cleared each. The
+  helper closes neither, because another bead may already wait on it. Every
+  reader finds a bead's human gates one way, through the bead's `blocks` edges
   (`bd_human_gates` in `assets/scripts/bd-lib.sh`), so a gate holds what it
   blocks whoever filed it. A gate on a bead with open children pauses every
   part of it that has not started, so a filer that can land on a parent says
