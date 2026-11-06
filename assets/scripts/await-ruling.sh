@@ -49,11 +49,10 @@
 # in_progress one, and reconcile never slings over an assignee. So a claim the
 # work bead still carries is released after the edge lands and before the arm,
 # when no live worker holds it. That is a claim in this session's name, or an
-# in_progress claim whose owner `gc session list --state all` lists under none
-# of its names, or lists only as closed. mol-polecat-work's load-context builds
-# over such a crashed owner's claim, and this script proves the owner gone
-# itself, so a wait asked at any step of that run releases the claim without
-# the caller naming it.
+# in_progress claim whose owner `gc session list` lists under none of its names.
+# mol-polecat-work's load-context builds over such a crashed owner's claim, and
+# this script proves the owner gone itself, so a wait asked at any step of that
+# run releases the claim without the caller naming it.
 # An in_progress claim is released with `gc bd release-if-current`, Gas City's
 # compare-and-swap release: one write that reopens the bead and clears its
 # assignee, made only while the bead is still in_progress under the holder this
@@ -111,9 +110,8 @@ usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
   --dry-run       resolve and report; write nothing
 
 A claim on the work bead is released before the arm when it is this session's,
-or when the bead is in_progress under an owner `gc session list --state all`
-does not list, or lists only as closed. Any other claim is kept, and no wait
-is recorded.
+or when the bead is in_progress under an owner `gc session list` does not list.
+Any other claim is kept, and no wait is recorded.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_AGENT, GC_ALIAS name this session.
 
@@ -191,17 +189,17 @@ case "$STATUS" in
     exit 1 ;;
 esac
 
-# owner_listed <assignee> — how many sessions `gc session list --state all`
-# lists under that assignee, in any of the three forms a claim writes: the
-# session name, the session id, or the agent address, which is a session's
-# alias or the end of one. The same three forms decide load-context's owner
-# check. A row marked closed is a session's history, not a worker, so it is
-# not counted. Prints nothing when the list cannot be read.
+# owner_listed <assignee> — how many sessions `gc session list` lists under
+# that assignee, in any of the three forms a claim writes: the session name,
+# the session id, or the agent address, which is a session's alias or the end
+# of one. That listing holds every session that has not closed, asleep ones
+# included. Load-context's owner check (work_owner_listed in work-lib.sh) reads
+# the same listing with the same match. Prints nothing when the list cannot be
+# read.
 owner_listed() {
-  gc session list --state all --json 2>/dev/null </dev/null | scrub | jq -r --arg o "$1" '
+  gc session list --json 2>/dev/null </dev/null | scrub | jq -r --arg o "$1" '
     if type == "object" and (.sessions | type) == "array" and all(.sessions[]; type == "object") then
-      [ .sessions[] | select(.closed != true)
-                    | select(((.alias // "") == $o) or ((.alias // "") | endswith($o))
+      [ .sessions[] | select(((.alias // "") == $o) or ((.alias // "") | endswith($o))
                              or ((.session_name // "") == $o) or ((.id // "") == $o)) ] | length
     else empty end' 2>/dev/null
 }

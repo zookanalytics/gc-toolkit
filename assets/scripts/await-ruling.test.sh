@@ -23,14 +23,14 @@
 #     records it as resling_target, so after an arm that is refused or whose
 #     write fails, a re-run with no --target arms to the same pool;
 #   * the claim: a bead in_progress under any of this session's names, or under
-#     an owner `gc session list --state all` lists under none of its names or
-#     only as closed, is released before the arm with gc bd release-if-current,
-#     and an open bead under one of this session's names with an update guarded
-#     on its status and assignee; its session pins are dropped, and it reads
-#     back open and unassigned. An owner the list names as not closed, a list
-#     that cannot be read, and an open bead under another assignee are refused
-#     before the edge, and a release that does not land, or that
-#     release-if-current answers "skipped", leaves the claim and arms nothing;
+#     an owner `gc session list` lists under none of its names, is released
+#     before the arm with gc bd release-if-current, and an open bead under one
+#     of this session's names with an update guarded on its status and
+#     assignee; its session pins are dropped, and it reads back open and
+#     unassigned. An owner the list names, a list that cannot be read, and an
+#     open bead under another assignee are refused before the edge, and a
+#     release that does not land, or that release-if-current answers
+#     "skipped", leaves the claim and arms nothing;
 #   * fail-closed: an unreadable bead, a parked bead, no gate, a refused edge,
 #     a refused route clear, a refused arm, no pool to re-sling to;
 #   * a closed work bead needs no wait and exits 0;
@@ -370,8 +370,8 @@ eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<ab
   "an open claim: its session pins are dropped"
 
 # A foreign claim is released once the script proves its owner gone: the bead is
-# in_progress, and `gc session list --state all` lists no session under that
-# owner's name, id or agent address. No caller names the owner.
+# in_progress, and `gc session list` lists no session under that owner's name,
+# id or agent address. No caller names the owner.
 LIVE_LIST='{"sessions":[{"id":"hq-live","alias":"rig/rig.hicks","session_name":"pool__polecat-hq-live","state":"active"},{"id":"hq-nap","alias":null,"session_name":"pool__polecat-hq-nap","state":"asleep"}]}'
 reset; claim in_progress hq-dead
 OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$LIVE_LIST" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
@@ -381,8 +381,8 @@ eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a crashed owner's claim: th
 eq "$(on_v1)" 1 "a crashed owner's claim: the work bead waits on the gate"
 eq "$(grep -c '^bd release-if-current tk-work hq-dead$' "$GC_LOG" | tr -d ' ')" 1 \
   "a crashed owner's claim: gc bd release-if-current releases it, a compare-and-swap on that owner"
-eq "$(grep -c '^session list --state all --json$' "$GC_LOG" | tr -d ' ')" 1 \
-  "a crashed owner: proven gone by one read of every session, asleep ones included"
+eq "$(grep '^session list' "$GC_LOG")" "session list --json" \
+  "a crashed owner: proven gone by one read of the default listing, every session that has not closed"
 eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<absent>" \
   "a crashed owner's claim: its session pins are dropped"
 reset; claim in_progress hq-dead
@@ -391,27 +391,7 @@ eq "$RC" 0 "dry run over a crashed owner's claim: exit 0"
 has "$OUT" "after releasing its claim (status in_progress, assignee hq-dead)" "dry run over a crashed owner's claim: names the release"
 eq "$(field tk-work assignee)" "hq-dead" "dry run over a crashed owner's claim: nothing released"
 
-# A list that also carries closed sessions' rows, as `--state all` does on a
-# build that returns a closed session's history: a row marked closed is no
-# worker, so an owner the list names only there is gone.
-CLOSED_LIST='{"sessions":[{"id":"hq-live","alias":"rig/rig.hicks","session_name":"pool__polecat-hq-live","state":"active","closed":false},{"id":"hq-dead","alias":"rig/rig.furiosa","session_name":"pool__polecat-hq-dead","state":"closed","closed":true}]}'
-for who in hq-dead pool__polecat-hq-dead rig/rig.furiosa; do
-  reset; claim in_progress "$who"
-  OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$CLOSED_LIST" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
-  eq "$RC" 0 "in_progress under '$who', listed only as closed: the wait lands"
-  eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "listed only as closed '$who': the claim is released"
-  eq "$(grep -cxF "bd release-if-current tk-work $who" "$GC_LOG" | tr -d ' ')" 1 \
-    "listed only as closed '$who': gc bd release-if-current releases it"
-done
-# An alias a closed session held and a live session holds now names a worker.
-reset; claim in_progress rig/rig.furiosa
-OUT=$(env "${SELF[@]}" FAKE_SESSIONS='{"sessions":[{"id":"hq-dead","alias":"rig/rig.furiosa","state":"closed","closed":true},{"id":"hq-new","alias":"rig/rig.furiosa","state":"active","closed":false}]}' \
-  "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
-eq "$RC" 1 "an alias a live session holds after a closed one: exit 1"
-eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|rig/rig.furiosa" "an alias a live session holds after a closed one: the claim is kept"
-
-# An owner the list names, in any of its forms and in any state but closed, may
-# be live.
+# An owner the list names, in any of its forms and in any state, may be live.
 for who in hq-live pool__polecat-hq-live rig/rig.hicks rig.hicks hq-nap; do
   reset; claim in_progress "$who"
   OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$LIVE_LIST" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
