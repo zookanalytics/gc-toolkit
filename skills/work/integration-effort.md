@@ -20,8 +20,8 @@ pool never sees the bead, and bd holds nothing on an edge between two stores.
 and polecat pool as `gc agent list` prints them, and `<binding>` is the name
 the city imports the pack under, as in the work skill.
 
-Fill in each placeholder and run the steps in order. Each step reads its writes
-back and stops when one did not land.
+Fill in each placeholder and run the steps in order. Steps 2 to 6 stop when a
+write did not land.
 
 ```bash
 # 1. The landing bead, under the effort's epic (drop --parent when it has

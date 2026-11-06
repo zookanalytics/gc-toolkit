@@ -44,9 +44,10 @@ skill), or leave it for the operator to place.
   with `--parent <that epic>`, even when the epic is the bead it came from. Add
   no `blocks` edge that makes the epic wait on it: an epic already waits on its
   members.
-- **Give it a parent only when one applies.** A parent puts the bead under its
-  epic's park and ranks it by the epic's priority. The parent of the bead it
-  came from applies only when the new work serves the same epic. Find it with
+- **Give it a parent only when one applies.** A parent makes the bead a member
+  of its epic: a park on the epic holds the bead, and the epic's priority ranks
+  it. The parent of the bead it came from applies only when the new work serves
+  the same epic. Find it with
   `"$(gc <binding> scripts-dir)/converse-parent.sh" <bead>`.
   This prints that parent, or the nearest open bead above it once that parent
   has closed, or an empty line when none is open. Never file under a closed
@@ -86,9 +87,9 @@ operator's:
 
 A product area, a theme or a wish to find work on the board files none. List
 the epic's open Deliveries first, and file a new one only once the list has
-succeeded and no open Delivery's aim already covers the work. Keep the
-`Delivery: ` title prefix, and open the description with the `Aim:` and
-`Done when:` lines. Send it to no pool: its Stories are the work.
+succeeded and no open Delivery's aim already covers the work. Start its title
+with `Delivery: `, and open its description with the `Aim:` and `Done when:`
+lines. Send it to no pool: its Stories are the work.
 
 ```bash
 gc bd list --parent <epic> -t epic --limit 0 --json
@@ -170,10 +171,10 @@ sends the effort on:
 - When the subject's recommendation is `mol-design-convoy`, the sign-off's
   `--accept` takes it (Take a recommendation, below), and that formula's run
   cuts the branch.
-- Any other effort goes to the mechanik. File a bead in the effort's rig that
-  names the effort's beads and what it delivers, then send it to the mechanik
-  (Send a bead to a named agent, above):
-  `gc bd --rig <rig> create "<title>" -t task -d "<description>" --json`.
+- Any other effort goes to the mechanik. File a bead in the effort's rig whose
+  description names the effort's beads and what the effort delivers:
+  `gc bd --rig <rig> create "<title>" -t task -d "<description>" --json`. Then
+  send it to the mechanik (Send a bead to a named agent, above).
 
 ## Take a recommendation
 
@@ -272,9 +273,9 @@ Before you run it:
 - Check that the bead has no work in flight: it is unassigned, has no branch or
   PR still in flight to a pool, and is not a review, step or workflow bead.
   Check it yourself, because the doctor skips a bead closed this way and
-  nothing checks it again. Retire a bead with an open PR instead (the prs skill), which
-  closes the PR too: a bare `gc bd close` on a bead whose `merge_result` is not
-  a closed state leaves its PR unlanded.
+  nothing checks it again. Retire a bead with an open PR instead (the prs
+  skill), which closes the PR too: a bare `gc bd close` on a bead whose
+  `merge_result` is not a closed state leaves its PR unlanded.
 - Disarm an armed bead, so a wait released before the close lands cannot send
   it: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 - In a sitting, close a subject only on the operator's agreement, and only
