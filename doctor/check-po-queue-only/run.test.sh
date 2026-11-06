@@ -3,16 +3,17 @@
 # the way bd does (a route or an assignee filter, closed beads left out), and
 # run-lib.sh's verbs (run-lib.stub.sh); no city, no network. Covers:
 #   - a clean city passes, and the reads ask for the right things: the route
-#     to the po's qualified name with ephemeral rows included, and one
-#     assignee query over the po's alias and the session id its mailbox names;
-#     a decoy agent whose name only ends in "po" is not the po;
+#     to the po's qualified name with ephemeral rows included, the seat's
+#     sessions by its template, and one assignee query over the po's alias,
+#     its session's id and runtime name, and the earlier alias its mailbox
+#     names; a decoy agent whose name only ends in "po" is not the po;
 #   - each arm fails on its fixture: a bead routed to the po, a bead assigned
-#     to its alias, a bead assigned to its session id, a run poured to the
-#     seat (one finding naming the root and each routed step, and not a step
-#     routed elsewhere), unread mail from any sender (a sender of human named
-#     as such), a queued bead carrying anchor_bead, one carrying a landing
-#     state, one carrying an arm, one carrying an assignee, and one a live run
-#     works;
+#     to its alias, to its session id, to its session's runtime name or to an
+#     earlier alias, a run poured to the seat (one finding naming the root and
+#     each routed step, and not a step routed elsewhere), unread mail from any
+#     sender (a sender of human named as such), a queued bead carrying
+#     anchor_bead, one carrying a landing state, one carrying an arm, one
+#     carrying an assignee, and one a live run works;
 #   - what is not a finding: a held bead routed or assigned to the po, under
 #     either hold label and any spelling Gas City reads, read mail, a closed
 #     bead, a queued bead whose only mark is a branch, and a queued bead whose
@@ -21,8 +22,10 @@
 #   - a city with no po: only the queue is judged, and no store is searched;
 #   - a suspended rig's store is never read, and its queued beads are named;
 #   - fail-closed: an unreadable agent list, rig list, queue (a failed read and
-#     a payload in neither shape), mailbox, route listing, assignee query or
-#     run map warns, and a queued bead no single rig's prefix names warns;
+#     a payload in neither shape), session list (both ways), mailbox, route
+#     listing, assignee query or run map warns, and each address the other
+#     reads give is still searched; a queued bead no single rig's prefix names
+#     warns;
 #   - a raw control byte in a mail subject stays on one line, and the scratch
 #     tree is removed on exit.
 set -uo pipefail
@@ -56,7 +59,12 @@ EOF
 cat > "$TMP/agents-nopo.json" <<'EOF'
 {"city_path":"/nowhere","agents":[{"name":"mechanik","qualified_name":"gc-toolkit.mechanik","scope":"city"}]}
 EOF
-INBOX_CLEAN='{"schema_version":"1","ok":true,"recipient":"gc-toolkit.po","recipients":["gc-toolkit.po","hq-sess1"],"messages":null}'
+INBOX_CLEAN='{"schema_version":"1","ok":true,"recipient":"gc-toolkit.po","recipients":["gc-toolkit.po","hq-sess1","gc-toolkit.prior-po"],"messages":null}'
+cat > "$TMP/sessions.json" <<'EOF'
+{"schema_version":"1","ok":true,"sessions":[
+  {"id":"hq-sess1","name":"gc-toolkit.po","template":"gc-toolkit.po","alias":"gc-toolkit.po","agent_name":"gc-toolkit.po","session_name":"gc-toolkit__po","state":"asleep","closed":false},
+  {"id":"hq-sess9","name":"gc-toolkit.mechanik","template":"gc-toolkit.mechanik","alias":"gc-toolkit.mechanik","agent_name":"gc-toolkit.mechanik","session_name":"gc-toolkit__mechanik","state":"active","closed":false}]}
+EOF
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
@@ -66,6 +74,11 @@ case "$1 $2" in
                 printf '%s\n' "$*" >> "$GC_LOG"; cat "$QUEUE_JSON" ;;
   "mail inbox") rc="${INBOX_RC:-0}"; [ "$rc" -eq 0 ] || { echo "gc mail inbox: mail store unreachable" >&2; exit "$rc"; }
                 printf '%s\n' "$*" >> "$GC_LOG"; cat "$INBOX_JSON" ;;
+  "session list") rc="${SESSIONS_RC:-0}"; [ "$rc" -eq 0 ] || { echo "gc session list: listing sessions: store down" >&2; exit "$rc"; }
+                printf '%s\n' "$*" >> "$GC_LOG"
+                # --template keeps the rows whose template it names, as gc does.
+                t=""; prev=""; for a in "$@"; do [ "$prev" = --template ] && t="$a"; prev="$a"; done
+                jq -c --arg t "$t" 'if (.sessions | type) == "array" and $t != "" then .sessions |= map(select(.template == $t)) else . end' "$SESSIONS_JSON" ;;
   "bd "*) shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -115,6 +128,7 @@ run_check() {
     : > "$TMP/bd.log"; : > "$TMP/gc.log"
     AGENTS_JSON="${AGENTS_JSON:-$TMP/agents.json}" RIGS_JSON="$TMP/rigs.json" \
     QUEUE_JSON="${QUEUE_JSON:-$TMP/queue.json}" INBOX_JSON="$TMP/inbox.json" \
+    SESSIONS_JSON="${SESSIONS_JSON:-$TMP/sessions.json}" \
     STORES="$TMP/stores" BD_LOG="$TMP/bd.log" GC_LOG="$TMP/gc.log" \
     GC_RUN_LIB="$HERE/../../assets/scripts/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" \
     PATH="$TMP/bin:$PATH" TMPDIR="$TMP/rt" GC_CITY_PATH="" GC_CITY="" \
@@ -137,10 +151,12 @@ has "$OUT" "OK: the po receives nothing but its queue" "the pass message is the 
 has "$OUT" "2 queued bead(s)" "…and it counts the queue it read"
 LOG=$(cat "$TMP/bd.log")
 has "$LOG" "alpha list --db $TMP/alpha/.beads --metadata-field gc.routed_to=gc-toolkit.po --include-ephemeral" "the route listing asks for the po's qualified name, ephemeral rows included"
-has "$LOG" 'alpha query --db '"$TMP/alpha/.beads"' assignee="gc-toolkit.po" OR assignee="hq-sess1"' "one assignee query names the po's alias and its session id"
+has "$LOG" 'alpha query --db '"$TMP/alpha/.beads"' assignee="gc-toolkit.po" OR assignee="gc-toolkit.prior-po" OR assignee="gc-toolkit__po" OR assignee="hq-sess1" --json' "one assignee query names the po's alias, its earlier alias, its session's runtime name and its session id"
+hasnt "$LOG" "gc-toolkit__mechanik" "…and no other seat's session"
 has "$LOG" "town list" "the town store is searched too"
 hasnt "$LOG" "gc.routed_to=gc-toolkit.repo" "an agent whose name only ends in po is not the po"
 has "$(cat "$TMP/gc.log")" "mail inbox gc-toolkit.po --json" "the mailbox is read at the po's address"
+has "$(cat "$TMP/gc.log")" "session list --template gc-toolkit.po --json" "the seat's sessions are read by its template"
 has "$(cat "$TMP/gc.log")" "beads list --label hold:mayor --format=json" "the queue is read the way the po reads it"
 
 # --- 2. a bead routed to the po ---------------------------------------------
@@ -164,6 +180,20 @@ store alpha '{"id":"al-a2","status":"in_progress","issue_type":"task","assignee"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a bead assigned to the session id the po's mailbox names is an ERROR"
 has "$OUT" "alpha bead al-a2 (in_progress task): assigned to hq-sess1" "the finding names the session id"
+
+# --- 4a. a bead assigned to the po's session's runtime name ------------------
+reset
+store alpha '{"id":"al-a4","status":"open","issue_type":"task","assignee":"gc-toolkit__po","metadata":{}}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bead assigned to the runtime name of the po's session is an ERROR"
+has "$OUT" "alpha bead al-a4 (open task): assigned to gc-toolkit__po" "the finding names the session name"
+
+# --- 4b. a bead assigned to an alias the seat had before ----------------------
+reset
+store town '{"id":"hq-a5","status":"open","issue_type":"task","assignee":"gc-toolkit.prior-po","metadata":{}}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bead assigned to an earlier alias the po's mailbox names is an ERROR"
+has "$OUT" "town bead hq-a5 (open task): assigned to gc-toolkit.prior-po" "the finding names the earlier alias"
 
 # --- 5. a run poured to the seat ---------------------------------------------
 reset
@@ -261,6 +291,7 @@ eq "$RC" "0" "with no po configured nothing can reach one"
 has "$OUT" "no agent named po is configured in this city" "…and the check says it judged only the queue"
 eq "$(grep -cE ' (list|query) ' "$TMP/bd.log")" "0" "no store is searched for a route or an assignment"
 hasnt "$(cat "$TMP/gc.log")" "mail inbox" "no mailbox is read"
+hasnt "$(cat "$TMP/gc.log")" "session list" "no session list is read"
 queue '{"id":"al-q1","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"anchor_bead":"al-anchor"}}'
 OUT=$(AGENTS_JSON="$TMP/agents-nopo.json" run_check); RC=$?
 eq "$RC" "2" "the queue is still judged with no po configured"
@@ -306,7 +337,24 @@ has "$OUT" "alpha bead al-a3 (open task): assigned to gc-toolkit.po" "…so an a
 has "$OUT" "could not read the po's mailbox" "…and the unread mailbox is named"
 has "$OUT" "mail store unreachable" "…with gc's reason"
 has "$(cat "$TMP/bd.log")" 'assignee="gc-toolkit.po"' "the query still carries the alias"
-hasnt "$(cat "$TMP/bd.log")" 'hq-sess1' "…and no session id it could not read"
+has "$(cat "$TMP/bd.log")" 'assignee="gc-toolkit__po" OR assignee="hq-sess1"' "…and the session's runtime name and id, which its session list gives"
+hasnt "$(cat "$TMP/bd.log")" 'gc-toolkit.prior-po' "…and no earlier alias it could not read"
+
+reset
+store alpha '{"id":"al-a6","status":"open","issue_type":"task","assignee":"hq-sess1","metadata":{}}' \
+            '{"id":"al-a7","status":"open","issue_type":"task","assignee":"gc-toolkit__po","metadata":{}}'
+OUT=$(SESSIONS_RC=1 run_check); RC=$?
+eq "$RC" "2" "an unreadable session list still leaves the mailbox's addresses searched"
+has "$OUT" "alpha bead al-a6 (open task): assigned to hq-sess1" "…so an assignment to the session id the mailbox names is found"
+has "$OUT" "could not read the po's sessions, \`gc session list --template gc-toolkit.po --json\` (rc=1)" "…and the unread session list is named"
+has "$OUT" "store down" "…with gc's reason"
+hasnt "$(cat "$TMP/bd.log")" 'gc-toolkit__po' "…and no runtime name it could not read"
+
+reset
+printf '{"error":"not a session list"}' > "$TMP/sessions-bad.json"
+OUT=$(SESSIONS_JSON="$TMP/sessions-bad.json" run_check); RC=$?
+eq "$RC" "1" "a session list payload with no sessions array warns, never passes"
+has "$OUT" "could not read the po's sessions" "…naming the read"
 
 reset
 OUT=$(BD_FAIL_STORE=alpha BD_FAIL_SUB=list run_check); RC=$?

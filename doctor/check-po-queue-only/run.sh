@@ -34,17 +34,25 @@
 #     lift, or a sling made while the bead was held, and `gc-helm.sh place`
 #     finishes either.
 #
-# The po's address is the qualified name `gc agent list` gives the agent named
-# po. Its mailbox read also names the session bead that holds the seat, and an
-# assignment to either is an assignment to the po. A city that configures no po
-# has no seat to reach, so only the queue is judged there. The queue's JSON is
-# an array from the direct read and {"beads": [...], "_cache_age_s": n} through
-# the supervisor API, and the check takes both. A queued bead lives in the rig
-# store its id's prefix names. A suspended rig's store is not read, because
-# querying it would auto-start an orphan Dolt server.
+# The po's addresses are every identity Gas City serves its work under, which
+# its session.AssigneeIdentities names: the session bead's id, its runtime
+# session name, its configured identity, its alias, and each alias it had
+# before. The qualified name `gc agent list` gives the agent named po is its
+# configured identity and its alias. `gc session list --template <po>` gives
+# each open session of the seat its id and its session name, and the po's
+# mailbox read gives its earlier aliases. Neither read wakes the seat. A city
+# that configures no po has no seat to reach, so only the queue is judged
+# there.
 #
-# The rig map, the agent list and the queue are read at once. Each store is
-# then scanned by its own background job, as many at a time as the fan-out cap
+# The queue's JSON is an array from the direct read and
+# {"beads": [...], "_cache_age_s": n} through the supervisor API, and the check
+# takes both. A queued bead lives in the rig store its id's prefix names. A
+# suspended rig's store is not read, because querying it would auto-start an
+# orphan Dolt server.
+#
+# The rig map, the agent list and the queue are read at once, and the po's
+# mailbox and sessions once the agent list names it. Each store is then
+# scanned by its own background job, as many at a time as the fan-out cap
 # allows: the beads routed to the po, the beads assigned to it, and, where the
 # store holds queued beads, its live runs.
 #
@@ -215,12 +223,13 @@ if [ "$agents_ok" = 1 ] && [ "${#po_list[@]}" -eq 0 ]; then
     notes+=("no agent named po is configured in this city, so no route, assignment or mail can reach one; only the queue was judged")
 fi
 
-# Each po's mailbox, read in the background while the rig map and the queue
-# finish.
-inbox_pids=(); i=0
+# Each po's mailbox and sessions, read in the background while the rig map and
+# the queue finish.
+inbox_pids=(); sessions_pids=(); i=0
 for qn in ${po_list[@]+"${po_list[@]}"}; do
     i=$((i + 1))
     read_to "$WORK/inbox.$i.json" gc mail inbox "$qn" --json </dev/null >/dev/null 2>&1 & inbox_pids+=("$!")
+    read_to "$WORK/sessions.$i.json" gc session list --template "$qn" --json </dev/null >/dev/null 2>&1 & sessions_pids+=("$!")
 done
 
 # The stores: name, path, the prefix its bead ids carry, and whether its rig is
@@ -258,17 +267,27 @@ if [ "$queue_rc" -ne 0 ] || ! jq -c -s 'if length != 1 then error("not one docum
 fi
 
 # --- The mailbox: unread mail is a finding, and its addresses are the po's ---
-# The addresses an assignment to the po carries: its qualified name, and each
-# address its mailbox resolves to, the id of the session bead that holds the
-# seat among them.
+# The addresses an assignment to the po carries: its qualified name, the id and
+# the session name of each open session of the seat, and each address its
+# mailbox resolves to, the aliases it had before among them.
 addrs=(${po_list[@]+"${po_list[@]}"}); i=0
 for qn in ${po_list[@]+"${po_list[@]}"}; do
-    i=$((i + 1)); f="$WORK/inbox.$i.json"
+    i=$((i + 1)); f="$WORK/sessions.$i.json"
+    wait "${sessions_pids[$((i - 1))]}"; rc=$?
+    if [ "$rc" -ne 0 ] || ! jq -e '(.sessions | type) == "array"' "$f" >/dev/null 2>&1; then
+        err=$(err_of "$f")
+        warnings+=("could not read the po's sessions, \`gc session list --template $qn --json\` (rc=$rc), so no store was searched for an assignment to a session's runtime name${err:+; stderr: $err}")
+    else
+        while IFS= read -r a; do
+            [ -n "$a" ] && addrs+=("$a")
+        done <<< "$(jq -r '.sessions[] | objects | (.id, .session_name, .alias) | strings' "$f" 2>/dev/null)"
+    fi
+    f="$WORK/inbox.$i.json"
     wait "${inbox_pids[$((i - 1))]}"; rc=$?
     if [ "$rc" -ne 0 ] || ! jq -e '(.messages == null or (.messages | type) == "array")
             and ((.recipients // []) | type) == "array"' "$f" >/dev/null 2>&1; then
         err=$(err_of "$f")
-        warnings+=("could not read the po's mailbox, \`gc mail inbox $qn --json\` (rc=$rc), so its unread mail was NOT checked, and no store was searched for an assignment to its session bead${err:+; stderr: $err}")
+        warnings+=("could not read the po's mailbox, \`gc mail inbox $qn --json\` (rc=$rc), so its unread mail was NOT checked, and no store was searched for an assignment to an alias the seat had before${err:+; stderr: $err}")
         continue
     fi
     while IFS= read -r m; do
@@ -295,7 +314,7 @@ if [ "${#po_list[@]}" -gt 0 ]; then
         esac
         ASSIGNEE_EXPR="${ASSIGNEE_EXPR:+$ASSIGNEE_EXPR OR }assignee=\"$a\""
         PO_ADDRS=$(jq -c --arg a "$a" '. + [$a] | unique' <<< "$PO_ADDRS")
-    done <<< "$(printf '%s\n' "${addrs[@]}" | sort -u)"
+    done <<< "$(printf '%s\n' "${addrs[@]}" | LC_ALL=C sort -u)"
 fi
 
 # --- One store's scan -------------------------------------------------------

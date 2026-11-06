@@ -43,3 +43,20 @@ with its supervisor up, and in the live city as well, so the
 `{"beads": [...], "_cache_age_s": n}` shape the check also takes was exercised only by
 `run.test.sh`. The live city itself read clean, with an empty queue and the note that
 no po is configured there, in about 3 seconds.
+
+## After the probe
+
+Self-review found that the check searched the po's alias and session id for an
+assignment, but not its session's runtime name, such as `gc-toolkit__po`. Gas City
+serves a session its work under that name too: `session.AssigneeIdentities` lists the
+session bead's id, its `session_name`, its configured identity, its alias and its
+earlier aliases, and the default work query's assigned tiers loop over
+`$GC_SESSION_ID`, `$GC_SESSION_NAME` and `$GC_ALIAS` (`internal/config/workquery.go`),
+both at upstream `d5b26f8810b3`. The mailbox read gives only the alias, the id and the
+earlier aliases. So the check also reads `gc session list --template <po> --json`, and
+adds each open session's id, runtime name and alias to the addresses it queries.
+
+That read ran on the live city's CLI on 2026-11-06, in a throwaway copy of the check
+that took mechanik for the po. Its one assignee query named `gc-toolkit.mechanik`,
+`gc-toolkit__mechanik` and the session's id, it found the beads assigned to the alias,
+and no read warned. The scratch city above was not run again.
