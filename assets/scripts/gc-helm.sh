@@ -163,14 +163,14 @@ nothing re-asks.
 
 park holds everything under a bead that has not started and leaves work in
 flight running (docs/steering.md). It gives the bead one `blocks` edge, onto
-the gate the text form files or onto the bead --waiting-on names, and reads the
-edge back. It prints `park <blocker> holds <bead>`, then what the park holds
-and what it leaves running. Re-running the text form with the same text files
-no second gate, and a --body on the re-run becomes that gate's description. It
-refuses a bead in flight (one claimed, in_progress or hooked, one carrying
-branch, merge_result or rejection_reason, or one with a workflow past
-load-context), because the bead's own edge would hold its merge. Closing the
-gate releases the park; removing one bead's edge (gc bd dep remove <bead>
+the gate the text form files or onto the bead --waiting-on names, and fails
+when the store refuses it. It prints `park <blocker> holds <bead>`, then what
+the park holds and what it leaves running. Re-running the text form with the
+same text files no second gate, and a --body on the re-run becomes that gate's
+description. It refuses a bead in flight (one claimed, in_progress or hooked,
+one carrying branch, merge_result or rejection_reason, or one with a workflow
+past load-context), because the bead's own edge would hold its merge. Closing
+the gate releases the park; removing one bead's edge (gc bd dep remove <bead>
 <gate>) releases that bead alone.
 
 priority moves where work queues (docs/steering.md). A bead's priority is the
