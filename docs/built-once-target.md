@@ -164,6 +164,25 @@ The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
 controller's stall handling or to Gas Town's dance (tk-1tfzr71.18 and .19).
 
+The witness's target is Gas Town's witness. Each remaining difference names its
+reason and what ends it:
+
+- **The spacing.** Its `next-iteration` defers the next wisp an hour, so Gas
+  City's reassignment restart starts the next pass once the hour has passed. Gas
+  Town's asks for that hour through `idle_timeout = "1h"`, which Gas City does
+  not apply to an always-on session, so there its passes run back to back. This
+  ends when Gas City gives an always-on patrol an idle interval.
+- **Reading our anchors, PR states and conversations.** Our pipeline writes them.
+  This ends as tk-1tfzr71.20 and .22 land.
+- **Findings and human gates in place of mayor mail.** This ends when the mayor
+  design tk-rl8gz4b.28 rules.
+- **No stuck-polecat check.** The liveness sweep covers it. This ends when
+  tk-1tfzr71.19 retires the sweep.
+- **The nudge order.** Gas Town's deacon does this through a command and a step
+  we do not carry. This ends when we take Gas Town's deacon or Gas City closes
+  issue #4090 with a fix that also reaches a session stopped short of
+  `next-iteration`.
+
 ### Doctor
 
 Doctor keeps one check per invariant of a surviving pack noun or warranted
