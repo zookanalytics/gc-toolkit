@@ -267,6 +267,11 @@ and the change that fires the trigger deletes it.
   `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
   among others. Trigger: no store or open PR holds the shape. Each goes with the
   member that rewrites its reader.
+- The pass for an incomplete Epic, an epic that is not a Delivery and carries no
+  hypothesis, in the close gate's `clause_epic_ruling_recorded` and I15's
+  `exempt-nohyp` arm. Each is one line that passes every epic with no hypothesis.
+  Trigger: every live Epic carries its hypothesis, and every closed one carries a
+  hypothesis or a disposition (tk-wmwcdlc.5). Carried by tk-wmwcdlc.6.
 
 ### Doctrine restated per call site
 

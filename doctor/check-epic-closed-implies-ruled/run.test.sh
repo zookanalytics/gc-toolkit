@@ -107,13 +107,13 @@ eq "$RC" "0" "gc.superseded_by is the explicit disposition the check accepts"
 hasnt "$OUT" "E5" "the disposed epic is not named"
 has "$OUT" "retired into a successor" "the disposal is counted"
 
-# --- 5. a closed epic that never entered stewardship (no hypothesis) is exempt,
-# so the check ships clean on a pre-stewardship store -------------------------
+# --- 5. a closed epic with no hypothesis, a Delivery or an incomplete Epic, is
+# exempt: it has nothing to rule on --------------------------------------------
 store "$(epic E5b closed '{}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a pre-stewardship closed epic (no hypothesis) is exempt, not an error"
-hasnt "$OUT" "E5b" "the legacy epic is not named"
-has "$OUT" "predate epic stewardship" "the legacy exemption is counted"
+eq "$RC" "0" "a closed epic with no hypothesis is exempt, not an error"
+hasnt "$OUT" "E5b" "the epic with no hypothesis is not named"
+has "$OUT" "Deliveries, or incomplete Epics that owed one" "the exemption is counted"
 
 # --- 6. an open epic is out of scope (only closed epics are judged) -----------
 store "$(epic E6 open '{"epic_hypothesis":"for X"}')"
@@ -128,7 +128,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a mix flags the stewarded unruled epic"
 has "$OUT" "E8" "the unruled epic is named"
 hasnt "$OUT" "epic E7" "the ruled epic is not named"
-hasnt "$OUT" "epic E9" "the legacy epic is not flagged as an error"
+hasnt "$OUT" "epic E9" "the epic with no hypothesis is not flagged as an error"
 
 # --- 7. fail-CLOSED ----------------------------------------------------------
 OUT=$(RIGS_RC=1 run_check); RC=$?
