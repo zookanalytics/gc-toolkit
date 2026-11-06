@@ -980,6 +980,9 @@ if [ "$1 $2 $3" = "bd update tk-conv" ]; then
   if [ -n "${DISMISS_BEFORE_UPDATE:-}" ]; then
     jq '.status = "closed" | .close_reason = "dismissed by the operator"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
   fi
+  if [ -n "${RETURN_BEFORE_UPDATE:-}" ]; then
+    jq '.assignee = "human" | .status = "open"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
+  fi
 fi
 exec "$(dirname "$0")/gc.real" "$@"
 G2
@@ -995,6 +998,11 @@ eq "$(field tk-conv status)/$(field tk-conv assignee)" "closed/gc-toolkit/gc-too
 has "$OUT" "was closed while this sign-off ran" "(CUT-SHORT-DISMISS) …saying so"
 hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT-DISMISS) …leaving the comment the dismiss drew"
 eq "$(field tk-rev status)" "open" "(CUT-SHORT-DISMISS) the gate stays open and owed"
+acceptance
+RETURN_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short" --ruled no
+eq "$RC" 0 "(CUT-SHORT-RETURNED) a conversation another writer put back in the queue between the sign-off's read and its hand-back exits 0"
+eq "$(field tk-conv assignee)/$(field tk-conv status)" "human/open" "(CUT-SHORT-RETURNED) …and stays in the operator's queue"
+has "$OUT" "(back in the operator's queue)" "(CUT-SHORT-RETURNED) …which the sign-off reports"
 mv "$TMP/bin/gc.real" "$TMP/bin/gc"
 # A conversation that already reads closed has ended: a dismiss or an earlier
 # sign-off closed it, and bd's close kept its assignee, so the guarded hand-back

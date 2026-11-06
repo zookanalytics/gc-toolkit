@@ -850,7 +850,9 @@ else
   # sign-off, and bd's close keeps its assignee, so a write guarded on the
   # holder alone would reopen it: it stays closed. A dismiss that lands between
   # the read and the write fails the status guard (exit 13), and a read then
-  # finds the conversation closed.
+  # finds the conversation closed. A guard that misses because another writer
+  # already put the conversation back in the queue leaves it where this
+  # hand-back puts it.
   BACK_AT=""
   if [ "$CONV_STATUS" = closed ]; then
     echo "conversation $CONVERSATION already reads closed, so it stays closed and is not handed back"
@@ -865,6 +867,7 @@ else
         BACK=$(show_row "$CONVERSATION") || BACK=""
         BACK_AT=$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)
         case "$BACK_AT" in
+          human/open) ;;
           */closed) echo "conversation $CONVERSATION was closed while this sign-off ran, so it stays closed and is not handed back" ;;
           *) stopped "conversation $CONVERSATION moved while this sign-off ran (it reads ${BACK_AT:-unreadable}), so its hand-back from $HOLDER was not written; re-run to hand it back from where it is now" ;;
         esac ;;
