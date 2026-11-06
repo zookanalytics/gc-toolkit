@@ -924,8 +924,9 @@ and 4 remove surface. Upstream is gastownhall/gascity at `8e75c50aa845`.
   Also searched `gc import prune` for a way to keep the clone a running session
   started from. It keeps only the clones a city's lock pins and those younger
   than `--keep-days`, and it reads no session (section 4). So a hook whose
-  recorded directory is gone asks `gc gc-toolkit scripts-dir` once, as a
-  session with no record does, and writes the answer into the record.
+  recorded directory is gone asks `gc gc-toolkit scripts-dir`, as a session
+  with no record does, and writes the answer into the record, so the session
+  asks once after a prune.
 - **A running session learning that a deploy happened.** Searched: the
   config-drift handling and `gc reload --soft` (fact 8). Drift restarts a
   named session from outside it, whatever it is doing, so the deploy accepts
