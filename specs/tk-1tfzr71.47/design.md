@@ -272,7 +272,9 @@ and the steps change in one place:
    by default, a named commit with `--to <commit>`, or the commit before the
    last deploy with `--revert`.
 2. Refuse to run when the town's `pack.toml`, `city.toml` or `packs.lock` holds
-   an uncommitted change, since step 6 commits those files whole.
+   an uncommitted change, since step 6 commits those files whole. Fetch the
+   town's origin too, and refuse when the town's branch is behind it, since
+   step 6's push would then be refused after the new pin is live.
 3. Replace the current pin with the target in every import whose source is
    gc-toolkit's repository, the sub-pack's import included, in `pack.toml` and
    `city.toml`.
@@ -285,9 +287,24 @@ and the steps change in one place:
    `git log --oneline <old>..<new>` from the target's clone. Then restart each
    service that resolves the pack when it starts (`gc service restart helm`,
    section 4).
-7. If step 4 or 5 fails, restore the three files from the town's HEAD, run
-   `gc import install` again, and exit non-zero with the reason. The old clone
-   is still in the cache, so the restore needs no network.
+7. If step 4 or 5 fails, or step 6's commit does, the town's HEAD has not
+   moved. The command restores the three files from it, runs
+   `gc import install` again, and exits non-zero with the reason: the old pin
+   runs again. The old clone is still in the cache, so the restore needs no
+   network.
+8. Once the commit is made, the new pin stays. If the push fails, the command
+   still restarts the services, so helm runs the revision the agents run, and
+   it exits non-zero saying that the new pin is live and committed but not
+   pushed, and why the push was refused. If a restart fails, it exits non-zero
+   saying that the new pin is live and pushed, and which service did not
+   restart. Either message ends with the command that finishes the deploy,
+   `gc gc-toolkit deploy --to <target>`.
+
+**A run converges.** When every pin already names the target, steps 3 to 5
+leave every pin as it is, and step 6 has no commit to make. The run then
+pushes what the town's branch holds that its origin lacks, and restarts the
+services. So the command a failed run prints finishes the deploy, and running
+a deploy twice leaves the city as one run does.
 
 **The deploy check.** This is an exec order, city scope, on a 15-minute
 cooldown. It reads the pack's own pin with `gc import status --json` and main's
@@ -299,10 +316,16 @@ mechanik. On a later pass it appends main's new head to the open bead.
 Several landings before the mechanik acts become one deploy.
 
 **The mechanik.** It takes the bead from its hook, runs the command, and
-closes the bead with the deploy commit as its outcome. If the command fails,
-the city keeps running the old pin, and the mechanik reports the failure on
-the bead. The bead's description carries the command, so the mechanik's
-prompt gains nothing.
+closes the bead with the deploy commit as its outcome. A failed run leaves the
+bead open, and the mechanik reports on it what the command printed. When
+verification or the commit failed, the old pin runs again, in helm too, since
+helm was not restarted. A later run starts the deploy over. When the push
+failed, the new pin runs, helm restarted onto it, and the town's origin lacks
+the commit. When a restart failed, the new pin runs and is pushed, and the
+service that failed runs the revision it started from, or nothing. In those
+last two cases the printed `--to` command, run once its cause is fixed,
+finishes the deploy. The bead's description carries the command, so the
+mechanik's prompt gains nothing.
 
 Under option 2, the order runs the command itself. Under option 3, you run
 it. Both keep the command and drop the bead.
@@ -315,7 +338,9 @@ it. Both keep the command and drop the bead.
    `gc gc-toolkit scripts-dir`, formula resolution and prompt rendering take the
    new revision at once. A reload that fails keeps the old config running,
    though the command's own verification catches a revision that fails to load
-   before it commits.
+   before it commits. The new revision is therefore live from step 4, before
+   the commit and the push, which is why steps 7 and 8 say which pin runs
+   after a failure.
 2. The reload re-points the rigs' `.beads/formulas/` symlinks into the new
    clone (fact 6). New molecules pour from it.
 3. Each pack agent's `pre_start` names `{{.ConfigDir}}/assets/scripts/...`,
@@ -546,8 +571,15 @@ asserts these things:
    and pinning back to the first resolves with no fetch.
 8. A file written into the clone makes `gc config show` fail with "local
    worktree changes", which is the contract section 4 relies on.
-9. The deploy command, run against the scratch city, rewrites every pin, and on
-   a forced verification failure it restores the previous pin.
+9. The deploy command, run against the scratch city, rewrites every pin. On a
+   forced verification failure, and on a commit its signing program refuses,
+   it restores the previous pin and leaves the town's HEAD where it was. When
+   the town's origin, a bare repository in scratch, refuses the push, the new
+   pin stays live and committed, the service restart still runs, and the exit
+   names the unpushed commit. When the service restart is made to fail, the
+   new pin stays live and pushed, and the exit names the service. In both
+   cases the printed `--to` command, run once the cause is gone, finishes the
+   deploy and moves no pin.
 
 ### The cutover
 
@@ -602,7 +634,7 @@ Running them in order keeps their shared docs from conflicting.
 |---|---|---|---|
 | 1. A session finds the pack it started from | `worktree-setup.sh` records its scripts directory, and the commit checked out there, in the work dir. deacon, mechanik and dog gain a `pre_start` step that does the same. The three overlays' hook commands, `patrol-continue.sh`, `work-context.sh` and `cycle-recycle.sh` read the record in place of `$GC_RIG_ROOT` and `rigs/gc-toolkit`. Pack drift compares the recorded commit with the pack's entry in the lock, which it reads again only after the lock's mtime moves. Its tests show that an install that changes nothing, and a re-pin of core or bd, recycle nothing. Also cycle-recycle.md, gh-origin-guard.md, and the tests. | polecat | nothing |
 | 2. Build and check what is deployed | `gc-build.sh` loses `behind_main`. helm's packhealth loses its band. I9 loses LAGGED and UNFETCHED, and its STALE-TEXT gains the cached-revision arm. Also the helm README, the I9 rows in component-model.md and install.md, and the tests. | polecat | unit 1 |
-| 3. Deploy by pin | `gc gc-toolkit deploy`, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
+| 3. Deploy by pin | `gc gc-toolkit deploy`, with each failure's outcome and the run that finishes it, the deploy check order and its script, with tests. Also install.md's import and deploy sections, and pack-authoring.md's "A landed pack change is confirmed on the deployed pin". | polecat | unit 2 |
 | 4. Retire the healer | Delete the reconciler, its test and its order, with their deletion-plan rows and the stage B schedule row. Retire `auto_ff_rig_main`. Move the demo engine to a worktree of its rig. Remove `reconcile_rig` and its comment from lifecycle.toml. Sweep the docs in section 6. Count the reconciler's open subjects again. | polecat | unit 3 |
 | 5. Prove it from the cache | The suite in section 7. | polecat | unit 4 |
 | 6. Cut the city over | The town commits in section 7. | mechanik, on a bead assigned to `gc-toolkit.mechanik` | tk-1tfzr71.14, which closes when the effort's PR merges. A ready-notice is armed to the mechanik. |
@@ -632,8 +664,9 @@ gastownhall/gascity at `8e75c50aa845`.
   constraint, and a `sha:` pin has no range (fact 5). A semver constraint would
   need tags this repository does not publish (section 1). A registry release is
   a publish step per deploy. The gap is rewriting every import of one
-  repository to one commit, and restoring the old pin when verification fails,
-  since install does not roll back (fact 5).
+  repository to one commit, restoring the old pin when verification or the
+  commit fails, since install does not roll back (fact 5), and saying which
+  pin runs when a later step fails.
 - **Knowing main has moved past the pin.** Searched: `gc import check` and
   `gc import status`. Check reports missing, stale or uncached state against
   the authored imports, and status reports the declared pins. Neither compares
