@@ -34,10 +34,13 @@ gc bd dep list <bead> --direction=down -t blocks
 Arm it only once the edge reads back, as the `gc-toolkit.waits` skill says. A
 first reaction does the same through its close exit, with
 `--waiting-on <retiring-bead>`. A bead that carries `hold:mayor` keeps its arm
-until the hold lifts, so once the arm lands, lift the hold as the
-`gc-toolkit.waits` skill gives it: remove each label that spells the hold, and
-read back that none is left. A problem that hurts the operator now gets the
-smallest stopgap that stops the harm, and no new test suite.
+until the hold lifts, so once the arm lands, lift the hold: list its labels
+(`gc bd label list <bead>`), remove each one that spells `hold:mayor` in any
+case, one `--remove-label` each
+(`gc bd update <bead> --remove-label hold:mayor`), and list them again to see
+that none is left, because bd removes a label only by its exact text. A problem
+that hurts the operator now gets the smallest stopgap that stops the harm, and
+no new test suite.
 
 ## A change that adds operational surface shows its Gas City search
 
