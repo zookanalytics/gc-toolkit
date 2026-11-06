@@ -73,7 +73,11 @@ work bead's re-sling, so clearing the gate pours a fresh run. The re-sling
 fires only for an open, unassigned bead, so the script first releases a claim
 on the work bead that no live worker holds. A ruling not to proceed goes through
 `assets/scripts/stand-down.sh`, which removes the re-sling's arm before it
-answers the gate, then closes the work bead.
+answers the gate, then closes the work bead. A step makes the whole refusal in
+one call to `assets/scripts/decline.sh`, which runs those parts in that order
+and then drains. The step passes it only its own facts: its `gc.step_ref` and
+the reason, and when a person must rule, the gate's subject, key and message,
+with the formula a re-sling pours when the work goes on after the ruling.
 
 The refusal drains only after the cancel lands. A cancel that does not land
 leaves the step claimed by this session, and the step goes back to the pool

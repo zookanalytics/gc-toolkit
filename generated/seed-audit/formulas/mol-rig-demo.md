@@ -35,11 +35,10 @@ inline-playable path and no .gitattributes LFS filter covers an MP4.
 Contract: single continuation group, run in one session, which closes each step
 and takes the next with `gc hook --claim --json`. Derive the demo-request bead
 from the input convoy's single member; produce the script; capture; deliver or
-report; close the request bead and this step; drain. On any blocker, human-gate.sh
-files one human gate and run-cancel.sh cancels the run through gascity before the
-drain, so a declined demo is never a silent
-strand. A demo's pour carries its vars, so a person re-pours it rather than an
-arm re-slinging it.
+report; close the request bead and this step; drain. On any blocker, decline.sh
+files one human gate, then cancels the run through gascity and drains, so a
+declined demo is never a silent strand. A demo's pour carries its vars, so a
+person re-pours it rather than an arm re-slinging it.
 NEVER commit the MP4, NEVER close or route a delivered PR's anchor.
 
 

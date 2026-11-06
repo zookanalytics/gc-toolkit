@@ -279,7 +279,7 @@ and every part filed under it: they leave the pool's offer until a person
 clears the gate. Its exit 0 is the release path the operator sees on the board:
 
 ```bash
-SCRIPTS=$(gc {{ .BindingName }} scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/run-cancel.sh" ] && [ -x "$SCRIPTS/await-ruling.sh" ] || SCRIPTS=""
+SCRIPTS=$(gc {{ .BindingName }} scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "$SCRIPTS/human-gate.sh" --subject <work-bead> --key polecat-blocked \
   --message "Blocked: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```
@@ -293,40 +293,34 @@ dispatch, a premise you found falsified, work another branch already
 delivered. Never close your step to decline, and never leave it open: an open
 step is claimable, so the pool hands it to a fresh polecat that re-derives
 your refusal. A molecule's lifecycle is gascity's, so the run ends through
-gascity's run cancel. `run-cancel.sh` sends it: gascity closes the root and
-every step that is not closed, yours included, with `gc.outcome=canceled`, and
-no pack script writes another step.
+gascity's run cancel: gascity closes the root and every step that is not
+closed, yours included, with `gc.outcome=canceled`, and no pack script writes
+another step.
 
 A wait for a person sits on the work bead, never on the molecule. When the work
-must go on once a person rules, file the human gate first, then run
-`await-ruling.sh`. The gate blocks the work bead, and `await-ruling.sh` reads
-that wait back and arms the work's re-sling, so clearing the gate is the ruling
-to proceed: the next deferred-dispatch pass pours a fresh run. A ruling not to
+must go on once a person rules, the human gate blocks the work bead and the
+work's re-sling is armed behind it, so clearing the gate is the ruling to
+proceed: the next deferred-dispatch pass pours a fresh run. A ruling not to
 proceed is the person's to carry out, through `stand-down.sh`, which removes that
-arm before it answers the gate and closes the work bead. When nobody has a
-decision to make, because the work is finished or a live peer is building it,
-cancel with no gate:
+arm before it answers the gate and closes the work bead. `decline.sh` makes the
+whole decline in one call. It files the gate, records the wait, cancels the run
+and drains, in that order, and it ends the gate's message with both ways a
+person can rule:
 
 ```bash
-"$SCRIPTS/human-gate.sh" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what releases the work>" \
-  || { echo "human-gate.sh recorded no gate; NOT cancelling or draining" >&2; exit 1; }
-"$SCRIPTS/await-ruling.sh" "<work-bead>" --key "<situation-key>" --formula "<the formula a re-sling pours>" \
-  || { echo "the wait did not land on the work bead; NOT cancelling or draining" >&2; exit 1; }
-"$SCRIPTS/run-cancel.sh" --step "<formula>.<step-id>" --reason "<why you declined>" \
-  || { echo "run-cancel.sh did not end the run; NOT draining" >&2; exit 1; }
-gc runtime drain-ack
+"$(gc {{ .BindingName }} scripts-dir)/decline.sh" --step "<its gc.step_ref>" --reason "<why you declined>" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what must happen before the work can go on>" --formula "<the formula a re-sling pours>"
 ```
 
-Drain only if every part landed. `human-gate.sh` exits non-zero when it can
-neither file nor find the gate, and `await-ruling.sh` when the edge or the arm
-did not land. `run-cancel.sh` exits non-zero when it cannot prove which step is
-yours, or when gascity does not confirm the cancel. After any of those the step
-stays claimed, and the next worker it goes to retries.
+When nobody has a decision to make, because the work is finished or a live
+peer is building it, decline with no gate: pass only `--step` and `--reason`.
+
+`decline.sh` drains only once every part has landed. When a part does not land,
+it exits 1 and names that part, and the step stays claimed, so the next worker
+it goes to retries.
 
 If a person rules stand-down on work whose run is still live, `stand-down.sh`
 cancels the run beneath it through gascity before it closes the work bead, so
-nothing re-offers the chain. Your part stays the same: record the wait, cancel,
-drain.
+nothing re-offers the chain. Your part stays the same: the one decline call.
 
 ## Communication
 
