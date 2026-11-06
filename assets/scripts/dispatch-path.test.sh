@@ -20,7 +20,8 @@
 # copied and misses every one added later. The behavioral half lives beside
 # each reader (tools/gc-proactive.test.sh,
 # doctor/check-blocked-work-armed/run.test.sh,
-# doctor/check-step-terminal/run.test.sh, deferred-dispatch.test.sh,
+# doctor/check-step-terminal/run.test.sh,
+# doctor/check-armed-dispatch-owed/run.test.sh, deferred-dispatch.test.sh,
 # liveness-classify.test.sh, liveness-recheck.test.sh).
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
@@ -117,12 +118,14 @@ asks() { # <reader> <predicate>
 for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh; do
     sources "$r"; asks "$r" has_dispatch_path
 done
-for r in assets/scripts/deferred-dispatch.sh assets/scripts/liveness-sweep.sh \
-         assets/scripts/liveness-sweep-precheck.sh assets/scripts/liveness-recheck.sh; do
+for r in assets/scripts/deferred-dispatch.sh doctor/check-armed-dispatch-owed/run.sh \
+         assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
+         assets/scripts/liveness-recheck.sh; do
     sources "$r"
 done
 for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh assets/scripts/deferred-dispatch.sh \
-         assets/scripts/liveness-classify.sh assets/scripts/liveness-recheck.sh; do
+         doctor/check-armed-dispatch-owed/run.sh assets/scripts/liveness-classify.sh \
+         assets/scripts/liveness-recheck.sh; do
     asks "$r" has_dispatch_hold
 done
 

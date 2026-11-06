@@ -337,8 +337,8 @@ cadence can be live and the pass still leave a dispatch unmade, so it flags an
 arm nothing holds that has stayed open and armed past the reconcile window, or
 one armed at a non-open status the pass can never dispatch — a dispatch
 silently not firing, surfaced before a human has to notice it days later. It
-reads holds through the same `hold-lib.sh`, so an arm a park holds is not
-reported.
+reads holds through the same `hold-lib.sh`, and hold labels through the same
+`dispatch-path.sh`, so an arm a park or a label holds is not reported.
 
 ## One pass at a time, inside the timeout
 

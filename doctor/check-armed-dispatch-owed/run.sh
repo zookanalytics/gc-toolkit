@@ -18,7 +18,10 @@
 #     not owed: the blocker leaves the arm intact and its status open, and the
 #     arm fires when the blocker closes. A bead in flight (a branch, a
 #     merge_result or a rejection_reason) is held by its own blockers alone, so
-#     its arm is owed under a parked epic, where reconcile slings it.
+#     its arm is owed under a parked epic, where reconcile slings it. An open
+#     bead carrying one of Gas City's hold labels (has_dispatch_hold,
+#     assets/scripts/dispatch-path.sh) is held too, because reconcile slings
+#     no such bead, so its arm is not owed either.
 #     check-blocked-work-armed asks blocked work for a dispatch path and nothing
 #     more, and an arm is one, so an arm that never fires is this check's to see.
 #     `bd blocked` lists a bead its parent's hold reaches under the bead's own
@@ -80,6 +83,15 @@ set -u
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/hold-lib.sh" || {
     echo "cannot determine whether owed deferred dispatches are firing"
     printf '  - %s\n' "assets/scripts/hold-lib.sh could not be sourced from this pack, so a held arm cannot be told from an owed one."
+    exit 1
+}
+# The one definition of a hold label, which reconcile also reads. Exposes
+# $DISPATCH_PATH_JQ. Unsourceable, a label-held arm cannot be told from an owed
+# one, so the check warns.
+# shellcheck source=../../assets/scripts/dispatch-path.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
+    echo "cannot determine whether owed deferred dispatches are firing"
+    printf '  - %s\n' "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a label-held arm cannot be told from an owed one."
     exit 1
 }
 
@@ -277,14 +289,14 @@ scan_store() {
     # Classify every armed bead from this one listing. A stranded arm (armed at a
     # non-open status) is a finding on its own; the exemptions — closed, delivered
     # (merge_result), mid-dispatch (a slung marker), capped (the reconcile pass has
-    # already escalated it), assigned (reconcile will not sling over a holder) —
-    # need no further read. deferred-dispatch.sh's `list` classifies CAPPED ahead
+    # already escalated it), assigned (reconcile will not sling over a holder),
+    # held by a hold label (reconcile slings no such bead) — need no further read. deferred-dispatch.sh's `list` classifies CAPPED ahead
     # of stranded and dispatchable, so the cap test precedes the status test here
     # too. Only an open, unassigned, live arm is a CANDIDATE whose blockers, on
     # it and on its ancestors, decide whether a dispatch is owed.
     classified=$(jq -r \
         --arg slung "$K_SLUNG" --arg armed_at "$K_ARMED_AT" --arg fails "$K_FAILS" \
-        --argjson cap "$MAX_SLING_FAILURES" '
+        --argjson cap "$MAX_SLING_FAILURES" "$DISPATCH_PATH_JQ"'
         .[]? | . as $b | ($b.metadata // {}) as $m
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | (($b.status // "") | tostring) as $st
@@ -300,6 +312,7 @@ scan_store() {
           elif $fails_n >= $cap then empty
           elif $st != "open"    then "stranded\t\($id)\t\($st)"
           elif $assigned        then empty
+          elif ($b | has_dispatch_hold) then empty
           else                       "candidate\t\($id)\t\($armed_when)"
           end' "$listing" 2>/dev/null) || {
         warnings+=("$label: could not evaluate armed beads in $rig_path/.beads — this store was NOT checked")

@@ -24,7 +24,8 @@
 # The readers that leave a held bead alone source it too: the proactive scan,
 # which files no first reaction for one; check-blocked-work-armed, which owes
 # one no arm; deferred-dispatch.sh's reconcile, which slings no armed bead while
-# it is held, because a sling reads no hold; and the liveness classifier
+# it is held, because a sling reads no hold, and check-armed-dispatch-owed, which
+# owes such an arm no dispatch for the same reason; and the liveness classifier
 # (liveness-classify.sh, which liveness-sweep.sh and its precheck compose) and
 # the re-check a liveness gate's message carries (liveness-recheck.sh), which
 # name the hold as a wait. One definition, no copies: a key or a label added

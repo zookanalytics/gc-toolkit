@@ -252,12 +252,14 @@ blocked, unassigned, plainly-work bead — an allowlisted work issue_type, not a
 review/step/workflow bead or a merge anchor — must carry a dispatch path,
 `gc.routed_to` or a `gc.dispatch_when_ready` arm, or it strands when its blocker
 closes and no pool is offered it; a bead a live molecule drives is exempt on a
-liveness check, warn-only), and `doctor/check-armed-dispatch-owed`
+liveness check, and a bead carrying a hold label is exempt because its dispatch
+is the placement sitting's, warn-only), and `doctor/check-armed-dispatch-owed`
 (the complement to `check-cadence-live`: a bead armed with `gc.dispatch_when_ready`
 that nothing holds is slung by the deferred-dispatch reconcile order within its
 cadence, so one that has stayed armed and open past that window — or one armed at a
 non-open status `bd ready` never answers — is a dispatch silently not firing; a hold
-is `assets/scripts/hold-lib.sh`'s, so an arm a park holds is not owed; `bd blocked`
+is `assets/scripts/hold-lib.sh`'s or a hold label (`dispatch-path.sh`), so an arm a
+park or a label holds is not owed; `bd blocked`
 lists an arm its parent's hold reaches under the arm's own id, naming the parent, but
 `check-blocked-work-armed` asks blocked work only for a dispatch path, and an arm is
 one, so it cannot see such an arm; warn-only),

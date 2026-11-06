@@ -146,7 +146,8 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
   move is the sitting's;
 - the deferred-dispatch pass slings no armed bead while it is held, because a
   sling reads no hold, and `deferred-dispatch.sh list` names the label that
-  holds the arm.
+  holds the arm, so `doctor/check-armed-dispatch-owed` owes that arm no
+  dispatch.
 
 ## Placing a bead
 
