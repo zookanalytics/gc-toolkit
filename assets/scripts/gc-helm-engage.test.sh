@@ -341,7 +341,7 @@ case "$1 ${2:-}" in
         esac ;;
       add)
         printf 'bd dep %s\n' "$*" >> "$CALLS"
-        [ -n "${REPLY_FAIL:-}" ] || printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
+        printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
       *) printf 'bd dep %s\n' "$*" >> "$CALLS" ;;
     esac ;;
   "session new")
@@ -521,6 +521,10 @@ chmod +x "$TMP/bin/date" "$TMP/bin/sleep"
 reps() { _r=""; _n=0; while [ "$_n" -lt "$2" ]; do _r="$_r $1"; _n=$((_n + 1)); done; printf '%s' "$_r"; }
 
 export PATH="$TMP/bin:$PATH"
+# engage files a conversation through open, which writes it through `gctk
+# bead`. gctk.stub.sh stands in for it and sends each write to the fake gc
+# above, and a stand-in for `gctk pr-status` sits behind it as GCTK_STUB_NEXT.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk-bead.log"
 export CALLS="$TMP/calls" STATE_DIR="$TMP/state" ALIAS_REFUSED="$TMP/alias-refused"
 export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
 unset GC_HELM_FIXTURE || true
@@ -842,7 +846,7 @@ eq "$RC" 0 "(GATE-LIVE) a gate whose bead a live sitting holds exits 0"
 has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(GATE-REPLY-LIVE) the live sitting's conversation replies to the gate"
 hasnt "$CALLED" "session new" "(GATE-LIVE) …and engage attaches to it rather than spawning"
 unset LIVE_SITTINGS
-reset; REPLY_FAIL=1 run_engage tk-gate --no-attach
+reset; GCTK_STUB_MISS=dep:tk-conv run_engage tk-gate --no-attach
 eq "$RC" 4 "(GATE-NOREPLY) a reply that does not read back exits 4"
 hasnt "$CALLED" "session new" "(GATE-NOREPLY) …starting no sitting that would not know its gate"
 has "$OUT" "gc bd dep add tk-conv tk-gate --type replies-to" "(GATE-NOREPLY) …and naming the edge to add by hand"
@@ -1844,7 +1848,7 @@ printf '%s\n' "$*" >> "$STATE_DIR/gctk.calls"
 printf '{"status":"needs-attention","held":[],"reasons":%s}\n' "${GCTK_REASONS:-[]}"
 GCTK
 chmod +x "$TMP/bin/gctk-stub"
-export GCTK_BIN="$TMP/bin/gctk-stub"
+export GCTK_STUB_NEXT="$TMP/bin/gctk-stub"
 ONE_GATE='[{"held":"gate","id":"tk-gate","title":"Approve the rollout"}]'
 gctk_calls() { cat "$STATE_DIR/gctk.calls" 2>/dev/null || true; }
 fresh_gctk() { rm -f "$STATE_DIR/gctk.calls"; }
@@ -2013,7 +2017,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1; then
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'GC_NO_API=1 STUB_WALK=1 exec "%s/gctk" "$@"\n' "$TMP"; } > "$TMP/bin/gctk-real"
   chmod +x "$TMP/bin/gctk-real"
-  export GCTK_BIN="$TMP/bin/gctk-real"
+  export GCTK_STUB_NEXT="$TMP/bin/gctk-real"
   REWORK_EDGE='{"id":"tk-rework","title":"fix the check","status":"open","issue_type":"task","dependency_type":"blocks"}'
   GATE_EDGE='{"id":"tk-gate","title":"Approve the rollout","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}'
   DECISION_EDGE='{"id":"tk-dec","title":"keep the old flag?","status":"open","issue_type":"decision","dependency_type":"blocks"}'

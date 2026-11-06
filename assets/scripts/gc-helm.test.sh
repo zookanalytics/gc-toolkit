@@ -8,8 +8,8 @@
 #     run cancel) and writes no step or root itself, while a run the releasing
 #     session holds a step of is left to close its own chain
 #   --release on a CLOSED anchor: the run's end without the resurrecting park
-#   the stamp read back after the update, before the run's end: an update that
-#     exits 0 and lands nothing fails the verb and ends no run
+#   the update goes through `gctk bead`, naming the stamp as its witness, and
+#     one that does not read back fails the verb and ends no run
 #   --waiting-on edges
 #   the ≤140-codepoint length gate
 #   the retired board verb refuses and names helm-svc board
@@ -192,9 +192,6 @@ case "$1 ${2:-}" in
     # a bead fails to land, and FAKE_UPDATE_RC refuses every update.
     case "$3" in *NOPIN*) exit 1 ;; esac
     [ -z "${FAKE_UPDATE_RC:-}" ] || exit "$FAKE_UPDATE_RC"
-    # FAKE_UPDATE_LOST is an update bd reports done and the store does not keep,
-    # under a degraded server or a racing legacy writer: exit 0, nothing written.
-    [ -z "${FAKE_UPDATE_LOST:-}" ] || exit 0
     # The keys a release writes land here, so a read of the bead sees them.
     for a in "$@"; do
       case "$a" in
@@ -207,13 +204,7 @@ case "$1 ${2:-}" in
         gc.session_id) : > "$FAKE_SID" ;;
       esac
     done
-    # FAKE_CLAIM_AFTER=<session> is a pool's claim landing right after this
-    # update: the bead reads in_progress, assigned to that session and carrying
-    # its pins, as a claim leaves it.
-    if [ -n "${FAKE_CLAIM_AFTER:-}" ]; then
-      printf 'in_progress' > "$FAKE_STATUS_NOW"; printf '%s' "$FAKE_CLAIM_AFTER" > "$FAKE_ASSIGNEE_NOW"
-      printf '%s' "$FAKE_CLAIM_AFTER" > "$FAKE_SNAME"; printf '%s' "$FAKE_CLAIM_AFTER-id" > "$FAKE_SID"
-    fi ;;
+    ;;
   "bd dep")
     # `dep list` is a READ: it answers from a per-bead fixture and never lands
     # in FAKE_DEPS, which models the graph writes the edge assertions count.
@@ -250,6 +241,10 @@ export GC_RUN_CANCEL_TOOL="$TMP/bin/run-cancel-stub" FAKE_CANCELS="$TMP/cancels"
 : > "$TMP/cancels"
 
 export PATH="$TMP/bin:$PATH"
+# takeaway writes through `gctk bead`, which gctk.stub.sh stands in for: each
+# write reaches the fake gc above, and GCTK_STUB_MISS names one that does not
+# read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 # run-lib.sh's verbs answer from the fixture store that is current: the live
 # store while its section's gc stub is first on PATH, the main one otherwise.
 # Its rows, with a convoy row for each "convoy|anchor" line tracking that
@@ -793,24 +788,23 @@ grep -q 'takeaway set on' "$TMP/rout" \
 eq "$(wc -l < "$TMP/deps" | tr -d ' ')|$(wc -l < "$FAKE_CANCELS" | tr -d ' ')" "0|0" \
    "(REFUSED) …with no edge written and no run ended"
 
-# ── takeaway reads its stamp back before anything it cannot take back ─────────
+# ── takeaway's stamp reads back before anything it cannot take back ────────
 # An update can exit 0 and still be lost under a degraded server or a racing
 # legacy writer (docs/warrants.md, "bd write durability"). The run's end, and the
-# close a caller makes on a zero exit, cannot be taken back, so the verb reads
-# its stamp back once before them. Each case starts from a bead carrying an
-# earlier sitting's stamp, an old route, pour stamp and assignee, and the session
-# pins of the executor that held it. Covered:
-#   (LOSTREL)    a release to a pool whose whole update is lost exits 4, names
-#                each stamp key that did not land, repairs nothing and ends no run
-#   (LOSTWAIT)   a headline whose update is lost wires no wait edge
-#   (LOSTSAME)   an earlier stamp with the same text, author and disposition does
-#                not pass for this call's, because it carries an earlier time
-#   (LOSTUNREAD) a bead that does not answer the read is a miss
-#   (CLAIMED)    a release that landed and a pool claimed at once is no lost
-#                write: the claim rewrites the status, the assignee and the pins,
-#                and the verb ends the run and exits 0
+# close a caller makes on a zero exit, cannot be taken back, so the verb's update
+# goes through `gctk bead update`, which reads the stamp back before the verb
+# does anything after it. services/gctk/internal/cli/bead_test.go proves that
+# read; here gctk.stub.sh names its miss. Each case starts from a bead carrying
+# an earlier sitting's stamp, an old route, pour stamp and assignee, and the
+# session pins of the executor that held it. Covered:
+#   (WITNESS)   the update names the four stamp keys as its witness and none of
+#               the release's fields, which a pool's claim right after it
+#               rewrites: the status, the assignee, the route and the pins
+#   (LOSTREL)   a release whose update does not read back exits 4, says so,
+#               repairs nothing and ends no run
+#   (LOSTWAIT)  a headline whose update does not read back wires no wait edge
 lost_fixture() {
-  : > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"; : > "$TMP/status_now"
+  : > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"; : > "$TMP/status_now"; : > "$TMP/gctk.log"
   printf '%s' "the sitting before this one parked it" > "$TMP/takeaway"
   printf '%s' "2026-11-01T09:00:00Z" > "$TMP/takeaway_at"
   printf '%s' "converse" > "$TMP/takeaway_by"
@@ -822,77 +816,53 @@ lost_fixture() {
   printf '%s' "gc-dead-session" > "$TMP/sid"
 }
 lost_fixture
+WRC=0
+sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
+   --by proactive --release --route "$POOL" --no-wait >/dev/null 2>"$TMP/lerr" || WRC=$?
+eq "$WRC" "0" "(WITNESS) a release that reads back exits 0"
+WCALL="$(grep '^bead|update|A-PARKED|' "$TMP/gctk.log" || true)"
+eq "$(grep -o -- '--verify-key|[^|]*|' <<< "$WCALL" | tr -d '\n')" \
+   "--verify-key|gc.takeaway|--verify-key|gc.takeaway_at|--verify-key|gc.takeaway_by|--verify-key|gc.takeaway_settled|" \
+   "(WITNESS) the update names the four stamp keys as its witness"
+grep -q -- '|--verify|' <<< "$WCALL" \
+  && bad "(WITNESS) the update asked for every key it sets, the route among them ($WCALL)" \
+  || ok "(WITNESS) …and no other: the route, status, assignee and pins a claim rewrites are not read"
+grep -q -- '--set-metadata|gc.routed_to='"$POOL"'|' <<< "$WCALL" \
+  && ok "(WITNESS) …while the release rides the same update" \
+  || bad "(WITNESS) the release is not in the verified update ($WCALL)"
+grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
+  && ok "(WITNESS) …and the run beneath the bead is ended once it reads back" \
+  || bad "(WITNESS) the run was not ended (cancels: $(cat "$FAKE_CANCELS"); stderr: $(cat "$TMP/lerr"))"
+
+lost_fixture
 LRC=0
-FAKE_UPDATE_LOST=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
+GCTK_STUB_MISS=update:A-PARKED sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
    --by proactive --release --route "$POOL" --no-wait >"$TMP/lout" 2>"$TMP/lerr" || LRC=$?
-eq "$LRC" "4" "(LOSTREL) a release whose update exits 0 and lands nothing fails the verb"
-grep -q "the update on A-PARKED exited 0, but the store does not hold it" "$TMP/lerr" \
-  && ok "(LOSTREL) …saying the store does not hold the update" \
-  || bad "(LOSTREL) the lost update was not reported (stderr: $(cat "$TMP/lerr"))"
-grep -q 'gc.takeaway reads "the sitting before this one parked it", not "actionable — routed to the polecat pool"' "$TMP/lerr" \
-  && ok "(LOSTREL) …naming the headline it reads instead of this call's" \
-  || bad "(LOSTREL) the earlier headline is unnamed (stderr: $(cat "$TMP/lerr"))"
-grep -q 'gc.takeaway_at reads "2026-11-01T09:00:00Z"' "$TMP/lerr" \
-  && ok "(LOSTREL) …and the stamp time that is not this call's" \
-  || bad "(LOSTREL) the stamp time is unnamed (stderr: $(cat "$TMP/lerr"))"
+eq "$LRC" "4" "(LOSTREL) a release whose update does not read back fails the verb"
+grep -q "the update on A-PARKED exited 0, but its stamp did not read back" "$TMP/lerr" \
+  && ok "(LOSTREL) …saying the stamp did not read back" \
+  || bad "(LOSTREL) the miss was not reported (stderr: $(cat "$TMP/lerr"))"
+grep -q 'gctk.stub.sh: GCTK_STUB_MISS' "$TMP/lerr" \
+  && ok "(LOSTREL) …after what gctk said was missing" \
+  || bad "(LOSTREL) gctk's own lines were dropped (stderr: $(cat "$TMP/lerr"))"
 grep -q 'The release rides the same update, so it is not taken as landed either' "$TMP/lerr" \
-  && ok "(LOSTREL) …and that the release in the update did not land either" \
+  && ok "(LOSTREL) …and that the release in the update is not taken as landed either" \
   || bad "(LOSTREL) the release is not named as lost (stderr: $(cat "$TMP/lerr"))"
 eq "$(grep -c . "$FAKE_CANCELS" || true)" "0" \
   "(LOSTREL) no run is ended while the bead still names its old route and session pins"
-eq "$(grep -cE '^bd update A-PARKED( |$)' "$TMP/updates" || true)" "1" \
-  "(LOSTREL) nothing is repaired: the one update is all the verb wrote"
+eq "$(grep -cE '^bd update A-PARKED( |$)' "$TMP/updates" || true)" "0" \
+  "(LOSTREL) nothing is repaired: the verb writes nothing after the update"
 grep -q 'takeaway set on' "$TMP/lout" \
-  && bad "(LOSTREL) the verb reported success on a lost update" \
+  && bad "(LOSTREL) the verb reported success on an update that did not read back" \
   || ok "(LOSTREL) …and success is not reported"
-eq "$(cat "$TMP/takeaway")|$(cat "$TMP/routed")|$(cat "$TMP/sid")" \
-   "the sitting before this one parked it|gc-toolkit/gc-toolkit.proactive|gc-dead-session" \
-   "(LOSTREL) the bead reads as it did, so a re-run writes the whole update again"
 
-# (LOSTWAIT) a headline that did not land carries no wait edge beside it.
+# (LOSTWAIT) a headline that did not read back carries no wait edge beside it.
 lost_fixture
 LWRC=0
-FAKE_UPDATE_LOST=1 sh "$SCRIPT" takeaway A-PARKED "held for the rollout" --by converse \
+GCTK_STUB_MISS=update:A-PARKED sh "$SCRIPT" takeaway A-PARKED "held for the rollout" --by converse \
    --waiting-on tk-blk1 >/dev/null 2>"$TMP/lerr" || LWRC=$?
-eq "$LWRC" "4" "(LOSTWAIT) a headline whose update is lost fails the verb"
+eq "$LWRC" "4" "(LOSTWAIT) a headline whose update does not read back fails the verb"
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" "(LOSTWAIT) …and wires no wait edge"
-
-# (LOSTSAME) a re-run that writes the same headline, author and disposition the
-# bead already carries: only the stamp's time tells this call's write apart.
-lost_fixture
-printf '%s' "routed — the fix is slung" > "$TMP/takeaway"
-LSRC=0
-FAKE_UPDATE_LOST=1 sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --by converse \
-   >/dev/null 2>"$TMP/lerr" || LSRC=$?
-eq "$LSRC" "4" "(LOSTSAME) a lost update over an earlier stamp with the same text, author and disposition still fails"
-grep -q 'gc.takeaway_at reads "2026-11-01T09:00:00Z"' "$TMP/lerr" \
-  && ok "(LOSTSAME) …on the stamp's time, which an earlier call wrote" \
-  || bad "(LOSTSAME) the time is not what told the write apart (stderr: $(cat "$TMP/lerr"))"
-grep -q 'gc.takeaway reads' "$TMP/lerr" \
-  && bad "(LOSTSAME) the matching headline was reported as a miss (stderr: $(cat "$TMP/lerr"))" \
-  || ok "(LOSTSAME) …and the headline itself, which matches, is not named"
-
-# (LOSTUNREAD) the update lands but the bead will not answer the read after it:
-# nothing shows it landed, so the verb stops.
-: > "$TMP/updates"; : > "$FAKE_CANCELS"
-LURC=0
-sh "$SCRIPT" takeaway UNKNOWN-1 "a headline nothing reads back" --by host >/dev/null 2>"$TMP/lerr" || LURC=$?
-eq "$LURC" "4" "(LOSTUNREAD) a bead that does not answer a read after its update fails the verb"
-grep -q 'UNKNOWN-1 did not answer a read after it' "$TMP/lerr" \
-  && ok "(LOSTUNREAD) …saying the read went unanswered" \
-  || bad "(LOSTUNREAD) the unanswered read is unnamed (stderr: $(cat "$TMP/lerr"))"
-
-# (CLAIMED) the release lands, and a pool claims the bead before the read: the
-# release's own fields now read as the claim left them, and the stamp still
-# reads as this call wrote it.
-lost_fixture
-CLRC=0
-FAKE_CLAIM_AFTER=gc-toolkit__polecat-hq-9 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
-   --by proactive --release --route "$POOL" --no-wait >"$TMP/lout" 2>"$TMP/lerr" || CLRC=$?
-eq "$CLRC" "0" "(CLAIMED) a release a pool claims before the read exits 0: the claim is no lost write"
-grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
-  && ok "(CLAIMED) …and the run beneath the bead is ended" \
-  || bad "(CLAIMED) the run was not ended (cancels: $(cat "$FAKE_CANCELS"); stderr: $(cat "$TMP/lerr"))"
 : > "$TMP/status_now"; : > "$TMP/assignee_now"; : > "$TMP/routed"; : > "$TMP/exec"
 : > "$TMP/sname"; : > "$TMP/sid"; : > "$TMP/takeaway"; : > "$TMP/takeaway_at"; : > "$TMP/takeaway_by"
 

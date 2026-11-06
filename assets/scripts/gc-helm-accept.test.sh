@@ -527,7 +527,7 @@ rec; held_bead tk-anc
 LC_FAIL=1 run_accept tk-anc
 T="$(token_of tk-rec)"
 eq "$RC" 4 "(HELD-FAIL) a release that does not land exits 4"
-has "$OUT" "its release to unanchored did not read back" "(HELD-FAIL) …saying the release did not land"
+has "$OUT" "its release to unanchored did not land" "(HELD-FAIL) …saying the release did not land"
 eq "$(slings)" 0 "(HELD-FAIL) …slinging nothing at a bead that still reads held"
 eq "$(meta tk-anc merge_result)" "held" "(HELD-FAIL) …which still reads held"
 eq "$(meta tk-anc gc.recommended_formula)" "mol-fix" "(HELD-FAIL) …with the recommendation in place"

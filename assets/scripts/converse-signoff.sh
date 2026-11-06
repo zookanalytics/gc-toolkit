@@ -583,6 +583,10 @@ if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
   [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether it reads held; nothing was written"
 fi
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
+# The conversation's close goes through `gctk bead close --verify`.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 # gh_bounded <args...> — gh, stopped after 20 seconds. A call stopped that way exits
 # non-zero, as one that failed does. A host with neither timeout tool makes no call
@@ -832,15 +836,23 @@ if [ "$RULED" = yes ]; then
   # gc.work_outcome, stamped in a write of its own so it never decides whether
   # the conversation closes. The sitting holds the conversation, so a plain
   # close is the holder's own; --force covers an actor bd does not read as its
-  # holder. The PR comment drawn after it cannot be taken back, so a close
-  # counts once it reads back (docs/warrants.md, "bd write durability").
+  # holder. The PR comment drawn after it cannot be taken back, so the close
+  # goes through `gctk bead close --verify` and counts once it reads back
+  # (docs/warrants.md, "bd write durability"). One that exited 0 and did not
+  # read back is not closed again with --force: nothing refused it.
   if [ "$CONV_STATUS" != closed ]; then
     work_outcome_noop "$CONVERSATION" gc bd
-    gc bd close "$CONVERSATION" --reason "$OUTCOME" >/dev/null 2>&1 \
-      || gc bd close "$CONVERSATION" --reason "$OUTCOME" --force >/dev/null 2>&1 \
-      || stopped "the store refused the close of conversation $CONVERSATION; every gate above is answered, and a re-run closes it"
-    [ "$(show_row "$CONVERSATION" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)" = closed ] \
-      || stopped "conversation $CONVERSATION did not close; every gate above is answered, and a re-run closes it"
+    CLOSE_RC=0
+    "$GCTK" bead close "$CONVERSATION" --reason "$OUTCOME" --verify >/dev/null 2>&1 || CLOSE_RC=$?
+    if [ "$CLOSE_RC" != 0 ] && [ "$CLOSE_RC" != 3 ]; then
+      CLOSE_RC=0
+      "$GCTK" bead close "$CONVERSATION" --reason "$OUTCOME" --force --verify >/dev/null 2>&1 || CLOSE_RC=$?
+    fi
+    case "$CLOSE_RC" in
+      0) ;;
+      3) stopped "conversation $CONVERSATION did not read back closed; every gate above is answered, and a re-run closes it" ;;
+      *) stopped "the store refused the close of conversation $CONVERSATION; every gate above is answered, and a re-run closes it" ;;
+    esac
   fi
   SIGNED=closed
 else

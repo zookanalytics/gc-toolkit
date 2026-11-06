@@ -119,11 +119,9 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # SHOW_DOWN=<id> fails `bd show` of that bead; SHOW_DOWN_SECOND=<id> answers the
 # first `bd show` of that bead and fails the next; DEP_UP_DOWN=<gate> fails the
 # listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
-# resolve change nothing; CLOSE_STUCK=<id> makes its close change nothing;
-# EARLIER_ANSWER=<reason> closes the gate with that reason inside the resolve
-# call, before the sign-off's own answer; LOSE_UPDATE=<id> answers an update of
-# that bead with exit 0 and keeps nothing, as bd does when a degraded server or a
-# racing legacy writer loses it. A bead's comments are kept in
+# resolve change nothing; EARLIER_ANSWER=<reason> closes the gate with that
+# reason inside the resolve call, before the sign-off's own answer. A bead's
+# comments are kept in
 # $STORE/b/<id>.comments.json, and each one added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
@@ -183,14 +181,12 @@ case "$1 ${2:-}" in
     fi ;;
   "bd close")
     log "$*"
-    [ "${CLOSE_STUCK:-}" = "$3" ] && exit 0
     _id="$3"; _r=""; _force=""; _p=""
     for a in "$@"; do [ "$_p" = "--reason" ] && _r="$a"; [ "$a" = "--force" ] && _force=1; _p="$a"; done
     row "$_id" | jq --arg r "$_r" '.status = "closed" | .close_reason = $r' | put "$_id" ;;
   "bd update")
     log "$*"
     _id="$3"; shift 3
-    [ -n "${LOSE_UPDATE:-}" ] && [ "$_id" = "$LOSE_UPDATE" ] && exit 0
     _r=$(row "$_id")
     _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""
     _args=("$@")
@@ -340,6 +336,11 @@ SCRIPT="$S/converse-signoff.sh"
 mkdir -p "$TMP/rig-a" "$TMP/rig-b"
 RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"
 export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GH_CALLS="$TMP/gh-calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B
+# The conversation's close, and the real gc-helm.sh's headline where a case
+# runs it, write through `gctk bead`, which gctk.stub.sh stands in for: each
+# write reaches the fake gc above, and GCTK_STUB_MISS names one that does not
+# read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 unset GC_CITY_PATH 2>/dev/null || true
 
 # --- fixtures -----------------------------------------------------------------
@@ -430,6 +431,7 @@ eq "$(field tk-rec status)" "open" "(ONLY-REPLIED) the recommendation's gate, wh
 hasnt "$(cat "$CALLS")" "gate resolve tk-rec" "(ONLY-REPLIED) …and is never resolved"
 eq "$(meta tk-anc gc.takeaway)" "review settled: fix the retry first" "(ONLY-REPLIED) the subject carries the headline"
 eq "$(field tk-conv status)" "closed" "(ONLY-REPLIED) the conversation is closed"
+has "$(cat "$TMP/gctk.log")" "bead|close|tk-conv|--reason|review settled: fix the retry first|--verify|" "(ONLY-REPLIED) …through gctk, which reads the close back"
 eq "$(field tk-conv close_reason)" "review settled: fix the retry first" "(ONLY-REPLIED) …with the headline as its close reason"
 eq "$(meta tk-conv gc.work_outcome)" "no-op" "(ONLY-REPLIED) …and gc.work_outcome=no-op stamped before the close"
 has "$OUT" "resolved gate tk-rev" "(ONLY-REPLIED) the resolve is reported"
@@ -544,7 +546,7 @@ eq "$(field tk-conv status)" "in_progress" "(EPIC-PR-ANSWER) the conversation st
 # then reads closed with this ruling's answer, and the re-run must still reach
 # the member's PR, where the real converse-rework.sh adopts the child the first
 # attempt filed, rather than fall back to the epic, which it refuses.
-epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+epic_pr; GCTK_STUB_MISS=close:tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 eq "$RC" 1 "(EPIC-PR-RERUN) a sign-off whose close does not land stops short"
 eq "$(field tk-mg status)" "closed" "(EPIC-PR-RERUN) …after resolving the member's gate"
 : > "$CALLS"
@@ -555,7 +557,7 @@ hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-epic" "(EPIC-PR-RERUN) …n
 eq "$(field tk-conv status)" "closed" "(EPIC-PR-RERUN) …and closes the conversation"
 # A re-run that says nothing of the PR still reaches it through the gate this
 # ruling's answer closed, so it is asked what the ruling does to that PR.
-epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+epic_pr; GCTK_STUB_MISS=close:tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
 eq "$RC" 2 "(EPIC-PR-RERUN) a re-run saying nothing of the PR exits 2"
 has "$OUT" "reaches tk-mem at merge_result=pull_request" "(EPIC-PR-RERUN) …naming the member's PR"
@@ -616,7 +618,7 @@ esac
 has "$OUT" "the ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) the other PR stands under the ruling"
 eq "$(acts tk-conv)" "Sent the PR of tk-anc back for rework.|Ruled: fix the retry before the merge" "(SHARED-PR) the conversation records the PR it sent back, named by its anchor where it records no number, then the ruling"
 eq "$(meta tk-pr2 gc.takeaway)" "" "(SHARED-PR) the headline stays off the other PR"
-shared_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
+shared_pr; GCTK_STUB_MISS=close:tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
 eq "$RC" 1 "(SHARED-PR-RERUN) a sign-off whose close does not land, after resolving the shared gate, stops short"
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
@@ -641,7 +643,7 @@ echo "# a re-run acts on the PR its ruling recorded, even once that PR's retirem
 # then no open PR the ruling reaches. The re-run takes the PR from the record
 # the first attempt wrote on the conversation, finds it closed and goes on,
 # rather than falling back to the epic, which pr-dispose.sh refuses.
-epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+epic_pr; GCTK_STUB_MISS=close:tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 1 "(RETIRED-RERUN) a sign-off that retired the member's PR, and whose close does not land, stops short"
 eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: the work moved to the new design"]')" '{"act":"retire","anchor":"tk-mem"}' "(RECORD) the conversation records the PR its ruling's --retire acts on, under the ruling's answer"
 case "$(cat "$CALLS")" in
@@ -655,7 +657,7 @@ eq "$RC" 0 "(RETIRED-RERUN) the re-run exits 0 though the retired member has clo
 has "$OUT" "tk-mem, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(RETIRED-RERUN) …finding the PR its ruling retired closed"
 hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRED-RERUN) …disposing nothing again, and never the epic"
 eq "$(field tk-conv status)" "closed" "(RETIRED-RERUN) …and closing the conversation"
-shared_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
+shared_pr; GCTK_STUB_MISS=close:tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
 eq "$RC" 1 "(RETIRED-RERUN-PICK) a sign-off that retired the PR --pr-anchor names, and whose close does not land, stops short"
 setf tk-pr2 status closed; setm tk-pr2 gc.superseded_by tk-anc
 : > "$CALLS"
@@ -725,21 +727,21 @@ acceptance; TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settle
 eq "$RC" 1 "(HEADLINE) a headline that does not land exits 1"
 eq "$(field tk-rev status)" "open" "(HEADLINE) …before any gate is resolved"
 eq "$(field tk-conv status)" "in_progress" "(HEADLINE) …or the conversation closed"
-# (HEADLINE-LOST) the real gc-helm.sh in place of the stub, over a store that
-# loses the headline's update while the subject carries an earlier sitting's
-# headline. takeaway reads its own stamp back before it exits 0, so the
-# sign-off stops before any gate is resolved, and the earlier headline does not
-# pass for this one.
+# (HEADLINE-LOST) the real gc-helm.sh in place of the stub, whose headline
+# update does not read back while the subject carries an earlier sitting's
+# headline. takeaway's update reads its own stamp back through `gctk bead`
+# before it exits 0, so the sign-off stops before any gate is resolved.
 acceptance
 setm tk-anc gc.takeaway "the sitting before this one parked it"
 setm tk-anc gc.takeaway_at "2026-11-01T09:00:00Z"
 setm tk-anc gc.takeaway_by converse
 mv "$S/gc-helm.sh" "$TMP/gc-helm.stub"; ln -s "$HERE/gc-helm.sh" "$S/gc-helm.sh"
-LOSE_UPDATE=tk-anc TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+: > "$TMP/gctk.log"
+GCTK_STUB_MISS=update:tk-anc TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 rm -f "$S/gc-helm.sh"; mv "$TMP/gc-helm.stub" "$S/gc-helm.sh"
-eq "$RC" 1 "(HEADLINE-LOST) a headline whose update exits 0 and lands nothing stops the sign-off"
-has "$(cat "$CALLS")" "bd update tk-anc --set-metadata gc.takeaway=settled" "(HEADLINE-LOST) …after the real takeaway wrote it"
-has "$OUT" "the store does not hold it" "(HEADLINE-LOST) …which its read of its own stamp finds lost"
+eq "$RC" 1 "(HEADLINE-LOST) a headline whose update does not read back stops the sign-off"
+has "$(cat "$TMP/gctk.log")" "bead|update|tk-anc|--set-metadata|gc.takeaway=settled|" "(HEADLINE-LOST) …after the real takeaway wrote it"
+has "$OUT" "its stamp did not read back" "(HEADLINE-LOST) …which its read of its own stamp finds missing"
 hasnt "$(cat "$CALLS")" "gate resolve" "(HEADLINE-LOST) …so no gate is resolved"
 eq "$(field tk-rev status)" "open" "(HEADLINE-LOST) …the gate stays open and owed"
 hasnt "$(cat "$CALLS")" "bd close tk-conv" "(HEADLINE-LOST) …and the conversation is not closed"

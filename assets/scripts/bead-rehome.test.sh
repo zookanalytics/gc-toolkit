@@ -126,16 +126,18 @@ GC
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
-# Fake bd: --db <path>/.beads [--actor X] <show|update|close> <id> ...
+# Fake bd: <show|update|close|dep> <id> ... with --db <path>/.beads and
+# [--actor X] anywhere among them, as bd takes its persistent flags.
 set -euo pipefail
-DB=""; ACTOR_ARG=""
+DB=""; ACTOR_ARG=""; _rest=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --db) DB="$2"; shift 2 ;;
     --actor) ACTOR_ARG="$2"; echo "$2" >> "$FAKE_ACTOR_LOG"; shift 2 ;;
-    *) break ;;
+    *) _rest+=("$1"); shift ;;
   esac
 done
+set -- ${_rest[@]+"${_rest[@]}"}
 sub="${1:-}"; shift || true
 
 # `bd dep <verb> <id> <depends-on-id>` puts the verb where every other
@@ -174,13 +176,8 @@ if [ "$sub" = "dep" ]; then
   [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
   case "$verb" in
     add)    printf 'dep.%s=blocks\n' "$other" >> "$f" ;;
-    # Real `bd dep remove` prints ✓ and exits 0 for an edge that never existed,
-    # so a stub that failed there would let a read-back-free caller pass.
-    # FAKE_BD_DEP_REMOVE_NOOP keeps that success report over an edge that
-    # survives — the case the read-back guard exists for.
-    remove) if [ -z "${FAKE_BD_DEP_REMOVE_NOOP:-}" ]; then
-              { grep -v "^dep\.$other=" "$f" || true; } > "$f.tmp"; mv "$f.tmp" "$f"
-            fi
+    # Real `bd dep remove` prints ✓ and exits 0 for an edge that never existed.
+    remove) { grep -v "^dep\.$other=" "$f" || true; } > "$f.tmp"; mv "$f.tmp" "$f"
             echo "✓ removed dependency: $id -> $other" ;;
     *)      exit 1 ;;
   esac
@@ -337,9 +334,7 @@ case "$sub" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata)
-          # FAKE_BD_DROP_META simulates a write that reports success and does
-          # not persist — the case the read-back guard exists for.
-          [ -n "${FAKE_BD_DROP_META:-}" ] || printf 'm.%s\n' "$2" >> "$f"
+          printf 'm.%s\n' "$2" >> "$f"
           shift 2 ;;
         --append-notes)
           printf 'notes=%s\n' "$2" >> "$f"; shift 2 ;;
@@ -352,8 +347,6 @@ case "$sub" in
       echo "cannot close issue assigned to other-agent (actor: someone-else)" >&2
       exit 1
     fi
-    # FAKE_BD_CLOSE_NOOP reports a close that never persisted.
-    [ -z "${FAKE_BD_CLOSE_NOOP:-}" ] || exit 0
     # FAKE_BD_ENFORCE_CLOSE_GUARDS: bd's own close guards, which refuse an
     # unforced close of a template, of a pinned bead, and of a bead assigned to
     # anyone but the --actor the close is given.
@@ -390,6 +383,10 @@ BD
 
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH"
+# The pointer, the wait edge's removal and the close go through `gctk bead
+# --verify`, which gctk.stub.sh stands in for: each write reaches the fake gc
+# above, and GCTK_STUB_MISS names one that does not read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export FAKE_RIGS_JSON="$TMP/rigs.json"
 export FAKE_ACTOR_LOG="$TMP/actors.log"
 : > "$FAKE_ACTOR_LOG"
@@ -440,8 +437,12 @@ run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
 # --- (a) happy path: pointer + populated reason + back-pointer --------------
 mkbead alpha open al-origin1
 mkbead beta  open bt-succ1
+: > "$TMP/gctk.log"
 rc=0; run --origin al-origin1 --successor bt-succ1 --kind re-homed --note "operator ruling rb-a3ny" || rc=$?
 eq "$rc" 0 "re-home succeeds"
+has "$(grep '^bead|update|al-origin1|' "$TMP/gctk.log")" "|--db|$TMP/rigs/alpha/.beads|" "the pointer is written through gctk, against the origin's store"
+has "$(grep '^bead|update|al-origin1|' "$TMP/gctk.log")" "|--verify|" "…which reads it back before the close"
+has "$(grep '^bead|close|al-origin1|' "$TMP/gctk.log")" "|--verify|" "the close is read back before the branch may end"
 eq "$(field alpha status al-origin1)" closed "origin is closed"
 eq "$(field alpha m.gc.superseded_by al-origin1)" bt-succ1 "forward pointer names the successor"
 eq "$(field alpha m.gc.superseded_by_store al-origin1)" rig:beta "forward pointer names the successor's store"
@@ -492,7 +493,7 @@ eq "$(field alpha m.gc.superseded_by al-origin2)" "" "no pointer is written to a
 # --- (c) pointer does not read back: origin must NOT be closed -------------
 mkbead alpha open al-origin3
 mkbead beta  open bt-succ3
-rc=0; FAKE_BD_DROP_META=1 run --origin al-origin3 --successor bt-succ3 --kind re-homed || rc=$?
+rc=0; GCTK_STUB_MISS=update:al-origin3 run --origin al-origin3 --successor bt-succ3 --kind re-homed || rc=$?
 eq "$rc" 4 "a pointer that does not read back refuses the close"
 eq "$(field alpha status al-origin3)" open "origin stays OPEN when the pointer did not stick"
 has "$(cat "$TMP/err")" "NOT closing" "the refusal says the close was skipped"
@@ -650,14 +651,15 @@ eq "$(grep -c '^dep\.al-succ14=' "$TMP/rigs/alpha/.beads/al-origin14")" 0 \
 has "$(cat "$TMP/err")" "blocked by" "the refusal names the hold the caller must judge"
 
 # --- (p) a drop that does not stick: the WARN hands back a gc bd command ---
-# `bd dep remove` reports success either way, so the read-back decides. When
-# the edge survives, the close below is refused and a human finishes by hand
+# `bd dep remove` reports success either way, so `gctk bead dep remove
+# --verify` reads the edge back, and here its miss is named. When the edge
+# survives, the close below is refused and a human finishes by hand
 # — through the same client the script reaches the store with, since raw bd
 # resolves that store from ambient state instead.
 mkbead alpha open al-origin16
 mkbead alpha open al-succ16
 printf 'dep.al-succ16=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin16"
-rc=0; FAKE_BD_DEP_REMOVE_NOOP=1 run --origin al-origin16 --successor al-succ16 --kind folded || rc=$?
+rc=0; GCTK_STUB_MISS=dep:al-origin16 run --origin al-origin16 --successor al-succ16 --kind folded || rc=$?
 eq "$rc" 5 "a wait edge that survives the drop still refuses the close"
 has "$(cat "$TMP/err")" "WARN could not drop" "the surviving edge is reported, not swallowed"
 has "$(cat "$TMP/err")" "gc bd --db $TMP/rigs/alpha/.beads dep remove al-origin16 al-succ16" \
@@ -903,7 +905,7 @@ eq "$(grep -c 'branch-end (stub): ended' "$TMP/rigs/alpha/.beads/al-br8")" 1 \
 mkbranched alpha open al-br9
 mkbead beta open bt-br9
 : > "$BE_LOG"
-rc=0; FAKE_BD_CLOSE_NOOP=1 run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
+rc=0; GCTK_STUB_MISS=close:al-br9 run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
 eq "$(cat "$BE_LOG")" "" "a close that does not read back ends no branch"
 has "$(cat "$TMP/err")" "did not read back closed" "…and a WARN says why the branch was left"
 
@@ -1178,7 +1180,7 @@ rc=0; "$SCRIPT" --origin al-check8 --successor al-succ8 --kind not-needed --exce
 eq "$rc" 0 "--check: a wait edge onto the successor holds nothing"
 hgate al-cg8 pr-dispose-failed.9
 printf 'dep.al-cg8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-check8"
-rc=0; FAKE_BD_DEP_REMOVE_NOOP=1 run --origin al-check8 --successor al-succ8 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+rc=0; GCTK_STUB_MISS=dep:al-check8 run --origin al-check8 --successor al-succ8 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 5 "the close: a wait edge onto the successor that would not drop holds it"
 eq "$(field alpha status al-cg8)" open "the close: …and its own gate stays open"
 # Without the key, --check judges the evidence alone, as it always has.

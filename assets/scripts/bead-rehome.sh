@@ -225,6 +225,24 @@ bead_json() {
     bd_at "$1" show "$2" --json 2>/dev/null | scrub || true
 }
 
+# verified_at <store-path> <verb> <args>... — the write bd_at makes, through
+# `gctk bead <verb> ... --verify`, which reads it back before it answers
+# (docs/warrants.md, "bd write durability"). The ids come first in <args>, then
+# the flags. Returns gctk's exit: 0 written and read back, 3 the write exited 0
+# and did not read back, any other code the store's refusal, 13 among them for
+# a guard that no longer holds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+verified_at() {
+    local db="$1" verb="$2"; shift 2
+    case "$verb" in dep) verb="dep $1"; shift ;; esac
+    local ids=()
+    while [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; do ids+=("$1"); shift; done
+    # shellcheck disable=SC2086  # $verb is one or two words
+    "$GCTK" bead $verb "${ids[@]}" --db "$db/.beads" ${ACTOR:+--actor "$ACTOR"} "$@" --verify
+}
+
 # The successor is checked first and hardest: a pointer to a bead that does
 # not exist reads as a resolved disposition and resolves to nothing.
 SUCC_JSON=$(bead_json "$SUCCESSOR_PATH" "$SUCCESSOR")
@@ -508,8 +526,9 @@ if [ -n "$DRY_RUN" ]; then
 fi
 
 # 1. Stamp the pointer and prove it landed. The close below cannot be undone, so
-# it is gated on a read-back of the stamp as well as on the stamp's exit
-# (docs/warrants.md, "bd write durability"). Both keys go in one update, which
+# the stamp goes through `gctk bead update --verify`, which reads both keys back
+# before the close may count on them (docs/warrants.md, "bd write durability").
+# Both keys go in one update, which
 # bd applies only while the origin still has the status and assignee the gates
 # above judged. bd holds a claimed bead against another actor's assignment and
 # close, never against a metadata write, so without that condition a caller
@@ -523,32 +542,34 @@ STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
             --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
 JUDGED=(--if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE")
 STAMP_RC=0
-bd_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" "${STAMP_META[@]}" >/dev/null 2>&1 || STAMP_RC=$?
-if [ "$STAMP_RC" = 13 ]; then
-    if [ -n "$JUDGED_ASSIGNEE" ]; then JUDGED_HOLDER="under $JUDGED_ASSIGNEE"; else JUDGED_HOLDER="and unassigned"; fi
-    die "$ORIGIN is no longer $JUDGED_STATUS $JUDGED_HOLDER, as this run read it before judging it: a claim, an assignment or a status change landed since, so nothing is stamped and $ORIGIN is not closed. Re-run to judge it as it stands now" 4
-elif [ "$STAMP_RC" != 0 ]; then
-    die "the store refused the successor pointer on $ORIGIN (gc bd update exited $STAMP_RC); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
-fi
+STAMP_ERR=$(verified_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" "${STAMP_META[@]}" 2>&1 >/dev/null) || STAMP_RC=$?
+case "$STAMP_RC" in
+    0) ;;
+    13)
+        if [ -n "$JUDGED_ASSIGNEE" ]; then JUDGED_HOLDER="under $JUDGED_ASSIGNEE"; else JUDGED_HOLDER="and unassigned"; fi
+        die "$ORIGIN is no longer $JUDGED_STATUS $JUDGED_HOLDER, as this run read it before judging it: a claim, an assignment or a status change landed since, so nothing is stamped and $ORIGIN is not closed. Re-run to judge it as it stands now" 4 ;;
+    3)
+        [ -z "$STAMP_ERR" ] || printf '%s\n' "$STAMP_ERR" >&2
+        die "successor pointer did NOT read back on $ORIGIN; NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4 ;;
+    *)
+        [ -z "$STAMP_ERR" ] || printf '%s\n' "$STAMP_ERR" >&2
+        die "the store refused the successor pointer on $ORIGIN (gctk bead update exited $STAMP_RC); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4 ;;
+esac
 
+# The bead as the stamp left it: its edges, its gates and its branch, which the
+# steps below judge.
 CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
-GOT_SUCC=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null || true)
-GOT_STORE=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by_store"] // empty' 2>/dev/null || true)
-if [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$SUCCESSOR_STORE" ]; then
-    die "successor pointer did NOT stick on $ORIGIN (read back gc.superseded_by='${GOT_SUCC:-}' gc.superseded_by_store='${GOT_STORE:-}'); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
-fi
 # 1a. Drop ONLY the wait edge to THIS successor: it would refuse the close,
 # and gc.superseded_by records the relationship more strongly. Any other
-# blocker is a real hold whose refusal below is correct.
+# blocker is a real hold whose refusal below is correct. bd's remove of an edge
+# exits 0 whether or not it held one, so the remove goes through
+# `gctk bead dep remove --verify`, which reads the edge back gone.
 if [ "$(wait_edge_count "$CHECK_JSON")" -gt 0 ]; then
-    bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 || true
-    # `bd dep remove` reports success for an edge that never existed; read the
-    # graph back instead.
-    if [ "$(wait_edge_count "$(bead_json "$ORIGIN_PATH" "$ORIGIN")")" -gt 0 ]; then
-        echo "bead-rehome: WARN could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge; while it stands the close below is refused — clear it with: gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR" >&2
-    else
+    if verified_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1; then
         printf 'bead-rehome: dropped the wait edge (%s blocked by %s) — a disposed bead is not waiting on its successor; gc.superseded_by is the record\n' \
             "$ORIGIN" "$SUCCESSOR"
+    else
+        echo "bead-rehome: WARN could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge; while it stands the close below is refused — clear it with: gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR" >&2
     fi
 fi
 
@@ -556,7 +577,9 @@ fi
 # the reason is what a human reads. On an already-closed origin the reason
 # cannot be rewritten; append the disposition note instead (never --notes,
 # which replaces).
+CLOSED_BACK=""
 if [ "$ORIGIN_STATUS" = "closed" ]; then
+    CLOSED_BACK=1
     PRIOR_NOTES=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)
     case "$PRIOR_NOTES" in
         *"Disposition recorded"*"$SUCCESSOR"*)
@@ -615,14 +638,20 @@ else
     fi
     # Deliberately NOT --force: the same flag overrides a foreign assignee and
     # an open-children hold. A refusal leaves an OPEN, pointed, findable bead.
-    CLOSE_ERR=""
-    if ! CLOSE_ERR=$(bd_at "$ORIGIN_PATH" close "$ORIGIN" --reason "$REASON" 2>&1); then
-        echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close was refused:" >&2
-        printf '%s\n' "$CLOSE_ERR" >&2
-        echo "bead-rehome: the disposition is legible either way — the bead is open, pointed, and findable. Judge the refusal, then finish it:" >&2
-        echo "  gc bd --db $ORIGIN_PATH/.beads close $ORIGIN --reason \"$REASON\"" >&2
-        exit 5
-    fi
+    # The close goes through `gctk bead close --verify`, so its exit says it
+    # reads back closed, which the branch's end below waits on.
+    CLOSE_ERR=""; CLOSE_RC=0
+    CLOSE_ERR=$(verified_at "$ORIGIN_PATH" close "$ORIGIN" --reason "$REASON" 2>&1) || CLOSE_RC=$?
+    case "$CLOSE_RC" in
+        0) CLOSED_BACK=1 ;;
+        3) [ -z "$CLOSE_ERR" ] || printf '%s\n' "$CLOSE_ERR" >&2 ;;
+        *)
+            echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close was refused:" >&2
+            printf '%s\n' "$CLOSE_ERR" >&2
+            echo "bead-rehome: the disposition is legible either way — the bead is open, pointed, and findable. Judge the refusal, then finish it:" >&2
+            echo "  gc bd --db $ORIGIN_PATH/.beads close $ORIGIN --reason \"$REASON\"" >&2
+            exit 5 ;;
+    esac
 fi
 
 # 3. Back-pointer on the successor, best-effort: a failure here does not undo
@@ -646,9 +675,8 @@ if [ -n "$RETIRED_BRANCH" ]; then
     # Quoted for a paste: a branch name may carry shell metacharacters.
     END_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN")
     END_CMD="${END_CMD% }"
-    FINAL_STATUS=$(bead_json "$ORIGIN_PATH" "$ORIGIN" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-    if [ "$FINAL_STATUS" != "closed" ]; then
-        echo "bead-rehome: WARN $ORIGIN did not read back closed (status '${FINAL_STATUS:-unreadable}'), so its branch $RETIRED_BRANCH was left on the git remote; once it reads closed, end it with: $END_CMD" >&2
+    if [ -z "$CLOSED_BACK" ]; then
+        echo "bead-rehome: WARN $ORIGIN did not read back closed, so its branch $RETIRED_BRANCH was left on the git remote; once it reads closed, end it with: $END_CMD" >&2
     else
         END_RC=0
         END_OUT=$("$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN" 2>&1) || END_RC=$?

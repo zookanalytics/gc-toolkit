@@ -292,6 +292,32 @@ row_now() {
             2>/dev/null || true
 }
 
+# gctk_bin — the gctk binary this script runs: $GCTK_BIN as given, else the
+# city's build. Prints nothing when no city resolves.
+gctk_bin() {
+    if [ -n "${GCTK_BIN:-}" ]; then
+        printf '%s' "$GCTK_BIN"
+        return 0
+    fi
+    _gb_root=$(city_root)
+    [ -z "$_gb_root" ] || printf '%s' "$_gb_root/.gc/services/gctk/bin/gctk"
+}
+
+# bead_write <verb> <args>... — one bd write through `gctk bead`, which with
+# --verify or --verify-key reads the write back before it answers
+# (docs/warrants.md, "bd write durability"). Returns gctk's exit: 0 written
+# (and read back), 3 the write exited 0 and did not read back, any other code
+# the store's refusal. With no gctk binary to run, nothing is written, it says
+# so on stderr, and it returns 127.
+bead_write() {
+    _bw_bin=$(gctk_bin)
+    if [ -z "$_bw_bin" ] || [ "$_bw_bin" = none ] || [ ! -x "$_bw_bin" ]; then
+        echo "$PROG: no gctk binary to write through (GCTK_BIN, or the city's .gc/services/gctk/bin/gctk), so nothing was written" >&2
+        return 127
+    fi
+    "$_bw_bin" bead "$@"
+}
+
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
 # enforce the shared ≤TAKEAWAY_MAX cap; sets HEADLINE. One gate for two verbs:
 # a park gate's TITLE is a one-line headline as a takeaway stamp is, so a cap
@@ -1243,43 +1269,36 @@ cmd_takeaway() {
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee="$assign" \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
                --unset-metadata gc.session_name --unset-metadata gc.session_id
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-    gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
-        || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
     # An update can exit 0 and still be lost under a degraded server or a racing
     # legacy writer (docs/warrants.md, "bd write durability"), and what follows a
     # zero exit here cannot be taken back: the run's end below, and the close a
     # caller makes on it, as when first-reaction-dispose.sh closes its reaction
     # or converse-signoff.sh resolves gates and closes the conversation. So the
-    # stamp is read back once before them, every key of it, and a row that will
-    # not read is a miss. The stamp carries this call's time to the second, so a
-    # stamp an earlier call left with the same text passes for it only when that
-    # call wrote it in the same second. The release rides the same atomic update,
-    # so the stamp reading back shows the release landed too, and the release's
-    # own fields are not compared: a claim that follows the release, such as a
-    # pool's on the route it names, rewrites the status, the assignee and the
-    # session pins, and is no lost write. On a miss the verb repairs nothing and
-    # does nothing after the update, so a re-run writes the whole update again.
-    stamp_row=$(row_now "$bead")
-    stamp_missed=""
-    if [ -z "$stamp_row" ]; then
-        stamp_missed="nothing shows that the store holds it, because $bead did not answer a read after it"
-    elif ! stamp_keys=$(printf '%s' "$stamp_row" | jq -r --arg t "$text" --arg at "$takeaway_at" --arg by "$by" --arg s "$no_wait" '
-            def str: if type == "string" then . else tojson end;
-            (.metadata // {}) as $m
-            | [ ["gc.takeaway", $t], ["gc.takeaway_at", $at], ["gc.takeaway_by", $by], ["gc.takeaway_settled", $s] ]
-            | map(select(($m[.[0]] | str) != .[1])
-                  | "\(.[0]) reads \(if $m[.[0]] == null then "nothing" else ($m[.[0]] | str | @json) end), not \(.[1] | @json)")
-            | join("; ")' 2>/dev/null); then
-        stamp_missed="nothing shows that the store holds it, because the row $bead answered would not parse"
-    elif [ -n "$stamp_keys" ]; then
-        stamp_missed="the store does not hold it: $stamp_keys"
-    fi
-    if [ -n "$stamp_missed" ]; then
-        bust_cache
-        printf '%s\n' "$PROG: takeaway: the update on $bead exited 0, but $stamp_missed. ${release_park:+The release rides the same update, so it is not taken as landed either. }Nothing was repaired, and nothing after the update was done: no wait edge, no run's end. Re-run this call." >&2
-        exit 4
-    fi
+    # update goes through `gctk bead update`, which reads the stamp back before
+    # this verb does anything after it. The stamp is its witness, every key of
+    # it, and it carries this call's time to the second, so a stamp an earlier
+    # call left with the same text passes for it only when that call wrote it in
+    # the same second. The release rides the same atomic update, so the stamp
+    # reading back shows the release landed too, and the release's own fields
+    # are no witness: a claim that follows the release, such as a pool's on the
+    # route it names, rewrites the status, the assignee and the session pins, and
+    # is no lost write. On a miss the verb repairs nothing and does nothing after
+    # the update, so a re-run writes the whole update again.
+    _tk_rc=0
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    _tk_err=$(bead_write update "$bead" ${db:+--db "$db"} "$@" \
+        --verify-key gc.takeaway --verify-key gc.takeaway_at \
+        --verify-key gc.takeaway_by --verify-key gc.takeaway_settled 2>&1 >/dev/null) || _tk_rc=$?
+    case "$_tk_rc" in
+        0) ;;
+        3)  bust_cache
+            [ -z "$_tk_err" ] || printf '%s\n' "$_tk_err" >&2
+            printf '%s\n' "$PROG: takeaway: the update on $bead exited 0, but its stamp did not read back, so nothing shows that the store holds it. ${release_park:+The release rides the same update, so it is not taken as landed either. }Nothing was repaired, and nothing after the update was done: no wait edge, no run's end. Re-run this call." >&2
+            exit 4 ;;
+        *)  [ -z "$_tk_err" ] || printf '%s\n' "$_tk_err" >&2
+            echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2
+            exit 4 ;;
+    esac
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
     # <blocker>", so the edge lands on <bead> — what the board reads. Only the
@@ -1870,27 +1889,16 @@ take_bead() {
     [ -n "$TAKE_BEAD" ] || { echo "$PROG: $_tb_verb: could not tell which bead '$_tb_id' is about. $_tb_nothing" >&2; exit 4; }
 }
 
-# conversation_replies_to <conversation> <gate> — 0 iff the conversation's own
-# row carries a replies-to edge onto the gate. The row is `gc bd list --id`'s,
-# whose edges keep a reply onto a gate in another store, which `gc bd dep list`
-# of one bead leaves out.
-conversation_replies_to() {
-    gc bd list --id "$1" --all --json 2>/dev/null | grep -av '^gc bd:' | scrub \
-        | jq -e --arg c "$1" --arg g "$2" '
-            any(.[]? | objects | select((.id // "") == $c) | (.dependencies // [])[]? | objects;
-                ((.type // .dependency_type) // "") == "replies-to" and ((.depends_on_id // .id) // "") == $g)' >/dev/null 2>&1
-}
-
 # conversation_reply <conversation> <gate> — make the conversation reply to the
 # gate it answers, bd's replies-to edge from the reply onto the original, which
-# holds nothing, and read the edge back. The gate can sit in another store, and
-# bd stores an edge onto such a bead without finding it (docs/warrants.md, "bd
-# write durability"), so the read, not the add's exit, says it landed. 0 once it
-# reads back.
+# holds nothing. The gate can sit in another store, where bd stores an edge onto
+# it without finding it (docs/warrants.md, "bd write durability"), so the add
+# goes through `gctk bead dep add --verify`, which reads the edge back off the
+# conversation's own row: a `gc bd list` row keeps an edge onto another store's
+# bead, which `gc bd dep list` leaves out. bd takes an edge it already holds as
+# a no-op that exits 0, so a re-run adds it safely. 0 once it reads back.
 conversation_reply() {
-    conversation_replies_to "$1" "$2" && return 0
-    gc bd dep add "$1" "$2" --type replies-to >/dev/null 2>&1 || true
-    conversation_replies_to "$1" "$2"
+    bead_write dep add "$1" "$2" --type replies-to --verify >/dev/null 2>&1
 }
 
 # open_join <conversation> — join open's concern ($join_note, empty for none)
@@ -2112,24 +2120,23 @@ $gate_desc}"
 
     # File the conversation: a task that tracks the bead, in the operator's
     # queue (assigned to `human`), in one create, so no reader ever sees a task
-    # in this shape without its subject. bd create answers an ARRAY (or bare
-    # object) carrying the id on success and a bare {"error":…} OBJECT on
-    # failure; the id is read type-guarded so an error object never crashes jq.
-    CONV_JSON=$(gc bd create -t task --title "$conv_title" -d "$conv_body" \
-        --deps "tracks:$bead" --assignee human --json 2>/dev/null || true)
+    # in this shape without its subject. The tracks edge is what makes the task
+    # a conversation about the bead, and the bead can sit in another store,
+    # where bd stores the edge without finding its target (docs/warrants.md, "bd
+    # write durability"). So the create goes through `gctk bead create
+    # --verify`, which reads the task back carrying the edge and its assignee,
+    # and prints bd's reply either way. A task left without them is no
+    # conversation any reader finds, so it is closed rather than left behind.
+    # bd create answers an ARRAY (or bare object) carrying the id on success and
+    # a bare {"error":…} OBJECT on failure; the id is read type-guarded so an
+    # error object never crashes jq.
+    CONV_RC=0
+    CONV_JSON=$(bead_write create -t task --title "$conv_title" -d "$conv_body" \
+        --deps "tracks:$bead" --assignee human --json --verify 2>/dev/null) || CONV_RC=$?
     CONV=$(printf '%s' "$CONV_JSON" | scrub \
         | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
-    [ -n "$CONV" ] && [ "$CONV" != "null" ] \
-        || { create_err=$(printf '%s' "$CONV_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
-             echo "$PROG: open: could not create a conversation for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
-    # The tracks edge is what makes the task a conversation about the bead, and
-    # the bead can sit in another store, where bd stores the edge without finding
-    # its target (docs/warrants.md, "bd write durability"). So it is read back off
-    # the task's own row. A task left without it is no conversation any reader
-    # finds, so it is closed rather than left behind.
-    if ! gc bd list --id "$CONV" --all --json 2>/dev/null | grep -av '^gc bd:' | scrub \
-            | jq -e --arg c "$CONV" --arg s "$bead" "$CONVERSATION_JQ"'
-                any(.[]? | objects | select((.id // "") == $c); conversation and conversation_subjects == [$s])' >/dev/null 2>&1; then
+    [ "$CONV" != "null" ] || CONV=""
+    if [ "$CONV_RC" = 3 ] && [ -n "$CONV" ]; then
         if gc bd close "$CONV" --reason "not a conversation: its tracks edge onto $bead or its assignee did not land" >/dev/null 2>&1; then
             echo "$PROG: open: the task $CONV filed for '$bead' did not read back as a conversation (its tracks edge onto $bead or its assignee did not land), so it was closed. Re-run: $PROG open $bead" >&2
         else
@@ -2137,6 +2144,9 @@ $gate_desc}"
         fi
         exit 4
     fi
+    [ "$CONV_RC" = 0 ] && [ -n "$CONV" ] \
+        || { create_err=$(printf '%s' "$CONV_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+             echo "$PROG: open: could not create a conversation for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
     if [ -n "$TAKE_GATE" ] && ! conversation_reply "$CONV" "$TAKE_GATE"; then
         echo "$PROG: open: conversation $CONV is filed on $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $CONV $TAKE_GATE --type replies-to" >&2
         exit 4
@@ -3100,9 +3110,11 @@ cmd_accept() {
     # answer, and step 3 read back that no other open human gate blocks the
     # bead, so Accept releases it here, routed to human, as a sitting's
     # sign-off releases a subject that takes its recommendation. The sling
-    # cannot be undone, so the release is read back before it (docs/warrants.md,
-    # "bd write durability"), and one that does not read back leaves the
-    # acceptance unfinished, for the next Accept to finish.
+    # cannot be undone, so the release is read back before it: lifecycle.sh
+    # exits 0 only once the transition reads back, through the read
+    # `gctk bead --verify` makes (docs/warrants.md, "bd write durability"). A
+    # release that does not land leaves the acceptance unfinished, for the next
+    # Accept to finish.
     held_row=$(row_now "$bead")
     if [ -z "$held_row" ]; then
         echo "$PROG: accept: could not read $bead back after its acceptance ($tok) to tell whether it reads held, so nothing is dispatched yet. The next Accept finishes it once the store answers: $PROG accept $bead" >&2
@@ -3111,10 +3123,15 @@ cmd_accept() {
     if [ "$(printf '%s' "$held_row" | jq -r '(.metadata // {}).merge_result // "" | tostring' 2>/dev/null)" = held ]; then
         lc_rc=0
         accept_lifecycle transition "$bead" --to unanchored --expect held --route human >/dev/null 2>&1 || lc_rc=$?
-        released_row=$(row_now "$bead")
-        if [ -z "$released_row" ] || [ "$(printf '%s' "$released_row" | jq -r '(.metadata // {}).merge_result // "" | tostring' 2>/dev/null)" = held ]; then
-            echo "$PROG: accept: $bead reads held, as a sitting's hold on its gate left it, and its release to unanchored did not read back (lifecycle.sh exited $lc_rc), so nothing is dispatched: mol-polecat-work cancels a run poured at a held bead. The next Accept finishes acceptance $tok once the release can land: $PROG accept $bead" >&2
-            exit 4
+        # Another release can land between the read above and this one, and its
+        # --expect held then refuses this one. So a refusal reads the bead again,
+        # to tell that release from one that did not land.
+        if [ "$lc_rc" != 0 ]; then
+            released_row=$(row_now "$bead")
+            if [ -z "$released_row" ] || [ "$(printf '%s' "$released_row" | jq -r '(.metadata // {}).merge_result // "" | tostring' 2>/dev/null)" = held ]; then
+                echo "$PROG: accept: $bead reads held, as a sitting's hold on its gate left it, and its release to unanchored did not land (lifecycle.sh exited $lc_rc), so nothing is dispatched: mol-polecat-work cancels a run poured at a held bead. The next Accept finishes acceptance $tok once the release can land: $PROG accept $bead" >&2
+                exit 4
+            fi
         fi
         echo "$PROG: accept: released $bead from held, which waited on this answer" >&2
     fi
@@ -3215,13 +3232,8 @@ engage_valid_model() {
 # verdict hold it. Returns 1 when gctk is not there or did not answer, which says
 # nothing about what holds the bead.
 holding_rows() {
-    _hr_bin="${GCTK_BIN:-}"
-    if [ -z "$_hr_bin" ]; then
-        _hr_root=$(city_root)
-        [ -n "$_hr_root" ] || return 1
-        _hr_bin="$_hr_root/.gc/services/gctk/bin/gctk"
-    fi
-    [ -x "$_hr_bin" ] || return 1
+    _hr_bin=$(gctk_bin)
+    [ -n "$_hr_bin" ] && [ -x "$_hr_bin" ] || return 1
     _hr_json=$("$_hr_bin" pr-status derive --anchor "$1" --json 2>/dev/null) || return 1
     printf '%s' "$_hr_json" | jq -r '.reasons[] | [.held, (.id // ""), (.title // "")] | @tsv' 2>/dev/null
 }

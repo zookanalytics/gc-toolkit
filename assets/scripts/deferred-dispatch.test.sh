@@ -467,6 +467,10 @@ DATE
 chmod +x "$BIN/bd" "$BIN/gc" "$BIN/human-gate.sh" "$BIN/gc-helm.sh" "$BIN/date"
 
 export PATH="$BIN:$PATH"
+# The disarm verb writes through `gctk bead update --verify`, which
+# gctk.stub.sh stands in for: each write reaches the stub gc above, and
+# GCTK_STUB_MISS names one that does not read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export STUB_STORE="$TMP/beads.json"
 export STUB_SLING_LOG="$TMP/sling.log"
 export STUB_MAIL_LOG="$TMP/mail.log"
@@ -1326,6 +1330,18 @@ store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":
 "$SUT" disarm n-1 >/dev/null 2>&1
 eq "$(meta n-1 gc.dispatch_when_ready)" "<absent>" "disarm on a bead with an arm and a notice clears the arm"
 eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "and the notice, in the same verb"
+# The verb's caller acts on the disarm in a way it cannot undo, so the write
+# reads back cleared before the verb exits 0, and one that does not fails it.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
+: > "$TMP/gctk.log"
+"$SUT" disarm b-1 >/dev/null 2>&1
+has "$(cat "$TMP/gctk.log")" "bead|update|b-1|" "disarm writes through gctk"
+has "$(cat "$TMP/gctk.log")" "|--verify|" "…which reads the record back cleared"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
+out="$(GCTK_STUB_MISS=update:b-1 "$SUT" disarm b-1 2>&1)"; rc=$?
+eq "$rc" 1 "a disarm that does not read back cleared exits 1"
+has "$out" "did not read back cleared" "…and says so"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "…leaving the arm the store holds"
 
 # A pass retires an arm through the same write, which leaves a notice owed on
 # the bead: only the notice's own send or retire, or the disarm verb, clears it.

@@ -448,6 +448,15 @@ RIG_PATH="${_path:-}"
 # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
 gc_bd() { gc bd "$@" $BD_DB_ARGS; }
 _bd_call() { gc_bd "$@"; }
+# verified_bd <verb> <id> <flags>... — the write gc_bd makes, through `gctk
+# bead <verb> ... --verify`, which reads it back before it answers. Returns
+# gctk's exit: 0 written and read back, 3 the write exited 0 and did not read
+# back, any other code the store's refusal.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+# shellcheck disable=SC2086  # $BD_DB_ARGS is empty or `--db <path>`, as gc_bd takes it
+verified_bd() { "$GCTK" bead "$@" $BD_DB_ARGS --verify; }
 
 # ── Read the subject once; the guards below all ask its metadata ──────
 # The store is pinned, so this reads the subject's own rig. The stand-down, the
@@ -856,34 +865,26 @@ fi
 # recommendation gate that offers only Discuss, and a clear that did not land
 # leaves a superseded Accept executable. So reco_ensure stops the exit when the
 # store refuses the write. The release, the arm and the close after it cannot
-# be undone, so it reads the key back once before them (docs/warrants.md, "bd
-# write durability"), and fails the exit when it is still wrong, or when the
-# subject cannot be read to prove the key moved. The read is tagged so an
-# unreadable subject is never mistaken for a proven clear: "v:<value>" is a
-# valid array payload (<value> empty = key absent), and "u:" is a non-array,
-# error object, empty or unparseable read, whose state is unknown. gc bd show
-# answers an error OBJECT for a subject it cannot resolve, and a bare "" would
-# collapse that onto "key absent".
-reco_now() {
-    gc_bd show "$BEAD" --json 2>/dev/null | scrub \
-        | jq -r 'if (type == "array" and length > 0) then "v:" + (((.[0].metadata // {})["gc.recommended_formula"]) // "") else "u:" end' 2>/dev/null \
-        || printf 'u:'
-}
+# be undone, so the write goes through `gctk bead update --verify`, which reads
+# the key back before them (docs/warrants.md, "bd write durability"), and the
+# exit fails when it does not read back as written, or cleared. A clear reads
+# back with the key gone, which no reader takes for a live recommendation.
 reco_ensure() { # <formula, or empty to clear> <what has already landed, for the failure>
-    local want="$1" landed="$2" got
+    local want="$1" landed="$2" rc=0
     if [ -n "$want" ]; then
-        gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$want" >/dev/null 2>&1 \
-            || die "the store refused gc.recommended_formula=$want on $BEAD. $landed The operator's Accept reads this key, so the exit stops here rather than leave a recommendation gate that offers only Discuss. Clear the cause and re-run this command."
-    else
-        gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 \
-            || die "the store refused the clear of the earlier recommendation on $BEAD. $landed A disposition must not leave a superseded Accept executable, so the exit stops here. Clear the cause and re-run this command."
+        verified_bd update "$BEAD" --set-metadata "gc.recommended_formula=$want" >/dev/null 2>&1 || rc=$?
+        case "$rc" in
+            0) return 0 ;;
+            3) die "the recommendation did not land on $BEAD: gc.recommended_formula=$want did not read back after the store took it. $landed The operator's Accept reads this key, so the exit stops here rather than leave a recommendation gate that offers only Discuss. Clear the cause and re-run this command." ;;
+            *) die "the store refused gc.recommended_formula=$want on $BEAD. $landed The operator's Accept reads this key, so the exit stops here rather than leave a recommendation gate that offers only Discuss. Clear the cause and re-run this command." ;;
+        esac
     fi
-    got="$(reco_now)"
-    [ "$got" = "v:$want" ] && return 0
-    if [ -n "$want" ]; then
-        die "the recommendation did not land on $BEAD: gc.recommended_formula read back as '$got' (want 'v:$want'; a 'u:' means the subject could not be read, which is not proof it landed). $landed The operator's Accept reads this key, so the exit stops here rather than leave a recommendation gate that offers only Discuss. Clear the cause and re-run this command."
-    fi
-    die "the earlier recommendation did not clear on $BEAD: gc.recommended_formula read back as '$got' (want 'v:' for a proven-absent key; a 'u:' means the subject could not be read, which is not proof it cleared). $landed A disposition must not leave a superseded Accept executable, so the exit stops here. Clear the cause and re-run this command."
+    verified_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) return 0 ;;
+        3) die "the earlier recommendation did not clear on $BEAD: gc.recommended_formula still reads back after the store took the clear. $landed A disposition must not leave a superseded Accept executable, so the exit stops here. Clear the cause and re-run this command." ;;
+        *) die "the store refused the clear of the earlier recommendation on $BEAD. $landed A disposition must not leave a superseded Accept executable, so the exit stops here. Clear the cause and re-run this command." ;;
+    esac
 }
 
 # ── A recommendation already on the subject is cleared, before the act ─────
@@ -1067,36 +1068,31 @@ fi
 # sitting's queue. A confirmed emergency carries P0 before its route or its arm,
 # so it is never claimable at the priority it was filed at. Either write carries
 # a note saying what intake found. The release after it cannot be undone, so
-# the write is read back once before it (docs/warrants.md, "bd write
-# durability"): one the store refused or that did not land stops the exit
-# before the act, with no landed proof, so a re-run resumes.
-# subject_now <jq-path> answers "v:<value>" from a readable subject and "u:"
-# from anything else, so an unreadable subject never reads as a write that
-# landed.
-subject_now() {
-    gc_bd show "$BEAD" --json 2>/dev/null | scrub \
-        | jq -r "if (type == \"array\" and length > 0) then \"v:\" + (((.[0] | $1) // \"\") | tostring) else \"u:\" end" 2>/dev/null \
-        || printf 'u:'
-}
+# the write goes through `gctk bead update --verify`, which reads it back before
+# the act (docs/warrants.md, "bd write durability"): one the store refused or
+# that did not read back stops the exit before the act, with no landed proof,
+# so a re-run resumes.
 if [ -n "$POOL_TARGET" ]; then
     INTAKE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     if [ -z "$ADMIT" ]; then
         set -- --set-metadata "placement=pending" --append-notes "## Intake (first reaction, $INTAKE_AT)
 Held for placement instead of reaching $POOL_TARGET: $HOLD_WHY. The operator's placement sitting places it under an epic or routes it on its own; gc-helm.sh unplaced lists it."
-        WANT="v:pending"; WHAT="placement=pending"; NOW_PATH=".metadata.placement"
+        WHAT="placement=pending"
     elif [ "$ADMIT" = emergency ]; then
         set -- --priority 0 --append-notes "## Intake (first reaction, $INTAKE_AT)
 Routed to $POOL_TARGET at P0 as an emergency: $ADMIT_WHY."
-        WANT="v:0"; WHAT="priority P0"; NOW_PATH=".priority"
+        WHAT="priority P0"
     else
         set --
     fi
     if [ $# -gt 0 ]; then
-        gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
-            || die "could not write $WHAT on $BEAD (does it exist${DB:+ in $DB}?), so it was not released. Nothing else was written by this step; clear the cause and re-run this command."
-        _got="$(subject_now "$NOW_PATH")"
-        [ "$_got" = "$WANT" ] \
-            || die "$WHAT did not land on $BEAD (it read back as '$_got', want '$WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The release is withheld, so $BEAD is not left unrouted without its marker or routed at the wrong priority. Clear the cause and re-run this command."
+        _rc=0
+        verified_bd update "$BEAD" "$@" >/dev/null 2>&1 || _rc=$?
+        case "$_rc" in
+            0) ;;
+            3) die "$WHAT did not land on $BEAD: it did not read back after the store took it. The release is withheld, so $BEAD is not left unrouted without its marker or routed at the wrong priority. Clear the cause and re-run this command." ;;
+            *) die "could not write $WHAT on $BEAD (does it exist${DB:+ in $DB}?), so it was not released. Nothing else was written by this step; clear the cause and re-run this command." ;;
+        esac
         note "intake wrote $WHAT on $BEAD"
     fi
 fi

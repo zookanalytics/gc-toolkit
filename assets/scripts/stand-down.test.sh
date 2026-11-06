@@ -71,11 +71,7 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
 # carry it writes nothing and exits 1. STUB_LAND_AT is text and STUB_LAND a command:
 # the first bd call whose arguments carry it runs the command first, a write that
 # lands between two of a script's reads. STUB_PASS_AFTER_WRITES runs a reconcile
-# pass after each write the stand-down makes. STUB_SHOW_FAILS_AFTER is text: once a
-# bd call carrying it has run, every show fails, and STUB_DEPS_FAIL_AFTER is the same
-# for every dep list. STUB_KEEP_KEY names a key a set or an unset leaves in place with
-# exit 0, a write a degraded store loses (docs/warrants.md, "bd write durability"),
-# and STUB_KEEP_EDGE has a dep remove do the same.
+# pass after each write the stand-down makes.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"
@@ -116,9 +112,6 @@ verb="${1:-}"; shift || true
 case "$verb" in
   show)
     id="${1:-}"
-    if [ -n "${STUB_SHOW_FAILS_AFTER:-}" ] && grep -q -F -- "$STUB_SHOW_FAILS_AFTER" "$STUB_GC_LOG"; then
-      echo '{"error":"simulated read failure","schema_version":1}'; exit 1
-    fi
     out=$(jq -c --arg id "$id" '. as $s | [ .[] | select(.id == $id) | . as $b
         | .dependencies = [ ($b._deps // [])[] | . as $e | ($s | map(select(.id == $e.id)) | .[0]) as $t | select($t != null)
             | {id: $e.id, dependency_type: $e.dependency_type, issue_type: ($t.issue_type // "task"), status: ($t.status // "open")} ]
@@ -164,8 +157,8 @@ case "$verb" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --db) shift ;;
-        --set-metadata) shift; k="${1:-}"; [ "${k%%=*}" = "${STUB_KEEP_KEY:-}" ] && { shift; continue; }; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
-        --unset-metadata) shift; [ "${1:-}" = "${STUB_KEEP_KEY:-}" ] && { shift; continue; }; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
+        --set-metadata) shift; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
+        --unset-metadata) shift; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
         --append-notes) shift; args+=("${1:-}"); prog="$prog | .notes = ((.notes // \"\") + \"\n\" + \$ARGS.positional[$((${#args[@]} - 1))])" ;;
         --status=*) args+=("${1#--status=}"); prog="$prog | .status = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
         --assignee=*) args+=("${1#--assignee=}"); prog="$prog | .assignee = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
@@ -207,9 +200,6 @@ case "$verb" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list)
-        if [ -n "${STUB_DEPS_FAIL_AFTER:-}" ] && grep -q -F -- "$STUB_DEPS_FAIL_AFTER" "$STUB_GC_LOG"; then
-          echo '{"error":"simulated read failure","schema_version":1}'; exit 1
-        fi
         id="${1:-}"; shift || true; dir=down; typ=""
         while [ $# -gt 0 ]; do
           case "$1" in
@@ -231,7 +221,7 @@ case "$verb" in
               | $s[] | select(.id == $e.id) | del(._deps) + {dependency_type: $e.dependency_type} ]' "$S"
         fi ;;
       remove)
-        [ -n "${STUB_KEEP_EDGE:-}" ] || apply --arg a "${1:-}" --arg b "${2:-}" 'map(if .id == $a then ._deps = ((._deps // []) | map(select(.id != $b))) else . end)'
+        apply --arg a "${1:-}" --arg b "${2:-}" 'map(if .id == $a then ._deps = ((._deps // []) | map(select(.id != $b))) else . end)'
         wrote ;;
       *) echo "gc stub: unsupported dep $sub" >&2; exit 2 ;;
     esac ;;
@@ -252,6 +242,10 @@ chmod +x "$BIN/gc" "$BIN/run-cancel" "$BIN/branch-end"
 printf '{"rigs":[{"name":"tkrig","path":"%s","prefix":"tk"}]}\n' "$TMP/rig" > "$TMP/rigs.json"
 
 export PATH="$BIN:$ROOT/tools/test-floor:$PATH"
+# The disarm, the release, and a shared gate's removal write through `gctk
+# bead --verify`, which gctk.stub.sh stands in for: each write reaches the stub
+# gc above, and GCTK_STUB_MISS names one that does not read back.
+export GCTK_BIN="$HERE/gctk.stub.sh"
 export STUB_STORE="$TMP/beads.json" STUB_RIGS="$TMP/rigs.json" STUB_GC_LOG="$TMP/gc.log" STUB_SLING_LOG="$TMP/sling.log"
 export STUB_DEFERRED="$HERE/deferred-dispatch.sh"
 export BEADS_ACTOR=a-person GC_RUN_CANCEL_TOOL="$BIN/run-cancel" GC_BRANCH_END_TOOL="$BIN/branch-end"
@@ -401,19 +395,15 @@ stop_case() { # <label> <text the stub refuses> <gate status after> <arm after> 
   eq "$(slings)" 0 "stop at $1: nothing was sent"
 }
 fresh
-STUB_KEEP_KEY="gc.dispatch_when_ready" run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a disarm that reports success and leaves the arm stops the stand-down"
-has "$OUT" "does not read back unarmed" "…and says why"
+GCTK_STUB_MISS='~gc.dispatch_when_ready ' run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 1 "a disarm that does not read back stops the stand-down"
+has "$OUT" "did not read back removed" "…and says why"
 eq "$(field tk-g status)" open "…with the gate unanswered"
 eq "$(field tk-w status)" open "…and the work open"
-fresh
-STUB_SHOW_FAILS_AFTER="--unset-metadata gc.dispatch_when_ready " run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "an arm whose removal does not read at all stops the stand-down"
-eq "$(field tk-g status)" open "…with the gate unanswered"
 fresh; patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-STUB_KEEP_KEY="gc.routed_to" run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a release that reports success and leaves the route stops the stand-down"
-has "$OUT" "does not read back unrouted" "…and says why"
+GCTK_STUB_MISS='~gc.takeaway=' run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 1 "a release that does not read back stops the stand-down"
+has "$OUT" "its stamp did not read back" "…and says why"
 has "$OUT" "Re-run this command" "…and names the way on"
 eq "$(field tk-g status)" open "…with the gate unanswered"
 eq "$(field tk-w status)" open "…and the work open"
@@ -551,21 +541,16 @@ eq "$(field tk-g status)" open "…and the gate stays open"
 eq "$(slings)" 0 "…and nothing was sent"
 
 shared
-STUB_KEEP_EDGE=1 run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a removal that reports success and leaves the edge stops the stand-down"
-has "$OUT" "did not leave gate tk-g" "…and it says so"
-eq "$(field tk-w status)" open "…with the work open"
-shared
-STUB_DEPS_FAIL_AFTER="dep remove tk-w" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a removal whose result does not read stops the stand-down"
+GCTK_STUB_MISS=dep:tk-w run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 1 "a removal that does not read back stops the stand-down"
 has "$OUT" "did not leave gate tk-g" "…and it says so"
 eq "$(field tk-w status)" open "…with the work open"
 
 shared
 patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-STUB_KEEP_KEY="gc.routed_to" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a release that leaves the route stops the stand-down before the bead leaves a shared gate"
-has "$OUT" "does not read back unrouted" "…and says why"
+GCTK_STUB_MISS='~gc.takeaway=' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 1 "a release that does not read back stops the stand-down before the bead leaves a shared gate"
+has "$OUT" "its stamp did not read back" "…and says why"
 eq "$(line_of "dep remove tk-w")" "" "…with no removal tried"
 eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.id == "tk-g")] | length' "$STUB_STORE")" 1 "…and the bead still on the gate"
 
