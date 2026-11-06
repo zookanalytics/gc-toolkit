@@ -356,9 +356,10 @@ type actuateResponse struct {
 	Bead string `json:"bead"`
 	Verb string `json:"verb"`
 	// Message is the script's stdout, trimmed: its success sentence, and for
-	// engage the follow-on "attach: gc session attach <id>" line. Empty is
-	// possible and honest (dismiss on a subject with no live sitting says so on
-	// stdout, but a bare success is not invented into a claim).
+	// engage a line naming each open human gate that holds the bead and the
+	// follow-on "attach: gc session attach <id>" line. Empty is possible and
+	// honest (dismiss on a subject with no live sitting says so on stdout, but a
+	// bare success is not invented into a claim).
 	Message string `json:"message"`
 }
 
