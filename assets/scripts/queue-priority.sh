@@ -313,7 +313,9 @@ workflow_rows() {
 }
 
 # write_priorities <plan-file> — the plan is a JSON array of {id, to}; write each
-# bead's priority, grouped by level in batches, then read every one back.
+# bead's priority, grouped by level in batches, then read every one back. A
+# settle's caller routes or slings the bead next, which cannot be undone, so the
+# levels are read back before it (docs/warrants.md, "bd write durability").
 # WROTE counts the beads written. Returns 1 when a write fails or a bead does
 # not read back at the level written, naming each in MISMATCH.
 WROTE=0
@@ -591,12 +593,6 @@ cmd_move() {
     if [ -n "$shift_n" ]; then
         bd_ update "$bead" --set-metadata "priority_shift=$shift_json" >/dev/null 2>&1 \
             || { echo "$PROG: move: the write of priority_shift=$shift_json to $bead failed. Nothing else was written." >&2; return 1; }
-        local got_shift
-        got_shift="$(qp_read "$bead" | scrub | jq -r --arg b "$bead" "$ROWS_JQ"' | [ .[] | select(.id == $b) | (.metadata // {}).priority_shift // "" | tostring ] | first // ""' 2>/dev/null)"
-        if [ "${got_shift#+}" != "$shift_json" ]; then
-            echo "$PROG: move: $bead reads priority_shift '${got_shift}', not $shift_json, after the write. Nothing else was written." >&2
-            return 1
-        fi
     fi
     if ! write_priorities "$plan"; then
         echo "$PROG: move: $bead moved to $derivation, but the work that follows it did not all settle: $MISMATCH. The queue-priority pass settles what is queued; re-run the move to finish the rest." >&2
