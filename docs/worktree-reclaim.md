@@ -1,9 +1,12 @@
 # Worktree reclaim
 
-A polecat creates a git worktree per bead and records the path in
-`metadata.work_dir`. Nothing removes it when the bead closes: the refinery
-merges and moves on, the witness inventories and flags but does not delete,
-and the polecat drains. Every checkout is a full working tree, so the
+A polecat creates a git worktree per bead, records the path in
+`metadata.work_dir`, and removes the tree at its hand-off to the refinery. A
+tree the hand-off does not remove stays, such as one a run left when it halted,
+died or took the store-only exit, or one with an uncommitted path. Nothing in
+the work flow removes such a tree when the bead closes: the refinery merges and
+moves on, the witness inventories and flags but does not delete, and the polecat
+drains. Every checkout is a full working tree, so the
 directories are a monotonic floor under the disk, and the only reclaim is an
 operator noticing the pressure and doing it by hand.
 

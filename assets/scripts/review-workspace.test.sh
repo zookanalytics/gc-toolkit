@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Tests for review-workspace.sh against a real git repository and a synthetic
-# workspace directory. Only `gc` is stubbed: it serves the city's rigs and each
-# bead's status from a table, and logs the store every lookup was sent to.
+# workspace directory. Only `gc` is stubbed, and signoff.sh where the formulas'
+# verdict call reaches it. The gc stub serves the city's rigs and each bead's
+# status from a table, and logs every call it gets, the store each lookup was
+# sent to included.
 #
 # Covers path and its id rails; add making a detached worktree at the commit,
 # reusing it at the same commit, rebuilding it at another, re-creating one whose
@@ -10,7 +12,10 @@
 # workspace, a nested one included, with its registration, and a read-only
 # subtree, while another worktree's stale registration is left for
 # worktree-reap; the formulas' own gather and remove lines, run as a pour fills
-# them in; and
+# them in; the formulas' lines that write a review's own files and hand them on,
+# run from a directory standing for the agent's home, which they leave empty;
+# each quorum lane storing the object it puts in its block, with no file
+# written, after a gather that failed before it made the workspace; and
 # reap's gates — the workspace of a closed review goes, its bead looked up in
 # the store its prefix names; a review that is not closed and a status that
 # cannot be read hold at any age; a bead the ledger no longer has, a name with no
@@ -76,6 +81,8 @@ case "$1 $2" in
             unreadable) echo "dial tcp: connection refused" >&2; exit 1 ;;
             *) printf '[{"id":"%s","status":"%s"}]\n' "$3" "$st"; exit 0 ;;
         esac ;;
+    "bd update")
+        exit 0 ;;
 esac
 echo "stub gc: unexpected call: $*" >&2
 exit 3
@@ -214,6 +221,69 @@ if exists "$WS/gc-review-tk-fx"; then bad "the verdict step's remove line takes 
 STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fq "$C1")" >/dev/null 2>&1
 STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$QREMOVE" tk-fq "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fq"; then bad "the quorum's remove line takes the workspace"; else ok "the quorum's remove line takes the workspace"; fi
+
+# --- the review's own files ----------------------------------------------------
+# A review writes its verdict body, its finding set and a quorum lane's output
+# in its workspace, and hands them on from there. Each line runs from a
+# directory standing for the agent's home, where a pool session's shell starts,
+# and the home must hold nothing once they ran. The agent writes by the
+# workspace path the gather printed, so a line that names it gets that path.
+FSET="$(extract "$ROOT/formulas/mol-review.toml" review-finding-set)"
+if [ -n "$FSET" ]; then ok "the formula's finding set lines extract"; else bad "the formula's finding set lines extract (markers missing)"; fi
+# signoff.sh as the verdict call reaches it: it records its arguments and
+# refuses a file it cannot read, as the real one does.
+cat > "$PACK/assets/scripts/signoff.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$STUB_SIGNOFF_ARGS"
+while [ "$#" -gt 0 ]; do
+    case "$1" in --notes-file|--findings-file) [ -r "$2" ] || { echo "$1 '$2' is not readable" >&2; exit 1; } ;; esac
+    shift
+done
+STUB
+chmod +x "$PACK/assets/scripts/signoff.sh"
+AGENT_HOME="$TMP/agent-home"; mkdir -p "$AGENT_HOME"
+cd "$AGENT_HOME" || exit 1
+FWS="$WS/gc-review-tk-ff"
+OUT="$(STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-ff "$C1")" 2>/dev/null)"
+eq "$(printf '%s\n' "$OUT" | sed -n "s/^== The review's workspace: //p")" "$(bash "$SUT" path --review-bead tk-ff)" "the gather prints the review's workspace, the directory path names"
+eq "$(printf '%s\n' "$OUT" | sed -n "s/^== The review's worktree: //p")" "$FWS/wt" "and the worktree in it"
+printf 'the trail\n' > "$FWS/findings.md"
+bash -c "$(render "$FSET" tk-ff "$C1" | sed "s|<workspace>|$FWS|g")" 2>/dev/null
+eq "$(jq -r '.[0].locus' "$FWS/findings.json" 2>/dev/null)" "<file>:<symbol or section>" "the finding set's block writes the set in the workspace"
+for f in mol-review mol-review-quorum-signoff; do
+    CALL="$(extract "$ROOT/formulas/$f.toml" review-verdict-call)"
+    if [ -n "$CALL" ]; then ok "$f's verdict call extracts"; else bad "$f's verdict call extracts (markers missing)"; fi
+    rm -f "$TMP/signoff.args"
+    STUB_SIGNOFF_ARGS="$TMP/signoff.args" STUB_PACK="$PACK" bash -c "$(render "$CALL" tk-ff "$C1" | sed 's/<approve|request-changes>/approve/')" 2>/dev/null
+    eq "$?" "0" "$f's verdict call hands signoff.sh files it can read"
+    eq "$(grep -A1 -x -- '--notes-file' "$TMP/signoff.args" 2>/dev/null | tail -1)" "$FWS/findings.md" "and the verdict body in the workspace"
+    eq "$(grep -A1 -x -- '--findings-file' "$TMP/signoff.args" 2>/dev/null | tail -1)" "$FWS/findings.json" "and the finding set in the workspace"
+done
+# Each lane stores the object it puts in its block, in place of the placeholder
+# line, and writes no file. So a lane whose gather failed before it made the
+# review's workspace still records its blocked output: here the gather's fetch
+# asks origin for a branch it does not have.
+QTOML="$ROOT/formulas/mol-review-quorum-signoff.toml"
+STORE_FROM='--set-metadata "gc.output_json='
+eq "$(grep -cF -- "$STORE_FROM" "$QTOML")" "2" "each of the two lanes stores its output in one command"
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fb "$C1" | sed 's|polecat/x|polecat/gone|g')" >/dev/null 2>&1
+eq "$?" "1" "a gather whose fetch fails exits 1"
+if exists "$WS/gc-review-tk-fb"; then bad "before it makes the review's workspace"; else ok "before it makes the review's workspace"; fi
+for n in 1 2; do
+    id=codex; [ "$n" = 2 ] && id=claude
+    # The object carries what the shell would expand in an unquoted body.
+    printf '{\n  "lane_id": "%s",\n  "verdict": "blocked",\n  "summary": "the gather'"'"'s `git fetch` failed in $HOME"\n}\n' "$id" > "$TMP/lane-object"
+    # The command runs from its first line to the line that closes its
+    # here-document's substitution.
+    STORE="$(awk -v want="$n" -v from="$STORE_FROM" 'index($0, from) { k++; on = (k == want) } on { print } on && $0 == ")\"" { on = 0 }' "$QTOML" \
+        | awk -v f="$TMP/lane-object" '$0 == "<your review-quorum.lane.v1 object>" { while ((getline l < f) > 0) print l; next } { print }')"
+    : > "$STUB_GC_LOG"
+    LANE_BEAD=tk-lane bash -c "$STORE" 2>/dev/null
+    eq "$(cat "$STUB_GC_LOG")" "bd update tk-lane --set-metadata gc.output_json=$(jq -c . "$TMP/lane-object")" "lane $n stores the blocked object in its block, with no workspace"
+done
+eq "$(find "$TMP" -name 'lane-*.json' | wc -l | tr -d ' ')" "0" "and neither lane writes its output to a file"
+eq "$(ls -A "$AGENT_HOME")" "" "no line a review runs leaves a file in the agent's home"
+bash "$SUT" remove --review-bead tk-ff >/dev/null 2>&1
 
 # --- reap ----------------------------------------------------------------------
 export REVIEW_WORKSPACE_DIR="$TMP/ws-reap"
