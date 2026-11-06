@@ -12,8 +12,15 @@ closes at step 2 must not have moved the operator's session title.
 
 ## 3. Title
 
-`gc session rename "$GC_SESSION_ID" "$SUBJECT — <topic>"`.
-Re-run it if your focus moves to a different subject.
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" session title --subject "$SUBJECT" --topic "<topic>"
+```
+The topic is a few words of your own. The command titles your session
+`$SUBJECT — <topic>` in Gas City and on your terminal, where the operator's tab
+shows it. Re-run it if your focus moves to a different subject.
 
 ## 4. Prime
 
