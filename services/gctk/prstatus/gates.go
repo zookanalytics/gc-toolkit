@@ -123,14 +123,17 @@ const (
 var ErrWalkBound = errors.New("the blocks edges run past the walk's bound")
 
 // Holds is what the walk from one bead finds holding it that only a person
-// moves, each in the order the walk reaches it, nearest first.
+// moves, each nearest first.
 type Holds struct {
-	// Gates is every open human gate the walk reaches.
+	// Gates is every open human gate the walk reaches, in the order it reaches
+	// them.
 	Gates []Blocker
 	// Owed is every other open bead the walk reaches that a person owes the next
 	// move on: a decision or a bead routed to a person ([Blocker.personal]), or a
 	// merge anchor whose own state is a person's to move ([Blocker.awaitsPerson]),
-	// such as another pull request that waits on a review.
+	// such as another pull request that waits on a review. A merge anchor is
+	// kept once the walk has read its own edges, after the other beads at its
+	// depth.
 	Owed []Blocker
 }
 
@@ -239,13 +242,17 @@ type holdWalk struct {
 
 // step weighs each merge anchor of the walk's level by its own edges, which
 // edges holds, then follows the level's open edges to the next level, keeping
-// each open human gate and each bead a person moves by what it is once.
+// each open human gate and each bead a person moves by what it is once. The
+// whole level is weighed before any of its edges is followed, so no bead of the
+// next level is kept ahead of an anchor of this one.
 func (w *holdWalk) step(edges map[string][]Blocker) {
-	var next []string
 	for _, id := range w.level {
 		if b, ok := w.weigh[id]; ok && b.awaitsPerson(edges[id]) {
 			w.holds.Owed = append(w.holds.Owed, b)
 		}
+	}
+	var next []string
+	for _, id := range w.level {
 		for _, b := range edges[id] {
 			if !b.open() || w.seen[b.ID] {
 				continue

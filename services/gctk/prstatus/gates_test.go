@@ -396,6 +396,10 @@ func TestHoldingOwed(t *testing.T) {
 			[]string{"g"}, []string{}},
 		{"owed beads nearest first",
 			map[string][]Blocker{"a": {task("rw"), decision("near")}, "rw": {decision("far")}}, []string{}, []string{"near", "far"}},
+		{"a pull request the bead waits on comes before a decision behind its rework",
+			map[string][]Blocker{"a": {task("rw"), anchorBlocker("b", awaitingReview)}, "rw": {decision("d")}}, []string{}, []string{"b", "d"}},
+		{"a pull request comes after a decision as near",
+			map[string][]Blocker{"a": {anchorBlocker("b", awaitingReview), decision("d")}}, []string{}, []string{"d", "b"}},
 		{"a walk back to the root weighs nothing",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("a", awaitingReview)}}, []string{}, []string{}},
 	} {
