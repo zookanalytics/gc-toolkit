@@ -151,18 +151,37 @@ one.
 Then answer the gates now, on this turn, through the sign-off's writer. The
 close gate refuses a bead that an open human gate holds, so every close below
 waits for these answers, and the sign-off later reads each gate as already
-cleared:
+cleared. One call answers, under the ruling, each gate a landed Delivery's close
+waits on:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the ruling, one line>" \
-  --outcome "<where the epic stands now, at most 140 characters, or 95 when the ruling leaves an open PR standing>" --no-wait
+  --outcome "<where the epic stands now, at most 140 characters>" --no-wait
   # --answer <gate> once for each gate a landed Delivery's close waits on
-  # a gate on a PR's anchor takes a call of its own, with --retire <kind>
-  # (and --successor <bead> unless the kind is not-needed), or --no-rework
 ```
-Until it exits 0, the ruling is not in place: repair what it printed and run
-it again. It prints a line for each open PR the ruling leaves standing whose
-merge still waits on GitHub: pass the line on, with its link.
+Each gate on a PR's anchor is answered on a call of its own, under that PR's
+own ruling: the checkpoint's ruling and what it does to that PR, naming the PR.
+The sign-off records the PR a retirement acts on under the words of its ruling,
+so a re-run of the call recovers its own PR. Two calls under the same words read
+as one ruling run twice, and the second would retire the first PR again and
+answer the second PR's gate with that PR left standing, free to merge. A PR the
+ruling retires, with `--pr-anchor` naming it so that no other PR is the target:
+```bash
+"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <the gate on its anchor> \
+  --ruling "<the ruling, one line>; it retires PR #<number> (<its anchor>)" --pr-anchor <its anchor> \
+  --retire <kind> --outcome "<where the epic stands now, at most 140 characters>" --no-wait
+  # and --successor <the bead that carries the work now>, unless the kind is not-needed
+```
+A PR the ruling leaves standing:
+```bash
+"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <the gate on its anchor> \
+  --ruling "<the ruling, one line>; PR #<number> (<its anchor>) stands" --no-rework \
+  --outcome "<where the epic stands now, at most 95 characters>" --no-wait
+```
+Until a call exits 0, its part of the ruling is not in place: repair what it
+printed and run the same call again, which acts on the same PR. A call that
+leaves a PR standing prints a line when that PR's merge still waits on GitHub:
+pass the line on, with its link.
 
 **3. Close each landed Delivery.** Every close here and in write 6 is made the
 same way, and none is forced. First, nothing under the bead may be open. This
@@ -235,9 +254,10 @@ released.** bd refuses to close the epic while any child of it is open, and it
 can still hold other Deliveries, Stories under the epic itself, and PRs in
 flight under either. The operator decides each item, whatever the outcome, and
 you carry out the decision. Meanwhile the epic's park, if it has one, keeps each
-unstarted item from starting. A PR in flight whose anchor no gate of this
-conversation holds yet gets one first, filed the way the hold files it, so the
-ruling's answer can reach it. Each item goes one of three ways:
+unstarted item from starting. A PR in flight the ruling retires, whose anchor
+no gate of this conversation holds yet, gets one first, filed the way the hold
+files it, so that its own call in write 2 can reach it. Each item goes one of
+three ways:
 
 - **Work that still coheres around a hypothesis moves to the epic that owns
   it.** File that epic when none does yet (the `work` skill). In the same store
@@ -246,9 +266,9 @@ ruling's answer can reach it. Each item goes one of three ways:
   `gc bd update <bead> --parent <delivery-or-epic>`. An edge holds only within
   one store, so work whose epic is in another rig's store is filed again there,
   and this bead then closes as re-homed onto the new one. With a PR in flight
-  that close is the PR's retirement, `--retire re-homed --successor <new bead>`
-  on the answer of the gate on its anchor. Without one, it is the disposition
-  writer:
+  that close is the PR's retirement, on the PR's own call as write 2 shows,
+  with `--retire re-homed --successor <new bead>`. Without one, it is the
+  disposition writer:
   `"$CONV/bead-rehome.sh" --origin <bead> --successor <new bead> --kind re-homed --note "<the ruling, one sentence>"`.
   A whole Delivery does not move, because its aim answers this epic's
   hypothesis, so its Stories move one by one.
@@ -256,7 +276,7 @@ ruling's answer can reach it. Each item goes one of three ways:
   ordinary flow** with no parent: `gc bd update <bead> --parent ""`. That is a
   decision about the item, never the default for whatever is left.
 - **Work that served only this hypothesis is retired.** A PR in flight is
-  retired by the answer of the gate on its anchor, with `--retire not-needed`.
+  retired on its own call as write 2 shows, with `--retire not-needed`.
   Any other bead closes as the `work` skill closes a bead that needs no work:
   stop a run in flight and disarm an arm first, then record the no-op and run
   the disposition writer, with this conversation as the evidence that ruled it
@@ -273,9 +293,15 @@ live blocker. The close gate passes the epic once write 2 has recorded the close
 ruling with its outcome, and so does the doctor invariant that reads it after
 the close.
 
-Then sign off as the settle step says, once nothing important is pending:
-`--ruled yes --ruling "<the ruling, one line>" --route human --no-wait`. It
-reads the gates the ruling answered as cleared and closes the conversation.
-A PR whose gate write 2 answered is reached again while it is open, so give
-the sign-off the same `--no-rework` or `--retire <kind>` that answer took.
-Then drain.
+**Last, whatever the ruling, sign off** as the settle step says, once nothing
+important is pending:
+`--ruled yes --ruling "<the ruling, one line>" --route human --no-wait`, with an
+outcome of at most 140 characters. Its subject is no PR, so it reaches a PR only
+through a gate still open, or one closed with its own answer. Once each PR's own
+call has exited 0, every gate on a PR's anchor carries that PR's own ruling, so
+the sign-off reaches none of those PRs and takes none of `--rework`,
+`--no-rework` or `--retire`. It reads each gate write 2 answered as cleared and
+closes the conversation. When it refuses because it reaches an open PR, that
+PR's gate is still open: make the PR's own call first, then sign off again. A PR
+answer added to the sign-off itself would answer that gate under the
+checkpoint's ruling instead of the PR's own. Then drain.

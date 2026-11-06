@@ -991,6 +991,9 @@ echo "── an Epic Checkpoint gates what its ruling closes, records it, and cl
 # human gate, records the ruling with the gates it clears as its evidence,
 # answers them before any close, and closes each bead through the close gate,
 # never forced, because bd refuses a close over an open child or a live blocker.
+# The sign-off records the PR a retirement acts on under the words of its ruling,
+# so each gate on a PR's anchor is answered under that PR's own ruling, and the
+# final sign-off reaches none of those PRs.
 have "the step table sends a checkpoint sitting to its skill" '**Steps 4–8, at an Epic Checkpoint, when the operator rules continue, shift or close on an epic, or the subject is a Delivery that has landed**' "$PROMPT"
 have "…by name" '`converse-epic-checkpoint` |' "$PROMPT"
 have "the prompt names the closes a checkpoint's ruling makes" \
@@ -1008,6 +1011,16 @@ have "the ruling's evidence is the gates it clears, read off the conversation" \
 have "…and is unset when it clears none" '--unset-metadata epic_ruling_evidence' "$CHECKPOINT"
 have "the gates are answered before any close, through the sign-off's writer" \
     'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$CHECKPOINT"
+have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \
+    "Each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling: the checkpoint's ruling and what it does to that PR, naming the PR." "$CHECKPOINT_JOINED"
+have "…a retirement's ruling names its PR, and --pr-anchor names it as the target" \
+    '--ruling "<the ruling, one line>; it retires PR #<number> (<its anchor>)" --pr-anchor <its anchor>' "$CHECKPOINT"
+have "…and so does the ruling of a PR left standing" \
+    '--ruling "<the ruling, one line>; PR #<number> (<its anchor>) stands" --no-rework' "$CHECKPOINT"
+have "…so the final sign-off reaches none of those PRs and takes no PR answer" \
+    'the sign-off reaches none of those PRs and takes none of `--rework`, `--no-rework` or `--retire`' "$CHECKPOINT_JOINED"
+lacks "…and gives none of the PR answers again" 'that answer took' "$CHECKPOINT_JOINED" \
+    "a sign-off under the checkpoint's ruling would answer a gate still open under that ruling, and two retirements under one ruling share one record"
 have "every close runs through the close gate" \
     '"$CONV/finalize-gate.sh" check <bead> && gc bd close <bead> --reason' "$CHECKPOINT"
 lacks "…and none is forced" '--force' "$CHECKPOINT" \
