@@ -33,8 +33,8 @@
 # hold skill points at it. It pins that the
 # dispatch fragment the keeper composes calls deferred-dispatch.sh and
 # gc-bd-watch.sh the work skill's way, and that the mechanik's prompt calls
-# gc-bd-watch.sh and human-gate.sh the same way, so each render reaches the
-# pack's own copies. It pins the prs
+# gc-bd-watch.sh and human-gate.sh under the binding it is rendered with, so
+# each render reaches the pack's own copies. It pins the prs
 # skill's supplement command: filed in the PR's rig, holding the anchor's merge,
 # and slung only once that hold reads back. It pins that a formula's own
 # description, not a doc, says which work
@@ -583,8 +583,9 @@ fenced_block() {
 # the gascity-keeper sub-pack, and a pack path rendered for it names that
 # sub-pack, which holds none of the scripts the fragment calls. So the fragment
 # calls each of them the work skill's way, and the render's calls resolve
-# through the pack command to the pack's own copy. The mechanik's prompt calls
-# its watch and its gate withdrawal the same way.
+# through the pack command to the pack's own copy. The mechanik comes from this
+# pack, so its prompt calls its watch and its gate withdrawal under the binding
+# it is rendered with, which the seed audit renders as gc-toolkit.
 DISPATCH="$REPO/template-fragments/watch-dispatched-work.template.md"
 DD_CALL='"$(gc <binding> scripts-dir)/deferred-dispatch.sh"'
 WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
@@ -593,10 +594,11 @@ MECHANIK_RENDER="$REPO/generated/seed-audit/agents/mechanik.md"
 have "the dispatch fragment gives the work skill's notice call" "$DD_CALL notify <bead> --agent <qualified-name>" "$DISPATCH"
 have "…the call the work skill gives" "$DD_CALL notify <bead> --agent <qualified-name>" "$WORK_SKILL"
 have "…and runs its watch through the pack command" "command: '$WATCH_CALL <bead>'" "$DISPATCH"
-# named_only_via <render> <script> — prose names a script by its bare name in
-# backticks. Every other mention is a call, and goes through the pack command.
+# named_only_via <render> <script> [<binding>] — prose names a script by its bare
+# name in backticks. Every other mention is a call, and goes through the pack
+# command under <binding>, the placeholder itself when none is given.
 named_only_via() {
-    call="\"\$(gc <binding> scripts-dir)/$2\""
+    call="\"\$(gc ${3:-<binding>} scripts-dir)/$2\""
     named=$(grep -oF -- "$2" "$1" | wc -l | tr -d ' ')
     prose=$(grep -oF -- "\`$2\`" "$1" | wc -l | tr -d ' ')
     via=$(grep -oF -- "$call" "$1" | wc -l | tr -d ' ')
@@ -611,12 +613,13 @@ have "…and the watch" "command: '$WATCH_CALL <bead>'" "$KEEPER_RENDER"
 for script in deferred-dispatch.sh gc-bd-watch.sh; do
     named_only_via "$KEEPER_RENDER" "$script"
 done
-have "the mechanik's render gives the watch as a call through the pack command" "command: '$WATCH_CALL <bead>'" "$MECHANIK_RENDER"
-have "…and the withdrawal of its own gate" '"$(gc <binding> scripts-dir)/human-gate.sh" --retract --subject <bead>' "$MECHANIK_RENDER"
+MECHANIK_WATCH_CALL='"$(gc gc-toolkit scripts-dir)/gc-bd-watch.sh"'
+have "the mechanik's render gives the watch as a call through the pack command" "command: '$MECHANIK_WATCH_CALL <bead>'" "$MECHANIK_RENDER"
+have "…and the withdrawal of its own gate" '"$(gc gc-toolkit scripts-dir)/human-gate.sh" --retract --subject <bead>' "$MECHANIK_RENDER"
 for script in gc-bd-watch.sh human-gate.sh; do
-    named_only_via "$MECHANIK_RENDER" "$script"
+    named_only_via "$MECHANIK_RENDER" "$script" gc-toolkit
 done
-for script in deferred-dispatch.sh gc-bd-watch.sh human-gate.sh; do
+for script in deferred-dispatch.sh gc-bd-watch.sh; do
     call="\"\$(gc <binding> scripts-dir)/$script\""
     printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"
     got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" bash "$TMP/fragment-call-$script" 2>/dev/null)

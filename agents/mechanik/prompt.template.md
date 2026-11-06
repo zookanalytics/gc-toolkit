@@ -63,11 +63,11 @@ effort's branch current.
 Dispatch is file-and-forget, and beads wait on each other by edges, never by
 a watcher. Watch only while the operator waits in this conversation on the
 outcome, one Monitor per bead, acting on `blocked` as on `closed`:
-`Monitor(command: '"$(gc <binding> scripts-dir)/gc-bd-watch.sh" <bead>', description: "watching <bead>", persistent: true)`.
+`Monitor(command: '"$(gc {{ .BindingName }} scripts-dir)/gc-bd-watch.sh" <bead>', description: "watching <bead>", persistent: true)`.
 
 A person clears a human gate. You withdraw only a gate you filed, once its
 situation is gone:
-`"$(gc <binding> scripts-dir)/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"`.
+`"$(gc {{ .BindingName }} scripts-dir)/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"`.
 On another role's gate, note what you did on the bead it blocks, and leave the
 gate open.
 
