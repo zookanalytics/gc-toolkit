@@ -147,15 +147,17 @@ write.
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
 page when one is open, the rig's guidance for this check, what `gctk rig`
-recorded at `{{reviewed_oid}}`, and the path of the review's worktree at that
-commit. The worktree is a detached checkout in
-a workspace named for this review, so running the block again in a later shell
-returns the same worktree. Read the change there with git. Its diff is
-`git diff origin/{{review_base}}...HEAD`, with three dots, so it shows what the
-branch changed and not what the base did since. Anything else the review
-writes to disk goes in the workspace beside the worktree, never loose in
-`/tmp` (docs/review-workspace.md). Carry the worktree's path and what the block
-printed into the steps that follow.
+recorded at `{{reviewed_oid}}`, and the paths of the review's workspace and of
+its worktree at that commit. The workspace is a directory named for this
+review, and the worktree is a detached checkout in it, so running the block
+again in a later shell returns the same worktree. Read the change there with
+git. Its diff is `git diff origin/{{review_base}}...HEAD`, with three dots, so
+it shows what the branch changed and not what the base did since. Every file
+the review writes goes in the workspace beside the worktree, named by its full
+path. In a pool session a shell starts in the agent's home, not in the
+workspace, and a home that holds a file gc did not write fails its session's
+next start. Nothing goes loose in `/tmp` either (docs/review-workspace.md).
+Carry both paths and what the block printed into the steps that follow.
 ```bash
 # >>> review-gather
 RR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" && [ -x "$RR" ] || RR=""
@@ -178,7 +180,7 @@ echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewe
 echo "== What gctk rig recorded at {{reviewed_oid}}"
 "$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
-echo "== The review's worktree: $WT"
+printf '%s\n' "== The review's workspace: ${WT%/wt}" "== The review's worktree: $WT"
 # <<< review-gather
 ```
 A block that exits non-zero here, other than the refusal in part 1, ends the
@@ -289,8 +291,9 @@ An unreadable probe files nothing, and neither does a create that returns no
 id. Say so in the verdict rather than filing blind, and the next round
 re-probes.
 
-**5. Write the verdict body** to `findings.md` in your working directory so
-it travels verbatim to the next step. `signoff.sh` opens the posted comment
+**5. Write the verdict body** to `<workspace>/findings.md`, where `<workspace>`
+is the review's workspace that load-dispatch printed, so it travels verbatim to
+the next step. `signoff.sh` opens the posted comment
 with one line, the check and its verdict and then what needs the operator, and
 renders the Findings block under it from `findings.json` (part 5b), so the body
 is the trail under them, collapsed. Every check writes this envelope, and the
@@ -318,18 +321,20 @@ operator's to make, pass it on the verdict call as
 `--needs-you "<the decision, what it means, where to look>"`; a finding is not
 one, because the city fixes it.
 
-**5b. Emit the finding set** to `findings.json` beside `findings.md`: a JSON
-array, one object per finding the check's method raises, each carrying a
-`locus` and a `message`, and the fields the method's verdict section adds. A
-method that grades its findings puts the grade in `severity` and says which
-grades block, and a finding with no grade blocks.
+**5b. Emit the finding set** to `<workspace>/findings.json`, beside
+`findings.md`: a JSON array, one object per finding the check's method raises,
+each carrying a `locus` and a `message`, and the fields the method's verdict
+section adds. A method that grades its findings puts the grade in `severity`
+and says which grades block, and a finding with no grade blocks.
 
 ```bash
-cat > findings.json <<'JSON'
+# >>> review-finding-set
+cat > "<workspace>/findings.json" <<'JSON'
 [
   {"locus": "<file>:<symbol or section>", "message": "<what is wrong, why it matters, and the fix — self-contained>"}
 ]
 JSON
+# <<< review-finding-set
 ```
 
 The `locus` names a file and a symbol, function, or section, never a line
@@ -351,7 +356,8 @@ SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/step-close.sh" && [ -x "$
 
 **Exit criteria:** the check's method applied, every finding located and every
 blocking one enumerated, out-of-scope findings filed or named unfiled,
-findings.md and findings.json written, this step bead closed.
+findings.md and findings.json written in the review's workspace, this step bead
+closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -371,11 +377,15 @@ fix.
 past your judgment: posting the artifact, closing the review bead with your
 verdict and reading it back, filing the finding set from `findings.json` beside
 one slung rework child on request-changes, and refusing a commit the branch no
-longer carries. The verdict names `{{reviewed_oid}}`, the commit the review
-read, and signoff.sh refuses any other:
+longer carries. The call hands it `findings.md` and `findings.json` from the
+review's workspace, the directory `review-workspace.sh path` names for this
+review. The verdict names `{{reviewed_oid}}`, the commit the review read, and
+signoff.sh refuses any other:
 ```bash
+# >>> review-verdict-call
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/signoff.sh" ] || SCRIPTS=""
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file "$("$SCRIPTS/review-workspace.sh" path --review-bead "{{review_bead}}")/findings.md" --findings-file "$("$SCRIPTS/review-workspace.sh" path --review-bead "{{review_bead}}")/findings.json"
+# <<< review-verdict-call
 ```
 Do not post the review yourself, do not write to the anchor, do not file rework
 beads or finding beads (signoff.sh files the findings from your
@@ -383,10 +393,10 @@ beads or finding beads (signoff.sh files the findings from your
 
 Pass on this same call every flag the check's method names for the verdict,
 and `--needs-you` when the review step named a decision for the operator.
-When signoff.sh refuses a verdict for a missing or invalid flag, or refuses
-the finding set and lists what is wrong with it, it has written nothing, so
-correct the flag or `findings.json` and re-run the call; that is still the one
-verdict.
+When signoff.sh refuses a verdict for a missing or invalid flag or a file the
+workspace lacks, or refuses the finding set and lists what is wrong with it, it
+has written nothing, so correct the flag or the file and re-run the call; that
+is still the one verdict.
 
 **2. Failure arms.** signoff.sh binds no verdict to a later head: commits that
 land on top of the reviewed commit while you read do not stale your findings.

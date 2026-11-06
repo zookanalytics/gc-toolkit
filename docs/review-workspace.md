@@ -1,17 +1,22 @@
 ---
 name: Review workspace
-description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing where a review reads its pinned commit or runs a suite, or how review leftovers in /tmp are reclaimed.
+description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing where a review reads its pinned commit, runs a suite or writes its findings, or how review leftovers in /tmp are reclaimed.
 ---
 
 # Review workspace
 
 A review reads its pinned commit in a detached worktree and runs there any
-suite its check calls for. The reviewer may also write logs, probe output, or a
-second worktree at the base.
+suite its check calls for. It writes its verdict body and its finding set
+beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
+them from there. A quorum lane writes its lane output there too. The reviewer
+may also write logs, probe output, or a second worktree at the base.
 All of it lives in one directory named for the review bead,
 `<dir>/gc-review-<review-bead>`, where `<dir>` is `$TMPDIR`, or `/tmp` when
 `TMPDIR` is unset. `assets/scripts/review-workspace.sh` owns that directory: it
 makes the worktree, and it removes the directory when the review ends.
+None of it goes in the agent's home, where a pool session's shell starts,
+because a home that holds a file gc did not write fails its session's next
+start (`assets/scripts/worktree-setup.sh`).
 
 ## Scope
 
