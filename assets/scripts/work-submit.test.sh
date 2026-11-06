@@ -39,9 +39,12 @@ cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-cl
    "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/deferred-dispatch.sh" "$PACK/" 2>/dev/null
 export REAL_GIT LOG="$TMP/log" STORE="$TMP/store.json"
 
-# git: push and ls-remote can be made to fail, and a push is logged.
+# git: push and ls-remote can be made to fail, and a push, a worktree's removal and
+# a branch's delete are logged, whatever directory -C names.
 cat > "$BIN/git" <<'SH'
 #!/usr/bin/env bash
+dir=()
+while [ "${1:-}" = -C ]; do dir+=("$1" "$2"); shift 2; done
 case "${1:-}" in
   push)
     printf 'push %s\n' "$*" >> "$LOG"
@@ -50,8 +53,10 @@ case "${1:-}" in
     [ -z "${LS_REMOTE_WRONG:-}" ] || { [ ! -e "$LS_REMOTE_WRONG" ] || { printf 'deadbeef\trefs/heads/x\n'; exit 0; }; : > "$LS_REMOTE_WRONG"; } ;;
   branch)
     case "${2:-}" in -D) printf 'release %s\n' "${3:-}" >> "$LOG" ;; esac ;;
+  worktree)
+    case "${2:-}" in remove) printf 'remove %s\n' "${3:-}" >> "$LOG" ;; esac ;;
 esac
-exec "$REAL_GIT" "$@"
+exec "$REAL_GIT" ${dir[@]+"${dir[@]}"} "$@"
 SH
 # gc over the store. A write whose arguments contain UPDATE_FAIL is refused. A list
 # fails while LIST_DOWN is set, and a show while SHOW_DOWN is set.
@@ -66,7 +71,11 @@ case "${1:-} ${2:-}" in
   "agent list")
     [ -z "${ROSTER_DOWN:-}" ] || exit 1
     printf '{"agents":[{"qualified_name":"%s"}]}\n' "${ROSTER:-gc-toolkit/gc-toolkit.refinery}"; exit 0 ;;
-  "session wake"|"session nudge") printf '%s %s %s\n' "$1" "$2" "$3" >> "$LOG"; exit 0 ;;
+  "session wake"|"session nudge")
+    printf '%s %s %s\n' "$1" "$2" "$3" >> "$LOG"
+    # The controller's reaper, taking the tree once the hand-off is written.
+    [ -z "${REAP:-}" ] || "$REAL_GIT" -C "$REAP_RIG" worktree remove --force "$REAP" >/dev/null 2>&1
+    exit 0 ;;
   "session list") printf '{"sessions":[]}\n'; exit 0 ;;
 esac
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
@@ -119,7 +128,15 @@ STUB
 recorder run-cancel.sh cancel CANCEL_RC
 recorder human-gate.sh gate GATE_RC
 recorder await-ruling.sh await AWAIT_RC
-recorder bring-current-guard.sh guard GUARD_RC
+# The guard runs after the check for uncommitted work and before the hand-off, so
+# GUARD_TOUCH leaves a path in the tree that only the tree's removal meets.
+cat > "$PACK/bring-current-guard.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'guard %s\n' "$*" >> "$LOG"
+[ -z "${GUARD_TOUCH:-}" ] || printf 'late\n' > "$GUARD_TOUCH"
+exit "${GUARD_RC:-0}"
+STUB
+chmod +x "$PACK/bring-current-guard.sh"
 
 # --- History: a bare origin whose main holds the base. ------------------------------
 g() { "$REAL_GIT" -C "$@"; }
@@ -133,14 +150,17 @@ STEP_ROW='{"id":"st-submit","status":"in_progress","assignee":"sess-me","metadat
 N=0
 # prepare <branch> <work metadata json> [<extra store rows json array>] — a tree on
 # <branch> with one commit past main, and a store holding the work bead and step.
+# The tree is a linked worktree of the rig's checkout $R, under a session's
+# directory, as workspace-setup makes it.
 prepare() {
-  N=$((N + 1)); C="$TMP/tree-$N"; CO="$TMP/origin-$N.git"
+  N=$((N + 1)); CO="$TMP/origin-$N.git"; R="$TMP/rig-$N"; C="$TMP/home-$N/worktrees/tk-w"
   cp -R "$O" "$CO"
-  "$REAL_GIT" clone -q "$CO" "$C" 2>/dev/null
+  "$REAL_GIT" clone -q "$CO" "$R" 2>/dev/null
+  mkdir -p "$TMP/home-$N/worktrees"
   if [ "$1" = DETACHED ]; then
-    g "$C" checkout -q --detach origin/main
+    g "$R" worktree add -q --detach "$C" origin/main
   else
-    g "$C" checkout -q -b "$1" origin/main
+    g "$R" worktree add -q -b "$1" "$C" origin/main
     printf 'work\n' > "$C/work.txt"; g "$C" add work.txt; g "$C" commit -qm work
   fi
   HEAD_SHA=$(g "$C" rev-parse HEAD)
@@ -154,7 +174,7 @@ submit() {
   local envs=()
   while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
   shift
-  OUT=$(cd "$TMP" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit HOOK_CURRENT=st-submit \
+  OUT=$(cd "${SUBMIT_DIR:-$TMP}" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit HOOK_CURRENT=st-submit \
     ${envs[@]+"${envs[@]}"} "$PACK/work-submit.sh" "$@" 2>&1); RC=$?
 }
 go() { submit "$@" -- --convoy cv-1 --base main --notes "Implemented: it"; }
@@ -164,6 +184,7 @@ words() { awk '{print $1}' "$LOG" | tr '\n' ' '; }
 pushed() { grep -c '^push ' "$LOG" | tr -d ' '; }
 ON_ORIGIN() { g "$CO" rev-parse -q --verify "refs/heads/$1" 2>/dev/null; }
 closed_step() { field status st-submit; }
+registered() { grep -qxF "worktree $C" <<< "$(g "$R" worktree list --porcelain)"; }
 
 echo "# fresh work lands whole"
 FRESH='{}'
@@ -178,19 +199,25 @@ eq "$(field status)" "open" "(1) open"
 eq "$(meta gc.routed_to)" "" "(1) route cleared"
 eq "$(closed_step)" "closed" "(1) this step is closed"
 eq "$(meta gc.outcome st-submit)" "pass" "(1) with outcome pass"
-eq "$(g "$C" branch --show-current)" "" "(1) the local branch is released"
-eq "$(g "$C" branch --list polecat/tk-w)" "" "(1) and deleted"
+[ ! -e "$C" ] && ok "(1) the tree is removed" || bad "(1) the tree is removed"
+registered && bad "(1) and no longer registered" || ok "(1) and no longer registered"
+eq "$(g "$R" branch --list polecat/tk-w)" "" "(1) the local branch is deleted"
+eq "$(meta work_dir)" "<absent>" "(1) work_dir is cleared"
 has "$(field notes)" "Implemented: it" "(1) the notes are appended"
 
 echo "# the handoff is ordered"
-ORDER=$(grep -nE '^(push|guard|update tk-w|session|update st-submit|release|drain)' "$LOG" | cut -d: -f2 | awk '{print $1, $2}')
+ORDER=$(grep -nE '^(push|guard|update tk-w|session|update st-submit|remove|release|drain)' "$LOG" | cut -d: -f2 | awk '{print $1, $2}')
 line_of() { printf '%s\n' "$ORDER" | grep -n "$1" | sed -n "${2:-1}p" | cut -d: -f1; }
 [ "$(line_of '^update tk-w')" -lt "$(line_of '^push')" ] && ok "(2) the branch is recorded before the push" || bad "(2) the branch is recorded before the push"
 [ "$(line_of '^push')" -lt "$(line_of '^guard')" ] && ok "(2) the push comes before the guard" || bad "(2) the push comes before the guard"
 [ "$(line_of '^guard')" -lt "$(line_of '^update tk-w' 2)" ] && ok "(2) the guard comes before the handoff" || bad "(2) the guard comes before the handoff"
-[ "$(line_of '^update st-submit')" -lt "$(line_of '^release')" ] && ok "(2) the step closes before the branch is released" || bad "(2) the step closes before the branch is released"
-[ "$(line_of '^release')" -lt "$(line_of '^drain')" ] && ok "(2) the branch is released before the drain" || bad "(2) the branch is released before the drain"
+[ "$(line_of '^update st-submit')" -lt "$(line_of '^remove')" ] && ok "(2) the step closes before the tree goes" || bad "(2) the step closes before the tree goes"
+[ "$(line_of '^remove')" -lt "$(line_of '^release')" ] && ok "(2) the tree goes before its local branch is deleted" || bad "(2) the tree goes before its local branch is deleted"
+[ "$(line_of '^release')" -lt "$(line_of '^update tk-w' 5)" ] && ok "(2) work_dir is cleared once both are gone" || bad "(2) work_dir is cleared once both are gone"
+[ "$(line_of '^update tk-w' 5)" -lt "$(line_of '^drain')" ] && ok "(2) and before the drain" || bad "(2) and before the drain"
 eq "$(printf '%s\n' "$ORDER" | tail -n 1)" "drain " "(2) the drain is last"
+eq "$(grep '^remove ' "$LOG")" "remove $C" "(2) the tree removed is the one work_dir records"
+eq "$(grep '^update tk-w' "$LOG" | sed -n 5p)" "update tk-w --unset-metadata work_dir" "(2) work_dir is cleared in a write of its own"
 eq "$(grep '^update tk-w' "$LOG" | sed -n 1p)" "update tk-w --set-metadata branch=polecat/tk-w" "(2) the branch is recorded in a write of its own"
 HANDOFF=$(grep '^update tk-w' "$LOG" | sed 1d)
 FIRST=$(printf '%s\n' "$HANDOFF" | sed -n 1p); SECOND=$(printf '%s\n' "$HANDOFF" | sed -n 2p); THIRD=$(printf '%s\n' "$HANDOFF" | sed -n 3p)
@@ -206,6 +233,47 @@ eq "$SECOND" "update tk-w --status=open" "(2) the second write is the status alo
 eq "$THIRD" "update tk-w --assignee=gc-toolkit/gc-toolkit.refinery" "(2) the third write is the assignee alone"
 has "$(grep '^session' "$LOG" | sed -n 1p)" "session wake gc-toolkit/gc-toolkit.refinery" "(2) the refinery is woken"
 eq "$(grep -c 'workflow-finalize' "$LOG" | tr -d ' ')" 0 "(2) workflow-finalize is never touched"
+
+echo "# the tree goes only when nothing in it or under it would go with it"
+prepare polecat/tk-w "$FRESH"
+go "GUARD_TOUCH=$C/late.txt"
+eq "$RC" 0 "(2b) a path left in the tree after the check: the handoff still exits 0"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2b) the handoff stands"
+[ -f "$C/late.txt" ] && ok "(2b) the tree stays, with the path in it" || bad "(2b) the tree stays, with the path in it"
+eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2b) on its branch"
+eq "$(meta work_dir)" "$C" "(2b) and work_dir still names it"
+has "$OUT" "$C stays, on polecat/tk-w" "(2b) and says so"
+has "$OUT" "git would not remove it" "(2b) with git's reason"
+eq "$(grep -c '^release ' "$LOG" | tr -d ' ')" 0 "(2b) the branch is not deleted"
+eq "$(tail -n 1 "$LOG")" "drain" "(2b) and the drain is last"
+prepare polecat/tk-w "$FRESH"
+go "REAP=$C" "REAP_RIG=$R"
+eq "$RC" 0 "(2c) a tree the reaper took after the handoff: exits 0: $OUT"
+eq "$(grep -c '^remove ' "$LOG" | tr -d ' ')" 0 "(2c) nothing is left to remove"
+eq "$(g "$R" branch --list polecat/tk-w)" "" "(2c) the local branch is still deleted"
+eq "$(meta work_dir)" "<absent>" "(2c) and work_dir cleared"
+no "$OUT" "stays" "(2c) with nothing reported left behind"
+prepare polecat/tk-w "$FRESH"
+go "GC_DIR=$C"
+eq "$RC" 0 "(2d) a tree that is this session's own directory: exits 0"
+[ -d "$C" ] && ok "(2d) it is not removed" || bad "(2d) it is not removed"
+eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2d) and the branch stays checked out in it"
+has "$OUT" "this session's own directory" "(2d) and says why"
+prepare polecat/tk-w "$FRESH"
+printf 'nested/\n' >> "$R/.git/info/exclude"
+g "$R" worktree add -q --detach "$C/nested" origin/main
+go
+eq "$RC" 0 "(2e) a tree that holds another worktree: exits 0"
+[ -d "$C/nested" ] && ok "(2e) neither is removed" || bad "(2e) neither is removed"
+eq "$(meta work_dir)" "$C" "(2e) work_dir still names the tree"
+has "$OUT" "holds another worktree" "(2e) and says why"
+prepare polecat/tk-w "$FRESH"
+jq -c --arg d "$TMP/elsewhere" 'map(if .id == "tk-w" then .metadata.work_dir = $d else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+SUBMIT_DIR="$C" go
+eq "$RC" 0 "(2f) a call run in a tree the bead does not record: exits 0"
+eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2f) that tree is not removed, and keeps its branch"
+eq "$(meta work_dir)" "$TMP/elsewhere" "(2f) work_dir is left as it was"
+has "$OUT" "ran in no tree that tk-w records" "(2f) and says so"
 
 echo "# a rework child stands on the reviewed branch, and a caller's target wins"
 prepare polecat/tk-anchor '{"branch":"polecat/tk-anchor","target":"integration/x"}'
@@ -284,6 +352,7 @@ eq "$(meta gc.session_id)" "<absent>" "(7) its pins go with the hand-back"
 eq "$(closed_step)" "closed" "(7) this step is closed"
 eq "$(tail -n 1 "$LOG")" "drain" "(7) and the drain is last"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(7) the branch stays checked out"
+eq "$(meta work_dir)" "$C" "(7) in the tree work_dir names, which holds the unpushed work"
 prepare polecat/tk-w '{"auto_push":false}'
 go
 eq "$(meta halt_reason)" "auto_push_false" "(7b) a boolean false halts too"
@@ -299,6 +368,7 @@ eq "$(meta gc.routed_to)" "" "(8) unrouted"
 eq "$(meta gc.session_id)" "<absent>" "(8) with its pins removed"
 eq "$(closed_step)" "closed" "(8) this step is closed"
 eq "$(pushed)" 0 "(8) nothing is pushed"
+[ -d "$C" ] && ok "(8) and its tree is not removed" || bad "(8) and its tree is not removed"
 eq "$(tail -n 1 "$LOG")" "drain" "(8) and the drain is last"
 prepare polecat/tk-w "$FRESH"
 submit -- --store-only "filed tk-z" --notes "n" --convoy cv-1 --base main --done ""
@@ -559,7 +629,9 @@ eq "$(meta branch)" "polecat/tk-w" "(36) and its branch recorded"
 no "$OUT" "is not closed" "(36) it asks for no close"
 eq "$(closed_step)" "in_progress" "(36) no step is written: it closes nothing of any other run"
 eq "$(grep -c '^update st-submit' "$LOG" | tr -d ' ')" 0 "(36) not even a stray stamp"
-eq "$(g "$C" branch --list polecat/tk-w)" "" "(36) the local branch is released"
+[ ! -e "$C" ] && ok "(36) the tree is removed" || bad "(36) the tree is removed"
+eq "$(g "$R" branch --list polecat/tk-w)" "" "(36) and the local branch deleted"
+eq "$(meta work_dir)" "<absent>" "(36) and work_dir cleared"
 eq "$(tail -n 1 "$LOG")" "drain" "(36) and the drain is last"
 
 prepare polecat/tk-w '{"auto_push":"false"}'; hold tk-w sess-me
@@ -600,15 +672,18 @@ eq "$RC" 1 "(39b) a direct claim closed unlanded: stops"
 has "$OUT" "was closed while this session held it" "(39b) says so"
 eq "$(words)" "drain " "(39b) with no run to cancel, it only drains"
 
-# A call interrupted after the handoff and before the release leaves the branch here.
+# A handoff whose tree could not go leaves it on its branch, and work_dir naming it.
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
-direct
-g "$C" checkout -q -b polecat/tk-w "$HEAD_SHA"
+submit HOOK_CURRENT=tk-w "GUARD_TOUCH=$C/late.txt" -- --bead tk-w --base main --notes "Implemented: it"
+eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(40) a tree that could not go keeps its branch"
+rm -f "$C/late.txt"
 : > "$LOG"
 direct
 eq "$RC" 0 "(40) the call again, with the bead already the refinery's: exits 0: $OUT"
 eq "$(field status) $(field assignee)" "open gc-toolkit/gc-toolkit.refinery" "(40) the handoff stands"
-eq "$(g "$C" branch --list polecat/tk-w)" "" "(40) the release finishes"
+[ ! -e "$C" ] && ok "(40) the tree goes" || bad "(40) the tree goes"
+eq "$(g "$R" branch --list polecat/tk-w)" "" "(40) with its local branch"
+eq "$(meta work_dir)" "<absent>" "(40) and work_dir is cleared"
 eq "$(tail -n 1 "$LOG")" "drain" "(40) and the drain is last"
 
 echo "# --bead validates the claim before anything is written"
@@ -627,7 +702,7 @@ refused() { # <label> : exit 3, with no write of any kind and no drain.
   eq "$RC" 3 "$1: exit 3"
   has "$OUT" "tk-w is NOT handed off" "$1: says so"
   eq "$(pushed)" 0 "$1: nothing is pushed"
-  eq "$(grep -cE '^(update|drain|gate|cancel|guard|session|release) ?' "$LOG" | tr -d ' ')" 0 "$1: nothing is written and nothing drains"
+  eq "$(grep -cE '^(update|drain|gate|cancel|guard|session|remove|release) ?' "$LOG" | tr -d ' ')" 0 "$1: nothing is written, removed or drained"
 }
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
 submit HOOK_CURRENT=tk-other -- --bead tk-w --base main --notes "n"

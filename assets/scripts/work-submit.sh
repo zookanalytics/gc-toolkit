@@ -41,9 +41,19 @@
 # because the witness ranks them ahead of the assignee, so a pin left behind names
 # a drained session and reads as an orphan.
 #
-# The local branch is released last, after every durable write, because releasing
-# it destroys the shape the branch gate reads. A session that dies before that
-# costs a held ref and nothing more, and a re-offered step finds the same branch.
+# The worktree goes last, after every durable write and the step's close, because
+# removing it destroys the shape the branch gate reads. It goes with its local
+# branch, and work_dir is cleared, so no tree outlives the hand-off on commits that
+# only its local branch reaches: once a squash merge deletes origin's branch,
+# nothing would reach them, and the controller's reaper never removes such a tree.
+# A rework or a re-dispatch makes a fresh tree from origin's branch. Only the tree
+# work_dir records and this call runs in is removed, never a session's own
+# directory or a tree that holds another worktree, and never by force: a tree with
+# an uncommitted or untracked path stays on its branch, work_dir still names it,
+# and the call says so. A session that dies before the removal leaves the tree on
+# its branch, which the reaper removes once the bead closes. The removal reads the
+# repository from where the tree was, so a tree the reaper took first costs only
+# the local branch's delete.
 #
 # A claimant with no poured workflow holds the work bead itself: `gc hook current`
 # names it and it carries no gc.step_ref, so there is no step to close and no other
@@ -212,6 +222,11 @@ fi
 
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
 METADATA_BRANCH=$(work_meta branch)
+# The tree the hand-off removes, read while it is still here: the bead's recorded
+# work_dir, when this call runs in it, and the repository it belongs to.
+OWN_TREE=$(git rev-parse --show-toplevel 2>/dev/null) || OWN_TREE=""
+{ [ -n "$OWN_TREE" ] && [ -n "$WORKTREE" ] && [ "$OWN_TREE" -ef "$WORKTREE" ]; } || OWN_TREE=""
+COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || COMMON_DIR=""
 
 # The list of open beads on this branch, read once. Parked and claimed beads count,
 # because every state that carries a merge_result is an anchor state.
@@ -403,9 +418,37 @@ gc session nudge "$REFINERY_TARGET" "Run 'gc prime' to check merge queue and beg
 
 close_step
 
-if ! { git checkout --detach >/dev/null 2>&1 && git branch -D "$CURRENT_BRANCH" >/dev/null 2>&1; }; then
-  echo "branch release failed: $CURRENT_BRANCH stays checked out here. The handoff is already written, so this costs a held ref, nothing more." >&2
-fi
+# The header says what goes and what stays. The hand-off is already written, so
+# each way this stops short is said, and none fails the call.
+release_tree() {
+  local out list nl=$'\n'
+  cd "${GC_DIR:-/nonexistent}" 2>/dev/null || cd "$(dirname "${OWN_TREE:-/}")" 2>/dev/null || cd /
+  if [ -z "$OWN_TREE" ] || [ -z "$COMMON_DIR" ]; then
+    echo "$PROG: this call ran in no tree that $WORK_ID records as its work_dir, so no tree is removed, and $CURRENT_BRANCH stays checked out where it is." >&2
+    return 0
+  fi
+  if [ -n "${GC_DIR:-}" ] && [ "$OWN_TREE" -ef "$GC_DIR" ]; then
+    echo "$PROG: $OWN_TREE is this session's own directory, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
+    return 0
+  fi
+  list=$(git -C "$COMMON_DIR" worktree list --porcelain 2>/dev/null) || list=""
+  case "$nl$list" in
+    *"${nl}worktree $OWN_TREE/"*)
+      echo "$PROG: $OWN_TREE holds another worktree, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
+      return 0 ;;
+  esac
+  if [ -e "$OWN_TREE" ] && ! out=$(git -C "$COMMON_DIR" worktree remove "$OWN_TREE" 2>&1) && [ -e "$OWN_TREE" ]; then
+    echo "$PROG: $OWN_TREE stays, on $CURRENT_BRANCH, and work_dir still names it, because git would not remove it: $out" >&2
+    return 0
+  fi
+  if git -C "$COMMON_DIR" show-ref --verify --quiet "refs/heads/$CURRENT_BRANCH" \
+      && ! out=$(git -C "$COMMON_DIR" branch -D "$CURRENT_BRANCH" 2>&1); then
+    echo "$PROG: the tree is gone, and the local branch $CURRENT_BRANCH stays: $out" >&2
+  fi
+  gc bd update "$WORK_ID" --unset-metadata work_dir </dev/null >/dev/null \
+    || echo "$PROG: work_dir on $WORK_ID still names $OWN_TREE, which is gone, so a later run makes a fresh tree." >&2
+}
+release_tree
 
 gc runtime drain-ack
 exit 0
