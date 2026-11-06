@@ -27,7 +27,7 @@ dir="${GC_PACK_DIR:-.}"
 
 # The declared enum. "unanchored" (merge_result absent) has no stored value on
 # the ordinary path, but a literal write of it is a declared state, not a drift.
-BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion held"
+BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion"
 BUILTIN_CLOSED="merged"
 BUILTIN_DETACHED="pre_open_gate pull_request"
 BUILTIN_PARK_ROUTE="human"
@@ -81,7 +81,7 @@ RETIRED_KEYS=(
 retired_consequence() { # <key> <value>
     local inert="so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key"
     case "$1" in
-        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (a human gate that blocks $2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
+        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (a human gate that blocks $2) and takeaway on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
         escalation_raised_by|escalation.recurrences|escalation.recurrence_last)
             printf '%s' "human-gate.sh neither redirects a wisp nor keeps a recurrence tally, $inert" ;;
         gc.hold_demand)

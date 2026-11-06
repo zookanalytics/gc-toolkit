@@ -62,34 +62,21 @@ not started, so when only one member waits, gate that member. No closing
 line means the wait did not land, so the merge or the work it was to hold is
 NOT held: do NOT post the framing.
 
-**3. Write the headline, and the held state when a gate holds the subject.**
-The subject's headline says what the operator owes, and its wait flag says
-what holds the subject. Pass `--waiting-on` the gate that holds it, one the
-conversation replies to or the one step 2 filed on it. A pre-PR (unanchored)
-subject that gate blocks also moves to `held` while the operator owes the
-answer, so the anchor readers leave it alone, and the sign-off moves it back.
-A subject armed for deferred dispatch does not move. Its gate already holds
-it, and its arm sends it once the gate is resolved. `held` would cost it that
-arm, because `held` writes a `merge_result` and the deferred-dispatch pass
-retires an arm on any `merge_result`. So the block reads the arm before it
-writes anything:
+**3. Write the headline.** The subject's headline says what the operator
+owes, and its wait flag says what holds the subject. Pass `--waiting-on` the
+gate that holds it, one the conversation replies to or the one step 2 filed on
+it. The gate is what holds the subject: bd reads the subject as blocked while
+the gate is open, and the hold leaves the subject's route and lifecycle state
+as they are.
 ```bash
-ARM=$(gc bd show "$SUBJECT" --json | jq -er '.[0].metadata["gc.dispatch_when_ready"] // ""') \
-  && "$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <the gate that holds the subject> \
-  && if [ -z "$ARM" ] && [ "$("$CONV/lifecycle.sh" state "$SUBJECT")" = unanchored ]; then "$CONV/lifecycle.sh" transition "$SUBJECT" --to held --route human; fi
+"$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <the gate that holds the subject>
 ```
 When no gate holds the subject, write the headline alone, with `--no-wait` in
-place of `--waiting-on`, and leave the subject's state as it is: nothing waits
-on it but the conversation, which the board shows in session on the subject's
-row, and a held bead must carry a live edge (`doctor/check-wait-is-an-edge`).
-When the subject does not read, the block writes nothing, and when the writer
-refuses the headline, the board cannot show the hold. Either way, do NOT post
-the framing. Fix what it names and re-run.
-
-**The headline is the sentence; `held` is the state.** Where `$SUBJECT`
-already carries an anchor state the held transition is skipped, and refused if
-attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh` enumerate anchors by
-that state, and `held` drops it from all three.
+place of `--waiting-on`: nothing waits on it but the conversation, which the
+board shows in session on the subject's row, and a held bead must carry a live
+edge (`doctor/check-wait-is-an-edge`). When the writer refuses the headline,
+the board cannot show the hold, so do NOT post the framing. Fix what it names
+and re-run.
 
 Never park a live conversation: the writer's `--release` clears the
 assignee and route, and the only place it belongs is a ruling that

@@ -4,7 +4,7 @@
 # `gc bd update` carrying every field; bd refusal (exit 1); post-write
 # verification mismatch (exit 2); human states routing to human and detached
 # states clearing the route, both in the same call; the empty-route refusal that
-# keeps a human state from waiting on nobody; the `held` sitting-hold state; the
+# keeps a human state from waiting on nobody; the
 # writes leaving a state makes (exit_sets), in the transition's own update; the
 # close/terminal pairing guards (--close only into a closed state, closed states
 # must --close); the non-empty merged_sha that --to merged must carry;
@@ -633,17 +633,6 @@ has "$out" "human_states:" "the refusal names the human-state set"
 eq "$(meta a-7b merge_result)" "pull_request" "the refused transition wrote nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 
-# The tk-9heqfh shape: a sitting ended holding and left its subject waiting on
-# nobody — no state, empty route, the hold recorded only as takeaway prose.
-# Through this writer that attempt is refused rather than recorded.
-store '[{"id":"tk-9heqfh","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — PR#477 is correctness-green and one approval from landing; needs a ruling"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition tk-9heqfh --to held --route "" 2>&1)"; rc=$?
-eq "$rc" 1 "the found tk-9heqfh state is unreachable through the writer"
-has "$out" "requires a route" "the refusal names the missing route"
-eq "$(meta tk-9heqfh merge_result)" "<absent>" "no state was recorded"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and no write was attempted"
-
 # --- a route names a pool by its qualified address, or the park sentinel ---------
 # gc.routed_to is matched as an exact string by every pool claim, so a bare
 # token like "pool" reaches no pool: the bead stays ready and is offered to
@@ -831,32 +820,6 @@ out="$(STUB_DROP_KEYS="p-14:gc.takeaway" "$SUT" transition p-14 --to abandoned \
   --takeaway "PR#9 was closed without merging" 2>&1)"; rc=$?
 eq "$rc" 2 "a dropped gc.takeaway exits 2"
 has "$out" "gc.takeaway=" "the refusal names the missing text"
-
-# --- held: a sitting's hold is a state, entered only from unanchored ------------
-echo "# held"
-store '[{"id":"h-1","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — needs a ruling"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition h-1 --to held 2>&1)"; rc=$?
-eq "$rc" 0 "unanchored -> held exits 0"
-eq "$(meta h-1 merge_result)" "held" "the hold is recorded as a declared state"
-eq "$(meta h-1 'gc.routed_to')" "human" "held routes to human by default"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "state + route ride in ONE update"
-
-# A gating anchor keeps its gating state: merge.sh, gate-ensure.sh and pr-facts.sh
-# each enumerate anchors by it, and a hold must not drop one from all three.
-store '[{"id":"h-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition h-2 --to held 2>&1)"; rc=$?
-eq "$rc" 1 "pull_request -> held is an illegal edge"
-has "$out" "illegal edge pull_request -> held" "the refusal names the edge"
-
-store '[{"id":"h-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"held","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"}}]'
-out="$("$SUT" transition h-3 --to held 2>&1)"; rc=$?
-eq "$rc" 0 "re-holding is an idempotent self-edge"
-
-out="$("$SUT" transition h-3 --to unanchored --route rig/polecat 2>&1)"; rc=$?
-eq "$rc" 0 "held -> unanchored releases the hold"
-eq "$(meta h-3 merge_result)" "<absent>" "the released bead carries no state"
-eq "$(meta h-3 'gc.routed_to')" "rig/polecat" "the ruling routes it onward"
 
 # --- rejection to unanchored ------------------------------------------------------
 echo "# unanchored"
