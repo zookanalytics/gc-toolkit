@@ -270,22 +270,13 @@ with_timeout() {
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# meta_now <bead> <key> — one metadata key as the store answers it right now,
-# for reading a write back. A row that will not read answers empty, which every
-# caller here treats the same as a value that did not land. $db is the caller's
-# store pin; the verbs that pin by BEADS_DIR leave it unset.
+# meta_now <bead> <key> — one metadata key as the store answers it right now.
+# A row that will not read answers empty. $db is the caller's store pin; the
+# verbs that pin by BEADS_DIR leave it unset.
 meta_now() {
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
         | jq -r --arg k "$2" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
-}
-
-# assignee_now <bead> — the bead's top-level assignee as the store reads it now,
-# empty when unassigned or unreadable. Same pinned store as meta_now.
-assignee_now() {
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-    gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-        | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null || printf ''
 }
 
 # row_now <bead> — the bead's own row as the store answers it now, one line of
@@ -300,26 +291,15 @@ row_now() {
 
 # blocks_edge_reads_back <bead> <blocker> — 0 iff the bead's own row, read now,
 # carries a `blocks` edge onto <blocker>. A row that will not read is a missing
-# edge. park reports an edge as landed only through this read, never through
-# the exit status of the `dep add` or create that wrote it.
+# edge. A `dep add` onto a bead another store holds exits 0, stores the edge
+# unverified and holds nothing (docs/warrants.md, "bd write durability"), and
+# the row shows no such edge, so park reports an edge as landed only through
+# this read.
 blocks_edge_reads_back() {
     row_now "$1" | jq -e --arg d "$2" '
         [ (.dependencies // [])[]? | select(type == "object")
           | select(((.dependency_type // .type // "") | tostring) == "blocks")
           | select(((.id // .depends_on_id // "") | tostring) == $d) ] | length > 0' >/dev/null 2>&1
-}
-
-# stamp_hides_placement — given a `bd show --json` answer on stdin whose row
-# carries gc.execution_routed_to, print 1 when that stamp is all that keeps the
-# bead out of the placement queue (placement.sh's awaiting_placement holds for
-# the row without it) and 0 when it is not. An answer that is not a row prints 1,
-# because nothing then shows the stamp hides nothing.
-stamp_hides_placement() {
-    shp_v=$(jq -r "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
-        if type == "array" and length > 0
-        then (.[0] | del(.metadata["gc.execution_routed_to"]) | if awaiting_placement then "1" else "0" end)
-        else "1" end' 2>/dev/null) || shp_v=1
-    case "$shp_v" in 0) printf '0' ;; *) printf '1' ;; esac
 }
 
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
@@ -1257,7 +1237,7 @@ cmd_takeaway() {
     # gc.execution_routed_to. The placement queue does read it: placement.sh counts
     # it as a live pour, which places a bead, so a finished pour's stamp left on a
     # bead held for placement keeps that bead out of the queue. The release drops
-    # it, and its read-back below fails the verb when that is the stamp's effect.
+    # it.
     #
     # The park unassigns the bead, or assigns it to the --assign agent, so the
     # identity the last executor stamped goes with the old assignee:
@@ -1266,187 +1246,15 @@ cmd_takeaway() {
     # gc.session_name left behind is residue the moment the bead next carries a
     # route its stamp does not match — the shape doctor/executor-identity-residue
     # reports on an open, routed bead — and a gc.session_id left behind is the
-    # stale pin the runtime's orphan recovery resolves an owner from. Both are
-    # read back after this write and a lone unset retried, the way
-    # the route beside them is: a silent multi-pair drop would otherwise report a
-    # successful release while the very residue
-    # doctor/executor-identity-residue exists to catch survives on the bead.
+    # stale pin the runtime's orphan recovery resolves an owner from. Every pair
+    # rides the one update, which bd writes in one transaction, so its exit says
+    # whether all of them landed (the bd-durability block of bd-lib.sh).
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee="$assign" \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
                --unset-metadata gc.session_name --unset-metadata gc.session_id
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
-    # The headline is what this verb exists to write, so it is read back first,
-    # in every mode: it rides the bare stamp, the park and a closed anchor's
-    # run end alike. One `--set-metadata` pair in a multi-pair update can fail to
-    # land while its siblings land, and a headline that does not land leaves the
-    # one the bead carried before this call, empty or an earlier sitting's. So
-    # the read-back compares with the text this call wrote, not with empty. The
-    # repair re-stamps the headline together with this call's disposition, as
-    # every headline write does (lifecycle.toml [holds]): a headline repaired
-    # alone could land beside the disposition an earlier sitting left, and read
-    # as a wait already discharged. The disposition is still read back on its
-    # own below. A repair that also misses is a verb failure, because callers
-    # read a zero exit as the headline being set. The miss is reported here with
-    # its repair. Its exit comes last, after the edges, the run's end and every
-    # other check have run and printed their own repairs. The messages carrying
-    # the headline go through printf, because sh's echo interprets backslash
-    # escapes, and a headline is free text.
-    takeaway_missed=""
-    takeaway_got=$(meta_now "$bead" gc.takeaway)
-    if [ "$takeaway_got" != "$text" ]; then
-        printf '%s\n' "$PROG: takeaway: gc.takeaway on $bead read back as '$takeaway_got', expected '$text' — repairing" >&2
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.takeaway=$text" --set-metadata "gc.takeaway_settled=$no_wait" >/dev/null 2>&1 || true
-        takeaway_got=$(meta_now "$bead" gc.takeaway)
-        if [ "$takeaway_got" = "$text" ]; then
-            echo "$PROG: takeaway: the headline repair landed on $bead" >&2
-        else
-            takeaway_missed=1
-            # The by-hand repair is pasted into a shell, so the headline is
-            # single-quoted, with each ' inside it written as '\''.
-            takeaway_arg=$(printf '%s' "gc.takeaway=$text" | sed "s/'/'\\\\''/g")
-            printf '%s\n' "$PROG: takeaway: $bead still reads gc.takeaway='$takeaway_got', not the headline this call wrote, so the board does not show it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata '$takeaway_arg' --set-metadata gc.takeaway_settled=$no_wait" >&2
-        fi
-    fi
-    # A route that lands EMPTY is the worst outcome of all: the bead is open,
-    # unassigned and routed to nobody, which no pool's exact-match query can
-    # see. One `--set-metadata` pair in a multi-pair update can land
-    # present-but-empty while its siblings land, so read this one back and
-    # repair it. A repair that also misses is a verb failure, because --route
-    # promises the pool can see the bead and a caller reading a zero exit as
-    # "released to that pool" would be wrong. The writes that did land stay,
-    # and the message names them, so the miss is repairable by hand.
-    route_missed=""
-    if [ -n "$route" ] && [ -n "$release_park" ]; then
-        route_got=$(meta_now "$bead" gc.routed_to)
-        if [ "$route_got" != "$route" ]; then
-            echo "$PROG: takeaway: gc.routed_to on $bead read back as '$route_got', expected '$route' — repairing" >&2
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.routed_to=$route" >/dev/null 2>&1 || true
-            route_got=$(meta_now "$bead" gc.routed_to)
-            if [ "$route_got" = "$route" ]; then
-                echo "$PROG: takeaway: the route repair landed on $bead" >&2
-            else
-                route_missed=1
-            fi
-        fi
-    fi
-    # An --assign is read back on the same terms. The release writes the
-    # assignee as the bead's only address, beside an empty route, so one that
-    # did not land leaves the bead open, unassigned and unrouted, offered to
-    # nobody.
-    assign_missed=""
-    if [ -n "$assign" ] && [ -n "$release_park" ]; then
-        assign_got=$(assignee_now "$bead")
-        if [ "$assign_got" != "$assign" ]; then
-            echo "$PROG: takeaway: the assignee on $bead read back as '$assign_got', expected '$assign' — repairing" >&2
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            gc bd update "$bead" ${db:+--db "$db"} --assignee="$assign" >/dev/null 2>&1 || true
-            assign_got=$(assignee_now "$bead")
-            if [ "$assign_got" = "$assign" ]; then
-                echo "$PROG: takeaway: the assignee repair landed on $bead" >&2
-            else
-                assign_missed=1
-            fi
-        fi
-    fi
-    # The disposition is read back on the same terms, and for a sharper reason:
-    # it is the one field of the stamp whose STALE value is a wrong answer
-    # rather than a missing one. A park whose clear did not land keeps the
-    # previous sitting's "settled", and doctor/check-wait-is-an-edge then reads
-    # this bead as a wait somebody already discharged — the exact blindness the
-    # pairing exists to remove, on the exact bead a person is owed an answer
-    # about. A repair that also misses is a verb failure: a caller reading a
-    # zero exit as "the disposition landed" would be wrong.
-    settled_missed=""
-    settled_got=$(meta_now "$bead" gc.takeaway_settled)
-    if [ "$settled_got" != "$no_wait" ]; then
-        echo "$PROG: takeaway: gc.takeaway_settled on $bead read back as '$settled_got', expected '$no_wait' — repairing" >&2
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.takeaway_settled=$no_wait" >/dev/null 2>&1 || true
-        settled_got=$(meta_now "$bead" gc.takeaway_settled)
-        if [ "$settled_got" = "$no_wait" ]; then
-            echo "$PROG: takeaway: the disposition repair landed on $bead" >&2
-        else
-            settled_missed=1
-            echo "$PROG: takeaway: $bead still reads gc.takeaway_settled='$settled_got', not '$no_wait' — the headline is stamped, but the disposition beside it is the one the sitting before it left, so the wait check answers for this bead from a stamp nobody wrote for it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.takeaway_settled=$no_wait" >&2
-        fi
-    fi
-    # The pour stamp is read back too: gc.execution_routed_to names the pool the
-    # pour dispatched this bead to, and a release ends that pour. Clear it, retry a
-    # lone unset, and if it still survives, ask placement.sh whether the stamp is
-    # all that keeps the bead out of the placement queue. On a bead held for
-    # placement it is, because the queue reads the stamp as a live pour, so that
-    # miss fails the verb below. On any other bead no reader misreads the stamp: no
-    # arm or reconcile guard reads it (reconcile keys on its own
-    # gc.dispatch_when_ready_slung marker). That miss warns and the release stands,
-    # because first-reaction-dispose's --then-route arm runs right after this
-    # release, and a failure here would skip the arm.
-    exec_missed=""; exec_hides=""
-    if [ -n "$release_park" ]; then
-        exec_got=$(meta_now "$bead" gc.execution_routed_to)
-        if [ -n "$exec_got" ]; then
-            echo "$PROG: takeaway: gc.execution_routed_to on $bead read back as '$exec_got', expected empty — repairing" >&2
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.execution_routed_to >/dev/null 2>&1 || true
-            # One read answers both questions, whether the stamp survived and
-            # whether it hides a bead held for placement, so the two answers
-            # cannot come from different states of the bead.
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            exec_row=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub) || exec_row=""
-            exec_got=$(printf '%s' "$exec_row" \
-                | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.execution_routed_to"] // "") else "" end' 2>/dev/null) || exec_got=""
-            if [ -z "$exec_got" ]; then
-                echo "$PROG: takeaway: the execution-stamp repair landed on $bead" >&2
-            else
-                exec_missed=1
-                exec_hides=$(printf '%s' "$exec_row" | stamp_hides_placement)
-            fi
-        fi
-    fi
-    # The executor identity the unassign takes with it is read back like the route
-    # above, and fails the verb the same way: both keys have readers.
-    # A gc.session_name left on the now-open bead is the residue
-    # doctor/executor-identity-residue reports the moment the bead next carries a
-    # route its stamp does not match — the finding this release exists to close. It
-    # rides the same multi-pair write, so the same silent drop can leave it
-    # standing; read it back, retry a lone unset, and fail if it survives.
-    # orphan-dispose.sh verifies the same pair after its own release.
-    sname_missed=""
-    if [ -n "$release_park" ]; then
-        sname_got=$(meta_now "$bead" gc.session_name)
-        if [ -n "$sname_got" ]; then
-            echo "$PROG: takeaway: gc.session_name on $bead read back as '$sname_got', expected empty — repairing" >&2
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.session_name >/dev/null 2>&1 || true
-            sname_got=$(meta_now "$bead" gc.session_name)
-            if [ -z "$sname_got" ]; then
-                echo "$PROG: takeaway: the session-name repair landed on $bead" >&2
-            else
-                sname_missed=1
-            fi
-        fi
-    fi
-    # gc.session_id is the pin the runtime's orphan recovery resolves an owner
-    # from, so one left behind lets it resolve a dead owner for a bead nobody
-    # holds. Same write, same silent drop, same read-back-and-fail.
-    sid_missed=""
-    if [ -n "$release_park" ]; then
-        sid_got=$(meta_now "$bead" gc.session_id)
-        if [ -n "$sid_got" ]; then
-            echo "$PROG: takeaway: gc.session_id on $bead read back as '$sid_got', expected empty — repairing" >&2
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.session_id >/dev/null 2>&1 || true
-            sid_got=$(meta_now "$bead" gc.session_id)
-            if [ -z "$sid_got" ]; then
-                echo "$PROG: takeaway: the session-id repair landed on $bead" >&2
-            else
-                sid_missed=1
-            fi
-        fi
-    fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
     # <blocker>", so the edge lands on <bead> — what the board reads. Only the
@@ -1469,53 +1277,13 @@ cmd_takeaway() {
     if [ -n "$release" ]; then
         cancel_release_molecules "$bead" "$db" || cancel_missed=1
     fi
-    if [ -n "$route_missed" ]; then
-        echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is open, unassigned and visible to no pool. The headline, the release and the edges are written; stamp the route by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.routed_to=$route" >&2
-        exit 4
-    fi
-    if [ -n "$assign_missed" ]; then
-        echo "$PROG: takeaway: $bead is released but NOT assigned to '$assign' (it reads '$assign_got') — it is open and unrouted, so no agent's hook offers it. The headline, the release and the edges are written; assign it by hand: gc bd update $bead${db:+ --db $db} --assignee $assign" >&2
-        exit 4
-    fi
-    # Reported at its read-back above; the exit waits until here so the edges
-    # and the run's end still run, the way the route miss does.
-    if [ -n "$settled_missed" ]; then
-        exit 4
-    fi
     # Named, with its repair, by the helper. Nothing retries a cancel that did not
     # land, so a zero exit here would read as a run ended when it still runs.
     if [ -n "$cancel_missed" ]; then
         exit 4
     fi
-    # A surviving session pin is exit-4 like the route above, on any bead: both
-    # pins have readers wherever they are left. A caller reading
-    # a zero exit as "released, identity cleared" would route the bead onward — the
-    # exact next step that turns a surviving gc.session_name into the residue
-    # doctor/executor-identity-residue reports. The release and edges are kept and
-    # named, so a hand repair finishes it.
-    if [ -n "$sname_missed" ]; then
-        echo "$PROG: takeaway: $bead still carries gc.session_name='$sname_got' after release — the executor identity the unassign was meant to take with it, so doctor/executor-identity-residue re-fires the moment this bead next carries a route. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_name" >&2
-        exit 4
-    fi
-    if [ -n "$sid_missed" ]; then
-        echo "$PROG: takeaway: $bead still carries gc.session_id='$sid_got' after release — a stale orphan-recovery pin, so the runtime resolves a dead owner for a bead nobody holds. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_id" >&2
-        exit 4
-    fi
-    # A surviving pour stamp fails the verb where it hides a bead held for
-    # placement: placement.sh reads it as a live pour, so gc-helm.sh unplaced does
-    # not list the bead and the placement sitting is never shown it. On any other
-    # bead the stamp WARNS and the release stands, for the --then-route arm that
-    # runs next.
-    if [ -n "$exec_missed" ]; then
-        if [ "$exec_hides" = 1 ]; then
-            echo "$PROG: takeaway: $bead is held for placement but still carries gc.execution_routed_to='$exec_got' after release. placement.sh reads that stamp as a live pour, so gc-helm.sh unplaced does not list $bead and the placement sitting is never shown it. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
-            exit 4
-        fi
-        echo "$PROG: takeaway: $bead still carries gc.execution_routed_to='$exec_got' after release — provenance a finished pour left. No arm or reconcile guard reads it (deferred-dispatch keys on gc.dispatch_when_ready_slung), and $bead is not held for placement, where the queue would read it as a live pour, so the release stands. Clear it by hand if you want it gone: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
-    fi
-    # A route asked for on a closed anchor is refused the same way a route that
-    # would not stamp is: the useful writes stand, and the exit is non-zero so
-    # no caller reads it as "released to that pool". Routing a disposed bead is
+    # A route asked for on a closed anchor is refused: the useful writes stand,
+    # and the exit is non-zero so no caller reads it as "released to that pool". Routing a disposed bead is
     # the resurrection in its purest form — the pool claims it and cuts a
     # branch for superseded work.
     if [ -n "$route" ] && [ -z "$release_park" ]; then
@@ -1524,11 +1292,6 @@ cmd_takeaway() {
     fi
     if [ -n "$assign" ] && [ -z "$release_park" ]; then
         echo "$PROG: takeaway: $bead is closed, so it was NOT assigned to '$assign' — the agent would be handed a bead whose disposition landed. The headline and the run's end are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
-        exit 4
-    fi
-    # Reported at its read-back above, with its repair. The exit stands in for
-    # the success line, which would say the headline is set.
-    if [ -n "$takeaway_missed" ]; then
         exit 4
     fi
     rel_note=""
