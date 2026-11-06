@@ -14,8 +14,8 @@ edges() { LC_ALL=C sort "$STUB_DEPS" | paste -sd' ' -; }
 marked() { grep -c '^anchor_edges\.joined=' "$STUB_KV"; }
 
 # A live anchor whose children predate the edge, closed ones included; a live
-# anchor with one child an older writer filed without the edge and a visit its
-# tracks edge already joins; a closed anchor one live finding still names; a
+# anchor with one child an older writer filed without the edge and a validation
+# pass a tracks edge already joins; a closed anchor one live finding still names; a
 # closed anchor with no live child; and a live child naming an anchor that is
 # no bead in this store.
 store '[
@@ -25,7 +25,7 @@ store '[
   {"id":"tk-mig","status":"in_progress","metadata":{"merge_result":"pre_open_gate"}},
   {"id":"tk-m1","status":"open","metadata":{"anchor_bead":"tk-mig","task_kind":"review"}},
   {"id":"tk-m2","status":"closed","metadata":{"anchor_bead":"tk-mig","task_kind":"rework"}},
-  {"id":"tk-mv","status":"open","metadata":{"anchor_bead":"tk-mig","task_kind":"visit"}},
+  {"id":"tk-mv","status":"open","metadata":{"anchor_bead":"tk-mig","task_kind":"validation"}},
   {"id":"tk-held","status":"closed","metadata":{"merge_result":"merged"}},
   {"id":"tk-h1","status":"open","metadata":{"anchor_bead":"tk-held","task_kind":"finding"}},
   {"id":"tk-h2","status":"closed","metadata":{"anchor_bead":"tk-held","task_kind":"rework"}},
@@ -50,7 +50,7 @@ out=$("$SUT" 2>&1); rc=$?
 eq "$rc" 0 "a run that joins every missing child exits 0"
 has "$out" "joined 5 child(ren)" "…and reports how many it joined"
 eq "$(edges)" "tk-h1|related|tk-held tk-h2|related|tk-held tk-m1|related|tk-mig tk-m2|related|tk-mig tk-mv|tracks|tk-mig tk-o1|related|tk-old tk-o2|blocks|tk-old tk-o2|related|tk-old" \
-  "every visited anchor's children are joined, and the visit stays on its tracks edge"
+  "every visited anchor's children are joined, and the child a tracks edge joins stays on that edge"
 eq "$(grep -c '^bd dep add --file' "$STUB_GC_LOG")" 3 "…in one write per anchor that needed one"
 eq "$(marked)" 0 "a plain run marks nothing"
 

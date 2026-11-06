@@ -153,7 +153,7 @@ LIVE=open,in_progress,blocked,deferred,hooked,pinned
 unset GC_RECONCILE_BD_CACHE
 
 # One anchor in every shape a child can take: closed children with the edge, a
-# visit joined by its tracks edge, an open review filed without the edge, a
+# validation pass joined by a tracks edge, an open review filed without the edge, a
 # closed review filed without it, a convoy tracking the anchor, and a bead moved
 # to another anchor that still carries its old edge.
 store '[
@@ -161,7 +161,7 @@ store '[
   {"id":"tk-two","status":"open","metadata":{"merge_result":"pull_request"}},
   {"id":"tk-r1","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-r2","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
-  {"id":"tk-vis","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"visit"}},
+  {"id":"tk-vis","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"validation"}},
   {"id":"tk-bare","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-cbare","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-cv","status":"open","metadata":{}},
@@ -189,7 +189,7 @@ mark_store; reset_log
 kids=$(bd_anchor_children tk-anc "$ALL"); rc=$?
 eq "$rc" 0 "marked: bd_anchor_children reads the anchor"
 eq "$(ids_of "$kids")" "tk-bare,tk-r1,tk-r2,tk-vis" \
-  "marked: the live children whatever their edge, and the closed dependents naming the anchor (a tracks-joined visit is one; a convoy and a moved bead are not)"
+  "marked: the live children whatever their edge, and the closed dependents naming the anchor (a tracks-joined validation pass is one; a convoy and a moved bead are not)"
 eq "$(printf '%s' "$kids" | jq -r '[ .[] | select(.id == "tk-bare") | .status ] | .[0]')" "open" \
   "marked: an open review filed without the edge is read, so it holds its lane"
 eq "$(printf '%s' "$kids" | jq -r '[ .[] | select(.id == "tk-cbare") ] | length')" "0" \
@@ -269,7 +269,7 @@ store '[
   {"id":"tk-old","status":"open","metadata":{"merge_result":"pull_request"}},
   {"id":"tk-o1","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"review"}},
   {"id":"tk-new","status":"open","metadata":{"task_kind":"rework"}},
-  {"id":"tk-vv","status":"open","metadata":{"task_kind":"visit"}}
+  {"id":"tk-vv","status":"open","metadata":{"task_kind":"validation"}}
 ]'
 printf '%s\n' 'tk-vv|tracks|tk-old' > "$STUB_DEPS"
 reset_log
@@ -317,7 +317,7 @@ store '[
   {"id":"tk-o2","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"finding"}},
   {"id":"tk-o3","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"rework"}},
   {"id":"tk-ok","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"review"}},
-  {"id":"tk-ov","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"visit"}},
+  {"id":"tk-ov","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"validation"}},
   {"id":"tk-cv","status":"open","metadata":{}}
 ]'
 printf '%s\n' 'tk-ok|related|tk-old' 'tk-ov|tracks|tk-old' 'tk-cv|tracks|tk-old' 'tk-o2|blocks|tk-old' > "$STUB_DEPS"
@@ -333,7 +333,7 @@ out=$(bd_anchor_backfill tk-old); rc=$?
 eq "$rc:$(printf '%s\n' "$out" | paste -sd, -)" "0:tk-o1,tk-o2,tk-o3" "backfill joins them and names them"
 eq "$(dep_adds)" 1 "…in one write"
 eq "$(edges)" "tk-cv|tracks|tk-old tk-o1|related|tk-old tk-o2|blocks|tk-old tk-o2|related|tk-old tk-o3|related|tk-old tk-ok|related|tk-old tk-ov|tracks|tk-old" \
-  "…each child on the pair once, the visit left on its tracks edge"
+  "…each child on the pair once, the one joined by tracks left on that edge"
 out=$(bd_anchor_backfill tk-old); rc=$?
 eq "$rc:$out" "0:" "a second backfill joins nothing"
 # bd refuses the one-transaction write when one pair is refused; each pair is

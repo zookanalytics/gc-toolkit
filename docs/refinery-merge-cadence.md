@@ -656,9 +656,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    cite code the target branch already carries, so its finding is carried
    forward to a bug bead of its own through `bead-rehome.sh` instead; the PR's
    inline comments are read once per anchor that carries such a candidate. It
-   leaves `task_kind=review` to review-sweep, `task_kind=visit` to the human
-   side, and a `rebase_hold` freeze to the operator, and never closes the anchor
-   itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
+   leaves `task_kind=review` to review-sweep, a human gate or a conversation to
+   the human side, and a `rebase_hold` freeze to the operator, and never closes
+   the anchor itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
    while a human gate on the anchor is open — which clearing the machine
    scaffolding here lets land once none is. Arm 7 runs this same sweep with `--anchor` for
    the one anchor whose PR-close disposition it is consummating, just before

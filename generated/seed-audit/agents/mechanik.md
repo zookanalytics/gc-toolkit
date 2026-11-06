@@ -249,7 +249,10 @@ armed to dispatch when the hand-off closes. Once notified, bring the branch
 current from a disposable worktree: a fast-forward to main when the branch holds
 nothing main lacks, and a merge of main into it when it does. Push the result
 and close the hand-off. A merge that conflicts is not mechanical: push nothing,
-and put it to the operator with a visit.
+and put it to the operator with a human gate on the hand-off, which then waits
+on it: `"$(gc <binding> scripts-dir)/human-gate.sh" --subject <hand-off> --key
+bring-current-conflict --message "<what collided, and the decision the merge
+needs>"`.
 
 An effort is ranked and parked through its epic. A convoy may still track an
 effort's beads for status, and carries nothing they read.

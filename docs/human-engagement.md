@@ -285,7 +285,7 @@ A bead id, a PR number or URL, or a superseded id resolves through
 as it is.
 
 **The bare command's default rig is fixed: `gc-toolkit`** (`--rig` overrides,
-`GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"`, so a
+`GC_INTAKE_DEFAULT_RIG` moves the default). Converse is `scope = "rig"`, so a
 sitting spawns from the subject's own rig, and a topic that is not rig-specific
 still has to land somewhere. The default is deliberately not inferred from the
 working directory: a destination that varies silently with the shell's
