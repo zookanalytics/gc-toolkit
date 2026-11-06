@@ -128,15 +128,11 @@ if [ -n "$MISSING" ]; then
   exit 1
 fi
 ```
-When it exits 1, end the run with the route left empty:
+When it exits 1, decline. The call ends the run, or hands the review back when
+no workflow was poured, and leaves the route empty either way:
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" --step mol-review.load-dispatch --reason "the review's record is incomplete; reviewing nothing" && gc runtime drain-ack
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-review.load-dispatch --reason "the review's record is incomplete; reviewing nothing"
 ```
-A claimant holding the review with no poured workflow has no steps to close.
-It hands the bead back instead, then drains: the pack's
-`assets/scripts/hand-back.sh <the review bead> --unset-metadata gc.routed_to`
-reopens the bead and releases its claim and the route it claimed it by in one
-write.
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
 page when one is open, the rig's guidance for this check, what `gctk rig`
