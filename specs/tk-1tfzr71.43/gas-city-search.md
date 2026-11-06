@@ -84,6 +84,15 @@ by `ensure` from `origin/main`, with one commit pushed to origin's branch:
   skips a recorded tree that no longer resolves (`hookClaimWorkerTrees` in
   `cmd/gc/cmd_hook_claim.go`). The reaper holds a tree that a bead's `work_dir`
   names while the bead is open, and a cleared key holds nothing.
+- The hook claim also reads the cleared key. On a bead that records no work
+  checkout under either key, it writes the claiming session's directory as
+  `gc.work_dir` (`hookClaimIdentityPatch` and `hookClaimRecordsNoWorkDir` in
+  `cmd/gc/cmd_hook_claim.go`). No session hook-claims a handed-off bead: the
+  refinery lists the work assigned to it, and a re-dispatched run's polecat
+  claims the run's steps. tk-1tfzr71.12, handed off and merged on 2026-11-06,
+  carries no `gc.claimed_at`. A bead a polecat claims itself, such as a rework
+  child, already records no `work_dir` when it is claimed, and no bead claimed
+  on this host that records a branch carries `gc.work_dir` (read 2026-11-06).
 
 ## The bead's other questions
 
