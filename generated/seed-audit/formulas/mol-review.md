@@ -41,10 +41,8 @@ Hard rules, in force for every step:
   because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: each step closes its own bead through
-assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,
-gc.step_ref) — never a GC_*BEAD_ID env var, which does not track the current
-step. No shell variable survives from one block to the next, so each block
-names the values it uses. A review held with no poured workflow follows these
+assets/scripts/claim-close.sh. No shell variable survives from one block to the
+next, so each block names the values it uses. A review held with no poured workflow follows these
 steps as its description says.
 
 

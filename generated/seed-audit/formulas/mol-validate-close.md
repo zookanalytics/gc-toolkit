@@ -33,9 +33,7 @@ without the fix it promised.
    SUBJECT, which is the one bead it closes, and only on its own confident
    check. It never closes a bead that carries a `merge_result` (that is the
    refinery's, closed on a verified merge); such a bead is put to the operator.
-4. **Close your own step beads** through assets/scripts/step-close.sh, which
-   resolves by (gc.root_bead_id, gc.step_ref); never a GC_*BEAD_ID env var,
-   which does not track the current step after a claim.
+4. **Close your own step beads** through assets/scripts/claim-close.sh.
 
 
 Variables:

@@ -92,7 +92,7 @@ waiting, and NEITHER where the subject is parked for a person. It exits
 non-zero when it stopped short, and then you must NOT post the sign-off:
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
-     --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters>" \
+     --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
      --ruled yes --ruling "<the ruling, one line>" --route human --no-wait
      # --route <rig>/<agent> releases a held subject to that pool instead
      # --leave <gate>, once for each gate the ruling leaves owed
@@ -124,7 +124,16 @@ operator, in the sign-off, which gate it was and what that answer said,
 instead of claiming your own.
 
 **On `--ruled yes`, the `--route` follows which bead carries the work** (the
-`work` skill says why):
+`work` skill says why). First read whether the subject is armed. An armed
+subject's arm sends it once its gate is resolved and nothing else holds it:
+```bash
+gc bd show "$SUBJECT" --json | jq -r '.[0].metadata | "\(.["gc.dispatch_when_ready"] // "not armed") \(.["gc.dispatch_when_ready_args"] // "")"'
+```
+When the ruling sends an armed subject to that target by that method, sign off
+with `--ruled yes --route human --no-wait` and send nothing yourself. Under any
+other ruling, disarm it before the sign-off with
+`"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "<the ruling, one line>"`,
+then take the case that fits. The cases:
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
   The formula the subject recommends is never sent this way; take it as the
@@ -205,6 +214,19 @@ way: keep the gate that releases it open until a ruling of its own is carried
 out. `--rework` and `--retire` apply only to an open PR. When the ruling
 reaches none, file and send its consequence as work (below), and re-run
 without them.
+
+**A ruling does not approve a PR.** A PR merges only on an Approve review on
+GitHub from an account other than the city's, and nothing a sitting writes is
+one. When an open PR the ruling leaves standing still waits on GitHub, the
+sign-off prints a line saying what its merge needs, with its link, and when
+that is the operator's Approve, the headline says so after your `--outcome`.
+Pass each line on in your sign-off, so the operator does not take your ruling
+for the approval. When a line asks for their Approve, call it the one thing
+left only when nothing else holds the PR. When the ruling holds the PR back,
+leaves a gate or decision owed (`--leave`) or waits on other work
+(`--waiting-on`), or the line names a request for changes, say that first,
+with what settles it, and give the Approve as the step after it. When no line
+prints, leave the Approve out.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),

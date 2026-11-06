@@ -209,10 +209,10 @@ pwd -P" 2>/dev/null | tail -1)"
     eq "$GOT" "$WS/gc-review-tk-fx/wt" "block $n running the formula's gather stands in the review's worktree"
 done
 eq "$(git -C "$WS/gc-review-tk-fx/wt" rev-parse HEAD)" "$C1" "at the reviewed commit"
-SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$REMOVE" tk-fx "$C1")" >/dev/null 2>&1
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$REMOVE" tk-fx "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fx"; then bad "the verdict step's remove line takes the workspace"; else ok "the verdict step's remove line takes the workspace"; fi
 STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fq "$C1")" >/dev/null 2>&1
-SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$QREMOVE" tk-fq "$C1")" >/dev/null 2>&1
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$QREMOVE" tk-fq "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fq"; then bad "the quorum's remove line takes the workspace"; else ok "the quorum's remove line takes the workspace"; fi
 
 # --- reap ----------------------------------------------------------------------

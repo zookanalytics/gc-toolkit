@@ -207,6 +207,33 @@ printf 'tk-v|tracks|tk-a\ntk-r|tracks|tk-a\n' > "$STUB_DEPS"
 eq "$("$SUT" derive --anchor tk-a)" "merging" "a bead that tracks the anchor does not hold the PR"
 : > "$STUB_DEPS"
 
+# The held: gate value reads the human gates that hold the PR through its open
+# blocks edges, so a gate on a rework the anchor waits on holds it as one on the
+# anchor does, and a person can find it from the PR.
+RW_ROW='{"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}'
+UNAPPROVED='{"id":"tk-a","status":"open","metadata":{"pr_posture":"review_required@abc@t"}}'
+store "[$UNAPPROVED, $RW_ROW, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"]}' "an open gate on the rework the anchor waits on holds the PR"
+store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-t\",\"status\":\"open\",\"metadata\":{}}, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-t|blocks|tk-rw\ntk-g|blocks|tk-t\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"]}' "…however far behind it the gate sits"
+store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-g\",\"status\":\"closed\",\"issue_type\":\"gate\",\"await_type\":\"human\",\"metadata\":{}}]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[]}' "resolving the gate clears the hold"
+store "[$UNAPPROVED, {\"id\":\"tk-rw\",\"status\":\"closed\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"tk-a\"}}, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-review","held":[]}' "a gate behind a closed blocker holds nothing"
+store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-c\",\"status\":\"open\",\"assignee\":\"human\",\"metadata\":{}}]"
+printf 'tk-rw|blocks|tk-a\ntk-c|tracks|tk-rw\ntk-c|tracks|tk-a\n' > "$STUB_DEPS"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[]}' "a conversation tracking the rework or the anchor holds nothing"
+store "[$UNAPPROVED, $RW_ROW, $GATE]"
+printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
+out=$(STUB_SHOW_FAIL_ON=tk-rw "$SUT" derive --anchor tk-a 2>/dev/null); rc=$?
+eq "$rc" "2" "a walk that does not read leaves the caller's labels alone"
+eq "$out" "" "…printing no value"
+: > "$STUB_DEPS"
+
 # The gate read is scoped to the anchor, the way the finalize gate reads it: the
 # beads its blocks edges reach. It never lists visits, or every gate, in the store.
 : > "$STUB_GC_LOG"
@@ -357,6 +384,24 @@ store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}
 resetlog
 "$SUT" reconcile --anchor tk-a --pr 71 --repo "$REPO" --current-labels "held: gate,status: needs-attention"
 eq "$(pv_labels 71)" "status: working" "the gate cleared => held: gate comes off, and the PR reads working again"
+: > "$STUB_DEPS"
+
+# held: gate — so does one on the rework the anchor waits on, and the status and
+# the label come off with it once a person resolves it.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","metadata":{}}]'
+printf 'tk-k|blocks|tk-a\ntk-g|blocks|tk-k\n' > "$STUB_DEPS"
+pv 72 '[{"name":"status: working"}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "status: working"
+eq "$(pv_labels 72)" "held: gate,status: needs-attention" "a human gate on the rework the anchor waits on => held: gate, and status: needs-attention"
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","metadata":{}}]'
+resetlog
+"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "held: gate,status: needs-attention"
+eq "$(pv_labels 72)" "status: working" "…and resolving it takes held: gate off"
 : > "$STUB_DEPS"
 
 # held: blocked — a live blocker routed to a person, which no automated actor clears.

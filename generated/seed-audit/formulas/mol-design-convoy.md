@@ -19,9 +19,7 @@ The molecule writes no code and needs no worktree of its own. Its one push is a
 ref push from the rig's checkout, which a converse sitting cannot make. Each step
 re-derives the subject from the input convoy ({{convoy_id}}'s one tracked member)
 in its own shell, records its result on the subject so a resume is idempotent,
-and closes its own step bead through assets/scripts/step-close.sh — resolved by
-(gc.root_bead_id, gc.step_ref), never a GC_*BEAD_ID env var, which after a
-hook-claim names a different step.
+and closes its own step bead through assets/scripts/claim-close.sh.
 
 Every PR the effort produces merges only with a standing APPROVED review from an
 account other than the city's, which counts until it is dismissed: merge.sh

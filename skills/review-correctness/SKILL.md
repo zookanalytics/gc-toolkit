@@ -53,8 +53,7 @@ the gate calls it by that path. The `test` line is the test evidence:
 Either way you may run one targeted suite for a gap you suspect, and the run of
 each new case against the pre-change code that the Testing dimension asks for
 is yours. Run those plain, each as `bash -c '<suite>'`, because a gate call
-with another command replaces the reviewed commit's record. Every suite runs
-under the claim-lease keepalive the review formula names. A failing suite is
+with another command replaces the reviewed commit's record. A failing suite is
 not automatically a finding: check whether it fails on the base too. A
 pre-existing failure belongs in the verdict as context, not as this branch's
 defect.
