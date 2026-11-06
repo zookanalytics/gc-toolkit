@@ -1044,7 +1044,7 @@ it('keeps a closed anchor on the board as a dimmed done row that names the windo
   expect(row.className).toContain('row-done');
   // The window bound is stated once under the table, for every DONE row — the
   // operator's only statement of what the band promises.
-  expect(within(anchors()).getByText(/GC_HELM_DONE_WINDOW/)).toBeTruthy();
+  expect(within(anchors()).getByText(/closed for longer than 7 days/)).toBeTruthy();
 });
 
 // The defect this split exists to prevent (tk-2plde): a subject that routed work

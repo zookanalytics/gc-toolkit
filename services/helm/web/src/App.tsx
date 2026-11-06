@@ -895,8 +895,7 @@ function AnchorsTable({
       {hasDone && (
         <p className="sub anchors-note">
           A closed row keeps its place below the live ones and leaves only by ageing out, once it
-          has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d, <code>0</code>{' '}
-          off).
+          has been closed for longer than 7 days.
         </p>
       )}
     </section>
