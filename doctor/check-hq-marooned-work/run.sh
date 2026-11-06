@@ -244,12 +244,14 @@ fi
 # The human gates that still hold by the shared rule (open_human_gates), read
 # only when a bead could be marooned: a bead one blocks waits on a person's
 # answer and is not marooned. `bd list` hides gates, so they are a listing of
-# their own, in bd's default scope, every status but closed, so the rule alone
-# decides which gates hold. A candidate it cannot clear is warned, not flagged,
+# their own. It names every live status, because bd's default scope leaves out
+# a gate in status pinned and any gate whose pinned flag is set, and the rule
+# counts both as holding. A candidate it cannot clear is warned, not flagged,
 # when that listing fails.
 gates=" "; gates_ok=1
 if [ -n "$rows" ]; then
-    read_to "$WORK/gates.json" gc bd list --db "$STORE" --type gate --include-gates --json --limit 0; grc=$?
+    read_to "$WORK/gates.json" gc bd list --db "$STORE" --type gate --include-gates \
+        --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0; grc=$?
     if [ "$grc" -eq 0 ] && gate_ids=$(jq -er "$HUMAN_GATE_JQ"'if type == "array" then open_human_gates | join(" ") else error("not an array") end' "$WORK/gates.json" 2>/dev/null); then
         gates=" $gate_ids "
     else

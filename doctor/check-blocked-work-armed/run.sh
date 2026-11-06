@@ -299,13 +299,14 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     fi
 
     # The gates a converse sitting's hold files: those that still hold by the
-    # shared rule (open_human_gate), under the hold's key. The listing is bd's
-    # default scope, every status but closed, so the rule alone decides which
-    # gates hold. Left unconfirmed ($sitting_ok=0) when the listing fails, so a
+    # shared rule (open_human_gate), under the hold's key. The listing names
+    # every live status, because bd's default scope leaves out a gate in status
+    # pinned and any gate whose pinned flag is set, and the rule counts both as
+    # holding. Left unconfirmed ($sitting_ok=0) when the listing fails, so a
     # candidate is warned rather than flagged.
     sittings=" "; sitting_ok=1
     gates=$(run_bounded gc bd list --db "$rig_path/.beads" --type gate --include-gates \
-        --json --limit 0 2>/dev/null); gates_rc=$?
+        --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null); gates_rc=$?
     gates=$(printf '%s' "$gates" | scrub)
     if [ "$gates_rc" -eq 0 ] && printf '%s' "$gates" | jq -e 'type == "array"' >/dev/null 2>&1 \
         && sitting_ids=$(printf '%s' "$gates" | jq -r "$HUMAN_GATE_JQ"'.[]? | select(open_human_gate("")

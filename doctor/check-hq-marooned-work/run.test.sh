@@ -58,12 +58,23 @@ name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
 [ "$name" = "${BD_SILENT_STORE:-}" ] && exit 0
 case "$sub" in
-  # `list --type gate` is the read of the store's gates; GATES_FAIL fails it, and
-  # each one's arguments are logged.
+  # `list --type gate` is the read of the store's gates; GATES_FAIL fails it. It
+  # answers in bd's scope: with no --status and no --all, bd leaves out status
+  # closed and pinned and every bead whose pinned flag is set; a --status set
+  # keeps the rows in it, and a flagged row only when the set names pinned or
+  # hooked.
   list) case " $* " in
-          *" --type gate "*) printf '%s\n' "$*" >> "$STORES/gates.args"
-                             [ -z "${GATES_FAIL:-}" ] || exit 3
-                             f="$STORES/$name.gates.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+          *" --type gate "*) [ -z "${GATES_FAIL:-}" ] || exit 3
+                             f="$STORES/$name.gates.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
+                             st=""; all=""; p=""
+                             for a in "$@"; do [ "$p" = "--status" ] && st="$a"; [ "$a" = "--all" ] && all=1; p="$a"; done
+                             jq -c --arg st "$st" --arg all "$all" '
+                               if $all != "" then .
+                               elif $st == "" then [ .[] | select((.status // "open") != "closed" and (.status // "open") != "pinned" and (.pinned // false) != true) ]
+                               else ($st | split(",")) as $set
+                                 | [ .[] | select(((.status // "open") as $s | $set | index($s)) != null)
+                                         | select(($set | index("pinned")) != null or ($set | index("hooked")) != null or (.pinned // false) != true) ]
+                               end' "$f" ;;
           *) f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
         esac ;;
   *) printf '[]' ;;
@@ -149,21 +160,18 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a bead only a gate of another kind blocks is still flagged"
 has "$OUT" "ok-held" "…and named"
 # Which gates hold is the rule every reader of a gate shares (bd-lib.sh's
-# open_human_gate): every status but closed. The listing is bd's default
-# scope, which leaves out only closed gates, so the check passes no status set
-# of its own, and a closed gate in the listing holds nothing.
-G_HUMAN_DEFERRED='{"id":"hq-g1","status":"deferred","issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
-G_HUMAN_CLOSED='{"id":"hq-g1","status":"closed","issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
-rm -f "$TMP/stores/gates.args"
-store "$B_HELD"; gates "$G_HUMAN_DEFERRED"
+# open_human_gate): every status but closed, pinned included. bd's default
+# scope leaves out a gate in status pinned and a gate whose pinned flag is set,
+# so the check's listing names every live status, and each such gate still
+# keeps the bead it blocks from being flagged.
+G_HUMAN_PINNED='{"id":"hq-g1","status":"pinned","issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
+G_HUMAN_FLAGGED='{"id":"hq-g1","status":"open","pinned":true,"issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
+store "$B_HELD"; gates "$G_HUMAN_PINNED"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a bead a human gate in any status but closed blocks is not flagged"
-has "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--type gate" "…judged on the store's gate listing"
-hasnt "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--status" "…read from bd's default scope, with no status set of the check's own"
-store "$B_HELD"; gates "$G_HUMAN_CLOSED"
+eq "$RC" "0" "a bead a human gate in status pinned blocks is not flagged"
+store "$B_HELD"; gates "$G_HUMAN_FLAGGED"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a bead only a closed human gate blocks is flagged"
-has "$OUT" "ok-held" "…and named"
+eq "$RC" "0" "a bead an open human gate whose pinned flag is set blocks is not flagged"
 store "$B_HELD"; gates "$G_HUMAN"
 OUT=$(GATES_FAIL=1 run_check); RC=$?
 eq "$RC" "1" "a gate listing that does not read warns (exit 1)"

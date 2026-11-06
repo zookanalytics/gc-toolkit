@@ -55,14 +55,25 @@ case "$sub" in
             [ "$name" = "${BD_FAIL_MARKED:-}" ] && exit 3
             f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
             if [ "$name" = "${BD_PARTIAL_MARKED:-}" ]; then exit 3; fi ;;
-          # `list --type gate` is the read of the store's gates; each one and its
-          # arguments are logged, and BD_FAIL_GATES names a store whose listing
-          # fails.
+          # `list --type gate` is the read of the store's gates; each one is
+          # logged, and BD_FAIL_GATES names a store whose listing fails. It
+          # answers in bd's scope: with no --status and no --all, bd leaves out
+          # status closed and pinned and every bead whose pinned flag is set;
+          # a --status set keeps the rows in it, and a flagged row only when the
+          # set names pinned or hooked.
           *" --type gate "*)
             printf '%s\n' "$name" >> "$STORES/gates.calls"
-            printf '%s\n' "$*" >> "$STORES/gates.args"
             [ "$name" = "${BD_FAIL_GATES:-}" ] && exit 3
-            f="$STORES/$name.gates.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+            f="$STORES/$name.gates.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
+            st=""; all=""; p=""
+            for a in "$@"; do [ "$p" = "--status" ] && st="$a"; [ "$a" = "--all" ] && all=1; p="$a"; done
+            jq -c --arg st "$st" --arg all "$all" '
+              if $all != "" then .
+              elif $st == "" then [ .[] | select((.status // "open") != "closed" and (.status // "open") != "pinned" and (.pinned // false) != true) ]
+              else ($st | split(",")) as $set
+                | [ .[] | select(((.status // "open") as $s | $set | index($s)) != null)
+                        | select(($set | index("pinned")) != null or ($set | index("hooked")) != null or (.pinned // false) != true) ]
+              end' "$f" ;;
           *) echo "stub bd: unexpected list: $*" >&2; exit 2 ;;
         esac ;;
   *) printf '[]'; exit 0 ;;
@@ -84,12 +95,14 @@ run_check() {
     RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
 }
 blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blocked.json"; }
-clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls" "$TMP/stores/gates.calls" "$TMP/stores/gates.args"; }
+clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls" "$TMP/stores/gates.calls"; }
 gates_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.gates.json"; }
 gate_reads() { if [ -f "$TMP/stores/gates.calls" ]; then wc -l < "$TMP/stores/gates.calls" | tr -d ' '; else echo 0; fi; }
 # hgate <id> <key> [<status>] — a human gate filed under <key>, open unless
-# <status> says otherwise.
+# <status> says otherwise. hgate_flagged <id> <key> — an open one whose pinned
+# flag is set.
 hgate() { printf '{"id":"%s","status":"%s","issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "${3:-open}" "$2"; }
+hgate_flagged() { printf '{"id":"%s","status":"open","pinned":true,"issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "$2"; }
 marked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.marked.json"; }
 marked_reads() { if [ -f "$TMP/stores/marked.calls" ]; then wc -l < "$TMP/stores/marked.calls" | tr -d ' '; else echo 0; fi; }
 
@@ -134,19 +147,17 @@ eq "$RC" "1" "a blocked bead another human gate holds is flagged"
 has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
 clear_stores
 # Which gates hold is the rule every reader of a gate shares (bd-lib.sh's
-# open_human_gate): every status but closed. The listing is bd's default
-# scope, which leaves out only closed gates, so the check passes no status set
-# of its own, and a closed gate in the listing holds nothing.
-blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1 deferred)"
+# open_human_gate): every status but closed, pinned included. bd's default
+# scope leaves out a gate in status pinned and a gate whose pinned flag is set,
+# so the check's listing names every live status, and each such gate still
+# holds the bead.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1 pinned)"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a sitting's gate in any status but closed holds the bead"
-has "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--type gate" "…judged on the store's gate listing"
-hasnt "$(cat "$TMP/stores/gates.args" 2>/dev/null)" "--status" "…read from bd's default scope, with no status set of the check's own"
+eq "$RC" "0" "a sitting's gate in status pinned holds the bead"
 clear_stores
-blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1 closed)"
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate_flagged x-0 conversation.tk-c1)"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "a sitting's closed gate holds nothing, so the bead is flagged"
-has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
+eq "$RC" "0" "a sitting's open gate whose pinned flag is set holds the bead"
 clear_stores
 # A gate listing that does not read cannot rule a sitting out, so the
 # candidate is warned as unverifiable and never flagged.
