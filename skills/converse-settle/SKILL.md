@@ -124,12 +124,16 @@ operator, in the sign-off, which gate it was and what that answer said,
 instead of claiming your own.
 
 **On `--ruled yes`, the `--route` follows which bead carries the work** (the
-`work` skill says why). An armed subject keeps its arm through a hold and never
-reads `held`, so the sign-off releases nothing and writes no route, whatever
-`--route` says, and the gate's resolution lets the arm send it. When the ruling
-sends the subject as it was armed, send it nothing more. When it sends it some
-other way, or not at all, disarm it before the sign-off:
-`"$CONV/deferred-dispatch.sh" disarm "$SUBJECT"`. The cases:
+`work` skill says why). First read whether the subject is armed. An armed
+subject's arm sends it once its gate is resolved and nothing else holds it:
+```bash
+gc bd show "$SUBJECT" --json | jq -r '.[0].metadata | "\(.["gc.dispatch_when_ready"] // "not armed") \(.["gc.dispatch_when_ready_args"] // "")"'
+```
+When the ruling sends an armed subject to that target by that method, sign off
+with `--ruled yes --route human --no-wait` and send nothing yourself. Under any
+other ruling, disarm it before the sign-off with
+`"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "<the ruling, one line>"`,
+then take the case that fits. The cases:
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
   The formula the subject recommends is never sent this way; take it as the

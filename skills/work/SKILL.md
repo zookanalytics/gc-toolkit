@@ -75,15 +75,10 @@ the target's `default_sling_formula`, which for a polecat pool is
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
   which a sitting's sign-off `--route <pool>` also writes when it releases a
-  held subject, has the pool claim the bead itself. Send it one way. Both start
-  two workers on one branch.
-  An arm (`deferred-dispatch.sh arm`) is a sling the deferred-dispatch pass makes
-  once nothing holds the bead. An armed subject keeps its arm through a sitting's
-  hold and never reads `held`, so the sign-off releases nothing and writes no
-  route, whatever `--route` says, and the gate's resolution lets the arm send it.
-  When the ruling sends it as it was armed, send it nothing more. When it sends
-  it some other way, or not at all, disarm it before the sign-off
-  (`deferred-dispatch.sh disarm <bead>`).
+  held subject, has the pool claim the bead itself. An arm
+  (`deferred-dispatch.sh arm`) has the deferred-dispatch pass sling the bead
+  once nothing holds it. Send it one way, and disarm an armed bead before you
+  send it another. Any two start two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`,
