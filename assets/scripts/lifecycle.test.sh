@@ -830,7 +830,7 @@ store '[{"id":"p-14","status":"open","assignee":"","notes":"","metadata":{"merge
 out="$(STUB_DROP_KEYS="p-14:gc.takeaway" "$SUT" transition p-14 --to abandoned \
   --takeaway "PR#9 was closed without merging" 2>&1)"; rc=$?
 eq "$rc" 2 "a dropped gc.takeaway exits 2"
-has "$out" "gc.takeaway=" "the refusal names the missing text"
+has "$out" "gc.takeaway reads nothing" "the refusal names the missing text"
 
 # --- held: a sitting's hold is a state, entered only from unanchored ------------
 echo "# held"
