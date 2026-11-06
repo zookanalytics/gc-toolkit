@@ -94,11 +94,11 @@ engage takes the one bead still waiting on the gate and makes the conversation
 it lands on reply to the gate; with several beads waiting it names them and
 starts nothing, and with none it says nothing waits and starts nothing.
 Named by a conversation that has closed, engage says when it closed and the
-first line of its last hand-back before any prompt. On a TTY it then engages
-the conversation's subject, where Enter files a new conversation whose ask
-names the closed one; with --no-input it starts nothing and names the
-subject's engage. A subject that is closed too takes no new conversation, so
-that engage starts nothing either way.
+first line of its last hand-back after the header, before any prompt. On a
+TTY it then engages the conversation's subject, where Enter files a new
+conversation whose ask names the closed one; with --no-input it starts nothing
+and names the subject's engage. A subject that is closed too takes no new
+conversation, so that engage starts nothing either way.
 Engaging a bead or a PR names each open human gate that holds it, reached
 through its open blocks edges, by the reader the PR's held: gate label and the
 board's row read: the interactive prompt offers each, and picking one engages
@@ -3519,17 +3519,20 @@ engage_take() {
 # of its close: when it closed, and the first line of its last hand-back
 # (gc.handback). A hand-back opens with a header, `<subject> — <label>`, that
 # names the subject and keeps its state for the lines after it, so a first line
-# that is that header gives way to the line after it. The text is the sitting's
-# own and reaches the operator's terminal, so control bytes are dropped, and a
-# line longer than 200 characters is cut at a word.
+# that is that header gives way to the line after it. A sitting may set the
+# header in markdown bold, `**<subject> — <label>**`, and the emphasis marks do
+# not stop it reading as the header. The text is the sitting's own and reaches
+# the operator's terminal, so control bytes are dropped, and a line longer than
+# 200 characters is cut at a word.
 engage_closed_said() {
     printf '%s' "$1" | jq -r --arg s "$2" '
         ((.closed_at // "") | tostring) as $at
         | ((.metadata // {})["gc.handback"] // "" | tostring
            | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")
            | [ split("\n")[] | gsub("^\\s+|\\s+$"; "") | select(. != "") ]) as $lines
-        | (if ($lines | length) > 1 and ($lines[0] | startswith($s))
-              and ($lines[0][($s | length):] | test("^\\s+[—–-]\\s"))
+        | (($lines[0] // "") | sub("^[*_]+"; "")) as $first
+        | (if ($lines | length) > 1 and ($first | startswith($s))
+              and ($first[($s | length):] | test("^[*_]*\\s+[—–-]\\s"))
            then $lines[1] else ($lines[0] // "") end
            | if length > 200 then (.[0:199] | sub("\\s+\\S*$"; "") | sub("[\\s,;:—–-]+$"; "")) + "…" else . end) as $line
         | ((.id // "") | tostring) + " closed" + (if $at == "" then "" else " at " + $at end)

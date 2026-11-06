@@ -36,12 +36,13 @@
 #             own row does not read starts nothing
 #   (CLOSED-*) a conversation id that names a closed conversation is said to
 #             be closed, with when and the first line of its hand-back after
-#             the header, before any prompt. With no input it starts nothing
-#             and names the subject's engage. On a terminal engage goes on as an
-#             engage of its subject: Enter files a new conversation whose ask
-#             names the closed one, a number takes a listed one, and the model
-#             is asked once. A closed subject starts nothing either way, and a
-#             conversation that closes while a prompt waits is refused as closed
+#             the header, plain or in bold, before any prompt. With no input
+#             it starts nothing and names the subject's engage. On a terminal
+#             engage goes on as an engage of its subject: Enter files a new
+#             conversation whose ask names the closed one, a number takes a
+#             listed one, and the model is asked once. A closed subject starts
+#             nothing either way, and a conversation that closes while a
+#             prompt waits is refused as closed
 #   (NOT-OPEN-CONV) an id the bead's listing holds as no open conversation has
 #             a refusal of its own
 #   (CUT-SHORT) a session still holding the alias of a conversation back in
@@ -848,6 +849,15 @@ hasnt "$OUT" "is not an open conversation" "(CLOSED-NOINPUT) …which is not the
 hasnt "$CALLED" "bd update" "(CLOSED-NOINPUT) …writing nothing"
 hasnt "$CALLED" "bd create" "(CLOSED-NOINPUT) …filing nothing"
 hasnt "$CALLED" "session new" "(CLOSED-NOINPUT) …and starting no sitting"
+reset; closed_conv tk-conv
+jq -n '{"gc.handback": "**tk-subj — the subject under engagement**\n\nSettled: the rewording rides the queued rework."}' > "$STATE_DIR/tk-conv.meta"
+run_engage tk-conv --no-attach
+has "$OUT" 'its hand-back reads "Settled: the rewording rides the queued rework."' "(CLOSED-BOLD) a header set in bold gives way to the line after it as well"
+hasnt "$OUT" 'reads "**' "(CLOSED-BOLD) …so the header is not the line engage prints"
+reset; closed_conv tk-conv
+jq -n '{"gc.handback": "Settled with no header.\nNothing further is owed here."}' > "$STATE_DIR/tk-conv.meta"
+run_engage tk-conv --no-attach
+has "$OUT" 'its hand-back reads "Settled with no header."' "(CLOSED-NOHEADER) a hand-back with no header shows its first line"
 reset; closed_conv tk-conv
 run_engage_tty '1\n\n\n' tk-conv --no-input --no-attach
 eq "$RC" 4 "(CLOSED-NOPROMPT) the same refusal on a terminal with --no-input exits 4"
