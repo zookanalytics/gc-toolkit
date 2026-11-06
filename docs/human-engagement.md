@@ -653,7 +653,7 @@ nothing. The lock's warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
-out of step 3 and runs `gc-helm.sh accept` at step 5, once the ruling's other
+out of its `ruled:` answers and runs `gc-helm.sh accept` once the ruling's other
 writes have landed and a `held` subject is released, because mol-polecat-work's
 load-context cancels a run poured at a bead that still reads `held`. Under the
 lock, that run finishes an acceptance the board's Accept left unfinished
@@ -829,7 +829,7 @@ assumed from the shared branch: the wait is closed, or handed off to the
 refinery.
 
 *A conversation that never held closes silently* — no sign-off, no thread
-output, only the reading appended to its subject. That is step 2's moot or
+output, only the reading appended to its subject: the premise re-check's moot or
 benign close. The sign-off exists because an unanswered framing left in a
 vanishing thread reads as a crash; where no framing was ever posted there is
 no question to abandon. An earlier sitting on the same conversation may have

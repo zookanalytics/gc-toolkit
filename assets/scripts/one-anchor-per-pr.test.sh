@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for the one-anchor-per-PR rework hand-back arm
-# (formulas/mol-refinery-patrol.toml merge-push step 4).
+# (formulas/mol-refinery-patrol.toml, the merge-push step's
+# one-anchor-per-pr-resolve and one-anchor-per-pr-terminal blocks).
 #
 # The defect: a rework child processed through the mr flow was stamped
 # merge_result=pull_request like a first handoff, becoming a SECOND gating

@@ -41,7 +41,7 @@
 #   (HELD, HELD-FAIL) a held subject is released on a ruling, and a release
 #             that fails stops the sign-off before the close, so the
 #             conversation stays open and its re-run releases the subject
-#   (HOLD*)   the hold skill's step-3 block, which writes held: it moves an
+#   (HOLD*)   the hold skill's held-state block, which writes held: it moves an
 #             unarmed unanchored subject to held, leaves an armed or an
 #             anchored subject's state alone, and writes nothing when the
 #             subject does not read
@@ -739,39 +739,39 @@ eq "$RC" 0 "(HELD-FAIL) the re-run, once the release lands, exits 0"
 eq "$(grep -c '^lifecycle transition tk-anc --to unanchored' "$CALLS")" 2 "(HELD-FAIL) …trying the release again"
 eq "$(field tk-conv status)" "closed" "(HELD-FAIL) …and then closing the conversation"
 
-echo "# the hold's step 3 moves an unarmed subject to held and leaves an armed one alone"
+echo "# the hold's held-state block moves an unarmed subject to held and leaves an armed one alone"
 # held writes a merge_result, and the deferred-dispatch pass retires an arm on
 # any merge_result, so an armed subject stays unanchored behind its gate. The
-# hold skill's own step-3 block runs here against the stub pack, its gate
+# hold skill's own held-state block runs here against the stub pack, its gate
 # placeholder filled.
 HOLD_SKILL="$HERE/../../skills/converse-hold/SKILL.md"
 awk '/^```/ { if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 } else if ($0 ~ /^```bash/) inb = 1; next }
      inb { buf = buf $0 "\n"; if (index($0, "--to held")) hit = 1 }' "$HOLD_SKILL" \
-  | sed -e 's#<the gate that holds the subject>#tk-rev#' > "$TMP/hold-step3"
-if [ -s "$TMP/hold-step3" ]; then ok "(HOLD) the hold skill's step-3 block is found"; else bad "(HOLD) the hold skill's step-3 block is found in $HOLD_SKILL"; fi
-# hold_step3 [subject] -> RC, OUT, from a cwd outside any checkout.
-hold_step3() {
+  | sed -e 's#<the gate that holds the subject>#tk-rev#' > "$TMP/held-block"
+if [ -s "$TMP/held-block" ]; then ok "(HOLD) the hold skill's held-state block is found"; else bad "(HOLD) the hold skill's held-state block is found in $HOLD_SKILL"; fi
+# held_block [subject] -> RC, OUT, from a cwd outside any checkout.
+held_block() {
     set +e
-    OUT="$(cd "$TMP/cwd" && CONV="$S" SUBJECT="${1:-tk-anc}" NEED="Build it now?" bash "$TMP/hold-step3" 2>&1)"; RC=$?
+    OUT="$(cd "$TMP/cwd" && CONV="$S" SUBJECT="${1:-tk-anc}" NEED="Build it now?" bash "$TMP/held-block" 2>&1)"; RC=$?
     set -e
 }
-acceptance; hold_step3
+acceptance; held_block
 eq "$RC" 0 "(HOLD) the step on an unarmed unanchored subject exits 0"
 has "$(cat "$CALLS")" "gc-helm takeaway tk-anc holding — Build it now? --by converse --waiting-on tk-rev" "(HOLD) …writing the headline"
 has "$(cat "$CALLS")" "lifecycle transition tk-anc --to held --route human" "(HOLD) …and moving the subject to held"
 acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat; setm tk-anc gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
-hold_step3
+held_block
 eq "$RC" 0 "(HOLD-ARMED) the step on an armed unanchored subject exits 0"
 has "$(cat "$CALLS")" "gc-helm takeaway tk-anc holding — Build it now? --by converse --waiting-on tk-rev" "(HOLD-ARMED) …writing the headline"
 hasnt "$(cat "$CALLS")" "lifecycle transition" "(HOLD-ARMED) …and no transition, so the subject stays unanchored"
 eq "$(meta tk-anc gc.dispatch_when_ready) $(meta tk-anc gc.dispatch_when_ready_args)" 'gc-toolkit/gc-toolkit.polecat ["--on","mol-polecat-work"]' "(HOLD-ARMED) …and the arm stays as it was"
-acceptance; SUBJECT_LC_STATE=pull_request hold_step3
+acceptance; SUBJECT_LC_STATE=pull_request held_block
 eq "$RC" 0 "(HOLD-ANCHORED) the step on an anchored subject exits 0"
 hasnt "$(cat "$CALLS")" "lifecycle transition" "(HOLD-ANCHORED) …and leaves its anchor state alone"
-acceptance; SHOW_DOWN=tk-anc hold_step3
+acceptance; SHOW_DOWN=tk-anc held_block
 [ "$RC" -ne 0 ] && ok "(HOLD-UNREAD) the step on a subject that does not read exits non-zero" || bad "(HOLD-UNREAD) the step on a subject that does not read exits non-zero (got 0)"
 eq "$(cat "$CALLS")" "" "(HOLD-UNREAD) …before any write"
-acceptance; hold_step3 tk-gone
+acceptance; held_block tk-gone
 [ "$RC" -ne 0 ] && ok "(HOLD-UNREAD) the step on a subject the store does not hold exits non-zero" || bad "(HOLD-UNREAD) the step on a subject the store does not hold exits non-zero (got 0)"
 eq "$(cat "$CALLS")" "" "(HOLD-UNREAD) …before any write"
 
