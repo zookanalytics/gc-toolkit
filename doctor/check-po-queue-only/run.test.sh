@@ -13,7 +13,8 @@
 #     each routed step, and not a step routed elsewhere), unread mail from any
 #     sender (a sender of human named as such), a queued bead carrying
 #     anchor_bead, one carrying a landing state, one carrying an arm, one
-#     carrying an assignee, and one a live run works;
+#     carrying an assignee, and one a live run works, and the lift a remedy
+#     names removes each spelling of the hold the bead carries;
 #   - what is not a finding: a held bead routed or assigned to the po, under
 #     either hold label and any spelling Gas City reads, read mail, a closed
 #     bead, a queued bead whose only mark is a branch, and a queued bead whose
@@ -281,7 +282,8 @@ hasnt "$OUT" "al-q7" "a run that has ended is not a live run"
 reset
 queue '{"id":"al-q8","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on\",\"mol-validate-close\"]"}}' \
       '{"id":"al-q9","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"}}' \
-      '{"id":"al-q10","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on=mol-validate-close\"]"}}'
+      '{"id":"al-q10","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on=mol-validate-close\"]"}}' \
+      '{"id":"al-q11","status":"open","issue_type":"task","labels":["learning","hold:mayor","Hold:Mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on\",\"mol-validate-close\"]"}}'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a queued bead armed for its validating closer is an ERROR"
 Q8=$(line_of "$OUT" "al-q8")
@@ -293,6 +295,9 @@ Q9=$(line_of "$OUT" "al-q9")
 has "$Q9" "queued bead al-q9 is armed for dispatch to alpha/gc-toolkit.polecat" "an arm on another formula keeps the placement remedy"
 has "$Q9" "deferred-dispatch.sh disarm al-q9" "…and its disarm"
 has "$(line_of "$OUT" "al-q10")" "armed for its validating closer (mol-validate-close)" "the --on=<formula> spelling names the closer too"
+# bd removes a label by its exact text, so the lift names each spelling of the
+# hold the bead carries, and only those.
+has "$(line_of "$OUT" "al-q11")" "gc bd update al-q11 --remove-label hold:mayor --remove-label Hold:Mayor --db $TMP/alpha/.beads, and keep the arm" "the lift removes each spelling of the hold the bead carries"
 
 # --- 11. the queue in the API's shape ----------------------------------------
 reset

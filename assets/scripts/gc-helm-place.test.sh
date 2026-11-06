@@ -20,8 +20,10 @@
 #     with no hold:mayor and no dispatch, a bead hold:external also holds, a
 #     status other than open, --standalone on a bead with a parent, a parent
 #     that is closed or not in the bead's store, and a bead an arm already
-#     sends to another pool or on another formula. A bead with no hold that a
-#     live run or an arm shows dispatched is reported as placed.
+#     sends to another pool or on another formula. A bead armed for its
+#     validating closer is refused with the by-hand lift, which removes each
+#     spelling of the hold it carries. A bead with no hold that a live run or
+#     an arm shows dispatched is reported as placed.
 #   - a sling that fails leaves the hold on, and so does an arm that fails.
 #   - a stop at any write, then a second run, ends with one run and no hold:
 #     the second run dispatches nothing once a live run works the bead or the
@@ -594,6 +596,12 @@ has "$ERR" "gc bd update tk-new --remove-label hold:mayor" "(ARMED-CLOSER) …an
 has "$ERR" "To place it as work instead, disarm it" "(ARMED-CLOSER) …with the disarm only as the way to place it instead"
 unchanged "(ARMED-CLOSER) …with nothing written"
 hasnt "$CALLS" "sling " "(ARMED-CLOSER) …and nothing slung"
+# bd removes a label by its exact text, so the lift it names removes each
+# spelling of the hold the bead carries.
+jq -c 'map(if .id == "tk-new" then .labels = ["hold:mayor", "Hold:Mayor"] else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+run_place tk-new --under tk-epic
+eq "$RC" "2" "(ARMED-CLOSER) a bead held under two spellings exits 2 too"
+has "$ERR" "gc bd update tk-new --remove-label hold:mayor --remove-label Hold:Mayor --db " "(ARMED-CLOSER) …naming a --remove-label for each spelling it carries"
 reset_store; arm_new gc-toolkit/gc-toolkit.polecat '["--on","mol-polecat-work"]'
 run_place tk-new --under tk-epic --on mol-polecat-work
 eq "$RC" "0" "(ARMED-SAME) a bead armed where this placement sends it exits 0"

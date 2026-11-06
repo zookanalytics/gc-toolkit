@@ -117,9 +117,13 @@ same again:
 gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: <what was proposed>; the operator declined: <their reason>."
 ```
 
-A bead sent where the rig says takes the edge the waits skill gives for it,
-loses its hold (`gc bd --rig <rig> update <bead> --remove-label hold:mayor`),
-and gets no route.
+A bead sent where the rig says takes the edge the waits skill gives for it, and
+gets no route. It loses its hold: list its labels
+(`gc bd --rig <rig> label list <bead>`), remove each one that spells
+`hold:mayor` in any case, one `--remove-label` each
+(`gc bd --rig <rig> update <bead> --remove-label hold:mayor`), and list them
+again to see that none is left, because bd removes a label only by its exact
+text.
 
 ## 7. Stop when the operator says
 

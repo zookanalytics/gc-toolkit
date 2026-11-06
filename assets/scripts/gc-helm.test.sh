@@ -1090,15 +1090,18 @@ grep -q -- '--remove-label' "$TMP/updates" \
   && bad "(HOLDPARK) a release back to the person lifted the hold: $(cat "$TMP/updates")" \
   || ok "(HOLDPARK) a release back to the person keeps the hold"
 eq "$(cat "$TMP/labels")" "A-PARKED|hold:mayor" "(HOLDPARK) …and the label stands"
-printf 'A-PARKED|hold:mayor\n' > "$TMP/labels"
+printf 'A-PARKED|hold:mayor\nA-PARKED|Hold:Mayor\n' > "$TMP/labels"
 : > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
 HRC=0
 FAKE_LABEL_DROP=1 sh "$SCRIPT" takeaway A-PARKED "placed" --release --route "$POOL" >/dev/null 2>"$TMP/herr" || HRC=$?
 eq "$HRC" "4" "(HOLDDEAD) a lift that will not land fails the verb"
-eq "$(grep -c -- '--remove-label hold:mayor' "$TMP/updates" || true)" "3" "(HOLDDEAD) …after the release write and two repairs"
+eq "$(grep -c -- '--remove-label hold:mayor --remove-label Hold:Mayor' "$TMP/updates" || true)" "3" "(HOLDDEAD) …after the release write and two repairs"
 grep -q 'still carries hold:mayor' "$TMP/herr" \
   && ok "(HOLDDEAD) …naming the hold and its repair" \
   || bad "(HOLDDEAD) the miss is not named: $(cat "$TMP/herr")"
+grep -q -- 'lift it by hand, removing each spelling of the hold it carries: gc bd update A-PARKED --remove-label hold:mayor --remove-label Hold:Mayor' "$TMP/herr" \
+  && ok "(HOLDDEAD) …and the by-hand lift removes each spelling it carries" \
+  || bad "(HOLDDEAD) the by-hand lift does not name each spelling: $(cat "$TMP/herr")"
 : > "$TMP/labels"; : > "$TMP/routed"
 
 # ── takeaway --release: the pour stamp read-back ──────────────────────────────

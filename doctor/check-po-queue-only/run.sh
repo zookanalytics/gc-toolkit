@@ -432,22 +432,23 @@ done <<< "$scopes"
 # Judged from the queue's own rows, so these need no store read.
 while IFS= read -r line; do
     [ -n "$line" ] && findings+=("$line")
-done <<< "$(jq -r --argjson stores "$STORES_JSON" '
+done <<< "$(jq -r --argjson stores "$STORES_JSON" "$DISPATCH_PATH_JQ"'
     def nonblank: (. // "") | tostring | test("[^[:space:]]");
     def arm_args: if type == "string" then (if test("[^[:space:]]") then (fromjson? // [.]) else [] end)
                   elif type == "array" then . else [] end;
     .[] | (if (.metadata | type) == "object" then .metadata else {} end) as $m
     | ((.id // "?") | tostring) as $id
     | (($stores[$id | split("-")[0]] // null) | if . == null then "" else " --db " + .db end) as $dbf
+    | "gc bd update \($id)\([dispatch_hold_spellings("hold:mayor")[] | " --remove-label " + .] | add // "")\($dbf)" as $lift
     | (if ($m.anchor_bead | nonblank) then
-         "queued bead \($id) carries anchor_bead=\($m.anchor_bead | tostring): it is PR-finishing work of that bead, not new work, and place refuses it. Lift its hold, gc bd update \($id) --remove-label hold:mayor\($dbf), and correct the writer that held it"
+         "queued bead \($id) carries anchor_bead=\($m.anchor_bead | tostring): it is PR-finishing work of that bead, not new work, and place refuses it. Lift its hold by removing each spelling of it the bead carries, \($lift), and correct the writer that held it"
        else empty end),
       (if ($m.merge_result | nonblank) then
-         "queued bead \($id) carries a landing state, merge_result=\($m.merge_result | tostring), so it is not new work. Lift its hold, gc bd update \($id) --remove-label hold:mayor\($dbf), and correct the writer that held it"
+         "queued bead \($id) carries a landing state, merge_result=\($m.merge_result | tostring), so it is not new work. Lift its hold by removing each spelling of it the bead carries, \($lift), and correct the writer that held it"
        else empty end),
       (if ($m["gc.dispatch_when_ready"] | nonblank) then
          (if ($m["gc.dispatch_when_ready_args"] | arm_args | any(.[]; tostring | test("(^|=)mol-validate-close$"))) then
-            "queued bead \($id) is armed for its validating closer (mol-validate-close) on \($m["gc.dispatch_when_ready"] | tostring): it waits on another bead to land and is checked then, so it is not new work to place, and while it is held the closer never runs. Lift its hold, gc bd update \($id) --remove-label hold:mayor\($dbf), and keep the arm"
+            "queued bead \($id) is armed for its validating closer (mol-validate-close) on \($m["gc.dispatch_when_ready"] | tostring): it waits on another bead to land and is checked then, so it is not new work to place, and while it is held the closer never runs. Lift its hold by removing each spelling of it the bead carries, \($lift), and keep the arm"
           else
             "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: deferred-dispatch.sh disarm \($id)"
           end)

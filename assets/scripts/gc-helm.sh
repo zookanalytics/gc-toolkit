@@ -376,6 +376,19 @@ EOF
     gc bd update "$_hr_bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 || true
 }
 
+# hold_lift_cmd <bead> <spellings> — the write that lifts those spellings by
+# hand, one --remove-label each as hold_remove writes them, in the caller's
+# store pin, for a message to name.
+hold_lift_cmd() {
+    _hl_cmd="gc bd update $1"
+    while IFS= read -r _hl_s; do
+        [ -z "$_hl_s" ] || _hl_cmd="$_hl_cmd --remove-label $_hl_s"
+    done <<EOF
+$2
+EOF
+    printf '%s%s' "$_hl_cmd" "${db:+ --db $db}"
+}
+
 # lift_hold <bead> [<note>] — lift hold:mayor off the bead with the note in the
 # same write, and read the row back, retrying the removal alone once. Returns 0
 # once no spelling remains, a bead that carries none included, which is not
@@ -1574,7 +1587,7 @@ EOF
         exit 4
     fi
     if [ -n "$hold_missed" ]; then
-        echo "$PROG: takeaway: $bead is released${route:+ to $route}${assign:+ to $assign}, but it still carries hold:mayor, and Gas City serves no bead a hold label holds, so it reaches nobody. The headline, the release and the edges are written; lift it by hand: gc bd update $bead${db:+ --db $db} --remove-label hold:mayor" >&2
+        echo "$PROG: takeaway: $bead is released${route:+ to $route}${assign:+ to $assign}, but it still carries hold:mayor, and Gas City serves no bead a hold label holds, so it reaches nobody. The headline, the release and the edges are written; lift it by hand, removing each spelling of the hold it carries: $(hold_lift_cmd "$bead" "$hold_sp")" >&2
         exit 4
     fi
     # Reported at its read-back above; the exit waits until here so the edges
@@ -2153,7 +2166,7 @@ cmd_place() {
         pl_want_args=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
         if [ "$pl_arm" != "$pool" ] || [ "$pl_arm_args" != "$pl_want_args" ]; then
             if printf '%s' "$pl_arm_args" | jq -e 'type == "array" and any(.[]; tostring | test("(^|=)mol-validate-close$"))' >/dev/null 2>&1; then
-                echo "$PROG: place: $bead is armed for its validating closer (mol-validate-close) on $pl_arm: it waits on another bead to land and is checked then, so it is not new work to place. Lift its hold and keep the arm: gc bd update $bead --remove-label hold:mayor --db $db. To place it as work instead, disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
+                echo "$PROG: place: $bead is armed for its validating closer (mol-validate-close) on $pl_arm: it waits on another bead to land and is checked then, so it is not new work to place. Lift its hold and keep the arm, removing each spelling of the hold it carries: $(hold_lift_cmd "$bead" "$hold_sp"). To place it as work instead, disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
                 exit 2
             fi
             echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}. Disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2

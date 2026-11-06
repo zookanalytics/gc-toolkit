@@ -217,8 +217,10 @@ its hold, so `place` runs the writes in one order and reads each one back:
    blocker holds the bead or a parent above it, such as a park, it arms the
    dispatch (`deferred-dispatch.sh arm`), so the run starts once nothing holds
    the bead. Otherwise it slings.
-5. It lifts the hold, with a note saying where the bead went, in one write:
+5. It lifts the hold, with a note saying where the bead went, in one write
+   that removes each label spelling the hold, one `--remove-label` each:
    `gc bd update <bead> --remove-label hold:mayor --append-notes "Placed ..."`.
+   It reads the labels back and retries the removal once.
 
 The dispatch comes before the lift, so a dispatch that fails leaves the bead
 held, in the queue. A run cut off between the two goes on with the hold still
@@ -234,10 +236,14 @@ A hold also lifts these ways:
   `gc-helm.sh accept`, lift it in the write that sends the bead on, because
   sending a held bead on is a placement and Gas City serves no bead a hold
   label holds, assigned or not.
-- `gc bd update <bead> --remove-label hold:mayor` lifts it by hand. A bead
-  that waits on the bead that retires its code, through a `blocks` edge and its
-  validating closer's arm, takes this write too, because deferred dispatch fires
-  a held bead's arm only once its hold lifts. A bead lifted with nothing else
+- By hand, `gc bd update <bead> --remove-label hold:mayor` lifts it, with one
+  `--remove-label` for each other spelling of the label that
+  `gc bd label list <bead>` shows, such as `Hold:Mayor`, because Gas City reads
+  the label in any case and bd removes a label only by its exact text. A second
+  `gc bd label list <bead>` shows that none is left. A bead that waits on the
+  bead that retires its code, through a `blocks` edge and its validating
+  closer's arm, takes this write too, because deferred dispatch fires a held
+  bead's arm only once its hold lifts. A bead lifted with nothing else
   written is raw input again, so the proactive scan reacts to it when intake is
   on, and the liveness sweep names it until then.
 - A close leaves the label on a closed bead, which nothing reads.
