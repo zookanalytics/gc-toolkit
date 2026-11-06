@@ -74,13 +74,17 @@ has resolved. So the close first reads the subject and what still blocks it.
 A headline that still waits, one with no `gc.takeaway_settled`, on a subject
 that no open blocker holds is replaced with the reading, settled, because it
 names a question that no longer stands. A subject that another open blocker
-still holds keeps its headline, since that wait is still owed. Every write is
-read back, and the conversation closes only after them:
+still holds keeps its headline, since that wait is still owed. A read counts
+only when `gc` exits 0 and answers in its shape: the subject's own row, alone,
+and a list of its blockers. Every write is read back, and the conversation
+closes only after them:
 ```bash
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
 ACTION="<what ended the visit, in one plain sentence>"
-WAITS=$(gc bd show "$SUBJECT" --json | jq -er '(.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end') \
-  && OPEN=$(gc bd dep list "$SUBJECT" --type blocks --json | jq -er 'if type == "array" then [ .[] | select(((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
+  && DEPS=$(gc bd dep list "$SUBJECT" --type blocks --json) \
+  && OPEN=$(printf '%s\n' "$DEPS" | jq -er 'if type == "array" then [ .[] | select(((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
   && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
        "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"

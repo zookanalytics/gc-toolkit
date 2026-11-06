@@ -885,7 +885,8 @@ echo "── a moot or benign close settles a headline that waits on nothing ─
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The
 # block runs as written, its placeholders filled, under stubs: gc answers the
-# subject's row from RL_ROW and its blocks edges from RL_GATES.
+# subject's row from RL_ROW and its blocks edges from RL_GATES, and exits
+# RL_SHOW_RC and RL_DEPS_RC after printing them.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
@@ -895,8 +896,8 @@ printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
     "bd show "*)
         [ -z "${RL_SHOW_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
-        printf '%s\n' "$RL_ROW" ;;
-    "bd dep list") printf '%s\n' "$RL_GATES" ;;
+        printf '%s\n' "$RL_ROW"; exit "${RL_SHOW_RC:-0}" ;;
+    "bd dep list") printf '%s\n' "$RL_GATES"; exit "${RL_DEPS_RC:-0}" ;;
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
@@ -977,6 +978,26 @@ EOF
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
             0:*|*"bd close"*|*"bd update"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
+            *) ok "($sh_) recheck close: $what closes nothing" ;;
+        esac
+    done
+    # A read is an answer only when gc exits 0 and the subject's read is its own
+    # row, alone. Anything else could be read as a settled headline or as no
+    # blocker, so the close writes nothing and stops.
+    TWICE=$(printf '%s' "$WAITING" | jq -c '. + .')
+    OTHER=$(printf '%s' "$WAITING" | jq -c '.[0].id = "tk-y"')
+    for stop in "[]|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers no row" \
+        "$TWICE|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers two rows" \
+        "$OTHER|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers another bead's row" \
+        "$WAITING|RL_SHOW_RC=1|RL_DEPS_RC=0|a subject read that exits non-zero, whatever it printed," \
+        "$WAITING|RL_SHOW_RC=0|RL_DEPS_RC=1|a blocker listing that exits non-zero, whatever it printed,"; do
+        IFS='|' read -r row show_rc deps_rc what <<EOF
+$stop
+EOF
+        rc=$(run_release "$run" "$row" "$NONE_HOLDS" "$show_rc" "$deps_rc")
+        calls=$(tr '\n' ';' <"$RL/log")
+        case "$rc:$calls" in
+            0:*|*"bd close"*|*"bd update"*|*"gc-helm takeaway"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
             *) ok "($sh_) recheck close: $what closes nothing" ;;
         esac
     done
