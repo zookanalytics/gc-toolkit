@@ -54,8 +54,12 @@ store, and the test file's own git calls were a tenth of
 
 - `bd-lib.sh`'s `bd_json`, `bd_list` and `_bd_anchor_up`, `run-lib.sh`'s
   `run_lib_read` and `hold-lib.sh`'s graph read start grep and tr only for a read
-  carrying a control byte or a leading `gc bd:` notice. Any other read is one line
-  those two would print unchanged.
+  carrying a leading `gc bd:` notice or a control byte other than a newline that
+  ends it. Any other read is one line those two would print unchanged, less that
+  newline. `bd_json` keeps the newlines that end gc's answer, so that it returns
+  the pipeline's statuses, and every answer ends in one, whether a stub's `jq -c`
+  line or a real store's indented JSON. Its test therefore leaves that last
+  newline out.
 - `test-harness.sh`'s gc stub answers `dep list` in one jq pass, and its writes
   name their temp files by pid instead of starting mktemp.
 - `deferred-dispatch.test.sh` and `bead-rehome.test.sh` run their bd stub inside
@@ -64,23 +68,38 @@ store, and the test file's own git calls were a tenth of
 
 ## What that came to
 
-A paired run of the whole suite on the macOS host, both trees at `-j 3` at the
-same time, at load 18 to 38, passed all 293 runs on both sides. Without
-`migrate-visits-to-gates.test.sh` its summed test-seconds were 10,482 on main
-and 9,646 on the branch, 92 percent. The branch took 3,797 s of wall time
-against main's 4,118 s. The kept suites came to 93 percent and the retiring ones
-to 90 percent. Suite by suite, paired runs measured `gate-ensure.test.sh`'s
-dispatch part at 65 percent, `deferred-dispatch.test.sh` at 72 to 83 percent,
-`hold-lib.test.sh` at 58 percent and `finding.test.sh` at 90 percent, and left
-`signoff.test.sh`, `bead-rehome.test.sh` and `bring-current-guard.test.sh`
-within the noise of even.
+Two paired runs of the whole suite on the macOS host passed all 293 runs on
+both sides. Their figures leave out `migrate-visits-to-gates.test.sh`.
+
+- At ea95ddcab, both trees at `-j 3` at the same time, at load 18 to 38, the
+  summed test-seconds were 10,482 on main and 9,646 on the branch, 92 percent.
+  The branch took 3,797 s of wall time against main's 4,118 s. The kept suites
+  came to 93 percent and the retiring ones to 90 percent.
+- At e22829359, once `bd_json`'s test left out the newline that ends a read,
+  both trees at `-j 6`, at load 7 to 56, they were 14,278 on main and 13,648 on
+  the branch, 96 percent. `tools/run-tests.test.sh` failed under contention on
+  both sides, before the serial re-run recovered it, and took 858 s on the branch
+  against 554 s on main. Without it the branch came to 93 percent. The wall
+  times were 3,238 s and 3,061 s. The suites on the shared harness came to 92 percent,
+  the kept suites to 98 percent and the retiring ones to 92 percent.
+
+The second run came out higher although the branch gained only a fix between
+them, so two paired whole-suite runs on this host differ by several percent.
+Suite by suite, paired runs measured `gate-ensure.test.sh`'s dispatch part at 65
+and 85 percent, `deferred-dispatch.test.sh` at 72 to 83 percent and at 74
+percent, and `finding.test.sh` at 90 and 59 percent. They left `signoff.test.sh`,
+`bead-rehome.test.sh` and `bring-current-guard.test.sh` within the noise of
+even. The shortest suites moved by half or more either way, such as
+`hold-lib.test.sh` at 58 and 170 percent. Two copies of `deferred-dispatch.test.sh`
+at e22829359 ran at the same moment, one with its stub's one-pass update and one
+with main's jq per flag, and took 132 s and 158 s.
 
 ## What holds most of what is left
 
 Each is a script the suites run, so a cut here is a change to what the pack
 ships, which `bd-lib.sh`'s change above was too.
 
-- `row_meta` in `bd-lib.sh` reads one metadata key per jq. `signoff.sh` has 38
+- `row_meta` in `bd-lib.sh` reads one metadata key per jq. `signoff.sh` has 43
   call sites of it, and one run of `signoff.test.sh` made 2,236 such calls.
 - `queue-priority.sh` is 12 to 17 percent of the gate-ensure, pr-facts and
   signoff profiles. Each call resolves its store through `rig-map.sh` and takes
