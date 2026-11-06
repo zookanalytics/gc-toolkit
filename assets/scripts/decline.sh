@@ -138,7 +138,7 @@ else
 fi
 
 if [ -n "$SUBJECT" ]; then
-  [ -z "$FORMULA" ] || MESSAGE="$MESSAGE Then clear this gate: $SUBJECT waits on it, and clearing it re-slings $SUBJECT. To stand down instead, close $SUBJECT first."
+  [ -z "$FORMULA" ] || MESSAGE="$MESSAGE Then clear this gate: $SUBJECT waits on it, and clearing it re-slings $SUBJECT. To stand down instead, do not clear this gate: run $SCRIPT_DIR/stand-down.sh $SUBJECT --key $KEY --ruling '<why>'."
   if ! "$SCRIPT_DIR/human-gate.sh" --subject "$SUBJECT" --key "$KEY" --message "$MESSAGE"; then
     echo "$PROG: human-gate.sh recorded no gate; $KEEP" >&2
     exit 1

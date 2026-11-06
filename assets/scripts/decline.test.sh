@@ -63,7 +63,7 @@ run "${GATED[@]}" --formula mol-f
 eq "$TRACE" "GATE AWAIT CANCEL DRAIN " "a gate with a formula: asks, waits, ends the run, drains"
 eq "$(args AWAIT)" "tk-w --key k1 --formula mol-f" "the wait names the subject, the key and the formula"
 has "$(args GATE)" "the message. Then clear this gate: tk-w waits on it, and clearing it re-slings tk-w." "the gate tells the person what clearing it does"
-has "$(args GATE)" "To stand down instead, close tk-w first." "and how to stand down"
+has "$(args GATE)" "To stand down instead, do not clear this gate: run $(cd "$PACK" && pwd)/stand-down.sh tk-w --key k1 --ruling '<why>'." "and how to stand down, under the gate's own key"
 
 GATE_RC=1 run "${GATED[@]}" --formula mol-f
 eq "$RC" 1 "a gate that does not land exits 1"

@@ -106,7 +106,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   `gastownhall/gascity-packs` main 796d7ecd7.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
   and parked work and ends a run by cancelling it. `workspace-setup`:
-  `tk-1tfzr71.10` moves its worktree to `gc worktree`, and the refinery's rework
+  `tk-1tfzr71.43` moves its worktree to `gc worktree`, and the refinery's rework
   machinery goes (`tk-1tfzr71.20`), which ends the merge resume. `preflight-tests`
   and `self-review`: Gas City ships a record of a check per commit. `submit-and-exit`:
   `tk-1tfzr71.20` moves the merge onto GitHub's branch rules.
@@ -496,3 +496,56 @@ shares only the word ([authority-map.md](authority-map.md)).
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
   GitHub's review thread events. The count then moves onto that record.
+
+## Agent home provisioning
+
+- **Covers.** `assets/scripts/worktree-setup.sh`.
+- **Stands in for.** A Gas City owner for the worktree an agent's sessions start
+  in, which `gc worktree ensure` would be if it provisioned a tree for an agent
+  rather than for a bead.
+- **Evidence.**
+  - In `gastownhall/gascity`, `gc worktree ensure` requires `--bead`,
+    `--store-ref` and `--generation`. Its postcondition is "the bead's uniquely
+    named branch checked out on an attached HEAD", on a path that is a direct
+    child of `--root`
+    ([gc worktree](https://docs.gascity.com/reference/cli#gc-worktree)). A home
+    serves many beads and outlives each of them. `Ensure` in
+    `internal/worktree/worktree.go` verifies an existing tree and never moves it,
+    and it writes no bead redirect and no excludes, so a home would still need
+    this script for all of that.
+  - Nothing else provisions one. `work_dir` and `pre_start` are the agent's own
+    config ([Agent](https://docs.gascity.com/reference/config#agent)), and the
+    daemon's `auto_prune_worker_dir` and `auto_reap_closed_bead_worktrees` only
+    remove trees. No formula in the core pack calls `gc worktree`:
+    `mol-polecat-commit` and `mol-scoped-work` cut their per-bead trees with
+    `git worktree add`.
+  - In `gastownhall/gascity-packs`, Gas Town's own polecat and refinery provision
+    their homes the same way: `pre_start` runs
+    `gastown/assets/scripts/worktree-setup.sh`, from which this script descends.
+    This pack imports no pack it could call that copy from.
+  - Nothing in Gas City brings a home to the default tip at each start. The
+    agent-home cleanup (`cleanupClosedBeadAgentHomeWorktrees` in
+    `cmd/gc/agent_home_worktree_cleanup.go`) moves a home only when it carries
+    the worker-dir prune's `.worktree-stale` marker, sits on a branch that names
+    a closed bead and has no uncommitted work.
+  - Nothing in Gas City brings a failed `pre_start` to a person. The command's
+    output goes into the start's error, which the controller and reconciler log
+    ([Agent](https://docs.gascity.com/reference/config#agent), `pre_start`). Five
+    failed wakes in a row hold the session for five minutes
+    (`defaultMaxWakeAttempts` and `defaultQuarantineDuration` in
+    `cmd/gc/session_types.go`), and a failed pending create also counts toward
+    a startup-health episode (`recordStartupHealthFailure` in
+    `cmd/gc/session_lifecycle_parallel.go`). Nothing sends the alert an episode
+    marks pending (`RecordStartupFailure` in `internal/session/startup_health.go`),
+    the doctor check that lists episodes leaves the error out
+    (`startupHealthEpisodesCheck` in `cmd/gc/doctor_startup_health.go`), and
+    `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
+    So the script reports a home it cannot sync through `patrol-finding.sh`, one
+    report per home, which the next clean start clears.
+  - The search, and each way this script differs from Gas Town's and why, is
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
+  `gastownhall/gascity-packs` main 796d7ecd73cf.
+- **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
+  the default branch, or Gas Town's agents stop running a script of their own at
+  `pre_start`.

@@ -144,6 +144,18 @@ instead of claiming your own.
   Answer that gate in the same ruling once the operator rules on it, or sign
   off without `--accept` and with `--leave` on the recommendation's gate, and
   the board offers Accept once the other gate is cleared.
+- **The ruling is that the subject's work will not go on, and a human gate
+  holds it.** Stand it down first, with the gate's `await_id` as the key:
+  `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
+  It removes the arm that would send the subject once its gate clears, ends any
+  run beneath it, answers the gate and closes the subject. Then sign off with
+  `--ruled yes --route human --no-wait`, which reads that gate as already
+  answered. A gate that also holds another open bead takes no answer from it:
+  the subject leaves the gate, and it prints which bead the gate still holds.
+  Unless the ruling settles that bead too, add `--leave <gate>` to the sign-off,
+  because the sign-off would answer the gate and release it. When it exits
+  non-zero, repair what it printed and re-run before you sign off. An open PR is
+  retired instead (below).
 - **New work carries it.** File and send that work (below), then sign off
   with `--ruled yes --route human --waiting-on <the work>`.
 - **New work decomposes an epic subject.** File it as the subject's member and

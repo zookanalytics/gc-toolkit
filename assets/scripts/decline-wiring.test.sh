@@ -20,10 +20,16 @@
 #     declares no quiet window, or bring-current-audit.sh's ask, because a wait
 #     needs an open gate and a quiet window files none for a situation a person
 #     already answered moot or benign;
+#   * STAND-DOWN: a gate that arms a re-sling tells a person how to rule the other
+#     way, through stand-down.sh under the gate's own key, and nothing tells them
+#     to close a bead the gate blocks, which bd refuses. bring-current-audit.sh's
+#     ask is the one that does not, because its gate asks how to resolve a conflict.
+#     The skills a person's ruling reaches give the command;
 #
 # decline.test.sh holds the order of a decline, and work-setup.test.sh,
 # work-enter.test.sh and work-submit.test.sh each arm that calls it. No live
-# city, Dolt, or network: this suite reads the formulas.
+# city, Dolt, or network: this suite reads the pack's formulas, prompts, skills
+# and scripts.
 #
 # run-tests-scope: tree
 set -uo pipefail
@@ -167,6 +173,75 @@ elif [ -z "$FRAG_BAD" ]; then
   ok "each of the $FRAG_WAITS waits in fragments, prompts and skills follows a filing with no quiet window"
 else
   bad "$FRAG_BAD"
+fi
+
+# --- 2c. A wait says how to rule the other way. ---------------------------------
+# bd refuses to close a bead an open gate blocks, and clearing the gate re-slings
+# armed work, so the one way to rule that it will not go on is stand-down.sh.
+CLOSE_FIRST=$(git -C "$ROOT" grep -n -E 'closes the work bead first|close \$[A-Z_]+,? (first|then clear)' \
+  -- 'formulas/*.toml' 'template-fragments/*.md' 'agents/*' 'skills/*' 'assets/scripts/await-ruling.sh' \
+  'assets/scripts/decline.sh' 'assets/scripts/work-*.sh' ':!assets/scripts/*.test.sh' 2>/dev/null || true)
+eq "$CLOSE_FIRST" "" "nothing tells a person to close a bead before they clear the gate that blocks it"
+grep -q 'stand-down\.sh' "$ROOT/template-fragments/polecat-doctrine.template.md" \
+  && ok "the doctrine names stand-down.sh for a ruling not to proceed" \
+  || bad "the doctrine does not name stand-down.sh for a ruling not to proceed"
+skill_has() { # <skill> <text> <label>: a phrase may wrap across lines there
+  local text
+  text=$(tr '\n' ' ' < "$ROOT/skills/$1/SKILL.md" | tr -s ' ')
+  case "$text" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2')" ;; esac
+}
+skill_has waits '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the waits skill gives the stand-down's command"
+skill_has waits 'Never answer the gate first and close afterwards' "the waits skill rules out answering the gate first"
+skill_has waits '--successor <the bead that records the ruling>' "the waits skill gives the evidence a gate that holds another bead needs"
+skill_has waits 'Never remove that edge yourself first' "the waits skill rules out taking an armed bead off a gate by hand"
+skill_has work '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the work skill gives the stand-down's command"
+skill_has work 'It leaves a deferred-dispatch arm in place' "the work skill says a stop that keeps the bead leaves its arm"
+skill_has converse-settle '/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"' "the converse-settle step gives the stand-down's command, with the conversation as its evidence"
+skill_has converse-settle 'Stand it down first' "the converse-settle step stands the subject down before the sign-off"
+skill_has converse-settle 'add `--leave <gate>` to the sign-off' "the converse-settle step keeps a gate's other bead waiting through the sign-off"
+# mol-polecat-work's step scripts file their gates through decline.sh, which ends
+# the message of each gate that arms a re-sling with the stand-down under that
+# gate's own key (decline.test.sh holds the sentence). So no work script arms a
+# gate's re-sling itself, apart from bring-current-audit.sh's question.
+OWN_WAITS=$(git -C "$ROOT" grep -n -E 'await-ruling\.sh" "\$[A-Z_]+" --key ' \
+  -- 'assets/scripts/work-*.sh' ':!assets/scripts/*.test.sh' 2>/dev/null | grep -v -F -- '--key "bring-current-question.' || true)
+eq "$OWN_WAITS" "" "mol-polecat-work's scripts arm a gate's re-sling only through decline.sh, apart from the bring-current question"
+if TOML_PY="$(tomllib_python)"; then
+  for f in mol-refinery-patrol; do
+    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+import re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+text = "\n".join(st.get("description", "") for st in d.get("steps", []))
+checked, bad = 0, []
+def judge(key, message):
+    global checked
+    checked += 1
+    if not re.search(r"stand-down\.sh \$[A-Z_]+ --key " + re.escape(key) + r" --ruling ", message):
+        bad.append(key)
+for key in set(re.findall(r'await-ruling\.sh" "\$[A-Z_]+" --key (\S+) ', text)):
+    # The GATE_MESSAGE loop below judges the first. bring-current-audit.sh composes
+    # the second's text, which asks how to resolve a conflict: a stand-down leaves
+    # that gate open while it also holds the anchor.
+    if key == '"$GATE_KEY"' or key.startswith('"bring-current-question.'):
+        continue
+    messages = [l for l in text.split("\n") if "--key %s --message" % key in l]
+    if not messages:
+        bad.append(key + " has no message")
+    for message in messages:
+        judge(key, message)
+for key, message in re.findall(r'GATE_KEY=([a-z-]+)\n\s*AWAIT=1\n\s*GATE_MESSAGE="([^\n]*)', text):
+    judge(key, message)
+print("%d|%s" % (checked, "; ".join(bad)))
+PY
+)
+    case "$out" in
+      0\|*) bad "$f: no gate that arms a re-sling was found" ;;
+      *\|) ok "$f: the ${out%%|*} gate messages that offer a stop name stand-down.sh under their own keys" ;;
+      *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
+    esac
+  done
+else
+  echo "skip - stand-down wiring check: $TOML_PY"
 fi
 
 echo
