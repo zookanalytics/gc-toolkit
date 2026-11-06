@@ -86,7 +86,7 @@ mkdir -p "$TMP/bin"
 #     written on a mismatch, as bd's guard does, then appends its note.
 #     $FAKE_GUARD_MISS makes the guard miss whatever it reads, as a writer
 #     landing between open's read and its write does; $FAKE_APPEND_FAIL fails
-#     the write (exit 1); $FAKE_APPEND_DROPS answers 0 and keeps no note; and
+#     the write (exit 1); and
 #     $FAKE_CLOSE_ON_APPEND closes the conversation just after the append, as a
 #     dismiss landing before open's read-back does.
 #   bd dep list ... --type tracks fails from the $FAKE_TRACKS_FAIL_FROM-th
@@ -232,7 +232,7 @@ case "$1 ${2:-}" in
       if [ "$_ifa_set$_ifs_set" != 00 ] && [ -n "${FAKE_GUARD_MISS:-}" ]; then exit 13; fi
       if [ "$_ifa_set" = 1 ] && [ "$_now_as" != "$_ifa" ]; then exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$_now_st" != "$_ifs" ]; then exit 13; fi
-      if [ "$_note_set" = 1 ] && [ -z "${FAKE_APPEND_DROPS:-}" ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
+      if [ "$_note_set" = 1 ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
       [ -z "${FAKE_CLOSE_ON_APPEND:-}" ] || printf 'closed' > "$TMP_NOW_STATUS"
     fi ;;
   "bd close")
@@ -397,11 +397,6 @@ grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
 grep -q 'already open' <<< "$OUT" \
   && bad "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting (out: $OUT)" \
   || ok "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting"
-
-FAKE_APPEND_DROPS=1 run_open found tk-real1 --reason "the cost question"
-eq "$RC" "4" "(JOIN-LOST) an append that answers 0 and keeps no note exits 4"
-grep -q 'did not read back in conversation tk-conv0' <<< "$ERR" \
-  && ok "(JOIN-LOST) …saying the concern did not read back" || bad "(JOIN-LOST) names the read-back (err: $ERR)"
 
 FAKE_CONV_UNREADABLE=1 run_open found tk-real1 --reason "the cost question"
 eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read back exits 4"

@@ -289,19 +289,6 @@ row_now() {
             2>/dev/null || true
 }
 
-# blocks_edge_reads_back <bead> <blocker> — 0 iff the bead's own row, read now,
-# carries a `blocks` edge onto <blocker>. A row that will not read is a missing
-# edge. A `dep add` onto a bead another store holds exits 0, stores the edge
-# unverified and holds nothing (docs/warrants.md, "bd write durability"), and
-# the row shows no such edge, so park reports an edge as landed only through
-# this read.
-blocks_edge_reads_back() {
-    row_now "$1" | jq -e --arg d "$2" '
-        [ (.dependencies // [])[]? | select(type == "object")
-          | select(((.dependency_type // .type // "") | tostring) == "blocks")
-          | select(((.id // .depends_on_id // "") | tostring) == $d) ] | length > 0' >/dev/null 2>&1
-}
-
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
 # enforce the shared ≤TAKEAWAY_MAX cap; sets HEADLINE. One gate for two verbs:
 # a park gate's TITLE is a one-line headline as a takeaway stamp is, so a cap
@@ -1306,9 +1293,9 @@ cmd_takeaway() {
 # A park holds everything under a bead that has not started, by giving the bead
 # one `blocks` edge (docs/steering.md). The text form files a gate of its own
 # for the edge to land on, and --waiting-on lands it on an existing bead and
-# files nothing. Either way the edge is read back off the bead before the verb
-# reports success: an edge that did not land leaves the bead and everything
-# under it reading ready while the operator believes them held.
+# files nothing. Either way the write's exit says whether the edge landed: an
+# edge that did not land leaves the bead and everything under it reading ready
+# while the operator believes them held, so a refusal fails the verb.
 #
 # The gate is a plain gate: issue_type=gate, titled with the text, with no
 # await type and none of the [holds] markers that doctor/check-wait-is-an-edge
@@ -1530,24 +1517,27 @@ cmd_park() {
             exit 2
         fi
         # `dep add <bead> <wait>` reads "<bead> is blocked by <wait>", so the
-        # edge lands on the bead, the side that waits. Its exit status settles
-        # nothing; the read-back below does.
+        # edge lands on the bead, the side that waits. Both ends are in one store,
+        # as checked above, so the add's exit says whether it landed, and an
+        # edge already there is a no-op that exits 0.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        gc bd dep add "$bead" "$wait_on" -t blocks ${db:+--db "$db"} >/dev/null 2>&1 || true
+        if ! gc bd dep add "$bead" "$wait_on" -t blocks ${db:+--db "$db"} >/dev/null 2>&1; then
+            echo "$PROG: park: $bead is NOT blocked by $wait_on: bd refused the edge, so nothing holds $bead or anything under it. Wire it by hand: gc bd dep add $bead $wait_on -t blocks${db:+ --db $db}" >&2
+            exit 4
+        fi
         blocker="$wait_on"
         blocker_title=$(printf '%s' "$wait_row" | jq -r '.title // ""' 2>/dev/null || true)
     else
         blocker=$(park_open_gate_titled "$bead_row" "$text")
         if [ -n "$blocker" ]; then
             # A re-run that names a body is how the operator corrects the
-            # park's detail, so the gate it reuses takes that body, read back
-            # as the edge is. A re-run without one leaves the description.
+            # park's detail, so the gate it reuses takes that body. A re-run
+            # without one leaves the description.
             _pk_note=""
             if [ -n "$body_set" ] && ! park_gate_described "$blocker" "$body"; then
                 # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-                gc bd update "$blocker" --description="$body" ${db:+--db "$db"} >/dev/null 2>&1 || true
-                if ! park_gate_described "$blocker" "$body"; then
-                    echo "$PROG: park: $bead already waits on the open gate $blocker under this text, so the park holds, but the gate's description is not the --body this run names: the update did not read back. Apply it by hand: gc bd update $blocker --description \"<the --body text>\"${db:+ --db $db}" >&2
+                if ! gc bd update "$blocker" --description="$body" ${db:+--db "$db"} >/dev/null 2>&1; then
+                    echo "$PROG: park: $bead already waits on the open gate $blocker under this text, so the park holds, but the gate's description is not the --body this run names: the store refused the update. Apply it by hand: gc bd update $blocker --description \"<the --body text>\"${db:+ --db $db}" >&2
                     exit 4
                 fi
                 _pk_note=", and its description is now the --body this run names"
@@ -1574,17 +1564,6 @@ cmd_park() {
             esac
         fi
         blocker_title="$text"
-    fi
-
-    if ! blocks_edge_reads_back "$bead" "$blocker"; then
-        # One repair: re-adding an edge that is there already is a no-op.
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        gc bd dep add "$bead" "$blocker" -t blocks ${db:+--db "$db"} >/dev/null 2>&1 || true
-        if ! blocks_edge_reads_back "$bead" "$blocker"; then
-            echo "$PROG: park: $bead is NOT blocked by $blocker: the edge did not land, so nothing holds $bead or anything under it. Wire it by hand: gc bd dep add $bead $blocker -t blocks${db:+ --db $db}" >&2
-            [ -n "$wait_on" ] || echo "$PROG: park: or close the gate, which holds nothing without its edge: gc bd close $blocker${db:+ --db $db}" >&2
-            exit 4
-        fi
     fi
 
     bust_cache
@@ -1866,7 +1845,10 @@ conversation_replies_to() {
 
 # conversation_reply <conversation> <gate> — make the conversation reply to the
 # gate it answers, bd's replies-to edge from the reply onto the original, which
-# holds nothing, and read the edge back. 0 once it reads back.
+# holds nothing, and read the edge back. The gate can sit in another store, and
+# bd stores an edge onto such a bead without finding it (docs/warrants.md, "bd
+# write durability"), so the read, not the add's exit, says it landed. 0 once it
+# reads back.
 conversation_reply() {
     conversation_replies_to "$1" "$2" && return 0
     gc bd dep add "$1" "$2" --type replies-to >/dev/null 2>&1 || true
@@ -1877,12 +1859,12 @@ conversation_reply() {
 # to a conversation waiting in the operator's queue, assigned to `human` and
 # open, which is where a sitting claims it and reads its notes. The note is
 # appended once, in a write guarded on that queue state, so a conversation a
-# sitting took or a dismiss closed after open's listing takes no note. A
-# pointed gate ($TAKE_GATE) gets the conversation's reply. The row is then read
-# back still waiting in the queue, carrying the concern. Returns 0 once that
-# reads back; 1 when the conversation is no longer in the queue, so it cannot
-# receive the concern and the caller moves on to the next one; and 2 when a
-# write or the read-back failed, which it says on stderr.
+# sitting took or a dismiss closed after open's listing takes no note, and the
+# write's exit says whether the note landed. A pointed gate ($TAKE_GATE) gets
+# the conversation's reply. The row is then read to tell that it still waits in
+# the queue. Returns 0 once it does; 1 when the conversation is no longer in the
+# queue, so it cannot receive the concern and the caller moves on to the next
+# one; and 2 when a write or that read failed, which it says on stderr.
 open_join() {
     _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"
     # $1 is a row_now answer: a row in the queue carries the concern when it is
@@ -1920,10 +1902,6 @@ open_join() {
         return 2
     fi
     printf '%s' "$_oj_back" | jq -e "$_oj_queued" >/dev/null 2>&1 || return 1
-    if [ -n "$join_note" ] && ! printf '%s' "$_oj_back" | jq -e --arg ask "$_oj_ask" --arg n "$join_note" "$_oj_carries" >/dev/null 2>&1; then
-        echo "$PROG: open: the new concern did not read back in conversation $_oj_c's notes after its append, so it did not join. Re-run once the store answers: $PROG open $bead" >&2
-        return 2
-    fi
     return 0
 }
 
@@ -2106,14 +2084,19 @@ $gate_desc}"
     [ -n "$CONV" ] && [ "$CONV" != "null" ] \
         || { create_err=$(printf '%s' "$CONV_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
              echo "$PROG: open: could not create a conversation for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
-    # The tracks edge is what makes the task a conversation about the bead, so
-    # it is read back off the task's own row. A task left without it is no
-    # conversation any reader finds, so it is closed rather than left behind.
+    # The tracks edge is what makes the task a conversation about the bead, and
+    # the bead can sit in another store, where bd stores the edge without finding
+    # its target (docs/warrants.md, "bd write durability"). So it is read back off
+    # the task's own row. A task left without it is no conversation any reader
+    # finds, so it is closed rather than left behind.
     if ! gc bd list --id "$CONV" --all --json 2>/dev/null | grep -av '^gc bd:' | scrub \
             | jq -e --arg c "$CONV" --arg s "$bead" "$CONVERSATION_JQ"'
                 any(.[]? | objects | select((.id // "") == $c); conversation and conversation_subjects == [$s])' >/dev/null 2>&1; then
-        gc bd close "$CONV" --reason "not a conversation: its tracks edge onto $bead or its assignee did not land" >/dev/null 2>&1 || true
-        echo "$PROG: open: the task $CONV filed for '$bead' did not read back as a conversation (its tracks edge onto $bead or its assignee did not land), so it was closed. Re-run: $PROG open $bead" >&2
+        if gc bd close "$CONV" --reason "not a conversation: its tracks edge onto $bead or its assignee did not land" >/dev/null 2>&1; then
+            echo "$PROG: open: the task $CONV filed for '$bead' did not read back as a conversation (its tracks edge onto $bead or its assignee did not land), so it was closed. Re-run: $PROG open $bead" >&2
+        else
+            echo "$PROG: open: the task $CONV filed for '$bead' did not read back as a conversation (its tracks edge onto $bead or its assignee did not land), and the store refused its close. Close it by hand, then re-run: gc bd close $CONV && $PROG open $bead" >&2
+        fi
         exit 4
     fi
     if [ -n "$TAKE_GATE" ] && ! conversation_reply "$CONV" "$TAKE_GATE"; then
