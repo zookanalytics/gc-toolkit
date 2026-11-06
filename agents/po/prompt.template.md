@@ -76,8 +76,10 @@ With `H="$(gc {{ .BindingName }} scripts-dir)/gc-helm.sh"`:
   releases it.
 - Priority: `"$H" priority <bead> <P0-P4>`, or `--shift <±n>` under a parent.
 - Hold: `gc bd --rig <rig> set-state <bead> hold=mayor --reason "<why>"`.
-- Close: the `work` skill's "Close a bead that needs no work", naming the bead
-  that carries the work, or under `not-needed` the bead the ruling rests on.
+- Close: the `work` skill's "Close a bead that needs no work", with the kind and
+  the bead the disposition names: `fixed-upstream` or `duplicate` and a closed or
+  shipped bead in the same store, `folded` and an open bead that carries the
+  need, or `not-needed` and the bead the ruling rests on.
 
 Read each write back. Note each ruling on its bead with the operator's reason in
 their words: `gc bd --rig <rig> update <bead> --append-notes "<ruling: reason>"`.
