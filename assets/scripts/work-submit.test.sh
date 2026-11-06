@@ -6,7 +6,7 @@
 # JSON store that its reads serve and its writes change, and the real work-lib.sh,
 # decline.sh, claim-close.sh, hand-back.sh and store-only-exit.sh. The guard, the
 # gate, the wait and the cancel are stubs that record their calls, except in the
-# case that runs the real bring-current guard over a reviewed anchor. Everything
+# cases that run the real bring-current guard over a reviewed anchor. Everything
 # goes into one log, in order, so a case can read what landed before what. No live
 # city, Dolt, network, or PRs.
 set -uo pipefail
@@ -233,6 +233,7 @@ go
 eq "$RC" 1 "(4b) fresh work off polecat/<bead>: stops"
 has "$OUT" "polecat/<bead-id> convention" "(4b) names the convention"
 has "$OUT" "Re-run workspace-setup" "(4b) says how to recover"
+eq "$(meta branch)" "<absent>" "(4b) the branch the gate refused is not recorded"
 prepare DETACHED '{"branch":"polecat/tk-w"}'
 go
 eq "$RC" 1 "(4c) a detached HEAD: stops"
@@ -256,6 +257,7 @@ eq "$RC" 1 "(5) base is the branch being pushed: stops"
 has "$OUT" "TARGET RESOLUTION FAILED" "(5) says so"
 eq "$(pushed)" 0 "(5) nothing is pushed"
 grep -q '^gate --subject tk-w --key polecat-no-landing-target ' "$LOG" && ok "(5) files a gate under its key" || bad "(5) files a gate under its key"
+eq "$(meta branch)" "polecat/tk-w" "(5) the branch the gate proved is recorded first, so the re-sling resumes it rather than cutting it again"
 
 echo "# nothing is pushed with work left behind"
 prepare polecat/tk-w "$FRESH"
@@ -374,18 +376,28 @@ eq "$(field assignee)" "" "(15) nothing is handed off"
 mv "$PACK/bring-current-guard.sh" "$TMP/guard.recorder"
 cp "$HERE/bring-current-guard.sh" "$HERE/bring-current-audit.sh" "$HERE/review-verdict.sh" "$HERE/review-dismissal.sh" "$PACK/"
 REVIEWED='[{"id":"tk-a","title":"the anchor","status":"open","assignee":"","created_at":"2026-01-01","metadata":{"branch":"polecat/tk-w","merge_result":"pull_request"}}]'
-prepare polecat/tk-w '{"target":"main"}' "$REVIEWED"
-printf 'branch side\n' > "$C/base.txt"; g "$C" commit -qam 'branch edits base'; g "$C" push -q origin polecat/tk-w
-M="$TMP/main-$N"; "$REAL_GIT" clone -q "$CO" "$M" 2>/dev/null
-printf 'main side\n' > "$M/base.txt"; g "$M" commit -qam 'main edits base'; g "$M" push -q origin HEAD:main
-g "$C" fetch -q origin; g "$C" merge -q origin/main >/dev/null 2>&1
-printf 'resolved by hand\n' > "$C/base.txt"; g "$C" add base.txt; g "$C" commit -q --no-edit
+unaudited_merge() {
+  prepare polecat/tk-w '{"target":"main"}' "$REVIEWED"
+  printf 'branch side\n' > "$C/base.txt"; g "$C" commit -qam 'branch edits base'; g "$C" push -q origin polecat/tk-w
+  M="$TMP/main-$N"; "$REAL_GIT" clone -q "$CO" "$M" 2>/dev/null
+  printf 'main side\n' > "$M/base.txt"; g "$M" commit -qam 'main edits base'; g "$M" push -q origin HEAD:main
+  g "$C" fetch -q origin; g "$C" merge -q origin/main >/dev/null 2>&1
+  printf 'resolved by hand\n' > "$C/base.txt"; g "$C" add base.txt; g "$C" commit -q --no-edit
+}
+unaudited_merge
 go
 eq "$RC" 3 "(15b) the real guard holds an unaudited merge on a branch the bead did not name: exit 3"
 has "$OUT" "base.txt: no entry" "(15b) it names the entry the merge owes"
 eq "$(meta branch)" "polecat/tk-w" "(15b) the branch it found the anchor through is recorded"
 eq "$(field assignee)" "" "(15b) nothing is handed off"
 eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(15b) no drain: the audit is the session's to finish"
+# The step passes the anchor --anchor-only printed, which here is the reviewed one.
+unaudited_merge
+submit -- --convoy cv-1 --base main --notes "Implemented: it" --anchor tk-a
+eq "$RC" 3 "(15c) called as the step calls it, with --anchor tk-a: exit 3"
+has "$OUT" "base.txt: no entry" "(15c) it names the entry the merge owes"
+eq "$(meta branch)" "polecat/tk-w" "(15c) the branch is recorded on the work bead, not on the anchor"
+eq "$(field assignee)" "" "(15c) nothing is handed off"
 rm -f "$PACK/bring-current-audit.sh" "$PACK/review-verdict.sh" "$PACK/review-dismissal.sh"
 mv "$TMP/guard.recorder" "$PACK/bring-current-guard.sh"
 
