@@ -419,8 +419,8 @@ if [ -n "$REACT" ]; then
         note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the conversation directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     elif [ "$REACT_RC" -eq 7 ]; then
-        note "$PROG: subject $SUBJECT is already routed or armed — no reaction was filed; filing the conversation directly"
-        REACT_WHY="no: the subject is already routed or armed (a first reaction never second-guesses a dispatch already decided)"
+        note "$PROG: subject $SUBJECT is already routed or armed, or waits on a person's answer — no reaction was filed; filing the conversation directly"
+        REACT_WHY="no: the subject is already routed or armed, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
     else
         note "$PROG: filing the first reaction FAILED — falling back to filing the conversation directly"
         REACT_WHY="no: filing the first reaction failed"

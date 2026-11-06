@@ -1134,7 +1134,7 @@ and holds until each derives green.
 
 Branch is the join key and `merge_result` present is the whole predicate: any
 declared state carries one, so an anchor parked for a person (`blocked`,
-`held`, `abandoned`, `retargeted`, `refused_false_completion`) still owns its
+`abandoned`, `retargeted`, `refused_false_completion`) still owns its
 PR, and a search restricted to the two gating states walks past it and mints
 the second anchor it was written to prevent. Multi-candidate tiebreak: the
 OLDEST anchor (the original predates any rework-minted duplicate);

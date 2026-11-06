@@ -4,8 +4,8 @@
 # A sitting holds one conversation, a task that tracks its subject and replies
 # to each human gate it answers. A ruled sign-off routes the ruling's rework,
 # writes the subject's headline, resolves each open gate the conversation
-# replies to and reads each back, releases a held subject, closes the
-# conversation and draws the visit's PR comment again. It records the ruling and
+# replies to and reads each back, closes the conversation and draws the
+# visit's PR comment again. It records the ruling and
 # each act it takes on the conversation as the visit's actions. A cut-short one
 # writes the headline, leaves every gate open and hands the conversation back to
 # the operator's queue.
@@ -38,15 +38,8 @@
 #   (LEAVE)   a gate the ruling leaves owed stays open
 #   (UNCLOSED, HEADLINE) a gate that does not close or a headline that does not
 #             land stops the sign-off before the conversation closes
-#   (HELD, HELD-FAIL) a held subject is released on a ruling, and a release
-#             that fails stops the sign-off before the close, so the
-#             conversation stays open and its re-run releases the subject
-#   (HOLD*)   the hold skill's step-3 block, which writes held: it moves an
-#             unarmed unanchored subject to held, leaves an armed or an
-#             anchored subject's state alone, and writes nothing when the
-#             subject does not read
-#   (ARMED)   a ruling on an armed unanchored subject releases nothing and
-#             writes no route, whatever --route says, and leaves the arm
+#   (ARMED)   a ruling on an armed subject resolves its gate, which is what
+#             lets the arm send it, writes no route and leaves the arm
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
@@ -56,6 +49,9 @@
 #   (ANSWER*) a ruling on a turn that does not sign off answers only the gates
 #             it names, after the same rework or retirement, and leaves the
 #             conversation open for the sign-off
+#   (ANSWER-ROUTE) the writer leaves a routed, armed subject's route and arm as
+#             they are, and the continue step's own withdrawal, run before the
+#             answer, leaves none for the answer to release the subject to
 #   (CUT-SHORT*) the hand-back is one write guarded on the holder and the
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
@@ -70,11 +66,7 @@
 #             that blocks another bead (an epic's member) and not the subject's
 #             own, or leaves unanswered a gate Accept would answer, the subject
 #             carries no recommendation, or another gate holds the subject; a
-#             sign-off
-#             releases a held subject before Accept's writer runs, and runs
-#             no Accept when that release fails, and an
-#             answer leaves a held subject to that writer's own release; a take
-#             Accept does not complete stops the sign-off, and an answer that
+#             take Accept does not complete stops the sign-off, and an answer that
 #             reached the gate first stands; each --var reaches Accept's writer,
 #             and one without --accept, or not <key>=<value>, is refused
 #   (APPROVE*) a PR a ruling leaves standing with no approval is named in the
@@ -204,6 +196,7 @@ case "$1 ${2:-}" in
         --assignee)     _r=$(printf '%s' "$_r" | jq --arg v "$2" '.assignee = $v'); shift 2 ;;
         --status)       _r=$(printf '%s' "$_r" | jq --arg v "$2" '.status = $v'); shift 2 ;;
         --append-notes) _r=$(printf '%s' "$_r" | jq --arg v "$2" '.notes = ((.notes // "") + $v)'); shift 2 ;;
+        --unset-metadata) _r=$(printf '%s' "$_r" | jq --arg k "$2" 'del(.metadata[$k])'); shift 2 ;;
         *) shift ;;
       esac
     done
@@ -220,7 +213,7 @@ chmod +x "$TMP/bin/gc"
 # every call, GH_USER_DOWN=<code> makes the login read exit with that code and
 # print nothing, and GH_REVIEWS_DOWN fails the review list alone.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
-printf 'writes=%s %s\n' "$(grep -c -v '^lifecycle state' "$CALLS" 2>/dev/null)" "$*" >> "$GH_CALLS"
+printf 'writes=%s %s\n' "$(grep -c '' "$CALLS" 2>/dev/null)" "$*" >> "$GH_CALLS"
 [ -n "${GH_DOWN:-}" ] && { echo "gh: network down" >&2; exit 1; }
 case "$*" in
   *" user "*)
@@ -292,15 +285,6 @@ case "$1" in
 esac
 exit 0
 H
-# TRANSITION_FAIL=<code> makes a transition exit with that code, as the real
-# writer exits 1 when bd refuses the write and 2 when it does not read back.
-cat > "$S/lifecycle.sh" <<'L'
-#!/usr/bin/env bash
-printf 'lifecycle %s\n' "$*" >> "$CALLS"
-[ "$1" = state ] && printf '%s\n' "${SUBJECT_LC_STATE:-unanchored}"
-[ "$1" = transition ] && [ -n "${TRANSITION_FAIL:-}" ] && { echo "lifecycle: the transition did not land" >&2; exit "$TRANSITION_FAIL"; }
-exit 0
-L
 # The rework and the retirement stand-ins each log the rig they ran in: GC_RIG,
 # GC_RIG_ROOT and the working directory.
 cat > "$S/converse-rework.sh" <<'R'
@@ -325,6 +309,15 @@ cat > "$S/pr-sitting-comment.sh" <<'P'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
 P
+# The sign-off never disarms. A sitting's own block does, before an answer that
+# sends the subject elsewhere, and (ANSWER-ROUTE) runs that block from the
+# continue step over this store.
+cat > "$S/deferred-dispatch.sh" <<'DD'
+#!/usr/bin/env bash
+printf 'deferred-dispatch %s\n' "$*" >> "$CALLS"
+[ "$1" = disarm ] || exit 2
+gc bd update "$2" --unset-metadata gc.dispatch_when_ready --unset-metadata gc.dispatch_when_ready_args >/dev/null
+DD
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
@@ -384,14 +377,14 @@ run_signoff() {
     OUT="$(cd "$TMP/cwd" && bash "$SCRIPT" "$@" 2>&1)"; RC=$?
     set -e
 }
-writes() { grep -c -v '^lifecycle state' "$CALLS" 2>/dev/null || true; }
+writes() { grep -c '' "$CALLS" 2>/dev/null || true; }
 # merge_held <bead> — "held" while the real finalize gate refuses the bead, the
 # check merge.sh makes for an open human gate before it lands a PR.
 merge_held() {
     if (cd "$TMP/cwd" && bash "$HERE/finalize-gate.sh" check "$1" >/dev/null 2>&1); then echo released; else echo held; fi
 }
-RULED=(--ruled yes --ruling "fix the retry before the merge" --route human --no-wait)
-RETIRED=(--ruled yes --ruling "the work moved to the new design" --route human --no-wait)
+RULED=(--ruled yes --ruling "fix the retry before the merge" --no-wait)
+RETIRED=(--ruled yes --ruling "the work moved to the new design" --no-wait)
 ANSWERED=(--ruling "fix the retry before the merge" --outcome "ruled on the review; the rollout is still open")
 
 echo "# refusals before any write"
@@ -399,10 +392,8 @@ acceptance; run_signoff --outcome x
 eq "$RC" 2 "(USAGE) a missing --conversation exits 2"
 run_signoff --conversation tk-conv
 eq "$RC" 2 "(USAGE) a missing --outcome exits 2"
-run_signoff --conversation tk-conv --outcome x --ruled yes --route human
+run_signoff --conversation tk-conv --outcome x --ruled yes
 eq "$RC" 2 "(USAGE) --ruled yes without --ruling exits 2"
-run_signoff --conversation tk-conv --outcome x --ruled yes --ruling r
-eq "$RC" 2 "(USAGE) --ruled yes without --route exits 2"
 run_signoff --conversation tk-conv --outcome x --rework
 eq "$RC" 2 "(USAGE) --rework without a ruling exits 2"
 run_signoff --conversation tk-conv --outcome x --leave tk-rev
@@ -755,68 +746,13 @@ eq "$(field tk-rev status)" "open" "(HEADLINE-LOST) …the gate stays open and o
 hasnt "$(cat "$CALLS")" "bd close tk-conv" "(HEADLINE-LOST) …and the conversation is not closed"
 eq "$(meta tk-anc gc.takeaway)" "the sitting before this one parked it" "(HEADLINE-LOST) …while the subject still carries the earlier headline"
 
-echo "# a held subject is released on a ruling"
-acceptance; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route gc-toolkit/gc-toolkit.polecat --no-wait
-eq "$RC" 0 "(HELD) a ruled sign-off on a held subject exits 0"
-has "$(cat "$CALLS")" "lifecycle transition tk-anc --to unanchored --route gc-toolkit/gc-toolkit.polecat" "(HELD) …releasing it to its route"
-acceptance; SUBJECT_LC_STATE=held TRANSITION_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route gc-toolkit/gc-toolkit.polecat --no-wait
-eq "$RC" 1 "(HELD-FAIL) a ruled sign-off whose release of the held subject fails exits 1"
-has "$OUT" "RELEASE FROM held FAILED on tk-anc" "(HELD-FAIL) …naming the subject it did not release"
-has "$OUT" "NOT SIGNED OFF" "(HELD-FAIL) …saying not to post the sign-off"
-hasnt "$OUT" "SIGNED OFF conversation" "(HELD-FAIL) …and reporting no settlement"
-eq "$(field tk-conv status)" "in_progress" "(HELD-FAIL) …so the conversation stays open under its sitting"
-hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(HELD-FAIL) …with no reminder update"
-SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route gc-toolkit/gc-toolkit.polecat --no-wait
-eq "$RC" 0 "(HELD-FAIL) the re-run, once the release lands, exits 0"
-eq "$(grep -c '^lifecycle transition tk-anc --to unanchored' "$CALLS")" 2 "(HELD-FAIL) …trying the release again"
-eq "$(field tk-conv status)" "closed" "(HELD-FAIL) …and then closing the conversation"
-
-echo "# the hold's step 3 moves an unarmed subject to held and leaves an armed one alone"
-# held writes a merge_result, and the deferred-dispatch pass retires an arm on
-# any merge_result, so an armed subject stays unanchored behind its gate. The
-# hold skill's own step-3 block runs here against the stub pack, its gate
-# placeholder filled.
-HOLD_SKILL="$HERE/../../skills/converse-hold/SKILL.md"
-awk '/^```/ { if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 } else if ($0 ~ /^```bash/) inb = 1; next }
-     inb { buf = buf $0 "\n"; if (index($0, "--to held")) hit = 1 }' "$HOLD_SKILL" \
-  | sed -e 's#<the gate that holds the subject>#tk-rev#' > "$TMP/hold-step3"
-if [ -s "$TMP/hold-step3" ]; then ok "(HOLD) the hold skill's step-3 block is found"; else bad "(HOLD) the hold skill's step-3 block is found in $HOLD_SKILL"; fi
-# hold_step3 [subject] -> RC, OUT, from a cwd outside any checkout.
-hold_step3() {
-    set +e
-    OUT="$(cd "$TMP/cwd" && CONV="$S" SUBJECT="${1:-tk-anc}" NEED="Build it now?" bash "$TMP/hold-step3" 2>&1)"; RC=$?
-    set -e
-}
-acceptance; hold_step3
-eq "$RC" 0 "(HOLD) the step on an unarmed unanchored subject exits 0"
-has "$(cat "$CALLS")" "gc-helm takeaway tk-anc holding — Build it now? --by converse --waiting-on tk-rev" "(HOLD) …writing the headline"
-has "$(cat "$CALLS")" "lifecycle transition tk-anc --to held --route human" "(HOLD) …and moving the subject to held"
-acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat; setm tk-anc gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
-hold_step3
-eq "$RC" 0 "(HOLD-ARMED) the step on an armed unanchored subject exits 0"
-has "$(cat "$CALLS")" "gc-helm takeaway tk-anc holding — Build it now? --by converse --waiting-on tk-rev" "(HOLD-ARMED) …writing the headline"
-hasnt "$(cat "$CALLS")" "lifecycle transition" "(HOLD-ARMED) …and no transition, so the subject stays unanchored"
-eq "$(meta tk-anc gc.dispatch_when_ready) $(meta tk-anc gc.dispatch_when_ready_args)" 'gc-toolkit/gc-toolkit.polecat ["--on","mol-polecat-work"]' "(HOLD-ARMED) …and the arm stays as it was"
-acceptance; SUBJECT_LC_STATE=pull_request hold_step3
-eq "$RC" 0 "(HOLD-ANCHORED) the step on an anchored subject exits 0"
-hasnt "$(cat "$CALLS")" "lifecycle transition" "(HOLD-ANCHORED) …and leaves its anchor state alone"
-acceptance; SHOW_DOWN=tk-anc hold_step3
-[ "$RC" -ne 0 ] && ok "(HOLD-UNREAD) the step on a subject that does not read exits non-zero" || bad "(HOLD-UNREAD) the step on a subject that does not read exits non-zero (got 0)"
-eq "$(cat "$CALLS")" "" "(HOLD-UNREAD) …before any write"
-acceptance; hold_step3 tk-gone
-[ "$RC" -ne 0 ] && ok "(HOLD-UNREAD) the step on a subject the store does not hold exits non-zero" || bad "(HOLD-UNREAD) the step on a subject the store does not hold exits non-zero (got 0)"
-eq "$(cat "$CALLS")" "" "(HOLD-UNREAD) …before any write"
-
-echo "# a ruling on an armed unanchored subject releases nothing and writes no route"
-for armed_route in human gc-toolkit/gc-toolkit.polecat; do
-    acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat
-    run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route "$armed_route" --no-wait
-    eq "$RC" 0 "(ARMED) --route $armed_route: the sign-off on an armed subject exits 0"
-    eq "$(field tk-rev status)" "closed" "(ARMED) …resolving the gate, which is what lets the arm send the subject"
-    hasnt "$(cat "$CALLS")" "lifecycle transition" "(ARMED) …running no transition"
-    hasnt "$(cat "$CALLS")" "gc.routed_to" "(ARMED) …writing no route"
-    eq "$(meta tk-anc gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(ARMED) …and leaving the arm"
-done
+echo "# a ruling on an armed subject leaves its arm to send it"
+acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 0 "(ARMED) the sign-off on an armed subject exits 0"
+eq "$(field tk-rev status)" "closed" "(ARMED) …resolving the gate, which is what lets the arm send the subject"
+hasnt "$(cat "$CALLS")" "gc.routed_to" "(ARMED) …writing no route"
+eq "$(meta tk-anc gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(ARMED) …and leaving the arm"
 
 echo "# a ruling on an open PR says whether its branch changes"
 acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
@@ -826,8 +762,8 @@ eq "$(writes)" 0 "(OPEN-PR) …writing nothing"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK) --rework exits 0"
 has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry before the merge" "(REWORK) the rework is filed with the conversation as its source ruling bead"
-has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "bd update tk-conv --set-metadata gc.ruling_consequence=" "(REWORK) the PR it acts on is recorded on the conversation first"
-has "$(grep -v '^lifecycle state' "$CALLS" | sed -n 2p)" "converse-rework --anchor tk-anc" "(REWORK) …then the rework runs, before every other write"
+has "$(head -1 "$CALLS")" "bd update tk-conv --set-metadata gc.ruling_consequence=" "(REWORK) the PR it acts on is recorded on the conversation first"
+has "$(sed -n 2p "$CALLS")" "converse-rework --anchor tk-anc" "(REWORK) …then the rework runs, before every other write"
 has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(REWORK) …in the rig of the PR it acts on"
 eq "$(acts tk-conv)" "Sent PR #41 back for rework.|Ruled: fix the retry before the merge" "(REWORK) …and the conversation records the PR it sent back, then the ruling"
 # The same sign-off run again once the rework has landed and the PR merged: the
@@ -862,11 +798,11 @@ gate tk-ga conversation.tk-ca; edge tk-anc blocks tk-ga
 gate tk-gb conversation.tk-cb; edge tk-anc blocks tk-gb
 conv tk-ca tk-anc; edge tk-ca replies-to tk-ga
 conv tk-cb tk-anc; edge tk-cb replies-to tk-gb
-run_signoff --conversation tk-ca --outcome "the retry stays" --ruled yes --ruling "keep the retry" --route human --no-wait --no-rework
+run_signoff --conversation tk-ca --outcome "the retry stays" --ruled yes --ruling "keep the retry" --no-wait --no-rework
 eq "$RC" 0 "(TWO-CONV) the first conversation's sign-off exits 0"
 eq "$(field tk-ga status)/$(field tk-gb status)" "closed/open" "(TWO-CONV) …resolving its own gate and leaving the other conversation's open"
 eq "$(merge_held tk-anc)" held "(TWO-CONV) …so the merge stays held for the second decision"
-run_signoff --conversation tk-cb --outcome "the docs ship first" --ruled yes --ruling "ship the docs first" --route human --no-wait --no-rework
+run_signoff --conversation tk-cb --outcome "the docs ship first" --ruled yes --ruling "ship the docs first" --no-wait --no-rework
 eq "$RC" 0 "(TWO-CONV) the second conversation's sign-off exits 0"
 eq "$(field tk-gb close_reason)" "ruled: ship the docs first" "(TWO-CONV) …answering its own gate with its own ruling"
 eq "$(merge_held tk-anc)" released "(TWO-CONV) …and only then is the merge released"
@@ -897,7 +833,7 @@ eq "$(field tk-conv status)" "in_progress" "(RETIRE-FAIL) …and the conversatio
 run_signoff --conversation tk-conv --outcome "retired: the work moved" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RETIRE) the re-run's --retire exits 0"
 has "$(cat "$CALLS")" "pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed --note the work moved to the new design" "(RETIRE) the PR is retired as not-needed, with the conversation as the evidence and the ruling as the note"
-has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "pr-dispose" "(RETIRE) …before every other write"
+has "$(head -1 "$CALLS")" "pr-dispose" "(RETIRE) …before every other write"
 case "$(cat "$CALLS")" in
   *"pr-dispose"*"gate resolve tk-rev"*) ok "(RETIRE) …so the PR is closed before the gate that held its merge is resolved" ;;
   *) bad "(RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
@@ -929,8 +865,6 @@ run_signoff --conversation tk-conv --answer tk-rev --outcome x
 eq "$RC" 2 "(ANSWER-USAGE) --answer without --ruling exits 2"
 run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --ruled no
 eq "$RC" 2 "(ANSWER-USAGE) --answer beside --ruled no exits 2"
-run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --route human
-eq "$RC" 2 "(ANSWER-USAGE) --answer beside --route exits 2"
 run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --leave tk-two
 eq "$RC" 2 "(ANSWER-USAGE) --answer beside --leave exits 2"
 eq "$(writes)" 0 "(ANSWER-USAGE) …and nothing is written"
@@ -945,7 +879,6 @@ case "$(cat "$CALLS")" in
   *) bad "(ANSWER) the gate was resolved before the headline: $(cat "$CALLS")" ;;
 esac
 hasnt "$(cat "$CALLS")" "bd close" "(ANSWER) nothing is closed"
-hasnt "$(cat "$CALLS")" "lifecycle" "(ANSWER) …no held subject is read or released"
 hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(ANSWER) …and the comment, which shows an open visit no actions, is left for the sign-off"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(ANSWER) the ruling is recorded among the visit's actions"
 has "$OUT" "ANSWERED tk-rev for conversation tk-conv on tk-anc" "(ANSWER) the answer is reported"
@@ -953,6 +886,35 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 0 "(ANSWER) the sign-off that follows exits 0"
 has "$OUT" "gate tk-rev was already cleared before this sign-off" "(ANSWER) …reading the answered gate as already cleared"
 eq "$(field tk-two status)/$(field tk-conv status)" "closed/closed" "(ANSWER) …and answering the gate left open before it closes the conversation"
+# A routed, armed subject whose only blocker is the sitting's gate, and a
+# ruling on a turn that does not sign off that sends it to another pool. The
+# hold kept the old route and arm and the writer leaves them, so its answer
+# alone would release the subject to the old pool. The continue step withdraws
+# both first, with its own block from skills/converse-continue/SKILL.md.
+routed_hold() {
+    fresh; bead tk-anc; setm tk-anc gc.routed_to rig-a/old-pool; setm tk-anc gc.dispatch_when_ready rig-a/old-pool
+    gate tk-rev conversation.tk-conv; edge tk-anc blocks tk-rev
+    conv tk-conv tk-anc; edge tk-conv replies-to tk-rev
+}
+routed_hold
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
+eq "$RC/$(field tk-rev status)/$(meta tk-anc gc.routed_to)" "0/closed/rig-a/old-pool" \
+    "(ANSWER-ROUTE) the writer answers a routed subject's last gate and leaves its route, so the sitting withdraws it first"
+awk '/^```bash[ \t]*$/ { inb = 1; buf = ""; hit = 0; next }
+     inb && /^```[ \t]*$/ { if (hit) { printf "%s", buf; exit } inb = 0; next }
+     inb { buf = buf $0 "\n"; if (index($0, "carries no arm and no pool route\"")) hit = 1 }' \
+    "$HERE/../../skills/converse-continue/SKILL.md" | sed 's#<[^>]*>#x#g' > "$TMP/withdraw.sh"
+[ -s "$TMP/withdraw.sh" ] && ok "(ANSWER-ROUTE) the continue step's withdrawal is found" \
+    || bad "(ANSWER-ROUTE) the continue step's withdrawal is found"
+routed_hold
+set +e
+WOUT="$(cd "$TMP/cwd" && CONV="$S" SUBJECT=tk-anc CONVERSATION=tk-conv bash "$TMP/withdraw.sh" 2>&1)"; WRC=$?
+set -e
+eq "$WRC" 0 "(ANSWER-ROUTE) the continue step's withdrawal exits 0"
+has "$WOUT" "tk-anc carries no arm and no pool route" "(ANSWER-ROUTE) …and says neither is left"
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
+eq "$RC/$(field tk-rev status)/$(field tk-conv status)" "0/closed/in_progress" "(ANSWER-ROUTE) the answer that follows resolves the gate and leaves the conversation open"
+eq "$(meta tk-anc gc.routed_to)/$(meta tk-anc gc.dispatch_when_ready)" "/" "(ANSWER-ROUTE) …with no old route or arm left to release the subject to"
 open_pr
 run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
 eq "$RC" 2 "(ANSWER-OPEN-PR) an answer on an open PR that says nothing of the PR exits 2"
@@ -1055,7 +1017,7 @@ recommend() {
     gate tk-rec first-reaction; edge tk-anc blocks tk-rec
     conv tk-conv tk-anc; edge tk-conv replies-to tk-rec
 }
-TAKE=(--ruled yes --ruling "take the reaction's mol-fix" --route human --no-wait --accept)
+TAKE=(--ruled yes --ruling "take the reaction's mol-fix" --no-wait --accept)
 
 echo "# a ruling that takes the recommendation hands its gate to Accept's writer"
 recommend; run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
@@ -1152,22 +1114,6 @@ eq "$RC" 0 "(ACCEPT-ANSWER) an --answer that takes the recommendation exits 0"
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT-ANSWER) …dispatching it through Accept"
 eq "$(field tk-conv status)" "in_progress" "(ACCEPT-ANSWER) …and the conversation stays open under its sitting"
 has "$OUT" "ANSWERED tk-rec" "(ACCEPT-ANSWER) …saying which gate it answered"
-recommend; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --answer tk-rec --ruling "take it" --outcome x --no-wait --accept
-eq "$RC" 0 "(ACCEPT-ANSWER-HELD) an --answer that takes a held subject's recommendation exits 0"
-hasnt "$(cat "$CALLS")" "lifecycle" "(ACCEPT-ANSWER-HELD) …reading and releasing nothing itself"
-has "$(cat "$CALLS")" "gc-helm accept tk-anc --conversation tk-conv" "(ACCEPT-ANSWER-HELD) …leaving the held subject to Accept's writer, which releases it before its sling"
-recommend; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
-eq "$RC" 0 "(ACCEPT-HELD) a sign-off that takes a held subject's recommendation exits 0"
-case "$(cat "$CALLS")" in
-  *"lifecycle transition tk-anc --to unanchored"*"gc-helm accept tk-anc"*) ok "(ACCEPT-HELD) …releasing the subject before Accept dispatches at it" ;;
-  *) bad "(ACCEPT-HELD) Accept ran before the release: $(cat "$CALLS")" ;;
-esac
-recommend; SUBJECT_LC_STATE=held TRANSITION_FAIL=2 run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
-eq "$RC" 1 "(ACCEPT-HELD-FAIL) a take whose release of the held subject fails exits 1"
-hasnt "$(cat "$CALLS")" "gc-helm accept" "(ACCEPT-HELD-FAIL) …before Accept's writer runs"
-eq "$(field tk-rec status)" "open" "(ACCEPT-HELD-FAIL) …so the recommendation's gate stays open"
-eq "$(field tk-conv status)" "in_progress" "(ACCEPT-HELD-FAIL) …and the conversation is not closed"
-
 echo "# a take Accept does not complete stops the sign-off, and an answer that reached the gate first stands"
 recommend; ACCEPT_DOES=refuse run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
 eq "$RC" 1 "(ACCEPT-REFUSED) a take Accept refuses stops the sign-off"
@@ -1188,7 +1134,7 @@ has "$(cat "$CALLS")" "gc-helm accept tk-anc --conversation tk-conv --reason tak
 ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
 eq "$RC" 0 "(ACCEPT-VAR) a re-run once the dispatch is made exits 0"
 has "$OUT" "keeps the vars it was made with, so the --var given here does not reach it" "(ACCEPT-VAR) …saying the dispatch already made keeps its own vars"
-recommend; run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it" --route human --no-wait --var design_gated=false
+recommend; run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it" --no-wait --var design_gated=false
 eq "$RC" 2 "(ACCEPT-VAR-ALONE) --var without --accept exits 2"
 eq "$(writes)" 0 "(ACCEPT-VAR-ALONE) …writing nothing"
 recommend; run_signoff --conversation tk-conv --outcome x "${TAKE[@]}" --var design_gated
