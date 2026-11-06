@@ -410,7 +410,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/work-setup.sh` | work | workspace-setup: the per-bead worktree and the recorded branch, the resume of a rejected branch by merge, and the wait behind a sibling whose tree holds the branch. |
 | `assets/scripts/work-enter.sh` | work | A step a session claims part way through a run enters the recorded tree, and a work bead closed mid-run ends the run. |
 | `assets/scripts/rig-checks.sh` | work | Runs the rig's declared checks through `gctk rig` for a step, each command handed over verbatim, and for self-review in the tree the work bead records, so a pass is never recorded at the session's home commit. |
-| `assets/scripts/work-submit.sh` | work | submit-and-exit: the gates, the push, the bring-current guard, the refinery handoff and the release, or the store-only exit. |
+| `assets/scripts/work-submit.sh` | work | submit-and-exit: the gates, the push, the bring-current guard, the refinery handoff and the removal of the run's worktree with its local branch, or the store-only exit. |
 | `assets/scripts/work-lib.sh` | work | What those scripts share: one read of the work bead, which tells a store that does not answer from an absent field. |
 | `assets/scripts/work-tree-holder.sh` | work | The name that step text from an earlier version of `mol-polecat-work` calls to judge a tree. It stays until no open step bead names it. |
 | `assets/scripts/rig-mentions.sh` | work | Lists each place a change names another rig of the city: its name, a bead id from its store, or a path into its checkout. The rigs come from `gc rig list`, so a repository never commits the names it looks for. The self-review runs it on the lines the branch adds, the commit messages no remote has yet, and the title, summary and dispatch text the pull request publishes, and submit-and-exit runs it on the summary it composes. The polecat fixes what it lists, and nothing stops on it. |
@@ -496,6 +496,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
 | `orders/pin-keepalive.toml` | patrol | Condition-triggered, city-scoped: pins standing conversational named sessions (mechanik today) so config-drift restart keeps deferring on them. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
+| `orders/witness-nudge.toml` | patrol | Fires the witness nudge every 5m, city-wide. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `orders/build-scratch-reap.toml` | patrol | Fires the build/test scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
@@ -514,6 +515,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
 | `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
+| `assets/scripts/witness-nudge.sh` | patrol | Gives a witness whose patrol pass stopped, with its wisp still in progress, its next turn. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions that have ended, and of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/build-scratch-reap.sh` | patrol | Removes build and test scratch (Go toolchain trees, gc.test per-run trees, templated tool temp) that a killed or crashed run left behind, gated on no live holder and — for pid-named trees — a dead pid, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
