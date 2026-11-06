@@ -227,6 +227,10 @@ store '[{"id":"ex-8","status":"open","assignee":"","notes":"","metadata":{"merge
 eq "$(meta ex-8 pr_finishing_settled)" "unapproved" "a caller that sets the key itself keeps its own value"
 "$SUT" transition ex-9 --to unanchored --route "" --unset pr_finishing_settled >/dev/null 2>&1
 eq "$(meta ex-9 pr_finishing_settled)" "<absent>" "…and so does one that clears it"
+store '[{"id":"ex-10","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}}]'
+out="$(STUB_DROP_KEYS="ex-10:pr_finishing_settled" "$SUT" transition ex-10 --to unanchored --route "" 2>&1)"; rc=$?
+eq "$rc" 2 "an exit set that does not read back fails the transition"
+has "$out" "pr_finishing_settled" "…naming the field"
 
 # --- --set-dated: the @<since> compare-and-preserve rule ------------------------
 # The operator's queue is ordered by how long a row has been owed, so the instant
@@ -432,17 +436,17 @@ eq "$rc" 1 "--set merge_result is refused (owned by --to)"
 out="$("$SUT" transition a-3 --to pull_request --set gc.routed_to=x 2>&1)"; rc=$?
 eq "$rc" 1 "--set gc.routed_to is refused (owned by --route)"
 
-# --- a write is settled by its exit ----------------------------------------------
-# bd writes the whole update in one transaction and exits non-zero when it
-# refuses or fails it (docs/warrants.md, "bd write durability"), so the
-# transition takes that exit and reads nothing back.
-echo "# one write"
+# --- post-write verification ----------------------------------------------------
+echo "# verification"
 store '[{"id":"a-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition a-4 --to pull_request \
+out="$(STUB_DROP_KEYS="a-4:pr_url" "$SUT" transition a-4 --to pull_request \
   --set pr_url=https://github.com/z/r/pull/9 --set pr_number=9 2>&1)"; rc=$?
-eq "$rc" 0 "a transition the store takes exits 0"
-eq "$(grep -c '^bd show' "$STUB_GC_LOG" || true)" "1" "…reading the bead once, before the write, and never back"
+eq "$rc" 2 "a half-landed write exits 2 (verification mismatch)"
+has "$out" "pr_url" "the unverified field is named"
+
+store '[{"id":"a-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$(STUB_DROP_KEYS="a-5:status" "$SUT" transition a-5 --to merged --close --set merged_sha=x 2>&1)"; rc=$?
+eq "$rc" 2 "a close that did not land exits 2"
 
 # --- human states route to human in the same atomic call ------------------------
 echo "# human states"
@@ -468,10 +472,18 @@ eq "$(meta a-6 'gc.takeaway_settled')" "" "the park's headline carries its own d
 # "settled" — and a bead can carry that value from the sitting before this one.
 # The clear is the one field of the stamp whose stale value is a wrong answer
 # rather than a missing one: doctor/check-wait-is-an-edge reads it and skips the
-# park it was written to report, so the clear rides the transition's update.
+# park it was written to report. A clear that did not land is a failed
+# transition, on the same terms as a dropped timestamp.
+store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway_settled":"1"}}]'
+out="$(STUB_DROP_KEYS="a-7:gc.takeaway_settled" "$SUT" transition a-7 --to abandoned \
+  --takeaway "PR#7 was closed without merging — rework it or close this bead" 2>&1)"; rc=$?
+eq "$rc" 2 "a takeaway that did not clear an inherited settled-key exits 2"
+has "$out" "gc.takeaway_settled" "…and the unverified field is named"
+eq "$(meta a-7 'gc.takeaway_settled')" "1" "…and the stale value is what read back"
+
 store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway_settled":"1"}}]'
 out="$("$SUT" transition a-8 --to abandoned --takeaway "needs a ruling on the base branch" 2>&1)"; rc=$?
-eq "$rc" 0 "a clear over an inherited value exits 0"
+eq "$rc" 0 "…while a clear that lands over an inherited value exits 0"
 eq "$(meta a-8 'gc.takeaway_settled')" "" "…leaving the park's own disposition on the bead"
 
 # --- detached states clear the route in the same atomic call --------------------
@@ -500,6 +512,11 @@ store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_
 out="$("$SUT" transition d-4 --to pull_request --set pr_number=9 2>&1)"; rc=$?
 eq "$rc" 0 "a park-routed anchor transitions"
 eq "$(meta d-4 'gc.routed_to')" "human" "the park route survives the transition"
+
+store '[{"id":"d-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"rig/pool"}}]'
+out="$(STUB_DROP_KEYS="d-5:gc.routed_to" "$SUT" transition d-5 --to pull_request 2>&1)"; rc=$?
+eq "$rc" 2 "a clear that did not land exits 2 (verification mismatch)"
+has "$out" "gc.routed_to" "the unverified route is named"
 
 # --- detached states clear the assignee in the same atomic call ----------------
 # The unheld half of the same property. The refinery's find-work queue is
@@ -595,6 +612,11 @@ store '[{"id":"x-4","status":"open","assignee":"rig/gc-toolkit.refinery","notes"
 eq "$(bassignee x-4)" "rig/mechanik" "an explicit --assignee wins over the declared clear"
 eq "$(meta x-4 'gc.session_id')" "hq-keep" "a named assignee keeps gc.session_id"
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when an assignee is named"
+
+store '[{"id":"h-7","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+out="$(STUB_DROP_KEYS="h-7:assignee" "$SUT" transition h-7 --to pull_request 2>&1)"; rc=$?
+eq "$rc" 2 "a clear that did not land exits 2 (verification mismatch)"
+has "$out" "assignee" "the unverified assignee is named"
 
 store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 "$SUT" transition a-7 --to retargeted --route rig/mechanik >/dev/null 2>&1
@@ -784,6 +806,31 @@ out="$("$SUT" transition k-6 --to abandoned --expect abandoned --keep-route --ro
 eq "$rc" 1 "--keep-route with --route exits 1"
 has "$out" "opposite things" "…saying the two contradict"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and neither refusal reaches bd"
+
+# --- a takeaway that lands in part is not a transition ---------------------------
+# The verifier owes every written field, and a takeaway is three of them: the
+# text the board renders, the timestamp it dates and attributes the wait by, and
+# the writer that readers discriminate on. Checking only the text passes a park
+# the board can neither place nor attribute back as recorded.
+echo "# takeaway triple read-back"
+store '[{"id":"p-12","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$(STUB_DROP_KEYS="p-12:gc.takeaway_by" "$SUT" transition p-12 --to abandoned \
+  --takeaway "PR#7 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 2 "a dropped gc.takeaway_by exits 2"
+has "$out" "did NOT verify" "the half-landed triple is reported unverified"
+has "$out" "gc.takeaway_by" "…and the refusal names the missing provenance"
+
+store '[{"id":"p-13","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$(STUB_DROP_KEYS="p-13:gc.takeaway_at" "$SUT" transition p-13 --to abandoned \
+  --takeaway "PR#8 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 2 "a dropped gc.takeaway_at exits 2"
+has "$out" "gc.takeaway_at" "the refusal names the missing timestamp"
+
+store '[{"id":"p-14","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$(STUB_DROP_KEYS="p-14:gc.takeaway" "$SUT" transition p-14 --to abandoned \
+  --takeaway "PR#9 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 2 "a dropped gc.takeaway exits 2"
+has "$out" "gc.takeaway=" "the refusal names the missing text"
 
 # --- held: a sitting's hold is a state, entered only from unanchored ------------
 echo "# held"
