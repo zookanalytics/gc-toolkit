@@ -158,8 +158,8 @@ func TestPRStatusDerive(t *testing.T) {
 	// The gate read is the one reader rule, from the anchor's end: the beads its
 	// `blocks` edges reach, each a dep-list row carrying the far bead's type,
 	// status and await type. Only a human gate in a status other than closed
-	// holds; a visit or conversation that tracks the anchor is not among the
-	// blockers at all.
+	// holds; a conversation that tracks the anchor is not among the blockers at
+	// all.
 	for _, tc := range []struct{ name, blockers, want string }{
 		{"an in_progress human gate => needs-attention",
 			`[{"id":"tk-g","status":"in_progress","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`,

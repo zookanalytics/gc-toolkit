@@ -90,15 +90,18 @@ bead's last assignee — and check its state:
 
 ```bash
 OWNER=$(basename "$PREDECESSOR_WORK_DIR")   # e.g. gc-toolkit.capable
-gc session list --state all --json \
+gc session list --json \
   | jq -r --arg o "$OWNER" \
-      '.sessions[] | select((.alias // "") | endswith($o)) | "\(.state) running=\(.running)"'
+      '.sessions[] | select((.alias // "") | endswith($o)) | .state'
 ```
 
-Reclaim **only** when the owning session is `closed` or absent from
-the list. Any live state — `active`, `asleep`, `suspended` — means it
-can resume and follow `work_dir` back into the tree. `asleep` is a
-scaled-to-zero pool slot, not a dead one; it wakes on the next claim.
+The list holds every session that has not closed, so reclaim **only**
+when it prints nothing. Any state it prints — `active`, `asleep`,
+`suspended` — means the owner can resume and follow `work_dir` back into
+the tree. `asleep` is a scaled-to-zero pool slot, not a dead one; it
+wakes on the next claim. Do not add `--state all`: it also lists every
+closed session the city has run, and a closed row under the same alias
+says nothing about the live one.
 
 If the predecessor is still in flight, do **not** reclaim: take a
 fresh worktree (or defer) and leave its `work_dir` untouched.

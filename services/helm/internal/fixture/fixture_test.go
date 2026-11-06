@@ -152,7 +152,7 @@ func TestLoadAnswersReadsTheStatusFromTheFileName(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
 		"dismiss.json":     `{"bead":"tk-abc12","verb":"dismiss","message":"dismissed"}`,
 		"accept.409.json":  `{"error":"busy","reason":"busy"}`,
-		"open.json":        `{"bead":"tk-abc12","outcome":"filed","visit":"tk-v1","message":"filed"}`,
+		"open.json":        `{"bead":"tk-abc12","outcome":"filed","conversation":"tk-c1","message":"filed"}`,
 		".DS_Store":        "not json",
 		"engage.503.json":  `{"error":"no tool","reason":"unavailable"}`,
 		"park-later.json":  `{}`,
