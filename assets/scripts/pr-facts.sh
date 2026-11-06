@@ -3654,7 +3654,7 @@ $CBODY"
           rc_rollup=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json statusCheckRollup 2>/dev/null)
           rc_req_json=$(printf '%s\n' "$REQ_CONTEXTS" | jq -Rs 'split("\n") | map(select(length > 0))' 2>/dev/null)
           # One entry per failing required check, tagged { name, url, code,
-          # deploy, retry, runs }.
+          # deploy, retry, runs, live }.
           # `failed` is the superset that holds the merge (any terminal failure);
           # `code` narrows it to a genuine code failure a polecat can fix — a
           # conclusion FAILURE, or a status context in state FAILURE/ERROR — and
@@ -3667,12 +3667,16 @@ $CBODY"
           # absent. `retry` says the check can be re-run: it is not deploy-type,
           # and each of its failed rows timed out, was cancelled or failed to
           # start, in a GitHub Actions run its URL names. `runs` holds the ids
-          # of those runs.
+          # of those runs, and `live` the ones among them that still have a job
+          # queued or running, by any row of the rollup.
           rc_fail_json=$(printf '%s' "$rc_rollup" | jq -c --argjson req "${rc_req_json:-[]}" --arg deploy "$RC_DEPLOY_CHECK_RE" '
             def name_of: (.name // .context // "");
             def run_of:
               ((.detailsUrl // .targetUrl // "") | tostring
                | capture("/actions/runs/(?<r>[0-9]+)") | .r) // "";
+            def unfinished:
+              ((.status // "") | tostring | ascii_upcase) as $s
+              | $s != "" and $s != "COMPLETED";
             def retryable:
               ((.conclusion // "") | tostring | ascii_upcase) as $c
               | ($c == "TIMED_OUT" or $c == "CANCELLED" or $c == "STARTUP_FAILURE")
@@ -3692,17 +3696,20 @@ $CBODY"
                 then ((.state | ascii_upcase) as $s | $s == "FAILURE" or $s == "ERROR")
               else false end;
             (.statusCheckRollup // []) as $r
+            | ([ $r[] | select(type == "object") | select(unfinished) | run_of | select(. != "") ] | unique) as $live
             | [ $req[] as $c
                 | ($c | ascii_downcase | test($deploy)) as $isdeploy
                 | ( [ $r[] | select(type == "object") | select(name_of == $c) ] ) as $runs
                 | ( [ $runs[] | select(failed) ] ) as $bad
+                | ( [ $bad[] | run_of | select(. != "") ] | unique ) as $ids
                 | if ($bad | length) > 0
                   then { name: $c,
                          url: (($bad[0].detailsUrl // $bad[0].targetUrl // "") | tostring),
                          code: ((([ $runs[] | select(code_failed) ] | length) > 0) and ($isdeploy | not)),
                          deploy: $isdeploy,
                          retry: (($isdeploy | not) and all($bad[]; retryable)),
-                         runs: ([ $bad[] | run_of | select(. != "") ] | unique) }
+                         runs: $ids,
+                         live: ($ids - ($ids - $live)) }
                   else empty end ]' 2>/dev/null)
           rc_nfail=$(printf '%s' "$rc_fail_json" | jq 'length' 2>/dev/null)
           case "$rc_nfail" in ''|*[!0-9]*) rc_nfail=0 ;; esac
@@ -3721,13 +3728,17 @@ $CBODY"
               # job that runs past its timeout, which a slow runner can make it
               # do. So when every failing check can be re-run (`retry`), the
               # refinery re-runs the failed jobs of each one's run, once per
-              # head. It records the head in pr_check_rerun before the re-run,
-              # so no later pass at that head re-runs again. The re-run's new
-              # attempt takes the failed row's place in the rollup, so a pass
-              # while it runs reads the check pending and does not come here for
-              # it. A non-code failure at a head already re-run is the re-run's
-              # own. That failure, a re-run that did not go through, and a
-              # failure no re-run reaches each park an approved PR, by the rule
+              # head. GitHub re-runs a run's failed jobs only once the whole run
+              # has finished, so while one of those runs still has a job queued
+              # or running (`live`), the pass records and re-runs nothing, and a
+              # later pass makes the re-run once the run is done. It records the
+              # head in pr_check_rerun before the re-run, so no later pass at
+              # that head re-runs again. The re-run's new attempt takes the
+              # failed row's place in the rollup, so a pass while it runs reads
+              # the check pending and does not come here for it. A non-code
+              # failure at a head already re-run is the re-run's own. That
+              # failure, a re-run that did not go through, and a failure no
+              # re-run reaches each park an approved PR, by the rule
               # review-verdict.sh defines, the one the merge lands on. A PR
               # nobody approved cannot land however green its checks are, so it
               # is never parked for a non-code failure: it waits for its review
@@ -3740,6 +3751,11 @@ $CBODY"
                 rc_runs=$(printf '%s' "$rc_fail_json" | jq -r 'if all(.[]; .retry) then ([ .[].runs[] ] | unique | join(" ")) else "" end' 2>/dev/null)
                 rc_rerun_at=$(printf '%s' "$row" | jq -r '(.metadata.pr_check_rerun // "") | tostring' 2>/dev/null)
                 if [ -n "$rc_runs" ] && [ -n "$head_oid" ] && [ "$rc_rerun_at" != "$head_oid" ]; then
+                  rc_live=$(printf '%s' "$rc_fail_json" | jq -r '[ .[].live[] ] | unique | join(" ")' 2>/dev/null)
+                  if [ -n "$rc_live" ]; then
+                    echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause; run(s) $rc_live still have a job queued or running, so the re-run waits for them to finish (nothing parked)"
+                    skipped=$((skipped + 1)); continue
+                  fi
                   if ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                        --set "pr_check_rerun=$head_oid" >/dev/null; then
                     echo "$PROG: WARN $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause, but the record of a re-run at head $head_oid did not land; nothing re-run or parked (retry next pass)" >&2

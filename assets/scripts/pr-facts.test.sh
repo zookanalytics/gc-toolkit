@@ -6171,6 +6171,21 @@ has "$out" "the record of a re-run at head sha-118 did not land; nothing re-run 
 eq "$(reruns 7118)" "0" "…and nothing is re-run without it"
 eq "$(meta NC9 'gc.routed_to')" "" "…or parked"
 
+echo "# …a run with a job still going is re-run only once it has finished"
+store "[$(anchor NC11 120)]"
+printf '%s' "$(prview 120 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test CANCELLED 7120),{\"name\":\"test-macos\",\"status\":\"IN_PROGRESS\",\"conclusion\":\"\",\"detailsUrl\":\"https://github.com/zook/gc-toolkit/actions/runs/7120/job/97121\"}]")" > "$GH_DIR/pr_view_120.json"
+approve 120
+: > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
+out=$(run)
+eq "$(reruns 7120)" "0" "a cancelled check whose run still has a job running is not re-run yet"
+has "$out" "run(s) 7120 still have a job queued or running, so the re-run waits for them to finish (nothing parked)" "…the pass says the re-run waits for the run"
+eq "$(meta NC11 pr_check_rerun)/$(meta NC11 'gc.routed_to')" "<absent>/" "…and records no re-run and parks nothing"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.120" "…nor files a gate"
+printf '%s' "$(prview 120 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test CANCELLED 7120),$(ncrow test-macos SUCCESS 7120)]")" > "$GH_DIR/pr_view_120.json"
+out=$(run)
+eq "$(reruns 7120)" "1" "…and once the run has finished, its failed jobs are re-run"
+eq "$(meta NC11 pr_check_rerun)" "sha-120" "…recorded at that head"
+
 echo "# …a failure no re-run reaches, a timeout with no Actions run named, parks an approved PR"
 echo "#   and a park whose route does not read back files no gate and retries next pass"
 store "[$(anchor NC6 115)]"
