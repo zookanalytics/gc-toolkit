@@ -319,3 +319,25 @@ func TestBeadCreateReadsAnExplicitBlocksDepOffItsTarget(t *testing.T) {
 		t.Errorf("both beads are read in one list: %v", reads)
 	}
 }
+
+// A blocks edge onto a bead another store holds is stored and holds nothing,
+// so the edge reads back only with its far end read back from the same store.
+func TestBeadBlocksEdgeReadsBackOnlyWithItsFarEndInTheStore(t *testing.T) {
+	r := newBeadRig(t)
+	t.Setenv("STUB_ROWS", `[{"id":"tk-sub","dependencies":[{"depends_on_id":"gf-child","type":"blocks"}]}]`)
+	rc, _, errOut := r.run("dep", "add", "tk-sub", "gf-child", "--type=blocks", "--verify")
+	if rc != 3 || !strings.Contains(errOut, "gf-child does not read back from this store, so the edge holds nothing") {
+		t.Errorf("a blocks edge onto another store's bead: rc = %d, stderr %s", rc, errOut)
+	}
+	if reads := r.calls("gc|bd|list|"); len(reads) != 1 || !strings.Contains(reads[0], "|--id|tk-sub,gf-child|") {
+		t.Errorf("the far end is read in the same list: %v", reads)
+	}
+	t.Setenv("STUB_ROWS", `[{"id":"tk-sub","dependencies":[{"depends_on_id":"tk-child","type":"blocks"}]},{"id":"tk-child"}]`)
+	if rc, _, errOut := r.run("dep", "add", "tk-sub", "tk-child", "--type=blocks", "--verify"); rc != 0 {
+		t.Errorf("a blocks edge with its far end in the store: rc = %d, stderr %s", rc, errOut)
+	}
+	t.Setenv("STUB_ROWS", `[{"id":"tk-c","dependencies":[{"depends_on_id":"gf-gate","type":"replies-to"}]}]`)
+	if rc, _, errOut := r.run("dep", "add", "tk-c", "gf-gate", "--type", "replies-to", "--verify"); rc != 0 {
+		t.Errorf("a reply, which holds nothing, needs no far end: rc = %d, stderr %s", rc, errOut)
+	}
+}

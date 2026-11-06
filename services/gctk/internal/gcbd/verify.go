@@ -63,7 +63,11 @@ type MetaWant struct {
 
 // EdgeWant is one dependency edge of a witness: an edge from the bead onto To,
 // of Type, or of any type when Type is empty. With Absent, no edge from the
-// bead onto To may read back, whatever its type.
+// bead onto To may read back, whatever its type. A blocks edge also needs its
+// far end to read back from the same store: bd stores an edge onto a bead
+// another store holds without finding it, and such an edge holds nothing
+// (docs/warrants.md, "bd write durability"). Any other kind is a record, which
+// the edge's own row carries.
 type EdgeWant struct {
 	To     string
 	Type   string
@@ -92,7 +96,21 @@ func (c *Client) Verify(scope []string, wants map[string]Want) []string {
 	if len(ids) == 0 {
 		return nil
 	}
-	args := append([]string{"bd", "list", "--id", strings.Join(ids, ","), "--all",
+	// Each blocks edge's far end is read in the same list, from the same store.
+	read := append([]string{}, ids...)
+	seen := map[string]bool{}
+	for _, id := range ids {
+		seen[id] = true
+	}
+	for _, id := range ids {
+		for _, e := range wants[id].Edges {
+			if e.Type == "blocks" && !e.Absent && !seen[e.To] {
+				seen[e.To] = true
+				read = append(read, e.To)
+			}
+		}
+	}
+	args := append([]string{"bd", "list", "--id", strings.Join(read, ","), "--all",
 		"--include-gates", "--include-infra", "--include-templates", "--include-ephemeral",
 		"--limit", "0", "--json"}, scope...)
 	unread := func(why string) []string {
@@ -123,7 +141,7 @@ func (c *Client) Verify(scope []string, wants map[string]Want) []string {
 			misses = append(misses, id+" did not read back: the store returned no row for it")
 			continue
 		}
-		misses = append(misses, row.judge(wants[id])...)
+		misses = append(misses, row.judge(wants[id], func(far string) bool { return byID[far] != nil })...)
 	}
 	return misses
 }
@@ -142,8 +160,9 @@ type verifyRow struct {
 	Dependencies []map[string]any `json:"dependencies"`
 }
 
-// judge returns one line for each way the row falls short of w.
-func (r *verifyRow) judge(w Want) []string {
+// judge returns one line for each way the row falls short of w. inStore
+// reports whether a bead read back from the store the row came from.
+func (r *verifyRow) judge(w Want, inStore func(string) bool) []string {
 	var out []string
 	miss := func(format string, a ...any) {
 		out = append(out, r.ID+": "+fmt.Sprintf(format, a...))
@@ -207,6 +226,8 @@ func (r *verifyRow) judge(w Want) []string {
 				kind = "dependency"
 			}
 			miss("no %s edge onto %s reads back", kind, e.To)
+		case e.Type == "blocks" && !e.Absent && !inStore(e.To):
+			miss("its blocks edge onto %s reads back, but %s does not read back from this store, so the edge holds nothing", e.To, e.To)
 		}
 	}
 	return out

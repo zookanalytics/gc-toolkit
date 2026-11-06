@@ -42,6 +42,8 @@ store the write named, and the write counts once each one carries its witness:
               --parent and its --assignee. The reply is gc bd's JSON
   dep add     the edge reads back, of its --type (blocks when none is given)
   dep remove  no edge onto <depends-on> reads back
+A blocks edge reads back only with its far end in the same store, because an
+edge onto a bead another store holds is stored and holds nothing.
 
 Exits: 0 written, and read back with --verify · 2 usage, nothing run · 3 gc bd
 exited 0, but the write did not read back, or the beads could not be read:
