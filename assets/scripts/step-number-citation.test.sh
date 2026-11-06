@@ -176,7 +176,7 @@ eq "$RC" 0 "the scan reads a fixture tree"
 want="$(grep -n ' cited$' "$FIX/docs/cases.md" | cut -d: -f1 | paste -sd' ' -)"
 got="$(printf '%s\n' "$OUT" | sed -n 's#^docs/cases\.md:\([0-9]*\):.*#\1#p' | paste -sd' ' -)"
 eq "$got" "$want" "the scan names each citation of another text's step, and no text's own step"
-if printf '%s\n' "$OUT" | grep -q -e '^generated/' -e '^specs/'; then
+if grep -q -e '^generated/' -e '^specs/' <<< "$OUT"; then
   bad "the scan reads no render and no spec: $OUT"
 else
   ok "the scan reads no render and no spec"
