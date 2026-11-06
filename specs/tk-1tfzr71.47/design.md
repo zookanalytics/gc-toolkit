@@ -63,6 +63,13 @@ steps call come from the new one, as they come from the checkout today. Its
 hooks' scripts move to the new one too if a prune removes the old revision
 from Gas City's cache first (section 4).
 
+Each deploy also leaves the replaced revision's clone in Gas City's cache. A
+clone takes about 62 MB, so the past week's 39 landings would have left up to
+about 2.4 GB (fact 3). The clones stay until someone runs
+`gc import prune --apply`, and a prune leaves a session that started from a
+removed clone, such as the mechanik, without gc-toolkit's skills until it
+restarts (section 4).
+
 One change reaches you directly. Once this lands, rig checkouts stop advancing
 on their own, and that includes the checkout of the Gas City fork you build gc
 from. Only the keeper's step after a fork rebase still moves that one. Pull it
@@ -119,7 +126,10 @@ read at main `6dfa90898`. The city's installed gc is the fork build
    `gc import prune` says the cache "is keyed by (source, commit), so commit
    churn accumulates stale clones". Prune keeps every clone a city's lock
    names and every clone modified in the last `--keep-days` days, 7 by
-   default, and it deletes nothing without `--apply`.
+   default, and it deletes nothing without `--apply`. A fresh clone of
+   gc-toolkit's repository, checked out at a commit, took 62 MB on disk on
+   2026-11-06, and gc-toolkit's main took 39 landings in the seven days up to
+   that date.
 4. **The loader validates the clone and never fetches.** On load, the
    clone's HEAD must equal the locked commit, and `git status --porcelain`
    (ignored files excluded) must be empty. Otherwise the load fails with
