@@ -677,8 +677,8 @@ type Sitting struct {
 	// `tracks` edge names.
 	Subject string `json:"subject"`
 	// Title is the conversation task's own title: what the conversation asks,
-	// in the words of whoever filed it, or [boardPickTitle] when the filing
-	// named no ask.
+	// in the words of whoever filed it, or a writer's stock title
+	// ([boardPickTitle], [intakeTitle]) when the filing named no ask.
 	Title string `json:"title"`
 	// Status is the conversation task's own status, and Assignee is who holds
 	// it: `human` while it waits in the operator's queue, a sitting's alias
@@ -776,9 +776,10 @@ func (s Sitting) Topic() string {
 // operator's dismissal, so the row reads as a decision rather than a blank.
 // Without either the row shows the conversation's own title, which says what
 // it asks, so two conversations on one subject read as two asks rather than as
-// the topic twice. A title that says nothing of the ask, an empty one or
-// [boardPickTitle], gives way to the subject's title, and is the last resort
-// only for a subject the gather could not read at all.
+// the topic twice. A title that says nothing of the ask, an empty one or a
+// writer's stock title ([boardPickTitle], [intakeTitle]), gives way to the
+// subject's title, and is the last resort only for a subject the gather could
+// not read at all.
 func sittingHeadline(s Sitting) string {
 	if s.Takeaway != "" {
 		return s.Takeaway
@@ -786,7 +787,7 @@ func sittingHeadline(s Sitting) string {
 	if s.OutcomeReason != "" {
 		return s.OutcomeReason
 	}
-	if s.Title != "" && s.Title != boardPickTitle {
+	if s.Title != "" && s.Title != boardPickTitle && s.Title != intakeTitle {
 		return s.Title
 	}
 	if s.SubjectTitle != "" {

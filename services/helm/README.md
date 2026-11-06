@@ -807,9 +807,11 @@ conversation's own title (`headline` on the wire, derived by
 `board.sittingHeadline`), and every surface prints it as it stands. The title
 says what the conversation asks, while the subject cell already shows the topic,
 so two conversations on one bead read as two asks. A title that says nothing of
-the ask gives way to the subject's title: an empty one, or the
+the ask gives way to the subject's title: an empty one, the
 `operator pick from the board` that `gc-helm.sh open` writes when its caller
-names neither a reason nor a gate.
+names neither a reason nor a gate, or the `operator-origin topic intake` that
+`operator-intake.sh` gives as the reason when it files the conversation on an
+operator's topic itself, with no first reaction to frame the topic.
 
 The close reason is the conversation task's own (`outcome_reason` on the wire):
 the headline a sign-off settled on, the operator's dismissal, or the reading a

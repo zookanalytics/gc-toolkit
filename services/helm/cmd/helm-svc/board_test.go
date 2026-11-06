@@ -107,9 +107,10 @@ func TestRenderSittingsHeadlineIsWhatTheConversationAsks(t *testing.T) {
 }
 
 // TestRenderSittingsFallsBackToTheSubjectTitle: the stock title a pick off the
-// board leaves says how the conversation was filed and nothing of what it asks,
-// so a sitting under it shows the subject's title, the topic, as its headline.
-// Only a subject the gather could not read at all drops to that title.
+// board leaves, and the one a topic the intake files directly leaves, each say
+// how the conversation was filed and nothing of what it asks, so a sitting
+// under either shows the subject's title, the topic, as its headline. Only a
+// subject the gather could not read at all drops to that title.
 func TestRenderSittingsFallsBackToTheSubjectTitle(t *testing.T) {
 	var buf bytes.Buffer
 	renderSittings(&buf, builtSittings([]board.Sitting{{
@@ -117,6 +118,11 @@ func TestRenderSittingsFallsBackToTheSubjectTitle(t *testing.T) {
 		SubjectTitle: "helm returns the raw script path",
 		Title:        "operator pick from the board",
 		Status:       "in_progress", OpenedAt: minsAgo(60),
+	}, {
+		ID: "tk-intake", Rig: "gc-toolkit", Subject: "tk-topic",
+		SubjectTitle: "why is dolt wedging under load",
+		Title:        "operator-origin topic intake",
+		Status:       "open", Assignee: "human", OpenedAt: minsAgo(30),
 	}}), renderNow)
 	out := buf.String()
 
@@ -125,6 +131,12 @@ func TestRenderSittingsFallsBackToTheSubjectTitle(t *testing.T) {
 	}
 	if strings.Contains(out, "operator pick from the board") {
 		t.Errorf("a board pick's stock title is not the headline once the subject has one:\n%s", out)
+	}
+	if !strings.HasSuffix(sittingRow(t, out, "tk-intake"), "why is dolt wedging under load") {
+		t.Errorf("an intake's headline falls back to the subject title (the topic):\n%s", out)
+	}
+	if strings.Contains(out, "operator-origin topic intake") {
+		t.Errorf("an intake's stock title is not the headline once the subject has one:\n%s", out)
 	}
 
 	// Only an unreadable subject — no title at all — drops to the conversation's title.

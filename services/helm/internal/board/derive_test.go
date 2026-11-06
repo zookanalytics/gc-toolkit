@@ -1358,13 +1358,15 @@ func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
 // headline prefers the takeaway, then the conversation's close reason, then the
 // conversation's own title, which says what it asks, and shows the subject's
 // title only when that title says nothing of the ask: an empty one, or the
-// stock title a pick off the board leaves. Both degrade to the id and the
-// conversation's title only when the gather could not read the subject at all.
+// stock title a pick off the board or a topic the intake files directly
+// leaves. Both degrade to the id and the conversation's title only when the
+// gather could not read the subject at all.
 func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 	const (
 		subjTitle = "the raw script path the launcher took"
 		ask       = "decide whether the launcher or the board owns the path"
 		boardPick = "operator pick from the board"
+		intake    = "operator-origin topic intake"
 		takeaway  = "routed the fix to the pool; nothing further here"
 		reason    = "dismissed by the operator: superseded by the new plan"
 	)
@@ -1384,6 +1386,8 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 			Sitting{SubjectTitle: subjTitle, Title: ask}, ask},
 		{"the stock title of a pick off the board gives way to the topic",
 			Sitting{SubjectTitle: subjTitle, Title: boardPick}, subjTitle},
+		{"the stock title of a topic the intake filed directly gives way to the topic",
+			Sitting{SubjectTitle: subjTitle, Title: intake}, subjTitle},
 		{"an untitled conversation gives way to the topic",
 			Sitting{SubjectTitle: subjTitle}, subjTitle},
 		{"an unread subject keeps the conversation's title",

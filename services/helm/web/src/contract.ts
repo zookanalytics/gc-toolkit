@@ -431,9 +431,11 @@ export interface Sitting {
    */
   state: string;
   /**
-   * What this sitting concluded, or failing that what it is about: its takeaway,
-   * else its close reason, else its subject's title, else the conversation's own
-   * title. Derived on the Go side. Print it; do not re-derive it. Always present.
+   * What this sitting concluded, or failing that what its conversation asks: its
+   * takeaway, else its close reason, else the conversation's own title. A title
+   * that says nothing of the ask, an empty one or a writer's stock title, gives
+   * way to the subject's title, and is kept only when the subject could not be
+   * read. Derived on the Go side. Print it; do not re-derive it. Always present.
    */
   headline: string;
 }
