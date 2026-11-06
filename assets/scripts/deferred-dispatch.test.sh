@@ -134,8 +134,22 @@ while :; do
         *) break ;;
     esac
 done
+# STUB_RACE_AT and STUB_RACE_JQ land a write another actor makes: the first
+# call whose arguments contain STUB_RACE_AT applies the jq program STUB_RACE_JQ
+# to the store before it is answered. It fires once; STUB_RACE_FIRED records it.
+if [ -n "${STUB_RACE_AT:-}" ] && [ ! -e "${STUB_RACE_FIRED:?}" ]; then
+    case " $* " in
+        *"$STUB_RACE_AT"*)
+            : > "$STUB_RACE_FIRED"
+            jq -c "${STUB_RACE_JQ:?}" "$STUB_STORE" > "$STUB_STORE.race" && mv "$STUB_STORE.race" "$STUB_STORE" ;;
+    esac
+fi
 if [ -n "${STUB_BD_LIST_FAIL:-}" ] && [ "${1:-}" = "list" ]; then
     echo "bd: simulated listing failure" >&2; exit 1
+fi
+# Every `show` fails once the file STUB_SHOW_FAIL_WHEN names exists.
+if [ -n "${STUB_SHOW_FAIL_WHEN:-}" ] && [ -e "$STUB_SHOW_FAIL_WHEN" ] && [ "${1:-}" = "show" ]; then
+    echo "bd: simulated show failure" >&2; exit 1
 fi
 case "${1:-}" in
   list)
@@ -460,6 +474,7 @@ export STUB_MAILBOX="$TMP/mailbox"
 export STUB_NUDGE_LOG="$TMP/nudge.log"
 export ESC_CALLS="$TMP/human-gate.log" ESC_MESSAGES="$TMP/human-gate-messages.log"
 export HELM_CALLS="$TMP/helm.log" HELM_BODIES="$TMP/helm-bodies.log"
+export STUB_RACE_FIRED="$TMP/race.fired"
 export GC_HUMAN_GATE_TOOL="$BIN/human-gate.sh"
 export GC_HELM_TOOL="$BIN/gc-helm.sh"
 export BEADS_ACTOR="test-actor"
@@ -476,6 +491,7 @@ unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE \
 store() {
     printf '%s' "$1" > "$STUB_STORE"
     : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"; : > "$ESC_CALLS"; : > "$ESC_MESSAGES"; : > "$HELM_CALLS"; : > "$HELM_BODIES"
+    rm -f "$STUB_RACE_FIRED"
 }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
