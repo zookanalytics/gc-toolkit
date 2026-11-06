@@ -227,7 +227,7 @@ already closed by hand, the same writer adds the missing pointer.
   (the waits skill). In a sitting it runs before the sign-off, with
   `--successor <conversation>` (the converse-settle step).
 - A bead that needs no work only once another bead lands is not closed now.
-  Give it an `until` edge to that bead instead (the waits skill), and it is
-  closed once that bead closes.
+  Make it wait on that bead and arm the validating closer for when it closes
+  (the waits skill), which checks it then and closes it or asks a person.
 
 `docs/state-machine.md` ("Disposition") is the doctrine.

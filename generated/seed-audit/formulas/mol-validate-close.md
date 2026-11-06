@@ -10,6 +10,11 @@ record its run wrote finishes the bead, such as a live check whose every check
 passed. A polecat never closes its own work bead, so this check stands between
 that record and the close, which records the bead as done.
 
+A bead whose whole job ended once another bead landed, such as a problem in
+code another bead retires, reaches here through the arm its wait carries, once
+that bead has closed. That close is a claim too: the bead it waited on can close
+without the fix it promised.
+
 ## The contract
 
 1. **The subject arrives as the input convoy's single tracked member.** Each

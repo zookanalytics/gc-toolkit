@@ -12,9 +12,8 @@
 #   (READERS)  every doctor check that judges a cadence sources this file
 #   (NO-COPY)  no other file carries a cadence window of its own
 # The behavioral half lives beside each reader, in
-# doctor/check-cadence-live/run.test.sh,
-# doctor/check-armed-dispatch-owed/run.test.sh and
-# doctor/check-until-resolved-owed/run.test.sh.
+# doctor/check-cadence-live/run.test.sh and
+# doctor/check-armed-dispatch-owed/run.test.sh.
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -89,7 +88,7 @@ eq "$(cadence_window 3600 1920)" "10800" "an hourly order keeps three intervals"
 eq "$(cadence_window 601 1800)" "1803" "three intervals win as soon as they pass the floor"
 
 echo "# (READERS) every cadence reader sources the one definition"
-for r in doctor/check-cadence-live/run.sh doctor/check-armed-dispatch-owed/run.sh doctor/check-until-resolved-owed/run.sh; do
+for r in doctor/check-cadence-live/run.sh doctor/check-armed-dispatch-owed/run.sh; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi
     grep -qF 'assets/scripts/order-cadence.sh' "$f" \
