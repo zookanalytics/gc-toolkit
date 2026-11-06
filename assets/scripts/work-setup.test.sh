@@ -387,6 +387,26 @@ fresh_run "$(jq -nc --arg d "$GONE" '[{id: "tk-w", status: "open", assignee: "",
 eq "$RC" "0" "(22) a recorded tree no longer on disk: a new one is made"
 eq "$(meta work_dir)" "$TMP/slot2/worktrees/tk-w" "(22) and recorded"
 
+# A rework after a hand-off, which takes the tree and its local branch and clears
+# work_dir: only the branch is recorded.
+NEW="$TMP/slot4/worktrees/tk-w"
+fresh_run '[{"id":"tk-w","status":"open","assignee":"","metadata":{"branch":"polecat/w1","rejection_reason":"tests failed"}}]' GC_DIR="$TMP/slot4"
+eq "$RC" "0" "(22b) a rework with its branch recorded and no tree: exits 0"
+eq "$(last_line)" "$NEW" "(22b) it resumes in a fresh tree under the session's directory"
+eq "$(meta work_dir)" "$NEW" "(22b) which is recorded"
+eq "$(g "$NEW" branch --show-current)" "polecat/w1" "(22b) on the recorded branch"
+eq "$(g "$NEW" rev-list --parents -n 1 HEAD | cut -d' ' -f2-)" "$W1 $BASE_TIP" "(22b) origin's branch, brought current by merge"
+"$REAL_GIT" -C "$RIG" worktree remove --force "$NEW"; "$REAL_GIT" -C "$RIG" branch -q -D polecat/w1
+# A rework on the tree an earlier hand-off left: detached at the pushed head,
+# still recorded, its local branch deleted.
+OLD="$TMP/slot5/worktrees/tk-w"; mkdir -p "$TMP/slot5/worktrees"
+"$REAL_GIT" -C "$RIG" worktree add -q --detach "$OLD" "$W1"
+fresh_run "$(jq -nc --arg d "$OLD" '[{id: "tk-w", status: "open", assignee: "", metadata: {branch: "polecat/w1", work_dir: $d, rejection_reason: "tests failed"}}]')" GC_DIR="$TMP/slot6"
+eq "$RC" "0" "(22c) a rework whose recorded tree an earlier hand-off left: exits 0"
+eq "$(last_line)" "$OLD" "(22c) it resumes in that tree"
+eq "$(g "$OLD" branch --show-current)" "polecat/w1" "(22c) on the recorded branch"
+eq "$(g "$OLD" rev-list --parents -n 1 HEAD | cut -d' ' -f2-)" "$W1 $BASE_TIP" "(22c) origin's branch, brought current by merge"
+
 clone polecat/w1
 g "$C" checkout -q --detach
 setup_run "$(bead "" '{"branch":""}')" DROP_NOTHING=1 >/dev/null

@@ -596,8 +596,9 @@ anchor, so a title typed into the PR alone is replaced on its next pass.
 
 **5. Hand off.** This pushes the branch and verifies it on origin, runs the
 bring-current guard, writes the summary and any retitle onto the anchor, writes
-the refinery handoff, wakes the refinery, closes this step, releases the local
-branch, and drains. Pass the anchor the last call printed, when it printed one.
+the refinery handoff, wakes the refinery, closes this step, removes the worktree
+and its local branch, and drains. Pass the anchor the last call printed, when it
+printed one.
 `--notes` is appended to the bead's notes, never written over them.
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --convoy {{convoy_id}} --base {{base_branch}} --binding-prefix {{binding_prefix}} --anchor "<the anchor it printed, or leave this flag out>" --summary-file "<the summary file>" --title "<type>(<scope>): <what the branch does>" --notes "Implemented: <brief summary>"
@@ -625,5 +626,6 @@ A guard that cannot finish hands nothing off: the bead stays open and still
 blocks the anchor, so nothing lands on a round nobody accounted for.
 
 **Exit criteria:** branch pushed and verified, the refinery handoff written,
-refinery signaled, this step closed, local branch released, drain acknowledged.
+refinery signaled, this step closed, the worktree and its local branch removed,
+drain acknowledged.
 Done means gone."""
