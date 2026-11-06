@@ -15,8 +15,8 @@
 # those harnesses, and gc-helm-engage.test.sh proves engage posts nothing.
 #
 # Hermetic: the sign-off runs from a pack directory that links the real scripts
-# it composes and stubs the headline writer, lifecycle.sh and the rework's
-# writers. No city, no network.
+# it composes and stubs the headline writer and the rework's writers. No city,
+# no network.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +44,7 @@ git -C "$REPO" init -q
 git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 
 # The pack the sign-off runs from: the real scripts it composes, and stubs for
-# the headline writer, lifecycle.sh, the rework's filer and the store resolver.
+# the headline writer, the rework's filer and the store resolver.
 SR="$TMPD/pack/assets/scripts"; mkdir -p "$SR"
 for f in converse-signoff.sh pr-sitting-comment.sh pr-post.sh bd-lib.sh conversation.sh work-outcome.sh review-verdict.sh review-dismissal.sh; do
   ln -s "$HERE/$f" "$SR/$f"
@@ -54,11 +54,6 @@ cat > "$SR/gc-helm.sh" <<'H'
 [ "$1" = takeaway ] && gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null
 exit 0
 H
-cat > "$SR/lifecycle.sh" <<'L'
-#!/usr/bin/env bash
-[ "$1" = state ] && echo unanchored
-exit 0
-L
 cat > "$SR/converse-rework.sh" <<'R'
 #!/usr/bin/env bash
 echo "filed rework tk-rw on $2"
@@ -67,7 +62,7 @@ cat > "$SR/bead-store.sh" <<'S'
 #!/usr/bin/env bash
 case "$1" in --path) echo "$REPO" ;; *) echo fixture ;; esac
 S
-chmod +x "$SR/gc-helm.sh" "$SR/lifecycle.sh" "$SR/converse-rework.sh" "$SR/bead-store.sh"
+chmod +x "$SR/gc-helm.sh" "$SR/converse-rework.sh" "$SR/bead-store.sh"
 
 # gc stub: one JSON file per bead under $STORE/b, its edges as deps [{type, on}],
 # and its comments in <id>.comments.json. A show of a bead whose <id>.show
@@ -292,7 +287,7 @@ fi
 
 echo "── a ruled sign-off records the ruling, then draws the ended comment ──"
 fixture
-signoff --outcome "ruled — we fix the retry first" --ruled yes --ruling "fix the retry first" --route human --no-wait
+signoff --outcome "ruled — we fix the retry first" --ruled yes --ruling "fix the retry first" --no-wait
 [ "$(actions)" = "Ruled: fix the retry first" ] && ok "the ruling is recorded on the conversation as its action" \
   || bad "the ruling is recorded on the conversation as its action" "$(actions)"
 has "the comment keeps its open lines and adds the conclusion and the actions" "$(body)" \
@@ -301,12 +296,12 @@ hasnt "…and the headline, which is the subject's, does not reach it" "$(body)"
 [ "$(jq 'length' "$STATE")" = 1 ] && ok "still one comment on the thread" || bad "still one comment on the thread" "$(cat "$STATE")"
 
 echo "── a re-run of the sign-off records no second action ──"
-signoff --outcome "ruled — we fix the retry first" --ruled yes --ruling "fix the retry first" --route human --no-wait
+signoff --outcome "ruled — we fix the retry first" --ruled yes --ruling "fix the retry first" --no-wait
 [ "$(actions)" = "Ruled: fix the retry first" ] && ok "the ruling is recorded once" || bad "the ruling is recorded once" "$(actions)"
 
 echo "── a rework sign-off records the PR it sent back and the ruling the gate carries ──"
 fixture "" open-pr
-signoff --outcome "ruled — the retry gets a cap" --ruled yes --ruling "cap the retry" --route human --no-wait --rework
+signoff --outcome "ruled — the retry gets a cap" --ruled yes --ruling "cap the retry" --no-wait --rework
 [ "$(actions)" = "Sent PR #41 back for rework.|Ruled: cap the retry" ] && ok "the rework, then the ruling, in the order they landed" \
   || bad "the rework, then the ruling, in the order they landed" "$(actions) / $(cat "$TMPD/signoff.out")"
 has "the comment lists both" "$(body)" "Actions:$nl- Sent PR #41 back for rework.$nl- Ruled: cap the retry"
@@ -321,7 +316,7 @@ signoff --outcome "cut short — the rollout question is still owed" --ruled no
 
 echo "── a sign-off on a conversation whose sitting named no topic posts nothing ──"
 fixture no-topic
-signoff --outcome "ruled — we fix the retry first" --ruled yes --ruling "fix the retry first" --route human --no-wait
+signoff --outcome "ruled — we fix the retry first" --ruled yes --ruling "fix the retry first" --no-wait
 [ "$(jq 'length' "$STATE")" = 0 ] && ok "nothing is posted" || bad "nothing is posted" "$(cat "$STATE")"
 [ "$(jq -r '.status' "$STORE/b/tk-conv.json")" = closed ] && ok "…though the sign-off closed the conversation" \
   || bad "…though the sign-off closed the conversation" "$(cat "$STORE/b/tk-conv.json")"

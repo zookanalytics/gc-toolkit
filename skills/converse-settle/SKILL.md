@@ -73,16 +73,15 @@ When nothing important is pending, sign off. Write the durable trace first,
 then post the sign-off as the thread's last word. `converse-signoff.sh` writes
 the trace in one order every time: the ruling's rework or the PR's retirement,
 the subject's headline, the answer on each gate the conversation replies to,
-the release of a `held` subject, the subject's recommendation when the ruling
-takes it, the conversation's close, and the comment that shows the visit on
-the subject's pull request. It records the ruling and each act it takes on the
-conversation as the visit's actions, which that comment lists once the visit
-ends, so the ruling reaches the pull request as you write it: keep other rigs
-and their beads out of it. You tell it what this sitting settled.
+the subject's recommendation when the ruling takes it, the conversation's
+close, and the comment that shows the visit on the subject's pull request. It
+records the ruling and each act it takes on the conversation as the visit's
+actions, which that comment lists once the visit ends, so the ruling reaches
+the pull request as you write it: keep other rigs and their beads out of it.
+You tell it what this sitting settled.
 `--ruled yes` resolves each open gate the conversation replies to with
 `ruled: <the ruling>`, except each one a `--leave` names, which the ruling
-leaves owed with its reply in place, and `--route` is where a `held` subject is
-released to, chosen as below.
+leaves owed with its reply in place.
 `--ruled no` answers nothing: it leaves every gate open and owed and hands the
 conversation back to the operator's queue, which is the low-context path in
 the prompt's Rules. What is waiting on the subject is yours to state: one
@@ -93,8 +92,7 @@ non-zero when it stopped short, and then you must NOT post the sign-off:
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
-     --ruled yes --ruling "<the ruling, one line>" --route human --no-wait
-     # --route <rig>/<agent> releases a held subject to that pool instead
+     --ruled yes --ruling "<the ruling, one line>" --no-wait
      # --leave <gate>, once for each gate the ruling leaves owed
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
      # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
@@ -104,10 +102,10 @@ then
   : # signed off — report any answer it says reached a gate first, then post the sign-off below
 else
   # NOT signed off: a read failed, the rework did not file, the PR did not
-  # retire, the headline did not land, a gate did not close, a held subject
-  # did not release, the recommendation was not taken, or the conversation did
-  # not close or hand back. Do NOT post the sign-off. Repair what it printed
-  # and re-run, or raise it in the thread.
+  # retire, the headline did not land, a gate did not close, the
+  # recommendation was not taken, or the conversation did not close or hand
+  # back. Do NOT post the sign-off. Repair what it printed and re-run, or raise
+  # it in the thread.
   exit 1
 fi
 ```
@@ -123,18 +121,37 @@ line. The sign-off prints that answer and leaves it standing. Tell the
 operator, in the sign-off, which gate it was and what that answer said,
 instead of claiming your own.
 
-**On `--ruled yes`, the `--route` follows which bead carries the work** (the
-`work` skill says why). First read whether the subject is armed. An armed
-subject's arm sends it once its gate is resolved and nothing else holds it:
+**On `--ruled yes`, the sign-off follows which bead carries the work** (the
+`work` skill says why). First settle the subject's dispatch path, its arm and
+its route, as every answer to a gate on it does first, a turn's `--answer`
+(step 8) included. The hold kept both, and the writer leaves them as they are,
+so once the gate is answered and nothing else holds the subject, an arm sends
+it and a pool route has that pool claim it. Read them:
 ```bash
-gc bd show "$SUBJECT" --json | jq -r '.[0].metadata | "\(.["gc.dispatch_when_ready"] // "not armed") \(.["gc.dispatch_when_ready_args"] // "")"'
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | "arm: \(.["gc.dispatch_when_ready"] // "none") \(.["gc.dispatch_when_ready_args"] // "") route: \(.["gc.routed_to"] // "none")" else error("unread") end'
 ```
-When the ruling sends an armed subject to that target by that method, sign off
-with `--ruled yes --route human --no-wait` and send nothing yourself. Under any
-other ruling, disarm it before the sign-off with
-`"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "<the ruling, one line>"`,
-then take the case that fits. The cases:
-- **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
+When the ruling leaves the subject to go where its arm or route already sends
+it, by the same method, keep them: sign off with `--ruled yes --no-wait` and
+send nothing yourself. Under any other ruling, one that sends it elsewhere or
+nowhere, withdraw them before the answer, with or without `--accept`. The block
+disarms an arm and clears a pool route, and keeps a `human` route, which sends
+the subject to no pool. It reads the subject back, and prints its
+`carries no arm and no pool route` line only once neither is left:
+```bash
+WHY="<the ruling, one line>"
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
+  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
+  && ROW=$(gc bd show "$SUBJECT" --json) \
+  && LEFT=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | [ ((.["gc.dispatch_when_ready"] // "") | tostring | select(. != "") | "arm " + .), ((.["gc.routed_to"] // "") | tostring | select(. != "" and . != "human") | "route " + .) ] | join(", ") else error("unread") end') \
+  && if [ -z "$LEFT" ]; then echo "$SUBJECT carries no arm and no pool route"; else echo "$SUBJECT still carries $LEFT"; false; fi
+```
+Without that line, answer nothing: fix what the block printed and re-run it.
+Then take the case that fits. The cases:
+- **The subject is the work.** Sign off with `--ruled yes --no-wait`,
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
   The formula the subject recommends is never sent this way; take it as the
   next case says.
@@ -144,7 +161,7 @@ then take the case that fits. The cases:
   key `first-reaction` that blocks the subject, as for any gate you answer. A
   gate under that key on an epic's member asks the member's recommendation,
   which the sign-off does not take. Then sign off with
-  `--ruled yes --route human --no-wait --accept`. Send nothing yourself: the
+  `--ruled yes --no-wait --accept`. Send nothing yourself: the
   sign-off answers that gate through `gc-helm.sh accept`, the writer the
   board's Accept runs, after every other write but the close. Under the
   subject's acceptance lock it dispatches the formula, or records a dispatch
@@ -162,7 +179,7 @@ then take the case that fits. The cases:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
   It removes the arm that would send the subject once its gate clears, ends any
   run beneath it, answers the gate and closes the subject. Then sign off with
-  `--ruled yes --route human --no-wait`, which reads that gate as already
+  `--ruled yes --no-wait`, which reads that gate as already
   answered. A gate that also holds another open bead takes no answer from it:
   the subject leaves the gate, and it prints which bead the gate still holds.
   Unless the ruling settles that bead too, add `--leave <gate>` to the sign-off,
@@ -170,9 +187,9 @@ then take the case that fits. The cases:
   non-zero, repair what it printed and re-run before you sign off. An open PR is
   retired instead (below).
 - **New work carries it.** File and send that work (below), then sign off
-  with `--ruled yes --route human --waiting-on <the work>`.
+  with `--ruled yes --waiting-on <the work>`.
 - **New work decomposes an epic subject.** File it as the subject's member and
-  send it (below), then sign off with `--ruled yes --route human --no-wait`,
+  send it (below), then sign off with `--ruled yes --no-wait`,
   or with `--waiting-on` naming only the dependencies the sitting also sent.
   A member takes no `--waiting-on`, because bd refuses that edge.
 
