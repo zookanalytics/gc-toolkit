@@ -115,6 +115,8 @@ assigned to anyone but the closing actor: `AssigneeMatches` in
 … assignee is …, actor is …" unless the assignee is empty or matches the actor.
 A conversation is always assigned, to `human` in the operator's queue or to its
 sitting's alias (`assets/scripts/conversation.sh`), and bead-rehome's close is
-unforced, so bead-rehome never closes one. On 2026-11-05 no bead with a
-conversation's shape carried `gc.superseded_by` in any of the city's seven
-stores: 0 of 1,105 pointed beads.
+unforced, so it can close a conversation only when it runs as that assignee.
+The sitting that holds a conversation names it only as the successor of the
+subject it re-homes (`agents/_converse/prompt.template.md`), never as the
+origin. On 2026-11-05 no bead with a conversation's shape carried
+`gc.superseded_by` in any of the city's seven stores: 0 of 1,105 pointed beads.
