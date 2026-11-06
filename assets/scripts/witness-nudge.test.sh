@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Hermetic test for witness-nudge.sh and its order.
 #
-# A fake `gc` on PATH answers the session list and records each nudge's argv, so
-# the assertions pin what a pass sends rather than grepping the script. No
+# A fake `gc` on PATH answers the session list, the rig map and each witness's
+# in-progress patrol wisps, and records every call and each nudge's argv, so the
+# assertions pin what a pass reads and sends rather than grepping the script. No
 # dependency on the live city, the store or a tmux server.
 set -uo pipefail
 
@@ -33,12 +34,32 @@ case "$1 $2" in
     printf '%s\n' "$*" >> "$NUDGE_LOG"
     case "$*" in *"${STUB_NUDGE_FAIL_ID:-no-such-id}"*) exit 1 ;; esac
     ;;
+  "rig list")
+    printf '%s\n' "$*" >> "$RIG_LOG"
+    [ "${STUB_RIGS_RC:-0}" -eq 0 ] || exit "$STUB_RIGS_RC"
+    printf '%s' "${STUB_RIGS-}"
+    ;;
+  "bd --db")
+    # gc bd --db <store> list ... --assignee=<alias> ...: the witness's
+    # in-progress patrol wisps. Every witness holds one unless STUB_WAITING
+    # names its alias; STUB_BD_FAIL names one whose read fails, and
+    # STUB_BD_GARBAGE one whose read prints no list.
+    printf '%s\n' "$*" >> "$BD_LOG"
+    a=""
+    for x in "$@"; do case "$x" in --assignee=*) a="${x#--assignee=}" ;; esac; done
+    case " ${STUB_BD_FAIL:-} " in *" $a "*) exit 1 ;; esac
+    case " ${STUB_BD_GARBAGE:-} " in *" $a "*) echo 'not json'; exit 0 ;; esac
+    case " ${STUB_WAITING:-} " in *" $a "*) echo '[]'; exit 0 ;; esac
+    printf '[{"id":"w-1","title":"mol-witness-patrol","status":"in_progress","assignee":"%s"},{"id":"w-2","title":"some-other-molecule","status":"in_progress","assignee":"%s"}]\n' "$a" "$a"
+    ;;
   *) echo "unexpected gc call: $*" >&2; exit 64 ;;
 esac
 STUB
 chmod +x "$TMP/bin/gc"
 PATH="$TMP/bin:$PATH"
-export LIST_LOG="$TMP/list.log" NUDGE_LOG="$TMP/nudge.log"
+export LIST_LOG="$TMP/list.log" NUDGE_LOG="$TMP/nudge.log" RIG_LOG="$TMP/rig.log" BD_LOG="$TMP/bd.log"
+# The rig map every witness's rig resolves through, unless a case changes it.
+export STUB_RIGS; STUB_RIGS='{"rigs":[{"name":"gc-toolkit","path":"/rigs/gc-toolkit"},{"name":"rig","path":"/rigs/rig"},{"name":"a","path":"/rigs/a"},{"name":"b","path":"/rigs/b"},{"name":"c","path":"/rigs/c"}]}'
 
 NOW=$(date +%s)
 # The script's clock stands at NOW, so a case one second from the bound stays there
@@ -54,10 +75,16 @@ iso() {
   esac
   jq -rn --argjson s "$((NOW - $1 + shift_secs))" --arg z "$zone" '$s | todate | sub("Z$"; $z)'
 }
-# row <id> <template> <state> <attached> <last_active> <last_nudge>
+# row <id> <template> <state> <attached> <last_active> <last_nudge> [rig]
+# The alias is the template, as a rig-scoped named session's is. The rig is the
+# alias's rig segment, else gc-toolkit; a case passes "-" for a row with none.
 row() {
-  jq -cn --arg id "$1" --arg t "$2" --arg st "$3" --argjson at "$4" --arg la "$5" --arg ln "$6" \
+  local rig="${7:-}"
+  if [ -z "$rig" ]; then case "$2" in */*) rig="${2%%/*}" ;; *) rig=gc-toolkit ;; esac; fi
+  [ "$rig" = - ] && rig=""
+  jq -cn --arg id "$1" --arg t "$2" --arg st "$3" --argjson at "$4" --arg la "$5" --arg ln "$6" --arg rig "$rig" \
     '{id: $id, alias: $t, template: $t, state: $st, attached: $at, last_active: $la}
+     + (if $rig == "" then {} else {rig: $rig} end)
      + (if $ln == "" then {} else {last_nudge_delivered_at: $ln} end)'
 }
 # list_of <row>...: the session list's JSON around those rows.
@@ -65,10 +92,12 @@ list_of() { printf '%s\n' "$@" | jq -s '{sessions: .}'; }
 
 # run: one pass over STUB_LIST, with the outcome in OUT, ERR and RC.
 run() {
-  : > "$LIST_LOG"; : > "$NUDGE_LOG"
+  : > "$LIST_LOG"; : > "$NUDGE_LOG"; : > "$RIG_LOG"; : > "$BD_LOG"
   OUT=$("$SCRIPT" 2>"$TMP/err"); RC=$?
   ERR=$(cat "$TMP/err")
   NUDGES=$(cat "$NUDGE_LOG")
+  RIGREADS=$(cat "$RIG_LOG")
+  BDREADS=$(cat "$BD_LOG")
 }
 count() { if [ -z "$1" ]; then echo 0; else printf '%s\n' "$1" | wc -l | tr -d ' '; fi; }
 
@@ -81,17 +110,56 @@ eq "$RC" 0 "a quiet witness's pass exits 0"
 eq "$(count "$NUDGES")" 1 "one nudge"
 has "$NUDGES" "session nudge --delivery immediate hq-1 " "the nudge is typed live and names the session id"
 has "$NUDGES" "quiet for 15 minutes" "the nudge says how long the pane has been quiet"
+has "$NUDGES" "patrol wisp still in progress, so your pass stopped" "the nudge says the pass stopped with its wisp in progress"
 has "$NUDGES" "startup wisp reconcile" "the nudge asks for the startup reconcile"
 has "$NUDGES" "mol-witness-patrol from check-inbox" "the nudge names the patrol and where to start it"
 hasnt "$NUDGES" "limit" "the nudge reads as no provider banner to the quota-park order"
 has "$OUT" "1 checked, 1 nudged" "the summary counts it"
 has "$(cat "$LIST_LOG")" "GC_NO_API=1 " "the list reads the local path"
 has "$(cat "$LIST_LOG")" "session list --json" "the list asks for JSON"
+eq "$(count "$RIGREADS")" 1 "the rig map is read once"
+has "$BDREADS" "bd --db /rigs/gc-toolkit/.beads list " "the wisps are read from the witness's rig store"
+has "$BDREADS" "--status=in_progress" "only in-progress wisps are read"
+has "$BDREADS" "--assignee=$W" "the wisps read are the witness's own"
+has "$BDREADS" "--type=molecule --include-infra" "the read reaches a wisp, which is an infra molecule"
+
+echo "--- a witness waiting out its next pass is left alone"
+export STUB_WAITING="$W"; run; unset STUB_WAITING
+eq "$(count "$NUDGES")" 0 "a quiet witness holding no patrol wisp in progress is not nudged"
+eq "$RC" 0 "waiting out the hour is a clean pass"
+has "$OUT" "waiting out its next pass" "the pass says why it left the witness alone"
+has "$OUT" "1 checked, 0 nudged" "the summary counts it"
+
+echo "--- a witness whose wisps cannot be read"
+export STUB_BD_FAIL="$W"; run; unset STUB_BD_FAIL
+eq "$(count "$NUDGES")" 0 "a failed wisp read nudges nothing"
+eq "$RC" 1 "a failed wisp read fails the pass"
+has "$ERR" "did not read" "stderr says the wisps did not read"
+export STUB_BD_GARBAGE="$W"; run; unset STUB_BD_GARBAGE
+eq "$(count "$NUDGES")" 0 "a read that prints no list nudges nothing"
+eq "$RC" 1 "and fails the pass"
+STUB_RIGS='{"rigs":[{"name":"other","path":"/rigs/other"}]}'; run
+eq "$(count "$NUDGES")" 0 "a rig the map does not name nudges nothing"
+eq "$RC" 1 "and fails the pass"
+has "$ERR" "is not in the rig map" "stderr names the missing rig"
+STUB_RIGS='{"rigs":[{"name":"gc-toolkit","path":"/rigs/gc-toolkit"}]}'
+export STUB_RIGS_RC=3; run; unset STUB_RIGS_RC
+eq "$(count "$NUDGES")" 0 "a rig map that does not read nudges nothing"
+eq "$RC" 1 "and fails the pass"
+has "$ERR" "the rig map did not read" "stderr says the map did not read"
+STUB_RIGS='{"rigs":[{"name":"gc-toolkit","path":"/rigs/gc-toolkit"},{"name":"rig","path":"/rigs/rig"},{"name":"a","path":"/rigs/a"},{"name":"b","path":"/rigs/b"},{"name":"c","path":"/rigs/c"}]}'
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 900)" "" -)"); run
+eq "$(count "$NUDGES")" 0 "a row with no rig nudges nothing"
+eq "$RC" 1 "and fails the pass"
+eq "$(count "$BDREADS")" 0 "and reads no store"
+STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 900)" "")")
 
 echo "--- what leaves a witness alone"
 STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 0)" "")"); run
 eq "$(count "$NUDGES")" 0 "a pane that just printed is working"
 eq "$RC" 0 "a working pane is a clean pass"
+eq "$(count "$RIGREADS")" 0 "a working pane costs no rig-map read"
+eq "$(count "$BDREADS")" 0 "and no store read"
 STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 659)" "")"); run
 eq "$(count "$NUDGES")" 0 "a pane quiet for under the bound is left alone"
 STUB_LIST=$(list_of "$(row hq-1 "$W" active false "$(iso 660)" "")"); run
@@ -166,6 +234,13 @@ STUB_LIST=$(list_of \
 eq "$(count "$NUDGES")" 2 "each quiet witness gets its own nudge"
 hasnt "$NUDGES" "hq-2" "a working witness among them is left alone"
 has "$OUT" "3 checked, 2 nudged" "the summary counts all three"
+eq "$(count "$RIGREADS")" 1 "two quiet witnesses share one rig-map read"
+eq "$(count "$BDREADS")" 2 "each quiet witness's own store is read once"
+has "$BDREADS" "/rigs/a/.beads" "a's wisps come from a's store"
+has "$BDREADS" "/rigs/c/.beads" "c's wisps come from c's store"
+export STUB_WAITING="a/gc-toolkit.witness"; run; unset STUB_WAITING
+eq "$(count "$NUDGES")" 1 "a witness waiting out its pass is left alone beside one that stopped"
+has "$NUDGES" "hq-3" "and the one that stopped is nudged"
 export STUB_NUDGE_FAIL_ID=hq-1; run; unset STUB_NUDGE_FAIL_ID
 eq "$RC" 1 "a failed nudge fails the pass"
 has "$ERR" "hq-1" "stderr names the session whose nudge failed"
@@ -198,26 +273,24 @@ timeout_secs=$(order_key timeout); timeout_secs=${timeout_secs%s}
 if [ "$timeout_secs" -lt 300 ]; then ok "a pass ends before the next one starts"; else bad "timeout ${timeout_secs}s reaches the 5m interval"; fi
 [ -x "$SCRIPT" ] && ok "the script is executable" || bad "the script is not executable"
 
-echo "--- the bound stays over the formula's inter-cycle wait"
-default_quiet=$(sed -n 's/^QUIET_SECS="${WITNESS_NUDGE_QUIET_SECS:-\([0-9]*\)}"$/\1/p' "$SCRIPT")
-wait_default=$(awk '/^\[vars\.event_timeout\]/ { inb = 1; next } /^\[/ { inb = 0 } inb && /^default[[:space:]]*=/ { v = $0; gsub(/[^0-9]/, "", v); print v; exit }' "$FORMULA")
-if [ -n "$default_quiet" ] && [ -n "$wait_default" ] && [ "$default_quiet" -gt "$wait_default" ]; then
-  ok "the ${default_quiet}s bound is over the ${wait_default}s wait"
-else
-  bad "the bound '$default_quiet' must stay over mol-witness-patrol's event_timeout default '$wait_default'"
-fi
-
-echo "--- the step this order backs up: a pass waits, pours and ends its turn"
+echo "--- the step this order backs up: a pass pours, defers its next wisp and ends its turn"
 STEP=$(awk '/^id = "next-iteration"$/ { inb = 1; next } /^\[\[steps\]\]$/ { inb = 0 } inb' "$FORMULA")
 line_of() { printf '%s\n' "$STEP" | grep -n -F -- "$1" | head -1 | cut -d: -f1; }
-wait_at=$(line_of 'until [ "$(date +%s)" -ge "$end" ]')
 pour_at=$(line_of '# >>> patrol-wisp-pour')
+assign_at=$(line_of 'gc bd update "$NEXT" --assignee="$GC_AGENT"')
+defer_at=$(line_of 'gc bd update "$NEXT" --defer=+1h')
+burn_at=$(line_of 'gc bd mol burn "$CURRENT_WISP" --force')
+end_at=$(line_of '# <<< patrol-wisp-pour')
 idle_at=$(line_of 'IDLE: no work, exiting turn.')
-if [ -n "$wait_at" ] && [ -n "$pour_at" ] && [ "$wait_at" -lt "$pour_at" ]; then
-  ok "next-iteration waits before it pours, because a wait after the pour never holds"
+hasnt "$STEP" 'until [ "$(date +%s)"' "next-iteration has no wait, since the defer spaces the passes"
+hasnt "$STEP" "event_timeout" "next-iteration reads no inter-cycle wait"
+if [ -n "$assign_at" ] && [ -n "$defer_at" ] && [ -n "$burn_at" ] && [ -n "$end_at" ] \
+    && [ "$assign_at" -lt "$defer_at" ] && [ "$defer_at" -lt "$burn_at" ] && [ "$burn_at" -lt "$end_at" ]; then
+  ok "the pour block defers the next wisp after the assign and before this wisp's burn"
 else
-  bad "next-iteration waits before it pours (wait at line '$wait_at', pour at line '$pour_at')"
+  bad "the pour block defers the next wisp between the assign and the burn (assign '$assign_at', defer '$defer_at', burn '$burn_at', block end '$end_at')"
 fi
+has "$STEP" 'gc bd update "$NEXT" --defer=+1h || echo' "a defer that fails still lets the burn run"
 if [ -n "$pour_at" ] && [ -n "$idle_at" ] && [ "$pour_at" -lt "$idle_at" ]; then
   ok "next-iteration writes the idle line after the pour"
 else
@@ -227,12 +300,15 @@ hasnt "$STEP" "gc formula show" "next-iteration does not send the session back t
 marks=$(printf '%s\n' "$STEP" | grep -E 'gc bd update [^;|&]*--status' || true)
 eq "$marks" "" "next-iteration marks no wisp's status"
 has "$STEP" "Never mark the next wisp in progress" "next-iteration tells the session not to mark its next wisp"
-has "$STEP" "A wait after the pour" "next-iteration says why the wait comes first"
+has "$STEP" "A deferred wisp is not ready work" "next-iteration says what the defer does"
 has "$STEP" "Then stop at once" "next-iteration stops at the idle line"
+has "$STEP" "start a" "next-iteration rules out a background command after the idle line"
 has "$STEP" "Leave this wisp in place and end the turn" "a fired guard keeps this wisp and ends the turn"
 PROMPT=$(cat "$ROOT/agents/witness/prompt.template.md")
 has "$PROMPT" "A pass ends at next-iteration" "the witness's prompt says where a pass ends"
 has "$PROMPT" "Never mark your next wisp in progress" "the witness's prompt tells the session not to mark its next wisp"
+RECONCILE=$(printf '%s\n' "$PROMPT" | awk '/# >>> patrol-wisp-reconcile$/ { f = 1; next } /# <<< patrol-wisp-reconcile$/ { f = 0 } f')
+has "$RECONCILE" "--status=deferred" "the startup reconcile reads a deferred successor, so a restart inside the hour adopts it"
 
 echo
 echo "witness-nudge.test: $PASS passed, $FAIL failed"
