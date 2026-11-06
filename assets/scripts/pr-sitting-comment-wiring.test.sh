@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # pr-sitting-comment-wiring.test.sh — proves, end to end, that the writes which
 # change what a visit's PR comment shows draw it again from the conversation.
-# converse-prep's title step, run as the skill prints it, writes the topic as
-# the conversation's title and posts the comment. converse-signoff.sh records
+# converse-prep's title step, run as the skill prints it, titles the session
+# with the topic through gctk, writes the topic as the conversation's title and
+# posts the comment. converse-signoff.sh records
 # the ruling and each act it takes on the conversation, then draws the comment
 # in its ended shape once the conversation reads closed. The real
 # pr-sitting-comment.sh and pr-post.sh run against stubs of gc and gh, so what
@@ -141,7 +142,16 @@ exit 0
 GH
 chmod +x "$BIN/gh"
 
+# gctk stub: the title step finds gctk through $GCTK_BIN, and this one writes
+# its arguments to $GCTK_LOG, one per line.
+cat > "$BIN/gctk" <<'K'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$GCTK_LOG"
+K
+chmod +x "$BIN/gctk"
+
 export PATH="$BIN:$PATH" STORE="$TMPD/store" REPO STATE="$TMPD/comments.json"
+export GCTK_BIN="$BIN/gctk" GCTK_LOG="$TMPD/gctk.args"
 unset GC_CITY_PATH 2>/dev/null || true
 OPENER="Why does the retry spin? the words I typed to open this"
 TOPIC="how the retry should work"
@@ -175,8 +185,11 @@ body() { jq -r '.[0].body // ""' "$STATE"; }
 actions() { jq -r '[.[].text] | join("|")' "$STORE/b/tk-conv.comments.json" 2>/dev/null; }
 OPEN_LINES="<!-- gc:sitting:tk-conv -->$nl### Visit tk-conv on tk-subj${nl}Topic: $TOPIC"
 
-echo "── the title step writes the topic onto the conversation and posts the comment ──"
+echo "── the title step titles the session, writes the topic onto the conversation and posts the comment ──"
 fixture
+[ "$(tr '\n' '|' < "$GCTK_LOG" 2>/dev/null)" = "session|title|--subject|tk-subj|--topic|$TOPIC|" ] \
+  && ok "the session is titled with the subject and the topic through gctk" \
+  || bad "the session is titled with the subject and the topic through gctk" "$(cat "$GCTK_LOG" 2>/dev/null)"
 [ "$(jq -r '.title' "$STORE/b/tk-conv.json")" = "$TOPIC" ] && ok "the conversation's title is the topic" \
   || bad "the conversation's title is the topic" "$(cat "$STORE/b/tk-conv.json")"
 has "the comment shows the visit, the bead it is on and the topic" "$(body)" "$OPEN_LINES"
