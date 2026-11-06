@@ -2139,7 +2139,10 @@ cmd_place() {
     # deferred-dispatch pass slings it once nothing holds the bead, so a second
     # dispatch beside it would start a second run when it fires. place keeps an
     # arm that sends the bead where this placement would, and refuses one that
-    # sends it to another pool or on another formula.
+    # sends it to another pool or on another formula. An arm for the validating
+    # closer (mol-validate-close) is a wait on another bead, which the closer
+    # checks once that bead lands (skills/waits/SKILL.md), so its refusal names
+    # the lift that lets the closer run before the disarm that would drop it.
     pl_arm=""
     if [ -z "$dispatched" ]; then
         pl_arm=$(printf '%s' "$row" | jq -r '((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring | select(test("[^[:space:]]"))' 2>/dev/null || true)
@@ -2149,6 +2152,10 @@ cmd_place() {
             | if type == "string" then (if test("[^[:space:]]") then (fromjson? // [.]) else [] end) else . end' 2>/dev/null || true)
         pl_want_args=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
         if [ "$pl_arm" != "$pool" ] || [ "$pl_arm_args" != "$pl_want_args" ]; then
+            if printf '%s' "$pl_arm_args" | jq -e 'type == "array" and any(.[]; tostring | test("(^|=)mol-validate-close$"))' >/dev/null 2>&1; then
+                echo "$PROG: place: $bead is armed for its validating closer (mol-validate-close) on $pl_arm: it waits on another bead to land and is checked then, so it is not new work to place. Lift its hold and keep the arm: gc bd update $bead --remove-label hold:mayor --db $db. To place it as work instead, disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
+                exit 2
+            fi
             echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}. Disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
             exit 2
         fi

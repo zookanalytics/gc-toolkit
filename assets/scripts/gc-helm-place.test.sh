@@ -586,6 +586,14 @@ reset_store; arm_new gc-toolkit/gc-toolkit.polecat '[]'
 run_place tk-new --under tk-epic --on mol-polecat-report
 eq "$RC" "2" "(ARMED-ELSEWHERE) a bead armed on another formula exits 2"
 unchanged "(ARMED-ELSEWHERE) …with nothing written"
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '["--on","mol-validate-close"]'
+run_place tk-new --under tk-epic
+eq "$RC" "2" "(ARMED-CLOSER) a bead armed for its validating closer exits 2"
+has "$ERR" "armed for its validating closer (mol-validate-close)" "(ARMED-CLOSER) …naming the wait"
+has "$ERR" "gc bd update tk-new --remove-label hold:mayor" "(ARMED-CLOSER) …and the lift that lets the closer run"
+has "$ERR" "To place it as work instead, disarm it" "(ARMED-CLOSER) …with the disarm only as the way to place it instead"
+unchanged "(ARMED-CLOSER) …with nothing written"
+hasnt "$CALLS" "sling " "(ARMED-CLOSER) …and nothing slung"
 reset_store; arm_new gc-toolkit/gc-toolkit.polecat '["--on","mol-polecat-work"]'
 run_place tk-new --under tk-epic --on mol-polecat-work
 eq "$RC" "0" "(ARMED-SAME) a bead armed where this placement sends it exits 0"

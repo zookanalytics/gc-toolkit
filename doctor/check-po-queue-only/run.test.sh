@@ -276,6 +276,24 @@ has "$OUT" "queued bead al-q6 is worked by live run al-run1 (mol-polecat-work)" 
 has "$OUT" "gc-helm.sh place al-q6 --under <parent> or --standalone" "…with the placement that finishes it"
 hasnt "$OUT" "al-q7" "a run that has ended is not a live run"
 
+# An arm for the validating closer is a wait whose hold was not lifted, so its
+# remedy is the lift, never the disarm or a placement that would replace it.
+reset
+queue '{"id":"al-q8","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on\",\"mol-validate-close\"]"}}' \
+      '{"id":"al-q9","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"}}' \
+      '{"id":"al-q10","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"gc.dispatch_when_ready":"alpha/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[\"--on=mol-validate-close\"]"}}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a queued bead armed for its validating closer is an ERROR"
+Q8=$(line_of "$OUT" "al-q8")
+has "$Q8" "queued bead al-q8 is armed for its validating closer (mol-validate-close) on alpha/gc-toolkit.polecat" "an arm for the validating closer is named as one"
+has "$Q8" "gc bd update al-q8 --remove-label hold:mayor --db $TMP/alpha/.beads, and keep the arm" "…with the lift that lets the closer run, in its own store"
+hasnt "$Q8" "disarm" "…and no disarm, which would drop the check"
+hasnt "$Q8" "gc-helm.sh place" "…and no placement"
+Q9=$(line_of "$OUT" "al-q9")
+has "$Q9" "queued bead al-q9 is armed for dispatch to alpha/gc-toolkit.polecat" "an arm on another formula keeps the placement remedy"
+has "$Q9" "deferred-dispatch.sh disarm al-q9" "…and its disarm"
+has "$(line_of "$OUT" "al-q10")" "armed for its validating closer (mol-validate-close)" "the --on=<formula> spelling names the closer too"
+
 # --- 11. the queue in the API's shape ----------------------------------------
 reset
 printf '{"beads":[%s],"_cache_age_s":4}' '{"id":"al-q1","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"anchor_bead":"al-anchor"}}' > "$TMP/queue-api.json"

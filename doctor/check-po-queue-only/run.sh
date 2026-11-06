@@ -32,7 +32,9 @@
 #     (gc.dispatch_when_ready), an assignee, or a live run that works it
 #     (assets/scripts/run-lib.sh). Each is a placement that stopped before its
 #     lift, or a sling made while the bead was held, and `gc-helm.sh place`
-#     finishes either.
+#     finishes either. An arm for the validating closer (mol-validate-close) is
+#     neither: the bead waits on another bead to land and is checked then, so
+#     its hold is lifted, not placed (skills/waits/SKILL.md).
 #
 # The po's addresses are every identity Gas City serves its work under, which
 # its session.AssigneeIdentities names: the session bead's id, its runtime
@@ -432,6 +434,8 @@ while IFS= read -r line; do
     [ -n "$line" ] && findings+=("$line")
 done <<< "$(jq -r --argjson stores "$STORES_JSON" '
     def nonblank: (. // "") | tostring | test("[^[:space:]]");
+    def arm_args: if type == "string" then (if test("[^[:space:]]") then (fromjson? // [.]) else [] end)
+                  elif type == "array" then . else [] end;
     .[] | (if (.metadata | type) == "object" then .metadata else {} end) as $m
     | ((.id // "?") | tostring) as $id
     | (($stores[$id | split("-")[0]] // null) | if . == null then "" else " --db " + .db end) as $dbf
@@ -442,7 +446,11 @@ done <<< "$(jq -r --argjson stores "$STORES_JSON" '
          "queued bead \($id) carries a landing state, merge_result=\($m.merge_result | tostring), so it is not new work. Lift its hold, gc bd update \($id) --remove-label hold:mayor\($dbf), and correct the writer that held it"
        else empty end),
       (if ($m["gc.dispatch_when_ready"] | nonblank) then
-         "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: deferred-dispatch.sh disarm \($id)"
+         (if ($m["gc.dispatch_when_ready_args"] | arm_args | any(.[]; tostring | test("(^|=)mol-validate-close$"))) then
+            "queued bead \($id) is armed for its validating closer (mol-validate-close) on \($m["gc.dispatch_when_ready"] | tostring): it waits on another bead to land and is checked then, so it is not new work to place, and while it is held the closer never runs. Lift its hold, gc bd update \($id) --remove-label hold:mayor\($dbf), and keep the arm"
+          else
+            "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: deferred-dispatch.sh disarm \($id)"
+          end)
        else empty end),
       (if (.assignee | nonblank) then
          "queued bead \($id) is assigned to \(.assignee | tostring), and Gas City serves a held bead to no assignee. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or clear the assignee"
