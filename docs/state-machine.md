@@ -109,8 +109,9 @@ each enumerate anchors by their gating state, so moving a live anchor to `held`
 to record a conversation would drop it from all three for as long as the hold
 lasts. An anchor already carries a state and a reader; an unanchored subject
 carried neither, which is what the state exists to fix. A subject armed for
-deferred dispatch (`gc.dispatch_when_ready`) skips it, because the hold's gate
-holds that bead and `deferred-dispatch.sh` retires an arm on any `merge_result`.
+deferred dispatch (`gc.dispatch_when_ready`) does not enter it: the hold's gate
+already holds that bead, and `deferred-dispatch.sh` retires an arm on any
+`merge_result`.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
