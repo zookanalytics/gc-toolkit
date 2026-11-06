@@ -283,6 +283,13 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     "Branch shape gate on $WORK_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed." \
     "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); the work waits on the commits moving onto $EXPECTED_BRANCH"
 fi
+# Recorded as soon as the gate has proved it, before the push: the bring-current
+# guard finds the anchor through metadata.branch, and a stop below that re-slings
+# the work resumes this branch rather than cutting a new one from the base.
+if [ -z "$METADATA_BRANCH" ]; then
+  gc bd update "$WORK_ID" --set-metadata "branch=$CURRENT_BRANCH" </dev/null >/dev/null \
+    || work_outage "could not record branch=$CURRENT_BRANCH on $WORK_ID, so nothing is pushed"
+fi
 
 EXISTING_TARGET=$(work_meta target)
 if [ -n "$EXISTING_TARGET" ]; then
@@ -368,7 +375,6 @@ fi
 PR_SUMMARY=""
 if [ -s "${SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$SUMMARY_FILE"); fi
 HANDOFF_META=(--set-metadata "target=$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
-[ -n "$METADATA_BRANCH" ] || HANDOFF_META+=(--set-metadata "branch=$CURRENT_BRANCH")
 if [ -n "$PR_SUMMARY" ]; then
   if [ -n "$ANCHOR" ]; then
     gc bd update "$ANCHOR" --set-metadata "pr_summary=$PR_SUMMARY" </dev/null >/dev/null \

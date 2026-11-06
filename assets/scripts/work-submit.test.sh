@@ -5,8 +5,9 @@
 # It runs against a real git repository with a real bare origin, a gc stub over a
 # JSON store that its reads serve and its writes change, and the real work-lib.sh,
 # decline.sh, claim-close.sh, hand-back.sh and store-only-exit.sh. The guard, the
-# gate, the wait and the cancel are stubs that record their calls. Everything goes
-# into one log, in order, so a case can read what landed before what. No live
+# gate, the wait and the cancel are stubs that record their calls, except in the
+# case that runs the real bring-current guard over a reviewed anchor. Everything
+# goes into one log, in order, so a case can read what landed before what. No live
 # city, Dolt, network, or PRs.
 set -uo pipefail
 
@@ -171,7 +172,7 @@ go
 eq "$RC" 0 "(1) fresh work exits 0"
 eq "$(ON_ORIGIN polecat/tk-w)" "$HEAD_SHA" "(1) the branch is on origin at HEAD"
 eq "$(meta target)" "main" "(1) base fills in the landing target"
-eq "$(meta branch)" "polecat/tk-w" "(1) metadata.branch is recorded with the handoff"
+eq "$(meta branch)" "polecat/tk-w" "(1) metadata.branch is recorded"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(1) the bead is the refinery's"
 eq "$(field status)" "open" "(1) open"
 eq "$(meta gc.routed_to)" "" "(1) route cleared"
@@ -183,13 +184,15 @@ has "$(field notes)" "Implemented: it" "(1) the notes are appended"
 
 echo "# the handoff is ordered"
 ORDER=$(grep -nE '^(push|guard|update tk-w|session|update st-submit|release|drain)' "$LOG" | cut -d: -f2 | awk '{print $1, $2}')
-line_of() { printf '%s\n' "$ORDER" | grep -n "$1" | head -n 1 | cut -d: -f1; }
+line_of() { printf '%s\n' "$ORDER" | grep -n "$1" | sed -n "${2:-1}p" | cut -d: -f1; }
+[ "$(line_of '^update tk-w')" -lt "$(line_of '^push')" ] && ok "(2) the branch is recorded before the push" || bad "(2) the branch is recorded before the push"
 [ "$(line_of '^push')" -lt "$(line_of '^guard')" ] && ok "(2) the push comes before the guard" || bad "(2) the push comes before the guard"
-[ "$(line_of '^guard')" -lt "$(line_of '^update tk-w')" ] && ok "(2) the guard comes before the handoff" || bad "(2) the guard comes before the handoff"
+[ "$(line_of '^guard')" -lt "$(line_of '^update tk-w' 2)" ] && ok "(2) the guard comes before the handoff" || bad "(2) the guard comes before the handoff"
 [ "$(line_of '^update st-submit')" -lt "$(line_of '^release')" ] && ok "(2) the step closes before the branch is released" || bad "(2) the step closes before the branch is released"
 [ "$(line_of '^release')" -lt "$(line_of '^drain')" ] && ok "(2) the branch is released before the drain" || bad "(2) the branch is released before the drain"
 eq "$(printf '%s\n' "$ORDER" | tail -n 1)" "drain " "(2) the drain is last"
-HANDOFF=$(grep '^update tk-w' "$LOG")
+eq "$(grep '^update tk-w' "$LOG" | sed -n 1p)" "update tk-w --set-metadata branch=polecat/tk-w" "(2) the branch is recorded in a write of its own"
+HANDOFF=$(grep '^update tk-w' "$LOG" | sed 1d)
 FIRST=$(printf '%s\n' "$HANDOFF" | sed -n 1p); SECOND=$(printf '%s\n' "$HANDOFF" | sed -n 2p); THIRD=$(printf '%s\n' "$HANDOFF" | sed -n 3p)
 has "$FIRST" "--set-metadata target=main" "(2) the first write carries the target"
 has "$FIRST" "--set-metadata gc.routed_to=" "(2) and clears the route"
@@ -198,6 +201,7 @@ has "$FIRST" "--append-notes Implemented: it" "(2) and appends the notes"
 no "$FIRST" "--notes " "(2) it never replaces the notes"
 no "$FIRST" "--assignee" "(2) it carries no assignee, which the claim guard refuses"
 no "$FIRST" "--status" "(2) and no status"
+no "$FIRST" "--set-metadata branch=" "(2) nor the branch again"
 eq "$SECOND" "update tk-w --status=open" "(2) the second write is the status alone"
 eq "$THIRD" "update tk-w --assignee=gc-toolkit/gc-toolkit.refinery" "(2) the third write is the assignee alone"
 has "$(grep '^session' "$LOG" | sed -n 1p)" "session wake gc-toolkit/gc-toolkit.refinery" "(2) the refinery is woken"
@@ -364,6 +368,26 @@ eq "$RC" 1 "(15) a guard that did not finish: stops"
 has "$OUT" "BRING-CURRENT GUARD DID NOT FINISH" "(15) says so"
 eq "$(tail -n 1 "$LOG")" "drain" "(15) the session drains"
 eq "$(field assignee)" "" "(15) nothing is handed off"
+# The real guard, over a work bead that names neither its branch nor an anchor while
+# a reviewed anchor stands on that branch: the guard finds the anchor only through
+# the branch this call records, and holds a merge resolved by hand with no audit.
+mv "$PACK/bring-current-guard.sh" "$TMP/guard.recorder"
+cp "$HERE/bring-current-guard.sh" "$HERE/bring-current-audit.sh" "$HERE/review-verdict.sh" "$HERE/review-dismissal.sh" "$PACK/"
+REVIEWED='[{"id":"tk-a","title":"the anchor","status":"open","assignee":"","created_at":"2026-01-01","metadata":{"branch":"polecat/tk-w","merge_result":"pull_request"}}]'
+prepare polecat/tk-w '{"target":"main"}' "$REVIEWED"
+printf 'branch side\n' > "$C/base.txt"; g "$C" commit -qam 'branch edits base'; g "$C" push -q origin polecat/tk-w
+M="$TMP/main-$N"; "$REAL_GIT" clone -q "$CO" "$M" 2>/dev/null
+printf 'main side\n' > "$M/base.txt"; g "$M" commit -qam 'main edits base'; g "$M" push -q origin HEAD:main
+g "$C" fetch -q origin; g "$C" merge -q origin/main >/dev/null 2>&1
+printf 'resolved by hand\n' > "$C/base.txt"; g "$C" add base.txt; g "$C" commit -q --no-edit
+go
+eq "$RC" 3 "(15b) the real guard holds an unaudited merge on a branch the bead did not name: exit 3"
+has "$OUT" "base.txt: no entry" "(15b) it names the entry the merge owes"
+eq "$(meta branch)" "polecat/tk-w" "(15b) the branch it found the anchor through is recorded"
+eq "$(field assignee)" "" "(15b) nothing is handed off"
+eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(15b) no drain: the audit is the session's to finish"
+rm -f "$PACK/bring-current-audit.sh" "$PACK/review-verdict.sh" "$PACK/review-dismissal.sh"
+mv "$TMP/guard.recorder" "$PACK/bring-current-guard.sh"
 
 echo "# a refused handoff write stops the chain"
 for piece in "--append-notes" "--status=open" "--assignee=gc-toolkit"; do
@@ -397,7 +421,7 @@ prepare polecat/tk-w "$FRESH"
 printf 'the summary\n' > "$SUM"
 submit -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A better title"
 eq "$(meta pr_summary)" "the summary" "(20) fresh work: the summary lands on this bead"
-has "$(grep '^update tk-w' "$LOG" | sed -n 2p)" "pr_summary=the summary" "(20) in the first handoff write"
+has "$(grep '^update tk-w --set-metadata target=' "$LOG")" "pr_summary=the summary" "(20) in the first handoff write"
 eq "$(field title)" "A better title" "(20) a retitle lands on this bead"
 [ ! -e "$SUM" ] && ok "(20) the summary file is gone once handed off" || bad "(20) the summary file is gone once handed off"
 ANCHOR_ROW='[{"id":"tk-a","title":"the anchor","status":"open","assignee":"","created_at":"2026-01-01","metadata":{"branch":"polecat/tk-a","merge_result":"pull_request"}}]'
@@ -482,6 +506,18 @@ printf '[]' > "$STORE"
 go
 eq "$RC" 1 "(34) no such bead: stops"
 eq "$(pushed)" 0 "(34) nothing is pushed"
+prepare polecat/tk-w "$FRESH"
+g "$C" push -q origin polecat/tk-w; BEFORE=$(ON_ORIGIN polecat/tk-w)
+printf 'more\n' >> "$C/work.txt"; g "$C" commit -qam more
+go UPDATE_FAIL=branch=polecat/tk-w
+eq "$RC" 1 "(34b) a branch the store does not record: stops"
+has "$OUT" "could not record branch=polecat/tk-w on tk-w" "(34b) says so"
+eq "$(pushed)" 0 "(34b) nothing is pushed"
+eq "$(ON_ORIGIN polecat/tk-w)" "$BEFORE" "(34b) origin's ref is unchanged"
+eq "$(grep -c '^guard ' "$LOG" | tr -d ' ')" 0 "(34b) and no guard runs"
+eq "$(meta branch)" "<absent>" "(34b) the store holds no branch"
+eq "$(closed_step)" "in_progress" "(34b) the step stays open"
+eq "$(tail -n 1 "$LOG")" "drain" "(34b) the step goes back to the pool"
 
 echo "# a close that does not land leaves the step for the next run"
 prepare polecat/tk-w "$FRESH"
