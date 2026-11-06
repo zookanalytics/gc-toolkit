@@ -195,6 +195,8 @@ these steps:
    starts nothing, so the operator engages the one they mean. With none, it
    says nothing waits on the gate, names any closed bead the gate was about,
    and starts nothing, and the operator clears the gate.
+   Picked from the gates offered on a bead (below), the gate takes that bead
+   when it is one of those waiting.
 2. **It reads the bead's conversations:** the open tasks that track the bead
    in the conversation shape, with the session list saying which of their
    sittings are live.
@@ -225,6 +227,17 @@ these steps:
    bind that misses, or a read-back that finds the task closed, closes the
    session this engage started. Then engage waits for the reconciler to start
    the session, and attaches the operator.
+
+**Engage offers the gates that hold the bead.** It reads the open human gates
+reached from the bead through its open `blocks` edges (`gctk pr-status gates`,
+`prstatus.HoldingGates`), the reader the PR's `held: gate` label and the board's
+row read, so a gate on a rework the anchor waits on is offered from the PR. The
+prompt lists them after the bead's conversations, and picking one engages it as
+if it were named, except that a gate several beads wait on takes the bead it was
+picked from when that bead is one of them. An engage that asks nothing, as
+`--no-input`, the tmux picker and the board's route do, names each and how to
+engage it, and an engage pointed at a gate or a conversation does not look for
+others. A conversation on the bead answers none of them until it replies to one.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
@@ -285,7 +298,7 @@ A bead id, a PR number or URL, or a superseded id resolves through
 as it is.
 
 **The bare command's default rig is fixed: `gc-toolkit`** (`--rig` overrides,
-`GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"`, so a
+`GC_INTAKE_DEFAULT_RIG` moves the default). Converse is `scope = "rig"`, so a
 sitting spawns from the subject's own rig, and a topic that is not rig-specific
 still has to land somewhere. The default is deliberately not inferred from the
 working directory: a destination that varies silently with the shell's
@@ -435,7 +448,9 @@ reads the reply back, so a resumed or handed-off conversation knows the gate
 it owes. Without that need it files nothing: a conversation does not
 freeze its subject, and a PR keeps moving while the operator and the sitting
 talk. An unanchored subject that a gate blocks moves to `held` and back through
-`lifecycle.sh`, because a held bead must carry a live edge. A hold does not use
+`lifecycle.sh`, because a held bead must carry a live edge. A subject armed for
+deferred dispatch stays unanchored, since `held` would cost it its arm
+([state-machine.md](state-machine.md#the-machine)). A hold does not use
 `gc session wait --sleep`, which sets a wait hold the controller then drains,
 destroying an attached operator's pane.
 
@@ -518,6 +533,18 @@ which runs steps 1 to 3 for the gates it names, and step 5 when the ruling
 takes the recommendation, and stops there, leaving the conversation open for
 the sign-off.
 
+A ruling is not an approval. The merge counts only an Approve review on GitHub
+from an account other than the city's (the merge condition in
+[state-machine.md](state-machine.md)), and nothing the sign-off writes is one.
+So when a ruling leaves an open PR standing with no such review, the headline
+ends by saying the PR still needs the operator's Approve on GitHub, and keeps
+saying so after the operator approves, until the PR merges or another headline
+replaces it. The sitting also passes on a line the sign-off prints with the
+PR's link. A PR whose reviews cannot be read counts as needing one, and on a
+host with neither `timeout` nor `gtimeout` no PR's reviews can be. A PR with an
+approval and a standing request for changes needs no Approve, and its line
+names whose request holds the merge.
+
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
 place and hands the conversation back to the operator's queue with one write
@@ -560,6 +587,23 @@ its sign-off, and the operator's tab prints that record once the session ends.
 It reads the
 conversation's id from the session's alias and strips the `c-` prefix. Its
 warrant, with the trigger that retires it, is in [warrants.md](warrants.md).
+
+**Iterating on a document.** A sitting writes no files, so it changes a document
+by sending work, and a worker sent on a short ruling makes every call the ruling
+left open. When more than one call stands between a document's text and what the
+operator wants, the sitting settles them with the operator item by item, reading
+the operator's guidance for its intent and pushing back where it disagrees, and
+then sends one rework that carries the decisions. The big picture between
+sittings is the subject's notes: the dated rulings and the newest
+`## Current state` block. That block with no open question left is the scaffold.
+It names only what changes, by section or once for the whole document, and gives
+each change its direction and substance, with exact words only where the wording
+itself was settled. Its first lines are the rules the worker follows for what the
+block leaves open, the wording included. The ruling's line names the block,
+`converse-rework.sh` files the rework on the ordinary lane and `mol-polecat-work`
+runs it, so the loop needs no formula, key or script of its own. With no PR open,
+the work is sent as a sign-off sends any other, and its bead names the block. The
+`gc-toolkit.converse-iterate-document` skill holds the steps and the block's form.
 
 ## Accept
 

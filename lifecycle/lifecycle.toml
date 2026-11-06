@@ -421,7 +421,8 @@ since_format = "RFC 3339 UTC"
 # it. Routes on beads outside that state machine — a bead with no --to edge for
 # --route to carry — are stamped directly with gc bd update --set-metadata by
 # whichever script or formula owns that bead's dispatch. The recurring shapes: a
-# visit parked to `human` (gc-helm.sh); a
+# bead with no run parked to `human` until a person decides (mol-polecat-work's
+# hand-back of a bring-current it cannot finish); a
 # reaction bead routed to the proactive pool (gc-proactive.sh); a rework child
 # routed to its fix pool (pr-facts.sh, pre-open-rebase.sh); a review
 # bead's pool route restored after an abandoned round (mol-review.toml). A route
@@ -451,7 +452,7 @@ since_format = "RFC 3339 UTC"
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
 # `blocks` is the one edge type bd ready honors as a hold. `parent-child` is
 # decomposition that cascades the parent's blocked state DOWN to its children,
-# so the pack attaches a visit, a conversation or a finding with `tracks` — which
+# so the pack attaches a conversation or a finding with `tracks` — which
 # carries the structure without making the child unclaimable — and reserves
 # parent-child for decomposition that should inherit the block. A `*_key` value
 # (finding.key, gc.blocker_key, upstream_send_key) is a dedup identity for
@@ -762,15 +763,13 @@ keys = [
 #   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
 #   the provenance check. Never cleared.
-# anchor_bead — the gating anchor a review, rework, finding, validation or visit
-#   child names; the key is what makes it a child. The child also has an edge
-#   onto the anchor, its membership edge, of any type. bd keeps one edge per
-#   ordered pair, so an edge the pair already carries is the membership edge.
-#   A visit whose subject is the anchor is usually joined by the `tracks` edge
-#   gc-helm.sh puts from the visit onto its subject. A pair with no edge is
-#   joined with `related`. A reader enumerates the live children by
-#   `--metadata-field anchor_bead=<id>`, and the closed ones through that edge
-#   (every dependent of the anchor, whatever the edge's type)
+# anchor_bead — the gating anchor a review, rework, finding or validation child
+#   names; the key is what makes it a child. The child also has an edge onto the
+#   anchor, its membership edge, of any type. bd keeps one edge per ordered
+#   pair, so an edge the pair already carries is the membership edge. A pair
+#   with no edge is joined with `related`. A reader enumerates the live children
+#   by `--metadata-field anchor_bead=<id>`, and the closed ones through that
+#   edge (every dependent of the anchor, whatever the edge's type)
 #   once the store is marked joined (bd-lib.sh bd_anchor_children). Written by
 #   gate-ensure.sh, finding.sh, review-outcome.sh, signoff.sh, rework-child.sh,
 #   pr-facts.sh and pre-open-rebase.sh, each on a child joined to
@@ -822,23 +821,23 @@ keys = [
 #   stamps source_review = the comma-joined GitHub review ids whose bodies its
 #   child carries verbatim, a comment batch rather than a signoff round.
 #   Neither is cleared.
-# source_ruling_bead — the visit a ruling-sourced rework child answers, the
-#   analog of source_review_bead for an operator ruling rather than a review
-#   verdict. rework-child.sh stamps it = the visit converse-rework.sh names, the
-#   one the sitting reached the ruling in. A child rework-child.sh files carries
-#   source_review_bead or source_ruling_bead, never both, and the writer dedups
-#   a second child against that key. gate-ensure's quiescence probe counts a
-#   live child by either key, and duplicate-sweep.sh's twin pass pairs a
-#   never-dispatched child with a landed sibling by either key. The finding
-#   lanes' fix-unit readers (finding.sh, liveness-sweep.sh) take no child
-#   carrying source_ruling_bead: it answers the ruling, not a finding. Not
+# source_ruling_bead — the conversation a ruling-sourced rework child answers,
+#   the analog of source_review_bead for an operator ruling rather than a review
+#   verdict. rework-child.sh stamps it = the conversation converse-rework.sh
+#   names, the one the sitting reached the ruling in. A child rework-child.sh
+#   files carries source_review_bead or source_ruling_bead, never both, and the
+#   writer dedups a second child against that key. gate-ensure's quiescence
+#   probe counts a live child by either key, and duplicate-sweep.sh's twin pass
+#   pairs a never-dispatched child with a landed sibling by either key. The
+#   finding lanes' fix-unit readers (finding.sh, liveness-sweep.sh) take no
+#   child carrying source_ruling_bead: it answers the ruling, not a finding. Not
 #   cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a
 #   lane green), `rework` (a fix unit answering a verdict), `finding` (a review
 #   objection, [metadata.review_findings]), `validation` (a validator pass,
-#   mol-validate.toml), `visit` (a human engagement), `triage-subject` (an
+#   mol-validate.toml), `triage-subject` (an
 #   ephemeral-findings bucket), `observation`/`feedback-pattern`/`prompt-update`
 #   (the learning loop), and `upstream-send` (a parked outbound command). Set
 #   once at creation; not cleared.
@@ -1192,6 +1191,13 @@ keys = [
   # only when a later head still carries the threads, so the same head never
   # re-files.
   "pr_unengaged_threads",
+  # The head oid at which pr-facts.sh last re-ran the failed jobs of required
+  # checks that timed out, were cancelled or failed to start. It is written
+  # before the re-run, and a later pass at the same head reads it to re-run
+  # nothing and to take a failure there as the re-run's own, which parks only an
+  # approved PR. Absent means no re-run was made; a new head gets one of its
+  # own, and nothing clears the key.
+  "pr_check_rerun",
   # The provenance cutover, mechanics in [posture] above. Written once per
   # anchor; signoff.sh reads it for the same test.
   "pr_provenance_since",
@@ -1364,7 +1370,7 @@ keys = [
 #   already a blocks edge (--waiting-on), and this key only names the cause across
 #   instances. Never cleared. A caller-supplied string.
 # gc.recommended_formula — the execution mol a recommend exit names, which the
-#   operator can Accept from the subject's visit. first-reaction-dispose.sh sets
+#   operator can Accept from the subject's row on the board. first-reaction-dispose.sh sets
 #   it before the act of a recommend disposition and unsets a stale one on every
 #   other disposition, reading the key back either way. gc-helm.sh
 #   `accept` unsets it in the write that records its dispatch, and
@@ -1372,7 +1378,7 @@ keys = [
 #   recommendation no longer valid. The board's Accept derivation
 #   (services/helm/internal/board/derive.go), gc-helm.sh `accept` and
 #   converse-invalidate-recommendation.sh all read it as a non-empty value, so
-#   absent and empty both mean no live recommendation, and the visit offers
+#   absent and empty both mean no live recommendation, and the subject offers
 #   Discuss only. A formula name that `gc formula show` resolves.
 # gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,
 #   written in the update that unsets gc.recommended_formula and read back after
@@ -1870,7 +1876,7 @@ keys = [
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
 #   stood), `superseded`, `moot` and `dismissed`, written by the pack component
-#   that reached the outcome (step-close.sh, signoff.sh, review-outcome.sh,
+#   that reached the outcome (claim-close.sh, signoff.sh, review-outcome.sh,
 #   pr-facts.sh, gc-helm.sh and the done arms), and `canceled`, which gascity's
 #   run cancel stamps on every member of a run it ends; read by the done gates
 #   and the review graph. gc.routed_to and gc.execution_routed_to are
@@ -1925,7 +1931,7 @@ keys = [
 #   mol-refinery-patrol.toml's rework hand-back close, and `no-op` from
 #   duplicate-sweep.sh on a rework twin it disposes,
 #   first-reaction-dispose.sh on the reaction bead it closes,
-#   mol-validate-close, work-outcome.sh on every visit close, the
+#   mol-validate-close, work-outcome.sh on every conversation close, the
 #   observation-filing recipes, and converse by hand. duplicate-sweep.sh reads it
 #   to confirm a no-op duplicate is disposable, bead-rehome.sh to confirm a no-op
 #   origin is, pr-stack.sh drops a no-op row from a branch's ledger, and each

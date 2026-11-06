@@ -86,8 +86,8 @@ reaction bead R — exactly-once is the substrate's, keyed on R's identity, not 
 done-marker on the subject. The card in the subject's notes records which
 disposition was chosen and why, so a wrong call is visible rather than silent.
 The card shape (Understanding · Found · Proposal · Decision needed · Disposition)
-is the same one a converse session opens with and the board's pick-a-row visit
-lands the human on.
+is the same one a converse session opens with when the operator picks the row
+on the board.
 
 Every bead is triaged on its merits, whatever its origin. A subject carrying
 `gc.origin=operator` is weighed like any other: a clear, reversible action

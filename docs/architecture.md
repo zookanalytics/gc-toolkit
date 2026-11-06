@@ -7,9 +7,9 @@ description: The 30,000-ft guide to gc-toolkit — the boundary between operator
 
 gc-toolkit delivers the beliefs in [foundation.md](foundation.md) by *composing
 Gas City* — the multi-agent runtime it runs on — rather than by growing bespoke
-machinery beside it. The pack is its workflows: **work, review, merge, visit,
-feedback, patrol**. Every component belongs to one of them or is a declared
-shared primitive; nothing exists because an incident once happened.
+machinery beside it. The pack is its workflows: **work, review, merge,
+engagement, feedback, patrol**. Every component belongs to one of them or is a
+declared shared primitive; nothing exists because an incident once happened.
 
 ## Scope
 
@@ -257,8 +257,10 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   pathway: a worker mails the witness, which unblocks what it can and promotes
   what needs a person. A human gate is the human engagement: Gas City's native
   gate (`await_type=human`) on the bead that waits, which any pack, formula or
-  person files natively or through `human-gate.sh`, the helper that keeps
-  **one open gate per bead and situation key**. The gate blocks that
+  person files natively or through `human-gate.sh`. The helper files nothing
+  while an open gate under the call's situation key already blocks the bead,
+  though two writers in the same instant can each file one, because bd keeps
+  no idempotency at create. Each gate blocks that
   bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
   close, until a person resolves the gate with the answer as its reason, headed
   `ruled:`, `moot:` or `benign:`

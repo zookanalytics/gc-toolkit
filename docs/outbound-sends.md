@@ -96,7 +96,8 @@ command in metadata:
 
 The ask itself is a human gate on that bead, filed through
 [`human-gate.sh`](../assets/scripts/human-gate.sh) under the key
-`upstream-send-<key>`, which keeps one open gate per bead and key. The send is
+`upstream-send-<key>`, and the helper files nothing while an open gate under
+that key already blocks the bead. The send is
 the operator's action, so the gate blocks the bead until they clear it, sent
 or declined. A re-run against an open bead refreshes that one ask; a re-run
 against a closed one files nothing, because a settled question is not

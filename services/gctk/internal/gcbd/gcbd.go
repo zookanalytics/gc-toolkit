@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 // Bead is one row of `gc bd show --json`, decoded far enough for the fields the
@@ -45,9 +46,11 @@ import (
 // IssueTypeString reads as jq's tostring. IssueType, AwaitType and AwaitID are
 // the fields that make a bead a human gate (IsHumanGate); `gc bd dep list`
 // carries them on each far bead's row, and bd leaves a field out of a row when
-// its value is empty.
+// its value is empty. DependencyType is the edge a `gc bd show` row's
+// dependency was reached by, and is empty on any other row.
 type Bead struct {
 	ID           string         `json:"id"`
+	Title        string         `json:"title"`
 	Status       *string        `json:"status"`
 	Assignee     any            `json:"assignee"`
 	Notes        any            `json:"notes"`
@@ -56,6 +59,8 @@ type Bead struct {
 	IssueType    any            `json:"issue_type"`
 	AwaitType    string         `json:"await_type"`
 	AwaitID      string         `json:"await_id"`
+
+	DependencyType string `json:"dependency_type"`
 }
 
 // Scrub strips every C0 control byte (U+0000–U+001F), the range JSON requires
@@ -106,10 +111,10 @@ func (b *Bead) Meta(key string) string {
 
 // IsHumanGate reports whether b is a human gate: Gas City's native bead for a
 // wait a person must clear (issue_type gate, await_type human). A reader of a
-// bead's `blocks` blockers keeps these rows to find the bead's human gates, the
-// one reader rule bd_human_gates applies in assets/scripts/bd-lib.sh.
+// bead's `blocks` blockers keeps these rows to find the bead's human gates, by
+// the rule [prstatus.IsHumanGate] states.
 func (b *Bead) IsHumanGate() bool {
-	return b != nil && b.IssueTypeString() == "gate" && b.AwaitType == "human"
+	return b != nil && prstatus.IsHumanGate(b.IssueTypeString(), b.AwaitType)
 }
 
 // AssigneeString returns `.assignee // "" | tostring`.
@@ -345,6 +350,60 @@ func (c *Client) List(args ...string) (rows []Bead, ok bool) {
 // failed or unreadable probe rather than reading it as "no dependencies".
 func (c *Client) DepList(id string, args ...string) (rows []Bead, ok bool) {
 	return c.array(true, append([]string{"bd", "dep", "list", id}, args...)...)
+}
+
+// Blockers reads the `blocks` blockers of each bead named, open and closed, in
+// one `gc bd show <ids...> --json`, under List's strict contract. A show row
+// carries each edge's far bead, so one read answers a whole level of a walk over
+// the edges. --brief-deps would shrink the answer, but it drops the far bead's
+// await_type, and with it what tells a human gate from any other. ok is false when
+// the read fails, when a bead named has no row, or when its edges do not decode,
+// because a bead whose edges nothing read proves nothing about what holds it.
+func (c *Client) Blockers(ids []string) (blockers map[string][]Bead, ok bool) {
+	rows, ok := c.array(true, append(append([]string{"bd", "show"}, ids...), "--json")...)
+	if !ok {
+		return nil, false
+	}
+	blockers = make(map[string][]Bead, len(rows))
+	for i := range rows {
+		edges, ok := rows[i].blocksEdges()
+		if !ok {
+			return nil, false
+		}
+		blockers[rows[i].ID] = edges
+	}
+	for _, id := range ids {
+		if _, read := blockers[id]; !read {
+			return nil, false
+		}
+	}
+	return blockers, true
+}
+
+// blocksEdges decodes a `gc bd show` row's dependencies and keeps the `blocks`
+// ones, each the far bead of its edge. ok is false on a shape that does not read
+// as those rows: an edge with no id or no type cannot be told from a blocker.
+func (b *Bead) blocksEdges() (edges []Bead, ok bool) {
+	if b.Dependencies == nil {
+		return nil, true
+	}
+	raw, err := json.Marshal(b.Dependencies)
+	if err != nil {
+		return nil, false
+	}
+	var deps []Bead
+	if err := json.Unmarshal(raw, &deps); err != nil {
+		return nil, false
+	}
+	for i := range deps {
+		if deps[i].ID == "" || deps[i].DependencyType == "" {
+			return nil, false
+		}
+		if deps[i].DependencyType == "blocks" {
+			edges = append(edges, deps[i])
+		}
+	}
+	return edges, true
 }
 
 // ErrNotFiled reports a Create that filed nothing a reader can find. Either the

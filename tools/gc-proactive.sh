@@ -53,8 +53,8 @@ REACTION_KIND="first-reaction"
 # reads it in-process to keep a skip from spending the cap; the `sling` CLI verb
 # in main() translates it to RC_ALREADY_REACTED, RC_DISPATCH_PATH or
 # RC_LIVE_WORKFLOW so a cross-process caller (gc-helm react, operator-intake) can
-# tell the no-op from a dispatch, name its cause, and file its own visit rather
-# than wait for a reaction that is already in flight or never ran.
+# tell the no-op from a dispatch, name its cause, and file its own conversation
+# rather than wait for a reaction that is already in flight or never ran.
 SLING_SKIPPED=""
 # Exit codes the `sling` CLI verb uses for those skips — distinct from a
 # dispatch (0) and an error (1), so a caller that needs a NEW reaction can
@@ -198,8 +198,8 @@ subject_present_guard() {
 #
 #   - A live operator intake (gc-helm engage --new-subject) marks the subject
 #     gc.reaction_owned=1 and handles it end-to-end — it has already filed the
-#     one visit and spawned the sitting. A reaction would only file a SECOND
-#     visit for a conversation already under way.
+#     one conversation and spawned the sitting. A reaction would only ask the
+#     operator a SECOND time about a conversation already under way.
 #   - A reaction is already open for this subject. The dedup key is (subject +
 #     kind): an open/in-progress task_kind=reaction bead that names this subject
 #     either by its gc.reaction_subject stamp OR by a tracks edge R --tracks-->
@@ -230,7 +230,7 @@ reaction_absent_guard() {
     fi
     ro="$(printf '%s' "$meta" | jq -r '."gc.reaction_owned" // ""' 2>/dev/null || printf '')"
     if [ "$ro" = "1" ]; then
-        log "$PROG: sling: $bead carries gc.reaction_owned=1 — a live operator intake is handling it end-to-end and has filed its one visit. Not filing a first reaction that would file a second."
+        log "$PROG: sling: $bead carries gc.reaction_owned=1 — a live operator intake is handling it end-to-end and has filed its one conversation. Not filing a first reaction, which would ask the operator a second time."
         return 1
     fi
 
@@ -325,7 +325,7 @@ sling_dispatch_path_guard() {
                     | "\($k)=\($m[$k])" ] | join(", ")' 2>/dev/null)" \
         || { log "$unreadable"; return 2; }
     [ -n "$paths" ] || return 0
-    log "$PROG: sling: $bead already has a dispatch path ($paths) — not filing a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File the visit directly, or react once that route or arm is cleared."
+    log "$PROG: sling: $bead already has a dispatch path ($paths) — not filing a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File a conversation directly (gc-helm open), or react once that route or arm is cleared."
     return 1
 }
 
@@ -749,11 +749,12 @@ cmd_demand() {
 #   - gc.reaction_owned — a live owner already owns reacting to this bead, so an
 #     autonomous first reaction would duplicate it. An operator engage (gc-helm
 #     engage --new-subject) is the setter today: it creates the subject marked,
-#     files the ONE visit, and spawns the sitting itself. The marker is set in
-#     the create write, so the scan never sees the subject unmarked; dropping it
-#     here keeps a sweep from filing a SECOND visit for a conversation that
-#     already has one. reaction_absent_guard refuses it too, and a reaction
-#     that reaches one anyway stands down (agents/proactive/prompt.template.md).
+#     files the ONE conversation, and spawns the sitting itself. The marker is
+#     set in the create write, so the scan never sees the subject unmarked;
+#     dropping it here keeps a sweep from asking the operator a SECOND time
+#     about a subject whose conversation is under way. reaction_absent_guard
+#     refuses it too, and a reaction that reaches one anyway stands down
+#     (agents/proactive/prompt.template.md).
 #   - a dispatch path (has_dispatch_path, assets/scripts/dispatch-path.sh) — a
 #     gc.routed_to a pool queue serves, or a gc.dispatch_when_ready arm the
 #     deferred-dispatch order slings once the bead's own blockers close.
@@ -761,8 +762,8 @@ cmd_demand() {
 #     reconcile pass reads no reaction and no route before it slings, so a
 #     reaction to an armed bead only second-guesses the arm and can leave the
 #     bead dispatched twice. An arm reconcile has stopped retrying at its
-#     failure cap is dropped too: that bead waits on the visit the cap
-#     escalated, not on a first reaction. sling_dispatch_path_guard refuses
+#     failure cap is dropped too: that bead waits on the human gate the cap
+#     filed, not on a first reaction. sling_dispatch_path_guard refuses
 #     the same beads, so a bead routed or armed after this read still gets no
 #     reaction.
 #   - a dispatch hold (has_dispatch_hold, assets/scripts/dispatch-path.sh) —
@@ -1142,8 +1143,8 @@ main() {
             cmd_sling "$@"
             # A skipped bead is a no-op, not a dispatch: surface it to a
             # cross-process caller under the exit code of its cause, so it files
-            # its own visit instead of waiting for a reaction that is already in
-            # flight or never ran.
+            # its own conversation instead of waiting for a reaction that is
+            # already in flight or never ran.
             case "$SLING_SKIPPED" in
                 reacted)       exit "$RC_ALREADY_REACTED" ;;
                 dispatch-path) exit "$RC_DISPATCH_PATH" ;;
