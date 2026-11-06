@@ -24,8 +24,8 @@ rig's guidance for this check, the reviewed commit's `docs/review-arch.md`,
 which the review formula printed when the commit carries one, is where a rig
 says where it keeps its architecture when that is not where this method looks.
 
-A diff that adds or changes the architecture document makes this check
-mandatory.
+A diff that adds or changes the architecture document, `docs/architecture.md`,
+makes this check mandatory.
 
 A `docs/architecture.md` at the reviewed commit is a precondition of approval,
 because without one the review has no architecture to hold the change to. A
@@ -60,11 +60,11 @@ pass the change, and the questions below judge it as they would anywhere else.
    what a section of the standard's skeleton states: it adds or removes a domain
    or gives a domain another's job, changes what the system talks to or where
    its boundary lies, adds or changes a cross-cutting rule or a decision, or
-   takes on or retires debt. If it does, is the move justified, and is it
-   reflected in the architecture document in this same PR? An architecture
-   change the document does not record is unfinished; an architecture change a
-   design fitting the current architecture would not have needed is a finding
-   to address.
+   takes on or retires debt. If it does, is the move justified, weighed against
+   the quality goals the document ranks, and is it reflected in the architecture
+   document in this same PR? An architecture change the document does not
+   record is unfinished; an architecture change a design fitting the current
+   architecture would not have needed is a finding to address.
 3. **Does the document meet the standard?** Hold each line the change adds to
    the architecture document, or changes in it, to the standard: the line sits
    in the section that holds its subject, passes the admission test, has the

@@ -75,8 +75,8 @@ the document sits in one of them.
 6. **Debt.** Each compromise, named, with what retires it. (arc42 section 11)
 
 A runtime or a deployment view is a section of its own, after Domains, only
-when the system has that story. Constraints, the solution strategy and a glossary fold into
-the sections above.
+when the system has that story. Constraints, the solution strategy and a
+glossary fold into the sections above.
 
 ## The admission test
 
