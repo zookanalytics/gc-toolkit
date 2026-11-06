@@ -1309,39 +1309,6 @@ func TestSittingOrderIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestCapSittingsKeepsEveryRunningOne: the cap is a bound on HISTORY. A running
-// sitting is a live conversation and is never the row that gets dropped.
-func TestCapSittingsKeepsEveryRunningOne(t *testing.T) {
-	at := func(h int) time.Time { return time.Date(2026, 8, 1, h, 0, 0, 0, time.UTC) }
-	var in []Sitting
-	for i := range 5 {
-		in = append(in, sit(fmt.Sprintf("run-%d", i), "open", at(i), time.Time{}))
-	}
-	for i := range 5 {
-		in = append(in, sit(fmt.Sprintf("done-%d", i), "closed", at(i), at(i+1)))
-	}
-
-	kept, dropped := CapSittings(buildBoard(nil, at(10), false, nil, Facts{Sittings: in}).Sittings, 2)
-	if dropped != 3 {
-		t.Errorf("dropped = %d, want 3", dropped)
-	}
-	var running, closed int
-	for _, s := range kept {
-		if s.State == SittingClosed {
-			closed++
-		} else {
-			running++
-		}
-	}
-	if running != 5 || closed != 2 {
-		t.Errorf("kept %d running and %d closed, want 5 and 2", running, closed)
-	}
-
-	if kept, dropped := CapSittings(in, 0); dropped != 0 || len(kept) != len(in) {
-		t.Errorf("maxClosed<=0 is uncapped: kept %d dropped %d", len(kept), dropped)
-	}
-}
-
 // TestBoardWithoutSittingsCarriesNone: a gather that supplied no record leaves
 // the field nil rather than an empty slice, matching how Tiles reads on the wire.
 func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
@@ -1350,13 +1317,12 @@ func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
 	}
 }
 
-// TestSittingTopicAndHeadlineFallback pins the two derivations a row reads off
-// its subject: the topic is the subject's title, and the headline prefers the
-// takeaway, then the conversation's close reason, and only then the subject
-// title before it shows the conversation's own title. Both degrade to the id
-// and the conversation's title only when the gather could not read the subject
-// at all.
-func TestSittingTopicAndHeadlineFallback(t *testing.T) {
+// TestSittingHeadlineFallback pins the headline a row reads off its subject: it
+// prefers the takeaway, then the conversation's close reason, and only then the
+// subject title before it shows the conversation's own title. It degrades to
+// the conversation's title only when the gather could not read the subject at
+// all.
+func TestSittingHeadlineFallback(t *testing.T) {
 	const (
 		subjTitle = "the raw script path the launcher took"
 		convTitle = "operator pick from the board"
@@ -1364,13 +1330,10 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 		reason    = "dismissed by the operator: superseded by the new plan"
 	)
 
-	// A concluded sitting: the takeaway is the headline, the subject title the topic.
+	// A concluded sitting: the takeaway is the headline.
 	concluded := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, Takeaway: takeaway}
 	if got := sittingHeadline(concluded); got != takeaway {
 		t.Errorf("a takeaway is the headline: got %q, want %q", got, takeaway)
-	}
-	if got := concluded.Topic(); got != subjTitle {
-		t.Errorf("the topic is the subject title: got %q, want %q", got, subjTitle)
 	}
 
 	// A takeaway still wins when a close reason is also present.
@@ -1391,17 +1354,11 @@ func TestSittingTopicAndHeadlineFallback(t *testing.T) {
 	if got := sittingHeadline(bare); got != subjTitle {
 		t.Errorf("no takeaway falls back to the subject title, not the conversation's title: got %q, want %q", got, subjTitle)
 	}
-	if got := bare.Topic(); got != subjTitle {
-		t.Errorf("topic is the subject title: got %q, want %q", got, subjTitle)
-	}
 
-	// Subject unread: the last resorts are the conversation's title and the bare id.
+	// Subject unread: the last resort is the conversation's title.
 	unread := Sitting{Subject: "tk-anchor", Title: convTitle}
 	if got := sittingHeadline(unread); got != convTitle {
 		t.Errorf("an unread subject falls back to the conversation's title: got %q, want %q", got, convTitle)
-	}
-	if got := unread.Topic(); got != "tk-anchor" {
-		t.Errorf("an unread subject topic falls back to the id: got %q, want %q", got, "tk-anchor")
 	}
 }
 
@@ -3289,38 +3246,21 @@ func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
 	}
 }
 
-// A closed merge anchor is not a coverage gap either, and this is the half the
-// owed test cannot cover: the queue and the coverage sentence have to empty
-// together. The closed pass fills the DONE band with rows carrying the same
-// axes as live ones, unrecorded positions among them, so counting those holds
-// the all-clear open over an empty queue for as long as the done window keeps
-// the row.
-func TestClosedMergeAnchorIsNotACoverageGap(t *testing.T) {
+// A closed merge anchor keeps its axes: the closed pass fills the DONE band with
+// rows carrying the same axes as live ones, unrecorded positions among them, and
+// a surface tells the two apart by closed_at, not by a missing axis.
+func TestClosedMergeAnchorKeepsItsAxes(t *testing.T) {
 	shut := mergeAnchor("tk-shut", nil) // nothing recorded: unknown on every axis
 	shut.ClosedAt = fixtureNow.Add(-24 * time.Hour)
 
 	done := buildBoard([]Anchor{shut}, fixtureNow, false, nil, Facts{})
 	// The axes still travel — the row is closed, not unreadable.
-	if got := mustTile(t, done, "tk-shut").PRMachine; got != AxisUnknown {
-		t.Errorf("the closed row keeps its axes: pr_machine = %q", got)
+	tile := mustTile(t, done, "tk-shut")
+	if tile.PRMachine != AxisUnknown {
+		t.Errorf("the closed row keeps its axes: pr_machine = %q", tile.PRMachine)
 	}
-	if c := Coverage(done.Tiles); c.Rows != 0 || !c.Complete() {
-		t.Errorf("a board holding only finished pull requests owes the operator nothing: %+v", c)
-	}
-
-	live := mergeAnchor("tk-live", map[string]string{
-		"pr.machine": dated(MachineSettled, headLive, fixtureNow),
-		"pr_posture": dated(postureNone, headLive, fixtureNow),
-	})
-	c := Coverage(buildBoard([]Anchor{live, shut}, fixtureNow, false, nil, Facts{}).Tiles)
-	if c.Rows != 1 {
-		t.Errorf("coverage speaks for the live rows: got %d, want 1", c.Rows)
-	}
-	if c.MachineUnknown != 0 {
-		t.Errorf("a closed row's unread position is not a gap: got %d", c.MachineUnknown)
-	}
-	if c.ConversationUnknown != 1 {
-		t.Errorf("the live row's unread conversation still is: got %d", c.ConversationUnknown)
+	if tile.ClosedAt.IsZero() {
+		t.Error("the closed row carries closed_at, which is how a surface leaves it out of what is owed")
 	}
 }
 
@@ -3968,11 +3908,10 @@ func TestOwedSinceTakesTheEarliestCause(t *testing.T) {
 	}
 }
 
-// TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage. A missing key means
-// the cadence has not written one yet, which is a fact about the city rather
-// than an all-clear — and the all-clear is exactly what a quiet default would
-// produce.
-func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
+// TestUnrecordedPositionIsUnknown. A missing key means the cadence has not
+// written one yet, which is a fact about the city rather than an all-clear —
+// and the all-clear is exactly what a quiet default would produce.
+func TestUnrecordedPositionIsUnknown(t *testing.T) {
 	b := buildBoard([]Anchor{
 		mergeAnchor("tk-silent", nil),
 		// It carries a branch, which every work bead does. That is what makes
@@ -4000,17 +3939,6 @@ func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
 	}
 	if epic.PRBranch != "" {
 		t.Errorf("a non-merge row names no pull request branch, got %q", epic.PRBranch)
-	}
-
-	c := Coverage(b.Tiles)
-	if c.Rows != 1 {
-		t.Errorf("coverage counts merge anchors only: got %d, want 1", c.Rows)
-	}
-	if c.MachineUnknown != 1 {
-		t.Errorf("the unrecorded position counts against coverage: got %d", c.MachineUnknown)
-	}
-	if c.Complete() {
-		t.Error("coverage cannot be complete while a position is unread — that is the all-clear nobody earned")
 	}
 }
 
@@ -4069,10 +3997,10 @@ func TestConversationAxisRendersTheRecordedPosition(t *testing.T) {
 	}
 }
 
-// TestReadableConversationIsNotACoverageGap. A recorded position is a fact, not
-// a gap: only an unread axis holds the all-clear open. A settled, quiet row whose
-// approval is met, with no demand, is genuinely nobody's move.
-func TestReadableConversationIsNotACoverageGap(t *testing.T) {
+// TestReadableConversationIsNobodysMove. A recorded position is a fact, not a
+// gap. A settled, quiet row whose approval is met, with no demand, is genuinely
+// nobody's move.
+func TestReadableConversationIsNobodysMove(t *testing.T) {
 	b := buildBoard([]Anchor{
 		mergeAnchor("tk-clear", map[string]string{
 			"pr.machine":      dated(MachineSettled, headLive, fixtureNow),
@@ -4087,27 +4015,6 @@ func TestReadableConversationIsNotACoverageGap(t *testing.T) {
 	}
 	if tile.Owed {
 		t.Error("a settled, quiet row whose approval is met is nobody's move")
-	}
-	if c := Coverage(b.Tiles); !c.Complete() || c.ConversationUnknown != 0 {
-		t.Errorf("a recorded conversation clears the gap it would otherwise hold: %+v", c)
-	}
-}
-
-// TestMachineUnknownDoesNotDoubleCountConversation. A row whose pr.machine is
-// absent reads unknown on the conversation axis too — the currency check in
-// prConversation pins to the machine head and cannot run without it — so
-// counting the conversation would report one gap as two and blame the
-// conversation for one that is the machine reference's. The machine is the gap
-// to fix; the conversation follows once it is current.
-func TestMachineUnknownDoesNotDoubleCountConversation(t *testing.T) {
-	// An open PR with neither axis recorded: both read unknown.
-	a := mergeAnchor("tk-noax", map[string]string{"pr_number": "9"})
-	c := Coverage(buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles)
-	if c.MachineUnknown != 1 {
-		t.Errorf("the absent machine is the gap: MachineUnknown = %d, want 1", c.MachineUnknown)
-	}
-	if c.ConversationUnknown != 0 {
-		t.Errorf("the conversation is not counted while the machine head it pins to is unknown: got %d, want 0", c.ConversationUnknown)
 	}
 }
 

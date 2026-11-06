@@ -1306,79 +1306,6 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 	return owed, since
 }
 
-// PRCoverage is what the board could and could not read about the pull requests
-// it holds — the counts the owed section states alongside its store coverage.
-//
-// That section's empty state is a contract: it renders its coverage or it
-// renders the error, never a blank. PR rows add a way for it to go quietly
-// wrong that beads alone did not have, because an axis nothing has recorded
-// looks exactly like an axis with nothing to say.
-type PRCoverage struct {
-	// Rows is every LIVE merge anchor on the board, owed or not. A closed
-	// anchor keeps its axes so the DONE band can render them, but an unread
-	// position on a row nobody will act on is not a gap in what the operator
-	// needs to see.
-	Rows int
-	// MachineUnknown is the rows whose position the merge cadence has not
-	// recorded. A missing key is a fact about the city, not an all-clear.
-	MachineUnknown int
-	// ConversationUnknown is the rows whose exchange with the operator cannot
-	// be read: the cadence has not recorded a position, or the one it recorded
-	// is pinned to a head that is no longer live. A missing key is a fact about
-	// the city, not an all-clear.
-	ConversationUnknown int
-	// ApprovalUnanswered is the SETTLED rows whose approval clause could not be
-	// read. Those are the rows where the question "is GitHub holding this for a
-	// human?" is both live and unanswerable, which is exactly the shape that
-	// would otherwise read as nobody's move.
-	ApprovalUnanswered int
-}
-
-// Complete reports whether every PR row on the board had a readable position.
-// [Tile.Owed] is a boolean and cannot carry the third value the axes do, so an
-// unread input has to surface as coverage rather than as a false negative on
-// the row — which is why an empty queue is only an all-clear when this holds.
-func (c PRCoverage) Complete() bool {
-	return c.MachineUnknown == 0 && c.ConversationUnknown == 0 && c.ApprovalUnanswered == 0
-}
-
-// Coverage counts the PR rows across the WHOLE board, not just the queue. The
-// sentence it feeds is printed when the queue is empty, and a row missing from
-// an empty queue is precisely the row that might have belonged in it.
-//
-// Closed rows are the exception, and they have to be, because the queue and
-// this count have to empty together. The gather makes a second pass at closed
-// anchors to fill the DONE band, and those rows carry the same axes as live
-// ones — including the unknowns. [Tile.Owed] already excludes them, so counting
-// them here would withhold the all-clear over rows the queue is right to omit,
-// for as long as the done window holds them.
-func Coverage(tiles []Tile) PRCoverage {
-	var c PRCoverage
-	for _, t := range tiles {
-		if t.PRMachine == "" || !t.ClosedAt.IsZero() {
-			continue // not a merge anchor, or closed: nothing left to cover
-		}
-		c.Rows++
-		if t.PRMachine == AxisUnknown {
-			c.MachineUnknown++
-		}
-		// The conversation pins to the pr.machine head for its currency check, so
-		// a row whose machine is itself unknown ALSO reads an unknown conversation
-		// — the check cannot run without a resolved machine head. Counting it here
-		// too would report the same gap on both axes and blame the conversation
-		// for one that is the machine reference's; MachineUnknown already carries
-		// it. Count the conversation only where the machine is known, so it names
-		// a real, standalone conversation gap.
-		if t.PRMachine != AxisUnknown && t.PRConversation == AxisUnknown {
-			c.ConversationUnknown++
-		}
-		if t.PRMachine == MachineSettled && t.PRApproval == AxisUnknown {
-			c.ApprovalUnanswered++
-		}
-	}
-	return c
-}
-
 // prNumber reads the anchor's recorded PR number, 0 before the PR opens.
 func prNumber(a Anchor) int {
 	n, err := strconv.Atoi(strings.TrimSpace(a.Metadata[mdPRNumber]))
@@ -2708,43 +2635,6 @@ func tagClusters(tiles []Tile) {
 	}
 }
 
-// SectionGroup is one attention band and the tiles in it, in the order the
-// caller ranked them. It is a RENDER helper, not a wire type: the section lives
-// on each [Tile], and this only buckets a ranked slice so a surface iterates
-// bands rather than re-deriving the split.
-type SectionGroup struct {
-	Key   string
-	Tiles []Tile
-}
-
-// GroupBySection buckets tiles into the fixed [SectionOrder], preserving the
-// caller's within-section order. An empty band is omitted. A tile whose section
-// is not in the order (a value a newer derivation added) is appended under its
-// own key after the known bands, so an unrecognised section shows rather than
-// vanishing.
-func GroupBySection(tiles []Tile) []SectionGroup {
-	buckets := make(map[string][]Tile)
-	for _, t := range tiles {
-		buckets[t.Section] = append(buckets[t.Section], t)
-	}
-	out := make([]SectionGroup, 0, len(SectionOrder))
-	for _, k := range SectionOrder {
-		if len(buckets[k]) > 0 {
-			out = append(out, SectionGroup{Key: k, Tiles: buckets[k]})
-			delete(buckets, k)
-		}
-	}
-	extra := make([]string, 0, len(buckets))
-	for k := range buckets {
-		extra = append(extra, k)
-	}
-	sort.Strings(extra)
-	for _, k := range extra {
-		out = append(out, SectionGroup{Key: k, Tiles: buckets[k]})
-	}
-	return out
-}
-
 // --- the dependency-family grouping ------------------------------------------
 //
 // A family is one top-level anchor and every tile that hangs off it by a
@@ -2955,9 +2845,8 @@ func GroupByFamily(tiles []Tile) []FamilyGroup {
 	return out
 }
 
-// sectionRank is a section's position in [SectionOrder]; an unknown section
-// sorts after every known one, matching [GroupBySection]'s handling of a band a
-// newer derivation added.
+// sectionRank is a section's position in [SectionOrder]; an unknown section,
+// such as a band a newer derivation added, sorts after every known one.
 func sectionRank(section string) int {
 	for i, s := range SectionOrder {
 		if s == section {
@@ -2965,36 +2854,6 @@ func sectionRank(section string) int {
 		}
 	}
 	return len(SectionOrder)
-}
-
-// ClusterRow is one rendered line: a single tile, or the head of a cluster with
-// every member behind it. Members has length one for an unclustered row.
-type ClusterRow struct {
-	Tile    Tile
-	Members []Tile
-}
-
-// ClusterRows folds a section's tiles into render lines. Rows sharing a
-// non-empty ClusterKey become ONE line whose Members are all of them, placed
-// where the first member fell; an empty key is always its own line. The order of
-// the input is preserved, so the caller's rank still decides where each line and
-// each cluster head sits.
-func ClusterRows(tiles []Tile) []ClusterRow {
-	out := make([]ClusterRow, 0, len(tiles))
-	at := make(map[string]int) // cluster key -> index in out
-	for _, t := range tiles {
-		if t.ClusterKey == "" {
-			out = append(out, ClusterRow{Tile: t, Members: []Tile{t}})
-			continue
-		}
-		if i, ok := at[t.ClusterKey]; ok {
-			out[i].Members = append(out[i].Members, t)
-			continue
-		}
-		at[t.ClusterKey] = len(out)
-		out = append(out, ClusterRow{Tile: t, Members: []Tile{t}})
-	}
-	return out
 }
 
 // orderSittings sorts the conversation record: running sittings first, oldest
@@ -3007,9 +2866,8 @@ func ClusterRows(tiles []Tile) []ClusterRow {
 // whatever started since. The closed group is the opposite question, "what just
 // concluded", so it reads newest-first.
 //
-// Ordering here rather than in a renderer is what keeps the terminal board and
-// the dashboard showing the same sequence. Both spend the order; neither may
-// invent one.
+// Ordering here rather than in a renderer is what keeps every surface showing
+// the same sequence. A surface spends the order and invents none.
 func orderSittings(in []Sitting) []Sitting {
 	if len(in) == 0 {
 		return nil
@@ -3038,39 +2896,6 @@ func orderSittings(in []Sitting) []Sitting {
 // the city grows later reads as running rather than as finished — the direction
 // that shows a row instead of hiding it.
 func (s Sitting) running() bool { return s.State != SittingClosed }
-
-// DefaultMaxSittings bounds the closed half of the conversation record in a
-// rendered view. Running sittings are never elided: there are as many of them
-// as the city has converse sessions, and each one is a live conversation.
-const DefaultMaxSittings = 12
-
-// CapSittings keeps every running sitting and the maxClosed most recently
-// closed, returning the kept rows and how many closed rows were dropped. It
-// assumes the [orderSittings] order, which is the only order the board emits.
-//
-// The count is returned rather than swallowed so a renderer can say the list
-// was shortened. A quiet truncation would read as "these are all the sittings
-// there were", which is the one thing an elided list must not imply.
-func CapSittings(in []Sitting, maxClosed int) (kept []Sitting, dropped int) {
-	if maxClosed <= 0 {
-		return in, 0
-	}
-	kept = make([]Sitting, 0, len(in))
-	closed := 0
-	for _, s := range in {
-		if s.running() {
-			kept = append(kept, s)
-			continue
-		}
-		if closed >= maxClosed {
-			dropped++
-			continue
-		}
-		closed++
-		kept = append(kept, s)
-	}
-	return kept, dropped
-}
 
 // owedFirst orders the board: the operator's queue ahead of everything else,
 // oldest-owed first inside it, and the established rank order everywhere else.

@@ -44,8 +44,9 @@ export type Severity = 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' | 'DONE';
 /**
  * Tile is one rendered row of the board.
  *
- * The field set and its order mirror the `--json` object gc-helm.sh emits, so
- * the dashboard and the `helm-svc board` CLI describe a row the same way. Every
+ * The field set and its order mirror the Go `board.Tile`, the row the service
+ * serves and `helm-svc board --json` prints, so both describe a row the same
+ * way. Every
  * `*_heads` / `cross_rig_refs` list is always emitted (`[]` when empty) even
  * though the mechanical Go mapping widens it to `| null`; narrow before
  * iterating.
@@ -449,9 +450,9 @@ export interface Sitting {
  * field a quiet tick moves, so it is the only one that can say the build order
  * itself has stopped.
  *
- * `severity` and `detail` are DERIVED on the Go side so this view and the
- * `helm-svc board` CLI cannot disagree about what a row means. Render them;
- * do not re-derive them from the raw fields.
+ * `severity` and `detail` are DERIVED on the Go side, so this view states
+ * what the derivation says. Render them; do not re-derive them from the raw
+ * fields.
  */
 export interface PackBuild {
   component: string;
