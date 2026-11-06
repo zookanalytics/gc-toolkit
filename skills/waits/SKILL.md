@@ -74,6 +74,10 @@ ask a person to close the bead once the blocker lands (a human gate, below).
 - `<rig>` is the bead's own rig, whose polecat pool runs the closer, and the
   arm needs the bead open with no route. A first reaction writes the brief, the
   edge and the arm in one exit, its close exit with `--waiting-on <blocker>`.
+- A bead that Gas City's `hold:mayor` label holds, new work in the po's queue,
+  keeps its arm until the hold lifts. Once the arm lands, lift the hold with
+  `gc bd update <bead> --remove-label hold:mayor`, and the bead waits on its
+  blocker instead of in the queue.
 - bd keeps one edge type per pair of beads and refuses a second, so a bead that
   already carries another edge type onto the blocker needs that edge removed
   first with `gc bd dep remove <bead> <blocker>`.
