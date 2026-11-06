@@ -248,8 +248,7 @@ reports and the witness owner filter (which ranks `gc.session_id` ahead of the
 assignee) reads as a false orphan.
 
 A session does not inherit the tree the last step ran in. When a claim hands you
-a step whose work bead records a `metadata.work_dir` you are not in, enter it,
-which also records you as the session holding the work:
+a step whose work bead records a `metadata.work_dir` you are not in, enter it:
 
 ```bash
 "[[PACK-ROOT]]/assets/scripts/work-enter.sh" --convoy <the input convoy> --step <its gc.step_ref>
