@@ -909,18 +909,20 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	}
 }
 
-// attachHoldingGates reads, for every live merge anchor in pending, the open human
-// gates that hold it ([prstatus.HoldingGates]), on the anchor or behind a bead it
-// waits on, so a PR's row and held: value count the gates its labels count. Each
-// anchor walks for itself, and the walks of the pass share their reads: one batched
-// OUTBOUND read and one hydration of the far ends not yet fetched per level, so
-// their cost is the depth of the `blocks` graph and not the number of anchors.
-// known holds the edges the pass already read, an anchor's own among them, which
-// cost nothing.
+// attachHoldingGates reads, for every live merge anchor in pending, what holds it
+// that only a person moves ([prstatus.Holding]), on the anchor or behind a bead
+// it waits on: the open human gates, and the beads a person owes the next move
+// on, each read with its own metadata. So a PR's row and held: values count what
+// its labels count. Each anchor walks for itself, and the walks of the pass share
+// their reads: one batched OUTBOUND read and one hydration of the far ends not yet
+// fetched per level, so their cost is the depth of the `blocks` graph and not the
+// number of anchors. known holds the edges the pass already read, an anchor's own
+// among them, which cost nothing.
 //
-// A failed read notes partial and leaves every anchor's gates empty, and each row
-// then reads the gates on its own bead. An anchor past its walk's bound has no
-// answer: the note names it, its row reads the same, and the others keep theirs.
+// A failed read notes partial and leaves every anchor's gates and owed beads
+// empty, and each row then reads the ones on its own bead. An anchor past its
+// walk's bound has no answer: the note names it, its row reads the same, and the
+// others keep theirs.
 func (s *BeadsSource) attachHoldingGates(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor, known map[string][]*beads.Dependency, issueByID map[string]*beads.Issue) {
 	var roots []string
 	for i := range pending {
@@ -969,19 +971,20 @@ func (s *BeadsSource) attachHoldingGates(ctx context.Context, g *gatherState, st
 					continue
 				}
 				if iss := issues[d.DependsOnID]; iss != nil {
+					md := decodeMetadata(iss.Metadata)
 					out[id] = append(out[id], prstatus.Blocker{
 						ID:        iss.ID,
 						Title:     iss.Title,
 						Status:    string(iss.Status),
 						IssueType: string(iss.IssueType),
 						AwaitType: iss.AwaitType,
-					})
+					}.WithMetadata(func(key string) string { return md[key] }))
 				}
 			}
 		}
 		return out, nil
 	}
-	gates, err := prstatus.HoldingGates(roots, read)
+	holds, err := prstatus.Holding(roots, read)
 	if err != nil {
 		g.note(true, []string{"holding-gates@" + r.name + ": " + err.Error()})
 	}
@@ -990,9 +993,14 @@ func (s *BeadsSource) attachHoldingGates(ctx context.Context, g *gatherState, st
 		if !needsInFlight(*p) {
 			continue
 		}
-		for _, gate := range gates[p.anchor.ID] {
+		for _, gate := range holds[p.anchor.ID].Gates {
 			if iss := issues[gate.ID]; iss != nil {
 				p.anchor.HoldingGates = append(p.anchor.HoldingGates, blockerOf(iss))
+			}
+		}
+		for _, owed := range holds[p.anchor.ID].Owed {
+			if iss := issues[owed.ID]; iss != nil {
+				p.anchor.HoldingOwed = append(p.anchor.HoldingOwed, blockerOf(iss))
 			}
 		}
 	}

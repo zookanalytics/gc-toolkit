@@ -928,6 +928,12 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	// and the merge arm below says where the cadence has it.
 	case a.Source == "parked" && r.mTotal == 0 && !isMergeAnchor(a):
 		return "parked for you — no question recorded"
+	// Nobody is owed this one, and a bead a person owes the next move on holds
+	// it behind a bead it waits on, so it names where that move is
+	// ([holdingNeeds]). The cadence's position would read as the city's while
+	// the work waits on a person.
+	case isMergeAnchor(a) && len(a.HoldingOwed) > 0:
+		return holdingNeeds(a.HoldingOwed)
 	// Nobody is owed this one, so it reports where the cadence has it. Ahead of
 	// the roll-up phrases below because a merge anchor does not decompose: its
 	// children are the rework and review beads the cadence files, and
@@ -1537,6 +1543,15 @@ func prNeeds(machine, approval, posture, reason string, asks []Blocker) string {
 	default:
 		return "position unknown — the merge cadence has recorded none"
 	}
+}
+
+// holdingNeeds is a merge anchor's NEEDS while beads a person owes the next move
+// on hold it ([Anchor.HoldingOwed]) and nothing makes its row owed. The move is
+// on those beads and not on this pull request, so the row names the nearest by
+// its title and counts the rest, rather than asking for the same move a second
+// time.
+func holdingNeeds(owed []Blocker) string {
+	return "your move is on " + waitsPhrase(beadState{waits: owed})
 }
 
 // The pre-open state the stall signal reads. mergeResultPreOpenGate is the
@@ -2478,10 +2493,12 @@ func beadPhase(a Anchor, f Facts, work anchorWork) string {
 // labels count the same gates.
 // A conversation blocks nothing, so it sets nothing here. The rest differs by
 // row shape. A merge anchor counts its in-flight set ([anchorWorkSet]) as its
-// in-flight count, as the PR labels do, and reads an open demand blocker
-// ([demand]) as a blocker a person owes. Any other bead reads the live-workflow
-// signal standing over its own bead ([Facts.anchorInFlight]) and neither of the
-// others.
+// in-flight count, as the PR labels do, and reads a bead a person owes the next
+// move on as a blocker a person owes: one the same walk reached
+// ([Anchor.HoldingOwed]), or an open demand blocker on its own listing
+// ([demand]), which the walk reaches first and which alone stands when the walk
+// did not read. Any other bead reads the live-workflow signal standing over its
+// own bead ([Facts.anchorInFlight]) and neither of the others.
 func phaseFacts(a Anchor, f Facts, work anchorWork) prstatus.Facts {
 	merge := isMergeAnchor(a)
 	inFlight := len(work.inFlight)
@@ -2492,7 +2509,7 @@ func phaseFacts(a Anchor, f Facts, work anchorWork) prstatus.Facts {
 		MergeHold:           a.Metadata[mdMergeHold],
 		RebaseHold:          a.Metadata[mdRebaseHold],
 		OpenHumanGate:       len(f.human.gates[a.ID]) > 0 || slices.ContainsFunc(a.Blockers, openHumanGate),
-		PersonBlocker:       merge && slices.ContainsFunc(a.Blockers, demand),
+		PersonBlocker:       merge && (len(a.HoldingOwed) > 0 || slices.ContainsFunc(a.Blockers, demand)),
 		PRPosture:           a.Metadata[mdPRPosture],
 		PRMachine:           a.Metadata[mdPRMachine],
 		PRMachineCause:      a.Metadata[mdPRMachineCause],

@@ -2815,9 +2815,9 @@ func TestPRPhaseCountsEveryChildInFlight(t *testing.T) {
 // InFlight, a member prstatus.IsWork accepts is also the review or rework row the
 // beads source gathers, each bead an open human gate blocks has the gate the gate
 // gather admits beside it, the anchor's blockers are its `blocks` listing, its
-// HoldingGates are what prstatus.HoldingGates reads over those edges, as the
-// beads source walks them, and a conversation is the row the gather admits for
-// it.
+// HoldingGates and HoldingOwed are what prstatus.Holding reads over those edges
+// and the ones behind them, as the beads source walks them, and a conversation is
+// the row the gather admits for it.
 func TestPRHeldParity(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "gctk", "prstatus", "testdata", "parity.json"))
 	if err != nil {
@@ -2834,7 +2834,14 @@ func TestPRHeldParity(t *testing.T) {
 		Blockers      []string `json:"blockers"`
 		Gates         []string `json:"gates"`
 		Conversations []string `json:"conversations"`
-		Want          struct {
+		Behind        map[string][]struct {
+			ID        string            `json:"id"`
+			Title     string            `json:"title"`
+			Status    string            `json:"status"`
+			IssueType string            `json:"issue_type"`
+			Metadata  map[string]string `json:"metadata"`
+		} `json:"behind"`
+		Want struct {
 			Status string   `json:"status"`
 			Held   []string `json:"held"`
 		} `json:"want"`
@@ -2865,14 +2872,33 @@ func TestPRHeldParity(t *testing.T) {
 			for _, c := range tc.Conversations {
 				anchors = append(anchors, conversationAnchor("tk-c-"+c, c, "what about this?", assigneeHuman))
 			}
-			gates, err := prstatus.HoldingGates([]string{"tk-a"}, func(ids []string) (map[string][]prstatus.Blocker, error) {
+			for id, beads := range tc.Behind {
+				for _, b := range beads {
+					status, issueType := b.Status, b.IssueType
+					if status == "" {
+						status = "open"
+					}
+					if issueType == "" {
+						issueType = "task"
+					}
+					edges[id] = append(edges[id], prstatus.Blocker{ID: b.ID, Title: b.Title, Status: status, IssueType: issueType}.
+						WithMetadata(func(key string) string { return b.Metadata[key] }))
+					if id == "tk-a" {
+						anchors[0].Blockers = append(anchors[0].Blockers, Blocker{ID: b.ID, Title: b.Title, Status: status, IssueType: issueType, RoutedTo: b.Metadata[mdRoutedTo]})
+					}
+				}
+			}
+			holds, err := prstatus.Holding([]string{"tk-a"}, func(ids []string) (map[string][]prstatus.Blocker, error) {
 				return edges, nil
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, g := range gates["tk-a"] {
+			for _, g := range holds["tk-a"].Gates {
 				anchors[0].HoldingGates = append(anchors[0].HoldingGates, Blocker{ID: g.ID, Title: g.Title, Status: g.Status, IssueType: g.IssueType, AwaitType: g.AwaitType})
+			}
+			for _, o := range holds["tk-a"].Owed {
+				anchors[0].HoldingOwed = append(anchors[0].HoldingOwed, Blocker{ID: o.ID, Title: o.Title, Status: o.Status, IssueType: o.IssueType, RoutedTo: o.RoutedTo})
 			}
 			tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
 			if tile.PRPhase != tc.Want.Status || !slices.Equal(tile.PRHeld, tc.Want.Held) {
@@ -3126,6 +3152,93 @@ func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
 		tile := mustTile(t, BuildBoard([]Anchor{heldThroughRework(md, undated, signOff)}, fixtureNow, false, nil, Facts{}), "tk-a")
 		if want := "asking: 2× — sign off the release · undated"; tile.Needs != want {
 			t.Errorf("needs = %q, want %q", tile.Needs, want)
+		}
+	})
+}
+
+// The row of a PR whose rework waits behind another pull request that waits on a
+// review reads held as the label does and names that pull request in NEEDS, but
+// asks nothing of its own: the review is asked once, on the other pull request's
+// row. The same rework behind work the city is doing leaves the row working.
+func TestPRRowPointsAtAMoveHeldBehindItsRework(t *testing.T) {
+	at := fixtureNow.Add(-time.Hour)
+	// tk-a: unapproved, and its one live work is a rework that waits on tk-b.
+	md := map[string]string{
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineProgressing, headLive, at),
+		mdPRNumber:  "18",
+	}
+	// tk-b: settled at its head with no approval, so its next move is a review.
+	other := mergeAnchor("tk-b", map[string]string{
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineSettled, headLive, at),
+		mdPRNumber:  "37",
+	})
+	other.Title = "the other PR"
+	review := Blocker{ID: "tk-b", Title: "the other PR", Status: "open", IssueType: "task"}
+	rework := Anchor{ID: "tk-rw", Title: "fix the check", Kind: kindRework, Source: kindRework, Rig: "gc-toolkit", Prefix: "tk",
+		Metadata: map[string]string{mdAnchorBead: "tk-a", mdTaskKind: kindRework}}
+	// held is tk-a as the beads source gathers it, with what its walk found a
+	// person owes behind the rework.
+	held := func(md map[string]string, owed ...Blocker) Anchor {
+		a := withInFlight(mergeAnchor("tk-a", md, Blocker{ID: "tk-rw", Title: "fix the check", Status: "open", IssueType: "task"}),
+			member("tk-rw", kindRework, "open"))
+		a.HoldingOwed = owed
+		return a
+	}
+
+	t.Run("behind a pull request that waits on a review", func(t *testing.T) {
+		b := BuildBoard([]Anchor{held(md, review), rework, other}, fixtureNow, false, nil, Facts{})
+		tile := mustTile(t, b, "tk-a")
+		if tile.PRPhase != PhaseNeedsAttention || tile.Phase != PhaseNeedsAttention || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("pr_phase=%q phase=%q pr_held=%v, want needs-attention and held blocked, as the label reads", tile.PRPhase, tile.Phase, tile.PRHeld)
+		}
+		if tile.Needs != "your move is on the other PR" {
+			t.Errorf("needs = %q, want it to name the pull request the move is on", tile.Needs)
+		}
+		if tile.Owed {
+			t.Errorf("owed = true, want the review asked once, on the other pull request's row")
+		}
+		if o := mustTile(t, b, "tk-b"); !o.Owed || o.Needs != "green, waiting on your review" {
+			t.Errorf("the other pull request: owed=%v needs=%q, want the review asked there", o.Owed, o.Needs)
+		}
+	})
+
+	t.Run("behind work the city is doing", func(t *testing.T) {
+		tile := mustTile(t, BuildBoard([]Anchor{held(md), rework, other}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.PRPhase != PhaseWorking || len(tile.PRHeld) != 0 || tile.Owed || tile.Needs != "in the merge cadence" {
+			t.Errorf("pr_phase=%q pr_held=%v owed=%v needs=%q, want a row the city is working", tile.PRPhase, tile.PRHeld, tile.Owed, tile.Needs)
+		}
+	})
+
+	t.Run("behind more than one", func(t *testing.T) {
+		decision := Blocker{ID: "tk-d", Title: "which design?", Status: "open", IssueType: "decision"}
+		tile := mustTile(t, BuildBoard([]Anchor{held(md, review, decision), rework, other}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "your move is on the other PR and 1 more" || tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the nearest named and the rest counted, with no ask of its own", tile.Needs, tile.Owed)
+		}
+	})
+
+	t.Run("a row owed for its own review keeps asking it", func(t *testing.T) {
+		settled := map[string]string{
+			mdPRPosture: dated(postureReviewRequired, headLive, at),
+			mdPRMachine: dated(MachineSettled, headLive, at),
+			mdPRNumber:  "18",
+		}
+		a := mergeAnchor("tk-a", settled, review)
+		a.HoldingOwed = []Blocker{review}
+		tile := mustTile(t, BuildBoard([]Anchor{a, other}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if !tile.Owed || tile.Needs != "green, waiting on your review" || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("owed=%v needs=%q pr_held=%v, want its own review asked and the hold read", tile.Owed, tile.Needs, tile.PRHeld)
+		}
+	})
+
+	t.Run("a takeaway still answers", func(t *testing.T) {
+		a := held(md, review)
+		a.Takeaway = "the rework waits for the other PR, by the operator's ruling"
+		tile := mustTile(t, BuildBoard([]Anchor{a, rework, other}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != a.Takeaway || tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the takeaway and no ask", tile.Needs, tile.Owed)
 		}
 	})
 }

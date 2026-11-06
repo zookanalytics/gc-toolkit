@@ -10,9 +10,10 @@
 //
 // Beside the one status value, [Held] names what holds an open PR that the city
 // will not clear on its own: an open human gate on the PR or behind a bead it
-// waits on, which [HoldingGates] reads, review feedback the city has not answered
-// or a review thread the merge waits on, or a blocker no automated actor will
-// clear.
+// waits on, which [Holding] reads, review feedback the city has not answered or
+// a review thread the merge waits on, or a blocker no automated actor will clear,
+// such as a bead a person owes the next move on that [Holding] reaches the same
+// way.
 // Each is a value of the `held:` label family, and more than one can stand.
 // Each names something a person has to act on, so [Derive] reads needs-attention
 // while any stands.
@@ -125,8 +126,9 @@ const (
 	HeldReview Hold = "review"
 	// HeldBlocked: a live blocker holds the PR that no automated actor will
 	// clear. It is the merge pass's blocked verdict with cause blocker, as
-	// [Blocked] counts it, or a live blocker a person owes: one routed to a
-	// person, or a decision. A blocker the city is landing is neither.
+	// [Blocked] counts it, or a bead a person owes the next move on that the
+	// anchor waits on ([Facts.PersonBlocker]). A blocker the city is landing is
+	// neither.
 	HeldBlocked Hold = "blocked"
 )
 
@@ -140,8 +142,8 @@ type Facts struct {
 	MergeHold string
 	// RebaseHold is metadata.rebase_hold: any truthy value is a rebase hold.
 	RebaseHold string
-	// OpenHumanGate is whether [HoldingGates] finds an open human gate that holds
-	// the anchor, on the anchor itself or behind a bead it waits on. Only a person
+	// OpenHumanGate is whether [Holding] finds an open human gate that holds the
+	// anchor, on the anchor itself or behind a bead it waits on. Only a person
 	// clears a human gate. While one stands the merge is refused, whether by the
 	// gate on the anchor, through the merge pass's blocker probe and its finalize
 	// gate (assets/scripts/finalize-gate.sh), or by the open blocker the gate
@@ -149,10 +151,13 @@ type Facts struct {
 	// rebase_hold do, whatever work is in flight. A conversation about the anchor
 	// tracks it and blocks nothing, so it sets nothing here.
 	OpenHumanGate bool
-	// PersonBlocker is whether a live blocker the anchor waits on, a bead its
-	// blocks edge names that has not closed, is a person's to clear: one routed
-	// to a person (gc.routed_to=human), or a decision. No automated actor will
-	// clear it, so it holds the PR.
+	// PersonBlocker is whether [Holding] finds a bead a person owes the next move
+	// on, among the anchor's own blockers or behind a bead it waits on
+	// ([Holds.Owed]): a decision, a bead routed to a person (gc.routed_to=human),
+	// or a merge anchor whose own state is a person's to move, such as another
+	// pull request waiting on a review that a rework of this one waits for. No
+	// automated actor will move it, so it holds the PR, and live work that waits
+	// on it is not the city changing the PR.
 	PersonBlocker bool
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
