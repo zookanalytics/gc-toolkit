@@ -14,7 +14,7 @@ The pack is its workflows. Every component belongs to one of six:
 | **work** | a filed bead becomes a pushed branch | `mol-polecat-work`, `lifecycle/lifecycle.toml`, `assets/scripts/lifecycle.sh` |
 | **review** | a gate verdict lands on the anchor | polecat pools (cadence-routed via `REVIEW_POOL`), `formulas/mol-review.toml`, `assets/scripts/signoff.sh` |
 | **merge** | gates green at the live head become a landed PR | `orders/refinery-reconcile.toml` + 5 arms ([docs/refinery-merge-cadence.md](docs/refinery-merge-cadence.md)) |
-| **visit** | a human decision is asked for on the bead that waits for it, and settled in a sitting | `assets/scripts/human-gate.sh`, `gc-helm engage`, converse, the helm board |
+| **engagement** | a human decision is asked for on the bead that waits for it, and settled in a sitting | `assets/scripts/human-gate.sh`, `gc-helm engage`, converse, the helm board |
 | **feedback** | corrective lessons become standing pack behavior | feedback miner/distiller orders ([docs/feedback-learning.md](docs/feedback-learning.md)) |
 | **patrol** | drift between recorded and true state is repaired | witness / deacon patrols, `orders/liveness-sweep.toml`, `doctor/` |
 

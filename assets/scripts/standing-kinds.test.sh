@@ -52,7 +52,7 @@ for k in $(printf '%s' "$KINDS_JSON" | jq -r '.[]'); do
 done
 for case in '{"metadata":{"task_kind":""}}' '{"metadata":{}}' '{}' \
             '{"metadata":{"task_kind":"triage-subjects"}}' \
-            '{"metadata":{"task_kind":"visit"}}' '{"metadata":{"task_kind":"review"}}'; do
+            '{"metadata":{"task_kind":"review"}}'; do
     eq "$(printf '%s' "$case" | jq -r "$STANDING_KINDS_JQ"'is_standing_kind')" \
        "false" "(PRED) $case is not a standing record"
 done
