@@ -35,9 +35,10 @@ const topUsage = `Usage:
   gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
   gctk pr-status <verb> [flags]   PR status working|merging|needs-review|needs-attention (services/gctk/prstatus)
   gctk rig <verb> [flags]         actions on the rig: run a check's command and record its result against the commit
+  gctk session <verb> [flags]     actions on a session: give it a title its record and its terminal show
   gctk version                    the revision this binary was built from
 
-Run "gctk lifecycle", "gctk pr-status" or "gctk rig" for that subcommand's verbs.
+Run "gctk lifecycle", "gctk pr-status", "gctk rig" or "gctk session" for that subcommand's verbs.
 `
 
 func main() {
@@ -58,6 +59,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return cli.PRStatus(args[1:], stdout, stderr)
 	case "rig":
 		return cli.Rig(args[1:], stdout, stderr)
+	case "session":
+		return cli.Session(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version())
 		return 0

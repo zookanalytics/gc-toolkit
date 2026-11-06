@@ -623,11 +623,13 @@ count, so on a base that requires no thread resolution an approved PR still
 lands while `held: review` stands.
 
 `prstatus.Held` is the rule, and the helm board shows the same values as a row's
-`pr_held`, from the same derivation over the same facts: the anchor's
-`pr.unanswered_threads` among them, and the same in-flight set, every bead
-carrying the anchor's `anchor_bead`, any `task_kind`, at a live status
-(`prstatus.InFlightStatuses`), which the board's beads source reads as
-`gctk pr-status derive` does.
+`pr_held`, from the same derivation over the same facts. `prstatus.Read` gathers
+those facts for every reader: the anchor's own row, `pr.unanswered_threads`
+among it, its in-flight set, every bead carrying the anchor's `anchor_bead`, any
+`task_kind`, at a live status (`prstatus.InFlightStatuses`), the blockers its
+`blocks` edges name, and the gates its walk reaches. `gctk pr-status derive` and
+the board's beads source each hand it their own adapter onto the store, and
+neither gathers or decides any of it.
 
 A blocked machine verdict whose cause is outside its writer's vocabulary holds
 the PR wherever it was recorded, as any state the derivation cannot name does.
@@ -643,14 +645,15 @@ board applies it too, over the in-flight set the labels count, and by it decides
 a blocked row's phase, whether the operator's queue lists the row, and the row's
 needs phrase.
 
-`prstatus.HoldingGates` is the one reader of the gates that hold a PR. The
-label's value counts them, the board's row names them, and `gc-helm engage` on the
-PR offers each, through `gctk pr-status gates`. Each bead walks for itself, and
-the walks of one call share their reads: each bead is read once, and its edges a
-level at a time. So a PR reads the same on the board, which walks a rig's PRs
-together, as on its label and at engage, which walk it alone. A walk is bounded,
-and one that passes its bound reads as a read that did not answer, for that bead
-alone.
+`prstatus.HoldingGates` is the one reader of the gates that hold a PR, and
+`prstatus.Read` gathers through it. The label's value counts them, the board's
+row names them, and `gc-helm engage` on the PR offers each, beside every other
+reason `prstatus.Reasons` gives, through `gctk pr-status derive --json`. Each
+bead walks for itself, and the walks of one call share their reads: each bead is
+read once, and its edges a level at a time. So a PR reads the same on the board,
+which walks a rig's PRs together, as on its label and at engage, which walk it
+alone. A walk is bounded, and one that passes its bound reads as a read that did
+not answer, for that bead alone.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
 anchor, its in-flight set, its blockers or the walk from them do not read,

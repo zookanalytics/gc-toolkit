@@ -4,19 +4,20 @@
 #
 # rig-demo-capture.sh exits 1 when no clip appears and 3 when the clip records a
 # step failing its proof. On either, the block appends a note naming which one,
-# files a human gate on the request bead through human-gate.sh, cancels the run
-# through run-cancel.sh only if the gate landed, and drains only if the cancel
-# landed. On success it records the clip path on the request bead.
+# then declines through decline.sh, with a human gate on the request bead under
+# the capture key, and exits 1. decline.sh files the gate, cancels the run and
+# drains, and decline.test.sh holds that order. On success the block records the
+# clip path on the request bead.
 #
 # A step's blocks can run under a strict shell, where a failing command whose
 # status nothing catches ends the block on the spot. For this block that abort
-# skips the gate and the cancel, which leaves the run claimed with no gate
-# behind it. So every case runs twice, once under `set -euo pipefail` and
-# once under a plain shell, and both runs must reach the same end.
+# skips the decline, which leaves the run claimed with no gate behind it. So
+# every case runs twice, once under `set -euo pipefail` and once under a plain
+# shell, and both runs must reach the same end.
 #
 # EXECUTES the real block extracted verbatim between the formula markers, with
 # the pour vars rendered at their defaults, against a stub capture, a fake `gc`,
-# and stub human-gate and cancel scripts. No live city, browser, or network.
+# and a stub decline script. No live city, browser, or network.
 #
 # A capture's sandbox refuses a rig's own checkout, so the app runs from a
 # detached worktree of it, which the step's rig-demo-app-root region makes. The
@@ -73,9 +74,10 @@ cp "$TMP/block.sh" "$TMP/plain.sh"
 
 # --- Fakes. --------------------------------------------------------------------
 # gc: the block reaches `bd update` (the failure note, or the clip path on
-# success) and `runtime drain-ack`. The capture, human-gate and cancel stubs sit in
-# a stub pack, $STUB_PACK, which gc names for `gc gc-toolkit scripts-dir`.
-# Each fake records its verb into one ordered log and its argv into its own file.
+# success), and a `runtime drain-ack` the block made itself would log DRAIN. The
+# capture and decline stubs sit in a stub pack, $STUB_PACK, which gc names for
+# `gc gc-toolkit scripts-dir`. Each fake records its verb into one ordered log
+# and its argv into its own file.
 mkdir -p "$TMP/bin" "$TMP/pack/assets/scripts" "$TMP/cwd"
 SHEBANG="#!${BASH:-/usr/bin/env bash}"
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/gc" <<'GC'
@@ -91,16 +93,11 @@ printf 'CAPTURE\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "$FAKE_DIR/capture.argv"
 exit "$FAKE_CAPTURE_RC"
 CAP
-{ printf '%s\n' "$SHEBANG"; cat; } > "$TMP/pack/assets/scripts/human-gate.sh" <<'GATE'
-printf 'GATE\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "$FAKE_DIR/gate.argv"
-exit "${FAKE_GATE_RC:-0}"
-GATE
-{ printf '%s\n' "$SHEBANG"; cat; } > "$TMP/pack/assets/scripts/run-cancel.sh" <<'CANCEL'
-printf 'CANCEL\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "$FAKE_DIR/cancel.argv"
-exit "${FAKE_CANCEL_RC:-0}"
-CANCEL
+{ printf '%s\n' "$SHEBANG"; cat; } > "$TMP/pack/assets/scripts/decline.sh" <<'DECLINE'
+printf 'DECLINE\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "$FAKE_DIR/decline.argv"
+exit "${FAKE_DECLINE_RC:-0}"
+DECLINE
 chmod +x "$TMP/bin/gc" "$TMP/pack/assets/scripts/"*.sh
 export PATH="$TMP/bin:$PATH"
 export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GIT_CEILING_DIRECTORIES="$TMP"
@@ -110,45 +107,44 @@ export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GIT_CEILING_DIRECTOR
 OUT="$TMP/rig-demo/tk-req/demo-rig-walkthrough.mp4"
 
 # run <strict|plain> <capture exit> prints "<rc>|<ordered verb log>"
-#   FAKE_GATE_RC and FAKE_CANCEL_RC set the human-gate and cancel stubs' exits.
+#   FAKE_DECLINE_RC sets the decline stub's exit.
 run() {
-  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/capture.argv"; : > "$TMP/gate.argv"; : > "$TMP/cancel.argv"
+  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/capture.argv"; : > "$TMP/decline.argv"
   local rc=0
   ( cd "$TMP/cwd" &&
     REQUEST_BEAD=tk-req SCRIPT_PATH="$TMP/cwd/walkthrough.md" OUT="$OUT" \
     SERVE_DIR="$TMP/cwd/site" SERVE_CMD="" BASE_URL="" APP_ROOT="$TMP/cwd" \
-    SCRIPTS="$TMP/pack/assets/scripts" CLAIMED_STEP_BEAD_ID=st-capture \
+    SCRIPTS="$TMP/pack/assets/scripts" \
     FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_CAPTURE_RC="$2" \
-    FAKE_GATE_RC="${FAKE_GATE_RC:-0}" FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" \
+    FAKE_DECLINE_RC="${FAKE_DECLINE_RC:-0}" \
       bash "$TMP/$1.sh" ) > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
 
 for MODE in strict plain; do
   echo "# $MODE shell: a clean capture records the clip on the request bead"
-  eq "$(run "$MODE" 0)" "0|CAPTURE;UPDATE;" "$MODE: exit 0 records the clip, with no gate or cancel"
+  eq "$(run "$MODE" 0)" "0|CAPTURE;UPDATE;" "$MODE: exit 0 records the clip, with no decline"
   has "$(cat "$TMP/capture.argv")" "--output $OUT" "$MODE: the capture writes the clip the block records"
   has "$(cat "$TMP/gc.argv")" "bd update tk-req --set-metadata demo_mp4_path=$OUT" "$MODE: the clip path lands on the request bead"
 
-  echo "# $MODE shell: no clip files a gate, cancels, and drains"
-  eq "$(run "$MODE" 1)" "1|CAPTURE;UPDATE;GATE;CANCEL;DRAIN;" "$MODE: exit 1 files a gate, cancels the run, drains, and exits 1"
-  has "$(cat "$TMP/gate.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead under the capture key"
-  has "$(cat "$TMP/gate.argv")" "produced no MP4" "$MODE: exit 1 is reported as no clip"
-  case "$(cat "$TMP/gate.argv")" in
-    *--quiet-window*) bad "$MODE: the gate declares a quiet window; a failed capture is an event of this run" ;;
-    *) ok "$MODE: the gate declares no quiet window" ;;
+  echo "# $MODE shell: no clip declines with a gate on the request bead"
+  eq "$(run "$MODE" 1)" "1|CAPTURE;UPDATE;DECLINE;" "$MODE: exit 1 notes the failure, declines, and exits 1, leaving the drain to decline.sh"
+  has "$(cat "$TMP/decline.argv")" "--step mol-rig-demo.capture --reason capture of demo-rig failed: " "$MODE: the decline names the capture step and why it ends"
+  has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed --message " "$MODE: the gate blocks the request bead under the capture key"
+  has "$(cat "$TMP/decline.argv")" "produced no MP4" "$MODE: exit 1 is reported as no clip"
+  case "$(cat "$TMP/decline.argv")" in
+    *--formula*) bad "$MODE: the decline arms a re-sling; a demo's pour carries its vars, so a person re-pours it" ;;
+    *) ok "$MODE: the decline arms no re-sling" ;;
   esac
-  has "$(cat "$TMP/cancel.argv")" "--step mol-rig-demo.capture --bead st-capture" "$MODE: the cancel names the capture step and the claimed bead"
 
-  echo "# $MODE shell: a clip with a failed proof files a gate, cancels, and drains"
-  eq "$(run "$MODE" 3)" "1|CAPTURE;UPDATE;GATE;CANCEL;DRAIN;" "$MODE: exit 3 files a gate, cancels the run, drains, and exits 1"
-  has "$(cat "$TMP/gate.argv")" "the clip at $OUT recorded at least one step failing its proof" "$MODE: the gate names the failed-proof clip"
+  echo "# $MODE shell: a clip with a failed proof declines the same way"
+  eq "$(run "$MODE" 3)" "1|CAPTURE;UPDATE;DECLINE;" "$MODE: exit 3 notes the failure, declines, and exits 1"
+  has "$(cat "$TMP/decline.argv")" "the clip at $OUT recorded at least one step failing its proof" "$MODE: the gate names the failed-proof clip"
   has "$(cat "$TMP/gc.argv")" "--append-notes rig-demo: capture failed for demo-rig" "$MODE: the request bead's note records the failure"
   has "$(cat "$TMP/gc.argv")" "failing its proof" "$MODE: and names the failed proof"
 
-  echo "# $MODE shell: a release path that does not land stops short of the drain"
-  eq "$(FAKE_GATE_RC=1 run "$MODE" 3)" "1|CAPTURE;UPDATE;GATE;" "$MODE: no gate filed, so no cancel and no drain"
-  eq "$(FAKE_CANCEL_RC=1 run "$MODE" 3)" "1|CAPTURE;UPDATE;GATE;CANCEL;" "$MODE: the cancel did not land, so no drain"
+  echo "# $MODE shell: a decline that does not land still ends the block"
+  eq "$(FAKE_DECLINE_RC=1 run "$MODE" 3)" "1|CAPTURE;UPDATE;DECLINE;" "$MODE: the block exits 1 and does not drain"
 done
 
 # --- The app root, through the real capture and its sandbox. ---------------------
@@ -211,15 +207,15 @@ GC
 # pour <strict|plain> <serve_dir> <serve_cmd> <base_url> [rig path] prints
 # "<rc>|<ordered verb log>", with no workspace left by an earlier case.
 pour() {
-  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/gate.argv"; rm -f "$TMP/profile"
+  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; rm -f "$TMP/profile"
   REVIEW_WORKSPACE_DIR="$WS" "$HERE/review-workspace.sh" remove --review-bead tk-req >/dev/null
   local rc=0
   ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" GIT_CEILING_DIRECTORIES="$TMP" \
       REVIEW_WORKSPACE_DIR="$WS" SPRINTSHOW_BIN="$TMP/bin/engine" STUB_PACK="$TMP/pack" \
-      FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_RIG="$RIG" FAKE_GATE_RC=0 FAKE_CANCEL_RC=0 \
+      FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_RIG="$RIG" FAKE_DECLINE_RC=0 \
       REQUEST_BEAD=tk-req SCRIPT_PATH="$TMP/cwd/walkthrough.md" OUT="$OUT" \
       SERVE_DIR="$2" SERVE_CMD="$3" BASE_URL="$4" RIG_PATH="${5-$RIG}" \
-      SCRIPTS="$HERE" CLAIMED_STEP_BEAD_ID=st-capture \
+      SCRIPTS="$HERE" \
       bash "$TMP/app-$1.sh" ) > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -258,17 +254,17 @@ for MODE in strict plain; do
   has "$(cat "$TMP/engine.argv")" "--base-url https://preview.example.com" "$MODE: the engine drives the preview"
   [ ! -e "$WS/gc-review-tk-req" ] && ok "$MODE: and no workspace is made" || bad "$MODE: and no workspace is made"
 
-  echo "# $MODE shell: a rig the city does not list files the capture's gate and cancels the run"
-  eq "$(pour "$MODE" "site" "" "" "")" "1|UPDATE;GATE;CANCEL;DRAIN;" "$MODE: it files a gate, cancels the run, drains, and exits 1"
+  echo "# $MODE shell: a rig the city does not list declines with the capture's gate"
+  eq "$(pour "$MODE" "site" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
   has "$(cat "$TMP/out")" "demo-rig is not in gc rig list" "$MODE: it names the rig"
-  has "$(cat "$TMP/gate.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead"
-  has "$(cat "$TMP/gate.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
+  has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead"
+  has "$(cat "$TMP/decline.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
   eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
 
   echo "# $MODE shell: a checkout no worktree can be made from does the same"
-  eq "$(pour "$MODE" "" "npm run dev" "" "$TMP/cwd")" "1|UPDATE;GATE;CANCEL;DRAIN;" "$MODE: it files a gate, cancels the run, drains, and exits 1"
+  eq "$(pour "$MODE" "" "npm run dev" "" "$TMP/cwd")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
   has "$(cat "$TMP/out")" "HEAD is not a commit in $TMP/cwd" "$MODE: it names the checkout"
-  has "$(cat "$TMP/gate.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
+  has "$(cat "$TMP/decline.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
   eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
 done
 
