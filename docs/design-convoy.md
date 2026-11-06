@@ -73,10 +73,11 @@ records its result on the subject (`branch` and `target`, `gc.design_child`,
 `gc.impl_child`, `gc.summary_task`, and the `*_armed` markers), so a crashed run
 resumes without cutting a second branch or filing a second child, task or
 workflow. The dispatch step stamps each `*_armed` marker right after its own
-dispatch, so a resume dispatches nothing twice. A target or an edge that does
-not read back fails its step, so the resume re-runs that step. The read-back
-decides, not the add's exit status, because a resumed add can meet an edge the
-failed pass already wrote.
+dispatch, so a resume dispatches nothing twice. A write bd refuses fails its
+step, so the resume re-runs that step, and an add that meets an edge the failed
+pass already wrote is a no-op that exits 0. The dispatch step reads every target
+and edge back before it hands the subject over or dispatches anything, since
+neither can be undone (docs/warrants.md, "bd write durability").
 
 The implementation is one child, not a fan-out: the design defines the
 breakdown, so the child carries "split into multiple beads if the design

@@ -332,8 +332,13 @@ case "${1:-} ${2:-}" in
         a="$4"; b="$5"; t="${6#--type=}"
         listed "${REFUSE_EDGES:-}" "$a>$b" && { echo "Error: refused" >&2; exit 1; }
         listed "${DROP_EDGES:-}" "$a>$b" && { echo "Added dependency: $a depends on $b ($t)"; exit 0; }
+        # bd takes an edge of the same type it already holds as a no-op that
+        # exits 0, and refuses one of another type onto the same pair.
+        if jq -e --arg a "$a" --arg b "$b" --arg t "$t" 'any(.[]; .id == $a and any((._deps // [])[]; .id == $b and .dependency_type == $t))' "$STORE" >/dev/null; then
+          echo "Added dependency: $a depends on $b ($t)"; exit 0
+        fi
         if jq -e --arg a "$a" --arg b "$b" 'any(.[]; .id == $a and any((._deps // [])[]; .id == $b))' "$STORE" >/dev/null; then
-          echo "Error: dependency $a -> $b already exists" >&2; exit 1
+          echo "Error: $a already depends on $b by another type" >&2; exit 1
         fi
         put --arg a "$a" --arg b "$b" --arg t "$t" 'map(if .id == $a then ._deps = ((._deps // []) + [{id: $b, dependency_type: $t}]) else . end)'
         exit 0 ;;
@@ -534,7 +539,7 @@ for sh in "${SHELLS[@]}"; do
 
   fixture; subject_json; export UPDATE_FAIL="sub-1:branch"
   run_block seed-branch-cut "$sh"
-  stopped && reported "not filing anything" && ok "[$sh] seed: a record that does not read back stops the step" \
+  stopped && reported "not filing anything" && ok "[$sh] seed: a record the store refuses stops the step" \
     || bad "[$sh] seed: an unrecorded branch passed (rc=$RC)"
 
   # --- file-design-create ---
@@ -576,27 +581,15 @@ for sh in "${SHELLS[@]}"; do
     && ok "[$sh] design wait: the subject is not handed over and the child is not slung, so a setup that stops here leaves nothing in flight" \
     || bad "[$sh] design wait: handed over or dispatched before the rest of the setup existed"
 
-  fixture '.[2].metadata = {}'; subject_json
-  run_block file-design-wait "$sh"
-  stopped && not_logged "dep add" && ok "[$sh] design wait: a child that reads no target is not waited on" \
-    || bad "[$sh] design wait: a child with no target went ahead (rc=$RC)"
-
-  fixture; subject_json; export DROP_EDGES="sub-1>dz-design"
-  run_block file-design-wait "$sh"
-  stopped && reported "reads no blocks edge" && ok "[$sh] design wait: a wait that exits 0 but does not read back fails the step" \
-    || bad "[$sh] design wait: an unread wait was trusted (rc=$RC)"
-
   fixture; subject_json; export REFUSE_EDGES="sub-1>dz-design"
   run_block file-design-wait "$sh"
-  stopped && ok "[$sh] design wait: a refused add that reads no edge back fails the step" \
+  stopped && reported "failed" && ok "[$sh] design wait: an add bd refuses fails the step" \
     || bad "[$sh] design wait: a refused add passed (rc=$RC)"
 
-  # resume: the edge is there from the failed first pass, and bd refuses the duplicate
+  # resume: the edge is there from the failed first pass, and bd's re-add is a no-op
   fixture '.[1]._deps += [{id: "dz-design", dependency_type: "blocks"}]'; subject_json
   run_block file-design-wait "$sh"
-  eq "$RC" "0" "[$sh] design wait resume: an existing wait that reads back completes the step"
-  reported "reading the edge back" && ok "[$sh] design wait resume: the refused add is reported" \
-    || bad "[$sh] design wait resume: the refused add passed silently"
+  eq "$RC $(waits_on sub-1 dz-design)" "0 1" "[$sh] design wait resume: a wait already there completes the step, once"
 
   # --- file-implementation-create ---
   fixture '.[3:] = []'; subject_json; export IMPL_CHILD="" NEXT_ID=dz-impl DESIGN_GATED=true
@@ -630,28 +623,21 @@ for sh in "${SHELLS[@]}"; do
   ! released && ok "[$sh] impl wait all-in-one: the child is not slung before the summary task is filed" \
     || bad "[$sh] impl wait all-in-one: the implementation started before gc.summary_task existed"
 
-  fixture '.[3].metadata = {}'; subject_json; export DESIGN_GATED=true
+  fixture; subject_json; export DESIGN_GATED=true REFUSE_EDGES="sub-1>dz-impl"
   run_block file-implementation-wait "$sh"
-  stopped && not_logged "dep add" && ok "[$sh] impl wait: a child that reads no target is not waited on" \
-    || bad "[$sh] impl wait: a child with no target went ahead (rc=$RC)"
+  stopped && not_logged "dz-impl dz-design" && ok "[$sh] impl wait: a refused wait of the subject stops before the design's edge" \
+    || bad "[$sh] impl wait: a refused wait of the subject went ahead (rc=$RC)"
 
-  fixture; subject_json; export DESIGN_GATED=true DROP_EDGES="sub-1>dz-impl"
+  fixture; subject_json; export DESIGN_GATED=true REFUSE_EDGES="dz-impl>dz-design"
   run_block file-implementation-wait "$sh"
-  stopped && not_logged "dz-impl dz-design" && ok "[$sh] impl wait: an unread wait of the subject stops before the design's edge" \
-    || bad "[$sh] impl wait: an unread wait of the subject was trusted (rc=$RC)"
+  stopped && ok "[$sh] impl wait gated: a design edge bd refuses fails the step" \
+    || bad "[$sh] impl wait gated: a refused design edge passed (rc=$RC)"
 
-  fixture; subject_json; export DESIGN_GATED=true DROP_EDGES="dz-impl>dz-design"
-  run_block file-implementation-wait "$sh"
-  stopped && ok "[$sh] impl wait gated: a design edge that does not read back fails the step" \
-    || bad "[$sh] impl wait gated: an unread design edge was trusted (rc=$RC)"
-
-  # resume: both edges are there from the failed first pass, bd refuses both duplicates
+  # resume: both edges are there from the failed first pass, and bd's re-adds are no-ops
   fixture '.[1]._deps += [{id: "dz-impl", dependency_type: "blocks"}] | .[3]._deps += [{id: "dz-design", dependency_type: "blocks"}]'; subject_json
   export DESIGN_GATED=true
   run_block file-implementation-wait "$sh"
-  eq "$RC" "0" "[$sh] impl wait gated resume: existing edges that read back complete the step"
-  [ "$(grep -c 'reading the edge back' "$TMP/block.err")" = "2" ] \
-    && ok "[$sh] impl wait gated resume: both refused adds are reported" || bad "[$sh] impl wait gated resume: a refused add passed silently"
+  eq "$RC $(waits_on sub-1 dz-impl) $(waits_on dz-impl dz-design)" "0 1 1" "[$sh] impl wait gated resume: edges already there complete the step, once each"
 
   # --- summary-task-create ---
   fixture; subject_json; export NEXT_ID=sum-1
@@ -690,19 +676,17 @@ for sh in "${SHELLS[@]}"; do
   ! released && ok "[$sh] summary wait: nothing is armed, handed over or slung" || bad "[$sh] summary wait: dispatched from a filing step"
 
   for edge in "sum-1>dz-design" "sum-1>dz-impl" "sub-1>sum-1"; do
-    fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=sum-1 DROP_EDGES="$edge"
+    fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=sum-1 REFUSE_EDGES="$edge"
     run_block summary-task-wait "$sh"
-    stopped && ok "[$sh] summary wait: an edge $edge that does not read back fails the step" \
-      || bad "[$sh] summary wait: an unread edge $edge was trusted (rc=$RC)"
+    stopped && ok "[$sh] summary wait: an edge $edge bd refuses fails the step" \
+      || bad "[$sh] summary wait: a refused edge $edge passed (rc=$RC)"
   done
 
-  # resume: every edge is there from a failed pass, bd refuses the three duplicates
+  # resume: every edge is there from a failed pass, and bd's three re-adds are no-ops
   fixture ". + [$SUMMARY_ROW] | map(if .id == \"sub-1\" then ._deps += [{id: \"sum-1\", dependency_type: \"blocks\"}] elif .id == \"sum-1\" then ._deps += [{id: \"dz-design\", dependency_type: \"blocks\"}, {id: \"dz-impl\", dependency_type: \"blocks\"}] else . end)"
   subject_json; export SUMMARY_TASK=sum-1
   run_block summary-task-wait "$sh"
-  eq "$RC" "0" "[$sh] summary wait resume: edges that already read back complete the step"
-  [ "$(grep -c 'reading the edge back' "$TMP/block.err")" = "3" ] \
-    && ok "[$sh] summary wait resume: the three refused adds are reported" || bad "[$sh] summary wait resume: a refused add passed silently"
+  eq "$RC" "0" "[$sh] summary wait resume: edges already there complete the step"
 
   # --- a setup that stops between steps leaves nothing in flight ---
   # The filing steps one after another over one store, each from its own shell

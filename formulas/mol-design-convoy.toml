@@ -121,8 +121,8 @@ hand cuts with the same marked blocks, `effort-default-branch` and
 `effort-branch-push`, so both cut from the same branch. A subject that already
 records the branch is cut no further, and one that records another branch is not
 this run's to cut. Neither is one that lands on a branch other than the default,
-because an effort that lands inside another effort's branch is not built. The
-record is read back before anything is filed:
+because an effort that lands inside another effort's branch is not built. A
+record the store refuses stops the step before anything is filed:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -156,13 +156,8 @@ if [ -z "$RECORDED" ]; then
     echo "origin already carries $BRANCH, so an earlier pass cut it"
   fi
   # <<< effort-branch-push
-  gc bd update "$SUBJECT" --set-metadata "branch=$BRANCH" --set-metadata "target=$BASE" || echo "recording $BRANCH on $SUBJECT returned non-zero; reading the record back" >&2
+  gc bd update "$SUBJECT" --set-metadata "branch=$BRANCH" --set-metadata "target=$BASE" || { echo "recording $BRANCH on $SUBJECT failed; not filing anything" >&2; exit 1; }
 fi
-RECORD=$(gc bd show "$SUBJECT" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata | (.branch // "") + " " + (.target // "")' 2>/dev/null)
-case "$RECORD" in
-  "$BRANCH "?*) ;;
-  *) echo "$SUBJECT reads branch and target '$RECORD' after the record, not $BRANCH and a target; not filing anything" >&2; exit 1 ;;
-esac
 # <<< seed-branch-cut
 ```
 
@@ -172,8 +167,8 @@ esac
 ```
 
 **Exit criteria:** `integration/<subject-id>` is on origin, the subject records it
-as its `branch` with the default branch as its `target`, the record reads back,
-and this step is closed.
+as its `branch` with the default branch as its `target`, and this step is
+closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -195,8 +190,8 @@ wait of the setup reads back, so no child can land while the subject waits on
 fewer than all of them.
 
 **Idempotent on resume** via `gc.design_child` on the subject, which guards the
-non-idempotent create, so a re-run files no second child. The wait is added and
-read back on every run.
+non-idempotent create, so a re-run files no second child. The wait is added on
+every run.
 
 `design_gated` resolves through the same marked block load-context ran:
 ```bash
@@ -257,16 +252,12 @@ fi
 # <<< file-design-create
 ```
 
-**Check the target, then wait.** The read-back decides, not the add's exit
-status, because a resume re-runs the add on an edge the failed pass may already
-have written. A target or a wait that does not read back fails the step:
+**Wait on it.** bd takes an edge it already holds as a no-op that exits 0, so a
+resume re-runs the add safely, and an add bd refuses fails the step. The
+dispatch step reads every target and edge back before it hands anything over:
 ```bash
 # >>> file-design-wait
-CHILD_TARGET=$(gc bd show "$DESIGN_CHILD" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata.target // empty' 2>/dev/null)
-[ "$CHILD_TARGET" = "$BRANCH" ] || { echo "design child $DESIGN_CHILD reads target '$CHILD_TARGET', not $BRANCH, so it would land elsewhere; not waiting on it" >&2; exit 1; }
-gc bd dep add "$SUBJECT" "$DESIGN_CHILD" --type=blocks || echo "dep add of the wait of $SUBJECT on design child $DESIGN_CHILD returned non-zero (already there?); reading the edge back" >&2
-WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$DESIGN_CHILD" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
-[ "${WAITS:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no blocks edge onto design child $DESIGN_CHILD after the add" >&2; exit 1; }
+gc bd dep add "$SUBJECT" "$DESIGN_CHILD" --type=blocks || { echo "dep add of the wait of $SUBJECT on design child $DESIGN_CHILD failed" >&2; exit 1; }
 # <<< file-design-wait
 ```
 
@@ -276,7 +267,7 @@ WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null 
 ```
 
 **Exit criteria:** the design child is filed with its target, the subject waits
-on it, both read back, and this step is closed.
+on it, and this step is closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -302,7 +293,7 @@ the subject by the time the child runs.
 
 **Idempotent on resume** via `gc.impl_child` on the subject, which guards the
 non-idempotent create, so a re-run files no second child. The edges are added
-and read back on every run.
+on every run.
 
 `design_gated` resolves through the same marked block load-context ran:
 ```bash
@@ -362,22 +353,15 @@ fi
 # <<< file-implementation-create
 ```
 
-**Check the target, then wait, and hold it behind the design by shape.** As in
-file-design, each write is read back, and one that does not read back fails the
-step:
+**Wait on it, and hold it behind the design by shape.** As in file-design, an
+add bd refuses fails the step:
 ```bash
 # >>> file-implementation-wait
-CHILD_TARGET=$(gc bd show "$IMPL_CHILD" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata.target // empty' 2>/dev/null)
-[ "$CHILD_TARGET" = "$BRANCH" ] || { echo "implementation child $IMPL_CHILD reads target '$CHILD_TARGET', not $BRANCH, so it would land elsewhere; not waiting on it" >&2; exit 1; }
-gc bd dep add "$SUBJECT" "$IMPL_CHILD" --type=blocks || echo "dep add of the wait of $SUBJECT on implementation child $IMPL_CHILD returned non-zero (already there?); reading the edge back" >&2
-WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$IMPL_CHILD" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
-[ "${WAITS:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no blocks edge onto implementation child $IMPL_CHILD after the add" >&2; exit 1; }
+gc bd dep add "$SUBJECT" "$IMPL_CHILD" --type=blocks || { echo "dep add of the wait of $SUBJECT on implementation child $IMPL_CHILD failed" >&2; exit 1; }
 if [ "$DESIGN_GATED" = "true" ]; then
   # dep add's second id is the blocker, so the design blocks the implementation
   # here, and the arm the dispatch step records fires once the design closes.
-  gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks || echo "dep add holding implementation child $IMPL_CHILD behind design child $DESIGN_CHILD returned non-zero (already held?); reading the edge back" >&2
-  HELD=$(gc bd dep list "$IMPL_CHILD" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg d "$DESIGN_CHILD" '[.[]? | select(.id == $d)] | length' 2>/dev/null)
-  [ "${HELD:-0}" -ge 1 ] 2>/dev/null || { echo "implementation child $IMPL_CHILD reads no blocks edge from design child $DESIGN_CHILD after the add" >&2; exit 1; }
+  gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks || { echo "dep add holding implementation child $IMPL_CHILD behind design child $DESIGN_CHILD failed" >&2; exit 1; }
 fi
 # <<< file-implementation-wait
 ```
@@ -388,8 +372,8 @@ fi
 ```
 
 **Exit criteria:** the implementation child is filed with its target, the
-subject waits on it, and, design-gated, the design child holds it, each write
-read back; this step is closed.
+subject waits on it, and, design-gated, the design child holds it; this step is
+closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -408,13 +392,13 @@ description names the subject it writes for. It lands nothing, so it carries no
 
 It waits on each child by a `blocks` edge, and the subject waits on it, so it
 runs once the effort's last bead has landed, and the refinery takes the subject
-only after it has closed. Each edge is read back here. The dispatch step arms it
+only after it has closed. The dispatch step reads each edge back and arms it
 to the rig's polecat pool on Gas City's `mol-polecat-report`, whose write-report
 step closes it.
 
 **Idempotent on resume** via `gc.summary_task` on the subject, which guards the
 non-idempotent create, so a re-run files no second task. The edges are added
-and read back on every run:
+on every run:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -455,22 +439,13 @@ fi
 # <<< summary-task-create
 ```
 
-**Wait, and read back.** As in the filing steps, the read-back decides, not the
-add's exit status, and an edge that does not read back fails the step:
+**Wait on both children.** As in the filing steps, an add bd refuses fails the
+step:
 ```bash
 # >>> summary-task-wait
-gc bd dep add "$SUMMARY_TASK" "$DESIGN_CHILD" --type=blocks || echo "dep add of the wait of summary task $SUMMARY_TASK on design child $DESIGN_CHILD returned non-zero (already there?); reading the edge back" >&2
-gc bd dep add "$SUMMARY_TASK" "$IMPL_CHILD" --type=blocks || echo "dep add of the wait of summary task $SUMMARY_TASK on implementation child $IMPL_CHILD returned non-zero (already there?); reading the edge back" >&2
-TASK_WAITS=$(gc bd dep list "$SUMMARY_TASK" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '[.[]? | .id] | join(" ")' 2>/dev/null)
-for C in "$DESIGN_CHILD" "$IMPL_CHILD"; do
-  case " $TASK_WAITS " in
-    *" $C "*) ;;
-    *) echo "summary task $SUMMARY_TASK reads no blocks edge onto $C after the add" >&2; exit 1 ;;
-  esac
-done
-gc bd dep add "$SUBJECT" "$SUMMARY_TASK" --type=blocks || echo "dep add of the wait of $SUBJECT on summary task $SUMMARY_TASK returned non-zero (already there?); reading the edge back" >&2
-HELD=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg s "$SUMMARY_TASK" '[.[]? | select(.id == $s)] | length' 2>/dev/null)
-[ "${HELD:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no blocks edge onto summary task $SUMMARY_TASK after the add" >&2; exit 1; }
+gc bd dep add "$SUMMARY_TASK" "$DESIGN_CHILD" --type=blocks || { echo "dep add of the wait of summary task $SUMMARY_TASK on design child $DESIGN_CHILD failed" >&2; exit 1; }
+gc bd dep add "$SUMMARY_TASK" "$IMPL_CHILD" --type=blocks || { echo "dep add of the wait of summary task $SUMMARY_TASK on implementation child $IMPL_CHILD failed" >&2; exit 1; }
+gc bd dep add "$SUBJECT" "$SUMMARY_TASK" --type=blocks || { echo "dep add of the wait of $SUBJECT on summary task $SUMMARY_TASK failed" >&2; exit 1; }
 # <<< summary-task-wait
 ```
 
@@ -545,7 +520,9 @@ REFINERY="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
 case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool and the refinery; set GC_RIG" >&2; exit 1 ;; esac
 ```
 
-**Read the setup back, hand the subject over, then dispatch.** A target or an
+**Read the setup back, hand the subject over, then dispatch.** The hand-over and
+the dispatch cannot be undone, so every target and edge the filing steps wrote
+is read back first (docs/warrants.md, "bd write durability"). A target or an
 edge that does not read back, a refinery address the roster lacks, a subject
 someone else holds, or a notice that does not record stops the step before
 anything is dispatched:
