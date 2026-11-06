@@ -25,6 +25,7 @@ no()  { case "$1" in *"$2"*) bad "$3" "'$2' unexpectedly in '$1'" ;; *) ok "$3" 
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 REAL_GIT="$(command -v git)" || { echo "git is required for this test" >&2; exit 1; }
+REAL_FIND="$(command -v find)" || { echo "find is required for this test" >&2; exit 1; }
 unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/gitconfig"
@@ -37,10 +38,10 @@ git config --file "$GIT_CONFIG_GLOBAL" advice.detachedHead false
 PACK="$TMP/pack"; BIN="$TMP/bin"; mkdir -p "$PACK" "$BIN"
 cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-close.sh" "$HERE/bd-lib.sh" \
    "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/deferred-dispatch.sh" "$PACK/" 2>/dev/null
-export REAL_GIT LOG="$TMP/log" STORE="$TMP/store.json"
+export REAL_GIT REAL_FIND LOG="$TMP/log" STORE="$TMP/store.json"
 
-# git: push, ls-remote and the worktree list can be made to fail, and a push, a
-# worktree's removal and a branch's delete are logged, whatever directory -C names.
+# git: push and ls-remote can be made to fail, and a push, a worktree's removal
+# and a branch's delete are logged, whatever directory -C names.
 cat > "$BIN/git" <<'SH'
 #!/usr/bin/env bash
 dir=()
@@ -56,10 +57,16 @@ case "${1:-}" in
   worktree)
     case "${2:-}" in
       remove) printf 'remove %s\n' "${3:-}" >> "$LOG" ;;
-      list) [ -z "${WORKTREE_LIST_DOWN:-}" ] || { echo "fatal: unreadable (stub)" >&2; exit 128; } ;;
     esac ;;
 esac
 exec "$REAL_GIT" ${dir[@]+"${dir[@]}"} "$@"
+SH
+# find: a walk can be made to fail, as one that meets a directory it cannot read
+# does.
+cat > "$BIN/find" <<'SH'
+#!/usr/bin/env bash
+[ -z "${FIND_DOWN:-}" ] || { echo "find: ./locked: Permission denied (stub)" >&2; exit 1; }
+exec "$REAL_FIND" "$@"
 SH
 # gc over the store. A write whose arguments contain UPDATE_FAIL is refused. A list
 # fails while LIST_DOWN is set, and a show while SHOW_DOWN is set.
@@ -118,7 +125,7 @@ case "$verb" in
 esac
 exit 0
 SH
-chmod +x "$BIN/git" "$BIN/gc"
+chmod +x "$BIN/git" "$BIN/find" "$BIN/gc"
 
 recorder() { # <name> <log word> <rc var>
   cat > "$PACK/$1" <<STUB
@@ -147,6 +154,11 @@ O="$TMP/origin.git"
 "$REAL_GIT" init -q --bare "$O"
 SEED="$TMP/seed"; "$REAL_GIT" clone -q "$O" "$SEED" 2>/dev/null
 printf 'base\n' > "$SEED/base.txt"; g "$SEED" add base.txt; g "$SEED" commit -qm base; g "$SEED" push -q origin HEAD:main
+# A second repository, whose checkouts a tree can hold.
+O2="$TMP/other-origin.git"
+"$REAL_GIT" init -q --bare "$O2"
+SEED2="$TMP/other-seed"; "$REAL_GIT" clone -q "$O2" "$SEED2" 2>/dev/null
+printf 'other\n' > "$SEED2/other.txt"; g "$SEED2" add other.txt; g "$SEED2" commit -qm other; g "$SEED2" push -q origin HEAD:main
 
 STEP_ROW='{"id":"st-submit","status":"in_progress","assignee":"sess-me","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-1"}}'
 
@@ -266,10 +278,10 @@ prepare polecat/tk-w "$FRESH"
 printf 'nested/\n' >> "$R/.git/info/exclude"
 g "$R" worktree add -q --detach "$C/nested" origin/main
 go
-eq "$RC" 0 "(2e) a tree that holds another worktree: exits 0"
+eq "$RC" 0 "(2e) a tree that holds another checkout of its own repository: exits 0"
 [ -d "$C/nested" ] && ok "(2e) neither is removed" || bad "(2e) neither is removed"
 eq "$(meta work_dir)" "$C" "(2e) work_dir still names the tree"
-has "$OUT" "holds another worktree" "(2e) and says why"
+has "$OUT" "holds the checkout at $C/nested," "(2e) and names the checkout that keeps it"
 prepare polecat/tk-w "$FRESH"
 jq -c --arg d "$TMP/elsewhere" 'map(if .id == "tk-w" then .metadata.work_dir = $d else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
 SUBMIT_DIR="$C" go
@@ -278,13 +290,45 @@ eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2f) that tree is not remov
 eq "$(meta work_dir)" "$TMP/elsewhere" "(2f) work_dir is left as it was"
 has "$OUT" "ran in no tree that tk-w records" "(2f) and says so"
 prepare polecat/tk-w "$FRESH"
-go WORKTREE_LIST_DOWN=1
-eq "$RC" 0 "(2g) the worktrees cannot be listed: exits 0"
+go FIND_DOWN=1
+eq "$RC" 0 "(2g) the walk under the tree cannot finish: exits 0"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2g) the handoff stands"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2g) the tree is not removed, and keeps its branch"
 eq "$(meta work_dir)" "$C" "(2g) work_dir still names it"
 eq "$(grep -cE '^(remove|release) ' "$LOG" | tr -d ' ')" 0 "(2g) nothing is removed or deleted"
-has "$OUT" "could not list the worktrees" "(2g) and says why"
+has "$OUT" "not every directory under $C could be read" "(2g) and says why"
+# Another repository's checkouts, each under a path the tree's repository ignores,
+# so the tree reads clean and its repository lists no worktree under it.
+prepare polecat/tk-w "$FRESH"
+printf 'worktrees/\n' >> "$R/.git/info/exclude"
+R2="$TMP/other-$N"; "$REAL_GIT" clone -q "$O2" "$R2" 2>/dev/null
+g "$R2" worktree add -q --detach "$C/worktrees/other" origin/main
+printf 'unsaved\n' > "$C/worktrees/other/unsaved.txt"
+eq "$(g "$C" status --porcelain)" "" "(2h) the tree reads clean"
+no "$(g "$R" worktree list --porcelain)" "worktree $C/" "(2h) and its repository lists no worktree under it"
+go
+eq "$RC" 0 "(2h) a tree that holds another repository's linked worktree: exits 0"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2h) the handoff stands"
+eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2h) the tree is not removed, and keeps its branch"
+eq "$(meta work_dir)" "$C" "(2h) work_dir still names it"
+eq "$(cat "$C/worktrees/other/unsaved.txt" 2>/dev/null)" "unsaved" "(2h) the other worktree's uncommitted file is in place"
+eq "$(grep -cE '^(remove|release) ' "$LOG" | tr -d ' ')" 0 "(2h) nothing is removed or deleted"
+has "$OUT" "holds the checkout at $C/worktrees/other," "(2h) and names the checkout that keeps it"
+prepare polecat/tk-w "$FRESH"
+printf 'cache/\n' >> "$R/.git/info/exclude"
+"$REAL_GIT" clone -q "$O2" "$C/cache/deep/co" 2>/dev/null
+printf 'local\n' > "$C/cache/deep/co/local.txt"; g "$C/cache/deep/co" add local.txt; g "$C/cache/deep/co" commit -qm unpushed
+CLONE_SHA=$(g "$C/cache/deep/co" rev-parse HEAD)
+eq "$(g "$C" status --porcelain)" "" "(2i) the tree reads clean"
+go
+eq "$RC" 0 "(2i) a tree that holds a clone three directories down: exits 0"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2i) the handoff stands"
+eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2i) the tree is not removed, and keeps its branch"
+eq "$(meta work_dir)" "$C" "(2i) work_dir still names it"
+eq "$(g "$C/cache/deep/co" rev-parse HEAD 2>/dev/null)" "$CLONE_SHA" "(2i) the clone keeps the commit only it holds"
+eq "$(cat "$C/cache/deep/co/local.txt" 2>/dev/null)" "local" "(2i) and its file"
+eq "$(grep -cE '^(remove|release) ' "$LOG" | tr -d ' ')" 0 "(2i) nothing is removed or deleted"
+has "$OUT" "holds the checkout at $C/cache/deep/co," "(2i) and names the checkout that keeps it"
 
 echo "# a rework child stands on the reviewed branch, and a caller's target wins"
 prepare polecat/tk-anchor '{"branch":"polecat/tk-anchor","target":"integration/x"}'

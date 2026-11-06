@@ -48,9 +48,13 @@
 # nothing would reach them, and the controller's reaper never removes such a tree.
 # A rework or a re-dispatch makes a fresh tree from origin's branch. Only the tree
 # work_dir records and this call runs in is removed, never a session's own
-# directory or a tree that holds another worktree, and never by force: a tree with
-# an uncommitted or untracked path stays on its branch, work_dir still names it,
-# and the call says so. A session that dies before the removal leaves the tree on
+# directory, and never by force: a tree with an uncommitted or untracked path stays
+# on its branch, work_dir still names it, and the call says so. A tree that holds a
+# checkout of any repository stays the same way. Git deletes an ignored path with
+# the tree, and a checkout under one is ignored whole: its uncommitted files go,
+# and a clone's own commits with them. So a .git anywhere below the tree's own
+# keeps the tree, and so does a walk that cannot read every directory under it.
+# A session that dies before the removal leaves the tree on
 # its branch, which the reaper removes once the bead closes. The removal reads the
 # repository from where the tree was, so a tree the reaper took first costs only
 # the local branch's delete.
@@ -421,7 +425,7 @@ close_step
 # The header says what goes and what stays. The hand-off is already written, so
 # each way this stops short is said, and none fails the call.
 release_tree() {
-  local out list="" nl=$'\n'
+  local out nested=""
   cd "${GC_DIR:-/nonexistent}" 2>/dev/null || cd "$(dirname "${OWN_TREE:-/}")" 2>/dev/null || cd /
   if [ -z "$OWN_TREE" ] || [ -z "$COMMON_DIR" ]; then
     echo "$PROG: this call ran in no tree that $WORK_ID records as its work_dir, so no tree is removed, and $CURRENT_BRANCH stays checked out where it is." >&2
@@ -431,15 +435,15 @@ release_tree() {
     echo "$PROG: $OWN_TREE is this session's own directory, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
     return 0
   fi
-  if [ -e "$OWN_TREE" ] && ! list=$(git -C "$COMMON_DIR" worktree list --porcelain 2>/dev/null); then
-    echo "$PROG: git could not list the worktrees, so $OWN_TREE is not removed, and $CURRENT_BRANCH stays checked out there." >&2
+  if [ -e "$OWN_TREE" ] && ! nested=$(cd "$OWN_TREE" && find -P . -path ./.git -prune -o -name .git -print -quit 2>/dev/null); then
+    echo "$PROG: not every directory under $OWN_TREE could be read, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
     return 0
   fi
-  case "$nl$list" in
-    *"${nl}worktree $OWN_TREE/"*)
-      echo "$PROG: $OWN_TREE holds another worktree, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
-      return 0 ;;
-  esac
+  if [ -n "$nested" ]; then
+    nested="${nested#./}"
+    echo "$PROG: $OWN_TREE holds the checkout at $OWN_TREE/${nested%/.git}, which would go with it, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
+    return 0
+  fi
   if [ -e "$OWN_TREE" ] && ! out=$(git -C "$COMMON_DIR" worktree remove "$OWN_TREE" 2>&1) && [ -e "$OWN_TREE" ]; then
     echo "$PROG: $OWN_TREE stays, on $CURRENT_BRANCH, and work_dir still names it, because git would not remove it: $out" >&2
     return 0
