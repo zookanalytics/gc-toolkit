@@ -94,8 +94,8 @@ provisions, the pre-flights and the self-review loop over `gctk rig` records, an
 the push and handoff, each for the reason its warrant gives. Each step closes
 through `gc hook current`, and a decline is one call. Work owns the work branch
 and the handoff write. Priority following stays under its warrant, and deferred
-dispatch shrinks to the residuals tk-1tfzr71.16 keeps under warrants: sling on
-unblock, and close on an `until` edge.
+dispatch shrinks to the residual tk-1tfzr71.16 keeps under a warrant: sling on
+unblock.
 
 The trade: `implement` is core's, so a pack refinement of it goes in the polecat
 doctrine or waits for upstream. A step inherited from core declares no
