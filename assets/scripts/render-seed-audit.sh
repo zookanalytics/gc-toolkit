@@ -105,7 +105,9 @@ BASE_STALE_OUT=""
 SIZES_BASE=""
 SINCE=""
 
-die() { printf 'render-seed-audit: %s\n' "$*" >&2; exit 2; }
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "render-seed-audit: cannot source bd-lib.sh from $HERE" >&2; exit 2; }
+DIE_STATUS=2
 
 while [ $# -gt 0 ]; do
     case "$1" in

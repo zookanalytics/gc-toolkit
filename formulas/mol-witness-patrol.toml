@@ -371,7 +371,7 @@ temp file, never --argjson (ARG_MAX):
 SESSIONS_RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
 trap 'rm -f "$SESSIONS_RAW" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
+gc session list --json > "$SESSIONS_RAW" 2>/dev/null || true
 # The session list is the map's only source. A non-object, or an object with
 # no .sessions array, is the READ failing, which is a different fact from a
 # city that reports no sessions.
@@ -430,17 +430,18 @@ so it outlives this wisp, which next-iteration burns; a cycle that trips the
 same way lands on that bead as another occurrence.
 
 An owner that resolves `absent` against a POPULATED map is never grounds for
-the fail safe. Closed sessions are excluded from `gc session list` on every
-path by design, so a bead naming a session that has since closed always
-resolves absent and `--state=closed` never returns a row. That is permanent,
-not drift, and it is the orphan signal the classification below prescribes.
+the fail safe. The map reads `gc session list` with no state filter, which
+leaves closed sessions out on every route, so a bead naming a session that has
+since closed always resolves absent. That is permanent, not drift, and it is
+the orphan signal the classification below prescribes.
 A map that omits sessions you can name is the steady state this step is built
 to read.
 
 The map holds no closed session, and the classification below orphans
 `absent` and `closed` alike. Closed sessions are recorded as session beads in
-the city store, a set that grows with every session the city runs, so a map
-that held them would cost a whole-history scan on every rig each cycle.
+the city store, a set that grows with every session the city runs, and
+`--state all` or `--state closed` lists that whole history, so a map that held
+them would cost a whole-history scan on every rig each cycle.
 Closed keys would also keep the map populated when the session list comes
 back empty, and that cycle would no longer trip `liveness map empty`.
 
@@ -630,7 +631,7 @@ elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" -
   git status --porcelain
   # All work is useful work — commit whatever is uncommitted, then publish.
   git add -A
-  git commit -m "witness: salvage work from orphaned agent (<bead>)" || true
+  git commit -m "chore: salvage work from an orphaned agent (<bead>)" || true
   BRANCH=$(git branch --show-current)
   git push origin HEAD
   gc bd update <bead> --set-metadata branch="$BRANCH"
@@ -901,8 +902,8 @@ landing bead sits in the queue from the moment its integration effort is stood
 up, and find-work leaves it until the effort's beads and its summary task close.
 ```bash
 # >>> refinery-stuck-handoff
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
-: "${SCRIPTS:?human-gate.sh, patrol-finding.sh, resolve-route.sh, bd-lib.sh and hold-lib.sh not found in the pack}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] && . "$SCRIPTS/bd-lib.sh" || SCRIPTS=""
+: "${SCRIPTS:?human-gate.sh, patrol-finding.sh, resolve-route.sh, bd-lib.sh and hold-lib.sh not found in the pack, or bd-lib.sh did not source}"
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an
 # address no agent holds as a valid empty array, which reads exactly like a
@@ -913,7 +914,7 @@ if REFINERY=$("$SCRIPTS/resolve-route.sh" "${GC_RIG:+$GC_RIG/}{{binding_prefix}}
 # A bead assigned to the refinery clears on its own: a handoff within a poll
 # interval, a rebase/rework task within the fix pool's work time (observed under
 # ~2h). Past this bound it is not churn; the session is not advancing it.
-# Conservative on purpose: a false gate here is the defect this step fixes.
+# Conservative on purpose: a false gate spends a person's attention.
 STUCK_SECS=14400
 NOW=$(date -u +%s)
 # Under a strict shell a plain VAR=$(...) capture exits the step at a failed
@@ -946,7 +947,7 @@ STUCK="$PAST"
 cr_hold_read() { gc bd list --all --include-gates --include-infra --include-templates --id="$1" --json --limit=0; }
 if [ -n "$PAST" ] && [ "$PAST" != "[]" ]; then
   JUDGED=""
-  if . "$SCRIPTS/bd-lib.sh" && . "$SCRIPTS/hold-lib.sh"; then
+  if . "$SCRIPTS/hold-lib.sh"; then
     JUDGED=$(printf '%s' "$PAST" | hold_annotate cr_hold_read) || JUDGED=""
   fi
   if [ -n "$JUDGED" ]; then
@@ -976,11 +977,11 @@ elif [ "$HOLD_RC" -ne 0 ]; then
   "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key witness-refinery-queue-unreadable --title "check-refinery cannot read what holds the refinery handoffs" --message "check-refinery read the refinery queue but not what holds the handoffs that have sat past the stuck bound (the hold-lib.sh walk over their blockers failed), so it cannot tell a handoff waiting on its blockers from a stuck one. The stuck-handoff monitor is blind until those reads answer. Inspect the store's health." || echo "check-refinery: hold walk unreadable AND the finding was not filed" >&2
 elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # Genuinely unreadable: bd failed, or the listing is not a JSON array even
-  # after the control-byte strip. A silent stderr log here was the defect this
-  # block fixes — a blinded monitor lets a genuinely stuck handoff go unseen —
-  # so the blind monitor itself is reported, as a patrol finding for the same
-  # reason as above. patrol-finding.sh keeps one live bead per key and counts a
-  # recurrence on it, so a persistently blind read is one finding, not a storm.
+  # after the control-byte strip. A blinded monitor lets a genuinely stuck
+  # handoff go unseen, so the blind monitor itself is reported, as a patrol
+  # finding for the same reason as above. patrol-finding.sh keeps one live bead
+  # per key and counts a recurrence on it, so a persistently blind read is one
+  # finding, not a storm.
   echo "check-refinery: refinery queue unreadable (rc=$QUEUE_RC; not a JSON array after the control-byte strip); reporting the blind monitor" >&2
   "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key witness-refinery-queue-unreadable --title "check-refinery cannot read the refinery queue" --message "check-refinery cannot read the refinery queue (rc=$QUEUE_RC; the bd --json listing is not a JSON array even after stripping control bytes). The stuck-handoff monitor is blind, so a genuinely stuck refinery handoff would go unseen until this is fixed. Inspect the refinery queue listing and the store's health." || echo "check-refinery: queue unreadable AND the finding was not filed (rc=$QUEUE_RC)" >&2
 elif [ "$STUCK_N" -eq 0 ]; then
@@ -1033,13 +1034,12 @@ fi
 # against comes from it. Every doubt keeps a gate open, because a wrong keep
 # leaves a question a person can clear, while a wrong withdrawal resolves the
 # gate moot, and this step's declared quiet window then holds a new gate off
-# every bead it blocked for a day. Only a waiting bead whose id is one bead id
-# is a candidate.
+# every bead it blocked for a day.
 if [ "$ROUTE_RC" -eq 0 ] && [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
   # bd gate list prints null with no gates, and [] through a proxied server.
-  GATES=$(gc bd gate list --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" then .[] | select((.await_type // "") == "human" and (.await_id // "") == "witness-refinery-queue" and (.status // "") != "closed") | .id else empty end' 2>/dev/null) || GATES=""
+  GATES=$(gc bd gate list --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' | jq -r "$HUMAN_GATE_JQ"'if type == "array" then .[] | select(open_human_gate("witness-refinery-queue")) | .id else empty end' 2>/dev/null) || GATES=""
   # One {gate, deps} row per gate, deps every bead the gate blocks. A read that
   # failed or answered anything but an array leaves deps null.
   GATE_DEPS=$(while IFS= read -r G; do
@@ -1050,7 +1050,7 @@ if [ "$ROUTE_RC" -eq 0 ] && [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
       | if . == "" then null else (try fromjson catch null) end
       | if type == "array" then [ .[] | if type == "object" then ((.id // "") | tostring) else "" end ] else null end)} ]' 2>/dev/null) || GATE_DEPS=""
   CANDIDATES=$(printf '%s' "$GATE_DEPS" | jq -c --argjson q "$QUEUE_IDS_JSON" 'if type == "array" then [ .[] | (.deps // [])[] as $h
-      | select($h | test("^[A-Za-z0-9._-]+$")) | select(($q | index($h)) == null) | $h ] | unique else empty end' 2>/dev/null) || CANDIDATES=""
+      | select($h != "") | select(($q | index($h)) == null) | $h ] | unique else empty end' 2>/dev/null) || CANDIDATES=""
   CANDIDATE_IDS=$(printf '%s' "$CANDIDATES" | jq -r 'if type == "array" then join(",") else empty end' 2>/dev/null) || CANDIDATE_IDS=""
   if [ -n "$CANDIDATE_IDS" ]; then
     # One read for every candidate, closed ones included.
@@ -1104,24 +1104,8 @@ if [ "$ROUTE_RC" -eq 0 ] && [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
 fi
 # <<< refinery-stuck-handoff
 ```
-One human-gate.sh call per stuck bead: the gate blocks that handoff, and the
-helper files nothing while an open gate under the key already blocks it, so each
-stuck bead gets its own gate and a churning queue files none. A stuck bead
-reaches a human through a gate on the bead rather than a nudge whose count goes
-stale. A queue that will not parse even after the control-byte strip is reported
-once under its own key as a patrol finding, and so is a queue whose holds cannot
-be read, so a blinded monitor is surfaced rather than silently trusted. A held
-bead files nothing, and a wait is aged from the close that released its last
-hold when that is later than its last write. A refinery address that resolves to
-no live agent is blind the same way and is reported under a key of its own,
-without reading a queue. The counterpart withdrawal closes the loop. A handoff
-an open gate under the key blocks, which a queue read at the refinery's verified
-address no longer carries, is read by id, and its gates are withdrawn through
-human-gate.sh --retract only when that read shows the handoff closed, prepared,
-or assigned away from the refinery, and shows the same for every other bead
-those gates block. A listing that omits a handoff still sitting with the
-refinery withdraws nothing, a handoff that cannot be read keeps its gate, and a
-gate shared with a handoff still in the queue stays open for both. Close this
+The block files one gate per stuck handoff, reports a blind queue or roster once
+as a patrol finding, and withdraws a handoff's gates once it has left. Close this
 step and continue to next-iteration."""
 
 [[steps]]

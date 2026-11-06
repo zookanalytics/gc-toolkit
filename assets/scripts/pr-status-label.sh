@@ -43,7 +43,9 @@
 set -u
 
 PROG="pr-status-label"
-warn() { echo "$PROG: $*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # The controlled `status:` group. One label per value; the prefix groups them on
 # the list apart from human triage labels, following Rust `S-`/Kubernetes

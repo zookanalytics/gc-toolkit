@@ -169,9 +169,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main 37bd09351,
-  `gastownhall/gascity-packs` main dac12a4a8 and `gastownhall/beads` main
-  2ef4df339 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c,
+  `gastownhall/gascity-packs` main 796d7ecd7 and `gastownhall/beads` main
+  6d713a748 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority), with bd 1.3.2
   (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
@@ -219,18 +219,17 @@ shares only the word ([authority-map.md](authority-map.md)).
   sitting cut short handed back to the operator's queue.
 - **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
   work closes. It stays until it is closed or drained, and attaching wakes one
-  that sleeps (`cmd/gc/compute_awake_set.go` 432-440, 583-594 and 668-693).
+  that sleeps (`cmd/gc/compute_awake_set.go` 443-451, 594-605 and 679-704).
   No closer the controller runs on its own ends one because its work closed:
   the stale-session closers exempt a session that has started its
   conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
-  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3057, 3237 and
-  3500), and the core reaper prunes a session only once it has drained
-  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69 and 1402-1404).
+  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3164, 3345 and
+  3608), and the core reaper prunes a session only once it has drained
+  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 118 and 1588-1590).
   A sitting drains itself once its conversation closes, and `gc-helm dismiss`
   stops the session that held the conversation it closes, so nothing in the
   controller ends a session either of them missed.
-- **Verified.** 2026-10-26, at `gastownhall/gascity` 1e05ae624, beside a live
-  `gc session list --state closed`.
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c.
 - **Retires when.** Gas City ends a manual session once its claimed work has
   closed.
 
@@ -450,3 +449,56 @@ shares only the word ([authority-map.md](authority-map.md)).
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
   GitHub's review thread events. The count then moves onto that record.
+
+## Agent home provisioning
+
+- **Covers.** `assets/scripts/worktree-setup.sh`.
+- **Stands in for.** A Gas City owner for the worktree an agent's sessions start
+  in, which `gc worktree ensure` would be if it provisioned a tree for an agent
+  rather than for a bead.
+- **Evidence.**
+  - In `gastownhall/gascity`, `gc worktree ensure` requires `--bead`,
+    `--store-ref` and `--generation`. Its postcondition is "the bead's uniquely
+    named branch checked out on an attached HEAD", on a path that is a direct
+    child of `--root`
+    ([gc worktree](https://docs.gascity.com/reference/cli#gc-worktree)). A home
+    serves many beads and outlives each of them. `Ensure` in
+    `internal/worktree/worktree.go` verifies an existing tree and never moves it,
+    and it writes no bead redirect and no excludes, so a home would still need
+    this script for all of that.
+  - Nothing else provisions one. `work_dir` and `pre_start` are the agent's own
+    config ([Agent](https://docs.gascity.com/reference/config#agent)), and the
+    daemon's `auto_prune_worker_dir` and `auto_reap_closed_bead_worktrees` only
+    remove trees. No formula in the core pack calls `gc worktree`:
+    `mol-polecat-commit` and `mol-scoped-work` cut their per-bead trees with
+    `git worktree add`.
+  - In `gastownhall/gascity-packs`, Gas Town's own polecat and refinery provision
+    their homes the same way: `pre_start` runs
+    `gastown/assets/scripts/worktree-setup.sh`, from which this script descends.
+    This pack imports no pack it could call that copy from.
+  - Nothing in Gas City brings a home to the default tip at each start. The
+    agent-home cleanup (`cleanupClosedBeadAgentHomeWorktrees` in
+    `cmd/gc/agent_home_worktree_cleanup.go`) moves a home only when it carries
+    the worker-dir prune's `.worktree-stale` marker, sits on a branch that names
+    a closed bead and has no uncommitted work.
+  - Nothing in Gas City brings a failed `pre_start` to a person. The command's
+    output goes into the start's error, which the controller and reconciler log
+    ([Agent](https://docs.gascity.com/reference/config#agent), `pre_start`). Five
+    failed wakes in a row hold the session for five minutes
+    (`defaultMaxWakeAttempts` and `defaultQuarantineDuration` in
+    `cmd/gc/session_types.go`), and a failed pending create also counts toward
+    a startup-health episode (`recordStartupHealthFailure` in
+    `cmd/gc/session_lifecycle_parallel.go`). Nothing sends the alert an episode
+    marks pending (`RecordStartupFailure` in `internal/session/startup_health.go`),
+    the doctor check that lists episodes leaves the error out
+    (`startupHealthEpisodesCheck` in `cmd/gc/doctor_startup_health.go`), and
+    `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
+    So the script reports a home it cannot sync through `patrol-finding.sh`, one
+    report per home, which the next clean start clears.
+  - The search, and each way this script differs from Gas Town's and why, is
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
+- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
+  `gastownhall/gascity-packs` main 796d7ecd73cf.
+- **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
+  the default branch, or Gas Town's agents stop running a script of their own at
+  `pre_start`.

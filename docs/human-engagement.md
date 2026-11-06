@@ -101,8 +101,11 @@ the seam the pack builds at each.
   not do: one open gate per bead and situation key, a quiet period after a
   `moot` or `benign` answer for a call that declares `--quiet-window`, the
   message as the gate's description, and `--retract`, which resolves the
-  filer's own gate as moot once the situation has gone. Every reader finds a
-  bead's human gates one way, through the bead's `blocks` edges
+  filer's own gate as moot once the situation has gone. Two writers in the
+  same instant can each file, because bd keeps no idempotency at create. Both
+  gates then stand, and the bead moves once a person has cleared each. The
+  helper closes neither, because another bead may already wait on it. Every
+  reader finds a bead's human gates one way, through the bead's `blocks` edges
   (`bd_human_gates` in `assets/scripts/bd-lib.sh`), so a gate holds what it
   blocks whoever filed it. A gate on a bead with open children pauses every
   part of it that has not started, so a filer that can land on a parent says
@@ -222,8 +225,8 @@ these steps:
    misses when another engage or a hand-off landed first, or when a dismiss
    closed the task, since a dismiss keeps the holder and changes the status. A
    bind that misses, or a read-back that finds the task closed, closes the
-   session this engage started. Then engage posts the PR reminder, waits for
-   the reconciler to start the session, and attaches the operator.
+   session this engage started. Then engage waits for the reconciler to start
+   the session, and attaches the operator.
 
 **Engage offers the gates that hold the bead.** It reads the open human gates
 reached from the bead through its open `blocks` edges (`gctk pr-status gates`,
@@ -244,12 +247,34 @@ racing on a bead with no conversation, or a gate two beads wait on can each
 put two sittings on one bead. The board folds both onto the bead's row, either
 may answer a gate, and the first answer wins.
 
-**The PR reminder.** When the subject carries a PR, engage leaves a comment on
-it saying a sitting engaged, and the sign-off or a dismiss edits that same
-comment in place when the sitting ends (`assets/scripts/pr-sitting-comment.sh`).
-It is keyed by the conversation's id under the marker
-`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it,
-or the marker reminders carried before it, as the city's own.
+**The visit's comment on its PR.** When the subject carries a PR, a comment on
+it shows the visit. It is a view of the conversation, drawn from the
+conversation's values word for word (`assets/scripts/pr-sitting-comment.sh`).
+While the conversation is open, the comment names the visit and the bead it is
+on, the conversation's id and the subject's, and the visit's topic, which is
+the conversation's title. The sitting writes that title in its own words in
+the title step of its prep, and again only when it moves to a different topic.
+The comment goes up then, so a conversation that closes before then posts
+nothing. Once the conversation closes, those lines stay and the conclusion and
+the actions follow them. The conclusion is the last hand-back recorded on the
+conversation, the text the operator's tab prints when the sitting ends. The
+actions are the conversation's comments. The sign-off writes one for the ruling
+and one for each act it takes, the sitting writes one for work it sends and one
+for a close at its premise re-check, and a dismiss writes one for the
+dismissal. Each write that changes what the comment
+shows draws it again: the sign-off, a dismiss and the premise re-check's close
+once the conversation reads closed, and a hand-back recorded after the close.
+The comment is keyed by the conversation's id under the marker
+`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it, or
+the marker reminders carried before it, as the city's own.
+
+A PR comment can be a public record, and no person reads this one before it
+posts. Nothing typed to open a conversation reaches it, because that text stays
+on the conversation as its description, and neither does a dismiss's reason.
+The comment shows what the visit writes, so the visit keeps other rigs and
+their beads out of its topic, its closing hand-back and its actions, and detail
+about another rig stays in the thread and in notes, which the comment does not
+show. Nothing filters the comment, so a slip publishes what the visit wrote.
 
 ### The operator's intake
 
@@ -273,7 +298,7 @@ A bead id, a PR number or URL, or a superseded id resolves through
 as it is.
 
 **The bare command's default rig is fixed: `gc-toolkit`** (`--rig` overrides,
-`GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"`, so a
+`GC_INTAKE_DEFAULT_RIG` moves the default). Converse is `scope = "rig"`, so a
 sitting spawns from the subject's own rig, and a topic that is not rig-specific
 still has to land somewhere. The default is deliberately not inferred from the
 working directory: a destination that varies silently with the shell's
@@ -468,7 +493,12 @@ durable trace in one order every time:
    (below), which sends the formula once;
 6. the conversation's close, whose reason is the headline the sitting settled
    on;
-7. the PR reminder.
+7. the comment that shows the visit on the subject's PR, drawn again from the
+   conversation.
+
+As it goes, it records the rework or the retirement, the ruling once the gates
+carry it, and the recommendation taken on the conversation, each a comment in
+plain words, which that comment lists as the visit's actions.
 
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the
@@ -657,6 +687,9 @@ as a hold unless its writer stamped that key beside it.
   is falsified and the work should not happen. The anchor is parked, and the
   run beneath it is cancelled through gascity's run cancel. An anchor already
   closed takes the cancel without the park, and `--route` is refused there.
+  `assets/scripts/stand-down.sh` runs this write for work a human gate holds, after
+  it removes the arm that would re-sling the work, and goes on to answer the gate,
+  or to leave one that also holds another open bead, and close the bead.
 
 Everywhere else a takeaway carries its wait as an edge: `--waiting-on` for
 work a pool owes, a human gate for what a person owes. A headline written with

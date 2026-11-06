@@ -656,9 +656,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    cite code the target branch already carries, so its finding is carried
    forward to a bug bead of its own through `bead-rehome.sh` instead; the PR's
    inline comments are read once per anchor that carries such a candidate. It
-   leaves `task_kind=review` to review-sweep, `task_kind=visit` to the human
-   side, and a `rebase_hold` freeze to the operator, and never closes the anchor
-   itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
+   leaves `task_kind=review` to review-sweep, a human gate or a conversation to
+   the human side, and a `rebase_hold` freeze to the operator, and never closes
+   the anchor itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
    while a human gate on the anchor is open — which clearing the machine
    scaffolding here lets land once none is. Arm 7 runs this same sweep with `--anchor` for
    the one anchor whose PR-close disposition it is consummating, just before
@@ -734,11 +734,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    checks rather than repeating arm 3's pre-open sign-off line.
 
    The title: arm 3 writes it once, at create, composed from the anchor's title
-   (a conventional-commit type, the title, then the bead id), and the squash
-   merge takes its commit subject from it. A rework that retitles the anchor
-   would otherwise merge under the superseded name. For a `pull_request` anchor
-   this arm composes the title the same way and edits the PR when its words
-   differ; whitespace alone is never a difference. The anchor owns the title, so
+   and then the bead id, and the squash merge takes its commit subject from it.
+   The author writes the conventional-commit type on the anchor's title: the
+   polecat at submit or, on a landing bead, its effort's summary task. A title
+   that reaches the composer with none takes one from the bead's kind, because a
+   PR-title check needs some type. A rework that retitles the anchor would
+   otherwise merge under the superseded name. For a `pull_request` anchor this
+   arm composes the title the same way and edits the PR when its words differ;
+   whitespace alone is never a difference. The anchor owns the title, so
    a retitle is made on the anchor: a title edited on the PR alone is composed
    back on the next pass. A stacked bead never renames the PR, because the title
    names the anchor and the body is where a reviewer reads scope. The title is an

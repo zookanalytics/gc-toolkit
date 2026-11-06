@@ -156,8 +156,9 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 	if rc, done := m.resolveOrigin(); done {
 		return rc
 	}
-	// Used only to exclude our own reviews; unresolved holds the approval gate.
-	m.selfLogin = strings.TrimSpace(string(firstOut(m.ghOrigin("user", "--jq", ".login"))))
+	// Used to tell the city's own reviews and posts from anyone else's;
+	// unresolved holds the approval gate.
+	m.selfLogin = m.actingLogin()
 	if m.selfLogin == "" {
 		// Approval is universal, so with no acting login the city cannot tell an
 		// external approver from its own review, and the approval gate holds
@@ -1378,6 +1379,17 @@ func (m *merger) threadComments(id string) ([]json.RawMessage, bool) {
 		nodes = append(nodes, page.Data.Node.Comments.Nodes...)
 	}
 	return nodes, len(nodes) > 0
+}
+
+// actingLogin reads `pr-post.sh acting-login` for the origin host, which prints
+// the login the city posts as or nothing. "" is an unresolved login: a gh call
+// that failed, or answered something that is not a login.
+func (m *merger) actingLogin() string {
+	out, rc := m.scriptCapture("pr-post.sh", "acting-login", "--host", m.originHost)
+	if rc != 0 {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // feedbackDefinitions reads `pr-post.sh feedback-def` once per pass. ok=false

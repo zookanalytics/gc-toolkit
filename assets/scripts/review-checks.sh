@@ -92,9 +92,10 @@
 set -uo pipefail
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
-warn() { echo "review-checks: $*" >&2; }
 
 HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 PACK_INDEX="$(CDPATH='' cd -- "$HERE/../.." && pwd)/review-checks.toml"
 
 MODE=""; GIVEN=""

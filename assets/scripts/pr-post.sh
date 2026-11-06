@@ -19,7 +19,7 @@
 # pr-facts.sh the first time it reads the PR). With no cutover known, every
 # post under that login is the city's own. Two purpose markers that only the
 # city has written count as the mark too: the write-back reply marker and the
-# visit-comment marker.
+# sitting reminder's marker, <!-- gc:sitting:<task> -->.
 #
 # A post that informs rather than asks is not for review, and is never feedback,
 # whoever posted it. It says so at its start: its body opens with the no-review
@@ -70,6 +70,13 @@
 #   pr-post.sh not-for-review
 #                        print the no-review mark and each prefix the rig
 #                        declares, one per line
+#   pr-post.sh acting-login [--host <host>]
+#                        print the acting login, the account the city's gh
+#                        token posts as, which gc_city_own and gc_feedback take
+#                        as $self. It prints a login or nothing: with none, it
+#                        says why on stderr and exits 1, and the caller records
+#                        nothing that depends on it. With no --host, gh's
+#                        default host answers.
 #
 # gh's own output passes through on stdout, so a caller that reads the posted
 # comment back still gets it: its URL from comment, the created comment's JSON
@@ -79,8 +86,8 @@
 #
 # Exit: 0 posted (or printed); 1 the post failed, with gh's error on stderr,
 #       not-for-review refused part of the declaration or could not read the
-#       default branch, or feedback-def could not read review-dismissal.sh, and
-#       printed nothing; 2 usage.
+#       default branch, feedback-def could not read review-dismissal.sh, or
+#       acting-login resolved no login, and printed nothing; 2 usage.
 set -u
 
 PROG=pr-post
@@ -306,6 +313,31 @@ def gc_thread_awaits_answer($self; $since):
          | length > 0 and (last | gc_feedback($self; $since)));
 '
 
+# The acting login is gh's answer to GET /user. On an HTTP error gh prints the
+# error's body to stdout without applying --jq, and exits non-zero, so the
+# answer counts only on exit 0, and only in a login's shape: letters, digits,
+# hyphens and underscores, not starting with a hyphen. Any other value taken
+# for $self makes no post the city's own, so every post the city made would
+# read as feedback.
+acting_login() { # [--hostname <host>]
+  local login rc shown
+  login=$(gh api "$@" user --jq '.login'); rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$PROG: gh api user exited $rc, so the acting login is unresolved" >&2
+    return 1
+  fi
+  case "$login" in
+    '')
+      echo "$PROG: gh api user answered no login, so the acting login is unresolved" >&2
+      return 1 ;;
+    -*|*[!A-Za-z0-9_-]*)
+      shown=$(printf '%s' "$login" | tr -s '\t\n' '  ' | cut -c1-80)
+      echo "$PROG: gh api user answered '$shown', which is not a login, so the acting login is unresolved" >&2
+      return 1 ;;
+  esac
+  printf '%s\n' "$login"
+}
+
 usage() { sed -n '/^# Usage:/,/^# gh.s own output/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 die_usage() { echo "$PROG: $1" >&2; usage >&2; exit 2; }
 
@@ -326,9 +358,19 @@ case "$VERB" in
     nfr_load
     [ -z "$NFR_REFUSED" ] || printf '%s\n' "$NFR_REFUSED" | sed "s/^/$PROG: /" >&2
     printf '%s\n' "$OWN_DEF"; nfr_defs; printf '%s\n' "$REVIEW_DISMISSAL_DEF"; printf '%s' "$THREAD_DEF"; exit 0 ;;
+  acting-login)
+    shift
+    LOGIN_HOST=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --host) [ $# -ge 2 ] || die_usage "--host needs a value"; LOGIN_HOST=(--hostname "$2"); shift 2 ;;
+        *) die_usage "acting-login takes only --host <host>" ;;
+      esac
+    done
+    acting_login ${LOGIN_HOST[@]+"${LOGIN_HOST[@]}"}; exit $? ;;
   comment|review|reply|edit|file-comment) shift ;;
   -h|--help) usage; exit 0 ;;
-  *) die_usage "first argument must be comment, review, reply, edit, file-comment, mark, own-def, feedback-def or not-for-review" ;;
+  *) die_usage "first argument must be comment, review, reply, edit, file-comment, mark, own-def, feedback-def, not-for-review or acting-login" ;;
 esac
 
 REPO_Q=""; HOST=""; PR=""; THREAD=""; COMMENT=""; BODY=""; BODY_FILE=""; ATTACH=""

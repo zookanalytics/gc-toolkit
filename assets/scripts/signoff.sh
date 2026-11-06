@@ -188,7 +188,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
 U
 }
 
-warn() { echo "signoff: $*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
 VISUAL_FALLBACK=""; REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""; NEEDS_YOU=""
@@ -234,9 +236,6 @@ case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
   *) NEEDS_YOU="$NEEDS_YOU." ;;
 esac
 
-_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=git-lib.sh
 . "$_bd_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 1; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
@@ -947,7 +946,7 @@ ensure_validation_pass() {
 dismiss_superseded() {
   [ -n "$POST_OPEN" ] || return 0
   local handle live raw rc stale rid paired owndef since
-  handle=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
+  handle=$("$PR_POST" acting-login --host "$PR_HOST" 2>/dev/null)
   [ -n "$handle" ] || return 0
   owndef=$("$PR_POST" own-def 2>/dev/null) && [ -n "$owndef" ] || return 0
   # Passed on as found: gc_city_cutover reads a malformed stamp as no cutover.
@@ -1231,8 +1230,8 @@ ensure_validation_pass
 close_review
 # A rework child now stands on the anchor, so the city holds the ball until it
 # lands. Reconcile rather than assert a value: the child reads working on an
-# unapproved PR and merging on an approved one, and an open visit still reads
-# needs-attention.
+# unapproved PR and merging on an approved one, and an open human gate on the
+# anchor still reads needs-attention.
 [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" reconcile --anchor "$ANCHOR" --pr "$PR_NUMBER" \
   --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
 if [ "$FIX_STATE" = in-flight ]; then

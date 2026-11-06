@@ -4,10 +4,10 @@
 # appended; own-def tells the city's own post from any other, reading nothing,
 # and the feedback-def predicates tell a post not for review, and feedback, on
 # every shape the readers hand them; not-for-review and feedback-def read the
-# rig's declaration from its default branch; no reader carries the no-review
-# rule of its own; and no file in the pack posts to a pull request any other
-# way. A gh stub records each call's argv and the body it would post; no
-# network, no city.
+# rig's declaration from its default branch; acting-login prints a login only
+# on gh's exit 0 and in a login's shape; no reader carries the no-review rule of
+# its own; and no file in the pack posts to a pull request any other way. A gh
+# stub records each call's argv and the body it would post; no network, no city.
 #
 # run-tests-scope: tree
 set -u
@@ -117,10 +117,10 @@ run GH_OUT="" -- reply --host github.com --thread PRRT_abc --body "x"
 eq "$RC" 1 "a mutation that answers nothing is a failure"
 
 echo "# edit: a conversation comment rewritten in place, marked"
-run -- edit --repo github.com/o/r --comment 991 --body "### Visit tk-v — closed"
+run -- edit --repo github.com/o/r --comment 991 --body "### Sitting on tk-c — ended"
 eq "$RC" 0 "edit exits 0"
 has "$(argv)" "$(printf 'api\n--method\nPATCH\nrepos/o/r/issues/comments/991\n--hostname\ngithub.com\n-f\n')" "it is a PATCH of issues/comments/<id> on the --repo host"
-has "$(argv)" "$(printf 'body=### Visit tk-v — closed\n\n%s' "$MARK")" "the new body carries the mark"
+has "$(argv)" "$(printf 'body=### Sitting on tk-c — ended\n\n%s' "$MARK")" "the new body carries the mark"
 
 echo "# file-comment: a review comment on a whole file of the diff, marked"
 run GH_OUT='{"id":4242}' -- file-comment --repo github.com/o/r --pr 12 --commit abc123 --path assets/scripts/x.sh --body "Finding from the codex review"
@@ -161,6 +161,45 @@ usage_case "an edit with no comment id" edit --repo github.com/o/r --body x
 usage_case "a file-comment with no commit" file-comment --repo github.com/o/r --pr 1 --path x.sh --body x
 usage_case "a file-comment with no path"   file-comment --repo github.com/o/r --pr 1 --commit abc --body x
 usage_case "--path on a comment"           comment --repo github.com/o/r --pr 1 --body x --path x.sh
+usage_case "acting-login with another flag"  acting-login --repo github.com/o/r
+usage_case "acting-login --host with no host" acting-login --host
+
+echo "# acting-login: gh's answer, taken only on its exit 0 and in a login's shape"
+# login [VAR=VAL ...] [-- <args...>] — runs acting-login; sets RC, LOGIN (its
+# stdout) and WHY (its stderr), and resets the gh record.
+login() {
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  [ "${1:-}" = "--" ] && shift
+  : >"$GHLOG"
+  LOGIN="$(env PATH="$BIN:$PATH" GHLOG="$GHLOG" GHBODY="$GHBODY" ${envs[@]+"${envs[@]}"} "$SUT" acting-login "$@" 2>"$TMPD/why")"; RC=$?
+  WHY="$(cat "$TMPD/why")"
+}
+login GH_OUT="gc-city-bot" -- --host github.com
+eq "$RC|$LOGIN|$WHY" "0|gc-city-bot|" "a login gh answers with exit 0 is printed, and nothing is said"
+eq "$(argv)" "$(printf -- '--\napi\n--hostname\ngithub.com\nuser\n--jq\n.login')" "it is one gh api --hostname <host> user --jq .login"
+login GH_OUT="gc-city-bot"
+eq "$RC|$LOGIN" "0|gc-city-bot" "with no --host the login is read too"
+hasnt "$(argv)" "--hostname" "…from gh's default host"
+login GH_OUT="emu-handle_short1" -- --host github.com
+eq "$RC|$LOGIN" "0|emu-handle_short1" "a login carrying an underscore, as a managed user's does, is a login"
+# On an HTTP error, real gh prints the error's body to stdout, ignores --jq and
+# exits 1. That body passes any check for a value, so the exit decides.
+login GH_OUT='{"message":"Server Error","documentation_url":"https://docs.github.com/rest","status":"502"}' GH_RC=1 -- --host github.com
+eq "$RC|$LOGIN" "1|" "a gh call that fails, its error body on stdout, prints no login and exits 1"
+has "$WHY" "pr-post: gh api user exited 1, so the acting login is unresolved" "…and says why"
+login GH_OUT="gc-city-bot" GH_RC=1 -- --host github.com
+eq "$RC|$LOGIN" "1|" "a failed call is no login even when its stdout reads like one"
+login GH_OUT="" -- --host github.com
+eq "$RC|$LOGIN" "1|" "an empty answer is no login"
+has "$WHY" "gh api user answered no login" "…and says so"
+login GH_OUT='{"login":"gc-city-bot"}' -- --host github.com
+eq "$RC|$LOGIN" "1|" "an answer that is not in a login's shape is no login"
+has "$WHY" "gh api user answered '{\"login\":\"gc-city-bot\"}', which is not a login" "…and names what it read"
+login GH_OUT="$(printf 'gc-city-bot\ngc-city-bot')" -- --host github.com
+eq "$RC|$LOGIN" "1|" "two lines are no login"
+login GH_OUT="-zook" -- --host github.com
+eq "$RC|$LOGIN" "1|" "a value starting with a hyphen is no login"
 
 echo "# own-def: the city's own post"
 DEF="$("$SUT" own-def)"

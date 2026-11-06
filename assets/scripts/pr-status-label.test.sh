@@ -477,25 +477,25 @@ eq "$(pv_labels 74)" "bug,held: blocked,held: gate,held: review,status: needs-at
 # the merge freeze reads needs-attention with no held value, and a stale held:
 # label comes off.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","merge_hold":"true"}}]'
-pv 75 '[{"name":"held: visit"},{"name":"status: needs-attention"}]'
+pv 75 '[{"name":"held: gate"},{"name":"status: needs-attention"}]'
 resetlog
-"$SUT" reconcile --anchor tk-a --pr 75 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
-eq "$(pv_labels 75)" "status: needs-attention" "the merge freeze => needs-attention, and a stale held: visit from before the cutover comes off"
+"$SUT" reconcile --anchor tk-a --pr 75 --repo "$REPO" --current-labels "held: gate,status: needs-attention"
+eq "$(pv_labels 75)" "status: needs-attention" "the merge freeze => needs-attention, and a stale held: gate comes off"
 
 # a held: label of a value the writer does not derive comes off, as a status:
 # one does; a label that only looks like one is a human's and stays.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]'
-pv 76 '[{"name":"held: legal"},{"name":"held:visit"},{"name":"release held: legal"},{"name":"on hold"}]'
+pv 76 '[{"name":"held: legal"},{"name":"held:legal"},{"name":"release held: legal"},{"name":"on hold"}]'
 resetlog
-"$SUT" reconcile --anchor tk-a --pr 76 --repo "$REPO" --current-labels "held: legal,held:visit,release held: legal,on hold"
-eq "$(pv_labels 76)" "held:visit,on hold,release held: legal,status: needs-review" "every label under the held: prefix is the writer's; one carrying it mid-name, or no space, is left alone"
+"$SUT" reconcile --anchor tk-a --pr 76 --repo "$REPO" --current-labels "held: legal,held:legal,release held: legal,on hold"
+eq "$(pv_labels 76)" "held:legal,on hold,release held: legal,status: needs-review" "every label under the held: prefix is the writer's; one carrying it mid-name, or no space, is left alone"
 
 # a derivation that cannot answer leaves both families as they are.
 store '[]'
-pv 77 '[{"name":"held: visit"},{"name":"status: needs-attention"}]'
+pv 77 '[{"name":"held: gate"},{"name":"status: needs-attention"}]'
 resetlog
-"$SUT" reconcile --anchor tk-missing --pr 77 --repo "$REPO" --current-labels "held: visit,status: needs-attention"
-eq "$(pv_labels 77)" "held: visit,status: needs-attention" "reconcile leaves both families as they are when the anchor does not resolve"
+"$SUT" reconcile --anchor tk-missing --pr 77 --repo "$REPO" --current-labels "held: gate,status: needs-attention"
+eq "$(pv_labels 77)" "held: gate,status: needs-attention" "reconcile leaves both families as they are when the anchor does not resolve"
 hasnt "$(ghlog)" "pr edit" "…and writes nothing"
 
 # set writes the status: value alone and leaves the held: labels to reconcile.
@@ -524,7 +524,7 @@ resetlog
 "$SUT" clear --pr 62 --repo "$REPO" --current-labels "bug"
 hasnt "$(ghlog)" "pr edit" "clear writes nothing on a PR with no status: label"
 
-pv 64 '[{"name":"status: needs-attention"},{"name":"held: visit"},{"name":"held: blocked"},{"name":"bug"}]'
+pv 64 '[{"name":"status: needs-attention"},{"name":"held: gate"},{"name":"held: blocked"},{"name":"bug"}]'
 resetlog
 "$SUT" clear --pr 64 --repo "$REPO"
 eq "$(pv_labels 64)" "bug" "clear takes every held: label off with the status: label"

@@ -53,8 +53,6 @@ has "$BLOCK" 'human-gate.sh' "the block files a stuck handoff's human gate throu
 has "$BLOCK" 'patrol-finding.sh' "the block reports a blind monitor as a patrol finding"
 has "$BLOCK" 'resolve-route.sh' "the block resolves the refinery address"
 has "$BLOCK" 'gc bd gate list' "the withdrawal starts from the store's human gates"
-hasnt "$BLOCK" 'escalate.sh' "the block calls the helper by its name, human-gate.sh"
-hasnt "$BLOCK" 'escalation_key' "the block reads no visit key"
 hasnt "$BLOCK" 'gc session nudge' "the block nudges no count"
 
 # {{binding_prefix}} must be substituted exactly as the materializer does it.
@@ -191,8 +189,7 @@ DEPS_DEFAULT='{
   "tk-g-lost":  [{"id":"tk-lost","dependency_type":"blocks"}],
   "tk-g-stuck": [{"id":"tk-stuck","dependency_type":"blocks"}],
   "tk-g-both":  [{"id":"tk-gone","dependency_type":"blocks"},{"id":"tk-still","dependency_type":"blocks"}],
-  "tk-g-bad":   [{"id":"tk-gone 2026-10-03T12:57:12Z","dependency_type":"blocks"}],
-  "tk-g-half":  [{"id":"tk-gone","dependency_type":"blocks"},{"id":"tk-gone 2026-10-03T12:57:12Z","dependency_type":"blocks"}],
+  "tk-g-noid":  [{"id":"tk-gone","dependency_type":"blocks"},{"dependency_type":"blocks"}],
   "tk-g-dark":  "fails"
 }'
 
@@ -482,10 +479,11 @@ has "$(out)" "its gate tk-g-both also blocks tk-still, which could not be read" 
 # handoff still in the queue.
 RSOLO="$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-gone),$(gate tk-g-both)]" "$H_CLOSED")"
 hasnt "$RSOLO" "--retract" "a departed handoff's own gate stays open while it shares another with a handoff still in the queue"
-# A waiting bead whose id is not one bead id is never read, so it keeps a gate
-# it shares with a departed handoff.
-RHALF="$(run '[]' "" "" "" "[$(gate tk-g-half)]" "$H_CLOSED")"
-hasnt "$RHALF" "--retract" "a gate that also blocks a bead whose id is not one bead id stays open"
+# A waiting row with no id names no bead to read, and what the gate also blocks
+# is then unknown, so the gate stays open.
+RNOID="$(run '[]' "" "" "" "[$(gate tk-g-noid)]" "$H_CLOSED")"
+hasnt "$RNOID" "--retract" "a gate with a waiting row that has no id stays open"
+has "$(grep -e '--id=' "$TMP/lists" || true)" "--id=tk-gone " "and only the row with an id is read by id"
 # A gate whose waiting beads did not read may block a departed handoff beside a
 # bead still in the queue, so while it stays unread no departed handoff is
 # withdrawn.
@@ -501,18 +499,30 @@ eq "$(printf '%s' "$RDUP" | grep -c -e '--retract' || true)" "1" "two gates on o
 has "$(grep -e '--id=' "$TMP/lists" || true)" "--id=tk-gone " "and one candidate in the by-id read"
 
 # The listing holds only gates that stand for this situation: open, human, under
-# the key. bd prints null with no gates and [] through a proxied server, and a
-# failed listing leaves nothing to withdraw.
+# the key, which is bd-lib.sh's rule. A gate holds in every status but closed,
+# whatever its case. bd prints null with no gates and [] through a proxied
+# server, and a failed listing leaves nothing to withdraw.
 for GL in null '[]' "[$(gate tk-g-gone witness-refinery-queue closed)]" \
+          "[$(gate tk-g-gone witness-refinery-queue CLOSED)]" \
           "[$(gate tk-g-gone witness-refinery-queue open timer)]" \
           "[$(gate tk-g-gone some-other-key)]"; do
   hasnt "$(run "$QUEUE_OTHER" "" "" "" "$GL" "$H_CLOSED")" "--retract" \
      "a gate listing of $GL withdraws nothing"
   hasnt "$(cat "$TMP/lists")" "--id=" "and reads no handoff by id"
 done
+has "$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-gone witness-refinery-queue pinned)]" "$H_CLOSED")" "human-gate --retract" \
+   "a pinned gate still holds, so it is withdrawn the way an open one is"
 RGF="$(GATES_RC_OVERRIDE=1 run "$STUCK_ONE" "" "" "" "$G_GONE" "$H_CLOSED")"
 hasnt "$RGF" "--retract" "a failed gate listing withdraws nothing"
 has "$RGF" "human-gate --subject tk-stuck" "and the stuck handoff beside it is still gated"
+# A pack whose bd-lib.sh will not source has no rule to read a gate by, so the
+# block stops the way it does for a script the pack lacks.
+cp "$TMP/rig/assets/scripts/bd-lib.sh" "$TMP/bd-lib.good"
+printf 'return 1\n' > "$TMP/rig/assets/scripts/bd-lib.sh"
+eq "$(run "$QUEUE_OTHER" "" "" "" "$G_GONE" "$H_CLOSED")" "" "a bd-lib.sh that will not source files and withdraws nothing"
+has "$(out)" "or bd-lib.sh did not source" "and the stop says so"
+eq "$(cat "$TMP/lists")" "" "and no queue and no gate listing is read"
+cp "$TMP/bd-lib.good" "$TMP/rig/assets/scripts/bd-lib.sh"
 
 # Absence from the listing is not departure. A listing under a wrong address is
 # a valid empty array with exit 0, and a handoff still open and assigned to the
@@ -581,12 +591,6 @@ has "$(cat "$TMP/lists")" "--id=tk-gone,tk-lost" "the one read names every candi
 H_CTL='[{"id":"tk-gone","status":"closed","assignee":null,"title":"handoff '"$CTL"'","metadata":{}}]'
 has "$(run '[]' "" "" "" "$G_GONE" "$H_CTL")" "--retract --subject tk-gone" \
    "a raw control byte in the handoff's row does not blind the departure read"
-
-# A waiting bead whose id is not one bead id (here an id with a trailing
-# timestamp) resolves to no bead, so it is never a candidate.
-RET3="$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-bad)]" "$H_CLOSED")"
-hasnt "$RET3" "--retract" "a waiting bead whose id is not one bead id is never withdrawn"
-hasnt "$(cat "$TMP/lists")" "--id=" "and is never read by id"
 
 # An unreadable queue never withdraws: the gate is QUEUE_RC, so a transient blip
 # runs no candidate pass at all, and no gate listing is read.

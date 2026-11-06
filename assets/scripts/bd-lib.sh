@@ -5,9 +5,9 @@
 # script files a stamped bead through, the metadata read-back that gates handing
 # such a bead on, the close that unmakes a bead no reader can find, the birth,
 # settle and route of PR-finishing work, the validation pass's work order, the
-# gating-PR read's field set, the per-rig key an order's state lives under, and
-# the pass lock that lets an order run one pass at a time. Sourced, never
-# executed.
+# gating-PR read's field set, the per-rig key an order's state lives under, the
+# pass lock that lets an order run one pass at a time, and warn and die, which a
+# script reports through. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
@@ -32,13 +32,42 @@
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
+# warn <text...>, die <text> [status] — a script's report on stderr, under $PROG
+# when it sets one and otherwise its file name without .sh. die then exits with
+# the status it is given, else $DIE_STATUS when the script sets one, else 1.
+warn() { local p="${0##*/}"; printf '%s: %s\n' "${PROG:-${p%.sh}}" "$*" >&2; }
+die() { local p="${0##*/}"; printf '%s: %s\n' "${PROG:-${p%.sh}}" "$1" >&2; exit "${2:-${DIE_STATUS:-1}}"; }
+
 # bd_json <gc-bd-args...> — one `gc bd` read as JSON, the `gc bd:` rig-store
 # notice line stripped and control chars scrubbed. The notice (a store can emit
 # it on stdout) is removed with a text-mode grep BEFORE scrub, while the newline
 # that delimits its line still stands; one such line otherwise aborts jq on the
 # whole payload. stdin is /dev/null so a call inside a `while read` loop cannot
 # consume the loop's own driving input, the guard bd_list already carries.
-bd_json() { gc bd "$@" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub; }
+#
+# It prints and returns what `gc bd ... | grep -a -vE '^gc bd:' | scrub` would.
+# A read whose only control byte is the newline that ends it, and with no notice
+# at its start, is one line that grep keeps and scrub prints without that
+# newline, so only another read goes through the two. Under pipefail the status
+# is that pipeline's: grep's 1 when no line is left, which an empty read is,
+# else gc's.
+bd_json() {
+  local raw line rc=0 st
+  { raw=$(r=0; gc bd "$@" --json </dev/null 2>/dev/null || r=$?; printf .; exit "$r") || rc=$?; } 2>/dev/null
+  raw=${raw%.}
+  if [ -z "$raw" ]; then [[ -o pipefail ]] || return 0; return 1; fi
+  line=${raw%$'\n'}
+  case "$line" in
+    *[[:cntrl:]]*|'gc bd:'*)
+      printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub
+      st=("${PIPESTATUS[@]}")
+      [ "${st[2]}" -eq 0 ] || return "${st[2]}"
+      [[ -o pipefail ]] || return 0
+      [ "${st[1]}" -eq 0 ] || return "${st[1]}" ;;
+    *) printf '%s' "$line"; [[ -o pipefail ]] || return 0 ;;
+  esac
+  return "$rc"
+}
 
 # row_meta <show-json> <key> — one metadata value off a `gc bd show --json` row,
 # as a string. A key that is absent and a row that will not parse both read as
@@ -133,10 +162,10 @@ bd_cache_clear() {
   return 0
 }
 
-# _bd_call <gc-bd-args...> — the `gc bd` call bd_list and the anchor-graph
-# reads make. A script that pins its reads to one store redefines it after
-# sourcing this file (liveness-sweep.sh adds its --db pin and per-call time
-# bound), and those reads follow the pin.
+# _bd_call <gc-bd-args...> — the `gc bd` call bd_list, the human gate reads and
+# the anchor-graph reads make. A script that pins its reads to one store
+# redefines it after sourcing this file (liveness-sweep.sh adds its --db pin and
+# per-call time bound), and those reads follow the pin.
 _bd_call() { gc bd "$@"; }
 
 # bd_list <gc-bd-list-args...> — a guarded array read. --limit=0 so a
@@ -150,9 +179,9 @@ _bd_call() { gc bd "$@"; }
 # cached, so the "could not tell" contract is unchanged: a server error is never
 # served and never stored.
 bd_list() {
-  local raw rc cache_file cached
-  cache_file=$(_bd_cache_file "$@")
-  if cached=$(_bd_cache_hit "$cache_file"); then
+  local raw rc cache_file="" cached
+  [ -z "${GC_RECONCILE_BD_CACHE:-}" ] || cache_file=$(_bd_cache_file "$@")
+  if [ -n "$cache_file" ] && cached=$(_bd_cache_hit "$cache_file"); then
     printf '%s' "$cached"; return 0
   fi
   raw=$(_bd_call list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
@@ -160,8 +189,11 @@ bd_list() {
   # Strip the `gc bd:` rig-store notice (a store can emit it on stdout) with a
   # text-mode grep before scrub removes the newline that delimits its line; one
   # such line otherwise fails the type==array check below and reads as "could
-  # not tell" on every call in a notice-emitting store.
-  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub)
+  # not tell" on every call in a notice-emitting store. A read with no control
+  # byte and no notice at its start is one line the two leave as it is.
+  case "$raw" in
+    *[[:cntrl:]]*|'gc bd:'*) raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub) ;;
+  esac
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
@@ -232,8 +264,8 @@ bd_open_human_gates() {
 
 # bd_gates_open_under_key <key> — the open gates under a situation key, read
 # from a bd_human_gates array on stdin and printed as one JSON array, first to
-# last by when each was created, then id. The first is the gate that asks:
-# human-gate.sh keeps it and resolves its own gate when another comes first,
+# last by when each was created, then id. Two stand when racing writers both
+# filed. The first is the one a caller names: human-gate.sh's dedup prints it,
 # and await-ruling.sh makes the work bead wait on it, so every writer and
 # reader of one situation orders the gates here. created_at is read as a time,
 # its fractional seconds and its offset included, because as text a time with
@@ -266,7 +298,7 @@ bd_gates_open_under_key() {
 }
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework
-# child, a finding, a validation pass, a visit) names the anchor in
+# child, a finding, a validation pass) names the anchor in
 # anchor_bead, and that key is what makes it a child. Each child also has an
 # edge onto its anchor, child -> anchor, the side parent-child uses, so the
 # anchor's dependents include it. A pair with no edge is joined with a `related`
@@ -278,8 +310,8 @@ bd_gates_open_under_key() {
 # `gc bd dep list <anchor> --direction=up`, because an anchor_bead query that
 # covers closed has no index to use and reads the whole closed ledger. A
 # dependent is a closed child when its anchor_bead names the anchor. bd keeps
-# one edge per ordered pair, so a child joined by another type (a visit's
-# `tracks` edge) is one too, and a bead moved to another anchor leaves the old
+# one edge per ordered pair, so a child joined by another type (a `tracks`
+# edge) is one too, and a bead moved to another anchor leaves the old
 # one's set with its old edge still in place.
 #
 # The edge answers for the closed children only in a store marked joined:
@@ -324,13 +356,13 @@ _bd_store_joined() {
 # that does not resolve is that too, never an empty set.
 _bd_anchor_up() {
   local raw rc cache_file="" cached
-  [ "${2:-}" = --cached ] && cache_file=$(_bd_cache_file dep list "$1" --direction=up)
-  if cached=$(_bd_cache_hit "$cache_file"); then
+  [ "${2:-}" = --cached ] && [ -n "${GC_RECONCILE_BD_CACHE:-}" ] && cache_file=$(_bd_cache_file dep list "$1" --direction=up)
+  if [ -n "$cache_file" ] && cached=$(_bd_cache_hit "$cache_file"); then
     printf '%s' "$cached"; return 0
   fi
   raw=$(_bd_call dep list "$1" --direction=up --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
+  case "$raw" in *[[:cntrl:]]*) raw=$(printf '%s' "$raw" | scrub) ;; esac
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
@@ -347,7 +379,7 @@ _bd_anchor_up() {
 bd_anchor_children() {
   local anchor="${1:-}" statuses="${2:-}" s live="" closed="" rows='[]' up
   [ -n "$anchor" ] && [ -n "$statuses" ] || return 1
-  for s in $(printf '%s' "$statuses" | tr ',' ' '); do
+  for s in ${statuses//,/ }; do
     if [ "$s" = closed ]; then closed=1; else live="${live:+$live,}$s"; fi
   done
   if [ -z "$closed" ]; then
@@ -463,8 +495,8 @@ bd_anchor_backfill() {
 }
 
 # bd_live_children — the live beads hung on each anchor through anchor_bead:
-# its reviews, validation passes, findings, rework children and visits, in one
-# read of the store. Prints one line per anchor that has any:
+# its reviews, validation passes, findings and rework children, in one read of
+# the store. Prints one line per anchor that has any:
 #   <anchor>\t<child ids, sorted, comma-joined>\t<1 when one is a rework child, else 0>
 # A walking arm compares the id list with what it saw at its last visit, so a
 # child that opened or closed since then shows without a read per anchor.
