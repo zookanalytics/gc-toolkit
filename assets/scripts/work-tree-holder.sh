@@ -28,7 +28,7 @@
 # sibling rework child. Directories are compared with `-ef`, because git lists a
 # worktree by its resolved path and a session records the path it was given.
 #
-# A session absent from `gc session list --state all` is gone, and a tree with
+# A session absent from `gc session list` is gone, and a tree with
 # no listed session in its directory is adoptable. That is how a re-dispatch
 # recovers a crashed run. Every input the answer depends on fails closed: a
 # failed `git worktree list`, an unreadable session list or bead listing, a
@@ -150,7 +150,7 @@ uncommitted() {
   fi
 }
 
-gc session list --state all --json 2>/dev/null </dev/null | scrub > "$SCRATCH/sessions.json"
+gc session list --json 2>/dev/null </dev/null | scrub > "$SCRATCH/sessions.json"
 SESSIONS_READ=1
 jq -e '.sessions | type == "array" and all(.[]; type == "object")' "$SCRATCH/sessions.json" >/dev/null 2>&1 || SESSIONS_READ=0
 SESSION_DIRS=""
