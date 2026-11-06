@@ -321,7 +321,9 @@ bead labeled `deploy` and assigned to the mechanik. On the first pass it files
 the bead with the exact command to run, `gc gc-toolkit deploy`, and nudges the
 mechanik. On a later pass it appends main's new head to the open bead.
 Several landings before the mechanik acts become one deploy. A held bead
-(below) is open too, so a pass during a hold only appends.
+(below) is open too, so a pass during a hold only appends, and the first pass
+that finds the bead ready again sends the mechanik the notice the revert
+recorded on it.
 
 **The mechanik.** It takes the bead from its hook, runs the command, and
 closes the bead with the deploy commit as its outcome. A failed run leaves the
@@ -393,20 +395,26 @@ runs nothing while it is open.
 
 Resolving the gate (`bd gate resolve`) is the resume. You resolve it once a
 fix for the rejected commit is on main, or to deploy main as it stands. Under
-option 1 the revert also records a ready-notice for the mechanik on the deploy
-bead (`deferred-dispatch.sh notify`), so the resolution reaches the mechanik,
-and its next run deploys main's head. Under option 2 the bead the revert files
-is the only deploy bead, it has no assignee, and the order closes it with its
-next deploy. Under option 3 nothing deploys on its own, so the revert files no
-hold.
+option 1, once the gate holds the deploy bead, the revert also records a
+ready-notice for the mechanik on it (`deferred-dispatch.sh notify`). No
+deferred-dispatch pass would send that notice. The order runs per rig, against
+each rig's own store (`orders/deferred-dispatch.toml`), and the deploy bead is
+in the city's store, because the check is a city-scope order
+(`orderExecEnvWithError`, cmd/gc/order_store.go, points `BEADS_DIR` at the
+city root's `.beads`). So the check's first pass that finds the bead ready runs
+the same `notify`, which mails the mechanik at once and clears the record. The
+resolution reaches the mechanik within one cooldown, and its next run deploys
+main's head. Under option 2 the bead the revert files is the only deploy bead,
+it has no assignee, and the order closes it with its next deploy. Under
+option 3 nothing deploys on its own, so the revert files no hold.
 
 **By hand.** If the bad revision broke the deploy command, the revert is done
 by hand, and the hold still comes first: file the deploy bead if none is open,
-as the revert does, and the same gate on it with `human-gate.sh`. Then
-`git revert` the deploy commit in the town repo, run `gc import install`, push
-the town commit, and run `gc service restart helm`. With the gate filed before
-the pin moves, the next pass of the check, or of the order under option 2,
-finds the hold.
+as the revert does, the same gate on it with `human-gate.sh`, and under
+option 1 the same notice. Then `git revert` the deploy commit in the town repo,
+run `gc import install`, push the town commit, and run
+`gc service restart helm`. With the gate filed before the pin moves, the next
+pass of the check, or of the order under option 2, finds the hold.
 
 The fix itself then lands on gc-toolkit's main, and the first deploy after the
 gate's resolution carries it. A revision that fails to load never deploys,
@@ -627,9 +635,10 @@ asserts these things:
     a pass of the deploy check with main still at the second commit nudges no
     one and leaves the held bead out of `bd ready`. A run with no `--to`
     refuses, and so does a second `--revert`. The same holds after the by-hand
-    route. Once the gate is resolved, the next run deploys main's head. These
-    runs may file their bead and gate in a stub store, as long as the command,
-    the check and their reads of the hold are the pack's own.
+    route. Once the gate is resolved, the check's next pass sends the
+    recorded notice, and the next run deploys main's head. These runs may file
+    their bead and gate in a stub store, as long as the command, the check and
+    their reads of the hold are the pack's own.
 
 ### The cutover
 
@@ -728,8 +737,12 @@ gastownhall/gascity at `8e75c50aa845`.
   whose script does one `git ls-remote`.
 - **Telling the mechanik.** Searched: assignment, `gc hook`, `gc session nudge`
   and bd labels. They cover it. The bead is assigned to the mechanik, found
-  again by its label and assignee, and announced by a nudge when filed. No new
-  metadata key is needed.
+  again by its label and assignee, and announced by a nudge when filed. After
+  a revert's hold, it is announced by the pack's ready-notice
+  (`deferred-dispatch.sh notify`, which composes `gc mail send --notify` and
+  `gc session nudge`), and the check sends it, because the order that sends
+  recorded notices reads only rig stores (section 2). No new metadata key is
+  needed.
 - **Holding deploys after a revert.** Searched: `gc import` and `gc order`
   (cli.md). None of their subcommands holds a pin or pauses an order. Also
   searched the canonical dispatch hold labels, `hold:mayor` and
