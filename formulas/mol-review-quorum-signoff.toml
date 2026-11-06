@@ -143,9 +143,9 @@ done
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
 page when one is open, the rig's guidance for this check, what `gctk rig`
-recorded at `{{reviewed_oid}}`, and the path of the review's worktree at that
-commit, which the two lanes and the synthesis share. Read the change there
-with git, read-only: its diff is
+recorded at `{{reviewed_oid}}`, and the paths of the review's workspace and of
+its worktree at that commit, which the two lanes and the synthesis share. Read
+the change there with git, read-only: its diff is
 `git diff origin/{{review_base}}...HEAD`. When the block exits non-zero, review
 nothing, as for a missing key: write a `blocked` lane output whose summary
 names what failed, and close this step.
@@ -171,7 +171,7 @@ echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewe
 echo "== What gctk rig recorded at {{reviewed_oid}}"
 "$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
-echo "== The review's worktree: $WT"
+printf '%s\n' "== The review's workspace: ${WT%/wt}" "== The review's worktree: $WT"
 # <<< review-gather
 ```
 
@@ -217,7 +217,10 @@ write every finding yourself.
 <!-- <<< review-subagents -->
 
 **4. Write your durable lane output** to this step bead's `gc.output_json` as
-a `review-quorum.lane.v1` object, then close the step. The keys:
+a `review-quorum.lane.v1` object, then close the step. Put the object in the
+block in place of its placeholder line. The block stores it without writing a
+file, so it needs no workspace, and a lane that part 1 or 2 sent here writes
+its `blocked` object the same way. The keys:
 `lane_id`={{lane_one_id}}, `provider`={{lane_one_provider}},
 `model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
 `fail`, `blocked`), `summary`, `findings_count`, `findings` (each with
@@ -231,7 +234,10 @@ read), `read_only_enforcement` (`baseline_command`, `after_command`,
 # into gc.output_json, stored compact because metadata is a string, then close
 # the step.
 LANE_BEAD=$(gc hook current --id-only) || exit 1
-gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_one_id}}.json)"
+gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . <<'LANE'
+<your review-quorum.lane.v1 object>
+LANE
+)"
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review-quorum-signoff.review-lane-one
 ```
 
@@ -272,9 +278,9 @@ done
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
 page when one is open, the rig's guidance for this check, what `gctk rig`
-recorded at `{{reviewed_oid}}`, and the path of the review's worktree at that
-commit, which the two lanes and the synthesis share. Read the change there
-with git, read-only: its diff is
+recorded at `{{reviewed_oid}}`, and the paths of the review's workspace and of
+its worktree at that commit, which the two lanes and the synthesis share. Read
+the change there with git, read-only: its diff is
 `git diff origin/{{review_base}}...HEAD`. When the block exits non-zero, review
 nothing, as for a missing key: write a `blocked` lane output whose summary
 names what failed, and close this step.
@@ -300,7 +306,7 @@ echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewe
 echo "== What gctk rig recorded at {{reviewed_oid}}"
 "$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
-echo "== The review's worktree: $WT"
+printf '%s\n' "== The review's workspace: ${WT%/wt}" "== The review's worktree: $WT"
 # <<< review-gather
 ```
 
@@ -346,7 +352,10 @@ write every finding yourself.
 <!-- <<< review-subagents -->
 
 **4. Write your durable lane output** to this step bead's `gc.output_json` as
-a `review-quorum.lane.v1` object, then close the step. The keys:
+a `review-quorum.lane.v1` object, then close the step. Put the object in the
+block in place of its placeholder line. The block stores it without writing a
+file, so it needs no workspace, and a lane that part 1 or 2 sent here writes
+its `blocked` object the same way. The keys:
 `lane_id`={{lane_two_id}}, `provider`={{lane_two_provider}},
 `model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
 `fail`, `blocked`), `summary`, `findings_count`, `findings` (each with
@@ -360,7 +369,10 @@ read), `read_only_enforcement` (`baseline_command`, `after_command`,
 # into gc.output_json, stored compact because metadata is a string, then close
 # the step.
 LANE_BEAD=$(gc hook current --id-only) || exit 1
-gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_two_id}}.json)"
+gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . <<'LANE'
+<your review-quorum.lane.v1 object>
+LANE
+)"
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-review-quorum-signoff.review-lane-two
 ```
 
@@ -435,7 +447,7 @@ echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewe
 echo "== What gctk rig recorded at {{reviewed_oid}}"
 "$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
-echo "== The review's worktree: $WT"
+printf '%s\n' "== The review's workspace: ${WT%/wt}" "== The review's worktree: $WT"
 # <<< review-gather
 ```
 
@@ -481,9 +493,10 @@ those that are the same defect at the same locus, keeping lane provenance. A
 finding either lane raises as blocking under the method that survives your
 own judgment is blocking for the quorum: `approve` iff none stands across both
 lanes and your own run, else `request-changes`. Write the body to
-`findings.md` in mol-review's verdict envelope, with the lines the method adds,
-self-contained because pre-open it is the PR's opening comment, and note in
-the trail which lanes covered what and any reduced coverage.
+`<workspace>/findings.md`, where `<workspace>` is the review's workspace the
+gather printed, in mol-review's verdict envelope with the lines the method
+adds. Make it self-contained, because pre-open it is the PR's opening comment,
+and note in the trail which lanes covered what and any reduced coverage.
 
 **6. Emit `findings.json`** beside it, every finding that stands for the
 quorum, exactly as `formulas/mol-review.toml`'s `review` step 5b specifies.
@@ -491,13 +504,15 @@ quorum, exactly as `formulas/mol-review.toml`'s `review` step 5b specifies.
 **7. One call, through the one writer.** The verdict names `{{reviewed_oid}}`,
 the commit the quorum read, and signoff.sh refuses any other. Pass every flag
 the method names for the verdict, and `--needs-you` when a decision is the
-operator's; a call refused for a missing or invalid flag, or for a finding set
-whose problems it lists, wrote nothing, so re-run it corrected. Never post the
-review yourself, write to the anchor, file beads, or run
+operator's; a call refused for a missing or invalid flag, a file the workspace
+lacks, or a finding set whose problems it lists, wrote nothing, so re-run it
+corrected. Never post the review yourself, write to the anchor, file beads, or run
 `gh pr review --approve`.
 ```bash
+# >>> review-verdict-call
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/signoff.sh" ] || SCRIPTS=""
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file "$("$SCRIPTS/review-workspace.sh" path --review-bead "{{review_bead}}")/findings.md" --findings-file "$("$SCRIPTS/review-workspace.sh" path --review-bead "{{review_bead}}")/findings.json"
+# <<< review-verdict-call
 ```
 
 **8. Failure arms** are mol-review's `verdict-and-drain` arms: after a
