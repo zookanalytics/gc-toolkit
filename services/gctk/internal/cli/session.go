@@ -244,7 +244,7 @@ func renameSkip(id string) string {
 // into: any name holding "codex" is codex, and "claude" is claude.
 func providerFamily(b *gcbd.Bead) string {
 	for _, key := range []string{"builtin_ancestor", "provider_kind", "provider"} {
-		v := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(b.Meta(key))), "builtin:")
+		v := strings.ToLower(strings.TrimSpace(b.Meta(key)))
 		if v == "" {
 			continue
 		}
