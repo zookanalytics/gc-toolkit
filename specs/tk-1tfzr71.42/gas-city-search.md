@@ -8,7 +8,8 @@ description: What tk-1tfzr71.42 read before deleting worktree-reap.sh. It covers
 Read on 2026-11-06 at `gastownhall/gascity` main bfd72756e. The census ran
 read-only on the live city between 16:15Z and 16:40Z, with the pack at
 3e478cff8, whose hand-off removes its own tree. The pins were written at
-16:41:07Z.
+16:41:07Z, and a second pass at 17:01:17Z pinned the trees the first one left
+out.
 
 ## What was decided
 
@@ -88,8 +89,20 @@ wrote before each removal. That covered 37 trees in six rigs, 17 of them in this
 rig. Remote-tracking refs alone reached 27 of them, and no ref reached the other
 10: 8 dirty trees in a suspended rig, which both reapers hold anyway, and 2
 closed beads' trees in this rig. The pins stay local, because no rig sets
-`push.followTags` and no origin holds an `archive/worktree` tag. With them in
-place, no tree depends on `worktree-reap.sh`, so the change can land at any time.
+`push.followTags` and no origin holds an `archive/worktree` tag.
+
+That pass left out a detached tree that a local branch still reached, and the
+hand-off now deletes such a branch. A rework child works the same
+`polecat/<bead-id>` branch in a tree of its own, and its hand-off removes that
+tree and deletes the branch, after which only origin reaches the old tree's
+commits. By 17:01Z one tree in this rig had come to this, and 7 more were
+reached only through a branch checked out in another bead's tree, whose hand-off
+deletes it. So at 17:01:17Z every detached per-bead tree whose HEAD no tag
+reached got the same pin: 8 trees in three rigs, 3 of them in this rig. A re-run
+then found no detached per-bead tree without a pin. A tree on a branch needs
+none, because git refuses to delete a branch that a tree has checked out. With
+both passes in place, no tree depends on `worktree-reap.sh`, so the change can
+land at any time.
 
 The pins cannot cover a run whose submit step text predates #1393, because that
 text still detaches the tree and deletes its branch. 3 such steps are open in
