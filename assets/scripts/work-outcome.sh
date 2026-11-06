@@ -1,8 +1,9 @@
 #!/bin/sh
 # work-outcome.sh — the one gc.work_outcome stamp a conversation gets before it
 # closes. Sourced, never executed, by every script that closes one:
-# converse-signoff.sh (a sitting's sign-off) and gc-helm.sh (dismiss). A rule
-# about this key changes here, once.
+# converse-signoff.sh (a sitting's sign-off) and gc-helm.sh (dismiss).
+# stand-down.sh stamps the work bead a ruling stops the same way. A rule about
+# this key changes here, once.
 #
 # A conversation is a plain task bead, so its close runs the runtime's
 # work-record gate, which wants gc.work_outcome, one of shipped | no-op |
