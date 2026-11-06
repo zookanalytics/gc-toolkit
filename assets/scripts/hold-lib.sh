@@ -232,7 +232,7 @@ hold_graph() {
 hold_graph_read() {
     local reader="$1" want="$2" out="$3" raw next
     raw="$("$reader" "$want" </dev/null)" || return 1
-    raw="$(printf '%s' "$raw" | scrub)"
+    case "$raw" in *[[:cntrl:]]*) raw="$(printf '%s' "$raw" | scrub)" ;; esac
     printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
     next="$(printf '%s' "$raw" | jq -c --slurpfile g "$out" --arg want "$want" '
         reduce (.[] | objects | select(((.id // "") | tostring) != "")) as $b ($g[0]; .[$b.id | tostring] = $b)
