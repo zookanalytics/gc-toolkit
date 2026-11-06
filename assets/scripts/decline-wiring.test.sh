@@ -207,8 +207,8 @@ OWN_WAITS=$(git -C "$ROOT" grep -n -E 'await-ruling\.sh" "\$[A-Z_]+" --key ' \
   -- 'assets/scripts/work-*.sh' ':!assets/scripts/*.test.sh' 2>/dev/null | grep -v -F -- '--key "bring-current-question.' || true)
 eq "$OWN_WAITS" "" "mol-polecat-work's scripts arm a gate's re-sling only through decline.sh, apart from the bring-current question"
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-refinery-patrol; do
-    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+  f=mol-refinery-patrol
+  out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
 text = "\n".join(st.get("description", "") for st in d.get("steps", []))
@@ -234,12 +234,11 @@ for key, message in re.findall(r'GATE_KEY=([a-z-]+)\n\s*AWAIT=1\n\s*GATE_MESSAGE
 print("%d|%s" % (checked, "; ".join(bad)))
 PY
 )
-    case "$out" in
-      0\|*) bad "$f: no gate that arms a re-sling was found" ;;
-      *\|) ok "$f: the ${out%%|*} gate messages that offer a stop name stand-down.sh under their own keys" ;;
-      *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
-    esac
-  done
+  case "$out" in
+    0\|*) bad "$f: no gate that arms a re-sling was found" ;;
+    *\|) ok "$f: the ${out%%|*} gate messages that offer a stop name stand-down.sh under their own keys" ;;
+    *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
+  esac
 else
   echo "skip - stand-down wiring check: $TOML_PY"
 fi
