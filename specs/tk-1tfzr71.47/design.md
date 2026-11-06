@@ -47,9 +47,10 @@ on their own, and that includes the checkout of the Gas City fork you build gc
 from. Only the keeper's step after a fork rebase still moves that one. Pull it
 before you build.
 
-The cutover keeps the content the city runs unchanged. The checkout is at the
-effort's merge commit when the cutover starts, and every pin names that same
-commit. Each step is a town commit that `git revert` undoes.
+The cutover keeps the content the city runs unchanged. It starts once the
+checkout holds the effort's merge commit and nothing moves the checkout any
+more, and every pin names the commit the checkout holds. Each step is a town
+commit that `git revert` undoes.
 
 ## Facts this design rests on
 
@@ -94,9 +95,10 @@ read at main `6dfa90898`. The city's installed gc is the fork build
    clone's HEAD must equal the locked commit, and `git status --porcelain`
    (ignored files excluded) must be empty. Otherwise the load fails with
    "cached import ... has local worktree changes; run gc import install"
-   (`validateLockedRemoteCache`, pack_include.go). The comment on
-   `fetchRemoteInclude` says the loader "is a pure reader: git operations must
-   happen ahead of time".
+   (`validateLockedRemoteCache`, pack_include.go). A locked commit whose
+   clone is missing fails the load with "is locked but not cached", and the
+   remediation names `gc import install` (`validateInstalledRemoteCache`), so
+   the load leaves fetching to install.
 5. **Install.** `doImportInstall` (cmd/gc/cmd_import.go) resolves the imports,
    writes `packs.lock`, materializes the clones, and then validates the
    composed config. A failed validation is not rolled back: the command says
@@ -152,8 +154,9 @@ read at main `6dfa90898`. The city's installed gc is the fork build
 10. **What a session can learn about its pack.** Gas City sets `GC_PACK_DIR`
     for pack commands, orders and doctor checks (cmd/gc/cmd_commands.go,
     cmd/gc/order_store.go, internal/doctor/pack_checks.go), and for no agent
-    session. Agent env values are not template-expanded (fact 7). This
-    session measured `gc gc-toolkit scripts-dir` at 0.18 to 0.20 seconds a call.
+    session. Agent env values are not template-expanded (fact 7). A call to
+    `gc gc-toolkit scripts-dir` took 0.18 to 0.20 seconds when measured on
+    2026-11-06.
 11. **How upstream deploys the packs it develops.** The bundled packs, core and
     bd, ride the gc binary: a city pins each one to the binary's canonical
     commit, and `gc doctor --fix` re-pins it after an upgrade
@@ -269,7 +272,8 @@ and the steps change in one place:
    lock and validates the composed config (fact 5).
 5. Verify. `gc import check` passes, both lock entries name the target, and
    `gc gc-toolkit scripts-dir` prints a directory inside the target's clone.
-6. Commit the three files to the town repo as one commit. Its message lists
+6. Commit the three files to the town repo as one signed commit, and push it
+   to the town's origin, as other town commits are. Its message lists
    `git log --oneline <old>..<new>` from the target's clone. Then restart each
    service that resolves the pack when it starts (`gc service restart helm`,
    section 4).
@@ -383,9 +387,10 @@ rig's directory wins a name defined in both (`PackDirsForRig`,
 internal/config/config.go). A formula and the script it calls can no longer
 be assumed to come from one commit. The cutover avoids that state. It starts
 after the effort's merge commit `M` is live in the checkout, and the retired
-reconciler no longer moves the checkout. Every pin then names `M`, so the two
-directories hold the same files while the cutover runs. Section 7 gives the
-order.
+reconciler no longer moves the checkout. Every pin then names the commit the
+checkout holds, `C`, so the two directories hold the same files while the
+cutover runs. `C` is `M`, or a later main when another landing came before the
+reconciler's last pass. Section 7 gives the order.
 
 ## 4. What else reads the rig checkout as the deployed pack
 
@@ -396,7 +401,7 @@ order.
 | `gc-build.sh`'s `behind_main` | A fetch of origin into the pack's own repository every 30 minutes (`:293`), counted against HEAD (`:298`). The helm board bands its PACK rows on it. | **Retirement.** Under the pin, it would fetch into a clone that Gas City shares across cities and validates on every load. Its premise is gone too: a checkout parked off main cannot happen when the served code is always exactly the pin. Deploy lag shows as the open deploy bead. `FETCH_TTL`, the `origin-fetch-at` marker, the record's `behind_main` field and helm's `BehindMain` band retire with it. |
 | I9's LAGGED and UNFETCHED (`doctor/check-pour-text-current`) | Each rig checkout's lag behind its origin ref, and that ref's fetch time, against the reconciler's 15-minute cadence. | **Retirement.** They measure whether the reconciler is keeping up, and nothing advances a checkout any more. |
 | I9's STALE-TEXT | The formula a running molecule was poured from (`gc.formula_source`), dated by `git log` in the checkout that owns the path (`:314`). | **The cached revision.** A source under a cache clone never changes in place, so staleness becomes "the deployed revision's copy differs from the poured one". The check compares the poured file with the same path under its own `GC_PACK_DIR`. The checkout arm stays for a city that imports by path. |
-| The overlays' hooks | The gh-origin-guard PreToolUse command in all three overlays, `patrol-continue.sh`'s ledger (`:118-120`), `work-context.sh`'s `run-lib.sh` (`:97-99`) and `cycle-recycle.sh`'s `scratch-reap.sh` (`:268-270`). Each takes its script from `$GC_RIG_ROOT` or `$GC_CITY_PATH/rigs/gc-toolkit`, and the guard exits 0 when neither holds it. | **The revision the session started from.** `worktree-setup.sh`, which runs as `pre_start` with its path under `{{.ConfigDir}}`, records its own scripts directory in the work dir. The hooks read that record. deacon, mechanik and dog do not run `worktree-setup.sh`, so each gains a `pre_start` step that writes the same record. `gh-origin-guard-codex.sh` copies the overlay's guard command into the Codex home, so the Codex agents take the change with it. A session with no record, such as one started before unit 1 went live, asks `gc gc-toolkit scripts-dir` instead. A per-hook `gc gc-toolkit scripts-dir` would be a Gas City query on every Bash call, which the operator ruled out: "Any query to gas city is expensive if done often, so it needs to be a push change vs a pull to check if anything changed" (conversation tk-vu6faf2, 2026-11-05). |
+| The overlays' hooks | The gh-origin-guard PreToolUse command in all three overlays, `patrol-continue.sh`'s ledger (`:118-120`), `work-context.sh`'s `run-lib.sh` (`:97-99`) and `cycle-recycle.sh`'s `scratch-reap.sh` (`:268-270`). Each takes its script from the first of `$GC_RIG_ROOT` and `$GC_CITY_PATH/rigs/gc-toolkit` that holds it, and the guard exits 0 when neither does. `work-context.sh` tries `$GC_RUN_LIB` and `$GC_PACK_DIR` first, and nothing sets either one for a session. | **The revision the session started from.** `worktree-setup.sh`, which runs as `pre_start` with its path under `{{.ConfigDir}}`, records its own scripts directory in the work dir. The hooks read that record. deacon, mechanik and dog do not run `worktree-setup.sh`, so each gains a `pre_start` step that writes the same record. `gh-origin-guard-codex.sh` copies the overlay's guard command into the Codex home, so the Codex agents take the change with it. A session with no record, such as one started before unit 1 went live, asks `gc gc-toolkit scripts-dir` instead. A per-hook `gc gc-toolkit scripts-dir` would be a Gas City query on every Bash call, which the operator ruled out: "Any query to gas city is expensive if done often, so it needs to be a push change vs a pull to check if anything changed" (converse sitting tk-vu6faf2, 2026-11-05, recorded in observation tk-dbsf5cu). |
 | `cycle-recycle.sh`'s pack drift | The mtimes of the role's prompt, patrol formula and fragments in the checkout, against the session's first prompt (`:95-111`). | **The lock.** A deploy writes the city's `packs.lock`, so its mtime later than the session's start means the pin moved under the session. That is one `stat`, with no query. Under a path import, the recorded directory's mtimes keep today's check. |
 | The demo engine's own-source rule | `_demo_engine_rig_of` treats the rig whose repository holds the pack's directory as one whose app reads the city (`:404-412`). | **No code change.** The clone belongs to no rig, so the rule finds nothing. The town already sets `app_reads_city = "true"` on the gc-toolkit rig. install.md's line that the rig the pack is imported from "needs no setting" changes to say a URL import needs the setting. |
 
@@ -413,11 +418,11 @@ runtime write into the pack's working tree through `$PACK_DIR`,
 into its git directory is `behind_main`'s fetch, which retires. Other writes
 reach the pack's directory today only because it is the gc-toolkit rig's
 checkout: bd's store under `.beads`, agent homes, worktrees and fetches. They
-keep landing in that checkout, which stops being the pack. `render-seed-audit.sh`
-writes `generated/` in a developer's checkout, which is a developer tool. A
-file written into the clone would stop every gc command until
-`gc import install` cleaned it (fact 4). The trial asserts the clone stays
-clean.
+keep landing in that checkout, which stops being the pack.
+`render-seed-audit.sh` writes `generated/` in a developer's checkout, which is
+a developer tool. A file written into the clone that git does not ignore would
+stop every gc command until `gc import install` cleaned it (fact 4). The trial
+asserts the clone stays clean.
 
 ## 5. Every rig's checkout
 
@@ -451,13 +456,14 @@ content reads `origin/<default>` or its own worktree.
 ## 6. What retires, and what changes with it
 
 **Files.** `assets/scripts/reconcile-rig-checkouts.sh` (906 lines), its test
-(1,787) and `orders/reconcile-rig-checkouts.toml` (11) are tools/deletion-plan.tsv's
-rows for this effort and docs/built-once-target.md's stage B row, 2,704 lines.
-The change that deletes them removes those rows, as the page's rule asks.
-`behind_main` and its knobs and tests also retire from `gc-build.sh`,
-`gc-build.test.sh`, `gc-helm-svc.test.sh`, `services/helm/internal/source/packhealth.go`
-and the board's banding, along with I9's LAGGED and UNFETCHED arms and their
-tests. So does the refinery formula's `auto_ff_rig_main` var and its step.
+(1,787) and `orders/reconcile-rig-checkouts.toml` (11) are
+tools/deletion-plan.tsv's rows for this effort and docs/built-once-target.md's
+stage B row, 2,704 lines. The change that deletes them removes those rows, as
+the page's rule asks. `behind_main` and its knobs and tests also retire from
+`gc-build.sh`, `gc-build.test.sh`, `gc-helm-svc.test.sh`,
+`services/helm/internal/source/packhealth.go` and the board's banding, along
+with I9's LAGGED and UNFETCHED arms and their tests. So does the refinery
+formula's `auto_ff_rig_main` var and its step.
 
 **Registry.** `reconcile_rig` leaves `[metadata.patrol_bookkeeping]` in
 lifecycle/lifecycle.toml (`:1845`), and the comment at `:1851-1852` goes with
@@ -475,8 +481,9 @@ refinery-merge-cadence.md (`:901-933`), design-convoy.md (`:97-98`),
 fork-patching.md (`:370-372`), gascity/packs.md (`:220-231`),
 review-correctness.md (`:222`), gh-origin-guard.md (`:346-347`),
 services/helm/README.md (`:1047-1060`, the `behind_main` row and
-`:1203-1216`), the header of `gc-helm-svc.sh` (`:5-7`, `:53-54`), and the
-mtime comment in `cycle-recycle.sh` (`:84-86`).
+`:1203-1216`), the headers of `gc-helm-svc.sh` (`:5-7`, `:53-54`) and
+`converse-capability.sh` (`:8-11`), and the mtime comment in `cycle-recycle.sh`
+(`:84-86`).
 
 **The reconciler's escalations.** It files one kind. For a rig it cannot
 advance or heal, it files a subject bead in the gc-toolkit store. The subject is
@@ -540,13 +547,16 @@ The mechanik runs the cutover on a town bead (unit 6), each step as one town
 commit:
 
 1. **Precondition.** The effort's merge commit `M` is live:
-   `git -C rigs/gc-toolkit rev-parse HEAD` prints `M`, and
+   `git -C rigs/gc-toolkit merge-base --is-ancestor M HEAD` succeeds, and
    `gc order list` no longer shows reconcile-rig-checkouts. The reconciler's
-   last pass is the one that moves the checkout to `M`. If that pass cannot
-   fast-forward, it files its gate as usual, and resolving that gate comes
-   first.
+   last pass is the one that moves the checkout to `M`, or to a later main when
+   another landing came first. The commit the checkout then holds,
+   `git -C rigs/gc-toolkit rev-parse HEAD`, is `C`, and every step pins `C`.
+   Pinning `M` when the checkout holds a later commit would take the landings
+   after `M` back out of the city. If that pass cannot fast-forward, it files
+   its gate as usual, and resolving that gate comes first.
 2. **The city import.** Rewrite `[imports.gc-toolkit]` as in section 1,
-   pinned to `M`. Run `gc import install`, then confirm that
+   pinned to `C`. Run `gc import install`, then confirm that
    `gc gc-toolkit scripts-dir` prints the clone and `gc config show --validate`
    is clean.
 3. **The gc-toolkit rig's own import.** It goes first among the rigs, because
@@ -557,7 +567,7 @@ commit:
 5. **The keeper import,** with the same checks for the keeper's agents.
 6. **The helm service command** (section 4), then `gc service restart helm`,
    then a board read.
-7. **The first deploy.** When main moves past `M`, the deploy check files its
+7. **The first deploy.** When main moves past `C`, the deploy check files its
    bead and the mechanik deploys. Watch which sessions restart and when. The
    watching is the canary for section 2's restart note.
 
@@ -565,10 +575,10 @@ commit:
 
 Before step 6, any step reverts with `git revert` of its town commit and
 `gc import install`. After step 6, the revert also restarts the helm service.
-Reverting every step returns the city to a path import of the checkout at `M`.
-That checkout is current, but nothing advances it, so a landing during that
-time goes live only if someone runs `git -C rigs/gc-toolkit merge --ff-only
-origin/main` by hand. That is the stopgap while a failed cutover is fixed.
+Reverting every step returns the city to a path import of the checkout at `C`.
+Nothing advances that checkout, so a landing after `C` goes live only if
+someone runs `git -C rigs/gc-toolkit merge --ff-only origin/main` by hand.
+That is the stopgap while a failed cutover is fixed.
 
 ## 8. The units
 
@@ -606,14 +616,16 @@ and dog. Units 2 and 4 remove surface. Upstream is gastownhall/gascity at
 `8e75c50aa845`.
 
 - **Moving a pin.** Searched: `gc import install`, `gc import upgrade`,
-  `gc import add --version`, and registry releases with `gc pack registry
-  publish` (cli.md). Install resolves, locks and fetches, and the command
-  composes it. Upgrade moves only within a constraint, and a `sha:` pin has no
-  range (fact 5). A semver constraint would need tags this repository does not
-  publish (section 1). A registry release is a publish step per deploy. The
-  gap is rewriting every import of one repository to one commit, and restoring
-  the old pin when verification fails, since install does not roll back
-  (fact 5).
+  `gc import add --version`, `gc pack fetch`, and registry releases with
+  `gc pack registry publish` (cli.md). Install resolves, locks and fetches, and
+  the command composes it. `gc pack fetch` fetches only the legacy `[packs]`
+  table, which schema-2 config replaces with `[imports]` (`doPackFetch`,
+  cmd/gc/cmd_pack.go, reads `cfg.Packs`). Upgrade moves only within a
+  constraint, and a `sha:` pin has no range (fact 5). A semver constraint would
+  need tags this repository does not publish (section 1). A registry release is
+  a publish step per deploy. The gap is rewriting every import of one
+  repository to one commit, and restoring the old pin when verification fails,
+  since install does not roll back (fact 5).
 - **Knowing main has moved past the pin.** Searched: `gc import check` and
   `gc import status`. Check reports missing, stale or uncached state against
   the authored imports, and status reports the declared pins. Neither compares
