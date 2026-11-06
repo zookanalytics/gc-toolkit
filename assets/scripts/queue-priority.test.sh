@@ -128,8 +128,7 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads"
 #                      write; an unknown id refuses the whole call. bd types a
 #                      --set-metadata value that reads as a JSON number, true or
 #                      false, and so does this. STUB_UPDATE_FAIL refuses every
-#                      update; STUB_DROP_PRIORITY answers 0 and writes no
-#                      priority. STUB_GATE, in the environment of one caller,
+#                      update. STUB_GATE, in the environment of one caller,
 #                      holds that caller's first priority write until the gate
 #                      file is removed, touching <gate>.reached when it arrives.
 # Any other call is refused with exit 2, so a call the scripts must not make
@@ -274,7 +273,6 @@ case "$verb" in
       : > "$STUB_GATE.reached"
       n=0; while [ -f "$STUB_GATE" ] && [ "$n" -lt 300 ]; do sleep 0.1; n=$((n + 1)); done
     fi
-    [ -n "${STUB_DROP_PRIORITY:-}" ] && pr=""
     setj="$(printf '%s\n' ${sets[@]+"${sets[@]}"} | jq -Rsc 'split("\n") | map(select(length > 0) | capture("^(?<k>[^=]+)=(?<v>.*)$")
       | .v |= (if test("^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?$") then tonumber
                elif . == "true" then true elif . == "false" then false else . end))')"
@@ -292,6 +290,10 @@ chmod +x "$TMP/bin/gc"
 # steers the scripts, and the floor refuses any call no stub answers.
 unset "${!GC_@}" "${!BEADS_@}" "${!QUEUE_PRIORITY_@}" 2>/dev/null || true
 export PATH="$TMP/bin:$FLOOR:$PATH"
+# A settle's priority writes go through `gctk bead update --verify`, which
+# gctk.stub.sh stands in for: each write reaches the stub gc above, and
+# GCTK_STUB_MISS names one that does not read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export TMPDIR="$TMP"
 export STUB_STORE="$TMP/store.json" STUB_CALLS="$TMP/calls" STUB_RIG_TK="$TMP/rig-tk"
 # run-lib.sh's verbs answer from the store as it stands at each call: its roots
@@ -454,9 +456,16 @@ eq "$(prio tk-wc)" 3 "(SETTLE) a claimed member is not rewritten"
 has "$OUT" "claimed, left as it is: tk-wc (in_progress)" "(SETTLE) and settle says so"
 
 reset_store
-STUB_DROP_PRIORITY=1 qp settle tk-w1
+: > "$TMP/gctk.log"
+qp settle tk-w1
+grep -q -- '^bead|update|.*|--priority|1|--db|.*|--verify|$' "$TMP/gctk.log" \
+  && ok "(SETTLE) each level is written through gctk, which reads it back" \
+  || bad "(SETTLE) the priority write is not verified ($(cat "$TMP/gctk.log"))"
+reset_store
+GCTK_STUB_MISS='~--priority' qp settle tk-w1
 eq "$RC" 1 "(SETTLE) a write that does not read back exits 1"
-has "$ERR" "tk-w1 reads P2, not P1" "(SETTLE) naming the bead that did not take the write"
+has "$ERR" "did not read back" "(SETTLE) saying the write did not read back"
+has "$ERR" "tk-w1" "(SETTLE) naming the bead that did not take the write"
 
 reset_store
 jq -c 'map(if .id == "tk-w2" then .metadata.priority_shift = "soon" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
@@ -654,7 +663,7 @@ eq "$(prio tk-e1)" 1 "(MOVE) and leaves the epic as it is"
 reset_store
 CACHE="$TMP/gc-helm-cache.$(id -u 2>/dev/null || echo 0)/board2-$(printf '%s' default | cksum | cut -d' ' -f1).ndjson"
 mkdir -p "${CACHE%/*}"; : > "$CACHE"
-STUB_DROP_PRIORITY=1 helm priority tk-e1 P0
+GCTK_STUB_MISS='~--priority' helm priority tk-e1 P0
 eq "$RC" 4 "(MOVE) a move whose writes do not read back exits 4"
 has "$ERR" "did not all settle" "(MOVE) and says so"
 [ ! -e "$CACHE" ] && ok "(MOVE) a move that fails after writing busts the board cache" || bad "(MOVE) a move that fails after writing busts the board cache"

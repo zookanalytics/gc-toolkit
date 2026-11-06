@@ -95,6 +95,10 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LC="$SCRIPTS_DIR/lifecycle.sh"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script; nothing landed"; exit 1; }
+# The landing stamp goes through `gctk bead update --verify`.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 usage() { echo "usage: $PROG --work <bead> --branch <branch> --target <target-branch> [--delete-branch]" >&2; exit 2; }
 
@@ -185,16 +189,18 @@ if carries "$TIP" "$PREPARED"; then
 elif carries "$PREPARED" "$TIP"; then
   MERGED_SHA="$PREPARED"
   # Without the stamp, a landing whose record failed would read as a branch
-  # with no work. The push cannot be undone, so the stamp is read back before
-  # it (the bd-durability block of bd-lib.sh).
-  if ! STAMP_OUT=$(gc bd update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" </dev/null 2>&1); then
-    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
-    exit 1
-  fi
-  if ! STAMPED=$(bd_meta_readback "$WORK" "$(jq -nc --arg s "$MERGED_SHA" '{direct_landing_sha: $s}')"); then
-    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (it reads back ${STAMPED%%$'\t'*}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
-    exit 1
-  fi
+  # with no work. The push cannot be undone, so the stamp goes through
+  # `gctk bead update --verify`, which reads it back before the push
+  # (docs/warrants.md, "bd write durability").
+  STAMP_RC=0
+  STAMP_OUT=$("$GCTK" bead update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" --verify </dev/null 2>&1) || STAMP_RC=$?
+  case "$STAMP_RC" in
+    0) ;;
+    3) echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK: it did not read back after the update (${STAMP_OUT:-gctk said nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
+       exit 1 ;;
+    *) echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
+       exit 1 ;;
+  esac
   STAMP="$MERGED_SHA"
   if ! PUSH_OUT=$(git -C "$RIG_ROOT" push origin "$MERGED_SHA:refs/heads/$TARGET" 2>&1); then
     case "$PUSH_OUT" in

@@ -203,6 +203,10 @@ INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
 BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.branch // empty')
 DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
 [ -n "$BRANCH" ] || { echo "seed-branch did not record the branch; cannot file the design child" >&2; exit 1; }
+# Every filing write goes through `gctk bead ... --verify`, which reads it back.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # >>> design-gated-resolve
 # Case-insensitive: false, 0, no, or off selects all-in-one; true, 1, yes, or on
 # selects design-gated. Anything else, empty included, falls back to the
@@ -219,9 +223,12 @@ esac
 **File the design child (only if not already filed).** Replace the `<...>` with
 the design topic and questions you read from the subject's card in load-context.
 The child goes under the subject's epic when it has one, so the epic ranks and
-parks it (docs/steering.md). bd answers a refused create with an
-`{"error": ...}` object, so the id is read type-guarded and a refusal reports
-bd's own reason:
+parks it (docs/steering.md). The create goes through `gctk bead create
+--verify`, which reads the child back carrying its target, and its parent when
+it has one. bd answers a refused create with an `{"error": ...}` object, so the
+id is read type-guarded and a refusal reports bd's own reason. A child that is
+filed and does not read back is still recorded, so a re-run files no second
+one, and the step stops:
 ```bash
 # >>> file-design-create
 if [ -z "$DESIGN_CHILD" ]; then
@@ -244,20 +251,25 @@ effort.
 A design doc committed to $BRANCH. The design defines the implementation
 child's breakdown. Use the filing-documentation skill for placement.")
   [ -z "$EPIC" ] || DESIGN_ARGS+=(--parent "$EPIC")
-  CREATE_JSON=$(gc bd create "${DESIGN_ARGS[@]}" --json | tr -d '[:cntrl:]')
+  CREATE_RC=0
+  CREATE_JSON=$("$GCTK" bead create "${DESIGN_ARGS[@]}" --json --verify) || CREATE_RC=$?
+  CREATE_JSON=$(printf '%s' "$CREATE_JSON" | tr -d '[:cntrl:]')
   DESIGN_CHILD=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$DESIGN_CHILD" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no design child${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.design_child=$DESIGN_CHILD" || { echo "design child $DESIGN_CHILD is filed but gc.design_child did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second child" >&2; exit 1; }
+  [ "$CREATE_RC" = 0 ] || { echo "design child $DESIGN_CHILD is filed and recorded on $SUBJECT, but it did not read back whole (gctk bead create exited $CREATE_RC); a re-run files no child beside it, and its wait below finds whether it exists" >&2; exit 1; }
 fi
 # <<< file-design-create
 ```
 
-**Wait on it.** bd takes an edge it already holds as a no-op that exits 0, so a
-resume re-runs the add safely, and an add bd refuses fails the step. The
-dispatch step reads every target and edge back before it hands anything over:
+**Wait on it.** The dispatch step hands the subject over on this edge, which
+cannot be undone, so the add goes through `gctk bead dep add --verify`, which
+reads the edge back (docs/warrants.md, "bd write durability"). bd takes an edge
+it already holds as a no-op that exits 0, so a resume re-runs the add safely. An
+add bd refuses, or one that does not read back, fails the step:
 ```bash
 # >>> file-design-wait
-gc bd dep add "$SUBJECT" "$DESIGN_CHILD" --type=blocks || { echo "dep add of the wait of $SUBJECT on design child $DESIGN_CHILD failed" >&2; exit 1; }
+"$GCTK" bead dep add "$SUBJECT" "$DESIGN_CHILD" --type=blocks --verify || { echo "the wait of $SUBJECT on design child $DESIGN_CHILD did not land, or did not read back" >&2; exit 1; }
 # <<< file-design-wait
 ```
 
@@ -306,6 +318,10 @@ BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.branch // empty')
 DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
 IMPL_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_child"] // empty')
 [ -n "$BRANCH" ] && [ -n "$DESIGN_CHILD" ] || { echo "the branch or the design child is not recorded; cannot file the implementation child" >&2; exit 1; }
+# Every filing write goes through `gctk bead ... --verify`, which reads it back.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # >>> design-gated-resolve
 # Case-insensitive: false, 0, no, or off selects all-in-one; true, 1, yes, or on
 # selects design-gated. Anything else, empty included, falls back to the
@@ -321,7 +337,8 @@ esac
 
 **File the implementation child (only if not already filed).** Its brief says
 when to start, by shape. As in file-design, it is filed under the subject's epic
-when the subject has one, and the id is read type-guarded:
+when the subject has one, through `gctk bead create --verify`, and the id is
+read type-guarded:
 ```bash
 # >>> file-implementation-create
 if [ -z "$IMPL_CHILD" ]; then
@@ -345,23 +362,27 @@ bead $SUBJECT records as gc.summary_task) each wait on it with a blocks edge,
 and read the target and both edges back before you sling it.
 $IMPL_START")
   [ -z "$EPIC" ] || IMPL_ARGS+=(--parent "$EPIC")
-  CREATE_JSON=$(gc bd create "${IMPL_ARGS[@]}" --json | tr -d '[:cntrl:]')
+  CREATE_RC=0
+  CREATE_JSON=$("$GCTK" bead create "${IMPL_ARGS[@]}" --json --verify) || CREATE_RC=$?
+  CREATE_JSON=$(printf '%s' "$CREATE_JSON" | tr -d '[:cntrl:]')
   IMPL_CHILD=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$IMPL_CHILD" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no implementation child${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.impl_child=$IMPL_CHILD" || { echo "implementation child $IMPL_CHILD is filed but gc.impl_child did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second child" >&2; exit 1; }
+  [ "$CREATE_RC" = 0 ] || { echo "implementation child $IMPL_CHILD is filed and recorded on $SUBJECT, but it did not read back whole (gctk bead create exited $CREATE_RC); a re-run files no child beside it, and its wait below finds whether it exists" >&2; exit 1; }
 fi
 # <<< file-implementation-create
 ```
 
-**Wait on it, and hold it behind the design by shape.** As in file-design, an
-add bd refuses fails the step:
+**Wait on it, and hold it behind the design by shape.** As in file-design, each
+add goes through `gctk bead dep add --verify`, and one bd refuses, or that does
+not read back, fails the step:
 ```bash
 # >>> file-implementation-wait
-gc bd dep add "$SUBJECT" "$IMPL_CHILD" --type=blocks || { echo "dep add of the wait of $SUBJECT on implementation child $IMPL_CHILD failed" >&2; exit 1; }
+"$GCTK" bead dep add "$SUBJECT" "$IMPL_CHILD" --type=blocks --verify || { echo "the wait of $SUBJECT on implementation child $IMPL_CHILD did not land, or did not read back" >&2; exit 1; }
 if [ "$DESIGN_GATED" = "true" ]; then
   # dep add's second id is the blocker, so the design blocks the implementation
   # here, and the arm the dispatch step records fires once the design closes.
-  gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks || { echo "dep add holding implementation child $IMPL_CHILD behind design child $DESIGN_CHILD failed" >&2; exit 1; }
+  "$GCTK" bead dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks --verify || { echo "the hold of implementation child $IMPL_CHILD behind design child $DESIGN_CHILD did not land, or did not read back" >&2; exit 1; }
 fi
 # <<< file-implementation-wait
 ```
@@ -410,6 +431,10 @@ DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_chi
 IMPL_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_child"] // empty')
 SUMMARY_TASK=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.summary_task"] // empty')
 [ -n "$BRANCH" ] && [ -n "$DESIGN_CHILD" ] && [ -n "$IMPL_CHILD" ] || { echo "the branch or a child is not recorded; cannot file the summary task" >&2; exit 1; }
+# Every filing write goes through `gctk bead ... --verify`, which reads it back.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 ```
 
 **File the summary task (only if not already filed).** Its parent is the
@@ -431,21 +456,25 @@ name where it departs from the description of $SUBJECT, title $SUBJECT with the
 branch's subject line, and read both writes back. Change no file, and write
 nothing else on $SUBJECT.")
   [ -z "$EPIC" ] || SUMMARY_ARGS+=(--parent "$EPIC")
-  CREATE_JSON=$(gc bd create "${SUMMARY_ARGS[@]}" --json | tr -d '[:cntrl:]')
+  CREATE_RC=0
+  CREATE_JSON=$("$GCTK" bead create "${SUMMARY_ARGS[@]}" --json --verify) || CREATE_RC=$?
+  CREATE_JSON=$(printf '%s' "$CREATE_JSON" | tr -d '[:cntrl:]')
   SUMMARY_TASK=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$SUMMARY_TASK" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no summary task${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.summary_task=$SUMMARY_TASK" || { echo "summary task $SUMMARY_TASK is filed but gc.summary_task did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second task" >&2; exit 1; }
+  [ "$CREATE_RC" = 0 ] || { echo "summary task $SUMMARY_TASK is filed and recorded on $SUBJECT, but it did not read back whole (gctk bead create exited $CREATE_RC); a re-run files no task beside it, and its wait below finds whether it exists" >&2; exit 1; }
 fi
 # <<< summary-task-create
 ```
 
-**Wait on both children.** As in the filing steps, an add bd refuses fails the
-step:
+**Wait on both children.** As in the filing steps, each add goes through
+`gctk bead dep add --verify`, and one bd refuses, or that does not read back,
+fails the step:
 ```bash
 # >>> summary-task-wait
-gc bd dep add "$SUMMARY_TASK" "$DESIGN_CHILD" --type=blocks || { echo "dep add of the wait of summary task $SUMMARY_TASK on design child $DESIGN_CHILD failed" >&2; exit 1; }
-gc bd dep add "$SUMMARY_TASK" "$IMPL_CHILD" --type=blocks || { echo "dep add of the wait of summary task $SUMMARY_TASK on implementation child $IMPL_CHILD failed" >&2; exit 1; }
-gc bd dep add "$SUBJECT" "$SUMMARY_TASK" --type=blocks || { echo "dep add of the wait of $SUBJECT on summary task $SUMMARY_TASK failed" >&2; exit 1; }
+"$GCTK" bead dep add "$SUMMARY_TASK" "$DESIGN_CHILD" --type=blocks --verify || { echo "the wait of summary task $SUMMARY_TASK on design child $DESIGN_CHILD did not land, or did not read back" >&2; exit 1; }
+"$GCTK" bead dep add "$SUMMARY_TASK" "$IMPL_CHILD" --type=blocks --verify || { echo "the wait of summary task $SUMMARY_TASK on implementation child $IMPL_CHILD did not land, or did not read back" >&2; exit 1; }
+"$GCTK" bead dep add "$SUBJECT" "$SUMMARY_TASK" --type=blocks --verify || { echo "the wait of $SUBJECT on summary task $SUMMARY_TASK did not land, or did not read back" >&2; exit 1; }
 # <<< summary-task-wait
 ```
 
@@ -462,13 +491,14 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "dispatch"
-title = "Read the setup back, hand the subject to the refinery, dispatch its work, and drain"
+title = "Hand the subject to the refinery, dispatch its work, and drain"
 needs = ["file-summary"]
 description = """
-Nothing is handed over or dispatched until the whole setup reads back: each
-child's `target`, the subject's `blocks` edge onto each child and onto the
-summary task, the summary task's onto each child, and, design-gated, the design
-child's on the implementation child. A run that stopped before this step left
+Nothing is handed over or dispatched until the whole setup has read back: each
+filing step wrote its child's `target`, the subject's `blocks` edge onto each
+child and onto the summary task, the summary task's onto each child, and,
+design-gated, the design child's on the implementation child, through
+`gctk bead --verify`, which read each one back. A run that stopped before this step left
 no child in flight and the subject with nobody, so no child can have landed
 while the subject waited on fewer than all of them.
 
@@ -520,28 +550,14 @@ REFINERY="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
 case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool and the refinery; set GC_RIG" >&2; exit 1 ;; esac
 ```
 
-**Read the setup back, hand the subject over, then dispatch.** The hand-over and
-the dispatch cannot be undone, so every target and edge the filing steps wrote
-is read back first (docs/warrants.md, "bd write durability"). A target or an
-edge that does not read back, a refinery address the roster lacks, a subject
-someone else holds, or a notice that does not record stops the step before
-anything is dispatched:
+**Hand the subject over, then dispatch.** The hand-over and the dispatch cannot
+be undone, and every target and edge they rest on read back when its filing
+step wrote it (docs/warrants.md, "bd write durability"). A refinery address the
+roster lacks, a subject someone else holds, or a notice that does not record
+stops the step before anything is dispatched:
 ```bash
 # >>> setup-dispatch
 if [ -z "$SUMMARY_ARMED" ]; then
-  need_wait() {
-    gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -e --arg b "$2" 'any(.[]?; .id == $b)' >/dev/null 2>&1 || { echo "$1 reads no blocks edge onto $2, so the setup is not whole; handing nothing over and dispatching nothing" >&2; exit 1; }
-  }
-  for C in "$DESIGN_CHILD" "$IMPL_CHILD"; do
-    CHILD_TARGET=$(gc bd show "$C" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata.target // empty' 2>/dev/null)
-    [ "$CHILD_TARGET" = "$BRANCH" ] || { echo "$C reads target '$CHILD_TARGET', not $BRANCH, so it would land elsewhere; handing nothing over and dispatching nothing" >&2; exit 1; }
-  done
-  need_wait "$SUBJECT" "$DESIGN_CHILD"
-  need_wait "$SUBJECT" "$IMPL_CHILD"
-  need_wait "$SUBJECT" "$SUMMARY_TASK"
-  need_wait "$SUMMARY_TASK" "$DESIGN_CHILD"
-  need_wait "$SUMMARY_TASK" "$IMPL_CHILD"
-  [ "$DESIGN_GATED" != "true" ] || need_wait "$IMPL_CHILD" "$DESIGN_CHILD"
   ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
   if [ -z "$ROSTER" ]; then
     echo "roster unreadable; handing $SUBJECT to $REFINERY unchecked" >&2
@@ -583,7 +599,7 @@ the subject, the summary task, or any child yourself.
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.dispatch && gc runtime drain-ack
 ```
 
-**Exit criteria:** every target and edge of the setup read back, the subject is
+**Exit criteria:** the subject is
 assigned to the refinery with its notice recorded, the design child is slung,
 the implementation child is armed behind the design or slung, the summary task
 is armed on `mol-polecat-report`, this step is closed, and the session is

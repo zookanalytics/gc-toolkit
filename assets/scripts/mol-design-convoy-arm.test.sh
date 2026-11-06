@@ -24,21 +24,24 @@
 # its create, under the subject's epic when it has one, make the subject wait on
 # it, hold the implementation behind a gated design, and file the summary task
 # under the subject's epic with no target, waiting on both children with the
-# subject waiting on it. Each write is read back. None of them assigns the
-# subject or dispatches anything, so a setup that stops between steps leaves no
-# child in flight, and no child can land while the subject waits on fewer than
-# all of them. The dispatch step reads every target and edge back, and only then
-# hands the subject to the refinery with its notice, slings the design child
+# subject waiting on it. Each create and each add goes through `gctk bead ...
+# --verify`, which reads it back, and one that does not read back stops its
+# step, a child it filed recorded so a re-run files no second one. None of them
+# assigns the subject or dispatches anything, so a setup that stops between
+# steps leaves no child in flight, and no child can land while the subject waits
+# on fewer than all of them. The dispatch step reads nothing back: it hands the
+# subject to the refinery with its notice, slings the design child
 # (--merge mr when gated), arms the implementation behind the design or slings
 # it, and arms the summary task on mol-polecat-report. It stamps each marker
 # (gc.design_armed, gc.impl_armed, gc.summary_armed) right after its own
 # dispatch, because a resume skips a dispatch whose marker is set. Each failure
 # case breaks one write or read and checks that nothing downstream of it ran.
 #
-# The read-back decides whether a write landed, not its exit status. A resume
-# re-runs every add on edges the failed pass may already have written, and bd
-# refuses the duplicate, so the resume cases give each add a non-zero exit over
-# an edge that reads back and check that the step completes.
+# A resume re-runs every add on edges the failed pass may already have written,
+# and bd takes an edge it already holds as a no-op that exits 0, so the resume
+# cases run each add over an edge already there and check that the step
+# completes, the edge single. gctk.stub.sh stands in for `gctk bead`, and the
+# command's own suite proves its read.
 #
 # The mechanik's recipe (agents/mechanik/prompt.template.md) runs with its
 # placeholders filled in: it cuts from origin/HEAD's branch and records it as
@@ -393,6 +396,10 @@ STUB
 chmod +x "$TMP/bin/gc" "$TMP/bin/git" "$TMP/bin/deferred-dispatch.sh"
 
 export GC_LOG="$TMP/gc.log" STORE="$TMP/store.json" ORIGIN_REFS="$TMP/origin-refs" ROSTER_FILE="$TMP/roster.json"
+# The filing steps write through `gctk bead ... --verify`, as the gctk-bin block
+# in each step's context sets $GCTK. gctk.stub.sh stands in for it: each write
+# reaches the stub gc, and GCTK_STUB_MISS names one that does not read back.
+export GCTK="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export SCRIPTS="$TMP/bin" RIG_ROOT="$TMP/rig" POOL="rig/gc-toolkit.polecat" REFINERY="rig/gc-toolkit.refinery"
 export SUBJECT="sub-1" BRANCH="integration/sub-1" INITIATIVE="Rebuild the widget"
 printf '%s\n' '{"agents":[{"qualified_name":"rig/gc-toolkit.polecat"},{"qualified_name":"rig/gc-toolkit.refinery"}]}' > "$ROSTER_FILE"
@@ -567,6 +574,16 @@ for sh in "${SHELLS[@]}"; do
     && ok "[$sh] design create: a refused create reports bd's reason and records nothing" \
     || bad "[$sh] design create: a refused create passed (rc=$RC)"
 
+  fixture '.[2:] = []'; subject_json; export DESIGN_CHILD="" NEXT_ID=dz-design GCTK_STUB_MISS=create
+  : > "$TMP/gctk.log"
+  run_block file-design-create "$sh"
+  stopped && reported "did not read back whole" && [ "$(meta sub-1 gc.design_child)" = "dz-design" ] \
+    && ok "[$sh] design create: a child that does not read back stops the step, recorded so a re-run files no second one" \
+    || bad "[$sh] design create: a child that did not read back went ahead, or was not recorded (rc=$RC)"
+  grep -qF -- '|--verify|' "$TMP/gctk.log" && ok "[$sh] design create: the create asks gctk to read the child back" \
+    || bad "[$sh] design create: the create is not verified ($(cat "$TMP/gctk.log"))"
+  unset GCTK_STUB_MISS
+
   fixture; subject_json
   run_block file-design-create "$sh"
   eq "$RC" "0" "[$sh] design create: a filed child is not filed again"
@@ -583,8 +600,18 @@ for sh in "${SHELLS[@]}"; do
 
   fixture; subject_json; export REFUSE_EDGES="sub-1>dz-design"
   run_block file-design-wait "$sh"
-  stopped && reported "failed" && ok "[$sh] design wait: an add bd refuses fails the step" \
+  stopped && reported "did not land" && ok "[$sh] design wait: an add bd refuses fails the step" \
     || bad "[$sh] design wait: a refused add passed (rc=$RC)"
+
+  fixture; subject_json; : > "$TMP/gctk.log"
+  run_block file-design-wait "$sh"
+  grep -qF -- 'bead|dep|add|sub-1|dz-design|--type=blocks|--verify|' "$TMP/gctk.log" \
+    && ok "[$sh] design wait: the add asks gctk to read the edge back" || bad "[$sh] design wait: the add is not verified ($(cat "$TMP/gctk.log"))"
+  fixture; subject_json; export GCTK_STUB_MISS=dep:sub-1
+  run_block file-design-wait "$sh"
+  stopped && reported "did not read back" && ok "[$sh] design wait: an add that does not read back fails the step" \
+    || bad "[$sh] design wait: an add that did not read back passed (rc=$RC)"
+  unset GCTK_STUB_MISS
 
   # resume: the edge is there from the failed first pass, and bd's re-add is a no-op
   fixture '.[1]._deps += [{id: "dz-design", dependency_type: "blocks"}]'; subject_json
@@ -632,6 +659,12 @@ for sh in "${SHELLS[@]}"; do
   run_block file-implementation-wait "$sh"
   stopped && ok "[$sh] impl wait gated: a design edge bd refuses fails the step" \
     || bad "[$sh] impl wait gated: a refused design edge passed (rc=$RC)"
+
+  fixture; subject_json; export DESIGN_GATED=true GCTK_STUB_MISS=dep:dz-impl
+  run_block file-implementation-wait "$sh"
+  stopped && reported "did not read back" && ok "[$sh] impl wait gated: a design edge that does not read back fails the step" \
+    || bad "[$sh] impl wait gated: a design edge that did not read back passed (rc=$RC)"
+  unset GCTK_STUB_MISS
 
   # resume: both edges are there from the failed first pass, and bd's re-adds are no-ops
   fixture '.[1]._deps += [{id: "dz-impl", dependency_type: "blocks"}] | .[3]._deps += [{id: "dz-design", dependency_type: "blocks"}]'; subject_json
@@ -681,6 +714,11 @@ for sh in "${SHELLS[@]}"; do
     stopped && ok "[$sh] summary wait: an edge $edge bd refuses fails the step" \
       || bad "[$sh] summary wait: a refused edge $edge passed (rc=$RC)"
   done
+  fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=sum-1 REFUSE_EDGES="" GCTK_STUB_MISS=dep:sub-1
+  run_block summary-task-wait "$sh"
+  stopped && reported "did not read back" && ok "[$sh] summary wait: the subject's edge that does not read back fails the step" \
+    || bad "[$sh] summary wait: an edge that did not read back passed (rc=$RC)"
+  unset GCTK_STUB_MISS
 
   # resume: every edge is there from a failed pass, and bd's three re-adds are no-ops
   fixture ". + [$SUMMARY_ROW] | map(if .id == \"sub-1\" then ._deps += [{id: \"sum-1\", dependency_type: \"blocks\"}] elif .id == \"sum-1\" then ._deps += [{id: \"dz-design\", dependency_type: \"blocks\"}, {id: \"dz-impl\", dependency_type: \"blocks\"}] else . end)"
@@ -726,9 +764,9 @@ for sh in "${SHELLS[@]}"; do
   logged "deferred-dispatch arm sum-1 --target rig/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-report" \
     && ok "[$sh] dispatch: the summary task is armed to the polecat pool on mol-polecat-report" || bad "[$sh] dispatch: no arm on mol-polecat-report"
   eq "$(meta sub-1 gc.design_armed) $(meta sub-1 gc.impl_armed) $(meta sub-1 gc.summary_armed)" "1 1 1" "[$sh] dispatch: the three markers are stamped"
-  all_before "bd dep list" "update sub-1 --if-assignee" && all_before "bd show dz-" "update sub-1 --if-assignee" \
-    && ok "[$sh] dispatch: every target and edge is read back before the subject is handed over" \
-    || bad "[$sh] dispatch: the subject was handed over before the whole setup read back"
+  not_logged "bd dep list" && not_logged "bd show dz-" \
+    && ok "[$sh] dispatch: it reads no target or edge back, each having read back when its filing step wrote it" \
+    || bad "[$sh] dispatch: the setup was read back again"
   before "update sub-1 --if-assignee" "deferred-dispatch notify" && before "deferred-dispatch notify" "gc sling" \
     && before "gc sling" "deferred-dispatch arm dz-impl" && before "deferred-dispatch arm dz-impl" "deferred-dispatch arm sum-1" \
     && ok "[$sh] dispatch: the hand-over and its notice come before any dispatch" \
@@ -745,27 +783,6 @@ for sh in "${SHELLS[@]}"; do
     || bad "[$sh] dispatch all-in-one: held behind the design anyway"
 
   # --- setup-dispatch refusals: nothing handed over, nothing dispatched ---
-  for edge in "sub-1>dz-design" "sub-1>dz-impl" "sub-1>sum-1" "sum-1>dz-design" "sum-1>dz-impl" "dz-impl>dz-design"; do
-    a="${edge%%>*}"; b="${edge#*>}"
-    wired "map(if .id == \"$a\" then ._deps |= map(select(.id != \"$b\")) else . end)"
-    run_block setup-dispatch "$sh"
-    stopped && ! released && [ "$(field sub-1 assignee)" = "" ] && reported "the setup is not whole" \
-      && ok "[$sh] dispatch: a missing edge $edge hands nothing over and dispatches nothing" \
-      || bad "[$sh] dispatch: went ahead without the edge $edge (rc=$RC)"
-  done
-  # The implementation starting before the summary task is wired is the case
-  # all-in-one must never meet: its splits would have no summary task to wait on.
-  wired 'map(if .id == "sum-1" then ._deps = [._deps[] | select(.dependency_type != "blocks")] else . end) | map(if .id == "dz-impl" then ._deps = [] else . end)'
-  export DESIGN_GATED=false
-  run_block setup-dispatch "$sh"
-  stopped && not_logged "sling" && ok "[$sh] dispatch all-in-one: an unwired summary task starts no implementation" \
-    || bad "[$sh] dispatch all-in-one: the implementation was slung before the summary task waited on it (rc=$RC)"
-
-  wired '.[3].metadata = {}'
-  run_block setup-dispatch "$sh"
-  stopped && ! released && ok "[$sh] dispatch: a child that reads no target hands nothing over and dispatches nothing" \
-    || bad "[$sh] dispatch: a child with no target went ahead (rc=$RC)"
-
   wired
   printf '%s\n' '{"agents":[{"qualified_name":"rig/gc-toolkit.polecat"}]}' > "$ROSTER_FILE"
   run_block setup-dispatch "$sh"

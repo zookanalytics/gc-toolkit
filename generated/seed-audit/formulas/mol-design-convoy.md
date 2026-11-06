@@ -43,5 +43,5 @@ Steps (7):
   ├── mol-design-convoy.file-design: File the design child and wire the subject's wait on it [needs: mol-design-convoy.seed-branch]
   ├── mol-design-convoy.file-implementation: File the implementation child and wire its waits [needs: mol-design-convoy.file-design]
   ├── mol-design-convoy.file-summary: File the summary task and wire its waits [needs: mol-design-convoy.file-implementation]
-  ├── mol-design-convoy.dispatch: Read the setup back, hand the subject to the refinery, dispatch its work, and drain [needs: mol-design-convoy.file-summary]
+  ├── mol-design-convoy.dispatch: Hand the subject to the refinery, dispatch its work, and drain [needs: mol-design-convoy.file-summary]
   └── mol-design-convoy.workflow-finalize: Finalize workflow [needs: mol-design-convoy.dispatch]

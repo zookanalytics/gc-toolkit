@@ -29,7 +29,7 @@ LINE='GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'
 
 echo "# every copy is the one line"
 git -C "$ROOT" grep -l -F -e '# >>> gctk-bin' -- formulas skills assets/scripts ':!*.test.sh' > "$TMP/files"
-eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/bead-rehome.sh assets/scripts/converse-signoff.sh assets/scripts/deferred-dispatch.sh assets/scripts/first-reaction-dispose.sh assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/rig-checks.sh assets/scripts/self-review-check.sh assets/scripts/stand-down.sh formulas/mol-refinery-patrol.toml skills/converse-prep/SKILL.md " \
+eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/bead-rehome.sh assets/scripts/converse-signoff.sh assets/scripts/deferred-dispatch.sh assets/scripts/direct-merge-push.sh assets/scripts/first-reaction-dispose.sh assets/scripts/queue-priority.sh assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/rig-checks.sh assets/scripts/seed-audit-reaudit.sh assets/scripts/self-review-check.sh assets/scripts/stand-down.sh formulas/mol-design-convoy.toml formulas/mol-refinery-patrol.toml skills/converse-prep/SKILL.md " \
   "the block sits in the files that call gctk directly"
 while IFS= read -r f; do
   awk '/# >>> gctk-bin$/ {f = 1; n++; next} /# <<< gctk-bin$/ {f = 0; next} f {print n "\t" $0}' "$ROOT/$f" > "$TMP/copies"

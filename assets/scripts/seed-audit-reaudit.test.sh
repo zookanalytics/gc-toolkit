@@ -94,9 +94,6 @@ case "${1:-}" in
       esac
       shift || true
     done
-    # STUB_CREATE_LOSE_META files the bead without its metadata, as a write a
-    # degraded store loses would read back (docs/warrants.md, "bd write durability").
-    [ -z "${STUB_CREATE_LOSE_META:-}" ] || cmeta='{}'
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-sar.XXXXXX")
     jq -c --arg id "re-$n" --arg t "$title" --arg d "$body" --argjson m "$cmeta" --argjson p "$prio" \
@@ -129,6 +126,10 @@ chmod +x "$BIN/gc"
 printf '#!/usr/bin/env bash\nprintf "settle %%s\\n" "$2" >> "${STUB_GC_LOG:?}"\n[ -z "${STUB_SETTLE_RC:-}" ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit "$STUB_SETTLE_RC"; }\n' > "$BIN/queue-priority"
 chmod +x "$BIN/queue-priority"
 export PATH="$BIN:$PATH"
+# The re-audit is filed through `gctk bead create --verify`, which gctk.stub.sh
+# stands in for: the create reaches the stub gc above, and GCTK_STUB_MISS names
+# one that does not read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export GC_RIG="gc-toolkit"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 export STUB_STORE="$TMP/store.json" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
@@ -254,7 +255,7 @@ eq "$(meta re-9 gc.execution_routed_to)" "$ROUTE" "…and slung"
 reset '{"id":"re-9","status":"open","assignee":"","metadata":{"seed_audit_reaudit":"main"},"notes":""}'
 OUT=$(run --base main 2>&1); RC=$?
 eq "$RC" "2" "an adopted re-audit short of its identity exits 2"
-has "$OUT" "re-9 does not read back carrying its identity (it reads back partial target)" "…naming the key it is short of"
+has "$OUT" "re-9 does not carry its whole identity (short: target)" "…naming the key it is short of"
 eq "$(calls '^sling ')" "0" "…and slings nothing"
 eq "$(calls '^bd update ')" "0" "…and writes nothing to repair it"
 
@@ -294,9 +295,15 @@ has "$OUT" "the re-audit create was refused: the store refused the create" "…w
 eq "$(beads)|$(calls '^sling ')" "0|0" "…filing and slinging nothing"
 
 reset
-OUT=$(STUB_CREATE_LOSE_META=1 run --base main 2>&1); RC=$?
+: > "$TMP/gctk.log"
+OUT=$(run --base main 2>&1); RC=$?
+grep -qF -- '|--metadata|{"seed_audit_reaudit":"main","target":"main"}|--json|--verify|' "$TMP/gctk.log" \
+  && ok "the create carries the identity and asks gctk to read it back" \
+  || bad "the create is not verified (gctk calls: $(cat "$TMP/gctk.log"))"
+reset
+OUT=$(GCTK_STUB_MISS=create run --base main 2>&1); RC=$?
 eq "$RC" "2" "a created re-audit whose identity does not read back exits 2"
-has "$OUT" "re-1 does not read back carrying its identity (it reads back bare seed_audit_reaudit,target)" "…naming what the read before the sling found"
+has "$OUT" "re-1 was filed but did not read back carrying its identity" "…naming the bead it filed"
 eq "$(calls '^sling ')" "0" "…and slings nothing"
 
 echo "# --- metadata-key drift against lifecycle.toml ---"
