@@ -62,17 +62,7 @@
 # pr-facts.sh (a PR closed with a pre-recorded disposition, and that branch's
 # parked rework children), stand-down.sh (a person's ruling that work a human
 # gate holds will not go on), scaffolding-sweep.sh (a finding a disposed PR leaves
-# unanswered, closed onto the bug that carries it), deferred-dispatch.sh
-# (folded, onto the `until` target that closed last, for an open, unassigned
-# bead whose `until` targets have all closed, whose `until` edge to that target
-# still stands, that no open `blocks` blocker of its own holds, and that carries
-# no live work as live-work.sh defines it, checked on its listing and again on
-# a fresh read just before the call. It claims the bead before that read and
-# runs this script as the claim, its holder, so no other caller's stamp lands
-# on the bead while it holds the claim. It removes the pointer itself:
-# reopening the bead when its read after the close finds something that landed
-# on the bead or its edges while it held the bead, and giving the bead back
-# when this script stamped the pointer and did not close the bead).
+# unanswered, closed onto the bug that carries it).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -352,9 +342,7 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
     # carrying the operator's pre-recorded PR-close disposition for this kind
     # and successor (pr-dispose.sh) is that ruling already made, read from the
     # store rather than taken from the caller, so (b) does not re-judge it. An
-    # automated caller passes a judgment kind only on its own proof:
-    # deferred-dispatch.sh passes folded only for a bead its `until` targets
-    # resolved, and never for one carrying live work, which a merge_result is.
+    # automated caller passes a judgment kind only on its own proof.
     if ruled_disposition; then
         return 0
     fi
