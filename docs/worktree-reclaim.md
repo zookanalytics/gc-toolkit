@@ -44,8 +44,10 @@ forced, when all of these hold (`reapClosedBeadWorktrees` in
 
 - the tree sits under the city's worktree root for the rig,
   `.gc/worktrees/<rig>/`
-- its directory name, or its parent's, carries a bead id with one of the
-  city's prefixes, and that bead reads closed in the rig's store
+- the first bead id it reads in its directory name, or in its parent's when
+  that name holds none, names a bead that reads closed in the rig's store. It
+  reads an id as two neighboring pieces of the name, split at its dashes, of
+  which the first is one of the city's prefixes
 - it is not a named agent's home
 - it is older than `auto_reap_closed_bead_worktrees_min_age_minutes`, 10 by
   default, measured from the mtime of its `.git` file
@@ -67,10 +69,10 @@ checkout is safe until the tree's bead closes, and no longer. That gap is filed
 as work on Gas City.
 
 Each removal records a `bead.worktree.reaped` event, which names the bead, the
-path, the rig and the branch. A closed bead's tree that the reaper holds records
-`bead.worktree.reap_skipped` with the reason when the reaper first holds it, and
-again each time the reason changes, so a tree held for days for one reason can
-have a single event:
+path, the rig and the branch, `HEAD` for a detached tree. A closed bead's tree
+that the reaper holds records `bead.worktree.reap_skipped` with the reason when
+the reaper first holds it, and again each time the reason changes, so a tree
+held for days for one reason can have a single event:
 
 ```bash
 gc events --type bead.worktree.reaped --since 24h | jq -r '.payload.path'
@@ -82,7 +84,12 @@ So the reaper never takes:
 
 - a tree outside `.gc/worktrees/<rig>/`, such as a review's workspace under
   `$TMPDIR`
-- a tree whose directory name carries no bead id, such as an agent's home
+- a tree in whose name, or its parent's, it reads no closed bead of the rig's,
+  such as an agent's home. A home is named for its agent, as
+  `gc-toolkit.polecat-4` is. A converse sitting's home,
+  `gc-toolkit.tk-<conversation>`, does hold its conversation's id, but split at
+  its dashes the name's pieces are `gc`, `toolkit.tk` and the id's suffix, so
+  the reaper never reads that id
 - a tree that reads dirty
 - a tree whose commits no ref reaches
 
@@ -114,12 +121,12 @@ Restore: git -C <repo> worktree add <path> archive/worktree/<bead>@${sha:0:12}"
 ## Branches
 
 The hand-off deletes the local `polecat/<bead-id>` branch with the tree.
-Nothing deletes the branch that a kept tree, a store-only exit, a halt or a run
-that ended before its hand-off leaves behind. The controller's reaper deletes
-no ref, and core's `prune-branches` order reads only `gc/*` branches and
-deletes with `git branch -d`, which refuses a squash-merged tip. Such a branch
-costs one ref. It keeps the commits of work that never landed reachable, so the
-controller can still take the tree they sit in once its bead closes.
+No reaper deletes the branch that a kept tree, a store-only exit, a halt or a
+run that ended before its hand-off leaves behind. The controller's reaper
+deletes no ref, and core's `prune-branches` order reads only `gc/*` branches
+and deletes with `git branch -d`, which refuses a squash-merged tip. Such a
+branch costs one ref. It keeps the commits of work that never landed reachable,
+so the controller can still take the tree they sit in once its bead closes.
 
 ## Restoring a removed tree
 
