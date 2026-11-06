@@ -130,7 +130,7 @@ CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
 cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$HERE/rig-root.sh" \
-  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$HERE/hold-lib.sh" "$PACK/"
+  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$HERE/hold-lib.sh" "$HERE/dispatch-path.sh" "$PACK/"
 cat > "$PACK/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LC_LOG"
