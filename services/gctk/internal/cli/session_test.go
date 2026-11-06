@@ -56,6 +56,7 @@ const (
 	draftClaudeBox = "────────────────────────────────────────\n\x1b[39m❯\u00a0half a message\n────────────────────────────────────────\n"
 	emptyCodexBox  = "• PONG\n\n\x1b[1m›\x1b[0m \x1b[2mExplain this codebase\x1b[22m\n\n  gpt-5.5 low · /tmp/probe\n"
 	claudeBead     = `[{"id":"tk-s1","metadata":{"provider":"claude","session_name":"s-tk-s1"}}]`
+	codexBead      = `[{"id":"tk-s1","metadata":{"provider":"codex","session_name":"s-tk-s1"}}]`
 )
 
 type titleRig struct {
@@ -240,12 +241,36 @@ func TestSessionTitle(t *testing.T) {
 
 	t.Run("a codex session takes the same /rename", func(t *testing.T) {
 		r := newTitleRig(t)
-		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s1","metadata":{"provider":"codex","session_name":"s-tk-s1"}}]`)
+		t.Setenv("STUB_SESSION_BEAD", codexBead)
 		r.screens(emptyCodexBox)
 		if _, stderr, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|nudge|")) != 1 {
 			t.Fatalf("exit %d, stderr %q, nudges %q", code, stderr, r.calls("gc|session|nudge|"))
 		}
 	})
+
+	// A Codex draft can leave nothing after the glyph on the composer's first
+	// row, and Gas City's nudge would submit it with the /rename joined on.
+	for _, tc := range []struct{ name, capture string }{
+		{"blank first row, text below", "\x1b[1m›\x1b[0m \n  unfinished operator message\n\n  ? for shortcuts\n"},
+		{"later row a bare glyph", "\x1b[1m›\x1b[0m hello\n  ›\n\n  ? for shortcuts\n"},
+		{"scrolled to a blank row", "\x1b[1m›\x1b[0m" + strings.Repeat(" ", 78) + "\x1b[2m↑\x1b[22m\n  a later line\n\n  ? for shortcuts\n"},
+	} {
+		t.Run("a codex draft with "+tc.name+": no nudge", func(t *testing.T) {
+			r := newTitleRig(t)
+			t.Setenv("STUB_SESSION_BEAD", codexBead)
+			r.screens(tc.capture)
+			stdout, _, code := r.run("--topic", "x")
+			if code != sessionExitDone {
+				t.Fatalf("exit %d, want %d", code, sessionExitDone)
+			}
+			if got := r.calls("gc|session|nudge|"); len(got) != 0 {
+				t.Fatalf("typed into a draft: %q", got)
+			}
+			if !strings.Contains(stdout, "skipped the /rename nudge: the input box still held text") {
+				t.Fatalf("stdout %q does not report the skip", stdout)
+			}
+		})
+	}
 
 	t.Run("a wrapped provider whose builtin is claude", func(t *testing.T) {
 		r := newTitleRig(t)

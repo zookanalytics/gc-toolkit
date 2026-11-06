@@ -13,12 +13,17 @@
 // rust-v0.164.0). Without the attributes an empty box with a placeholder reads
 // as one holding a draft, so the capture this package reads keeps them.
 //
-// Read departs from paneShowsDrainedComposer in one case. Gas City's reader
-// asks only whether a box is drained, so a row with Claude Code's glyph that
-// no rules frame is read there by the text after the glyph, as a Codex row
-// is. Claude Code draws its box between rules, so such a row is a menu's
-// cursor, such as a permission menu's, or a message of the transcript, and
-// Read reports no box.
+// Gas City's reader asks only whether a box is drained, such as to confirm a
+// delivery, and outside a framed Claude Code box it reads the last row with a
+// prompt glyph by the text after the glyph. Read decides whether typing into
+// the box would join a person's draft, so it departs from
+// paneShowsDrainedComposer where that text does not show the box empty. A row
+// with Claude Code's glyph that no rules frame is no box: Claude Code draws its
+// box between rules, so such a row is a menu's cursor, such as a permission
+// menu's, or a message of the transcript. A Codex composer is empty only while
+// its prompt row shows the placeholder, because Codex draws the glyph on the
+// first row of a draft alone, and a row with nothing after the glyph can open
+// a draft whose text is below it.
 package composer
 
 import (
@@ -78,11 +83,20 @@ var prompts = []prompt{
 // a provider's prompt glyph, because both providers draw earlier messages with
 // the same glyph above it. Claude Code frames its box with full-width rules,
 // and every row between them is the draft, so a row with its glyph that no
-// rules frame is no box. A Codex box holds text when its row does after the
-// glyph.
+// rules frame is no box. A Codex box is empty only when its row is dim from
+// the first cell after the glyph, which is where Codex draws its placeholder,
+// and it holds text otherwise. While input is enabled, Codex draws the
+// placeholder exactly when its composer holds no text (textarea_is_empty in
+// render_with_options, in codex-rs/tui/src/bottom_pane/chat_composer.rs at
+// openai/codex rust-v0.164.0). The rows under the prompt row cannot show it
+// instead. Codex starts a draft's later rows in the composer's third column,
+// the footer it draws under the composer starts there too
+// (FOOTER_INDENT_COLS), and the footer's text is not dim (secondary_text_style
+// and key_hint_style).
 func Read(capture string) State {
-	lines := strings.Split(strings.TrimRight(capture, "\n"), "\n")
-	for i, line := range lines {
+	raw := strings.Split(strings.TrimRight(capture, "\n"), "\n")
+	lines := make([]string, len(raw))
+	for i, line := range raw {
 		lines[i] = StripDim(line)
 	}
 	live, prefix := -1, ""
@@ -122,10 +136,22 @@ func Read(capture string) State {
 	if prefix == claudePrompt {
 		return Absent
 	}
-	if strings.TrimSpace(remainder(lines[live], prefix)) != "" {
-		return Holding
+	if strings.TrimSpace(remainder(lines[live], prefix)) == "" && showsPlaceholder(raw[live], prefix) {
+		return Empty
 	}
-	return Empty
+	return Holding
+}
+
+// showsPlaceholder reports whether the prompt row line, captured with its
+// escapes, has text in the first cell after the glyph and its space. Called
+// on a row with nothing but blanks after the glyph once the dim text is gone,
+// it reports whether the row is dim from that cell, as Codex's placeholder
+// is. A reverse-video cursor cell on the placeholder's first character goes
+// with it, as StripDim pairs them. Codex's scroll arrows are dim too, but sit
+// in the row's right margin after blank cells.
+func showsPlaceholder(line, prefix string) bool {
+	rest := remainder(plainText(line), prefix)
+	return rest != "" && rest[0] != ' '
 }
 
 // claudeInput finds Claude Code's live input box in lines: the last prompt
@@ -208,7 +234,6 @@ func stripBoxBorder(s string) string {
 // highlighted text, and stays (stripDimText).
 func StripDim(line string) string {
 	var b strings.Builder
-	var attrs sgrAttrs
 	// cursor holds a reverse-video run until the next visible character shows
 	// whether a dim placeholder follows it.
 	var cursor strings.Builder
@@ -218,22 +243,41 @@ func StripDim(line string) string {
 		}
 		cursor.Reset()
 	}
+	eachTextByte(line, func(c byte, attrs sgrAttrs) {
+		switch {
+		case attrs.dim:
+			settle(true)
+		case attrs.reverse:
+			cursor.WriteByte(c)
+		default:
+			settle(false)
+			b.WriteByte(c)
+		}
+	})
+	settle(false)
+	return b.String()
+}
+
+// plainText removes the escape sequences from a row captured with
+// capture-pane -e and keeps every character, dim or not.
+func plainText(line string) string {
+	var b strings.Builder
+	eachTextByte(line, func(c byte, _ sgrAttrs) { b.WriteByte(c) })
+	return b.String()
+}
+
+// eachTextByte calls text with each byte of line that no escape sequence
+// holds, and the SGR attributes it is drawn with.
+func eachTextByte(line string, text func(c byte, attrs sgrAttrs)) {
+	var attrs sgrAttrs
 	for i := 0; i < len(line); {
 		if line[i] != 0x1b {
-			switch {
-			case attrs.dim:
-				settle(true)
-			case attrs.reverse:
-				cursor.WriteByte(line[i])
-			default:
-				settle(false)
-				b.WriteByte(line[i])
-			}
+			text(line[i], attrs)
 			i++
 			continue
 		}
 		if i+1 >= len(line) {
-			break
+			return
 		}
 		switch line[i+1] {
 		case '[': // CSI: parameters, then a final byte in 0x40-0x7e.
@@ -258,11 +302,9 @@ func StripDim(line string) string {
 			i += 2
 		}
 	}
-	settle(false)
-	return b.String()
 }
 
-// sgrAttrs are the SGR attributes StripDim tracks.
+// sgrAttrs are the SGR attributes eachTextByte tracks.
 type sgrAttrs struct {
 	dim     bool // SGR 2, cleared by 22
 	reverse bool // SGR 7, cleared by 27

@@ -17,6 +17,18 @@ var (
 	claudeRule256   = "\x1b[38;5;244m" + strings.Repeat("─", 80)
 )
 
+// The Codex 0.164 rows are built from its render code at openai/codex
+// rust-v0.164.0, not captured: ChatComposer::render_with_options draws the
+// glyph on the first row of the draft alone, the draft's rows from the third
+// column, its placeholder dim from that column while the draft is empty, and
+// its scroll arrows dim in the right margin. The footer under the composer
+// starts in the same third column (FOOTER_INDENT_COLS), in a color that is not
+// dim (secondary_text_style).
+var (
+	codexGlyph  = "\x1b[1m›\x1b[0m"
+	codexFooter = "\x1b[38;2;139;139;139m  ? for shortcuts" + strings.Repeat(" ", 46) + "100% context left\x1b[39m"
+)
+
 func capture(rows ...string) string { return strings.Join(rows, "\n") + "\n" }
 
 func TestRead(t *testing.T) {
@@ -207,6 +219,68 @@ func TestRead(t *testing.T) {
 				"\x1b[1m›\x1b[0m [Pasted Content 1200 chars]",
 				"",
 				"  gpt-5.5 low · /tmp/probe",
+			),
+			want: Holding,
+		},
+		{
+			// The footer's text is not dim, and the placeholder still marks
+			// the box empty.
+			name: "codex 0.164 idle, footer not dim",
+			capture: capture(
+				"",
+				codexGlyph+" \x1b[2mAsk Codex to do anything\x1b[22m",
+				"",
+				codexFooter,
+			),
+			want: Empty,
+		},
+		{
+			// A cursor drawn on the placeholder's first character goes with
+			// the placeholder, as StripDim pairs them.
+			name: "codex placeholder under a reverse-video cursor cell",
+			capture: capture(
+				"",
+				codexGlyph+" \x1b[7mA\x1b[27m\x1b[2msk Codex to do anything\x1b[22m",
+				"",
+				codexFooter,
+			),
+			want: Empty,
+		},
+		{
+			// A draft whose first line is blank, such as one written in the
+			// external editor, leaves nothing after the glyph.
+			name: "codex draft whose first row is blank",
+			capture: capture(
+				"",
+				codexGlyph+" ",
+				"  unfinished operator message",
+				"",
+				codexFooter,
+			),
+			want: Holding,
+		},
+		{
+			// A draft taller than the box, scrolled to a blank line of it: the
+			// dim scroll arrow in the right margin is no placeholder.
+			name: "codex scrolled draft showing a blank row",
+			capture: capture(
+				"",
+				codexGlyph+strings.Repeat(" ", 78)+"\x1b[2m↑\x1b[22m",
+				"  a later line of a long draft"+strings.Repeat(" ", 49)+"\x1b[2m↓\x1b[22m",
+				"",
+				codexFooter,
+			),
+			want: Holding,
+		},
+		{
+			// A later row of the draft that is the bare glyph is no prompt.
+			name: "codex draft whose later row is a bare glyph",
+			capture: capture(
+				"",
+				codexGlyph+" hello",
+				"  ›",
+				"",
+				codexFooter,
 			),
 			want: Holding,
 		},
