@@ -29,8 +29,8 @@
 # Removal takes each git worktree inside a workspace with `git worktree
 # remove`, deepest first, so its registration goes with its directory. Nothing
 # here runs `git worktree prune`, which is repository-wide: it drops the admin
-# HEAD of every other worktree whose directory has gone, the ref worktree-reap
-# pins before it prunes (docs/worktree-reclaim.md).
+# HEAD of every other worktree whose directory has gone, which for a detached
+# worktree can be the only ref to its commits (docs/worktree-reclaim.md).
 #
 # reap reads every gc-review-* entry this user owns directly under the
 # directory, and under /tmp as well unless REVIEW_WORKSPACE_DIR names the one

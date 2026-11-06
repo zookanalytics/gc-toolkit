@@ -261,7 +261,9 @@ rig root before the session starts. This holds for the worker pools (polecat,
 proactive, refinery) and for the coordination roles that shell `gh`/`git`
 (the `converse-<model>` sitting templates, witness). The worktree is not the
 rig's main checkout (`rigs/<rig>`), so it does not collide with the refinery's
-home; `worktree-reap.sh` protects it as an agent home. The template variables
+home. The controller's closed-bead reaper never takes it, because a home's
+directory name carries no bead id ([worktree-reclaim.md](worktree-reclaim.md)).
+The template variables
 `work_dir` and `pre_start` accept are upstream's
 ([config reference](https://docs.gascity.com/reference/config), `Agent`).
 
