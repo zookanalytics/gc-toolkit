@@ -9,7 +9,8 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 These are the ways to say that a bead needs work, who should do it, or that it
 needs none. Each option says what the message means, who acts on it, and the
 one writer that sends it. The writer's `--help` carries its flags. Doing the
-work is a molecule's job, so nothing here changes a repo.
+work is a molecule's job, so nothing here changes a repo except an integration
+effort's branch, which the mechanik pushes (below).
 
 The writers are the gc-toolkit pack's own scripts.
 `gc <binding> scripts-dir` prints their directory in the pack as gc loaded it,
@@ -121,12 +122,20 @@ the PR's summary once they have all landed, and the refinery takes the landing
 bead that carries the branch through the one PR the operator reviews. A lone
 bead needs none of this: slung to a pool, it opens its own PR.
 
-Writer: the recipe in `integration-effort.md`, beside this file. It files the
-landing bead and cuts its branch, files each bead with its target and the
-landing bead's wait on it, files the summary task, and hands the landing bead
-to the refinery before it dispatches anything, reading each write back before
-the next. It also says how a bead joins an effort later and how the effort's
-branch is brought current.
+Writer: the recipe in `integration-effort.md`, beside this file, which the
+mechanik runs. It files the landing bead and cuts its branch, files each bead
+with its target and the landing bead's wait on it, files the summary task, and
+hands the landing bead to the refinery before it dispatches anything, reading
+each write back before the next. It also says how a bead joins an effort later
+and how the effort's branch is brought current.
+
+The recipe's branch cut is a push, and a converse sitting never pushes, so a
+sitting does not run it. When the subject's recommendation is
+`mol-design-convoy`, the sign-off's `--accept` takes it (Take a recommendation,
+below), and that formula's run cuts the branch. Any other effort goes to the mechanik as a bead in the effort's rig that names
+the effort's beads and what it delivers,
+`gc bd --rig <rig> create "<title>" -t task -d "<description>" --json`, sent to
+the mechanik as a named agent's bead (A named agent takes an assignee, above).
 
 ## Take a recommendation
 

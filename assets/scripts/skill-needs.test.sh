@@ -551,6 +551,23 @@ awk '/^\[/ { exit }
 have "the design-convoy formula's own description says which work it fits" 'high-blast-radius' "$TMP/design-description"
 lacks "the design-convoy doc carries no formula choice for an agent" 'When to reach for it' "$DESIGN_DOC" \
     "which work a formula fits is its own description, which the work skill reads"
+# The effort recipe pushes the effort's branch, and converse sittings, which
+# never push, load the work skill. So the skill and the recipe name the session
+# that runs it, and the skill sends a sitting's effort to the Accept path or to
+# that session. Read with whitespace squeezed, so a re-wrap keeps them.
+WORK_JOINED="$TMP/work-squeezed"
+tr -s '[:space:]' ' ' <"$WORK_SKILL" >"$WORK_JOINED"
+EFFORT_JOINED="$TMP/effort-squeezed"
+tr -s '[:space:]' ' ' <"$SKILLS/work/integration-effort.md" >"$EFFORT_JOINED"
+have "the work skill names the session that runs the effort recipe" \
+    'beside this file, which the mechanik runs.' "$WORK_JOINED"
+have "…and the recipe names it too" 'The mechanik runs this recipe.' "$EFFORT_JOINED"
+have "…and a sitting does not run it" 'a converse sitting never pushes, so a sitting does not run it.' "$WORK_JOINED"
+have "…but takes a design-convoy recommendation through Accept" \
+    "When the subject's recommendation is \`mol-design-convoy\`, the sign-off's \`--accept\` takes it" "$WORK_JOINED"
+have "…and hands any other effort to the mechanik" 'Any other effort goes to the mechanik' "$WORK_JOINED"
+lacks "the work skill claims no scope the recipe's push breaks" 'nothing here changes a repo.' "$WORK_JOINED" \
+    "the effort recipe pushes the effort's branch"
 # A supplement goes to the PR's own rig, because a pool reads only its rig's
 # store, and the anchor waits on it, because the merge holds on what blocks the
 # anchor and never on a bead that only names the PR's branch. The hold is read

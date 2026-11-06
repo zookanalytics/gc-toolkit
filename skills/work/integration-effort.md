@@ -1,6 +1,9 @@
 # Stand up an integration effort
 
-The `work` skill's section of the same name points here.
+The `work` skill's section of the same name points here. The mechanik runs this
+recipe. Its branch cut in step 2 is a push from the rig's checkout, which a
+converse sitting never makes, so the skill's section says where a sitting sends
+an effort instead.
 
 A PR comes from one bead, which owns it and its rework until it merges, so
 `closed` always means landed. A lone bead needs nothing else: filed in its rig's
