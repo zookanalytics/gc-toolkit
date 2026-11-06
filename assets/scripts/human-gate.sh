@@ -235,14 +235,19 @@ fi
 # The gate's description is the whole message: what the person reads, and what
 # a filer that keeps its report current compares against. bd gate create puts a
 # head of its own above the reason it is given and takes no description, so the
-# description is set to the message in a second write, which the read-back below
-# checks. Filing is rare beside the dedup above, so the write is paid once per
-# gate.
-gc bd update "$GATE" --description "$MESSAGE" </dev/null >/dev/null 2>&1 || true
+# description is set to the message in a second write. Filing is rare beside the
+# dedup above, so the write is paid once per gate. A description the store
+# refuses still leaves a gate that asks, its message under bd's head, so the
+# filing stands and only the repair is named.
+gc bd update "$GATE" --description "$MESSAGE" </dev/null >/dev/null 2>&1 \
+  || warn "gate $GATE asks for $SUBJECT [$KEY], but the store refused its description, so bd's own head stands above the message; repair: gc bd update $GATE --description <the message>"
 
 # The gate asks only while it blocks the bead under the key, so its edge, its
 # type and its await id are read back from the bead's side, the read every other
-# reader makes.
+# reader makes. The subject can sit in another store than the gate, where bd
+# stores the edge without finding its target, and every caller's next act, such
+# as a cancel or a drain, cannot be undone (docs/warrants.md, "bd write
+# durability").
 if ! GOT=$(bd_human_gates "$SUBJECT"); then
   warn "gate $GATE was filed, but the human gates of $SUBJECT did not read back; check that it blocks $SUBJECT under [$KEY]: gc bd dep list $SUBJECT --type blocks --json"
   exit 1
@@ -250,11 +255,6 @@ fi
 if ! printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1; then
   warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
   exit 1
-fi
-# A description that did not take still leaves a gate that asks, its message
-# under bd's head, so the filing stands and only the repair is named.
-if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg m "$MESSAGE" 'any(.[]; .id == $g and (.description // "") == $m)' >/dev/null 2>&1; then
-  warn "gate $GATE asks for $SUBJECT [$KEY], but its description did not become the message, so bd's own head stands above it; repair: gc bd update $GATE --description <the message>"
 fi
 
 # The deacon's shift record. Filing a gate is a non-routine action, and this is

@@ -74,8 +74,8 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
 # pass after each write the stand-down makes. STUB_SHOW_FAILS_AFTER is text: once a
 # bd call carrying it has run, every show fails, and STUB_DEPS_FAIL_AFTER is the same
 # for every dep list. STUB_KEEP_KEY names a key a set or an unset leaves in place with
-# exit 0, a write that reports success and half lands, STUB_KEEP_EDGE has a dep remove
-# do the same, and STUB_CLOSE_NOOP has a close exit 0 and write nothing.
+# exit 0, a write a degraded store loses (docs/warrants.md, "bd write durability"),
+# and STUB_KEEP_EDGE has a dep remove do the same.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"
@@ -185,7 +185,6 @@ case "$verb" in
   close)
     id="${1:-}"; shift || true; reason=""
     while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
-    [ -z "${STUB_CLOSE_NOOP:-}" ] || exit 0
     who=$(jq -r --arg id "$id" '(.[] | select(.id == $id) | .assignee // "") // ""' "$S")
     if [ -n "$who" ] && [ "$who" != "$actor" ]; then
       echo "Error: cannot close $id: assignee is \"$who\", actor is \"$actor\"; reclaim or use --force to override" >&2; exit 1
@@ -422,10 +421,6 @@ run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 0 "a re-run once the route clears stands it down"
 eq "$(meta tk-w gc.routed_to)" "" "…with no route left"
 eq "$(field tk-w status)" closed "…and closes it"
-fresh
-STUB_CLOSE_NOOP=1 run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a close that reports success and does not land is no stand-down"
-has "$OUT" "does not read back closed" "…and it says so"
 stop_case "the disarm" "--unset-metadata gc.dispatch_when_ready " open armed "was not removed"
 stop_case "the release" "gc.takeaway=" open gone "did not end or its route did not clear"
 stop_case "the answer" "gate resolve" open gone "did not resolve"

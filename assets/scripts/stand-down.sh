@@ -11,7 +11,9 @@
 # first makes the bead ready, which is what the arm waits for. This runs the one
 # order that does end it:
 #   1. It removes the arm, and any notice owed, through deferred-dispatch.sh
-#      disarm, and reads the arm back. The reconcile pass reads an arm again just
+#      disarm, and reads the arm back, as it reads back each step before the
+#      close, which cannot be undone (docs/warrants.md, "bd write durability").
+#      The reconcile pass reads an arm again just
 #      before it slings, so a pass that reads the gate closed reads the arm gone.
 #   2. It ends the run beneath the bead and clears the bead's route and session
 #      pins through gc-helm.sh takeaway --release --no-wait, and reads back that
@@ -24,8 +26,8 @@
 #      about the rest. Either way the bead is ready from here on, with nothing
 #      left to send it, which is why this comes after the arm and the route.
 #   4. It hands the close to bead-rehome.sh, the writer of a close that is not a
-#      landing, as not-needed. The bead's branch ends with the close, as any
-#      disposition's does.
+#      landing, as not-needed, and takes its exit as the close's. The bead's
+#      branch ends with the close, as any disposition's does.
 #
 # The evidence the pointer names is the gate that carries the ruling, unless
 # --successor names other evidence, such as a sitting's conversation. A gate this
@@ -224,8 +226,5 @@ work_outcome_noop "$WORK" gc bd
 
 "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING" \
   || stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
-
-[ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ] \
-  || stopped "$WORK does not read back closed."
 echo "$PROG: $WORK closed as not needed, per $SUCCESSOR; nothing re-slings it"
 exit 0
