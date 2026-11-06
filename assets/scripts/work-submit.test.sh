@@ -39,8 +39,8 @@ cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-cl
    "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/deferred-dispatch.sh" "$PACK/" 2>/dev/null
 export REAL_GIT LOG="$TMP/log" STORE="$TMP/store.json"
 
-# git: push and ls-remote can be made to fail, and a push, a worktree's removal and
-# a branch's delete are logged, whatever directory -C names.
+# git: push, ls-remote and the worktree list can be made to fail, and a push, a
+# worktree's removal and a branch's delete are logged, whatever directory -C names.
 cat > "$BIN/git" <<'SH'
 #!/usr/bin/env bash
 dir=()
@@ -54,7 +54,10 @@ case "${1:-}" in
   branch)
     case "${2:-}" in -D) printf 'release %s\n' "${3:-}" >> "$LOG" ;; esac ;;
   worktree)
-    case "${2:-}" in remove) printf 'remove %s\n' "${3:-}" >> "$LOG" ;; esac ;;
+    case "${2:-}" in
+      remove) printf 'remove %s\n' "${3:-}" >> "$LOG" ;;
+      list) [ -z "${WORKTREE_LIST_DOWN:-}" ] || { echo "fatal: unreadable (stub)" >&2; exit 128; } ;;
+    esac ;;
 esac
 exec "$REAL_GIT" ${dir[@]+"${dir[@]}"} "$@"
 SH
@@ -274,6 +277,14 @@ eq "$RC" 0 "(2f) a call run in a tree the bead does not record: exits 0"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2f) that tree is not removed, and keeps its branch"
 eq "$(meta work_dir)" "$TMP/elsewhere" "(2f) work_dir is left as it was"
 has "$OUT" "ran in no tree that tk-w records" "(2f) and says so"
+prepare polecat/tk-w "$FRESH"
+go WORKTREE_LIST_DOWN=1
+eq "$RC" 0 "(2g) the worktrees cannot be listed: exits 0"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2g) the handoff stands"
+eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2g) the tree is not removed, and keeps its branch"
+eq "$(meta work_dir)" "$C" "(2g) work_dir still names it"
+eq "$(grep -cE '^(remove|release) ' "$LOG" | tr -d ' ')" 0 "(2g) nothing is removed or deleted"
+has "$OUT" "could not list the worktrees" "(2g) and says why"
 
 echo "# a rework child stands on the reviewed branch, and a caller's target wins"
 prepare polecat/tk-anchor '{"branch":"polecat/tk-anchor","target":"integration/x"}'

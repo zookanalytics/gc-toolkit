@@ -421,7 +421,7 @@ close_step
 # The header says what goes and what stays. The hand-off is already written, so
 # each way this stops short is said, and none fails the call.
 release_tree() {
-  local out list nl=$'\n'
+  local out list="" nl=$'\n'
   cd "${GC_DIR:-/nonexistent}" 2>/dev/null || cd "$(dirname "${OWN_TREE:-/}")" 2>/dev/null || cd /
   if [ -z "$OWN_TREE" ] || [ -z "$COMMON_DIR" ]; then
     echo "$PROG: this call ran in no tree that $WORK_ID records as its work_dir, so no tree is removed, and $CURRENT_BRANCH stays checked out where it is." >&2
@@ -431,7 +431,10 @@ release_tree() {
     echo "$PROG: $OWN_TREE is this session's own directory, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
     return 0
   fi
-  list=$(git -C "$COMMON_DIR" worktree list --porcelain 2>/dev/null) || list=""
+  if [ -e "$OWN_TREE" ] && ! list=$(git -C "$COMMON_DIR" worktree list --porcelain 2>/dev/null); then
+    echo "$PROG: git could not list the worktrees, so $OWN_TREE is not removed, and $CURRENT_BRANCH stays checked out there." >&2
+    return 0
+  fi
   case "$nl$list" in
     *"${nl}worktree $OWN_TREE/"*)
       echo "$PROG: $OWN_TREE holds another worktree, so it is not removed, and $CURRENT_BRANCH stays checked out there." >&2
