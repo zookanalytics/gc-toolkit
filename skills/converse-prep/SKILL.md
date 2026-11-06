@@ -8,12 +8,27 @@ description: Converse's session titling and subject prime.
 Each tool call starts a fresh shell, so set `CONV`, `CONVERSATION` and
 `SUBJECT` literally, from what step 1 found, at the top of every call below.
 Run these only after step 2's premise re-check holds — a conversation that
-closes at step 2 must not have moved the operator's session title.
+closes at step 2 must not have moved the operator's session title or posted on
+the subject's pull request.
 
 ## 3. Title
 
-`gc session rename "$GC_SESSION_ID" "$SUBJECT — <topic>"`.
-Re-run it if your focus moves to a different subject.
+Name the topic in a few words of your own: what this conversation is
+discussing. It titles your session and the conversation. When the subject has
+a pull request, the comment there that shows this visit carries the
+conversation's title as its topic, where anyone who reads the pull request
+sees it. So write it yourself, not in the operator's words, and name no other
+rig or its beads:
+```bash
+TOPIC="<topic>"
+gc session rename "$GC_SESSION_ID" "$SUBJECT — $TOPIC"
+gc bd update "$CONVERSATION" --title "$TOPIC" \
+  && "$CONV/pr-sitting-comment.sh" post --sitting "$CONVERSATION" --topic "$TOPIC"
+```
+Re-run it with the new topic only when your focus moves to a different one.
+The comment is best effort, and it posts nothing when the subject has no pull
+request. When the visit ends it keeps the topic and adds the conclusion and
+the actions that steps 6–7 record on the conversation.
 
 ## 4. Prime
 

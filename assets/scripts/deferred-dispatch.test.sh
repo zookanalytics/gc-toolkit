@@ -384,35 +384,23 @@ case "${1:-}" in
         echo "Error: precondition failed for $id: status/assignee changed" >&2; exit 13
       fi
     fi
-    tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
-    cp "$STORE" "$tmp"
-    # A status that leaves closed takes the close with it, as bd's reopen does.
-    if [ "$new_st" != "-" ]; then
-      jq -c --arg id "$id" --arg s "$new_st" \
-        'map(if .id == $id then ((if .status == "closed" and $s != "closed" then del(.close_reason) else . end) | .status = $s) else . end)' \
-        "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    if [ "$new_who" != "-" ]; then
-      jq -c --arg id "$id" --arg a "$new_who" 'map(if .id == $id then .assignee = $a else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    for kv in ${sets[@]+"${sets[@]}"}; do
-      k="${kv%%=*}"; v="${kv#*=}"
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
-        'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    for k in ${unsets[@]+"${unsets[@]}"}; do
-      jq -c --arg id "$id" --arg k "$k" \
-        'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    if [ "$note_mode" = "append" ]; then
-      jq -c --arg id "$id" --arg n "$note" \
-        'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
-        "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    elif [ "$note_mode" = "replace" ]; then
-      jq -c --arg id "$id" --arg n "$note" \
-        'map(if .id == $id then .notes = $n else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    mv "$tmp" "$STORE"
+    # One jq pass lands the whole update, in bd's order: the status (one that
+    # leaves closed takes the close with it, as bd's reopen does), the
+    # assignee, each --set-metadata k=v split at its first =, each
+    # --unset-metadata, then the notes, appended or replaced.
+    tmp="$STORE.$$"
+    jq -c --arg id "$id" --arg st "$new_st" --arg who "$new_who" --arg mode "$note_mode" --arg n "$note" \
+       --argjson ns "${#sets[@]}" '
+      ($ARGS.positional[:$ns] | map(split("=") as $p | if ($p | length) <= 1 then [., .] else [$p[0], ($p[1:] | join("="))] end)) as $sets
+      | $ARGS.positional[$ns:] as $unsets
+      | map(if .id == $id then
+          (if $st != "-" then ((if .status == "closed" and $st != "closed" then del(.close_reason) else . end) | .status = $st) else . end)
+          | (if $who != "-" then .assignee = $who else . end)
+          | reduce $sets[] as [$k, $v] (.; .metadata[$k] = $v)
+          | reduce $unsets[] as $k (.; .metadata |= del(.[$k]))
+          | (if $mode == "append" then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n)
+             elif $mode == "replace" then .notes = $n else . end)
+        else . end)' "$STORE" --args ${sets[@]+"${sets[@]}"} ${unsets[@]+"${unsets[@]}"} > "$tmp" && mv "$tmp" "$STORE"
     [ -z "$held" ] || [ -z "${STUB_UPDATE_HOLD_AFTER:-}" ] || hold_update
     echo "updated $id"
     ;;
@@ -512,7 +500,10 @@ fi
 if [ "${1:-}" = "bd" ]; then
     shift
     printf '%s\n' "$*" >> "${STUB_BD_LOG:-/dev/null}"
-    VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@"
+    # The bd stub runs in this process rather than a second bash's.
+    export VIA_GC_BD=1
+    . "${0%/*}/bd" "$@"
+    exit
 fi
 if [ "${1:-}" = "sling" ]; then
     shift

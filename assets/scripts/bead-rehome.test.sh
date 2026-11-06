@@ -116,7 +116,8 @@ field()  { sed -n "s/^$2=//p" "$TMP/rigs/$1/.beads/$3" 2>/dev/null | tail -1; }
 # Only the surface bead-rehome.sh touches.
 case "$1 $2" in
   "rig list") cat "$FAKE_RIGS_JSON" ;;
-  "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
+  # The bd stub runs in this process rather than a second bash's.
+  "bd "*)    shift; export VIA_GC_BD=1; . "${0%/*}/bd" "$@"; exit ;;
   *) exit 1 ;;
 esac
 GC
