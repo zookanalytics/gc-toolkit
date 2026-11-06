@@ -943,12 +943,12 @@ eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | [
 ROOT="$(cd "$HERE/../.." && pwd)"
 for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-hq-marooned-work/run.sh; do
   code=$(grep -vE '^[[:space:]]*#' "$ROOT/$r")
-  if printf '%s\n' "$code" | grep -qE '^[[:space:]]*\.[[:space:]].*bd-lib\.sh'; then ok "(READERS) $r sources bd-lib.sh"
+  if grep -qE '^[[:space:]]*\.[[:space:]].*bd-lib\.sh' <<< "$code"; then ok "(READERS) $r sources bd-lib.sh"
   else bad "(READERS) $r sources bd-lib.sh"; fi
-  if printf '%s\n' "$code" | grep -q 'HUMAN_GATE_JQ' && printf '%s\n' "$code" | grep -q 'open_human_gate'; then
+  if grep -q 'HUMAN_GATE_JQ' <<< "$code" && grep -q 'open_human_gate' <<< "$code"; then
     ok "(READERS) …and judges a gate by \$HUMAN_GATE_JQ's open_human_gate"
   else bad "(READERS) $r judges a gate by \$HUMAN_GATE_JQ's open_human_gate"; fi
-  if printf '%s\n' "$code" | grep -q 'await_type'; then bad "(READERS) $r tests no gate's await type itself"
+  if grep -q 'await_type' <<< "$code"; then bad "(READERS) $r tests no gate's await type itself"
   else ok "(READERS) …and tests no gate's await type itself"; fi
 done
 
