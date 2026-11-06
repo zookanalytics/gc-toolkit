@@ -198,7 +198,9 @@ shares only the word ([authority-map.md](authority-map.md)).
 ## bd write durability
 
 - **Covers.** The `bd-durability` block of `assets/scripts/bd-lib.sh`, which
-  holds `bd_meta_readback`, and each script's read-back through it.
+  holds `bd_meta_readback`. A read-back elsewhere in the pack before an act that
+  cannot be undone, or of an edge across stores, rests on this entry too, and
+  `git grep -n "bd write durability"` lists those that name it.
 - **Stands in for.** A bd write whose exit status settles whether it landed. bd
   would re-read an ordinary update under a degraded Dolt server, as it re-reads
   a claim, and `bd dep add` would refuse a target that another database holds.
@@ -258,11 +260,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c,
-  `gastownhall/gascity-packs` main 796d7ecd7 and `gastownhall/beads` main
-  6d713a748 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
-  orders the priority policy by the bead's own priority), with bd 1.3.2
-  (9b65b9e19).
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main 005135c33 and
+  `gastownhall/beads` main 8c3eb30f3 (`BuildReadyWorkOrder` in
+  `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
+  own priority), with bd 1.3.2 (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
