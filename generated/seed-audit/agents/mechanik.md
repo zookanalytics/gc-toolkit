@@ -121,6 +121,13 @@ URL with the title and body filled in for gascity's PR template.
   the operator never gave.
 
 
+## Standards for what you produce
+
+The adopted standards for what you write do not fit in this prime. Before you
+write anything that outlives the turn, such as a bead or its notes, a doc or
+spec, or a `city.toml` edit, read them if they are not in your context:
+`cat "[[PACK-ROOT]]"/template-fragments/work-quality-{base,system}.template.md`
+
 
 ## Learned conventions
 

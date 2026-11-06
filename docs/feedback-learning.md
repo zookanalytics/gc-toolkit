@@ -248,12 +248,14 @@ and its class fragment, so a universal standard lives in the base once while a
 class-specific one reaches only the classes it impacts — a standard about
 changing a repo does not reach the human converse class. The classes: polecats
 (polecat, polecat-codex), human (the converse-opus, converse-fable and
-converse-codex sittings), system (deacon, proactive, witness, refinery,
-keeper). The mechanik writes bead bodies too, but composes neither fragment:
-its prime has to fit Claude Code's 10,000-character session-start cap, which
-`assets/scripts/mechanik-prime-cap.test.sh` holds it to, and the standards do
-not fit beside its own doctrine, the operator profile and its learned
-conventions.
+converse-codex sittings), system (deacon, mechanik, proactive, witness,
+refinery, keeper). The mechanik composes neither of its fragments, because its
+prime has to fit Claude Code's 10,000-character session-start cap, which
+`assets/scripts/mechanik-prime-cap.test.sh` holds it to. Its prompt instead
+gives the command that reads both from their files, and has it read them
+before it writes anything that outlives the turn, so a promotion to either
+fragment reaches the mechanik the next time it reads them. The same suite runs
+that command against the tree, so a fragment renamed or moved fails it.
 The correctness method, `skills/review-correctness/SKILL.md`, holds the diff's
 output to every one of these fragments. It reads them from its own
 `references/` directory, where a relative link to each fragment keeps one
