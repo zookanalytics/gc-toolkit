@@ -270,8 +270,8 @@ dismissal. Each write that changes what the comment
 shows draws it again: the sign-off, a dismiss and the premise re-check's close
 once the conversation reads closed, and a hand-back recorded after the close.
 The comment is keyed by the conversation's id under the marker
-`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it, or
-the marker reminders carried before it, as the city's own.
+`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it as
+the city's own.
 
 A PR comment can be a public record, and no person reads this one before it
 posts. Nothing typed to open a conversation reaches it, because that text stays

@@ -282,8 +282,6 @@ and the change that fires the trigger deletes it.
   cutover still runs. Carried by tk-kvdomjb.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
   with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.39.
-- The PR reminder's old marker. Trigger: no open PR carries one. Carried by
-  tk-1tfzr71.45.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
   files: the bare `superseded_by` key, the
   `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
@@ -330,7 +328,6 @@ shows its measured net instead.
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
-| tk-1tfzr71.45 | the PR reminder's old marker | partial files | the open PRs whose reminders carry it (tk-3zlwp6p, tk-r4c0g67) |
 | tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
 | tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41) |
 
