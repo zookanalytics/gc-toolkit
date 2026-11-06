@@ -211,19 +211,23 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 ## bd write durability
 
-- **Covers.** The `bd-durability` block of `assets/scripts/bd-lib.sh`, which
-  holds `bd_meta_readback`. A read-back elsewhere in the pack before an act that
-  cannot be undone, or of an edge across stores, rests on this entry too, and
-  `git grep -n "bd write durability"` lists those that name it.
+- **Covers.** `gctk bead`'s `--verify` (`services/gctk/internal/cli/bead.go`)
+  and the read it makes, `Verify` in `services/gctk/internal/gcbd/verify.go`,
+  which `gctk lifecycle` calls for a transition too: the one place the pack
+  reads a bd write back. Each script that confirms a write through it names
+  this entry, and `git grep -n "bd write durability"` lists them. The
+  `bd-durability` block of `assets/scripts/bd-lib.sh` holds the read that the
+  callers in code the deletion plan retires still make.
 - **Stands in for.** A bd write whose exit status settles whether it landed. bd
   would re-read an ordinary update under a degraded Dolt server, as it re-reads
   a claim, and `bd dep add` would refuse a target that another database holds.
   With both, a write that exits 0 would stay written, and the pack would read
-  nothing back. Without them, the pack re-reads a write only before an act that
-  cannot be undone or run again, such as a close, a push, a dismissal or a
-  sling, and after a dependency edge whose ends sit in two stores. Every other
-  write is settled by its exit status: a refused or failed `bd update` exits
-  non-zero, and so does `gc bd` around it.
+  nothing back. Without them, a script makes a write it is about to act on in a
+  way that cannot be undone or run again, such as a close, a push, a dismissal
+  or a sling, through `gctk bead ... --verify`, and a dependency edge whose ends
+  sit in two stores the same way. Every other write is settled by its exit
+  status: a refused or failed `bd update` exits non-zero, and so does `gc bd`
+  around it.
 - **Evidence.** In `gastownhall/beads`:
   - `verifiedUpdate` in `internal/storage/dolt/issue_operations.go` re-reads a
     claim and a qualifying guarded update after the write, and keeps the
@@ -252,14 +256,31 @@ shares only the word ([authority-map.md](authority-map.md)).
     `internal/storage/dolt/issue_operations.go` gives `verifiedUpdate` nothing
     to re-read for an update that edits metadata (`hasNonCoordinationPatch`), so
     no flag makes bd verify such an update itself.
-- **Verified.** 2026-11-06, at `gastownhall/beads` main 8c3eb30f3 and
-  `gastownhall/gascity` main 005135c33. At beads v1.3.2 (9b65b9e19), the bd
-  build the city runs, the `verifiedUpdate` comment, the NEXUS#92 note, the
-  unverified cross-prefix edge, the one atomic operation and the metadata
-  exclusion read the same. Re-verify on every bd upgrade.
+  - Where the read lives: no `bd update` flag asks bd to re-read an ordinary
+    write, and `bd update --json` prints the operation's own post-state
+    snapshot (`cmd/bd/update.go`), not a read after its commit. In
+    `gastownhall/gascity`, `beads.UpdateAndReadBack`
+    (`internal/beads/update_reporting.go`) reads that same snapshot from inside
+    Gas City's own `internal` tree, and `gc bd` has no option that reads a write
+    back. So the pack reads each bead back itself, with one `gc bd list --id`,
+    whose row carries the bead's raw edges, an edge onto another store's bead
+    included, where `bd dep list` leaves such an edge out and says so only on
+    stderr (`warnDroppedDepEdges` in `cmd/bd/dep.go`). The search is
+    [specs/tk-1tfzr71.11/gas-city-search.md](../specs/tk-1tfzr71.11/gas-city-search.md).
+  - bd v1.3.4 closed one more loss path, a write that reached main while
+    `bd compact` ran (beads 9ab6b0f8c), so this entry does not stand in for it.
+- **Verified.** 2026-11-06, at `gastownhall/beads` v1.3.4 (7ef2fd05e), the bd
+  the city runs, and at `gastownhall/gascity` main bb61aadbf. At v1.3.4 the
+  `verifiedUpdate` comment, the NEXUS#92 note, the one atomic operation and the
+  metadata exclusion read as above, no `bd update` flag asks for a re-read, and
+  `depAddCmd`'s own code stores the cross-prefix edge as given. The
+  `resolveUnresolvedDepTarget` and `depTargetLookupMiss` code, and that such an
+  edge holds nothing, were read at beads main 8c3eb30f3. Re-verify on every bd
+  upgrade.
 - **Retires when.** bd re-reads an ordinary update in server mode and its
   NEXUS#92 hazard note is gone, and `bd dep add` refuses a target that another
-  database holds.
+  database holds. Then `gctk bead`'s `--verify` and gcbd's `Verify` go, and each
+  script takes its write's exit.
 
 ## Priority following
 

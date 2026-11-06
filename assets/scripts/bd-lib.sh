@@ -570,8 +570,8 @@ bd_live_children() {
 # deletion plan retires: scripts tools/deletion-plan.tsv lists, and the part of
 # signoff.sh the review-lane migration replaces. Any other script files with
 # `gc bd create --metadata`, takes a non-zero exit as a create that failed, and
-# reads a bead back only through bd_meta_readback, before an act that cannot
-# be undone (the bd-durability block below).
+# reads a bead back only through `gctk bead create --verify`, before an act that
+# cannot be undone (the bd-durability block below).
 bd_create() {
   local sel="" child="" anchor="" meta db="" prev="" a reply id row got short lost="" err
   while :; do
@@ -655,10 +655,13 @@ bd_create() {
 # gaps bd leaves are docs/warrants.md's "bd write durability": an exit-0 write
 # under a degraded Dolt server, or beside a legacy write path, may not stay
 # written, and a dependency edge onto a target another database holds is stored
-# unverified and holds nothing. So a script reads a write back through
-# bd_meta_readback only before an act that cannot be undone or run again, such
-# as a close, a push, a dismissal or a sling, and reads back a dependency edge
-# whose ends sit in two stores. It reads back nothing else.
+# unverified and holds nothing. So a script makes a write it is about to act on
+# in a way that cannot be undone or run again, such as a close, a push, a
+# dismissal or a sling, through `gctk bead ... --verify`, which reads it back,
+# and a dependency edge whose ends sit in two stores the same way. It reads back
+# nothing else. The two helpers below are that read for the callers in code the
+# deletion plan retires, bd_create and bd_meta_ensure among them, and no other
+# script calls them.
 
 # bd_meta_judge <id> <metadata-json> <show-json> — how a bead carries a metadata
 # payload, judged from a `gc bd show --json` reply the caller already holds, with
@@ -720,7 +723,7 @@ bd_meta_readback() {
 # write ignores bd's claim guard, so a caller runs this only on a bead nobody
 # has taken. Like bd_create's read-back, this serves only callers in code the
 # deletion plan retires. Any other script writes once, takes a non-zero exit as
-# the failure, and gates its act on bd_meta_readback.
+# the failure, and gates its act on `gctk bead ... --verify`.
 bd_meta_ensure() {
   local row="" seen="" id meta got kv sets=()
   if [ "${1:-}" = "--row" ]; then row="${2:-}"; seen=1; shift 2 || true; fi

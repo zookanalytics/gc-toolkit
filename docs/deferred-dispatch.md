@@ -195,7 +195,10 @@ turn. A pass that dies between the send and the retire costs no second
 message either, only a second turn request. `list` shows each notice owed
 and what decides it. `list --json` prints only the armed beads, and no
 notice. The `disarm` verb clears a notice with the rest of the record, while
-a pass that retires an arm on the same bead leaves its notice owed.
+a pass that retires an arm on the same bead leaves its notice owed. The verb's
+write goes through `gctk bead update --verify`, so it exits 0 only once the
+record reads back cleared, and its caller can act on that exit, as
+`stand-down.sh` closes the bead on it.
 
 `first-reaction-dispose.sh` asks for the notice on both of its named-agent
 exits: `--assign`, whose bead is normally ready, and `--then-assign`, whose
