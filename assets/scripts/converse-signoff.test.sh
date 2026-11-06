@@ -637,6 +637,14 @@ eq "$RC" 0 "(SHARED-OTHER-PR) --retire on that ruling exits 0"
 has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr2 --successor tk-anc --kind duplicate" "(SHARED-OTHER-PR) …retiring the one open PR the ruling reaches"
 
 echo "# a re-run acts on the PR its ruling recorded, even once that PR's retirement has closed it"
+# A record of the PR that does not read back stops the sign-off before it acts
+# on the PR, with nothing else written.
+epic_pr; GCTK_STUB_MISS='~gc.ruling_consequence=' run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 1 "(RECORD-LOST) a record of the PR that does not read back stops the sign-off"
+has "$OUT" "did not read back recorded on conversation tk-conv" "(RECORD-LOST) …saying so"
+hasnt "$(cat "$CALLS")" "pr-dispose" "(RECORD-LOST) …before the retirement acts"
+hasnt "$(cat "$CALLS")" "gate resolve" "(RECORD-LOST) …and before any gate is answered"
+
 # An attempt that retires the member's PR and answers its gate, then stops
 # because the conversation's close does not land, asks for a re-run. pr-facts
 # can consummate the retirement before it, closing the member's anchor, which is

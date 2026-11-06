@@ -709,17 +709,20 @@ take_recommendation() {
 CONSEQUENCE=""
 # The PR the answer acts on is recorded first, so an attempt that stops at any
 # later write leaves its re-run that PR to act on. The act on the PR cannot be
-# undone, so the record is read back before it (docs/warrants.md, "bd write
-# durability"), and a record the store refuses or that does not read back stops
-# the sign-off with nothing else written.
+# undone, so the record goes through `gctk bead update --verify`, which reads it
+# back before the act (docs/warrants.md, "bd write durability"), and a record
+# the store refuses or that does not read back stops the sign-off with nothing
+# else written.
 if [ -n "$PR_TARGET" ] && [ "$RECORDED_ON" != "$PR_TARGET" ]; then
   RECORD=$(printf '%s' "$CONV_ROW" | jq -c --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
     consequences + {($a): {act: $act, anchor: $t}}' 2>/dev/null)
-  { [ -n "$RECORD" ] && gc bd update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" >/dev/null 2>&1; } \
-    || stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) could not be recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written"
-  show_row "$CONVERSATION" | jq -e --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
-      consequences | .[$a] == {act: $act, anchor: $t}' >/dev/null 2>&1 \
-    || stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) did not read back recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written"
+  REC_RC=1
+  [ -z "$RECORD" ] || { REC_RC=0; "$GCTK" bead update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" --verify >/dev/null 2>&1 || REC_RC=$?; }
+  case "$REC_RC" in
+    0) ;;
+    3) stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) did not read back recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written" ;;
+    *) stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) could not be recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written" ;;
+  esac
 fi
 ACTING="$PR_ANSWER"
 if [ -n "$TARGET_CLOSED" ]; then

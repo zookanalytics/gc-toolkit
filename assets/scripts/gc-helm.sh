@@ -2804,8 +2804,8 @@ accept_input() {
 # accept_record <token> <formula> <gate>... — record the acceptance's dispatch
 # input on each gate as gc.acceptance, before the resolve that names the token.
 # The resolve cannot be run again, and a finish reads the input off the gate,
-# so each record is read back before it (docs/warrants.md, "bd write
-# durability"; this sh script cannot source bd-lib.sh's helper). Returns 0 once
+# so each record goes through `gctk bead update --verify`, which reads it back
+# before the resolve (docs/warrants.md, "bd write durability"). Returns 0 once
 # every gate reads it back; ACCEPT_RECORD_LEFT names the ones that do not.
 ACCEPT_RECORD_LEFT=""
 accept_record() {
@@ -2816,12 +2816,8 @@ accept_record() {
         return 1
     fi
     for _arc_g in "$@"; do
-        if ! gc bd update "$_arc_g" --set-metadata "gc.acceptance=$_arc_in" >/dev/null 2>&1 \
-            || ! row_now "$_arc_g" | jq -e --arg want "$_arc_in" '
-                ((.metadata // {})["gc.acceptance"] // null)
-                | (if type == "string" then (fromjson? // null) else . end) == ($want | fromjson)' >/dev/null 2>&1; then
-            ACCEPT_RECORD_LEFT="${ACCEPT_RECORD_LEFT:+$ACCEPT_RECORD_LEFT }$_arc_g"
-        fi
+        bead_write update "$_arc_g" --set-metadata "gc.acceptance=$_arc_in" --verify >/dev/null 2>&1 \
+            || ACCEPT_RECORD_LEFT="${ACCEPT_RECORD_LEFT:+$ACCEPT_RECORD_LEFT }$_arc_g"
     done
     [ -z "$ACCEPT_RECORD_LEFT" ]
 }
