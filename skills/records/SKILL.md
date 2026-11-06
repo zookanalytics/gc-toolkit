@@ -4,34 +4,34 @@ description: Use when you need to write down what was decided, what happened, or
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
-# Records: what a bead's next reader inherits
+# Records: notes, headlines and observations
 
-A bead carries its own record. The next worker, sitting or person who reads it
-starts from what is written there, not from your context, which ends with your
-session. Each option says what the record means, who reads it, and the one
-writer that sends it.
+Use this skill to record an outcome in a bead's notes, to sum up long notes in
+a current-state block, to set the headline the board shows for a bead, or to
+file an observation of feedback about standing agent behavior.
 
-The writers are the gc-toolkit pack's own scripts.
-`gc <binding> scripts-dir` prints their directory in the pack as gc loaded it,
-so each example calls the pack's copy inside the command itself, and runs in a
-fresh shell. `<binding>` is the name the city imports the pack under, which gc
-puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.records`.
-`gc skill list` prints it in this skill's FROM column.
+The headline command calls the gc-toolkit pack's script as
+`"$(gc <binding> scripts-dir)/gc-helm.sh"`, and only that way. The call looks
+up the pack gc loaded inside the command, so it runs no checkout's copy and
+needs nothing an earlier call set. `<binding>` is the name the city imports the
+pack under, which gc puts in front of this skill's name: `gc-toolkit` in
+`gc-toolkit.records`. `gc skill list` prints it in this skill's FROM column.
 
 ## Record an outcome on a bead
 
-The message is what was decided or found, why, and what changed. The next
-reader of the bead picks it up: a sitting primes from the bead's notes, and a
-worker reads them before it starts.
+Append the outcome to the bead notes: what was decided or found, why, and what
+changed. Do not replace existing notes.
 
-Writer: `gc bd update <bead> --append-notes "<decision or finding, the reason, what changed>"`.
+```bash
+gc bd update <bead> --append-notes "<decision or finding, the reason, what changed>"
+```
 
-Notes are append-only. `--notes` replaces the whole field and erases every
-note other writers left there, so never use it.
+Never pass `--notes`: it replaces the whole field and erases every note other
+writers left there.
 
-When the notes have grown past a quick read, append a current-state block:
-where things stand, the decisions in force, and the open questions. The newest
-current-state block is the one in force, so a reader starts there:
+When the notes have grown past a quick read, append a current-state block that
+says where things stand, each decision in force and each open question. The
+newest current-state block is the one in force:
 
 ```bash
 gc bd update <bead> --append-notes "## Current state ($(date -u +%Y-%m-%d))
@@ -40,44 +40,41 @@ Decisions in force: <each decision in force>
 Open questions: <each open question, or none>"
 ```
 
-A bead's notes are operational state. A durable document, such as a spec, an
-analysis or a decision record, is a file in a repo, filed through the
-filing-documentation skill. A sitting writes no files, so it files a bead for
-the document instead (the work skill).
+Put a durable document, such as a spec, an analysis or a decision record, in a
+file in a repo through the filing-documentation skill, not in the notes. A
+sitting writes no files, so it files a bead for the document instead (the work
+skill).
 
 ## Set the headline the board shows
 
-The message is one sentence saying what the bead needs now. The helm board
-shows it as the bead's NEEDS cell, except on a row with no PR that a human gate
-holds or a conversation is on, where NEEDS names what the gate asks, or what a
-conversation waiting in the operator's queue asks, or reads `in conversation`
-while a sitting holds the conversation. A gate holds the bead's work until a
-person answers it, and a conversation holds nothing.
-`doctor/check-wait-is-an-edge` checks the wait the headline declares against
-the bead's `blocks` edges.
+Write one sentence that says what the bead needs now, and name what it waits
+on:
 
-Writer: `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
-when the bead waits on nothing, or `--waiting-on <bead>` (repeatable) for each
-bead it waits on. Each named wait is also written as a `blocks` edge,
-best-effort: an edge that will not take only warns, so read it back when the
-wait matters (the waits skill). Saying neither parks the bead on prose, which
-the doctor reports unless a live `blocks` edge holds it.
+```bash
+"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait
+```
 
-In a sitting, the hold and the sign-off write the headlines (the converse-hold
-and converse-settle steps). The one other headline a sitting writes is a
-stand-down, which stops work in flight (the work skill).
+Pass `--no-wait` when the bead waits on nothing. When it waits, pass
+`--waiting-on <bead>` in its place, once for each bead it waits on. Each named
+wait is also written as a `blocks` edge, best-effort: an edge that will not
+take only warns, so read it back when the wait matters (the waits skill). A
+headline with neither flag parks the bead on prose, which
+`doctor/check-wait-is-an-edge` reports unless a live `blocks` edge holds the
+bead.
+
+In a sitting, leave the headlines to the hold and the sign-off (the
+converse-hold and converse-settle steps). The one other headline a sitting
+writes is the release that stops work in flight (the work skill).
 
 ## Record feedback as an observation
 
-The message is that someone corrected how agents behave as a standing matter:
-the operator correcting you, a PR review or comment, or a rework whose cause
-was a habit rather than a one-off. The learning distiller reads observations
-and proposes the rules a reviewed PR may adopt. Feedback about one change's
-content, such as a bug or a wrong approach, is review, not an observation.
+When someone corrects how agents behave as a standing matter, such as the
+operator correcting you, a PR review or comment, or a rework whose cause was a
+habit rather than a one-off, fix the instance in front of you first. Then file
+one observation before the turn ends, by
+`references/file-feedback-observations.template.md` in this skill's directory:
+it says which turns carry feedback, gives the create that files the
+observation whole, and says how to set its provenance, category and directive.
 
-Fix the instance in front of you first, then file one observation before the
-turn ends. The capture recipe the pack composes into the prompts that file
-observations is the writer, and this skill carries it as
-`references/file-feedback-observations.template.md`: which turns carry
-feedback, the create that files the observation whole, and how to set its
-provenance, category and directive.
+Feedback about one change's content, such as a bug or a wrong approach, is
+review, not an observation.
