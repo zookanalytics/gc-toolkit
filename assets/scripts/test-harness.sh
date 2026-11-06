@@ -352,7 +352,17 @@ dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
 case "$verb" in
   show)
     [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "gc: simulated show failure" >&2; exit 1; }
-    id="${1:-}"
+    # STUB_SHOW_FAIL_ON fails only the shows naming that id, so a suite can break
+    # one read of several.
+    if [ -n "${STUB_SHOW_FAIL_ON:-}" ]; then
+      case " $* " in *" $STUB_SHOW_FAIL_ON "*) echo "gc: simulated show failure" >&2; exit 1 ;; esac
+    fi
+    # A show of several ids reads a row for each, as the walk to the human gates
+    # that hold a bead does. A row names its edges as real bd does, each edge's far
+    # bead with the type of the edge, and a row with no edges has none.
+    show_ids=()
+    for a in "$@"; do case "$a" in --*) ;; *) show_ids+=("$a") ;; esac; done
+    id="${show_ids[0]:-}"
     # STUB_SHOW_HOOK: executable run before serving each show (gets the id);
     # lets a test mutate the store between reads (mid-pass write modelling).
     if [ -n "${STUB_SHOW_HOOK:-}" ] && [ -x "${STUB_SHOW_HOOK:-}" ]; then
@@ -366,7 +376,16 @@ case "$verb" in
     fi
     # Every bead bd prints carries a priority, P2 unless one was written, so a
     # fixture row that names none reads at bd's default.
-    jq -c --arg id "$id" '[ .[] | select(.id == $id) | .priority //= 2 ]' "$S"
+    jq -nc --rawfile d "$D" --slurpfile store "$S" --args '
+      ($d | split("\n") | map(select(length > 0) | split("|")
+         | if .[1] == "blocks" then {issue: .[2], on: .[0], type: "blocks"}
+           else {issue: .[0], on: .[2], type: .[1]} end)) as $edges
+      | $store[0] as $all
+      | [ $ARGS.positional[] as $id | $all[] | select(.id == $id) | .priority //= 2
+          | ([ $edges[] | select(.issue == $id) | .type as $t | .on as $o
+               | (first($all[] | select(.id == $o)) // {id: $o}) + {dependency_type: $t} ]) as $deps
+          | if ($deps | length) > 0 and (has("dependencies") | not) then . + {dependencies: $deps} else . end ]' \
+      "${show_ids[@]}"
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
