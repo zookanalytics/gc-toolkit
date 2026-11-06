@@ -195,14 +195,15 @@ the bead or a parent above it, such as a park on the epic, it arms the
 dispatch (deferred-dispatch.sh arm) instead of slinging, so the run starts
 once the blocker closes. It refuses a closed bead, PR-finishing work
 (anchor_bead), a bead another hold also holds, a status other than open, a
-parent that is closed or not in the bead's store, and --standalone on a bead
-that has a parent. A bead with no hold:mayor is refused, or reported as
-already placed when a live run, a route, an arm or an assignee shows its
-dispatch. A dispatch that fails leaves the hold on, so the bead stays in the
-queue. A re-run after a stop at any write finishes the placement without a
-second run: it dispatches nothing once an assignee, a merge_result or a live
-run shows a dispatch, and gc sling refuses a second live run of one formula
-at one bead (exit 3).
+parent that is closed or not in the bead's store, --standalone on a bead that
+has a parent, and a bead an arm already sends to another pool or on another
+formula. A bead with no hold:mayor is refused, or reported as already placed
+when a live run, a route, an arm or an assignee shows its dispatch. A
+dispatch that fails leaves the hold on, so the bead stays in the queue. A
+re-run after a stop at any write finishes the placement without a second
+run: it dispatches nothing once an assignee, a merge_result, a live run or an
+arm shows a dispatch, and gc sling refuses a second live run of one formula at
+one bead (exit 3).
 
 dismiss is the operator's explicit "end this sitting". It closes the
 conversation a live sitting holds on the subject, with a reason naming the
@@ -1971,9 +1972,9 @@ cmd_priority() {
 #      through queue-priority.sh move.
 #   3. It settles the bead's priority (queue-priority.sh settle), because a
 #      pour copies the priority once.
-#   4. It dispatches, unless an assignee, a merge_result or a live run shows
-#      that an earlier dispatch did. A bead hold-lib.sh finds held by a blocker
-#      on it or on a parent above it, such as a park, is armed
+#   4. It dispatches, unless an assignee, a merge_result, a live run or an arm
+#      shows that an earlier dispatch did. A bead hold-lib.sh finds held by a
+#      blocker on it or on a parent above it, such as a park, is armed
 #      (deferred-dispatch.sh arm), so the park keeps holding it, and so is one
 #      whose holds the walk could not read. Any other is slung; gc sling's exit
 #      3 says a live run of the formula already works the bead.
@@ -2128,6 +2129,25 @@ cmd_place() {
             echo "$PROG: place: could not name the polecat pool of rig $rig (resolve-route.sh resolved no live agent named polecat there), so $bead has nowhere to go. Name its pool with --route <rig>/<pool>. Nothing was written." >&2
             exit 4; }
     fi
+    # An arm the bead already carries is a dispatch already made, such as the
+    # one an earlier place wrote before it stopped short of its lift. The
+    # deferred-dispatch pass slings it once nothing holds the bead, so a second
+    # dispatch beside it would start a second run when it fires. place keeps an
+    # arm that sends the bead where this placement would, and refuses one that
+    # sends it to another pool or on another formula.
+    pl_arm=""
+    if [ -z "$dispatched" ]; then
+        pl_arm=$(printf '%s' "$row" | jq -r '((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring | select(test("[^[:space:]]"))' 2>/dev/null || true)
+    fi
+    if [ -n "$pl_arm" ]; then
+        pl_arm_args=$(printf '%s' "$row" | jq -c '((.metadata // {})["gc.dispatch_when_ready_args"] // "")
+            | if type == "string" then (if test("[^[:space:]]") then (fromjson? // [.]) else [] end) else . end' 2>/dev/null || true)
+        pl_want_args=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
+        if [ "$pl_arm" != "$pool" ] || [ "$pl_arm_args" != "$pl_want_args" ]; then
+            echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}. Disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
+            exit 2
+        fi
+    fi
 
     # Step 2: clear the route, then give the bead its parent and its shift.
     if [ -z "$dispatched" ]; then
@@ -2183,6 +2203,8 @@ cmd_place() {
     # Step 4: dispatch, unless an earlier dispatch shows.
     if [ -n "$dispatched" ]; then
         how="already dispatched ($dispatched)"
+    elif [ -n "$pl_arm" ]; then
+        how="already armed for $pl_arm${formula:+ on $formula}, so its run starts once nothing holds it"
     else
         pl_hold=$(place_hold "$bead")
         pl_state="${pl_hold%%"$TAB"*}"

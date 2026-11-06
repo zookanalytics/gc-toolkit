@@ -180,8 +180,9 @@ its hold, so `place` runs the writes in one order and reads each one back:
 
 1. It refuses a closed bead, PR-finishing work (`anchor_bead`), a bead that
    `hold:external` also holds, a bead whose status is not open, a parent that
-   is closed or not in the bead's store, and `--standalone` on a bead that has
-   a parent. A bead with no `hold:mayor` is refused, or reported as already
+   is closed or not in the bead's store, `--standalone` on a bead that has a
+   parent, and a bead an arm already sends to another pool or on another
+   formula. A bead with no `hold:mayor` is refused, or reported as already
    placed when a live run, a route, an arm or an assignee shows its dispatch.
 2. It clears any route, since the `--fix` of Gas City's `hold-label-routed-to`
    check writes one and `deferred-dispatch.sh arm` refuses a routed bead. With
@@ -202,8 +203,9 @@ The dispatch comes before the lift, so a dispatch that fails leaves the bead
 held, in the queue. A run cut off between the two goes on with the hold still
 on its bead, and the next `place` finishes the lift. Running `place` again
 after a stop at any write finishes the placement without a second run: it
-dispatches nothing once an assignee, a `merge_result` or a live run shows a
-dispatch, and `gc sling` refuses a second live run of one formula at one bead.
+dispatches nothing once an assignee, a `merge_result`, a live run or an arm
+shows a dispatch, and `gc sling` refuses a second live run of one formula at
+one bead.
 
 A hold also lifts these ways:
 

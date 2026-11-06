@@ -18,13 +18,15 @@
 #   - a route a doctor --fix wrote is cleared before the dispatch.
 #   - refused with nothing written: a closed bead, PR-finishing work, a bead
 #     with no hold:mayor and no dispatch, a bead hold:external also holds, a
-#     status other than open, --standalone on a bead with a parent, and a
-#     parent that is closed or not in the bead's store. A bead with no hold
-#     that a live run or an arm shows dispatched is reported as placed.
+#     status other than open, --standalone on a bead with a parent, a parent
+#     that is closed or not in the bead's store, and a bead an arm already
+#     sends to another pool or on another formula. A bead with no hold that a
+#     live run or an arm shows dispatched is reported as placed.
 #   - a sling that fails leaves the hold on, and so does an arm that fails.
 #   - a stop at any write, then a second run, ends with one run and no hold:
-#     the second run dispatches nothing once a live run works the bead, and a
-#     sling that exits 3 counts as dispatched.
+#     the second run dispatches nothing once a live run works the bead or the
+#     first run's arm stands, even when the park that held it has closed
+#     since, and a sling that exits 3 counts as dispatched.
 #
 # It runs the REAL gc-helm.sh via `sh` (as shipped), with the real
 # resolve-route.sh, run-lib.sh, dispatch-path.sh, bd-lib.sh and hold-lib.sh,
@@ -551,6 +553,44 @@ run_place tk-new --under tk-parked
 eq "$RC" "0" "(STOP) after a stop at an armed bead's lift, a second run finishes"
 eq "$(labels tk-new)" "" "(STOP) its hold is lifted"
 hasnt "$CALLS" "sling " "(STOP) and nothing is slung"
+hasnt "$CALLS" "deferred-dispatch arm" "(STOP) and the first run's arm is kept, not written again"
+# The park closes between the stop and the second run: the first run's arm is
+# the dispatch, which the deferred-dispatch pass slings once the hold is gone,
+# so a sling beside it would start a second run when it fires.
+reset_store
+(export STUB_UPDATE_FAIL_ON=--remove-label; sh "$SCRIPT" place tk-new --under tk-parked >/dev/null 2>&1) || true
+jq -c 'map(if .id == "tk-pg" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+run_place tk-new --under tk-parked
+eq "$RC" "0" "(STOP-FREED) after a stop at an armed bead's lift and its park's close, a second run finishes"
+hasnt "$CALLS" "sling " "(STOP-FREED) …slinging nothing beside the arm"
+hasnt "$CALLS" "deferred-dispatch arm" "(STOP-FREED) …and arming nothing again"
+eq "$(meta tk-new gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(STOP-FREED) …keeping the arm, which the pass slings once the hold is gone"
+eq "$(labels tk-new)" "" "(STOP-FREED) …and lifting the hold"
+has "$OUT" "already armed for gc-toolkit/gc-toolkit.polecat" "(STOP-FREED) …and says the arm stands"
+
+echo "# an arm that would send the bead elsewhere is refused"
+# arm_new <target> <args-json> — tk-new armed the way deferred-dispatch.sh arm
+# stores it, the sling args as a JSON string.
+arm_new() {
+  jq -c --arg t "$1" --arg a "$2" 'map(if .id == "tk-new" then .metadata["gc.dispatch_when_ready"] = $t | .metadata["gc.dispatch_when_ready_args"] = $a else . end)' \
+    "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+}
+reset_store; arm_new gc-toolkit/gc-toolkit.other '[]'
+run_place tk-new --under tk-epic
+eq "$RC" "2" "(ARMED-ELSEWHERE) a bead armed for another pool exits 2"
+has "$ERR" "already armed for gc-toolkit/gc-toolkit.other" "(ARMED-ELSEWHERE) …naming the arm"
+has "$ERR" "disarm tk-new" "(ARMED-ELSEWHERE) …and the disarm that frees it"
+unchanged "(ARMED-ELSEWHERE) …with nothing written"
+hasnt "$CALLS" "sling " "(ARMED-ELSEWHERE) …and nothing slung"
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '[]'
+run_place tk-new --under tk-epic --on mol-polecat-report
+eq "$RC" "2" "(ARMED-ELSEWHERE) a bead armed on another formula exits 2"
+unchanged "(ARMED-ELSEWHERE) …with nothing written"
+reset_store; arm_new gc-toolkit/gc-toolkit.polecat '["--on","mol-polecat-work"]'
+run_place tk-new --under tk-epic --on mol-polecat-work
+eq "$RC" "0" "(ARMED-SAME) a bead armed where this placement sends it exits 0"
+hasnt "$CALLS" "sling " "(ARMED-SAME) …slinging nothing beside the arm"
+eq "$(labels tk-new)" "" "(ARMED-SAME) …and lifting the hold"
 
 echo "# a sling that exits 3 counts as dispatched"
 reset_store
