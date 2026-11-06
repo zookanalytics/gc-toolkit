@@ -15,8 +15,8 @@ first-reaction card to the notes, then dispose the subject: route it to the pool
 that does that work or hold it with Gas City's `hold:mayor` label for the
 operator's placement sitting, recommend an action for the operator to trigger,
 hold it on the bead it waits for, route a confident no-op to a validating
-closer, or put it to the operator as a human gate), closes R, and drains. It is the city's
-first-level triage:
+closer, or put it to the operator as a human gate), closes R, and drains. It
+is the city's first-level triage:
 it makes the human arrive at *advanced* work — a bead that already moved one
 step — and it keeps the beads it can schedule out of the human's queue
 entirely.

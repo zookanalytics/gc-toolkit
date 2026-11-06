@@ -1143,9 +1143,10 @@ fi
 # moving, and the pool its route names, or the agent it is assigned to, will
 # take it. Held for placement, it is released with no route into the sitting's
 # queue, which its hold:mayor label puts it in and
-# `gc beads list --label hold:mayor` lists. Either way --no-wait says so. A blocked one names its wait as an edge, and a
-# --then-assign rides the same release, so the agent's hook offers the bead
-# once the edge clears. An until one says --no-wait too: its until edge, written
+# `gc beads list --label hold:mayor` lists. Either way --no-wait says so. A
+# blocked one names its wait as an edge, and a --then-assign rides the same
+# release, so the agent's hook offers the bead once the edge clears. An until
+# one says --no-wait too: its until edge, written
 # after the release, holds nothing, and a --waiting-on blocks edge onto the same
 # bead would make bd refuse it. The release leaves the bead open, unassigned and
 # unrouted, the pure wait the deferred-dispatch pass closes. A recommend or a

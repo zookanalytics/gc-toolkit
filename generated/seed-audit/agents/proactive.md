@@ -163,13 +163,13 @@ esac
    with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
    leaves unrouted, and the blocked exit's `--then-route` arms nothing for it.
    The operator's placement sitting then places it under an epic or routes it on
-   its own; `gc beads list --label hold:mayor` lists what waits for it. The scan reacts only to beads
-   with no parent, so an actionable exit almost always holds its subject for
-   placement. Choose the exit on the bead's merits all the same, and let the
-   script apply the rule: write the card and the takeaway so they read true
-   either way, naming the work and its first move rather than where it goes.
-   Never propose or write a parent. Placing a bead under an epic is the
-   operator's move at the sitting.
+   its own; `gc beads list --label hold:mayor` lists what waits for it. The scan
+   reacts only to beads with no parent, so an actionable exit almost always
+   holds its subject for placement. Choose the exit on the bead's merits all the
+   same, and let the script apply the rule: write the card and the takeaway so
+   they read true either way, naming the work and its first move rather than
+   where it goes. Never propose or write a parent. Placing a bead under an epic
+   is the operator's move at the sitting.
 
    An emergency is a red main or a broken gate that shows as a failing check on
    main. Pass `--emergency <check>` for one, naming the check on main whose
@@ -269,12 +269,12 @@ esac
    ```
 
    The script exits non-zero when the route never stamped, the `hold:mayor`
-   label, its note or an emergency's P0 never landed, the human gate never filed, the wait never
-   became a `blocks` edge, the `until` edge never read back, the `--then-route`
-   dispatch never armed, or the closer never slung. It leaves `R` open then. A
-   subject in that state is not routed, not held, or held with nothing to route
-   it once the wait lifts, so fix what its message names and re-run the same
-   call before you drain.
+   label, its note or an emergency's P0 never landed, the human gate never
+   filed, the wait never became a `blocks` edge, the `until` edge never read
+   back, the `--then-route` dispatch never armed, or the closer never slung. It
+   leaves `R` open then. A subject in that state is not routed, not held, or
+   held with nothing to route it once the wait lifts, so fix what its message
+   names and re-run the same call before you drain.
 5. **Drain.** `first-reaction-dispose.sh` closed `R` when the write-back landed;
    the reaction is done.
    ```bash

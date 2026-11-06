@@ -59,11 +59,13 @@ hook, pool demand and the route-restore sweeps, so no pool is offered it. The
 label names Gas City's default coordinator, and no code branches on who that
 is.
 
-A held bead carries no route, as Gas City's hold conventions have a pack that
-parks on a hold clear it. Gas City's `hold-label-routed-to` doctor check wants
-the route to equal the label's value, and Gas City's issue 6069 reports that
-check as a bug. So it warns on every held bead, and the deacon's patrol neither
-files that warning nor runs its fix (`formulas/mol-deacon-patrol.toml`).
+A held bead carries no route. Gas City's hold conventions say a pack that parks
+finished work on a hold usually clears its route, because the next actor is not
+the pool that worked it, and intake holds new work with no route the same way.
+Gas City's `hold-label-routed-to` doctor check wants the route to equal the
+label's value, and Gas City's issue 6069 reports that check as a bug. So it
+warns on every held bead, and the deacon's patrol neither files that warning nor
+runs its fix (`formulas/mol-deacon-patrol.toml`).
 
 ## The writers that hold new work
 
