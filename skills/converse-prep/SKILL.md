@@ -15,22 +15,26 @@ the subject's pull request.
 
 Name the topic in a few words of your own: what this conversation is
 discussing. It titles your session and the conversation. `gctk session title`
-sets the session's title, `$SUBJECT — <topic>`, in Gas City and on your
-terminal, which the operator's tab shows. When the subject has a pull request,
-the comment there that shows this visit carries the conversation's title as
-its topic, where anyone who reads the pull request sees it. So write it
-yourself, not in the operator's words, and name no other rig or its beads:
+sets the session's title, `$SUBJECT #<PR> — <topic>`, in Gas City and on your
+terminal, which the operator's tab shows. `#<PR>` is the subject's pull
+request, and it is left out while the subject has none. When the subject has
+a pull request, the comment there that shows this visit carries the
+conversation's title as its topic, where anyone who reads the pull request
+sees it. So write it yourself, not in the operator's words, and name no other
+rig or its beads:
 ```bash
 TOPIC="<topic>"
+PR=$(gc bd show "$SUBJECT" --json | jq -r '.[0].metadata as $m | ($m.pr_number // "" | tostring) as $n | if $n != "" then $n else (($m.pr_url // "") | split("/pull/") | if length > 1 then ((.[1] | capture("^(?<d>[0-9]+)") | .d) // "") else "" end) end')
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" session title --subject "$SUBJECT" --topic "$TOPIC"
+"$GCTK" session title --subject "$SUBJECT" --pr "$PR" --topic "$TOPIC"
 gc bd update "$CONVERSATION" --title "$TOPIC" \
   && "$CONV/pr-sitting-comment.sh" post --sitting "$CONVERSATION" --topic "$TOPIC"
 ```
 Re-run it with the new topic only when your focus moves to a different one.
-The comment is best effort, and it posts nothing when the subject has no pull
+The re-run also shows a pull request opened for the subject since then. The
+comment is best effort, and it posts nothing when the subject has no pull
 request. When the visit ends it keeps the topic and adds the conclusion and
 the actions that steps 6–7 record on the conversation.
 

@@ -2,8 +2,8 @@
 # pr-sitting-comment-wiring.test.sh — proves, end to end, that the writes which
 # change what a visit's PR comment shows draw it again from the conversation.
 # converse-prep's title step, run as the skill prints it, titles the session
-# with the topic through gctk, writes the topic as the conversation's title and
-# posts the comment. converse-signoff.sh records
+# through gctk with the subject, its PR and the topic, writes the topic as the
+# conversation's title and posts the comment. converse-signoff.sh records
 # the ruling and each act it takes on the conversation, then draws the comment
 # in its ended shape once the conversation reads closed. The real
 # pr-sitting-comment.sh and pr-post.sh run against stubs of gc and gh, so what
@@ -166,20 +166,37 @@ awk '
 [ -s "$TMPD/title-step.sh" ] && ok "converse-prep's title step is found" \
   || bad "converse-prep's title step is found" "no fenced bash block in $PREP runs pr-sitting-comment.sh post"
 
-# fixture [no-topic] [open-pr]: the subject tk-subj with PR 41 and a review
-# gate, and the conversation tk-conv a sitting holds, replying to that gate and
-# opened with $OPENER. Unless no-topic is given, the sitting's title step has
-# run. open-pr makes the subject an open PR the ruling must answer for.
+# fixture [no-topic] [open-pr] [no-pr | link-only] [zsh]: the subject tk-subj
+# with PR 41, recorded as pr_number and pr_url, and a review gate, and the
+# conversation tk-conv a sitting holds, replying to that gate and opened with
+# $OPENER. Unless no-topic is given, the sitting's title step has run, under
+# bash, or under zsh as a Codex sitting's shell runs it; -f keeps a zsh
+# startup file from putting the real gh ahead of the stub. open-pr makes the
+# subject an open PR the ruling must answer for. no-pr records no PR on the
+# subject, and link-only records it as pr_url alone.
 fixture() {
-  rm -rf "$STORE"; mkdir -p "$STORE/b"; printf '[]' > "$STATE"
-  local mr=""; [ "${2:-}" = open-pr ] && mr=pull_request
-  jq -n --arg mr "$mr" '{id:"tk-subj", issue_type:"task", status:"open", assignee:"", metadata:({pr_number:"41", pr_url:"https://github.com/acme/widgets/pull/41"} + (if $mr == "" then {} else {merge_result:$mr} end)), deps:[{type:"blocks", on:"tk-gate"}]}' > "$STORE/b/tk-subj.json"
+  rm -rf "$STORE" "$GCTK_LOG"; mkdir -p "$STORE/b"; printf '[]' > "$STATE"
+  local a mr="" topic=yes run=bash pr='{"pr_number":"41","pr_url":"https://github.com/acme/widgets/pull/41"}'
+  for a in "$@"; do
+    case "$a" in
+      no-topic) topic="" ;;
+      open-pr) mr=pull_request ;;
+      no-pr) pr='{}' ;;
+      link-only) pr='{"pr_url":"https://github.com/acme/widgets/pull/41"}' ;;
+      zsh) run="zsh -f" ;;
+    esac
+  done
+  jq -n --arg mr "$mr" --argjson pr "$pr" '{id:"tk-subj", issue_type:"task", status:"open", assignee:"", metadata:($pr + (if $mr == "" then {} else {merge_result:$mr} end)), deps:[{type:"blocks", on:"tk-gate"}]}' > "$STORE/b/tk-subj.json"
   jq -n '{id:"tk-gate", issue_type:"gate", await_type:"human", await_id:"review-needs-you.tk-f", status:"open", assignee:"", metadata:{}, deps:[]}' > "$STORE/b/tk-gate.json"
   jq -n --arg o "$OPENER" '{id:"tk-conv", issue_type:"task", status:"in_progress", title:$o, description:$o, assignee:"gc-toolkit/gc-toolkit.tk-conv", metadata:{}, deps:[{type:"tracks", on:"tk-subj"}, {type:"replies-to", on:"tk-gate"}]}' > "$STORE/b/tk-conv.json"
-  [ "${1:-}" = no-topic ] && return 0
+  [ -n "$topic" ] || return 0
+  # $run is the shell and its flag, two words.
+  # shellcheck disable=SC2086
   ( cd "$REPO" && env -u BASH_ENV -u ENV CONV="$SR" CONVERSATION=tk-conv SUBJECT=tk-subj GC_SESSION_ID=s-1 \
-      bash "$TMPD/title-step.sh" ) >/dev/null 2>&1
+      $run "$TMPD/title-step.sh" ) >/dev/null 2>&1
 }
+# titled: the arguments the title step passed gctk, each followed by "|".
+titled() { tr '\n' '|' < "$GCTK_LOG" 2>/dev/null; }
 signoff() { ( cd "$REPO" && bash "$SR/converse-signoff.sh" --conversation tk-conv "$@" ) >"$TMPD/signoff.out" 2>&1; }
 body() { jq -r '.[0].body // ""' "$STATE"; }
 actions() { jq -r '[.[].text] | join("|")' "$STORE/b/tk-conv.comments.json" 2>/dev/null; }
@@ -187,13 +204,37 @@ OPEN_LINES="<!-- gc:sitting:tk-conv -->$nl### Visit tk-conv on tk-subj${nl}Topic
 
 echo "── the title step titles the session, writes the topic onto the conversation and posts the comment ──"
 fixture
-[ "$(tr '\n' '|' < "$GCTK_LOG" 2>/dev/null)" = "session|title|--subject|tk-subj|--topic|$TOPIC|" ] \
-  && ok "the session is titled with the subject and the topic through gctk" \
-  || bad "the session is titled with the subject and the topic through gctk" "$(cat "$GCTK_LOG" 2>/dev/null)"
+[ "$(titled)" = "session|title|--subject|tk-subj|--pr|41|--topic|$TOPIC|" ] \
+  && ok "the session is titled with the subject, its PR and the topic through gctk" \
+  || bad "the session is titled with the subject, its PR and the topic through gctk" "$(titled)"
 [ "$(jq -r '.title' "$STORE/b/tk-conv.json")" = "$TOPIC" ] && ok "the conversation's title is the topic" \
   || bad "the conversation's title is the topic" "$(cat "$STORE/b/tk-conv.json")"
 has "the comment shows the visit, the bead it is on and the topic" "$(body)" "$OPEN_LINES"
 hasnt "…and not the words the visit opened with" "$(body)" "$OPENER"
+
+echo "── the title step reads the subject's PR from its link, and passes none for a subject without one ──"
+fixture link-only
+[ "$(titled)" = "session|title|--subject|tk-subj|--pr|41|--topic|$TOPIC|" ] \
+  && ok "a PR recorded only as its link is passed as its number" \
+  || bad "a PR recorded only as its link is passed as its number" "$(titled)"
+fixture no-pr
+[ "$(titled)" = "session|title|--subject|tk-subj|--pr||--topic|$TOPIC|" ] \
+  && ok "a subject with no PR passes an empty --pr, which gctk reads as no PR" \
+  || bad "a subject with no PR passes an empty --pr, which gctk reads as no PR" "$(titled)"
+
+echo "── under zsh, the shell a Codex sitting runs the step in ──"
+if command -v zsh >/dev/null 2>&1; then
+  fixture zsh
+  [ "$(titled)" = "session|title|--subject|tk-subj|--pr|41|--topic|$TOPIC|" ] \
+    && ok "zsh: the PR goes to gctk as an argument of its own" \
+    || bad "zsh: the PR goes to gctk as an argument of its own" "$(titled)"
+  fixture zsh no-pr
+  [ "$(titled)" = "session|title|--subject|tk-subj|--pr||--topic|$TOPIC|" ] \
+    && ok "zsh: a subject with no PR passes an empty --pr" \
+    || bad "zsh: a subject with no PR passes an empty --pr" "$(titled)"
+else
+  echo "skip - zsh is not installed"
+fi
 
 echo "── a ruled sign-off records the ruling, then draws the ended comment ──"
 fixture
