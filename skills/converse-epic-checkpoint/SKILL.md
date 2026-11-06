@@ -155,13 +155,14 @@ cleared:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the ruling, one line>" \
-  --outcome "<where the epic stands now, at most 140 characters>" --no-wait
+  --outcome "<where the epic stands now, at most 140 characters, or 95 when the ruling leaves an open PR standing>" --no-wait
   # --answer <gate> once for each gate a landed Delivery's close waits on
   # a gate on a PR's anchor takes a call of its own, with --retire <kind>
   # (and --successor <bead> unless the kind is not-needed), or --no-rework
 ```
 Until it exits 0, the ruling is not in place: repair what it printed and run
-it again.
+it again. It prints a line for each open PR the ruling leaves standing whose
+merge still waits on GitHub: pass the line on, with its link.
 
 **3. Close each landed Delivery.** Every close here and in write 6 is made the
 same way, and none is forced. First, nothing under the bead may be open. This
@@ -275,4 +276,6 @@ the close.
 Then sign off as the settle step says, once nothing important is pending:
 `--ruled yes --ruling "<the ruling, one line>" --route human --no-wait`. It
 reads the gates the ruling answered as cleared and closes the conversation.
+A PR whose gate write 2 answered is reached again while it is open, so give
+the sign-off the same `--no-rework` or `--retire <kind>` that answer took.
 Then drain.
