@@ -390,7 +390,7 @@ case "${1:-}" in
     tmp="$STORE.$$"
     jq -c --arg id "$id" --arg st "$new_st" --arg who "$new_who" --arg mode "$note_mode" --arg n "$note" \
        --argjson ns "${#sets[@]}" '
-      ($ARGS.positional[:$ns] | map(split("=") as $p | if ($p | length) == 1 then [., .] else [$p[0], ($p[1:] | join("="))] end)) as $sets
+      ($ARGS.positional[:$ns] | map(split("=") as $p | if ($p | length) <= 1 then [., .] else [$p[0], ($p[1:] | join("="))] end)) as $sets
       | $ARGS.positional[$ns:] as $unsets
       | map(if .id == $id then
           (if $st != "-" then ((if .status == "closed" and $st != "closed" then del(.close_reason) else . end) | .status = $st) else . end)
