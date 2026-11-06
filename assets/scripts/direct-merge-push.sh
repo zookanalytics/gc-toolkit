@@ -184,13 +184,15 @@ if carries "$TIP" "$PREPARED"; then
   echo "origin/$TARGET at $TIP already carries the prepared head $PREPARED, so nothing is pushed; recording the landing at $MERGED_SHA"
 elif carries "$PREPARED" "$TIP"; then
   MERGED_SHA="$PREPARED"
-  # The bead is assigned to the refinery, and bd_meta_ensure is for a bead
-  # nobody has taken, so the stamp is a plain update. The read-back decides
-  # whether it landed, since an update can exit 0 without writing.
-  STAMP_OUT=$(gc bd update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" </dev/null 2>&1)
-  STAMPED=$(bd_meta_readback "$WORK" "$(jq -nc --arg s "$MERGED_SHA" '{direct_landing_sha: $s}')")
-  if [ "${STAMPED%%$'\t'*}" != landed ]; then
-    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (it reads back ${STAMPED%%$'\t'*}; the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
+  # Without the stamp, a landing whose record failed would read as a branch
+  # with no work. The push cannot be undone, so the stamp is read back before
+  # it (the bd-durability block of bd-lib.sh).
+  if ! STAMP_OUT=$(gc bd update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" </dev/null 2>&1); then
+    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
+    exit 1
+  fi
+  if ! STAMPED=$(bd_meta_readback "$WORK" "$(jq -nc --arg s "$MERGED_SHA" '{direct_landing_sha: $s}')"); then
+    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (it reads back ${STAMPED%%$'\t'*}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
     exit 1
   fi
   STAMP="$MERGED_SHA"

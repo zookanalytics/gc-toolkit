@@ -36,18 +36,20 @@
 # nothing, because an unreadable answer cannot be told from no bead, and it
 # reads the store itself, never a pass's memo, since a memo taken before this
 # run's own write would show no bead. Otherwise the bead is created with its
-# identity in the create (bd_create), settled at its priority (queue-priority.sh
-# settle), and slung with mol-polecat-work, and the dispatch is proved by
-# reading gc.execution_routed_to back. The route is proved before any write,
-# after the dedup read, so a base whose re-audit is already in flight costs one
-# query (pool-route.sh).
+# identity in the create, settled at its priority (queue-priority.sh settle),
+# and slung with mol-polecat-work. A sling cannot be undone, so the identity is
+# read back first (the bd-durability block of bd-lib.sh), and the sling's exit
+# says whether it dispatched. The route is proved before any write, after the
+# dedup read, so a base whose re-audit is already in flight costs one query
+# (pool-route.sh).
 #
 # Output: one line on stdout, "<bead> <route> <filed|adopted|in-flight|held>",
 #   or "none <base> not-default" for a base that is not the default branch. The
 #   narrative goes to stderr.
 # Exit: 0 the base has its re-audit, or is not one to re-audit · 1 usage,
 #   nothing written · 2 not dispatched: the route, the dedup query, the create,
-#   the settle or the sling did not land, and a retry adopts what was filed
+#   the identity read back before the sling, the settle or the sling did not
+#   land, and a retry adopts what was filed
 set -uo pipefail
 
 _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -140,8 +142,6 @@ POOL=$("$SCRIPT_DIR/pool-route.sh" "$POOL_NAME") \
   || fail "the re-audit would route to '$POOL_NAME', which no live pool claims; nothing filed"
 
 if [ -n "$ROW" ]; then
-  short=$(bd_meta_ensure "$BEAD" "$IDENTITY") \
-    || fail "re-audit $BEAD does not carry its identity (short: ${short:-unreadable}); not dispatched, and a retry adopts it"
   warn "adopting $BASE's re-audit $BEAD (a prior run filed it but never dispatched it); filing no second one"
   STATE=adopted
 else
@@ -156,12 +156,9 @@ else
   BODY=$(printf '## What happened\n\nThe `gc` binary renders files of generated/seed-audit differently from what %s commits, and no change in this repository moved them. %s found %s already stale in the files below: each renders the same at %s as at the change it was checking. The text came from gc itself, whose builtin packs carry the prompts and recipes those files mirror (assets/scripts/render-seed-audit.sh, WHOSE TEXT IT IS).\n\n%s\n## The work\n\nOn a branch from %s, run `assets/scripts/render-seed-audit.sh` and commit generated/seed-audit as it renders, every file the render changes, including any not listed above. That re-render is the whole change. Edit no rendered file by hand and change no seed input: a page that reads wrong is corrected in gc and arrives here on the next re-audit.\n\nIn the PR summary, name the gc that rendered it (`gc version`, the binary'"'"'s path and its build time) and say what text moved.\n\nIf the render changes nothing, %s already carries this text and there is nothing to land: decline the work through a human gate, as for a falsified premise, so a person closes this bead.' \
     "$BASE" "${SEEN_BY:-A caller}" "$BASE" "$BASE" "$PAGE_LIST" "$BASE" "$BASE")
   TITLE="Re-render the seed audit on $BASE: the gc binary moved its text"
-  BEAD=$(bd_create --select "$KEY" "$IDENTITY" --title "$TITLE" -t task --priority=2 -d "$BODY"); rc=$?
-  case "$rc" in
-    0) ;;
-    2) fail "re-audit ${BEAD:-?} was filed but its identity did not read back whole; not dispatched, and a retry adopts it" ;;
-    *) fail "the re-audit create filed nothing a later run can find; a retry files it" ;;
-  esac
+  REPLY=$(bd_json create --title "$TITLE" -t task --priority=2 -d "$BODY" --metadata "$IDENTITY") \
+    || fail "the re-audit create was refused${REPLY:+: $(printf '%s' "$REPLY" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)}; nothing filed, and a retry files it"
+  BEAD=$(printf '%s' "$REPLY" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$BEAD" ] || fail "the re-audit create returned no id; a retry adopts the bead by $KEY=$BASE if the create landed"
   STATE=filed
 fi
@@ -171,14 +168,15 @@ fi
 "${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}" settle "$BEAD" >&2 \
   || fail "re-audit $BEAD did not settle at its priority (queue-priority.sh says why above); not dispatched, and a retry adopts it"
 
-# mol-polecat-work gives the re-audit the control-dispatcher driver a bare
-# gc.routed_to has no driver for. The pour stamps gc.execution_routed_to=<pool>,
-# and that read-back is the proof. Without it the bead stays filed, and a retry
-# adopts and slings it.
-gc sling ${GC_RIG:+--rig "$GC_RIG"} "$POOL" "$BEAD" --on "$WORK_FORMULA" >/dev/null 2>&1
-if [ "$(row_meta "$(bd_json show "$BEAD")" "gc.execution_routed_to")" != "$POOL" ]; then
-  fail "re-audit $BEAD: the $WORK_FORMULA pour did not stamp gc.execution_routed_to=$POOL; not falling back to a bare route (double-dispatch hazard), and a retry adopts and slings it"
-fi
+# A sling cannot be undone, so the identity the dedup finds the bead by is read
+# back first. mol-polecat-work gives the re-audit the control-dispatcher driver
+# a bare gc.routed_to has no driver for, so a sling that fails is reported and
+# never replaced by a bare route (double-dispatch hazard). The bead stays filed,
+# and a retry adopts and slings it.
+GOT=$(bd_meta_readback "$BEAD" "$IDENTITY") \
+  || fail "re-audit $BEAD does not read back carrying its identity (it reads back ${GOT%%$'\t'*} ${GOT#*$'\t'}); not dispatched"
+SLING_OUT=$(gc sling ${GC_RIG:+--rig "$GC_RIG"} "$POOL" "$BEAD" --on "$WORK_FORMULA" </dev/null 2>&1) \
+  || fail "re-audit $BEAD: the $WORK_FORMULA sling to $POOL failed (${SLING_OUT:-no reason given}); not falling back to a bare route (double-dispatch hazard), and a retry adopts and slings it"
 warn "$STATE $BASE's re-audit $BEAD, slung $WORK_FORMULA to $POOL"
 printf '%s %s %s\n' "$BEAD" "$POOL" "$STATE"
 exit 0

@@ -195,6 +195,48 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** `mol-dog-backup` backs up a suspended rig whose store inherits
   the city's endpoint.
 
+## bd write durability
+
+- **Covers.** The `bd-durability` block of `assets/scripts/bd-lib.sh`, which
+  holds `bd_meta_readback`, and each script's read-back through it.
+- **Stands in for.** A bd write whose exit status settles whether it landed. bd
+  would re-read an ordinary update under a degraded Dolt server, as it re-reads
+  a claim, and `bd dep add` would refuse a target that another database holds.
+  With both, a write that exits 0 would stay written, and the pack would read
+  nothing back. Without them, the pack re-reads a write only before an act that
+  cannot be undone or run again, such as a close, a push, a dismissal or a
+  sling, and after a dependency edge whose ends sit in two stores. Every other
+  write is settled by its exit status: a refused or failed `bd update` exits
+  non-zero, and so does `gc bd` around it.
+- **Evidence.** In `gastownhall/beads`:
+  - `verifiedUpdate` in `internal/storage/dolt/issue_operations.go` re-reads a
+    claim and a qualifying guarded update after the write, and keeps the
+    write's outcome otherwise. Its comment says that under a degraded server an
+    ordinary update's exit status "is no more trustworthy" than a claim's.
+  - The comment on `doltAddAndCommitInTx` in
+    `internal/storage/dolt/ephemeral_routing.go` lists the write paths that
+    still stage and commit inside the SQL transaction, the legacy `UpdateIssue`,
+    `CloseIssue` and `MergeMetadata` among them, and says any of them racing a
+    concurrent writer "can still silently revert that writer's committed rows"
+    (LatentLabsSpace/NEXUS#92).
+  - `resolveUnresolvedDepTarget` in `cmd/bd/dep.go` stores an edge whose target
+    carries another repository's prefix without finding that target, and in a
+    proxied-server store prints no warning (`depTargetLookupMiss`).
+    `GetExternalBlockingDependencyRecordsInTx` in
+    `internal/storage/issueops/dependency_queries.go` counts only `external:`
+    edges as blockers, so such an edge holds nothing.
+  - What a write's exit status does settle: `cmd/bd/update.go` reports every
+    refused or failed issue and exits non-zero, a guard mismatch included, and
+    in `gastownhall/gascity`, `cmd/gc/cmd_bd.go` passes bd's exit status
+    through and turns bd's silent fallback to the on-disk store into exit 4.
+- **Verified.** 2026-11-06, at `gastownhall/beads` main 8c3eb30f3 and
+  `gastownhall/gascity` main 005135c33. At beads v1.3.2 (9b65b9e19), the bd
+  build the city runs, the `verifiedUpdate` comment, the NEXUS#92 note and the
+  unverified cross-prefix edge read the same. Re-verify on every bd upgrade.
+- **Retires when.** bd re-reads an ordinary update in server mode and its
+  NEXUS#92 hazard note is gone, and `bd dep add` refuses a target that another
+  database holds.
+
 ## Priority following
 
 - **Covers.** `assets/scripts/queue-priority.sh`,

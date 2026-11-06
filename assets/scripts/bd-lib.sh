@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the read of a bead's human gates every reader of them makes and
-# the order its open gates under one key are read in, the one-write create every
-# script files a stamped bead through, the metadata read-back that gates handing
-# such a bead on, the close that unmakes a bead no reader can find, the birth,
+# the order its open gates under one key are read in, the read-back that gates
+# an act that cannot be undone, the checked create, metadata repair and unmake
+# that code the deletion plan retires still files through, the birth,
 # settle and route of PR-finishing work, the validation pass's work order, the
 # gating-PR read's field set, the per-rig key an order's state lives under, the
 # pass lock that lets an order run one pass at a time, and warn and die, which a
@@ -565,6 +565,13 @@ bd_live_children() {
 #      written. Prints the id. The bead carries every --select key, or some key
 #      with no --select, so the caller's next run can find it, and a caller
 #      hands it on only once bd_meta_ensure has made it whole.
+#
+# The read-back, the second write and the close serve only callers in code the
+# deletion plan retires: scripts tools/deletion-plan.tsv lists, and the part of
+# signoff.sh the review-lane migration replaces. Any other script files with
+# `gc bd create --metadata`, takes a non-zero exit as a create that failed, and
+# reads a bead back only through bd_meta_readback, before an act that cannot
+# be undone (the bd-durability block below).
 bd_create() {
   local sel="" child="" anchor="" meta db="" prev="" a reply id row got short lost="" err
   while :; do
@@ -642,6 +649,17 @@ bd_create() {
   return 2
 }
 
+# >>> bd-durability
+# A write's exit status says whether it landed: a refused or failed `gc bd`
+# write exits non-zero, and a caller treats that as the failure it is. The two
+# gaps bd leaves are docs/warrants.md's "bd write durability": an exit-0 write
+# under a degraded Dolt server, or beside a legacy write path, may not stay
+# written, and a dependency edge onto a target another database holds is stored
+# unverified and holds nothing. So a script reads a write back through
+# bd_meta_readback only before an act that cannot be undone or run again, such
+# as a close, a push, a dismissal or a sling, and reads back a dependency edge
+# whose ends sit in two stores. It reads back nothing else.
+
 # bd_meta_judge <id> <metadata-json> <show-json> — how a bead carries a metadata
 # payload, judged from a `gc bd show --json` reply the caller already holds, with
 # no read of its own. Prints one line: a verdict, a tab, and the payload's keys
@@ -670,14 +688,20 @@ bd_meta_judge() {
   if [ -n "$out" ]; then printf '%s\n' "$out"; else printf 'unreadable\t\n'; fi
 }
 
-# bd_meta_readback <id> <metadata-json> [gc-bd-args...] — bd_meta_judge on a
-# fresh read of the bead. The trailing arguments reach `gc bd show`, so the read
-# follows the --db a write named.
+# bd_meta_readback <id> <metadata-json> [gc-bd-args...] — the read before an act
+# that cannot be undone: bd_meta_judge on a fresh read of the bead, which prints
+# its verdict line. Returns 0 when every key reads back as written, else 1, so a
+# caller runs its act only on 0. It writes nothing: a write it finds missing is
+# reported, and the act does not run. The trailing arguments reach
+# `gc bd show`, so the read follows the --db a write named.
 bd_meta_readback() {
-  local id="${1:-}" meta="${2:-}"
+  local id="${1:-}" meta="${2:-}" got
   shift 2 || true
-  bd_meta_judge "$id" "$meta" "$(bd_json show "$id" "$@" </dev/null)"
+  got=$(bd_meta_judge "$id" "$meta" "$(bd_json show "$id" "$@" </dev/null)")
+  printf '%s\n' "$got"
+  [ "${got%%$'\t'*}" = landed ]
 }
+# <<< bd-durability
 
 # bd_meta_ensure [--row <show-json>] <id> <metadata-json> [gc-bd-args...] — make
 # a bead that already exists carry a payload before its caller hands it on. The
@@ -692,9 +716,11 @@ bd_meta_readback() {
 #
 # A route or a sling makes a bead someone's work order, so a caller gates that
 # act on this check and not on the exit of the write that filed the bead:
-# bd_create prints the id of a bead whose read-back fell short (its rc 2), and
-# `gc bd update` can exit 0 without writing. The write ignores bd's claim guard,
-# so a caller runs this only on a bead nobody has taken.
+# bd_create prints the id of a bead whose read-back fell short (its rc 2). The
+# write ignores bd's claim guard, so a caller runs this only on a bead nobody
+# has taken. Like bd_create's read-back, this serves only callers in code the
+# deletion plan retires. Any other script writes once, takes a non-zero exit as
+# the failure, and gates its act on bd_meta_readback.
 bd_meta_ensure() {
   local row="" seen="" id meta got kv sets=()
   if [ "${1:-}" = "--row" ]; then row="${2:-}"; seen=1; shift 2 || true; fi
@@ -723,8 +749,8 @@ bd_meta_ensure() {
 # reader can find, so that nothing it carries holds anything. The close carries
 # gc.outcome=abandoned and appends <note>, which names who unmade it and why.
 # The trailing arguments reach the close and its read-back, so a --db sends both
-# to that store. Returns 0 once the bead reads back closed, 1 otherwise: the
-# update's exit cannot say, because `gc bd update` can exit 0 without writing.
+# to that store. Returns 0 once the bead reads back closed, 1 otherwise. Its
+# callers are bd_create's unmake and code the deletion plan retires.
 bd_unmake() {
   local id="${1:-}" note="${2:-}" st
   shift 2 || true
