@@ -30,7 +30,11 @@
 // them, so fields may be added but never renamed or removed.
 package board
 
-import "time"
+import (
+	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+)
 
 // Severity is the attention band of a tile. Higher bands dominate ranking.
 type Severity string
@@ -207,17 +211,23 @@ type Anchor struct {
 	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 
-	// HoldingGates is every open human gate that holds a live merge anchor, on the
-	// anchor itself or behind a bead it waits on, which prstatus.HoldingGates
-	// reads through open `blocks` edges. The PR's held: gate value and its row's
-	// `asking` read it, so the row and the label count the same gates. The beads
-	// source walks it for each live merge anchor
-	// ([source.BeadsSource.attachHoldingGates]). A read that fails is noted partial
-	// and leaves it empty on every anchor. An anchor past its walk's bound has no
-	// answer, so it is noted partial and left empty, and the others keep theirs. A
-	// row with it empty reads the gates on the anchor itself.
-	// The supervisor backend walks none, because its beads carry no await type.
-	HoldingGates []Blocker `json:"holding_gates,omitempty"`
+	// PR is what the city records about a live merge anchor's PR, as
+	// prstatus.Read gathers it: the one definition of what holds a PR and where it
+	// stands, which the PR's labels and gc-helm.sh engage read too. The row's PR
+	// phase, held values, machine axis and liveness decide from it by prstatus's
+	// own rules, so the row and the labels cannot disagree. The beads source reads
+	// it for each live merge anchor ([source.BeadsSource.attachPR]). It is nil when
+	// that read did not answer, which is noted partial, and on the supervisor
+	// backend, whose beads carry no await type, so no human gate can be read
+	// there. A row with it nil carries no PR phase or held value.
+	PR *prstatus.Facts `json:"-"`
+
+	// PRReasons is the bead behind each of the PR's reasons that names one
+	// (prstatus.Reasons): each open human gate that holds it, nearest first, then
+	// each blocker it waits on that a person has to clear, as the gather read
+	// them. The row's `asking`, its owed clock and its held gates read them. The
+	// beads source fills it beside [Anchor.PR].
+	PRReasons []Blocker `json:"pr_reasons,omitempty"`
 
 	// Reviews is the anchor's review beads, open and closed: each carries
 	// task_kind=review and names this anchor in anchor_bead. A lane's green
@@ -253,17 +263,6 @@ type Anchor struct {
 	// operator's queue, and its sitting's alias while a sitting holds it. The
 	// gather sets it on a conversation only.
 	Assignee string `json:"assignee,omitempty"`
-
-	// InFlight is a live merge anchor's in-flight set: every bead that names it
-	// in anchor_bead, any task_kind, at one of prstatus.InFlightStatuses, the set
-	// `gctk pr-status derive` reads for the PR labels. Its phase and held values
-	// count it ([anchorWorkSet]), so the board and the labels read the same work.
-	// The beads source reads it for each live merge anchor
-	// ([source.BeadsSource.readInFlight]). A read that fails is noted partial
-	// and leaves it empty, and the board then counts the live review and rework
-	// rows it gathered for the anchor, which the set also holds. The supervisor
-	// backend gathers neither.
-	InFlight []Child `json:"in_flight,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.
@@ -589,10 +588,11 @@ type Tile struct {
 	// Phase is this bead's liveness in the shared status vocabulary — `working`,
 	// `merging`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
-	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
-	// human gate, posture, the merge pass's verdict, the draft stage, and for a merge
-	// anchor its in-flight set ([Anchor.InFlight]), or for any other bead the
-	// live-workflow signal standing over it. A bead's board liveness and its
+	// [prstatus.Derive] names: on a merge anchor, from the facts its PRPhase
+	// reads ([Anchor.PR]), and on any other bead, from its holds, the open human
+	// gates that hold it and the live-workflow signal standing over it. A merge
+	// anchor whose PR has no answer reads its liveness as any other bead does.
+	// A bead's board liveness and its
 	// GitHub `status:` label come from that one core. A row WITH child tiles then
 	// takes their rolled-up state in place of that per-bead value
 	// ([aggregatePhases]): an epic's frontier is its children's frontier.

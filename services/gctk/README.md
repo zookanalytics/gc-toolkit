@@ -43,7 +43,10 @@ whose build failed keeps serving the last good binary.
 `assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
 shell and takes their values from `gctk pr-status derive`. It resolves the
 binary the same way, and when there is none, or the binary is too old to carry
-`pr-status` or its `--json`, it leaves the labels unchanged.
+`pr-status` or its `--json`, it leaves the labels unchanged. `gc-helm.sh` engage
+lists what holds a bead from the reasons in the same verb's `--json` answer, and
+the helm board imports the package behind it, `prstatus`, so the labels, engage
+and the board read one definition of what holds a PR.
 
 ## rig
 

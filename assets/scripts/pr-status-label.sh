@@ -183,8 +183,9 @@ ensure_labels() { # uses ORIGIN_*
 # the helm board derives the same per-bead state from it, so a bead's PR labels
 # and its board liveness cannot disagree. `gctk pr-status derive --anchor ID`
 # prints working|merging|needs-review|needs-attention, and with --json one object
-# carrying that status and the held values, {"status": ..., "held": [...]}. It
-# exits 0 on success and 2 when a read did not resolve. There is deliberately no
+# carrying that status, the held values and the reasons behind them,
+# {"status": ..., "held": [...], "reasons": [...]}, of which this script reads the
+# first two. It exits 0 on success and 2 when a read did not resolve. There is deliberately no
 # shell reimplementation: a second code path is the divergence this shared
 # package exists to remove, and the board has no shell to fall back to. When
 # gctk cannot answer, the caller leaves the labels as they are, because a failed
