@@ -196,14 +196,7 @@ these steps:
    says nothing waits on the gate, names any closed bead the gate was about,
    and starts nothing, and the operator clears the gate.
    Picked from the gates offered on a bead (below), the gate takes that bead
-   when it is one of those waiting. Given a conversation, it works on the bead
-   the conversation tracks. A conversation that has closed is not held again:
-   before any prompt, engage says when it closed and the first line of its last
-   hand-back after the header. On a terminal it then engages the subject, where
-   Enter files a new conversation whose ask names the closed one, so its
-   sitting reads what that one settled. With `--no-input` it starts nothing and
-   names the subject's engage. When the subject is closed too, it starts
-   nothing either way, since a closed subject takes no new conversation.
+   when it is one of those waiting.
 2. **It reads the bead's conversations:** the open tasks that track the bead
    in the conversation shape, with the session list saying which of their
    sittings are live.
