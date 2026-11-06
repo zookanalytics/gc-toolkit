@@ -82,15 +82,17 @@ it.
 
 Four producers file the same bead contract:
 
-1. **Self-report.** Working agents (polecat, mechanik, converse)
-   carry the `file-feedback-observations` fragment: when a turn brings
-   corrective feedback about standing behavior, the agent fixes the
-   instance first, then files one observation bead with
-   `obs.source=self`. A pool session such as a polecat has no one at its
-   terminal, so every turn there is text the city sends. It captures only
-   from durable sources: a PR review or comment, a rework's rejection
-   reason, and a bead's notes. A session the operator attends, mechanik
-   or a converse sitting, also captures the operator's own turns.
+1. **Self-report.** Working agents (polecat, converse) carry the
+   `file-feedback-observations` fragment, and the mechanik reads the same
+   recipe from the `records` skill, which carries the fragment as a
+   reference. When a turn brings corrective feedback about standing
+   behavior, the agent fixes the instance first, then files one
+   observation bead with `obs.source=self`. A pool session such as a
+   polecat has no one at its terminal, so every turn there is text the
+   city sends. It captures only from durable sources: a PR review or
+   comment, a rework's rejection reason, and a bead's notes. A session the
+   operator attends, mechanik or a converse sitting, also captures the
+   operator's own turns.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
    rig's merged/closed PRs' review and conversation comments, with
    `obs.source=miner`, in two captures:
@@ -246,8 +248,12 @@ and its class fragment, so a universal standard lives in the base once while a
 class-specific one reaches only the classes it impacts — a standard about
 changing a repo does not reach the human converse class. The classes: polecats
 (polecat, polecat-codex), human (the converse-opus, converse-fable and
-converse-codex sittings), system (deacon, mechanik, proactive, witness,
-refinery, keeper).
+converse-codex sittings), system (deacon, proactive, witness, refinery,
+keeper). The mechanik writes bead bodies too, but composes neither fragment:
+its prime has to fit Claude Code's 10,000-character session-start cap, which
+`assets/scripts/mechanik-prime-cap.test.sh` holds it to, and the standards do
+not fit beside its own doctrine, the operator profile and its learned
+conventions.
 The correctness method, `skills/review-correctness/SKILL.md`, holds the diff's
 output to every one of these fragments. It reads them from its own
 `references/` directory, where a relative link to each fragment keeps one

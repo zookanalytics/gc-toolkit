@@ -1,6 +1,6 @@
 ---
 name: records
-description: Use when you need to write down what was decided, what happened, or what a bead needs, such as an outcome or a finding in its notes, a Current state summary of long notes, or the headline the board shows for it (its takeaway). To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
+description: Use when you need to write down what was decided, what happened, or what a bead needs, such as an outcome or a finding in its notes, a Current state summary of long notes, the headline the board shows for it (its takeaway), or an observation of feedback that corrects standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -66,3 +66,18 @@ the doctor reports unless a live `blocks` edge holds it.
 In a sitting, the hold and the sign-off write the headlines (the converse-hold
 and converse-settle steps). The one other headline a sitting writes is a
 stand-down, which stops work in flight (the work skill).
+
+## Record feedback as an observation
+
+The message is that someone corrected how agents behave as a standing matter:
+the operator correcting you, a PR review or comment, or a rework whose cause
+was a habit rather than a one-off. The learning distiller reads observations
+and proposes the rules a reviewed PR may adopt. Feedback about one change's
+content, such as a bug or a wrong approach, is review, not an observation.
+
+Fix the instance in front of you first, then file one observation before the
+turn ends. The capture recipe the pack composes into the prompts that file
+observations is the writer, and this skill carries it as
+`references/file-feedback-observations.template.md`: which turns carry
+feedback, the create that files the observation whole, and how to set its
+provenance, category and directive.

@@ -113,6 +113,21 @@ carries the work:
   descendant, and containment already carries the wait. When the sitting also
   sent a dependency, name that one with `--waiting-on` in place of `--no-wait`.
 
+## Stand up an integration effort
+
+The message is that several beads reach the default branch as one PR. Each
+lands on one integration branch with no PR of its own, a summary task writes
+the PR's summary once they have all landed, and the refinery takes the landing
+bead that carries the branch through the one PR the operator reviews. A lone
+bead needs none of this: slung to a pool, it opens its own PR.
+
+Writer: the recipe in `integration-effort.md`, beside this file. It files the
+landing bead and cuts its branch, files each bead with its target and the
+landing bead's wait on it, files the summary task, and hands the landing bead
+to the refinery before it dispatches anything, reading each write back before
+the next. It also says how a bead joins an effort later and how the effort's
+branch is brought current.
+
 ## Take a recommendation
 
 A first reaction that cannot route a bead itself records the formula it

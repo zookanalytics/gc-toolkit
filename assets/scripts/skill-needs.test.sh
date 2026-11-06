@@ -31,12 +31,13 @@
 # once, with one fragment pointing both prompts at the skills. It pins how the
 # prompt's hand-back definition has a framing name its subject, and that the
 # hold skill points at it. It pins that the
-# dispatch fragment the mechanik and the keeper compose calls deferred-dispatch.sh
-# and gc-bd-watch.sh the work skill's way, so both renders reach the pack's own
-# copies. It pins the prs
+# dispatch fragment the keeper composes calls deferred-dispatch.sh and
+# gc-bd-watch.sh the work skill's way, and that the mechanik's prompt calls
+# gc-bd-watch.sh and human-gate.sh the same way, so each render reaches the
+# pack's own copies. It pins the prs
 # skill's supplement command: filed in the PR's rig, holding the anchor's merge,
-# and slung only once that hold reads back, with the mechanik's copy the same
-# command. It pins that a formula's own description, not a doc, says which work
+# and slung only once that hold reads back. It pins that a formula's own
+# description, not a doc, says which work
 # the formula fits. It pins that a problem in software the rig does not own goes
 # through the external-issue skill, which alone holds that path's commands and
 # files the finding set aside, with no send drafted and no question asked.
@@ -578,57 +579,44 @@ fenced_block() {
         }
     ' "$1"
 }
-# The mechanik names the act where it routes work, so it gives the command too:
-# the prs skill's own, sent to its rig's polecat pool. Compared whole, the two
-# copies cannot drift apart.
-SUP_MARK='SUP=$(gc bd --rig <rig> create'
-fenced_block "$PRS_SKILL" "$SUP_MARK" >"$TMP/sup-prs"
-fenced_block "$MECHANIK" "$SUP_MARK" | sed 's#{{ \.BindingPrefix }}polecat#<pool>#' >"$TMP/sup-mechanik"
-if [ -s "$TMP/sup-prs" ] && cmp -s "$TMP/sup-prs" "$TMP/sup-mechanik"; then
-    ok "the mechanik's supplement command is the prs skill's, sent to its rig's polecat pool"
-else
-    bad "the mechanik's supplement command is the prs skill's, sent to its rig's polecat pool" \
-        "$(diff "$TMP/sup-prs" "$TMP/sup-mechanik" 2>&1 | head -4 | tr '\n' ' ')"
-fi
-# The mechanik's disposition fragment names the work skill's option and calls
-# the pack's own writer, never a copy found in a checkout.
-DISPOSITION="$REPO/template-fragments/bead-disposition.template.md"
-have "the disposition fragment calls the pack's own writer" '"{{ .ConfigDir }}/assets/scripts/bead-rehome.sh" --origin <bead>' "$DISPOSITION"
-found=""
-for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' 'GC_CITY_PATH'; do
-    grep -qF -- "$probe" "$DISPOSITION" && found="$found [$probe]"
-done
-[ -z "$found" ] && ok "…and looks for it in no checkout" || bad "…and looks for it in no checkout" "found:$found"
-# The dispatch fragment renders into the mechanik's prompt and into the
-# keeper's. The keeper comes from the gascity-keeper sub-pack, and a pack path
-# rendered for it names that sub-pack, which holds none of the scripts the
-# fragment calls. So the fragment calls each of them the work skill's way, and
-# each render's calls resolve through the pack command to the pack's own copy.
+# The dispatch fragment renders into the keeper's prompt. The keeper comes from
+# the gascity-keeper sub-pack, and a pack path rendered for it names that
+# sub-pack, which holds none of the scripts the fragment calls. So the fragment
+# calls each of them the work skill's way, and the render's calls resolve
+# through the pack command to the pack's own copy. The mechanik's prompt calls
+# its watch and its gate withdrawal the same way.
 DISPATCH="$REPO/template-fragments/watch-dispatched-work.template.md"
 DD_CALL='"$(gc <binding> scripts-dir)/deferred-dispatch.sh"'
 WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
+KEEPER_RENDER="$REPO/generated/seed-audit/agents/keeper.md"
+MECHANIK_RENDER="$REPO/generated/seed-audit/agents/mechanik.md"
 have "the dispatch fragment gives the work skill's notice call" "$DD_CALL notify <bead> --agent <qualified-name>" "$DISPATCH"
 have "…the call the work skill gives" "$DD_CALL notify <bead> --agent <qualified-name>" "$WORK_SKILL"
 have "…and runs its watch through the pack command" "command: '$WATCH_CALL <bead>'" "$DISPATCH"
-for render in "$REPO/generated/seed-audit/agents/mechanik.md" "$REPO/generated/seed-audit/agents/keeper.md"; do
-    agent=$(basename "$render" .md)
-    verbs=$(grep -oF -- "$DD_CALL notify
-$DD_CALL arm" "$render" | sed 's/.* //' | sort -u | tr '\n' ' ')
-    [ "$verbs" = "arm notify " ] && ok "$agent's render gives the notice and the arm as calls through the pack command" \
-        || bad "$agent's render gives the notice and the arm as calls through the pack command" "found: '$verbs'"
-    have "…and the watch" "command: '$WATCH_CALL <bead>'" "$render"
-    # Prose names a script by its bare name in backticks. Every other mention
-    # is a call, and goes through the pack command.
-    for script in deferred-dispatch.sh gc-bd-watch.sh; do
-        call="\"\$(gc <binding> scripts-dir)/$script\""
-        named=$(grep -oF -- "$script" "$render" | wc -l | tr -d ' ')
-        prose=$(grep -oF -- "\`$script\`" "$render" | wc -l | tr -d ' ')
-        via=$(grep -oF -- "$call" "$render" | wc -l | tr -d ' ')
-        [ "$via" -gt 0 ] && [ "$named" = "$((via + prose))" ] && ok "…and names $script no other way ($via calls)" \
-            || bad "…and names $script no other way" "$via of its $((named - prose)) calls go through the pack command"
-    done
-done
+# named_only_via <render> <script> — prose names a script by its bare name in
+# backticks. Every other mention is a call, and goes through the pack command.
+named_only_via() {
+    call="\"\$(gc <binding> scripts-dir)/$2\""
+    named=$(grep -oF -- "$2" "$1" | wc -l | tr -d ' ')
+    prose=$(grep -oF -- "\`$2\`" "$1" | wc -l | tr -d ' ')
+    via=$(grep -oF -- "$call" "$1" | wc -l | tr -d ' ')
+    [ "$via" -gt 0 ] && [ "$named" = "$((via + prose))" ] && ok "…and names $2 no other way ($via calls)" \
+        || bad "…and names $2 no other way" "$via of its $((named - prose)) calls go through the pack command"
+}
+verbs=$(grep -oF -- "$DD_CALL notify
+$DD_CALL arm" "$KEEPER_RENDER" | sed 's/.* //' | sort -u | tr '\n' ' ')
+[ "$verbs" = "arm notify " ] && ok "keeper's render gives the notice and the arm as calls through the pack command" \
+    || bad "keeper's render gives the notice and the arm as calls through the pack command" "found: '$verbs'"
+have "…and the watch" "command: '$WATCH_CALL <bead>'" "$KEEPER_RENDER"
 for script in deferred-dispatch.sh gc-bd-watch.sh; do
+    named_only_via "$KEEPER_RENDER" "$script"
+done
+have "the mechanik's render gives the watch as a call through the pack command" "command: '$WATCH_CALL <bead>'" "$MECHANIK_RENDER"
+have "…and the withdrawal of its own gate" '"$(gc <binding> scripts-dir)/human-gate.sh" --retract --subject <bead>' "$MECHANIK_RENDER"
+for script in gc-bd-watch.sh human-gate.sh; do
+    named_only_via "$MECHANIK_RENDER" "$script"
+done
+for script in deferred-dispatch.sh gc-bd-watch.sh human-gate.sh; do
     call="\"\$(gc <binding> scripts-dir)/$script\""
     printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"
     got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" bash "$TMP/fragment-call-$script" 2>/dev/null)
@@ -801,7 +789,6 @@ while IFS='|' read -r label file marker; do
 done <<SPECS
 work: closing a bead that needs no work|$WORK_SKILL|gc.work_outcome=no-op
 converse prompt: disposing of a no-work subject|$PROMPT|gc.work_outcome=no-op
-disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outcome=no-op
 converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
 converse-settle: arming a follow-up|$SETTLE|gc bd --rig <rig> dep add <follow-up> <blocker>
 converse-settle: arming a follow-up on a human gate|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
