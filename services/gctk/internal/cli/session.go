@@ -40,16 +40,22 @@ import (
 // attributes that tell a placeholder from a draft.
 
 const sessionUsage = `usage:
-  gctk session title --topic <words> [--subject <bead-id>]
+  gctk session title --topic <words> [--subject <bead-id>] [--pr <n>]
                      [--session <id-or-alias>]
 
 Gives a session a title and shows it on the session's terminal. The title is
-"<subject> — <topic>", or the topic alone when --subject is absent.
+"<subject> #<n> — <topic>", and an item not given is left out of it:
+"<subject> — <topic>", "#<n> — <topic>", or the topic alone.
 
   --topic <words>          what the session is on, in a few words
   --subject <bead-id>      the bead the session is about, which leads the title
+  --pr <n>                 the number of the pull request the session is
+                           about, which follows the subject as #<n>
   --session <id-or-alias>  the session to title; default the session this runs
                            in ($GC_SESSION_ID)
+
+An empty --subject or --pr is an item not given, so a caller can pass what it
+read, which is empty when there is none.
 
 gc session rename sets the title on the session's record, which gc session
 list and the board show. For a Claude Code or Codex session, gc session nudge
@@ -92,7 +98,7 @@ var (
 const agentPaneFormat = "#{?#{==:#{@gc_agent},#{session_id}},agent,#{?#{@gc_agent_session},orphan,pane}}\t#{pane_id}"
 
 type titleOpts struct {
-	topic, subject, session string
+	topic, subject, pr, session string
 }
 
 // Session dispatches `gctk session <verb>`, returning a process exit code so
@@ -126,7 +132,7 @@ func parseTitleArgs(args []string) (titleOpts, string) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch a {
-		case "--topic", "--subject", "--session":
+		case "--topic", "--subject", "--pr", "--session":
 		default:
 			return o, fmt.Sprintf("unknown argument %q", a)
 		}
@@ -144,12 +150,17 @@ func parseTitleArgs(args []string) (titleOpts, string) {
 			o.topic = v
 		case "--subject":
 			o.subject = v
+		case "--pr":
+			o.pr = v
 		case "--session":
 			o.session = v
 		}
 	}
 	if o.topic == "" {
 		return o, "--topic needs the words the title is made of"
+	}
+	if strings.Trim(o.pr, "0123456789") != "" {
+		return o, fmt.Sprintf("--pr takes the pull request's number, such as 1409, not %q", o.pr)
 	}
 	// The title is typed into the agent's input box, where a newline sends
 	// what came before it as a message of its own.
@@ -167,13 +178,26 @@ func parseTitleArgs(args []string) (titleOpts, string) {
 	return o, ""
 }
 
+// titleText is the title the options make: the subject, its pull request as
+// #<n>, and a dash before the topic, with an item not given left out.
+func titleText(o titleOpts) string {
+	var lead []string
+	if o.subject != "" {
+		lead = append(lead, o.subject)
+	}
+	if o.pr != "" {
+		lead = append(lead, "#"+o.pr)
+	}
+	if len(lead) == 0 {
+		return o.topic
+	}
+	return strings.Join(append(lead, "—", o.topic), " ")
+}
+
 // sessionTitle renames the session in Gas City, then types /rename into it,
 // reporting each step on stdout.
 func sessionTitle(o titleOpts, stdout, stderr io.Writer) int {
-	title := o.topic
-	if o.subject != "" {
-		title = o.subject + " — " + o.topic
-	}
+	title := titleText(o)
 
 	out, errText, code := runSplit("gc", "session", "rename", o.session, title, "--json")
 	if code != 0 {

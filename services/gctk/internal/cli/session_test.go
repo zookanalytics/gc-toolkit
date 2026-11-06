@@ -146,6 +146,10 @@ func TestSessionTitleUsage(t *testing.T) {
 		{"flag with no value", []string{"--topic"}, "tk-s1"},
 		{"newline in topic", []string{"--topic", "one\ntwo"}, "tk-s1"},
 		{"no session to default to", []string{"--topic", "x"}, ""},
+		{"PR given as #<n>", []string{"--topic", "x", "--pr", "#41"}, "tk-s1"},
+		{"PR given as its link", []string{"--topic", "x", "--pr", "https://github.com/acme/widgets/pull/41"}, "tk-s1"},
+		{"PR with no value", []string{"--topic", "x", "--pr"}, "tk-s1"},
+		{"PR twice", []string{"--topic", "x", "--pr", "41", "--pr", "42"}, "tk-s1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,16 +194,6 @@ func TestSessionTitle(t *testing.T) {
 			if !strings.Contains(stdout, want) {
 				t.Fatalf("stdout %q lacks %q", stdout, want)
 			}
-		}
-	})
-
-	t.Run("the topic alone without a subject", func(t *testing.T) {
-		r := newTitleRig(t)
-		if _, stderr, code := r.run("--topic", "triage the review queue"); code != sessionExitDone {
-			t.Fatalf("exit %d, stderr %q", code, stderr)
-		}
-		if got := r.calls("gc|session|nudge|"); len(got) != 1 || !strings.Contains(got[0], "|/rename triage the review queue|") {
-			t.Fatalf("nudge calls = %q", got)
 		}
 	})
 
@@ -370,6 +364,42 @@ func TestSessionTitle(t *testing.T) {
 			t.Fatalf("exit %d, stdout %q", code, stdout)
 		}
 	})
+}
+
+// TestSessionTitleItems covers each combination of the items a title is made
+// of, which the session record and the typed /rename both carry.
+func TestSessionTitleItems(t *testing.T) {
+	cases := []struct {
+		name  string
+		args  []string
+		title string
+	}{
+		{"subject, PR and topic", []string{"--subject", "tk-a8k8dpw", "--pr", "1409", "--topic", "show the PR on the tab"}, "tk-a8k8dpw #1409 — show the PR on the tab"},
+		{"subject and topic", []string{"--subject", "tk-a8k8dpw", "--topic", "show the PR on the tab"}, "tk-a8k8dpw — show the PR on the tab"},
+		{"PR and topic", []string{"--pr", "1409", "--topic", "show the PR on the tab"}, "#1409 — show the PR on the tab"},
+		{"the topic alone", []string{"--topic", "triage the review queue"}, "triage the review queue"},
+		{"an empty PR is not given", []string{"--subject", "tk-a8k8dpw", "--pr", "", "--topic", "t"}, "tk-a8k8dpw — t"},
+		{"a blank subject is not given", []string{"--subject", " ", "--pr", "1409", "--topic", "t"}, "#1409 — t"},
+		{"the flags in another order", []string{"--topic", "t", "--pr", " 1409 ", "--subject", "tk-a8k8dpw"}, "tk-a8k8dpw #1409 — t"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTitleRig(t)
+			stdout, stderr, code := r.run(tc.args...)
+			if code != sessionExitDone {
+				t.Fatalf("exit %d, stderr %q", code, stderr)
+			}
+			if got := r.calls("gc|session|rename|"); len(got) != 1 || got[0] != "gc|session|rename|tk-s1|"+tc.title+"|--json|" {
+				t.Fatalf("rename calls = %q, want the title %q", got, tc.title)
+			}
+			if got := r.calls("gc|session|nudge|"); len(got) != 1 || got[0] != "gc|session|nudge|tk-s1|--delivery|immediate|/rename "+tc.title+"|--json|" {
+				t.Fatalf("nudge calls = %q, want /rename %q", got, tc.title)
+			}
+			if want := "renamed tk-s1 to \"" + tc.title + "\""; !strings.Contains(stdout, want) {
+				t.Fatalf("stdout %q lacks %q", stdout, want)
+			}
+		})
+	}
 }
 
 func TestTitlePaneChoice(t *testing.T) {
