@@ -1107,7 +1107,8 @@ distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
 `duplicate` — say the work relocated, and the pointer names the bead that
 carries it now. The fifth, `not-needed`, says nothing carries it: the bead
 was not needed, and the pointer names the evidence that concluded so,
-typically the conversation of the sitting that ruled. The pointer is required
+typically the conversation of the sitting that ruled, or the human gate its
+ruling answered. The pointer is required
 under every kind, because it is the whole of that distinction. The kind is
 read from the close reason, which opens with the kind's phrase and the
 successor, as in `not needed, per <successor> in <store>`. When the pointer is
@@ -1116,8 +1117,9 @@ instead. The read side searches every store before concluding a close was
 false. Consumers: the mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), `preexisting-failure.sh` (a pre-existing-failure gate follows a closed
-tracker's pointer to the live bead that carries its failure, and a
+twins), `stand-down.sh` (a person's ruling that work a human gate holds will
+not go on), `preexisting-failure.sh` (a pre-existing-failure gate follows a
+closed tracker's pointer to the live bead that carries its failure, and a
 `not-needed` close ends that chain), and any patrol judging a closed bead.
 
 `bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and

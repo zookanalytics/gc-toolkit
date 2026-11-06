@@ -28,7 +28,7 @@
 # same way. The variable holds that bead when it was assigned from the create's
 # command substitution, quoted or not, or from a substitution that reads `.id`
 # out of a variable that holds it (the
-# `VISIT=$(printf '%s' "$VISIT_JSON" | jq … .id …)` step). Any other assignment
+# `ID=$(printf '%s' "$JSON" | jq … .id …)` step). Any other assignment
 # to the variable, a create that carries --metadata, and the start of a shell
 # function forget it, so the scan tracks a bead only along the straight line
 # from its create.
@@ -36,7 +36,7 @@
 # The scan folds continuation lines, carries quote state across lines, and
 # skips comments and here-doc bodies. Quoted text is data, so a message that
 # quotes the shape is not a finding; a double-quoted word that is exactly one
-# variable (`"$VISIT"`) stays a word, because that is how a script names the
+# variable (`"$ID"`) stays a word, because that is how a script names the
 # bead it writes, and one that is exactly one substitution (`"$(…)"`) stays
 # that substitution. The commands of one line are judged in the order they
 # run, after the words that only open one (if, then, do, a group, a function

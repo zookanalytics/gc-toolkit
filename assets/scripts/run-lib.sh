@@ -154,12 +154,15 @@ run_lib() {
 # run_lib_read <reader> <bd args...> — one read, printed only when it is a JSON
 # array of objects. The `gc bd:` notice a store can print on stdout is dropped
 # while the newline that ends its line still stands, then the read is
-# scrubbed, as bd-lib.sh's bd_json does.
+# scrubbed, as bd-lib.sh's bd_json does. A read with no control byte and no
+# notice at its start is one line the two leave as it is.
 run_lib_read() {
     local reader="$1" raw
     shift
     raw="$("$reader" "$@" </dev/null 2>/dev/null)" || return 1
-    raw="$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)"
+    case "$raw" in
+        *[[:cntrl:]]*|'gc bd:'*) raw="$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)" ;;
+    esac
     printf '%s' "$raw" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null 2>&1 || return 1
     printf '%s' "$raw"
 }

@@ -416,7 +416,7 @@ LOG_ACT="$LOG"
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --waiting-on tk-other --reaction-bead "$R"
 eq "$RC" "2" "(ACT) actionable refuses the other exits' flags"
 
-# (ACTPOOL) a route to a pool nothing runs is worse than a visit: the bead
+# (ACTPOOL) a route to a pool nothing runs is worse than a human gate: the bead
 # would be open, unassigned and offered to nobody.
 has "PROACTIVE deliverable gc-toolkit/gc-toolkit.polecat tk-sub" "$LOG_ACT" \
     "(ACTPOOL) the exit asks whether the pool can claim this bead before handing over"

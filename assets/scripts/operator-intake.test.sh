@@ -359,9 +359,9 @@ has "$ERR" "unknown rig" "(RIG) the error names the problem"
 # without editing the script.
 : > "$FAKE_CALLS"
 set +e
-GC_VISIT_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>&1
+GC_INTAKE_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>&1
 set -e
-has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAULT_RIG moves the default"
+has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_INTAKE_DEFAULT_RIG moves the default"
 
 # --- (LIVENESS) filing into a paused rig is recorded, not refused -------------
 # Suspend means paused processing, not a dead store: gc rig suspend leaves the

@@ -750,7 +750,7 @@ REVIEW_META='{"branch":"polecat/tk-a","task_kind":"rework","anchor_bead":"tk-a",
 eq "$(run_anchor_resolve polecat/tk-a "[{\"id\":\"tk-work\",\"metadata\":$REVIEW_META},$NAMED_ROW]" "$REVIEW_META")" \
    "0|" \
    "a review's rework naming an unanchored bead elects nothing"
-RULING_META='{"branch":"integration/tk-cv","task_kind":"rework","anchor_bead":"tk-cv","source_ruling_bead":"tk-visit"}'
+RULING_META='{"branch":"integration/tk-cv","task_kind":"rework","anchor_bead":"tk-cv","source_ruling_bead":"tk-conv"}'
 eq "$(run_anchor_resolve integration/tk-cv "[{\"id\":\"tk-work\",\"metadata\":$RULING_META},$CONVOY_ROW]" "$RULING_META")" \
    "0|" \
    "a ruling's rework naming the convoy elects nothing"

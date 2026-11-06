@@ -71,7 +71,9 @@ resumes a cancelled run, so a wait for a person sits on the work bead:
 `assets/scripts/await-ruling.sh` reads that `blocks` edge back and arms the
 work bead's re-sling, so clearing the gate pours a fresh run. The re-sling
 fires only for an open, unassigned bead, so the script first releases a claim
-on the work bead that no live worker holds.
+on the work bead that no live worker holds. A ruling not to proceed goes through
+`assets/scripts/stand-down.sh`, which removes the re-sling's arm before it
+answers the gate, then closes the work bead.
 
 The refusal drains only after the cancel lands. A cancel that does not land
 leaves the step claimed by this session, and the step goes back to the pool

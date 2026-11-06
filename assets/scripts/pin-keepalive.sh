@@ -51,7 +51,7 @@
 # NOT set -e: every failure is handled and routed to the correct side.
 set -uo pipefail
 
-PROG=pin-keepalive
+PROG="pin-keepalive"
 
 # The interactive/conversational provider. mechanik is "claude"; the watchers
 # (deacon, witness, refinery) are "claude-watch" and are deliberately excluded.
@@ -65,7 +65,7 @@ CALL_TIMEOUT="${PIN_KEEPALIVE_CALL_TIMEOUT:-20}"
 KILL_AFTER="${PIN_KEEPALIVE_KILL_AFTER:-5}"
 LOG_KEEP="${PIN_KEEPALIVE_LOG_KEEP:-400}"
 
-MODE=exec
+MODE="exec"
 FORCE=0
 DRY_RUN=0
 while [ $# -gt 0 ]; do
@@ -204,7 +204,7 @@ enumerate_targets() {
     TARGETS=""
     ENUM_STATUS=ok
     local sess cand id alias b cns pin
-    sess="$(bounded gc session list "${CITY_FLAG[@]}" --state all --json 2>/dev/null | scrub)"
+    sess="$(bounded gc session list "${CITY_FLAG[@]}" --json 2>/dev/null | scrub)"
     if ! printf '%s' "$sess" | jq -e '(.sessions // empty) | type == "array"' >/dev/null 2>&1; then
         ENUM_STATUS=list_fail
         return 0
