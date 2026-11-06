@@ -3398,6 +3398,90 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 	})
 }
 
+// holdingOwedIDs lists the beads a person owes that a walk reached for an anchor,
+// in its order.
+func holdingOwedIDs(a board.Anchor) []string {
+	ids := []string{}
+	for _, o := range a.HoldingOwed {
+		ids = append(ids, o.ID)
+	}
+	return ids
+}
+
+// TestMergeAnchorHoldingOwedIsWalked: the same walk carries the beads a person
+// owes the next move on, each weighed by what its own row records. Another pull
+// request the anchor's rework waits on holds it while that pull request waits on
+// a review, and not while the city is changing or landing it.
+func TestMergeAnchorHoldingOwedIsWalked(t *testing.T) {
+	const prMeta = `{"merge_result":"pull_request","pr_number":"18"}`
+	pr := func() *beads.Issue { return issue("tk-pr", "an open PR", "task", 2, testNow, prMeta) }
+	rework := func() *beads.Issue {
+		return issue("tk-rw", "fix the check", "task", 2, testNow, `{"task_kind":"rework","anchor_bead":"tk-pr"}`)
+	}
+	other := func(meta string) *beads.Issue { return issue("tk-b", "the other PR", "task", 2, testNow, meta) }
+	const awaitingReview = `{"merge_result":"pull_request","pr_number":"37","pr_posture":"review_required@h@t","pr.machine":"settled@h@t"}`
+	const landing = `{"merge_result":"pull_request","pr_number":"37","pr_posture":"approved@h@t","pr.machine":"settled@h@t"}`
+	store := func(edges map[string][]*beads.IssueWithDependencyMetadata) *fakeStore {
+		return &fakeStore{issues: map[string][]*beads.Issue{"task": {pr()}}, depsDown: edges}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		edges map[string][]*beads.IssueWithDependencyMetadata
+		want  []string
+	}{
+		{"nothing blocks it", nil, []string{}},
+		{"another pull request waiting on a review behind its rework", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(other(awaitingReview))}}, []string{"tk-b"}},
+		{"another pull request the city is changing", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(other(awaitingReview))},
+			"tk-b": {blocksEdge(issue("tk-b.rw", "its own rework", "task", 2, testNow, `{"task_kind":"rework","anchor_bead":"tk-b"}`))}}, []string{}},
+		{"another pull request the city is landing", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(other(landing))}}, []string{}},
+		{"a bead routed to a person behind its rework", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(issue("tk-p", "for you", "task", 2, testNow, `{"gc.routed_to":"human"}`))}}, []string{"tk-p"}},
+		{"a decision on the anchor", map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(issue("tk-d", "which way?", "decision", 2, testNow, `{}`))}}, []string{"tk-d"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, anchor := gatherPreOpen(t, store(tc.edges), "tk-pr")
+			if got := holdingOwedIDs(anchor); !slices.Equal(got, tc.want) {
+				t.Errorf("holding owed = %v, want %v", got, tc.want)
+			}
+			if got := holdingGateIDs(anchor); len(got) != 0 {
+				t.Errorf("holding gates = %v, want none: no gate is on the graph", got)
+			}
+			if res.Partial {
+				t.Errorf("a walk that read notes nothing partial: %v", res.PartialErrors)
+			}
+		})
+	}
+
+	t.Run("the bead comes back whole", func(t *testing.T) {
+		_, anchor := gatherPreOpen(t, store(map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(other(awaitingReview))}}), "tk-pr")
+		if len(anchor.HoldingOwed) != 1 {
+			t.Fatalf("holding owed = %v, want one", anchor.HoldingOwed)
+		}
+		if o := anchor.HoldingOwed[0]; o.Title != "the other PR" || o.Status != "open" {
+			t.Errorf("owed = %+v, want its title and status", o)
+		}
+	})
+
+	t.Run("a walk that fails notes partial and leaves it empty", func(t *testing.T) {
+		st := store(map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(other(awaitingReview))}})
+		st.failDeps = map[string]error{"tk-rw": errors.New("dolt timeout")}
+		res, anchor := gatherPreOpen(t, st, "tk-pr")
+		if len(anchor.HoldingOwed) != 0 {
+			t.Errorf("holding owed = %v, want none from a walk that failed", holdingOwedIDs(anchor))
+		}
+		if !res.Partial {
+			t.Error("the walk failed, so the board says so")
+		}
+	})
+}
+
 // TestMergeAnchorInFlightSetIsGathered: each live merge anchor carries its
 // in-flight set, the beads `gctk pr-status derive` counts for the PR labels:
 // every bead naming it in anchor_bead, any task_kind, at a live status. One read

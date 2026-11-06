@@ -592,7 +592,7 @@ carries none.
 |---|---|---|
 | `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.HoldingGates`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
 | `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
-| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision. A human gate is not among them, whatever its route, because `held: gate` counts it |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is routed to a person, is a decision, or is another merge anchor whose own status, by the same rule over the facts it records and its own `blocks` edges, is `needs-attention`, or `needs-review` once its PR is open. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a pull request the city is changing or landing holds nothing. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, whatever its route, because `held: gate` counts it |
 
 Any `held:` label reads `status: needs-attention`, because each names something
 a person has to act on. The merge freeze and the rebase hold carry no `held:`
@@ -643,9 +643,11 @@ board applies it too, over the in-flight set the labels count, and by it decides
 a blocked row's phase, whether the operator's queue lists the row, and the row's
 needs phrase.
 
-`prstatus.HoldingGates` is the one reader of the gates that hold a PR. The
-label's value counts them, the board's row names them, and `gc-helm engage` on the
-PR offers each, through `gctk pr-status gates`. Each bead walks for itself, and
+`prstatus.Holding` is the one reader of what holds a PR behind its edges: the
+human gates, and the beads a person owes the next move on. The labels count both.
+The board's row asks each gate and names the other beads as where the move is,
+and `gc-helm engage` on the PR offers each gate, through `gctk pr-status gates`
+(`prstatus.HoldingGates`, the gates alone). Each bead walks for itself, and
 the walks of one call share their reads: each bead is read once, and its edges a
 level at a time. So a PR reads the same on the board, which walks a rig's PRs
 together, as on its label and at engage, which walk it alone. A walk is bounded,

@@ -273,8 +273,8 @@ conversation" while a sitting holds the conversation. A merge anchor keeps its
 own PR needs, whose `asking` names each open human gate that holds it, oldest
 first, and outranks a takeaway. Those are the gates on the anchor and the ones
 behind a bead it waits on, such as a rework, which the beads source reads for
-each live merge anchor by `prstatus.HoldingGates`, the walk behind the PR's
-`held: gate` label. The supervisor backend walks none, because its beads carry no
+each live merge anchor by `prstatus.Holding`, the walk behind the PR's
+`held: gate` and `held: blocked` labels. The supervisor backend walks none, because its beads carry no
 await type. The owed clock is the earliest `updated_at` among the row's open gates and owed
 conversations. A bead that carries `gc.recommended_formula` and that no open
 gate under the key `first-reaction` blocks has its own `blocks` listing read
@@ -622,7 +622,7 @@ field would be lying on a normal day.
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from a human gate's edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
-| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's demand blockers |
+| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held`, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the beads a person owes the next move on that the anchor waits on, on its own blockers or behind a bead it waits on |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
@@ -657,6 +657,12 @@ it, so once no fix unit, review, or finding is in flight the merge pass records
 `settled` and the row is the operator's to clear by re-reviewing (`pr_approval`
 reads `required`, and `needs` names the re-review). A veto with a fix unit still
 in flight reads `progressing` and stays the city's move.
+
+A row held only by a bead a person owes the next move on, such as another pull
+request waiting on a review that its rework waits for, reads `needs-attention`
+with `pr_held` `blocked`, as its label does, and is not owed: the move is on that
+bead, and the row's `needs` names it, `your move is on <its title>`, counting any
+others. A row owed for a cause of its own keeps naming that cause.
 
 **Blocked, not settled.** `blocked` is a hold no automated actor will clear and
 no review verdict is owed on: an unresolved required review thread, a failed

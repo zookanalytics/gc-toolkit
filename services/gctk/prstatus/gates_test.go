@@ -310,3 +310,122 @@ func TestHoldingGatesShareReadsAcrossLevels(t *testing.T) {
 		t.Errorf("reads = %v, want %v", g.reads, want)
 	}
 }
+
+// anchorBlocker is an open bead with the metadata a merge anchor records on itself,
+// read as a caller reads it.
+func anchorBlocker(id string, md map[string]string) Blocker {
+	return Blocker{ID: id, Title: "pr " + id, Status: "open", IssueType: "task"}.
+		WithMetadata(func(key string) string { return md[key] })
+}
+
+// with returns md with each pair of keys and values added, leaving md as it was.
+func with(md map[string]string, kv ...string) map[string]string {
+	out := make(map[string]string, len(md)+len(kv)/2)
+	for k, v := range md {
+		out[k] = v
+	}
+	for i := 0; i+1 < len(kv); i += 2 {
+		out[kv[i]] = kv[i+1]
+	}
+	return out
+}
+
+// awaitingReview is an open pull request the merge pass settled with no approval:
+// its next move is a person's review.
+var awaitingReview = map[string]string{"merge_result": "pull_request", "pr_posture": "review_required@h@t", "pr.machine": "settled@h@t"}
+
+func decision(id string) Blocker {
+	return Blocker{ID: id, Title: "decide " + id, Status: "open", IssueType: "decision"}
+}
+
+func routedToPerson(id string) Blocker {
+	return Blocker{ID: id, Title: "for " + id, Status: "open", IssueType: "task", RoutedTo: "human"}
+}
+
+// The walk keeps the beads a person owes the next move on, other than the human
+// gates it keeps apart, wherever they hold the root: on it, or behind a bead it
+// waits on. A merge anchor it reaches is weighed by its own state, its own edges
+// among it, so another pull request the city is changing or landing holds
+// nothing.
+func TestHoldingOwed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		edges     map[string][]Blocker
+		wantGates []string
+		wantOwed  []string
+	}{
+		{"nothing blocks the bead", nil, []string{}, []string{}},
+		{"a decision on the bead", map[string][]Blocker{"a": {decision("d")}}, []string{}, []string{"d"}},
+		{"a bead routed to a person behind a rework",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {routedToPerson("p")}}, []string{}, []string{"p"}},
+		{"another pull request waiting on a review behind a rework",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}}, []string{}, []string{"b"}},
+		{"another pull request the city is changing",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {task("b.rw")}}, []string{}, []string{}},
+		{"another pull request the city is landing",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t"))}}, []string{}, []string{}},
+		{"another pull request the merge pass blocked",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr.machine", "blocked@h@t", "pr.machine_cause", "check-failed"))}},
+			[]string{}, []string{"b"}},
+		{"another pull request under a merge hold",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t", "merge_hold", "true"))}},
+			[]string{}, []string{"b"}},
+		{"another pull request review feedback holds",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t", "pr.unanswered_threads", "1@h"))}},
+			[]string{}, []string{"b"}},
+		{"a pre-open anchor whose checks are done has no pull request to review",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pre_open_gate"))}}, []string{}, []string{}},
+		{"a pre-open anchor the merge pass blocked",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pre_open_gate", "pr.machine", "blocked@h@t", "pr.machine_cause", "rule"))}},
+			[]string{}, []string{"b"}},
+		{"a bead that is no merge anchor is no review to wait on",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("t", with(awaitingReview, "merge_result", ""))}}, []string{}, []string{}},
+		{"a pull request held only by its gate is the gate's to clear",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t"))}, "b": {gate("g")}},
+			[]string{"g"}, []string{}},
+		{"a pull request waiting on a review and a decision is two moves",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {decision("d")}}, []string{}, []string{"b", "d"}},
+		{"of two stacked pull requests the review owed is the one the other waits on",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b1", awaitingReview)}, "b1": {anchorBlocker("b2", awaitingReview)}},
+			[]string{}, []string{"b2"}},
+		{"a pull request that landed holds nothing",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {closed(anchorBlocker("b", with(awaitingReview, "merge_result", "merged")))}}, []string{}, []string{}},
+		{"a closed decision holds nothing", map[string][]Blocker{"a": {closed(decision("d"))}}, []string{}, []string{}},
+		{"a human gate routed to a person counts once, as a gate",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", RoutedTo: "human"}}},
+			[]string{"g"}, []string{}},
+		{"owed beads nearest first",
+			map[string][]Blocker{"a": {task("rw"), decision("near")}, "rw": {decision("far")}}, []string{}, []string{"near", "far"}},
+		{"a walk back to the root weighs nothing",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("a", awaitingReview)}}, []string{}, []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &graph{edges: tc.edges}
+			got, err := Holding([]string{"a"}, g.read)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ids := gateIDs(got["a"].Gates); !slices.Equal(ids, tc.wantGates) {
+				t.Errorf("gates of a = %v, want %v", ids, tc.wantGates)
+			}
+			if ids := gateIDs(got["a"].Owed); !slices.Equal(ids, tc.wantOwed) {
+				t.Errorf("owed of a = %v, want %v", ids, tc.wantOwed)
+			}
+		})
+	}
+}
+
+// HoldingGates is Holding's gates, root by root, with its bound and its errors.
+func TestHoldingGatesIsHoldingsGates(t *testing.T) {
+	g := &graph{edges: map[string][]Blocker{"a": {task("rw"), decision("d")}, "rw": {gate("g")}, "b": nil}}
+	gates, err := HoldingGates([]string{"a", "b"}, g.read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := gateIDs(gates["a"]); !slices.Equal(ids, []string{"g"}) {
+		t.Errorf("gates of a = %v, want only the gate", ids)
+	}
+	if ids, answered := gates["b"]; !answered || len(ids) != 0 {
+		t.Errorf("gates of b = %v (%v), want an answer with none", ids, answered)
+	}
+}

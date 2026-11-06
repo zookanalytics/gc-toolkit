@@ -208,8 +208,8 @@ type Anchor struct {
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 
 	// HoldingGates is every open human gate that holds a live merge anchor, on the
-	// anchor itself or behind a bead it waits on, which prstatus.HoldingGates
-	// reads through open `blocks` edges. The PR's held: gate value and its row's
+	// anchor itself or behind a bead it waits on, which prstatus.Holding reads
+	// through open `blocks` edges. The PR's held: gate value and its row's
 	// `asking` read it, so the row and the label count the same gates. The beads
 	// source walks it for each live merge anchor
 	// ([source.BeadsSource.attachHoldingGates]). A read that fails is noted partial
@@ -218,6 +218,16 @@ type Anchor struct {
 	// row with it empty reads the gates on the anchor itself.
 	// The supervisor backend walks none, because its beads carry no await type.
 	HoldingGates []Blocker `json:"holding_gates,omitempty"`
+
+	// HoldingOwed is every other bead a person owes the next move on that holds a
+	// live merge anchor, on its own blockers or behind a bead it waits on, which the
+	// same walk reads ([prstatus.Holds.Owed]): a decision, a bead routed to a
+	// person, or a merge anchor whose own state is a person's to move, such as
+	// another pull request waiting on a review. The PR's held: blocked value reads
+	// it, as the label's does. The person's move is on that bead, not on this one,
+	// so this row names it in NEEDS ([holdingNeeds]) and is not owed for it. It is
+	// read and left empty as HoldingGates is.
+	HoldingOwed []Blocker `json:"holding_owed,omitempty"`
 
 	// Reviews is the anchor's review beads, open and closed: each carries
 	// task_kind=review and names this anchor in anchor_bead. A lane's green

@@ -25,10 +25,10 @@ import (
 // `gc bd`. The cli tests pin GC_NO_API, so every read answers from the same `gc
 // bd` stub the shell acceptance drives.
 //
-// The values are decided by prstatus.Derive, prstatus.Held and
-// prstatus.HoldingGates, the package exported for the helm board to derive the
-// same per-bead state: one code path, so a bead's PR labels, its board liveness
-// and what engage offers on it cannot disagree.
+// The values are decided by prstatus.Derive, prstatus.Held and prstatus.Holding,
+// the package exported for the helm board to derive the same per-bead state: one
+// code path, so a bead's PR labels, its board liveness and what engage offers on
+// it cannot disagree.
 
 // prStatusProg is the name warnings carry: the script whose derivation this is,
 // because its callers grep those lines and the language behind the command is
@@ -89,8 +89,8 @@ func prStatusArgs(verb string, args []string, asJSON *bool, stderr io.Writer) (s
 // returns beside it: the holds, the dated posture, the machine verdict and its
 // blocked cause, the count of review threads waiting on the city's answer, and
 // the draft-stage markers off the anchor, the size of the anchor's in-flight
-// set, whether an open human gate holds the anchor, and whether a blocker it
-// waits on is a person's.
+// set, and what the walk from the anchor finds holding it: an open human gate,
+// and a bead a person owes the next move on.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	asJSON := false
 	anchor, ok := prStatusArgs("derive", args, &asJSON, stderr)
@@ -122,9 +122,9 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// The anchor's blockers, one read, answer the holds a person owes on the
-	// anchor itself: a live blocker routed to a person or a decision. They are
-	// also the first level of the walk to the open human gates that hold it. A
+	// The anchor's blockers, one read, are the first level of the walk to what
+	// holds it that only a person moves: the open human gates, and the beads a
+	// person owes the next move on, on the anchor or behind a bead it waits on. A
 	// conversation about the anchor tracks it and blocks nothing, so it is not
 	// among them.
 	blockers, ok := client.DepList(anchor, "--type", "blocks", "--json")
@@ -132,17 +132,17 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: could not read the blockers of %s; cannot derive a status\n", prStatusProg, anchor)
 		return 2
 	}
-	gates, err := prstatus.HoldingGates([]string{anchor}, blockerRead(client, map[string][]gcbd.Bead{anchor: blockers}))
+	holds, err := prstatus.Holding([]string{anchor}, blockerRead(client, map[string][]gcbd.Bead{anchor: blockers}))
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: could not read the human gates that hold %s: %v; cannot derive a status\n", prStatusProg, anchor, err)
+		fmt.Fprintf(stderr, "%s: could not read what holds %s: %v; cannot derive a status\n", prStatusProg, anchor, err)
 		return 2
 	}
 
 	facts := prstatus.Facts{
 		MergeHold:           bead.Meta("merge_hold"),
 		RebaseHold:          bead.Meta("rebase_hold"),
-		OpenHumanGate:       len(gates[anchor]) > 0,
-		PersonBlocker:       personBlocker(blockers),
+		OpenHumanGate:       len(holds[anchor].Gates) > 0,
+		PersonBlocker:       len(holds[anchor].Owed) > 0,
 		PRPosture:           bead.Meta("pr_posture"),
 		PRMachine:           bead.Meta("pr.machine"),
 		PRMachineCause:      bead.Meta("pr.machine_cause"),
@@ -201,7 +201,7 @@ func prStatusGates(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// blockerRead is the read prstatus.HoldingGates walks through `gc bd`: one
+// blockerRead is the read prstatus.Holding walks through `gc bd`: one
 // client.Blockers per level, for the beads the caller has not read already.
 // known holds the `blocks` rows of each bead it has.
 func blockerRead(client *gcbd.Client, known map[string][]gcbd.Bead) prstatus.ReadBlockers {
@@ -229,8 +229,8 @@ func blockerRead(client *gcbd.Client, known map[string][]gcbd.Bead) prstatus.Rea
 	}
 }
 
-// asBlockers projects `blocks` rows onto what the walk reads. A row with no status
-// reads open.
+// asBlockers projects `blocks` rows onto what the walk reads, each row's own
+// metadata among it. A row with no status reads open.
 func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 	out := make([]prstatus.Blocker, 0, len(rows))
 	for i := range rows {
@@ -241,26 +241,7 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 			Status:    b.StatusLowerOr("open"),
 			IssueType: b.IssueTypeString(),
 			AwaitType: b.AwaitType,
-		})
+		}.WithMetadata(b.Meta))
 	}
 	return out
-}
-
-// personBlocker reports whether a live blocker among blockers, the beads the
-// anchor's blocks edges name, is a person's to clear: one routed to a person, or
-// a decision. A human gate is not among them, whatever its route, because
-// held: gate is what counts it. A blocker with no status reads open, and only a
-// closed one is not live. It is the helm board's demand test (board.demand), so
-// the board's asking row and the label read one rule.
-func personBlocker(blockers []gcbd.Bead) bool {
-	for i := range blockers {
-		b := &blockers[i]
-		if b.StatusLowerOr("open") == "closed" || b.IsHumanGate() {
-			continue
-		}
-		if b.Meta("gc.routed_to") == "human" || b.IssueTypeString() == "decision" {
-			return true
-		}
-	}
-	return false
 }

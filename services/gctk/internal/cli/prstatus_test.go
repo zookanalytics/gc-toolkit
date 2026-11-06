@@ -239,8 +239,8 @@ func TestPRStatusDerive(t *testing.T) {
 
 // --json prints the status beside what holds the PR, the values the held: labels
 // carry. An open human gate blocking the anchor holds it, and a live blocker
-// routed to a person or a decision holds it as the merge pass's stuck-blocker
-// verdict does.
+// routed to a person, a decision, or another pull request whose own state is a
+// person's to move holds it as the merge pass's stuck-blocker verdict does.
 func TestPRStatusDeriveHeld(t *testing.T) {
 	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
 	rework := `[{"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
@@ -275,6 +275,14 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 			`{"status":"merging","held":[]}`},
 		{"a blocker a pool will claim is the city's", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependency_type":"blocks"}]`},
+			`{"status":"merging","held":[]}`},
+		{"another pull request it waits on, waiting on a review", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-b","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@def@t","pr.machine":"settled@def@t"},"dependency_type":"blocks"}]`},
+			`{"status":"needs-attention","held":["blocked"]}`},
+		{"another pull request it waits on, which the city is changing", approved, `[]`,
+			map[string]string{
+				"STUB_BLOCKERS": `[{"id":"tk-b","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@def@t","pr.machine":"settled@def@t"},"dependency_type":"blocks"}]`,
+				"STUB_EDGES":    `{"tk-b":[{"id":"tk-b.rw","status":"open","issue_type":"task","metadata":{"task_kind":"rework","anchor_bead":"tk-b"},"dependency_type":"blocks"}]}`},
 			`{"status":"merging","held":[]}`},
 		{"the merge pass's thread verdict", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"review-threads"}}]`, `[]`, nil,
 			`{"status":"needs-attention","held":["review"]}`},
@@ -325,7 +333,8 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 // parityCase is one row of prstatus/testdata/parity.json, the table the PR
 // labels and the helm board are both held to: anchor tk-a's metadata, its
 // in-flight set, the beads its `blocks` edges name, the beads an open human gate
-// blocks, the beads a conversation tracks, and the status and held values both
+// blocks, the beads a conversation tracks, the beads further `blocks` edges name
+// behind a bead, each with its own fields, and the status and held values both
 // derive from them.
 type parityCase struct {
 	Name     string            `json:"name"`
@@ -335,13 +344,39 @@ type parityCase struct {
 		TaskKind string `json:"task_kind"`
 		Status   string `json:"status"`
 	} `json:"in_flight"`
-	Blockers      []string `json:"blockers"`
-	Gates         []string `json:"gates"`
-	Conversations []string `json:"conversations"`
+	Blockers      []string                `json:"blockers"`
+	Gates         []string                `json:"gates"`
+	Conversations []string                `json:"conversations"`
+	Behind        map[string][]parityBead `json:"behind"`
 	Want          struct {
 		Status string   `json:"status"`
 		Held   []string `json:"held"`
 	} `json:"want"`
+}
+
+// parityBead is a bead a `blocks` edge names behind another in the parity
+// table, with the fields its row carries. An absent status reads open and an
+// absent issue type reads task.
+type parityBead struct {
+	ID        string            `json:"id"`
+	Title     string            `json:"title"`
+	Status    string            `json:"status"`
+	IssueType string            `json:"issue_type"`
+	Metadata  map[string]string `json:"metadata"`
+}
+
+// row is the bead as a `gc bd show` dependency row carries it, the far end of a
+// `blocks` edge.
+func (b parityBead) row() map[string]any {
+	status, issueType := b.Status, b.IssueType
+	if status == "" {
+		status = "open"
+	}
+	if issueType == "" {
+		issueType = "task"
+	}
+	return map[string]any{"id": b.ID, "title": b.Title, "status": status, "issue_type": issueType,
+		"dependency_type": "blocks", "metadata": b.Metadata}
 }
 
 // The label's side of the parity table: each case reaches the derive as the
@@ -387,6 +422,15 @@ func TestPRStatusDeriveParity(t *testing.T) {
 					own = append(own, gate)
 				} else {
 					edges[g] = append(edges[g], gate)
+				}
+			}
+			for id, beads := range tc.Behind {
+				for _, b := range beads {
+					if id == "tk-a" {
+						own = append(own, b.row())
+					} else {
+						edges[id] = append(edges[id], b.row())
+					}
 				}
 			}
 			rawOwn, err := json.Marshal(own)
