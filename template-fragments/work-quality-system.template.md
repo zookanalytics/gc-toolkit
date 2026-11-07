@@ -2,9 +2,10 @@
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
-     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
-     standards for that class only; universal standards live in
-     work-quality-base. -->
+     proactive, witness, refinery, and keeper. The mechanik, also in this
+     class, reads this file and work-quality-base before it writes, because
+     its prime has no room for them. Holds the authoring standards for that
+     class only; universal standards live in work-quality-base. -->
 
 <!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
 - File work as a bead in the pass that names it, and put the bead id in the

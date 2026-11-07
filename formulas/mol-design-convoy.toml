@@ -116,8 +116,8 @@ The default branch is the one `origin/HEAD` names in the rig's checkout, or
 `main` when it names none. The push sends a ref and checks nothing out, so the
 rig's checkout never moves. Its empty lease refuses a branch that already
 exists, so a refused push after which origin carries the branch is a cut an
-earlier pass already made. The mechanik's recipe for standing an effort up by
-hand cuts with the same marked blocks, `effort-default-branch` and
+earlier pass already made. The `work` skill's recipe for standing an effort up
+by hand cuts with the same marked blocks, `effort-default-branch` and
 `effort-branch-push`, so both cut from the same branch. A subject that already
 records the branch is cut no further, and one that records another branch is not
 this run's to cut. Neither is one that lands on a branch other than the default,
