@@ -180,6 +180,16 @@ one that trades a procedure for a call. `tools/lint-step-text.in-flight` names
 the branches whose formula changes were built before the rule, and a step made
 heavier only by lines one of them adds draws a warning instead of a failure.
 
+A step also reaches its agent whole. gc delivers an agent's current step in a
+hook's output, which Claude Code keeps to 10,000 characters and Codex to 10,000
+bytes, and a longer one reaches the agent cut. So every step a hook delivers
+renders within 9,000 bytes, with the reminder that wraps it, and the rest of the
+hook's output is left for what shares it, such as the clock line, queued nudges
+and unread mail. A step over the bound keeps its instructions inline and moves
+its reference prose into the doc it points to, or its mechanics into a tested
+script. `assets/scripts/formula-step-size.test.sh` holds the bound, and its
+header says how it renders a step and which formulas no hook delivers.
+
 ## A landed pack change is confirmed on the deployed checkout
 
 This city imports the pack by directory, so what is live is the rig
