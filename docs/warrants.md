@@ -276,8 +276,8 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 - **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
 - **Stands in for.** Ending a manual session that outlives the conversation it
-  held: a stop that did not take, a conversation another path closed, or one a
-  sitting cut short handed back to the operator's queue.
+  held: a close that did not take, or a conversation another path closed or
+  handed back to the operator's queue.
 - **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
   work closes. It stays until it is closed or drained, and attaching wakes one
   that sleeps (`cmd/gc/compute_awake_set.go` 443-451, 594-605 and 679-704).
@@ -287,10 +287,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3164, 3345 and
   3608), and the core reaper prunes a session only once it has drained
   (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 118 and 1588-1590).
-  A sitting drains itself once its conversation closes, and `gc-helm dismiss`
-  stops the session that held the conversation it closes, so nothing in the
-  controller ends a session either of them missed.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c.
+  A sitting closes its own session once its conversation closes, and
+  `gc-helm dismiss` closes the session that held the conversation it closes,
+  so nothing in the controller ends a session either of them missed.
+- **Verified.** 2026-11-07, at `gastownhall/gascity` main 986e25dd2b.
 - **Retires when.** Gas City ends a manual session once its claimed work has
   closed.
 

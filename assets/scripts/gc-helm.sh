@@ -62,7 +62,7 @@ Usage:
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
-  gc-helm dismiss  [<bead-id>] [--reason "..."] [--operator] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok}
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok}
   gc-helm handback <conversation-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its conversation, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of; each --var rides the sling, a var the operator settled for this dispatch
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
@@ -194,15 +194,13 @@ dismissal, and answers nothing: every human gate the conversation replies to
 stays open and owed, for its filer or the next sitting. It records the
 dismissal as one of the visit's actions, a comment on the conversation that
 carries no reason, and draws the comment that shows the visit on the subject's
-PR again. It then stops the converse session that held the conversation with
-`gc runtime drain-ack`, so the controller ends the session outside this
-process: the session dismiss runs in acks itself, last, and any other is acked
-as an operator. --operator says the caller is outside the sitting even when it
-runs under the sitting's identity to infer the subject, as prefix+X does, so
-every session is acked as an operator and none acks itself. A session that
-will not stop is left to converse-reap, which closes any converse session
-whose conversation reads closed. The close falls back to --force when bd
-refuses an operator closing a conversation its sitting holds. A conversation
+PR again. It then closes the converse session that held the conversation with
+`gc session close`, which stops a session whether or not a client is attached:
+any other session first, and the session dismiss runs in last, because that
+close ends dismiss too. A session that will not close is left to converse-reap,
+which closes any converse session whose conversation reads closed. The close of
+the conversation falls back to --force when bd refuses an operator closing a
+conversation its sitting holds. A conversation
 the verb could not account for aborts the run, which exits 4. It writes
 nothing to the subject. A subject with no live sitting has nothing to end, and
 dismiss says so and writes nothing; a conversation id names its own
@@ -2586,20 +2584,6 @@ sitting_session_of() {
           else empty end' 2>/dev/null || true
 }
 
-# operator_drain_ack <session-id> — stop a session as the operator, from outside
-# it, with `gc runtime drain-ack --operator`. Gas City refuses an operator ack
-# whose caller's GC_SESSION_ID or GC_INSTANCE_TOKEN names the session it stops.
-# A caller can carry both, because a run-shell job inherits the tmux
-# environment of the session its key was pressed in, incarnation token
-# included. So the ack runs with this process's session identity and token
-# removed.
-operator_drain_ack() {
-    (
-        unset GC_SESSION_ID GC_SESSION_NAME GC_ALIAS GC_INSTANCE_TOKEN
-        gc runtime drain-ack --operator "$1"
-    ) >/dev/null 2>&1
-}
-
 # ── Verb: dismiss ────────────────────────────────────────────────────
 # The operator's explicit "end this sitting". converse runs with no
 # idle_timeout, so a held conversation keeps its sitting up until something
@@ -2616,21 +2600,20 @@ operator_drain_ack() {
 # one waiting in the queue. A conversation the verb could not account for
 # aborts the run. Idempotent.
 #
-# The stop is `gc runtime drain-ack`, so the controller ends the session
-# outside this process: a dismiss typed into the sitting's own pane is never
-# killed half done. The session this verb runs in acks itself, last of all;
-# any other is acked as an operator. Under --operator the caller is outside
-# every sitting, whatever identity it runs under, so no session acks itself.
-# A session that will not stop is left to converse-reap, which closes any
-# converse session whose conversation reads closed.
+# The stop is `gc session close`, which stops a session whether or not a client
+# is attached, where the stop a drain-ack asks for waits while one is. The
+# session this verb runs in is closed last of all. From inside its own pane that
+# close signals everything there but itself, this script included, and goes on
+# to close the session's record, so nothing can follow it. A session that will
+# not close is left to converse-reap, which closes any converse session whose
+# conversation reads closed.
 cmd_dismiss() {
-    bead=""; dismiss_reason=""; dismiss_json=""; dismiss_stop=""; dismiss_operator=""
+    bead=""; dismiss_reason=""; dismiss_json=""; dismiss_stop=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) dismiss_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --reason requires a value" >&2; exit 2; }
                         dismiss_reason="$1"; shift ;;
-            --operator) dismiss_operator=1; shift ;;
             --json)     dismiss_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: dismiss: unknown flag '$1'" >&2; exit 2 ;;
@@ -2746,9 +2729,9 @@ cmd_dismiss() {
         fi
     done
 
-    # dismiss_stop_sittings — stop each session dismiss_stop names, the one this
-    # verb runs in last, since a dismiss typed into a sitting's pane ends with
-    # that pane. Under --operator none is the one this verb runs in.
+    # dismiss_stop_sittings — close each session dismiss_stop names, the one
+    # this verb runs in last, since a dismiss typed into a sitting's pane ends
+    # with that pane. Whatever the verb has to say is said before this runs.
     dismiss_stop_sittings() {
         _ds_own=""
         _ds_ifs=$IFS
@@ -2756,17 +2739,17 @@ cmd_dismiss() {
 '
         for _ds_line in $dismiss_stop; do
             _ds_id=${_ds_line%% *}
-            if [ "${_ds_line#* }" = own ] && [ -z "$dismiss_operator" ]; then _ds_own=$_ds_id; continue; fi
-            if operator_drain_ack "$_ds_id"; then
-                _dmsg "$PROG: dismiss: stopped session $_ds_id, which held the sitting"
+            if [ "${_ds_line#* }" = own ]; then _ds_own=$_ds_id; continue; fi
+            if gc session close "$_ds_id" >/dev/null 2>&1; then
+                _dmsg "$PROG: dismiss: closed session $_ds_id, which held the sitting"
             else
-                echo "$PROG: dismiss: could not stop session $_ds_id, which held the sitting; converse-reap closes it on its next pass, because its conversation is closed" >&2
+                echo "$PROG: dismiss: could not close session $_ds_id, which held the sitting; converse-reap closes it on its next pass, because its conversation is closed" >&2
             fi
         done
         IFS=$_ds_ifs
         if [ -n "$_ds_own" ]; then
             _dmsg "$PROG: dismiss: ending this session ($_ds_own), which held the sitting"
-            gc runtime drain-ack >/dev/null 2>&1 \
+            gc session close "$_ds_own" >/dev/null 2>&1 \
                 || echo "$PROG: dismiss: could not end this session ($_ds_own); converse-reap closes it on its next pass, because its conversation is closed" >&2
         fi
     }
@@ -4541,8 +4524,9 @@ cmd_engage() {
 
     # A session still in the list under this conversation's alias that does not
     # hold it keeps the alias, since only a closed session gives one up. A
-    # sitting cut short leaves exactly that: its conversation back in the queue
-    # and its session waiting for converse-reap. So such a session is closed
+    # sitting cut short whose own close did not take leaves exactly that: its
+    # conversation back in the queue and its session waiting for converse-reap.
+    # So such a session is closed
     # first and read back gone, and only then is the alias free for the new
     # sitting. A session spawned less than the bind wait ago may be a concurrent
     # engage about to bind the conversation, and one the operator is attached to
@@ -4559,7 +4543,7 @@ cmd_engage() {
                 | select(.attached != true)
                 | select((.created_at | fromdateiso8601? // null) as $t | $t != null and $t < (now - $w))
                 | .id' 2>/dev/null); do
-        echo "$PROG: engage: session $_st still holds the alias of conversation $CONV without holding it (a sitting cut short) — closing it so a new sitting can take the alias" >&2
+        echo "$PROG: engage: session $_st still holds the alias of conversation $CONV without holding it (a sitting cut short whose own close did not take) — closing it so a new sitting can take the alias" >&2
         gc session close "$_st" >/dev/null 2>&1 || true
         if ! live_after=$(live_sittings) || printf '%s' "$live_after" | jq -e --arg s "$_st" 'any(.[]; .id == $s)' >/dev/null 2>&1; then
             echo "$PROG: engage: session $_st still holds the alias of conversation $CONV and did not read back closed. Nothing spawned. Close it by hand, then re-run: gc session close $_st && $PROG engage $bead" >&2

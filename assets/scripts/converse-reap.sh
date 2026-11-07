@@ -4,12 +4,13 @@
 # A sitting is a manual converse-<model> session that `gc-helm engage` starts
 # under the alias of the conversation it holds: the conversation task's id, or
 # its `c-` fallback when the runtime refuses the bare id as an alias. Gas City
-# does not end a manual session when its work closes, so a sitting ends its own
-# session as soon as its conversation closes, and `gc-helm dismiss` stops the
-# session that held the conversation it closes. This pass is the backstop for a
-# session that outlives its conversation anyway: a stop that did not take, a
-# conversation some other path closed, or one a sitting cut short handed back
-# to the operator's queue (docs/warrants.md, Converse reap).
+# does not end a manual session when its work closes, so a sitting closes its
+# own session as soon as its conversation closes or goes back to the
+# operator's queue, and `gc-helm dismiss` closes the session that held the
+# conversation it closes. This pass is the backstop for a session that
+# outlives its conversation anyway: a close that did not take, or a
+# conversation some other path closed or handed back to the operator's queue
+# (docs/warrants.md, Converse reap).
 #
 # A converse session is settled, and closed here, when the conversation its
 # alias names has closed, is gone, or is back in the operator's queue (assigned

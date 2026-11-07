@@ -2,18 +2,16 @@
 # tmux-dismiss-sitting.sh — prefix+X: end the converse sitting in view. It is
 # the keystroke for `gc-helm dismiss`, which, with no bead named, infers the
 # conversation the caller's session holds from its identity, closes it, and
-# stops the session that held it.
+# closes the session that held it.
 #
 # Usage: tmux-dismiss-sitting.sh <config-dir> [--city-path <path>]
 #
 # Bound by tmux-bindings.sh behind confirm-before, as a backgrounded run-shell.
 # It reads the session the key was pressed in, looks that session up in
 # `gc session list`, and refuses unless it runs a converse template. Then it
-# runs `gc-helm.sh dismiss --operator` under the identity on that record
-# (session name, id, alias), the identity a `!` command typed inside the
-# sitting carries, so dismiss's own fail-closed inference picks the subject.
-# The keystroke is the operator's, from outside the sitting, so --operator has
-# dismiss stop the session as the operator rather than as the session itself.
+# runs `gc-helm.sh dismiss` under the identity on that record (session name, id,
+# alias), the identity a `!` command typed inside the sitting carries, so
+# dismiss's own fail-closed inference picks the subject.
 # The identity comes from the record, not from the job's environment. The
 # record is what says whether this is a converse sitting, and a non-converse
 # Gas City pane carries an identity of its own that dismiss would act on all
@@ -129,7 +127,7 @@ unset BEADS_DIR GC_INSTANCE_TOKEN
 RC=0
 OUT=$(GC_SESSION_NAME="$(field session_name)" GC_SESSION_ID="$(field id)" \
     GC_ALIAS="$(field alias)" GC_RIG="$(field rig)" \
-    sh "$HELM" dismiss --operator --json 2>"${ERR:-/dev/null}") || RC=$?
+    sh "$HELM" dismiss --json 2>"${ERR:-/dev/null}") || RC=$?
 
 if [ "$RC" -ne 0 ]; then
     WHY=""

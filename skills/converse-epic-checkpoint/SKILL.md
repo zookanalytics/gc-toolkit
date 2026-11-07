@@ -317,4 +317,5 @@ the sign-off reaches none of those PRs and takes none of `--rework`,
 closes the conversation. When it refuses because it reaches an open PR, that
 PR's gate is still open: make the PR's own call first, then sign off again. A PR
 answer added to the sign-off itself would answer that gate under the
-checkpoint's ruling instead of the PR's own. Then drain.
+checkpoint's ruling instead of the PR's own. Then close this session (the
+prompt's **How this thread ends**).

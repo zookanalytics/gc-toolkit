@@ -165,7 +165,8 @@ The loop, for the one conversation this sitting holds:
    below can run: say so in the thread, mail the witness `HELP:`, and wait.
 
    - **`action: "drain"`** — nothing is assigned to this session, so there
-     is no conversation to hold: `gc runtime drain-ack`, and stop.
+     is no conversation to hold: close this session with the block in **How
+     this thread ends** below, and stop.
    - **`action: "work"`** — `bead_id` is your conversation, `CONVERSATION`
      from here on. Work only that bead. Its subject is the one bead its
      `tracks` edge names, and the gates it answers are its `replies-to`
@@ -176,14 +177,14 @@ The loop, for the one conversation this sitting holds:
 
    **`reason: "existing_assignment"` — the conversation was already in
    progress under this session's alias, so a restart brought you here.** Do
-   not `drain-ack` it and do not work it to a close: draining ends a sitting
-   the operator has not ruled on, and running the loop from step 2 can close
-   a conversation the operator is engaged in. If this thread posted the
-   framing, there is nothing to do; go back to waiting. Otherwise a restart
-   took the scrollback, or this session took the conversation over from one
-   that closed, and the record says where the sitting stands. The hold
-   (step 5) appends a `holding:` line to the conversation's notes before it
-   posts the framing, so read them (`gc bd show "$CONVERSATION"`):
+   not close this session and do not work it to a close: ending the session
+   ends a sitting the operator has not ruled on, and running the loop from
+   step 2 can close a conversation the operator is engaged in. If this thread
+   posted the framing, there is nothing to do; go back to waiting. Otherwise a
+   restart took the scrollback, or this session took the conversation over
+   from one that closed, and the record says where the sitting stands. The
+   hold (step 5) appends a `holding:` line to the conversation's notes before
+   it posts the framing, so read them (`gc bd show "$CONVERSATION"`):
 
    - **A `holding:` line** — the hold began. Re-open the sitting at steps
      3–4 and then step 5, and skip step 2: the premise was tested when the
@@ -251,13 +252,15 @@ Rules:
   argument that a repo which is not pack source is fair game, and that
   argument reaches the wrong answer.
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then step
-  7 with `--ruled no` — sign-off included — and `gc runtime drain-ack`.
+  7 with `--ruled no` — sign-off included — and close this session with the
+  block in **How this thread ends**.
   The decision is still open, so `--ruled no` leaves every gate the
   conversation replies to open and owed, with its reply in place, and hands
   the conversation back to the operator's queue, where the board shows it
   owed and the next engagement takes it up with its record. This is the ONLY
-  sitting that drains with its conversation still open, and a sitting the
-  operator has not ruled on is never ended to unblock something else.
+  sitting that ends its session with its conversation still open, and a
+  sitting the operator has not ruled on is never ended to unblock something
+  else.
 - **How this thread ends — a closed conversation ends the session, and no
   clock cuts the hold short.** A held sitting ends when its conversation
   closes. Two things close it, and both are explicit: your own sign-off
@@ -272,13 +275,19 @@ Rules:
   it.
   A closed conversation ends this session, whichever path closed it: the
   sign-off, or a moot or benign close at step 2. Once the close has landed
-  and every write that must follow it has run, drain, with nothing after it:
+  and every write that must follow it has run, close this session, with
+  nothing after it:
   ```bash
-  gc runtime drain-ack
+  gc session close "$GC_SESSION_ID"
   ```
+  It stops this session whether or not a tab is attached to it, which
+  `gc runtime drain-ack` does not do, so never end a sitting with a drain-ack.
+  The close ends this agent too, so no answer comes back from it. If it does
+  come back with a failure, stop there all the same: the `converse-reap` order
+  closes the session on its next pass.
   Never claim again. A closed conversation has no next turn here, and a turn
   on another subject belongs to a sitting of its own. The operator's
-  `gc-helm dismiss` stops this session itself. A tab showing the sitting
+  `gc-helm dismiss` closes this session itself. A tab showing the sitting
   does not hold it open: the tab exits when the session ends and prints the
   last hand-back recorded on the conversation. The `converse-reap` order
   (`assets/scripts/converse-reap.sh`) closes any converse session that

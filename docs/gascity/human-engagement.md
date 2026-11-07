@@ -310,6 +310,44 @@ after that work closes, whoever is attached.
 `DecideMaxSessionAge` (`internal/session/lifecycle_timers.go`), read at
 upstream `1e05ae624` and the fork on 2026-10-19.
 
+### A stop the v2 reconciler makes waits while a client is attached
+
+The v2 session reconciler runs each stop of a live runtime through a fence, and
+the fence's attach leg holds the stop while a client is attached to the
+session, or while the attach probe cannot tell. That covers the stop a
+`gc runtime drain-ack` asks for, whether the session acks itself or an operator
+acks it with `--operator`, and the idle stop. A held stop backs off, 10 seconds
+doubling to five minutes, and goes ahead on the first attempt after the client
+detaches. v2 has no forced stop, and its stop-outstanding alert stays quiet
+while a client is attached. Only an explicit restart request stops through an
+attached client. The legacy reconciler stopped an acked session under one.
+
+A drain-ack's stop also leaves the session's record open: on this host the
+record read `asleep`, not closed, once the stop went through.
+
+`gc session close` makes no such stop: it stops the runtime itself, attached or
+not, and then closes the session's record. It can run inside the pane it closes,
+as that session's last act, because it leaves its own process out of what it
+signals. That holds for a command an agent runs, from a tool call or a `!` line:
+Claude Code and Codex each run one as the leader of a process session of its own,
+with no controlling terminal. It does not hold at an interactive shell that leads
+the pane. There the close is in the terminal's foreground group, and the SIGHUP
+that follows the shell's SIGKILL ends it before it closes the record, which leaves
+a dead pane and an open session.
+
+*Evidence:* `stopLegs` (`cmd/gc/reconcile_effect_stop.go`), `fenceDestructive`,
+`stopFenced` and `attachLeg` (`cmd/gc/reconcile_session_fence.go`), `armAck`
+(`cmd/gc/reconcile_arms_drain.go`), `armStop` (`cmd/gc/reconcile_arms_stop.go`),
+`vetoBackoff` (`cmd/gc/allocator_backoff.go`), `escalateStop` and
+`stopQuietHold` (`cmd/gc/reconcile_observe_v2.go`),
+`v2SignaledStopHeldForAttach` (`cmd/gc/session_reconciler.go`),
+`Manager.CloseDetailed` (`internal/session/manager.go`), `Provider.Stop`
+(`internal/runtime/tmux/adapter.go`) and `TestFencedStopNeverKillsAttached`
+(`cmd/gc/reconcile_effect_stop_test.go`), `buildProcessKillPlan`
+(`internal/runtime/tmux/tmux.go`); read at upstream `9f807760c` on 2026-11-07.
+Probed on this host on 2026-11-07, in a scratch v2 city
+([specs/tk-bhrmihv/sitting-end-probe.md](../../specs/tk-bhrmihv/sitting-end-probe.md)).
+
 ### A manual session stays up until it is closed
 
 A session whose `session_origin` is `manual` stays desired: the awake set

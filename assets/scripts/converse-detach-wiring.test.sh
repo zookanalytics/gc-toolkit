@@ -10,6 +10,9 @@
 # command from every template and replays it the same way against a private
 # tmux server whose global detach-on-destroy is off.
 #
+#   (ENDS)  the prompt and the skills that end a sitting end it with
+#           gc session close, the stop a client does not hold up, and none of
+#           them runs gc runtime drain-ack, the stop a client does hold up
 #   (WIRED) every converse-<model> template carries the same session_live
 #           commands, one of which sets detach-on-destroy, and that one names
 #           the session by the {{.Session}} placeholder
@@ -65,6 +68,22 @@ wait_for() {            # wait_for <predicate> [args…]
         sleep 0.1
     done
 }
+
+###############################################################################
+# (ENDS) — what a sitting's last act is.
+###############################################################################
+for f in agents/_converse/prompt.template.md skills/converse-continue/SKILL.md skills/converse-settle/SKILL.md; do
+    if grep -q -E '^[[:space:]]*gc session close "\$GC_SESSION_ID"$' "$REPO/$f"; then
+        ok "(ENDS) $f closes the session as a command of its own"
+    else
+        bad "(ENDS) $f has no gc session close line"
+    fi
+    if grep -q -E '^[[:space:]]*gc runtime drain-ack' "$REPO/$f"; then
+        bad "(ENDS) $f still runs gc runtime drain-ack"
+    else
+        ok "(ENDS) $f runs no gc runtime drain-ack"
+    fi
+done
 
 ###############################################################################
 # (WIRED) — the command every template carries.

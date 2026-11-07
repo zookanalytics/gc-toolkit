@@ -125,7 +125,7 @@ the seam the pack builds at each.
   Upstream's `gc-role-worker` contract is claim, execute, close. A sitting
   claims its conversation, holds it `in_progress` while the operator thinks,
   records the answer to the subject, closes only the conversation, and then
-  drains: a closed conversation ends its session. A session holds one
+  closes its session: a closed conversation ends it. A session holds one
   conversation, so a sitting never claims across subjects,
   and the contract's continue-or-drain clause
   ([gascity/human-engagement.md](gascity/human-engagement.md#the-gc-roles-worker-contract))
@@ -214,8 +214,8 @@ these steps:
    `gc session new converse-<model> --alias <task> --no-attach`, under the
    prefix `c-` when the runtime refuses the bare id as an alias. A session
    still holding that alias that no longer holds the task, as a sitting cut
-   short leaves it, is closed first once it is older than the bind wait and
-   unattached.
+   short whose own close did not take leaves it, is closed first once it is
+   older than the bind wait and unattached.
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
@@ -744,12 +744,11 @@ held sitting therefore ends when its conversation closes: the sitting's
 sign-off, or the operator's `gc-helm dismiss`. The sign-off is terminal, so
 converse takes it only when nothing important is still pending. Closing the
 conversation ends the session too, whichever path closes it. The sitting's own
-last act is `gc runtime drain-ack`, after the sign-off or a moot or benign
+last act is `gc session close`, after the sign-off or a moot or benign
 close, and it never claims again: a closed conversation has no next turn in
-that session. `gc-helm dismiss` closes the conversation and then stops the
-session that held it, also through `drain-ack`, so the controller ends the
-session outside the verb's process; a dismiss typed into the sitting's own
-pane acks its own session last. The pack's `converse-reap` order
+that session. `gc-helm dismiss` closes the conversation and then closes the
+session that held it the same way; a dismiss typed into the sitting's own pane
+closes its own session last. The pack's `converse-reap` order
 (`assets/scripts/converse-reap.sh`) is the backstop: it closes any converse
 session whose conversation reads closed, gone or back in the operator's
 queue, whether or not anyone is attached. Viewing a sitting does not hold it
@@ -783,9 +782,9 @@ Two endings the idle setting does not own:
   closed nor drained
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
   so the `no-wake-reason` drain that collects an ended pool session in about
-  a minute never reaches it. Its own `drain-ack` ends it, `gc-helm dismiss`
-  stops it, and `converse-reap` above closes one that outlives its
-  conversation anyway. See *How a pane dies when no sitting is live*, below.
+  a minute never reaches it. Its own `gc session close` ends it,
+  `gc-helm dismiss` closes it, and `converse-reap` above closes one that
+  outlives its conversation anyway. See *How a pane dies when no sitting is live*, below.
 - **No max-age restart reaches a sitting.** No `converse-<model>` template
   sets `max_session_age`, and an unset age is off. Gas City's max-age restart
   defers while the session holds open assigned work and has no attachment
@@ -845,8 +844,8 @@ replaced with the reading, settled. The conversation closes only once those
 writes read back.
 
 *A restart is not an ending.* A wake that reaches a session mid-hold gets its
-conversation back from `gc hook --claim` as an existing assignment. Draining
-then would end a sitting the operator has not ruled on, and running the loop
+conversation back from `gc hook --claim` as an existing assignment. Closing
+the session then would end a sitting the operator has not ruled on, and running the loop
 from its premise re-check could close a conversation the operator is part way
 through, so the converse prompt's restart rule reads the conversation's
 `holding:` line and re-opens the hold rather than doing either. A wake nudge
@@ -859,13 +858,13 @@ governs a session that is not pool_managed
 What the empty field reaches is the launch delivery, where the prompt is
 prepended to it and still arrives.
 
-Attachment is the one reading signal the runtime has, and only this city's
-gascity fork reads it: there an attached terminal defers the idle stop, a
-detached reader is still indistinguishable from abandonment, and the max-age
-restart ignores attachment altogether
-([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
-That is why the trace is written when the hold begins rather than bought with
-a longer clock, and why no converse template sets `max_session_age`.
+Attachment is the one reading signal the runtime has. The v2 reconciler holds
+a stop it makes, an idle stop or the stop a drain-ack asks for, while a client
+is attached
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)),
+and a detached reader is still indistinguishable from abandonment. That is why
+the trace is written when the hold begins rather than bought with a longer
+clock.
 
 ## How a pane dies when no sitting is live
 
@@ -881,9 +880,16 @@ sitting
 Nothing idle-sleeps one either: that takes a `[chat_sessions] idle_timeout` or
 a `[session_sleep]` policy, and this city sets neither. So a sitting ends its
 own session: once its conversation has closed and every write that must
-follow the close has run, its last act is `gc runtime drain-ack`, and the
-controller stops the session. `gc-helm dismiss` stops the session that held
-the conversation it closes the same way. The `converse-reap` order
+follow the close has run, its last act is `gc session close`. That stops the
+session whether or not a client is attached to it, where the stop a
+`gc runtime drain-ack` asks for waits while one is
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)).
+The agent runs it from inside the pane it closes, which Gas City's close
+supports: it signals everything in the pane but itself, and an agent runs each
+command in a process session of its own, so the agent's end does not reach the
+close before it closes the session's record.
+`gc-helm dismiss` closes the session that held the conversation it closes the
+same way. The `converse-reap` order
 (`orders/converse-reap.toml`, a five-minute cooldown) runs
 `assets/scripts/converse-reap.sh`, which closes any converse session whose
 conversation reads closed, gone or back in the operator's queue with
@@ -922,13 +928,11 @@ Three things about that path are worth knowing before trusting a pane:
   the re-attach command, and `wake_mode = "resume"` brings the thread back.
 - **A pool session ends differently, and a sitting is outside it.** A pool
   session left with no wake reason is drained as `no-wake-reason` about a
-  minute after its last wake reason goes, and the reconciler acknowledges that
-  drain on the agent's behalf, so its stop event reads
-  `"drain acknowledged by agent"` even when the agent never ran
-  `gc runtime drain-ack`
+  minute after its last wake reason goes
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-pool-session-with-no-wake-reason-is-drained)).
-  A sitting's stop event reads the same, and there it is the sitting's own
-  `drain-ack`.
+  A sitting keeps its manual wake reason, so that drain never reaches it, and
+  its session ends through `gc session close`, which closes its record with
+  its runtime.
 
 **What the design holds to.** A sitting ends its session as soon as its
 conversation closes, whichever path closes it, and nothing holds a session
