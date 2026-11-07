@@ -604,7 +604,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string, own beadState) bool
 //     CHILD of the subject, and beads refuses a parent→descendant `blocks`
 //     edge, so those subjects have no waiting edges at all (tk-a9k0l,
 //     tk-2cyxo). A roll-up whose children have all closed lands back on LOW
-//     through the r.open == 0 branch below.
+//     through the r.open == 0 branch below, unless it is a landed Delivery's.
 //
 // STRANDED (HIGH) is open work with nothing LIVE in it and nothing holding it.
 // Three things make that different from the naive "0 in progress":

@@ -409,7 +409,8 @@ gate blocks the bead that waits on it, so the `waiting_on` edge takes and the
 disposition rule below fires for them. The child roll-up stays exactly as it is: it is what keeps the
 work already filed as a child visible, and nothing re-parents it.
 
-A `parked` roll-up whose children have ALL closed stays LOW. The row can now
+A `parked` roll-up whose children have ALL closed stays LOW, unless its bead is
+a landed Delivery, which waits for its epic's checkpoint. The row can now
 *say* the work landed (`m_total>0`, `complete`, "all N closed · 0 open"), which
 is what a sweep needs to act on it; pushing the operator at that moment is
 `tk-2cyxo`'s bead, not the board's.
