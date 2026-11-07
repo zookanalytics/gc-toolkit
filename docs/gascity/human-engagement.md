@@ -300,15 +300,19 @@ upstream `1e05ae624` and the fork on 2026-10-19.
 
 ### `max_session_age`
 
-Only an agent with a positive `max_session_age` is registered with the
-max-age tracker. `DecideMaxSessionAge` walks blocker, pending interaction and
-assigned work, then stops; it has no attachment rung on either ref. So a
-session whose only defer is its assigned work restarts on the first tick
-after that work closes, whoever is attached.
+Only the legacy reconciler reads `max_session_age`: the tracker's one reader
+is its tick, and the v2 reconciler has no max-age arm. There, only an agent with
+a positive `max_session_age` is registered with the tracker.
+`DecideMaxSessionAge` walks blocker, pending interaction and assigned work, then
+stops; it has no attachment rung. So under the legacy reconciler a session whose
+only defer is its assigned work restarts on the first tick after that work
+closes, whoever is attached.
 
 *Evidence:* `buildMaxSessionAgeTracker` (`cmd/gc/cmd_start.go`) and
 `DecideMaxSessionAge` (`internal/session/lifecycle_timers.go`), read at
-upstream `1e05ae624` and the fork on 2026-10-19.
+upstream `1e05ae624` and the fork on 2026-10-19; `shouldRestart`'s one caller,
+in `reconcileSessionBeadsTracedWithNamedDemand`
+(`cmd/gc/session_reconciler.go`), read at upstream `9f807760c` on 2026-11-07.
 
 ### A stop the v2 reconciler makes waits while a client is attached
 
@@ -422,16 +426,17 @@ it is quiet and the trigger is still unclaimed; the continuation backstop's
 last step is a no-op; and the execution backstop requests a tracked drain on
 an unstarted claim and sends a default nudge on a started one.
 
-Upstream also has `[daemon] work_ladder` (default on), which only the opt-in
-v2 reconciler reads: there it replaces the three backstops with a per-seat
-ladder over open pool seats. The default reconciler ignores it and runs the
-three backstops, and the city's fork has no `work_ladder` at all.
+`[daemon] work_ladder` (default on), which only the v2 reconciler reads,
+replaces the three backstops with a per-seat ladder over the same open pool
+seats, and this city runs v2. The ladder governs no named or manual session
+either. With `work_ladder` off, or under the legacy reconciler, the three
+backstops run.
 
 *Evidence:* `governs()` in `cmd/gc/idle_nudge.go` and
-`cmd/gc/execution_backstop.go`, `runNudgeBackstop`
-(`cmd/gc/nudge_backstop.go`), `workLadder` (`cmd/gc/reconcile_steps_nudges.go`)
-and `cmd/gc/work_ladder_lane.go` (upstream only); read at upstream
-`1e05ae624` and the fork on 2026-10-19.
+`cmd/gc/execution_backstop.go` and `runNudgeBackstop`
+(`cmd/gc/nudge_backstop.go`), read at upstream `1e05ae624` and the fork on
+2026-10-19; `workLadder` (`cmd/gc/reconcile_steps_nudges.go`) and `ladderGoverns`
+(`cmd/gc/work_ladder_lane.go`), read at upstream `9f807760c` on 2026-11-07.
 
 ### No release frees a claim routed to `human`
 

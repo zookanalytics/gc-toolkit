@@ -389,11 +389,11 @@ waits in the queue, so the topic is never lost.
 ## The sitting
 
 A sitting's session is a manual session of the converse agent the operator
-chose. It is manual because the pool execution backstop drains a pool session
-that holds in-progress work and is quiet for 90 seconds, and a sitting is quiet
-whenever the operator is reading or thinking. A manual session has no such
-clock: its work closing does not end it, idleness only sleeps it, and
-attaching wakes it.
+chose. It is manual because the controller's work ladder paces a pool session
+that holds a claim, nudging one that stays quiet and then recycling it, and a
+sitting is quiet whenever the operator is reading or thinking. A manual session
+has no such clock: its work closing does not end it, idleness only sleeps it,
+and attaching wakes it.
 
 **The claim.** The sitting claims its conversation with a plain
 `gc hook --claim`. The default work query finds the task assigned to the
@@ -558,7 +558,8 @@ names whose request holds the merge.
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
 place and hands the conversation back to the operator's queue with one write
-guarded on the sitting that holds it and on the status it read, and drains.
+guarded on the sitting that holds it and on the status it read, and closes
+its session.
 The task is then the queued conversation it was before any sitting took it,
 so the board shows it owed and the next engagement takes it up from its
 record. A dismiss closes the conversation and keeps its holder, so the status
@@ -571,21 +572,17 @@ that names the dismissal, and it answers nothing: every gate the conversation
 replies to stays open and owed, for its filer or the next sitting. With no
 argument it infers the current sitting from the session it runs in. The close
 falls back to `--force` when bd refuses an operator closing a conversation its
-sitting holds. It then stops the converse session that held each conversation
-it closed, with `gc runtime drain-ack`: the session it runs in acks itself,
-last, and any other is acked as an operator. On a bead with no live sitting it
-writes nothing and says so. `prefix+X` runs the same dismiss from the keyboard
-after a y/n confirm (`assets/scripts/tmux-dismiss-sitting.sh`), under the
-pane's own session. It passes `--operator`, because the keystroke comes from
-outside the sitting, and dismiss stops the session with an operator ack. That
-ack runs with no session identity or incarnation token: the key's job
-inherits the sitting's tmux environment, and Gas City refuses an operator ack
-whose caller names the session it stops.
+sitting holds. It then closes the converse session that held each conversation
+it closed, with `gc session close`: any other session first, and the session it
+runs in last, because that close ends dismiss too. On a bead with no live
+sitting it writes nothing and says so. `prefix+X` runs the same dismiss from the
+keyboard after a y/n confirm (`assets/scripts/tmux-dismiss-sitting.sh`), under
+the pane's own session.
 
 **A sitting ends its own session.** Gas City does not end a manual session
 when its work closes, so once a sitting's conversation has closed, or its
 sign-off has handed the conversation back, its last act is
-`gc runtime drain-ack`. The `converse-reap` order
+`gc session close`. The `converse-reap` order
 (`assets/scripts/converse-reap.sh`, every five minutes) is the backstop: it
 closes any converse session whose conversation has closed, is gone, or is back
 in the operator's queue, attached or not, once the session is older than the
@@ -786,11 +783,8 @@ Two endings the idle setting does not own:
   `gc-helm dismiss` closes it, and `converse-reap` above closes one that
   outlives its conversation anyway. See *How a pane dies when no sitting is live*, below.
 - **No max-age restart reaches a sitting.** No `converse-<model>` template
-  sets `max_session_age`, and an unset age is off. Gas City's max-age restart
-  defers while the session holds open assigned work and has no attachment
-  rung ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)),
-  so it would fire on the first tick after the conversation closed and destroy
-  the pane and its scrollback under an attached operator.
+  sets `max_session_age`, and only the legacy reconciler reads it
+  ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)).
 
 The cost is real: a held conversation nobody answers keeps its sitting's
 session running, where an idle clock would recycle it, and
@@ -852,8 +846,8 @@ through, so the converse prompt's restart rule reads the conversation's
 that names `gc hook --claim` alone, rather than sending the session through the
 prompt's claim block, skips that rule, so every `converse-<model>` template
 holds its `nudge` empty. Emptiness is not what protects a held sitting: a
-sitting runs as a manual session, never pool_managed, and no claim backstop
-governs a session that is not pool_managed
+sitting runs as a manual session, never pool_managed, and neither the work
+ladder nor a claim backstop governs a session that is not pool_managed
 ([gascity/human-engagement.md](gascity/human-engagement.md#the-controllers-backstops-govern-pool-sessions-only)).
 What the empty field reaches is the launch delivery, where the prompt is
 prepended to it and still arrives.

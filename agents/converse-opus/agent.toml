@@ -7,8 +7,10 @@
 # bare id), and the conversation's assignee is that alias, which is how its
 # claim finds it, through the default work query, so the template needs no work
 # query of its own. That is an origin=manual session, which is not pool_managed,
-# so the pool execution backstop never governs it and a pane held open for a
-# conversation is not reaped by a no-nudge drain.
+# so the controller's pacing of pool work never reaches it: the work ladder
+# governs pool-managed seats only, and so do the claim backstops it replaces
+# when `[daemon] work_ladder` is off. A pane held open for a conversation is
+# never recycled or drained for being quiet.
 # Session-ending mechanics (what ends a held sitting when no clock does, and how
 # its session ends with its conversation) are documented in docs/human-engagement.md,
 # which links the Gas City facts beneath them; read that before tuning.
@@ -56,28 +58,22 @@ session_live = [
   'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#T"',
 ]
 # Empty on purpose, and empty is not what protects a sitting. A sitting runs as
-# a manual (spawn-on-engagement) session, never pool_managed, and all three
-# claim backstops gate governs() on pool_managed (gascity idle_nudge.go,
-# execution_backstop.go), so none of them fires against a held sitting whatever
-# this field holds. The manual origin is the exemption. Empty is also not a
-# uniform "skip": the three claim backstops split on an empty nudge. Only the
-# execution backstop drains on it: gascity's shared empty-content path
-# (nudge_backstop.go) runs its exhausted action, the tracked drain that
-# releases the claim. The pool-claim backstop substitutes a default claim nudge
-# and re-delivers instead. The continuation backstop's exhausted action is a
-# no-op. Neither of those drains. So for a pool_managed session emptiness
-# drains only through the execution backstop, and a sitting, never
-# pool_managed, is reached by none of it.
+# a manual (spawn-on-engagement) session, never pool_managed. The work ladder,
+# which nudges and recycles claimed work, governs pool-managed seats only
+# (ladderGoverns in gascity's cmd/gc/work_ladder_lane.go), and so do the claim
+# backstops it replaces when `[daemon] work_ladder` is off, so nothing nudges
+# or drains a held sitting whatever this field holds. The manual origin is the
+# exemption.
 # Nothing is lost at launch. The launch delivers the rendered prompt, and step 1
 # of that prompt is the claim block, so a fresh sitting claims with no
 # keystrokes. A provider that takes no prompt argument gets the prompt prepended
 # to this field, and prepending to an empty field still delivers it, so the
 # precondition is the prompt rather than prompt_mode. A prompt that stops
 # opening with the claim block leaves nothing to start the turn.
-# Non-empty text does not arm a backstop here; it feeds that launch delivery.
+# Non-empty text arms no nudge here; it feeds that launch delivery.
 # The text must then send the session back through the prompt's step-1 block
 # rather than name `gc hook --claim` alone: the block's restart rule, which
-# reads an existing assignment as a sitting to resume rather than one to drain
+# reads an existing assignment as a sitting to resume rather than one to end
 # or work to a close, is what stops a nudge from ending a live sitting, and it
 # is read there and nowhere else. Keep it at peer length; fixes go in the
 # prompt.
@@ -85,16 +81,20 @@ nudge = ""
 # 0 keeps this template off the idle reap; any positive value re-arms it. Idle
 # is measured from terminal output, and an operator reading a held thread
 # produces none. A sitting ends when its conversation closes, and its session
-# with it: the agent's own sign-off ends in its drain-ack, and the operator's
-# bare `gc-helm dismiss` (it infers the conversation) stops the session that
-# held it. A sitting cut short hands its conversation back to the operator's
-# queue and drains. The `converse-reap` order closes any converse session that
-# outlives its conversation, attached or not. Why, and the ending this does not
-# reach (an OPEN conversation the operator walked away from):
+# with it: the agent's own sign-off ends with `gc session close`, and the
+# operator's bare `gc-helm dismiss` (it infers the conversation) closes the
+# session that held it the same way. A sitting cut short hands its
+# conversation back to the operator's queue and closes its session. That close
+# stops the session whether or not a tab is attached to it. A drain-ack would
+# not: the v2 reconciler holds the stop it asks for while a client is attached,
+# and leaves the record open. The `converse-reap` order closes any converse
+# session that outlives its conversation, attached or not. Why, and the ending
+# this does not reach (an OPEN conversation the operator walked away from):
 # docs/human-engagement.md.
 idle_timeout = "0"
 # Sittings are opened by hand, never spawned by demand: min 0 starts nothing.
 # max_active_sessions does not ration them: `gc session new` checks no session
-# count, and the pool's scale-down drop paths skip a manual session.
+# count, and the reconciler keeps every open manual session wanted, whatever
+# the count.
 min_active_sessions = 0
 max_active_sessions = 8

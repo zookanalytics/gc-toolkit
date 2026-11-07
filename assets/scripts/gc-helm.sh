@@ -3949,7 +3949,7 @@ engage_new_subject_cleanup() {
 # conversation picked at the prompt) is a distinct dialogue, so it files a
 # fresh conversation even when the bead has one. A sitting is a manual
 # converse-<model> session named for its conversation (origin=manual, which the
-# pool execution backstop never governs). The session is spawned before the
+# controller's pacing of pool work never governs). The session is spawned before the
 # bind, because its alias is the reservation: only one session that is not
 # closed can hold the alias. Then the conversation is bound to the session's
 # alias with a write guarded on the holder engage read, so of two engages only
