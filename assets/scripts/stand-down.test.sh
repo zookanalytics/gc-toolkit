@@ -128,6 +128,10 @@ case "$verb" in
     fi
     printf '%s\n' "$out" ;;
   list)
+    # STUB_LIST_FAIL_AFTER is text: once a bd call carrying it has run, every list fails.
+    if [ -n "${STUB_LIST_FAIL_AFTER:-}" ] && grep -q -F -- "$STUB_LIST_FAIL_AFTER" "$STUB_GC_LOG"; then
+      echo '{"error":"simulated read failure","schema_version":1}'; exit 1
+    fi
     key=""; ready=0; all=0; gates=0; ids=""; st=""; parent=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -445,6 +449,18 @@ stop_case "the disarm" "--unset-metadata gc.dispatch_when_ready " open armed "wa
 stop_case "the release" "gc.takeaway=" open gone "did not end or its route did not clear"
 stop_case "the answer" "gate resolve" open gone "did not resolve"
 stop_case "the close" "--status=closed" closed gone "bead-rehome.sh said why"
+# The writer's non-zero exit can come after its close. The bead is closed then, and
+# a re-run of the stand-down would find it closed and record nothing.
+fresh
+STUB_LIST_FAIL_AFTER="--status=closed" run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 1 "a close that stands behind the writer's exit 4 is reported"
+eq "$(field tk-w status)" closed "…the work is closed"
+has "$OUT" "closed as not needed, but its edge onto tk-g may not be recorded" "…and it says the close stands"
+has "$OUT" "bead-rehome.sh --origin tk-w --successor tk-g --kind not-needed" "…and names the call that records the edge"
+hasnt "$OUT" "it did not close" "…and does not say it did not close"
+run tk-w --key polecat-x --ruling "stop"
+eq "$RC" 0 "…a re-run finds it closed"
+has "$OUT" "already closed" "…and says so"
 
 # --- refusals --------------------------------------------------------------------
 fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request" else . end)'

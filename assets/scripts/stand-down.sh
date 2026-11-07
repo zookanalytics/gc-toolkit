@@ -221,8 +221,15 @@ done
 
 work_outcome_noop "$WORK" gc bd
 
-"$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING" \
-  || stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
+if ! "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING"; then
+  # A close can stand behind that exit, with its edge unrecorded. A re-run of this
+  # command takes a closed bead for done, so the writer's own call is the way on.
+  if [ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ]; then
+    echo "$PROG: $WORK closed as not needed, but its edge onto $SUCCESSOR may not be recorded: bead-rehome.sh said why, above. A re-run of this command would find it closed and record nothing, so run: $REHOME --origin $WORK --successor $SUCCESSOR --kind not-needed" >&2
+    exit 1
+  fi
+  stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
+fi
 
 [ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ] \
   || stopped "$WORK does not read back closed."
