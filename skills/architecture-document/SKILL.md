@@ -23,6 +23,11 @@ The sections are borrowed rather than invented: the
   repository, not of the part a change reached first. Its title, description
   and mandate frame the whole, and a change that moves the structure of any
   part changes the document.
+- **The architecture as desired.** The document describes the architecture as
+  desired, grounded in what exists today: the design the built parts expect,
+  including any part not built yet. Where the implementation has not caught
+  up, the document still describes that design, not the system as it works
+  around the gap, and Debt names the gap.
 - **The big picture first.** It opens on what the system is for and the
   domains it is made of, such as its schemas, before any one part's detail.
 - **The architecture's altitude.** A line states a fact at the level where it
@@ -38,8 +43,8 @@ The sections are borrowed rather than invented: the
   spec is never the home of a fact the document needs, never one of its
   boundaries, and never where its reasoning lives.
 - **Each element defends itself.** Every element the document names is a
-  feature, whose entry says what it gives, or debt, named with what retires
-  it.
+  feature, whose entry says what it gives. Where what is built falls short of
+  an element, the gap belongs under Debt.
 
 ## The scope
 
@@ -72,7 +77,12 @@ the document sits in one of them.
    only where a reader would otherwise get it wrong, and a link to its
    decision record when it has one, never to a spec. (arc42 section 9,
    decision records)
-6. **Debt.** Each compromise, named, with what retires it. (arc42 section 11)
+6. **Debt.** Each place where what is built falls short of the architecture
+   the sections above describe. An entry names the gap, why a reader must know
+   it, and the work that retires it, such as the epic or bead that carries that
+   work. A gap no reader needs to know stays out, and so does backlog: work the
+   document does not describe as part of the architecture is tracked in beads,
+   not in the document. (arc42 section 11)
 
 A runtime or a deployment view is a section of its own, after Domains, only
 when the system has that story. Constraints, the solution strategy and a
