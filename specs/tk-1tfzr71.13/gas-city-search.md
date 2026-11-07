@@ -40,7 +40,7 @@ calling them as they stand:
   otherwise (`canonical issue not found`, `replacement issue not found`). A
   re-home into another rig is a normal disposition here. Of the beads carrying
   the key on 2026-11-06, 23 of the gc-toolkit store's 814 and 92 of
-  loomington's 93 name a bead in another rig.
+  the city store's 93 name a bead in another rig.
 
 Both also refuse in proxied-server mode (`usesProxiedServer`).
 
@@ -60,7 +60,7 @@ So the pack composes two of bd's primitives that do cover the need:
   far bead in another store and keeps it unverified in `depends_on_external`.
   `bd list --json` returns that edge in the row's `.dependencies` (`type`,
   `depends_on_id`), and `bd show --json` and `bd dep list` leave it out. This
-  was seen live on tk-7b1g53j, whose edge names gc-7eevlv. So a reader that must
+  was seen live on tk-7b1g53j, whose edge names a bead in another rig's store. So a reader that must
   follow a cross-store edge reads the list row (`bd_disposed_to`).
 
 `bd close` applies three refusals that `bd update` does not:
@@ -85,7 +85,8 @@ reports such a bead when it is an anchor.
   `update` (judged), `dep add` and `link` (`judgeBdEdgeVerb`: "every endpoint
   must be a work-store bead"), `dep remove`, `duplicate` and `supersede`. On a
   split city an edge onto another rig's bead is refused, so there a cross-rig
-  disposition closes and then exits 4. Loomington is not a split city.
+  disposition closes and then exits 4. The city these stores belong to is not
+  split.
 - **The work-record close gate counts this close.**
   `workRecordCloseTargets` (`cmd/gc/work_record_gate.go`) counts `close` and an
   `update` that moves the status to closed, and neither `duplicate` nor
