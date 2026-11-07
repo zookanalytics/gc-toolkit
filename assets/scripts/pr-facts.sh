@@ -2063,9 +2063,9 @@ MP_EOF
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no gate filed"
           continue
         elif [ "$rrc" -eq 4 ]; then
-          # A write did not land, and unless it came after the close, which I5
-          # reports, the close did not run on it: the anchor changed after
-          # bead-rehome judged it, or its edge did not write. It stays
+          # A write did not land, and unless it came after the close, which I5 or
+          # the anchor's notes report, the close did not run on it: the anchor
+          # changed after bead-rehome judged it, or its edge did not write. It stays
           # open at merge_result=pull_request, so the next pass re-enumerates it and
           # retries. An anchor another close reached first drops out of that
           # enumeration, with that close's disposition standing.

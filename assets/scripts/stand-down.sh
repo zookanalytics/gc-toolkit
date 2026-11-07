@@ -46,11 +46,14 @@
 # A step that does not land exits 1 and names what has landed. Re-running
 # converges: the arm stays gone, an answered gate stays answered and still names
 # the evidence, and bd keeps the first answer a gate was given. A closed bead exits
-# 0 with nothing to do.
+# 0 with nothing to do. So when the writer fails after its close has landed, this
+# exits 1 and names the writer's own call, which records the edge that a re-run of
+# this command would not.
 #
 # Callers: a person or a sitting, on the ruling. A worker that declines its work
 # does not run this; it asks with human-gate.sh and await-ruling.sh.
-# exit: 0 the bead is closed · 1 it is not · 2 usage
+# exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
+# recorded · 2 usage
 set -uo pipefail
 
 PROG="stand-down"
@@ -76,7 +79,8 @@ usage: stand-down.sh <work-bead> --key <situation-key> --ruling <why>
                 which a gate that also holds another open bead cannot be
   --dry-run     resolve and report; write nothing
 
-exit: 0 the bead is closed · 1 it is not · 2 usage
+exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
+      recorded · 2 usage
 USAGE
 }
 
