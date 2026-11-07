@@ -285,6 +285,10 @@ GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
+# Accept records each acceptance on its gate through `gctk bead update
+# --verify`, which gctk.stub.sh stands in for: each write reaches the fake gc
+# above, and GCTK_STUB_MISS names one that does not read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export STORE="$TMP/store" CALLS="$TMP/calls" LINGERERS="$TMP/lingerers" CITY_ROOT="$TMP/city"
 export GC_CITY_PATH="$TMP/city" ACC_BEAD=tk-anc
 unset GC_HELM_FIXTURE GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR 2>/dev/null || true
@@ -414,11 +418,21 @@ case "$(cat "$CALLS")" in
   *"bd update tk-rec --set-metadata gc.acceptance="*"bd gate resolve tk-rec"*) ok "(ACCEPT) …before the resolve that names the token" ;;
   *) bad "(ACCEPT) the dispatch input should be recorded before the resolve (calls: $(cat "$CALLS"))" ;;
 esac
+grep -q -- '^bead|update|tk-rec|--set-metadata|gc.acceptance=.*|--verify|$' "$TMP/gctk.log" \
+  && ok "(ACCEPT) …through gctk, which reads the record back before the resolve" \
+  || bad "(ACCEPT) the record is not verified (gctk calls: $(cat "$TMP/gctk.log"))"
 hasnt "$(cat "$CALLS")" "bd close" "(ACCEPT) Accept runs no dismiss"
 : > "$CALLS"; run_accept tk-anc
 eq "$RC" 2 "(DISPATCHED) an Accept run after the first one's record exits 2"
 has "$OUT" "was dispatched (mol-fix)" "(DISPATCHED) …because the recommendation is dispatched"
 eq "$(writes)" 0 "(DISPATCHED) …and writes nothing"
+
+echo "# an acceptance whose record does not read back answers no gate and dispatches nothing"
+rec; GCTK_STUB_MISS='~gc.acceptance=' run_accept tk-anc
+eq "$RC" 4 "(RECORD-LOST) an acceptance whose record on its gate does not read back exits 4"
+has "$OUT" "could not record acceptance" "(RECORD-LOST) …saying so"
+eq "$(field tk-rec status)" "open" "(RECORD-LOST) …the recommendation's gate stays open"
+hasnt "$(cat "$CALLS")" "sling tk-anc" "(RECORD-LOST) …and nothing is slung"
 
 echo "# a gate filed after the live read stops the dispatch"
 rec; LATE_GATE_ON_RESOLVE=tk-late run_accept tk-anc
@@ -426,7 +440,7 @@ eq "$RC" 4 "(LATE) a gate filed between the live read and the resolve exits 4"
 has "$OUT" "tk-late" "(LATE) …naming the late gate"
 eq "$(field tk-rec status)" "open" "(LATE) …and the recommendation's gate is reopened"
 eq "$(field tk-rec close_reason)" "" "(LATE) …its close and reason cleared"
-has "$OUT" "is open again, back on the board" "(LATE) …and read back as open"
+has "$OUT" "is open again, back on the board" "(LATE) …and says it is back on the board"
 eq "$(slings)" 0 "(LATE) …nothing is slung"
 eq "$(meta tk-anc gc.recommended_formula)" "mol-fix" "(LATE) …and the recommendation stays"
 

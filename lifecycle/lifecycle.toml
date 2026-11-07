@@ -1121,10 +1121,10 @@ keys = [
 #   (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms,
 #   runner, recorded_at and command. gctk writes it only once the record store
 #   holds the result it copies: after recording a result, and after answering
-#   from a record. It reads the copy back once to confirm the write. No other
-#   pack path reads it. Absent means no call published that check to the bead.
-#   Never cleared: the next publish replaces it. Its commit is the one the check
-#   ran at: the head the call answered for, or, for a full-suite test pass
+#   from a record. A write the store refuses is reported and changes no exit. No
+#   other pack path reads it. Absent means no call published that check to the
+#   bead. Never cleared: the next publish replaces it. Its commit is the one the
+#   check ran at: the head the call answered for, or, for a full-suite test pass
 #   answered through the tree, an earlier commit with the same tree. A JSON
 #   object stored as a string.
 # rig_check_pre_existing.test, .lint, .typecheck, .setup, .build — a caller's
@@ -1362,11 +1362,10 @@ keys = [
 #   absent and empty both mean no live recommendation, and the subject offers
 #   Discuss only. A formula name that `gc formula show` resolves.
 # gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,
-#   written in the update that unsets gc.recommended_formula and read back after
-#   it. `accept` reads it to resume a run that dispatched but did not finish: it
-#   completes the unset and never slings again. `accept` slings before it writes
-#   this key, so absent means no Accept has recorded a dispatch. Never cleared.
-#   A formula name.
+#   written in the update that unsets gc.recommended_formula. `accept` reads it
+#   to resume a run that dispatched but did not finish: it completes the unset
+#   and never slings again. `accept` slings before it writes this key, so absent
+#   means no Accept has recorded a dispatch. Never cleared. A formula name.
 # gc.acceptance — on the human gate under the key first-reaction, the dispatch
 #   input of the acceptance that answers it: a JSON object {token, formula,
 #   vars}, with vars the `<key>=<value>` strings its sling carries. gc-helm.sh
@@ -1425,18 +1424,18 @@ keys = ["placement"]
 keys = ["priority_shift"]
 # priority_shift — the bead's shift from the bead it follows: +1 is one level
 #   later and -1 one level sooner, and each level stops at P0 and P4. Written by
-#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
-#   back there. Each script that files PR-finishing work (gate-ensure.sh,
-#   pr-facts.sh, pre-open-rebase.sh, rework-child.sh and signoff.sh) also
-#   writes it, -1, in the create that files a child, through bd-lib.sh's
-#   pr_finishing_birth, and never rewrites it on a child it adopts or re-routes.
-#   Read by priority-lib.sh wherever a priority is computed: queue-priority.sh
-#   settle, its move and its reconcile pass. Read only on a
-#   bead that follows a parent or an anchor: a workflow's convoy, root and steps
-#   carry no shift, and a bead that follows nothing has nothing to shift from.
-#   Absent or empty reads as 0. A value that is not a signed integer makes the
-#   bead unreadable, and every bead that follows it, so no priority is computed
-#   from it. No pack writer clears it. A signed integer, stored as a number.
+#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs. Each
+#   script that files PR-finishing work (gate-ensure.sh, pr-facts.sh,
+#   pre-open-rebase.sh, rework-child.sh and signoff.sh) also writes it, -1, in
+#   the create that files a child, through bd-lib.sh's pr_finishing_birth, and
+#   never rewrites it on a child it adopts or re-routes. Read by priority-lib.sh
+#   wherever a priority is computed: queue-priority.sh settle, its move and its
+#   reconcile pass. Read only on a bead that follows a parent or an anchor: a
+#   workflow's convoy, root and steps carry no shift, and a bead that follows
+#   nothing has nothing to shift from. Absent or empty reads as 0. A value that
+#   is not a signed integer makes the bead unreadable, and every bead that
+#   follows it, so no priority is computed from it. No pack writer clears it. A
+#   signed integer, stored as a number.
 
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to
@@ -1620,13 +1619,12 @@ keys = [
 # gc.handback / gc.handback_at — on a conversation, the latest hand-back its
 #   converse sitting posted, whole (a framing or the sign-off), and when it was
 #   recorded (RFC-3339 UTC). gc-helm.sh `handback` writes both in one update,
-#   each record replacing the one before, and reads the text back. gc-helm.sh
-#   `engage` reads them once the tab's attach returns on a closed conversation,
-#   and prints the text in the operator's terminal as the sitting's last words.
-#   Absent, the tab says the sitting recorded no hand-back. Once the
-#   conversation reads closed, pr-sitting-comment.sh shows the text word for
-#   word as the visit's conclusion in its comment on the subject's PR. Never
-#   cleared. Freeform multi-line text.
+#   each record replacing the one before. gc-helm.sh `engage` reads them once
+#   the tab's attach returns on a closed conversation, and prints the text in
+#   the operator's terminal as the sitting's last words. Absent, the tab says
+#   the sitting recorded no hand-back. Once the conversation reads closed,
+#   pr-sitting-comment.sh shows the text word for word as the visit's conclusion
+#   in its comment on the subject's PR. Never cleared. Freeform multi-line text.
 # gc.ruling_consequence — on a conversation, the open PR each of its rulings'
 #   --rework or --retire acts on: a JSON object from the ruling's answer
 #   (`ruled: <ruling>`) to {act, anchor}, act `rework` or `retire` and anchor

@@ -209,6 +209,84 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** `mol-dog-backup` backs up a suspended rig whose store inherits
   the city's endpoint.
 
+## bd write durability
+
+- **Covers.** `gctk bead`'s `--verify` (`services/gctk/internal/cli/bead.go`)
+  and the read it makes, `Verify` in `services/gctk/internal/gcbd/verify.go`,
+  which `gctk lifecycle` calls for a transition too: the read a script
+  confirms a bd write through. Each script that confirms a write through it
+  names this entry, and `git grep -n "bd write durability"` lists them. The
+  `bd-durability` block of `assets/scripts/bd-lib.sh` holds the read that the
+  callers in code the deletion plan retires still make. `human-gate.sh`,
+  `await-ruling.sh`, `decline.sh`, `store-only-exit.sh`, `patrol-finding.sh`,
+  `pr-dispose.sh` and `pr-sitting-comment.sh` still read their own writes
+  back, and so do the `waits`, `converse-hold`, `converse-iterate-document`
+  and `converse-recheck-premise` skills and the mechanik's recipe for an
+  integration effort (`agents/mechanik/prompt.template.md`).
+- **Stands in for.** A bd write whose exit status settles whether it landed. bd
+  would re-read an ordinary update under a degraded Dolt server, as it re-reads
+  a claim, and `bd dep add` would refuse a target that another database holds.
+  With both, a write that exits 0 would stay written, and the pack would read
+  nothing back. Without them, a script makes a write it is about to act on in a
+  way that cannot be undone or run again, such as a close, a push, a dismissal
+  or a sling, through `gctk bead ... --verify`, and a dependency edge whose ends
+  sit in two stores the same way. Every other write is settled by its exit
+  status: a refused or failed `bd update` exits non-zero, and so does `gc bd`
+  around it.
+- **Evidence.** In `gastownhall/beads`:
+  - `verifiedUpdate` in `internal/storage/dolt/issue_operations.go` re-reads a
+    claim and a qualifying guarded update after the write, and keeps the
+    write's outcome otherwise. Its comment says that under a degraded server an
+    ordinary update's exit status "is no more trustworthy" than a claim's.
+  - The comment on `doltAddAndCommitInTx` in
+    `internal/storage/dolt/ephemeral_routing.go` lists the write paths that
+    still stage and commit inside the SQL transaction, the legacy `UpdateIssue`,
+    `CloseIssue` and `MergeMetadata` among them, and says any of them racing a
+    concurrent writer "can still silently revert that writer's committed rows"
+    (LatentLabsSpace/NEXUS#92).
+  - `resolveUnresolvedDepTarget` in `cmd/bd/dep.go` stores an edge whose target
+    carries another repository's prefix without finding that target, and in a
+    proxied-server store prints no warning (`depTargetLookupMiss`).
+    `GetExternalBlockingDependencyRecordsInTx` in
+    `internal/storage/issueops/dependency_queries.go` counts only `external:`
+    edges as blockers, so such an edge holds nothing.
+  - What a write's exit status does settle: `cmd/bd/update.go` reports every
+    refused or failed issue and exits non-zero, a guard mismatch included, and
+    in `gastownhall/gascity`, `cmd/gc/cmd_bd.go` passes bd's exit status
+    through and turns bd's silent fallback to the on-disk store into exit 4.
+  - What one read can show: `cmd/bd/update.go` applies an update's field,
+    label and metadata edits as "one atomic operation", so they land or are
+    lost together, and a key the update alone wrote reading back shows the whole
+    update landed. `updateClaimPostcondition` in
+    `internal/storage/dolt/issue_operations.go` gives `verifiedUpdate` nothing
+    to re-read for an update that edits metadata (`hasNonCoordinationPatch`), so
+    no flag makes bd verify such an update itself.
+  - Where the read lives: no `bd update` flag asks bd to re-read an ordinary
+    write, and `bd update --json` prints the operation's own post-state
+    snapshot (`cmd/bd/update.go`), not a read after its commit. In
+    `gastownhall/gascity`, `beads.UpdateAndReadBack`
+    (`internal/beads/update_reporting.go`) reads that same snapshot from inside
+    Gas City's own `internal` tree, and `gc bd` has no option that reads a write
+    back. So the pack reads each bead back itself, with one `gc bd list --id`,
+    whose row carries the bead's raw edges, an edge onto another store's bead
+    included, where `bd dep list` leaves such an edge out and says so only on
+    stderr (`warnDroppedDepEdges` in `cmd/bd/dep.go`). The search is
+    [specs/tk-1tfzr71.11/gas-city-search.md](../specs/tk-1tfzr71.11/gas-city-search.md).
+  - bd v1.3.4 closed one more loss path, a write that reached main while
+    `bd compact` ran (beads 9ab6b0f8c), so this entry does not stand in for it.
+- **Verified.** 2026-11-06, at `gastownhall/beads` v1.3.4 (7ef2fd05e), the bd
+  the city runs, and at `gastownhall/gascity` main bb61aadbf. At v1.3.4 the
+  `verifiedUpdate` comment, the NEXUS#92 note, the one atomic operation and the
+  metadata exclusion read as above, no `bd update` flag asks for a re-read, and
+  `depAddCmd`'s own code stores the cross-prefix edge as given. The
+  `resolveUnresolvedDepTarget` and `depTargetLookupMiss` code, and that such an
+  edge holds nothing, were read at beads main 8c3eb30f3. Re-verify on every bd
+  upgrade.
+- **Retires when.** bd re-reads an ordinary update in server mode and its
+  NEXUS#92 hazard note is gone, and `bd dep add` refuses a target that another
+  database holds. Then `gctk bead`'s `--verify` and gcbd's `Verify` go, and each
+  script takes its write's exit.
+
 ## Priority following
 
 - **Covers.** `assets/scripts/queue-priority.sh`,
@@ -230,11 +308,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c,
-  `gastownhall/gascity-packs` main 796d7ecd7 and `gastownhall/beads` main
-  6d713a748 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
-  orders the priority policy by the bead's own priority), with bd 1.3.2
-  (9b65b9e19).
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main 005135c33 and
+  `gastownhall/beads` main 8c3eb30f3 (`BuildReadyWorkOrder` in
+  `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
+  own priority), with bd 1.3.2 (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 

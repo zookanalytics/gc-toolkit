@@ -95,6 +95,10 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LC="$SCRIPTS_DIR/lifecycle.sh"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script; nothing landed"; exit 1; }
+# The landing stamp goes through `gctk bead update --verify`.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 usage() { echo "usage: $PROG --work <bead> --branch <branch> --target <target-branch> [--delete-branch]" >&2; exit 2; }
 
@@ -184,15 +188,19 @@ if carries "$TIP" "$PREPARED"; then
   echo "origin/$TARGET at $TIP already carries the prepared head $PREPARED, so nothing is pushed; recording the landing at $MERGED_SHA"
 elif carries "$PREPARED" "$TIP"; then
   MERGED_SHA="$PREPARED"
-  # The bead is assigned to the refinery, and bd_meta_ensure is for a bead
-  # nobody has taken, so the stamp is a plain update. The read-back decides
-  # whether it landed, since an update can exit 0 without writing.
-  STAMP_OUT=$(gc bd update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" </dev/null 2>&1)
-  STAMPED=$(bd_meta_readback "$WORK" "$(jq -nc --arg s "$MERGED_SHA" '{direct_landing_sha: $s}')")
-  if [ "${STAMPED%%$'\t'*}" != landed ]; then
-    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (it reads back ${STAMPED%%$'\t'*}; the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
-    exit 1
-  fi
+  # Without the stamp, a landing whose record failed would read as a branch
+  # with no work. The push cannot be undone, so the stamp goes through
+  # `gctk bead update --verify`, which reads it back before the push
+  # (docs/warrants.md, "bd write durability").
+  STAMP_RC=0
+  STAMP_OUT=$("$GCTK" bead update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" --verify </dev/null 2>&1) || STAMP_RC=$?
+  case "$STAMP_RC" in
+    0) ;;
+    3) echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK: it did not read back after the update (${STAMP_OUT:-gctk said nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
+       exit 1 ;;
+    *) echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
+       exit 1 ;;
+  esac
   STAMP="$MERGED_SHA"
   if ! PUSH_OUT=$(git -C "$RIG_ROOT" push origin "$MERGED_SHA:refs/heads/$TARGET" 2>&1); then
     case "$PUSH_OUT" in

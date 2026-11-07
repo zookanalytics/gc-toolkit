@@ -887,83 +887,55 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Re-read and verify every written field; a write that reported success but
-	// did not land must never be reported as a transition. The read-back must
-	// observe the write just made and must carry the appended notes, so it uses
-	// the authoritative path, never the daemon's cached, notes-less read.
-	bead = client.ShowDirect(id)
-	if bead == nil {
-		fmt.Fprintf(stderr, "%s: %s %s -> %s written but the read-back failed; UNVERIFIED\n", prog, id, cur, o.to)
-		return 2
-	}
-	var bad strings.Builder
-	got := bead.Meta("merge_result")
+	// Read the write back before reporting the transition. A caller acts on what
+	// a transition wrote, sometimes in a way that cannot be undone, such as the
+	// refinery's close of a rework child that has left its anchor state, and an
+	// exit-0 write under a degraded Dolt server may not stay written
+	// (docs/warrants.md, "bd write durability"). The read is gcbd.Verify, the
+	// one `gctk bead --verify` makes, and the transition's witness is every
+	// field it wrote. The takeaway stamp is read whole, the text a person reads
+	// and also its time and writer: helm orders the operator's queue by the
+	// time and attributes a takeaway to the sitting whose span holds it, and
+	// readers tell a sitting's decision from a park's own sentence by the
+	// writer, so a stamp that lands in part is a failed transition. Its
+	// settled-key reads back cleared, because a value an earlier sitting left
+	// reads as this headline's own disposition, which
+	// doctor/check-wait-is-an-edge answers from.
+	var want gcbd.Want
 	if o.to == "unanchored" {
-		if got != "" {
-			fmt.Fprintf(&bad, " merge_result='%s'(want absent)", got)
-		}
-	} else if got != o.to {
-		fmt.Fprintf(&bad, " merge_result='%s'(want '%s')", got, o.to)
+		want.Meta = append(want.Meta, gcbd.MetaWant{Key: "merge_result", Unset: true})
+	} else {
+		want.Meta = append(want.Meta, gcbd.MetaWant{Key: "merge_result", Value: o.to})
 	}
 	for _, s := range o.sets {
 		k, v := kv(s)
-		if g := bead.Meta(k); g != v {
-			fmt.Fprintf(&bad, " %s='%s'(want '%s')", k, g, v)
-		}
+		want.Meta = append(want.Meta, gcbd.MetaWant{Key: k, Value: v})
 	}
 	for _, k := range o.unsets {
-		if g := bead.Meta(k); g != "" {
-			fmt.Fprintf(&bad, " %s='%s'(want unset)", k, g)
-		}
+		want.Meta = append(want.Meta, gcbd.MetaWant{Key: k, Unset: true})
 	}
 	if o.routeSet {
-		if g := bead.Meta("gc.routed_to"); g != o.route {
-			fmt.Fprintf(&bad, " gc.routed_to='%s'(want '%s')", g, o.route)
-		}
+		want.Meta = append(want.Meta, gcbd.MetaWant{Key: "gc.routed_to", Value: o.route})
 	}
-	// Every field of the takeaway stamp, not just the text a person reads.
-	// The timestamp dates the wait: helm orders the operator's queue by it, and
-	// attributes a takeaway to the sitting whose span contains it, dropping one it
-	// cannot date. The writer is the provenance readers discriminate on to tell a
-	// sitting's decision from a park's own sentence. A stamp that lands in part
-	// leaves a headline the board can neither place nor attribute, so it is a
-	// failed transition and not a recorded one.
-	//
-	// The settled-key is verified CLEARED rather than merely written: a
-	// transition's takeaway names a park or an end, and a value inherited from an
-	// earlier sitting reads as this headline's own disposition, which is what
-	// doctor/check-wait-is-an-edge answers from.
 	if o.takeawaySet {
-		if g := bead.Meta("gc.takeaway"); g != o.takeaway {
-			fmt.Fprintf(&bad, " gc.takeaway='%s'(want '%s')", g, o.takeaway)
-		}
-		if g := bead.Meta("gc.takeaway_at"); g != takeawayAt {
-			fmt.Fprintf(&bad, " gc.takeaway_at='%s'(want '%s')", g, takeawayAt)
-		}
-		if g := bead.Meta("gc.takeaway_by"); g != prog {
-			fmt.Fprintf(&bad, " gc.takeaway_by='%s'(want '%s')", g, prog)
-		}
-		if g := bead.Meta("gc.takeaway_settled"); g != "" {
-			fmt.Fprintf(&bad, " gc.takeaway_settled='%s'(want cleared)", g)
-		}
+		want.Meta = append(want.Meta,
+			gcbd.MetaWant{Key: "gc.takeaway", Value: o.takeaway},
+			gcbd.MetaWant{Key: "gc.takeaway_at", Value: takeawayAt},
+			gcbd.MetaWant{Key: "gc.takeaway_by", Value: prog},
+			gcbd.MetaWant{Key: "gc.takeaway_settled", Value: ""})
 	}
 	if o.assigneeSet {
-		if g := bead.AssigneeString(); g != o.assignee {
-			fmt.Fprintf(&bad, " assignee='%s'(want '%s')", g, o.assignee)
-		}
+		assignee := o.assignee
+		want.Assignee = &assignee
 	}
 	if o.closeIt {
-		if g := bead.StatusLower(); g != "closed" {
-			fmt.Fprintf(&bad, " status='%s'(want closed)", g)
-		}
+		want.Status = "closed"
 	}
 	if o.notesSet && o.notes != "" {
-		if !strings.Contains(bead.NotesString(), o.notes) {
-			bad.WriteString(" notes(missing appended text)")
-		}
+		want.Notes = []string{o.notes}
 	}
-	if bad.Len() > 0 {
-		fmt.Fprintf(stderr, "%s: %s %s -> %s wrote but did NOT verify:%s\n", prog, id, cur, o.to, bad.String())
+	if misses := client.Verify(nil, map[string]gcbd.Want{id: want}); len(misses) > 0 {
+		fmt.Fprintf(stderr, "%s: %s %s -> %s wrote but did NOT verify: %s\n", prog, id, cur, o.to, strings.Join(misses, "; "))
 		return 2
 	}
 
@@ -1033,25 +1005,6 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %s reopen refused by bd (rc=%d): %s\n", prog, id, gcbd.ExitCode(err), out)
 		return 1
-	}
-	// Same read-back discipline as transition: verify status flipped and
-	// merge_result stayed put before reporting the repair. Authoritative read,
-	// not the daemon's cache, so the just-written flip is observed.
-	bead = client.ShowDirect(id)
-	if bead == nil {
-		fmt.Fprintf(stderr, "%s: %s reopen written but the read-back failed; UNVERIFIED\n", prog, id)
-		return 2
-	}
-	var bad strings.Builder
-	if g := bead.StatusLower(); g != "open" {
-		fmt.Fprintf(&bad, " status='%s'(want open)", g)
-	}
-	if g := bead.Meta("merge_result"); g != st {
-		fmt.Fprintf(&bad, " merge_result='%s'(want '%s' unchanged)", g, st)
-	}
-	if bad.Len() > 0 {
-		fmt.Fprintf(stderr, "%s: %s reopen wrote but did NOT verify:%s\n", prog, id, bad.String())
-		return 2
 	}
 	fmt.Fprintf(stdout, "%s: %s reopened — status closed -> open, merge_result '%s' unchanged\n", prog, id, st)
 	return 0

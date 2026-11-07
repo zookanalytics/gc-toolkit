@@ -819,7 +819,7 @@ store '[{"id":"p-14","status":"open","assignee":"","notes":"","metadata":{"merge
 out="$(STUB_DROP_KEYS="p-14:gc.takeaway" "$SUT" transition p-14 --to abandoned \
   --takeaway "PR#9 was closed without merging" 2>&1)"; rc=$?
 eq "$rc" 2 "a dropped gc.takeaway exits 2"
-has "$out" "gc.takeaway=" "the refusal names the missing text"
+has "$out" "gc.takeaway reads nothing" "the refusal names the missing text"
 
 # --- rejection to unanchored ------------------------------------------------------
 echo "# unanchored"
@@ -1102,11 +1102,6 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "a refused truncated com
 store '[{"id":"r-4","status":"closed","assignee":"","notes":"","metadata":{}}]'
 out="$("$SUT" reopen r-4 2>&1)"; rc=$?
 eq "$rc" 1 "reopen refuses a closed unanchored bead (a legal closed shape)"
-
-store '[{"id":"r-5","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
-out="$(STUB_DROP_KEYS="r-5:status" "$SUT" reopen r-5 2>&1)"; rc=$?
-eq "$rc" 2 "a reopen that did not land exits 2 (read-back verification)"
-has "$out" "status" "the unverified field is named"
 
 out="$("$SUT" reopen r-nope 2>&1)"; rc=$?
 eq "$rc" 2 "reopen on an unreadable bead exits 2"

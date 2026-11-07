@@ -394,6 +394,9 @@ exit 0
 STUB
 chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/finding"
 export PATH="$BIN:$PATH"
+# The scripts under test confirm a write through `gctk bead`, which
+# gctk.stub.sh stands in for, so each write reaches the fake gc.
+export GCTK_BIN="$HERE/gctk.stub.sh"
 # The priority writer rework-child.sh settles the child with: this tree's
 # queue-priority.sh over the stub store, named by GC_QUEUE_PRIORITY_TOOL. The
 # writer finds a bead's store in the rig list, which the stub does not serve, so

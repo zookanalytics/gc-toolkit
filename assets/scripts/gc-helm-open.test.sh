@@ -37,7 +37,8 @@
 #   (GATE)     a human gate names the one bead still waiting on it, and the
 #              conversation replies to the gate; several waiting beads, or none,
 #              file nothing and say why
-#   (SHAPE)    a task whose tracks edge did not land is closed, not left behind
+#   (SHAPE)    a task that did not read back as a conversation is closed, not
+#              left behind, and the create asks gctk to read it back
 #   (MISSING)  bd show's `{"error": …}` OBJECT answer -> exit 4, NOTHING filed
 #   (MISMATCH) bd show answering a DIFFERENT bead -> exit 4, nothing filed
 #   (NORIG)    an id prefix matching no rig -> exit 4 naming the prefix
@@ -86,7 +87,7 @@ mkdir -p "$TMP/bin"
 #     written on a mismatch, as bd's guard does, then appends its note.
 #     $FAKE_GUARD_MISS makes the guard miss whatever it reads, as a writer
 #     landing between open's read and its write does; $FAKE_APPEND_FAIL fails
-#     the write (exit 1); $FAKE_APPEND_DROPS answers 0 and keeps no note; and
+#     the write (exit 1); and
 #     $FAKE_CLOSE_ON_APPEND closes the conversation just after the append, as a
 #     dismiss landing before open's read-back does.
 #   bd dep list ... --type tracks fails from the $FAKE_TRACKS_FAIL_FROM-th
@@ -97,8 +98,8 @@ mkdir -p "$TMP/bin"
 #     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, and
 #     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
 #     id is the conversation a create filed, read back: a task that tracks the
-#     subject its --deps named and carries the assignee it was filed with,
-#     unless $FAKE_SHAPE_BROKEN drops the edge. Its replies-to edges are the
+#     subject its --deps named and carries the assignee it was filed with. Its
+#     replies-to edges are the
 #     ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left out, as a row
 #     the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
@@ -189,7 +190,6 @@ case "$1 ${2:-}" in
         _subj="$(cat "$TMP_SUBJ" 2>/dev/null || true)"
         _asg="$(cat "$TMP_ASG" 2>/dev/null || true)"
         _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
-        if [ -n "${FAKE_SHAPE_BROKEN:-}" ]; then _subj=""; fi
         _row=$(jq -n --arg c "$_id" --arg s "$_subj" --arg a "$_asg" --argjson r "${_reps:-[]}" \
           '{id:$c, issue_type:"task", status:"open", assignee:$a,
             dependencies:((if $s == "" then [] else [{issue_id:$c, depends_on_id:$s, type:"tracks"}] end) + $r)}')
@@ -232,7 +232,7 @@ case "$1 ${2:-}" in
       if [ "$_ifa_set$_ifs_set" != 00 ] && [ -n "${FAKE_GUARD_MISS:-}" ]; then exit 13; fi
       if [ "$_ifa_set" = 1 ] && [ "$_now_as" != "$_ifa" ]; then exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$_now_st" != "$_ifs" ]; then exit 13; fi
-      if [ "$_note_set" = 1 ] && [ -z "${FAKE_APPEND_DROPS:-}" ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
+      if [ "$_note_set" = 1 ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
       [ -z "${FAKE_CLOSE_ON_APPEND:-}" ] || printf 'closed' > "$TMP_NOW_STATUS"
     fi ;;
   "bd close")
@@ -243,6 +243,10 @@ GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
+# open files its conversation and its reply through `gctk bead`, which
+# gctk.stub.sh stands in for: each write reaches the fake gc of the case, and
+# GCTK_STUB_MISS names one that does not read back.
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export FAKE_CALLS="$TMP/calls" TMP_SUBJ="$TMP/subj" TMP_ASG="$TMP/asg" TMP_REPLIES="$TMP/replies" TMP_TRACKED="$TMP/tracked"
 export TMP_NOTES="$TMP/notes" TMP_NOW_STATUS="$TMP/now-status" TMP_TRACKS_READS="$TMP/tracks-reads"
 # Neutralize any inherited helm fixture hook so enumerate_rigs uses the stub.
@@ -271,7 +275,7 @@ run_open() {
 # --- (EXISTS) the happy path ---------------------------------------------------
 # A positive control first: a gate that rejects everything would pass every
 # fail-closed assertion below while breaking the verb outright.
-unset FAKE_CONV FAKE_WAITERS FAKE_SHAPE_BROKEN || true
+unset FAKE_CONV FAKE_WAITERS || true
 run_open found tk-real1
 eq "$RC" "0" "(EXISTS) a resolvable bead exits 0"
 CREATE=$(grep '^bd create' <<< "$CALLS" || true)
@@ -398,11 +402,6 @@ grep -q 'already open' <<< "$OUT" \
   && bad "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting (out: $OUT)" \
   || ok "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting"
 
-FAKE_APPEND_DROPS=1 run_open found tk-real1 --reason "the cost question"
-eq "$RC" "4" "(JOIN-LOST) an append that answers 0 and keeps no note exits 4"
-grep -q 'did not read back in conversation tk-conv0' <<< "$ERR" \
-  && ok "(JOIN-LOST) …saying the concern did not read back" || bad "(JOIN-LOST) names the read-back (err: $ERR)"
-
 FAKE_CONV_UNREADABLE=1 run_open found tk-real1 --reason "the cost question"
 eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read back exits 4"
 grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
@@ -501,6 +500,7 @@ unset FAKE_CONV
 
 # --- (GATE) a gate names the one bead still waiting on it ---------------------
 export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"},{"id":"tk-done","status":"closed","dependency_type":"blocks"}]'
+: > "$TMP/gctk.log"
 run_open found tk-gate1
 eq "$RC" "0" "(GATE) a gate with one open bead waiting on it exits 0"
 grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" \
@@ -510,6 +510,9 @@ grep -q -- '--deps tracks:tk-gate1' <<< "$CALLS" \
   && bad "(GATE) a conversation never tracks a gate (calls: $CALLS)" || ok "(GATE) no tracks edge onto the gate"
 grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
   && ok "(GATE) the conversation replies to the gate" || bad "(GATE) replies-to edge (calls: $CALLS)"
+grep -q -- '^bead|dep|add|tk-conv1|tk-gate1|--type|replies-to|--verify|' "$TMP/gctk.log" \
+  && ok "(GATE) …and the reply is read back off the conversation's row" \
+  || bad "(GATE) the reply is not verified (gctk calls: $(cat "$TMP/gctk.log"))"
 grep -q -- '--title Approve the rollout' <<< "$CALLS" \
   && ok "(GATE) its title is what the gate asks" || bad "(GATE) gate's title (calls: $CALLS)"
 grep -q 'Answer the human gate tk-gate1' <<< "$CALLS" \
@@ -532,13 +535,21 @@ grep -q 'gc bd gate resolve tk-gate1' <<< "$ERR" \
   && ok "(GATE-NONE) …and how to clear the gate" || bad "(GATE-NONE) names the resolve (err: $ERR)"
 unset FAKE_WAITERS
 
-# --- (SHAPE) a task that did not land as a conversation is closed ---------------
-export FAKE_SHAPE_BROKEN=1
+# --- (SHAPE) a task that did not read back as a conversation is closed ---------
+# `gctk bead create --verify` reads the task back carrying its tracks edge and
+# its assignee (services/gctk/internal/cli/bead_test.go), and here its miss is
+# named: the create runs and its reply names the task.
+export GCTK_STUB_MISS=create
 run_open found tk-real1
-eq "$RC" "4" "(SHAPE) a task whose tracks edge did not land exits 4"
+eq "$RC" "4" "(SHAPE) a task that did not read back as a conversation exits 4"
 grep -q 'bd close tk-conv1' <<< "$CALLS" \
   && ok "(SHAPE) the misshapen task is closed, not left behind" || bad "(SHAPE) closed (calls: $CALLS)"
-unset FAKE_SHAPE_BROKEN
+unset GCTK_STUB_MISS
+: > "$TMP/gctk.log"
+run_open found tk-real1
+grep -q -- '^bead|create|.*|--deps|tracks:tk-real1|--assignee|human|.*--verify|' "$TMP/gctk.log" \
+  && ok "(SHAPE) the create asks gctk to read the task back" \
+  || bad "(SHAPE) the create is not verified (gctk calls: $(cat "$TMP/gctk.log"))"
 
 # --- (MISSING) a typo must file NOTHING ----------------------------------------
 run_open missing tk-nope1

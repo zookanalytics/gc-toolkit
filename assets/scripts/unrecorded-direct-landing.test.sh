@@ -315,6 +315,9 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
+# The scripts under test confirm a write through `gctk bead`, which
+# gctk.stub.sh stands in for, so each write reaches the fake gc.
+export GCTK_BIN="$HERE/gctk.stub.sh"
 
 # The cwd every block runs from: a directory git finds no repository in, as in
 # a scratch directory under the system temp dir.

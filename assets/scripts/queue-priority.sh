@@ -125,6 +125,10 @@ mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-queue-priority.XXXXXX")
 # wherever it stands, and a stub gc that answers by the verb after `bd` reads
 # the same call.
 bd_() { gc bd "$@" --db "$BD_DB" 9>&-; }
+# A settle's priority writes go through `gctk bead update --verify`.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 now_epoch() { date -u +%s; }
 
 usage() {
@@ -313,13 +317,16 @@ workflow_rows() {
 }
 
 # write_priorities <plan-file> — the plan is a JSON array of {id, to}; write each
-# bead's priority, grouped by level in batches, then read every one back.
-# WROTE counts the beads written. Returns 1 when a write fails or a bead does
-# not read back at the level written, naming each in MISMATCH.
+# bead's priority, grouped by level in batches. A settle's caller routes or
+# slings the bead next, which cannot be undone, so each batch goes through
+# `gctk bead update --verify`, which reads every bead of it back at the level
+# written (docs/warrants.md, "bd write durability"). WROTE counts the beads
+# written. Returns 1 when a write fails or does not read back, saying which in
+# MISMATCH.
 WROTE=0
 MISMATCH=""
 write_priorities() {
-    local plan="$1" p ids n i id batch rows
+    local plan="$1" p ids n i id batch
     WROTE=0; MISMATCH=""
     n="$(jq 'length' "$plan" 2>/dev/null)" || return 1
     [ "$n" -gt 0 ] || return 0
@@ -331,22 +338,29 @@ write_priorities() {
         while IFS= read -r id; do
             batch+=("$id"); i=$((i + 1))
             if [ "$i" -ge "$WRITE_BATCH" ]; then
-                bd_ update "${batch[@]}" --priority "$p" >/dev/null 2>&1 || { MISMATCH="the write of P$p to ${batch[*]} failed"; return 1; }
+                write_level "$p" "${batch[@]}" || return 1
                 WROTE=$((WROTE + i)); batch=(); i=0
             fi
         done <<< "$ids"
         if [ "$i" -gt 0 ]; then
-            bd_ update "${batch[@]}" --priority "$p" >/dev/null 2>&1 || { MISMATCH="the write of P$p to ${batch[*]} failed"; return 1; }
+            write_level "$p" "${batch[@]}" || return 1
             WROTE=$((WROTE + i))
         fi
     done
-    rows="$(qp_read "$(jq -r '[ .[].id ] | unique | join(",")' "$plan")")" || { MISMATCH="the read-back did not answer"; return 1; }
-    MISMATCH="$(printf '%s' "$rows" | scrub | jq -r --slurpfile plan "$plan" "$ROWS_JQ"' as $rows
-        | ($rows | map({key: (.id | tostring), value: .priority}) | from_entries) as $got
-        | [ $plan[0][] | select(($got[.id] // null) != .to)
-            | "\(.id) reads P\($got[.id] // "?"), not P\(.to)" ] | join("; ")' 2>/dev/null)" \
-        || { MISMATCH="the read-back did not parse"; return 1; }
-    [ -z "$MISMATCH" ]
+}
+
+# write_level <priority> <id>... — one batch of write_priorities. Sets MISMATCH
+# and returns 1 when the write fails or a bead does not read back at the level.
+write_level() {
+    local p="$1" out rc=0
+    shift
+    out="$("$GCTK" bead update "$@" --priority "$p" --db "$BD_DB" --verify 9>&- 2>&1 >/dev/null)" || rc=$?
+    case "$rc" in
+        0) return 0 ;;
+        3) MISMATCH="the write of P$p to $* did not read back: $(printf '%s\n' "$out" | sed -n 's/^  //p' | tr '\n' ';' | sed 's/;$//; s/;/; /g')" ;;
+        *) MISMATCH="the write of P$p to $* failed" ;;
+    esac
+    return 1
 }
 
 # settle_subject <subject-row-json> <priority> <plan-file> — add to the plan
@@ -591,12 +605,6 @@ cmd_move() {
     if [ -n "$shift_n" ]; then
         bd_ update "$bead" --set-metadata "priority_shift=$shift_json" >/dev/null 2>&1 \
             || { echo "$PROG: move: the write of priority_shift=$shift_json to $bead failed. Nothing else was written." >&2; return 1; }
-        local got_shift
-        got_shift="$(qp_read "$bead" | scrub | jq -r --arg b "$bead" "$ROWS_JQ"' | [ .[] | select(.id == $b) | (.metadata // {}).priority_shift // "" | tostring ] | first // ""' 2>/dev/null)"
-        if [ "${got_shift#+}" != "$shift_json" ]; then
-            echo "$PROG: move: $bead reads priority_shift '${got_shift}', not $shift_json, after the write. Nothing else was written." >&2
-            return 1
-        fi
     fi
     if ! write_priorities "$plan"; then
         echo "$PROG: move: $bead moved to $derivation, but the work that follows it did not all settle: $MISMATCH. The queue-priority pass settles what is queued; re-run the move to finish the rest." >&2

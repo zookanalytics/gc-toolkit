@@ -186,6 +186,10 @@ mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch.XXXXX
 bd_() {
     if [ -n "$BD_DB" ]; then pass_child gc bd --db "$BD_DB" "$@"; else pass_child gc bd "$@"; fi
 }
+# The disarm verb writes through `gctk bead update --verify` (disarm_bead).
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now_epoch() { date -u +%s; }
@@ -435,13 +439,22 @@ hold_of() { # id seed_file graph_file -> summary on stdout
 # Clears the dispatch record, and each further key the caller names in the same
 # write. reconcile retires an arm through it and names none, so a notice owed on
 # the same bead outlives the arm: only its own send or retire, or the disarm
-# verb, clears it.
-disarm_bead() { # id reason [key]... -> rc
+# verb, clears it. With --verify the write goes through `gctk bead update
+# --verify`, which reads the record back gone before it returns 0
+# (docs/warrants.md, "bd write durability"). The disarm verb asks for that,
+# because its caller acts on the disarm in a way that cannot be undone, as
+# stand-down.sh closes the bead once it is unarmed.
+disarm_bead() { # [--verify] id reason [key]... -> rc
+    local -a write=(bd_ update)
+    if [ "${1:-}" = --verify ]; then
+        write=(pass_child "$GCTK" bead update); shift
+    fi
     local id="$1" reason="${2:-}"
     local -a also=()
     shift 2 || shift $#
     while [ $# -gt 0 ]; do also+=(--unset-metadata "$1"); shift; done
-    bd_ update "$id" \
+    [ "${write[0]}" = bd_ ] || also+=(${BD_DB:+--db "$BD_DB"} --verify)
+    "${write[@]}" "$id" \
         --unset-metadata "$K_TARGET" \
         --unset-metadata "$K_ARGS" \
         --unset-metadata "$K_BY" \
@@ -467,8 +480,8 @@ cmd_disarm() {
     done
     # The verb withdraws everything this script owes on the bead: the arm, and
     # any notice owed.
-    disarm_bead "$bead" "${reason:-disarmed by $(actor)}" "$K_NOTIFY" || {
-        echo "$PROG: disarm: failed to clear the dispatch record on $bead" >&2; return 1; }
+    disarm_bead --verify "$bead" "${reason:-disarmed by $(actor)}" "$K_NOTIFY" || {
+        echo "$PROG: disarm: failed to clear the dispatch record on $bead, or it did not read back cleared" >&2; return 1; }
     echo "$PROG: disarmed $bead"
 }
 
@@ -1128,13 +1141,15 @@ reconcile_dispatch() {
                 if printf '%s' "$children" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
                     if [ -x "$HELM" ]; then
                         pass_child "$HELM" open "$id" --reason "deferred dispatch has failed $fails times: disarm or re-arm" \
-                          --body "$cap_msg" >/dev/null 2>&1 || true
+                          --body "$cap_msg" >/dev/null 2>&1 \
+                          || echo "$PROG: WARN could not open a conversation on capped $id; it stays capped and armed, so the next pass asks again" >&2
                     else
                         echo "$PROG: WARN gc-helm.sh '$HELM' not executable — capped $id has no conversation; disarm or clear its fail count by hand" >&2
                     fi
                 elif [ -x "$HUMAN_GATE" ]; then
                     pass_child "$HUMAN_GATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
-                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg Then clear this gate. It blocks $id, so the retry stays held while the gate is open, and a gate cleared while $id is still armed at the cap is asked again by a later pass." >/dev/null 2>&1 || true
+                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg Then clear this gate. It blocks $id, so the retry stays held while the gate is open, and a gate cleared while $id is still armed at the cap is asked again by a later pass." >/dev/null 2>&1 \
+                      || echo "$PROG: WARN could not file the gate on capped $id; it stays capped and armed, so the next pass asks again" >&2
                 else
                     echo "$PROG: WARN human-gate.sh '$HUMAN_GATE' not executable — capped $id has no gate; disarm or clear its fail count by hand" >&2
                 fi
@@ -1200,7 +1215,8 @@ reconcile_dispatch() {
 
         sling_bead "$id" "$target" "$args_json"; rc=$?
         if [ "$rc" != 0 ]; then
-            [ "$DRY_RUN" = 1 ] || bd_ update "$id" --unset-metadata "$K_SLUNG" >/dev/null 2>&1 || true
+            [ "$DRY_RUN" = 1 ] || bd_ update "$id" --unset-metadata "$K_SLUNG" >/dev/null 2>&1 \
+                || echo "$PROG: WARN could not roll $K_SLUNG back on $id; the next pass reads it unconfirmed and slings again" >&2
             if [ "$rc" = 3 ]; then
                 echo "$PROG: WARN $id has a malformed $K_ARGS ('$args_json') — leaving armed" >&2
             else
@@ -1213,10 +1229,11 @@ reconcile_dispatch() {
         # Sling returned success: promote the marker to its proven "slung@" state
         # before clearing the record, so a death in the narrow window before disarm
         # recovers as a retire, not a second sling. disarm then clears the whole
-        # record, the marker included; if this promotion write is lost, disarm
-        # still clears it on this pass, and only a death before disarm falls back to
-        # a re-sling next pass.
-        bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_DONE$(now_utc)" >/dev/null 2>&1 || true
+        # record, the marker included; if the store refuses this promotion,
+        # disarm still clears it on this pass, and only a death before disarm
+        # falls back to a re-sling next pass.
+        bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_DONE$(now_utc)" >/dev/null 2>&1 \
+            || echo "$PROG: WARN could not promote $K_SLUNG on $id to slung; the disarm below clears it" >&2
         if disarm_bead "$id" "dispatched to $target by the deferred-dispatch reconcile pass"; then
             echo "$PROG: dispatched $id -> $target"
         else

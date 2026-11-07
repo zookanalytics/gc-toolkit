@@ -55,11 +55,11 @@ The subject is the effort's landing bead. Its steps:
 | Step | What it does |
 |---|---|
 | `load-context` | Read the subject and its recommendation card for the design topic and intended implementation. Resolve `design_gated` (var, default `true`). |
-| `seed-branch` | Cut `integration/<subject-id>` from the default branch with one create-only push from the rig's checkout, and record it on the subject: `branch` names the integration branch and `target` the default branch, read back. |
-| `file-design` | File the design child with the integration branch as its `target` in its create, under the subject's epic when it has one, make the subject wait on it by a `blocks` edge, and read both back. |
-| `file-implementation` | File one implementation child the same way, which builds the initiative per the design and lands with no PR of its own. `design_gated=true`: also hold it behind the design child by a `blocks` edge, read back. |
-| `file-summary` | File the summary task beside the subject, under the subject's epic when it has one, with no `target`. It waits on each child by a `blocks` edge, and the subject waits on it. The three edges are read back. |
-| `dispatch` | Read every target and edge of the setup back. Then hand the subject to the refinery, assigned with the notice that assignment owes, and dispatch the work: sling the design child, `--merge mr` when design-gated; arm the implementation child behind the design (`design_gated=true`) or sling it now, in parallel (`design_gated=false`); and arm the summary task to the polecat pool on `mol-polecat-report`. Then close the step chain and drain. |
+| `seed-branch` | Cut `integration/<subject-id>` from the default branch with one create-only push from the rig's checkout, and record it on the subject: `branch` names the integration branch and `target` the default branch. |
+| `file-design` | File the design child with the integration branch as its `target` in its create, under the subject's epic when it has one, make the subject wait on it by a `blocks` edge. The create and the add go through `gctk bead ... --verify`, which reads each back. |
+| `file-implementation` | File one implementation child the same way, which builds the initiative per the design and lands with no PR of its own. `design_gated=true`: also hold it behind the design child by a `blocks` edge. |
+| `file-summary` | File the summary task beside the subject, under the subject's epic when it has one, with no `target`. It waits on each child by a `blocks` edge, and the subject waits on it, each write read back as in `file-design`. |
+| `dispatch` | Hand the subject to the refinery, assigned with the notice that assignment owes, and dispatch the work: sling the design child, `--merge mr` when design-gated; arm the implementation child behind the design (`design_gated=true`) or sling it now, in parallel (`design_gated=false`); and arm the summary task to the polecat pool on `mol-polecat-report`. Then close the step chain and drain. |
 
 Nothing is handed over or dispatched until the whole setup reads back. The
 filing steps dispatch nothing, so a run that stops between them leaves no child
@@ -73,10 +73,14 @@ records its result on the subject (`branch` and `target`, `gc.design_child`,
 `gc.impl_child`, `gc.summary_task`, and the `*_armed` markers), so a crashed run
 resumes without cutting a second branch or filing a second child, task or
 workflow. The dispatch step stamps each `*_armed` marker right after its own
-dispatch, so a resume dispatches nothing twice. A target or an edge that does
-not read back fails its step, so the resume re-runs that step. The read-back
-decides, not the add's exit status, because a resumed add can meet an edge the
-failed pass already wrote.
+dispatch, so a resume dispatches nothing twice. A write bd refuses fails its
+step, so the resume re-runs that step, and an add that meets an edge the failed
+pass already wrote is a no-op that exits 0. The hand-over and the dispatch
+cannot be undone, so each filing step writes its targets and edges through
+`gctk bead ... --verify`, which reads each one back, and one that does not read
+back stops its step (docs/warrants.md, "bd write durability"). A child filed
+and not read back is still recorded on the subject, so a resume files no second
+one, and the resumed step's wait finds whether it exists.
 
 The implementation is one child, not a fan-out: the design defines the
 breakdown, so the child carries "split into multiple beads if the design

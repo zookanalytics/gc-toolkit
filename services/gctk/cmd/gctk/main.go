@@ -31,6 +31,7 @@ import (
 )
 
 const topUsage = `Usage:
+  gctk bead <verb> [flags]        a bd write through gc bd, and with --verify the write read back
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
   gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
   gctk pr-status <verb> [flags]   PR status working|merging|needs-review|needs-attention (services/gctk/prstatus)
@@ -38,7 +39,7 @@ const topUsage = `Usage:
   gctk session <verb> [flags]     actions on a session: give it a title its record and its terminal show
   gctk version                    the revision this binary was built from
 
-Run "gctk lifecycle", "gctk pr-status", "gctk rig" or "gctk session" for that subcommand's verbs.
+Run "gctk bead", "gctk lifecycle", "gctk pr-status", "gctk rig" or "gctk session" for that subcommand's verbs.
 `
 
 func main() {
@@ -51,6 +52,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	switch args[0] {
+	case "bead":
+		return cli.Bead(args[1:], stdout, stderr)
 	case "lifecycle":
 		return cli.Lifecycle(args[1:], stdout, stderr)
 	case "merge":
