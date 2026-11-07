@@ -5199,5 +5199,5 @@ case "${1:-}" in
     accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, park, priority, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac
