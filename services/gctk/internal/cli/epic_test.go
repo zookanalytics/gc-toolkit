@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -227,7 +228,42 @@ func TestEpicCreateFiling(t *testing.T) {
 			if strings.Contains(errText, "nothing was filed") {
 				t.Errorf("stderr %q says nothing was filed after a create ran", errText)
 			}
+			if lookup := "before filing it again, with gc bd list -t epic --title 'Epic: x'\n"; !strings.HasSuffix(errText, lookup) {
+				t.Errorf("stderr %q does not end with the list that finds the epic, %q", errText, lookup)
+			}
 		})
+	}
+}
+
+func TestEpicLookup(t *testing.T) {
+	cases := []struct {
+		o    epicOpts
+		want string
+	}{
+		{epicOpts{title: "Epic: x"}, `gc bd list -t epic --title 'Epic: x'`},
+		{epicOpts{title: "plain"}, `gc bd list -t epic --title plain`},
+		{epicOpts{title: "Delivery: it's d", parent: "tk-e", rig: "gc-toolkit"},
+			`gc bd list --rig gc-toolkit --parent tk-e -t epic --title 'Delivery: it'\''s d'`},
+	}
+	for _, c := range cases {
+		if got := epicLookup(c.o); got != c.want {
+			t.Errorf("epicLookup(%+v) = %q, want %q", c.o, got, c.want)
+		}
+	}
+}
+
+// TestShellWord reads each word back through sh, so a quote the shell would
+// split or expand fails here.
+func TestShellWord(t *testing.T) {
+	for _, s := range []string{"plain", "tk-e.1", "Epic: x", "it's", `$HOME`, "a`b`", `a"b\c`, "two\nlines", "*", "~", "=x", ""} {
+		out, err := exec.Command("sh", "-c", "printf '%s' "+shellWord(s)).Output()
+		if err != nil {
+			t.Errorf("sh read shellWord(%q) = %s and failed: %v", s, shellWord(s), err)
+			continue
+		}
+		if string(out) != s {
+			t.Errorf("sh read shellWord(%q) = %s as %q", s, shellWord(s), out)
+		}
 	}
 }
 

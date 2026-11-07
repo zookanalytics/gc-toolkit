@@ -140,15 +140,19 @@ It is the primitive for reporting at once, and it does not fit this need:
   on a proxied server one line of text, and exit 1 (`cmd/bd/create.go` and
   `cmd/bd/create_proxied_server.go`, all three at `7ef2fd05e`). So a create
   that exits non-zero exits 4, and the filer looks for the epic by its title
-  before filing it again. bd marks a refusal that wrote nothing in two ways: a
-  typed refusal, `{code, error, mutates}` (`buildJSONCapabilityError` in
-  `cmd/bd/errors.go`), and exit 14 for a migration freeze
-  (`ExitMigrationFrozen`). bd gives a typed refusal to a create only for
-  `--repo`, or `--readonly` on a proxied server, and this create passes
-  neither. The command reads a freeze as unknown too, and passes on bd's
-  message. Nothing reads the epic back, because the command takes no act on it
-  after the create. gctk's `gcbd.Create` reads each key back after its create,
-  and the command does not use it.
+  before filing it again, with the `gc bd list -t epic --title` the message
+  ends with. That list repeats the create's `--rig` and `--parent`, because
+  `gc bd` answers from the store an explicit `--rig` names, else from the
+  store that holds an argument carrying a bound store's prefix
+  (`resolveBdScopeTarget` in `cmd/gc/cmd_bd.go` at `24c9f5f1f`). bd marks a
+  refusal that wrote nothing in two ways: a typed refusal,
+  `{code, error, mutates}` (`buildJSONCapabilityError` in `cmd/bd/errors.go`),
+  and exit 14 for a migration freeze (`ExitMigrationFrozen`). bd gives a typed
+  refusal to a create only for `--repo`, or `--readonly` on a proxied server,
+  and this create passes neither. The command reads a freeze as unknown too,
+  and passes on bd's message. Nothing reads the epic back, because the command
+  takes no act on it after the create. gctk's `gcbd.Create` reads each key back
+  after its create, and the command does not use it.
 - The same create with no metadata, for a Delivery.
 - `gc bd show`, or the supervisor API's read of a bead, for the parent's
   `issue_type`, which tells a Delivery from an epic of its own.

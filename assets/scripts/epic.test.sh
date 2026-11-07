@@ -23,7 +23,8 @@
 #   - an epic under an epic with a hypothesis of its own is filed carrying it;
 #   - a parent that does not read files nothing (exit 1);
 #   - a create that fails, or whose reply names no bead, prints no id and says
-#     to look for the epic before filing it again (exit 4);
+#     to look for the epic before filing it again, with the gc bd list that
+#     finds it (exit 4);
 #   - with no gctk binary, the bridge refuses (exit 1) and files nothing;
 #   - the work skill gives this create with the contract's floor fields, and
 #     the sitting's record step and the checkpoint's re-aim name the keys.
@@ -140,6 +141,7 @@ run create "Epic: bd fails" --hypothesis "For the operator, X changes, and Y sho
 eq "$RC|$OUT" "4|" "a create that exits non-zero exits 4 and prints no id"
 has "$ERR" "bd's create exited 1" "...and says how the create ended"
 has "$ERR" "look for it by its title before filing it again" "...and to look for the epic before filing it again"
+has "$ERR" "with gc bd list -t epic --title 'Epic: bd fails'" "...with the list that finds it"
 unset STUB_CREATE_FAIL
 export STUB_CREATE_GARBAGE=1
 run create "Epic: reply lost" --hypothesis "For the operator, X changes, and Y shows it"

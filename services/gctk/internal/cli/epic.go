@@ -81,7 +81,8 @@ exit: 0 filed
       4 whether the epic was filed is unknown: bd's create exited non-zero,
         or exited 0 and named no bead. bd answers a commit it could not
         confirm with the same error as a create it refused, so look for the
-        epic by its title before filing it again
+        epic by its title before filing it again, with the gc bd list that
+        stderr ends with
 `
 
 // The exit codes epicUsage states.
@@ -294,12 +295,12 @@ func epicCreate(o epicOpts, stdout, stderr io.Writer) int {
 		// with bd's reply passed through, when bd fell back to a store whose
 		// writes do not persist, so an id in that reply is not taken for an
 		// epic filed either.
-		fmt.Fprintf(stderr, "gctk epic create: bd's create exited %d%s, so whether the epic was filed is unknown: look for it by its title before filing it again\n",
-			gcbd.ExitCode(err), detail(bdError, bdErr.String(), err.Error()))
+		fmt.Fprintf(stderr, "gctk epic create: bd's create exited %d%s, so whether the epic was filed is unknown: look for it by its title before filing it again, with %s\n",
+			gcbd.ExitCode(err), detail(bdError, bdErr.String(), err.Error()), epicLookup(o))
 		return epicExitUnknown
 	case id == "":
-		fmt.Fprintf(stderr, "gctk epic create: bd's create exited 0 and its reply named no bead%s, so whether the epic was filed is unknown: look for it by its title before filing it again\n",
-			detail(bdError, bdErr.String()))
+		fmt.Fprintf(stderr, "gctk epic create: bd's create exited 0 and its reply named no bead%s, so whether the epic was filed is unknown: look for it by its title before filing it again, with %s\n",
+			detail(bdError, bdErr.String()), epicLookup(o))
 		return epicExitUnknown
 	}
 	fmt.Fprintln(stdout, id)
@@ -309,6 +310,41 @@ func epicCreate(o epicOpts, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gctk epic create: filed %s, an epic carrying %s\n", id, strings.Join(keys, ", "))
 	}
 	return epicExitDone
+}
+
+// epicLookup is the `gc bd list` that finds the epic a create of o may have
+// filed. gc bd answers from the store an explicit --rig names, else from the
+// store that holds an argument carrying a bound store's prefix, such as
+// --parent's id, else from GC_RIG or the working directory (cmd/gc/cmd_bd.go
+// resolveBdScopeTarget). So the list repeats the create's --rig and --parent,
+// and the store the create went to answers it. --title matches a part of the
+// title, in any case.
+func epicLookup(o epicOpts) string {
+	words := []string{"gc", "bd", "list"}
+	if o.rig != "" {
+		words = append(words, "--rig", shellWord(o.rig))
+	}
+	if o.parent != "" {
+		words = append(words, "--parent", shellWord(o.parent))
+	}
+	words = append(words, "-t", "epic", "--title", shellWord(o.title))
+	return strings.Join(words, " ")
+}
+
+// shellWord is s as one POSIX shell word: bare when every character is one
+// the shell reads as itself, else in single quotes.
+func shellWord(s string) string {
+	bare := s != ""
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:@,+", r)) {
+			bare = false
+			break
+		}
+	}
+	if bare {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // epicReply reads a `gc bd create --json` reply: the id of the bead it names,
