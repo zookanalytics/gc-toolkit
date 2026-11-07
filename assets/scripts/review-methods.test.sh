@@ -405,7 +405,7 @@ hasF "$TMP/verdict.demo" "**Delivered, and it shows a departure from the rig's s
   "the demo verdict requests changes on a departure from the rig's standard"
 hasF "$TMP/verdict.demo" 'names the standard, each screen and message it held to it and in which states' \
   "…and names the standard and each screen and message it held to it"
-hasF "$ROOT/skills/review-pm/SKILL.md" "whether a screen or message meets the rig's standard, is not your call" \
+hasF "$ROOT/skills/review-pm/SKILL.md" "whether a screen or message meets the rig's standard, are not your call" \
   "the pm method leaves the rig's standard to the demo check"
 
 echo "---"
