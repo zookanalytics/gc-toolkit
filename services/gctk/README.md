@@ -17,7 +17,7 @@ supervisor's API (`internal/gcbd`).
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
 | `pr-status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `internal/cli/prstatus.go`, `prstatus` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
-| `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code terminal takes the title at once, and a Codex terminal at the session's next boundary | `gctk session --help`, `internal/cli/session.go` |
+| `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
 
 Logic gctk does not hold runs as shell scripts. Among them are the rest of the

@@ -10,8 +10,7 @@ import (
 
 // titleGCStub answers the gc calls `gctk session title` makes: `session rename`
 // prints $STUB_RENAME_OUT and exits $STUB_RENAME_RC, `bd show` prints
-// $STUB_SESSION_BEAD, `session nudge` prints $STUB_NUDGE_OUT and exits
-// $STUB_NUDGE_RC, and `session submit` prints $STUB_SUBMIT_OUT and exits
+// $STUB_SESSION_BEAD, and `session submit` prints $STUB_SUBMIT_OUT and exits
 // $STUB_SUBMIT_RC. Every call's arguments go to $STUB_LOG, one call per line
 // with each argument followed by "|", so a title with spaces reads back whole.
 const titleGCStub = `#!/bin/sh
@@ -22,9 +21,6 @@ case "$1 $2" in
     [ -z "$STUB_RENAME_ERR" ] || printf '%s\n' "$STUB_RENAME_ERR" >&2
     exit "${STUB_RENAME_RC:-0}" ;;
   "bd show") printf '%s\n' "$STUB_SESSION_BEAD" ;;
-  "session nudge")
-    printf '%s\n' "$STUB_NUDGE_OUT"
-    exit "${STUB_NUDGE_RC:-0}" ;;
   "session submit")
     printf '%s\n' "$STUB_SUBMIT_OUT"
     [ -z "$STUB_SUBMIT_ERR" ] || printf '%s\n' "$STUB_SUBMIT_ERR" >&2
@@ -45,14 +41,21 @@ const (
 	codexBead  = `[{"id":"tk-s1","metadata":{"provider":"codex","session_name":"s-tk-s1"}}]`
 )
 
+// renameFamilies are the session beads of the families whose /rename gctk knows.
+// Each takes the same call.
+var renameFamilies = []struct{ name, bead string }{
+	{"claude", claudeBead},
+	{"codex", codexBead},
+}
+
 type titleRig struct {
 	t   *testing.T
 	log string
 }
 
 // newTitleRig puts the stubs first on PATH. The defaults are a Claude session
-// tk-s1, a rename and a nudge that succeed, a submit that queues as gc reports
-// it for a running session, and a caller whose own session is tk-s1.
+// tk-s1, a rename that succeeds, a submit that queues as gc reports it for a
+// running session, and a caller whose own session is tk-s1.
 func newTitleRig(t *testing.T) *titleRig {
 	t.Helper()
 	bin := t.TempDir()
@@ -69,8 +72,6 @@ func newTitleRig(t *testing.T) *titleRig {
 	t.Setenv("STUB_RENAME_RC", "0")
 	t.Setenv("STUB_RENAME_ERR", "")
 	t.Setenv("STUB_SESSION_BEAD", claudeBead)
-	t.Setenv("STUB_NUDGE_OUT", `{"schema_version":"1","ok":true,"session_id":"tk-s1","delivery":"immediate","queued":false,"outcome":"delivered"}`)
-	t.Setenv("STUB_NUDGE_RC", "0")
 	t.Setenv("STUB_SUBMIT_OUT", `{"schema_version":"1","ok":true,"target":"tk-s1","intent":"follow_up","queued":true,"outcome":"queued"}`)
 	t.Setenv("STUB_SUBMIT_RC", "0")
 	t.Setenv("STUB_SUBMIT_ERR", "")
@@ -78,7 +79,7 @@ func newTitleRig(t *testing.T) *titleRig {
 }
 
 // calls returns the logged calls whose program and leading arguments are
-// prefix, such as "gc|session|nudge|".
+// prefix, such as "gc|session|submit|".
 func (r *titleRig) calls(prefix string) []string {
 	r.t.Helper()
 	raw, err := os.ReadFile(r.log)
@@ -142,90 +143,62 @@ func TestSessionTitleUsage(t *testing.T) {
 }
 
 func TestSessionTitle(t *testing.T) {
-	t.Run("a claude session: renames, then nudges /rename at once, reading no pane", func(t *testing.T) {
-		r := newTitleRig(t)
-		stdout, stderr, code := r.run("--subject", "tk-a8k8dpw", "--topic", "converse tab title from its topic")
-		if code != sessionExitDone {
-			t.Fatalf("exit %d, stderr %q", code, stderr)
-		}
-		title := "tk-a8k8dpw — converse tab title from its topic"
-		want := []string{
-			"gc|session|rename|tk-s1|" + title + "|--json|",
-			"gc|bd|show|tk-s1|",
-			"gc|session|nudge|tk-s1|--delivery|immediate|/rename " + title + "|--json|",
-		}
-		got := r.calls("")
-		if len(got) != len(want) {
-			t.Fatalf("calls = %q, want %q", got, want)
-		}
-		for i := range want {
-			if !strings.HasPrefix(got[i], want[i]) {
-				t.Fatalf("call %d = %q, want %q", i, got[i], want[i])
+	for _, fam := range renameFamilies {
+		t.Run("a "+fam.name+" session: renames, then queues /rename as a deferred submit, reading no pane and sending no nudge", func(t *testing.T) {
+			r := newTitleRig(t)
+			t.Setenv("STUB_SESSION_BEAD", fam.bead)
+			stdout, stderr, code := r.run("--subject", "tk-a8k8dpw", "--topic", "converse tab title from its topic")
+			if code != sessionExitDone {
+				t.Fatalf("exit %d, stderr %q", code, stderr)
 			}
-		}
-		for _, line := range []string{"renamed tk-s1 to \"" + title + "\"", "nudged tk-s1: /rename delivered"} {
-			if !strings.Contains(stdout, line) {
-				t.Fatalf("stdout %q lacks %q", stdout, line)
+			title := "tk-a8k8dpw — converse tab title from its topic"
+			want := []string{
+				"gc|session|rename|tk-s1|" + title + "|--json|",
+				"gc|bd|show|tk-s1|",
+				"gc|session|submit|tk-s1|--intent|follow_up|/rename " + title + "|--json|",
 			}
-		}
-	})
-
-	t.Run("a codex session: renames, then queues /rename as a deferred submit, never a nudge", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("STUB_SESSION_BEAD", codexBead)
-		stdout, stderr, code := r.run("--subject", "tk-a8k8dpw", "--topic", "converse tab title from its topic")
-		if code != sessionExitDone {
-			t.Fatalf("exit %d, stderr %q", code, stderr)
-		}
-		title := "tk-a8k8dpw — converse tab title from its topic"
-		want := []string{
-			"gc|session|rename|tk-s1|" + title + "|--json|",
-			"gc|bd|show|tk-s1|",
-			"gc|session|submit|tk-s1|--intent|follow_up|/rename " + title + "|--json|",
-		}
-		got := r.calls("")
-		if len(got) != len(want) {
-			t.Fatalf("calls = %q, want %q", got, want)
-		}
-		for i := range want {
-			if !strings.HasPrefix(got[i], want[i]) {
-				t.Fatalf("call %d = %q, want %q", i, got[i], want[i])
+			got := r.calls("")
+			if len(got) != len(want) {
+				t.Fatalf("calls = %q, want %q", got, want)
 			}
-		}
-		if !strings.Contains(stdout, "queued the /rename submit: Gas City types it into tk-s1 at the session's next boundary") {
-			t.Fatalf("stdout %q", stdout)
-		}
-	})
+			for i := range want {
+				if !strings.HasPrefix(got[i], want[i]) {
+					t.Fatalf("call %d = %q, want %q", i, got[i], want[i])
+				}
+			}
+			if nudges := r.calls("gc|session|nudge|"); len(nudges) != 0 {
+				t.Fatalf("sent a nudge: %q", nudges)
+			}
+			for _, line := range []string{"renamed tk-s1 to \"" + title + "\"", "queued the /rename submit: Gas City types it into tk-s1 at the session's next boundary"} {
+				if !strings.Contains(stdout, line) {
+					t.Fatalf("stdout %q lacks %q", stdout, line)
+				}
+			}
+		})
+	}
 
-	t.Run("a claude session never takes a submit", func(t *testing.T) {
-		r := newTitleRig(t)
-		if _, _, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|submit|")) != 0 {
-			t.Fatalf("exit %d, calls %q", code, r.calls(""))
-		}
-	})
-
-	t.Run("a wrapped provider takes the call of its builtin", func(t *testing.T) {
+	t.Run("a wrapped provider takes the same call as its builtin", func(t *testing.T) {
 		cases := []struct {
-			name, bead, want string
+			name, bead string
 		}{
-			{"claude", `[{"id":"tk-s1","metadata":{"provider":"claude-watch","builtin_ancestor":"claude","session_name":"s-tk-s1"}}]`, "gc|session|nudge|"},
-			{"codex", `[{"id":"tk-s1","metadata":{"provider":"sandboxed","builtin_ancestor":"codex","session_name":"s-tk-s1"}}]`, "gc|session|submit|"},
+			{"claude", `[{"id":"tk-s1","metadata":{"provider":"claude-watch","builtin_ancestor":"claude","session_name":"s-tk-s1"}}]`},
+			{"codex", `[{"id":"tk-s1","metadata":{"provider":"sandboxed","builtin_ancestor":"codex","session_name":"s-tk-s1"}}]`},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				r := newTitleRig(t)
 				t.Setenv("STUB_SESSION_BEAD", tc.bead)
-				if _, _, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls(tc.want)) != 1 || len(r.calls("gc|session|")) != 2 {
-					t.Fatalf("exit %d, calls %q, want one %q after the rename", code, r.calls(""), tc.want)
+				if _, _, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|submit|tk-s1|--intent|follow_up|/rename x|--json|")) != 1 || len(r.calls("gc|session|")) != 2 {
+					t.Fatalf("exit %d, calls %q, want the one submit after the rename", code, r.calls(""))
 				}
 			})
 		}
 	})
 
-	t.Run("a provider whose name holds codex is codex, as Gas City reads it", func(t *testing.T) {
+	t.Run("a provider whose name holds codex has a /rename, as Gas City reads it", func(t *testing.T) {
 		r := newTitleRig(t)
 		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s1","metadata":{"provider":"my-codex","session_name":"s-tk-s1"}}]`)
-		if _, _, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|submit|")) != 1 || len(r.calls("gc|session|nudge|")) != 0 {
+		if _, _, code := r.run("--topic", "x"); code != sessionExitDone || len(r.calls("gc|session|submit|")) != 1 {
 			t.Fatalf("exit %d, calls %q", code, r.calls(""))
 		}
 	})
@@ -273,18 +246,6 @@ func TestSessionTitle(t *testing.T) {
 		if got := r.calls("gc|bd|show|tk-s9|"); len(got) != 1 {
 			t.Fatalf("the session bead read = %q, want tk-s9", r.calls("gc|bd|"))
 		}
-		if got := r.calls("gc|session|nudge|tk-s9|"); len(got) != 1 {
-			t.Fatalf("nudge calls = %q", r.calls("gc|session|nudge|"))
-		}
-	})
-
-	t.Run("an alias resolves to the id the rename reports, for a submit too", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("STUB_RENAME_OUT", `{"ok":true,"action":"rename","session_id":"tk-s9","title":"x"}`)
-		t.Setenv("STUB_SESSION_BEAD", `[{"id":"tk-s9","metadata":{"provider":"codex","session_name":"s-tk-s9"}}]`)
-		if _, _, code := r.run("--topic", "x", "--session", "gc-toolkit/gc-toolkit.tk-c1"); code != sessionExitDone {
-			t.Fatalf("exit %d", code)
-		}
 		if got := r.calls("gc|session|submit|tk-s9|"); len(got) != 1 {
 			t.Fatalf("submit calls = %q", r.calls("gc|session|submit|"))
 		}
@@ -307,38 +268,22 @@ func TestSessionTitle(t *testing.T) {
 		}
 	})
 
-	t.Run("a failed nudge exits 3", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("STUB_NUDGE_RC", "1")
-		t.Setenv("STUB_NUDGE_OUT", `{"ok":false,"error":"session is not running"}`)
-		if _, stderr, code := r.run("--topic", "x"); code != sessionExitSendFailed || !strings.Contains(stderr, "not running") {
-			t.Fatalf("exit %d, stderr %q", code, stderr)
-		}
-	})
-
-	t.Run("a failed submit exits 3, carrying gc's error", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("STUB_SESSION_BEAD", codexBead)
-		t.Setenv("STUB_SUBMIT_RC", "1")
-		t.Setenv("STUB_SUBMIT_OUT", "")
-		t.Setenv("STUB_SUBMIT_ERR", "gc session submit: session has a pending interaction")
-		_, stderr, code := r.run("--topic", "x")
-		if code != sessionExitSendFailed || !strings.Contains(stderr, "the /rename submit failed") || !strings.Contains(stderr, "pending interaction") {
-			t.Fatalf("exit %d, stderr %q", code, stderr)
-		}
-	})
-
-	t.Run("a queued nudge is reported as queued, and as a reminder", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("STUB_NUDGE_OUT", `{"ok":true,"queued":true,"outcome":"queued"}`)
-		if stdout, _, code := r.run("--topic", "x"); code != sessionExitDone || !strings.Contains(stdout, "queued the /rename nudge: it reaches tk-s1 as a reminder") {
-			t.Fatalf("exit %d, stdout %q", code, stdout)
-		}
-	})
+	for _, fam := range renameFamilies {
+		t.Run("a failed submit exits 3, carrying gc's error, on a "+fam.name+" session", func(t *testing.T) {
+			r := newTitleRig(t)
+			t.Setenv("STUB_SESSION_BEAD", fam.bead)
+			t.Setenv("STUB_SUBMIT_RC", "1")
+			t.Setenv("STUB_SUBMIT_OUT", "")
+			t.Setenv("STUB_SUBMIT_ERR", "gc session submit: session has a pending interaction")
+			_, stderr, code := r.run("--topic", "x")
+			if code != sessionExitSubmitFailed || !strings.Contains(stderr, "the /rename submit failed") || !strings.Contains(stderr, "pending interaction") {
+				t.Fatalf("exit %d, stderr %q", code, stderr)
+			}
+		})
+	}
 
 	t.Run("a submit gc did not queue says what it did to the session", func(t *testing.T) {
 		r := newTitleRig(t)
-		t.Setenv("STUB_SESSION_BEAD", codexBead)
 		t.Setenv("STUB_SUBMIT_OUT", `{"ok":true,"intent":"follow_up","queued":false,"outcome":"submitted"}`)
 		stdout, _, code := r.run("--topic", "x")
 		if code != sessionExitDone || !strings.Contains(stdout, "submitted /rename to tk-s1: Gas City resumed the session for it, lifting any operator hold") || strings.Contains(stdout, "queued") {
@@ -348,26 +293,16 @@ func TestSessionTitle(t *testing.T) {
 
 	t.Run("a submit gc answers otherwise gives gc's answer, claiming no resume", func(t *testing.T) {
 		r := newTitleRig(t)
-		t.Setenv("STUB_SESSION_BEAD", codexBead)
 		t.Setenv("STUB_SUBMIT_OUT", `{"schema_version":"1","ok":true,"target":"tk-s1","intent":"follow_up","queued":false,"outcome":"accepted","op_id":"op-1","key":"k-1"}`)
 		stdout, _, code := r.run("--topic", "x")
 		if code != sessionExitDone || !strings.Contains(stdout, `submitted /rename to tk-s1: gc session submit answered "accepted", not queued`) || strings.Contains(stdout, "resumed") {
 			t.Fatalf("exit %d, stdout %q", code, stdout)
 		}
 	})
-
-	t.Run("a nudge that reports no outcome is reported as sent", func(t *testing.T) {
-		r := newTitleRig(t)
-		t.Setenv("STUB_NUDGE_OUT", `{"ok":true,"queued":false}`)
-		if stdout, _, code := r.run("--topic", "x"); code != sessionExitDone || !strings.Contains(stdout, "nudged tk-s1: /rename sent") {
-			t.Fatalf("exit %d, stdout %q", code, stdout)
-		}
-	})
 }
 
 // TestSessionTitleItems covers each combination of the items a title is made
-// of, which the session record and the typed /rename both carry, whichever call
-// types it.
+// of, which the session record and the typed /rename both carry, on each family.
 func TestSessionTitleItems(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -383,32 +318,24 @@ func TestSessionTitleItems(t *testing.T) {
 		{"the flags in another order", []string{"--topic", "t", "--pr", " 1409 ", "--subject", "tk-a8k8dpw"}, "tk-a8k8dpw #1409 — t"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := newTitleRig(t)
-			stdout, stderr, code := r.run(tc.args...)
-			if code != sessionExitDone {
-				t.Fatalf("exit %d, stderr %q", code, stderr)
-			}
-			if got := r.calls("gc|session|rename|"); len(got) != 1 || got[0] != "gc|session|rename|tk-s1|"+tc.title+"|--json|" {
-				t.Fatalf("rename calls = %q, want the title %q", got, tc.title)
-			}
-			if got := r.calls("gc|session|nudge|"); len(got) != 1 || got[0] != "gc|session|nudge|tk-s1|--delivery|immediate|/rename "+tc.title+"|--json|" {
-				t.Fatalf("nudge calls = %q, want /rename %q", got, tc.title)
-			}
-			if want := "renamed tk-s1 to \"" + tc.title + "\""; !strings.Contains(stdout, want) {
-				t.Fatalf("stdout %q lacks %q", stdout, want)
-			}
-		})
-		t.Run(tc.name+", on a codex session", func(t *testing.T) {
-			r := newTitleRig(t)
-			t.Setenv("STUB_SESSION_BEAD", codexBead)
-			_, stderr, code := r.run(tc.args...)
-			if code != sessionExitDone {
-				t.Fatalf("exit %d, stderr %q", code, stderr)
-			}
-			if got := r.calls("gc|session|submit|"); len(got) != 1 || got[0] != "gc|session|submit|tk-s1|--intent|follow_up|/rename "+tc.title+"|--json|" {
-				t.Fatalf("submit calls = %q, want /rename %q", got, tc.title)
-			}
-		})
+		for _, fam := range renameFamilies {
+			t.Run(tc.name+", on a "+fam.name+" session", func(t *testing.T) {
+				r := newTitleRig(t)
+				t.Setenv("STUB_SESSION_BEAD", fam.bead)
+				stdout, stderr, code := r.run(tc.args...)
+				if code != sessionExitDone {
+					t.Fatalf("exit %d, stderr %q", code, stderr)
+				}
+				if got := r.calls("gc|session|rename|"); len(got) != 1 || got[0] != "gc|session|rename|tk-s1|"+tc.title+"|--json|" {
+					t.Fatalf("rename calls = %q, want the title %q", got, tc.title)
+				}
+				if got := r.calls("gc|session|submit|"); len(got) != 1 || got[0] != "gc|session|submit|tk-s1|--intent|follow_up|/rename "+tc.title+"|--json|" {
+					t.Fatalf("submit calls = %q, want /rename %q", got, tc.title)
+				}
+				if want := "renamed tk-s1 to \"" + tc.title + "\""; !strings.Contains(stdout, want) {
+					t.Fatalf("stdout %q lacks %q", stdout, want)
+				}
+			})
+		}
 	}
 }
