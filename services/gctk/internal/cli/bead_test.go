@@ -258,21 +258,21 @@ func TestBeadCloseVerifyReadsTheBeadClosed(t *testing.T) {
 // among them, so an edge reads back by its far end and its kind.
 func TestBeadDepVerifyReadsTheEdgeOffTheBeadsOwnRow(t *testing.T) {
 	r := newBeadRig(t)
-	t.Setenv("STUB_ROWS", `[{"id":"tk-c","dependencies":[{"issue_id":"tk-c","depends_on_id":"gf-gate","type":"replies-to"}]}]`)
-	if rc, _, errOut := r.run("dep", "add", "tk-c", "gf-gate", "--type", "replies-to", "--verify"); rc != 0 {
+	t.Setenv("STUB_ROWS", `[{"id":"tk-c","dependencies":[{"issue_id":"tk-c","depends_on_id":"ra-gate","type":"replies-to"}]}]`)
+	if rc, _, errOut := r.run("dep", "add", "tk-c", "ra-gate", "--type", "replies-to", "--verify"); rc != 0 {
 		t.Fatalf("rc = %d, want 0; stderr: %s", rc, errOut)
 	}
-	if rc, _, errOut := r.run("dep", "add", "tk-c", "gf-gate", "--verify"); rc != 3 || !strings.Contains(errOut, "no blocks edge onto gf-gate") {
+	if rc, _, errOut := r.run("dep", "add", "tk-c", "ra-gate", "--verify"); rc != 3 || !strings.Contains(errOut, "no blocks edge onto ra-gate") {
 		t.Errorf("an add with no --type reads back as blocks: rc = %d, stderr %s", rc, errOut)
 	}
-	if writes := r.calls("gc|bd|dep|add|"); len(writes) != 2 || writes[0] != "gc|bd|dep|add|tk-c|gf-gate|--type|replies-to|" {
+	if writes := r.calls("gc|bd|dep|add|"); len(writes) != 2 || writes[0] != "gc|bd|dep|add|tk-c|ra-gate|--type|replies-to|" {
 		t.Errorf("the adds gc bd got = %v", writes)
 	}
-	if rc, _, errOut := r.run("dep", "remove", "tk-c", "gf-gate", "--verify"); rc != 3 || !strings.Contains(errOut, "an edge onto gf-gate still reads back") {
+	if rc, _, errOut := r.run("dep", "remove", "tk-c", "ra-gate", "--verify"); rc != 3 || !strings.Contains(errOut, "an edge onto ra-gate still reads back") {
 		t.Errorf("a remove whose edge still reads back: rc = %d, stderr %s", rc, errOut)
 	}
 	t.Setenv("STUB_ROWS", `[{"id":"tk-c","dependencies":[]}]`)
-	if rc, _, errOut := r.run("dep", "remove", "tk-c", "gf-gate", "--verify"); rc != 0 {
+	if rc, _, errOut := r.run("dep", "remove", "tk-c", "ra-gate", "--verify"); rc != 0 {
 		t.Errorf("a remove whose edge is gone: rc = %d, stderr %s", rc, errOut)
 	}
 }
@@ -324,20 +324,20 @@ func TestBeadCreateReadsAnExplicitBlocksDepOffItsTarget(t *testing.T) {
 // so the edge reads back only with its far end read back from the same store.
 func TestBeadBlocksEdgeReadsBackOnlyWithItsFarEndInTheStore(t *testing.T) {
 	r := newBeadRig(t)
-	t.Setenv("STUB_ROWS", `[{"id":"tk-sub","dependencies":[{"depends_on_id":"gf-child","type":"blocks"}]}]`)
-	rc, _, errOut := r.run("dep", "add", "tk-sub", "gf-child", "--type=blocks", "--verify")
-	if rc != 3 || !strings.Contains(errOut, "gf-child does not read back from this store, so the edge holds nothing") {
+	t.Setenv("STUB_ROWS", `[{"id":"tk-sub","dependencies":[{"depends_on_id":"ra-child","type":"blocks"}]}]`)
+	rc, _, errOut := r.run("dep", "add", "tk-sub", "ra-child", "--type=blocks", "--verify")
+	if rc != 3 || !strings.Contains(errOut, "ra-child does not read back from this store, so the edge holds nothing") {
 		t.Errorf("a blocks edge onto another store's bead: rc = %d, stderr %s", rc, errOut)
 	}
-	if reads := r.calls("gc|bd|list|"); len(reads) != 1 || !strings.Contains(reads[0], "|--id|tk-sub,gf-child|") {
+	if reads := r.calls("gc|bd|list|"); len(reads) != 1 || !strings.Contains(reads[0], "|--id|tk-sub,ra-child|") {
 		t.Errorf("the far end is read in the same list: %v", reads)
 	}
 	t.Setenv("STUB_ROWS", `[{"id":"tk-sub","dependencies":[{"depends_on_id":"tk-child","type":"blocks"}]},{"id":"tk-child"}]`)
 	if rc, _, errOut := r.run("dep", "add", "tk-sub", "tk-child", "--type=blocks", "--verify"); rc != 0 {
 		t.Errorf("a blocks edge with its far end in the store: rc = %d, stderr %s", rc, errOut)
 	}
-	t.Setenv("STUB_ROWS", `[{"id":"tk-c","dependencies":[{"depends_on_id":"gf-gate","type":"replies-to"}]}]`)
-	if rc, _, errOut := r.run("dep", "add", "tk-c", "gf-gate", "--type", "replies-to", "--verify"); rc != 0 {
+	t.Setenv("STUB_ROWS", `[{"id":"tk-c","dependencies":[{"depends_on_id":"ra-gate","type":"replies-to"}]}]`)
+	if rc, _, errOut := r.run("dep", "add", "tk-c", "ra-gate", "--type", "replies-to", "--verify"); rc != 0 {
 		t.Errorf("a reply, which holds nothing, needs no far end: rc = %d, stderr %s", rc, errOut)
 	}
 }
