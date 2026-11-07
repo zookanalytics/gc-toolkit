@@ -31,11 +31,11 @@ import (
 // cmd/gc/cmd_nudge.go) once the pane has been quiet for three seconds
 // (defaultNudgePollQuiescence). So a session takes its title at its next
 // boundary, a few seconds after the turn that ran the command ends. A nudge does
-// not serve: the queue delivers one as a reminder (formatNudgeInjectOutput in
-// cmd/gc/cmd_nudge.go), which runs no command, and Gas City queues a nudge to a
-// Codex session running a turn, because Codex's submit keys lead with Escape and
-// Escape cancels the turn (refuseInterruptingSubmitWhileBusy in
-// internal/runtime/tmux/tmux.go).
+// not serve both agents: the queue delivers one as a reminder
+// (formatNudgeInjectOutput in cmd/gc/cmd_nudge.go), which runs no command, and
+// Gas City queues a nudge to a Codex session running a turn, because Codex's
+// submit keys lead with Escape and Escape cancels the turn
+// (refuseInterruptingSubmitWhileBusy in internal/runtime/tmux/tmux.go).
 //
 // On a session suspended or not running, the submit acts as the operator: it
 // resumes the session, which lifts an operator's hold on it, and types at once
