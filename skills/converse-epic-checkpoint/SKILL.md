@@ -309,7 +309,7 @@ the close.
 
 **Last, whatever the ruling, sign off** as the settle step says, once nothing
 important is pending:
-`--ruled yes --ruling "<the ruling, one line>" --route human --no-wait`, with an
+`--ruled yes --ruling "<the ruling, one line>" --no-wait`, with an
 outcome of at most 140 characters. Its subject is no PR, so it reaches a PR only
 through a gate still open, or one closed with its own answer. Once each PR's own
 call has exited 0, every gate on a PR's anchor carries that PR's own ruling, so

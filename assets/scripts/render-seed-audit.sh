@@ -566,9 +566,9 @@ fi
 # composition quietly drops the agent's prompt_template, and `gc prime` — even
 # with --strict, which by contract does not object to an agent that "intentionally
 # lacks a prompt_template" — renders the builtin worker prompt and exits 0.
-# Measured: remove agents/mechanik/prompt.template.md and mechanik renders 4,461 B
-# of generic "# Graph Worker" instead of 36,222 B of its own doctrine, with a
-# clean exit everywhere. Nothing downstream can tell that apart from an agent
+# Remove agents/mechanik/prompt.template.md and the mechanik renders the generic
+# "# Graph Worker" prompt instead of its own doctrine, with a clean exit
+# everywhere. Nothing downstream can tell that apart from an agent
 # that never had a prompt.
 #
 # So the readability of this pack's own templates is asserted here, before any

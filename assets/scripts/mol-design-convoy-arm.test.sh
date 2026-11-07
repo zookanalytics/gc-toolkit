@@ -2,7 +2,7 @@
 # Hermetic test for mol-design-convoy's gate-shape resolution, its branch cut,
 # the steps that file its children and its summary task, and the step that
 # hands its subject to the refinery and dispatches the work. It also runs the
-# mechanik's recipe that stands an integration effort up by hand.
+# work skill's recipe that stands an integration effort up by hand.
 #
 # design-gated-resolve turns the design_gated var into exactly true or false.
 # It reads the value case-insensitively and falls back to the design-gated
@@ -16,7 +16,7 @@
 # carries the branch is an earlier pass's cut, a subject that records the branch
 # is cut no further, and a subject that records another branch or lands
 # elsewhere is refused. The cut is the marked blocks effort-default-branch and
-# effort-branch-push, which the mechanik's recipe carries too. The copies must
+# effort-branch-push, which the work skill's recipe carries too. The copies must
 # stay identical, so both ways of standing an effort up cut from the branch
 # origin/HEAD names, a default other than main included.
 #
@@ -40,7 +40,7 @@
 # refuses the duplicate, so the resume cases give each add a non-zero exit over
 # an edge that reads back and check that the step completes.
 #
-# The mechanik's recipe (agents/mechanik/prompt.template.md) runs with its
+# The work skill's recipe (skills/work/integration-effort.md) runs with its
 # placeholders filled in: it cuts from origin/HEAD's branch and records it as
 # the landing bead's target, files every bead and the summary task with their
 # waits read back before it hands the landing bead over, and dispatches only
@@ -50,14 +50,14 @@
 # already be slinging it.
 #
 # EXECUTES the real snippets extracted verbatim between the formula markers and
-# from the mechanik's fenced blocks, so the test cannot drift from the shipped
+# from the recipe's fenced blocks, so the test cannot drift from the shipped
 # instruction. No live city or network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-design-convoy.toml"
-MECHANIK="$ROOT/agents/mechanik/prompt.template.md"
+RECIPE_FILE="$ROOT/skills/work/integration-effort.md"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-design-convoy-arm-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -67,7 +67,7 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 [ -f "$TOML" ] || { echo "formula not found: $TOML" >&2; exit 1; }
-[ -f "$MECHANIK" ] || { echo "mechanik prompt not found: $MECHANIK" >&2; exit 1; }
+[ -f "$RECIPE_FILE" ] || { echo "effort recipe not found: $RECIPE_FILE" >&2; exit 1; }
 
 # extract_copy <marker> <n> [file]: the lines of the n-th marked copy
 # (exclusive) in the formula, or in <file>.
@@ -124,19 +124,19 @@ else
 fi
 
 # The branch cut is one rule in two places: the formula's seed step and the
-# mechanik's recipe for standing an effort up by hand.
+# work skill's recipe for standing an effort up by hand.
 for m in $SHARED; do
-  eq "$(copies "$m" "$MECHANIK")" "1" "$m has one copy in the mechanik's recipe"
-  if [ -n "$(unindented "$m" "$TOML")" ] && [ "$(unindented "$m" "$TOML")" = "$(unindented "$m" "$MECHANIK")" ]; then
-    ok "the mechanik's $m is the formula's"
+  eq "$(copies "$m" "$RECIPE_FILE")" "1" "$m has one copy in the work skill's recipe"
+  if [ -n "$(unindented "$m" "$TOML")" ] && [ "$(unindented "$m" "$TOML")" = "$(unindented "$m" "$RECIPE_FILE")" ]; then
+    ok "the work skill's $m is the formula's"
   else
-    bad "the mechanik's $m differs from the formula's — the two recipes would cut an effort's branch from different bases"
+    bad "the work skill's $m differs from the formula's — the two recipes would cut an effort's branch from different bases"
   fi
 done
-if grep -qF 'refs/remotes/origin/main' "$MECHANIK" || grep -qE 'target=("?)main' "$MECHANIK"; then
-  bad "the mechanik's recipe names main itself instead of the default branch the cut resolved"
+if grep -qF 'refs/remotes/origin/main' "$RECIPE_FILE" || grep -qE 'target=("?)main' "$RECIPE_FILE"; then
+  bad "the work skill's recipe names main itself instead of the default branch the cut resolved"
 else
-  ok "the mechanik's recipe takes the default branch from the cut, never main by name"
+  ok "the work skill's recipe takes the default branch from the cut, never main by name"
 fi
 
 # Gate 1 binds through merge.sh's universal approval rule, so the formula stamps
@@ -848,17 +848,16 @@ for sh in "${SHELLS[@]}"; do
   [ -s "$GC_LOG" ] && bad "[$sh] dispatch: a finished setup still wrote" || ok "[$sh] dispatch: a finished setup writes nothing"
 done
 
-# --- the mechanik's recipe -----------------------------------------------------
-# The recipe as the mechanik runs it, with its placeholders filled in for one
+# --- the work skill's recipe --------------------------------------------------
+# The recipe as a session runs it, with its placeholders filled in for one
 # bead of the effort. NEXT_IDS gives the landing bead, the bead and the summary
 # task their ids in the order the recipe files them.
-RECIPE="$(fenced_block "$MECHANIK" '# >>> effort-default-branch')"
-LATE="$(fenced_block "$MECHANIK" "dep add's second id is the bead that is waited on")"
-[ -n "$RECIPE" ] && ok "the mechanik's recipe is found" || bad "the mechanik's recipe is not found in $MECHANIK"
-[ -n "$LATE" ] && ok "the mechanik's block for a bead that joins later is found" || bad "the mechanik's late-join block is not found in $MECHANIK"
+RECIPE="$(fenced_block "$RECIPE_FILE" '# >>> effort-default-branch')"
+LATE="$(fenced_block "$RECIPE_FILE" "dep add's second id is the bead that is waited on")"
+[ -n "$RECIPE" ] && ok "the work skill's recipe is found" || bad "the work skill's recipe is not found in $RECIPE_FILE"
+[ -n "$LATE" ] && ok "the work skill's block for a bead that joins later is found" || bad "the work skill's late-join block is not found in $RECIPE_FILE"
 fill() {
-  sed -e 's#{{ \.BindingPrefix }}#gc-toolkit.#g' \
-      -e 's#<each bead of the effort, comma-separated>#$WORK#g' \
+  sed -e 's#<each bead of the effort, comma-separated>#$WORK#g' \
       -e 's#<each bead of the effort>#"$WORK"#g' \
       -e 's#<rig>#rig#g' -e 's#<epic>#ep-1#g' -e 's#<binding>#gc-toolkit#g' \
       -e 's#<[^>]*>#x#g'
@@ -912,7 +911,8 @@ for sh in "${SHELLS[@]}"; do
 
   # --- a bead that joins later ---
   # The effort's beads and its summary task are filed and dispatched; work-2
-  # joins with step 4's writes. The summary task's own wait takes it while the
+  # joins with the writes that file an effort's bead (its target and the landing
+  # bead's wait on it). The summary task's own wait takes it while the
   # task is undispatched, which the arm with no dispatch marker shows, and still
   # held, which the open work-1 shows.
   JOINED='map(if .id == "land-1" then ._deps += [{id: "work-2", dependency_type: "blocks"}] else . end)

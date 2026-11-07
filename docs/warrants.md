@@ -80,7 +80,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     forced relaunch and a claimant with no poured workflow, so it adds no key and
     writes nothing to let a run through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases and force-pushes under an open PR, and waits behind a sibling.
+    rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.
@@ -116,7 +116,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main bfd72756e and
+- **Verified.** 2026-11-07, at `gastownhall/gascity` main 6c9663d4c and
   `gastownhall/gascity-packs` main e3cb468bb.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
   and parked work and ends a run by cancelling it. `workspace-setup`: the

@@ -382,6 +382,92 @@ func TestGatherRefusesNonWorkBeads(t *testing.T) {
 	}
 }
 
+// TestSupervisorRowsSayTheirWaitsAreUnread: this backend reads no row's
+// `blocks` waits. The epic and convoy reads keep their members alone, the
+// decision read keeps none of a decision's edges, and the scan cannot resolve a
+// blocker's status. So every row it serves says its waits are unknown, because
+// board.ruled reads an empty wait set on a human-gated row as every wait
+// landed.
+func TestSupervisorRowsSayTheirWaitsAreUnread(t *testing.T) {
+	res, err := newTestSource(t, mockSupervisor(t, nil)).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	served := map[string]bool{}
+	for _, a := range res.Anchors {
+		served[a.Kind] = true
+		if !a.WaitingUnknown {
+			t.Errorf("%s (%s): this backend read none of its waits, so the row must say they are unknown", a.ID, a.Kind)
+		}
+	}
+	for _, kind := range []string{"epic", "decision", "convoy", "human", "parked"} {
+		if !served[kind] {
+			t.Errorf("the fixture no longer serves a %s row, so this test no longer covers one", kind)
+		}
+	}
+}
+
+// TestSupervisorRoutedEpicWithAnUnreadWaitKeepsAsking: an epic routed to the
+// operator carries a takeaway and waits through a `blocks` edge on open work
+// outside its tree. Its graph carries no edge to that work, and the scan that
+// carries the epic's own edges does not admit an epic, so this backend never
+// reads the wait. The row keeps asking. Read as a settled ruling, it would say
+// "ruled — close or extend", band LOW and be owed to nobody while the work it
+// waits on is still open.
+func TestSupervisorRoutedEpicWithAnUnreadWaitKeepsAsking(t *testing.T) {
+	const base = "/v0/city/testcity"
+	const takeaway = "routed the cutover to tk-work; close this once it lands"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		switch {
+		case r.URL.Path == base+"/rigs":
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
+		case r.URL.Path == base+"/beads" && q.Get("type") == "epic":
+			writeJSON(w, `{"items":[{"id":"tk-rt","title":"a routed epic","status":"open","issue_type":"epic","priority":2,
+				"metadata":{"gc.routed_to":"human","gc.takeaway":"`+takeaway+`","gc.takeaway_at":"2026-08-01T11:00:00Z","gc.takeaway_by":"converse"}}],"total":1}`)
+		case r.URL.Path == base+"/beads/graph/tk-rt":
+			writeJSON(w, `{"root":{"id":"tk-rt","status":"open"},"beads":[{"id":"tk-rt","status":"open"}],"deps":[]}`)
+		case r.URL.Path == base+"/beads" && (q.Get("type") == "decision" || q.Get("type") == "gate"):
+			writeJSON(w, `{"items":[],"total":0}`)
+		case r.URL.Path == base+"/beads" && q.Get("status") == "open":
+			writeJSON(w, `{"items":[
+				{"id":"tk-rt","title":"a routed epic","status":"open","issue_type":"epic","priority":2,
+				 "metadata":{"gc.routed_to":"human","gc.takeaway":"`+takeaway+`"},
+				 "dependencies":[{"issue_id":"tk-rt","depends_on_id":"tk-work","type":"blocks"}]},
+				{"id":"tk-work","title":"the routed work","status":"open","issue_type":"task","assignee":"polecat-live"}
+			],"total":2}`)
+		case r.URL.Path == base+"/convoys":
+			writeJSON(w, `{"items":[],"total":0}`)
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path+"?"+r.URL.RawQuery, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	res, err := newTestSource(t, srv).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Partial {
+		t.Errorf("unexpected partial: %v", res.PartialErrors)
+	}
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	var tile *board.Tile
+	for i := range b.Tiles {
+		if b.Tiles[i].ID == "tk-rt" {
+			tile = &b.Tiles[i]
+		}
+	}
+	if tile == nil {
+		t.Fatal("no row for tk-rt")
+	}
+	if tile.Needs != takeaway || tile.Severity != board.SevElevated || !tile.Owed {
+		t.Errorf("tk-rt reads needs=%q severity=%s owed=%v, want the takeaway, %s and owed: its wait was never read",
+			tile.Needs, tile.Severity, tile.Owed, board.SevElevated)
+	}
+}
+
 // TestGatherAdmitsHumanGatesAndQueuedConversations: the operator's side, read
 // off the scan. The live API returns gates on the bare status=open scan AND on
 // the type=gate page the source adds as a guard, so the mock serves them on
