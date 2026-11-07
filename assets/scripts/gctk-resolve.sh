@@ -26,7 +26,7 @@
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
-# and the tmux pickers read, and GC_CITY_PATH is the one the supervisor puts in
+# and the tmux session picker read, and GC_CITY_PATH is the one the supervisor puts in
 # an agent session — else the city `gc service list --json` reports. The
 # listing is what the merge cadence itself needs: the order runner that execs
 # refinery-reconcile.sh carries no city variable at all (docs/

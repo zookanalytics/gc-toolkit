@@ -7,12 +7,13 @@ board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces �
 the bash dies).
 
 > **The bash board is gone; the bash verbs are what is left.**
-> `tmux-pick-helm.sh:60` invokes `"$HELM_SVC" board --json --limit=36`, this
-> binary. `gc-helm.sh` no longer renders a board at all: it carries the write
-> and read-only verbs that `gc-helm --help` lists, and `gc-helm.sh --json`
-> exits 2 with `unknown verb`. Its own usage text points at `helm-svc board`.
-> Retiring the remaining verbs is a separate decision recorded under "Two
-> programs behind one board" in `docs/human-engagement.md`, under Watch items.
+> The board's one view for people is the web page this binary serves, and
+> `helm-svc board --json` prints the same rows for agents. `gc-helm.sh` renders
+> no board at all: it carries the write and read-only verbs that
+> `gc-helm --help` lists, and `gc-helm.sh --json` exits 2 with `unknown verb`.
+> Its own usage text points at `helm-svc board`. Retiring the remaining verbs
+> is a separate decision recorded under "One board, and its verbs in
+> gc-helm.sh" in `docs/human-engagement.md`, under Watch items.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
@@ -22,7 +23,7 @@ the bash dies).
 
 The spine came from the `tk-sy3vj` spike; `tk-x89rn` then widened the source seam
 so the board can read `updated_at` and bead metadata, which is what makes
-`stale_days` real; `tk-134d7` completed the model port and added the CLI view.
+`stale_days` real; `tk-134d7` completed the model port.
 See *What's proven vs. deferred*, below.
 
 ## What it does
@@ -31,12 +32,16 @@ Two entry points over ONE board. They share `internal/source` (the gather) and
 `internal/board` (the ranking); neither reimplements the other.
 
 ```
-helm-svc                 serve  — the sidecar (below). Bare invocation, which is
-                                  how the supervisor spawns it.
-helm-svc board [--json]  render — what is owed by you (tk-134d7). See *CLI view*.
-helm-svc board --all     render — the city overview instead.
-helm-svc probe           check  — can THIS binary read the city's bead stores?
-                                  See *Readability check*.
+helm-svc                    serve — the sidecar (below), whose web page is the
+                                    board's one view for people. Bare
+                                    invocation, which is how the supervisor
+                                    spawns it.
+helm-svc board --json       print — the board's rows as JSON, for agents and
+                                    tooling: what is owed by you. See *The JSON
+                                    read*.
+helm-svc board --json --all print — the city overview instead.
+helm-svc probe              check — can THIS binary read the city's bead stores?
+                                    See *Readability check*.
 ```
 
 As the sidecar:
@@ -86,15 +91,14 @@ held row, and empty on a row nothing holds. `work_held` refines `held`: it is
 true when an open human gate holds the bead or an acceptance an earlier Accept
 left unfinished keeps it, so the operator's answer is required before the work
 can move. A held row where it is false only has a conversation on it, which
-blocks nothing, and the boards mark it apart: ◌ in both terminal views, except
-where the overview's ● marks a row that wants you, and a chip reading
-`conversation` rather than `gate` on the web. `acceptable` reads
+blocks nothing, and the board marks it apart with a chip reading
+`conversation` rather than `gate`. `acceptable` reads
 Accept's three conditions (`docs/human-engagement.md`, "Accept").
 `accept_withheld` is set on a row that
 meets the first two and fails the third: it names the open human gates that
-hold Accept back, the way NEEDS names gates, and the boards print it beside
+hold Accept back, the way NEEDS names gates, and the board prints it beside
 Discuss. `gates_in_session` names the open gates on the row that a live
-sitting's conversation replies to, and the boards print it beside NEEDS. Both
+sitting's conversation replies to, and the board prints it beside NEEDS. Both
 are null on every other row.
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
@@ -118,31 +122,30 @@ how-badly.
 `group_root` is the board's PRIMARY grouping axis, and every tile carries one:
 the id of the dependency family the row belongs to — the top-most anchor its
 parent-child and `blocks` edges climb to, its own id when it climbs to nothing
-(`board.assignGroupRoots`). The city overview groups by it: `helm-svc board
---all` renders one block per family (`board.GroupByFamily`), the root as the
-header and its members one level beneath it in `board.SectionOrder`, with `●` on
-the rows that want a person; there `section` is the within-family band. The
-default operator queue (`helm-svc board`) stays flat and owed-first, banded by
-`section` (`board.GroupBySection`). `specs/tk-492ssx/` records the family model.
+(`board.assignGroupRoots`). The city overview groups by it: the web page
+renders one block per family, the root as the header and its members beneath it
+in `board.SectionOrder`, and `helm-svc board --json --all` caps the overview by
+whole families (`board.CapFamilies`, over `board.GroupByFamily`); there
+`section` is the within-family band. The operator's queue stays flat and
+owed-first. `specs/tk-492ssx/` records the family model.
 
 `group_parent` is the same climb's IMMEDIATE step: the id of the row's direct
 parent one anchor up, empty at a family root. Where `group_root` names the top
 of the family, `group_parent` names the next step toward it, so a surface can
 render the family as the nested containment tree it is — a sub-epic above its
 own children rather than flat beside them. The web dashboard body nests each
-family by it (`flattenFamilies` in `web/src/App.tsx`); the CLI board renders one
-level deep.
+family by it (`flattenFamilies` in `web/src/App.tsx`).
 
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
 that are one template (a run of rows held by gates with one title, a run of
-PRs green and waiting on review); a renderer folds them into one entry while the wire keeps every
+PRs green and waiting on review); the web page folds them into one entry while the wire keeps every
 member. `specs/tk-9tbbk.4/` records the band taxonomy and the wrapper fold.
 
 ### The two questions, and why they are two surfaces
 
 `owed` marks a row whose next move is a PERSON'S — an unanswered human gate, or
 a parked conversation whose recorded waits have all landed. That partition is
-the board's default answer; the city overview is one flag or one keystroke away.
+the board's default answer, and the city overview sits behind it.
 
 Ranking cannot express the split. `rank_score` is severity, then subtree size,
 then staleness; severity is coarse and shared between stranded, unowned and
@@ -158,9 +161,8 @@ dates the turn rather than the last look at it.
 
 | surface | default | the overview |
 |---|---|---|
-| `helm-svc board` | the queue, oldest first | `--all` |
-| tmux | `prefix+b` | `prefix+B` |
 | dashboard | the *owed by you* section, at the top of the page | the ranked table under it |
+| `helm-svc board --json` | the queue, oldest first | `--all` |
 
 The wire arrives partitioned, so the overview sorts itself back to `rank_score`
 before it is capped (`board.CityOverview`). Reading the partitioned slice as if
@@ -169,56 +171,52 @@ sit behind, and the cap then drops whatever the hoisted rows pushed past the
 limit.
 
 In the queue the row's HEADLINE is what it asks — the `needs` sentence — and the
-bead title is secondary; `prefix+b` and the *owed by you* table both read it
-that way. The overview asks what the city's shape is, so it leads with the
-object and its frontier.
+bead title is secondary; the *owed by you* table reads it that way. The overview
+asks what the city's shape is, so it leads with the object and its frontier.
 
-**The empty queue is a CLAIM, and it is the most consequential sentence any of
-these print.** So it never renders blank: the CLI prints its coverage
-(`N rigs checked, all reachable`), and an empty queue out of a PARTIAL gather is
-not an answer at all — it exits `3`, because the rows that would have
-contradicted it are exactly the ones the unread store was holding. The picker
-reads that exit code rather than substituting an empty menu. `--all` keeps its
-own contract: an empty overview is an empty overview.
+**The empty queue is a CLAIM, and it is the most consequential sentence the
+board states.** So it never renders blank: the web page states what it checked,
+or the error, and an empty queue out of a PARTIAL gather is not an answer at
+all. `helm-svc board --json` exits `3` on one rather than print an empty array,
+because the rows that would have contradicted it are exactly the ones the
+unread store was holding. `--all` keeps its own contract: an empty overview is
+an empty overview.
 
-### CLI view (`helm-svc board`)
+### The JSON read (`helm-svc board --json`)
 
 ```
-helm-svc board                     # what is owed by you, oldest first
-helm-svc board --all               # the city overview: every anchor, ranked
-helm-svc board --json              # the same rows as a JSON ARRAY (the gc-helm.sh contract)
-helm-svc board --all --json --limit=0   # uncapped, for tooling
+helm-svc board --json                   # what is owed by you, oldest first
+helm-svc board --json --all             # the city overview: every anchor, ranked
+helm-svc board --json --all --limit=0   # uncapped
 ```
 
-`--json` emits a bare **array**, not the service's envelope, because that array
-is what `assets/scripts/tmux-pick-helm.sh` consumes — it runs `jq 'length'` and
-`.[]` over this output, and the `{generated_at,total,tiles}` envelope would make
-every row invisible while still parsing cleanly. Overview rows are grouped into
+It prints the board's rows for agents and tooling, such as a count of the rows
+across the city, or a comparison of a board change against the live city before
+it ships. It has no terminal view: a call without `--json` exits `2` and names
+the web page.
+
+`--json` emits a bare **array**, not the service's envelope: a caller counts the
+rows with `jq length` and walks them with `.[]`, and the
+`{generated_at,total,tiles}` envelope would make every row invisible while still
+parsing cleanly. An empty board is `[]`. Overview rows are grouped into
 dependency families and capped by `CapFamilies`, which never splits a family. It
 admits whole families in rank order until the live rows reach the limit, 50 by
 default and set by `--limit=N`, and rations the terminal DONE families, each a
 closed anchor, against a separate budget of 10. `--limit=0` opts out of both. The
 queue takes the same 50 as a flat, ungrouped truncation with no DONE budget,
 because there a parked row is a conversation waiting on the operator rather than
-a straggler, and no closed row reaches it at all. Exit codes: `0`
-rendered, `2` usage, `3` gather failed or an empty queue could not be stood
-behind — a failed gather is never rendered as an empty "nothing needs you".
+a straggler, and no closed row reaches it at all. Exit codes: `0` printed, `2`
+usage, including a call without `--json`, and `3` when the gather failed or an
+empty queue could not be stood behind. A failed gather is never printed as an
+empty array.
 
-`tmux-pick-helm.sh` asks for no `DONE` band at all (`GC_HELM_DONE_WINDOW=0`).
-Neither menu it renders is a view an operator leaves open, and the one action
-either of them offers is `engage`; a closed row there would spend a hotkey on
-engaging a conversation about something that is finished.
+It runs the gather **in-process and uncached**: no daemon and no dependency on
+the sidecar being up, so a build from a working tree reads the live city through
+that tree's gather and derivation. Measured on the operator's city (5 stores, 55
+anchors), every run cold: 3.27 / 2.76 / 2.73 s for `helm-svc board --json
+--limit=0`.
 
-It runs the gather **in-process and uncached**: no daemon, no dependency on the
-sidecar being up, which is most of the point of having a CLI. Measured on the
-operator's city (5 stores, 55 anchors):
-
-| | cold | warm |
-|---|---|---|
-| `gc-helm.sh --json --limit=0` | 19.9 / 22.2 / 26.6 s | 1.75 / 1.82 / 1.77 s (45s file cache) |
-| `helm-svc board --json --limit=0` | 3.27 / 2.76 / 2.73 s | *(no cache — every run is cold)* |
-
-Same binary as the sidecar on purpose: a separately-built CLI would be a second
+Same binary as the sidecar on purpose: a separately-built one would be a second
 artifact that can go stale on its own, which is the failure that motivated the
 epic (`tk-5nm0p`). Full rationale in `cmd/helm-svc/board.go`.
 
@@ -314,7 +312,7 @@ and absent from the other is the shape of bug that cost the board its
 human-routed rows.
 
 **The library backend gathers every kind twice**: once at status open, and once
-at status closed over `GC_HELM_DONE_WINDOW` (default 7d, `0` disables). The open
+at status closed over the last seven days (`source.doneWindow`). The open
 queries stop returning an anchor the moment it is answered, so the second pass
 is the only thing that gives a closed one a row. It bands `DONE`, which sorts
 below every live band, and stays there until the window ages it out. The band
@@ -553,8 +551,7 @@ NEEDS spends itself on the disposition rather than on the takeaway, the same
 trade the disposition rule makes. The takeaway here is not stale — it IS the
 ruling — but NEEDS answers "what does this row want from me", and what a ruled
 row wants is a close or a re-open, not a re-read. The ruling stays on the wire
-in `takeaway`, where nothing truncates it; in the terminal table it was the
-longest cell in that column and the least actionable.
+in `takeaway`, where nothing truncates it.
 
 ### A parent counts its children by what holds them (`tk-lb3u4m`)
 
@@ -738,17 +735,16 @@ the quiet end.
 **Every live PR row shows its conversation.** The row is where the operator sees
 which pull requests carry their comments. The dashboard puts a `💬 <value>` chip
 beside the PR link, colored for `outstanding`, `answered` and `asking`, with the
-value's meaning on hover. The terminal board ends the row's needs with
-`conversation <value>`, including a member row inside a fold, and skips it on an
-`asking` row, whose needs already names the question. Neither prints one on a
-closed row, since nobody acts on a finished pull request's conversation. Each
-surface's legend says what the values mean.
+value's meaning on hover, and the legend says what each value means. It shows
+none on a closed row, since nobody acts on a finished pull request's
+conversation.
 
 **The empty state.** `owed` is a boolean and cannot carry the third value the
 axes do, so an unread position surfaces as coverage rather than as a false
 negative on a row nobody sees. The section withholds "Nothing is owed by you"
 while any PR row's position, conversation or approval clause is unreadable, and
-says which. `board.Coverage` computes it for both renderers.
+says which. The web page counts it from the rows (`prCoverage` in
+`web/src/App.tsx`).
 
 ## Converse sittings (`tk-ghlg1e.1`)
 
@@ -760,14 +756,13 @@ produces `held`.
 
 Sittings are **not tiles and are not ranked against them**. A tile is an anchor
 that wants something; a sitting is an event. The web app gives them a section of
-their own below the parked one, and `helm-svc board` prints them under the
-table, for the same reason parked conversations get a section: putting an event
-in a queue of asks answers a question nobody asked.
+their own below the parked one, for the same reason parked conversations get a
+section: putting an event in a queue of asks answers a question nobody asked.
 
 | | gathered | shown |
 |---|---|---|
 | open | its task is open or in_progress: in the operator's queue, or held by a sitting | always — a live conversation is never elided |
-| closed | `closed_at` inside `GC_HELM_SITTINGS_WINDOW` (default `24h`) | most recent first, capped at 12 in a rendered view |
+| closed | `closed_at` inside `GC_HELM_SITTINGS_WINDOW` (default `24h`) | most recent first |
 
 `GC_HELM_SITTINGS_WINDOW` takes a Go duration (`6h`, `90m`). `0` gathers no
 closed sittings and leaves the running ones untouched; anything unparseable
@@ -798,10 +793,10 @@ disagree.
 The task's own status cannot say this, because a session that ends without
 handing the conversation back leaves it `in_progress` under the sitting's alias.
 So the status and the assignee are inputs to the derivation and stay off the
-wire. The web row marker and its hover card, the web sittings table and the
-terminal section each print the state's word, and none derives it. Each list's
-count line splits the open sittings into in session and waiting, and names failed
-starts when there are any.
+wire. The web row marker and its hover card and the web sittings table each
+print the state's word, and none derives it. The sittings table's count line
+splits the open sittings into in session and waiting, and names failed starts
+when there are any.
 
 ### A sitting's headline
 
@@ -837,19 +832,15 @@ narrower, not wrong — and marks the gather partial.
 
 ### Where it shows up
 
-Both terminal views print the section under their rows, the queue and `--all`
-alike: the record belongs to the board rather than to one of its views, and a
-conversation nobody ended is owed in the same sense the queue's rows are. STATE
-prints each sitting's word; AGE is measured from the start of an open one and
-from the end of a closed one. `--json` is **untouched**: it emits the bare
-ranked array that `tmux-pick-helm.sh` consumes, and growing a second shape
-there would break that contract.
-
-The web app renders the same order — open first, longest-open first, then most
-recently closed — and drills in on a sitting's SUBJECT, since that is the
+The web app renders the record in the board's order — open first, longest-open
+first, then most recently closed — and drills in on a sitting's SUBJECT, since that is the
 anchor the drill plane knows how to open. Because `POST /helm/open` already
 invalidates the cached board, a conversation filed from the drill panel appears
 in this section on the next read rather than after the TTL.
+
+`helm-svc board --json` prints the tiles alone. The record rides the service's
+envelope as `sittings`, because a second shape in the bare array would break
+every caller that counts its rows.
 
 ### A sitting that failed to start
 
@@ -890,10 +881,8 @@ and `never started` when Gas City recorded no cause.
 | `needs` | `start failed (<reason>): <the ask>` |
 | `owed`, `severity` | owed, and at least `ELEVATED` |
 
-The row leads the operator's queue, ahead of every row owed longer, so it is
-among the rows `tmux-pick-helm.sh` offers off the head of the queue. The picker
-and both terminal views mark it `✗`, and the web chip reads `start failed`, with
-the reason in its card. The mark shows as soon as Gas City
+The row leads the operator's queue, ahead of every row owed longer, and the web
+chip reads `start failed`, with the reason in its card. The mark shows as soon as Gas City
 records the failure and stays until the conversation is engaged again or
 closed. A failed start outranks a live sitting on the same row, because each
 conversation on a subject is a conversation of its own. A sitting never
@@ -998,7 +987,7 @@ Measured on the live city, the same gather went from 28 tiles to 81.
 The **sittings** record is absent on this backend, and not for either of those
 reasons: its closed half needs the closed conversations, and the scan reads
 `open`. Under `GC_HELM_SOURCE=supervisor` the envelope's `sittings` is `null` and
-neither view renders the section. Two narrowings follow from the same scan. A
+the web page renders no sittings section. Two narrowings follow from the same scan. A
 held conversation is `in_progress`, so the backend sees a conversation only
 while it is `open`, and with no sitting to read a state from, that conversation
 reads `waiting` whoever it is assigned to. And the supervisor's bead carries no
@@ -1237,11 +1226,10 @@ cannot reach degrades to a stale gap rather than a failed build.
 `internal/source.GatherPackHealth` reads every
 `<city>/.gc/services/*/build-status.json` — helm's own, gctk's, anything else
 the pack builds out of band — and `board.DerivePackHealth` bands each row once,
-in the model, so the dashboard and `helm-svc board` cannot disagree about what
-a row means. The rows ride the envelope as `pack_health`; the CLI prints them
-as `PACK` lines above the anchors, and the dashboard as a "pack builds"
-section. `--json` is untouched: it stays the ranked tiles array that
-`tmux-pick-helm.sh` runs `jq 'length'` over.
+in the model, so the dashboard renders what the derivation says. The rows ride
+the envelope as `pack_health`, and the dashboard shows them as a "pack builds"
+section. `helm-svc board --json` carries none: it stays the ranked tiles array
+its callers count with `jq length`.
 
 Rows are unconditional whenever a record exists — a strip that appears only on
 trouble is a strip nobody learns to read. A city whose build orders have never
@@ -1483,12 +1471,10 @@ is a read. Each shells out to the matching `gc-helm.sh` verb:
   and answers no gate.
 
 Where they surface: **Accept** renders on the board row itself, when the wire
-says the row is `acceptable` — mirroring the CLI board's `accept ▸` marker
-(`cmd/helm-svc/board.go`), which keeps Discuss and Dismiss as separate verbs off
-the marked row. **Discuss**, **Dismiss** and **open** are the drill panel's
-per-bead conversation actions. Each affordance already existed in tmux / the CLI
-(`gc-helm.sh <verb>`); the operator's main surface is the web board, so they
-needed to exist there too.
+says the row is `acceptable`. **Discuss**, **Dismiss** and **open** are the drill
+panel's per-bead conversation actions. Each is also a `gc-helm.sh <verb>` a
+person or an agent can run by hand, and the web board is the operator's surface
+for all of them.
 
 **They own no verb logic.** Each verb lives once, in `gc-helm.sh`, and these
 routes *shell out to it* exactly as `assets/scripts/operator-intake.sh` does —
@@ -1660,8 +1646,7 @@ GC_CITY_PATH=$GC_CITY_PATH \
   ./helm-svc &
 curl --unix-socket /tmp/helm.sock http://x/helm | jq .
 
-# The CLI view needs only the city root — no socket, no running sidecar:
-GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board
+# The JSON read needs only the city root — no socket, no running sidecar:
 GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board --json --limit=0 | jq length
 ```
 
@@ -1679,8 +1664,8 @@ Discovery env:
   beads backend enumerates `.beads` and `rigs/*/.beads` under. With none of them
   set, helm-svc asks gc which city it resolves (`gc config show --json` →
   `city_path`) rather than reimplementing discovery, so a plain shell that injects
-  none of these reads the same city gc would. `helm-svc board` has no HTTP
-  fallback by design, so a gc that cannot answer — absent, or resolving no city —
+  none of these reads the same city gc would. `helm-svc board --json` has no
+  HTTP fallback by design, so a gc that cannot answer — absent, or resolving no city —
   leaves it with no city to read.
 - `GC_HELM_GC_BIN` — override the `gc` binary the liveness read and city
   discovery shell out to (otherwise `gc` on `PATH`).
@@ -1765,10 +1750,10 @@ attached to the city's existing ttyd, peek at rest and live on focus, with the
 same-origin reachability confirmed and detach-not-kill verified — see
 *Terminal*.
 
-**Delivered since** (tk-134d7, the CLI view + the completed model port):
+**Delivered since** (tk-134d7, the completed model port):
 
-- **`helm-svc board`** — a second renderer over this gather and this
-  derivation. See *CLI view*.
+- **`helm-svc board --json`** — the board's rows as JSON, over this gather and
+  this derivation. See *The JSON read*.
 - **The full rank `weight`** — `m_total + prio_w(priority) + min(xrefs,5)`, with
   the cross-rig-ref description scan restored.
 - **The takeaway-driven NEEDS sentence** — an anchor carrying `gc.takeaway`
@@ -1776,9 +1761,8 @@ same-origin reachability confirmed and detach-not-kill verified — see
   remaining scope is the web tile's presentation. The sentence is bounded at
   **140 characters**, enforced by `gc-helm.sh takeaway` at write time (a longer
   text is refused, not trimmed — only the author knows which clause is the
-  headline) and clipped with an ellipsis by both terminal tables for anything
-  stored before that gate existed. `--json` always carries the whole string, in
-  `needs` and in `takeaway`. It is a bound on PROSE only: NEEDS never holds an
+  headline). `--json` always carries the whole string, in `needs` and in
+  `takeaway`. It is a bound on PROSE only: NEEDS never holds an
   identifier, because the mechanical heads are `--json`-only (`tk-9tbbk.1`).
 - **A human route with no takeaway says so.** A `human` row with no
   `gc.takeaway` reads "routed to you — no question recorded", and a childless
@@ -1807,10 +1791,10 @@ that adds a third sanctioned backend to.
 - **Retiring `gc-helm.sh`.** Its `open`, `engage`, `react`, `takeaway`,
   `dismiss` and `accept` verbs have no Go equivalent, so the script stays. Retirement is a
   follow-up once the board view is proven at parity in daily use.
-- **A CLI cache.** `helm-svc board` re-gathers every run (~2.7-3.3s). The bash
-  board's 45s file cache makes a repeat glance ~1.8s. Caching here would buy
-  about a second and re-introduce a staleness surface, which is the thing this
-  epic exists to reduce — so it is deliberately not done, not merely undone.
+- **A cache for the JSON read.** `helm-svc board --json` re-gathers every run
+  (~2.7-3.3s). Caching it would buy about a second and re-introduce a staleness
+  surface, which is the thing this epic exists to reduce — so it is
+  deliberately not done, not merely undone.
 - **`tk-b3rga`** (decision tiles) — still open, in the presentation.
 - **event-invalidation** — the sidecar's cache is TTL-only; the supervisor SSE
   `/v0/events/stream` can later replace polling.

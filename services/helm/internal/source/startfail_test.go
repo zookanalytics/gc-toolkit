@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -366,25 +365,6 @@ func TestNoHQStoreReadsNoFailures(t *testing.T) {
 	}
 }
 
-// pickerCap is the row cap tmux-pick-helm.sh asks the board for, read off the
-// script so the test cuts the queue where the picker does.
-func pickerCap(t *testing.T) int {
-	t.Helper()
-	src, err := os.ReadFile("../../../../assets/scripts/tmux-pick-helm.sh")
-	if err != nil {
-		t.Fatalf("read the picker: %v", err)
-	}
-	m := regexp.MustCompile(`board --json --limit=(\d+)`).FindSubmatch(src)
-	if m == nil {
-		t.Fatal("found no capped board invocation in tmux-pick-helm.sh")
-	}
-	n, err := strconv.Atoi(string(m[1]))
-	if err != nil || n <= 0 {
-		t.Fatalf("the picker's cap %q is not a positive count", m[1])
-	}
-	return n
-}
-
 // TestFailedStartReachesAConversationGatheredTwice runs the gather through the
 // board for a conversation handed back to the operator's queue with
 // `gc.routed_to=human` on it. The metadata query and the conversation read each
@@ -446,23 +426,19 @@ func TestFailedStartReachesAConversationGatheredTwice(t *testing.T) {
 	}
 }
 
-// TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain is the
-// whole path. An engaged conversation's sitting fails to start, and Gas City
-// records it as it does: the session closes as failed-create and a timeout
-// episode names the session. The conversation's row reads start failed with
-// the reason. On a board holding more owed rows than the picker offers, every
-// one of them older, the row is among the rows the picker offers. Engaging the
+// TestFailedStartReadsOnTheBoardUntilEngagedAgain is the whole path. An engaged
+// conversation's sitting fails to start, and Gas City records it as it does:
+// the session closes as failed-create and a timeout episode names the session.
+// The conversation's row reads start failed with the reason, and it leads the
+// operator's queue ahead of owed rows that are all older. Engaging the
 // conversation again clears the mark.
-func TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain(t *testing.T) {
-	limit := pickerCap(t)
-
+func TestFailedStartReadsOnTheBoardUntilEngagedAgain(t *testing.T) {
 	// The conversation's subject, an epic with work under it, so the
-	// conversation folds onto its row; and more owed rows than the picker shows,
-	// each owed for days.
+	// conversation folds onto its row; and owed rows that are each owed for days.
 	subject := issue("tk-subj", "the plan", "epic", 2, minsBefore(60), "")
 	conv := boundConversation(failConv, minsBefore(10))
 	var tasks []*beads.Issue
-	for i := 0; i < limit+5; i++ {
+	for i := 0; i < 5; i++ {
 		tasks = append(tasks, issue(fmt.Sprintf("tk-old%02d", i), "waiting on a person", "task", 2,
 			testNow.Add(-time.Duration(30+i)*24*time.Hour), metaJSON("gc.routed_to", "human")))
 	}
@@ -478,31 +454,23 @@ func TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain(t *testin
 	root, hqName := failCity(t)
 	sessions := &fakeGC{}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": rig, hqName: hq}, withGCClient(sessions))
-	offered := func() (board.Board, []board.Tile) {
+	built := func() (board.Board, []board.Tile) {
 		t.Helper()
 		res, err := src.Gather(context.Background())
 		if err != nil {
 			t.Fatalf("Gather: %v", err)
 		}
 		b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
-		return b, board.CapQueue(board.OperatorQueue(b.Tiles), limit)
-	}
-	find := func(rows []board.Tile, id string) (board.Tile, bool) {
-		for _, r := range rows {
-			if r.ID == id {
-				return r, true
-			}
-		}
-		return board.Tile{}, false
+		return b, board.OperatorQueue(b.Tiles)
 	}
 
-	b, rows := offered()
-	if owed := len(board.OperatorQueue(b.Tiles)); owed <= limit {
-		t.Fatalf("fixture: the queue holds %d owed rows, not more than the picker's %d", owed, limit)
+	_, queue := built()
+	if len(queue) < 2 {
+		t.Fatalf("fixture: the queue holds %d owed rows, want the failure and the older rows", len(queue))
 	}
-	row, ok := find(rows, "tk-subj")
-	if !ok {
-		t.Fatalf("the conversation's row is not among the %d rows the picker offers", limit)
+	row := queue[0]
+	if row.ID != "tk-subj" {
+		t.Fatalf("the conversation's row does not lead the queue: the head is %s", row.ID)
 	}
 	if row.SittingState != board.SittingStartFailed || row.SittingStartFailure != "startup timeout" {
 		t.Errorf("the row reads start failed with the reason: state=%q reason=%q", row.SittingState, row.SittingStartFailure)
@@ -511,12 +479,12 @@ func TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain(t *testin
 		t.Errorf("NEEDS leads with the failure: %q", row.Needs)
 	}
 
-	// Control: without the failure on record, the same fresh row sorts below
-	// the picker's cut, which is why the cut above is a finding.
+	// Control: without the failure on record, the same fresh row sorts behind
+	// the older rows, which is why leading the queue above is a finding.
 	saved := hq.issues["session"]
 	hq.issues["session"] = nil
-	if _, ok := find(func() []board.Tile { _, r := offered(); return r }(), "tk-subj"); ok {
-		t.Error("control: with no failure recorded the fresh row should sort below the picker's cut")
+	if _, q := built(); len(q) > 0 && q[0].ID == "tk-subj" {
+		t.Error("control: with no failure recorded the fresh row should sort behind the older rows")
 	}
 	hq.issues["session"] = saved
 
@@ -526,7 +494,7 @@ func TestFailedStartReadsOnTheBoardInsideThePickerCutUntilEngagedAgain(t *testin
 	hq.issues["session"] = append(hq.issues["session"],
 		sessionBead("hq-wisp-n2", failAlias, "start-pending", minsBefore(1), nil))
 	sessions.sessions = map[string]string{failAlias: "active"}
-	b, _ = offered()
+	b, _ := built()
 	again, ok := tileOf(b, "tk-subj")
 	if !ok {
 		t.Fatal("the conversation's row left the board")

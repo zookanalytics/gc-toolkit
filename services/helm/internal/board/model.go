@@ -11,8 +11,8 @@
 // board's `--json` emits, in the same order, inside the envelope
 // {generated_at, total, tiles}.
 //
-// PARITY (tk-134d7). The board is now ONE model with TWO renderers — the web
-// dashboard and the `helm-svc board` CLI — so the field set here is the whole
+// PARITY (tk-134d7). The board is ONE model, which the web dashboard renders
+// and `helm-svc board --json` prints, so the field set here is the whole
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
@@ -511,10 +511,10 @@ type Tile struct {
 
 	// --- the attention-type band and the cluster key -----------------------
 	//
-	// Two derived classifications the renderers group by, on the wire for the
+	// Two derived classifications the dashboard groups by, on the wire for the
 	// same reason [Owed] is: the split is not recoverable from the coarse
-	// [Severity] band, and putting it here is what keeps the CLI table and the
-	// dashboard from each inventing their own client-side split.
+	// [Severity] band, and putting it here is what keeps the dashboard from
+	// inventing its own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
 	// how-badly: review (a pull request), gate (a person must answer), stalled
@@ -537,7 +537,7 @@ type Tile struct {
 	// GroupRoot is the id of the family this row belongs to — the top-most anchor
 	// its parent-child and blocked edges climb to, equal to the row's OWN id when
 	// it climbs to nothing. Every tile carries one, so a surface buckets families
-	// the way both renderers already bucket [Section]. Dependency structure is the
+	// the way the dashboard already buckets [Section]. Dependency structure is the
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
@@ -739,9 +739,8 @@ type Sitting struct {
 	// conversation is about. It is read in the same batch as the takeaway
 	// (source.attributeTakeaways), so a row can say what it concerns even when
 	// nothing was concluded on it. Empty when the subject could not be read,
-	// which [Sitting.Topic] falls back on the id for and [sittingHeadline] on
-	// the conversation's title. It carries the whole title; a renderer clips it
-	// to its column.
+	// which [sittingHeadline] falls back on the conversation's title for. It
+	// carries the whole title.
 	SubjectTitle string `json:"subject_title"`
 
 	// State is where this sitting stands: SittingInSession, SittingWaiting,
@@ -755,17 +754,6 @@ type Sitting struct {
 	// conversation's title does not say ([sittingHeadline]). Every surface
 	// prints it as it stands.
 	Headline string `json:"headline"`
-}
-
-// Topic is what a sitting is about, for a surface that shows one cell of it: the
-// subject bead's title, falling back to the subject id when the gather could not
-// read the title. Never empty on a real sitting — the row always says at least
-// the id it stands on, so a bare id is the floor rather than the whole of it.
-func (s Sitting) Topic() string {
-	if s.SubjectTitle != "" {
-		return s.SubjectTitle
-	}
-	return s.Subject
 }
 
 // sittingHeadline is what a sitting CONCLUDED, or failing that what its
