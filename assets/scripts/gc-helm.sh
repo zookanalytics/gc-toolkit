@@ -4544,29 +4544,13 @@ cmd_engage() {
             *) printf 'is %s' "$1" ;;
         esac
     }
-    # engage_kick — a codex sitting's opening turn; a claude one gets none
-    # (see the kick's notes below).
-    engage_kick() {
-        case "$engage_model" in
-            opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
-            *)
-                kick="The operator engaged this sitting. Begin now: claim your conversation ($CONV), re-check its premise, prep, and post your framing, then hold for the operator."
-                _kick_opener="${engage_body:-$engage_reason}"
-                [ -n "$_kick_opener" ] && kick="$kick The operator's reason: $_kick_opener"
-                gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
-                    || echo "$PROG: engage: spawned and bound $CONV, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
-                ;;
-        esac
-    }
-    # engage_wait <kick> — the attach path's wait for the launch, under the
-    # INT, TERM and HUP trap, HUP being the terminal going away under the wait.
-    # The handler writes and closes nothing, so the binding and the start carry
-    # on without engage. With <kick> set, a codex sitting is kicked first, as on
-    # every path past the wait, so it begins once it starts. The handler
+    # engage_wait — the attach path's wait for the launch, under the INT, TERM
+    # and HUP trap, HUP being the terminal going away under the wait. The
+    # handler writes and closes nothing, so the binding and the start carry on
+    # without engage, and the sitting begins once it starts. The handler
     # disarms itself, so a second Ctrl-C ends engage at once. Leaves the wait's
     # answer in start_rc.
     engage_wait() {
-        _ew_kick="$1"
         start_rc=0; start_waited=0
         trap 'engage_wait_interrupted 130' INT
         trap 'engage_wait_interrupted 143' TERM
@@ -4576,7 +4560,6 @@ cmd_engage() {
     }
     engage_wait_interrupted() {
         trap - INT TERM HUP
-        [ -z "$_ew_kick" ] || engage_kick
         echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Conversation $CONV stays held by $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach $sid" >&2
         exit "$1"
     }
@@ -4637,7 +4620,7 @@ cmd_engage() {
         printf '  attach: gc session attach %s\n' "$sid"
         printf '[debug] conversation=%s sitting=%s holder=%s subject=%s\n' "$CONV" "$sid" "$conv_holder" "$bead" >&2
         if [ "$engage_attach" = "1" ]; then
-            engage_wait ""
+            engage_wait
             case "$start_rc" in
                 0) attach_rc=0
                    gc session attach "$sid" || attach_rc=$?
@@ -4901,50 +4884,39 @@ cmd_engage() {
     printf '[debug] conversation=%s sitting=%s (%s) alias=%s subject=%s work_dir=%s\n' \
         "$CONV" "$sid" "$sname" "$salias" "$bead" "${swork_dir:-?}" >&2
 
-    # A freshly spawned sitting self-starts from the prompt its launch delivers,
-    # and only the reconciler's launch delivers one. `gc session new --no-attach`
-    # records the sitting as start-pending. The reconciler then launches it with
-    # the rendered converse prompt on argv (every converse provider resolves to
-    # prompt_mode=arg), and that prompt's loop opens with the claim block. So a claude
-    # sitting (opus, fable) claims its conversation, re-checks the premise, preps, and
-    # posts its framing with no keystrokes. Sending it a kick as well is worse
-    # than redundant. engage would deliver the kick while that self-started turn
-    # is still running, so the harness holds it as a deferred reminder and
-    # releases it after the framing lands, and the operator reads a stale
-    # "begin now" once per engage.
+    # A freshly spawned sitting starts itself from the prompt its launch
+    # delivers, and only the reconciler's launch delivers one. `gc session new
+    # --no-attach` records the sitting as start-pending. The reconciler then
+    # launches it with the rendered converse prompt on argv: every converse
+    # provider resolves to prompt_mode=arg, and Claude Code and the codex CLI
+    # each take that argument as the session's first user turn. The prompt's
+    # loop opens with the claim block, so the sitting claims its conversation,
+    # re-checks the premise, preps, and posts its framing with no keystrokes.
+    # That holds on the --no-attach board-picker path too, so whoever attaches
+    # later finds a started sitting.
+    #
+    # engage sends the sitting no opening turn of its own. One sent now would
+    # find the sitting's first turn still running, and a nudge's default
+    # delivery, wait-idle, holds it for an idle boundary rather than enter a
+    # running turn, so it would land after the framing as a stale "begin now"
+    # and cost one more model turn. What the operator gave engage reaches the
+    # sitting through the conversation's ask: cmd_open files a --reason, a
+    # seed's body or a lens brief there, and the sitting reads the ask when it
+    # claims.
     #
     # The attach path waits for the reconciler's launch first
     # (engage_await_start, above), and attaches only a started sitting.
     # It waits as long as the start takes, because a start on a busy controller
     # can take minutes, and an engage that stops waiting first leaves the
     # operator with no sitting on screen while it starts anyway.
-    #
-    # codex is the exception to self-starting. gascity delivers its prompt the
-    # same way, but the codex CLI is not trusted to consume an argv prompt at
-    # launch: its pool slots carry no prompt template and are primed by an
-    # explicit nudge instead. A codex sitting can wake idle at its prompt, so it
-    # keeps a START directive kick. A bare poke reads as a connectivity check and
-    # does not begin the loop, so the kick names the action. An idle session takes
-    # it at once, with no in-flight turn for the harness to defer it behind. The
-    # kick follows the start wait and precedes the attach, so the operator lands
-    # on a started sitting. On the --no-attach board-picker path it starts the
-    # sitting for whoever attaches later; a kick that reaches the sitting before
-    # its launch does not launch it, because gc queues the nudge and delivers it
-    # once the reconciler has. A failed kick is not fatal: the conversation is bound, so
-    # report it and let the operator start it by hand.
-    #
-    # A --reason is filed into the conversation's ask by cmd_open, so every sitting reads
-    # it when it claims. The kick also carries it, for the one provider kicked.
     start_rc=0
     if [ "$engage_attach" = "1" ]; then
-        engage_wait kick
+        engage_wait
         if [ "$start_rc" -eq 2 ]; then
             echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Conversation $CONV is still bound to it; hand it back to the operator's queue: gc bd update $CONV --if-assignee \"$salias\" --assignee human --status open" >&2
             exit 4
         fi
     fi
-
-    engage_kick
 
     # The summary already printed the attach line; on the default path we attach
     # a started sitting. One still unstarted at the bound is left unattached,
