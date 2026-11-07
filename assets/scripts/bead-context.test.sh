@@ -267,7 +267,7 @@ blk "$R_TK" tk-w-hidden open "$POOL"
 
 # Merge anchors read their recorded merge axis, not their empty route.
 blk "$R_TK" tk-w-anchors open '{}' tk-a-approval tk-a-progress tk-a-preopen tk-a-approved \
-  tk-a-hold tk-a-blocked tk-a-stale tk-a-noaxis tk-a-heldstate
+  tk-a-hold tk-a-blocked tk-a-stale tk-a-noaxis tk-a-humanstate
 AX='@h1@2026-10-01T00:00:00Z'
 blk "$R_TK" tk-a-approval open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required$AX\"}"
 blk "$R_TK" tk-a-progress open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"progressing$AX\",\"pr_posture\":\"changes_requested$AX\"}"
@@ -277,7 +277,7 @@ blk "$R_TK" tk-a-hold open "{\"merge_result\":\"pre_open_gate\",\"merge_hold\":\
 blk "$R_TK" tk-a-blocked open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"blocked$AX\"}"
 blk "$R_TK" tk-a-stale open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required@h0@2026-09-30T00:00:00Z\"}"
 blk "$R_TK" tk-a-noaxis open '{"merge_result":"pre_open_gate"}'
-blk "$R_TK" tk-a-heldstate open '{"merge_result":"held","gc.routed_to":"human","gc.takeaway":"waits on a ruling"}'
+blk "$R_TK" tk-a-humanstate open '{"merge_result":"abandoned","gc.routed_to":"human","gc.takeaway":"PR#9 was closed without merging"}'
 
 # A bead's own state, one rule per blocker.
 blk "$R_TK" tk-w-kinds open '{}' tk-k-blocked tk-k-validation tk-k-finding tk-k-needsyou \
@@ -756,7 +756,7 @@ eq "$(blkr tk-a-hold)" "stuck tk-a-hold merge-hold" "an operator merge hold is s
 eq "$(blkr tk-a-blocked)" "stuck tk-a-blocked merge-blocked" "an anchor its machine axis records blocked is stuck"
 eq "$(blkr tk-a-stale)" "stuck tk-a-stale unread" "a posture read at another head than the axis is unread, so stuck"
 eq "$(blkr tk-a-noaxis)" "stuck tk-a-noaxis unread" "an anchor with no recorded axis is unread, so stuck"
-eq "$(blkr tk-a-heldstate)" "stuck tk-a-heldstate human" "an anchor parked in a human state is stuck on a person"
+eq "$(blkr tk-a-humanstate)" "stuck tk-a-humanstate human" "an anchor parked in a human state is stuck on a person"
 eq "$(logcount 'list --id')" 1 "  ... nine same-store blockers cost one read"
 
 # A bead's own state, one rule per blocker.

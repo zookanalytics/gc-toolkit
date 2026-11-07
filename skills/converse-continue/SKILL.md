@@ -19,17 +19,49 @@ has already cleared. Answer a gate only once the operator rules on it,
 replying to it first and naming what the answer releases (step 7). The
 sign-off resolves it. A ruling given on a turn that does not sign off is
 answered at once, so a dismiss that ends the sitting later leaves nothing the
-operator ruled on open. Answer it through the sign-off's writer with
-`--answer`, never with a bare `gc bd gate resolve`. A gate can be what holds a
-merge, so the writer puts the ruling's consequences in place before it
-resolves the gate. When the ruling reaches an open PR, the subject or one the
+operator ruled on open.
+
+First settle the subject's dispatch path, its arm and its route, by step 7's
+rule, which every answer to a gate on the subject follows. The hold kept both,
+and the writer leaves them as they are, so once the gate is answered and
+nothing else holds the subject, an arm sends it and a pool route has that pool
+claim it. Read them:
+```bash
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | "arm: \(.["gc.dispatch_when_ready"] // "none") \(.["gc.dispatch_when_ready_args"] // "") route: \(.["gc.routed_to"] // "none")" else error("unread") end'
+```
+When the ruling leaves the subject to go where its arm or route already sends
+it, by the same method, keep them. Under any other ruling, one that sends it
+elsewhere or nowhere, withdraw them before the answer, with or without
+`--accept`. The block disarms an arm and clears a pool route, and keeps a
+`human` route, which sends the subject to no pool. It reads the subject back,
+and prints its `carries no arm and no pool route` line only once neither is
+left:
+```bash
+WHY="<the ruling, one line>"
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
+  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
+  && ROW=$(gc bd show "$SUBJECT" --json) \
+  && LEFT=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | [ ((.["gc.dispatch_when_ready"] // "") | tostring | select(. != "") | "arm " + .), ((.["gc.routed_to"] // "") | tostring | select(. != "" and . != "human") | "route " + .) ] | join(", ") else error("unread") end') \
+  && if [ -z "$LEFT" ]; then echo "$SUBJECT carries no arm and no pool route"; else echo "$SUBJECT still carries $LEFT"; false; fi
+```
+Without that line, answer nothing: fix what the block printed and re-run it.
+A ruling that sends the subject on is carried out once the answer below exits
+0: send the subject then, as step 7's cases do.
+
+Then answer the ruling through the sign-off's writer with `--answer`, never
+with a bare `gc bd gate resolve`. A gate can be what holds a merge, so the
+writer puts the ruling's consequences in place before it resolves the gate.
+When the ruling reaches an open PR, the subject or one the
 gate releases, the first of them is the rework or the retirement the ruling
 calls for, passed the way step 7 passes it, and the next is the subject's
 headline with each wait this turn routed. A ruling that takes the subject's
 recommendation names the recommendation's gate with `--answer` and adds
 `--accept`, so Accept's writer answers that gate and sends the formula, as at
-the sign-off (step 7). A subject that reads held is released by that writer
-before it sends the formula. The `--answer` call resolves only the gates it
+the sign-off (step 7). The `--answer` call resolves only the gates it
 names, leaves the conversation open, and exits non-zero when it stopped short.
 Until it exits 0, do not tell the operator the ruling is in place:
 ```bash

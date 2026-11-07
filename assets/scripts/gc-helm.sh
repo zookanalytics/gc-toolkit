@@ -93,11 +93,13 @@ the sitting to start on its own, to attach later). Pointed at a human gate,
 engage takes the one bead still waiting on the gate and makes the conversation
 it lands on reply to the gate; with several beads waiting it names them and
 starts nothing, and with none it says nothing waits and starts nothing.
-Engaging a bead or a PR names each open human gate that holds it, reached
-through its open blocks edges, by the reader the PR's held: gate label and the
-board's row read: the interactive prompt offers each, and picking one engages
-it, taking this bead when several wait on the gate and this is one of them, and
-any other engage says how to.
+Engaging a bead or a PR names everything that holds it, by the definition the
+PR's held: labels and the board's row read (gctk pr-status derive): each open
+human gate reached through its open blocks edges, each blocker it waits on that
+a person has to clear, and the PR's own review threads or blocked verdict. The
+interactive prompt offers each gate and blocker, and picking one engages it,
+taking this bead when several wait on a gate and this is one of them; any other
+engage says how to.
 --model picks the converse variant (opus, the work tier, is the default),
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
@@ -235,23 +237,21 @@ live read of those three conditions to its last write, and refuses while
 another Accept holds it. It records the acceptance's dispatch input (its
 token, the formula and each --var) on the gate, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, checks
-that no open human gate blocks the bead, releases a bead a sitting's hold left
-at held to unanchored, since a run poured at a held bead cancels at its first
-step, slings the formula titled `<formula> accept:<token>`, and records the
-dispatch by stripping gc.recommended_formula. An answer another reached first
-stands, and Accept slings nothing. A gate filed in the meantime, or a sling
-that poured no root, reopens the gate. A run that stopped after its resolve, or
-whose release did not land, leaves an unfinished acceptance, which the next
-Accept finishes under the same token, slinging only when no root carries the
-token, and slinging the vars the acceptance recorded. A sitting takes a
-recommendation through this verb too: its sign-off's --accept runs it with
---conversation naming the sitting's own conversation, which Accept then does
-not warn of as a live sitting on the bead, and with a --var for each var the
-operator's ruling settled for the dispatch, such as mol-design-convoy's
-design_gated=false. Each --var rides the sling. A run that finishes an
-acceptance slings the vars that acceptance was made with and refuses a --var
-that differs from them, and a root an earlier run already poured under the
-token keeps the vars it was poured with.
+that no open human gate blocks the bead, slings the formula titled
+`<formula> accept:<token>`, and records the dispatch by stripping
+gc.recommended_formula. An answer another reached first stands, and Accept
+slings nothing. A gate filed in the meantime, or a sling that poured no root,
+reopens the gate. A run that stopped after its resolve leaves an unfinished
+acceptance, which the next Accept finishes under the same token, slinging
+only when no root carries the token, and slinging the vars the acceptance
+recorded. A sitting takes a recommendation through this verb too: its
+sign-off's --accept runs it with --conversation naming the sitting's own
+conversation, which Accept then does not warn of as a live sitting on the
+bead, and with a --var for each var the operator's ruling settled for the
+dispatch, such as mol-design-convoy's design_gated=false. Each --var rides
+the sling. A run that finishes an acceptance slings the vars that acceptance
+was made with and refuses a --var that differs from them, and a root an
+earlier run already poured under the token keeps the vars it was poured with.
 EOF
 }
 
@@ -428,10 +428,6 @@ SITTING_COMMENT_TOOL="${GC_SITTING_COMMENT_TOOL:-$SCRIPT_DIR/pr-sitting-comment.
 # Ends the run beneath a released anchor through gascity's run cancel;
 # overridable so a hermetic test can point it at a fixture.
 RUN_CANCEL_TOOL="${GC_RUN_CANCEL_TOOL:-$SCRIPT_DIR/run-cancel.sh}"
-# The writer of a bead's lifecycle state, which Accept runs to release a held
-# bead before it dispatches; overridable so a hermetic test can point it at a
-# fixture.
-LIFECYCLE_TOOL="${GC_LIFECYCLE_TOOL:-$SCRIPT_DIR/lifecycle.sh}"
 # The longest engage waits, in seconds, for the reconciler to start the sitting
 # it spawned before attaching to it. The wait stops once the sitting reads
 # active or has ended, so this bound is a backstop for a controller that has
@@ -2418,7 +2414,8 @@ cmd_react() {
     # open reaction bead already tracking this subject, or a live owner owning its
     # reaction, 4 (RC_LIVE_WORKFLOW) when its live-workflow guard skipped a bead a
     # live workflow already drives, and 5 (RC_DISPATCH_PATH) when its
-    # dispatch-path guard skipped a bead that is already routed or armed. Each is
+    # dispatch-path guard skipped a bead that is already routed or armed, or
+    # that an open human gate blocks. Each is
     # a no-op, not a failure, and NO new reaction was filed. Re-raise them as exit
     # 5, exit 6 and exit 7 so an intake caller (operator-intake.sh) files its own
     # conversation, naming the cause, instead of waiting for a reaction that is already
@@ -2436,7 +2433,7 @@ cmd_react() {
             exit 6
         fi
         if [ "$sling_rc" -eq 5 ]; then
-            echo "$PROG: react: $bead is already routed or armed — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route or arm is cleared." >&2
+            echo "$PROG: react: $bead is already routed or armed, or waits on a person's answer — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route, arm or gate is cleared." >&2
             exit 7
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
@@ -2875,11 +2872,6 @@ accept_take_lock() {
 ACCEPT_GC=""
 accept_gc() { ( "$ACCEPT_GC" "$@" 9>&-; exit "$?" ); }
 
-# accept_lifecycle <args...> — the lifecycle writer, run under the acceptance
-# lock the way accept_gc runs gc: the program starts with fd 9 closed, and the
-# subshell that waits on it keeps the lock.
-accept_lifecycle() { ( "$LIFECYCLE_TOOL" "$@" 9>&-; exit "$?" ); }
-
 # accept_token — a token unique to this run, which titles the root its sling
 # pours and closes the recommendation's gate, so a later run tells this
 # acceptance's dispatch from any other. Fixed length, so no token is another's
@@ -3095,18 +3087,17 @@ accept_vars_said() {
 # the acceptance's dispatch input on the gate (gc.acceptance: the token, the
 # formula and each --var) and reads it back, resolves the gate with
 # `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
-# back that no open human gate blocks the bead, releases a bead a sitting's
-# hold left at `held` to unanchored, since a run poured at a held bead cancels
-# at its first step, slings the formula titled `<formula> accept:<token>`, and
-# records the dispatch. The first answer to reach the gate wins: a sitting's
-# ruling, a filer's withdrawal or a person's resolve stands, and Accept slings
-# nothing and reopens nothing. A gate filed in the meantime, or a sling that
-# poured no root under the token, reopens the gate from Accept's own close. A
-# run that stopped after its resolve leaves the gate closed with its answer
-# beside the recommendation, an unfinished acceptance, which the next run
-# finishes under the same token: it records the dispatch when a root carries
-# the token, and otherwise takes the read-back, the release, the sling and the
-# record, slinging the vars the gate records under the token.
+# back that no open human gate blocks the bead, slings the formula titled
+# `<formula> accept:<token>`, and records the dispatch. The first answer to
+# reach the gate wins: a sitting's ruling, a filer's withdrawal or a person's
+# resolve stands, and Accept slings nothing and reopens nothing. A gate filed
+# in the meantime, or a sling that poured no root under the token, reopens the
+# gate from Accept's own close. A run that stopped after its resolve leaves
+# the gate closed with its answer beside the recommendation, an unfinished
+# acceptance, which the next run finishes under the same token: it records the
+# dispatch when a root carries the token, and otherwise takes the read-back,
+# the sling and the record, slinging the vars the gate records under the
+# token.
 # An acceptance dispatches the input it was accepted with whoever finishes it,
 # so a finishing run given a --var that differs from that input dispatches
 # nothing, and one given none, as the board's Accept is, slings the recorded
@@ -3327,33 +3318,6 @@ cmd_accept() {
         exit 4
     fi
 
-    # Step 3b: a bead a sitting held goes back to unanchored before the sling.
-    # A sitting's hold moves an unanchored bead to `held` while the operator owes
-    # the answer of a gate that blocks it (skills/converse-hold), and
-    # mol-polecat-work's load-context reads any merge_result as a PR or merge
-    # that already exists, so a run poured at a held bead cancels at its first
-    # step while step 5 withdraws the recommendation. The acceptance is that
-    # answer, and step 3 read back that no other open human gate blocks the
-    # bead, so Accept releases it here, routed to human, as a sitting's
-    # sign-off releases a subject that takes its recommendation. A release that
-    # does not read back leaves the acceptance unfinished, for the next Accept
-    # to finish.
-    held_row=$(row_now "$bead")
-    if [ -z "$held_row" ]; then
-        echo "$PROG: accept: could not read $bead back after its acceptance ($tok) to tell whether it reads held, so nothing is dispatched yet. The next Accept finishes it once the store answers: $PROG accept $bead" >&2
-        exit 4
-    fi
-    if [ "$(printf '%s' "$held_row" | jq -r '(.metadata // {}).merge_result // "" | tostring' 2>/dev/null)" = held ]; then
-        lc_rc=0
-        accept_lifecycle transition "$bead" --to unanchored --expect held --route human >/dev/null 2>&1 || lc_rc=$?
-        released_row=$(row_now "$bead")
-        if [ -z "$released_row" ] || [ "$(printf '%s' "$released_row" | jq -r '(.metadata // {}).merge_result // "" | tostring' 2>/dev/null)" = held ]; then
-            echo "$PROG: accept: $bead reads held, as a sitting's hold on its gate left it, and its release to unanchored did not read back (lifecycle.sh exited $lc_rc), so nothing is dispatched: mol-polecat-work cancels a run poured at a held bead. The next Accept finishes acceptance $tok once the release can land: $PROG accept $bead" >&2
-            exit 4
-        fi
-        echo "$PROG: accept: released $bead from held, which waited on this answer" >&2
-    fi
-
     # Step 4: dispatch the recommendation AT the bead (--on), titled with the
     # token, so the root it pours names the acceptance that sent it. A graph.v2
     # formula reads the bead as its input convoy's one tracked member, so the
@@ -3441,43 +3405,54 @@ engage_valid_model() {
     return "$_evm_ok"
 }
 
-# holding_gate_rows <bead> — the open human gates that hold the bead, nearest
-# first, one "<id>\t<title>" row each: `gctk pr-status gates`, the reader the PR's
-# held: gate label and the board's row read, so what engage offers cannot differ
-# from what they say. Returns 1 when gctk is not there or did not answer, which
-# says nothing about the gates.
-holding_gate_rows() {
-    _hgr_bin="${GCTK_BIN:-}"
-    if [ -z "$_hgr_bin" ]; then
-        _hgr_root=$(city_root)
-        [ -n "$_hgr_root" ] || return 1
-        _hgr_bin="$_hgr_root/.gc/services/gctk/bin/gctk"
+# holding_rows <bead> — what holds the bead, one "<held>\t<id>\t<title>" row
+# each, in the order of the reasons `gctk pr-status derive --json` gives: the
+# definition the PR's held: labels and the board's row read, so what engage
+# offers cannot differ from what they say. <held> is the held: value the row
+# stands for. <id> is the bead to engage, an open human gate or a blocker a
+# person has to clear, and is empty where the PR's own review threads or blocked
+# verdict hold it. Returns 1 when gctk is not there or did not answer, which says
+# nothing about what holds the bead.
+holding_rows() {
+    _hr_bin="${GCTK_BIN:-}"
+    if [ -z "$_hr_bin" ]; then
+        _hr_root=$(city_root)
+        [ -n "$_hr_root" ] || return 1
+        _hr_bin="$_hr_root/.gc/services/gctk/bin/gctk"
     fi
-    [ -x "$_hgr_bin" ] || return 1
-    _hgr_json=$("$_hgr_bin" pr-status gates --anchor "$1" 2>/dev/null) || return 1
-    printf '%s' "$_hgr_json" | jq -r '.[] | [.id, (.title // "")] | @tsv' 2>/dev/null
+    [ -x "$_hr_bin" ] || return 1
+    _hr_json=$("$_hr_bin" pr-status derive --anchor "$1" --json 2>/dev/null) || return 1
+    printf '%s' "$_hr_json" | jq -r '.reasons[] | [.held, (.id // ""), (.title // "")] | @tsv' 2>/dev/null
 }
 
-# engage_warn_gates_unread <bead> — say that the gates holding the bead did not
-# read, which leaves the operator to look for them. Engage goes on: a sitting on
-# the bead can still be started. It writes to stdout, as engage_say_holding_gates
-# does, because stdout is all the board's route returns from an engage that exits 0.
-engage_warn_gates_unread() {
-    echo "$PROG: engage: could not read the human gates that hold $1 ('gctk pr-status gates' did not answer), so none are offered."
+# engage_warn_holds_unread <bead> — say that what holds the bead did not read,
+# which leaves the operator to look for it. Engage goes on: a sitting on the bead
+# can still be started. It writes to stdout, as engage_say_holds does, because
+# stdout is all the board's route returns from an engage that exits 0.
+engage_warn_holds_unread() {
+    echo "$PROG: engage: could not read what holds $1 ('gctk pr-status derive' did not answer), so nothing that holds it is offered."
 }
 
-# engage_say_holding_gates <bead> — name each open human gate that holds the bead,
-# and how to engage it, for an engage that asks nothing. A sitting on the bead does
-# not answer them unless its conversation replies to them.
-engage_say_holding_gates() {
-    if ! _esh_rows=$(holding_gate_rows "$1"); then
-        engage_warn_gates_unread "$1"
+# engage_say_holds <bead> — name each thing that holds the bead, and how to
+# engage it, for an engage that asks nothing. A sitting on the bead does not
+# answer a gate unless its conversation replies to it.
+engage_say_holds() {
+    if ! _esh_rows=$(holding_rows "$1"); then
+        engage_warn_holds_unread "$1"
         return 0
     fi
     printf '%s\n' "$_esh_rows" | while IFS= read -r _esh_row; do
         [ -n "$_esh_row" ] || continue
-        _esh_id=$(printf '%s' "$_esh_row" | cut -f1)
-        echo "$PROG: engage: $1 is held by human gate $_esh_id (\"$(printf '%s' "$_esh_row" | cut -f2-)\"). To answer it: $PROG engage $_esh_id"
+        _esh_held=$(printf '%s' "$_esh_row" | cut -f1)
+        _esh_id=$(printf '%s' "$_esh_row" | cut -f2)
+        _esh_title=$(printf '%s' "$_esh_row" | cut -f3-)
+        if [ -z "$_esh_id" ]; then
+            echo "$PROG: engage: $1 is held (held: $_esh_held): $_esh_title"
+        elif [ "$_esh_held" = gate ]; then
+            echo "$PROG: engage: $1 is held by human gate $_esh_id (\"$_esh_title\"). To answer it: $PROG engage $_esh_id"
+        else
+            echo "$PROG: engage: $1 is held by $_esh_id (\"$_esh_title\"), which a person has to clear. To engage it: $PROG engage $_esh_id"
+        fi
     done
 }
 
@@ -3633,23 +3608,25 @@ EOF
 }
 
 # engage_prompt_conversation_or_starter <subject> — ONE prompt covering the
-# choice of a conversation the subject already has, of a human gate that holds
-# it, and the starter of a new conversation. The subject's open conversations are
-# listed numbered with their state, and the gates follow on the same numbers,
-# unless the engage was pointed at a gate already; the starter seeds follow, each
-# keyed by its letter. The single reply resolves as: a number takes that
-# conversation (a live sitting is attached to, any other is held in a fresh
-# sitting) or engages that gate; a seed letter opens a new conversation on that
-# seed; any other text opens a new conversation with that text as its opener;
-# Enter takes the default, which attaches to a live sitting, takes a conversation
-# from the queue, or files one. Numbers and letters never collide, so both live
-# in one prompt. Sets ENGAGE_CONV_CHOICE to a conversation id, "new", or "" for
-# the default, and ENGAGE_GATE_CHOICE to a gate picked; on "new" it also sets
-# ENGAGE_STARTER_BODY (the conversation's ask; empty = blank) and
-# ENGAGE_STARTER_TAIL (a short title).
+# choice of a conversation the subject already has, of a gate or blocker that
+# holds it, and the starter of a new conversation. The subject's open
+# conversations are listed numbered with their state, and what holds the subject
+# follows, unless the engage was pointed at a gate already: each gate and
+# blocker on the same numbers, and the PR's own review threads or blocked
+# verdict unnumbered, since engaging the subject is how a person acts on them.
+# The starter seeds follow, each keyed by its letter. The single reply resolves
+# as: a number takes that conversation (a live sitting is attached to, any other
+# is held in a fresh sitting) or engages that gate or blocker; a seed letter
+# opens a new conversation on that seed; any other text opens a new conversation
+# with that text as its opener; Enter takes the default, which attaches to a
+# live sitting, takes a conversation from the queue, or files one. Numbers and
+# letters never collide, so both live in one prompt. Sets ENGAGE_CONV_CHOICE to
+# a conversation id, "new", or "" for the default, and ENGAGE_HOLD_CHOICE to a
+# gate or blocker picked; on "new" it also sets ENGAGE_STARTER_BODY (the
+# conversation's ask; empty = blank) and ENGAGE_STARTER_TAIL (a short title).
 engage_prompt_conversation_or_starter() {
-    ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""; ENGAGE_CONV_CHOICE=""; ENGAGE_GATE_CHOICE=""
-    _epv_i=0; _epv_map=""; _epv_gmap=""; _epv_convs=0
+    ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""; ENGAGE_CONV_CHOICE=""; ENGAGE_HOLD_CHOICE=""
+    _epv_i=0; _epv_map=""; _epv_hmap=""; _epv_convs=0
     _epv_rows=$(engage_find_conversations "$1" || true)
     if [ -n "$_epv_rows" ]; then
         printf '  Subject has open conversation(s):\n'
@@ -3676,21 +3653,30 @@ EOR
         _epv_convs="$_epv_i"
     fi
     if [ -z "$pointed_gate" ]; then
-        if _epv_rows=$(holding_gate_rows "$1"); then
-            [ -z "$_epv_rows" ] || printf '  Held by human gate(s):\n'
+        if _epv_rows=$(holding_rows "$1"); then
+            [ -z "$_epv_rows" ] || printf '  Held by:\n'
             while IFS= read -r _epv_row; do
                 [ -n "$_epv_row" ] || continue
-                _epv_id=$(printf '%s' "$_epv_row" | cut -f1)
+                _epv_held=$(printf '%s' "$_epv_row" | cut -f1)
+                _epv_id=$(printf '%s' "$_epv_row" | cut -f2)
+                _epv_title=$(printf '%s' "$_epv_row" | cut -f3-)
+                if [ -z "$_epv_id" ]; then
+                    printf '     ·  held: %s — %s\n' "$_epv_held" "$_epv_title"
+                    continue
+                fi
                 _epv_i=$((_epv_i + 1))
-                printf '    [%s] %s — "%s"  (takes the bead waiting on it, and answers the gate)\n' \
-                    "$_epv_i" "$_epv_id" "$(printf '%s' "$_epv_row" | cut -f2-)"
-                _epv_gmap="$_epv_gmap$_epv_i $_epv_id
+                if [ "$_epv_held" = gate ]; then
+                    printf '    [%s] %s — "%s"  (human gate: takes the bead waiting on it, and answers the gate)\n' "$_epv_i" "$_epv_id" "$_epv_title"
+                else
+                    printf '    [%s] %s — "%s"  (a person has to clear it: engages it)\n' "$_epv_i" "$_epv_id" "$_epv_title"
+                fi
+                _epv_hmap="$_epv_hmap$_epv_i $_epv_id
 "
             done <<EOR
 $_epv_rows
 EOR
         else
-            engage_warn_gates_unread "$1"
+            engage_warn_holds_unread "$1"
         fi
     fi
     # The new-conversation starters, keyed by letter; a menu and a letter->key map.
@@ -3708,9 +3694,9 @@ EOR
     if [ "$_epv_i" -eq 0 ]; then
         printf '  a letter or text starts a new conversation · Enter = a new one, blank › '
     elif [ "$_epv_convs" -eq 0 ]; then
-        printf '  [1-%s] engage a listed gate · a letter or text starts a new conversation · Enter = a new one, blank › ' "$_epv_i"
-    elif [ -n "$_epv_gmap" ]; then
-        printf '  [1-%s] take a listed conversation or gate · a letter or text starts a new one · Enter = the first conversation › ' "$_epv_i"
+        printf '  [1-%s] engage a listed gate or blocker · a letter or text starts a new conversation · Enter = a new one, blank › ' "$_epv_i"
+    elif [ -n "$_epv_hmap" ]; then
+        printf '  [1-%s] take a listed conversation, gate or blocker · a letter or text starts a new one · Enter = the first conversation › ' "$_epv_i"
     else
         printf '  [1-%s] take a listed conversation · a letter or text starts a new one · Enter = the first listed › ' "$_epv_i"
     fi
@@ -3726,14 +3712,15 @@ EOR
         ENGAGE_STARTER_TAIL=$(engage_starter_list | awk -F"$TAB" -v k="$_epv_seed" '$1==k{print $2}')
         return 0
     fi
-    # A number naming a listed conversation → take it; one naming a gate → engage it.
+    # A number naming a listed conversation → take it; one naming a gate or a
+    # blocker → engage it.
     case "$_epv_reply" in
         *[!0-9]*) : ;;
         *)
             _epv_sel=$(printf '%s' "$_epv_map" | awk -v n="$_epv_reply" '$1==n{print $2}')
             if [ -n "$_epv_sel" ]; then ENGAGE_CONV_CHOICE="$_epv_sel"; return 0; fi
-            _epv_sel=$(printf '%s' "$_epv_gmap" | awk -v n="$_epv_reply" '$1==n{print $2}')
-            if [ -n "$_epv_sel" ]; then ENGAGE_GATE_CHOICE="$_epv_sel"; return 0; fi ;;
+            _epv_sel=$(printf '%s' "$_epv_hmap" | awk -v n="$_epv_reply" '$1==n{print $2}')
+            if [ -n "$_epv_sel" ]; then ENGAGE_HOLD_CHOICE="$_epv_sel"; return 0; fi ;;
     esac
     # Anything else → a new conversation with the reply verbatim as its opener.
     ENGAGE_CONV_CHOICE="new"
@@ -4211,11 +4198,11 @@ cmd_engage() {
     fi
 
     # Interactive decision for a SUBJECT, in one prompt: take one of its
-    # conversations, engage a gate that holds it, or open a new one (blank, on a
-    # seed, or with a typed opener). An explicit conversation id names its own
-    # conversation, and a pre-filled --reason/--template already chose a new one.
-    # An engage that asks nothing names the gates instead, unless it was pointed
-    # at a conversation or a gate.
+    # conversations, engage a gate or blocker that holds it, or open a new one
+    # (blank, on a seed, or with a typed opener). An explicit conversation id
+    # names its own conversation, and a pre-filled --reason/--template already
+    # chose a new one. An engage that asks nothing names what holds the bead
+    # instead, unless it was pointed at a conversation or a gate.
     if [ "$engage_interactive" = 1 ] && [ -z "$named_conv" ] && [ "$starter_prefilled" = 0 ]; then
         engage_prompt_conversation_or_starter "$bead" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
         case "$ENGAGE_CONV_CHOICE" in
@@ -4225,9 +4212,9 @@ cmd_engage() {
             "")  ;;
             *)   engage_chosen_conv="$ENGAGE_CONV_CHOICE" ;;
         esac
-        [ -z "$ENGAGE_GATE_CHOICE" ] || engage_take "$ENGAGE_GATE_CHOICE" "$bead"
+        [ -z "$ENGAGE_HOLD_CHOICE" ] || engage_take "$ENGAGE_HOLD_CHOICE" "$bead"
     elif [ -z "$named_conv" ] && [ -z "$pointed_gate" ]; then
-        engage_say_holding_gates "$bead"
+        engage_say_holds "$bead"
     fi
 
     # Model: prompt when interactive and unset, else the opus default (or the
