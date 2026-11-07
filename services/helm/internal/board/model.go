@@ -189,8 +189,9 @@ type Anchor struct {
 	// failure marks every anchor of the pass whose kind reads waits
 	// ([source.needsWaitingEdges]). Epic and convoy are among those kinds: they
 	// read their `blocks` edges for the dependency-family grouping, so a failed
-	// read flags them too. The supervisor backend sets it on every
-	// metadata-keyed row it serves, because it cannot resolve a blocker's
+	// read flags them too. The supervisor backend sets it on every row it
+	// serves. Its epic, decision and convoy rows read none of their `blocks`
+	// edges, and on the rows its scan admits it cannot resolve a blocker's
 	// status ([source.SupervisorSource.metadataAnchorFor]).
 	//
 	// An unread wait set and an empty one are not interchangeable. A blocker
@@ -203,12 +204,13 @@ type Anchor struct {
 	// the operator to close or extend a question whose routed work may still
 	// be open.
 	//
-	// Only [ruled] and [ruledInFlight] read the flag, and both refuse a row
-	// that carries it, so the row falls through to the un-ruled arm. The family
-	// grouping reads WaitingOn and never this flag. So on an epic or a convoy
-	// the flag matters only when the row is routed to the operator. Both
-	// readers apply only to rows [humanGated] accepts, and for an epic or a
-	// convoy that route is the only way in.
+	// [ruled] and [ruledInFlight] refuse a row that carries it, so the row
+	// falls through to the un-ruled arm. Both apply only to rows [humanGated]
+	// accepts, and for an epic or a convoy the route to the operator is the
+	// only way in. [readAcceptance] refuses it too, so Accept's conditions meet
+	// nothing on the row. The family grouping reads WaitingOn and never this
+	// flag. So on an epic or a convoy the flag matters only when the row is
+	// routed to the operator or carries a recommendation.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 
 	// PR is what the city records about a live merge anchor's PR, as
@@ -317,8 +319,9 @@ type Tile struct {
 	Severity Severity `json:"severity"`
 
 	// Owed marks a row whose next move is a PERSON'S: an unanswered human gate,
-	// a conversation waiting for the operator, or a parked subject whose
-	// recorded waits have all landed. It is not
+	// a conversation waiting for the operator, a parked subject whose recorded
+	// waits have all landed, or a landed Delivery waiting for its epic's
+	// checkpoint. It is not
 	// derivable from the band — severity is coarse and shared, so a one-bead
 	// question (ELEVATED) sorts below a stranded container (HIGH) and rank alone
 	// can never put the operator's queue first. [OperatorQueue] is the partition.
@@ -546,7 +549,7 @@ type Tile struct {
 	// edges climb to a single level up, empty when it climbs to nothing. GroupRoot
 	// names the top of the family tree; GroupParent names the next step toward it,
 	// so a surface renders the family as the nested containment tree it is — a
-	// sub-epic beneath its parent, that sub-epic's own children beneath it —
+	// Delivery beneath its epic, that Delivery's own Stories beneath it —
 	// instead of one flat member list under the top root. Both come from the same
 	// per-tile parent walk in [assignGroupRoots]: GroupRoot follows it to the top,
 	// GroupParent reports its first step.
@@ -830,6 +833,10 @@ type Facts struct {
 	// by it when nothing holds the child's own bead.
 	held    map[string]hold
 	subtree map[string]string
+
+	// deliveries is set by [BuildBoard], never by a source. It holds the id of
+	// every epic row that is a Delivery ([deliveries]).
+	deliveries map[string]bool
 }
 
 // Board is the envelope returned by the service. Tiles are deduplicated by id

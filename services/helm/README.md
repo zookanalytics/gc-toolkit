@@ -132,7 +132,7 @@ owed-first. `specs/tk-492ssx/` records the family model.
 `group_parent` is the same climb's IMMEDIATE step: the id of the row's direct
 parent one anchor up, empty at a family root. Where `group_root` names the top
 of the family, `group_parent` names the next step toward it, so a surface can
-render the family as the nested containment tree it is — a sub-epic above its
+render the family as the nested containment tree it is — a Delivery above its
 own children rather than flat beside them. The web dashboard body nests each
 family by it (`flattenFamilies` in `web/src/App.tsx`).
 
@@ -250,7 +250,7 @@ conversations, by their native shape.
 
 | kind | selected by | band | why |
 |---|---|---|---|
-| `epic` | `issue_type=epic` | derived from the roll-up | durable per-rig anchor |
+| `epic` | `issue_type=epic` | derived from the roll-up; ELEVATED and owed for a landed Delivery | durable per-rig anchor |
 | `decision` | `issue_type=decision` | ELEVATED; NORMAL or LOW once *ruled* | human-gated |
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
 | `human` | `gc.routed_to=human` | ELEVATED; NORMAL or LOW once *ruled* | the operator owns it; no agent will take it |
@@ -258,6 +258,14 @@ conversations, by their native shape.
 | `merge` | `merge_result` present | derived from the roll-up, so LOW while childless | a branch the city is trying to land — the PR round-trip's row |
 | `gate` | `issue_type=gate` with `await_type=human` | folds onto the row of every bead it blocks, read from the gate's `blocks` dependents; a row of its own only when none of them has one | a wait a person must clear |
 | `conversation` | a task that tracks one bead and is assigned to `human` or to the alias that names its own id | folds onto the row of the bead it tracks | a dialogue waiting in the operator's queue or held by a sitting |
+
+A Delivery is an `epic` row whose parent is a live epic and which carries no
+`epic_hypothesis` (`docs/epics.md`, "Deliveries and Epic Checkpoints";
+`board.deliveries`). Once its Stories have all closed, its epic's checkpoint is
+the operator's to call, so its row reads `landed — waits for its Epic
+Checkpoint` ahead of any takeaway, bands ELEVATED and is owed, and its epic's
+roll-up counts it as parked. Both backends carry an epic's metadata on its row,
+which is where the derivation reads the hypothesis.
 
 `gate` and `conversation` are WRAPPERS: each folds onto the rows of the beads
 it concerns (`board.foldWrappers`), which it marks `held`. A gate also marks
@@ -399,10 +407,11 @@ gate blocks the bead that waits on it, so the `waiting_on` edge takes and the
 disposition rule below fires for them. The child roll-up stays exactly as it is: it is what keeps the
 work already filed as a child visible, and nothing re-parents it.
 
-A roll-up whose children have ALL closed stays LOW. The row can now *say* the
-work landed (`m_total>0`, `complete`, "all N closed · 0 open"), which is what a
-sweep needs to act on it; pushing the operator at that moment is `tk-2cyxo`'s
-bead, not the board's.
+A `parked` roll-up whose children have ALL closed stays LOW, unless its bead is
+a landed Delivery, which waits for its epic's checkpoint. The row can now
+*say* the work landed (`m_total>0`, `complete`, "all N closed · 0 open"), which
+is what a sweep needs to act on it; pushing the operator at that moment is
+`tk-2cyxo`'s bead, not the board's.
 
 **Until its named wait is over.** A takeaway is one frozen string, so a sitting that
 ROUTES work out of a subject leaves it saying "routed — nothing further needed
@@ -589,8 +598,10 @@ A child that is itself a parent on the board carries no route or arm of its
 own. When nothing holds its own bead, it is counted by what its own children
 are doing, read bottom-up through every level (`board.subtreeStates`): in
 flight while one of them moves, stranded while one is idle, and otherwise in
-the state its waiting children are in. A sub-epic whose children wait their
-turn does not strand its parent.
+the state its waiting children are in. A Delivery whose Stories wait their
+turn does not strand its epic, and a landed Delivery, whose Stories have all
+closed, counts as parked, because it waits on the operator for its epic's
+checkpoint.
 
 A child is also held by its ancestors' waits, as bd holds it: bd keeps a bead
 out of `bd ready` while it or any parent-child ancestor has an open blocker
