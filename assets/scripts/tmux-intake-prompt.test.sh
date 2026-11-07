@@ -163,9 +163,12 @@ BINDINGS="$HERE/tmux-bindings.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-tmux-intake-prompt-test.XXXXXX")"
 SOCKET="gcvp-test-$$"
 PROBE_SOCKET="gcvp-probe-$$"
+# kill-server leaves the socket file behind, so the suite removes its own two.
+SOCKET_DIR="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
 cleanup() {
     tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
     tmux -L "$PROBE_SOCKET" kill-server >/dev/null 2>&1 || true
+    rm -f "$SOCKET_DIR/$SOCKET" "$SOCKET_DIR/$PROBE_SOCKET"
     rm -rf "$TMP"
 }
 trap cleanup EXIT
