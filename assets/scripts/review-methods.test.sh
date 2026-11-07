@@ -64,16 +64,22 @@
 #     message settles need. It shows each message a change adds or alters as
 #     its recipient would see it, from a run of the reviewed commit, beside any
 #     clip of the screens, and its verdict names each message it shows.
-#   - Where the rig's guidance for the demo check names a standard for how its
-#     screens look or for the words of its screens and messages, a change that
-#     alters what a screen renders settles need. The method reads the standard
-#     at the reviewed commit, captures each screen and message the change
-#     alters in each state the guidance names, and reads the words as the
-#     person they are for reads them. A departure the change brings, or leaves
-#     on a screen or message it alters, is a finding that names the standard's
-#     rule, with the capture as its evidence, and it blocks. With no standard
-#     named the method holds nothing to one, and the pm method leaves the
-#     standard to the demo check.
+#   - If the rig's guidance for the demo check names a design or writing
+#     standard, any change to what a screen renders settles need. The method
+#     reads each standard at the reviewed commit. It captures each changed
+#     screen, or for a part many screens show the ones the guidance names and
+#     otherwise every one, and each message the change adds or alters. Each is
+#     captured in each required state, and a changed screen also in the state
+#     that shows the change, in its own named PNG. It reads the words as the
+#     person they are for reads them. A violation the change introduces, or one
+#     already on a changed screen or message, blocks approval as a finding with
+#     the rule, the state, the correction, the capture and the locus. A
+#     violation elsewhere is filed as a separate bug. A limit outside the change
+#     that stops a capture is named in the verdict and does not block, while a
+#     failure the change causes is a finding. With no standard named the method
+#     skips this section, and the pm method leaves the standards to the demo
+#     check. A page's capture size stays stated: its default, the Device line
+#     and the resize step.
 #
 # Hermetic: reads this checkout and a scratch git repository; no gc, store or
 # network.
@@ -376,37 +382,75 @@ hasF "$TMP/demo.messages" 'beside the clip or the screenshot of any screen the c
   "…beside any clip of the screens"
 hasF "$TMP/verdict.demo" 'names each message it shows, by its subject' "the demo verdict names each message it shows"
 
-echo "# the demo method holds each screen and message a change alters to the standard the rig's guidance names"
+echo "# the demo method reviews changed screens and messages against the standards the rig's guidance names"
 awk '/^## What it reads$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.reads"
-hasF "$TMP/demo.reads" 'and the standard it holds its screens and messages to, when it keeps one, with the states a capture shows a screen in.' \
-  "the rig's guidance for the demo check can name the standard its screens and messages are held to"
-hasF "$TMP/demo.need" 'a change that alters what a screen renders settles need too, whatever its size' \
-  "under a standard, a change that alters what a screen renders settles need"
-awk '/^### Hold each one to the rig.s standard$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.standard"
-[ -s "$TMP/demo.standard" ] && ok "the demo method has a section that holds each screen and message to the rig's standard" \
-  || bad "the demo method has a section that holds each screen and message to the rig's standard"
-hasF "$TMP/demo.standard" 'Where the guidance names none, the check holds nothing to a standard, and this section does not apply.' \
-  "…which holds nothing to a standard when the guidance names none"
-hasF "$TMP/demo.standard" 'read the standard at the reviewed commit' "…reads the standard at the reviewed commit"
-hasF "$TMP/demo.standard" 'Capture each screen and message in each state the guidance names for it' \
-  "…captures each screen and message the change alters in each state the guidance names"
+hasF "$TMP/demo.reads" 'A rig can also name its design and writing standards there, and the states to capture for each screen or message.' \
+  "the rig's guidance for the demo check can name its standards and the states to capture"
+hasF "$TMP/demo.need" 'any change to what a screen renders settles need, whatever its size.' \
+  "under a standard, any change to what a screen renders settles need, whatever its size"
+hasF "$TMP/demo.need" "as the section Review against the rig's standards says." \
+  "…and the need decision points at the section that does the review"
+awk '/^### Review against the rig.s standards$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.standard"
+[ -s "$TMP/demo.standard" ] && ok "the demo method has a section that reviews against the rig's standards" \
+  || bad "the demo method has a section that reviews against the rig's standards"
+hasF "$TMP/demo.standard" 'A rig'"'"'s guidance, its `docs/review-demo.md`, can name a design standard, a writing standard, or both.' \
+  "…which a rig opts into through its guidance"
+hasF "$TMP/demo.standard" 'If the guidance names neither, skip this section.' \
+  "…and which the check skips when the guidance names no standard"
+hasF "$TMP/demo.standard" 'read each named standard at the reviewed commit' "…reads each standard at the reviewed commit"
+hasF "$TMP/demo.standard" 'through the screen'"'"'s own source or through a part it shows, such as a component, a style or its words.' \
+  "…counts a screen as changed through a component, a style or its words"
+hasF "$TMP/demo.standard" 'list the screens the guidance names for such a change. If it names none, list every screen that shows the part.' \
+  "…takes a shared part's screens from the guidance, otherwise every screen that shows it"
+hasF "$TMP/demo.standard" 'The required states of a screen or message are the ones the guidance names for it' \
+  "…requires each state the guidance names"
+hasF "$TMP/demo.standard" 'A changed screen also needs the state that shows the change.' \
+  "…and a changed screen also in the state that shows the change"
+hasF "$TMP/demo.standard" 'Capture each message as the section Show each message says.' \
+  "…captures each message by its existing method"
+hasF "$TMP/demo.standard" 'Deliver each capture on its own, in a PNG named for the screen or message and the state' \
+  "…delivers each capture on its own, in a PNG named for what it shows"
+hasF "$TMP/demo.standard" 'If a limit outside the change stops a capture, that is not a finding and it does not block.' \
+  "…does not block on a limit outside the change"
+hasF "$TMP/demo.standard" 'Name in the verdict each screen, message or state you could not capture, and what stopped it.' \
+  "…and names what it could not capture in the verdict"
+hasF "$TMP/demo.standard" 'If the change itself makes a capture fail, that failure is a finding.' \
+  "…but a failure the change causes is a finding"
+hasF "$TMP/demo.standard" 'Design rules cover each screen. Writing rules cover the words on each screen and in each message.' \
+  "…applies design rules to screens, and writing rules to the words of screens and messages"
 hasF "$TMP/demo.standard" 'Read the words as the person the screen or message is for reads them' \
   "…reads the words as the person the screen or message is for reads them"
-hasF "$TMP/demo.standard" 'A departure is a finding against the change when the change brings it, and also when it is already on a screen or message the change alters' \
-  "…makes a departure the change brings, or leaves on what it alters, a finding"
-hasF "$TMP/demo.standard" "the standard's rule it departs from" "…that names the standard's rule"
-hasF "$TMP/demo.standard" 'Its evidence is the capture that shows the departure' "…with the capture as its evidence"
-hasF "$TMP/demo.standard" 'it is one of this verdict'"'"'s findings and not a bug filed apart' \
-  "…which a departure already on a screen the change alters is too, not a bug filed apart"
+hasF "$TMP/demo.standard" 'knowing what that person knows, and knowing nothing of the change or its anchor.' \
+  "…knowing what that person knows, and nothing of the change"
+hasF "$TMP/demo.standard" 'A violation the change introduces is a finding. A violation already on a changed screen or message is also a finding' \
+  "…makes a violation the change introduces, or one already on a changed surface, a finding"
+hasF "$TMP/demo.standard" 'Both block approval, and both go in this verdict, not in a separate bug.' \
+  "…both of which block approval in this verdict"
+hasF "$TMP/demo.standard" 'File a violation on a screen or message the change does not alter as a separate bug' \
+  "…and files one on an unchanged surface as a separate bug"
+hasF "$TMP/demo.standard" "the rule, in the standard's words, and where the standard states it" "…that names the rule and where it stands"
+hasF "$TMP/demo.standard" 'the screen or message, and the state' "…the screen or message, and the state"
+hasF "$TMP/demo.standard" 'what is wrong, and what would meet the rule' "…what is wrong and what would meet the rule"
+hasF "$TMP/demo.standard" 'its evidence: the capture that shows the problem, by the name of its PNG' "…with the capture as its evidence"
+hasF "$TMP/demo.standard" 'its `locus`: the file and the component, template or style that draws the part that is wrong' \
+  "…and the source as its locus"
 awk '/^## What blocks$/ {f = 1; next} f && /^## / {exit} f' "$DEMO" > "$TMP/demo.blocks"
-hasF "$TMP/demo.blocks" "departing from one of the standard's rules is a finding against the change too" \
-  "a departure from the rig's standard blocks"
-hasF "$TMP/verdict.demo" "**Delivered, and it shows a departure from the rig's standard.** Request changes" \
-  "the demo verdict requests changes on a departure from the rig's standard"
-hasF "$TMP/verdict.demo" 'names the standard, each screen and message it held to it and in which states' \
-  "…and names the standard and each screen and message it held to it"
-hasF "$ROOT/skills/review-pm/SKILL.md" "whether a screen or message meets the rig's standard, are not your call" \
-  "the pm method leaves the rig's standard to the demo check"
+hasF "$TMP/demo.blocks" 'a violation on a changed screen or message is also a finding against the change, whether the change introduced it or it was already there.' \
+  "a violation of the rig's standard blocks, whether the change introduced it or not"
+hasF "$TMP/demo.blocks" 'or the capture tools may be unable to reach a required state.' \
+  "a required state the capture tools cannot reach does not block"
+hasF "$TMP/verdict.demo" "**Delivered, and it shows a violation of the rig's standard.** Request changes" \
+  "the demo verdict requests changes on a violation of the rig's standard"
+hasF "$TMP/verdict.demo" 'If the rig names a standard, approve only when every capture meets it.' \
+  "…approves under a standard only when every capture meets it"
+hasF "$TMP/verdict.demo" 'lists each screen and message you checked against it, in which states, and each screen, message or state you could not check, with what stopped it.' \
+  "…and lists what it checked against the standard and what it could not"
+hasF "$DEMO" 'The page renders at 1280 by 900 by default.' "a page's capture size has a stated default"
+hasF "$DEMO" 'line can name another size, such as `390x844`, or a device the engine knows by name' \
+  "…which the script's Device line can change"
+hasF "$DEMO" 'A `resize <width>x<height>` step changes the size from that step on.' "…as a resize step can"
+hasF "$ROOT/skills/review-pm/SKILL.md" "whether a visual proves its claim and whether a screen or message meets the rig's standards." \
+  "the pm method leaves the rig's standards to the demo check"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

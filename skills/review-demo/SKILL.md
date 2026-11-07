@@ -10,10 +10,9 @@ The demo check decides whether a change needs a visual to be understood, and
 delivers the right one when it does. Need comes first: would a reviewer
 understand this change better by seeing it than by reading the diff? Modality
 comes second: what is the cheapest visual that shows it? When no visual helps,
-the check approves with a one-line note and attaches nothing. Where a rig holds
-its screens and messages to a standard of its own, for how the screens look or
-how their words read, the check also holds each one the change alters to that
-standard.
+the check approves with a one-line note and attaches nothing. If the rig's
+guidance names design or writing standards, the check also reviews changed
+screens and messages against them.
 
 This check holds the specialist stance: load `gc-toolkit.specialist-stance`
 before you judge. This file is the visual lens. Whether the change is correct
@@ -27,9 +26,9 @@ The anchor `<anchor_bead>` for what the change is for, then the diff at
 draft PR, `<review_pr_url>`, and its preview where the rig's host deploys one.
 The rig's guidance for this check, the reviewed commit's `docs/review-demo.md`,
 which the review formula printed when the commit carries one: a rig names its
-own visual surfaces there, how to serve its app for a capture, how a run of its
-app shows the messages it sends, and the standard it holds its screens and
-messages to, when it keeps one, with the states a capture shows a screen in.
+own visual surfaces there, how to serve its app for a capture, and how a run of
+its app shows the messages it sends. A rig can also name its design and writing
+standards there, and the states to capture for each screen or message.
 
 ### When it runs
 
@@ -74,10 +73,9 @@ A message the change adds or alters settles need the same way, whatever the
 check decides for the change's screens: the check shows each one, as the
 section Show each message says.
 
-Where the rig's guidance names a standard for how its screens look or for their
-words, a change that alters what a screen renders settles need too, whatever
-its size: the check captures each screen the change alters, as the section Hold
-each one to the rig's standard says.
+If the rig's guidance names a design or writing standard, any change to what a
+screen renders settles need, whatever its size. Capture each changed screen as
+the section Review against the rig's standards says.
 
 When no visual helps, approve with a one-line note that says why, attach
 nothing, and record `--visual none`.
@@ -183,14 +181,15 @@ reports whether the `gh` it needs is present.
   For a page, write the script as you would for a video
   (`gc-toolkit.gc-demo-script`). Its steps drive the app to the state, the
   capture is the state the last step leaves, and the app target is the one a
-  video takes. The page renders at 1280 by 900 unless the script's
-  `**Device:**` line names another size, such as `390x844`, or a device the
-  engine knows by name, such as `iPhone 15`, and a `resize <width>x<height>`
-  step changes the size from that step on. `demo-screenshot.sh` adds what the
-  engine lacks for a `--serve` command. It puts the port `--port` names in the
-  command's `$PORT`, and it turns `--port 0` into a free port first, so two
-  screenshots side by side each get a server of their own. With no `--port`, the
-  command gets no `$PORT` and the engine waits on 5173, as for a video.
+  video takes. The page renders at 1280 by 900 by default. The script's
+  `**Device:**` line can name another size, such as `390x844`, or a device the
+  engine knows by name, such as `iPhone 15`. A `resize <width>x<height>` step
+  changes the size from that step on.
+  `demo-screenshot.sh` adds what the engine lacks for a `--serve`
+  command. It puts the port `--port` names in the command's `$PORT`, and it
+  turns `--port 0` into a free port first, so two screenshots side by side each
+  get a server of their own. With no `--port`, the command gets no `$PORT` and
+  the engine waits on 5173, as for a video.
   `--selector <css>` captures one element instead of the viewport, and
   `--full-page` captures the whole page. For a terminal, the engine types the
   command at a bash prompt in a terminal of its own, whose shell starts in
@@ -257,50 +256,56 @@ and check that it holds the whole message.
 Deliver each message on its own, in a PNG named for it, beside the clip or the
 screenshot of any screen the change alters.
 
-### Hold each one to the rig's standard
+### Review against the rig's standards
 
-A rig's guidance can name a standard: a page of the rig's that says how its
-screens look, how the words of its screens and messages read, or both. Where the
-guidance names none, the check holds nothing to a standard, and this section
-does not apply.
+A rig's guidance, its `docs/review-demo.md`, can name a design standard, a
+writing standard, or both. A design standard says how the rig's screens should
+look. A writing standard says how the words on its screens and in its messages
+should read. If the guidance names neither, skip this section.
 
-Where it names one, read the standard at the reviewed commit, in `<worktree>`,
-before you capture. Then capture each screen the change alters, whether the diff
-changes the screen's own source or a part the screen shows, such as a
-component, a style or its words. Show each message the change adds or alters, as
-the section Show each message says. When the change alters a part that many
-screens show, such as a theme, capture the screens the guidance names for such a
-change, and where it names none, each screen that shows the part. Capture each
-screen and message in each state the guidance names for it, such as a width, a
-light or dark theme, or a dialog the change opens, and a screen also in the
-state that shows the change. The guidance says how a script reaches each state.
-Deliver each capture on its own, in a PNG named for the screen or message and
-the state, so the evidence for every finding is on the PR.
+If it names a standard, work through these steps in order.
 
-Judge each capture against every rule of the standard that bears on what it
-shows: a standard for how screens look holds each screen, and a standard for
-words holds the words of each screen and each message. Read the words as the
-person the screen or message is for reads them: at that point in what they are
-doing, knowing what that person knows, and knowing nothing of the change or its
-anchor. Words that state every fact the change claims can still depart from how
-the standard says words read, and that departure is a finding like any other.
-
-A departure is a finding against the change when the change brings it, and also
-when it is already on a screen or message the change alters, because the check
-holds each screen and message the change alters whole, as the change ships it.
-Such a departure is this diff's to fix, so it is one of this verdict's findings
-and not a bug filed apart. A departure on a screen or message the change does
-not alter is not this change's, and you file it as the review formula files what
-is real but not this diff's. Each finding names the screen or message and the
-state, and the standard's rule it departs from, in the standard's words, with
-the place in the standard that holds it. It says what departs and what would
-meet the rule. Its evidence is the capture that shows the departure, by the name
-of its PNG, and its `locus` is the file and the component, template or style
-that draws the part that departs.
-
-A state the guidance names that no capture here can reach is not a finding. The
-verdict names each screen, message and state the check could not hold to the
-standard, and what stopped it.
+1. **Read the standards.** Before you capture anything, read each named standard
+   at the reviewed commit, in `<worktree>`.
+2. **List what to capture.** List each changed screen, each message the change
+   adds or alters, and the states to capture each one in.
+   - A screen has changed when the diff alters what it renders, through the
+     screen's own source or through a part it shows, such as a component, a
+     style or its words.
+   - When the change alters a part that many screens show, such as a theme, list
+     the screens the guidance names for such a change. If it names none, list
+     every screen that shows the part.
+   - The required states of a screen or message are the ones the guidance names
+     for it, such as a width, a light or dark theme, or a dialog the change
+     opens. A changed screen also needs the state that shows the change.
+3. **Capture each one in each state.** The guidance says how a script reaches
+   each state. Capture each message as the section Show each message says.
+   Deliver each capture on its own, in a PNG named for the screen or message and
+   the state, so the evidence for every finding is on the PR. If a limit outside
+   the change stops a capture, that is not a finding and it does not block. Name
+   in the verdict each screen, message or state you could not capture, and what
+   stopped it. If the change itself makes a capture fail, that failure is a
+   finding.
+4. **Check each capture against the standards.** Apply every rule that covers
+   what the capture shows. Design rules cover each screen. Writing rules cover
+   the words on each screen and in each message. Read the words as the person
+   the screen or message is for reads them: at that point in their task, knowing
+   what that person knows, and knowing nothing of the change or its anchor.
+   Words can state every fact the change claims and still violate the writing
+   standard. That violation is a finding like any other.
+5. **Report what you find.** A violation the change introduces is a finding. A
+   violation already on a changed screen or message is also a finding. The
+   change ships that screen or message, so the violation is this change's to
+   fix. Both block approval, and both go in this verdict, not in a separate bug.
+   File a violation on a screen or message the change does not alter as a
+   separate bug, as the review formula says for what is real but not this
+   diff's. Each finding gives:
+   - the rule, in the standard's words, and where the standard states it;
+   - the screen or message, and the state;
+   - what is wrong, and what would meet the rule;
+   - its evidence: the capture that shows the problem, by the name of its PNG;
+   - its `locus`: the file and the component, template or style that draws the
+     part that is wrong.
 
 ### Judge what it shows
 
@@ -322,16 +327,15 @@ with a placeholder left unfilled, is a finding against the change. Request
 changes, and name the visual as the evidence. A change that fails is that
 finding, and the clip or the screenshot is its evidence to deliver.
 
-Where the rig's guidance names a standard, a capture that shows a screen or
-message the change alters departing from one of the standard's rules is a
-finding against the change too, whether the change brought the departure or left
-it there. Request changes, and name the capture as the evidence.
+If the rig's guidance names a standard, a violation on a changed screen or
+message is also a finding against the change, whether the change introduced it
+or it was already there. Request changes, and name the capture as the evidence.
 
 A capture that cannot run for a reason outside the change is not a finding. The
 capture toolchain may not resolve, the rig may have no app to serve, no preview
-may deploy, the surface may show only what live state produces, or a state the
-guidance names may be one no capture here reaches. Each of those is the note
-below, and it never blocks.
+may deploy, the surface may show only what live state produces, or the capture
+tools may be unable to reach a required state. Each of those is the note below,
+and it never blocks.
 
 ## The verdict
 
@@ -361,28 +365,28 @@ repo-artifact's sentence also says where the visual came from, as its delivery
 comment does. A delivered screenshot's sentence also says what it was rendered
 from: the reviewed commit, and any fixture that stands in for live data. A
 verdict on a change that adds or alters a message names each message it shows,
-by its subject, and each one it could not show, with what stopped it. A verdict
-under a rig's standard names the standard, each screen and message it held to
-it and in which states, and each one it could not hold to it, with what stopped
-it.
+by its subject, and each one it could not show, with what stopped it. If the
+rig names a standard, the verdict names it. The verdict also lists each screen
+and message you checked against it, in which states, and each screen, message or
+state you could not check, with what stopped it.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
 - **Delivered, and it shows the change working.** Approve with its modality.
-  Under a rig's standard, approve only when each capture also meets it.
+  If the rig names a standard, approve only when every capture meets it.
 - **Delivered, and it shows the change failing.** Request changes with its
   modality. The finding goes in `findings.json`.
-- **Delivered, and it shows a departure from the rig's standard.** Request
-  changes with its modality. Each departure is a finding in `findings.json` that
-  names the standard's rule, with the capture as its evidence.
+- **Delivered, and it shows a violation of the rig's standard.** Request changes
+  with its modality. Each violation is a finding in `findings.json` that names
+  the rule, with the capture as its evidence.
 - **Delivered as a fallback.** Judge what it shows the same way. Record the
   modality delivered with `--visual` and the one that fits with
   `--visual-fallback-from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
   say that a visual is warranted and what stopped it: a surface none of these
-  captures renders, a surface only live state produces, a state the rig's
-  guidance names that no capture here reaches, a capture toolchain that does not
-  resolve, or no running app to capture.
+  captures renders, a surface only live state produces, a required state the
+  capture tools cannot reach, a capture toolchain that does not resolve, or no
+  running app to capture.
   This never blocks. A rework child cannot build the city's capture capability,
   and a red lane would keep the PR in draft, away from the human who would judge
   it.

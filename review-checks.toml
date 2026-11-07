@@ -53,7 +53,7 @@ purpose = "Which specialist checks does this diff warrant?"
 phase = "pre-open"
 
 [checks.demo]
-purpose = "Does this change need a visual to be understood, is the right one delivered, and does each screen and message it alters meet the rig's standard, where the rig names one?"
+purpose = "Does this change have the visual evidence it needs, and do its screens and messages meet any standards the rig names?"
 phase = "open-as-draft"
 
 [checks.arch]
