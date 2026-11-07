@@ -24,7 +24,9 @@
 #   - a parent that does not read files nothing (exit 1);
 #   - a create that fails, or whose reply names no bead, prints no id and says
 #     to look for the epic before filing it again (exit 4);
-#   - with no gctk binary, the bridge refuses (exit 1) and files nothing.
+#   - with no gctk binary, the bridge refuses (exit 1) and files nothing;
+#   - the work skill gives this create with the contract's floor fields, and
+#     the sitting's record step and the checkpoint's re-aim name the keys.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -163,6 +165,22 @@ GCTK_BIN=none "$SUT" create "Epic: x" --hypothesis "y" >/dev/null 2>"$TMP/err"; 
 eq "$RC" 1 "GCTK_BIN=none exits 1"
 has "$(cat "$TMP/err")" "no binary" "...and says there is no binary"
 eq "$(ncreates)" 0 "...and nothing is created"
+
+echo "# the skills give this create and name the keys"
+# pin <file> <text> <name>: <text> sits in <file>, its line breaks read as
+# spaces so a sentence that wraps still matches.
+pin() {
+    if grep -qF -- "$2" < <(tr '\n' ' ' < "$ROOT/$1" | tr -s ' '); then ok "$3"; else bad "$3 (no '$2' in $1)"; fi
+}
+pin skills/work/SKILL.md '"$(gc <binding> scripts-dir)/epic.sh" create' "the work skill files an epic through epic.sh"
+for f in --hypothesis --handle --boundaries; do
+    pin skills/work/SKILL.md "$f \"" "...giving $f"
+done
+pin skills/work/SKILL.md '"Epics are mortal"' "...and says an area with no hypothesis that can be answered is not an epic"
+for k in epic_hypothesis epic_handle epic_boundaries epic_closure_condition epic_indicators; do
+    pin skills/converse-settle/SKILL.md "--set-metadata $k=" "the settle step records $k in its key"
+done
+pin skills/converse-epic-checkpoint/SKILL.md '--set-metadata epic_hypothesis=' "the checkpoint re-aims a contract field in its key"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

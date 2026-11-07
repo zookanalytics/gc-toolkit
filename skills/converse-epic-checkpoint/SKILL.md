@@ -227,11 +227,12 @@ still holds it. Settle what the refusal names and run the line again. Never
 force a close.
 
 **4. On continue or shift, aim the next body of work.** On a shift, first
-re-aim each contract field the ruling changes
-(`gc bd update "$EPIC" --set-metadata <field>="<its new text>"`), and each
-Delivery still open whose aim the shift changes. A Delivery's aim is the
-`Aim:` line its description opens with, so read the description, then write it
-whole with the new line:
+re-aim each contract field the ruling changes, in its own key
+(`gc bd update "$EPIC" --set-metadata epic_hypothesis="<its new text>"`, and
+the same way `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
+`epic_indicators`), and each Delivery still open whose aim the shift changes.
+A Delivery's aim is the `Aim:` line its description opens with, so read the
+description, then write it whole with the new line:
 `gc bd update <delivery> --description "<the description, with its new Aim: and Done when: lines>"`.
 
 When the ruling aims a next Delivery, list the epic's open Deliveries first.

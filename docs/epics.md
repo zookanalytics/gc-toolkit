@@ -174,8 +174,13 @@ write the contract up front: create-time classification proposing an epic's
 hypothesis, boundaries, and closure condition for the operator to confirm,
 recorded as a dated decision on the epic, and a periodic scope-reading audit
 re-reading the epic against completed work and proposing updates in place.
-Neither is built. Today the operator records the contract on the epic, and
-[epic stewardship](epic-stewardship.md) enforces only the ruling that closes it.
+Neither is built. Today the contract is recorded on the epic as the operator
+states or confirms it, in the create that files the epic and in a later write
+for each field stated after it. That create
+([`gctk epic create`](../services/gctk/internal/cli/epic.go), which the `work`
+skill gives) refuses an epic with no hypothesis unless the epic's parent is an
+epic, which makes it a Delivery. [Epic stewardship](epic-stewardship.md)
+enforces the ruling that closes an epic.
 
 ## Deliveries and Epic Checkpoints
 

@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for, such as filing new work or a follow-up in the right rig and under the right parent or epic, routing, slinging or dispatching a bead to a pool on a formula, releasing a held bead, assigning it to an agent, choosing a formula or taking a recommended formula, stopping or redirecting work in flight, or closing or retiring a duplicate or a bead that needs no work. Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
+description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for, such as filing new work, an epic or a follow-up in the right rig and under the right parent or epic, routing, slinging or dispatching a bead to a pool on a formula, releasing a held bead, assigning it to an agent, choosing a formula or taking a recommended formula, stopping or redirecting work in flight, or closing or retiring a duplicate or a bead that needs no work. Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -100,6 +100,40 @@ gc bd create "Delivery: <what it lands>" -t epic --parent <epic> \
   -d "Aim: <the portion of the epic's hypothesis its landing tests>
 Done when: <what lands>" --json
 ```
+
+An epic is filed with its contract (`docs/epics.md`, "The contract an epic
+carries"), each field in its own key, through the writer below. The fields are
+the operator's, so give a field only as the operator stated or confirmed it,
+and leave out one nobody stated. The one an epic cannot go without is its
+hypothesis: one sentence that says for whom, what changes and the signal that
+shows it worked. An area with no hypothesis that can be answered is not an
+epic, and its work is ordinary flow (`docs/epics.md`, "Epics are mortal"). A
+Delivery carries an `Aim:` line instead, and is filed as above.
+
+Before you put a hypothesis you drafted to the operator, test its signal.
+Could it still come out wrong once the work lands? A count the work moves by
+itself, such as lines removed or members closed, cannot, so it is a leading
+indicator and not the signal. Can it be read soon after the work lands,
+without waiting for data that does not exist yet? When you ask the operator to
+confirm the sentence, quote it.
+
+The writer refuses an epic whose parent is not an epic when it has no
+hypothesis, and files nothing. It prints the new epic's id:
+
+```bash
+"$(gc <binding> scripts-dir)/epic.sh" create "<title>" \
+  --hypothesis "<for whom, what changes, and the signal that shows it worked>" \
+  --handle "<three to five words>" \
+  --boundaries "<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  -d "<what the epic is about>"
+```
+
+`--closure-condition` and `--indicators` record the rest of the contract when
+it is stated, and `--parent` and `--rig` place the epic as they place any bead.
+A field stated after the create is recorded in its key:
+`gc bd update <epic> --set-metadata epic_hypothesis="<the sentence>"`, and the
+same way `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
+`epic_indicators`.
 
 ## Send a bead to a pool on a formula
 

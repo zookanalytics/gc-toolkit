@@ -45,9 +45,13 @@ gc bd update <epic> --set-metadata epic_ruling=close \
 The fields are registered in
 [`lifecycle/lifecycle.toml`](../lifecycle/lifecycle.toml)
 `[metadata.epic_stewardship]`. They are the operator's: stamped when the
-operator confirms a contract field or rules, the dated decision
-[epics.md](epics.md) calls for. No pack script writes them; the finalize gate and
-the doctor check read the hypothesis, the ruling, and its reason.
+operator states or confirms a contract field or rules, the dated decision
+[epics.md](epics.md) calls for. The contract fields the operator states when an
+epic is filed land in the create itself, which
+[`gctk epic create`](../services/gctk/internal/cli/epic.go) makes. It refuses an
+epic with no hypothesis unless the epic's parent is an epic, which makes it a
+Delivery. No pack script writes the ruling's fields. The finalize gate and the
+doctor check read the hypothesis, the ruling, and its reason.
 
 | Field | Meaning |
 |---|---|
