@@ -383,7 +383,7 @@ esac
         say 6000 "gc intake: subject ${SUBJECT:-?} — first reaction filed; it writes the card and puts the topic to you if it needs you"
     elif [ -n "$CONV" ]; then
         drop_draft
-        say 6000 "gc intake: subject ${SUBJECT:-?} — conversation $CONV waits in your queue · prefix+b to engage"
+        say 6000 "gc intake: subject ${SUBJECT:-?} — conversation $CONV waits in your queue · engage it from the Helm page"
     elif [ -n "$SUBJECT" ]; then
         drop_draft
         say 6000 "gc intake: subject $SUBJECT — $(printf '%s\n' "$OUT" | grep -v '^[[:space:]]*$' | tail -1)"

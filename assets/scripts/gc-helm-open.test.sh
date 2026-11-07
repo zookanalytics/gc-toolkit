@@ -734,7 +734,7 @@ grep -qi 'cannot index object' <<< "$ERR" \
 # --- (RIGTIMEOUT) the rig-enumeration bound is the pack's one, and tunable -----
 # `gc rig list` can take seconds to answer in a loaded city, and a bound it
 # overruns makes open exit 3 having filed nothing. That is harmless for the
-# board picker, but operator-intake.sh's topic path creates the subject bead
+# board's open route, but operator-intake.sh's topic path creates the subject bead
 # before open runs, so a timeout there leaves that bead with no conversation.
 # enumerate_rigs reads through rig-map.sh, bounded by GC_RIG_LIST_TIMEOUT.
 mkdir -p "$TMP/slowbin"

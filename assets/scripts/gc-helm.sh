@@ -2,20 +2,21 @@
 # gc-helm.sh — the helm verbs: the WRITE verbs, and the read-only resolve and
 # unplaced.
 # Job: write the operator-facing state the helm board renders, and the
-# operator's steering moves. The board itself is `helm-svc board`
-# (services/helm); this script renders nothing.
+# operator's steering moves. The board itself is helm-svc's web page
+# (services/helm), and `helm-svc board --json` prints its rows; this script
+# renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
 # write verbs open, engage, react, takeaway, park, priority, dismiss, handback,
 # accept, and the read-only resolve and unplaced. open, engage and react take a
 # <subject> (a bead id, a PR number or URL, or a superseded id) and resolve it to
 # the live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
-# Callers: tmux-pick-helm.sh (engage), operator-intake.sh (react, resolve,
-# open), helm-svc's POST routes via GC_HELM_OPEN_TOOL (open, engage, accept,
-# dismiss — open's stderr/stdout sentences are parsed by
-# services/helm/internal/server, guarded by open_parity_test.go), converse
-# (takeaway, handback) and the proactive worker (takeaway), the placement
-# sitting (unplaced), operators by hand (park, priority).
+# Callers: operator-intake.sh (react, resolve, open), helm-svc's POST routes
+# via GC_HELM_OPEN_TOOL (open, engage, accept, dismiss — open's stderr/stdout
+# sentences are parsed by services/helm/internal/server, guarded by
+# open_parity_test.go), converse (takeaway, handback) and the proactive worker
+# (takeaway), the placement sitting (unplaced), operators by hand (park,
+# priority).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable, no city root or flock for Accept's lock — each failure names
 # its own operator move),
@@ -4011,8 +4012,8 @@ engage_new_subject_cleanup() {
 # carries. The lens brief is the new conversation's ask, which a sitting on any
 # model reads when it claims the conversation, so the skill rides it across a
 # restart with no per-skill template. --no-attach spawns and binds without
-# attaching — the board picker uses it, then the operator attaches from the
-# session picker. Attached (the default), the operator lands in the sitting
+# attaching — the board's engage route uses it, then the operator attaches from
+# the session picker. Attached (the default), the operator lands in the sitting
 # directly.
 cmd_engage() {
     bead=""; engage_model="opus"; engage_reason=""; engage_attach=1
@@ -4608,8 +4609,8 @@ cmd_engage() {
     # `gc session new` resolves a bare template through currentRigContext, which
     # reads GC_DIR (or cwd), NOT the GC_RIG exported above. The converse
     # templates are rig-scoped, with no city-scoped bare converse-<model>, so
-    # from the city root (where the tmux board picker runs) the bare name matches
-    # no rig and nothing spawns. Point GC_DIR at the subject's rig so the name
+    # from the city root (where helm-svc's engage route runs it) the bare name
+    # matches no rig and nothing spawns. Point GC_DIR at the subject's rig so the name
     # resolves to that rig's template.
     #
     # gc says WHY a spawn failed only on stderr (template not found in this rig,
