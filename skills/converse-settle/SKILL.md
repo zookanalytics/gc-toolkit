@@ -35,6 +35,7 @@ sharpened it, is a ruling on the epic, a continue, and the first ruling ends the
 sentence's first draft (`docs/epics.md`, "The contract an epic carries"). So a
 sitting that hears it is an Epic Checkpoint, and the `converse-epic-checkpoint`
 skill records the ruling.
+
 When the notes have grown past a quick read, append a current-state block too.
 The newest one is the one in force, and step 4 primes from it:
 ```bash

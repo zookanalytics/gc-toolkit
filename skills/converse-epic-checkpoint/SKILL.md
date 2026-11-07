@@ -112,7 +112,7 @@ each costs. Above it sit the measures with their commits, the grades the
 operator owes, each landed Delivery's aim against what it showed, and the open
 work. On a close, the framing asks the operator what becomes of each piece of
 open work. When the hypothesis is a first draft, the framing says so, quotes
-it, says what the test of its signal found, and quotes the sharper sentence you
+it, says what the test of its signal found, and quotes any sharper sentence you
 propose, so that a yes approves words the operator has read.
 
 ## The writes, in order
