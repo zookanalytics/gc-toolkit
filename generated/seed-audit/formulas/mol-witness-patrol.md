@@ -6,16 +6,13 @@ pours):
   gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
-The pour passes the binding prefix and nothing else, so the cycle wait is the
-formula's default as it stood when this wisp was poured. It is rendered here
-for the step that reads it:
-
-  event_timeout={{event_timeout}}
-
 Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
 pour the next iteration. Steps are not materialized; read each description
 as you reach it. Never exit the wisp from an intermediate step — continue,
-or jump to next-iteration to pour and burn.
+or jump to next-iteration to pour and burn. A pass ends at next-iteration,
+which defers the next wisp an hour and ends the turn, and the controller's
+reassignment restart runs the next pass in a fresh session once the hour has
+passed.
 
 Scope: the witness recovers work whose owner died, files ONE warrant bead
 for the dog pool when an owner is alive but wedged, files a bug bead that
@@ -49,10 +46,9 @@ their tests; keep markers, keep them backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery and dog addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds. (default=gc-toolkit.)
-  {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured. (default=600)
 
 Steps (4):
   ├── mol-witness-patrol.check-inbox: Check mail
   ├── mol-witness-patrol.recover-orphaned-beads: Recover orphaned work beads [needs: mol-witness-patrol.check-inbox]
   ├── mol-witness-patrol.check-refinery: Check refinery queue health [needs: mol-witness-patrol.recover-orphaned-beads]
-  └── mol-witness-patrol.next-iteration: Pour next iteration and loop [needs: mol-witness-patrol.check-refinery]
+  └── mol-witness-patrol.next-iteration: Pour the next iteration, defer it an hour and end the turn [needs: mol-witness-patrol.check-refinery]

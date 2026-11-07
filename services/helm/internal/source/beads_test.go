@@ -79,9 +79,9 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	//                            does. The set is spelled out here, not read from
 	//                            the source, so the fake pins it to bd-lib.sh's.
 	//   Statuses=the same live set, keyed on anchor_bead's presence
-	//                            the IN-FLIGHT read (readInFlight), a live merge
-	//                            anchor's in-flight set as `gctk pr-status
-	//                            derive` reads it.
+	//                            the IN-FLIGHT read prstatus.Read asks for
+	//                            (libraryPRStore.Anchored), a live merge
+	//                            anchor's in-flight set.
 	//   ExcludeStatus=[closed], keyed on issue_type=gate
 	//                            the live HUMAN GATE read, which reads every gate
 	//                            that still holds the way bd-lib.sh's
@@ -3171,11 +3171,14 @@ func TestMergeAnchorUnreadableEdgesStayUnknown(t *testing.T) {
 	}
 }
 
-// holdingGateIDs lists the gates a walk reached for an anchor, in its order.
+// holdingGateIDs lists the gates a walk reached for an anchor, in its order: the
+// gates among its PR's facts, none when the PR has no answer.
 func holdingGateIDs(a board.Anchor) []string {
 	ids := []string{}
-	for _, g := range a.HoldingGates {
-		ids = append(ids, g.ID)
+	if a.PR != nil {
+		for _, g := range a.PR.Gates {
+			ids = append(ids, g.ID)
+		}
 	}
 	return ids
 }
@@ -3185,11 +3188,11 @@ func blocksEdge(far *beads.Issue) *beads.IssueWithDependencyMetadata {
 	return &beads.IssueWithDependencyMetadata{Issue: *far, DependencyType: "blocks"}
 }
 
-// TestMergeAnchorHoldingGatesAreWalked: a live merge anchor carries the open human
-// gates that hold it, through the `blocks` edges of what it waits on, read by the
-// walk the PR labels read, with each gate's own age and question. A closed
-// blocker ends a path, a closed gate holds nothing, and a conversation, which
-// tracks its bead, is no edge the walk follows.
+// TestMergeAnchorHoldingGatesAreWalked: a live merge anchor's PR facts carry the
+// open human gates that hold it, through the `blocks` edges of what it waits on,
+// read by the walk the PR labels read, and its reasons carry each gate's own age
+// and question. A closed blocker ends a path, a closed gate holds nothing, and a
+// conversation, which tracks its bead, is no edge the walk follows.
 func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 	const prMeta = `{"merge_result":"pull_request","pr_number":"79"}`
 	pr := func() *beads.Issue { return issue("tk-pr", "an open PR", "task", 2, testNow, prMeta) }
@@ -3250,17 +3253,17 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 	t.Run("the gate comes back whole", func(t *testing.T) {
 		_, anchor := gatherPreOpen(t, store(map[string][]*beads.IssueWithDependencyMetadata{
 			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}}), "tk-pr")
-		if len(anchor.HoldingGates) != 1 {
-			t.Fatalf("holding gates = %v, want one", anchor.HoldingGates)
+		if len(anchor.PRReasons) != 1 {
+			t.Fatalf("the PR's reasons = %v, want the one gate", anchor.PRReasons)
 		}
-		g := anchor.HoldingGates[0]
+		g := anchor.PRReasons[0]
 		if g.Title != "ask tk-g" || g.IssueType != "gate" || g.AwaitType != "human" || g.Status != "open" ||
 			!g.CreatedAt.Equal(testNow.Add(-48*time.Hour)) {
 			t.Errorf("gate = %+v, want its title, kind, status and age", g)
 		}
 	})
 
-	t.Run("a closed anchor walks nothing", func(t *testing.T) {
+	t.Run("a closed anchor reads nothing", func(t *testing.T) {
 		doneAt := testNow.Add(-time.Hour)
 		done := issue("tk-done", "landed", "task", 2, testNow, `{"merge_result":"merged"}`)
 		done.Status, done.ClosedAt = beads.StatusClosed, &doneAt
@@ -3269,8 +3272,8 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 			depsDown: map[string][]*beads.IssueWithDependencyMetadata{"tk-done": {blocksEdge(gate("tk-g"))}},
 		}
 		res, _ := gatherPreOpen(t, st, "tk-pr")
-		if i, ok := findAnchor(res, "tk-done"); ok && len(res.Anchors[i].HoldingGates) != 0 {
-			t.Errorf("a closed anchor carries gates %v", holdingGateIDs(res.Anchors[i]))
+		if i, ok := findAnchor(res, "tk-done"); ok && res.Anchors[i].PR != nil {
+			t.Errorf("a closed anchor carries PR facts %+v", *res.Anchors[i].PR)
 		}
 	})
 
@@ -3279,10 +3282,10 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}})
 		st.failDeps = map[string]error{"tk-rw": errors.New("dolt timeout")}
 		res, anchor := gatherPreOpen(t, st, "tk-pr")
-		if len(anchor.HoldingGates) != 0 {
-			t.Errorf("holding gates = %v, want none from a walk that failed", holdingGateIDs(anchor))
+		if anchor.PR != nil || len(anchor.PRReasons) != 0 {
+			t.Errorf("PR facts %v, reasons %v, want no answer from a walk that failed", anchor.PR, anchor.PRReasons)
 		}
-		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "holding-gates@") }) {
+		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "pr-status@") }) {
 			t.Errorf("partial=%v errors=%v, want the walk's failure noted", res.Partial, res.PartialErrors)
 		}
 		if len(anchor.Blockers) != 1 || anchor.WaitingUnknown {
@@ -3295,10 +3298,10 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 			"tk-pr": {blocksEdge(rework())}, "tk-rw": {blocksEdge(gate("tk-g"))}})
 		st.failIDs = map[string]error{"tk-g": errors.New("dolt timeout")}
 		res, anchor := gatherPreOpen(t, st, "tk-pr")
-		if len(anchor.HoldingGates) != 0 {
-			t.Errorf("holding gates = %v, want none from a walk that failed", holdingGateIDs(anchor))
+		if anchor.PR != nil {
+			t.Errorf("PR facts %+v, want no answer from a walk that failed", *anchor.PR)
 		}
-		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "holding-gates@") }) {
+		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "pr-status@") }) {
 			t.Errorf("partial=%v errors=%v, want the walk's failure noted", res.Partial, res.PartialErrors)
 		}
 	})
@@ -3317,8 +3320,8 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 			},
 		}
 		res, anchor := gatherPreOpen(t, st, "tk-pr")
-		if got := holdingGateIDs(anchor); len(got) != 0 {
-			t.Errorf("tk-pr's holding gates = %v, want none from a walk that did not finish", got)
+		if anchor.PR != nil {
+			t.Errorf("tk-pr's PR facts = %+v, want no answer from a walk that did not finish", *anchor.PR)
 		}
 		if len(anchor.Blockers) != len(wide) {
 			t.Errorf("tk-pr has %d blockers, want its own %d: its own edges read, so they stand", len(anchor.Blockers), len(wide))
@@ -3331,7 +3334,7 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 			t.Errorf("tk-pr2's holding gates = %v, want its own, whatever walk beside it passed its bound", got)
 		}
 		if !res.Partial || !slices.ContainsFunc(res.PartialErrors, func(e string) bool {
-			return strings.HasPrefix(e, "holding-gates@") && strings.HasSuffix(e, ": tk-pr")
+			return strings.HasPrefix(e, "pr-status@") && strings.HasSuffix(e, ": tk-pr")
 		}) {
 			t.Errorf("partial=%v errors=%v, want the note to name tk-pr", res.Partial, res.PartialErrors)
 		}
@@ -3398,14 +3401,14 @@ func TestMergeAnchorHoldingGatesAreWalked(t *testing.T) {
 	})
 }
 
-// TestMergeAnchorInFlightSetIsGathered: each live merge anchor carries its
-// in-flight set, the beads `gctk pr-status derive` counts for the PR labels:
-// every bead naming it in anchor_bead, any task_kind, at a live status. One read
+// TestMergeAnchorInFlightSetIsGathered: each live merge anchor's PR facts count
+// its in-flight set, the beads prstatus.Read counts for the PR labels too: every
+// bead naming it in anchor_bead, any task_kind, at a live status. One read
 // serves the pass, in the live pass only. So a PR whose merge pass recorded a
 // thread verdict reads merging with nothing held on the board, as it does on its
 // labels, while a validation pass the board shows no row for is in flight. A
-// read that fails is noted partial, and the board then counts the review row it
-// gathered.
+// read that fails is noted partial, and the PR then has no answer: its row
+// carries no PR phase or held value, whatever rows the board gathered for it.
 func TestMergeAnchorInFlightSetIsGathered(t *testing.T) {
 	at := testNow.Add(-time.Hour).Format(time.RFC3339)
 	threads := `{"merge_result":"pull_request","pr_number":"9","pr_posture":"approved@abc@` + at +
@@ -3428,13 +3431,11 @@ func TestMergeAnchorInFlightSetIsGathered(t *testing.T) {
 		reviewFixture("rv-gate", beads.StatusInProgress, `{"task_kind":"review","anchor_bead":"tk-gate"}`),
 		reviewFixture("fi-gone", beads.StatusOpen, `{"task_kind":"finding","anchor_bead":"tk-done"}`),
 	}
-	inFlight := func(a board.Anchor) []string {
-		var ids []string
-		for _, c := range a.InFlight {
-			ids = append(ids, c.ID+"/"+c.Status+"/"+c.Metadata["task_kind"])
+	inFlight := func(a board.Anchor) int {
+		if a.PR == nil {
+			return -1
 		}
-		slices.Sort(ids)
-		return ids
+		return a.PR.InFlightCount
 	}
 	pr := func(t *testing.T, b board.Board) board.Tile {
 		t.Helper()
@@ -3447,14 +3448,14 @@ func TestMergeAnchorInFlightSetIsGathered(t *testing.T) {
 
 	st := store(children...)
 	res, anchor := gatherPreOpen(t, st, "tk-pr")
-	if got, want := inFlight(anchor), []string{"fi-1/blocked/finding", "va-1/open/validation"}; !slices.Equal(got, want) {
-		t.Errorf("tk-pr in flight = %v, want %v: every live bead naming it, whatever its kind, and no closed one", got, want)
+	if got := inFlight(anchor); got != 2 {
+		t.Errorf("tk-pr in flight = %d, want 2: every live bead naming it, whatever its kind, and no closed one", got)
 	}
-	if i, ok := findAnchor(res, "tk-gate"); !ok || !slices.Equal(inFlight(res.Anchors[i]), []string{"rv-gate/in_progress/review"}) {
-		t.Errorf("tk-gate in flight = %v, want its in_progress review", inFlight(res.Anchors[i]))
+	if i, ok := findAnchor(res, "tk-gate"); !ok || inFlight(res.Anchors[i]) != 1 {
+		t.Errorf("tk-gate in flight = %d, want its in_progress review", inFlight(res.Anchors[i]))
 	}
-	if i, ok := findAnchor(res, "tk-done"); !ok || res.Anchors[i].InFlight != nil {
-		t.Errorf("a closed merge anchor gathers no in-flight set (found=%v)", ok)
+	if i, ok := findAnchor(res, "tk-done"); !ok || res.Anchors[i].PR != nil {
+		t.Errorf("a closed merge anchor reads no PR facts (found=%v)", ok)
 	}
 	var reads []beads.IssueFilter
 	for _, c := range st.calls {
@@ -3481,14 +3482,14 @@ func TestMergeAnchorInFlightSetIsGathered(t *testing.T) {
 	failing := store(reviewFixture("rv-1", beads.StatusOpen, `{"task_kind":"review","anchor_bead":"tk-pr"}`))
 	failing.failMeta = map[string]error{"anchor_bead": errors.New("in-flight unreadable")}
 	res, anchor = gatherPreOpen(t, failing, "tk-pr")
-	if anchor.InFlight != nil {
-		t.Errorf("a failed read gathers nothing: %v", inFlight(anchor))
+	if anchor.PR != nil {
+		t.Errorf("a failed read answers nothing: %+v", *anchor.PR)
 	}
-	if want := "in-flight@gc-toolkit: in-flight unreadable"; !res.Partial || !slices.Contains(res.PartialErrors, want) {
+	if want := "pr-status@gc-toolkit: in-flight unreadable"; !res.Partial || !slices.Contains(res.PartialErrors, want) {
 		t.Errorf("partial=%v errors=%v, want %q among them", res.Partial, res.PartialErrors, want)
 	}
-	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != board.PhaseMerging || tile.PRHeld != nil {
-		t.Errorf("with the read failed, the review row still counts: pr_phase=%q pr_held=%v, want merging and none", tile.PRPhase, tile.PRHeld)
+	if tile := pr(t, board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)); tile.PRPhase != "" || tile.PRHeld != nil {
+		t.Errorf("with the read failed, the PR has no answer: pr_phase=%q pr_held=%v, want neither", tile.PRPhase, tile.PRHeld)
 	}
 }
 

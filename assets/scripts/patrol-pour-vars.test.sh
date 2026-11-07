@@ -16,8 +16,9 @@
 #   (C) CHAIN. A refinery chain started under one check_set and
 #       default_merge_strategy default renders the new defaults on its next
 #       wisp once the formula defaults change, and the merge-push stamp
-#       (`check-set-normalize`) stamps the new check_set. A witness chain does
-#       the same for event_timeout. Every var the next-iteration pour names is
+#       (`check-set-normalize`) stamps the new check_set. A witness chain, whose
+#       formula declares only the var its startup pour passes, still pours and
+#       renders its next wisp. Every var the next-iteration pour names is
 #       read off the current wisp's rendered root, the surface the agent
 #       substitutes from. A CONTROL puts the forwarded vars back and shows the
 #       chain keeping the old values.
@@ -270,21 +271,10 @@ fi
 
 echo
 echo "== witness: chain =="
-chain witness 'event_timeout=600=300'
-eq "$(root_value "$NEXT" event_timeout)" "300" \
-  "witness: REGRESSION: the next wisp renders the changed event_timeout default"
-
-LIVE="$TMP/formulas/mol-witness-patrol.toml"
-sed "/gc bd mol wisp mol-witness-patrol /s/ --json / --var event_timeout='{{event_timeout}}' --json /" "$LIVE" > "$TMP/control.toml"
-if cmp -s "$LIVE" "$TMP/control.toml"; then
-  bad "witness: control did not re-add the forwarded var — the pour line changed shape, re-check the sed"
-else
-  extract patrol-wisp-pour "$TMP/control.toml" > "$TMP/control.sh"
-  substitute "$TMP/control.sh" "$FIRST" "$LIVE" >/dev/null
-  CONTROL="$(run_sh "$TMP/control.sh" "$FIRST")"
-  eq "$(root_value "$CONTROL" event_timeout)" "600" \
-    "witness: CONTROL: forwarding event_timeout keeps the first wisp's value past the default change"
-fi
+# The witness's formula declares binding_prefix alone, and its startup pour
+# passes it, so no default change can miss the chain. The chain must still pour
+# and render.
+chain witness
 
 echo
 echo "patrol-pour-vars: $PASS passed, $FAIL failed"

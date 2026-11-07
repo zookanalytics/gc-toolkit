@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { CitySignals, DrillPanel } from './drill';
 
@@ -16,6 +16,24 @@ import type { Board, PackBuild, Sitting, Tile } from './contract';
 // only re-reads the same bytes. This surface is pull-only by charter: it
 // refreshes in place and never notifies.
 const REFRESH_MS = 30_000;
+
+// How long the service serves one board from its cache, its defaultCacheTTL in
+// cmd/helm-svc/main.go. A city that sets GC_HELM_CACHE_TTL longer must raise
+// this to match, or a working page reads as stale.
+const BOARD_CACHE_MS = 45_000;
+
+// The age past which no poll has replaced the board. A board reaches this page
+// up to one cache window old, and a working page replaces it within one poll
+// and one gather, which the service cuts off at 30s (gatherTimeout in
+// internal/server/server.go). A board older than the cache window plus two
+// polls is therefore one this page has stopped replacing.
+const STALE_AFTER_MS = BOARD_CACHE_MS + 2 * REFRESH_MS;
+
+// How long one board read may stay unanswered before the page drops it. The
+// service cuts a gather off at 30s, so a read open twice that long is a
+// connection that will not answer. Dropping it shows the failure and frees the
+// next poll to ask again.
+const FETCH_TIMEOUT_MS = 60_000;
 
 // The board arrives as ONE ranked list, and every row carries its dependency
 // family in `tile.group_root` and the band it wants within that family in
@@ -61,6 +79,18 @@ function shortAge(stamp: string | undefined, now: number): string {
   const hours = Math.floor(mins / 60);
   if (hours < 48) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
+}
+
+// An age as a sentence says it, in the coarsest unit that still says how old.
+function ageWords(ms: number): string {
+  const count = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  const secs = Math.max(0, Math.floor(ms / 1000));
+  if (secs < 120) return count(secs, 'second');
+  const mins = Math.floor(secs / 60);
+  if (mins < 120) return count(mins, 'minute');
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return count(hours, 'hour');
+  return count(Math.floor(hours / 24), 'day');
 }
 
 // Document-relative on purpose. The app is served under a runtime-city-named
@@ -994,7 +1024,12 @@ export function App() {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [reloadToken, setReloadToken] = useState(0);
+  // The clock the board's age is read against. It moves on each poll tick, each
+  // read that settles and each return to the tab, so a board ages on screen even
+  // while no read lands.
+  const [now, setNow] = useState(() => Date.now());
+  // The board read in flight, or null. There is one at a time.
+  const inFlight = useRef<AbortController | null>(null);
   // The tile being drilled into, or null. A tile's id IS a bead id, which is
   // all the drill plane needs to open it.
   const [drillTarget, setDrillTarget] = useState<string | null>(() =>
@@ -1007,7 +1042,54 @@ export function App() {
   // storage in step, so the board never persists a set it is not showing.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
 
-  const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
+  // Reads the board. A poll tick passes restart=false, and skips while a read is
+  // in flight so that a slow build still lands. A refresh and a return to the tab
+  // pass restart=true and replace the read in flight. The service runs one gather
+  // for every request waiting on it, on a context no hang-up cancels
+  // (Server.Board in internal/server/server.go), so the replacement joins the
+  // gather already running rather than starting over. A read open past
+  // FETCH_TIMEOUT_MS is dropped as failed.
+  const load = useCallback((restart: boolean) => {
+    const running = inFlight.current;
+    if (running) {
+      if (!restart) return;
+      running.abort();
+    }
+    const controller = new AbortController();
+    inFlight.current = controller;
+    let timedOut = false;
+    const deadline = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FETCH_TIMEOUT_MS);
+    setLoading(true);
+    fetchBoard(controller.signal)
+      .then((next) => {
+        if (inFlight.current !== controller) return;
+        setBoard(next);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (inFlight.current !== controller) return;
+        setError(
+          timedOut
+            ? `the board did not answer within ${ageWords(FETCH_TIMEOUT_MS)}`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
+      })
+      .finally(() => {
+        window.clearTimeout(deadline);
+        // A replaced read, or one the page dropped on leaving, settles nothing.
+        if (inFlight.current !== controller) return;
+        inFlight.current = null;
+        setNow(Date.now());
+        setLoading(false);
+      });
+  }, []);
+
+  const refresh = useCallback(() => load(true), [load]);
 
   const toggleCollapse = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -1032,28 +1114,35 @@ export function App() {
   const terminalBase = useMemo(() => resolveTerminalBase(window.location.search), []);
   const terminalSession = useMemo(() => resolveTerminalSession(window.location.search), []);
 
+  // The first read, and the drop of the read in flight when the page goes.
   useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    fetchBoard(controller.signal)
-      .then((next) => {
-        setBoard(next);
-        setError(null);
-      })
-      .catch((err: unknown) => {
-        if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [reloadToken]);
+    load(true);
+    return () => {
+      const running = inFlight.current;
+      inFlight.current = null;
+      running?.abort();
+    };
+  }, [load]);
 
   useEffect(() => {
-    const timer = window.setInterval(refresh, REFRESH_MS);
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      load(false);
+    }, REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [load]);
+
+  // A tab that was hidden or asleep still shows what it last had, so it reads
+  // again the moment it is shown.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      setNow(Date.now());
+      load(true);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [load]);
 
   const tiles = board?.tiles ?? [];
   const sittings = board?.sittings ?? [];
@@ -1136,8 +1225,24 @@ export function App() {
   // whose only live rows are the ones the queue just named.
   const otherLive = visibleTiles.filter((t) => !t.owed && t.section !== 'done');
 
+  // The board's age on this page's clock. A stamp that does not parse has no
+  // age, so it raises no age warning, and a failed read still does.
+  const generatedMs = board ? Date.parse(board.generated_at) : NaN;
+  const ageMs = Number.isNaN(generatedMs) ? null : now - generatedMs;
+  const stale = ageMs !== null && ageMs > STALE_AFTER_MS;
+
   return (
     <main>
+      {/* What the rows below are worth: how old the board is once no poll has
+          replaced it, and the last read's failure. It heads the page and stays
+          in view while the rows scroll, and the rows stay, because they are
+          what the page last had. */}
+      {(stale || error) && (
+        <p className="error banner" role="alert">
+          {board && ageMs !== null ? `This board is ${ageWords(ageMs)} old. ` : ''}
+          {error ? `The last read failed: ${error}` : 'No newer board has reached this page.'}
+        </p>
+      )}
       <header>
         <h1>helm</h1>
         <p className="sub">
@@ -1174,12 +1279,6 @@ export function App() {
         )}
         <CitySignals />
       </header>
-
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
 
       {board?.partial && (
         <p className="warn" role="status">
