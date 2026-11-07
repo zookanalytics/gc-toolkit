@@ -98,8 +98,25 @@ of them passes.
 
 ## Entry shape and budget
 
-- Each entry is one bullet stating one fact, under the section and the entry
-  it is about.
+The admission test governs what a section says. Its form is whichever of a
+table, a diagram or bullets carries the section's facts at the highest
+bandwidth to the document's two readers: the agents it directs, and a person
+who scans it to see when a change moves the architecture.
+
+- A table gives one row per entry and a column per slot. It is the natural
+  form for Domains: one row per domain keeps each entry concise, and a change
+  to the structure shows in a diff as a row added, removed or changed.
+- A diagram is drawn at its section's grain, such as C4's system context
+  diagram for Context, or a map of the domains and how they relate for
+  Domains. A drawing at the code's grain, such as an entity-relationship
+  diagram of tables and columns, restates the schema and fails the admission
+  test.
+- A bullet states one fact, under the section and the entry it is about.
+
+Whatever the form:
+
+- Every row of a table and every element of a diagram passes the admission
+  test, as a bullet does.
 - Domain entries fill the same fixed slots.
 - Each section fits on one screen.
 - Depth is linked, not copied.
