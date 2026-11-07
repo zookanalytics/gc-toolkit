@@ -189,8 +189,9 @@ type Anchor struct {
 	// failure marks every anchor of the pass whose kind reads waits
 	// ([source.needsWaitingEdges]). Epic and convoy are among those kinds: they
 	// read their `blocks` edges for the dependency-family grouping, so a failed
-	// read flags them too. The supervisor backend sets it on every
-	// metadata-keyed row it serves, because it cannot resolve a blocker's
+	// read flags them too. The supervisor backend sets it on every row it
+	// serves. Its epic, decision and convoy rows read none of their `blocks`
+	// edges, and on the rows its scan admits it cannot resolve a blocker's
 	// status ([source.SupervisorSource.metadataAnchorFor]).
 	//
 	// An unread wait set and an empty one are not interchangeable. A blocker
@@ -203,12 +204,13 @@ type Anchor struct {
 	// the operator to close or extend a question whose routed work may still
 	// be open.
 	//
-	// Only [ruled] and [ruledInFlight] read the flag, and both refuse a row
-	// that carries it, so the row falls through to the un-ruled arm. The family
-	// grouping reads WaitingOn and never this flag. So on an epic or a convoy
-	// the flag matters only when the row is routed to the operator. Both
-	// readers apply only to rows [humanGated] accepts, and for an epic or a
-	// convoy that route is the only way in.
+	// [ruled] and [ruledInFlight] refuse a row that carries it, so the row
+	// falls through to the un-ruled arm. Both apply only to rows [humanGated]
+	// accepts, and for an epic or a convoy the route to the operator is the
+	// only way in. [readAcceptance] refuses it too, so Accept's conditions meet
+	// nothing on the row. The family grouping reads WaitingOn and never this
+	// flag. So on an epic or a convoy the flag matters only when the row is
+	// routed to the operator or carries a recommendation.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 
 	// PR is what the city records about a live merge anchor's PR, as

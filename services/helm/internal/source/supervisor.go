@@ -390,20 +390,27 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 		// does. The derivation reads epic_hypothesis off it to tell a Delivery
 		// from a child epic that is an epic of its own, and the route and the
 		// takeaway as it reads them on any row.
+		//
+		// Its waits are unread, because epicChildren keeps only the graph's
+		// parent-child edges, so the row says they are unknown. With the route
+		// on the row, an epic routed to the operator is human-gated, and on such
+		// a row an empty wait set lets board.ruled read its takeaway as a
+		// settled ruling while the work the epic waits on is still open.
 		md := decodeMetadata(e.Metadata)
 		g.anchors = append(g.anchors, board.Anchor{
-			ID:         e.ID,
-			Title:      e.Title,
-			Kind:       "epic",
-			Source:     "epic",
-			Rig:        rig,
-			Prefix:     prefix,
-			Priority:   e.Priority,
-			Metadata:   md,
-			Children:   children[i],
-			Takeaway:   md["gc.takeaway"],
-			TakeawayAt: md["gc.takeaway_at"],
-			TakeawayBy: md["gc.takeaway_by"],
+			ID:             e.ID,
+			Title:          e.Title,
+			Kind:           "epic",
+			Source:         "epic",
+			Rig:            rig,
+			Prefix:         prefix,
+			Priority:       e.Priority,
+			Metadata:       md,
+			Children:       children[i],
+			Takeaway:       md["gc.takeaway"],
+			TakeawayAt:     md["gc.takeaway_at"],
+			TakeawayBy:     md["gc.takeaway_by"],
+			WaitingUnknown: true,
 		})
 	}
 }
@@ -453,14 +460,18 @@ func (s *SupervisorSource) gatherDecisions(ctx context.Context, g *gatherState) 
 	g.ok()
 	for _, d := range decisions.Items {
 		rig, prefix := g.rigOf(d.ID)
+		// A decision is human-gated by its kind, and the row reads none of its
+		// `blocks` edges, so its waits are unknown rather than empty, as on
+		// every row this backend serves.
 		g.anchors = append(g.anchors, board.Anchor{
-			ID:       d.ID,
-			Title:    d.Title,
-			Kind:     "decision",
-			Source:   "decision",
-			Rig:      rig,
-			Prefix:   prefix,
-			Priority: d.Priority,
+			ID:             d.ID,
+			Title:          d.Title,
+			Kind:           "decision",
+			Source:         "decision",
+			Rig:            rig,
+			Prefix:         prefix,
+			Priority:       d.Priority,
+			WaitingUnknown: true,
 		})
 	}
 }
@@ -517,15 +528,19 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 			g.note(true, warns[i])
 		}
 		rig, prefix := g.rigOf(c.ID)
+		// convoyChildren reads the convoy's members and none of its `blocks`
+		// edges, so its waits are unknown rather than empty, as on every row
+		// this backend serves.
 		g.anchors = append(g.anchors, board.Anchor{
-			ID:       c.ID,
-			Title:    c.Title,
-			Kind:     "convoy",
-			Source:   "convoy",
-			Rig:      rig,
-			Prefix:   prefix,
-			Priority: c.Priority,
-			Children: children[i],
+			ID:             c.ID,
+			Title:          c.Title,
+			Kind:           "convoy",
+			Source:         "convoy",
+			Rig:            rig,
+			Prefix:         prefix,
+			Priority:       c.Priority,
+			Children:       children[i],
+			WaitingUnknown: true,
 		})
 	}
 }
