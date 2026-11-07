@@ -93,7 +93,11 @@
 #       take-back and that close fall in, a wait put back included;
 #   (au) the repair's note is written only while the origin has the status and
 #       assignee this run read, so a reopen or a claim since that read keeps its
-#       bead with no edge and no note (exit 4).
+#       bead with no edge and no note (exit 4);
+#   (av) what comes to wait on a duplicate after the first read of its waiters
+#       moves once the close has landed. One that cannot move leaves the close
+#       standing, exit 4, a WARN and a note, and does not hold back one that can.
+#       Another kind and a delivered canonical read no waiters after the close.
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -231,12 +235,13 @@ if [ "$sub" = "dep" ]; then
   # dependency_type, a field whose value is empty left out as real bd leaves it
   # out. FAKE_BD_DEP_LIST_FAIL makes that read fail. With --direction=up the rows
   # are the beads in this store whose `blocks` edge names <id>, the beads that
-  # wait on it, and FAKE_BD_DEP_LIST_UP_FAIL makes that read fail.
+  # wait on it, and FAKE_BD_DEP_LIST_UP_FAIL makes that read fail, as
+  # FAKE_UP_FAIL_AFTER_CLOSE does from the moment a close lands.
   if [ "$verb" = "list" ]; then
     up=""
     for a in "$@"; do case "$a" in --direction=up) up=1 ;; esac; done
     if [ -n "$up" ]; then
-      [ -z "${FAKE_BD_DEP_LIST_UP_FAIL:-}" ] || { echo "Error: simulated dep list failure" >&2; exit 1; }
+      { [ -z "${FAKE_BD_DEP_LIST_UP_FAIL:-}" ] && [ ! -e "$DB/.up-list-fails" ]; } || { echo "Error: simulated dep list failure" >&2; exit 1; }
     else
       [ -z "${FAKE_BD_DEP_LIST_FAIL:-}" ] || { echo "Error: simulated dep list failure" >&2; exit 1; }
     fi
@@ -946,7 +951,7 @@ rc=0; run --origin al-wdup6 --successor bt-wcanon6 --kind duplicate || rc=$?
 eq "$rc" 5 "a ruled duplicate onto another store's canonical refuses while a bead waits on it"
 eq "$(snap alpha al-wdup6)|$(snap alpha al-waiter7)" "$BD|$B7" "…and writes nothing"
 has "$(cat "$TMP/err")" "holds nothing" "…because an edge across stores holds nothing"
-has "$(cat "$TMP/err")" "dep remove <bead> al-wdup6, and re-run" "…and it names the wait to end before a re-run"
+has "$(cat "$TMP/err")" "dep remove <bead> al-wdup6, then re-run" "…and it names the wait to end before a re-run"
 mkbead alpha open al-wdup7
 mkbead alpha open al-wcanon7
 BD=$(snap alpha al-wdup7)
@@ -1511,6 +1516,64 @@ rc=0; FAKE_BD_NOTE_FAIL=1 run --origin al-uf --successor al-uf-1 --kind folded |
 eq "$rc/$(edge alpha al-uf al-uf-1)/$(field alpha notes al-uf)" "4//" "(au) a note that does not write: exit 4, no edge and no note"
 rc=0; run --origin al-uf --successor al-uf-1 --kind folded || rc=$?
 eq "$rc/$(edge alpha al-uf al-uf-1)" "0/supersedes" "…and the same call run again records it"
+
+# --- (av) what comes to wait on a duplicate as it closes moves after the close --
+waits_on() { # <name> <waiter> <duplicate> — a hook that gives the waiter the edge
+  printf "printf 'dep.%s=blocks\\\\n' >> %q\n" "$3" "$ALPHA/$2" > "$TMP/$1.late.sh"
+  printf '%s' "$TMP/$1.late.sh"
+}
+mkbead alpha open al-va; mkbead alpha open al-va-c; mkbead alpha open al-va-w; mkbead alpha open al-va-e
+printf 'dep.al-va=blocks\n' >> "$ALPHA/al-va-e"
+H=$(waits_on va al-va-w al-va)
+rc=0; FAKE_RACE_BEFORE_CLOSE="$H" run --origin al-va --successor al-va-c --kind duplicate || rc=$?
+eq "$rc/$(field alpha status al-va)" "0/closed" "(av) a bead that comes to wait just before the close does not stop it"
+eq "$(edge alpha al-va-w al-va-c)" blocks "…and it waits on the canonical once the close has landed"
+eq "$(edge alpha al-va-e al-va-c)" blocks "…beside the one the first read moved"
+has "$(cat "$TMP/out")" "al-va-w came to wait on al-va as it closed, and wait on al-va-c now" "…and the output names it"
+mkbead alpha open al-vb; mkbead alpha open al-vb-c; mkbead alpha open al-vb-w
+H=$(waits_on vb al-vb-w al-vb)
+rc=0; FAKE_RACE_AFTER_CLOSE="$H" run --origin al-vb --successor al-vb-c --kind duplicate || rc=$?
+eq "$rc/$(edge alpha al-vb-w al-vb-c)" "0/blocks" "(av) one whose edge lands just after the close moves too"
+# A wait that cannot move is too late to refuse: the close stands, and says so.
+mkbead alpha open al-vc; mkbead alpha open al-vc-c; mkbead alpha open al-vc-w
+printf 'dep.al-vc-c=related\n' >> "$ALPHA/al-vc-w"
+H=$(waits_on vc al-vc-w al-vc)
+rc=0; FAKE_RACE_BEFORE_CLOSE="$H" run --origin al-vc --successor al-vc-c --kind duplicate || rc=$?
+eq "$rc/$(field alpha status al-vc)/$(edge alpha al-vc al-vc-c)" "4/closed/duplicates" "(av) a late waiter another edge type joins to the canonical: exit 4, the close stands"
+eq "$(edge alpha al-vc-w al-vc-c)" related "…and its edge is left as it is"
+has "$(cat "$TMP/err")" "al-vc-w by a 'related' edge" "…the WARN names it"
+hasnt "$(cat "$TMP/err")" "re-run this close" "…and asks for no re-run, which would move nothing"
+has "$(field alpha notes al-vc)" "did not all move to al-vc-c" "…and the bead's note records it"
+mkbead alpha open al-vd; mkbead alpha open al-vd-c; mkbead alpha open al-vd-w
+H=$(waits_on vd al-vd-w al-vd)
+rc=0; FAKE_RACE_BEFORE_CLOSE="$H" FAKE_BD_DEP_ADD_REFUSE_FROM=al-vd-w run --origin al-vd --successor al-vd-c --kind duplicate || rc=$?
+eq "$rc/$(field alpha status al-vd)" "4/closed" "(av) a late waiter bd refuses the edge: exit 4, the close stands"
+has "$(cat "$TMP/err")" "bd refused al-vd-w a blocks edge onto al-vd-c" "…the WARN names it"
+# One that cannot move does not hold back one that can.
+mkbead alpha open al-ve; mkbead alpha open al-ve-c; mkbead alpha open al-ve-w; mkbead alpha open al-ve-x
+printf 'dep.al-ve-c=related\n' >> "$ALPHA/al-ve-x"
+printf "printf 'dep.al-ve=blocks\\\\n' >> %q\nprintf 'dep.al-ve=blocks\\\\n' >> %q\n" "$ALPHA/al-ve-w" "$ALPHA/al-ve-x" > "$TMP/ve.late.sh"
+rc=0; FAKE_RACE_BEFORE_CLOSE="$TMP/ve.late.sh" run --origin al-ve --successor al-ve-c --kind duplicate || rc=$?
+eq "$rc/$(edge alpha al-ve-w al-ve-c)/$(edge alpha al-ve-x al-ve-c)" "4/blocks/related" "(av) of two late waiters, the one that can move does"
+has "$(cat "$TMP/err")" "dep list al-ve --direction=up" "…and the WARN gives the read that lists them"
+mkbead alpha open al-vf; mkbead alpha open al-vf-c
+rc=0; FAKE_UP_FAIL_AFTER_CLOSE=1 run --origin al-vf --successor al-vf-c --kind duplicate || rc=$?
+rm -f "$ALPHA/.up-list-fails"
+eq "$rc/$(field alpha status al-vf)" "4/closed" "(av) a second read that does not answer: exit 4, the close stands"
+has "$(cat "$TMP/err")" "did not read" "…and the WARN says so"
+# Only a duplicate of a canonical yet to deliver reads its waiters again.
+mkbead alpha open al-vg; mkbead alpha open al-vg-s; mkbead alpha open al-vg-w
+H=$(waits_on vg al-vg-w al-vg)
+: > "$TMP/vg.calls"
+rc=0; FAKE_RACE_BEFORE_CLOSE="$H" FAKE_CALL_LOG="$TMP/vg.calls" run --origin al-vg --successor al-vg-s --kind re-homed || rc=$?
+eq "$rc/$(edge alpha al-vg-w al-vg-s)" "0/" "(av) another kind moves no late wait"
+eq "$(grep -c -- '--direction=up' "$TMP/vg.calls" || true)" 0 "…and reads no waiters"
+mkbead alpha open al-vh; mkbead alpha closed al-vh-c; mkbead alpha open al-vh-w
+H=$(waits_on vh al-vh-w al-vh)
+: > "$TMP/vh.calls"
+rc=0; FAKE_RACE_BEFORE_CLOSE="$H" FAKE_CALL_LOG="$TMP/vh.calls" run --origin al-vh --successor al-vh-c --kind duplicate || rc=$?
+eq "$rc/$(edge alpha al-vh-w al-vh-c)" "0/" "(av) a canonical already delivered moves no late wait"
+eq "$(grep -c -- '--direction=up' "$TMP/vh.calls" || true)" 0 "…and reads no waiters"
 
 # --- (am) the retry withdraws its own gates before the close ---------------
 hgate() { # <id> <await_id> [<assignee>]: an open human gate in alpha

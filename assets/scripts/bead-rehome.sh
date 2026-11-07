@@ -63,6 +63,11 @@
 # canonical is in another store, where the edge holds nothing. A waiter bd
 # refuses the edge, for a cycle or a parent chain, refuses the close too, and the
 # edges added before it stay, true while the origin duplicates the canonical.
+# bd's close neither reads nor refuses what waits on the bead, so a bead can come
+# to wait on the duplicate after that read. The read is made again once the close
+# has landed (carry_late), and a waiter it finds gains its edge then. One whose
+# edge lands after that read waits on a closed bead, which holds nothing, as a
+# wait on any closed bead does.
 # Every other kind ends its waits with the close: fixed-upstream once the fix
 # has landed, the judgment kinds on the caller's judgment.
 # --check evaluates those gates and the duplicate's waits, and exits 0
@@ -160,7 +165,8 @@ PR-close disposition for that kind and successor.
 A duplicate of a canonical that has neither closed nor shipped first gives
 each open bead blocked by it a blocks edge onto the canonical, so its close
 releases none of them before the canonical delivers. A waiter that cannot take
-that edge refuses the close.
+that edge refuses the close. A bead that comes to wait on the duplicate after
+that read gains the edge just after the close.
 
 The edge goes on just before the close, and is read back. The close is bd's
 checked close, applied only while the origin still has the status and assignee
@@ -568,7 +574,7 @@ carry_plan() {
         CARRY_NONE="no open bead waits on $ORIGIN"; return 0
     fi
     if [ "$SUCCESSOR_STORE" != "$ORIGIN_STORE" ]; then
-        CARRY_HELD="$ORIGIN blocks $waiting, and its canonical $SUCCESSOR is in $SUCCESSOR_STORE, where a blocks edge from $ORIGIN_STORE holds nothing, so its close would release them before $SUCCESSOR has delivered. Give each one that must still wait a human gate that names $SUCCESSOR, then end each one's wait on $ORIGIN with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN, and re-run this close"
+        CARRY_HELD="$ORIGIN blocks $waiting, and its canonical $SUCCESSOR is in $SUCCESSOR_STORE, where a blocks edge from $ORIGIN_STORE holds nothing, so its close releases them before $SUCCESSOR has delivered. Give each one that must still wait a human gate that names $SUCCESSOR, and end each one's wait on $ORIGIN with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN"
         return 0
     fi
     rows_json=$(list_rows "$waiting")
@@ -592,8 +598,7 @@ carry_plan() {
         esac
     done
     if [ -n "$conflicts" ]; then
-        CARRY=""
-        CARRY_HELD="$ORIGIN blocks beads already joined to $SUCCESSOR, $conflicts, and bd keeps one edge per pair of beads, so they cannot come to wait on $SUCCESSOR and its close would release them before $SUCCESSOR has delivered. Replace each such edge with a blocks edge (gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $SUCCESSOR, then dep add <bead> $SUCCESSOR --type blocks), or end its wait by hand, then re-run this close"
+        CARRY_HELD="$ORIGIN blocks beads already joined to $SUCCESSOR, $conflicts, and bd keeps one edge per pair of beads, so they cannot come to wait on $SUCCESSOR and its close releases them before $SUCCESSOR has delivered. Replace each such edge with a blocks edge (gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $SUCCESSOR, then dep add <bead> $SUCCESSOR --type blocks), or end its wait by hand"
     elif [ -z "$CARRY" ]; then
         CARRY_NONE="every open bead $ORIGIN blocks already waits on $SUCCESSOR"
     fi
@@ -846,7 +851,31 @@ settle_edge() {
     return "$rc"
 }
 
+# carry_late — the second read of what waits on a duplicate, once its close has
+# landed (the header's rule). A wait it cannot move is too late to refuse: the close
+# stands, the run ends on exit 4, and the note says so, because a caller that runs
+# this script for its exit status drops its output.
 AFTER_CLOSE_RC=0
+carry_late() {
+    [ "$KIND" = duplicate ] || return 0
+    local w err moved="" why stop
+    carry_plan
+    why="${CARRY_UNREAD:-$CARRY_HELD}"
+    for w in $CARRY; do
+        if err=$(bd_at "$ORIGIN_PATH" dep add "$w" "$SUCCESSOR" --type blocks 2>&1 >/dev/null); then
+            moved="${moved:+$moved }$w"
+        else
+            why="${why:+$why; }bd refused $w a blocks edge onto $SUCCESSOR ($err)"
+        fi
+    done
+    [ -z "$moved" ] || printf 'bead-rehome: %s came to wait on %s as it closed, and wait on %s now\n' "$moved" "$ORIGIN" "$SUCCESSOR"
+    [ -n "$why" ] || return 0
+    stop="$ORIGIN has closed, and what came to wait on it after this run first read its waiters did not all move to $SUCCESSOR, so a bead can go ready before $SUCCESSOR has delivered: $why. What waits on it: gc bd --db $ORIGIN_PATH/.beads dep list $ORIGIN --direction=up --type blocks"
+    echo "bead-rehome: WARN $stop" >&2
+    bd_at "$ORIGIN_PATH" update "$ORIGIN" --append-notes "$stop" >/dev/null 2>&1 \
+        || echo "bead-rehome: WARN could not record that on $ORIGIN" >&2
+    AFTER_CLOSE_RC=4
+}
 
 if [ "$ORIGIN_STATUS" = "closed" ]; then
     # The repair path: the close happened earlier, so the edge and a note record
@@ -907,7 +936,7 @@ else
     # wait on the canonical holds the close, and so does anything bd's close
     # would refuse on, so no waiter gains an edge for a close that is refused.
     [ -z "$CARRY_UNREAD" ] || die "$CARRY_UNREAD; nothing written. Re-run this close." 5
-    [ -z "$CARRY_HELD" ] || die "$CARRY_HELD. Nothing written" 5
+    [ -z "$CARRY_HELD" ] || die "$CARRY_HELD, then re-run this close. Nothing written" 5
     if [ -n "$CARRY" ] && [ -z "$EXCEPT_KEY" ]; then
         except_key_holds "$ORIGIN_JSON"
         [ -z "$HOLD_UNREAD" ] || die "$HOLD_UNREAD; nothing written. Re-run this close." 5
@@ -972,6 +1001,7 @@ else
     printf 'bead-rehome: %s closed in %s — %s (%s %s)\n' "$ORIGIN" "$ORIGIN_STORE" "$REASON" "$EDGE_TYPE" "$SUCCESSOR"
     [ -z "$CARRIED" ] || printf 'bead-rehome: %s, which %s blocked, wait on %s now\n' "$CARRIED" "$ORIGIN" "$SUCCESSOR"
     settle_edge || AFTER_CLOSE_RC=$?
+    carry_late
 fi
 
 # End the branch the retired bead names on the git remote, the way a merge ends
