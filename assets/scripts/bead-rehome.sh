@@ -85,7 +85,10 @@
 # stand-down.sh, can stop before its first write.
 # An already-closed origin is the REPAIR path: it gains the edge, read back the
 # same way, and an appended note, with the gates skipped and no wait moved (the
-# close they would guard already happened).
+# close they would guard already happened). The note is written only while the
+# origin still has the status and assignee this run read, the one write bd can
+# hold to that, so a reopen or a claim since the read takes the edge back and
+# records nothing on the bead someone else now holds.
 # Once the origin reads back closed, on either path, the branch it names in
 # metadata.branch is ended on the git remote through branch-end.sh, the way a
 # merge ends a landed branch. That remote write never gates the disposition:
@@ -173,7 +176,8 @@ With --except-key it also reads what would hold the close.
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
 An already-closed origin gains the edge and an appended note (repair path),
-with the evidence gates skipped.
+with the evidence gates skipped. A reopen or a claim since the read leaves it
+unrecorded (exit 4).
 
 --except-key is for the caller that reports its own refusals of this close as
 human gates through human-gate.sh: it names the situation key that caller files
@@ -860,10 +864,17 @@ if [ "$ORIGIN_STATUS" = "closed" ]; then
             WAIT_DROPPED=1
         fi
         record_edge
-        bd_at "$ORIGIN_PATH" update "$ORIGIN" \
-            --append-notes "Disposition recorded $(date -u +%Y-%m-%dT%H:%MZ): $REASON. (Recorded after the close.)" \
-            >/dev/null 2>&1 \
-            || echo "bead-rehome: WARN could not append the disposition note to $ORIGIN; its $EDGE_TYPE edge onto $SUCCESSOR is recorded" >&2
+        # bd takes no compare-and-set on an edge, so the guarded note is what shows
+        # the bead was still closed under the same assignee once the edge stood. A
+        # reopen or a claim since the read leaves that holder's bead as they have it.
+        if ! bd_at "$ORIGIN_PATH" update "$ORIGIN" \
+                --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" \
+                --append-notes "Disposition recorded $(date -u +%Y-%m-%dT%H:%MZ): $REASON. (Recorded after the close.)" \
+                >/dev/null 2>&1; then
+            undo_edges
+            die "the disposition note on $ORIGIN did not write under the status and assignee this run read (${JUDGED_STATUS}, ${JUDGED_ASSIGNEE:-unassigned}), so a reopen, a claim or an assignment landed since, or the store did not answer, and nothing is recorded on it. Re-run to judge it as it stands now" 4
+        fi
+        EDGE_ADDED=""; WAIT_DROPPED=""
         printf 'bead-rehome: %s was ALREADY closed in %s — its successor is recorded now (%s %s).\n' \
             "$ORIGIN" "$ORIGIN_STORE" "$EDGE_TYPE" "$SUCCESSOR"
     fi

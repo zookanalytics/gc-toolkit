@@ -90,7 +90,10 @@
 #       earlier run wrote stays through this run's refused close;
 #   (at) callers naming one successor share one edge, and each reads after it acts,
 #       so a close naming it keeps its edge whichever order another caller's
-#       take-back and that close fall in, a wait put back included.
+#       take-back and that close fall in, a wait put back included;
+#   (au) the repair's note is written only while the origin has the status and
+#       assignee this run read, so a reopen or a claim since that read keeps its
+#       bead with no edge and no note (exit 4).
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -425,6 +428,9 @@ case "$sub" in
       case "$prev" in --if-status) if_st="$a" ;; --if-assignee) if_as="$a" ;; esac
       prev="$a"
     done
+    # FAKE_BD_NOTE_FAIL fails an update that does not close, as a store that does
+    # not answer fails it, which is not a guard's refusal.
+    [ -n "$closing" ] || [ -z "${FAKE_BD_NOTE_FAIL:-}" ] || { echo "Error: simulated update failure" >&2; exit 1; }
     cur_st="$(sed -n 's/^status=//p' "$f" | tail -1)"
     cur_as="$(sed -n 's/^assignee=//p' "$f" | tail -1)"
     if { [ "$if_st" != "-" ] && [ "$if_st" != "$cur_st" ]; } || { [ "$if_as" != "-" ] && [ "$if_as" != "$cur_as" ]; }; then
@@ -1460,6 +1466,51 @@ mkbead alpha open al-th; mkbead alpha open al-th-1
 rc=0; FAKE_CALL_LOG="$TMP/th.calls" run --origin al-th --successor al-th-1 --kind folded || rc=$?
 eq "$rc/$(grep -c '^dep add al-th al-th-1' "$TMP/th.calls")" "0/1" "(at) a close with its edge in place adds it once"
 hasnt "$(cat "$TMP/out")" "had gone" "…and reports nothing back"
+
+# --- (au) a repair records nothing on a bead reopened since its read ----------
+reopen_hook() { # <name> <origin> — a holder reopens and claims the origin
+  printf "printf 'status=in_progress\\\\nassignee=review-holder\\\\n' >> %q\n" "$ALPHA/$2" > "$TMP/$1.reopen.sh"
+  printf '%s' "$TMP/$1.reopen.sh"
+}
+mkbead alpha closed al-ua; mkbead alpha open al-ua-1
+H=$(reopen_hook ua al-ua)
+rc=0; FAKE_RACE_BEFORE_EDGE="$H" run --origin al-ua --successor al-ua-1 --kind folded || rc=$?
+eq "$rc" 4 "(au) a reopen and a claim landing just before a repair's edge: exit 4"
+eq "$(field alpha status al-ua)/$(field alpha assignee al-ua)" "in_progress/review-holder" "…the reopen and the claim stand"
+eq "$(edge alpha al-ua al-ua-1)" "" "…the edge comes back off"
+eq "$(field alpha notes al-ua)" "" "…and no note is written"
+has "$(cat "$TMP/err")" "under the status and assignee this run read (closed, unassigned)" "…and the refusal names the state it read"
+mkbead alpha closed al-ub; mkbead alpha open al-ub-1
+H=$(reopen_hook ub al-ub)
+rc=0; FAKE_RACE_BEFORE_NOTE="$H" run --origin al-ub --successor al-ub-1 --kind folded || rc=$?
+eq "$rc" 4 "(au) one landing between the edge and the note: exit 4"
+eq "$(field alpha status al-ub)/$(edge alpha al-ub al-ub-1)/$(field alpha notes al-ub)" "in_progress//" "…the claim stands with no edge and no note"
+# A wait a forced close left behind comes back with the rest.
+mkbead alpha closed al-uc; mkbead alpha open al-uc-1
+printf 'dep.al-uc-1=blocks\n' >> "$ALPHA/al-uc"
+H=$(reopen_hook uc al-uc)
+rc=0; FAKE_RACE_BEFORE_NOTE="$H" run --origin al-uc --successor al-uc-1 --kind folded || rc=$?
+eq "$rc/$(edge alpha al-uc al-uc-1)" "4/blocks" "(au) a repair that loses puts back the wait it replaced"
+# The control: a repair nothing raced records both.
+mkbead alpha closed al-ud; mkbead alpha open al-ud-1
+: > "$TMP/updates.log"
+rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-ud --successor al-ud-1 --kind folded || rc=$?
+eq "$rc/$(edge alpha al-ud al-ud-1)" "0/supersedes" "(au) a repair nothing raced records the edge"
+has "$(field alpha notes al-ud)" "Recorded after the close" "…and the note"
+has "$(cat "$TMP/updates.log")" "al-ud --if-status=closed --if-assignee= --append-notes" "…conditional on what it read"
+mkbead alpha closed al-ue; mkbead alpha open al-ue-1
+printf 'assignee=earlier-holder\n' >> "$ALPHA/al-ue"
+: > "$TMP/updates.log"
+rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-ue --successor al-ue-1 --kind folded || rc=$?
+eq "$rc/$(edge alpha al-ue al-ue-1)" "0/supersedes" "(au) a closed bead keeping an assignee is repaired"
+has "$(cat "$TMP/updates.log")" "al-ue --if-status=closed --if-assignee=earlier-holder --append-notes" "…under that same assignee"
+# A note the store does not take cannot show the bead stayed closed. Nothing stays
+# recorded, and the same call does it again.
+mkbead alpha closed al-uf; mkbead alpha open al-uf-1
+rc=0; FAKE_BD_NOTE_FAIL=1 run --origin al-uf --successor al-uf-1 --kind folded || rc=$?
+eq "$rc/$(edge alpha al-uf al-uf-1)/$(field alpha notes al-uf)" "4//" "(au) a note that does not write: exit 4, no edge and no note"
+rc=0; run --origin al-uf --successor al-uf-1 --kind folded || rc=$?
+eq "$rc/$(edge alpha al-uf al-uf-1)" "0/supersedes" "…and the same call run again records it"
 
 # --- (am) the retry withdraws its own gates before the close ---------------
 hgate() { # <id> <await_id> [<assignee>]: an open human gate in alpha
