@@ -343,9 +343,12 @@ to. The sign-off is owed to a sitting that was **held**; one closed before any
 framing was posted (step 2's `moot` or `benign`) asked the operator nothing,
 so closing it silently is the contract.
 
-Then drain: a closed conversation ends this session (the prompt's **How this
-thread ends**). Run `gc runtime drain-ack` once the sign-off has closed the
-conversation and its message is posted, and run nothing after it. A sign-off
-that stopped short leaves the conversation open and the sitting not over:
-repair what `converse-signoff.sh` printed, or raise it in the thread, and do
-not drain.
+Then close this session: a closed conversation ends it (the prompt's **How
+this thread ends**). Once the sign-off has closed the conversation and its
+message is posted, run this, and nothing after it:
+```bash
+gc session close "$GC_SESSION_ID"
+```
+A sign-off that stopped short leaves the conversation open and the sitting not
+over: repair what `converse-signoff.sh` printed, or raise it in the thread,
+and do not close the session.

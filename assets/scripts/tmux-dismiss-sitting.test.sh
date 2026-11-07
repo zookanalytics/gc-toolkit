@@ -18,9 +18,7 @@
 #   (CONVERSE)  a converse sitting is dismissed under its OWN identity:
 #               gc-helm.sh dismiss runs with the session name, id, alias and rig
 #               from the session record, and the operator is told which subject
-#               ended. That identity is what dismiss's inference reads. It runs
-#               with --operator, so the session is stopped as the operator
-#               stops it, from outside the sitting.
+#               ended. That identity is what dismiss's inference reads.
 #   (AMBIENT)   an identity or store pin already in the job's environment is
 #               replaced by the record's, never inherited. A record with no alias
 #               leaves GC_ALIAS empty rather than passing an ambient one through,
@@ -196,7 +194,7 @@ quiet() {               # quiet <label> — the view-mode guard, on every path
 
 echo "# a converse sitting is dismissed under its own identity"
 run s-hq-conv1
-has "$HELM" "ARGS=dismiss --operator --json" "(CONVERSE) gc-helm.sh dismiss runs as the operator, with no bead named"
+has "$HELM" "ARGS=dismiss --json" "(CONVERSE) gc-helm.sh dismiss runs with no bead named"
 has "$HELM" "GC_SESSION_NAME=s-hq-conv1" "(CONVERSE) …under the record's session name"
 has "$HELM" "GC_SESSION_ID=hq-conv1" "(CONVERSE) …its id"
 has "$HELM" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-conv1" "(CONVERSE) …its alias"
@@ -374,7 +372,7 @@ if [ -n "$LIVE_TERM" ]; then
     echo "# LIVE: prefix+X, y in a converse pane"
     press s-hq-conv1 y msg_has "the sitting on tk-sub1 is over"
     live=$(cat "$LIVE_CALLS" 2>/dev/null)
-    has "$live" "ARGS=dismiss --operator --json" "(LIVE-YES) a real press, confirmed, runs dismiss as the operator"
+    has "$live" "ARGS=dismiss --json" "(LIVE-YES) a real press, confirmed, runs dismiss"
     eq "$(grep -c '^ARGS=' "$LIVE_CALLS")" "1" "(LIVE-YES) …exactly once"
     has "$live" "GC_SESSION_NAME=s-hq-conv1" "(LIVE-YES) …under the pressed pane's session"
     has "$live" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-conv1" "(LIVE-YES) …and its alias"

@@ -98,8 +98,12 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && { "$CONV/pr-sitting-comment.sh" refresh --sitting "$CONVERSATION" || true; } \
   && echo "closed $CONVERSATION as $KIND"
 ```
-When it prints its `closed` line, drain (the prompt's **How this thread
-ends**). **Post nothing** — no framing, no sign-off, not even "this turned out
+When it prints its `closed` line, close this session, with nothing after it
+(the prompt's **How this thread ends**):
+```bash
+gc session close "$GC_SESSION_ID"
+```
+**Post nothing** before it — no framing, no sign-off, not even "this turned out
 to be fine".
 
 No `closed` line means the close stopped short: the subject or its blockers

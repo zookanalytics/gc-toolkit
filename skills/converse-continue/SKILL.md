@@ -85,17 +85,17 @@ up.
 
 **Once the conversation has closed, the thread has ended, and so does this
 session.** Whichever path closed it, once the close has landed and every write
-that must follow it has run, drain, with nothing after it (the prompt's **How
-this thread ends**):
+that must follow it has run, close this session, with nothing after it (the
+prompt's **How this thread ends**):
 ```bash
-gc runtime drain-ack
+gc session close "$GC_SESSION_ID"
 ```
-Nothing is left to claim, so never claim again. The operator's dismiss stops
+Nothing is left to claim, so never claim again. The operator's dismiss closes
 this session itself, and a tab showing the sitting exits when the session
 ends, printing the last hand-back recorded on the conversation. A new concern
 the operator raises is a new conversation. Open it on its bead, where it waits
 in the operator's queue until they engage it:
 `"$CONV/gc-helm.sh" open <bead> --reason "<what it is about>" --body "<the ask>"`.
-The one sitting that drains with its conversation still open is the
+The one sitting that ends its session with its conversation still open is the
 low-context path in the prompt's Rules, once its sign-off has handed the
 conversation back to the queue.
