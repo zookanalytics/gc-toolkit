@@ -146,9 +146,9 @@ eq "$(bstatus FY)" "open" "…and closes nothing"
 has "$out" "false all-clear" "…rather than reporting one"
 
 # bead-rehome.sh, the close a carried-forward finding takes: on success it
-# closes the origin and records its supersedes edge onto the successor.
-# STUB_REHOME_RC models a refusal that closes nothing, and STUB_REHOME_NOEDGE a
-# close whose edge did not write.
+# records its supersedes edge onto the successor and closes the origin.
+# STUB_REHOME_RC models a refusal that closes nothing, and STUB_REHOME_NOEDGE an
+# edge that did not write, which closes nothing either.
 cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
@@ -162,9 +162,9 @@ while [ $# -gt 0 ]; do
   shift || true
 done
 [ -z "${STUB_REHOME_RC:-}" ] || exit "$STUB_REHOME_RC"
-gc bd update "$origin" --status=closed >/dev/null 2>&1 || exit 5
 [ -z "${STUB_REHOME_NOEDGE:-}" ] || exit 4
 gc bd dep add "$origin" "$succ" --type supersedes >/dev/null 2>&1 || exit 4
+gc bd update "$origin" --status=closed >/dev/null 2>&1 || exit 5
 REHOME
 chmod +x "$SD/bead-rehome.sh"
 export STUB_REHOME_LOG="$TMP/rehome.log"; : > "$STUB_REHOME_LOG"
@@ -305,7 +305,8 @@ echo "# a close that names no successor is not counted carried forward"
 store "[$(hfind FC5 AP8 docs/b.md:7 502),$(anchor AP8 pull_request "$(PRD 47)")]"
 comments 47
 out=$(STUB_REHOME_NOEDGE=1 "$SUT" --anchor AP8 2>&1); rc=$?
-eq "$(succ_of FC5)" "<none>" "the finding closed with no edge onto its bug"
+eq "$(succ_of FC5)" "<none>" "the finding has no edge onto its bug"
+eq "$(bstatus FC5)" "open" "…and stays open"
 has "$out" "did not read back" "…which the pass reports"
 has "$out" "0 finding(s) carried forward" "…without counting it carried forward"
 

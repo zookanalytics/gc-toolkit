@@ -36,8 +36,8 @@
 #
 # One reading, also named by the caller: --as-disposed reads the bead as naming
 # its successor, through the duplicates or supersedes edge bead-rehome.sh
-# records once the close lands. bead-rehome.sh asks before it writes anything,
-# so it asks about the bead as the close will leave it. Only the epic clause
+# records for the close. bead-rehome.sh asks before it writes anything, so it
+# asks about the bead as the close will leave it. Only the epic clause
 # reads a disposition, so this releases no human gate, and a read that fails
 # still refuses.
 #

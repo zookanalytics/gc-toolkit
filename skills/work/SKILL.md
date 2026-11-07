@@ -243,9 +243,9 @@ gc bd update <bead> --set-metadata gc.work_outcome=no-op \
 
 Under `not-needed` the successor is the evidence that ruled the work out, such
 as the conversation where it was decided. Under `duplicate`, `folded`, `re-homed` and
-`fixed-upstream` it is the bead that carries the work now. The writer closes the
-bead through bd's checked close and records the successor in bd's own edge,
-`duplicates` under `duplicate` and `supersedes` otherwise, so never close the
+`fixed-upstream` it is the bead that carries the work now. The writer records
+the successor in bd's own edge, `duplicates` under `duplicate` and `supersedes`
+otherwise, and closes the bead through bd's checked close, so never close the
 bead by hand: a close that names no successor reads as a careless one. On a bead
 already closed by hand, the same writer adds the missing edge.
 

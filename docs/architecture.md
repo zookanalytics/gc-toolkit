@@ -64,7 +64,7 @@ flowchart LR
   LIFE -->|one atomic bd update| LEDGER
   FORM -->|disposition| DISP
   CAD -->|disposition| DISP
-  DISP -->|checked close, then successor edge| LEDGER
+  DISP -->|successor edge, then checked close| LEDGER
   SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
   CAD -->|reads + writes via lifecycle.sh| LEDGER

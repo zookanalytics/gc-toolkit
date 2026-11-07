@@ -1165,13 +1165,18 @@ is the caller's. A hand disposition, by the mechanik, converse or the operator,
 judges the bead itself. An automated caller proves its own case before it
 calls, and [authority-map.md](authority-map.md) records the power in its
 Close-with-successor row. Whoever judges, `bead-rehome.sh` stays the one
-writer of the close and its edge. The close is bd's checked close, in one write
-bd applies only while the bead still has the status and assignee its gates
-read, and the edge goes on once it lands, so a caller whose gates passed before
-another actor claimed or closed the bead writes nothing. `bd duplicate` and
-`bd supersede` write the same edges, but they close past an open human gate and
-an open child, and refuse a successor in another store, so the pack closes
-through the writer instead.
+writer of the close and its edge. The edge goes on first and is read back, so
+no reader finds the writer's close without its successor, and a second caller
+finds the first one's choice on the bead, a reopened bead included, and refuses
+to name another. bd keeps one edge per pair of beads and none per bead, so two
+callers that read the bead before either wrote can each add one, and the caller
+that finds another disposition edge beside its own takes its own back. The close
+is bd's checked close, in one write bd applies only while the bead still has the
+status and assignee its gates read, so a caller whose gates passed before another
+actor claimed or closed the bead closes nothing and takes its edge back. `bd
+duplicate` and `bd supersede` write the same two things in the same order, but
+they close past an open human gate and an open child, and refuse a successor in
+another store, so the pack closes through the writer instead.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,

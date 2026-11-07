@@ -15,7 +15,7 @@ between 23:20Z and 23:55Z.
 | The bead's part | Outcome |
 |---|---|
 | The successor keys (`gc.superseded_by`, `gc.supersedes`, `duplicate_of`, each with its `_store`) | Retired. A disposed bead names its successor through one outgoing bd edge, `duplicates` onto its canonical or `supersedes` onto the bead that carries its work, or under not-needed onto the evidence. The keys stay registered as retired, so residue on a bead disposed before the edges reads as known. |
-| `bead-rehome.sh` | Stays the one writer, with the same interface. It closes through bd's checked close and then records the edge, both described below. It drops the metadata stamp, its read-back and the back-pointer on the successor. |
+| `bead-rehome.sh` | Stays the one writer, with the same interface. It records the edge and then closes through bd's checked close, both described below. It drops the metadata stamp, its read-back and the back-pointer on the successor. |
 | The readers | Read the edge through one jq definition, `$DISPOSITION_JQ` in `bd-lib.sh`, and `bd_disposed_to` where the successor may sit in another rig's store. |
 | `duplicate-sweep.sh` and its cadence arm | Deleted, both passes. A polecat that finds its work bead duplicates another closes it at once through `bead-rehome.sh --kind duplicate`, which reverses "never close the work bead" for that one case, in the same change. The beads the duplicate blocks come to wait on its canonical first (below). |
 
@@ -70,13 +70,30 @@ So the pack composes two of bd's primitives that do cover the need:
 anything (`close_guard`), so a close it starts is one `bd close` would also
 allow.
 
-The close and the edge are two writes, because bd offers no checked close that
-records an edge in the same transaction. The close goes first. A close that is
-held, refused or raced then leaves no edge, which a reader could take for a
-disposition. A close whose edge then fails to write leaves the bead closed,
-with its note naming the successor. The writer exits 4, and the same call run
-again records the edge on the closed bead. `doctor/check-closed-implies-landed`
-reports such a bead when it is an anchor.
+The close and the edge are two writes, because bd offers no guarded close that
+records an edge in the same transaction. `bd batch` (`cmd/bd/batch.go`,
+`runBatchOp`) comes closest: `dep add` and `update <id> status=closed` commit as
+one, and that close refuses a live blocker and an open child, but its grammar
+takes no `--if-status` or `--if-assignee`, so it cannot make the compare-and-set
+that stops a claim or a second closer, and no notes.
+
+The edge goes first, the order `runDuplicate` and `runSupersede` use. So no
+reader finds the writer's close without its successor, and neither does a second
+caller, which would otherwise take a closed bead with no edge for one it may
+repair, and name another successor. A reopened bead keeps its edge, so the same
+holds after a reopen. bd enforces one edge per pair of beads and none per bead
+(`AddDependencyInTx`, `internal/storage/issueops/dependencies.go`), so two callers
+that read the bead before either wrote can each add an edge. The writer therefore
+reads the edge back before it closes, and a caller that finds another disposition
+edge beside its own takes its own back and exits 6. The later writer always reads
+both edges, so at most one caller goes on to the close.
+
+A close that is held by what the writer reads first writes nothing. A close bd
+then refuses, or that a change since the read beats, takes the edge back, unless
+a close naming the same successor is what beat it, since the edge is that close's
+record too. A run stopped between the edge and the close leaves the bead open and
+naming its successor, the state main's key left, which every reader already takes
+for a disposition in progress, and the same call run again finishes it.
 
 ## What Gas City provides, and where it stops
 
@@ -85,7 +102,7 @@ reports such a bead when it is an anchor.
   `update` (judged), `dep add` and `link` (`judgeBdEdgeVerb`: "every endpoint
   must be a work-store bead"), `dep remove`, `duplicate` and `supersede`. On a
   split city an edge onto another rig's bead is refused, so there a cross-rig
-  disposition closes and then exits 4. The city these stores belong to is not
+  disposition exits 4 and closes nothing. The city these stores belong to is not
   split.
 - **The work-record close gate counts this close.**
   `workRecordCloseTargets` (`cmd/gc/work_record_gate.go`) counts `close` and an

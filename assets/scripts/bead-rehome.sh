@@ -14,12 +14,20 @@
 # any write, holds it while an open human gate blocks the origin. bd's update
 # leaves out two refusals its `bd close` makes, a pinned bead and a bead
 # assigned to anyone but the actor, so the writer reads those off the origin
-# first. So a close that is held, refused or raced writes nothing. The edge goes
-# on once the close has landed. `bd duplicate` and `bd supersede` record the same edge, but they close
-# unchecked, past a gate and an open child, record no reason, and refuse a
-# successor in another store (specs/tk-1tfzr71.13/gas-city-search.md). bd's
-# update sets no close reason, so the disposition's prose rides the same write
-# as an appended note.
+# first, and a close any of these holds writes nothing. bd's update sets no close
+# reason, so the disposition's prose rides the close as an appended note.
+#
+# The edge goes on just before the close, the order `bd duplicate` and
+# `bd supersede` write the two in. So this writer's close always names its
+# successor, and a second caller finds the first one's choice on the bead, a
+# reopened bead included, and refuses to name another (exit 6). Those two commands
+# close unchecked, past a gate and an open child, record no reason, and refuse a
+# successor in another store (specs/tk-1tfzr71.13/gas-city-search.md). bd keeps
+# one edge per pair of beads and none per bead, so two callers that read the origin
+# before either wrote can each add an edge. The edge is therefore read back before
+# the close, and a caller that finds another disposition edge beside its own takes
+# its own back and stops. A close that then does not land takes the edge back too,
+# and leaves it only when a close naming this same successor is what beat it.
 #
 # The close is gated on EVIDENCE the script re-establishes itself:
 #   (a) EVERY kind: the origin is not a review, step or workflow bead, and it is
@@ -68,9 +76,9 @@
 # because a resolved gate stays resolved. With --except-key, --check reads the
 # same holds, so a caller that answers those gates itself, such as
 # stand-down.sh, can stop before its first write.
-# An already-closed origin is the REPAIR path: it gains the edge and an
-# appended note, with the gates skipped and no wait moved (the close they would
-# guard already happened).
+# An already-closed origin is the REPAIR path: it gains the edge, read back the
+# same way, and an appended note, with the gates skipped and no wait moved (the
+# close they would guard already happened).
 # Once the origin reads back closed, on either path, the branch it names in
 # metadata.branch is ended on the git remote through branch-end.sh, the way a
 # merge ends a landed branch. That remote write never gates the disposition:
@@ -144,10 +152,12 @@ each open bead blocked by it a blocks edge onto the canonical, so its close
 releases none of them before the canonical delivers. A waiter that cannot take
 that edge refuses the close.
 
-The close is bd's checked close, applied only while the origin still has the
-status and assignee this run judged: a live blocker, an open human gate, an
-open child or a change since the read refuses it, and then nothing is written
-but the edges a duplicate's waiters gained, which the refusal names.
+The edge goes on just before the close, and is read back. The close is bd's
+checked close, applied only while the origin still has the status and assignee
+this run judged: a live blocker, an open human gate, an open child or a change
+since the read refuses it, and then the edge comes back off, and nothing stays
+written but the edges a duplicate's waiters gained, which the refusal names, and
+the gates a retry resolved, as below.
 
 --check evaluates that evidence and a duplicate's waiters, and exits 0
 (eligible) or non-zero (refused, reason on stderr) without writing anything.
@@ -168,11 +178,11 @@ live blocker and every open child: then nothing is resolved or closed.
 
 Exit: 0 disposed (or already recorded) · 1 --check refused · 2 a store does not
 resolve · 3 the origin or successor does not exist · 4 a write did not land: the
-origin changed since it was judged, a waiter's edge onto the canonical did not
-read back, or the origin's edge did not write after the close · 5 the close is
-held or refused, a waiter that cannot wait on the canonical included · 6 the
-origin already names another successor · 7 the evidence refuses the close ·
-64 usage
+origin changed since it was judged, or a waiter's edge onto the canonical or the
+origin's own edge did not write or read back · 5 the close is held or refused, a
+waiter that cannot wait on the canonical included · 6 the origin already names
+another successor, read before any write or beside this run's own edge · 7 the
+evidence refuses the close · 64 usage
 U
     exit "${1:-1}"
 }
@@ -301,10 +311,17 @@ esac
 PAIR_TYPE=$(printf '%s' "$ORIGIN_JSON" | jq -r --arg s "$SUCCESSOR" \
     '[.[0].dependencies[]? | select(((.depends_on_id // "") | tostring) == $s) | ((.type // "") | tostring)] | .[0] // ""' \
     2>/dev/null || true)
+# other_successor <origin-row> — a bead other than this successor that one of the
+# row's disposition edges names, or nothing. Every edge counts, not only the first
+# a reader takes.
+other_successor() {
+    printf '%s' "$1" | jq -r --arg s "$SUCCESSOR" "$DISPOSITION_JQ"'
+        [ .[0].dependencies[]? | select(disposition_edge) | edge_target | select(. != $s) ] | .[0] // ""' 2>/dev/null || true
+}
 # A disposition the origin already records, onto another bead, is somebody
 # else's decision.
-PRIOR_SUCC=$(printf '%s' "$ORIGIN_JSON" | jq -r "$DISPOSITION_JQ"' .[0] | disposed_to' 2>/dev/null || true)
-if [ -n "$PRIOR_SUCC" ] && [ "$PRIOR_SUCC" != "$SUCCESSOR" ]; then
+PRIOR_SUCC=$(other_successor "$ORIGIN_JSON")
+if [ -n "$PRIOR_SUCC" ]; then
     die "origin $ORIGIN already names $PRIOR_SUCC as its successor (a duplicates or supersedes edge); refusing to record another disposition over it — reconcile the two by hand" 6
 fi
 case "$PAIR_TYPE" in
@@ -314,6 +331,9 @@ esac
 if [ -n "$PAIR_TYPE" ] && [ "$PAIR_TYPE" != blocks ] && [ "$PAIR_TYPE" != "$EDGE_TYPE" ]; then
     die "origin $ORIGIN already names $SUCCESSOR through a '$PAIR_TYPE' edge, which records another kind of disposition than --kind $KIND; refusing to rewrite it — reconcile the two by hand" 6
 fi
+# This disposition's edge is on the origin already: an earlier run wrote it.
+EDGE_STANDS=""
+[ "$PAIR_TYPE" != "$EDGE_TYPE" ] || EDGE_STANDS=1
 
 case "$KIND" in
     re-homed)       PHRASE="re-homed to" ;;
@@ -661,13 +681,15 @@ if [ -n "$DRY_RUN" ]; then
     else
         CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\""
     fi
-    if [ "$PRIOR_SUCC" = "$SUCCESSOR" ]; then
+    if [ -n "$EDGE_STANDS" ]; then
         EDGE_PLAN="none ($ORIGIN already names $SUCCESSOR)"
+    elif [ "$ORIGIN_STATUS" = "closed" ]; then
+        EDGE_PLAN="$ORIGIN $EDGE_TYPE $SUCCESSOR, in $ORIGIN_STORE, read back"
     else
-        EDGE_PLAN="$ORIGIN $EDGE_TYPE $SUCCESSOR, in $ORIGIN_STORE"
+        EDGE_PLAN="$ORIGIN $EDGE_TYPE $SUCCESSOR, in $ORIGIN_STORE, read back before the close and taken back if the close does not land"
     fi
     if [ "$PAIR_TYPE" = blocks ] && [ "$ORIGIN_STATUS" != "closed" ]; then
-        WAIT_PLAN="drop the 'blocked by $SUCCESSOR' wait edge just before the close, and put it back if the close does not land"
+        WAIT_PLAN="drop the 'blocked by $SUCCESSOR' wait edge for the disposition's edge, and put it back if the close does not land"
     else
         WAIT_PLAN="none ($ORIGIN carries no wait edge to $SUCCESSOR)"
     fi
@@ -694,23 +716,60 @@ if [ -n "$DRY_RUN" ]; then
     else
         GATE_PLAN="none (no --except-key)"
     fi
-    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  waiters:   %s\n  wait:      %s\n  gates:     %s\n  close:     %s\n  edge:      %s\n  branch:    %s\n  actor:     %s\n' \
+    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  waiters:   %s\n  wait:      %s\n  edge:      %s\n  gates:     %s\n  close:     %s\n  branch:    %s\n  actor:     %s\n' \
         "$ORIGIN" "${ORIGIN_STATUS:-unknown}" "$ORIGIN_STORE" \
-        "$SUCCESSOR" "$SUCCESSOR_STORE" "$WAITERS_PLAN" "$WAIT_PLAN" "$GATE_PLAN" \
-        "$CLOSE_PLAN" "$EDGE_PLAN" "$BRANCH_PLAN" "${ACTOR:-<bd default>}"
+        "$SUCCESSOR" "$SUCCESSOR_STORE" "$WAITERS_PLAN" "$WAIT_PLAN" "$EDGE_PLAN" "$GATE_PLAN" \
+        "$CLOSE_PLAN" "$BRANCH_PLAN" "${ACTOR:-<bd default>}"
     exit 0
 fi
 
 RERUN="re-run this call once it is cleared"
 
-# record_edge — write the disposition edge on the origin, which has closed.
-# Same-type re-add is a no-op in bd, so a re-run that finds it written is safe.
+# What this run wrote on the origin ahead of a close, so that a close that does
+# not land can take it back.
+EDGE_ADDED=""; WAIT_DROPPED=""
+
+# undo_edges — take back this run's disposition edge, then put back the wait it
+# replaced, since bd keeps one edge per pair. An edge this run found on the origin
+# was not this run's to take.
+undo_edges() {
+    if [ -n "$EDGE_ADDED" ]; then
+        EDGE_ADDED=""
+        bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 \
+            || echo "bead-rehome: WARN the $EDGE_TYPE edge from $ORIGIN onto $SUCCESSOR did not come back off, so $ORIGIN names $SUCCESSOR with no close behind it; take it off with gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR" >&2
+    fi
+    if [ -n "$WAIT_DROPPED" ]; then
+        WAIT_DROPPED=""
+        bd_at "$ORIGIN_PATH" dep add "$ORIGIN" "$SUCCESSOR" --type blocks >/dev/null 2>&1 \
+            || echo "bead-rehome: WARN the '$ORIGIN blocked by $SUCCESSOR' wait edge was dropped for the close and did not go back; restore it with gc bd --db $ORIGIN_PATH/.beads dep add $ORIGIN $SUCCESSOR --type blocks" >&2
+    fi
+    return 0
+}
+
+# record_edge — write the disposition edge and read it back, the read the header's
+# rule rests on. Whichever order two callers' writes and reads fall in, the later
+# writer reads both edges, so it takes its own back and no second edge stays. Two
+# that read after both wrote both stand down, and a re-run judges the bead as it
+# then stands. An edge an earlier run wrote is not written again.
 record_edge() {
-    [ "$PRIOR_SUCC" = "$SUCCESSOR" ] && return 0
-    local err=""
+    [ -z "$EDGE_STANDS" ] || return 0
+    local err="" row other
     if ! err=$(bd_at "$ORIGIN_PATH" dep add "$ORIGIN" "$SUCCESSOR" --type "$EDGE_TYPE" 2>&1 >/dev/null); then
         printf '%s\n' "$err" >&2
-        die "$ORIGIN is closed, but its $EDGE_TYPE edge onto $SUCCESSOR did not write, so nothing names its successor yet. Re-run this call, which records the edge on a closed bead" 4
+        undo_edges
+        die "the $EDGE_TYPE edge from $ORIGIN onto $SUCCESSOR did not write, so nothing names its successor and this run closes nothing.$(carried_left) Re-run this call" 4
+    fi
+    EDGE_ADDED=1
+    row=$(bead_row "$ORIGIN_PATH" "$ORIGIN")
+    other=$(other_successor "$row")
+    if [ -n "$other" ]; then
+        undo_edges
+        die "another caller named $other as the successor of $ORIGIN while this run was naming $SUCCESSOR, so this run took its edge back and closes nothing.$(carried_left) Reconcile the two by hand" 6
+    fi
+    if ! printf '%s' "$row" | jq -e --arg s "$SUCCESSOR" --arg t "$EDGE_TYPE" \
+            'any(.[0].dependencies[]?; ((.depends_on_id // "") | tostring) == $s and ((.type // "") | tostring) == $t)' >/dev/null 2>&1; then
+        undo_edges
+        die "the $EDGE_TYPE edge from $ORIGIN onto $SUCCESSOR did not read back, so whether another caller named another successor is unknown, and this run closes nothing.$(carried_left) Re-run this call" 4
     fi
     return 0
 }
@@ -719,7 +778,7 @@ if [ "$ORIGIN_STATUS" = "closed" ]; then
     # The repair path: the close happened earlier, so the edge and a note record
     # the disposition now. A note says when it was recorded, because the close
     # it explains predates it.
-    if [ "$PRIOR_SUCC" = "$SUCCESSOR" ]; then
+    if [ -n "$EDGE_STANDS" ]; then
         printf 'bead-rehome: %s already records this disposition (%s %s) — nothing to do\n' \
             "$ORIGIN" "$EDGE_TYPE" "$SUCCESSOR"
     else
@@ -728,6 +787,7 @@ if [ "$ORIGIN_STATUS" = "closed" ]; then
         if [ "$PAIR_TYPE" = blocks ]; then
             bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 \
                 || die "could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge, which stands where the $EDGE_TYPE edge goes; nothing recorded. Clear it with gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR, then re-run this call" 4
+            WAIT_DROPPED=1
         fi
         record_edge
         bd_at "$ORIGIN_PATH" update "$ORIGIN" \
@@ -775,20 +835,16 @@ else
     fi
     carry_waits
 
-    # The wait onto the successor ends with the disposition, and bd refuses to
-    # close a bead it blocks. It goes just before the close, and back when the
-    # close does not land, so a held close leaves the wait as it was.
-    WAIT_DROPPED=""
+    # The wait onto the successor ends with the disposition, bd refuses to close
+    # a bead it blocks, and bd keeps one edge per pair, so the wait gives way to
+    # the disposition's edge. Both come back undone when the close does not land,
+    # so a held close leaves the wait as it was.
     if [ "$PAIR_TYPE" = blocks ]; then
         bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 \
             || die "could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge, and while it stands bd refuses the close; nothing closed.$(carried_left) Clear it with gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR, then re-run this close" 5
         WAIT_DROPPED=1
     fi
-    restore_wait() {
-        [ -n "$WAIT_DROPPED" ] || return 0
-        bd_at "$ORIGIN_PATH" dep add "$ORIGIN" "$SUCCESSOR" --type blocks >/dev/null 2>&1 \
-            || echo "bead-rehome: WARN the '$ORIGIN blocked by $SUCCESSOR' wait edge was dropped for the close and did not go back; restore it with gc bd --db $ORIGIN_PATH/.beads dep add $ORIGIN $SUCCESSOR --type blocks" >&2
-    }
+    record_edge
 
     # The withdrawal: the gates the caller filed under its key ask for this
     # retry, and bd refuses the close while one blocks the origin. Nothing else
@@ -800,7 +856,7 @@ else
             bd_at "$ORIGIN_PATH" gate resolve "$GATE" --reason "$GATE_REASON" >/dev/null 2>&1 || true
             GATE_STATUS=$(bead_row "$ORIGIN_PATH" "$GATE" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
             if [ "$GATE_STATUS" != "closed" ]; then
-                restore_wait
+                undo_edges
                 die "the gate $GATE [$EXCEPT_KEY] on $ORIGIN did not resolve (status reads '${GATE_STATUS:-unreadable}'), and while it is open bd refuses the close; nothing closed.$(carried_left) Re-run this close." 5
             fi
             printf 'bead-rehome: withdrew the gate %s [%s] on %s before the close it asked for\n' "$GATE" "$EXCEPT_KEY" "$ORIGIN"
@@ -810,7 +866,7 @@ else
     # The close: bd's checked close, never --force, which would also override a
     # foreign assignee and an open child. It lands only while the origin still
     # has the status and assignee the gates judged, so a claim, an assignment or
-    # a status change since that read, a second closer's included, writes nothing
+    # a status change since that read, a second closer's included, closes nothing
     # (exit 13). The note rides the same write, and names the beads that came to
     # wait on the canonical.
     CLOSE_RC=0; CLOSE_ERR=""
@@ -818,15 +874,21 @@ else
         --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" --status=closed \
         --append-notes "Disposition $(date -u +%Y-%m-%dT%H:%MZ): $REASON.${CARRIED:+ What waited on it waits on $SUCCESSOR now: $CARRIED.}" 2>&1 >/dev/null) || CLOSE_RC=$?
     if [ "$CLOSE_RC" = 13 ]; then
-        restore_wait
+        # A close naming this same successor is what beat this one: the edge is
+        # its record as well, and the wait ended with it.
+        if bead_row "$ORIGIN_PATH" "$ORIGIN" | jq -e --arg named " $SUCCESSOR in $SUCCESSOR_STORE" '
+                ((.[0].status // "") | tostring | ascii_downcase) == "closed"
+                and ((.[0].notes // "") | tostring | contains($named))' >/dev/null 2>&1; then
+            EDGE_ADDED=""; WAIT_DROPPED=""
+        fi
+        undo_edges
         if [ -n "$JUDGED_ASSIGNEE" ]; then JUDGED_HOLDER="under $JUDGED_ASSIGNEE"; else JUDGED_HOLDER="and unassigned"; fi
         die "$ORIGIN is no longer $JUDGED_STATUS $JUDGED_HOLDER, as this run read it before judging it: a claim, an assignment, a status change or another close landed since, so nothing is recorded and $ORIGIN is not closed by this run.$(carried_left) Re-run to judge it as it stands now" 4
     elif [ "$CLOSE_RC" != 0 ]; then
-        restore_wait
+        undo_edges
         printf '%s\n' "$CLOSE_ERR" >&2
         die "the close of $ORIGIN was refused, as printed above, so nothing is recorded and it stays open.$(carried_left) Judge the refusal; $RERUN" 5
     fi
-    record_edge
     printf 'bead-rehome: %s closed in %s — %s (%s %s)\n' "$ORIGIN" "$ORIGIN_STORE" "$REASON" "$EDGE_TYPE" "$SUCCESSOR"
     [ -z "$CARRIED" ] || printf 'bead-rehome: %s, which %s blocked, wait on %s now\n' "$CARRIED" "$ORIGIN" "$SUCCESSOR"
 fi

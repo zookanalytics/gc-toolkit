@@ -12,8 +12,8 @@
 #   (a3) a successor in another rig's store is recorded in the origin's store;
 #   (b) the successor must exist in the named store, or nothing is written at
 #       all (an edge onto a missing bead is worse than no edge);
-#   (c) an edge that does not write after the close is reported (exit 4), with
-#       the re-run that records it;
+#   (c) an edge that does not write closes nothing and is reported (exit 4), with
+#       the re-run that finishes the disposition;
 #   (d) a refused close writes nothing: no edge, no note, no outcome;
 #   (e) an existing disposition naming a different successor is never
 #       overwritten, nor an edge of another type on the same pair;
@@ -79,7 +79,15 @@
 #       a canonical in another store, a read that fails) and a blocker of the
 #       duplicate refuse the close before anything is written; an edge bd
 #       refuses, or one that does not read back, refuses it after the edges
-#       before it, which stay.
+#       before it, which stay;
+#   (as) the edge goes on before the close and is read back, so two callers
+#       cannot both leave a successor: a caller that finds a first one's edge,
+#       with the first paused before or after its close or the bead reopened
+#       since, refuses another successor; a caller whose read came before the
+#       other's write finds the other's edge beside its own and takes its own
+#       back, on the repair path too; a close that does not land takes the edge
+#       back, unless a close naming the same successor beat it; and an edge an
+#       earlier run wrote stays through this run's refused close.
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -159,10 +167,21 @@ meta_of() { # <file>
   printf '%s' "$lines" | jq -R -s 'split("\n") | map(select(length > 0))
     | map(split("=") | {key: .[0], value: (.[1:] | join("="))}) | from_entries'
 }
-# The edges a bead carries, one {other, type} per line, the last write of each
-# pair winning, and none of the pairs a remove dropped.
+# The edges a bead carries, one {other, type} per line. The order is the one bd
+# keeps them in, the order they were added, which is the first a reader takes.
 edges_of() { # <file>
-  sed -n 's/^dep\.\([^=]*\)=\(.*\)$/\1 \2/p' "$1" 2>/dev/null | awk '{ t[$1] = $2 } END { for (k in t) if (t[k] != "-") print k, t[k] }' | sort
+  sed -n 's/^dep\.\([^=]*\)=\(.*\)$/\1 \2/p' "$1" 2>/dev/null
+}
+# race_at <point> — run the script FAKE_RACE_<point> names, once per bead, while
+# this write waits: a second caller's whole run, made with this one paused there.
+# BEFORE_EDGE is just before a duplicates or supersedes edge is added, BEFORE_CLOSE
+# just before an update that closes, and AFTER_CLOSE just after it.
+race_at() { # <point>
+  local v="FAKE_RACE_$1" s
+  s="${!v:-}"
+  [ -n "$s" ] && [ ! -e "$DB/.raced.$1.$id" ] || return 0
+  : > "$DB/.raced.$1.$id"
+  bash "$s" || true
 }
 # A `bd list` row: the far end of an edge by depends_on_id, its type as type.
 list_row() { # <file>
@@ -259,14 +278,25 @@ if [ "$sub" = "dep" ]; then
       while [ $# -gt 0 ]; do
         case "$1" in --type|-t) type="$2"; shift 2 ;; --type=*) type="${1#--type=}"; shift ;; *) shift ;; esac
       done
+      case "$type" in duplicates|supersedes) race_at BEFORE_EDGE ;; esac
       cur=$(edges_of "$f" | awk -v o="$other" '$1 == o { print $2 }')
       if [ -n "$cur" ] && [ "$cur" != "$type" ]; then
         echo "Error: dependency $id -> $other already exists with type $cur" >&2; exit 1
       fi
       [ -n "$cur" ] || printf 'dep.%s=%s\n' "$other" "$type" >> "$f"
-      [ -z "${FAKE_DEP_LOG:-}" ] || printf '%s %s %s\n' "$id" "$other" "$type" >> "$FAKE_DEP_LOG" ;;
+      [ -z "${FAKE_DEP_LOG:-}" ] || printf '%s %s %s\n' "$id" "$other" "$type" >> "$FAKE_DEP_LOG"
+      case "$type" in duplicates|supersedes) [ -z "${FAKE_LIST_FAIL_AFTER_EDGE:-}" ] || : > "$DB/.list-id-fails" ;; esac ;;
     # Real `bd dep remove` reports success for an edge that never existed.
-    remove) printf 'dep.%s=-\n' "$other" >> "$f"; echo "✓ removed dependency: $id -> $other" ;;
+    # FAKE_BD_DEP_REMOVE_FAIL refuses a remove of a disposition edge.
+    remove)
+      if [ -n "${FAKE_BD_DEP_REMOVE_FAIL:-}" ]; then
+        case "$(edges_of "$f" | awk -v o="$other" '$1 == o { print $2 }')" in
+          duplicates|supersedes) echo "Error: simulated dep remove failure" >&2; exit 1 ;;
+        esac
+      fi
+      awk -v p="dep.$other=" 'index($0, p) != 1' "$f" > "$DB/.removing.$id"
+      mv "$DB/.removing.$id" "$f"
+      echo "✓ removed dependency: $id -> $other" ;;
     *)      exit 1 ;;
   esac
   exit 0
@@ -302,7 +332,7 @@ if [ "$sub" = "list" ]; then
   if [ -n "$parent" ] && [ -n "${FAKE_BD_LIST_PARENT_FAIL:-}" ]; then
     echo "Error: simulated list failure" >&2; exit 1
   fi
-  if [ -n "$ids" ] && [ -n "${FAKE_BD_LIST_ID_FAIL:-}" ]; then
+  if [ -n "$ids" ] && { [ -n "${FAKE_BD_LIST_ID_FAIL:-}" ] || [ -e "$DB/.list-id-fails" ]; }; then
     echo "Error: simulated list failure" >&2; exit 1
   fi
   rows='[]'
@@ -373,6 +403,7 @@ case "$sub" in
     # write on the bead just before the first update that closes it is
     # answered: a claim, an assignment, a status change or another close made
     # after the caller read the bead.
+    [ -z "$closing" ] || race_at BEFORE_CLOSE
     if [ -n "$closing" ] && [ -n "${FAKE_BD_CLAIM_BEFORE_CLOSE:-}" ] && [ ! -e "$DB/.claimed-before-close.$id" ]; then
       : > "$DB/.claimed-before-close.$id"
       printf 'status=%s\nassignee=%s\n' "${FAKE_BD_CLAIM_BEFORE_CLOSE%% *}" "${FAKE_BD_CLAIM_BEFORE_CLOSE#* }" >> "$f"
@@ -430,6 +461,7 @@ case "$sub" in
         *) shift ;;
       esac
     done
+    [ -z "$closing" ] || race_at AFTER_CLOSE
     ;;
   *) exit 1 ;;
 esac
@@ -553,15 +585,17 @@ rc=0; run --origin al-origin2 --successor bt-ghost --kind folded || rc=$?
 eq "$rc" 3 "a successor that does not exist is refused"
 eq "$(snap alpha al-origin2)" "$BEFORE" "…and the origin is untouched"
 
-# --- (c) an edge that does not write after the close ------------------------
+# --- (c) an edge that does not write closes nothing --------------------------
 mkbead alpha open al-origin3
 mkbead alpha open al-succ3
 rc=0; FAKE_BD_DEP_ADD_FAIL=1 run --origin al-origin3 --successor al-succ3 --kind re-homed || rc=$?
-eq "$rc" 4 "an edge that does not write after the close exits 4"
+eq "$rc" 4 "an edge that does not write exits 4"
+eq "$(field alpha status al-origin3)" open "…and the bead is not closed, so no close stands without its successor"
 has "$(cat "$TMP/err")" "did not write" "…and says so"
-has "$(cat "$TMP/err")" "Re-run this call" "…with the re-run that records it"
+has "$(cat "$TMP/err")" "Re-run this call" "…with the re-run that finishes it"
 rc=0; run --origin al-origin3 --successor al-succ3 --kind re-homed || rc=$?
-eq "$rc" 0 "the re-run on the closed bead succeeds"
+eq "$rc" 0 "the re-run succeeds"
+eq "$(field alpha status al-origin3)" closed "…closes the bead"
 eq "$(edge alpha al-origin3 al-succ3)" supersedes "…and records the edge"
 
 # --- (d) a refused close writes nothing --------------------------------------
@@ -1186,6 +1220,135 @@ eq "$rc" 4 "a close that lands between a second closer's read and its own refuse
 eq "$(edge alpha al-race al-race-b)" "" "…and the second records no edge"
 eq "$(field alpha notes al-race)" "" "…and no note"
 
+# --- (as) the edge goes on before the close, so two callers cannot both name one
+# racer <name> <bead-rehome args...> — write a script that makes a second caller's
+# whole run, and print its path. The run's exit lands in racer.<name>.rc.
+racer() {
+  local name="$1"; shift
+  { printf '%q ' "$SCRIPT" "$@"; printf '>%q 2>&1; echo $? >%q\n' "$TMP/racer.$name.out" "$TMP/racer.$name.rc"; } > "$TMP/racer.$name.sh"
+  printf '%s' "$TMP/racer.$name.sh"
+}
+racer_rc() { cat "$TMP/racer.$1.rc" 2>/dev/null || printf 'did not run'; }
+mkbead alpha open al-ord
+mkbead alpha open al-ords
+: > "$TMP/calls.log"
+rc=0; FAKE_CALL_LOG="$TMP/calls.log" run --origin al-ord --successor al-ords --kind folded || rc=$?
+eq "$rc" 0 "a disposition lands"
+EDGE_AT=$(grep -n '^dep add al-ord al-ords' "$TMP/calls.log" | head -1 | cut -d: -f1 || true)
+CLOSE_AT=$(grep -n '^update al-ord .*--status=closed' "$TMP/calls.log" | head -1 | cut -d: -f1 || true)
+if [ -n "$EDGE_AT" ] && [ -n "$CLOSE_AT" ] && [ "$EDGE_AT" -lt "$CLOSE_AT" ]; then
+  ok "…its edge is written before its close"
+else
+  bad "…its edge is written before its close (edge at line '${EDGE_AT:-none}', close at '${CLOSE_AT:-none}')"
+fi
+
+# A second caller reads the origin while the first is paused just after its close.
+# A close with no edge on it was the opening for a second successor.
+mkbead alpha open al-ra; mkbead alpha open al-ra-1; mkbead alpha open al-ra-2
+R=$(racer ra --origin al-ra --successor al-ra-2 --kind folded)
+rc=0; FAKE_RACE_AFTER_CLOSE="$R" run --origin al-ra --successor al-ra-1 --kind folded || rc=$?
+eq "$rc" 0 "(as) the first closer, paused just after its close, finishes"
+eq "$(racer_rc ra)" 6 "…a second caller that reads the closed origin in that pause refuses another successor"
+has "$(cat "$TMP/racer.ra.out")" "already names al-ra-1" "…and names the first one's choice"
+eq "$(edge alpha al-ra al-ra-1)" supersedes "…the first edge stands"
+eq "$(edge alpha al-ra al-ra-2)" "" "…and the second writes none"
+
+# The same, with the first paused between its edge and its close.
+mkbead alpha open al-rb; mkbead alpha open al-rb-1; mkbead alpha open al-rb-2
+R=$(racer rb --origin al-rb --successor al-rb-2 --kind folded)
+rc=0; FAKE_RACE_BEFORE_CLOSE="$R" run --origin al-rb --successor al-rb-1 --kind folded || rc=$?
+eq "$rc" 0 "(as) the first closer, paused between its edge and its close, finishes"
+eq "$(racer_rc rb)" 6 "…a second caller in that pause refuses another successor"
+eq "$(field alpha status al-rb)" closed "…the first close lands"
+eq "$(edge alpha al-rb al-rb-1)" supersedes "…under the first edge"
+eq "$(edge alpha al-rb al-rb-2)" "" "…and the second writes none"
+
+# Both read the open origin before either wrote. The second caller runs whole
+# while the first is paused before its edge, so the first's write is the later one.
+mkbead alpha open al-rc; mkbead alpha open al-rc-1; mkbead alpha open al-rc-2
+R=$(racer rc --origin al-rc --successor al-rc-2 --kind folded)
+rc=0; FAKE_RACE_BEFORE_EDGE="$R" run --origin al-rc --successor al-rc-1 --kind folded || rc=$?
+eq "$(racer_rc rc)" 0 "(as) of two callers that read the open origin first, the one that writes first disposes it"
+eq "$rc" 6 "…the later writer reads the other's edge beside its own, and stops"
+has "$(cat "$TMP/err")" "named al-rc-2 as the successor of al-rc" "…naming the other's choice"
+eq "$(edge alpha al-rc al-rc-1)" "" "…its own edge comes back off"
+eq "$(edge alpha al-rc al-rc-2)" supersedes "…the other's stands"
+eq "$(grep -c '^notes=' "$TMP/rigs/alpha/.beads/al-rc")" 1 "…and it writes no note"
+
+# Two repairs of one closed, unnamed origin, the same way.
+mkbead alpha closed al-rd; mkbead alpha open al-rd-1; mkbead alpha open al-rd-2
+R=$(racer rd --origin al-rd --successor al-rd-2 --kind folded)
+rc=0; FAKE_RACE_BEFORE_EDGE="$R" run --origin al-rd --successor al-rd-1 --kind folded || rc=$?
+eq "$(racer_rc rd)" 0 "(as) of two repairs of a closed bead, the one that writes first records it"
+eq "$rc" 6 "…the later repair stops"
+eq "$(edge alpha al-rd al-rd-1)" "" "…its own edge comes back off"
+eq "$(edge alpha al-rd al-rd-2)" supersedes "…the other's stands"
+eq "$(grep -c '^notes=' "$TMP/rigs/alpha/.beads/al-rd")" 1 "…and it writes no note"
+
+# A person reopens a disposed bead. Its edge stays, so a second disposition still
+# has to reconcile with the first, and the first's call finishes it again.
+mkbead alpha open al-re; mkbead alpha open al-re-1; mkbead alpha open al-re-2
+rc=0; run --origin al-re --successor al-re-1 --kind folded || rc=$?
+eq "$rc" 0 "(as) a disposition lands"
+printf 'status=open\n' >> "$TMP/rigs/alpha/.beads/al-re"
+rc=0; run --origin al-re --successor al-re-2 --kind folded || rc=$?
+eq "$rc" 6 "…once the bead is reopened, another successor is still refused"
+eq "$(field alpha status al-re)" open "…and the bead stays open"
+eq "$(edge alpha al-re al-re-2)" "" "…with no second edge"
+rc=0; run --origin al-re --successor al-re-1 --kind folded || rc=$?
+eq "$rc" 0 "…the same call closes it again"
+eq "$(field alpha status al-re)" closed "…the bead closes"
+eq "$(edge alpha al-re al-re-1)" supersedes "…under its one edge"
+
+# A close naming this same successor beats this one's: the edge is its record too.
+mkbead alpha open al-rf; mkbead alpha open al-rf-1
+printf 'dep.al-rf-1=blocks\n' >> "$TMP/rigs/alpha/.beads/al-rf"
+R=$(racer rf --origin al-rf --successor al-rf-1 --kind folded)
+rc=0; FAKE_RACE_BEFORE_CLOSE="$R" run --origin al-rf --successor al-rf-1 --kind folded || rc=$?
+eq "$(racer_rc rf)" 0 "(as) a second caller naming the same successor closes the bead first"
+eq "$rc" 4 "…the first's close, beaten, exits 4"
+eq "$(edge alpha al-rf al-rf-1)" supersedes "…and the edge stays, since the close that landed is recorded by it"
+rc=0; run --origin al-rf --successor al-rf-1 --kind folded || rc=$?
+eq "$rc" 0 "…a re-run finds the disposition recorded"
+has "$(cat "$TMP/out")" "already records this disposition" "…and says so"
+
+# Every disposition edge counts, not only the first a reader takes.
+mkbead alpha open al-rk; mkbead alpha open al-rk-1; mkbead alpha open al-rk-2
+printf 'dep.al-rk-1=supersedes\ndep.al-rk-2=supersedes\n' >> "$TMP/rigs/alpha/.beads/al-rk"
+rc=0; run --origin al-rk --successor al-rk-1 --kind folded || rc=$?
+eq "$rc" 6 "(as) a bead naming two successors is refused under the first as well"
+eq "$(field alpha status al-rk)" open "…and is not closed"
+
+# A close that was refused takes back only what this run wrote.
+mkbead alpha open al-rg; mkbead alpha open al-rg-1
+printf 'dep.al-rg-1=supersedes\n' >> "$TMP/rigs/alpha/.beads/al-rg"
+rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-rg --successor al-rg-1 --kind folded || rc=$?
+eq "$rc" 5 "(as) a close refused over an edge an earlier run wrote exits 5"
+eq "$(edge alpha al-rg al-rg-1)" supersedes "…and leaves that edge"
+rc=0; run --origin al-rg --successor al-rg-1 --kind folded || rc=$?
+eq "$rc" 0 "…the same call then finishes it"
+eq "$(field alpha status al-rg)" closed "…and closes the bead"
+
+# An edge that does not come back off is said out loud, with what removes it.
+mkbead alpha open al-rh; mkbead alpha open al-rh-1
+rc=0; FAKE_BD_CLOSE_REFUSE=1 FAKE_BD_DEP_REMOVE_FAIL=1 run --origin al-rh --successor al-rh-1 --kind folded || rc=$?
+eq "$rc" 5 "(as) a refused close whose edge will not come off still exits 5"
+has "$(cat "$TMP/err")" "did not come back off" "…the WARN says the edge is still there"
+has "$(cat "$TMP/err")" "dep remove al-rh al-rh-1" "…and names what removes it"
+
+# The read-back decides before the close: unread, or missing, closes nothing.
+mkbead alpha open al-ri; mkbead alpha open al-ri-1
+rc=0; FAKE_LIST_FAIL_AFTER_EDGE=1 run --origin al-ri --successor al-ri-1 --kind folded || rc=$?
+eq "$rc" 4 "(as) an edge whose read-back does not answer exits 4"
+rm -f "$TMP/rigs/alpha/.beads/.list-id-fails"
+eq "$(field alpha status al-ri)" open "…the bead is not closed"
+eq "$(edge alpha al-ri al-ri-1)" "" "…and the edge comes back off"
+has "$(cat "$TMP/err")" "did not read back" "…and it says so"
+mkbead alpha open al-rj; mkbead alpha open al-rj-1
+rc=0; FAKE_BD_DEP_ADD_NOOP_FROM=al-rj run --origin al-rj --successor al-rj-1 --kind folded || rc=$?
+eq "$rc" 4 "(as) an edge reported written that reads back absent exits 4"
+eq "$(field alpha status al-rj)" open "…and the bead is not closed"
+
 # --- (am) the retry withdraws its own gates before the close ---------------
 hgate() { # <id> <await_id> [<assignee>]: an open human gate in alpha
   mkbead alpha open "$1"
@@ -1218,6 +1381,19 @@ printf 'dep.al-g2=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry2"
 rc=0; run --origin al-retry2 --successor bt-retry2 --kind not-needed || rc=$?
 eq "$rc" 5 "without --except-key a gate blocking the origin refuses the close"
 eq "$(field alpha status al-g2)" open "…and is not resolved"
+# The edge's read-back comes before the withdrawal, so another caller's edge stops
+# the retry with its gate still asking.
+mkbead alpha open al-retry3
+mkbead alpha open al-retry3-1
+mkbead alpha open al-retry3-2
+hgate al-g3 pr-dispose-failed.9
+printf 'dep.al-g3=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry3"
+printf '%q ' gc bd --db "$TMP/rigs/alpha/.beads" dep add al-retry3 al-retry3-2 --type supersedes > "$TMP/racer.g3.sh"
+rc=0; FAKE_RACE_BEFORE_EDGE="$TMP/racer.g3.sh" run --origin al-retry3 --successor al-retry3-1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 6 "(as) another caller's edge beside the retry's stops it"
+eq "$(field alpha status al-g3)" open "…before its own gate is resolved"
+eq "$(field alpha status al-retry3)" open "…and before the close"
+eq "$(edge alpha al-retry3 al-retry3-1)" "" "…and its edge comes back off"
 
 # --- (an) anything else that would refuse the close holds it first ----------
 mkbead alpha open al-retry3
