@@ -157,8 +157,8 @@ controller's closed-bead worktree reaper, and the dolt pack's orders. The
 pack's patrols carry only judgment: the witness's HELP-mail triage, salvage and
 watch on the refinery's queue, and the deacon running `gc doctor` from an
 order. Patrol owns the warranted Dolt reclaim and suspended-store backup, and the
-reapers no native one covers: scratch, the review workspaces outside
-`.gc/worktrees/`, and the `polecat/<bead-id>` refs of landed work.
+reapers no native one covers: scratch and the review workspaces outside
+`.gc/worktrees/`.
 
 The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
@@ -246,7 +246,6 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| `worktree-reap.sh` | the controller's closed-bead worktree reaper | tk-1tfzr71.42 |
 | `step-close.sh` | `gc hook current` | tk-1tfzr71.39 |
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
@@ -329,7 +328,6 @@ shows its measured net instead.
 |---|---|---|---|
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
 | tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
-| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41) |
 
 ### 3. The lanes
 
