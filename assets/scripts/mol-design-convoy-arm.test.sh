@@ -912,7 +912,8 @@ for sh in "${SHELLS[@]}"; do
 
   # --- a bead that joins later ---
   # The effort's beads and its summary task are filed and dispatched; work-2
-  # joins with step 4's writes. The summary task's own wait takes it while the
+  # joins with the writes that file an effort's bead (its target and the landing
+  # bead's wait on it). The summary task's own wait takes it while the
   # task is undispatched, which the arm with no dispatch marker shows, and still
   # held, which the open work-1 shows.
   JOINED='map(if .id == "land-1" then ._deps += [{id: "work-2", dependency_type: "blocks"}] else . end)

@@ -64,14 +64,14 @@ session_live = [
 # backstops it replaces when `[daemon] work_ladder` is off, so nothing nudges
 # or drains a held sitting whatever this field holds. The manual origin is the
 # exemption.
-# Nothing is lost at launch. The launch delivers the rendered prompt, and step 1
-# of that prompt is the claim block, so a fresh sitting claims with no
+# Nothing is lost at launch. The launch delivers the rendered prompt, and that
+# prompt's loop opens with the claim block, so a fresh sitting claims with no
 # keystrokes. A provider that takes no prompt argument gets the prompt prepended
 # to this field, and prepending to an empty field still delivers it, so the
 # precondition is the prompt rather than prompt_mode. A prompt that stops
 # opening with the claim block leaves nothing to start the turn.
 # Non-empty text arms no nudge here; it feeds that launch delivery.
-# The text must then send the session back through the prompt's step-1 block
+# The text must then send the session back through the prompt's claim block
 # rather than name `gc hook --claim` alone: the block's restart rule, which
 # reads an existing assignment as a sitting to resume rather than one to end
 # or work to a close, is what stops a nudge from ending a live sitting, and it

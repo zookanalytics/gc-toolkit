@@ -1317,48 +1317,74 @@ func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
 	}
 }
 
-// TestSittingHeadlineFallback pins the headline a row reads off its subject: it
-// prefers the takeaway, then the conversation's close reason, and only then the
-// subject title before it shows the conversation's own title. It degrades to
-// the conversation's title only when the gather could not read the subject at
-// all.
+// TestSittingHeadlineFallback pins the headline a row reads off its
+// conversation and its subject. It prefers the takeaway, then the
+// conversation's close reason, then the conversation's own title, which says
+// what it asks, and shows the subject's title only when that title says nothing
+// of the ask: an empty one, or the stock title a pick off the board or a topic
+// the intake files directly leaves. It degrades to the conversation's title
+// only when the gather could not read the subject at all.
 func TestSittingHeadlineFallback(t *testing.T) {
 	const (
 		subjTitle = "the raw script path the launcher took"
-		convTitle = "operator pick from the board"
+		ask       = "decide whether the launcher or the board owns the path"
+		boardPick = "operator pick from the board"
+		intake    = "operator-origin topic intake"
 		takeaway  = "routed the fix to the pool; nothing further here"
 		reason    = "dismissed by the operator: superseded by the new plan"
 	)
 
-	// A concluded sitting: the takeaway is the headline.
-	concluded := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, Takeaway: takeaway}
-	if got := sittingHeadline(concluded); got != takeaway {
-		t.Errorf("a takeaway is the headline: got %q, want %q", got, takeaway)
+	cases := []struct {
+		name string
+		s    Sitting
+		want string
+	}{
+		{"a takeaway is the headline",
+			Sitting{SubjectTitle: subjTitle, Title: ask, Takeaway: takeaway}, takeaway},
+		{"a takeaway wins over the close reason",
+			Sitting{SubjectTitle: subjTitle, Title: ask, Takeaway: takeaway, OutcomeReason: reason}, takeaway},
+		{"with no takeaway the close reason wins over the conversation's title",
+			Sitting{SubjectTitle: subjTitle, Title: ask, OutcomeReason: reason}, reason},
+		{"with neither, the conversation's title says what it asks, not the topic",
+			Sitting{SubjectTitle: subjTitle, Title: ask}, ask},
+		{"the stock title of a pick off the board gives way to the topic",
+			Sitting{SubjectTitle: subjTitle, Title: boardPick}, subjTitle},
+		{"the stock title of a topic the intake filed directly gives way to the topic",
+			Sitting{SubjectTitle: subjTitle, Title: intake}, subjTitle},
+		{"an untitled conversation gives way to the topic",
+			Sitting{SubjectTitle: subjTitle}, subjTitle},
+		{"an unread subject keeps the conversation's title",
+			Sitting{Title: ask}, ask},
+		{"an unread subject keeps even the stock title, the last thing left to show",
+			Sitting{Title: boardPick}, boardPick},
 	}
-
-	// A takeaway still wins when a close reason is also present.
-	both := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, Takeaway: takeaway, OutcomeReason: reason}
-	if got := sittingHeadline(both); got != takeaway {
-		t.Errorf("a takeaway wins over the close reason: got %q, want %q", got, takeaway)
+	for _, tc := range cases {
+		tc.s.Subject = "tk-anchor"
+		if got := sittingHeadline(tc.s); got != tc.want {
+			t.Errorf("%s: headline %q, want %q", tc.name, got, tc.want)
+		}
 	}
+}
 
-	// A dismissal: no takeaway, but a close reason — the headline is the
-	// reason, so the row reads as a decision instead of the bare topic.
-	dedup := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, OutcomeReason: reason}
-	if got := sittingHeadline(dedup); got != reason {
-		t.Errorf("no takeaway but a close reason: the headline is the reason: got %q, want %q", got, reason)
+// TestTwoAsksOnOneSubjectReadAsTwoHeadlines: two conversations filed on one
+// subject, neither concluded, carry their own asks as their headlines on the
+// wire, so the record shows two different rows rather than the topic twice.
+func TestTwoAsksOnOneSubjectReadAsTwoHeadlines(t *testing.T) {
+	const (
+		topic = "every live epic states a hypothesis or becomes ordinary flow"
+		ask1  = "the triage clusters: make their work ordinary flow, or state a hypothesis for each one kept"
+		ask2  = "the closed epics: record the close ruling each one lacks"
+	)
+	in := []Sitting{
+		{ID: "tk-conv1", Subject: "tk-subj", SubjectTitle: topic, Title: ask1, Status: "open", Assignee: assigneeHuman, OpenedAt: daysAgo(0)},
+		{ID: "tk-conv2", Subject: "tk-subj", SubjectTitle: topic, Title: ask2, Status: "open", Assignee: assigneeHuman, OpenedAt: daysAgo(0)},
 	}
-
-	// No takeaway, no reason, subject read: the headline is the topic, NOT the conversation's title.
-	bare := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle}
-	if got := sittingHeadline(bare); got != subjTitle {
-		t.Errorf("no takeaway falls back to the subject title, not the conversation's title: got %q, want %q", got, subjTitle)
+	got := map[string]string{}
+	for _, s := range BuildBoard(nil, fixtureNow, false, nil, Facts{Sittings: in}).Sittings {
+		got[s.ID] = s.Headline
 	}
-
-	// Subject unread: the last resort is the conversation's title.
-	unread := Sitting{Subject: "tk-anchor", Title: convTitle}
-	if got := sittingHeadline(unread); got != convTitle {
-		t.Errorf("an unread subject falls back to the conversation's title: got %q, want %q", got, convTitle)
+	if got["tk-conv1"] != ask1 || got["tk-conv2"] != ask2 {
+		t.Errorf("each conversation's headline is its own ask, not the topic: got %q", got)
 	}
 }
 

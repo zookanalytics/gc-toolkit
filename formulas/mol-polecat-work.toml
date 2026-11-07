@@ -429,9 +429,10 @@ the gate the same way, with `--test '<its test command>'` on the call.
 
 **4. A failure your diff did not cause.** A red check that fails the same way on
 `origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or
-file its tracker as preflight-tests' step 3 does, then mark its record at this
-HEAD on the work bead; the exit condition takes the mark in place of a passing
-record while that record stands:
+file its tracker with `preexisting-failure.sh`, as preflight-tests does for a
+failure on the base, then mark its record at this HEAD on the work bead; the
+exit condition takes the mark in place of a passing record while that record
+stands:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-check-pre-existing.sh" --bead "<the work bead>" --check "<test, lint, typecheck, setup or build: the red check>" --commit "<git rev-parse HEAD>" --trackers "<the tracker id of each failure in it, space-separated>"
 ```

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for the witness-patrol WORKTREE CLEANUP (part 5 of
-# recover-orphaned-beads).
+# Hermetic test for the witness-patrol WORKTREE CLEANUP (the worktree-cleanup
+# block of recover-orphaned-beads).
 #
 # Invariant: cleanup is best-effort and never aborts the patrol pass. A
 # work_dir can name no registered worktree: a husk (the git worktree is gone,
@@ -62,8 +62,8 @@ fi
 
 # run_cleanup OWNED WORKTREE GC_RIG_ROOT -> runs the block under `set -e`, then
 # prints a sentinel. The sentinel reaches stdout only if the block ran to
-# completion without aborting the shell — which is exactly what part 5 needs so
-# disposal runs after cleanup. Returns the block's exit status.
+# completion without aborting the shell — which is exactly what recovery needs
+# so disposal runs after cleanup. Returns the block's exit status.
 run_cleanup() {
   OWNED="$1" WORKTREE="$2" GC_RIG_ROOT="$3" bash -c '
     set -euo pipefail
