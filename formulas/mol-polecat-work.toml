@@ -606,24 +606,10 @@ printed one.
 - Exit 0: handed off and drained. You are gone.
 - Exit 3: nothing is handed off and you must not drain: it names what you owe,
   an uncommitted change or a bring-current audit entry. Finish that and re-run
-  this call.
+  this call. What the bring-current guard holds a round to, and what it reopens,
+  is docs/state-machine.md, *Bringing a branch current*.
 - Exit 1: stop. The script says why, and when the refusal is final it has already
   recorded what releases the work, cancelled the run and drained.
-
-The bring-current guard runs for every handoff and acts on a branch that
-carries a review to keep current: its anchor is gating, or a PR stands on it.
-When the push brought that branch current with its base, the round is either
-clean, because git merged it on its own and it lands quietly, or conflicted.
-A conflicted round is handed off only when your audit has an entry for every
-item the guard names, and then the guard stores the audit with its diff
-evidence on the anchor and reopens triage, which rules from your entries on
-what else reopens, and lifts the approval only when the round made a call
-that is the operator's to make. On
-an anchor whose check_set declares no triage lane, the guard adds triage to
-it, so triage rules on that round too. The none and off opt-outs are the
-exception: only a person changes one, so the guard lifts the approval itself.
-A guard that cannot finish hands nothing off: the bead stays open and still
-blocks the anchor, so nothing lands on a round nobody accounted for.
 
 **Exit criteria:** branch pushed and verified, the refinery handoff written,
 refinery signaled, this step closed, the worktree and its local branch removed,
