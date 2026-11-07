@@ -315,15 +315,17 @@ func uniqueWaits(bs []Blocker) []Blocker {
 // childState names the state an open child is counted in by its parent's
 // roll-up ([Facts.stateOf]). A child that is itself a parent on the board, and
 // whose own bead nothing holds, reads what its own children are doing
-// ([subtreeStates]): a sub-epic whose children wait their turn is not stranded
+// ([subtreeStates]): a Delivery whose Stories wait their turn is not stranded
 // work.
 func (f Facts) childState(c Child) string {
 	return f.stateOf(childInput(c), func() string { return f.subtree[c.ID] }).kind
 }
 
 // subtreeStates names, for every live anchor with open children, the state
-// those children put it in ([rollup.subtreeState]). It works bottom-up, so a
-// nested parent is read through its own nested parents the same way.
+// those children put it in ([rollup.subtreeState]), and for a landed Delivery,
+// whose Stories have all closed, the parked state its epic's checkpoint puts it
+// in. It works bottom-up, so a nested parent is read through its own nested
+// parents the same way.
 func subtreeStates(anchors []Anchor, f Facts) map[string]string {
 	byID := make(map[string]Anchor, len(anchors))
 	for _, a := range anchors {
@@ -346,7 +348,14 @@ func subtreeStates(anchors []Anchor, f Facts) map[string]string {
 			return ""
 		}
 		onPath[id] = true
-		s := rollUpBy(a, f, classify).subtreeState()
+		r := rollUpBy(a, f, classify)
+		s := r.subtreeState()
+		// A landed Delivery waits on a person, the operator who calls its
+		// epic's checkpoint, so its parent counts it among the children that
+		// wait on the operator rather than as idle work nobody picked up.
+		if f.deliveries[id] && r.mTotal > 0 && r.open == 0 {
+			s = stateParked
+		}
 		delete(onPath, id)
 		memo[id] = s
 		return s

@@ -317,8 +317,9 @@ type Tile struct {
 	Severity Severity `json:"severity"`
 
 	// Owed marks a row whose next move is a PERSON'S: an unanswered human gate,
-	// a conversation waiting for the operator, or a parked subject whose
-	// recorded waits have all landed. It is not
+	// a conversation waiting for the operator, a parked subject whose recorded
+	// waits have all landed, or a landed Delivery waiting for its epic's
+	// checkpoint. It is not
 	// derivable from the band — severity is coarse and shared, so a one-bead
 	// question (ELEVATED) sorts below a stranded container (HIGH) and rank alone
 	// can never put the operator's queue first. [OperatorQueue] is the partition.
@@ -546,7 +547,7 @@ type Tile struct {
 	// edges climb to a single level up, empty when it climbs to nothing. GroupRoot
 	// names the top of the family tree; GroupParent names the next step toward it,
 	// so a surface renders the family as the nested containment tree it is — a
-	// sub-epic beneath its parent, that sub-epic's own children beneath it —
+	// Delivery beneath its epic, that Delivery's own Stories beneath it —
 	// instead of one flat member list under the top root. Both come from the same
 	// per-tile parent walk in [assignGroupRoots]: GroupRoot follows it to the top,
 	// GroupParent reports its first step.
@@ -830,6 +831,10 @@ type Facts struct {
 	// by it when nothing holds the child's own bead.
 	held    map[string]hold
 	subtree map[string]string
+
+	// deliveries is set by [BuildBoard], never by a source. It holds the id of
+	// every epic row that is a Delivery ([deliveries]).
+	deliveries map[string]bool
 }
 
 // Board is the envelope returned by the service. Tiles are deduplicated by id

@@ -427,6 +427,40 @@ const (
 	mdRecommendedFormula = "gc.recommended_formula"
 )
 
+// mdEpicHypothesis is the key epic stewardship records an epic's hypothesis
+// under (docs/epic-stewardship.md). It is what tells a Delivery from a child
+// epic that is an epic of its own ([deliveries]).
+const mdEpicHypothesis = "epic_hypothesis"
+
+// deliveries names the epic rows that are Deliveries, keyed by id. A Delivery is
+// an epic whose parent is a live epic and which carries no epic_hypothesis
+// (docs/epics.md, "Deliveries and Epic Checkpoints"). Its epic's checkpoint makes
+// the one ruling and closes it, so once its Stories have all closed it waits for
+// that checkpoint rather than for a close or more work. An anchor carries no
+// parent of its own, so the parent is read off the live epic rows whose children
+// include the Delivery. A child epic with a hypothesis of its own reads as an
+// epic. So does one whose parent has closed, because no checkpoint is coming for
+// it, and one whose parent the gather did not read, because the board cannot
+// place it.
+func deliveries(anchors []Anchor) map[string]bool {
+	underEpic := map[string]bool{}
+	for _, a := range anchors {
+		if a.Source != "epic" || !a.ClosedAt.IsZero() {
+			continue
+		}
+		for _, c := range a.Children {
+			underEpic[c.ID] = true
+		}
+	}
+	out := map[string]bool{}
+	for _, a := range anchors {
+		if a.Source == "epic" && underEpic[a.ID] && a.Metadata[mdEpicHypothesis] == "" {
+			out[a.ID] = true
+		}
+	}
+	return out
+}
+
 // The kinds an in-flight review or rework child surfaces under. They are the
 // task_kind the source selects them by (source.reviewReworkAnchor), restated
 // here because the derivation bands them: a review or rework child is a
@@ -581,7 +615,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string, own beadState) bool
 // turn, a review or a conversation, [Facts.stateOf]) is not work nobody has
 // picked up, so [rollup.idle] excludes it. An anchor whose every open child
 // waits that way falls through to NORMAL: nothing under it is idle.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledCheck bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledCheck, deliveryLanded bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -631,6 +665,11 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 		sev0 = SevLow
 	case r.mTotal == 0:
 		sev0 = SevLow
+	// A landed Delivery waits for its epic's checkpoint, which only the operator
+	// calls, so it bands with the rows the operator owes rather than sinking to
+	// the LOW a finished roll-up takes.
+	case deliveryLanded:
+		sev0 = SevElevated
 	case r.open == 0:
 		sev0 = SevLow
 	case r.idle() > 0 && inProgressLive == 0 && !held:
@@ -815,7 +854,7 @@ func collapseWS(s string) string {
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
 func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen []string, own beadState, dispDue, isRuled, humanGatedInFlight bool,
-	machine, approval string, asks []Blocker, prIsOwed bool, stallNeeds string) string {
+	machine, approval string, asks []Blocker, prIsOwed bool, stallNeeds string, deliveryLanded bool) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
 	// nothing now — it ages out of the DONE band on its own once it has been
@@ -830,6 +869,15 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	// for anyone who wants to read what the sitting concluded.
 	if dispDue {
 		return "blocker landed — dispose or resume"
+	}
+	// A landed Delivery names the checkpoint it waits for, and that outranks the
+	// takeaway for the disposition phrase's reason: a sentence a sitting left on
+	// the Delivery was written before its last Story closed, and the landing is
+	// news it does not carry. An open human gate on the Delivery, such as the
+	// checkpoint's own hold, still names its question on the row through the
+	// fold.
+	if deliveryLanded {
+		return "landed — waits for its Epic Checkpoint"
 	}
 	// A childless takeaway row whose graph says more than its takeaway answers
 	// with its state ([stateNeeds]): the wait it is queued or parked behind, by
@@ -1746,7 +1794,7 @@ func nilIfEmpty(s string) *string {
 // the same state.
 const (
 	SectionReview  = "review"  // a pull request wants the operator
-	SectionGate    = "gate"    // a person must answer: decision, human gate, conversation, human-route, disposition
+	SectionGate    = "gate"    // a person must answer: decision, human gate, conversation, human-route, disposition, checkpoint
 	SectionStalled = "stalled" // open work with nothing moving it, or an unowned convoy
 	SectionActive  = "active"  // healthy in-flight roll-up work
 	SectionCleanup = "cleanup" // a finished, empty or ruled row to dispose of
@@ -1782,9 +1830,9 @@ func classifySection(t Tile) string {
 		// it or it waits on the operator; the round-trip axes carry which.
 		return SectionReview
 	case t.Owed:
-		// Owed is humanGated-and-unruled, disposition-due, or a PR owed by the
-		// operator; the PR case already went to review, so what is left is a
-		// person's answer on a bead.
+		// Owed is humanGated-and-unruled, disposition-due, a landed Delivery, or
+		// a PR owed by the operator; the PR case already went to review, so what
+		// is left is a person's answer on a bead.
 		return SectionGate
 	case t.Stranded || t.DeadOwner || t.Kind == "unowned":
 		return SectionStalled
@@ -1886,7 +1934,12 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		}
 	}
 
-	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalled)
+	// A Delivery has landed when it has Stories and every one has closed. Its
+	// next move is the operator's: the checkpoint that rules on its epic and
+	// closes it, which only the operator calls.
+	deliveryLanded := f.deliveries[a.ID] && r.mTotal > 0 && r.open == 0
+
+	sev := severity(a, r, held, stale, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalled, deliveryLanded)
 	// A conversation waiting for the operator is a question they owe, banded as
 	// a human gate is. One a live sitting holds is the operator's attention at
 	// work, banded as work in flight.
@@ -1915,7 +1968,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		Title:    a.Title,
 		Severity: sev,
 
-		// The two states in which a PERSON, not an agent, holds the next move.
+		// The states in which a PERSON, not an agent, holds the next move.
 		// Read from the same predicates severity uses, not from the band it
 		// produces: `unowned` is checked first there and would swallow a
 		// human-routed convoy, and the stale bump can lift an ordinary row into
@@ -1926,7 +1979,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		// would hoist it above every live question — the exact opposite of the
 		// terminal band [rankScore] floors it into. It gates every cause,
 		// the merge anchor's included.
-		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight && !humanGatedInFlight) || dispDue || prIsOwed || convOwed),
+		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled && !isRuledInFlight && !humanGatedInFlight) || dispDue || prIsOwed || convOwed || deliveryLanded),
 
 		Weight:   w,
 		Held:     held,
@@ -1978,7 +2031,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, workHeld, takeaway, waitingOpen, own, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, asks, prIsOwed, stallNeeds),
+		Needs:     needs(a, r, held, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, asks, prIsOwed, stallNeeds, deliveryLanded),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -2031,9 +2084,11 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	facts.human = indexHuman(anchors, facts)
 	// A child is held by its ancestors' waits as bd holds it, and a parent
 	// counts a child that is itself a parent by what that child's own children
-	// are doing, so both are read first: the holds top-down, then the nested
-	// states bottom-up through them.
+	// are doing, or as waiting on the operator when it is a landed Delivery. So
+	// these are read first: the holds top-down, then which epics are
+	// Deliveries, then the nested states bottom-up through both.
 	facts.held = holds(anchors)
+	facts.deliveries = deliveries(anchors)
 	facts.subtree = subtreeStates(anchors, facts)
 	tiles := make([]Tile, 0, len(anchors))
 	for _, a := range anchors {
@@ -2238,8 +2293,8 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 // that grouping also climbs: a blocker is a prerequisite, not a child, and a
 // merge anchor's review/rework children hang off it by a blocked/anchor_bead
 // edge, so a PR keeps its own PR round-trip phase rather than rolling up its
-// reviews. It is bottom-up and memoized, so a multi-level epic aggregates its
-// sub-epics' already-rolled-up states.
+// reviews. It is bottom-up and memoized, so an epic aggregates its Deliveries'
+// already-rolled-up states.
 //
 // The precedence is the roll-up's own, deliberately NOT [prstatus.Derive]'s
 // per-bead needs-attention > merging > working > needs-review: a family is
