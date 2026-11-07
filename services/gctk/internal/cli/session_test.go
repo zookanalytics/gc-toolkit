@@ -346,6 +346,16 @@ func TestSessionTitle(t *testing.T) {
 		}
 	})
 
+	t.Run("a submit gc answers otherwise gives gc's answer, claiming no resume", func(t *testing.T) {
+		r := newTitleRig(t)
+		t.Setenv("STUB_SESSION_BEAD", codexBead)
+		t.Setenv("STUB_SUBMIT_OUT", `{"schema_version":"1","ok":true,"target":"tk-s1","intent":"follow_up","queued":false,"outcome":"accepted","op_id":"op-1","key":"k-1"}`)
+		stdout, _, code := r.run("--topic", "x")
+		if code != sessionExitDone || !strings.Contains(stdout, `submitted /rename to tk-s1: gc session submit answered "accepted", not queued`) || strings.Contains(stdout, "resumed") {
+			t.Fatalf("exit %d, stdout %q", code, stdout)
+		}
+	})
+
 	t.Run("a nudge that reports no outcome is reported as sent", func(t *testing.T) {
 		r := newTitleRig(t)
 		t.Setenv("STUB_NUDGE_OUT", `{"ok":true,"queued":false}`)

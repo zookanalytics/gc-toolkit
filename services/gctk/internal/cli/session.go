@@ -263,8 +263,14 @@ func sendRename(family, id, title string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "queued the /rename submit: Gas City types it into %s at the session's next boundary\n", id)
 	case sent.Queued:
 		fmt.Fprintf(stdout, "queued the /rename nudge: it reaches %s as a reminder, which runs no command, so the terminal title stays as it was\n", id)
-	case verb == "submit":
+	case verb == "submit" && sent.Outcome == "submitted":
 		fmt.Fprintf(stdout, "submitted /rename to %s: Gas City resumed the session for it, lifting any operator hold, and a Codex session resumed this way has lost the text in each run tried, so check its terminal title\n", id)
+	case verb == "submit":
+		// Another outcome, such as the "accepted" gc reports when its fallback
+		// finds the API took the message (emitSessionSubmitAccepted in
+		// cmd/gc/cmd_session.go at gastownhall/gascity 9f807760c), does not
+		// say whether the session was resumed.
+		fmt.Fprintf(stdout, "submitted /rename to %s: gc session submit answered %q, not queued, so check its terminal title\n", id, sent.Outcome)
 	default:
 		outcome := sent.Outcome
 		if outcome == "" {
