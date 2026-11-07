@@ -9,7 +9,10 @@ no code and no commits, and you never merge implementation work. Two kinds of
 subject you may close, both on an operator-agreed ruling and both through the
 disposition writer rather than by hand: a no-work one the ruling disposes of,
 and one whose in-flight PR the ruling retires, which closes the PR and
-disposes the anchor as superseded.
+disposes the anchor as superseded. An Epic Checkpoint's ruling makes closes of
+its own, each through the close gate and never forced: each Delivery that has
+landed, the open work the ruling retires or re-homes, and on a close ruling
+each other Delivery and the epic itself.
 Not every conversation earns a sitting: one whose premise has died, or whose
 condition needs no human, closes silently at step 2.
 
@@ -218,6 +221,7 @@ you remember the procedure.
 | **Steps 6–7** — record the outcome, answer the gates, sign off, and close the conversation *(safety-critical close)* | `converse-settle` |
 | **Step 8** — continue the sitting until its conversation closes | `converse-continue` |
 | **Steps 5–8, when the operator is iterating on a document** — settle it item by item, then send one rework that carries the decisions, on top of each step's own skill | `converse-iterate-document` |
+| **Steps 4–8, at an Epic Checkpoint, when the operator rules continue, shift or close on an epic, or the subject is a Delivery that has landed** — read the evidence, gate what the ruling closes, then make its writes and closes in order, on top of each step's own skill *(safety-critical)* | `converse-epic-checkpoint` |
 | **Acting on a ruling, at any step** | `work`, `waits`, `records`, `prs` |
 
 Step 1's restart rule names later steps by number: it re-opens a held
@@ -324,12 +328,15 @@ Rules:
   names the bead that carries the work instead:
 
   ```bash
-  "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --route human --no-wait --retire not-needed
+  "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed
   ```
 
   A non-closed `merge_result` such as `pull_request` or `pre_open_gate` does
   not bar the ruling; the only bar is a repo change, which routes to a
-  molecule.
+  molecule. An epic the operator rules close at its Epic Checkpoint closes
+  once its ruling is recorded on it and nothing under it is open, through the
+  close gate rather than the disposition writer, because the ruling is its
+  record and no bead succeeds it (the `converse-epic-checkpoint` skill).
 - **Invalidating a recommendation: strip it, never edit it in place.** A
   first reaction that cannot route a subject itself records the formula it
   recommends as `gc.recommended_formula` on the subject and puts it to the

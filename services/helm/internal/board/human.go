@@ -262,9 +262,10 @@ func SessionEnded(state string) bool {
 
 // humanIndex holds, for each bead, the open human gates that hold it and the
 // open conversations that track it, read off the gate and conversation anchors
-// the gather admitted and off a merge anchor's [Anchor.HoldingGates], and which
-// of them a live sitting holds or answers. [BuildBoard] builds it once, before
-// it derives any tile, so a row's held fact and the fold read one index.
+// the gather admitted and off the gates among a merge anchor's
+// [Anchor.PRReasons], and which of them a live sitting holds or answers.
+// [BuildBoard] builds it once, before it derives any tile, so a row's held fact
+// and the fold read one index.
 type humanIndex struct {
 	// gates maps a bead id to the open human gates whose Subjects name it, and,
 	// on a merge anchor, the ones behind the beads it waits on.
@@ -291,8 +292,8 @@ func indexHuman(anchors []Anchor, f Facts) humanIndex {
 	}
 	seen := map[string]bool{}
 	for _, a := range anchors {
-		for _, g := range a.HoldingGates {
-			if !slices.Contains(ix.gates[a.ID], g.ID) {
+		for _, g := range a.PRReasons {
+			if humanGate(g) && !slices.Contains(ix.gates[a.ID], g.ID) {
 				ix.gates[a.ID] = append(ix.gates[a.ID], g.ID)
 			}
 		}

@@ -76,9 +76,6 @@ stateDiagram-v2
   refused_false_completion --> [*]: human
   abandoned --> [*]: human
   retargeted --> [*]: human
-
-  UN --> held: the converse hold — a sitting holds for an operator decision
-  held --> UN: the ruling landed, or nothing holds it any more
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
@@ -103,15 +100,11 @@ there until the checkout fetches it, so the transition fetches that branch into
 `GC_RIG_ROOT`, or a target git does not accept as a branch name, it fetches
 nothing and prints one WARN line naming the landing.
 
-`held` is the one human state a sitting writes rather than the refinery, and it
-is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
-each enumerate anchors by their gating state, so moving a live anchor to `held`
-to record a conversation would drop it from all three for as long as the hold
-lasts. An anchor already carries a state and a reader; an unanchored subject
-carried neither, which is what the state exists to fix. A subject armed for
-deferred dispatch (`gc.dispatch_when_ready`) does not enter it: the hold's gate
-already holds that bead, and `deferred-dispatch.sh` retires an arm on any
-`merge_result`.
+A sitting that holds a bead for an operator decision writes no state. The human
+gate it files blocks the bead, so `bd ready` leaves the bead out until the gate
+is resolved, and the board reads the open gate as the bead's hold
+([human-engagement.md](human-engagement.md#the-sitting)). The bead keeps the
+state, the route and any deferred-dispatch arm it carried.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
@@ -119,8 +112,8 @@ the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
 entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
 still at `status=open`.
 
-The route exception is `park_route` (`human`), the sentinel a hold leaves for
-a person. No pool claims that value, so a transition
+The route exception is `park_route` (`human`), the sentinel that parks a bead
+for a person. No pool claims that value, so a transition
 that finds it leaves it in place. Any other route on a detached anchor is pool demand
 for work that is already in the merge queue. A worker claims it, the claim moves
 the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
@@ -187,8 +180,6 @@ transition into a closed state writes none.
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | handed_off → poured | `mol-refinery-patrol` merge-push, through `assets/scripts/await-ruling.sh` | the zero-diff check could not run three patrols in a row: a human gate names git's error and blocks the bead, which waits on it unassigned and armed, until clearing the gate pours a fresh `mol-polecat-work` run on it |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
-| unanchored → held | `skills/converse-hold`, a converse sitting's hold, via `lifecycle.sh`, only beside a human gate that blocks the bead | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off; `gc-helm.sh accept`, before it dispatches the recommendation; `skills/converse-recheck-premise`, a moot or benign close; each via `lifecycle.sh`; or human | the ruling landed; Accept's answer read back; or the premise re-check found the conversation moot or benign, and no open human gate still holds the bead |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
 routed rework child that blocks the anchor, with the reviewer's findings and the
@@ -623,11 +614,13 @@ count, so on a base that requires no thread resolution an approved PR still
 lands while `held: review` stands.
 
 `prstatus.Held` is the rule, and the helm board shows the same values as a row's
-`pr_held`, from the same derivation over the same facts: the anchor's
-`pr.unanswered_threads` among them, and the same in-flight set, every bead
-carrying the anchor's `anchor_bead`, any `task_kind`, at a live status
-(`prstatus.InFlightStatuses`), which the board's beads source reads as
-`gctk pr-status derive` does.
+`pr_held`, from the same derivation over the same facts. `prstatus.Read` gathers
+those facts for every reader: the anchor's own row, `pr.unanswered_threads`
+among it, its in-flight set, every bead carrying the anchor's `anchor_bead`, any
+`task_kind`, at a live status (`prstatus.InFlightStatuses`), the blockers its
+`blocks` edges name, and the gates its walk reaches. `gctk pr-status derive` and
+the board's beads source each hand it their own adapter onto the store, and
+neither gathers or decides any of it.
 
 A blocked machine verdict whose cause is outside its writer's vocabulary holds
 the PR wherever it was recorded, as any state the derivation cannot name does.
@@ -643,14 +636,15 @@ board applies it too, over the in-flight set the labels count, and by it decides
 a blocked row's phase, whether the operator's queue lists the row, and the row's
 needs phrase.
 
-`prstatus.HoldingGates` is the one reader of the gates that hold a PR. The
-label's value counts them, the board's row names them, and `gc-helm engage` on the
-PR offers each, through `gctk pr-status gates`. Each bead walks for itself, and
-the walks of one call share their reads: each bead is read once, and its edges a
-level at a time. So a PR reads the same on the board, which walks a rig's PRs
-together, as on its label and at engage, which walk it alone. A walk is bounded,
-and one that passes its bound reads as a read that did not answer, for that bead
-alone.
+`prstatus.HoldingGates` is the one reader of the gates that hold a PR, and
+`prstatus.Read` gathers through it. The label's value counts them, the board's
+row names them, and `gc-helm engage` on the PR offers each, beside every other
+reason `prstatus.Reasons` gives, through `gctk pr-status derive --json`. Each
+bead walks for itself, and the walks of one call share their reads: each bead is
+read once, and its edges a level at a time. So a PR reads the same on the board,
+which walks a rig's PRs together, as on its label and at engage, which walk it
+alone. A walk is bounded, and one that passes its bound reads as a read that did
+not answer, for that bead alone.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
 anchor, its in-flight set, its blockers or the walk from them do not read,

@@ -19,7 +19,7 @@ func TestAnchorOwnWorkflowCounts(t *testing.T) {
 
 	t.Run("childless work bead reads in flight, not invisible", func(t *testing.T) {
 		anchors := []Anchor{{ID: "tk-work", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)}}
-		tl := BuildBoard(anchors, fixtureNow, false, nil, live).Tiles[0]
+		tl := buildBoard(anchors, fixtureNow, false, nil, live).Tiles[0]
 		if tl.InProgressLive != 1 || tl.InFlight != 1 {
 			t.Errorf("anchor's own live molecule must count: in_progress_live=%d in_flight=%d (want 1, 1)", tl.InProgressLive, tl.InFlight)
 		}
@@ -32,7 +32,7 @@ func TestAnchorOwnWorkflowCounts(t *testing.T) {
 		anchors := []Anchor{{ID: "tk-work", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "c1", Status: "open"},
 		}}}
-		tl := BuildBoard(anchors, fixtureNow, false, nil, live).Tiles[0]
+		tl := buildBoard(anchors, fixtureNow, false, nil, live).Tiles[0]
 		if tl.InProgressLive != 1 {
 			t.Errorf("in_progress_live=%d (want 1)", tl.InProgressLive)
 		}
@@ -55,7 +55,7 @@ func TestAnchorOwnWorkflowCounts(t *testing.T) {
 			{ID: "c1", Status: "open"},
 		}}}
 		dead := Facts{Inflight: live.Inflight, OwnerState: map[string]string{"gc-toolkit__polecat-hq-1": "archived"}}
-		tl := BuildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]
+		tl := buildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]
 		if tl.InProgressLive != 0 || !tl.Stranded {
 			t.Errorf("a drained molecule over the anchor stops counting and strands: in_progress_live=%d stranded=%v", tl.InProgressLive, tl.Stranded)
 		}

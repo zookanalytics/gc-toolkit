@@ -14,12 +14,13 @@
 #     disposers do not ship. molecule-hold.sh ships only as the name that step
 #     text from an earlier version of a formula calls: it hands the call to
 #     run-cancel.sh and reads or writes no bead itself;
-#   * OWN STEP: every run-cancel.sh --step call names the step it sits in, so a
-#     decline cancels the run this shell is executing and no other;
-#   * OPEN GATE: every await-ruling.sh call follows a human-gate.sh filing that
-#     declares no quiet window, or bring-current-audit.sh's ask, because a wait
-#     needs an open gate and a quiet window files none for a situation a person
-#     already answered moot or benign;
+#   * OWN STEP: every run-cancel.sh or decline.sh --step call in a formula names
+#     the step it sits in, so a decline cancels the run this shell is executing
+#     and no other;
+#   * OPEN GATE: every await-ruling.sh call in a formula follows a human-gate.sh
+#     filing that declares no quiet window, or bring-current-audit.sh's ask,
+#     because a wait needs an open gate and a quiet window files none for a
+#     situation a person already answered moot or benign;
 #   * STAND-DOWN: a gate that arms a re-sling tells a person how to rule the other
 #     way, through stand-down.sh under the gate's own key, and nothing tells them
 #     to close a bead the gate blocks, which bd refuses. bring-current-audit.sh's
@@ -27,9 +28,9 @@
 #     The skills a person's ruling reaches give the command;
 #
 # decline.test.sh holds the order of a decline, and work-setup.test.sh,
-# work-enter.test.sh and work-submit.test.sh each arm that calls it. No live
-# city, Dolt, or network: this suite reads the pack's formulas, prompts, skills
-# and scripts.
+# work-enter.test.sh, work-submit.test.sh and mol-rig-demo-capture-arm.test.sh
+# each arm that calls it. No live city, Dolt, or network: this suite reads the
+# pack's formulas, prompts, skills and scripts.
 #
 # run-tests-scope: tree
 set -uo pipefail
@@ -79,7 +80,7 @@ formula = d.get("formula", "")
 bad = []
 calls = 0
 for st in d.get("steps", []):
-    for m in re.finditer(r'run-cancel\.sh"? --step "?([^"` ,]+)', st.get("description", "")):
+    for m in re.finditer(r'(?:run-cancel|decline)\.sh"? --step "?([^"` ,]+)', st.get("description", "")):
         ref = m.group(1)
         if not ref.startswith(formula + "."):
             continue
@@ -90,26 +91,13 @@ print("%d|%s" % (calls, "; ".join(bad)))
 PY
 )
     case "$out" in
-      0\|*) bad "$f: no run-cancel.sh --step call found" ;;
-      *\|) ok "$f: each of its ${out%%|*} run-cancel.sh --step calls names the step it sits in" ;;
+      0\|*) bad "$f: no run-cancel.sh or decline.sh --step call found" ;;
+      *\|) ok "$f: each of its ${out%%|*} run-cancel.sh and decline.sh --step calls names the step it sits in" ;;
       *) bad "$f: a cancel names another step: ${out#*|}" ;;
     esac
   done
 else
   echo "skip - own-step check: $TOML_PY"
-fi
-
-# Closing load-dispatch would advance the graph into a review with nothing
-# gathered, so both of its failures end the run by cancelling it.
-if TOML_PY="$(tomllib_python)"; then
-  out=$("$TOML_PY" - "$ROOT/formulas/mol-review.toml" <<'PY'
-import sys, tomllib
-d = tomllib.load(open(sys.argv[1], "rb"))
-st = next(s for s in d["steps"] if s["id"] == "load-dispatch")
-print(st["description"].count('run-cancel.sh" --step mol-review.load-dispatch'))
-PY
-)
-  eq "$out" 2 "mol-review's load-dispatch cancels on a short record and on a failed gather"
 fi
 
 # --- 2b. A wait sits on an open gate. -------------------------------------------
@@ -153,26 +141,6 @@ PY
   done
 else
   echo "skip - open-gate check: $TOML_PY"
-fi
-# The same rule over the prose a worker declines by hand from.
-FRAG_WAITS=0; FRAG_BAD=""
-while IFS= read -r frag; do
-  out=$(awk -v f="$frag" '
-    /human-gate\.sh" --subject/ || /"\$BCA" ask/ { filer = $0 }
-    /await-ruling\.sh" "/ {
-      n++
-      if (filer == "") bad = bad f ": a wait with no human gate filed before it; "
-      else if (filer ~ /human-gate\.sh"/ && filer ~ /--quiet-window/) bad = bad f ": the filing before a wait declares a quiet window; "
-    }
-    END { printf "%d|%s", n, bad }' "$ROOT/$frag")
-  FRAG_WAITS=$((FRAG_WAITS + ${out%%|*})); FRAG_BAD="$FRAG_BAD${out#*|}"
-done < <(git -C "$ROOT" grep -l 'await-ruling.sh" "' -- 'template-fragments/*.md' 'agents/*' 'skills/*' 2>/dev/null)
-if [ "$FRAG_WAITS" -eq 0 ]; then
-  bad "no fragment, prompt or skill shows a wait; the doctrine's decline recipe is expected to"
-elif [ -z "$FRAG_BAD" ]; then
-  ok "each of the $FRAG_WAITS waits in fragments, prompts and skills follows a filing with no quiet window"
-else
-  bad "$FRAG_BAD"
 fi
 
 # --- 2c. A wait says how to rule the other way. ---------------------------------

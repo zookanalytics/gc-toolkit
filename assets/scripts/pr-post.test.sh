@@ -236,8 +236,6 @@ eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"Addressed in abc.\n<!-- gc
   "the write-back reply marker counts as the city's mark"
 eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"<!-- gc:sitting:tk-c -->\n### Sitting on tk-c","created_at":"2026-10-08T00:00:00Z"}')" true \
   "the sitting reminder's marker counts as the city's mark"
-eq "$(own bot "$CUT" '{"user":{"login":"bot"},"body":"<!-- gc:visit:tk-v -->\n### Visit","created_at":"2026-10-08T00:00:00Z"}')" true \
-  "…and so does the marker a reminder carried before conversations were tasks"
 # An inline comment is drafted inside a pending review and published with it, so
 # its instant is the review's submission: a review drafted before the cutover and
 # submitted after it is feedback whole, its inline comments included.
