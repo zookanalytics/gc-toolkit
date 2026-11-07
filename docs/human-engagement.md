@@ -903,10 +903,12 @@ client on any other session still move on. `gc-helm engage` runs its attach
 as a child, so when the tab's client exits it reads the conversation. A
 closed conversation prints how it closed and the last hand-back the sitting
 recorded on it (`gc-helm handback`, which the sitting runs before each
-framing and its sign-off); a conversation still open prints the command that
-re-attaches. Claude draws in tmux's alternate screen with no history, so
-nothing of the pane survives to recover, and the record on the conversation
-is what the tab prints.
+framing and its sign-off). A conversation back in the operator's queue, as a
+sitting cut short leaves it, prints the same hand-back and the command that
+takes the conversation up again. A conversation its sitting still holds prints
+the command that re-attaches. Claude draws in tmux's alternate screen with no
+history, so nothing of the pane survives to recover, and the record on the
+conversation is what the tab prints.
 
 Three things about that path are worth knowing before trusting a pane:
 

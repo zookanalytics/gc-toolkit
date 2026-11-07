@@ -72,7 +72,7 @@ wait_for() {            # wait_for <predicate> [args…]
 ###############################################################################
 # (ENDS) — what a sitting's last act is.
 ###############################################################################
-for f in agents/_converse/prompt.template.md skills/converse-continue/SKILL.md skills/converse-settle/SKILL.md; do
+for f in agents/_converse/prompt.template.md skills/converse-continue/SKILL.md skills/converse-settle/SKILL.md skills/converse-recheck-premise/SKILL.md skills/converse-epic-checkpoint/SKILL.md; do
     if grep -q -E '^[[:space:]]*gc session close "\$GC_SESSION_ID"$' "$REPO/$f"; then
         ok "(ENDS) $f closes the session as a command of its own"
     else

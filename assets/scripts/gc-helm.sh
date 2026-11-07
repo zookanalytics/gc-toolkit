@@ -62,7 +62,7 @@ Usage:
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
-  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok}
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok}
   gc-helm handback <conversation-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its conversation, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of; each --var rides the sling, a var the operator settled for this dispatch
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
@@ -4459,26 +4459,36 @@ cmd_engage() {
     # [detached] when the operator left it, and both exit 0, so the
     # conversation says which. A closed conversation is a sitting that ended,
     # and the tab prints how the conversation closed and the last hand-back the
-    # sitting recorded on it (cmd_handback). A conversation still open is a
-    # sitting still going, and the tab prints how to re-attach. A failed attach
-    # reads the same conversation first, because a sitting that ended before the
-    # tab reached it is reported, not offered for an attach.
+    # sitting recorded on it (cmd_handback). A conversation back in the
+    # operator's queue is a sitting cut short, whose close took the session with
+    # it, so the tab prints that hand-back and how to take the conversation up
+    # again. A conversation its sitting still holds is a sitting still going, and
+    # the tab prints how to re-attach. A failed attach reads the same conversation
+    # first, because a sitting that ended before the tab reached it is reported,
+    # not offered for an attach.
+    engage_print_handback() {
+        _ph_at=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.handback_at"] // "" | tostring' 2>/dev/null || true)
+        # The text is the sitting's own, printed to the operator's terminal,
+        # so control bytes other than tab and newline are dropped.
+        _ph_text=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
+            | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
+        if [ -n "$_ph_text" ]; then
+            printf 'Its last hand-back%s:\n\n%s\n' "${_ph_at:+, recorded $_ph_at}" "$_ph_text"
+        else
+            printf 'It recorded no hand-back.\n'
+        fi
+    }
     engage_after_attach() {
         _aa_row=$(row_now "$CONV")
         _aa_status=$(printf '%s' "$_aa_row" | jq -r '.status // ""' 2>/dev/null || true)
+        _aa_holder=$(printf '%s' "$_aa_row" | jq -r '.assignee // ""' 2>/dev/null || true)
         if [ "$_aa_status" = "closed" ]; then
             _aa_reason=$(printf '%s' "$_aa_row" | jq -r '.close_reason // "" | tostring' 2>/dev/null || true)
-            _aa_at=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback_at"] // "" | tostring' 2>/dev/null || true)
-            # The text is the sitting's own, printed to the operator's terminal,
-            # so control bytes other than tab and newline are dropped.
-            _aa_text=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
-                | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
             printf '\nThe sitting on %s has ended: conversation %s closed%s.\n' "$bead" "$CONV" "${_aa_reason:+ ($_aa_reason)}"
-            if [ -n "$_aa_text" ]; then
-                printf 'Its last hand-back%s:\n\n%s\n' "${_aa_at:+, recorded $_aa_at}" "$_aa_text"
-            else
-                printf 'It recorded no hand-back.\n'
-            fi
+            engage_print_handback "$_aa_row"
+        elif [ "$_aa_status" = "open" ] && [ "$_aa_holder" = "human" ]; then
+            printf '\nThe sitting on %s has ended: conversation %s is back in your queue. Take it up again: %s engage %s\n' "$bead" "$CONV" "$PROG" "$bead"
+            engage_print_handback "$_aa_row"
         elif [ "$1" -ne 0 ]; then
             echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
         elif [ -z "$_aa_status" ]; then
