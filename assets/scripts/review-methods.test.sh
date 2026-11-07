@@ -71,15 +71,17 @@
 #     otherwise every one, and each message the change adds or alters. Each is
 #     captured in each required state, and a changed screen also in the state
 #     that shows the change, in its own named PNG. It reads the words as the
-#     person they are for reads them. A violation the change introduces, or one
+#     person they are for reads them, and words that state every fact can still
+#     violate the writing standard. A violation the change introduces, or one
 #     already on a changed screen or message, blocks approval as a finding with
 #     the rule, the state, the correction, the capture and the locus. A
-#     violation elsewhere is filed as a separate bug. A limit outside the change
-#     that stops a capture is named in the verdict and does not block, while a
-#     failure the change causes is a finding. With no standard named the method
-#     skips this section, and the pm method leaves the standards to the demo
-#     check. A page's capture size stays stated: its default, the Device line
-#     and the resize step.
+#     violation elsewhere is filed as a separate bug. The verdict names the
+#     standard and what it checked. A limit outside the change that stops a
+#     capture is named in the verdict and does not block, while a failure the
+#     change causes is a finding. With no standard named the method skips this
+#     section, and the pm method leaves the standards to the demo check. A
+#     page's capture size stays stated: its default, the Device line and the
+#     resize step.
 #
 # Hermetic: reads this checkout and a scratch git repository; no gc, store or
 # network.
@@ -422,6 +424,8 @@ hasF "$TMP/demo.standard" 'Read the words as the person the screen or message is
   "…reads the words as the person the screen or message is for reads them"
 hasF "$TMP/demo.standard" 'knowing what that person knows, and knowing nothing of the change or its anchor.' \
   "…knowing what that person knows, and nothing of the change"
+hasF "$TMP/demo.standard" 'Words can state every fact the change claims and still violate the writing standard.' \
+  "…so words that state every fact can still violate the writing standard"
 hasF "$TMP/demo.standard" 'A violation the change introduces is a finding. A violation already on a changed screen or message is also a finding' \
   "…makes a violation the change introduces, or one already on a changed surface, a finding"
 hasF "$TMP/demo.standard" 'Both block approval, and both go in this verdict, not in a separate bug.' \
@@ -443,6 +447,7 @@ hasF "$TMP/verdict.demo" "**Delivered, and it shows a violation of the rig's sta
   "the demo verdict requests changes on a violation of the rig's standard"
 hasF "$TMP/verdict.demo" 'If the rig names a standard, approve only when every capture meets it.' \
   "…approves under a standard only when every capture meets it"
+hasF "$TMP/verdict.demo" 'If the rig names a standard, the verdict names it.' "…names the standard"
 hasF "$TMP/verdict.demo" 'lists each screen and message you checked against it, in which states, and each screen, message or state you could not check, with what stopped it.' \
   "…and lists what it checked against the standard and what it could not"
 hasF "$DEMO" 'The page renders at 1280 by 900 by default.' "a page's capture size has a stated default"
