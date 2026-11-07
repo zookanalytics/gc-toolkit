@@ -4896,12 +4896,13 @@ cmd_engage() {
     # later finds a started sitting.
     #
     # engage sends the sitting no opening turn of its own. One sent now would
-    # find the sitting's first turn still running, and gc delivers a nudge at
-    # an idle boundary, never into a running turn, so it would land after the
-    # framing as a stale "begin now" and cost one more model turn. What the
-    # operator gave engage reaches the sitting through the conversation's ask:
-    # cmd_open files a --reason, a seed's body or a lens brief there, and the
-    # sitting reads the ask when it claims.
+    # find the sitting's first turn still running, and a nudge's default
+    # delivery, wait-idle, holds it for an idle boundary rather than enter a
+    # running turn, so it would land after the framing as a stale "begin now"
+    # and cost one more model turn. What the operator gave engage reaches the
+    # sitting through the conversation's ask: cmd_open files a --reason, a
+    # seed's body or a lens brief there, and the sitting reads the ask when it
+    # claims.
     #
     # The attach path waits for the reconciler's launch first
     # (engage_await_start, above), and attaches only a started sitting.
