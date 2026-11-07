@@ -80,7 +80,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     forced relaunch and a claimant with no poured workflow, so it adds no key and
     writes nothing to let a run through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases and force-pushes under an open PR, and waits behind a sibling.
+    rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.

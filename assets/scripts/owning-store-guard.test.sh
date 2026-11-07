@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for the witness-patrol OWNING STORE GUARD.
 #
-# The hazard: step 5 removes a worktree on the authority of the bead that owns
+# The hazard: the recover-orphaned-beads step's cleanup removes a worktree on
+# the authority of the bead that owns
 # it, and a bare `gc bd show` cannot prove that bead absent — it resolves a
 # live id from whichever store holds it, but a miss is answered by the store
 # the caller stands in, not the one the prefix names, so an id the witness
@@ -103,7 +104,8 @@ grep -qF 'if [ "$OWNED" = "1" ]' "$TOML" \
 # The removal must ALSO require a nonempty worktree. A bead no workspace-setup
 # reached, a graph.v2 step and a graph.v2 root carry no metadata.work_dir, so
 # WORKTREE is empty for them, and `git worktree remove "" --force` exits 128,
-# which under set -e aborts part 5 before orphan-dispose.sh releases the bead.
+# which under set -e aborts the cleanup before orphan-dispose.sh releases the
+# bead.
 RM_IF=$(grep -nE '^[[:space:]]*if \[ "\$OWNED" = "1" \]' "$TOML" | head -1)
 case "$RM_IF" in
   *'-n "$WORKTREE"'*) ok "the worktree removal also requires a nonempty worktree" ;;

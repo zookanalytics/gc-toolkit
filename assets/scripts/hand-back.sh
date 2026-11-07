@@ -34,11 +34,9 @@
 # read. Nothing is written to it but a note saying what it showed. A write the
 # store refuses gets the same note, naming what the bead shows after it.
 #
-# gc bd release-if-current is not this write. It leaves both pins, and it opens
-# the store of whichever argument names an existing bead, trying city ids
-# first. A pool session's id is a city bead, so a rig bead released under that
-# holder goes to the city store, finds no bead there, and prints "skipped" with
-# exit 0.
+# gc bd release-if-current is not this write. It leaves both pins, takes no
+# argument beyond its bead and holder, so it carries none of the caller's flags,
+# and releases only an in_progress claim.
 #
 # Callers: mol-polecat-work's hand-back arms (the stop to ask a person about a
 # bead with no molecule, the store-only exit, the auto_push=false halt), and

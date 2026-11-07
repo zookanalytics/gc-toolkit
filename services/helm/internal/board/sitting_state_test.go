@@ -152,7 +152,7 @@ func TestSittingStateAndHeadlineRideTheWire(t *testing.T) {
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		t.Fatal(err)
 	}
-	if wire["state"] != SittingInSession || wire["headline"] != "the topic" {
+	if wire["state"] != SittingInSession || wire["headline"] != "the ask" {
 		t.Errorf("state=%v headline=%v", wire["state"], wire["headline"])
 	}
 	for _, key := range []string{"status", "assignee", "start_failure"} {

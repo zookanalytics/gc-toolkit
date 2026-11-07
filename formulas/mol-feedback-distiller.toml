@@ -29,7 +29,8 @@ Every step closes its own bead through `assets/scripts/claim-close.sh --step
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
 drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
-a worker waking fresh re-runs step 1 §1-§3 to rebuild it — never guesses.
+a worker waking fresh re-runs load-and-gate through its cadence gate to
+rebuild it — never guesses.
 
 Spec: specs/2026-08-learning-system/implementation-design.md §3; rulings D5-D7.
 """
@@ -95,10 +96,10 @@ SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "
 gc prime
 gc bd prime
 REPO="$(git rev-parse --show-toplevel)"
-# Load-bearing: step 2 reads the rubric and the adopted-rule inventory from
-# origin/main, never the working tree (no workspace-setup step keeps this
-# checkout current). Fail-soft — a failed fetch falls back to the last-known
-# origin/main.
+# Load-bearing: judge-and-cluster reads the rubric and the adopted-rule
+# inventory from origin/main, never the working tree (no workspace-setup step
+# keeps this checkout current). Fail-soft — a failed fetch falls back to the
+# last-known origin/main.
 git -C "$REPO" fetch origin main --quiet || true
 
 DISTILL_RUN=open   # open | gated | aborted | off-home
@@ -178,7 +179,8 @@ while IFS="$TAB" read -r R RPATH; do
     "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome fail
     exit 0
   fi
-  # obs_rig_path rides along so step 3's stamping reopens the SAME store.
+  # obs_rig_path rides along so file-and-dispatch's stamping reopens the SAME
+  # store.
   jq --arg rig "$R" --arg rigpath "$RPATH" '[.[]
       | select((.metadata.task_kind // "") == "observation")
       | select((.metadata["obs.distilled"] // "") == "")
@@ -217,8 +219,9 @@ else
   DISTILL_RUN=gated
   echo "DISTILL_RUN=gated — $N pending, none urgent, oldest ${AGE_D}d; no observation is judged this run"
   # Empty the JUDGEABLE set and fall through — nothing is stamped on a gated
-  # run, so all $N stay pending and still count toward the next gate; step 2's
-  # retirement pass (inputs: the fragments on disk) still runs every run.
+  # run, so all $N stay pending and still count toward the next gate;
+  # judge-and-cluster's retirement pass (inputs: the fragments on disk) still
+  # runs every run.
   echo '[]' > "$PENDING"
 fi
 # <<< distiller-cadence-gate
@@ -316,12 +319,13 @@ to one occurrence while two findings from one event both survive. Provenance
 names the event, not the finding: one sitting files several observations
 under a single `bead:<id>:turn:<date>`, and one review comment can produce
 two under a single `pr:<slug>#<n>:comment:<id>`. Keying on provenance alone
-drops every observation after the first, and step 3 stamps the dropped ones
-consumed along with the survivor, so they never return to the pending set.
+drops every observation after the first, and file-and-dispatch stamps the
+dropped ones consumed along with the survivor, so they never return to the
+pending set.
 Cluster the deduped set onto pattern beads — the standing-record idiom:
 open, unrouted, never assigned, `task_kind=feedback-pattern`. List existing
 ones from this rig's open beads (an unreadable listing aborts the run,
-`--outcome fail`, exit — same fail-safe as step 1). Seed a new pattern
+`--outcome fail`, exit — same fail-safe as load-and-gate). Seed a new pattern
 bead per new cluster:
 ```bash
 PATTERN_JSON=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --metadata '{"task_kind":"feedback-pattern"}' --json)
@@ -346,9 +350,9 @@ is the corroboration Gate 1 exists to withhold.
 One outcome per cluster: **promote** (ADD/UPDATE/SUPERSEDE, reasoning
 written down — the D3 reviewer judges from the PR alone), **hold** (say
 what recurrence would change the call), **contest** (becomes a human gate in
-step 3), **discard with reason**, **surface** (Gate 1 block — hold awaiting
-corroboration or operator endorsement), or **route-to-engineering** (Gate 2
-— step 3 files an engineering bead instead).
+file-and-dispatch), **discard with reason**, **surface** (Gate 1 block — hold
+awaiting corroboration or operator endorsement), or **route-to-engineering**
+(Gate 2 — file-and-dispatch files an engineering bead instead).
 
 ## 5. Retirement pass over adopted rules — EVERY run (gated runs included)
 
@@ -399,7 +403,7 @@ the consumed-observation map forward):
 recomputed rollups (vacuous on a gated run); retirement pass asked of every
 adopted rule; a bounded proposal list with written reasoning; contested
 rules marked; a consumed map `(obs id, obs rig, obs rig path) -> pattern`
-for step 3. Bead closed on every path; session NOT drained.
+for file-and-dispatch. Bead closed on every path; session NOT drained.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -505,7 +509,7 @@ Judged is the criterion, not seen: every observation judged into a pattern
 this run — promoted, held, NOOPed, contested, discarded — is stamped so it
 never re-counts toward the D7 gate; on a gated run the map is empty and
 NOTHING is stamped (the pending set is what opens the next gate). Reopen
-the store each observation was read from, by the same rule step 1 used:
+the store each observation was read from, by the same rule load-and-gate used:
 ```bash
 if [ -n "$OBS_RIG_PATH" ]; then
   gc bd -C "$OBS_RIG_PATH" update "$OBS_ID" --set-metadata "obs.distilled=$PATTERN"
@@ -543,8 +547,8 @@ if [ -n "$RECUR" ]; then
 else
   echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
 fi
-# Step 1 hands the pending set past its own trap because every step reads it;
-# this is its last use. Guarded because each block is its own shell.
+# load-and-gate hands the pending set past its own trap because every step
+# reads it; this is its last use. Guarded because each block is its own shell.
 [ -n "${PENDING:-}" ] && rm -f "$PENDING"
 "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
