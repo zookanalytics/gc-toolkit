@@ -2063,10 +2063,13 @@ MP_EOF
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no gate filed"
           continue
         elif [ "$rrc" -eq 4 ]; then
-          # A write did not land: the anchor changed after bead-rehome judged
-          # it — transient. Keep merge_result=pull_request so the anchor is
-          # re-enumerated and the next pass retries.
-          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome's write did not land (transient); retry next pass" >&2
+          # A write did not land. Most often the anchor changed after
+          # bead-rehome judged it, and it stays open at merge_result=pull_request,
+          # so the next pass re-enumerates it and retries. When the close landed
+          # and only its edge did not, the anchor is closed, no pass enumerates it
+          # again, and doctor/check-closed-implies-landed reports it until the
+          # same bead-rehome call is run again and records the edge.
+          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome's write did not land (transient); retry next pass while the anchor is open, and check-closed-implies-landed reports it if it closed without its edge" >&2
           skipped=$((skipped + 1)); continue
         else
           # Close refused, a conflicting successor, or a bad invocation — a human

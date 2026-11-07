@@ -19,7 +19,7 @@
 #       overwritten, nor an edge of another type on the same pair;
 #   (f) each kind renders its own note phrasing;
 #   (g) an id prefix no rig claims is refused, not guessed;
-#   (h) a self-pointer is refused;
+#   (h) a bead named as its own successor is refused;
 #   (i) --dry-run writes nothing;
 #   (j) an already-closed bead is REPAIRED (edge + note), not refused, and a
 #       wait edge a forced close left behind gives way to the edge;
@@ -605,7 +605,7 @@ eq "$rc" 2 "an id prefix no rig claims is refused"
 eq "$(field alpha status al-origin7)" open "origin untouched when the store cannot be derived"
 has "$(cat "$TMP/err")" "cannot derive the store" "the refusal explains what to pass"
 
-# --- (h) a self-pointer is refused ---------------------------------------
+# --- (h) a bead named as its own successor is refused --------------------
 mkbead alpha open al-origin8
 rc=0; run --origin al-origin8 --successor al-origin8 --kind folded || rc=$?
 eq "$rc" 64 "a bead cannot supersede itself"

@@ -80,24 +80,24 @@ which is fixed by recording its hypothesis
 ([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
 Epic is compatibility debt
 ([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
-epic (its duplicates or supersedes edge) carries a recorded terminal reason, so it passes too. A
-non-epic bead is untouched ([epic-stewardship.md](epic-stewardship.md)). The
+epic (its duplicates or supersedes edge) carries a recorded terminal reason, so
+it passes too. A non-epic bead is untouched
+([epic-stewardship.md](epic-stewardship.md)). The
 clause reads the bead itself (`gc bd show`), so that read runs for every
 finalize, epic or not. The `--except-key` exception excepts a human gate, so it
 never releases an epic this clause holds.
 
 Neither finalize path wired today reaches an undisposed epic: `merge.sh`
 finalizes merge anchors, and `bead-rehome.sh` asks the gate about the bead as
-its disposition will leave it. A bare `gc bd close` runs no gate, and the doctor invariant I15
-(`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
-without its ruling.
+its disposition will leave it. A bare `gc bd close` runs no gate, and the
+doctor invariant I15 (`doctor/check-epic-closed-implies-ruled`) reports an epic
+closed that way without its ruling.
 
 `--as-disposed` reads the bead as carrying that disposition. `bead-rehome.sh`
-asks before it writes anything, the close and its read-only `--check` under
-`--except-key` alike, so it asks this way so that its answer is the one the
-close will get. Only this
-clause reads a disposition, so the option releases no human gate, and a bead that
-does not read still refuses.
+asks with it before it writes anything, on its close and on its read-only
+`--check` under `--except-key` alike, so each reads the answer the bead will
+get once it is disposed. Only this clause reads a disposition, so the option
+releases no human gate, and a bead that does not read still refuses.
 
 ## Fail closed
 

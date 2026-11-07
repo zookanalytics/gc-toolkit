@@ -25,7 +25,7 @@
 #   * each refusal writes nothing: an open PR, no gate under the key, another open
 #     gate, a gate a person is assigned, another live blocker, an open child, a gate
 #     that also holds another open bead with nothing else as the evidence, a claim,
-#     an unreadable bead, a pointer to other evidence, a review bead;
+#     an unreadable bead, a disposition already naming other evidence, a review bead;
 #   * a gate that also holds another open bead, with the evidence named: the arm and
 #     the route go before the edge, passes after every write and mid-pass sling
 #     nothing, a stop at the edge converges on a re-run, and the gate stays open and

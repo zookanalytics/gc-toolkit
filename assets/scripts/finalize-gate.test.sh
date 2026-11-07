@@ -264,8 +264,8 @@ out=$("$SUT" check E27r --except-key dispose-failed.27 2>/dev/null); rc=$?
 eq "$rc" 0 "an epic ruled close with its outcome whose only gate is excepted: exit 0"
 
 # 28. --as-disposed answers as a disposed epic (22) answers, whatever the epic's
-# ruling reads. That is what bead-rehome.sh's close finds once it has stamped its
-# pointer, and what its --check asks before the stamp.
+# ruling reads. That is what bead-rehome.sh asks before it writes anything, on
+# its close and its --check alike.
 for m in '{"epic_hypothesis":"h"}' '{"epic_hypothesis":"h","epic_ruling":"continue"}' '{"epic_hypothesis":"h","epic_ruling":"shift"}' '{"epic_hypothesis":"h","epic_ruling":"pending"}' '{"epic_hypothesis":"h","epic_ruling":"close"}'; do
   store "[$(epic_bead E28 open "$m")]"; : > "$STUB_DEPS"
   "$SUT" check E28 >/dev/null 2>&1; eq "$?" 1 "$m: held as it stands"

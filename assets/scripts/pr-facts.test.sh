@@ -523,7 +523,7 @@ eq "$(succ_of F2c)" "<none>" "nothing was disposed"
 has "$(cat "$STUB_ESC_LOG")" "--subject F2c --key pr-dispose-failed.23" "a gate is filed under a DISTINCT key"
 hasnt "$(cat "$STUB_ESC_LOG")" "pr-abandoned.23" "…never the generic rework-or-close gate"
 
-echo "# a disposition whose pointer would not stick (transient) -> skip, retry, no gate"
+echo "# a disposition whose write does not land (transient) -> skip, retry, no gate"
 store "[$(anchor F2d 24 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-d"')]"
 printf '%s' "$(prview 24 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_24.json"
 : > "$STUB_ESC_LOG"
