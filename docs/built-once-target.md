@@ -146,8 +146,8 @@ pack's attention model.
 The trade: the second data plane that reads the store directly, the rows that
 exist only because a pack writer stamped a route, and the hand-written
 TypeScript mirror of the Go contract with the parity test that holds the two
-equal all go. Which views stay is the Helm UX epic's (tk-ikpyzn) decision with
-tk-1tfzr71.24, which makes the board's estimate the least certain on the page.
+equal all go. The web page is the board's one view for people, and
+`helm-svc board --json` prints its rows for agents.
 
 ### Patrol
 
