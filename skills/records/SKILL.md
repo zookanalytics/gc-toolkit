@@ -1,6 +1,6 @@
 ---
 name: records
-description: Use when you need to write down what was decided, what happened, or what a bead needs, such as an outcome or a finding in its notes, a Current state summary of long notes, the headline the board shows for it (its takeaway), or an observation of feedback that corrects standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
+description: Use when you record an outcome or a finding in a bead's notes, sum up long notes, set the headline the board shows for a bead (its takeaway), or file an observation of feedback about standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec, use filing-documentation.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -56,15 +56,15 @@ on:
 
 Pass `--no-wait` when the bead waits on nothing. When it waits, pass
 `--waiting-on <bead>` in its place, once for each bead it waits on. Each named
-wait is also written as a `blocks` edge, best-effort: an edge that will not
-take only warns, so read it back when the wait matters (the waits skill). A
-headline with neither flag parks the bead on prose, which
+wait is also written as a `blocks` edge, best-effort: an edge that fails to
+write only warns, so read it back when the wait matters (the waits skill). A
+headline with neither flag leaves the bead waiting on its text alone, which
 `doctor/check-wait-is-an-edge` reports unless a live `blocks` edge holds the
 bead.
 
 In a sitting, leave the headlines to the hold and the sign-off (the
 converse-hold and converse-settle steps). The one other headline a sitting
-writes is the release that stops work in flight (the work skill).
+writes is the one that comes with stopping work already sent (the work skill).
 
 ## Record feedback as an observation
 
@@ -73,8 +73,9 @@ operator correcting you, a PR review or comment, or a rework whose cause was a
 habit rather than a one-off, fix the instance in front of you first. Then file
 one observation before the turn ends, by
 `references/file-feedback-observations.template.md` in this skill's directory:
-it says which turns carry feedback, gives the create that files the
-observation whole, and says how to set its provenance, category and directive.
+it says which turns carry feedback, gives the one `gc bd create` call that
+files the observation with every field, and says how to set its provenance,
+category and directive.
 
 Feedback about one change's content, such as a bug or a wrong approach, is
 review, not an observation.

@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for, such as filing new work or a follow-up in the right rig and under the right parent or epic, routing, slinging or dispatching a bead to a pool on a formula, releasing a held bead, assigning it to an agent, choosing a formula or taking a recommended formula, stopping or redirecting work in flight, or closing or retiring a duplicate or a bead that needs no work. Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
+description: Use when you carry out a decision about work, such as filing it as a task in the right rig under the right parent, routing or slinging it to a pool on a formula, assigning it to a named agent, taking a recommended formula, stopping or redirecting it once dispatched, or closing a bead that needs no work or duplicates another. Not for doing the work yourself. To make work wait first, use waits; for work that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -8,8 +8,8 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 Use this skill to file new work, send a bead to a pool or a named agent, stand
 up an integration effort, take a recommended formula, choose a formula, stop or
-redirect work in flight, or close a bead that needs no work. The pool or agent
-you send a bead to does the work.
+redirect work already sent, or close a bead that needs no work. The pool or
+agent you send a bead to does the work.
 
 Commands call the gc-toolkit pack's scripts as
 `"$(gc <binding> scripts-dir)/<script>"`, and only that way. The call looks up
@@ -21,16 +21,16 @@ script's `--help` lists its flags.
 
 ## File new work
 
-File a bead for the work. Its description is the contract the worker reads:
+File a bead for the work. The worker reads its description to learn what to do:
 
 ```bash
 gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json
 ```
 
 Add `--parent <epic>` when an epic applies, and
-`--metadata '{"placement":"pending"}'` when intake holds the bead (below).
-Filing starts nothing: afterwards, send the bead, make it wait (the waits
-skill), or leave it for the operator to place.
+`--metadata '{"placement":"pending"}'` when the bead may not be sent yet
+(below). Filing starts nothing: afterwards, send the bead, make it wait (the
+waits skill), or leave it for the operator to place.
 
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig:
@@ -38,22 +38,22 @@ skill), or leave it for the operator to place.
 - **A dependency goes beside the bead it came from, never under it.** A
   dependency is work the bead it came from waits on, and it is the default. bd
   refuses a `blocks` edge from a parent to its own descendant, so a child could
-  never gate the bead it came from. Leave work already filed under the bead it
+  never block the bead it came from. Leave work already filed under the bead it
   came from where it is.
 - **Work that genuinely decomposes an epic is a member of that epic.** File it
   with `--parent <that epic>`, even when the epic is the bead it came from. Add
   no `blocks` edge that makes the epic wait on it: an epic already waits on its
   members.
 - **Give it a parent only when one applies.** A parent makes the bead a member
-  of its epic: a park on the epic holds the bead, and the epic's priority ranks
-  it. The parent of the bead it came from applies only when the new work serves
-  the same epic. Find it with
+  of its epic: parking the epic (`gc-helm.sh park`) holds the bead too, and the
+  bead follows the epic's priority. The parent of the bead it came from applies
+  only when the new work serves the same epic. Find it with
   `"$(gc <binding> scripts-dir)/converse-parent.sh" <bead>`.
   This prints that parent, or the nearest open bead above it once that parent
   has closed, or an empty line when none is open. Never file under a closed
-  parent: work there follows no priority and sits under no open row. A non-zero
-  exit means a bead on the way could not be read, not that there is no parent.
-  When no epic applies, give the bead no parent.
+  parent: work there follows no priority, and the board shows it under no open
+  bead. A non-zero exit means a bead on the way could not be read, not that
+  there is no parent. When no epic applies, give the bead no parent.
 - **Under an epic, file it in the open Delivery whose aim covers it.** A
   Delivery is a child epic that lands a bounded step toward its epic's
   hypothesis, and its description opens with an `Aim:` line (`docs/epics.md`).
@@ -67,13 +67,13 @@ skill), or leave it for the operator to place.
   all closed has landed. It stays open until its checkpoint, and until then
   takes only work its aim covers, such as a follow-up that finishes one of its
   Stories.
-- **Send it now only when intake admits it.** Intake admits a member of an
-  epic, PR-finishing work carrying `anchor_bead`, an emergency, and work the
-  operator routed in a sitting, by hand or by Accept. An emergency is a red main
-  or a broken gate, confirmed by a check that failed on the default branch's
-  head. Critical work the operator wants run now goes through the operator's
-  own routing. File any other bead with `placement=pending` in its create and
-  no route or arm: the operator's placement sitting places it.
+- **Send it now only when it is one of these:** a member of an epic, work that
+  finishes an open PR and carries `anchor_bead`, an emergency, or work the
+  operator routed in a sitting (a converse session with the operator), by hand
+  or by Accept. An emergency is a check that fails on the default branch's head,
+  confirmed by reading that check. Other critical work runs now only when the
+  operator routes it. File any other bead with `placement=pending` in its create
+  and no route or arm: the operator decides where it goes.
 
 ### File a Delivery
 
@@ -106,21 +106,21 @@ Choose the formula (below), then sling the bead to the pool:
 gc sling <rig>/<pool> <bead> --on <formula>
 ```
 
-With no `--on`, the sling pours the target's `default_sling_formula`, which for
-a polecat pool is `mol-polecat-work`.
+With no `--on`, the sling runs the pool's `default_sling_formula`, which for a
+polecat pool is `mol-polecat-work`.
 
-- **One dispatch, never two.** A sling pours a workflow and stamps
-  `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
-  has the pool claim the bead itself. An arm
-  (`deferred-dispatch.sh arm`) has the deferred-dispatch pass sling the bead
-  once nothing holds it. Send it one way, and disarm an armed bead before you
-  send it another. Any two start two workers on one branch.
+- **One dispatch, never two.** A sling starts a workflow on the bead and sets
+  `gc.execution_routed_to` on it. Setting `gc.routed_to=<pool>` by hand has the
+  pool claim the bead itself. Arming the bead (`deferred-dispatch.sh arm`) has
+  the deferred-dispatch order sling it once nothing holds it. Send it one way,
+  and disarm an armed bead before you send it another. Any two start two
+  workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`
   as finished. Release the wait (the waits skill), then send.
 
-### In a sitting, decide which bead carries the work
+### In a sitting, decide which bead is the work
 
 Sign off by the case that fits (the converse-settle step):
 
@@ -128,7 +128,7 @@ Sign off by the case that fits (the converse-settle step):
   the subject: `gc sling <rig>/<pool> <subject> --on <formula>`. When the
   formula is the one the subject recommends, add `--accept` to the same sign-off
   and send nothing yourself (Take a recommendation, below).
-- **New work carries it, and the subject waits for it.** File the work, send
+- **A new bead is the work, and the subject waits for it.** File the work, send
   it, and sign off with `--ruled yes --waiting-on <the work>`.
 - **New work decomposes an epic subject.** File it as the subject's member,
   with `--parent <subject>`, send it, and sign off with `--ruled yes --no-wait`.
@@ -141,7 +141,7 @@ Sign off by the case that fits (the converse-settle step):
 
 The mechanik, deacon, witness, refinery and keeper are named agents. Assign the
 bead to the agent by the qualified name `gc agent list` prints, then notify it,
-because the notice is what gives an idle named agent a turn on the bead
+because an idle named agent acts on the bead only once notified
 (`docs/deferred-dispatch.md`):
 
 ```bash
@@ -155,10 +155,10 @@ Stand one up when several beads must reach the default branch as one PR the
 operator reviews. A lone bead needs none: slung to a pool, it opens its own PR.
 
 The procedure is the recipe in `integration-effort.md`, beside this file, which
-the mechanik runs. It also covers adding a bead to a standing effort and
+the mechanik runs. It also covers adding a bead to an existing effort and
 bringing the effort's branch current. The recipe pushes the effort's branch,
 and a converse sitting never pushes, so a sitting does not run it. A sitting
-sends the effort on:
+sends the effort this way instead:
 
 - When the subject's recommendation is `mol-design-convoy`, the sign-off's
   `--accept` takes it (Take a recommendation, below), and that formula's run
@@ -170,23 +170,23 @@ sends the effort on:
 
 ## Take a recommendation
 
-A first reaction that cannot send a bead itself records the formula it
-recommends as `gc.recommended_formula` and asks the operator in a human gate on
-the bead, under the key `first-reaction`. Take the recommendation only on the
-operator's go, and only through `gc-helm.sh accept`, the writer the board's
-Accept runs:
+When the proactive agent's first reaction to a bead cannot send it, the agent
+records the formula it recommends as `gc.recommended_formula` and asks the
+operator in a human gate on the bead, under the key `first-reaction`. Take the
+recommendation only once the operator approves it, and only through
+`gc-helm.sh accept`, the command the board's Accept button runs:
 
 - **Outside a sitting:** `"$(gc <binding> scripts-dir)/gc-helm.sh" accept <bead>`.
 - **In a sitting:** pass `--accept` on the sign-off, or on the `--answer` call
-  of a turn that does not sign off. It hands the recommendation's gate to
-  Accept's writer once the ruling's other writes have landed, every other gate
-  it answers included (the converse-settle step). A var the operator settles
-  for the dispatch rides beside it as `--var <key>=<value>`; the formula's own
-  description names the vars it takes.
+  of a turn that does not sign off. It answers the recommendation's gate
+  through `gc-helm.sh accept` after the ruling's other writes succeed, including
+  its answer to every other gate (the converse-settle step). Pass a var
+  the operator settles for the dispatch beside it as `--var <key>=<value>`; the
+  formula's own description names the vars it takes.
 
-Never send a recommended formula with a sling of your own. Under the bead's
-acceptance lock, Accept clears the recommendation's gate and nothing else,
-sends the formula, and records the dispatch. It refuses while another human
+Never send a recommended formula with a sling of your own. Accept holds a lock
+on the bead while it clears the recommendation's gate and nothing else, sends
+the formula, and records the dispatch. It refuses while another human
 gate blocks the bead, because a worker builds nothing that still waits. When an
 Accept stopped after its sling, run it again: it finds the run it sent by the
 token in that run's title and only records it, where a sling of your own sends
@@ -213,20 +213,20 @@ Choose by what done looks like for the work:
    it produces that and fits work like this.
 
 Never send new work on a patrol, review or validation formula: the city's
-orders and review cadence pour those. Set a formula's variables with
+orders and review cadence start those. Set a formula's variables with
 `--var <name>=<value>` on the sling. When you put the choice to the operator,
 name the formula and why you chose it.
 
-## Stop or redirect work in flight
+## Stop or redirect work already sent
 
 - **Stop it.**
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
-  stops the run beneath the bead and leaves the bead open, unassigned and
-  routed to no pool, with that sentence as its headline. It leaves a
-  deferred-dispatch arm in place, and an armed bead goes out again once nothing
+  stops any workflow running on the bead and leaves the bead open, unassigned
+  and routed to no pool, with that sentence as its headline. It leaves a
+  deferred-dispatch arm in place, and an armed bead is sent again once nothing
   holds it, so disarm it first (the waits skill). When the bead now waits on
   something, pass `--waiting-on <bead>` in place of `--no-wait`.
-- **Send it elsewhere.** Name where it goes in the same release:
+- **Send it elsewhere.** Name where it goes in the same call:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For a named agent, pass `--assign <named-agent>` in place of
   `--route <rig>/<pool>`, then notify it:
@@ -238,12 +238,13 @@ name the formula and why you chose it.
   leaves the gate that put the recommendation to the operator open until it is
   answered. When the bead itself should go, close it instead (below).
 
-Retire a pull request in flight instead of stopping it (the prs skill).
+When the work already has an open pull request, retire the pull request instead
+of stopping the bead (the prs skill).
 
 ## Close a bead that needs no work
 
 Record the no-op, then close through `bead-rehome.sh`, which runs only once the
-record landed:
+record is written:
 
 ```bash
 gc bd update <bead> --set-metadata gc.work_outcome=no-op \
@@ -252,23 +253,23 @@ gc bd update <bead> --set-metadata gc.work_outcome=no-op \
 
 Name a successor under every kind. Under `not-needed` it is the evidence that
 ruled the work out, such as the conversation where it was decided. Under
-`duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead that
-carries the work now. The script stamps the pointer, reads it back and only
-then closes, so never close the bead by hand: a close that names no successor
-reads as a careless one. On a bead already closed by hand, the same call adds
-the missing pointer. An open human gate that blocks the bead holds the close:
-the script records the pointer and exits 5, and the same call closes the bead
-once each such gate is cleared.
+`duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead the work
+moved to. The script records the successor on the bead, reads it back and only
+then closes the bead, so never close it by hand: a close that names no
+successor cannot be told from a careless one. On a bead already closed by hand,
+the same call adds the missing successor. An open human gate that blocks the
+bead stops the close: the script records the successor and exits 5, and the same
+call closes the bead once each such gate is cleared.
 
 Before you run it:
 
-- Check that the bead has no work in flight: it is unassigned, has no branch or
-  PR still in flight to a pool, and is not a review, step or workflow bead.
-  Check it yourself, because the doctor skips a bead closed this way and
+- Check that work on the bead has not started: it is unassigned, has no branch
+  or PR that a pool still works on, and is not a review, step or workflow bead.
+  Check it yourself, because `gc doctor` skips a bead closed this way and
   nothing checks it again. Retire a bead with an open PR instead (the prs
   skill), which closes the PR too: a bare `gc bd close` on a bead whose
   `merge_result` is not a closed state leaves its PR unlanded.
-- Disarm an armed bead, so a wait released before the close lands cannot send
+- Disarm an armed bead, so that a wait cleared before the close cannot send
   it: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 - In a sitting, close a subject only on the operator's agreement, and only
   after the sign-off, which answers the gates the ruling settles.
@@ -280,5 +281,6 @@ In a sitting it runs before the sign-off, with `--successor <conversation>`
 (the converse-settle step).
 
 A bead that needs no work only once another bead lands is not closed now. Make
-it wait on that bead and arm the validating closer for when it closes (the
-waits skill), which checks it then and closes it or asks a person.
+it wait on that bead, and arm `mol-validate-close` to run when that bead closes
+(the waits skill): the run checks the bead then, and closes it or asks a
+person.
