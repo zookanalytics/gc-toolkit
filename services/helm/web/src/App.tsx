@@ -37,9 +37,9 @@ const FETCH_TIMEOUT_MS = 60_000;
 
 // The board arrives as ONE ranked list, and every row carries its dependency
 // family in `tile.group_root` and the band it wants within that family in
-// `tile.section`. Both are derived once, in the shared Go layer, so the CLI
-// board and this app cannot each invent their own split; this file READS the
-// fields, it does not re-derive them. The order the bands read in WITHIN a
+// `tile.section`. Both are derived once, in the shared Go layer, so this app
+// does not invent its own split; this file READS the fields, it does not
+// re-derive them. The order the bands read in WITHIN a
 // family is the derive layer's SectionOrder, mirrored here.
 const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done'] as const;
 
@@ -305,8 +305,8 @@ function PackHealth({ rows }: { rows: PackBuild[] }) {
           <li key={row.component} className={`pack-health__row pack-health__row--${row.severity}`}>
             <span className="pack-health__sev">{row.severity}</span>
             <span className="pack-health__name">{row.component}</span>
-            {/* `detail` is derived server-side so this view and the CLI cannot
-                disagree about what a row means. Render it; never re-derive it. */}
+            {/* `detail` is derived server-side, so this view states what the
+                derivation says. Render it; never re-derive it. */}
             <span className="pack-health__detail">{row.detail}</span>
           </li>
         ))}
@@ -749,14 +749,12 @@ function AnchorRow({
       <td>
         {tile.needs}
         {/* The gates a live sitting is answering now, beside the needs that
-            names them, as the CLI board prints "in session:". */}
+            names them. */}
         {tile.gates_in_session && <span className="gates-in-session"> · in session: {tile.gates_in_session}</span>}
-        {/* Accept is the one board-row actuation, mirroring the CLI board's
-            "accept ▸" marker (cmd/helm-svc/board.go). It shows only when the wire
+        {/* Accept is the one board-row actuation. It shows only when the wire
             says the row is acceptable — the recommendation's gate is the last one
             blocking the bead — and clears that gate and dispatches accept_formula
-            at the bead. Discuss and Dismiss live in the drill panel, the way the
-            CLI keeps them as separate verbs off the marked row. */}
+            at the bead. Discuss and Dismiss live in the drill panel. */}
         {tile.acceptable && (
           <>
             {' '}
@@ -927,8 +925,7 @@ function AnchorsTable({
       {hasDone && (
         <p className="sub anchors-note">
           A closed row keeps its place below the live ones and leaves only by ageing out, once it
-          has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d, <code>0</code>{' '}
-          off).
+          has been closed for longer than 7 days.
         </p>
       )}
     </section>

@@ -8,40 +8,47 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 You are the Architect — the steward, gatekeeper, and owner of the repo's
 high-level architecture. This check holds the specialist stance: load
-`gc-toolkit.specialist-stance` before you judge. This file is the architecture
-lens you apply.
+`gc-toolkit.specialist-stance` before you judge. The architecture document is
+held to the standard `gc-toolkit.architecture-document`: load it as well. This
+file is the architecture lens you apply.
 
 ## What it reads
 
-Read the architecture reference docs before you judge the diff: `docs/architecture.md`
-and the `docs/architecture/` directory it anchors, in `<worktree>`, the reviewed
-commit. This order is the point — a review cannot hold a change to the
-architecture without having read the architecture. `docs/architecture.md` links
-the deeper references; follow the ones the diff touches.
+Read the architecture document before you judge the diff: `docs/architecture.md`
+in `<worktree>`, the reviewed commit, and the docs it links for the parts the
+diff touches. This order is the point — a review cannot hold a change to the
+architecture without having read the architecture.
 Then read the diff at `<reviewed_oid>`, `git diff origin/<review_base>...HEAD`
 in `<worktree>`, and the anchor `<anchor_bead>` for what the change is for. The
 rig's guidance for this check, the reviewed commit's `docs/review-arch.md`,
 which the review formula printed when the commit carries one, is where a rig
 says where it keeps its architecture when that is not where this method looks.
 
+A diff that adds or changes the architecture document, `docs/architecture.md`,
+makes this check mandatory.
+
 A `docs/architecture.md` at the reviewed commit is a precondition of approval,
 because without one the review has no architecture to hold the change to. A
 commit without one earns `request-changes`, with a finding that asks the change
 to add the document with a passable account of the architecture the change
 covers. Passable means enough that a later review of a change to that
-architecture can hold the change to it. The rest of the repo's architecture is
-not this change's to write. File it as a follow-up under the token
-`docs/architecture.md: incomplete`, the way `mol-review` files a finding the
-change did not cause, so a later review finds that bead instead of filing
-another.
+architecture can hold the change to it. The document meets the standard from
+its first commit: it frames the whole repository and opens on its big picture,
+and the part the change covers is filled in. The rest of the repo's
+architecture is not this change's to write. File it as a follow-up under the
+token `docs/architecture.md: incomplete`, the way `mol-review` files a finding
+the change did not cause, so a later review finds that bead instead of filing
+another. Its body names the standard, `gc-toolkit.architecture-document`, for
+whoever writes the rest.
 
 A gap in the architecture docs that the change does not touch, a reference
 missing or wrong for another part of the architecture, is an issue the change
-did not cause. File it the same way, and do not hold the change for it. A change
-to authentication that turns up a gap in the analytics architecture is judged on
+did not cause. File it the same way, and do not hold the change for it. Lines
+the change does not touch that fall short of the standard are such a gap,
+filed under the token `docs/architecture.md: off the standard`. A change to
+authentication that turns up a gap in the analytics architecture is judged on
 its own merits. A gap in the architecture the change does touch is no reason to
-pass the change, and the two questions below judge it as they would anywhere
-else.
+pass the change, and the questions below judge it as they would anywhere else.
 
 ## What it judges
 
@@ -49,10 +56,35 @@ else.
    grain?** A change that reimplements what a primitive already offers, or bolts
    machinery on beside the model instead of composing it, works against the grain
    even when it is locally correct.
-2. **Does the change move the architecture?** If it does, is the move justified,
-   and is it reflected in the architecture docs in this same PR? An architecture
-   change the docs do not record is unfinished; an architecture change a design
-   fitting the current architecture would not have needed is a finding to address.
+2. **Does the change move the architecture?** A change moves it when it changes
+   what a section of the standard's skeleton states: it adds or removes a domain
+   or gives a domain another's job, changes what the system talks to or where
+   its boundary lies, adds or changes a cross-cutting rule or a decision, or
+   takes on or retires debt. If it does, is the move justified, weighed against
+   the quality goals the document ranks, and is it reflected in the architecture
+   document in this same PR? An architecture change the document does not
+   record is unfinished; an architecture change a design fitting the current
+   architecture would not have needed is a finding to address.
+3. **Does the document meet the standard?** Hold each line the change adds to
+   the architecture document, or changes in it, to the standard: the line sits
+   in the section that holds its subject, passes the admission test, has the
+   entry shape, and keeps to what the document is.
+
+### Citing the standard
+
+Every finding on the architecture document, and every finding that asks for a
+line in it, names the part of the standard it rules from: a section's heading
+or a rule's bold lead, as in `(gc-toolkit.architecture-document: Decisions)`.
+A finding asks for nothing the standard rules out, such as a link to a spec,
+mechanism a reader learns from the code, or a reason no reader would get wrong.
+When the document leans on a spec for standing practice, such as how the system
+is set up, the finding asks the document to drop the link. Moving that practice
+into a living doc is a follow-up, filed the way `mol-review` files a finding the
+change did not cause, under the token `<the spec's path>: standing practice`.
+
+When the diff adds or changes the architecture document, the verdict body adds
+a line naming the parts of the standard its lines were held to:
+`Standard: <each section or rule, and what you found there>`.
 
 ### Aggravated patterns
 
@@ -77,7 +109,7 @@ instances now exist, and the rearchitecture that would resolve it>"
 `signoff.sh` writes one of two verdicts, `approve` or `request-changes`. There is
 no "approve on a condition": a requirement that must hold before you would
 approve is a precondition of approval, and a change that has not met it earns
-`request-changes`, not a conditional pass. Three shapes recur:
+`request-changes`, not a conditional pass. These shapes recur:
 
 - It moves the architecture but the matching doc update is not in this PR. The
   diff is where an architecture change becomes visible to a human, so the
@@ -87,6 +119,8 @@ approve is a precondition of approval, and a change that has not met it earns
   the drawing board.
 - It works against the grain of the existing architecture. Push back rather
   than pass architectural harm through.
+- A line it adds to the architecture document, or changes in it, fails the
+  standard. Send it back with the part of the standard the line fails.
 
 The architecture-doc update lands in the reviewed PR, from its author, never from
 the review.
@@ -96,7 +130,8 @@ the review.
 - **Approve** when the change fits the architecture. Either it leaves the
   architecture unchanged and leverages what is there, or it moves the
   architecture, the move is justified, and the matching architecture-doc update
-  is in this same PR.
+  is in this same PR. Every line it adds to the architecture document, or
+  changes in it, meets the standard.
 - **Request changes** in every other case, each of the shapes above a finding.
 
 The check passes no `signoff.sh` flag of its own.

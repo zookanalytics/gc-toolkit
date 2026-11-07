@@ -576,14 +576,20 @@ shares only the word ([authority-map.md](authority-map.md)).
   - In `gastownhall/beads`, the example formula `gh-pr-review` tells the agent
     running it to check for unresolved review threads, and records none
     (`examples/formulas/gh-pr-review.formula.toml`).
-  - In `gastownhall/gascity-packs`, no pack reads whether a review thread is
-    resolved or answered. The `compound-engineering` pack's
-    `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
-    keeps no record of it.
+  - In `gastownhall/gascity-packs`, no pack keeps a record of which of a pull
+    request's review threads wait on an answer. The `pr-review` pack's
+    `mol-pr-iterate` formula checks whether the copilot comments it was slung
+    to address are resolved, and records on its own run only whether that one
+    signal cleared (`evidence.cleared`, in
+    `pr-review/formulas/mol-pr-iterate.formula.toml`). The
+    `compound-engineering` pack's `ce-previous-comments-reviewer` agent reads a
+    PR's review comments for feedback the diff leaves unaddressed and returns
+    findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
+    or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main 74d62eb1e0c0,
-  `gastownhall/gascity-packs` main e3cb468bbc65, and `gastownhall/beads` main
-  8c3eb30f30f7.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main b2c0f62ae6c9 with
+  the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
+  main e3cb468bbc65, and `gastownhall/beads` main 8c3eb30f30f7.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
