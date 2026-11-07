@@ -45,7 +45,9 @@
 #   (ag) no branch-end runs when the close is refused or held, when the bead
 #       names no branch, or on a dry run, which names the branch in its plan;
 #   (ah) the repair path ends an already-closed bead's branch too;
-#   (ai) a close that does not read back closed leaves the branch, with a WARN;
+#   (ai) a close that does not read back closed exits 5, pointed, with its
+#       branch left and nothing reporting it closed, and a re-run finishes the
+#       disposition whether the bead then reads open or closed;
 #   (aj) end to end, through the real branch-end.sh and a bare origin: a retire
 #       ends the branch with its tip pinned, and a delete origin refuses leaves
 #       the close standing;
@@ -901,13 +903,30 @@ rc=0; run --origin al-br8 --successor bt-br8 --kind re-homed || rc=$?
 eq "$(grep -c 'branch-end (stub): ended' "$TMP/rigs/alpha/.beads/al-br8")" 1 \
    "a re-run that reaches the same outcome records it once"
 
-# --- (ai) a close that does not read back closed leaves the branch ----------
+# --- (ai) a close that does not read back closed exits 5 and leaves the branch
 mkbranched alpha open al-br9
 mkbead beta open bt-br9
 : > "$BE_LOG"
 rc=0; GCTK_STUB_MISS=close:al-br9 run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
-eq "$(cat "$BE_LOG")" "" "a close that does not read back ends no branch"
-has "$(cat "$TMP/err")" "did not read back closed" "…and a WARN says why the branch was left"
+eq "$rc" 5 "a close that does not read back closed exits 5, as a refused one does"
+eq "$(field alpha m.gc.superseded_by al-br9)" bt-br9 "…with the pointer recorded"
+eq "$(cat "$BE_LOG")" "" "…and ends no branch"
+has "$(cat "$TMP/err")" "the close did not read back closed" "…and stderr says why"
+hasnt "$(cat "$TMP/out")" "al-br9 closed in" "…and nothing reports the bead closed"
+rc=0; run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
+eq "$rc" 0 "a re-run over the bead that reads open finishes the disposition"
+eq "$(field alpha status al-br9)" closed "…closing the bead"
+eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br9 --bead al-br9 status-at-call=closed" "…and ending its branch"
+# The close landed and only its read missed: the bead reads closed on the re-run.
+mkbranched alpha open al-br9b
+mkbead beta open bt-br9b
+: > "$BE_LOG"
+rc=0; GCTK_STUB_MISS=close:al-br9b run --origin al-br9b --successor bt-br9b --kind re-homed || rc=$?
+eq "$rc" 5 "a close whose read alone missed exits 5 too"
+printf 'status=closed\n' >> "$TMP/rigs/alpha/.beads/al-br9b"
+rc=0; run --origin al-br9b --successor bt-br9b --kind re-homed || rc=$?
+eq "$rc" 0 "a re-run over the bead that reads closed finishes the disposition"
+eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br9b --bead al-br9b status-at-call=closed" "…ending its branch"
 
 # --- (aj) end to end: the real branch-end.sh against a bare origin -----------
 # A rig of its own, gamma, is a git checkout whose origin is a bare repository:

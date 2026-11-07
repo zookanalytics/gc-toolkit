@@ -31,7 +31,9 @@
 # status and assignee this run read before judging it. A caller that read the
 # bead before another actor claimed, assigned or moved it therefore stamps
 # nothing while that change stands, and exits 4, as it does for a pointer that
-# does not stick.
+# does not stick. A close that is held, is refused or does not read back closed
+# exits 5 and leaves the origin pointed and findable. The same call, run again
+# once nothing holds or refuses the close, finishes the disposition.
 # An open human gate that blocks the origin holds its close (finalize-gate.sh).
 # A caller that reports its own refusals of the close as human gates names their
 # key with --except-key, and the retry withdraws those gates before it closes,
@@ -577,9 +579,7 @@ fi
 # the reason is what a human reads. On an already-closed origin the reason
 # cannot be rewritten; append the disposition note instead (never --notes,
 # which replaces).
-CLOSED_BACK=""
 if [ "$ORIGIN_STATUS" = "closed" ]; then
-    CLOSED_BACK=1
     PRIOR_NOTES=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)
     case "$PRIOR_NOTES" in
         *"Disposition recorded"*"$SUCCESSOR"*)
@@ -638,13 +638,19 @@ else
     fi
     # Deliberately NOT --force: the same flag overrides a foreign assignee and
     # an open-children hold. A refusal leaves an OPEN, pointed, findable bead.
-    # The close goes through `gctk bead close --verify`, so its exit says it
-    # reads back closed, which the branch's end below waits on.
+    # The close goes through `gctk bead close --verify`, whose exit 0 says the
+    # bead reads back closed. Every caller takes this script's exit as the
+    # close's, so a close that does not read back stops here like a refused one,
+    # before the branch's end below.
     CLOSE_ERR=""; CLOSE_RC=0
     CLOSE_ERR=$(verified_at "$ORIGIN_PATH" close "$ORIGIN" --reason "$REASON" 2>&1) || CLOSE_RC=$?
     case "$CLOSE_RC" in
-        0) CLOSED_BACK=1 ;;
-        3) [ -z "$CLOSE_ERR" ] || printf '%s\n' "$CLOSE_ERR" >&2 ;;
+        0) ;;
+        3)
+            echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close did not read back closed:" >&2
+            [ -z "$CLOSE_ERR" ] || printf '%s\n' "$CLOSE_ERR" >&2
+            echo "bead-rehome: the disposition is legible either way — the bead is pointed and findable, and its branch was left. Re-run this close: it closes a bead that reads open, and finishes the disposition of one that reads closed." >&2
+            exit 5 ;;
         *)
             echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close was refused:" >&2
             printf '%s\n' "$CLOSE_ERR" >&2
@@ -675,30 +681,26 @@ if [ -n "$RETIRED_BRANCH" ]; then
     # Quoted for a paste: a branch name may carry shell metacharacters.
     END_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN")
     END_CMD="${END_CMD% }"
-    if [ -z "$CLOSED_BACK" ]; then
-        echo "bead-rehome: WARN $ORIGIN did not read back closed, so its branch $RETIRED_BRANCH was left on the git remote; once it reads closed, end it with: $END_CMD" >&2
-    else
-        END_RC=0
-        END_OUT=$("$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN" 2>&1) || END_RC=$?
-        END_NOTE=""
-        case "$END_RC" in
-            0|3) [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT"
-                 case "$END_OUT" in *"is not on origin"*) ;; *) END_NOTE="$END_OUT" ;; esac ;;
-            *)   [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT" >&2
-                 echo "bead-rehome: WARN the close stands, but branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC); end it with: $END_CMD" >&2
-                 END_NOTE="Branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC: $(printf '%s' "$END_OUT" | tail -1)). End it with: $END_CMD" ;;
+    END_RC=0
+    END_OUT=$("$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN" 2>&1) || END_RC=$?
+    END_NOTE=""
+    case "$END_RC" in
+        0|3) [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT"
+             case "$END_OUT" in *"is not on origin"*) ;; *) END_NOTE="$END_OUT" ;; esac ;;
+        *)   [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT" >&2
+             echo "bead-rehome: WARN the close stands, but branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC); end it with: $END_CMD" >&2
+             END_NOTE="Branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC: $(printf '%s' "$END_OUT" | tail -1)). End it with: $END_CMD" ;;
+    esac
+    # The bead records what became of its branch. pr-facts.sh and
+    # duplicate-sweep.sh run this script for its exit status and drop its
+    # output, so the note is what a later reader finds. A re-run that reaches
+    # the same outcome adds nothing.
+    if [ -n "$END_NOTE" ]; then
+        case "$(printf '%s' "$CHECK_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
+            *"$END_NOTE"*) ;;
+            *) bd_at "$ORIGIN_PATH" update "$ORIGIN" --append-notes "$END_NOTE" >/dev/null 2>&1 \
+                   || echo "bead-rehome: WARN could not record the branch's outcome on $ORIGIN: $END_NOTE" >&2 ;;
         esac
-        # The bead records what became of its branch. pr-facts.sh and
-        # duplicate-sweep.sh run this script for its exit status and drop its
-        # output, so the note is what a later reader finds. A re-run that reaches
-        # the same outcome adds nothing.
-        if [ -n "$END_NOTE" ]; then
-            case "$(printf '%s' "$CHECK_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
-                *"$END_NOTE"*) ;;
-                *) bd_at "$ORIGIN_PATH" update "$ORIGIN" --append-notes "$END_NOTE" >/dev/null 2>&1 \
-                       || echo "bead-rehome: WARN could not record the branch's outcome on $ORIGIN: $END_NOTE" >&2 ;;
-            esac
-        fi
     fi
 fi
 

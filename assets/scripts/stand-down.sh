@@ -29,8 +29,9 @@
 #      nothing left to send it, which is why this comes after the arm and the
 #      route.
 #   4. It hands the close to bead-rehome.sh, the writer of a close that is not a
-#      landing, as not-needed, and takes its exit as the close's. The bead's
-#      branch ends with the close, as any disposition's does.
+#      landing, as not-needed, and takes its exit as the close's: bead-rehome.sh
+#      exits 0 only once the bead reads back closed. The bead's branch ends with
+#      the close, as any disposition's does.
 #
 # The evidence the pointer names is the gate that carries the ruling, unless
 # --successor names other evidence, such as a sitting's conversation. A gate this
@@ -225,6 +226,6 @@ done
 work_outcome_noop "$WORK" gc bd
 
 "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING" \
-  || stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
+  || stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close, or did not read back closed: bead-rehome.sh said why, above."
 echo "$PROG: $WORK closed as not needed, per $SUCCESSOR; nothing re-slings it"
 exit 0
