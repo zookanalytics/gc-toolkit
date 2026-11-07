@@ -97,6 +97,10 @@ GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
+# The scripts under test confirm a write through `gctk bead`, which
+# gctk.stub.sh stands in for, so each write reaches the fake gc.
+GCTK_BIN="$(dirname "$SCRIPT")/gctk.stub.sh"
+export GCTK_BIN
 export FAKE_CALLS="$TMP/calls" FAKE_SUBJ="$TMP/subj"
 unset GC_HELM_FIXTURE || true
 export TMPDIR="$TMP"

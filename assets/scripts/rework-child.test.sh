@@ -155,6 +155,9 @@ esac
 STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
+# The scripts under test confirm a write through `gctk bead`, which
+# gctk.stub.sh stands in for, so each write reaches the fake gc.
+export GCTK_BIN="$HERE/gctk.stub.sh"
 export GC_RIG="gc-toolkit"
 # The priority writer the SUT settles a child with: this tree's queue-priority.sh
 # over the stub store, named by GC_QUEUE_PRIORITY_TOOL. The writer finds a bead's

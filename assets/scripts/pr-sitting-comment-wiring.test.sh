@@ -154,7 +154,9 @@ GH
 chmod +x "$BIN/gh"
 
 # gctk stub: the title step finds gctk through $GCTK_BIN, and this one writes
-# its arguments to $GCTK_LOG, one per line.
+# its arguments to $GCTK_LOG, one per line. The sign-off's `gctk bead` writes
+# reach the fake gc through gctk.stub.sh, which hands every other
+# subcommand to this one (GCTK_STUB_NEXT).
 cat > "$BIN/gctk" <<'K'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$GCTK_LOG"
@@ -162,7 +164,7 @@ K
 chmod +x "$BIN/gctk"
 
 export PATH="$BIN:$PATH" STORE="$TMPD/store" REPO STATE="$TMPD/comments.json"
-export GCTK_BIN="$BIN/gctk" GCTK_LOG="$TMPD/gctk.args"
+export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_NEXT="$BIN/gctk" GCTK_LOG="$TMPD/gctk.args"
 unset GC_CITY_PATH 2>/dev/null || true
 OPENER="Why does the retry spin? the words I typed to open this"
 TOPIC="how the retry should work"
