@@ -98,6 +98,16 @@ then refuses, or that a change since the read beats, takes the edge back, unless
 a close naming the same successor is what beat it, since the edge is that close's
 record too.
 
+A repair finds the bead closed and adds the edge with no guard on it, because
+bd's guards cover a bead's own fields and no edge
+(`CheckExpectedFieldsInTx`, `internal/storage/issueops/update_cas.go`). So its
+note goes through the guard (`bd update --if-status --if-assignee
+--append-notes`), after the edge. A reopen or a claim since the read exits 13
+there and writes nothing, seen on a scratch store on 2026-11-07, and the writer
+takes the edge back. Any other failure of that note cannot show the bead stayed
+closed either, so it does the same, and the same call run again repeats the
+repair.
+
 A run stopped between the edge and the close leaves the bead open and naming its
 successor, the state main's key left, and the same call run again finishes it.
 Readers take that state for a disposition in progress, except two that read a
@@ -107,17 +117,60 @@ the re-run's close, and the finalize gate's epic clause holds an epic for a
 ruling. Each needs a run stopped in that moment with a successor in another store,
 and each ends in a refusal, not a wrong close, so both keep their read.
 
-One interleaving still closes a bead with no edge. bd's re-add of an edge is a
-no-op, so two callers naming the same successor share one edge, and `bd dep add`
-and `bd dep remove` take no compare-and-set. Say a caller has written the edge
-when a holder claims the bead and runs the same call, which finds the edge standing
-and writes none. The first caller's close then fails on the claim and takes the
-edge back, and the holder's close lands just after. The bead is closed and its note
-names the successor, but no edge does. This was reproduced against bd 1.3.4 on a
-scratch store on 2026-11-07. The same call run again records the edge, and the
-doctor reports such an anchor (I5). A read after the close would only narrow this,
-since the first caller can still take the edge back after that read, so the writer
-leaves it.
+### An edge two callers share
+
+bd's re-add of an edge is a no-op, so two callers naming the same successor share
+one edge, and `bd dep add` and `bd dep remove` take no compare-and-set. So one
+caller's take-back can reach the edge another's close relies on. Say a caller has
+written the edge when a holder claims the bead and runs the same call, which finds
+the edge standing and writes none. The first caller's close then fails on the claim
+and takes the edge back, and the holder's close lands with no edge behind it.
+
+Each side therefore reads after it acts. The closer reads the bead after its close,
+and a caller reads it after taking its edge back. Whichever finds a close naming
+this successor with no disposition edge adds the edge, and a re-add of one standing
+changes nothing, for an edge into another store and on a closed bead too. Between
+them the two reads cover every order. A take-back before the closer's read is seen
+by the closer, and one after that read comes after the close, so the caller sees
+the close. A caller reads before it puts back a wait it dropped, because the close
+that read finds ended that wait. Both orders were reproduced against bd 1.3.4 on a
+scratch store on 2026-11-07, and both now end closed with the edge, while a caller
+that loses to a claim with no second closer still leaves none.
+
+One order leaves a wait where the edge goes: on a bead that waited on its successor,
+a close landing between a caller's read and the wait it then puts back. bd keeps one
+edge per pair, so the closer's add is refused, the closer exits 4 with its close
+standing, and the same call run again replaces the wait through the repair path.
+
+Two other designs were weighed:
+
+- **The writer claims the bead first.** bd's compare-and-set could take the bead
+  before the edge, so no two callers ever share one. That costs a third write, a
+  release on every failed close, and a claim stranded by a killed run. It holds off
+  neither a reopen on the repair path nor a waiter's edge, and it would change the
+  order the summary's second call asks the operator to accept.
+- **A guard on the bead's revision.** `--if-revision` is on upstream main
+  (`cmd/bd/if_revision.go`, read at `gastownhall/beads` d7bcee648) and absent at
+  the city's 1.3.4. It compares a bead's own `row_lock` (`CheckVersionInTx`,
+  `internal/storage/issueops/version.go`), and
+  `internal/storage/issueops/dependencies.go` there writes no `row_lock`: an edge
+  mints a version row for its source alone (`mintDependencyVersion`). As read, it
+  would fence neither an edge on the origin nor an edge onto it.
+
+### Which actor a close runs as
+
+`bd close` refuses a bead assigned to anyone but its actor, and `bead-rehome.sh`
+compares the same two because `bd update` does not. A caller with no identity of
+its own leaves the actor to bd, whose `getActorWithGit` (`cmd/bd/main.go`) takes
+`BEADS_ACTOR`, `BD_ACTOR`, git's `user.name`, `USER` and then `unknown`. bd has no
+verb that prints the answer, since `bd context` carries no actor. A copy of the
+chain would resolve git in the wrong place, because gc runs bd in the scope root
+(`cmd.Dir = target.ScopeRoot`, `cmd/gc/cmd_bd.go`), not the caller's directory. So
+the writer reads `.created_by` off `bd create --dry-run --json`, which writes
+nothing, and passes that actor on its writes. It asks only when the origin has an
+assignee. A split city judges a create (`judgeBdCreate`,
+`cmd/gc/bd_split_allowlist.go`), and a refusal there leaves the actor empty, which
+holds an assigned origin.
 
 ## What Gas City provides, and where it stops
 
@@ -170,6 +223,31 @@ refuses a `blocks` edge onto the bead itself, across a parent chain, into a
 cycle, or onto a pair another edge type already joins
 (`dependencyUseCaseImpl.add` in `internal/storage/domain/dependency.go`), so
 each of those is a refusal the writer reports.
+
+bd's close neither reads nor refuses what waits on the bead: `CloseIssueCheckedInTx`
+(`internal/storage/issueops/close.go`) checks the bead's own blockers and children,
+and an edge onto a bead leaves that bead's row as it is
+(`markDirectBlockingDependencySourceInTx` marks the edge's source). So a bead can
+come to wait on the duplicate after the writer's read, and nothing stops the close.
+The writer reads again once the close has landed, and each waiter it finds gains
+its edge then. A waiter that cannot take it is too late to refuse: the close stands,
+the writer exits 4, and it says so in a WARN and on the bead. That leaves two limits:
+
+- A waiter the second read moves reads ready for the moment between the close and
+  its new edge. A polecat that claims it in that moment stops at load-context, where
+  `work-gate.sh` refuses a bead with an open blocker.
+- A bead that first comes to wait on the duplicate after the second read waits on
+  nothing, as on any closed bead. Before this branch a duplicate closed only after
+  its canonical delivered, so a filer who named the duplicate during that whole
+  stretch got a real wait. On 2026-11-07 the gc-toolkit store's closed duplicates
+  had 27 blocks waiters: none gained its edge in the 60 seconds before the close,
+  the nearest being 1,231 seconds before it, and one gained its edge after the
+  close. That sizes the first limit and cannot size the second, because a filer who
+  sees a closed bead may name its canonical instead.
+
+Keeping the refusal to close onto an unfinished canonical would have neither limit.
+It needs something to close the duplicate once the canonical lands, which is the
+sweep this branch deletes, and it reverses the call the summary puts to the operator.
 
 The rework-twin pass closed a never-dispatched second rework child of one
 source, once a sibling had landed. The gc-toolkit store records eight such
