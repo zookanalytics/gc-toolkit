@@ -11,9 +11,13 @@
 #   1. The polecat and polecat-codex renders say that a turn in the session's
 #      own terminal is the city's text and never an operator correction, and
 #      name the durable sources a pool session captures from.
-#   2. Every render that carries the recipe, the mechanik's and the converse
-#      sittings' among them, tells a session the operator attends that it
-#      captures the operator's own turns too.
+#   2. Every render that carries the recipe, the converse sittings' among
+#      them, tells a session the operator attends that it captures the
+#      operator's own turns too.
+#   3. The mechanik, whose prime carries no fragment it can do without under
+#      Claude Code's session-start cap, reaches the same recipe through the
+#      records skill, whose reference is the fragment itself, and its render
+#      sends an operator correction there.
 #
 # The fragment is checked first, so a render that lacks a sentence its source
 # carries reads as a stale render. Text is compared with its line breaks
@@ -67,12 +71,25 @@ for render in "$RENDERS"/*.md; do
   carries "$render" "$ATTENDED" && ok "$agent's prompt tells an attended session to capture the operator's own turns" \
     || bad "$agent's prompt carries the capture recipe without: $ATTENDED"
 done
-for agent in polecat polecat-codex mechanik converse-opus; do
+for agent in polecat polecat-codex converse-opus; do
   case " $WITH_RECIPE " in
     *" $agent "*) ok "$agent's prompt carries the capture recipe" ;;
     *) bad "$agent's prompt no longer carries the capture recipe (found in:${WITH_RECIPE:- none})" ;;
   esac
 done
+
+REFERENCE="$ROOT/skills/records/references/file-feedback-observations.template.md"
+if [ -L "$REFERENCE" ] && cmp -s "$REFERENCE" "$FRAGMENT"; then
+  ok "the records skill carries the capture recipe as a link to the fragment"
+else
+  bad "the records skill's reference is not the capture recipe's fragment: $REFERENCE"
+fi
+grep -qF 'references/file-feedback-observations.template.md' "$ROOT/skills/records/SKILL.md" \
+  && ok "the records skill names its reference to the capture recipe" \
+  || bad "the records skill no longer names references/file-feedback-observations.template.md"
+CORRECTION="When the operator corrects standing agent behavior, fix the instance, then file one observation before the turn ends (the \`records\` skill)."
+carries "$RENDERS/mechanik.md" "$CORRECTION" && ok "the mechanik's prompt sends an operator correction to the records skill" \
+  || bad "the mechanik's prompt lacks: $CORRECTION"
 
 echo
 echo "feedback-capture-wiring: $PASS passed, $FAIL failed"

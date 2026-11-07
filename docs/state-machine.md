@@ -1130,8 +1130,9 @@ read from the close reason, which opens with the kind's phrase and the
 successor, as in `not needed, per <successor> in <store>`. When the pointer is
 added after an earlier close, a `Disposition recorded` note carries that reason
 instead. The read side searches every store before concluding a close was
-false. Consumers: the mechanik/converse close paths
-(`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
+false. Consumers: the close paths of the `work` skill and the converse prompt,
+the mechanik's prompt, which searches every store before it reopens a closed
+bead, `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
 twins), `stand-down.sh` (a person's ruling that work a human gate holds will
 not go on), `preexisting-failure.sh` (a pre-existing-failure gate follows a
