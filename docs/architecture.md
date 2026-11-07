@@ -76,10 +76,10 @@ flowchart LR
 ```
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
-path that matters has one writer: `lifecycle.sh` writes lifecycle transitions,
-`bead-rehome.sh` writes dispositions, the closes that name a successor,
-`signoff.sh` writes check verdicts, and the merge cadence alone opens or merges a
-PR. Everything else reads.
+path that matters has one writer. `lifecycle.sh` writes lifecycle transitions.
+`bead-rehome.sh` writes dispositions, the closes that name a successor.
+`signoff.sh` writes check verdicts. The merge cadence alone opens or merges a PR.
+Everything else reads.
 
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
