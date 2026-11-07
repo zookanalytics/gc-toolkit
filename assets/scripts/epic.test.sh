@@ -13,7 +13,7 @@
 # Proves:
 #   - a top-level epic with no hypothesis is refused (exit 3), with other
 #     fields or with none, nothing is created, and the refusal names
-#     --hypothesis and ordinary flow;
+#     --hypothesis, says a rough sentence is enough and names ordinary flow;
 #   - a top-level epic with a hypothesis is filed as an epic in one create,
 #     carrying each field given in its key and no other, and its id is printed;
 #   - a Delivery with no hypothesis is filed under its epic with no metadata;
@@ -27,7 +27,12 @@
 #     finds it (exit 4);
 #   - with no gctk binary, the bridge refuses (exit 1) and files nothing;
 #   - the work skill gives this create with the contract's floor fields, and
-#     the sitting's record step and the checkpoint's re-aim name the keys.
+#     says a rough sentence is enough, which the filer writes itself and files
+#     at once when the operator has stated none, and calls a first draft;
+#   - the sitting's record step and the checkpoint's re-aim name the keys, the
+#     record step reads the operator's yes to a hypothesis as a continue
+#     ruling, and the checkpoint reads an epic with no ruling as a first draft
+#     and tests its signal.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,7 +75,8 @@ eq "$(ncreates)" 0 "...and nothing is created"
 eq "$OUT" "" "...and no id is printed"
 has "$ERR" "it has no parent" "...and the refusal says why"
 has "$ERR" "--hypothesis" "...and names the flag that records one"
-has "$ERR" "is not an epic, and its work is ordinary flow" "...and what an area with no hypothesis is"
+has "$ERR" "A rough sentence that sets the general direction is enough" "...and says a rough sentence is enough"
+has "$ERR" "is not an epic, and its work is ordinary flow" "...and what an area that is only ever improvable is"
 run create "Epic: a title alone" -d "about it"
 eq "$RC|$(ncreates)" "3|0" "a top-level epic given no field at all is refused, and nothing is created"
 
@@ -178,11 +184,19 @@ pin skills/work/SKILL.md '"$(gc <binding> scripts-dir)/epic.sh" create' "the wor
 for f in --hypothesis --handle --boundaries; do
     pin skills/work/SKILL.md "$f \"" "...giving $f"
 done
-pin skills/work/SKILL.md '"Epics are mortal"' "...and says an area with no hypothesis that can be answered is not an epic"
+pin skills/work/SKILL.md 'A rough sentence that sets the general direction is enough.' "...and says a rough sentence that sets the general direction is enough"
+pin skills/work/SKILL.md 'When the operator has stated none, write one yourself and file at once, without asking first.' "...which the filer writes itself when the operator has stated none, and files at once"
+pin skills/work/SKILL.md 'quote the sentence and call it a first draft' "...and quotes as a first draft where it reports the filing"
+pin skills/work/SKILL.md '"Epics are mortal"' "...and says an area that is only ever improvable is not an epic"
 for k in epic_hypothesis epic_handle epic_boundaries epic_closure_condition epic_indicators; do
     pin skills/converse-settle/SKILL.md "--set-metadata $k=" "the settle step records $k in its key"
 done
+pin skills/converse-settle/SKILL.md 'is a ruling on the epic, a continue' "the settle step reads the operator's yes to a hypothesis as a continue ruling"
+pin skills/converse-settle/SKILL.md '--set-metadata epic_ruling=continue' "...and records that yes on an epic the ruling files"
 pin skills/converse-epic-checkpoint/SKILL.md '--set-metadata epic_hypothesis=' "the checkpoint re-aims a contract field in its key"
+pin skills/converse-epic-checkpoint/SKILL.md 'When that read shows `epic_hypothesis` and no `epic_ruling`, the hypothesis is a first draft' "the checkpoint reads an epic with no ruling as a first draft"
+pin skills/converse-epic-checkpoint/SKILL.md 'Could it still come out wrong once the work lands?' "...and tests its signal"
+pin skills/converse-epic-checkpoint/SKILL.md 'the framing says so, quotes it' "...and its framing quotes the draft"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

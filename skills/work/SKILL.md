@@ -99,20 +99,18 @@ Done when: <what lands>" --json
 ```
 
 An epic is filed with its contract (`docs/epics.md`, "The contract an epic
-carries"), each field in its own key, through the writer below. The fields are
-the operator's, so give a field only as the operator stated or confirmed it,
-and leave out one nobody stated. The one an epic cannot go without is its
-hypothesis: one sentence that says for whom, what changes and the signal that
-shows it worked. An area with no hypothesis that can be answered is not an
-epic, and its work is ordinary flow (`docs/epics.md`, "Epics are mortal"). A
-Delivery carries an `Aim:` line instead, and is filed as above.
-
-Before you put a hypothesis you drafted to the operator, test its signal.
-Could it still come out wrong once the work lands? A count the work moves by
-itself, such as lines removed or members closed, cannot, so it is a leading
-indicator and not the signal. Can it be read soon after the work lands,
-without waiting for data that does not exist yet? When you ask the operator to
-confirm the sentence, quote it.
+carries"), each field in its own key, through the writer below. The one field
+it cannot go without is its hypothesis: one sentence that says for whom, what
+changes and the signal that shows it worked. A rough sentence that sets the
+general direction is enough. When the operator has stated none, write one
+yourself and file at once, without asking first. Wherever you report that
+filing, quote the sentence and call it a first draft: it stays one until the
+operator first rules on the epic, at a sitting that judges and sharpens it. The
+other fields are the operator's, so give one only as the operator stated or
+confirmed it, and leave out one nobody stated. A Delivery carries an `Aim:`
+line instead, and is filed as above. An area that is only ever improvable has
+no hypothesis to answer, so it is not an epic, and its work is ordinary flow
+(`docs/epics.md`, "Epics are mortal").
 
 The writer refuses an epic whose parent is not an epic when it has no
 hypothesis, and files nothing. It prints the new epic's id:

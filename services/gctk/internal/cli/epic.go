@@ -16,7 +16,9 @@ import (
 // registers for it under [metadata.epic_stewardship], in the create itself.
 // docs/epics.md makes a hypothesis the one hard gate on an epic, so an epic
 // whose parent is not an epic is refused without one, and nothing is filed.
-// bd's create checks (validation.on-create, validation.metadata) and gc bd's
+// The gate is that a sentence is there, never how good it is: a rough first
+// draft passes, and the operator's first ruling on the epic judges it
+// (docs/epics.md, "The contract an epic carries"). bd's create checks (validation.on-create, validation.metadata) and gc bd's
 // admission refusals take no rule that holds one issue type to a metadata
 // key, so the check runs here, in the create the work skill gives for an epic.
 //
@@ -60,11 +62,14 @@ create itself:
   --rig <rig>                 the rig whose store it is filed in; default this
                               session's
 
-The fields are the operator's, so give a field only as the operator stated or
-confirmed it. An empty field is a field not given. An epic is a hypothesis that
-can be answered (docs/epics.md), so an epic whose parent is not an epic is
-refused without --hypothesis, and nothing is filed. An area with no hypothesis
-that can be answered is not an epic, and its work is ordinary flow.
+An epic needs a hypothesis to be filed (docs/epics.md), so an epic whose parent
+is not an epic is refused without --hypothesis, and nothing is filed. A rough
+sentence that sets the general direction is enough: when the operator has
+stated none, the filer writes one and files at once, and it stays a first draft
+until the operator first rules on the epic. The other fields are the
+operator's, so give one only as the operator stated or confirmed it. An empty
+field is a field not given. An area that is only ever improvable is not an
+epic, and its work is ordinary flow.
 
 An epic whose --parent is an epic and that has no --hypothesis is a Delivery, a
 step toward its epic's hypothesis. Its description opens with its Aim: and
@@ -219,9 +224,12 @@ func epicRefusal(o epicOpts, parentType string) string {
 			where = fmt.Sprintf("its parent %s is a %s, not an epic", o.parent, kind)
 		}
 		return where + ", so it is an epic of its own, and it has no --hypothesis. " +
-			"An epic is a hypothesis that can be answered (docs/epics.md): give --hypothesis the one sentence that says " +
-			"for whom, what changes and the signal that shows it worked, as the operator states or confirms it. " +
-			"An area with no hypothesis that can be answered is not an epic, and its work is ordinary flow. " +
+			"An epic needs a hypothesis to be filed (docs/epics.md): give --hypothesis one sentence that says " +
+			"for whom, what changes and the signal that shows it worked. " +
+			"A rough sentence that sets the general direction is enough. When the operator has stated none, " +
+			"write one yourself and run the create again with it, without asking first: " +
+			"it stays a first draft until the operator first rules on the epic. " +
+			"An area that is only ever improvable is not an epic, and its work is ordinary flow. " +
 			"A Delivery, a step toward an epic's hypothesis, is filed with --parent <its epic>."
 	}
 	var given []string

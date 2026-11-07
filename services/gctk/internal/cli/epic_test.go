@@ -108,6 +108,38 @@ func TestEpicRefusal(t *testing.T) {
 	}
 }
 
+// The refusal of a blank hypothesis is the one gate on an epic, and it sets no
+// bar on the sentence. The refusal and the usage say a rough one is enough and
+// that the filer writes it when the operator has stated none, and the refusal
+// sends the filer to no one first. Only the other fields are the operator's.
+func TestEpicRoughSentenceIsEnough(t *testing.T) {
+	flat := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	why := flat(epicRefusal(epicOpts{title: "T", fields: map[string]string{}}, ""))
+	for _, s := range []string{
+		"A rough sentence that sets the general direction is enough",
+		"When the operator has stated none, write one yourself and run the create again with it, without asking first",
+		"it stays a first draft until the operator first rules on the epic",
+		"An area that is only ever improvable is not an epic",
+	} {
+		if !strings.Contains(why, s) {
+			t.Errorf("refusal %q does not say %q", why, s)
+		}
+	}
+	if strings.Contains(why, "confirm") {
+		t.Errorf("refusal %q asks for the operator's confirmation", why)
+	}
+	usage := flat(epicUsage)
+	for _, s := range []string{
+		"A rough sentence that sets the general direction is enough",
+		"when the operator has stated none, the filer writes one and files at once, and it stays a first draft until the operator first rules on the epic",
+		"The other fields are the operator's, so give one only as the operator stated or confirmed it",
+	} {
+		if !strings.Contains(usage, s) {
+			t.Errorf("usage does not say %q", s)
+		}
+	}
+}
+
 func TestEpicDispatch(t *testing.T) {
 	cases := []struct {
 		args []string

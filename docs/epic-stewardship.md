@@ -44,19 +44,22 @@ gc bd update <epic> --set-metadata epic_ruling=close \
 
 The fields are registered in
 [`lifecycle/lifecycle.toml`](../lifecycle/lifecycle.toml)
-`[metadata.epic_stewardship]`. They are the operator's: stamped when the
-operator states or confirms a contract field or rules, the dated decision
-[epics.md](epics.md) calls for. The contract fields the operator states when an
-epic is filed land in the create itself, which
+`[metadata.epic_stewardship]`. The contract lands in the create that files an
+epic, which
 [`gctk epic create`](../services/gctk/internal/cli/epic.go) makes. It refuses an
 epic with no hypothesis unless the epic's parent is an epic, which makes it a
-Delivery. No pack script writes the ruling's fields. The finalize gate and the
+Delivery. The hypothesis can be the filer's first draft until the
+operator's first ruling on the epic
+([epics.md](epics.md#the-contract-an-epic-carries)). The other contract fields
+and the ruling's fields are the operator's: stamped when the operator states or
+confirms a contract field or rules, the dated decision [epics.md](epics.md)
+calls for. No pack script writes the ruling's fields. The finalize gate and the
 doctor check read the hypothesis, the ruling, and its reason.
 
 | Field | Meaning |
 |---|---|
 | `epic_handle` | the 3–5 word handle |
-| `epic_hypothesis` | the one-sentence hypothesis — a floor field, and what brings an epic under the close requirement |
+| `epic_hypothesis` | the one-sentence hypothesis — a floor field, a first draft until the epic's first ruling, and what brings an epic under the close requirement |
 | `epic_boundaries` | the epic's boundaries |
 | `epic_closure_condition` | the 3–6 operator-runnable closure checks |
 | `epic_indicators` | the 1–3 leading indicators |

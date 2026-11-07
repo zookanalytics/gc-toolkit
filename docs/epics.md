@@ -84,6 +84,16 @@ improve through the work, and nothing here is meant as a major gate on filing.
 A Delivery carries an aim in place of this contract, and its epic carries the
 contract ([Deliveries and Epic Checkpoints](#deliveries-and-epic-checkpoints)).
 
+**A first draft.** A hypothesis is a first draft until the operator's first
+ruling on its epic, so an epic that carries `epic_hypothesis` and no
+`epic_ruling` has one. A first draft can be the filer's own words: whoever files
+an epic writes a rough sentence when the operator has stated none, and files the
+epic at once rather than asking first. A ruling can judge the sentence before
+any work lands, and the operator's yes to it, as written or sharpened, is
+recorded as a continue ruling ([How an epic closes](#how-an-epic-closes)). The
+other fields of the contract are recorded only as the operator states or
+confirms them.
+
 ## How an epic closes
 
 An epic closes when its hypothesis is answered, following SAFe's model, never as
@@ -110,6 +120,11 @@ holds. The ruling is the operator's, made on evidence read directly, such as the
 landed work and the measures re-run. The worker that built the units under
 judgment never rules on them, because a worker's account of its own work is not
 evidence.
+
+A ruling can also come before any unit lands, as the operator's judgment of the
+hypothesis sentence itself. The first ruling on an epic ends its hypothesis's
+[first draft](#the-contract-an-epic-carries), and a continue that sharpens the
+sentence records the sharper sentence with it.
 
 A disproven epic's surviving work is not swept back into ordinary flow by
 default: work begun to serve a disproven hypothesis is evaluated deliberately,
@@ -174,13 +189,15 @@ write the contract up front: create-time classification proposing an epic's
 hypothesis, boundaries, and closure condition for the operator to confirm,
 recorded as a dated decision on the epic, and a periodic scope-reading audit
 re-reading the epic against completed work and proposing updates in place.
-Neither is built. Today the contract is recorded on the epic as the operator
-states or confirms it, in the create that files the epic and in a later write
-for each field stated after it. That create
-([`gctk epic create`](../services/gctk/internal/cli/epic.go), which the `work`
-skill gives) refuses an epic with no hypothesis unless the epic's parent is an
-epic, which makes it a Delivery. [Epic stewardship](epic-stewardship.md)
-enforces the ruling that closes an epic.
+Neither is built. Today the contract is recorded on the epic in the create that
+files it ([`gctk epic create`](../services/gctk/internal/cli/epic.go), which the
+`work` skill gives), and in a later write for each field stated after it. The
+hypothesis can be the filer's [first draft](#the-contract-an-epic-carries) until
+the operator's first ruling. The other fields are recorded as the operator
+states or confirms them, and each ruling as the operator makes it. The create
+refuses an epic with no hypothesis unless the epic's parent is an epic, which
+makes it a Delivery. [Epic stewardship](epic-stewardship.md) enforces the ruling
+that closes an epic.
 
 ## Deliveries and Epic Checkpoints
 

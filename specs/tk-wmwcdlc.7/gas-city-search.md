@@ -1,6 +1,6 @@
 ---
 name: Gas City search for an epic's hypothesis at its create
-description: The search the arch check asks for before gctk adds `gctk epic create` and its bridge `assets/scripts/epic.sh`. What bd and Gas City ship for refusing or reporting a bead created without a metadata key, read at named upstream commits, and why the pack checks the key in the epic's own create rather than in bd's create validation, a bd hook or a Gas City event order. Read it when checking whether the command's check can move onto a bd or Gas City primitive.
+description: The search the arch check asks for before gctk adds `gctk epic create` and its bridge `assets/scripts/epic.sh`. What bd and Gas City ship for refusing or reporting a bead created without a metadata key, read at named upstream commits, and why the pack checks the key in the epic's own create rather than in bd's create validation, a bd hook or a Gas City event order. Read it when checking whether the command's check can move onto a bd or Gas City primitive, or why an epic's first draft adds no key of its own.
 ---
 
 # Gas City search for an epic's hypothesis at its create
@@ -32,8 +32,8 @@ check 1).
 - A top-level epic created with no `epic_hypothesis` is refused at its create,
   or reported at once.
 - A Delivery, an epic whose parent is an epic, is exempt.
-- The refusal or report reaches the filer while the operator's statement is in
-  its context. A converse sitting files an epic as one of its last writes, then
+- The refusal or report reaches the filer while it can still give the epic a
+  sentence. A converse sitting files an epic as one of its last writes, then
   signs off and drains.
 - Nothing polls. The operator, in converse sitting tk-vu6faf2 on 2026-11-05,
   about how a session's title reaches its terminal: "Any query to gas city is
@@ -158,13 +158,65 @@ It is the primitive for reporting at once, and it does not fit this need:
   `issue_type`, which tells a Delivery from an epic of its own.
 
 The refusal comes from the create the work skill gives for an epic, where the
-filer reads it while the operator's statement is in its context, and it costs
-nothing when no epic is filed. It takes the intent-level shape the operator
+filer reads it while it can still write the sentence, and it costs nothing when
+no epic is filed. It takes the intent-level shape the operator
 described in the same sitting, about a session's title: "It's where I think
 wrapper scripts in gc-toolkit are actually valuable, they consolidated complex
 logic into having an agent express intent instead of knowing the execution
 logic of that intent" (observation tk-rtr0xzk). Reading those words as
 covering an epic's create is this change's own.
+
+## A first draft reuses the ruling
+
+The operator opened a conversation on this change (tk-nxb4z05, 2026-11-07)
+with: "When we added the epic with hypothesis we didn't want to make the right
+hypothesis the gate keeper to getting an epic in place. I feel like this
+directly contradicts unless we have a good way to know a hypothesis needs to be
+improved or is just a first draft, etc". The earlier words it recalls are on
+PR #944, inline on `docs/epics.md` (comment 4167687812, 2026-10-02): "a hastily
+written hypothesis that gives the general direction is acceptable and then gets
+refined through the process. We need a small gate (it needs a hypothesis), but
+the goal is to prevent any sense of a major gate." In that sitting the operator
+answered "yes send back as recommended" to a hand-back that kept the refusal of
+a blank, had an agent with no sentence from the operator write a rough one and
+file at once, and showed an epic the operator has never ruled on as a first
+draft until a sitting sharpens the sentence and records the operator's yes as a
+continue ruling. The sitting's ruling note on tk-wmwcdlc.7 quotes that
+hand-back in full.
+
+So the refusal of a blank is the small gate, and the filing text no longer asks
+for the operator's sentence or tests its signal before the epic is filed. The
+need this leaves is to tell a first draft from a sentence the operator has
+judged, with nothing the filer has to remember to say. The change gives that
+state one definition, an epic that carries `epic_hypothesis` and no
+`epic_ruling`, and adds no key, flag or state for it. That definition, and the
+reasons below, are this change's reading of the ruling, not the operator's
+words.
+
+- `epic_ruling` is already registered (`lifecycle/lifecycle.toml`
+  `[metadata.epic_stewardship]`), and the Epic Checkpoint already writes it on
+  each ruling. The operator's first judgment of the sentence is a ruling, so
+  the write that ends a draft is that ruling's write, and no second write has
+  to be kept in step with it. The settle step makes the same write on an epic a
+  ruling files with a sentence the operator stated.
+- A flag the filer sets when it wrote the sentence itself, such as a key beside
+  `epic_hypothesis`, relies on the filer saying it drafted the sentence. A filer
+  that forgets leaves a draft that reads as confirmed, and every ruling would
+  also have to clear the flag. bd's state primitive, `bd set-state <issue-id>
+  <dimension>=<value>` (`setStateCmd` in `cmd/bd/state.go` at `7ef2fd05e`),
+  records a state as an event bead and a `<dimension>:<value>` label, so a
+  draft state there has the same two writes to keep in step, and costs a label
+  and an event bead on each epic.
+- The questions that test a drafted signal move from filing to the Epic
+  Checkpoint, the sitting an epic's first ruling runs, so the sentence is judged
+  where the operator rules on it, and filing stays one call.
+
+The board row does not show a first draft yet, and the hypotheses the operator
+already confirmed carry no ruling, so they read as first drafts until it is
+recorded. Both are tk-wmwcdlc.8, which waits on this change. A catch-all epic
+filed with a throwaway sentence is caught at the operator's first ruling or at
+its close rather than at filing, a cost the hand-back named and the operator
+accepted.
 
 ## What it leaves in place
 
