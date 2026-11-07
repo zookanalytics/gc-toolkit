@@ -94,6 +94,12 @@ the sitting to start on its own, to attach later). Pointed at a human gate,
 engage takes the one bead still waiting on the gate and makes the conversation
 it lands on reply to the gate; with several beads waiting it names them and
 starts nothing, and with none it says nothing waits and starts nothing.
+Named by a conversation that has closed, engage says when it closed and the
+first line of its last hand-back after the header, before any prompt. On a
+TTY it then engages the conversation's subject, where Enter files a new
+conversation whose ask names the closed one; with --no-input it starts nothing
+and names the subject's engage. A subject that is closed too takes no new
+conversation, so that engage starts nothing either way.
 Engaging a bead or a PR names everything that holds it, by the definition the
 PR's held: labels and the board's row read (gctk pr-status derive): each open
 human gate reached through its open blocks edges, each blocker it waits on that
@@ -118,12 +124,12 @@ match (review-arch to gc-toolkit.review-arch). The new conversation's ask
 tells the sitting to load that skill, read the subject through it, and leave
 the skill's final writes, such as a review verdict, to the bead it was written
 for; a --reason or --template opener follows the brief. It is refused on an
-explicit conversation id, whose ask is already written, and on a name the
+open conversation's id, whose ask is already written, and on a name the
 roster does not carry; a roster that will not read seeds the name unverified.
 A --reason, --template or --skill with a SUBJECT is a concern of its own, so
 it files a new conversation carrying that opener and engages it even when the
 bead has one, passing --allow-duplicate through to open and --body the opener
-as the ask. A --reason with an explicit conversation id is refused, because a
+as the ask. A --reason with an open conversation's id is refused, because a
 new conversation needs a subject and the reason would otherwise be dropped.
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. The summary and prompts print on
@@ -3497,14 +3503,17 @@ engage_say_holds() {
 # conversation or a gate: sets bead and bead_row to the bead its conversation
 # tracks, pointed_gate to a gate the id named, which the conversation replies to,
 # and named_conv to a conversation it named. <from> is the bead a gate was picked
-# from (take_bead). A refusal exits.
+# from (take_bead). A conversation the id named is read for its status here,
+# before any prompt, and a closed one goes to engage_closed_conversation. A
+# refusal exits.
 engage_take() {
-    bead="$1"
+    bead="$1"; _et_conv_row=""
     verify_subject "$bead" engage "Nothing spawned." || exit $?
     take_bead engage "Nothing spawned." "${2:-}"
     pointed_gate="$TAKE_GATE"; named_conv="$TAKE_CONV"
     if [ "$TAKE_BEAD" != "$bead" ]; then
         if [ -n "$named_conv" ]; then
+            _et_conv_row="$VS_ROW"
             echo "$PROG: engage: $bead is a conversation on $TAKE_BEAD" >&2
         else
             echo "$PROG: engage: $bead is a gate about $TAKE_BEAD — engaging $TAKE_BEAD, and the conversation replies to the gate" >&2
@@ -3513,6 +3522,77 @@ engage_take() {
         verify_subject "$bead" engage "Nothing spawned." || exit $?
     fi
     bead_row="$VS_ROW"
+    if [ "$(printf '%s' "$_et_conv_row" | jq -r '(.status // "") | tostring | ascii_downcase' 2>/dev/null || true)" = closed ]; then
+        engage_closed_conversation "$_et_conv_row"
+    fi
+}
+
+# engage_closed_said <row> <subject> — what a closed conversation's own row says
+# of its close: when it closed, and the first line of its last hand-back
+# (gc.handback). A hand-back opens with a header, `<subject> — <label>`, that
+# names the subject and keeps its state for the lines after it, so a first line
+# that is that header gives way to the line after it. A sitting may set the
+# header in markdown bold, `**<subject> — <label>**`, and the emphasis marks do
+# not stop it reading as the header. The text is the sitting's own and reaches
+# the operator's terminal, so control bytes are dropped, and a line longer than
+# 200 characters is cut at a word.
+engage_closed_said() {
+    printf '%s' "$1" | jq -r --arg s "$2" '
+        ((.closed_at // "") | tostring) as $at
+        | ((.metadata // {})["gc.handback"] // "" | tostring
+           | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")
+           | [ split("\n")[] | gsub("^\\s+|\\s+$"; "") | select(. != "") ]) as $lines
+        | (($lines[0] // "") | sub("^[*_]+"; "")) as $first
+        | (if ($lines | length) > 1 and ($first | startswith($s))
+              and ($first[($s | length):] | test("^[*_]*\\s+[—–-]\\s"))
+           then $lines[1] else ($lines[0] // "") end
+           | if length > 200 then (.[0:199] | sub("\\s+\\S*$"; "") | sub("[\\s,;:—–-]+$"; "")) + "…" else . end) as $line
+        | ((.id // "") | tostring) + " closed" + (if $at == "" then "" else " at " + $at end)
+          + (if $line == "" then "" else ", and its hand-back reads \"" + $line + "\"" end)' 2>/dev/null || true
+}
+
+# engage_refuse_closed <row> — refuse a conversation that reads closed, saying
+# when it closed and how its hand-back reads, and naming the subject's engage,
+# which opens a fresh conversation there. Exits 4.
+engage_refuse_closed() {
+    _erc_said=$(engage_closed_said "$1" "$bead")
+    echo "$PROG: engage: ${_erc_said:-the conversation is closed}. A closed conversation is not held again; engage its subject to open a fresh one: $PROG engage $bead. Nothing spawned." >&2
+    exit 4
+}
+
+# engage_closed_conversation <row> — the id named a conversation that has
+# closed, so its sitting ended and nothing holds it again. A subject that is
+# closed too takes no new conversation (open refuses it), so that engage is
+# refused, and so is one with --no-input, which names the subject's engage. On a
+# TTY engage says the conversation closed and goes on as an engage of its
+# subject, and a new conversation it files there names the closed one in its
+# ask (engage_continues_ask), so its sitting can read what that one settled.
+# Each refusal comes before any prompt and exits 4.
+engage_closed_conversation() {
+    _ecc_said=$(engage_closed_said "$1" "$bead")
+    if [ "$(printf '%s' "$bead_row" | jq -r '(.status // "") | tostring | ascii_downcase' 2>/dev/null || true)" = closed ]; then
+        echo "$PROG: engage: ${_ecc_said:-$named_conv is closed}. Its subject $bead is closed too, a settled item that takes no new conversation. To act on it, re-open $bead or file fresh work. Nothing spawned." >&2
+        exit 4
+    fi
+    [ "$engage_interactive" = 1 ] || engage_refuse_closed "$1"
+    echo "$PROG: engage: ${_ecc_said:-$named_conv is closed}. Engaging $bead instead: a new conversation you start there names $named_conv, so its sitting can read what it settled." >&2
+    closed_conv="$named_conv"; named_conv=""
+    closed_conv_at=$(printf '%s' "$1" | jq -r '(.closed_at // "") | tostring' 2>/dev/null || true)
+}
+
+# engage_continues_ask <rest> — the ask of a new conversation engage files on the
+# subject of the closed conversation the operator named ($closed_conv). It opens
+# by naming that conversation, so the sitting reads what it settled before it
+# preps, and <rest> follows: the seed, the opener, the lens brief or the reason
+# the new conversation carries. With none, the board pick's instruction does.
+engage_continues_ask() {
+    printf 'The operator engaged conversation %s on %s, which closed%s, to take it up again. Before you prep, read what it settled: gc bd show %s prints its close reason, its notes and its last hand-back.' \
+        "$closed_conv" "$bead" "${closed_conv_at:+ at $closed_conv_at}" "$closed_conv"
+    if [ -n "$1" ]; then
+        printf '\n\n%s\n' "$1"
+    else
+        printf "%s\n" " Then rebuild the subject's slice, prep, hold for the operator."
+    fi
 }
 
 # engage_find_conversations <subject> — the subject's conversations that are
@@ -3656,11 +3736,13 @@ EOF
 # is held in a fresh sitting) or engages that gate or blocker; a seed letter
 # opens a new conversation on that seed; any other text opens a new conversation
 # with that text as its opener; Enter takes the default, which attaches to a
-# live sitting, takes a conversation from the queue, or files one. Numbers and
-# letters never collide, so both live in one prompt. Sets ENGAGE_CONV_CHOICE to
-# a conversation id, "new", or "" for the default, and ENGAGE_HOLD_CHOICE to a
-# gate or blocker picked; on "new" it also sets ENGAGE_STARTER_BODY (the
-# conversation's ask; empty = blank) and ENGAGE_STARTER_TAIL (a short title).
+# live sitting, takes a conversation from the queue, or files one, and in place
+# of a closed conversation the operator named ($closed_conv) files a new one.
+# Numbers and letters never collide, so both live in one prompt. Sets
+# ENGAGE_CONV_CHOICE to a conversation id, "new", or "" for the default, and
+# ENGAGE_HOLD_CHOICE to a gate or blocker picked; on "new" it also sets
+# ENGAGE_STARTER_BODY (the conversation's ask; empty = blank) and
+# ENGAGE_STARTER_TAIL (a short title).
 engage_prompt_conversation_or_starter() {
     ENGAGE_STARTER_BODY=""; ENGAGE_STARTER_TAIL=""; ENGAGE_CONV_CHOICE=""; ENGAGE_HOLD_CHOICE=""
     _epv_i=0; _epv_map=""; _epv_hmap=""; _epv_convs=0
@@ -3728,18 +3810,32 @@ EOR
 $(engage_starter_list)
 EOR
     [ -n "$_epv_smenu" ] && printf '    new:  %s · or type your own opener\n' "$_epv_smenu"
-    if [ "$_epv_i" -eq 0 ]; then
-        printf '  a letter or text starts a new conversation · Enter = a new one, blank › '
+    # In place of a closed conversation the operator named, Enter files a new
+    # one even beside listed conversations, because the closed one is the
+    # dialogue the operator asked to take up, and the new one's ask names it.
+    if [ -n "$closed_conv" ]; then
+        _epv_enter="a new one, continuing $closed_conv"
     elif [ "$_epv_convs" -eq 0 ]; then
-        printf '  [1-%s] engage a listed gate or blocker · a letter or text starts a new conversation · Enter = a new one, blank › ' "$_epv_i"
+        _epv_enter="a new one, blank"
     elif [ -n "$_epv_hmap" ]; then
-        printf '  [1-%s] take a listed conversation, gate or blocker · a letter or text starts a new one · Enter = the first conversation › ' "$_epv_i"
+        _epv_enter="the first conversation"
     else
-        printf '  [1-%s] take a listed conversation · a letter or text starts a new one · Enter = the first listed › ' "$_epv_i"
+        _epv_enter="the first listed"
+    fi
+    if [ "$_epv_i" -eq 0 ]; then
+        printf '  a letter or text starts a new conversation · Enter = %s › ' "$_epv_enter"
+    elif [ "$_epv_convs" -eq 0 ]; then
+        printf '  [1-%s] engage a listed gate or blocker · a letter or text starts a new conversation · Enter = %s › ' "$_epv_i" "$_epv_enter"
+    elif [ -n "$_epv_hmap" ]; then
+        printf '  [1-%s] take a listed conversation, gate or blocker · a letter or text starts a new one · Enter = %s › ' "$_epv_i" "$_epv_enter"
+    else
+        printf '  [1-%s] take a listed conversation · a letter or text starts a new one · Enter = %s › ' "$_epv_i" "$_epv_enter"
     fi
     IFS= read -r _epv_reply || return 1
-    # Enter → the default: the first listed conversation, or a new blank one.
-    [ -n "$_epv_reply" ] || return 0
+    if [ -z "$_epv_reply" ]; then
+        [ -z "$closed_conv" ] || ENGAGE_CONV_CHOICE="new"
+        return 0
+    fi
     # A seed letter (case-insensitive) → a new conversation on that seed.
     _epv_lc=$(printf '%s' "$_epv_reply" | tr 'A-Z' 'a-z')
     _epv_seed=$(printf '%s' "$_epv_smap" | awk -v l="$_epv_lc" '$1==l{print $2}')
@@ -4032,6 +4128,9 @@ cmd_engage() {
     engage_skill=""; engage_skill_set=0
     # Interactive decisions carried into the conversation choice and output below.
     engage_body=""; engage_file_new=0; engage_chosen_conv=""; conv_new=0
+    # A closed conversation the id named, which a new conversation names in its
+    # ask, and when it closed (engage_closed_conversation).
+    closed_conv=""; closed_conv_at=""
     # --new-subject files a FRESH subject bead, then engages it (rig-aware, since
     # there is no id prefix yet to derive the rig from). --rig names that rig;
     # --subject names an EXISTING one, so the two are mutually exclusive.
@@ -4184,11 +4283,12 @@ cmd_engage() {
     # The bead must resolve before anything spawns — the shared resolve+classify,
     # so an unanswered read fails closed as a data-plane outage, not a missing
     # bead, the way open does. A gate names the one bead still waiting on it, and
-    # a conversation id names its own conversation and the bead it tracks.
+    # a conversation id names its own conversation and the bead it tracks. A
+    # closed conversation is refused, or on a TTY leaves engage on its subject.
     engage_take "$bead"
 
     # --skill and --reason write a NEW conversation's ask, which is written once,
-    # at filing. An explicit conversation id names a conversation whose ask
+    # at filing. An open conversation's id names a conversation whose ask
     # already exists, so neither has anywhere to go; refuse before any prompt,
     # and point at the subject form that files a conversation carrying them.
     if [ -n "$named_conv" ] && [ -n "$engage_skill" ]; then
@@ -4297,6 +4397,11 @@ cmd_engage() {
         [ -n "$engage_body" ] || { echo "$PROG: engage: $STARTERS_TOOL did not produce the lens brief for '$engage_skill'. Nothing spawned." >&2; exit 3; }
         engage_reason="${engage_skill##*.} lens${engage_reason:+: $engage_reason}"
     fi
+    # A new conversation filed in place of a closed one the operator named opens
+    # its ask by naming that one, ahead of whatever else the ask carries.
+    if [ -n "$closed_conv" ] && { [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; }; then
+        engage_body=$(engage_continues_ask "${engage_body:-$engage_reason}")
+    fi
 
     # Land on the sitting's conversation. A conversation id named it; a concern
     # files a fresh one, even when the bead has one, because a distinct concern
@@ -4325,7 +4430,14 @@ cmd_engage() {
     if [ -n "$CONV" ]; then
         conv_line=$(printf '%s\n' "$conv_rows" | awk -F'\t' -v c="$CONV" '$1 == c')
         if [ -z "$conv_line" ]; then
-            echo "$PROG: engage: conversation $CONV is not an open conversation about $bead (closed, or not a conversation). Engage the subject to open a fresh one: $PROG engage $bead. Nothing spawned." >&2
+            # One that closed after engage read it, as a sign-off or a dismiss
+            # closes one while the operator answers a prompt, is refused as
+            # closed. Any other is not one of the bead's open conversations.
+            conv_now=$(row_now "$CONV")
+            if [ "$(printf '%s' "$conv_now" | jq -r '(.status // "") | tostring | ascii_downcase' 2>/dev/null || true)" = closed ]; then
+                engage_refuse_closed "$conv_now"
+            fi
+            echo "$PROG: engage: $CONV is not an open conversation about $bead, so there is no sitting of it to hold. Engage the subject to take one of its conversations or open a fresh one: $PROG engage $bead. Nothing spawned." >&2
             exit 4
         fi
         conv_state=$(printf '%s' "$conv_line" | cut -f2)
