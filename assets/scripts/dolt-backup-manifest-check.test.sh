@@ -124,26 +124,26 @@ else
     bad "snippet does not drive the scan from an expected-database list"
 fi
 
-# --- Step 3 alert templates must be FLAG-class-neutral ----------------------
-# Step 2a FLAGs for five distinct reasons — no backup directory, no manifest, a
-# strictly newer file, a stale manifest, a directory that could not be read —
-# and only ONE of them has a "newer file" to name. A Step 3 template that
-# demands that field renders an empty or invented value for the other four, so
-# the operator gets an alert about a file that does not exist. Each Step 2a
-# verdict is already a complete one-line reason: the templates carry it
-# verbatim, and these assertions keep the class-specific field from creeping
-# back. Asserted over the shipped step TEXT, because the templates are prose —
-# no snippet marker fences them.
+# --- The alert templates must be FLAG-class-neutral -------------------------
+# The manifest check FLAGs for five distinct reasons — no backup directory, no
+# manifest, a strictly newer file, a stale manifest, a directory that could not
+# be read — and only ONE of them has a "newer file" to name. An alert template
+# that demands that field renders an empty or invented value for the other four,
+# so the operator gets an alert about a file that does not exist. Each
+# manifest-check verdict is already a complete one-line reason: the templates
+# carry it verbatim, and these assertions keep the class-specific field from
+# creeping back. Asserted over the shipped step TEXT, because the templates are
+# prose — no snippet marker fences them.
 ALERT_LINES="$(grep -E 'FLAG line, verbatim' <<< "$STEP" || true)"
 if [ -z "$ALERT_LINES" ]; then
-    bad "could not find the Step 3 backup alert template in the dolt-health step"
+    bad "could not find the backup alert template in the dolt-health step"
 else
-    ok "found the Step 3 backup alert template (patrol-finding.sh, verdict verbatim)"
+    ok "found the backup alert template (patrol-finding.sh, verdict verbatim)"
 
     if grep -qE 'newer file <' <<< "$ALERT_LINES"; then
-        bad "Step 3 backup alert demands a 'newer file' most FLAG classes lack: $ALERT_LINES"
+        bad "the backup alert demands a 'newer file' most FLAG classes lack: $ALERT_LINES"
     else
-        ok "Step 3 backup alerts demand no class-specific 'newer file' field"
+        ok "backup alerts demand no class-specific 'newer file' field"
     fi
 fi
 
@@ -356,24 +356,24 @@ else
 fi
 
 # The missing-dir verdict must name the database and say what is wrong, or the
-# Step 3 nudge/escalation template has nothing concrete to carry.
+# alert template has nothing concrete to carry.
 if grep -q 'no backup directory' < <(verdict missing_backup_dir); then
     ok "missing-dir verdict names the database and the cause"
 else
     bad "missing-dir verdict is not actionable: $(verdict missing_backup_dir)"
 fi
 
-# Generalised: Step 3's templates quote the Step 2a line VERBATIM rather than
-# rebuilding it from class-specific fields, so every finding line has to be
-# self-describing. A bare `FLAG <db>:` would render an alert that names a
-# database and no reason at all — the failure mode the reason-neutral templates
-# exist to prevent, seen from the producing end.
+# Generalised: the alert templates quote the manifest check's line VERBATIM
+# rather than rebuilding it from class-specific fields, so every finding line
+# has to be self-describing. A bare `FLAG <db>:` would render an alert that
+# names a database and no reason at all — the failure mode the reason-neutral
+# templates exist to prevent, seen from the producing end.
 BARE="$(printf '%s\n' "$OUT" | grep -E '^(FLAG|RECHECK|FLAG-ROOT)' \
     | grep -vE '^[A-Z-]+ ?[^:]*: .+' || true)"
 if [ -n "$BARE" ]; then
-    bad "finding lines carry no reason for Step 3 to quote: $BARE"
+    bad "finding lines carry no reason for the alerts to quote: $BARE"
 else
-    ok "every finding line carries a reason Step 3 can quote verbatim"
+    ok "every finding line carries a reason the alerts can quote verbatim"
 fi
 
 # No verdict may ever name a literal '*' — that is an unmatched glob leaking
@@ -519,8 +519,8 @@ else
 fi
 
 # The verdict has to say the SCAN failed, not merely that something is wrong:
-# Step 3 quotes this line verbatim, and "fix the directory read" is a different
-# action from "re-run the backup dog".
+# the alert quotes this line verbatim, and "fix the directory read" is a
+# different action from "re-run the backup dog".
 if grep -q 'scan failed' < <(grep -E '^RECHECK scan_fresh:' <<< "$SCAN_OUT"); then
     ok "scan-failure verdict names the scan as the cause"
 else
@@ -662,8 +662,9 @@ else
     ok "no unbufferable backup directory read as OK"
 fi
 
-# Step 3 quotes the verdict verbatim, so it has to name the buffering failure —
-# "the host is out of scratch space" is a different action from "re-run the dog".
+# The alert quotes the verdict verbatim, so it has to name the buffering
+# failure — "the host is out of scratch space" is a different action from
+# "re-run the dog".
 if grep -qiE 'buffer|temp file' < <(grep -E '^RECHECK scanbuf_fresh:' <<< "$BUF_OUT"); then
     ok "buffer-failure verdict names the buffering/temp failure as the cause"
 else

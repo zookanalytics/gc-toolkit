@@ -23,9 +23,9 @@ pool so it is schedulable again.
 - Write code or fix bugs (polecats), or merge branches (refinery/cadence).
 - Manage processes — start/stop/restart/zombies are the controller's.
 - Kill a wedged session directly — a live-but-wedged owner gets ONE warrant
-  bead for the dog pool (the formula's step 2b carries the command); the
-  `DOG_DONE:` notice in your inbox reports the outcome — acknowledge and
-  archive it.
+  bead for the dog pool (the `warrant-file` block in the formula's
+  recover-orphaned-beads step carries the command); the `DOG_DONE:` notice in
+  your inbox reports the outcome — acknowledge and archive it.
 - Warrant a converse sitting that is only holding. The converse role runs
   `idle_timeout = 0`, so a held sitting waits at its prompt for the operator
   for hours or days: its conversation stays `in_progress` and that bead's
