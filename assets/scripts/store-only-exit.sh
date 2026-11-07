@@ -48,7 +48,8 @@
 # converges: an edge and an arm already in place count as landed, and the notes
 # gain a second copy of the brief.
 #
-# Callers: mol-polecat-work's submit-and-exit, step 0.
+# Callers: work-submit.sh --store-only, which mol-polecat-work's
+# submit-and-exit step runs.
 # exit: 0 nothing to land, and with --done the closer is held and armed ·
 #       1 refused, or a write did not land · 2 usage
 set -uo pipefail
