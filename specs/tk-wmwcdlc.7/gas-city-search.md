@@ -128,14 +128,27 @@ It is the primitive for reporting at once, and it does not fit this need:
 
 - One `gc bd create --metadata`, which the command runs itself. bd writes the
   metadata into the issue it inserts (`cmd/bd/create.go` at `7ef2fd05e`), so
-  the epic exists with its contract or not at all. The exit and the reply say
-  whether it was filed: an exit 0 whose reply names the new bead. `gc bd` exits
-  4, with bd's reply passed through, when bd fell back to a store whose writes
-  do not persist (`cmd/gc/cmd_bd.go` `bdSilentFallbackExitCode` at
-  `24c9f5f1f`), so the command takes no id from a non-zero exit. Nothing reads
-  the epic back, because the command takes no act on it after the create.
-  gctk's `gcbd.Create` reads each key back after its create, and the command
-  does not use it.
+  the epic exists with its contract or not at all. Only an exit 0 whose reply
+  names the new bead says it was filed. `gc bd` exits 4, with bd's reply passed
+  through, when bd fell back to a store whose writes do not persist
+  (`cmd/gc/cmd_bd.go` `bdSilentFallbackExitCode` at `24c9f5f1f`), so the
+  command takes no id from a non-zero exit. No non-zero exit says the epic was
+  not filed either. When bd loses the answer to a commit, the commit may have
+  landed, and `withRetryTx` (`internal/storage/dolt/store.go`) returns
+  `ErrCommitIndeterminate` without replaying the write. `bd create` answers
+  that error as it answers a refusal at the write: with one error object, or
+  on a proxied server one line of text, and exit 1 (`cmd/bd/create.go` and
+  `cmd/bd/create_proxied_server.go`, all three at `7ef2fd05e`). So a create
+  that exits non-zero exits 4, and the filer looks for the epic by its title
+  before filing it again. bd marks a refusal that wrote nothing in two ways: a
+  typed refusal, `{code, error, mutates}` (`buildJSONCapabilityError` in
+  `cmd/bd/errors.go`), and exit 14 for a migration freeze
+  (`ExitMigrationFrozen`). bd gives a typed refusal to a create only for
+  `--repo`, or `--readonly` on a proxied server, and this create passes
+  neither. The command reads a freeze as unknown too, and passes on bd's
+  message. Nothing reads the epic back, because the command takes no act on it
+  after the create. gctk's `gcbd.Create` reads each key back after its create,
+  and the command does not use it.
 - The same create with no metadata, for a Delivery.
 - `gc bd show`, or the supervisor API's read of a bead, for the parent's
   `issue_type`, which tells a Delivery from an epic of its own.

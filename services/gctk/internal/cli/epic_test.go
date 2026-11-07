@@ -182,6 +182,12 @@ func TestEpicCreateFiling(t *testing.T) {
 		}
 	})
 
+	// bd's error object, as cmd/bd/errors.go's jsonStdoutError prints it
+	// for a create that fails in the write.
+	bdErrorReply := func(message string) string {
+		return "{\n  \"error\": " + strconv.Quote(message) + ",\n  \"schema_version\": 1\n}\n"
+	}
+	notice := `gc bd: answering from the rig "r" store`
 	cases := []struct {
 		name, reply string
 		rc          int
@@ -189,8 +195,15 @@ func TestEpicCreateFiling(t *testing.T) {
 		code        int
 		says        []string
 	}{
-		{"a refusal at the write is nothing filed", `{"error":"no such parent"}`, 1, "",
-			epicExitNotFiled, []string{"bd refused the create, and nothing was filed: no such parent"}},
+		{"a commit bd could not confirm leaves whether it was filed unknown, with bd's error",
+			bdErrorReply("write commit result indeterminate after connection loss (not retried to avoid double-apply): " +
+				"commit write tx: invalid connection: write commit result indeterminate"), 1, notice,
+			epicExitUnknown, []string{"bd's create exited 1: write commit result indeterminate after connection loss",
+				"so whether the epic was filed is unknown", "look for it by its title before filing it again"}},
+		{"a refusal in bd's error object is read the same way, since its reply is the lost commit's",
+			bdErrorReply("validation failed: field exceeds maximum length"), 1, notice,
+			epicExitUnknown, []string{"bd's create exited 1: validation failed: field exceeds maximum length",
+				"look for it by its title before filing it again"}},
 		{"a non-zero exit prints no id, even when the reply names one", `{"id":"tk-n"}`, 4,
 			"gc bd: managed Dolt unreachable; bd fell back to on-disk auto-import mode.",
 			epicExitUnknown, []string{"exited 4", "managed Dolt unreachable", "look for it by its title before filing it again"}},
@@ -211,12 +224,15 @@ func TestEpicCreateFiling(t *testing.T) {
 					t.Errorf("stderr %q does not say %q", errText, s)
 				}
 			}
+			if strings.Contains(errText, "nothing was filed") {
+				t.Errorf("stderr %q says nothing was filed after a create ran", errText)
+			}
 		})
 	}
 }
 
 func TestEpicReply(t *testing.T) {
-	cases := []struct{ out, id, refusal string }{
+	cases := []struct{ out, id, bdError string }{
 		{`{"id":"tk-n","title":"T"}`, "tk-n", ""},
 		{`[{"id":"tk-n"}]`, "tk-n", ""},
 		{`{"error":"no such parent"}`, "", "no such parent"},
@@ -228,8 +244,8 @@ func TestEpicReply(t *testing.T) {
 		{`"tk-n"`, "", ""},
 	}
 	for _, c := range cases {
-		if id, refusal := epicReply([]byte(c.out)); id != c.id || refusal != c.refusal {
-			t.Errorf("epicReply(%q) = (%q, %q), want (%q, %q)", c.out, id, refusal, c.id, c.refusal)
+		if id, bdError := epicReply([]byte(c.out)); id != c.id || bdError != c.bdError {
+			t.Errorf("epicReply(%q) = (%q, %q), want (%q, %q)", c.out, id, bdError, c.id, c.bdError)
 		}
 	}
 }

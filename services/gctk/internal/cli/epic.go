@@ -28,9 +28,11 @@ import (
 //
 // The epic is filed by one `gc bd create`, and bd writes its --metadata into
 // the issue it inserts (cmd/bd/create.go), so the epic exists with its contract
-// or not at all. The exit and the reply say whether it was filed, and nothing
-// reads it back: an exit 0 whose reply names the new bead is an epic filed, and
-// a refusal at the write answers with bd's error object.
+// or not at all. An exit 0 whose reply names the new bead is an epic filed, and
+// nothing reads it back. Any other end of the create leaves whether it was
+// filed unknown, because bd answers a create whose commit may have landed
+// before its answer was lost with the same reply and exit as a create it
+// refused. So the command says nothing was filed only when it ran no create.
 
 const epicUsage = `usage:
   gctk epic create <title> [--hypothesis <sentence>] [--handle <words>]
@@ -72,12 +74,14 @@ epic with a hypothesis of its own is an epic wherever it is filed.
 It prints the new epic's id, and on stderr what it filed.
 
 exit: 0 filed
-      1 nothing was filed: the parent did not read, or bd refused the create
+      1 nothing was filed: the parent did not read
       2 usage
       3 refused, and nothing was filed: an epic whose parent is not an epic
         has no hypothesis, or a Delivery was given a contract field
-      4 bd's create failed or named no bead, so whether the epic was filed is
-        unknown: look for it by its title before filing it again
+      4 whether the epic was filed is unknown: bd's create exited non-zero,
+        or exited 0 and named no bead. bd answers a commit it could not
+        confirm with the same error as a create it refused, so look for the
+        epic by its title before filing it again
 `
 
 // The exit codes epicUsage states.
@@ -281,21 +285,21 @@ func epicCreate(o epicOpts, stdout, stderr io.Writer) int {
 	var bdErr bytes.Buffer
 	cmd.Stderr = &bdErr
 	out, err := cmd.Output()
-	id, refusal := epicReply(out)
+	id, bdError := epicReply(out)
 	switch {
-	case refusal != "":
-		fmt.Fprintf(stderr, "gctk epic create: bd refused the create, and nothing was filed: %s\n", refusal)
-		return epicExitNotFiled
 	case err != nil:
-		// gc bd exits 4, with bd's reply passed through, when bd fell back to a
-		// store whose writes do not persist, so an id in the reply of a
-		// non-zero exit is not taken for an epic filed.
+		// No non-zero exit says the epic was not filed. bd answers a create
+		// whose commit result it lost (ErrCommitIndeterminate) with the same
+		// reply and exit 1 as a refusal (cmd/bd/create.go). gc bd exits 4,
+		// with bd's reply passed through, when bd fell back to a store whose
+		// writes do not persist, so an id in that reply is not taken for an
+		// epic filed either.
 		fmt.Fprintf(stderr, "gctk epic create: bd's create exited %d%s, so whether the epic was filed is unknown: look for it by its title before filing it again\n",
-			gcbd.ExitCode(err), detail(bdErr.String(), err.Error()))
+			gcbd.ExitCode(err), detail(bdError, bdErr.String(), err.Error()))
 		return epicExitUnknown
 	case id == "":
 		fmt.Fprintf(stderr, "gctk epic create: bd's create exited 0 and its reply named no bead%s, so whether the epic was filed is unknown: look for it by its title before filing it again\n",
-			detail(bdErr.String()))
+			detail(bdError, bdErr.String()))
 		return epicExitUnknown
 	}
 	fmt.Fprintln(stdout, id)
@@ -308,9 +312,9 @@ func epicCreate(o epicOpts, stdout, stderr io.Writer) int {
 }
 
 // epicReply reads a `gc bd create --json` reply: the id of the bead it names,
-// as an object or an array holding one, or the message of the error object bd
-// answers a refusal at the write with.
-func epicReply(out []byte) (id, refusal string) {
+// as an object or an array holding one, or the message of bd's error object,
+// which says why the create failed and not whether it wrote.
+func epicReply(out []byte) (id, bdError string) {
 	var v any
 	if json.NewDecoder(bytes.NewReader(gcbd.Scrub(out))).Decode(&v) != nil {
 		return "", ""
