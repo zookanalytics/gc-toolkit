@@ -104,7 +104,9 @@ eq "$rc/$out" "0/[]" "…no row for a bead the store does not hold, at exit 0"
 out=$(STUB_LIST_FAIL=1 bd_exact_row tk-n); rc=$?
 eq "$rc/$out" "1/" "…and returns 1 for a read that fails"
 out=$(STUB_LIST_TRAILING=tk-n bd_exact_row tk-n); rc=$?
-eq "$rc/$out" "1/" "…or an answer that is no listing"
+eq "$rc/$out" "1/" "…or an answer with unreadable bytes after the listing"
+out=$(_bd_call() { printf '{"error":"database is locked"}'; }; bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…or an answer that is no listing, at exit 0"
 : > "$STUB_GC_LOG"
 out=$(bd_disposed_to tk-d); rc=$?
 eq "$rc/$out" "0/x-1" "bd_disposed_to names the successor an edge into another store records"

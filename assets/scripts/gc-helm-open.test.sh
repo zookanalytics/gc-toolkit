@@ -921,7 +921,7 @@ case "$1 ${2:-}" in
     case "$3" in
       tk-pred|tk-pred2|tk-head|tk-mid|tk-cyc1|tk-cyc2) settled "$3" ;;
       tk-oldgate) jq -n '[{id:"tk-oldgate", status:"closed", issue_type:"gate", await_type:"human", metadata:{}}]' ;;
-      tk-listfail|tk-listjunk|tk-listgone|tk-settled) closed_row "$3" ;;
+      tk-oldinfra|tk-oldtmpl|tk-listfail|tk-listjunk|tk-listerr|tk-listgone|tk-settled) closed_row "$3" ;;
       tk-succ)    jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
       tk-live1)   jq -n '[{id:"tk-live1",  status:"open",   title:"a live bead"}]' ;;
       tk-prbead)  jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
@@ -945,8 +945,16 @@ case "$1 ${2:-}" in
               *) printf '[]' ;;
             esac
             exit 0 ;;
+          tk-oldinfra|tk-oldtmpl)
+            case "$_c:$* " in
+              tk-oldinfra:*" --include-infra "*|tk-oldtmpl:*" --include-templates "*)
+                jq -n --arg i "$_c" '[{id:$i, status:"closed", dependencies:[{issue_id:$i, depends_on_id:"tk-succ", type:"supersedes"}]}]' ;;
+              *) printf '[]' ;;
+            esac
+            exit 0 ;;
           tk-listfail) echo "bd: database is locked" >&2; exit 1 ;;
           tk-listjunk) printf 'not json at all'; exit 0 ;;
+          tk-listerr)  printf '{"error":"database is locked"}'; exit 0 ;;
           tk-listgone) printf '[]'; exit 0 ;;
           tk-settled)  closed_row tk-settled; exit 0 ;;
         esac
@@ -1041,20 +1049,26 @@ grep -q 'tk-gone' <<< "$ERR" \
   && ok "(RESOLVE-BROKEN-POINTER) names the successor it could not resolve" \
   || bad "(RESOLVE-BROKEN-POINTER) names the successor (err: $ERR)"
 
-# (RESOLVE-GATE) a closed gate names its successor as any bead does, though a
-# plain listing hides a gate.
-OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve tk-oldgate 2>"$TMP/err")"; RC=$?
-eq "$RC/$OUT" "0/tk-succ" "(RESOLVE-GATE) a superseded gate resolves to its successor"
+# (RESOLVE-GATE) a closed gate, an infrastructure bead and a template name their
+# successor as any bead does, though a plain listing hides each of them.
+for _hidden in tk-oldgate tk-oldinfra tk-oldtmpl; do
+  set +e
+  OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve "$_hidden" 2>"$TMP/err")"; RC=$?
+  set -e
+  eq "$RC/$OUT" "0/tk-succ" "(RESOLVE-GATE) superseded $_hidden resolves to its successor"
+done
 
 # (RESOLVE-SETTLED) a closed bead whose read answers and names no successor is
 # itself the answer.
+set +e
 OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve tk-settled 2>"$TMP/err")"; RC=$?
+set -e
 eq "$RC/$OUT" "0/tk-settled" "(RESOLVE-SETTLED) a closed bead that names no successor resolves to itself"
 
 # (RESOLVE-UNREAD) a closed bead whose list row does not read is refused: a failed
-# read, an answer that is no listing and a listing without the row each say
-# nothing about its successor, and none of them is "it names none".
-for _unread in tk-listfail tk-listjunk tk-listgone; do
+# read, output that is not JSON, an answer that is no listing and a listing without
+# the row each say nothing about its successor, and none of them is "it names none".
+for _unread in tk-listfail tk-listjunk tk-listerr tk-listgone; do
   set +e
   OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve "$_unread" 2>"$TMP/err")"; RC=$?
   set -e
