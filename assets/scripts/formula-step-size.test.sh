@@ -27,11 +27,17 @@
 # text and is not read here.
 #
 # The render is what a pour writes and the reminder wraps. Each {{var}} in the
-# title and the description takes the formula's own non-empty default and keeps
-# its placeholder otherwise, as a pour keeps a var it cannot resolve. Both are
-# trimmed and lose any <system-reminder> tag, as promptsafe's
-# SanitizeForSystemReminder strips them. The bead id is a stand-in a little
-# longer than a step bead's id.
+# title and the description takes the formula's own non-empty default. Any other
+# keeps its placeholder, which stands in for the value a sling passes. A pour
+# fills a var from the values it is given and then from the var's default, an
+# empty one included, and keeps the placeholder only of a var with neither
+# (applyVarDefaults and substituteStepDescription in gascity's
+# internal/molecule/molecule.go). Both are trimmed and lose any
+# <system-reminder> tag, as promptsafe's SanitizeForSystemReminder strips them.
+# The bead id is a stand-in a little longer than a step bead's id. The render
+# reads a step's own title and description, so a step that keeps text anywhere
+# else, in a description_file, children or a loop body, fails the run until the
+# render reads it too.
 #
 # Hermetic: reads the tracked files of the pack and of the fixture trees it
 # builds. No city, network or build.
@@ -56,6 +62,7 @@ if ! PY="$(tomllib_python)"; then
   exit 0
 fi
 command -v git >/dev/null 2>&1 || { echo "git is required for this test" >&2; exit 2; }
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-formula-step-size-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -75,6 +82,7 @@ import sys
 import tomllib
 
 BEAD_ID = "tk-xxxxxxxxx"
+UNREAD = ("description_file", "children", "loop")
 VAR = re.compile(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
 FORMULA_FILE = re.compile(r"^(?:packs/[^/]+/)?formulas/[^/]+\.toml$")
 POUR = re.compile(r"(\bmol (?:wisp|pour) |--on[= ]|--formula[= ]|--sling-arg )[\"']?(mol-[A-Za-z0-9_-]+)")
@@ -131,6 +139,9 @@ def steps(root, files):
                     if isinstance(spec, dict) and spec.get("default") not in (None, "")}
         render = lambda text: VAR.sub(lambda m: defaults.get(m.group(1), m.group(0)), text)
         for step in formula.get("steps") or []:
+            unread = [key for key in UNREAD if key in step]
+            if unread:
+                sys.exit(f"{name}.{step.get('id', '?')} sets {', '.join(unread)}, which this render does not read")
             title = sanitize(render(step.get("title", "")).strip())
             description = sanitize(render(step.get("description", "")).strip())
             reminder = ("<system-reminder>\nYour current active work assignment:\n\n"
@@ -218,6 +229,22 @@ r = ("<system-reminder>\nYour current active work assignment:\n\n## V 0123456789
 print(len(r.encode()))')"
 eq "$(steps "$TMP/vars" | cut -f1)" "$want" \
   "a default fills its var in the title and the description, an empty or undeclared var keeps its placeholder, and every reminder tag is stripped"
+
+# ── A step with text the render does not read fails the run ─────────────────
+for unread in 'description_file = "step.md"' 'children = [{ id = "c", title = "C" }]' \
+              'loop = { body = [{ id = "b", title = "B" }] }'; do
+  key="${unread%% =*}"
+  rm -rf "$TMP/unread" && mkdir -p "$TMP/unread/formulas"
+  printf 'formula = "mol-unread"\n\n[[steps]]\nid = "u"\ntitle = "U"\n%s\n' "$unread" \
+    > "$TMP/unread/formulas/mol-unread.toml"
+  track "$TMP/unread"
+  if steps "$TMP/unread" > /dev/null 2> "$TMP/unread.err"; then
+    bad "a step that sets $key renders as though its title and description held all its text"
+  else
+    eq "$(cat "$TMP/unread.err")" "mol-unread.u sets $key, which this render does not read" \
+      "a step that sets $key fails the run"
+  fi
+done
 
 # ── A formula the pack pours only as a root-only wisp is left out ────────────
 mkdir -p "$TMP/patrol/formulas" "$TMP/patrol/agents/fx" "$TMP/patrol/docs"
