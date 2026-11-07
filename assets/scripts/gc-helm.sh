@@ -487,16 +487,23 @@ need_disposition_jq() {
 
 # disposed_to_of <bead-id> — the bead <bead-id> names as its canonical or
 # successor, read from its `gc bd list` row in the store its id prefix names, so
-# an edge into another rig's store counts. Prints nothing when it names none or
-# the row does not read.
+# an edge into another rig's store counts. The flags lift every type bd hides from
+# a listing, so a gate names its successor as any bead does. Prints nothing when
+# it names none. Returns 1 when the row does not read, whether the read failed,
+# answered no listing or left the row out, so "names no successor" and "could not
+# read" stay apart.
 disposed_to_of() {
     need_disposition_jq
     _dt_path=$(rig_path_for_bead "$1")
     _dt_db=""; [ -n "$_dt_path" ] && [ -d "$_dt_path/.beads" ] && _dt_db="$_dt_path/.beads"
     # shellcheck disable=SC2086  # ${_dt_db:+--db "$_dt_db"} expands to 0 or 2 space-free fields
-    gc bd list --id "$1" --all ${_dt_db:+--db "$_dt_db"} --json --limit 0 2>/dev/null | grep -av '^gc bd:' | scrub \
-        | jq -r --arg b "$1" "$DISPOSITION_JQ"'
-            if type == "array" then ([ .[] | objects | select((.id // "") == $b) ] | first // {} | disposed_to) else empty end' 2>/dev/null || true
+    _dt_raw=$(gc bd list --id "$1" --all --include-gates --include-infra --include-templates ${_dt_db:+--db "$_dt_db"} --json --limit 0 2>/dev/null) || return 1
+    printf '%s' "$_dt_raw" | grep -av '^gc bd:' | scrub \
+        | jq -er --arg b "$1" "$DISPOSITION_JQ"'
+            if type != "array" then error("not a listing") else
+              [ .[] | objects | select((.id // "") == $b) ]
+              | if length == 0 then error("no row") else (.[0] | disposed_to) end
+            end' 2>/dev/null
 }
 
 # bd_rows <gc-bd-args...> — one `gc bd` read that must answer a JSON array,
@@ -833,8 +840,9 @@ _resolve_pr_reference() {
 # its live successor and set RESOLVED_SUBJECT. The edge is read off the bead's
 # list row, which carries one into another rig's store, and the successor is
 # read cross-ledger by its rig-unique id. A live bead, or one that does not
-# resolve, passes through unchanged for the caller's existence gate; a cycle is
-# refused (exit 4) rather than guessed.
+# resolve, passes through unchanged for the caller's existence gate. A cycle, and
+# a closed bead whose list row does not read, are refused (exit 4) rather than
+# guessed.
 _resolve_superseded_reference() {
     _ss_orig="$1"; _ss_cur="$1"; _ss_seen=" $1 "; _ss_hops=0
     while [ "$_ss_hops" -le 24 ]; do
@@ -853,7 +861,10 @@ _resolve_superseded_reference() {
         fi
         _ss_status=$(printf '%s' "$_ss_this" | jq -r '.status // ""' 2>/dev/null) || _ss_status=""
         _ss_succ=""
-        [ "$_ss_status" != "closed" ] || _ss_succ=$(disposed_to_of "$_ss_cur")
+        if [ "$_ss_status" = "closed" ] && ! _ss_succ=$(disposed_to_of "$_ss_cur"); then
+            echo "$PROG: $_ss_cur is closed, and its list row did not read, so whether it names a successor is unknown. Refusing to open the settled bead; re-run once the store answers, or pass the live bead id directly. Nothing filed." >&2
+            exit 4
+        fi
         if [ "$_ss_status" = "closed" ] && [ -n "$_ss_succ" ]; then
             case "$_ss_seen" in
                 *" $_ss_succ "*)
@@ -1119,7 +1130,7 @@ cmd_takeaway() {
         fi
         if [ "$anchor_status" = "closed" ]; then
             release_park=""
-            superseded=$(disposed_to_of "$bead")
+            superseded=$(disposed_to_of "$bead") || superseded=""
             echo "$PROG: takeaway: $bead is closed${superseded:+, superseded by $superseded} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route stamp). The run beneath it is still ended." >&2
         fi
     fi

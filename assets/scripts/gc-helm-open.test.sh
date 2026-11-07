@@ -910,12 +910,18 @@ succ_of() {
   esac
 }
 settled() { jq -n --arg i "$1" --arg s "$(succ_of "$1")" '[{id:$i, status:"closed", metadata:{}, dependencies:[{id:$s, dependency_type:"supersedes"}]}]'; }
+# A closed gate whose successor only its list row names, the way bd's listing
+# hides a gate unless --include-gates lifts that, whatever the --id names; and
+# closed beads whose list read goes wrong after their show answered.
+closed_row() { jq -n --arg i "$1" '[{id:$i, status:"closed", metadata:{}}]'; }
 case "$1 ${2:-}" in
   "rig list")
     jq -n '{rigs:[{name:"gc-toolkit", path:env.RESRIG, prefix:"tk"}]}' ;;
   "bd show")
     case "$3" in
       tk-pred|tk-pred2|tk-head|tk-mid|tk-cyc1|tk-cyc2) settled "$3" ;;
+      tk-oldgate) jq -n '[{id:"tk-oldgate", status:"closed", issue_type:"gate", await_type:"human", metadata:{}}]' ;;
+      tk-listfail|tk-listjunk|tk-listgone|tk-settled) closed_row "$3" ;;
       tk-succ)    jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
       tk-live1)   jq -n '[{id:"tk-live1",  status:"open",   title:"a live bead"}]' ;;
       tk-prbead)  jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
@@ -932,6 +938,18 @@ case "$1 ${2:-}" in
           jq -n --arg i "$_c" --arg s "$(succ_of "$_c")" '[{id:$i, status:"closed", dependencies:[{issue_id:$i, depends_on_id:$s, type:"supersedes"}]}]'
           exit 0
         fi
+        case "$_c" in
+          tk-oldgate)
+            case " $* " in
+              *" --include-gates "*) jq -n '[{id:"tk-oldgate", status:"closed", issue_type:"gate", dependencies:[{issue_id:"tk-oldgate", depends_on_id:"tk-succ", type:"supersedes"}]}]' ;;
+              *) printf '[]' ;;
+            esac
+            exit 0 ;;
+          tk-listfail) echo "bd: database is locked" >&2; exit 1 ;;
+          tk-listjunk) printf 'not json at all'; exit 0 ;;
+          tk-listgone) printf '[]'; exit 0 ;;
+          tk-settled)  closed_row tk-settled; exit 0 ;;
+        esac
         jq -n --arg c "$_c" --arg s "$(cat "$TMP_SUBJ" 2>/dev/null)" \
           '[{id:$c, issue_type:"task", status:"open", assignee:"human", dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}]'
         exit 0 ;;
@@ -1022,6 +1040,32 @@ eq "$RC" "4" "(RESOLVE-BROKEN-POINTER) an unresolvable successor exits 4"
 grep -q 'tk-gone' <<< "$ERR" \
   && ok "(RESOLVE-BROKEN-POINTER) names the successor it could not resolve" \
   || bad "(RESOLVE-BROKEN-POINTER) names the successor (err: $ERR)"
+
+# (RESOLVE-GATE) a closed gate names its successor as any bead does, though a
+# plain listing hides a gate.
+OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve tk-oldgate 2>"$TMP/err")"; RC=$?
+eq "$RC/$OUT" "0/tk-succ" "(RESOLVE-GATE) a superseded gate resolves to its successor"
+
+# (RESOLVE-SETTLED) a closed bead whose read answers and names no successor is
+# itself the answer.
+OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve tk-settled 2>"$TMP/err")"; RC=$?
+eq "$RC/$OUT" "0/tk-settled" "(RESOLVE-SETTLED) a closed bead that names no successor resolves to itself"
+
+# (RESOLVE-UNREAD) a closed bead whose list row does not read is refused: a failed
+# read, an answer that is no listing and a listing without the row each say
+# nothing about its successor, and none of them is "it names none".
+for _unread in tk-listfail tk-listjunk tk-listgone; do
+  set +e
+  OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve "$_unread" 2>"$TMP/err")"; RC=$?
+  set -e
+  eq "$RC/$OUT" "4/" "(RESOLVE-UNREAD) resolve refuses $_unread, and prints no id"
+  grep -q "$_unread is closed, and its list row did not read" "$TMP/err" \
+    && ok "(RESOLVE-UNREAD) the refusal says why, for $_unread" \
+    || bad "(RESOLVE-UNREAD) the refusal says why, for $_unread (err: $(cat "$TMP/err"))"
+  FAKE_PR_ROWS='[]'; run_resolve "$_unread"
+  eq "$RC" "4" "(RESOLVE-UNREAD) open refuses $_unread"
+  [ -z "$CALLS" ] && ok "(RESOLVE-UNREAD) nothing filed on $_unread" || bad "(RESOLVE-UNREAD) filed on $_unread (calls: $CALLS)"
+done
 
 # (RESOLVE-PR-NUMBER) a bare PR number resolves to the anchor recording it.
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'

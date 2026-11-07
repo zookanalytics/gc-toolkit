@@ -362,10 +362,11 @@ gc bd update <bead> --set-metadata gc.work_outcome=no-op \
 
 **The read side: a missing successor is not proof of a false close.**
 Before reopening or escalating a closed bead, read the successor its edge
-names (`gc bd list --id <bead> --all --json`, whose `duplicates` or
-`supersedes` edge names it, an edge into another rig's store included), and on
-a bead no edge was recorded for, the retired `gc.superseded_by` key. Read notes
-and close reason, then search EVERY store — your rig store is not the city:
+names (`gc bd list --id <bead> --all --include-gates --include-infra
+--include-templates --json`, whose `duplicates` or `supersedes` edge names it, an
+edge into another rig's store included), and on a bead no edge was recorded for,
+the retired `gc.superseded_by` key. Read notes and close reason, then search
+EVERY store — your rig store is not the city:
 
 ```bash
 gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do

@@ -359,7 +359,9 @@ case "$verb" in
     fi
     # A show of several ids reads a row for each, as the walk to the human gates
     # that hold a bead does. A row names its edges as real bd does, each edge's far
-    # bead with the type of the edge, and a row with no edges has none.
+    # bead with the type of the edge, and a row with no edges has none. A fixture
+    # edge marked "external" stands for one onto a bead in another rig's store,
+    # which bd's show leaves out and its list keeps.
     show_ids=()
     for a in "$@"; do case "$a" in --*) ;; *) show_ids+=("$a") ;; esac; done
     id="${show_ids[0]:-}"
@@ -384,7 +386,8 @@ case "$verb" in
       | [ $ARGS.positional[] as $id | $all[] | select(.id == $id) | .priority //= 2
           | ([ $edges[] | select(.issue == $id) | .type as $t | .on as $o
                | (first($all[] | select(.id == $o)) // {id: $o}) + {dependency_type: $t} ]) as $deps
-          | if ($deps | length) > 0 and (has("dependencies") | not) then . + {dependencies: $deps} else . end ]' \
+          | if ($deps | length) > 0 and (has("dependencies") | not) then . + {dependencies: $deps} else . end
+          | if has("dependencies") then .dependencies |= map(select(.external != true)) else . end ]' \
       "${show_ids[@]}"
     ;;
   list)
@@ -408,9 +411,13 @@ case "$verb" in
     if [ -n "${STUB_LIST_TRAILING:-}" ]; then
       case " $* " in *"$STUB_LIST_TRAILING"*) ltrail=1 ;; esac
     fi
-    statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
+    # An --id read hides a gate unless --include-gates lifts that, as bd's type
+    # suppression does whatever the --id names.
+    statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""; idread=""; withgates=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        --id|--id=*) idread=1 ;;
+        --include-gates) withgates=1 ;;
         --status=*) statuses="${1#--status=}" ;;
         --status) shift; statuses="${1:-}" ;;
         --metadata-field) shift; fields+=("${1:-}") ;;
@@ -428,7 +435,8 @@ case "$verb" in
     # One jq answers the whole query, the --metadata-field filters included:
     # each `k=v` is split at its first `=` (a field with no `=` keeps the whole
     # word as both, as the shell split it did) and a row must match every one.
-    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
+    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" \
+          --arg idread "$idread" --arg withgates "$withgates" '
       ($ARGS.positional | map(split("=") as $p
                                | if ($p | length) == 1 then {k: ., v: .}
                                  else {k: $p[0], v: ($p[1:] | join("="))} end)) as $fields
@@ -439,6 +447,7 @@ case "$verb" in
         | select($ty == "" or ((.issue_type // "task") == $ty))
         | select($ex == "" or ((.issue_type // "task") != $ex))
         | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase)))
+        | select($idread == "" or $withgates != "" or ((.issue_type // "") != "gate"))
         | . as $row
         | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v))
         | .priority //= 2 ]' \

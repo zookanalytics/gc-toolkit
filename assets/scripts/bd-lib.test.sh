@@ -90,14 +90,27 @@ eq "$(disp '[{"id":"a","dependencies":[{"id":"p","dependency_type":"parent-child
 eq "$(disp '[{"id":"a","metadata":{"gc.superseded_by":"b"}}]')" "|" \
   "…or for one that carries only the retired key"
 
-# --- bd_disposed_to: the successor off the bead's list row ----------------------
+# --- bd_exact_row and bd_disposed_to: a bead's own list row --------------------
 # The edge onto x-1, a bead in another rig's store, rides only the list row.
-store '[{"id":"tk-d","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-d","depends_on_id":"x-1","type":"supersedes"}]},
-        {"id":"tk-n","status":"closed","metadata":{}}]'
+store '[{"id":"tk-d","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-d","depends_on_id":"x-1","type":"supersedes","external":true}]},
+        {"id":"tk-n","status":"closed","metadata":{}},
+        {"id":"tk-g","status":"closed","issue_type":"gate","metadata":{},"dependencies":[{"issue_id":"tk-g","depends_on_id":"tk-g2","type":"supersedes"}]}]'
+out=$(bd_exact_row tk-n); rc=$?
+eq "$rc/$(printf '%s' "$out" | jq -r 'map(.id) | join(",")')" "0/tk-n" "bd_exact_row answers the bead's own row, whatever else the listing holds"
+out=$(bd_exact_row tk-g); rc=$?
+eq "$rc/$(printf '%s' "$out" | jq -r 'map(.id) | join(",")')" "0/tk-g" "…a gate's, which a plain list hides"
+out=$(bd_exact_row tk-gone); rc=$?
+eq "$rc/$out" "0/[]" "…no row for a bead the store does not hold, at exit 0"
+out=$(STUB_LIST_FAIL=1 bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…and returns 1 for a read that fails"
+out=$(STUB_LIST_TRAILING=tk-n bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…or an answer that is no listing"
 : > "$STUB_GC_LOG"
 out=$(bd_disposed_to tk-d); rc=$?
 eq "$rc/$out" "0/x-1" "bd_disposed_to names the successor an edge into another store records"
-has "$(cat "$STUB_GC_LOG")" "bd list --id tk-d --all" "…read off the bead's list row"
+has "$(cat "$STUB_GC_LOG")" "bd list --id tk-d --all --include-gates --include-infra --include-templates" "…read off the bead's list row, every type included"
+out=$(bd_disposed_to tk-g); rc=$?
+eq "$rc/$out" "0/tk-g2" "…and names a gate's successor too"
 out=$(bd_disposed_to tk-n); rc=$?
 eq "$rc/$out" "0/" "…prints nothing for a bead that names none"
 out=$(bd_disposed_to tk-gone); rc=$?
