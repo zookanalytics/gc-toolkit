@@ -29,6 +29,9 @@ someone would want to read it after the bead closes, it is a file.
 - A record of work — **what was thought, decided, or explored** on a bead
   → `specs/<bead-id>/`.
 
+A repository's architecture document is a central doc with a standard of its
+own: load `gc-toolkit.architecture-document` before you write or change one.
+
 Unsure? Ask which claim the document makes. *What is true* is central;
 *what was considered while doing this bead* is local. The gc-toolkit
 pack's `docs/file-structure.md` carries the tier rules in full, including

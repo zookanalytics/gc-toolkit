@@ -184,9 +184,10 @@ and the Epic Checkpoint runs by hand, as a sitting on the epic that follows the
 [`converse-epic-checkpoint`](../skills/converse-epic-checkpoint/SKILL.md) skill.
 The sitting records each ruling on the epic, and the pack checks that an epic
 closes only on the close ruling with its outcome or on a disposition
-([epic-stewardship.md](epic-stewardship.md)). Nothing
-prompts an evaluation when work lands, so one happens when the operator calls a
-sitting on the epic. The machinery a checkpoint may grow is
+([epic-stewardship.md](epic-stewardship.md)). When a Delivery lands, its row on
+the helm board asks for the checkpoint, among the rows the operator owes. Nothing
+else prompts an evaluation, so one happens when the operator calls a sitting on
+the epic. The machinery a checkpoint may grow is
 [direction](epic-stewardship.md#direction-the-checkpoints-machinery).
 
 **Epic, Delivery, Story.** A Delivery is a bounded step toward an epic's
@@ -254,7 +255,8 @@ every epic and Delivery ([steering.md](steering.md#pr-finishing-work)).
 **How a Delivery ends.** A Delivery has landed when every Story under it has
 closed. It closes at the Epic Checkpoint that follows its landing, as one of the
 ruling's writes, never on its own when its last Story closes. Between its landing
-and its checkpoint it stays open, so its row stays on the board.
+and its checkpoint it stays open, and its row on the board reads
+`landed — waits for its Epic Checkpoint`, among the rows the operator owes.
 
 Until its checkpoint it takes only work its aim covers, such as a follow-up that
 finishes one of its Stories, and a follow-up still open at the checkpoint is

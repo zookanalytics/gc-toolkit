@@ -4,10 +4,10 @@
 # operator's entry point is this runnable script, not a `gc helm` subcommand.
 #
 # The board itself — its render, ranking, severity bands, and the held glyph —
-# is `helm-svc board` (services/helm). Its derivation is proven by
-# services/helm/internal/board (derive_test.go) and its CLI render by
-# services/helm/cmd/helm-svc (board_test.go, board_render_test.go,
-# main_test.go); none of it is driven from here.
+# is helm-svc's web page (services/helm). Its derivation is proven by
+# services/helm/internal/board (derive_test.go), its render by services/helm/web
+# (App.test.tsx), and the rows `helm-svc board --json` prints by
+# services/helm/cmd/helm-svc (main_test.go); none of it is driven from here.
 #
 # What this fixture locks down:
 #
@@ -99,7 +99,7 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
     absent "react does NOT forward --reason to sling" "--reason"                        "$RXR"
     # Regression: react must SELF-SUPPLY GC_RIG so the sling can
     # rig-qualify its pool target even from a GC_RIG-less shell — the NORMAL
-    # operator path (the prefix+b board picker and a bare shell both lack it).
+    # operator path (a bare shell lacks it).
     # The assertions above pre-set GC_RIG=gc-toolkit, which MASKS the bug by
     # letting resolve_pool_target read it from the environment; here we DROP it
     # with `env -u GC_RIG` and prove react derives gc-toolkit from the tk- bead's
@@ -127,8 +127,7 @@ echo "── contract: operator surface is the runnable script, not a phantom gc
 # `gc helm …` CLI that was never registered, so a bare invocation renders
 # root gc help. Pack commands bind under the pack name (`gc <pack> <cmd>`), so
 # no top-level helm subcommand can exist. The runnable surface is THIS
-# script — reached via the prefix+b tmux picker (tmux-pick-helm.sh →
-# gc-helm.sh) or run directly. These
+# script — run by helm-svc's write routes or run directly. These
 # assertions lock the operator-facing docs to that reality.
 
 # (a) the documented script entry actually runs and prints its own usage.

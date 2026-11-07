@@ -81,8 +81,9 @@ func TestStartFailedOwnRowStaysInTheQueue(t *testing.T) {
 	}
 }
 
-// TestStartFailedLeadsTheQueue: by age a failed start sorts at the tail, below
-// the head the picker offers. It leads the queue instead, and the cap keeps it.
+// TestStartFailedLeadsTheQueue: by age a failed start sorts at the tail, which
+// a capped read drops once the queue outgrows the cap. It leads the queue
+// instead, and the default cap keeps it.
 func TestStartFailedLeadsTheQueue(t *testing.T) {
 	build := func(conv Anchor, facts Facts) []Tile {
 		conv.UpdatedAt = fixtureNow // the conversation was filed just now
@@ -100,7 +101,7 @@ func TestStartFailedLeadsTheQueue(t *testing.T) {
 	if queue[0].ID != "tk-subj" {
 		t.Errorf("the failed start leads the queue: got %s first", queue[0].ID)
 	}
-	if capped := CapQueue(queue, 36); capped[0].ID != "tk-subj" {
+	if capped := CapQueue(queue, DefaultMaxRows); capped[0].ID != "tk-subj" {
 		t.Errorf("the cap keeps the head: got %s first", capped[0].ID)
 	}
 

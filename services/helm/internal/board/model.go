@@ -11,8 +11,8 @@
 // board's `--json` emits, in the same order, inside the envelope
 // {generated_at, total, tiles}.
 //
-// PARITY (tk-134d7). The board is now ONE model with TWO renderers — the web
-// dashboard and the `helm-svc board` CLI — so the field set here is the whole
+// PARITY (tk-134d7). The board is ONE model, which the web dashboard renders
+// and `helm-svc board --json` prints, so the field set here is the whole
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
@@ -189,8 +189,9 @@ type Anchor struct {
 	// failure marks every anchor of the pass whose kind reads waits
 	// ([source.needsWaitingEdges]). Epic and convoy are among those kinds: they
 	// read their `blocks` edges for the dependency-family grouping, so a failed
-	// read flags them too. The supervisor backend sets it on every
-	// metadata-keyed row it serves, because it cannot resolve a blocker's
+	// read flags them too. The supervisor backend sets it on every row it
+	// serves. Its epic, decision and convoy rows read none of their `blocks`
+	// edges, and on the rows its scan admits it cannot resolve a blocker's
 	// status ([source.SupervisorSource.metadataAnchorFor]).
 	//
 	// An unread wait set and an empty one are not interchangeable. A blocker
@@ -203,12 +204,13 @@ type Anchor struct {
 	// the operator to close or extend a question whose routed work may still
 	// be open.
 	//
-	// Only [ruled] and [ruledInFlight] read the flag, and both refuse a row
-	// that carries it, so the row falls through to the un-ruled arm. The family
-	// grouping reads WaitingOn and never this flag. So on an epic or a convoy
-	// the flag matters only when the row is routed to the operator. Both
-	// readers apply only to rows [humanGated] accepts, and for an epic or a
-	// convoy that route is the only way in.
+	// [ruled] and [ruledInFlight] refuse a row that carries it, so the row
+	// falls through to the un-ruled arm. Both apply only to rows [humanGated]
+	// accepts, and for an epic or a convoy the route to the operator is the
+	// only way in. [readAcceptance] refuses it too, so Accept's conditions meet
+	// nothing on the row. The family grouping reads WaitingOn and never this
+	// flag. So on an epic or a convoy the flag matters only when the row is
+	// routed to the operator or carries a recommendation.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 
 	// PR is what the city records about a live merge anchor's PR, as
@@ -317,8 +319,9 @@ type Tile struct {
 	Severity Severity `json:"severity"`
 
 	// Owed marks a row whose next move is a PERSON'S: an unanswered human gate,
-	// a conversation waiting for the operator, or a parked subject whose
-	// recorded waits have all landed. It is not
+	// a conversation waiting for the operator, a parked subject whose recorded
+	// waits have all landed, or a landed Delivery waiting for its epic's
+	// checkpoint. It is not
 	// derivable from the band — severity is coarse and shared, so a one-bead
 	// question (ELEVATED) sorts below a stranded container (HIGH) and rank alone
 	// can never put the operator's queue first. [OperatorQueue] is the partition.
@@ -511,10 +514,10 @@ type Tile struct {
 
 	// --- the attention-type band and the cluster key -----------------------
 	//
-	// Two derived classifications the renderers group by, on the wire for the
+	// Two derived classifications the dashboard groups by, on the wire for the
 	// same reason [Owed] is: the split is not recoverable from the coarse
-	// [Severity] band, and putting it here is what keeps the CLI table and the
-	// dashboard from each inventing their own client-side split.
+	// [Severity] band, and putting it here is what keeps the dashboard from
+	// inventing its own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
 	// how-badly: review (a pull request), gate (a person must answer), stalled
@@ -537,7 +540,7 @@ type Tile struct {
 	// GroupRoot is the id of the family this row belongs to — the top-most anchor
 	// its parent-child and blocked edges climb to, equal to the row's OWN id when
 	// it climbs to nothing. Every tile carries one, so a surface buckets families
-	// the way both renderers already bucket [Section]. Dependency structure is the
+	// the way the dashboard already buckets [Section]. Dependency structure is the
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
@@ -546,7 +549,7 @@ type Tile struct {
 	// edges climb to a single level up, empty when it climbs to nothing. GroupRoot
 	// names the top of the family tree; GroupParent names the next step toward it,
 	// so a surface renders the family as the nested containment tree it is — a
-	// sub-epic beneath its parent, that sub-epic's own children beneath it —
+	// Delivery beneath its epic, that Delivery's own Stories beneath it —
 	// instead of one flat member list under the top root. Both come from the same
 	// per-tile parent walk in [assignGroupRoots]: GroupRoot follows it to the top,
 	// GroupParent reports its first step.
@@ -675,7 +678,10 @@ type Sitting struct {
 	// Subject is the bead this conversation is about: the one bead its
 	// `tracks` edge names.
 	Subject string `json:"subject"`
-	Title   string `json:"title"`
+	// Title is the conversation task's own title: what the conversation asks,
+	// in the words of whoever filed it, or a writer's stock title
+	// ([boardPickTitle], [intakeTitle]) when the filing named no ask.
+	Title string `json:"title"`
 	// Status is the conversation task's own status, and Assignee is who holds
 	// it: `human` while it waits in the operator's queue, a sitting's alias
 	// while a sitting holds it. Neither says whether anyone is on the
@@ -736,9 +742,8 @@ type Sitting struct {
 	// conversation is about. It is read in the same batch as the takeaway
 	// (source.attributeTakeaways), so a row can say what it concerns even when
 	// nothing was concluded on it. Empty when the subject could not be read,
-	// which the [Topic] and [Headline] helpers fall back on the id or the
-	// conversation's title for. It carries the whole title; a renderer clips it
-	// to its column.
+	// which [sittingHeadline] falls back on the conversation's title for. It
+	// carries the whole title.
 	SubjectTitle string `json:"subject_title"`
 
 	// State is where this sitting stands: SittingInSession, SittingWaiting,
@@ -747,35 +752,33 @@ type Sitting struct {
 	// against the session list, which the wire does not carry. A row's
 	// [Tile.SittingState] rolls up from it and every surface prints it.
 	State string `json:"state"`
-	// Headline is what this sitting concluded, or failing that what it is about
-	// ([sittingHeadline]). Every surface prints it as it stands.
+	// Headline is what this sitting concluded or why it closed, or failing
+	// those what its conversation asks, or what it is about when the
+	// conversation's title does not say ([sittingHeadline]). Every surface
+	// prints it as it stands.
 	Headline string `json:"headline"`
 }
 
-// Topic is what a sitting is about, for a surface that shows one cell of it: the
-// subject bead's title, falling back to the subject id when the gather could not
-// read the title. Never empty on a real sitting — the row always says at least
-// the id it stands on, so a bare id is the floor rather than the whole of it.
-func (s Sitting) Topic() string {
-	if s.SubjectTitle != "" {
-		return s.SubjectTitle
-	}
-	return s.Subject
-}
-
-// sittingHeadline is what a sitting CONCLUDED, or failing that what it is ABOUT.
-// The takeaway is the conversation's own one-line conclusion and wins whenever
-// one was attributed. A closed sitting that left no takeaway shows its close
-// reason next, the sentence naming why it closed, such as the operator's
-// dismissal, so the row reads as a decision rather than a blank. Without either
-// the row shows the subject's title — the topic — and the conversation's own
-// title is the last resort, for a subject the gather could not read at all.
+// sittingHeadline is what a sitting CONCLUDED, or failing that what its
+// conversation ASKS. The takeaway is the conversation's own one-line conclusion
+// and wins whenever one was attributed. A closed sitting that left no takeaway
+// shows its close reason next, the sentence naming why it closed, such as the
+// operator's dismissal, so the row reads as a decision rather than a blank.
+// Without either the row shows the conversation's own title, which says what
+// it asks, so two conversations on one subject read as two asks rather than as
+// the topic twice. A title that says nothing of the ask, an empty one or a
+// writer's stock title ([boardPickTitle], [intakeTitle]), gives way to the
+// subject's title, and is the last resort only for a subject the gather could
+// not read at all.
 func sittingHeadline(s Sitting) string {
 	if s.Takeaway != "" {
 		return s.Takeaway
 	}
 	if s.OutcomeReason != "" {
 		return s.OutcomeReason
+	}
+	if s.Title != "" && s.Title != boardPickTitle && s.Title != intakeTitle {
+		return s.Title
 	}
 	if s.SubjectTitle != "" {
 		return s.SubjectTitle
@@ -830,6 +833,10 @@ type Facts struct {
 	// by it when nothing holds the child's own bead.
 	held    map[string]hold
 	subtree map[string]string
+
+	// deliveries is set by [BuildBoard], never by a source. It holds the id of
+	// every epic row that is a Delivery ([deliveries]).
+	deliveries map[string]bool
 }
 
 // Board is the envelope returned by the service. Tiles are deduplicated by id

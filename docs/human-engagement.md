@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, the helm boards, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -65,7 +65,7 @@ model the pack builds on them.
 **Mandate.** gc-toolkit's model for engaging a person: the four terms, how a
 human gate reaches the operator, how a conversation starts, how a sitting
 claims, holds, answers and ends, Accept, how a parked subject comes back, the
-helm boards, and the ground the pack builds itself.
+helm board, and the ground the pack builds itself.
 
 **Boundaries.** The Gas City primitives the model rides are
 [gascity/human-engagement.md](gascity/human-engagement.md), and the routing
@@ -185,7 +185,7 @@ session carries `human`. A sitting starts only when the operator engages.
 
 ### Engage
 
-`gc-helm engage` (the tmux picker and helm-svc's engage route run it) takes
+`gc-helm engage` (helm-svc's engage route runs it) takes
 these steps:
 
 1. **It takes the bead.** Given a bead, it works on that bead. Given a gate, it
@@ -239,7 +239,7 @@ conversations. A gate or a blocker takes a number, and picking one engages it as
 if it were named, except that a gate several beads wait on takes the bead it was
 picked from when that bead is one of them. The PR's own threads and verdict take
 none, because engaging the PR is how a person acts on them. An engage that asks
-nothing, as `--no-input`, the tmux picker and the board's route do, names each
+nothing, as `--no-input` and the board's route do, names each
 and how to engage it, and an engage pointed at a gate or a conversation does not
 look for others. A conversation on the bead answers no gate until it replies to
 one.
@@ -270,8 +270,8 @@ dismissal. Each write that changes what the comment
 shows draws it again: the sign-off, a dismiss and the premise re-check's close
 once the conversation reads closed, and a hand-back recorded after the close.
 The comment is keyed by the conversation's id under the marker
-`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it, or
-the marker reminders carried before it, as the city's own.
+`<!-- gc:sitting:<task> -->`, and `pr-post.sh` counts a post that carries it as
+the city's own.
 
 A PR comment can be a public record, and no person reads this one before it
 posts. Nothing typed to open a conversation reaches it, because that text stays
@@ -659,7 +659,7 @@ warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
-out of step 3 and runs `gc-helm.sh accept` at step 4, once the ruling's other
+out of its `ruled:` answers and runs `gc-helm.sh accept` once the ruling's other
 writes have landed. Under the lock, that run finishes an acceptance the
 board's Accept left unfinished instead of sending the formula again, and a
 board Accept that runs after the sitting's finds the recommendation
@@ -773,8 +773,8 @@ never started when Gas City recorded no cause
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-failed-start-is-recorded-on-the-session-bead-and-in-a-startup-health-episode)).
 The board reads that record itself, so the mark shows as soon as the failure
 is recorded, and it stays until the conversation is engaged again or closed.
-The row leads the operator's queue, so the tmux picker offers it
-(services/helm/README.md, "A sitting that failed to start").
+The row leads the operator's queue (services/helm/README.md, "A sitting that
+failed to start").
 
 Two endings the idle setting does not own:
 
@@ -834,7 +834,7 @@ assumed from the shared branch: the wait is closed, or handed off to the
 refinery.
 
 *A conversation that never held closes silently* — no sign-off, no thread
-output, only the reading appended to its subject. That is step 2's moot or
+output, only the reading appended to its subject: the premise re-check's moot or
 benign close. The sign-off exists because an unanswered framing left in a
 vanishing thread reads as a crash; where no framing was ever posted there is
 no question to abandon. An earlier sitting on the same conversation may have
@@ -954,15 +954,17 @@ operator's *own* unsent words.
   conversation surface work lands behind that seam, not in new bespoke
   plumbing. The supervisor API carries no `await_type`, so a board built on it
   alone folds no human gate ([gascity/human-engagement.md](gascity/human-engagement.md#where-a-question-surfaces)).
-- **Two programs behind one board.** `prefix+b` runs `tmux-pick-helm.sh`,
-  which reads the board from `helm-svc board` and engages through
-  `gc-helm.sh`, and the dashboard serves the same `internal/source` gather and
-  `internal/board` derivation. `gc-helm.sh` keeps the write verbs (`open`,
+- **One board, and its verbs in gc-helm.sh.** The web page that
+  `services/helm/` serves is the board's one view for people, and
+  `helm-svc board --json` prints the same rows for agents. Both run the one
+  `internal/source` gather and the one `internal/board` derivation, so a
+  change to the gather, the ranking or the anchor kinds reaches the page and
+  the JSON together. A new tile field also owes the page's TypeScript mirror,
+  `web/src/contract.ts`, which `services/helm/web/contract_parity_test.go`
+  holds equal to the Go contract. `gc-helm.sh` keeps the write verbs (`open`,
   `engage`, `react`, `takeaway`, `dismiss`, `accept`, `park`, `priority`) that
-  have no Go equivalent, and helm-svc's POST routes run them. A change to the
-  gather, the ranking or the anchor kinds is a standing question against both
-  surfaces; say in the PR which one you touched and whether the other needs the
-  same change.
+  have no Go equivalent, and helm-svc's POST routes run `open`, `engage`,
+  `accept` and `dismiss`.
 
 ## What upstream does not ship (the pack's actual seam)
 

@@ -112,7 +112,7 @@ const SITTINGS: Sitting[] = [
     takeaway: '',
     subject_title: 'the attention-canvas epic topic',
     state: 'in_session',
-    headline: 'the attention-canvas epic topic',
+    headline: 'what the canvas owes the operator',
   },
   {
     id: 'tk-vst02',
@@ -856,8 +856,7 @@ it('highlights a held row in place', async () => {
 
 // A recommendation Accept is withheld on says why where the button would be —
 // the other gates to answer first — and a row whose gate a live sitting is
-// answering names that gate beside its needs, as the CLI board's NEEDS cell
-// does.
+// answering names that gate beside its needs.
 it('names the gates that withhold Accept and the gates in session', async () => {
   serve([
     tile({
@@ -886,8 +885,7 @@ it('names the gates that withhold Accept and the gates in session', async () => 
 // The Accept affordance is the board's one row-level actuation: it renders only
 // where the wire says the row is `acceptable`, names the formula it would
 // dispatch, and — proven in ActuateButton.test.tsx — POSTs helm/accept. A
-// discuss-only row (acceptable false) carries no button, the same split the CLI
-// board's "accept ▸" marker makes.
+// discuss-only row (acceptable false) carries no button.
 it('renders Accept on an acceptable member row and not on a discuss-only one', async () => {
   serve([
     tile({ id: 'tk-root', kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
@@ -1051,7 +1049,7 @@ it('keeps a closed anchor on the board as a dimmed done row that names the windo
   expect(row.className).toContain('row-done');
   // The window bound is stated once under the table, for every DONE row — the
   // operator's only statement of what the band promises.
-  expect(within(anchors()).getByText(/GC_HELM_DONE_WINDOW/)).toBeTruthy();
+  expect(within(anchors()).getByText(/closed for longer than 7 days/)).toBeTruthy();
 });
 
 // The defect this split exists to prevent (tk-2plde): a subject that routed work
@@ -1148,13 +1146,13 @@ it('shows where each sitting stands and what the recently closed ones concluded'
   expect(within(section).getByText(/1 in session · 0 waiting · 1 closed recently/)).toBeTruthy();
   expect(within(section).queryByText('outcome')).toBeNull();
 
-  const live = within(section).getByText('tk-vst01').closest('tr') as HTMLElement;
+  const live = within(section).getByText('tk-vst01').closest('tr') as HTMLTableRowElement;
   expect(within(live).getByText('in session')).toBeTruthy();
   expect(within(live).getByText('40m')).toBeTruthy();
-  // No takeaway: the headline is the subject's title (the topic), not the
-  // conversation's own title. The topic also labels the subject cell.
-  expect(within(live).getAllByText(/the attention-canvas epic topic/).length).toBeGreaterThan(0);
-  expect(within(live).queryByText(/what the canvas owes the operator/)).toBeNull();
+  // No takeaway: the headline is the conversation's own title, what it asks,
+  // and the subject's title (the topic) labels the subject cell.
+  expect(live.cells[5].textContent).toBe('what the canvas owes the operator');
+  expect(live.cells[3].textContent).toBe('the attention-canvas epic topic');
 
   const done = within(section).getByText('tk-vst02').closest('tr') as HTMLElement;
   expect(within(done).getByText('closed')).toBeTruthy();
