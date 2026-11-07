@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1; shift ;;
     --rig)   RIGS+=("${2:?--rig needs a name}"); shift 2 ;;
-    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
     *) echo "backfill: unknown argument '$1'" >&2; exit 64 ;;
   esac
 done
