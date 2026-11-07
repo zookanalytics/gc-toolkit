@@ -386,15 +386,24 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 			g.note(true, warns[i])
 		}
 		rig, prefix := g.rigOf(e.ID)
+		// The row carries the epic's metadata, as the beads backend's newAnchor
+		// does. The derivation reads epic_hypothesis off it to tell a Delivery
+		// from a child epic that is an epic of its own, and the route and the
+		// takeaway as it reads them on any row.
+		md := decodeMetadata(e.Metadata)
 		g.anchors = append(g.anchors, board.Anchor{
-			ID:       e.ID,
-			Title:    e.Title,
-			Kind:     "epic",
-			Source:   "epic",
-			Rig:      rig,
-			Prefix:   prefix,
-			Priority: e.Priority,
-			Children: children[i],
+			ID:         e.ID,
+			Title:      e.Title,
+			Kind:       "epic",
+			Source:     "epic",
+			Rig:        rig,
+			Prefix:     prefix,
+			Priority:   e.Priority,
+			Metadata:   md,
+			Children:   children[i],
+			Takeaway:   md["gc.takeaway"],
+			TakeawayAt: md["gc.takeaway_at"],
+			TakeawayBy: md["gc.takeaway_by"],
 		})
 	}
 }
