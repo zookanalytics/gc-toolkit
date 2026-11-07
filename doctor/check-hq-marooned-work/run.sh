@@ -16,7 +16,8 @@
 # is reachable there; a `warrant` label marks city machinery a rig never works; a
 # standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a
 # held-by-design escalation host, not work; a `human` route is an operator-queue
-# decision; a `deacon-ledger` label is a daily digest; a `debt` label or a
+# decision; a bead an open human gate blocks waits on a person's answer, which
+# the board shows; a `deacon-ledger` label is a daily digest; a `debt` label or a
 # `gc doctor:` title is a doctor/tech-debt advisory record. An assigned bead is
 # already claimed, and that covers a conversation, which is always assigned: to
 # `human` in the operator's queue or to its sitting's alias. A human gate is a
@@ -50,6 +51,15 @@ INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
     echo "cannot determine whether the HQ store holds marooned work"
     printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from marooned work."
+    exit 1
+}
+# Which human gates still hold the bead they block, from the one rule every
+# reader of a gate shares. Exposes $HUMAN_GATE_JQ. An unsourceable one warns:
+# without it a bead that waits on a person's answer would read as marooned work.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether the HQ store holds marooned work"
+    printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a bead that waits on a person's answer cannot be told from marooned work."
     exit 1
 }
 
@@ -221,7 +231,9 @@ rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES"
     | select(($title | test("^gc doctor:")) == false) # not a doctor advisory record
     | [ ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")),
         (if $t == "" then "untyped" else $t end),
-        (if $rt == "" then "unrouted" else "routed to " + $rt end)
+        (if $rt == "" then "unrouted" else "routed to " + $rt end),
+        ([ ($b.dependencies // [])[] | select(((.type // .dependency_type // "") | tostring) == "blocks")
+           | ((.depends_on_id // "") | tostring) | gsub("[^A-Za-z0-9._-]"; "") | select(. != "") ] | join(","))
       ] | join("\u001f")' "$listing" 2>/dev/null)
 if [ $? -ne 0 ]; then
     echo "cannot determine whether the HQ store holds marooned work"
@@ -229,8 +241,37 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-while IFS=$'\037' read -r id type route; do
+# The human gates that still hold by the shared rule (open_human_gates), read
+# only when a bead could be marooned: a bead one blocks waits on a person's
+# answer and is not marooned. `bd list` hides gates, so they are a listing of
+# their own. It names every live status, because bd's default scope leaves out
+# a gate in status pinned and any gate whose pinned flag is set, and the rule
+# counts both as holding. A candidate it cannot clear is warned, not flagged,
+# when that listing fails.
+gates=" "; gates_ok=1
+if [ -n "$rows" ]; then
+    read_to "$WORK/gates.json" gc bd list --db "$STORE" --type gate --include-gates \
+        --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0; grc=$?
+    if [ "$grc" -eq 0 ] && gate_ids=$(jq -er "$HUMAN_GATE_JQ"'if type == "array" then open_human_gates | join(" ") else error("not an array") end' "$WORK/gates.json" 2>/dev/null); then
+        gates=" $gate_ids "
+    else
+        gates_ok=0
+    fi
+fi
+
+while IFS=$'\037' read -r id type route blocks; do
     [ -n "$id" ] || continue
+    if [ -n "$blocks" ]; then
+        gated=""
+        while IFS= read -r b; do
+            case "$gates" in *" $b "*) gated=1 ;; esac
+        done <<< "$(printf '%s\n' "$blocks" | tr ',' '\n')"
+        [ -z "$gated" ] || continue                     # a person owes an answer on it
+        if [ "$gates_ok" != "1" ]; then
+            warnings+=("$id ($type, $route): whether an open human gate holds it could not be read in $STORE — NOT flagged, because a bead that waits on a person's answer is not marooned")
+            continue
+        fi
+    fi
     findings+=("$id ($type, $route): rig-workable bead in the HQ store $STORE — no pool reads that store, so it is unclaimable and shows in no rig queue; re-home it into a rig with assets/scripts/bead-rehome.sh, or route it to a rig pool")
 done <<< "$rows"
 

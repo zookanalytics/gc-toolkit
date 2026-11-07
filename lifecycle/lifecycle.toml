@@ -17,13 +17,12 @@ states = [
   "retargeted",
   "blocked",
   "refused_false_completion",
-  "held",
 ]
 # States that also route the bead to a human (lifecycle.sh stamps
 # gc.routed_to=human in the same atomic update). A self-transition that passes
 # --keep-route records on the bead and writes no route, so it keeps the route
 # the bead carries.
-human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion", "held"]
+human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"]
 # States the merge cadence drives and no queue offers, so an anchor in one rests
 # both unrouted and unheld. lifecycle.sh writes the two halves in the same
 # atomic update: it clears gc.routed_to unless --route or --keep-route is given
@@ -100,10 +99,6 @@ meaning = "recorded existing_pr unusable, or a graduated convoy's zero-diff chec
 status = "open"
 meaning = "the zero-diff check found no change on the branch; routed to human"
 
-[states.held]
-status = "open"
-meaning = "a sitting is waiting on an operator decision; routed to human"
-
 # Transitions. Every edge names its writer; the lifecycle writer performs the
 # write: gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process.
 # A self-edge (from == to) is always legal: an idempotent re-record.
@@ -131,14 +126,6 @@ writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable, or a graduate
 from = "unanchored"
 to = "refused_false_completion"
 writer = "formulas/mol-refinery-patrol.toml (the zero-diff check found no change on the branch; via lifecycle.sh)"
-
-# `held` is entered only from `unanchored`. merge.sh, gate-ensure.sh and
-# pr-facts.sh each enumerate anchors by their gating state, so moving one here
-# to record a conversation would drop it from all three for the hold's length.
-[[transition]]
-from = "unanchored"
-to = "held"
-writer = "skills/converse-hold/SKILL.md, a converse sitting's hold, only beside a human gate that blocks the subject (via lifecycle.sh)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -194,11 +181,6 @@ writer = "human"
 from = "refused_false_completion"
 to = "unanchored"
 writer = "human"
-
-[[transition]]
-from = "held"
-to = "unanchored"
-writer = "assets/scripts/converse-signoff.sh, the ruling landed; assets/scripts/gc-helm.sh accept, its answer to the recommendation's gate read back, before it dispatches; skills/converse-recheck-premise/SKILL.md, a moot or benign close, once no open human gate holds the subject (each via lifecycle.sh); or human"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by

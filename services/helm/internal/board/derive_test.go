@@ -2180,8 +2180,8 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 		{name: "a pull request outranks its conversation", in: stateInput{id: "ra-pr-talk",
 			metadata: map[string]string{mdMergeResult: "pull_request", mdTakeaway: "in rework"}, blockers: []Blocker{landed}},
 			facts: conversations, want: stateInReview},
-		{name: "a merge held for the operator is not in review", in: stateInput{id: "ra-held",
-			metadata: map[string]string{mdMergeResult: "held", mdRoutedTo: routedHuman}}, want: stateParked},
+		{name: "an anchor parked in a human state is not in review", in: stateInput{id: "ra-parked",
+			metadata: map[string]string{mdMergeResult: "abandoned", mdRoutedTo: routedHuman}}, want: stateParked},
 		{name: "a live workflow", in: stateInput{id: "ra-slung", blockers: []Blocker{gate}}, facts: live, want: stateInFlight},
 		{name: "a live claim", in: stateInput{id: "ra-a", status: "in_progress", assignee: "polecat-live"}, facts: live, want: stateInFlight},
 	}
@@ -3694,7 +3694,7 @@ func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
 		}),
 		// A human state carries merge_result and nothing else to name itself by.
 		mergeAnchor("tk-bare", map[string]string{
-			"merge_result": "held",
+			"merge_result": "abandoned",
 			"branch":       "",
 			"gc.routed_to": "human",
 		}),

@@ -47,6 +47,16 @@
 # anyway. `bd blocked` prints a bead's labels, so the hold is read on the row the
 # listing already gives.
 #
+# So is a bead a converse sitting holds. The hold files a human gate under the
+# key `conversation.<conversation id>`, and the sitting's sign-off decides the
+# bead's dispatch once the operator rules, so arming it would send it ahead of
+# the ruling. Every other human gate keeps the rule: clearing one is the ruling
+# to proceed, and an arm is what sends the work then. `bd blocked` names each
+# blocker without saying what it is, so the store's gates are read once, only
+# when a candidate exists, and bd-lib.sh's open_human_gate, the rule every
+# reader of a gate shares, says which of them still hold. A candidate is
+# reported as unverifiable and never flagged when that listing cannot be read.
+#
 # The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
 # safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
 # The complement check is doctor/check-wait-is-an-edge (I1): that one asserts
@@ -100,6 +110,16 @@ WORK_TYPES=" bug feature task chore spike story "
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
     echo "cannot determine whether blocked work carries a dispatch path"
     printf '  - %s\n' "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a routed or armed bead cannot be told from stranded work."
+    exit 1
+}
+# Which human gates still hold the bead they block, from the one rule every
+# reader of a gate shares. Exposes $HUMAN_GATE_JQ. An unsourceable one warns:
+# without it a bead a converse sitting holds would read as stranded work and
+# draw the arm remedy.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether blocked work carries a dispatch path"
+    printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a bead a converse sitting holds cannot be told from stranded work."
     exit 1
 }
 # The one reader of a run's link to the bead it works. An unsourceable one
@@ -222,6 +242,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | [ $id,
             (($b.issue_type // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
             (if (($m["gc.execution_routed_to"] // "") != "") then "1" else "0" end),
+            ([ ($b.blocked_by // [])[] | tostring | gsub("[^A-Za-z0-9._-]"; "") | select(. != "") ]
+             | if length == 0 then "-" else join(",") end),
             (($b.title // "") | tostring | gsub("[[:cntrl:]]"; " ") | .[0:70]) ]
         | @tsv' 2>/dev/null) || {
         warnings+=("$label: could not evaluate blocked beads in $rig_path/.beads — this store was NOT checked")
@@ -243,12 +265,41 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         liveness_ok=0           # the runs could not be read: cannot confirm any coverage
     fi
 
-    while IFS=$'\t' read -r id btype has_exec title; do
+    # The gates a converse sitting's hold files: those that still hold by the
+    # shared rule (open_human_gate), under the hold's key. The listing names
+    # every live status, because bd's default scope leaves out a gate in status
+    # pinned and any gate whose pinned flag is set, and the rule counts both as
+    # holding. Left unconfirmed ($sitting_ok=0) when the listing fails, so a
+    # candidate is warned rather than flagged.
+    sittings=" "; sitting_ok=1
+    gates=$(run_bounded gc bd list --db "$rig_path/.beads" --type gate --include-gates \
+        --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null); gates_rc=$?
+    gates=$(printf '%s' "$gates" | scrub)
+    if [ "$gates_rc" -eq 0 ] && printf '%s' "$gates" | jq -e 'type == "array"' >/dev/null 2>&1 \
+        && sitting_ids=$(printf '%s' "$gates" | jq -r "$HUMAN_GATE_JQ"'.[]? | select(open_human_gate("")
+                and (((.await_id // "") | tostring) | startswith("conversation."))) | .id' 2>/dev/null); then
+        while IFS= read -r g; do [ -n "$g" ] && sittings="$sittings$g "; done <<< "$sitting_ids"
+    else
+        sitting_ok=0
+    fi
+
+    while IFS=$'\t' read -r id btype has_exec blockers title; do
         [ -n "$id" ] || continue
         case "$worked" in *" $id "*) continue ;; esac   # a live run works it
         if [ "$has_exec" = "1" ] && [ "$liveness_ok" != "1" ]; then
             warnings+=("$label bead $id [$btype]: blocked and carries gc.execution_routed_to, but whether a live run works it could not be confirmed in $rig_path/.beads — NOT flagged, because arming a bead a live workflow still drives would double-dispatch it. Verify by hand whether a live run works it; if not, arm it ($title)")
             continue
+        fi
+        if [ "$blockers" != "-" ]; then
+            sat=""
+            while IFS= read -r b; do
+                case "$sittings" in *" $b "*) sat=1 ;; esac
+            done <<< "$(printf '%s\n' "$blockers" | tr ',' '\n')"
+            [ -z "$sat" ] || continue                       # a sitting holds it; its ruling decides the dispatch
+            if [ "$sitting_ok" != "1" ]; then
+                warnings+=("$label bead $id [$btype]: blocked, but whether a converse sitting's gate holds it could not be read in $rig_path/.beads — NOT flagged, because arming a bead a sitting holds would send it ahead of the operator's ruling")
+                continue
+            fi
         fi
         findings+=("$label bead $id [$btype]: blocked with no gc.routed_to and no gc.dispatch_when_ready — when its blocker closes it becomes ready and no pool is offered it. Arm it so it auto-resumes: deferred-dispatch.sh arm $id --target <rig>/<agent> --reason \"waits for <blocker>\" ($title)")
     done <<< "$cand"

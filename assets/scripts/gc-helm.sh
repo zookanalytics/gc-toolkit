@@ -262,24 +262,22 @@ live read of those three conditions to its last write, and refuses while
 another Accept holds it. It records the acceptance's dispatch input (its
 token, the formula and each --var) on the gate, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, checks
-that no open human gate blocks the bead, releases a bead a sitting's hold left
-at held to unanchored, since a run poured at a held bead cancels at its first
-step, slings the formula titled `<formula> accept:<token>`, lifts the bead's
-hold:mayor, since an Accept is a placement, and records the dispatch by
-stripping gc.recommended_formula. An answer another reached first
-stands, and Accept slings nothing. A gate filed in the meantime, or a sling
-that poured no root, reopens the gate. A run that stopped after its resolve, or
-whose release did not land, leaves an unfinished acceptance, which the next
-Accept finishes under the same token, slinging only when no root carries the
-token, and slinging the vars the acceptance recorded. A sitting takes a
-recommendation through this verb too: its sign-off's --accept runs it with
---conversation naming the sitting's own conversation, which Accept then does
-not warn of as a live sitting on the bead, and with a --var for each var the
-operator's ruling settled for the dispatch, such as mol-design-convoy's
-design_gated=false. Each --var rides the sling. A run that finishes an
-acceptance slings the vars that acceptance was made with and refuses a --var
-that differs from them, and a root an earlier run already poured under the
-token keeps the vars it was poured with.
+that no open human gate blocks the bead, slings the formula titled
+`<formula> accept:<token>`, lifts the bead's hold:mayor, since an Accept is a
+placement, and records the dispatch by stripping
+gc.recommended_formula. An answer another reached first stands, and Accept
+slings nothing. A gate filed in the meantime, or a sling that poured no root,
+reopens the gate. A run that stopped after its resolve leaves an unfinished
+acceptance, which the next Accept finishes under the same token, slinging
+only when no root carries the token, and slinging the vars the acceptance
+recorded. A sitting takes a recommendation through this verb too: its
+sign-off's --accept runs it with --conversation naming the sitting's own
+conversation, which Accept then does not warn of as a live sitting on the
+bead, and with a --var for each var the operator's ruling settled for the
+dispatch, such as mol-design-convoy's design_gated=false. Each --var rides
+the sling. A run that finishes an acceptance slings the vars that acceptance
+was made with and refuses a --var that differs from them, and a root an
+earlier run already poured under the token keeps the vars it was poured with.
 EOF
 }
 
@@ -518,10 +516,6 @@ SITTING_COMMENT_TOOL="${GC_SITTING_COMMENT_TOOL:-$SCRIPT_DIR/pr-sitting-comment.
 # Ends the run beneath a released anchor through gascity's run cancel;
 # overridable so a hermetic test can point it at a fixture.
 RUN_CANCEL_TOOL="${GC_RUN_CANCEL_TOOL:-$SCRIPT_DIR/run-cancel.sh}"
-# The writer of a bead's lifecycle state, which Accept runs to release a held
-# bead before it dispatches; overridable so a hermetic test can point it at a
-# fixture.
-LIFECYCLE_TOOL="${GC_LIFECYCLE_TOOL:-$SCRIPT_DIR/lifecycle.sh}"
 # The longest engage waits, in seconds, for the reconciler to start the sitting
 # it spawned before attaching to it. The wait stops once the sitting reads
 # active or has ended, so this bound is a backstop for a controller that has
@@ -2743,7 +2737,8 @@ cmd_react() {
     # open reaction bead already tracking this subject, or a live owner owning its
     # reaction, 4 (RC_LIVE_WORKFLOW) when its live-workflow guard skipped a bead a
     # live workflow already drives, and 5 (RC_DISPATCH_PATH) when its
-    # dispatch-path guard skipped a bead that is already routed or armed. Each is
+    # dispatch-path guard skipped a bead that is already routed or armed, or
+    # that an open human gate blocks. Each is
     # a no-op, not a failure, and NO new reaction was filed. Re-raise them as exit
     # 5, exit 6 and exit 7 so an intake caller (operator-intake.sh) files its own
     # conversation, naming the cause, instead of waiting for a reaction that is already
@@ -2761,7 +2756,7 @@ cmd_react() {
             exit 6
         fi
         if [ "$sling_rc" -eq 5 ]; then
-            echo "$PROG: react: $bead is already routed or armed — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route or arm is cleared." >&2
+            echo "$PROG: react: $bead is already routed or armed, or waits on a person's answer — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route, arm or gate is cleared." >&2
             exit 7
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
@@ -3200,11 +3195,6 @@ accept_take_lock() {
 ACCEPT_GC=""
 accept_gc() { ( "$ACCEPT_GC" "$@" 9>&-; exit "$?" ); }
 
-# accept_lifecycle <args...> — the lifecycle writer, run under the acceptance
-# lock the way accept_gc runs gc: the program starts with fd 9 closed, and the
-# subshell that waits on it keeps the lock.
-accept_lifecycle() { ( "$LIFECYCLE_TOOL" "$@" 9>&-; exit "$?" ); }
-
 # accept_token — a token unique to this run, which titles the root its sling
 # pours and closes the recommendation's gate, so a later run tells this
 # acceptance's dispatch from any other. Fixed length, so no token is another's
@@ -3420,18 +3410,17 @@ accept_vars_said() {
 # the acceptance's dispatch input on the gate (gc.acceptance: the token, the
 # formula and each --var) and reads it back, resolves the gate with
 # `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
-# back that no open human gate blocks the bead, releases a bead a sitting's
-# hold left at `held` to unanchored, since a run poured at a held bead cancels
-# at its first step, slings the formula titled `<formula> accept:<token>`, and
-# records the dispatch. The first answer to reach the gate wins: a sitting's
-# ruling, a filer's withdrawal or a person's resolve stands, and Accept slings
-# nothing and reopens nothing. A gate filed in the meantime, or a sling that
-# poured no root under the token, reopens the gate from Accept's own close. A
-# run that stopped after its resolve leaves the gate closed with its answer
-# beside the recommendation, an unfinished acceptance, which the next run
-# finishes under the same token: it records the dispatch when a root carries
-# the token, and otherwise takes the read-back, the release, the sling and the
-# record, slinging the vars the gate records under the token.
+# back that no open human gate blocks the bead, slings the formula titled
+# `<formula> accept:<token>`, and records the dispatch. The first answer to
+# reach the gate wins: a sitting's ruling, a filer's withdrawal or a person's
+# resolve stands, and Accept slings nothing and reopens nothing. A gate filed
+# in the meantime, or a sling that poured no root under the token, reopens the
+# gate from Accept's own close. A run that stopped after its resolve leaves
+# the gate closed with its answer beside the recommendation, an unfinished
+# acceptance, which the next run finishes under the same token: it records the
+# dispatch when a root carries the token, and otherwise takes the read-back,
+# the sling and the record, slinging the vars the gate records under the
+# token.
 # An acceptance dispatches the input it was accepted with whoever finishes it,
 # so a finishing run given a --var that differs from that input dispatches
 # nothing, and one given none, as the board's Accept is, slings the recorded
@@ -3654,33 +3643,6 @@ cmd_accept() {
         # shellcheck disable=SC2086
         echo "$PROG: accept: a human gate filed since Accept read $bead blocks it: $late. Nothing is dispatched ahead of it.$(accept_reopen_said $rec_gates) Discuss it: $PROG engage $bead" >&2
         exit 4
-    fi
-
-    # Step 3b: a bead a sitting held goes back to unanchored before the sling.
-    # A sitting's hold moves an unanchored bead to `held` while the operator owes
-    # the answer of a gate that blocks it (skills/converse-hold), and
-    # mol-polecat-work's load-context reads any merge_result as a PR or merge
-    # that already exists, so a run poured at a held bead cancels at its first
-    # step while step 5 withdraws the recommendation. The acceptance is that
-    # answer, and step 3 read back that no other open human gate blocks the
-    # bead, so Accept releases it here, routed to human, as a sitting's
-    # sign-off releases a subject that takes its recommendation. A release that
-    # does not read back leaves the acceptance unfinished, for the next Accept
-    # to finish.
-    held_row=$(row_now "$bead")
-    if [ -z "$held_row" ]; then
-        echo "$PROG: accept: could not read $bead back after its acceptance ($tok) to tell whether it reads held, so nothing is dispatched yet. The next Accept finishes it once the store answers: $PROG accept $bead" >&2
-        exit 4
-    fi
-    if [ "$(printf '%s' "$held_row" | jq -r '(.metadata // {}).merge_result // "" | tostring' 2>/dev/null)" = held ]; then
-        lc_rc=0
-        accept_lifecycle transition "$bead" --to unanchored --expect held --route human >/dev/null 2>&1 || lc_rc=$?
-        released_row=$(row_now "$bead")
-        if [ -z "$released_row" ] || [ "$(printf '%s' "$released_row" | jq -r '(.metadata // {}).merge_result // "" | tostring' 2>/dev/null)" = held ]; then
-            echo "$PROG: accept: $bead reads held, as a sitting's hold on its gate left it, and its release to unanchored did not read back (lifecycle.sh exited $lc_rc), so nothing is dispatched: mol-polecat-work cancels a run poured at a held bead. The next Accept finishes acceptance $tok once the release can land: $PROG accept $bead" >&2
-            exit 4
-        fi
-        echo "$PROG: accept: released $bead from held, which waited on this answer" >&2
     fi
 
     # Step 4: dispatch the recommendation AT the bead (--on), titled with the
