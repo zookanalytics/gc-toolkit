@@ -172,9 +172,9 @@ start one workflow from another branch on origin, name it as `base_branch`:
 `gc sling <rig>/<pool> <bead> --var base_branch=<branch>`. A tag or a commit id
 fails at worktree setup, which starts from `origin/<branch>`.
 
-`base_branch` affects this workflow only, and nothing writes it on the bead. The
-bead's `target` decides where the work lands, and later slings start from it.
-When the bead has no `target`, `mol-polecat-work` records this workflow's base
-as its `target` at submit, so the work lands on `<branch>`. To land a bead on
+`base_branch` affects this workflow. The bead's `target` decides where the work
+lands and where later slings start. When the bead has no `target`,
+`mol-polecat-work` records this workflow's base as its `target` at submit, so
+the work lands on `<branch>` and later slings start there too. To land a bead on
 another branch from the start, write that branch as its `target` in its create,
 as step 4 does.

@@ -263,7 +263,7 @@ call closes the bead once each such gate is cleared.
 
 Before you run it:
 
-- Check that work on the bead has not started: it is unassigned, has no branch
+- Check that no work on the bead is under way: it is unassigned, has no branch
   or PR that a pool still works on, and is not a review, step or workflow bead.
   Check it yourself, because `gc doctor` skips a bead closed this way and
   nothing checks it again. Retire a bead with an open PR instead (the prs

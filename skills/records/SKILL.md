@@ -42,8 +42,8 @@ Open questions: <each open question, or none>"
 
 Put a durable document, such as a spec, an analysis or a decision record, in a
 file in a repo through the filing-documentation skill, not in the notes. A
-sitting writes no files, so it files a bead for the document instead (the work
-skill).
+sitting, a converse session with the operator, writes no files, so it files a
+bead for the document instead (the work skill).
 
 ## Set the headline the board shows
 
