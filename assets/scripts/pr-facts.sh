@@ -2068,7 +2068,7 @@ MP_EOF
           # open at merge_result=pull_request, so the next pass re-enumerates it and
           # retries. An anchor another close reached first drops out of that
           # enumeration, with that close's disposition standing.
-          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome's write did not land (transient); the next pass retries while the anchor is open" >&2
+          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome's write did not land (transient); retry next pass while the anchor is open" >&2
           skipped=$((skipped + 1)); continue
         else
           # Close refused, a conflicting successor, or a bad invocation — a human
