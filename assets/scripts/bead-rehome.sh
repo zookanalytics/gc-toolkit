@@ -18,7 +18,7 @@
 # reason, so the disposition's prose rides the close as an appended note.
 #
 # The edge goes on just before the close, the order `bd duplicate` and
-# `bd supersede` write the two in. So this writer's close always names its
+# `bd supersede` write the two in. So this writer's close names its
 # successor, and a second caller finds the first one's choice on the bead, a
 # reopened bead included, and refuses to name another (exit 6). Those two commands
 # close unchecked, past a gate and an open child, record no reason, and refuse a
@@ -27,7 +27,9 @@
 # before either wrote can each add an edge. The edge is therefore read back before
 # the close, and a caller that finds another disposition edge beside its own takes
 # its own back and stops. A close that then does not land takes the edge back too,
-# and leaves it only when a close naming this same successor is what beat it.
+# and leaves it only when a close naming this same successor is what beat it. A
+# holder's close landing just after such a take-back leaves the bead closed with no
+# edge, and the same call run again records it (the same spec names the case).
 #
 # The close is gated on EVIDENCE the script re-establishes itself:
 #   (a) EVERY kind: the origin is not a review, step or workflow bead, and it is

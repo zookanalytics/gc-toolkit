@@ -1166,7 +1166,7 @@ judges the bead itself. An automated caller proves its own case before it
 calls, and [authority-map.md](authority-map.md) records the power in its
 Close-with-successor row. Whoever judges, `bead-rehome.sh` stays the one
 writer of the close and its edge. The edge goes on first and is read back, so
-no reader finds the writer's close without its successor, and a second caller
+a reader finds the writer's close with its successor, and a second caller
 finds the first one's choice on the bead, a reopened bead included, and refuses
 to name another. bd keeps one edge per pair of beads and none per bead, so two
 callers that read the bead before either wrote can each add one, and the caller

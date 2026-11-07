@@ -16,7 +16,7 @@ between 23:20Z and 23:55Z.
 |---|---|
 | The successor keys (`gc.superseded_by`, `gc.supersedes`, `duplicate_of`, each with its `_store`) | Retired. A disposed bead names its successor through one outgoing bd edge, `duplicates` onto its canonical or `supersedes` onto the bead that carries its work, or under not-needed onto the evidence. The keys stay registered as retired, so residue on a bead disposed before the edges reads as known. |
 | `bead-rehome.sh` | Stays the one writer, with the same interface. It records the edge and then closes through bd's checked close, both described below. It drops the metadata stamp, its read-back and the back-pointer on the successor. |
-| The readers | Read the edge through one jq definition, `$DISPOSITION_JQ` in `bd-lib.sh`, and `bd_disposed_to` where the successor may sit in another rig's store. |
+| The readers | Read the edge through one jq definition, `$DISPOSITION_JQ` in `bd-lib.sh`, and `bd_exact_row` where the successor may sit in another rig's store. |
 | `duplicate-sweep.sh` and its cadence arm | Deleted, both passes. A polecat that finds its work bead duplicates another closes it at once through `bead-rehome.sh --kind duplicate`, which reverses "never close the work bead" for that one case, in the same change. The beads the duplicate blocks come to wait on its canonical first (below). |
 
 ## What bd provides, and where it stops
@@ -60,8 +60,13 @@ So the pack composes two of bd's primitives that do cover the need:
   far bead in another store and keeps it unverified in `depends_on_external`.
   `bd list --json` returns that edge in the row's `.dependencies` (`type`,
   `depends_on_id`), and `bd show --json` and `bd dep list` leave it out. This
-  was seen live on tk-7b1g53j, whose edge names a bead in another rig's store. So a reader that must
-  follow a cross-store edge reads the list row (`bd_disposed_to`).
+  was seen live on tk-7b1g53j, whose edge names a bead in another rig's store. So
+  a reader that must follow a cross-store edge reads the list row
+  (`bd_exact_row`). That read passes `--include-gates`, `--include-infra` and
+  `--include-templates`, because bd hides those types from a listing whatever the
+  `--id` names (`applyTypeSuppressions`, `internal/workapi/list.go`). `bd list` has
+  no one flag for all three: only `bd human` sets `IncludeAllTypes`
+  (`cmd/bd/human.go`).
 
 `bd close` applies three refusals that `bd update` does not:
 `validateIssueClosable` (`cmd/bd/show_unit_helpers.go`) chains `NotTemplate`,
@@ -77,10 +82,10 @@ one, and that close refuses a live blocker and an open child, but its grammar
 takes no `--if-status` or `--if-assignee`, so it cannot make the compare-and-set
 that stops a claim or a second closer, and no notes.
 
-The edge goes first, the order `runDuplicate` and `runSupersede` use. So no
-reader finds the writer's close without its successor, and neither does a second
-caller, which would otherwise take a closed bead with no edge for one it may
-repair, and name another successor. A reopened bead keeps its edge, so the same
+The edge goes first, the order `runDuplicate` and `runSupersede` use. So a reader
+finds the writer's close with its successor, and so does a second caller, which
+would otherwise take a closed bead with no edge for one it may repair, and name
+another successor. A reopened bead keeps its edge, so the same
 holds after a reopen. bd enforces one edge per pair of beads and none per bead
 (`AddDependencyInTx`, `internal/storage/issueops/dependencies.go`), so two callers
 that read the bead before either wrote can each add an edge. The writer therefore
@@ -91,9 +96,28 @@ both edges, so at most one caller goes on to the close.
 A close that is held by what the writer reads first writes nothing. A close bd
 then refuses, or that a change since the read beats, takes the edge back, unless
 a close naming the same successor is what beat it, since the edge is that close's
-record too. A run stopped between the edge and the close leaves the bead open and
-naming its successor, the state main's key left, which every reader already takes
-for a disposition in progress, and the same call run again finishes it.
+record too.
+
+A run stopped between the edge and the close leaves the bead open and naming its
+successor, the state main's key left, and the same call run again finishes it.
+Readers take that state for a disposition in progress, except two that read a
+live bead's `show` row, which leaves out an edge into another store. On such a
+bead `converse-rework.sh` can still file a rework, whose blocks edge then refuses
+the re-run's close, and the finalize gate's epic clause holds an epic for a
+ruling. Each needs a run stopped in that moment with a successor in another store,
+and each ends in a refusal, not a wrong close, so both keep their read.
+
+One interleaving still closes a bead with no edge. bd's re-add of an edge is a
+no-op, so two callers naming the same successor share one edge, and `bd dep add`
+and `bd dep remove` take no compare-and-set. Say a caller has written the edge
+when a holder claims the bead and runs the same call, which finds the edge standing
+and writes none. The first caller's close then fails on the claim and takes the
+edge back, and the holder's close lands just after. The bead is closed and its note
+names the successor, but no edge does. This was reproduced against bd 1.3.4 on a
+scratch store on 2026-11-07. The same call run again records the edge, and the
+doctor reports such an anchor (I5). A read after the close would only narrow this,
+since the first caller can still take the edge back after that read, so the writer
+leaves it.
 
 ## What Gas City provides, and where it stops
 
