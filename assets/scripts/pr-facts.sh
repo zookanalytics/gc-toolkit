@@ -244,8 +244,9 @@ LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 # The sanctioned terminal close for a disposed (non-landed) anchor. A close arm
 # below consummates a pre-recorded PR-close disposition through it rather than
-# abandoning + filing a rework-or-close gate; it stamps gc.superseded_by, the
-# explicit terminal state doctor/check-closed-implies-landed accepts.
+# abandoning + filing a rework-or-close gate; it closes the anchor with the edge
+# that names its successor, the explicit terminal state
+# doctor/check-closed-implies-landed accepts.
 REHOME="$SCRIPTS_DIR/bead-rehome.sh"
 # The retirement of a disposed anchor's machine review scaffolding, the same
 # sweep the cadence runs as arm 9. The close arm runs it for its one anchor
@@ -1906,7 +1907,7 @@ while IFS= read -r tagged; do
     # still-open anchor before the PR closes (assets/scripts/pr-dispose.sh):
     # the bead-rehome kind, the successor, and an optional store. When it is
     # present and well-formed, consummate it through bead-rehome.sh — the
-    # sanctioned terminal close that stamps gc.superseded_by, the explicit
+    # sanctioned terminal close that records the successor's edge, the explicit
     # terminal state doctor/check-closed-implies-landed accepts — rather than
     # re-asking the decision the closer already made as a rework-or-close
     # gate. A missing or malformed marker falls through to the default.
@@ -1931,8 +1932,8 @@ while IFS= read -r tagged; do
         # Dispose the branch's parked rework/rebase children BEFORE the anchor's
         # own close below, not after it. A rework child holds a `blocks` edge on
         # the anchor, so while one is open bead-rehome's non-force close of the
-        # anchor is refused and the anchor strands OPEN with its pointer already
-        # stamped — the whole failure this arm exists to prevent. Closing the
+        # anchor is refused and the anchor strands OPEN — the whole failure this
+        # arm exists to prevent. Closing the
         # children first clears that hold, so the anchor's close below succeeds in
         # the same pass. These children exist only to carry this branch to a merge
         # the now-closed PR will never reach; left open they re-offer to the fix
@@ -2062,9 +2063,13 @@ MP_EOF
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no gate filed"
           continue
         elif [ "$rrc" -eq 4 ]; then
-          # Pointer would not stick — transient. Keep merge_result=pull_request
-          # so the anchor is re-enumerated and the next pass retries.
-          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome could not stamp the pointer (transient); retry next pass" >&2
+          # A write did not land, and unless it came after the close, which I5 or
+          # the anchor's notes report, the close did not run on it: the anchor
+          # changed after bead-rehome judged it, or its edge did not write. It stays
+          # open at merge_result=pull_request, so the next pass re-enumerates it and
+          # retries. An anchor another close reached first drops out of that
+          # enumeration, with that close's disposition standing.
+          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome's write did not land (transient); retry next pass while the anchor is open" >&2
           skipped=$((skipped + 1)); continue
         else
           # Close refused, a conflicting successor, or a bad invocation — a human

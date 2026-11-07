@@ -11,8 +11,10 @@
 #   - a bead whose PARENT carries merge_result and names the same work (same
 #     pr_number or same branch) — the parent is the anchor, so a finding, if
 #     there is one, belongs to the parent and is reported there;
-#   - a bead carrying gc.superseded_by — bead-rehome.sh is the sole writer of
-#     that pointer, and it IS the "explicit terminal state" this check accepts.
+#   - a bead that names its successor through a duplicates or supersedes edge —
+#     bead-rehome.sh is the sole writer of that disposition, and it IS the
+#     "explicit terminal state" this check accepts. The listing's rows carry
+#     every edge, one onto a bead in another rig's store included.
 # Ledger-only and offline-safe BY DESIGN: no gh calls — the ledger's own
 # record is the invariant, whatever GitHub would add. That is also why an
 # unlanded finding never asserts what the PR did; it names the repairs and
@@ -66,6 +68,15 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# The reading of a disposition, $DISPOSITION_JQ. Unsourceable, a disposed bead
+# cannot be told from an unlanded one, so the check warns.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether closed anchors landed (I5)"
+    detail "assets/scripts/bd-lib.sh could not be sourced from this pack, so a disposed bead cannot be told from an unlanded one; nothing was scanned"
+    exit 1
+}
 
 # rig-map.sh prints the map when the listing reads and only its reason when it
 # does not, so one capture holds whichever came back.
@@ -136,7 +147,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not list merge_result-carrying beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
     fi
-    rows=$(printf '%s' "$raw" | scrub | jq -r '
+    rows=$(printf '%s' "$raw" | scrub | jq -r "$DISPOSITION_JQ"'
         . as $all
         | (reduce ($all[]? | select(((((.metadata // {}).merge_result) // "") | tostring) != "")) as $b ({};
               . + { ((($b.id // "") | tostring)):
@@ -152,7 +163,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | (if $mr == "pull_request" or $mr == "pre_open_gate" then "unlanded"
            elif $mr == "merged" and ((($m.merged_sha // "") | tostring) == "") then "nosha"
            else empty end) as $kind
-        | (if ((($m["gc.superseded_by"] // "") | tostring) != "") then "exempt-disposed"
+        | (if (disposed_to != "") then "exempt-disposed"
            else ((.parent // "") | tostring) as $par
               | (if $par == "" then null else $idx[$par] end) as $anc
               | ((($m.pr_number // "") | tostring)) as $cpr
@@ -177,7 +188,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         case "$kind" in
             unlanded)
                 if [ "$mr" = "pull_request" ]; then
-                    errors+=("$label bead $id: CLOSED carrying merge_result=pull_request${pr:+ (PR $pr)} — merge.sh enumerates open anchors only, so nothing will land this. Read the PR before repairing: merged means the ledger is stale (\`lifecycle.sh transition $id --to merged --close --set merged_sha=<sha>\`), still open means the anchor has to come back (\`lifecycle.sh reopen $id\`), and dropped on purpose means it needs a successor pointer (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)")
+                    errors+=("$label bead $id: CLOSED carrying merge_result=pull_request${pr:+ (PR $pr)} — merge.sh enumerates open anchors only, so nothing will land this. Read the PR before repairing: merged means the ledger is stale (\`lifecycle.sh transition $id --to merged --close --set merged_sha=<sha>\`), still open means the anchor has to come back (\`lifecycle.sh reopen $id\`), and dropped on purpose means it needs its successor recorded (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)")
                 else
                     errors+=("$label bead $id: CLOSED carrying merge_result=$mr — no PR was ever opened and merge.sh enumerates open anchors only, so nothing will land this. Reopen the anchor to resume it (\`lifecycle.sh reopen $id\`), or record the disposition that ended it (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)")
                 fi ;;
@@ -187,7 +198,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         esac
     done < "$ENUM_TMP/rows"
     if [ $((n_child + n_disposed)) -gt 0 ]; then
-        notes+=("$label: $((n_child + n_disposed)) closed bead(s) carry merge_result but are not anchors, so they were not judged ($n_child child of a bead holding the same work, $n_disposed disposed via gc.superseded_by)")
+        notes+=("$label: $((n_child + n_disposed)) closed bead(s) carry merge_result but are not anchors, so they were not judged ($n_child child of a bead holding the same work, $n_disposed disposed onto a successor)")
     fi
 done < "$ENUM_TMP/scopes"
 

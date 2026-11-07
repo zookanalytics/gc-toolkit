@@ -254,12 +254,21 @@ gc bd update <bead> --set-metadata gc.work_outcome=no-op \
 Name a successor under every kind. Under `not-needed` it is the evidence that
 ruled the work out, such as the conversation where it was decided. Under
 `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead the work
-moved to. The script records the successor on the bead, reads it back and only
-then closes the bead, so never close it by hand: a close that names no
-successor cannot be told from a careless one. On a bead already closed by hand,
-the same call adds the missing successor. An open human gate that blocks the
-bead stops the close: the script records the successor and exits 5, and the same
-call closes the bead once each such gate is cleared.
+moved to. The script records the successor in bd's own edge, `duplicates` under
+`duplicate` and `supersedes` otherwise, reads it back and only then closes the
+bead, through bd's checked close, so never close it by hand: a close that names
+no successor cannot be told from a careless one. On a bead already closed by
+hand, the same call adds the missing edge. An open human gate that blocks the
+bead stops the close: the script records nothing and exits 5, and the same call
+closes the bead once each such gate is cleared.
+
+A bead that duplicates another closes at once, whatever state its canonical is
+in, because the canonical carries the work: `--kind duplicate` needs the two in
+one store and a bead that did no work of its own. Before the close, each open
+bead it blocks comes to wait on the canonical too, so none goes ready before the
+canonical has closed or shipped, and a waiter that cannot refuses the close.
+`fixed-upstream` needs the fix closed or shipped. A duplicate close records the
+canonical, so `bd show` names it under DUPLICATE OF.
 
 Before you run it:
 
