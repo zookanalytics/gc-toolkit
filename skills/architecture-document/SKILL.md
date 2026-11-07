@@ -100,8 +100,8 @@ of them passes.
 
 The admission test governs what a section says. Its form is whichever of a
 table, a diagram or bullets carries the section's facts at the highest
-bandwidth to the document's two readers: the agents it directs, and a person
-who scans it to see when a change moves the architecture.
+bandwidth to the document's readers: the agents it directs, and a person who
+scans it to see when a change moves the architecture.
 
 - A table gives one row per entry and a column per slot. It is the natural
   form for Domains: one row per domain keeps each entry concise, and a change
