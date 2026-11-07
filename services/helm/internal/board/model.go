@@ -11,8 +11,8 @@
 // board's `--json` emits, in the same order, inside the envelope
 // {generated_at, total, tiles}.
 //
-// PARITY (tk-134d7). The board is now ONE model with TWO renderers — the web
-// dashboard and the `helm-svc board` CLI — so the field set here is the whole
+// PARITY (tk-134d7). The board is ONE model, which the web dashboard renders
+// and `helm-svc board --json` prints, so the field set here is the whole
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
@@ -30,7 +30,11 @@
 // them, so fields may be added but never renamed or removed.
 package board
 
-import "time"
+import (
+	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+)
 
 // Severity is the attention band of a tile. Higher bands dominate ranking.
 type Severity string
@@ -207,17 +211,23 @@ type Anchor struct {
 	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 
-	// HoldingGates is every open human gate that holds a live merge anchor, on the
-	// anchor itself or behind a bead it waits on, which prstatus.HoldingGates
-	// reads through open `blocks` edges. The PR's held: gate value and its row's
-	// `asking` read it, so the row and the label count the same gates. The beads
-	// source walks it for each live merge anchor
-	// ([source.BeadsSource.attachHoldingGates]). A read that fails is noted partial
-	// and leaves it empty on every anchor. An anchor past its walk's bound has no
-	// answer, so it is noted partial and left empty, and the others keep theirs. A
-	// row with it empty reads the gates on the anchor itself.
-	// The supervisor backend walks none, because its beads carry no await type.
-	HoldingGates []Blocker `json:"holding_gates,omitempty"`
+	// PR is what the city records about a live merge anchor's PR, as
+	// prstatus.Read gathers it: the one definition of what holds a PR and where it
+	// stands, which the PR's labels and gc-helm.sh engage read too. The row's PR
+	// phase, held values, machine axis and liveness decide from it by prstatus's
+	// own rules, so the row and the labels cannot disagree. The beads source reads
+	// it for each live merge anchor ([source.BeadsSource.attachPR]). It is nil when
+	// that read did not answer, which is noted partial, and on the supervisor
+	// backend, whose beads carry no await type, so no human gate can be read
+	// there. A row with it nil carries no PR phase or held value.
+	PR *prstatus.Facts `json:"-"`
+
+	// PRReasons is the bead behind each of the PR's reasons that names one
+	// (prstatus.Reasons): each open human gate that holds it, nearest first, then
+	// each blocker it waits on that a person has to clear, as the gather read
+	// them. The row's `asking`, its owed clock and its held gates read them. The
+	// beads source fills it beside [Anchor.PR].
+	PRReasons []Blocker `json:"pr_reasons,omitempty"`
 
 	// Reviews is the anchor's review beads, open and closed: each carries
 	// task_kind=review and names this anchor in anchor_bead. A lane's green
@@ -253,17 +263,6 @@ type Anchor struct {
 	// operator's queue, and its sitting's alias while a sitting holds it. The
 	// gather sets it on a conversation only.
 	Assignee string `json:"assignee,omitempty"`
-
-	// InFlight is a live merge anchor's in-flight set: every bead that names it
-	// in anchor_bead, any task_kind, at one of prstatus.InFlightStatuses, the set
-	// `gctk pr-status derive` reads for the PR labels. Its phase and held values
-	// count it ([anchorWorkSet]), so the board and the labels read the same work.
-	// The beads source reads it for each live merge anchor
-	// ([source.BeadsSource.readInFlight]). A read that fails is noted partial
-	// and leaves it empty, and the board then counts the live review and rework
-	// rows it gathered for the anchor, which the set also holds. The supervisor
-	// backend gathers neither.
-	InFlight []Child `json:"in_flight,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.
@@ -512,10 +511,10 @@ type Tile struct {
 
 	// --- the attention-type band and the cluster key -----------------------
 	//
-	// Two derived classifications the renderers group by, on the wire for the
+	// Two derived classifications the dashboard groups by, on the wire for the
 	// same reason [Owed] is: the split is not recoverable from the coarse
-	// [Severity] band, and putting it here is what keeps the CLI table and the
-	// dashboard from each inventing their own client-side split.
+	// [Severity] band, and putting it here is what keeps the dashboard from
+	// inventing its own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
 	// how-badly: review (a pull request), gate (a person must answer), stalled
@@ -538,7 +537,7 @@ type Tile struct {
 	// GroupRoot is the id of the family this row belongs to — the top-most anchor
 	// its parent-child and blocked edges climb to, equal to the row's OWN id when
 	// it climbs to nothing. Every tile carries one, so a surface buckets families
-	// the way both renderers already bucket [Section]. Dependency structure is the
+	// the way the dashboard already buckets [Section]. Dependency structure is the
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
@@ -589,13 +588,13 @@ type Tile struct {
 	// Phase is this bead's liveness in the shared status vocabulary — `working`,
 	// `merging`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
-	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
-	// human gate, posture, the merge pass's verdict, the draft stage, and for a merge
-	// anchor its in-flight set ([Anchor.InFlight]), or for any other bead the
-	// live-workflow signal standing over it. A bead's board liveness and its
-	// GitHub `status:` label come from that one core. A row WITH child tiles then
-	// takes their rolled-up state in place of that per-bead value
-	// ([aggregatePhases]): an epic's frontier is its children's frontier.
+	// [prstatus.Derive] names: on a merge anchor, from the facts its PRPhase reads
+	// ([Anchor.PR]), and on any other bead, from its holds, the open human gates
+	// that hold it and the live-workflow signal standing over it. A merge anchor
+	// whose PR has no answer reads its liveness as any other bead does. A bead's
+	// board liveness and its GitHub `status:` label come from that one core. A row
+	// WITH child tiles then takes their rolled-up state in place of that per-bead
+	// value ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
 	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
 	// round-trip value and is never rolled up. Phase equals it on a merge anchor
@@ -737,9 +736,8 @@ type Sitting struct {
 	// conversation is about. It is read in the same batch as the takeaway
 	// (source.attributeTakeaways), so a row can say what it concerns even when
 	// nothing was concluded on it. Empty when the subject could not be read,
-	// which the [Topic] and [Headline] helpers fall back on the id or the
-	// conversation's title for. It carries the whole title; a renderer clips it
-	// to its column.
+	// which [sittingHeadline] falls back on the conversation's title for. It
+	// carries the whole title.
 	SubjectTitle string `json:"subject_title"`
 
 	// State is where this sitting stands: SittingInSession, SittingWaiting,
@@ -751,17 +749,6 @@ type Sitting struct {
 	// Headline is what this sitting concluded, or failing that what it is about
 	// ([sittingHeadline]). Every surface prints it as it stands.
 	Headline string `json:"headline"`
-}
-
-// Topic is what a sitting is about, for a surface that shows one cell of it: the
-// subject bead's title, falling back to the subject id when the gather could not
-// read the title. Never empty on a real sitting — the row always says at least
-// the id it stands on, so a bare id is the floor rather than the whole of it.
-func (s Sitting) Topic() string {
-	if s.SubjectTitle != "" {
-		return s.SubjectTitle
-	}
-	return s.Subject
 }
 
 // sittingHeadline is what a sitting CONCLUDED, or failing that what it is ABOUT.

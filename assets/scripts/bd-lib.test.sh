@@ -13,7 +13,8 @@
 # warn and die, the report every script that sources the library makes, row_meta,
 # the metadata read it shares with them, and bd_gates_open_under_key, the order
 # every writer and reader of one situation's human gates reads them in, are
-# pinned first; they read no store.
+# pinned first; they read no store. The readers that judge a gate by
+# $HUMAN_GATE_JQ are checked last, for sourcing it rather than copying it.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -933,6 +934,23 @@ eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | .
   "gates_blocking: the open gates a row's own blocks edges reach, and no other edge type"
 eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | [.[] | select(blocked_by_any($g)) | .id]')" '["w1"]' \
   "blocked_by_any: the rows a gate holds"
+
+# The readers that judge one bead's blockers or a store's gates by this rule
+# source it, and keep to themselves only which edges they follow and which key a
+# gate is filed under. A test of a gate's await type in one of them is a second
+# definition of a human gate. Comment lines are left out, so a reader that names
+# the rule in prose but no longer applies it still fails.
+ROOT="$(cd "$HERE/../.." && pwd)"
+for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-hq-marooned-work/run.sh; do
+  code=$(grep -vE '^[[:space:]]*#' "$ROOT/$r")
+  if grep -qE '^[[:space:]]*\.[[:space:]].*bd-lib\.sh' <<< "$code"; then ok "(READERS) $r sources bd-lib.sh"
+  else bad "(READERS) $r sources bd-lib.sh"; fi
+  if grep -q 'HUMAN_GATE_JQ' <<< "$code" && grep -q 'open_human_gate' <<< "$code"; then
+    ok "(READERS) …and judges a gate by \$HUMAN_GATE_JQ's open_human_gate"
+  else bad "(READERS) $r judges a gate by \$HUMAN_GATE_JQ's open_human_gate"; fi
+  if grep -q 'await_type' <<< "$code"; then bad "(READERS) $r tests no gate's await type itself"
+  else ok "(READERS) …and tests no gate's await type itself"; fi
+done
 
 echo
 echo "passed: $PASS  failed: $FAIL"

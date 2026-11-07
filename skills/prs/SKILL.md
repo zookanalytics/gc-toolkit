@@ -156,5 +156,5 @@ is the sitting's conversation, and every other kind names the bead that
 carries the work with `--successor <bead>`:
 
 ```bash
-"$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --route human --no-wait --retire not-needed
+"$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed
 ```

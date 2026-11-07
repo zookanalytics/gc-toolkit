@@ -214,19 +214,19 @@ RW_ROW='{"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_b
 UNAPPROVED='{"id":"tk-a","status":"open","metadata":{"pr_posture":"review_required@abc@t"}}'
 store "[$UNAPPROVED, $RW_ROW, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"]}' "an open gate on the rework the anchor waits on holds the PR"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"}]}' "an open gate on the rework the anchor waits on holds the PR, and names the gate"
 store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-t\",\"status\":\"open\",\"metadata\":{}}, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-t|blocks|tk-rw\ntk-g|blocks|tk-t\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"]}' "…however far behind it the gate sits"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"}]}' "…however far behind it the gate sits"
 store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-g\",\"status\":\"closed\",\"issue_type\":\"gate\",\"await_type\":\"human\",\"metadata\":{}}]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[]}' "resolving the gate clears the hold"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[],"reasons":[]}' "resolving the gate clears the hold"
 store "[$UNAPPROVED, {\"id\":\"tk-rw\",\"status\":\"closed\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"tk-a\"}}, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-review","held":[]}' "a gate behind a closed blocker holds nothing"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-review","held":[],"reasons":[]}' "a gate behind a closed blocker holds nothing"
 store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-c\",\"status\":\"open\",\"assignee\":\"human\",\"metadata\":{}}]"
 printf 'tk-rw|blocks|tk-a\ntk-c|tracks|tk-rw\ntk-c|tracks|tk-a\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[]}' "a conversation tracking the rework or the anchor holds nothing"
+eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[],"reasons":[]}' "a conversation tracking the rework or the anchor holds nothing"
 store "[$UNAPPROVED, $RW_ROW, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
 out=$(STUB_SHOW_FAIL_ON=tk-rw "$SUT" derive --anchor tk-a 2>/dev/null); rc=$?
@@ -235,10 +235,11 @@ eq "$out" "" "…printing no value"
 : > "$STUB_DEPS"
 
 # The gate read is scoped to the anchor, the way the finalize gate reads it: the
-# beads its blocks edges reach. It never lists visits, or every gate, in the store.
+# beads its blocks edges reach, starting from the anchor's own row. It never
+# lists visits, or every gate, in the store.
 : > "$STUB_GC_LOG"
 "$SUT" derive --anchor tk-a >/dev/null 2>&1
-grep -qF 'bd dep list tk-a --type blocks' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the anchor's blocks blockers"
+grep -qF 'bd show tk-a --json' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the anchor's own row, which carries its blocks edges"
 grep -qF 'task_kind=visit' "$STUB_GC_LOG"; eq "$?" "1" "the derive makes no store-wide read of the open visits"
 grep -qF 'gc.continuation_group' "$STUB_GC_LOG"; eq "$?" "1" "the derive reads no continuation-group stamp"
 

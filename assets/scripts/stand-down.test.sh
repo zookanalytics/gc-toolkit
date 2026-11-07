@@ -663,9 +663,9 @@ eq "$(line_of "--unset-metadata gc.dispatch_when_ready ")" "" "…with no disarm
 fresh; patch 'map(if .id == "tk-w" then .metadata = {"gc.notify_when_ready":"an-agent"} else . end)'
 run tk-w --key polecat-x --ruling "no notice either"
 eq "$(meta tk-w gc.notify_when_ready)" "<absent>" "a notice owed goes with the arm"
-fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "held" | .metadata["gc.routed_to"] = "human" else . end)'
-run tk-w --key polecat-x --ruling "from a held sitting"
-eq "$RC" 0 "a subject a sitting's hold left at held stands down, for the sign-off to release"
+fresh; patch 'map(if .id == "tk-w" then .metadata["gc.routed_to"] = "human" else . end)'
+run tk-w --key polecat-x --ruling "parked for a person"
+eq "$RC" 0 "a subject parked on the person route stands down"
 eq "$(field tk-w status)" closed "…and closes"
 eq "$(meta tk-w gc.routed_to)" "" "…with its person route cleared"
 fresh; patch 'map(if .id == "tk-w" then .issue_type = "convoy" | .metadata = {"merge_result":"blocked","gc.routed_to":"human"} else . end)'
