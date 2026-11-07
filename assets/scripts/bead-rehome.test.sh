@@ -97,7 +97,11 @@
 #   (av) what comes to wait on a duplicate after the first read of its waiters
 #       moves once the close has landed. One that cannot move leaves the close
 #       standing, exit 4, a WARN and a note, and does not hold back one that can.
-#       Another kind and a delivered canonical read no waiters after the close.
+#       Another kind and a delivered canonical read no waiters after the close;
+#   (aw) with no identity of its own the writer compares an assignee with the actor
+#       bd itself defaults to, read off a create's preview that writes nothing, and
+#       passes that actor on its writes. It asks only when the origin has an
+#       assignee, and a preview that does not read holds an assigned origin.
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -370,6 +374,17 @@ if [ "$sub" = "list" ]; then
   done
   printf '%s\n' "$rows" | jq -c --argjson mf "$mf" \
     '[.[] | select(. as $row | all($mf[]; $row.metadata[.k] as $x | $x != null and ($x | tostring) == .v))]'
+  exit 0
+fi
+
+# `bd create --dry-run --json` previews the bead bd would create, created_by naming
+# the actor it runs as: --actor, or the one it defaults to, FAKE_BD_DEFAULT_ACTOR.
+# With neither the preview fails. A create that would write is the regression this
+# guard catches, since this writer files nothing.
+if [ "$sub" = "create" ]; then
+  case " $* " in *" --dry-run "*) ;; *) echo "stub bd: a create that writes" >&2; exit 127 ;; esac
+  [ -n "${ACTOR_ARG:-${FAKE_BD_DEFAULT_ACTOR:-}}" ] || { echo "Error: simulated preview failure" >&2; exit 1; }
+  jq -nc --arg a "${ACTOR_ARG:-$FAKE_BD_DEFAULT_ACTOR}" '{id: "", created_by: $a}'
   exit 0
 fi
 
@@ -1819,6 +1834,49 @@ printf 'dep.al-gg5=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard5"
 rc=0; run --origin al-guard5 --successor bt-guard5 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
 eq "$rc" 0 "an origin assigned to exactly the actor closes"
 eq "$(field alpha status al-gg5)/$(field alpha status al-guard5)" "closed/closed" "…its own gate withdrawn first"
+unset FAKE_BD_ENFORCE_CLOSE_GUARDS
+
+# --- (aw) with no identity of its own the writer uses bd's default actor -------
+export FAKE_BD_ENFORCE_CLOSE_GUARDS=1
+no_identity() { env -u BEADS_ACTOR -u GC_SESSION_NAME -u GC_AGENT -u GC_SESSION_ID -u GC_ALIAS "$@" >"$TMP/out" 2>"$TMP/err"; }
+mkbead alpha open al-wa; mkbead alpha open al-wa-1
+printf 'assignee=Operator Name\n' >> "$ALPHA/al-wa"
+: > "$FAKE_ACTOR_LOG"
+rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-wa --successor al-wa-1 --kind folded || rc=$?
+eq "$rc/$(field alpha status al-wa)" "0/closed" "(aw) an origin assigned to the actor bd defaults to closes"
+eq "$(tail -1 "$FAKE_ACTOR_LOG")" "Operator Name" "…and the writes run as that actor"
+mkbead alpha open al-wb; mkbead alpha open al-wb-1
+printf 'assignee=someone-else\n' >> "$ALPHA/al-wb"
+BEFORE=$(snap alpha al-wb)
+rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-wb --successor al-wb-1 --kind folded || rc=$?
+eq "$rc/$(snap alpha al-wb)" "5/$BEFORE" "(aw) an origin assigned to anyone else is refused and nothing is written"
+has "$(cat "$TMP/err")" "assigned to someone-else" "…naming the assignee"
+has "$(cat "$TMP/err")" "runs as Operator Name" "…and the actor it read"
+mkbead alpha open al-wc; mkbead alpha open al-wc-1
+printf 'assignee=Operator Name\n' >> "$ALPHA/al-wc"
+BEFORE=$(snap alpha al-wc)
+rc=0; no_identity "$SCRIPT" --origin al-wc --successor al-wc-1 --kind folded || rc=$?
+eq "$rc/$(snap alpha al-wc)" "5/$BEFORE" "(aw) a preview that does not read holds an assigned origin"
+has "$(cat "$TMP/err")" "runs as the actor bd defaults to" "…and says which actor it could not name"
+mkbead alpha in_progress al-wd; mkbead alpha open al-wd-1
+printf 'assignee=Operator Name\n' >> "$ALPHA/al-wd"
+rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-wd --successor al-wd-1 --kind folded || rc=$?
+eq "$rc/$(field alpha status al-wd)" "0/closed" "(aw) a bead held in_progress under that actor is its own to close"
+mkbead alpha in_progress al-we; mkbead alpha open al-we-1
+printf 'assignee=someone-else\n' >> "$ALPHA/al-we"
+rc=0; no_identity FAKE_BD_DEFAULT_ACTOR="Operator Name" "$SCRIPT" --origin al-we --successor al-we-1 --kind folded || rc=$?
+eq "$rc" 7 "(aw) one held in_progress under anyone else is not"
+# It asks only when an assignee has to be compared.
+mkbead alpha open al-wf; mkbead alpha open al-wf-1
+: > "$TMP/wf.calls"; : > "$FAKE_ACTOR_LOG"
+rc=0; no_identity FAKE_CALL_LOG="$TMP/wf.calls" "$SCRIPT" --origin al-wf --successor al-wf-1 --kind folded || rc=$?
+eq "$rc/$(grep -c '^create' "$TMP/wf.calls" || true)" "0/0" "(aw) an unassigned origin needs no preview"
+eq "$(grep -c . "$FAKE_ACTOR_LOG" || true)" 0 "…and its writes leave the actor to bd"
+mkbead alpha open al-wg; mkbead alpha open al-wg-1
+printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$ALPHA/al-wg"
+: > "$TMP/wg.calls"
+rc=0; FAKE_CALL_LOG="$TMP/wg.calls" run --origin al-wg --successor al-wg-1 --kind folded || rc=$?
+eq "$rc/$(grep -c '^create' "$TMP/wg.calls" || true)" "0/0" "(aw) a caller with an identity of its own needs no preview"
 unset FAKE_BD_ENFORCE_CLOSE_GUARDS
 
 echo "---"

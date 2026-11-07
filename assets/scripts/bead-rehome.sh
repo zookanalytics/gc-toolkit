@@ -319,6 +319,17 @@ ORIGIN_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | ascii_
 JUDGED_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | tostring' 2>/dev/null || true)
 JUDGED_ASSIGNEE=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].assignee // "") | tostring' 2>/dev/null || true)
 
+# With no identity of its own, a caller's writes run as bd's default actor, which
+# only bd can name, since gc runs it in the store's directory and git's user.name
+# resolves there. The gates compare an assignee with that actor, so it is read off
+# bd's preview of a create, which writes nothing. An answer that does not read
+# leaves it empty, and close_guard holds an assigned origin.
+if [ -z "$ACTOR" ] && [ -n "$JUDGED_ASSIGNEE" ]; then
+    ACTOR=$(bd_at "$ORIGIN_PATH" create "bead-rehome actor read" --dry-run --json 2>/dev/null \
+        | grep -a -vE '^gc bd:' | scrub \
+        | jq -r 'if type == "array" then .[0] else . end | (.created_by // "") | tostring' 2>/dev/null || true)
+fi
+
 case "$KIND" in
     duplicate) EDGE_TYPE=duplicates ;;
     *)         EDGE_TYPE=supersedes ;;
