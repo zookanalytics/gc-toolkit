@@ -979,7 +979,10 @@ review's result set.
   (`work_outcome=no-op` or no work-product key at all), unless the origin carries
   the operator's pre-recorded PR-close disposition for that kind and successor —
   and holds on anything it cannot establish. A duplicate closes at once, whatever
-  state its canonical is in, because the canonical carries the work. Converse and
+  state its canonical is in, because the canonical carries the work. While the
+  canonical has neither closed nor shipped, each open bead the duplicate blocks
+  first gains a `blocks` edge onto it, so none goes ready before the canonical
+  delivers (Disposition, below). Converse and
   operator dispositions use the same writer, and so does a polecat whose work
   bead duplicates another: that close is the one a polecat makes on its work
   bead, before it declines its run. A never-dispatched rework twin, an open
@@ -1144,6 +1147,16 @@ and any patrol judging a closed bead.
 the origin recorded no work, and under `fixed-upstream` that the successor is
 closed or shipped, unless the origin carries the operator's pre-recorded
 PR-close disposition for that kind and successor.
+Under `duplicate` it also keeps the waits on the bead in force. bd's ready rule
+follows a `blocks` edge and never a `duplicates` edge, so before a duplicate of a
+canonical that has neither closed nor shipped closes, each open bead it blocks
+gains a `blocks` edge onto the canonical, read back. The canonical itself and a
+bead it already blocks need none. A waiter that cannot take the edge refuses the
+close before anything is written: one the canonical already joins by another
+edge type, since bd keeps one edge per pair, and every waiter of a canonical in
+another store, where the edge would hold nothing. One bd refuses the edge, for a
+cycle or a parent chain, refuses it after the edges added before it, which stay.
+Every other kind ends the waits on the bead with its close.
 Under `re-homed`, `folded` and `not-needed` it applies only the checks every
 kind gets: the origin is not a review bead, a step bead or a workflow root, and
 no other session holds it in progress. The judgment that the bead should close

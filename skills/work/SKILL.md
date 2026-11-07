@@ -251,9 +251,11 @@ already closed by hand, the same writer adds the missing edge.
 
 - A bead that duplicates another closes at once, whatever state its canonical
   is in, because the canonical carries the work: `--kind duplicate` needs the
-  two in one store and a bead that did no work of its own. `fixed-upstream`
-  needs the fix closed or shipped. A duplicate close records the canonical, so
-  `bd show` names it under DUPLICATE OF.
+  two in one store and a bead that did no work of its own. Before the close,
+  each open bead it blocks comes to wait on the canonical too, so none goes ready
+  before the canonical has closed or shipped, and a waiter that cannot refuses
+  the close. `fixed-upstream` needs the fix closed or shipped. A duplicate close
+  records the canonical, so `bd show` names it under DUPLICATE OF.
 
 - It fits a bead with no work in flight: unassigned, no branch or PR still in
   flight to a pool, and not a review, step or workflow bead. A bead with an open

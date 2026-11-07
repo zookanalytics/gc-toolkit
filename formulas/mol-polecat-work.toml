@@ -12,8 +12,10 @@ whose whole product is store work has no branch to push and takes
 submit-and-exit's store-only exit instead, which releases the bead and names the
 disposition for whoever owns the close. A bead its record finishes goes to its
 validating closer, mol-validate-close.
-NEVER close the work bead: the refinery closes an anchor on a verified merge, and
-closes a rework hand-back landed-on-branch, both from merge-push. ALWAYS close
+NEVER close the work bead, except as the duplicate of another bead through
+bead-rehome.sh (the polecat doctrine): the refinery closes an anchor on a
+verified merge, and closes a rework hand-back landed-on-branch, both from
+merge-push. ALWAYS close
 your own step through assets/scripts/claim-close.sh: a graph.v2 step advances
 only by closing its own bead. workflow-finalize is the control-dispatcher's;
 never close it.

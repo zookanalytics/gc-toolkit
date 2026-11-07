@@ -69,7 +69,17 @@
 #       the retry before any gate is resolved: an origin no one is assigned,
 #       or one assigned to exactly the actor the close runs as, goes ahead,
 #       and one assigned to anyone else, under any other name this session
-#       carries included, keeps its gates open and closes nothing.
+#       carries included, keeps its gates open and closes nothing;
+#   (ar) before a duplicate of a canonical that has neither closed nor shipped
+#       closes, each open bead it blocks gains a blocks edge onto the canonical,
+#       written before the close and named in its note, so none goes ready
+#       before the canonical delivers. A closed waiter, the canonical, a waiter
+#       it already blocks, a delivered canonical, another kind and the repair
+#       path move none. A waiter that cannot take the edge (another edge type,
+#       a canonical in another store, a read that fails) and a blocker of the
+#       duplicate refuse the close before anything is written; an edge bd
+#       refuses, or one that does not read back, refuses it after the edges
+#       before it, which stay.
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -192,9 +202,17 @@ if [ "$sub" = "dep" ]; then
   # `bd dep list <id> --type blocks --json`: one row per `blocks` edge the bead
   # carries onto a bead this store holds, the far bead's fields with the edge's
   # dependency_type, a field whose value is empty left out as real bd leaves it
-  # out. FAKE_BD_DEP_LIST_FAIL makes that read fail.
+  # out. FAKE_BD_DEP_LIST_FAIL makes that read fail. With --direction=up the rows
+  # are the beads in this store whose `blocks` edge names <id>, the beads that
+  # wait on it, and FAKE_BD_DEP_LIST_UP_FAIL makes that read fail.
   if [ "$verb" = "list" ]; then
-    [ -z "${FAKE_BD_DEP_LIST_FAIL:-}" ] || { echo "Error: simulated dep list failure" >&2; exit 1; }
+    up=""
+    for a in "$@"; do case "$a" in --direction=up) up=1 ;; esac; done
+    if [ -n "$up" ]; then
+      [ -z "${FAKE_BD_DEP_LIST_UP_FAIL:-}" ] || { echo "Error: simulated dep list failure" >&2; exit 1; }
+    else
+      [ -z "${FAKE_BD_DEP_LIST_FAIL:-}" ] || { echo "Error: simulated dep list failure" >&2; exit 1; }
+    fi
     f="$DB/$id"
     [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
     rows='[]'
@@ -212,7 +230,12 @@ if [ "$sub" = "dep" ]; then
           await_type: $at, await_id: $ai, assignee: $as, dependency_type: "blocks"}
          | with_entries(select(.value != ""))')
       rows=$(jq -nc --argjson r "$rows" --argjson x "$row" '$r + [$x]')
-    done < <(edges_of "$f")
+    done < <(if [ -n "$up" ]; then
+               for wf in "$DB"/*; do
+                 [ -f "$wf" ] || continue
+                 edges_of "$wf" | awk -v i="$id" -v w="${wf##*/}" '$1 == i && $2 == "blocks" { print w, "blocks" }'
+               done
+             else edges_of "$f"; fi)
     printf '%s\n' "$rows"
     exit 0
   fi
@@ -224,8 +247,14 @@ if [ "$sub" = "dep" ]; then
       # bd keeps one edge per pair: a re-add of the same type changes nothing,
       # and another type on the pair is refused. A target this store does not
       # hold is kept unverified when its prefix names another store.
-      # FAKE_BD_DEP_ADD_FAIL refuses every add.
+      # FAKE_BD_DEP_ADD_FAIL refuses every add, FAKE_BD_DEP_ADD_REFUSE_FROM=<id>
+      # refuses an add from that bead as bd refuses one across a parent chain,
+      # and FAKE_BD_DEP_ADD_NOOP_FROM=<id> reports one from it that never
+      # persisted.
       [ -z "${FAKE_BD_DEP_ADD_FAIL:-}" ] || { echo "Error: simulated dep add failure" >&2; exit 1; }
+      [ "${FAKE_BD_DEP_ADD_REFUSE_FROM:-}" != "$id" ] \
+        || { echo "Error: cannot add blocks dependency: $id and $other are in the same parent chain" >&2; exit 1; }
+      [ "${FAKE_BD_DEP_ADD_NOOP_FROM:-}" != "$id" ] || { echo "✓ Added dependency: $id depends on $other"; exit 0; }
       type=blocks
       while [ $# -gt 0 ]; do
         case "$1" in --type|-t) type="$2"; shift 2 ;; --type=*) type="${1#--type=}"; shift ;; *) shift ;; esac
@@ -794,6 +823,143 @@ printf 'm.branch=polecat/al-twinSucc\nm.gc.work_outcome=no-op\n' >> "$TMP/rigs/a
 rc=0; run --origin al-twin --successor al-twinSucc --kind duplicate || rc=$?
 eq "$rc" 0 "work_outcome=no-op is accepted even with a work-product key present"
 eq "$(field alpha status al-twin)" closed "and the duplicate is closed"
+
+# --- (ar) a duplicate's waiters come to wait on its canonical ------------------
+# bd's ready rule never follows a duplicates edge, so each open bead the
+# duplicate blocks gains a blocks edge onto the canonical, before the close.
+mkbead alpha open al-wdup
+mkbead alpha open al-wcanon
+mkbead alpha open al-waiter1
+mkbead alpha closed al-waiter2
+mkbead alpha open al-waiter3
+printf 'dep.al-wdup=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter1"
+printf 'dep.al-wdup=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter2"
+printf 'dep.al-wdup=blocks\ndep.al-wcanon=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter3"
+printf 'dep.al-wdup=blocks\n' >> "$TMP/rigs/alpha/.beads/al-wcanon"
+B3=$(snap alpha al-waiter3)
+rc=0; FAKE_CALL_LOG="$TMP/ar.calls" run --origin al-wdup --successor al-wcanon --kind duplicate || rc=$?
+eq "$rc" 0 "a duplicate whose canonical is open closes at once"
+eq "$(field alpha status al-wdup)" closed "…the duplicate is closed"
+eq "$(edge alpha al-waiter1 al-wcanon)" blocks "…an open bead it blocked now waits on the canonical"
+CARRY_AT=$(grep -n '^dep add al-waiter1 al-wcanon' "$TMP/ar.calls" | head -1 | cut -d: -f1 || true)
+CLOSE_AT=$(grep -n '^update al-wdup .*--status=closed' "$TMP/ar.calls" | head -1 | cut -d: -f1 || true)
+[ -n "$CARRY_AT" ] && [ -n "$CLOSE_AT" ] && [ "$CARRY_AT" -lt "$CLOSE_AT" ] \
+    && ok "…its edge is written before the close" || bad "…its edge is written before the close (edge at '${CARRY_AT:-none}', close at '${CLOSE_AT:-none}')"
+eq "$(edge alpha al-waiter2 al-wcanon)" "" "…a closed bead it blocked gains no edge"
+eq "$(edge alpha al-wcanon al-wcanon)" "" "…nor does the canonical, whose wait on its duplicate ends"
+eq "$(snap alpha al-waiter3)" "$B3" "…and a bead the canonical already blocks is not written"
+has "$(field alpha notes al-wdup)" "waits on al-wcanon now: al-waiter1." "…the close's note names what moved"
+has "$(cat "$TMP/out")" "al-waiter1, which al-wdup blocked, wait on al-wcanon now" "…and so does the output"
+# No wait moves once the canonical has delivered, under another kind, or on the
+# repair path, whose close already happened.
+mkbead alpha open al-wdup2
+mkbead alpha closed al-wcanon2
+mkbead alpha open al-wdup3
+mkbead alpha open al-wcanon3
+printf 'm.gc.work_outcome=shipped\n' >> "$TMP/rigs/alpha/.beads/al-wcanon3"
+mkbead alpha open al-wre
+mkbead alpha open al-wresucc
+mkbead alpha closed al-wdup4
+mkbead alpha open al-wcanon4
+mkbead alpha open al-waiter4
+printf 'dep.al-wdup2=blocks\ndep.al-wdup3=blocks\ndep.al-wre=blocks\ndep.al-wdup4=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter4"
+rc=0; run --origin al-wdup2 --successor al-wcanon2 --kind duplicate || rc=$?
+eq "$rc/$(edge alpha al-waiter4 al-wcanon2)" "0/" "a duplicate of a closed canonical moves no wait"
+rc=0; run --origin al-wdup3 --successor al-wcanon3 --kind duplicate || rc=$?
+eq "$rc/$(edge alpha al-waiter4 al-wcanon3)" "0/" "…nor one of a canonical that has shipped"
+rc=0; run --origin al-wre --successor al-wresucc --kind re-homed || rc=$?
+eq "$rc/$(edge alpha al-waiter4 al-wresucc)" "0/" "…nor a re-home, whose waits end on its caller's judgment"
+rc=0; run --origin al-wdup4 --successor al-wcanon4 --kind duplicate || rc=$?
+eq "$rc/$(edge alpha al-waiter4 al-wcanon4)" "0/" "…nor the repair path"
+# A waiter that cannot take the edge refuses the close before anything is
+# written: one the canonical already joins by another edge type, any waiter of a
+# canonical in another store, and a waiter read that fails.
+mkbead alpha open al-wdup5
+mkbead alpha open al-wcanon5
+mkbead alpha open al-waiter5
+mkbead alpha open al-waiter6
+printf 'dep.al-wdup5=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter5"
+printf 'dep.al-wdup5=blocks\ndep.al-wcanon5=related\n' >> "$TMP/rigs/alpha/.beads/al-waiter6"
+BD=$(snap alpha al-wdup5); B5=$(snap alpha al-waiter5); B6=$(snap alpha al-waiter6)
+rc=0; run --origin al-wdup5 --successor al-wcanon5 --kind duplicate || rc=$?
+eq "$rc" 5 "a waiter joined to the canonical by another edge type refuses the close"
+eq "$(snap alpha al-wdup5)|$(snap alpha al-waiter5)|$(snap alpha al-waiter6)" "$BD|$B5|$B6" "…before anything is written"
+has "$(cat "$TMP/err")" "al-waiter6 by a 'related' edge" "…and the refusal names the waiter and its edge"
+rc=0; run --origin al-wdup5 --successor al-wcanon5 --kind duplicate --check || rc=$?
+eq "$rc" 1 "--check refuses it too"
+mkbead alpha open al-wdup6
+mkbead beta  open bt-wcanon6
+mkbead alpha open al-waiter7
+printf 'm.merge_result=pull_request\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=bt-wcanon6\nm.gc.pr_close_disposition_successor_store=rig:beta\n' >> "$TMP/rigs/alpha/.beads/al-wdup6"
+printf 'dep.al-wdup6=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter7"
+BD=$(snap alpha al-wdup6); B7=$(snap alpha al-waiter7)
+rc=0; run --origin al-wdup6 --successor bt-wcanon6 --kind duplicate || rc=$?
+eq "$rc" 5 "a ruled duplicate onto another store's canonical refuses while a bead waits on it"
+eq "$(snap alpha al-wdup6)|$(snap alpha al-waiter7)" "$BD|$B7" "…and writes nothing"
+has "$(cat "$TMP/err")" "holds nothing" "…because an edge across stores holds nothing"
+mkbead alpha open al-wdup7
+mkbead alpha open al-wcanon7
+BD=$(snap alpha al-wdup7)
+rc=0; FAKE_BD_DEP_LIST_UP_FAIL=1 run --origin al-wdup7 --successor al-wcanon7 --kind duplicate || rc=$?
+eq "$rc/$(snap alpha al-wdup7)" "5/$BD" "a waiter read that fails refuses the close and writes nothing"
+has "$(cat "$TMP/err")" "did not read" "…and says the read failed"
+# What would refuse bd's close holds a duplicate before any waiter is written.
+mkbead alpha open al-wdup8
+mkbead alpha open al-wcanon8
+mkbead alpha open al-wblock8
+mkbead alpha open al-waiter8
+printf 'dep.al-wblock8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-wdup8"
+printf 'dep.al-wdup8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter8"
+B8=$(snap alpha al-waiter8)
+rc=0; run --origin al-wdup8 --successor al-wcanon8 --kind duplicate || rc=$?
+eq "$rc/$(field alpha status al-wdup8)" "5/open" "a duplicate another bead blocks is held"
+eq "$(snap alpha al-waiter8)" "$B8" "…before its waiter gains an edge"
+has "$(cat "$TMP/err")" "held by blocker(s) al-wblock8" "…and the refusal names the blocker"
+# With no --except-key no gate is the duplicate's own, so an open human gate no
+# one is assigned holds it the same way and stays open.
+mkbead alpha open al-wdup8g
+mkbead alpha open al-wcanon8g
+mkbead alpha open al-wgate8
+printf 'issue_type=gate\nawait_type=human\nawait_id=some-key\n' >> "$TMP/rigs/alpha/.beads/al-wgate8"
+mkbead alpha open al-waiter8g
+printf 'dep.al-wgate8=blocks\n' >> "$TMP/rigs/alpha/.beads/al-wdup8g"
+printf 'dep.al-wdup8g=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiter8g"
+B8=$(snap alpha al-waiter8g)
+rc=0; run --origin al-wdup8g --successor al-wcanon8g --kind duplicate || rc=$?
+eq "$rc/$(field alpha status al-wgate8)/$(snap alpha al-waiter8g)" "5/open/$B8" "…and so does a human gate, which stays open"
+# An edge bd refuses, or one that does not read back, refuses the close, and the
+# edges written before it stay.
+mkbead alpha open al-wdup9
+mkbead alpha open al-wcanon9
+mkbead alpha open al-waiterA
+mkbead alpha open al-waiterB
+printf 'dep.al-wdup9=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterA"
+printf 'dep.al-wdup9=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterB"
+rc=0; FAKE_BD_DEP_ADD_REFUSE_FROM=al-waiterB run --origin al-wdup9 --successor al-wcanon9 --kind duplicate || rc=$?
+eq "$rc" 5 "a waiter bd refuses the edge refuses the close"
+eq "$(field alpha status al-wdup9)/$(edge alpha al-wdup9 al-wcanon9)" "open/" "…the duplicate stays open with no edge"
+eq "$(edge alpha al-waiterA al-wcanon9)" blocks "…a waiter carried before it keeps its edge"
+has "$(cat "$TMP/err")" "same parent chain" "…bd's refusal is printed"
+has "$(cat "$TMP/err")" "al-waiterA keep the blocks edge onto al-wcanon9" "…and the edges that stay are named"
+mkbead alpha open al-wdup10
+mkbead alpha open al-wcanon10
+mkbead alpha open al-waiterC
+printf 'dep.al-wdup10=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterC"
+rc=0; FAKE_BD_DEP_ADD_NOOP_FROM=al-waiterC run --origin al-wdup10 --successor al-wcanon10 --kind duplicate || rc=$?
+eq "$rc/$(field alpha status al-wdup10)" "4/open" "a waiter's edge that does not read back refuses the close"
+has "$(cat "$TMP/err")" "did not read back on al-waiterC" "…and names the waiter"
+# --check and the dry run name the waits that would move, and write nothing.
+mkbead alpha open al-wdup11
+mkbead alpha open al-wcanon11
+mkbead alpha open al-waiterD
+printf 'dep.al-wdup11=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterD"
+BD=$(snap alpha al-wdup11); BW=$(snap alpha al-waiterD)
+rc=0; run --origin al-wdup11 --successor al-wcanon11 --kind duplicate --check || rc=$?
+eq "$rc" 0 "--check finds a duplicate with waiters eligible"
+has "$(cat "$TMP/out")" "once al-waiterD, which it blocks, wait on al-wcanon11 too" "…and names the wait that moves"
+rc=0; run --origin al-wdup11 --successor al-wcanon11 --kind duplicate --dry-run || rc=$?
+has "$(cat "$TMP/out")" "waiters:   al-waiterD, which al-wdup11 blocks, each gain a blocks edge onto al-wcanon11 before the close" "the dry run names it too"
+eq "$(snap alpha al-wdup11)|$(snap alpha al-waiterD)" "$BD|$BW" "…and neither writes anything"
 
 # --- (check) --check evaluates the gates and writes nothing --------------
 mkbead alpha open al-chkok

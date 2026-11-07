@@ -218,9 +218,9 @@ anchor's readers read, and to your claimed bead everything else.
   another bead in the same store carries the same work, the work bead closes
   as its duplicate at once, whatever state the canonical is in, and you then
   decline your run with no gate (Blocked work and human gates). The
-  disposition writer records the canonical in bd's `duplicates` edge and
-  refuses a bead that did work of its own, so record first that this run
-  pushed nothing:
+  disposition writer records the canonical in bd's `duplicates` edge, first
+  makes whatever waits on the work bead wait on the canonical, and refuses a
+  bead that did work of its own, so record first that this run pushed nothing:
 
   ```bash
   gc bd update <work-bead> --set-metadata gc.work_outcome=no-op \

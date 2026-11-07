@@ -17,7 +17,7 @@ between 23:20Z and 23:55Z.
 | The successor keys (`gc.superseded_by`, `gc.supersedes`, `duplicate_of`, each with its `_store`) | Retired. A disposed bead names its successor through one outgoing bd edge, `duplicates` onto its canonical or `supersedes` onto the bead that carries its work, or under not-needed onto the evidence. The keys stay registered as retired, so residue on a bead disposed before the edges reads as known. |
 | `bead-rehome.sh` | Stays the one writer, with the same interface. It closes through bd's checked close and then records the edge, both described below. It drops the metadata stamp, its read-back and the back-pointer on the successor. |
 | The readers | Read the edge through one jq definition, `$DISPOSITION_JQ` in `bd-lib.sh`, and `bd_disposed_to` where the successor may sit in another rig's store. |
-| `duplicate-sweep.sh` and its cadence arm | Deleted, both passes. A polecat that finds its work bead duplicates another closes it at once through `bead-rehome.sh --kind duplicate`, which reverses "never close the work bead" for that one case, in the same change. |
+| `duplicate-sweep.sh` and its cadence arm | Deleted, both passes. A polecat that finds its work bead duplicates another closes it at once through `bead-rehome.sh --kind duplicate`, which reverses "never close the work bead" for that one case, in the same change. The beads the duplicate blocks come to wait on its canonical first (below). |
 
 ## What bd provides, and where it stops
 
@@ -98,10 +98,37 @@ reports such a bead when it is an anchor.
 
 The marker pass closed a bead a polecat had marked `duplicate_of`, because a
 polecat never closed its work bead. bd's own `duplicates` edge needs no later
-pass: the bead closes when the duplicate is found. The cost is that a duplicate
-of a canonical still open closes at once. The sweep waited for the canonical to
-close or ship first. The canonical carries the work either way, so nothing that
-was waiting is lost.
+pass: the bead closes when the duplicate is found. The sweep waited for the
+canonical to close or ship first, and that wait also held every bead the
+duplicate blocked. bd's ready rule, `AffectsReadyWork` in
+`internal/types/types.go`, follows `blocks`, `parent-child`,
+`conditional-blocks` and `waits-for` edges and never a `duplicates` edge, so a
+duplicate that closes at once would release those beads before the work they
+wait for exists. On 2026-11-07, 21 of the gc-toolkit store's closed duplicates
+had beads blocked by them, 26 in all.
+
+So `bead-rehome.sh` keeps those waits itself. Before a duplicate of a canonical
+that has neither closed nor shipped closes, each open bead it blocks gains a
+`blocks` edge onto the canonical, read back, and a waiter that cannot take one
+refuses the close. Neither bd nor Gas City moves a bead's waiters:
+
+- `bd duplicate` (`runDuplicate` in `cmd/bd/duplicate.go`) adds the edge and
+  closes, and leaves the beads that depend on the duplicate as they are.
+- `bd duplicates --auto-merge` (`performMerge` in `cmd/bd/duplicates.go`)
+  re-parents only `parent-child` dependents onto the merge target before it
+  closes a source, and acts only on groups of identical content it finds itself,
+  never on a pair it is given.
+- Gas City has no reader of the edge. At `gastownhall/gascity` main 6c9663d4c,
+  `duplicates` appears only as the name of bd's verb in the split-city allowlist
+  (`cmd/gc/bd_split_allowlist.go`).
+
+`blocks` is the one wait to carry. On 2026-11-07 the city store and the four
+live rig stores held no `conditional-blocks` or `waits-for` edge, and the checked
+close refuses a duplicate with an open child, which covers `parent-child`. bd
+refuses a `blocks` edge onto the bead itself, across a parent chain, into a
+cycle, or onto a pair another edge type already joins
+(`dependencyUseCaseImpl.add` in `internal/storage/domain/dependency.go`), so
+each of those is a refusal the writer reports.
 
 The rework-twin pass closed a never-dispatched second rework child of one
 source, once a sibling had landed. The gc-toolkit store records eight such
