@@ -14,7 +14,7 @@ led here is in the notes of bead tk-bhrmihv.
 ## Setup
 
 All of it ran in a scratch city with its own supervisor and tmux server, on the
-macOS host at load 15 to 25: `gc` 1.4.3 at fork main `cb80c5354`, whose
+macOS host at a load near 22 when read: `gc` 1.4.3 at fork main `cb80c5354`, whose
 merge-base with upstream is `9f807760c`, Claude Code 2.1.319, Codex CLI 0.164.0
 and tmux 3.8. The city set `session_reconciler = "v2"`.
 
