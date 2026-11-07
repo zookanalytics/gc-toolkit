@@ -50,7 +50,9 @@
 # so a caller that answers those gates itself, such as stand-down.sh, can stop
 # before its first write.
 # An already-closed origin is the REPAIR path: pointer + appended note, with the
-# gates skipped (the close they would guard already happened).
+# gates skipped (the close they would guard already happened). A close reason
+# that already names this disposition, as this script's close writes it, needs
+# no note.
 # Once the origin reads back closed, on either path, the branch it names in
 # metadata.branch is ended on the git remote through branch-end.sh, the way a
 # merge ends a landed branch. That remote write never gates the disposition:
@@ -122,7 +124,8 @@ would hold the close, as the close itself does once its pointer is stamped.
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
 An already-closed origin gains the pointer and an appended note (repair path),
-with the evidence gates skipped.
+with the evidence gates skipped. A close reason that already names this
+disposition gains no note.
 
 An open human gate that blocks the origin holds the close (finalize-gate.sh).
 --except-key is for the caller that reports its own refusals of this close as
@@ -298,6 +301,13 @@ case "$KIND" in
 esac
 REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 [ -n "$NOTE" ] && REASON="$REASON — $NOTE"
+# A closed origin whose close reason already names this disposition, kind,
+# successor and store, whatever its note: this script's own close writes that
+# reason, and bd show renders it, so the repair path owes the bead no note.
+CLOSE_CARRIES=""
+case "$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].close_reason // "") | tostring' 2>/dev/null || true)" in
+    "$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"|"$PHRASE $SUCCESSOR in $SUCCESSOR_STORE — "*) CLOSE_CARRIES=1 ;;
+esac
 
 # ── The evidence, re-established here so no caller closes over work it cannot prove ──
 # The gates guard the CLOSE, so they run only when the origin is still open; an
@@ -495,7 +505,9 @@ if [ -n "$CHECK" ]; then
 fi
 
 if [ -n "$DRY_RUN" ]; then
-    if [ "$ORIGIN_STATUS" = "closed" ]; then
+    if [ "$ORIGIN_STATUS" = "closed" ] && [ -n "$CLOSE_CARRIES" ]; then
+        CLOSE_PLAN="already closed with this disposition's reason — pointer only"
+    elif [ "$ORIGIN_STATUS" = "closed" ]; then
         CLOSE_PLAN="already closed — pointer + note only, close reason left as-is"
     else
         CLOSE_PLAN="$REASON"
@@ -578,8 +590,12 @@ fi
 # 2. The prose carrier: `bd show` renders the close reason, not metadata, so
 # the reason is what a human reads. On an already-closed origin the reason
 # cannot be rewritten; append the disposition note instead (never --notes,
-# which replaces).
-if [ "$ORIGIN_STATUS" = "closed" ]; then
+# which replaces), unless the reason already names this disposition, as it does
+# when this script's own close landed and only its read missed.
+if [ "$ORIGIN_STATUS" = "closed" ] && [ -n "$CLOSE_CARRIES" ]; then
+    printf "bead-rehome: %s was ALREADY closed in %s with this disposition's reason, which bd show renders — pointer recorded (gc.superseded_by=%s in %s), no note added.\n" \
+        "$ORIGIN" "$ORIGIN_STORE" "$SUCCESSOR" "$SUCCESSOR_STORE"
+elif [ "$ORIGIN_STATUS" = "closed" ]; then
     PRIOR_NOTES=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)
     case "$PRIOR_NOTES" in
         *"Disposition recorded"*"$SUCCESSOR"*)
@@ -649,7 +665,12 @@ else
         3)
             echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close did not read back closed:" >&2
             [ -z "$CLOSE_ERR" ] || printf '%s\n' "$CLOSE_ERR" >&2
-            echo "bead-rehome: the disposition is legible either way — the bead is pointed and findable, and its branch was left. Re-run this close: it closes a bead that reads open, and finishes the disposition of one that reads closed." >&2
+            # Quoted for a paste: the note is free text.
+            RERUN=$(printf '%q ' "$HERE/bead-rehome.sh" --origin "$ORIGIN" --successor "$SUCCESSOR" --kind "$KIND" \
+                --origin-store "$ORIGIN_STORE" --successor-store "$SUCCESSOR_STORE" \
+                ${NOTE:+--note "$NOTE"} ${EXCEPT_KEY:+--except-key "$EXCEPT_KEY"})
+            echo "bead-rehome: the disposition is legible either way — the bead is pointed and findable, and its branch was left. Re-run this close, which closes a bead that reads open and finishes the disposition of one that reads closed:" >&2
+            echo "  ${RERUN% }" >&2
             exit 5 ;;
         *)
             echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close was refused:" >&2

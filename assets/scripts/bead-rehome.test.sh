@@ -46,8 +46,10 @@
 #       names no branch, or on a dry run, which names the branch in its plan;
 #   (ah) the repair path ends an already-closed bead's branch too;
 #   (ai) a close that does not read back closed exits 5, pointed, with its
-#       branch left and nothing reporting it closed, and a re-run finishes the
-#       disposition whether the bead then reads open or closed;
+#       branch left, nothing reporting it closed and the call that finishes it
+#       named, and a re-run finishes the disposition whether the bead then reads
+#       open or closed, adding no note to a bead whose close reason already
+#       names the disposition, and one to a bead closed with another reason;
 #   (aj) end to end, through the real branch-end.sh and a bare origin: a retire
 #       ends the branch with its tip pinned, and a delete origin refuses leaves
 #       the close standing;
@@ -296,9 +298,10 @@ case "$sub" in
           --arg as "$as" \
           --arg tpl "$(sed -n 's/^is_template=//p' "$f" | tail -1)" \
           --arg notes "$(sed -n 's/^notes=//p' "$f" | tr '\n' ' ')" \
+          --arg cr "$(sed -n 's/^reason=//p' "$f" | tail -1)" \
           --argjson meta "$(meta_json)" \
           --argjson deps "$(deps_json)" \
-          '[{id: $id, status: $st, assignee: (if $as == "" then null else $as end), notes: $notes, metadata: $meta, dependencies: $deps}
+          '[{id: $id, status: $st, assignee: (if $as == "" then null else $as end), notes: $notes, close_reason: (if $cr == "" then null else $cr end), metadata: $meta, dependencies: $deps}
             | if $tpl == "true" then .is_template = true else . end]'
     ;;
   update)
@@ -912,6 +915,8 @@ eq "$rc" 5 "a close that does not read back closed exits 5, as a refused one doe
 eq "$(field alpha m.gc.superseded_by al-br9)" bt-br9 "…with the pointer recorded"
 eq "$(cat "$BE_LOG")" "" "…and ends no branch"
 has "$(cat "$TMP/err")" "the close did not read back closed" "…and stderr says why"
+has "$(cat "$TMP/err")" "bead-rehome.sh --origin al-br9 --successor bt-br9 --kind re-homed --origin-store rig:alpha --successor-store rig:beta" \
+    "…and names the call that finishes it"
 hasnt "$(cat "$TMP/out")" "al-br9 closed in" "…and nothing reports the bead closed"
 rc=0; run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
 eq "$rc" 0 "a re-run over the bead that reads open finishes the disposition"
@@ -923,10 +928,22 @@ mkbead beta open bt-br9b
 : > "$BE_LOG"
 rc=0; GCTK_STUB_MISS=close:al-br9b run --origin al-br9b --successor bt-br9b --kind re-homed || rc=$?
 eq "$rc" 5 "a close whose read alone missed exits 5 too"
-printf 'status=closed\n' >> "$TMP/rigs/alpha/.beads/al-br9b"
+printf 'status=closed\nreason=re-homed to bt-br9b in rig:beta\n' >> "$TMP/rigs/alpha/.beads/al-br9b"
+rc=0; run --origin al-br9b --successor bt-br9b --kind re-homed --dry-run || rc=$?
+has "$(cat "$TMP/out")" "already closed with this disposition's reason — pointer only" "a dry run of the re-run plans no note"
 rc=0; run --origin al-br9b --successor bt-br9b --kind re-homed || rc=$?
 eq "$rc" 0 "a re-run over the bead that reads closed finishes the disposition"
 eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br9b --bead al-br9b status-at-call=closed" "…ending its branch"
+eq "$(field beta m.gc.supersedes bt-br9b)" al-br9b "…and writing the back-pointer"
+eq "$(grep -c '^notes=Disposition recorded' "$TMP/rigs/alpha/.beads/al-br9b")" 0 "…with no note, since its close reason names the disposition"
+has "$(cat "$TMP/out")" "with this disposition's reason" "…which the output says"
+# A close reason that names another successor is not this disposition's.
+mkbead alpha closed al-br9c
+printf 'reason=re-homed to bt-br9b in rig:beta\n' >> "$TMP/rigs/alpha/.beads/al-br9c"
+mkbead beta open bt-br9c
+rc=0; run --origin al-br9c --successor bt-br9c --kind re-homed || rc=$?
+eq "$rc" 0 "a closed bead whose reason names another successor is repaired"
+eq "$(grep -c '^notes=Disposition recorded' "$TMP/rigs/alpha/.beads/al-br9c")" 1 "…with the disposition appended as a note"
 
 # --- (aj) end to end: the real branch-end.sh against a bare origin -----------
 # A rig of its own, gamma, is a git checkout whose origin is a bare repository:
