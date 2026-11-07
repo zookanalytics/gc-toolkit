@@ -3,7 +3,9 @@
      hold for every role that produces durable output, whatever class it sits
      in. Each such role composes this fragment AND its per-class fragment
      (work-quality-polecats / work-quality-human / work-quality-system), so a
-     universal standard lives here once instead of in each class.
+     universal standard lives here once instead of in each class. The
+     mechanik, whose prime has no room for them, reads this file and
+     work-quality-system before it writes, by the command its prompt gives.
      Elected by roles that author durable output: artifacts that outlive the
      turn and that someone else reads — code, docs, specs, PR and bead bodies,
      findings and reports. A role whose only outputs are its own control flow

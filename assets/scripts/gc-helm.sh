@@ -4829,7 +4829,7 @@ cmd_engage() {
     # and only the reconciler's launch delivers one. `gc session new --no-attach`
     # records the sitting as start-pending. The reconciler then launches it with
     # the rendered converse prompt on argv (every converse provider resolves to
-    # prompt_mode=arg), and step 1 of that prompt is the claim block. So a claude
+    # prompt_mode=arg), and that prompt's loop opens with the claim block. So a claude
     # sitting (opus, fable) claims its conversation, re-checks the premise, preps, and
     # posts its framing with no keystrokes. Sending it a kick as well is worse
     # than redundant. engage would deliver the kick while that self-started turn

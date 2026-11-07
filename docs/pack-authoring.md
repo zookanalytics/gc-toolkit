@@ -1,6 +1,6 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a landed pack change is confirmed live, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
@@ -17,8 +17,9 @@ convention rests on one of them, it links there.
 agents follow where Gas City leaves the choice to the pack: how a step closes
 and how a run declines, how step text and skills reach a pack script, why each
 shell block in step text makes one call, how a landed pack change is confirmed
-live, the names the pack's artifacts carry, where a rig-scoped agent runs, the
-patrol-wisp cycle, and how a scan resolves an owner or an address.
+live, the names the pack's artifacts carry, how one text names another's step,
+where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an
+owner or an address.
 
 **Boundaries.** What Gas City itself does when a formula runs or a pack loads
 is [gascity/packs.md](gascity/packs.md); agent variants, identity and session
@@ -176,9 +177,17 @@ the commands and the control flow of the procedures its blocks hold, and fails
 a step the change makes heavier in either count. A new step fails when it holds
 a procedure at all. A block the change leaves alone, or moves without editing
 it, weighs nothing, so a step that only gains single calls passes, and so does
-one that trades a procedure for a call. `tools/lint-step-text.in-flight` names
-the branches whose formula changes were built before the rule, and a step made
-heavier only by lines one of them adds draws a warning instead of a failure.
+one that trades a procedure for a call.
+
+A step also reaches its agent whole. gc delivers an agent's current step in a
+hook's output, which Claude Code keeps to 10,000 characters and Codex to 10,000
+bytes, and a longer one reaches the agent cut. So every step a hook delivers
+renders within 9,000 bytes, with the reminder that wraps it, and the rest of the
+hook's output is left for what shares it, such as the clock line, queued nudges
+and unread mail. A step over the bound keeps its instructions inline and moves
+its reference prose into the doc it points to, or its mechanics into a tested
+script. `assets/scripts/formula-step-size.test.sh` holds the bound, and its
+header says how it renders a step and which formulas no hook delivers.
 
 ## A landed pack change is confirmed on the deployed checkout
 
@@ -231,6 +240,25 @@ formulas, so none shadows a same-named artifact of another layer
 Keep it that way: check a new artifact's basename against any pack the
 importing city composes with before adding it, and never reuse a template
 `define` name you did not coin.
+
+## A text names another text's step by what it is
+
+A formula step numbers its parts by their place in its text, and so do a skill
+and a prompt. A rewrite renumbers them, and nothing ties a number cited from
+another text to the part it meant: the citation goes on naming another part, or
+none, and a search for "step 4" finds a step 4 in every text. So a text names a
+step of another text by what identifies it: the formula step's id, a marked
+block's name, the skill, the script or command the step runs, or what the step
+does. A text's own numbers are its own, so a step can send its reader on to its
+own step 4.
+
+`assets/scripts/step-number-citation.test.sh` holds the rule wherever a
+citation says whose number it is: after a possessive, after a backquoted name,
+after the name of a formula, a formula step or a skill, or before "of" and such
+a name. It reads every tracked text except the renders under `generated/` and
+the records under `specs/`. A bare number reads as the text's own, so a bare
+number that points into another text is this rule's to prevent, and the suite
+does not see it.
 
 ## A check loop's iterations are routed to a pool
 

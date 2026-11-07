@@ -472,8 +472,9 @@ keys = [
 # target — the landing branch the work merges into: the polecat records it at
 #   submit, the refinery stamps it on a rework child (pr-facts.sh,
 #   pre-open-rebase.sh, signoff.sh), and an integration effort's setup
-#   (mol-design-convoy.toml, the mechanik's recipe) writes the effort's branch
-#   on each of its beads and the default branch on its landing bead. Read two
+#   (mol-design-convoy.toml, the work skill's effort recipe) writes the
+#   effort's branch on each of its beads and the default branch on its
+#   landing bead. Read two
 #   ways — as the fallback alias for merged_target before a
 #   PR opens (pr-open.sh, gate-ensure.sh, both defaulting to the rig's default
 #   branch when both are absent), and directly as the landing branch by the

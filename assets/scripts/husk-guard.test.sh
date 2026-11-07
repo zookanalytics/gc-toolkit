@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Hermetic test for the witness-patrol HUSK GUARD (gc-7v0lx / gc-5v01w).
 #
-# THE BUG (SECURITY, HIGH): mol-witness-patrol Step 2 salvage reads the orphaned
-# bead's metadata.work_dir into $WORKTREE, then Cases B/C/D `cd "$WORKTREE"` and
+# THE BUG (SECURITY, HIGH): mol-witness-patrol's salvage, in its
+# recover-orphaned-beads step, reads the orphaned bead's metadata.work_dir into
+# $WORKTREE, then Cases B/C/D `cd "$WORKTREE"` and
 # run `git add -A && git commit && git push origin HEAD`. When work_dir is a
 # HUSK — the git worktree was removed but the directory survives (typically only
 # .gc/ left) — the `cd` still succeeds, but git finds no repo there and walks UP

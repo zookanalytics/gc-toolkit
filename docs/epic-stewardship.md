@@ -127,10 +127,13 @@ is not a doctor check: doctor is already over-leveraged, and its role here stays
 the after-the-fact invariant. The ruling the sitting records stays the one the
 gate and I15 read.
 
-Until it lands, nothing asks for a ruling. An epic whose work has landed waits
-for the operator to call a sitting on it, so an answered or stalled epic stays
-open until someone looks. A Delivery that stalls before it lands is inspected only
-by such a sitting, and the machinery may add a nudge on a Delivery's age.
+Until it lands, nothing files the checkpoint sitting. A landed Delivery's row on
+the helm board asks for the checkpoint, among the rows the operator owes, and the
+operator calls the sitting from there. An epic with no Deliveries whose work has
+landed waits for the operator to call a sitting on it, so an answered or stalled
+epic stays open until someone looks. A Delivery that stalls before it lands is
+inspected only by such a sitting, and the machinery may add a nudge on a
+Delivery's age.
 
 Membership (re-homing work that drifted outside its epic) is a separate concern
 with its own deferral, recorded in `specs/tk-isd5sa/design.md`.
