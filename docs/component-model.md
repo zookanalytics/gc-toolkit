@@ -483,7 +483,6 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/tmux-intake-prompt.sh` | engagement | `prefix + a`: type a message, get a durable conversation. |
 | `assets/scripts/tmux-dismiss-sitting.sh` | engagement | `prefix + X`: dismiss the converse sitting in view, after a confirm. |
 | `assets/scripts/tmux-bindings.sh` | engagement | Installs the keybindings that reach the surfaces above. |
-| `assets/scripts/tmux-pick-helm.sh` | engagement | The board picker. |
 | `assets/scripts/tmux-pick-session.sh` | engagement | The session picker. |
 | `assets/scripts/tmux-keeper-toggle.sh` | engagement | Pins or unpins the keeper in the session picker. |
 | `assets/scripts/work-outcome.sh` | engagement | The one `gc.work_outcome=no-op` stamp a conversation gets before it closes, for the work-record gate `gc bd close` runs. Every closer of one sources it: `converse-signoff.sh` and the `gc-helm.sh` dismiss verb. `stand-down.sh` stamps the work bead a ruling stops the same way. |

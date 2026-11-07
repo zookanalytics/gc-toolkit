@@ -93,7 +93,7 @@ render's byte and token counts.
 - [docs/epic-stewardship.md](docs/epic-stewardship.md) — how an epic is held open until its hypothesis is ruled closed, what closes a Delivery, and the checkpoint machinery that is direction
 - [docs/steering.md](docs/steering.md) — how the operator steers the city's work: the intake rule that holds new work for placement, and the park, which holds work under a bead that has not started while work in flight finishes
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
-- [docs/human-engagement.md](docs/human-engagement.md) — how the pack engages a person: the subject, its human gates and conversations, converse sittings, Accept and the helm boards
+- [docs/human-engagement.md](docs/human-engagement.md) — how the pack engages a person: the subject, its human gates and conversations, converse sittings, Accept and the helm board
 - [docs/pack-authoring.md](docs/pack-authoring.md) — the pack's own conventions for its formulas, scripts, skills and agents on top of Gas City
 - [docs/gascity/](docs/gascity/README.md) — Gas City itself: the pages that state Gas City behavior only, cited and dated, and the index of canonical Gas City documentation
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota

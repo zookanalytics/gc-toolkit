@@ -2696,39 +2696,19 @@ func TestGatherBoundsTheDoneBand(t *testing.T) {
 	}
 }
 
-// The opt-out has to actually switch the pass off, not merely narrow it: a
-// query that still runs against a store with no ClosedAfter bound is the
-// unbounded read this window exists to prevent.
-func TestDoneWindowOptOut(t *testing.T) {
-	t.Setenv("GC_HELM_DONE_WINDOW", "0")
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
-	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
-
-	res, err := src.Gather(context.Background())
-	if err != nil {
-		t.Fatalf("Gather: %v", err)
-	}
-	if _, ok := findAnchor(res, "tk-fresh"); ok {
-		t.Error("GC_HELM_DONE_WINDOW=0 turns the DONE band off entirely")
-	}
-	if _, ok := findAnchor(res, "tk-live"); !ok {
-		t.Error("...and leaves the live board untouched")
-	}
-}
-
 // A gather that reads the clock again per rig measures each rig's DONE window
 // from a different instant, so a row at the boundary is kept or dropped by how
 // long the gather took to reach its rig rather than by the board's own clock.
 // The pinned-clock fixtures cannot see that — their clock never moves — so this
 // one advances on every read.
 func TestDoneWindowUsesOneClockAcrossRigs(t *testing.T) {
-	t.Setenv("GC_HELM_DONE_WINDOW", "24h")
-	// Closed 23h before the pass clock: inside a 24h window measured at the
-	// captured instant, outside one measured from any later read.
+	// Closed an hour inside the window at the pass clock: inside it measured at
+	// the captured instant, outside it measured from any later read.
+	edge := testNow.Add(-doneWindow + time.Hour)
 	boundary := func(prefix string) *fakeStore {
 		return &fakeStore{issues: map[string][]*beads.Issue{
 			"epic": {closedIssue(prefix+"-edge", "closed just inside the window", "epic", 2,
-				testNow.Add(-23*time.Hour), testNow.Add(-23*time.Hour), "")},
+				edge, edge, "")},
 		}}
 	}
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
@@ -2756,39 +2736,6 @@ func advancingClock(start time.Time, step time.Duration) func() time.Time {
 		t := start.Add(time.Duration(reads) * step)
 		reads++
 		return t
-	}
-}
-
-func TestDoneSince(t *testing.T) {
-	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
-	cases := []struct {
-		name string
-		env  string
-		want time.Duration
-		off  bool
-	}{
-		{name: "unset is the default week", want: defaultDoneWindow},
-		{name: "a Go duration", env: "48h", want: 48 * time.Hour},
-		{name: "bare seconds", env: "3600", want: time.Hour},
-		{name: "zero switches the band off", env: "0", off: true},
-		// A typo degrades to the DEFAULT, never to off, and a negative value is
-		// a typo. Reading "-24h" as an opt-out would silently restore the
-		// vanishing this band exists to stop; only the literal "0" does that.
-		// Same reading as durationEnv in cmd/helm-svc.
-		{name: "a negative duration degrades to the default", env: "-24h", want: defaultDoneWindow},
-		{name: "so does an unparseable one", env: "seven days", want: defaultDoneWindow},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("GC_HELM_DONE_WINDOW", c.env)
-			since, ok := doneSince(now)
-			if ok == c.off {
-				t.Fatalf("window enabled = %v, want %v", ok, !c.off)
-			}
-			if !c.off && !since.Equal(now.Add(-c.want)) {
-				t.Errorf("since = %s, want %s", since, now.Add(-c.want))
-			}
-		})
 	}
 }
 
