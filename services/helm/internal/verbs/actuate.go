@@ -53,7 +53,7 @@ type Actuator struct {
 	script string
 	// dir is the working directory for the run: the city root, so `gc`'s city
 	// discovery is deterministic wherever this process was started from. Same
-	// rationale as internal/source/gccli.go and tmux-pick-helm.sh's --city-path.
+	// rationale as internal/source/gccli.go.
 	dir     string
 	timeout time.Duration
 }
@@ -134,7 +134,7 @@ func (o *Actuator) Script() string { return o.script }
 // flag-driven one-shot path (no prompts) and --no-attach spawns the Discuss
 // sitting WITHOUT attaching. The operator then attaches from the terminal tile
 // or the sessions picker — exactly how `open`'s queued conversation is reached, and the
-// documented use of engage's --no-attach (the tmux board picker uses it too).
+// documented use of engage's --no-attach.
 // Every other semantic is the CLI's, unchanged (tk-hsm4d9).
 func argvFor(verb, bead string) ([]string, bool) {
 	switch verb {

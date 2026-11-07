@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -570,18 +569,17 @@ var metadataAnchors = []metadataAnchor{
 //
 // THE SECOND PASS is the only thing that gives a closed anchor a row: the open
 // queries stop returning it the instant it is answered. It derives into the
-// terminal DONE band, below every live row. doneSince ages it out on a clock
-// once it has been closed longer than the window; nothing else retires it, so
-// the band carries no per-row state. That clock is the caller's captured `now`,
-// so every rig is bounded at the same cutoff and a row at the boundary does not
-// turn on which rig the gather reached last.
+// terminal DONE band, below every live row. It ages out on a clock once it has
+// been closed longer than [doneWindow]; nothing else retires it, so the band
+// carries no per-row state. That clock is the caller's captured `now`, so every
+// rig is bounded at the same cutoff and a row at the boundary does not turn on
+// which rig the gather reached last.
 func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, now time.Time) {
 	// Children are read at ALL statuses in both passes, so n_closed is a real
 	// count rather than a count of the still-open ones.
 	s.gatherAnchors(ctx, g, st, r, beads.StatusOpen, nil, nil)
-	if since, ok := doneSince(now); ok {
-		s.gatherAnchors(ctx, g, st, r, beads.StatusClosed, &since, gatesClosedSince(now, since))
-	}
+	since := now.Add(-doneWindow)
+	s.gatherAnchors(ctx, g, st, r, beads.StatusClosed, &since, gatesClosedSince(now, since))
 }
 
 // gatesClosedSince bounds the closed pass's human gates: those closed inside
@@ -599,38 +597,15 @@ func gatesClosedSince(now, doneSince time.Time) *time.Time {
 	return &cutoff
 }
 
-// defaultDoneWindow bounds how far back the closed pass reaches.
+// doneWindow bounds how far back the closed pass reaches.
 //
 // Some bound is unavoidable: this city's ledger holds hundreds of closed
-// anchors and the board is read 36 rows at a time, so an unbounded pass would
-// bury the live rows under years of finished ones — a different way of losing
-// the operator's view. The guarantee the window buys is the one that was
-// actually broken: a row does not vanish BECAUSE it closed. It does age out
-// eventually, and a week is the span in which an operator can still recognise
-// what they were looking at. GC_HELM_DONE_WINDOW retunes it; 0 turns the DONE
-// band off entirely, which is the opt-out for anyone who wants the old
-// behaviour back.
-const defaultDoneWindow = 7 * 24 * time.Hour
-
-// doneSince resolves the closed pass's lower bound. ok is false when the band
-// is switched off, which is the only case where no closed query runs at all.
-func doneSince(now time.Time) (time.Time, bool) {
-	w := defaultDoneWindow
-	if v := strings.TrimSpace(os.Getenv("GC_HELM_DONE_WINDOW")); v != "" {
-		switch d, err := time.ParseDuration(v); {
-		case err == nil && d >= 0:
-			w = d
-		default:
-			if secs, atoiErr := strconv.Atoi(v); atoiErr == nil && secs >= 0 {
-				w = time.Duration(secs) * time.Second
-			}
-		}
-	}
-	if w <= 0 {
-		return time.Time{}, false
-	}
-	return now.Add(-w), true
-}
+// anchors, so an unbounded pass would bury the live rows under years of
+// finished ones — a different way of losing the operator's view. The guarantee
+// the window buys is the one that was actually broken: a row does not vanish
+// BECAUSE it closed. It does age out eventually, and a week is the span in which
+// an operator can still recognise what they were looking at.
+const doneWindow = 7 * 24 * time.Hour
 
 // gatherAnchors runs every anchor kind for one rig at one status. closedAfter
 // is non-nil only on the closed pass, where it both bounds the query and marks
