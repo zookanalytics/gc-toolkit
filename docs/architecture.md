@@ -151,9 +151,9 @@ performer; the full transition table with writers is
    the duplicate blocks first gains a `blocks` edge onto the canonical, so none
    goes ready before the canonical delivers. Every other disposition ends the
    waits on its bead with the close: `fixed-upstream` once the fix has closed or
-   shipped, and `re-homed`, `folded` and `not-needed` at once. The polecat that
-   builds a work bead never closes it, except as the duplicate of another bead,
-   through `bead-rehome.sh`.
+   shipped, or on a person's ruling, and `re-homed`, `folded` and `not-needed`
+   at once. The polecat that builds a work bead never closes it, except as the
+   duplicate of another bead, through `bead-rehome.sh`.
 
 An integration effort's beads take this pipeline through the handoff, and then
 the refinery lands each one directly on the effort's integration branch, which

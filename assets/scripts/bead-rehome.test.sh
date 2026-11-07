@@ -897,6 +897,7 @@ rc=0; run --origin al-wdup6 --successor bt-wcanon6 --kind duplicate || rc=$?
 eq "$rc" 5 "a ruled duplicate onto another store's canonical refuses while a bead waits on it"
 eq "$(snap alpha al-wdup6)|$(snap alpha al-waiter7)" "$BD|$B7" "…and writes nothing"
 has "$(cat "$TMP/err")" "holds nothing" "…because an edge across stores holds nothing"
+has "$(cat "$TMP/err")" "dep remove <bead> al-wdup6, and re-run" "…and it names the wait to end before a re-run"
 mkbead alpha open al-wdup7
 mkbead alpha open al-wcanon7
 BD=$(snap alpha al-wdup7)

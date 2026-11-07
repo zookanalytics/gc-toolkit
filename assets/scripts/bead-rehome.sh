@@ -536,7 +536,7 @@ carry_plan() {
         CARRY_NONE="no open bead waits on $ORIGIN"; return 0
     fi
     if [ "$SUCCESSOR_STORE" != "$ORIGIN_STORE" ]; then
-        CARRY_HELD="$ORIGIN blocks $waiting, and its canonical $SUCCESSOR is in $SUCCESSOR_STORE, where a blocks edge from $ORIGIN_STORE holds nothing, so its close would release them before $SUCCESSOR has delivered. Make each wait on a human gate that names $SUCCESSOR, or end its wait by hand, then re-run this close"
+        CARRY_HELD="$ORIGIN blocks $waiting, and its canonical $SUCCESSOR is in $SUCCESSOR_STORE, where a blocks edge from $ORIGIN_STORE holds nothing, so its close would release them before $SUCCESSOR has delivered. Give each one that must still wait a human gate that names $SUCCESSOR, then end each one's wait on $ORIGIN with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN, and re-run this close"
         return 0
     fi
     rows_json=$(list_rows "$waiting")
