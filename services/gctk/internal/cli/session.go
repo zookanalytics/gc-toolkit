@@ -19,20 +19,45 @@ import (
 // nothing else. The agent's own session name is the terminal title Claude Code
 // and Codex draw, which tmux carries to an attached client's tab once the
 // session has set-titles on. Each agent sets that name only through its own
-// /rename command, typed into its input box: Claude Code runs it locally, with
-// no model turn, and Codex accepts it with its argument during a turn
-// (codex-rs/tui/src/slash_command.rs at openai/codex rust-v0.164.0). So the
-// command renames the session in Gas City, then has `gc session nudge` type
-// /rename <title> into the session, delivered at once.
+// /rename command, typed into its input box, which it runs locally with no
+// model turn. So the command renames the session in Gas City, then has Gas City
+// type /rename <title> into the session.
 //
-// The nudge types into whatever the input box holds (nudgeSession in
-// internal/runtime/tmux/tmux.go at gastownhall/gascity 9f807760c). With a
-// client attached it types onto the text there and submits the two as one
-// message, and with none attached it clears the text first. So a /rename that
-// lands while a person is typing in the session joins their draft. The command
-// does not read the box first, and accepts that case: a session takes its
-// title when it starts and when its focus moves, and rarely while a person is
-// typing into it.
+// It does that with `gc session submit --intent follow_up`, for either agent.
+// Citations are to gastownhall/gascity 9f807760c.
+//
+// On a running session that queues the text, and the queue types a queued submit
+// verbatim and alone (nextQueuedDeliveryGroup and isQueuedUserSubmit in
+// cmd/gc/cmd_nudge.go) once the pane has been quiet for three seconds
+// (defaultNudgePollQuiescence). So a session takes its title at its next
+// boundary, a few seconds after the turn that ran the command ends. A nudge does
+// not serve both agents: the queue delivers one as a reminder
+// (formatNudgeInjectOutput in cmd/gc/cmd_nudge.go), which runs no command, and
+// Gas City queues a nudge to a Codex session running a turn, because Codex's
+// submit keys lead with Escape and Escape cancels the turn
+// (refuseInterruptingSubmitWhileBusy in internal/runtime/tmux/tmux.go).
+//
+// On a session suspended or not running, the submit acts as the operator: it
+// resumes the session, which lifts an operator's hold on it, and types at once
+// (Manager.submit in internal/session/submit.go). Gas City reports that as
+// submitted. A Claude Code session resumed this way took the title in each run
+// tried, on 2.1.319. A Codex session lost the text in each run tried, on
+// codex-cli 0.164.0, so its terminal keeps its old title.
+//
+// The typing goes into whatever the input box holds (nudgeSession in
+// internal/runtime/tmux/tmux.go). With a client attached it types onto the text
+// there and submits the two as one message, which goes to the model, so the
+// title does not reach the terminal. With none attached it clears the text first.
+// So a /rename that lands while a person is typing in the session joins their
+// draft, and it lands just after a turn ends, when a person may be writing a
+// reply. A /rename also starts no turn, and the session's poller confirms a
+// submit by seeing a turn start, so on Claude Code, whose plain Enter it re-sends
+// with no look at the box (submitAndConfirm in internal/runtime/tmux/tmux.go), it
+// presses Enter again over the next two seconds and can send what a person typed
+// in that time. Text it finds in the box just after that reads as a submit that
+// did not take, so the queue types the /rename again about 15 seconds later
+// (defaultQueuedNudgeRetryDelay in cmd/gc/cmd_nudge.go), onto that text. The
+// command cannot read the box at the moment of delivery, and accepts these cases.
 
 const sessionUsage = `usage:
   gctk session title --topic <words> [--subject <bead-id>] [--pr <n>]
@@ -53,27 +78,47 @@ An empty --subject or --pr is an item not given, so a caller can pass what it
 read, which is empty when there is none.
 
 gc session rename sets the title on the session's record, which gc session
-list and the board show. For a Claude Code or Codex session, gc session nudge
-then types "/rename <title>" into the session's input box at once, and the
-agent runs it, so its terminal title shows the title. The nudge does not wait
-for the input box to empty. A /rename that lands while a person is typing in
-the session joins their draft: with a client attached, Gas City types it onto
-the draft and submits the two together, and with none attached, it clears the
-box first. The command skips the nudge for another provider. Each line it
-prints says what it did: renamed, nudged, queued, or skipped and why.
+list and the board show. For a Claude Code or Codex session, gc session submit
+--intent follow_up then has Gas City type "/rename <title>" into the session's
+input box, and the agent runs it with no model turn, so its terminal title shows
+the title. The command skips this for another provider. Each line it prints says
+what it did: renamed, queued, submitted, or skipped and why.
 
-exit: 0 renamed; the nudge was delivered, queued, or skipped as printed
+On a running session the submit queues, and the terminal takes the title at the
+session's next boundary, a few seconds after the turn running now ends. So a
+session titling itself shows the title only after the turn that ran this
+command.
+
+On a session suspended or not running, Gas City treats the submit as the
+operator's own send: it resumes the session and lifts an operator's hold on it.
+So --session on a held session releases the hold and restarts the session, and
+Gas City reports that as submitted. A Claude Code session resumed this way took
+the title in each run tried. A Codex session lost the text in each run tried on
+codex-cli 0.164.0, so its terminal title stays as it was.
+
+Gas City does not wait for the input box to empty, and a /rename lands just
+after a turn ends, when a person may be writing a reply. One that lands while a
+person is typing in the session joins their draft: with a client attached, Gas
+City types it onto the draft and submits the two together as one message to the
+model, and the terminal title stays as it was. With none attached, it clears the
+box first. Steady typing holds the /rename back, and a pause of about three
+seconds lets it land. On a Claude Code session, Gas City can press Enter again
+over the two seconds after the /rename runs, which sends what a person has typed
+by then to the model. Text it finds in the box just after that has it type the
+/rename again, onto that text, about 15 seconds later.
+
+exit: 0 renamed; the /rename was queued, submitted, or skipped as printed
       1 the rename failed, and nothing else was done
       2 usage
-      3 renamed, but the nudge failed
+      3 renamed, but the gc session submit that sends the /rename failed
 `
 
 // The exit codes sessionUsage states.
 const (
-	sessionExitDone        = 0
-	sessionExitRenameFail  = 1
-	sessionExitUsage       = 2
-	sessionExitNudgeFailed = 3
+	sessionExitDone         = 0
+	sessionExitRenameFail   = 1
+	sessionExitUsage        = 2
+	sessionExitSubmitFailed = 3
 )
 
 type titleOpts struct {
@@ -173,8 +218,8 @@ func titleText(o titleOpts) string {
 	return strings.Join(append(lead, "—", o.topic), " ")
 }
 
-// sessionTitle renames the session in Gas City, then types /rename into it,
-// reporting each step on stdout.
+// sessionTitle renames the session in Gas City, then has Gas City type /rename
+// into it, reporting each step on stdout.
 func sessionTitle(o titleOpts, stdout, stderr io.Writer) int {
 	title := titleText(o)
 
@@ -193,29 +238,32 @@ func sessionTitle(o titleOpts, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "renamed %s to %q\n", id, title)
 
 	if why := renameSkip(id); why != "" {
-		fmt.Fprintf(stdout, "skipped the /rename nudge: %s\n", why)
+		fmt.Fprintf(stdout, "skipped the /rename: %s\n", why)
 		return sessionExitDone
 	}
 
-	out, errText, code = runSplit("gc", "session", "nudge", id, "--delivery", "immediate", "/rename "+title, "--json")
+	out, errText, code = runSplit("gc", "session", "submit", id, "--intent", "follow_up", "/rename "+title, "--json")
 	if code != 0 {
-		fmt.Fprintf(stderr, "gctk session title: the /rename nudge failed: gc session nudge exited %d%s\n", code, detail(errText, out))
-		return sessionExitNudgeFailed
+		fmt.Fprintf(stderr, "gctk session title: the /rename submit failed: gc session submit exited %d%s\n", code, detail(errText, out))
+		return sessionExitSubmitFailed
 	}
-	var nudged struct {
+	var sent struct {
 		Queued  bool   `json:"queued"`
 		Outcome string `json:"outcome"`
 	}
-	_ = json.Unmarshal([]byte(strings.TrimSpace(out)), &nudged)
-	if nudged.Queued {
-		fmt.Fprintf(stdout, "queued the /rename nudge: Gas City types it into %s when it can\n", id)
-		return sessionExitDone
+	_ = json.Unmarshal([]byte(strings.TrimSpace(out)), &sent)
+	switch {
+	case sent.Queued:
+		fmt.Fprintf(stdout, "queued the /rename submit: Gas City types it into %s at the session's next boundary\n", id)
+	case sent.Outcome == "submitted":
+		fmt.Fprintf(stdout, "submitted /rename to %s: Gas City resumed the session for it, lifting any operator hold, and a Codex session resumed this way has lost the text in each run tried, so check its terminal title\n", id)
+	default:
+		// Another outcome, such as the "accepted" gc reports when its fallback
+		// finds the API took the message (emitSessionSubmitAccepted in
+		// cmd/gc/cmd_session.go at gastownhall/gascity 9f807760c), does not
+		// say whether the session was resumed.
+		fmt.Fprintf(stdout, "submitted /rename to %s: gc session submit answered %q, not queued, so check its terminal title\n", id, sent.Outcome)
 	}
-	outcome := nudged.Outcome
-	if outcome == "" {
-		outcome = "sent"
-	}
-	fmt.Fprintf(stdout, "nudged %s: /rename %s\n", id, outcome)
 	return sessionExitDone
 }
 
