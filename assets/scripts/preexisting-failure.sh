@@ -272,12 +272,12 @@ tracked_by() {
       return 0
     fi
     seen="$seen$id "
-    # The answer decides, not the exit status. bd answers an id that names no
-    # bead with an error object at exit 1, and a store it could not reach with
-    # another error or with nothing.
-    out=$(bd_json show "$id")
-    step=$(printf '%s' "$out" | jq -r --arg id "$id" --arg live "$LIVE_STATUSES" "$DISPOSITION_JQ"'
-        if type == "array" and length > 0 and ((.[0].id // "") | tostring) == $id then
+    # The bead's list row, the one that carries an edge onto a bead in another
+    # rig's store. No row is a store that holds no such bead, and a read that
+    # fails is unknown.
+    out=$(bd_exact_row "$id") || return 1
+    step=$(printf '%s' "$out" | jq -r --arg live "$LIVE_STATUSES" "$DISPOSITION_JQ"'
+        if length > 0 then
           .[0] as $b
           | ($b | disposed_to) as $p
           | if ($live | split(",") | any(. == (($b.status // "") | tostring))) then "live"
@@ -286,8 +286,7 @@ tracked_by() {
               or ((($b.notes // "") | tostring) | contains(": not needed, per " + $p + " in "))
             then "ruled"
             else "next " + $p end
-        elif type == "object" and ((.error // "") | tostring | ascii_downcase | contains("no issues found")) then "missing"
-        else error("unread") end' 2>/dev/null) || return 1
+        else "missing" end' 2>/dev/null) || return 1
     case "$step" in
       live)
         FILING="$id"

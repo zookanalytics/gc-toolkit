@@ -1323,7 +1323,9 @@ ruled_gate() { # <gate-id>
   while [ -n "$g" ]; do
     case "$seen" in *" $g "*) return 1 ;; esac
     seen="$seen$g "
-    row=$(bd_json show "$g")
+    # The gate's list row, the one that carries an edge onto a gate in another
+    # rig's store.
+    row=$(bd_exact_row "$g") || return 1
     printf '%s' "$row" | jq -e --arg g "$g" '
       type == "array" and ((.[0].id // "") == $g)
       and ((.[0].issue_type // "") == "gate") and ((.[0].await_type // "") == "human")

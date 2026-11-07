@@ -1217,7 +1217,7 @@ eq "$rc" "0" "needs-you --visit adopts a gate on the anchor itself"
 out=$("$SUT" fix-in-flight --anchor tk-ancN); rc=$?
 eq "$rc/$out" "1/" "fix-in-flight reports a needs-you finding with no fix unit as neither in flight nor unanswered"
 set_row gN '.status = "closed" | .close_reason = "ruled: the operator audience"'
-STUB_SHOW_FAIL=1 "$SUT" close-answered --anchor tk-ancN >/dev/null 2>&1
+STUB_LIST_FAIL_ON="--id gN" "$SUT" close-answered --anchor tk-ancN >/dev/null 2>&1
 eq "$(bstatus "$FN")" "open" "a ruled gate whose row will not read releases nothing"
 "$SUT" close-answered --anchor tk-ancN
 eq "$(bstatus "$FN")" "closed" "close-answered closes it once its gate is ruled on, with no fix unit to wait on"
@@ -1269,8 +1269,7 @@ store '[{"id":"tk-ancF2","status":"open","assignee":"","title":"ancF2","notes":"
 printf 'gF1|blocks|tk-ancF2\n' > "$STUB_DEPS"
 FF2=$(human_finding tk-ancF2 "docs/f.md" "keep this flag or drop it?" 64)
 "$SUT" set-disposition --finding "$FF2" --anchor tk-ancF2 --disposition needs-you --visit gF1 >/dev/null
-set_row gF1 '.status = "closed" | .close_reason = "re-homed"'
-gc bd dep add gF1 gF3 --type supersedes >/dev/null
+set_row gF1 '.status = "closed" | .close_reason = "re-homed" | .dependencies = [{issue_id: "gF1", depends_on_id: "gF3", type: "supersedes"}]'
 "$SUT" close-answered --anchor tk-ancF2
 eq "$(bstatus "$FF2")" "open" "a finding whose gate was re-homed to one still open stays open"
 set_row gF3 '.status = "closed" | .close_reason = "ruled: drop the flag"'
@@ -1288,16 +1287,26 @@ store '[{"id":"tk-ancG","status":"open","assignee":"","title":"ancG","notes":"",
 printf 'gG1|blocks|tk-ancG\n' > "$STUB_DEPS"
 FG=$(human_finding tk-ancG "docs/g.md" "which name do we ship?" 65)
 "$SUT" set-disposition --finding "$FG" --anchor tk-ancG --disposition needs-you --visit gG1 >/dev/null
-set_row gG1 '.status = "closed" | .close_reason = "re-homed"'
-gc bd dep add gG1 bugG --type supersedes >/dev/null
+set_row gG1 '.status = "closed" | .close_reason = "re-homed" | .dependencies = [{issue_id: "gG1", depends_on_id: "bugG", type: "supersedes"}]'
 "$SUT" close-answered --anchor tk-ancG
 eq "$(bstatus "$FG")" "open" "a hand-off to a bead that is not a human gate releases nothing"
-gc bd dep remove gG1 bugG >/dev/null
-gc bd dep add gG1 gG2 --type supersedes >/dev/null
-set_row gG2 '.status = "closed" | .close_reason = "re-homed"'
-gc bd dep add gG2 gG1 --type supersedes >/dev/null
+set_row gG1 '.dependencies = [{issue_id: "gG1", depends_on_id: "gG2", type: "supersedes"}]'
+set_row gG2 '.status = "closed" | .close_reason = "re-homed" | .dependencies = [{issue_id: "gG2", depends_on_id: "gG1", type: "supersedes"}]'
 "$SUT" close-answered --anchor tk-ancG
 eq "$(bstatus "$FG")" "open" "…and neither does a hand-off that comes back to a gate already passed"
+# A gate re-homed onto a gate in another rig's store: the edge rides only the
+# gate's list row, and bd's show leaves it out.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancX","status":"open","assignee":"","title":"ancX","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"gX1","status":"open","assignee":"","title":"which path?","notes":"","issue_type":"gate","await_type":"human","await_id":"path","metadata":{}},
+        {"id":"xr-gX2","status":"closed","assignee":"","title":"which path? (moved)","notes":"","issue_type":"gate","await_type":"human","await_id":"path","close_reason":"ruled: the short one","metadata":{}}]'
+printf 'gX1|blocks|tk-ancX\n' > "$STUB_DEPS"
+FX=$(human_finding tk-ancX "docs/x.md" "which path do we take?" 67)
+"$SUT" set-disposition --finding "$FX" --anchor tk-ancX --disposition needs-you --visit gX1 >/dev/null
+set_row gX1 '.status = "closed" | .close_reason = "re-homed" | .dependencies = [{issue_id: "gX1", depends_on_id: "xr-gX2", type: "supersedes", external: true}]'
+"$SUT" close-answered --anchor tk-ancX
+eq "$(bstatus "$FX")" "closed" "a gate re-homed into another rig's store hands its question to the gate there"
+eq "$(meta "$FX" 'finding.ruling_bead')" "xr-gX2" "…and records the gate that was ruled on"
 : > "$STUB_DEPS"
 store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request"}}]'
 FR=$(human_finding tk-ancR "docs/r.md" "keep the old name?" 66)

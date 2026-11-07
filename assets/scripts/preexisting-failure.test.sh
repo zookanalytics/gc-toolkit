@@ -54,9 +54,13 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 #                      exit (non-zero, nothing on stdout), empty (exit 0,
 #                      nothing on stdout), object (an error object at exit 0)
 #                      or other (the bead's row under another bead's id)
-#   STUB_SHOW_FAIL_ID  every show of this id fails, in the same shapes
-# A show of an id the store does not hold answers bd's error object at exit 1,
-# or at STUB_SHOW_MISSING_RC.
+#   STUB_ROW_FAIL_ID   every `list --id` of this id fails, in the shape
+#                      STUB_ROW_SHAPE names: exit, empty or object, as above
+# A list --id answers that bead's row, or [] when the store does not hold it, and
+# hides a gate unless --include-gates lifts that, as bd's type suppression does
+# whatever the --id names. A show of an id the store does not hold answers bd's
+# error object at exit 1, and leaves out an edge marked "external", one onto a bead
+# in another rig's store, as bd's show does and its list does not.
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
@@ -70,9 +74,11 @@ case "${1:-}" in
     [ -n "${STUB_LIST_EMPTY:-}" ] && exit 0
     [ -n "${STUB_LIST_OBJECT:-}" ] && { echo '{"error":"database is locked"}'; exit 0; }
     shift
-    st=""; ty=""; tc=""; after=""; fields=()
+    st=""; ty=""; tc=""; after=""; fields=(); idf=""; gates=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        --id) shift; idf="${1:-}" ;;
+        --include-gates) gates=1 ;;
         --status=*) st="${1#--status=}" ;;
         --status|-s) shift; st="${1:-}" ;;
         --type=*) ty="${1#--type=}" ;;
@@ -86,6 +92,18 @@ case "${1:-}" in
       esac
       shift || true
     done
+    if [ -n "$idf" ]; then
+      if [ "$idf" = "${STUB_ROW_FAIL_ID:-}" ]; then
+        case "${STUB_ROW_SHAPE:-exit}" in
+          exit)   echo "bd: database is locked" >&2; exit 1 ;;
+          empty)  exit 0 ;;
+          object) echo '{"error":"database is locked"}'; exit 0 ;;
+        esac
+      fi
+      jq -c --arg id "$idf" --arg gates "$gates" \
+        '[ .[] | select(.id == $id) | select($gates != "" or ((.issue_type // "") != "gate")) ]' "$STORE"
+      exit 0
+    fi
     ign="${STUB_LIST_IGNORE:-}"
     out=$(cat "$STORE")
     if [ -n "$st" ] && [ "$ign" != "status" ]; then
@@ -107,7 +125,6 @@ case "${1:-}" in
       c=$(cat "$STUB_SEQ.show" 2>/dev/null || echo 0); c=$((c + 1)); printf '%s' "$c" > "$STUB_SEQ.show"
       [ "$c" -le "$STUB_SHOW_FAILS" ] && fail=1
     fi
-    [ -n "${STUB_SHOW_FAIL_ID:-}" ] && [ "$id" = "$STUB_SHOW_FAIL_ID" ] && fail=1
     if [ -n "$fail" ]; then
       case "${STUB_SHOW_SHAPE:-exit}" in
         exit)   echo "bd: database is locked" >&2; exit 1 ;;
@@ -116,10 +133,11 @@ case "${1:-}" in
         other)  jq -c --arg id "$id" '[ .[] | select(.id == $id) | .id = "tk-elsewhere" ]' "$STORE"; exit 0 ;;
       esac
     fi
-    out=$(jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$STORE")
+    out=$(jq -c --arg id "$id" '[ .[] | select(.id == $id)
+          | if has("dependencies") then .dependencies |= map(select(.external != true)) else . end ]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
       echo '{"error":"no issues found matching the provided IDs"}'
-      exit "${STUB_SHOW_MISSING_RC:-1}"
+      exit 1
     else
       printf '%s\n' "$out"
     fi ;;
@@ -466,20 +484,18 @@ done
 echo "# find and file: a chain that cannot be read is unknown, one that names nothing tracks nothing"
 store "$(closed tk-folded 2026-10-09T07:17:10Z "$(ptr "$K" tk-batch)" "$(reason "folded into" tk-batch)")" \
       "$(bead tk-batch open task 'batch: clear the pre-existing shellcheck tracker set')"
-for shape in exit empty object other; do
-  STUB_SHOW_FAIL_ID=tk-batch STUB_SHOW_SHAPE=$shape run find "$K"
+for shape in exit empty object; do
+  STUB_ROW_FAIL_ID=tk-batch STUB_ROW_SHAPE=$shape run find "$K"
   eq "$RC/$OUT" "1/" "a successor read that fails ($shape) fails the lookup"
 done
 has "$ERR" "not proof the tracker is missing" "the failure says why it is not an all-clear"
-STUB_SHOW_FAIL_ID=tk-folded run find "$K"
+STUB_ROW_FAIL_ID=tk-folded run find "$K"
 eq "$RC/$OUT" "1/" "a tracker read that fails fails the lookup"
-STUB_SHOW_FAIL_ID=tk-batch run file "$K" --message "seen"
+STUB_ROW_FAIL_ID=tk-batch run file "$K" --message "seen"
 eq "$RC/$OUT/$(creates)" "1//0" "an unread chain files nothing"
 store "$(closed tk-folded 2026-10-09T07:17:10Z "$(ptr "$K" tk-gone)" "$(reason "folded into" tk-gone)")"
-for rc in 1 0; do
-  STUB_SHOW_MISSING_RC=$rc run find "$K"
-  eq "$RC/$OUT" "0/" "an edge onto a bead the store does not hold tracks nothing (bd answers at exit $rc)"
-done
+run find "$K"
+eq "$RC/$OUT" "0/" "an edge onto a bead the store does not hold tracks nothing"
 has "$ERR" "tk-folded names tk-gone as its successor, but the store holds no such bead" "the dangling edge is reported"
 run file "$K" --message "seen"
 eq "$RC/$(creates)" "0/1" "so the red is filed"
@@ -505,6 +521,19 @@ ROWS+=("$(bead tk-c20 open task 'the end of a chain at the cap')")
 store "${ROWS[@]}"
 run find "$K"
 eq "$OUT" "tk-c20" "a chain of exactly the cap reaches its live bead"
+
+echo "# find and file: a fold into another rig's store, whose edge only the list row carries"
+XR=$(closed tk-xfold 2026-10-09T07:17:10Z "$(ptr "$K" xr-batch)" "$(reason "folded into" xr-batch)" \
+     | jq -c '.dependencies = [{issue_id: .id, depends_on_id: "xr-batch", type: "supersedes", external: true}]')
+store "$XR" "$(bead xr-batch open task 'batch in another rig')"
+run find "$K"
+eq "$RC/$OUT" "0/xr-batch" "a tracker folded into another rig's store answers through the bead there"
+run file "$K" --message "seen"
+eq "$RC/$OUT/$(creates)" "0/xr-batch/0" "so the red is confirmed there, and no duplicate tracker is filed"
+store "$(closed tk-gfold 2026-10-09T07:17:10Z "$(ptr "$K" tk-qgate)" "$(reason "re-homed to" tk-qgate)")" \
+      "$(bead tk-qgate open gate 'a person owes the call on this failure')"
+run find "$K"
+eq "$RC/$OUT" "0/tk-qgate" "a tracker re-homed onto a gate answers through the gate, which a plain list hides"
 
 echo "# find: a listing that dropped a filter cannot pass another bead off as the key's"
 store "$(closed tk-stranger 2026-10-11T08:00:00Z "$(ptr TestOther tk-batch)" "$(reason "folded into" tk-batch)")" \
