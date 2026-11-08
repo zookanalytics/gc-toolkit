@@ -520,7 +520,9 @@ SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/sig
 `superseded` or `already closed` exit, close this step and drain; after any
 other failure, part 3's gather included, append `findings.md` and
 `findings.json` to the review bead (`--append-notes`), close this step, then
-restore its route from `metadata.review_pool` and drain.
+return the review to your pool with
+`gc sling "$GC_TEMPLATE" "{{review_bead}}" --no-formula --no-convoy`, append
+what a failed sling said to the review bead's notes, and drain.
 
 **9. Close this step, remove the workspace, then drain.** The lanes closed their
 own beads. Never close `workflow-finalize`.
