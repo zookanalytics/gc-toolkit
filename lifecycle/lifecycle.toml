@@ -1477,10 +1477,16 @@ keys = [
 # An epic's contract and the ruling on its hypothesis, recorded on the epic bead
 # (issue_type=epic). docs/epics.md is the contract these fields make
 # machine-readable, and docs/epic-stewardship.md is the enforcement that reads
-# them. They are the operator's: stamped when the operator confirms a contract
-# field or rules at a sitting on the epic, the dated decision docs/epics.md calls
-# for. No pack script writes them. finalize-gate.sh (clause_epic_ruling_recorded)
-# and doctor/check-epic-closed-implies-ruled read epic_hypothesis, epic_ruling and
+# them. `gctk epic create` (assets/scripts/epic.sh, the work skill's epic
+# create) writes the contract fields into the create that files an epic, and
+# refuses an epic whose parent is not an epic when it has no epic_hypothesis.
+# The hypothesis can be the filer's first draft until the operator's first
+# ruling, and an epic with epic_hypothesis and no epic_ruling has one. The other
+# contract fields and the ruling's keys are the operator's: stamped when the
+# operator states or confirms a contract field or rules at a sitting on the
+# epic, the dated decision docs/epics.md calls for. No pack script writes the
+# ruling's keys. finalize-gate.sh (clause_epic_ruling_recorded) and
+# doctor/check-epic-closed-implies-ruled read epic_hypothesis, epic_ruling and
 # epic_ruling_reason.
 keys = [
   "epic_handle", "epic_hypothesis", "epic_boundaries",

@@ -14,8 +14,9 @@
 // do not call gctk yet, and it goes away once they do. A bridge is not a
 // contract gctk keeps: matching a script's flags and output byte for byte is
 // not a goal, and neither are tests that pin usage text.
-// assets/scripts/lifecycle.sh and assets/scripts/merge.sh are bridges: they
-// only exec this binary, and refuse the call when there is none to run.
+// assets/scripts/lifecycle.sh, assets/scripts/merge.sh and
+// assets/scripts/epic.sh are bridges: they only exec this binary, and refuse
+// the call when there is none to run.
 // pr-status-label.sh writes the status: and held: labels in shell and takes
 // their values from `gctk pr-status`, the one derivation the labels and the helm
 // board share, so when the binary is absent or stale it leaves the labels
@@ -31,6 +32,7 @@ import (
 )
 
 const topUsage = `Usage:
+  gctk epic <verb> [flags]        actions on an epic: file one with its contract
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
   gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
   gctk pr-status <verb> [flags]   PR status working|merging|needs-review|needs-attention (services/gctk/prstatus)
@@ -38,7 +40,7 @@ const topUsage = `Usage:
   gctk session <verb> [flags]     actions on a session: give it a title its record and its terminal show
   gctk version                    the revision this binary was built from
 
-Run "gctk lifecycle", "gctk pr-status", "gctk rig" or "gctk session" for that subcommand's verbs.
+Run "gctk epic", "gctk lifecycle", "gctk pr-status", "gctk rig" or "gctk session" for that subcommand's verbs.
 `
 
 func main() {
@@ -51,6 +53,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	switch args[0] {
+	case "epic":
+		return cli.Epic(args[1:], stdout, stderr)
 	case "lifecycle":
 		return cli.Lifecycle(args[1:], stdout, stderr)
 	case "merge":
