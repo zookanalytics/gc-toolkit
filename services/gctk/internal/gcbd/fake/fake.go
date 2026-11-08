@@ -72,16 +72,19 @@ func (s *Store) Row(id string) (Bead, bool) {
 	return b, ok
 }
 
-// Rows returns each bead named that the store holds, as gcbd.Client.Rows does.
+// Rows returns the row of each bead named. A bead the store does not hold fails
+// the read with a *gcbd.ReadError naming it, as gcbd.Client.Rows does.
 func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 	if s.RowsErr != nil {
 		return nil, s.RowsErr
 	}
 	var out []gcbd.Bead
 	for _, id := range ids {
-		if b, ok := s.rows[id]; ok {
-			out = append(out, row(b))
+		b, ok := s.rows[id]
+		if !ok {
+			return nil, &gcbd.ReadError{ID: id, Reason: "the fake store holds no row for it"}
 		}
+		out = append(out, row(b))
 	}
 	return out, nil
 }

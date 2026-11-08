@@ -191,8 +191,11 @@ func (s *BlockedSet) Answer(b *Bead) (Blocking, error) {
 }
 
 // Rows reads each bead named, with its own edges, from the store itself in one
-// `gc bd show`, so the read sees a write just made. A bead the store does not
-// hold is left out. A read that fails returns a *ReadError.
+// `gc bd show`, so the read sees a write just made. A read that fails returns a
+// *ReadError, and so does a bead named that the reply carries no row for, which
+// the error names. bd's show leaves out a bead the store does not hold and a
+// bead whose lookup failed alike, and exits 0 while it found another bead named,
+// so its reply cannot tell the two apart. When it finds none, it exits 1.
 func (c *Client) Rows(ids []string) ([]Bead, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -206,6 +209,15 @@ func (c *Client) Rows(ids []string) ([]Bead, error) {
 	var rows []Bead
 	if err := dec.Decode(&rows); err != nil {
 		return nil, &ReadError{Reason: "gc bd show's rows did not decode: " + err.Error()}
+	}
+	read := make(map[string]bool, len(rows))
+	for i := range rows {
+		read[rows[i].ID] = true
+	}
+	for _, id := range ids {
+		if !read[id] {
+			return nil, &ReadError{ID: id, Reason: "gc bd show returned no row for it, which is its reply both for a bead the store does not hold and for one whose lookup failed"}
+		}
 	}
 	return rows, nil
 }
@@ -263,7 +275,7 @@ func (c *Client) strictArray(args ...string) (json.RawMessage, error) {
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			return nil, &ReadError{Reason: fmt.Sprintf("%s exited %d: %s", what, ee.ExitCode(), firstLine(stderr.String()))}
+			return nil, &ReadError{Reason: fmt.Sprintf("%s exited %d: %s", what, ee.ExitCode(), failure(out, stderr.String()))}
 		}
 		return nil, &ReadError{Reason: fmt.Sprintf("%s did not run: %v", what, err)}
 	}
@@ -277,6 +289,23 @@ func (c *Client) strictArray(args ...string) (json.RawMessage, error) {
 		return nil, &ReadError{Reason: what + " printed more than one JSON array"}
 	}
 	return raw, nil
+}
+
+// failure is what a read that exited non-zero said. bd, asked for --json,
+// prints its error as a JSON object on stdout, while gc's stderr can open with
+// its notice of the store it answers from, so the object's error comes first,
+// and the first line of stderr, where gc itself reports a failure, comes next.
+func failure(stdout []byte, stderr string) string {
+	var reply struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(Scrub(stdout), &reply) == nil && reply.Error != "" {
+		return reply.Error
+	}
+	if s := firstLine(stderr); s != "" {
+		return s
+	}
+	return "it printed no error"
 }
 
 func firstLine(s string) string {

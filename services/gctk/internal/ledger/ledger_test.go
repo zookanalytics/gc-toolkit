@@ -239,3 +239,20 @@ func TestASnapshotWhoseReadFailsIsAReadError(t *testing.T) {
 		t.Errorf("a row read that fails = %v, want its read error", err)
 	}
 }
+
+// A bead the store reads no row for, named or reached as an ancestor, fails the
+// snapshot, since without it the snapshot can answer neither for it nor for a
+// bead below it.
+func TestASnapshotWithoutABeadItNeedsIsAReadError(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "orphan", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "gone-parent", Status: "open"}}})
+	for _, tc := range []struct{ name, id, missing string }{
+		{"a bead named", "gone", "gone"},
+		{"an ancestor", "orphan", "gone-parent"},
+	} {
+		var re *gcbd.ReadError
+		if snap, err := New(s).Read(tc.id); !errors.As(err, &re) || re.ID != tc.missing || snap != nil {
+			t.Errorf("%s the store does not hold = %v, %v; want a read error naming %s", tc.name, snap, err, tc.missing)
+		}
+	}
+}

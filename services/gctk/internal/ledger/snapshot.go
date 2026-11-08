@@ -75,9 +75,10 @@ const maxAncestry = 32
 
 // Read builds a snapshot of the beads named and every ancestor their
 // parent-child edges reach, since the store can hold a bead through any of
-// them. It reads the rows one level at a time and the blocked set once. A bead
-// the store does not hold is absent from the snapshot. A read that fails returns
-// its *gcbd.ReadError.
+// them. It reads the rows one level at a time and the blocked set once. A read
+// that fails returns its *gcbd.ReadError, and so does a bead named or reached
+// that the store reads no row for, since a snapshot without it can answer
+// neither for it nor for a bead below it.
 func (l *Ledger) Read(ids ...string) (*Snapshot, error) {
 	s := &Snapshot{records: map[string]*Record{}}
 	level := ids

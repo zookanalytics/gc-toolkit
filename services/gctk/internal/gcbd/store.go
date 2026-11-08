@@ -5,8 +5,9 @@ package gcbd
 // domain's tests run on.
 type Store interface {
 	// Rows reads each bead named, with its own edges, from the store itself, so
-	// the read sees a write just made. A bead the store does not hold is left
-	// out, and a read that fails returns a *ReadError.
+	// the read sees a write just made. A read that fails returns a *ReadError,
+	// and so does a bead named that it reads no row for, because the store's
+	// reply cannot tell a bead it does not hold from one whose lookup failed.
 	Rows(ids []string) ([]Bead, error)
 	// Blocked reads the store's blocked set once, for Answer to judge beads
 	// against. A read that fails returns a *ReadError.

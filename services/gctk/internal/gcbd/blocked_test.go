@@ -9,16 +9,18 @@ import (
 	"testing"
 )
 
-// blockedStub puts a `gc` on PATH that answers `bd show` with $STUB_SHOW,
-// `bd blocked --json` with $STUB_BLOCKED and exit $STUB_BLOCKED_RC, and
-// `bd sql --json <query>` with $STUB_MARKS and exit $STUB_MARKS_RC. It logs each
-// call's argv, one line per call, to the file it returns.
+// blockedStub puts a `gc` on PATH that answers `bd show` with $STUB_SHOW and
+// exit $STUB_SHOW_RC, `bd blocked --json` with $STUB_BLOCKED and exit
+// $STUB_BLOCKED_RC, and `bd sql --json <query>` with $STUB_MARKS and exit
+// $STUB_MARKS_RC, each after printing $STUB_STDERR, when set, on stderr. It
+// logs each call's argv, one line per call, to the file it returns.
 func blockedStub(t *testing.T, show, blocked, marks string) string {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	stub := `#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_LOG"
+[ -z "${STUB_STDERR:-}" ] || printf '%s\n' "$STUB_STDERR" >&2
 case "$1 $2" in
 "bd show") printf '%s\n' "$STUB_SHOW"; exit "${STUB_SHOW_RC:-0}" ;;
 "bd blocked") printf '%s\n' "$STUB_BLOCKED"; exit "${STUB_BLOCKED_RC:-0}" ;;
@@ -197,6 +199,46 @@ func TestBlockedReadThatFailsIsAReadError(t *testing.T) {
 			t.Fatalf("Rows = %v, %v; want a *ReadError", rows, err)
 		}
 	})
+	// bd's show leaves out a bead it does not hold and one whose lookup failed
+	// alike, and exits 0 while it found another, so a bead named that the reply
+	// carries no row for is a read that could not answer it.
+	t.Run("a bead the reply carries no row for", func(t *testing.T) {
+		blockedStub(t, `[{"id":"b-own","status":"open"}]`, blockedListing, blockedMarks)
+		rows, err := (&Client{bin: "gc"}).Rows([]string{"b-own", "b-gone"})
+		var re *ReadError
+		if !errors.As(err, &re) || re.ID != "b-gone" || rows != nil {
+			t.Fatalf("Rows = %v, %v; want a *ReadError naming b-gone", rows, err)
+		}
+	})
+}
+
+// A read that exits non-zero says what failed: the error bd's --json reply
+// carries on stdout, ahead of gc's notice of the store it answers from on
+// stderr, else stderr's first line, where gc reports a failure of its own.
+func TestAFailedReadSaysWhatFailed(t *testing.T) {
+	const notice = `gc bd: answering from the rig "gc-toolkit" store`
+	for _, tc := range []struct {
+		name, show, stderr, want, wantNot string
+	}{
+		{"bd's error on stdout", `{"error":"no issues found matching the provided IDs","schema_version":1}`, notice + "\nIssue b-gone not found",
+			"gc bd show exited 1: no issues found matching the provided IDs", notice},
+		{"gc's error on stderr", "", "Error: unknown flag: --json", "gc bd show exited 1: Error: unknown flag: --json", ""},
+		{"no error printed", "", "", "gc bd show exited 1: it printed no error", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockedStub(t, tc.show, blockedListing, blockedMarks)
+			t.Setenv("STUB_SHOW_RC", "1")
+			t.Setenv("STUB_STDERR", tc.stderr)
+			_, err := (&Client{bin: "gc"}).Rows([]string{"b-gone"})
+			var re *ReadError
+			if !errors.As(err, &re) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Rows = %v; want a *ReadError saying %q", err, tc.want)
+			}
+			if tc.wantNot != "" && strings.Contains(err.Error(), tc.wantNot) {
+				t.Errorf("Rows = %v; it names gc's notice rather than what failed", err)
+			}
+		})
+	}
 }
 
 func TestEdgesCarryTheFarBead(t *testing.T) {

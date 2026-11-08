@@ -18,7 +18,11 @@ func TestFakeRowsAnswerAsTheStoreDoes(t *testing.T) {
 	s.Put(Bead{ID: "b-2", Status: "open"})
 	s.List("b-1", "b-2")
 	s.Mark("b-1")
-	rows, err := s.Rows([]string{"b-1", "b-missing"})
+	var re *gcbd.ReadError
+	if rows, err := s.Rows([]string{"b-1", "b-missing"}); !errors.As(err, &re) || re.ID != "b-missing" || rows != nil {
+		t.Fatalf("Rows with a bead the store does not hold = %v, %v; want a *gcbd.ReadError naming b-missing", rows, err)
+	}
+	rows, err := s.Rows([]string{"b-1"})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("Rows = %v, %v; want b-1 alone", rows, err)
 	}

@@ -256,6 +256,20 @@ func TestStoreAcceptance(t *testing.T) {
 			t.Errorf("the marks read does not name %s", id)
 		}
 	}
+	// bd's show leaves out a bead the store does not hold and exits 0 beside one
+	// it holds, and fails when it holds none named, so the adapter's row read
+	// fails either way, naming the bead in the first case and bd's error in the
+	// second.
+	if out, err := s.try("show", own, "pb-gone", "--json"); err != nil || strings.Contains(out, `"id": "pb-gone"`) {
+		t.Errorf("bd show of a held bead beside one it does not hold = %v: %s; want exit 0 and no row for pb-gone", err, out)
+	}
+	var re *ReadError
+	if _, err := c.Rows([]string{own, "pb-gone"}); !errors.As(err, &re) || re.ID != "pb-gone" {
+		t.Errorf("adapter: rows with a bead the store does not hold = %v; want a read error naming pb-gone", err)
+	}
+	if _, err := c.Rows([]string{"pb-gone"}); !errors.As(err, &re) || !strings.Contains(err.Error(), "no issues found") {
+		t.Errorf("adapter: rows of only a bead the store does not hold = %v; want a read error carrying bd's error", err)
+	}
 
 	// bd's close rule: a blocker of a bead's own refuses the close, and a bead
 	// held only through its parent closes.
