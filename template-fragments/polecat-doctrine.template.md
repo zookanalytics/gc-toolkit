@@ -204,7 +204,7 @@ anchor's readers read, and to your claimed bead everything else.
 
 | Bead | Closed by |
 |---|---|
-| the work bead | the refinery, from merge-push — the anchor on a verified merge, a rework hand-back landed-on-branch — **NEVER you** |
+| the work bead | the refinery, from merge-push — the anchor on a verified merge, a rework hand-back landed-on-branch — **NEVER you**, unless it duplicates another bead |
 | a review bead | `signoff.sh` after the verdict, or the cadence's `review-sweep.sh` when there is none to give — **NEVER you** |
 | your step beads | **you**, via `assets/scripts/claim-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
@@ -214,6 +214,21 @@ anchor's readers read, and to your claimed bead everything else.
   equally when it is a child whose anchor is elsewhere. Hand it to the
   refinery with a note: merge-push is where a bead leaves the anchor class
   and closes, and it is the only thing that verifies a merge.
+- **One close is yours: a work bead that duplicates another bead.** When
+  another bead in the same store carries the same work, the work bead closes
+  as its duplicate at once, whatever state the canonical is in, and you then
+  decline your run with no gate (Blocked work and human gates). The
+  disposition writer records the canonical in bd's `duplicates` edge, first
+  makes whatever waits on the work bead wait on the canonical, and refuses a
+  bead that did work of its own, so record first that this run pushed nothing:
+
+  ```bash
+  gc bd update <work-bead> --set-metadata gc.work_outcome=no-op \
+    && "{{ .ConfigDir }}/assets/scripts/bead-rehome.sh" --origin <work-bead> --successor <canonical> --kind duplicate --note "<why it is the same work, one sentence>"
+  ```
+
+  A refusal is a decision for a person: decline with a gate that names the
+  canonical and what the writer refused.
 - **Always close your own step, when its exit criteria hold.** A graph.v2 step
   advances only by closing its own bead; a run that closes nothing leaves its
   whole chain open and re-offered as new work (the husk generator). Close the
@@ -290,7 +305,8 @@ otherwise leave the bead resumable (branch + notes recorded) and drain.
 **Declining work you must not close means cancelling your run, after
 recording its wait.** This covers every reason you decline: a duplicate
 dispatch, a premise you found falsified, work another branch already
-delivered. Never close your step to decline, and never leave it open: an open
+delivered, and the run a work bead leaves once you close it as a duplicate.
+Never close your step to decline, and never leave it open: an open
 step is claimable, so the pool hands it to a fresh polecat that re-derives
 your refusal. A molecule's lifecycle is gascity's, so the run ends through
 gascity's run cancel: gascity closes the root and every step that is not

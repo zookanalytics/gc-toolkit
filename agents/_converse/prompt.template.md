@@ -314,7 +314,7 @@ Rules:
   ```
 
   When a gate the sitting did not answer still blocks the subject, the
-  writer records the pointer and exits 5, and the close waits until that
+  writer records nothing and exits 5, and the close waits until that
   gate is cleared; run the same line again then. When another bead carries
   the work, that bead is the successor, under `--kind duplicate`, `folded`,
   `re-homed` or `fixed-upstream`. A subject whose **in-flight PR** the
