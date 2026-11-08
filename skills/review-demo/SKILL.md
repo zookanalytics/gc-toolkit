@@ -14,6 +14,13 @@ the check approves with a one-line note and attaches nothing. If the rig's
 guidance names design or writing standards, the check also reviews changed
 screens and messages against them.
 
+A demo shows a reviewer what the change does, concisely, as a sprint demo does:
+the few items that present the change as a whole, an example or two of a change
+that repeats across many places, and each problem the check finds. It does not
+walk the reviewer through every place the change reaches. Checking every place
+is the check's own work, and the verdict says what it checked. Whatever the
+change, the check posts only the visuals such a demo needs.
+
 This check holds the specialist stance: load `gc-toolkit.specialist-stance`
 before you judge. This file is the visual lens. Whether the change is correct
 is the `correctness` check's. Whether it is the right thing to ship, and
@@ -254,7 +261,9 @@ subject in the delivery's `--body`, as the same run produced them. Open each PNG
 and check that it holds the whole message.
 
 Deliver each message on its own, in a PNG named for it, beside the clip or the
-screenshot of any screen the change alters.
+screenshot of any screen the change alters. When the change alters many
+messages in the same way, such as a footer they share, capture and check each
+one, then deliver an example or two and list the rest in the verdict.
 
 ### Review against the rig's standards
 
@@ -280,12 +289,12 @@ If it names a standard, work through these steps in order.
      opens. A changed screen also needs the state that shows the change.
 3. **Capture each one in each state.** The guidance says how a script reaches
    each state. Capture each message as the section Show each message says.
-   Deliver each capture on its own, in a PNG named for the screen or message and
-   the state, so the evidence for every finding is on the PR. If a limit outside
-   the change stops a capture, that is not a finding and it does not block. Name
-   in the verdict each screen, message or state you could not capture, and what
-   stopped it. If the change itself makes a capture fail, that failure is a
-   finding.
+   Keep each capture in the review workspace, in a PNG named for the screen or
+   message and the state. The captures are your working evidence, and step 6
+   says which of them reach the PR. If a limit outside the change stops a
+   capture, that is not a finding and it does not block. Name in the verdict
+   each screen, message or state you could not capture, and what stopped it. If
+   the change itself makes a capture fail, that failure is a finding.
 4. **Check each capture against the standards.** Apply every rule that covers
    what the capture shows. Design rules cover each screen. Writing rules cover
    the words on each screen and in each message. Read the words as the person
@@ -299,13 +308,27 @@ If it names a standard, work through these steps in order.
    fix. Both block approval, and both go in this verdict, not in a separate bug.
    File a violation on a screen or message the change does not alter as a
    separate bug, as the review formula says for what is real but not this
-   diff's. Each finding gives:
+   diff's. A violation with one cause is one finding, wherever it shows, as
+   when a shared component is drawn wrong on every screen. Violations with
+   different causes are separate findings. Each finding gives:
    - the rule, in the standard's words, and where the standard states it;
-   - the screen or message, and the state;
+   - every screen or message where it shows, and in which states;
    - what is wrong, and what would meet the rule;
-   - its evidence: the capture that shows the problem, by the name of its PNG;
+   - its evidence: an example or two of the captures that show it, by the
+     names of their PNGs;
    - its `locus`: the file and the component, template or style that draws the
      part that is wrong.
+6. **Deliver the demo.** The PR gets the three things below, and no other
+   capture. Deliver each one as the section Produce it and deliver it says.
+   - The showcase: a visual that shows the change as a whole. Pick it as the
+     section Pick the modality picks a visual. A visual the diff carries, such
+     as a repo's updated golden images, is a `repo-artifact`. A flow is a
+     `video`. Otherwise it is a `screenshot`. When the change repeats across
+     many screens, the showcase is an example or two, such as one screen in
+     the states that show the change best.
+   - Each finding's evidence: the capture or two that show it, so the evidence
+     for every finding is on the PR.
+   - The messages, as the section Show each message says.
 
 ### Judge what it shows
 
@@ -329,7 +352,8 @@ finding, and the clip or the screenshot is its evidence to deliver.
 
 If the rig's guidance names a standard, a violation on a changed screen or
 message is also a finding against the change, whether the change introduced it
-or it was already there. Request changes, and name the capture as the evidence.
+or it was already there. Request changes, and name an example or two of its
+captures as the evidence.
 
 A capture that cannot run for a reason outside the change is not a finding. The
 capture toolchain may not resolve, the rig may have no app to serve, no preview
@@ -365,10 +389,13 @@ repo-artifact's sentence also says where the visual came from, as its delivery
 comment does. A delivered screenshot's sentence also says what it was rendered
 from: the reviewed commit, and any fixture that stands in for live data. A
 verdict on a change that adds or alters a message names each message it shows,
-by its subject, and each one it could not show, with what stopped it. If the
-rig names a standard, the verdict names it. The verdict also lists each screen
-and message you checked against it, in which states, and each screen, message or
-state you could not check, with what stopped it.
+by its subject, and each one it could not show, with what stopped it. Where it
+shows an example or two of many messages the change alters in the same way, it
+also names the rest, by subject. If the rig names a standard, the verdict names
+it. The verdict also lists each screen and message you checked against it, in
+which states, and each screen, message or state you could not check, with what
+stopped it. The PR shows only the demo, so this list is how a person sees what
+the check covered.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
@@ -377,8 +404,9 @@ state you could not check, with what stopped it.
 - **Delivered, and it shows the change failing.** Request changes with its
   modality. The finding goes in `findings.json`.
 - **Delivered, and it shows a violation of the rig's standard.** Request changes
-  with its modality. Each violation is a finding in `findings.json` that names
-  the rule, with the capture as its evidence.
+  with its modality. Each cause of a violation is one finding in
+  `findings.json` that names the rule, with an example or two of its captures
+  as evidence.
 - **Delivered as a fallback.** Judge what it shows the same way. Record the
   modality delivered with `--visual` and the one that fits with
   `--visual-fallback-from`, and say what stopped the one that fits.
