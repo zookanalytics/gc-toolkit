@@ -291,10 +291,11 @@ If it names a standard, work through these steps in order.
    each state. Capture each message as the section Show each message says.
    Keep each capture in the review workspace, in a PNG named for the screen or
    message and the state. The captures are your working evidence, and step 6
-   says which of them reach the PR. If a limit outside the change stops a
-   capture, that is not a finding and it does not block. Name in the verdict
-   each screen, message or state you could not capture, and what stopped it. If
-   the change itself makes a capture fail, that failure is a finding.
+   says what the PR gets. When a capture cannot be made for a reason the change
+   did not cause, such as a state the capture tools cannot reach, that is not a
+   finding and it does not block. Name in the verdict each screen, message or
+   state you could not capture, and what stopped it. If the change itself makes
+   a capture fail, that failure is a finding.
 4. **Check each capture against the standards.** Apply every rule that covers
    what the capture shows. Design rules cover each screen. Writing rules cover
    the words on each screen and in each message. Read the words as the person
@@ -314,21 +315,31 @@ If it names a standard, work through these steps in order.
    - the rule, in the standard's words, and where the standard states it;
    - every screen or message where it shows, and in which states;
    - what is wrong, and what would meet the rule;
-   - its evidence: an example or two of the captures that show it, by the
-     names of their PNGs;
+   - its evidence: where the demo shows it, as step 6 says;
    - its `locus`: the file and the component, template or style that draws the
      part that is wrong.
-6. **Deliver the demo.** The PR gets the items below, and no other
-   capture. Deliver each one as the section Produce it and deliver it says.
-   - The showcase: a visual that shows the change as a whole. Pick it as the
-     section Pick the modality picks a visual. A visual the diff carries, such
-     as a repo's updated golden images, is a `repo-artifact`. A flow is a
-     `video`. Otherwise it is a `screenshot`. When the change repeats across
-     many screens, the showcase is an example or two, such as one screen in
-     the states that show the change best.
-   - Each finding's evidence: the capture or two that show it, so the evidence
-     for every finding is on the PR.
-   - The messages, as the section Show each message says.
+6. **Deliver the demo.** The demo is one narrated `video` that walks a
+   reviewer through the change and through each finding on a screen. It is a
+   video even when the change is static, because a walkthrough presents
+   several screens and states better than a set of screenshots does. Record
+   it as the section Produce it and deliver it says for a video. Its script
+   reaches each state the way your captures did. It can visit several screens,
+   with a `goto` step for each, and change the size with a `resize` step. Its
+   steps show the following.
+   - The showcase: what the change does, on an example screen or two, in the
+     states that show the change best.
+   - Each finding on a screen: a screen where it shows, in a state that shows
+     it, under a caption that names the rule it breaks. The finding names that
+     caption as its evidence.
+
+   The PR gets no other capture of a screen. When a single capture shows the
+   whole demo, such as one changed screen in one state with no finding,
+   deliver that capture as a `screenshot` instead. When the video cannot be
+   produced here, its fallback is a screenshot of each state the showcase
+   shows and one of each finding, which the finding names as its evidence.
+   Deliver the messages as the section Show each message says. A finding in a
+   message names that message's capture as its evidence. When the change
+   alters no screen, the messages are the whole demo.
 
 ### Judge what it shows
 
@@ -352,8 +363,8 @@ finding, and the clip or the screenshot is its evidence to deliver.
 
 If the rig's guidance names a standard, a violation on a changed screen or
 message is also a finding against the change, whether the change introduced it
-or it was already there. Request changes, and name an example or two of its
-captures as the evidence.
+or it was already there. Request changes, and name where the demo shows it as
+the evidence.
 
 A capture that cannot run for a reason outside the change is not a finding. The
 capture toolchain may not resolve, the rig may have no app to serve, no preview
@@ -405,8 +416,8 @@ the check covered.
   modality. The finding goes in `findings.json`.
 - **Delivered, and it shows a violation of the rig's standard.** Request changes
   with its modality. Each cause of a violation is one finding in
-  `findings.json` that names the rule, with an example or two of its captures
-  as evidence.
+  `findings.json` that names the rule, and where the demo shows it as its
+  evidence.
 - **Delivered as a fallback.** Judge what it shows the same way. Record the
   modality delivered with `--visual` and the one that fits with
   `--visual-fallback-from`, and say what stopped the one that fits.
