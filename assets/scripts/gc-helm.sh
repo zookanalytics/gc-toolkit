@@ -55,7 +55,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one; --json prints {subject,conversation,filed}
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --json prints {subject,conversation,filed}
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; a subject filed whose conversation is not is named, filed:false in --json, for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, a new topic's rig, question and model on one screen, filled in from the command line; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
@@ -121,11 +121,15 @@ conversations and what holds it, and the city's rigs for a new topic. A result
 for an earlier subject never stands in for the current one, and no result
 changes the rig or a conversation the operator chose. Ctrl+S saves only once the
 destination it shows is settled: open files the question as a new conversation,
-with --allow-duplicate on a subject and --new-subject on a topic, and the form
-says it is saved; engage <conversation> --no-attach then starts its sitting, and
-the form follows it to ready. Enter attaches; leaving keeps it running. A
-question the form did not save is kept in a file when it closes. `gc-helm
-attach` opens the same form on the conversations to return to.
+with --allow-duplicate and --if-subject naming the subject shown on a subject,
+and --new-subject on a topic, and the form says it is saved; engage
+<conversation> --no-attach then starts its sitting, and the form follows it to
+ready. A save open refuses reads the subject again, so a subject that names
+another bead now is shown before the next Ctrl+S can file there. Enter attaches;
+leaving keeps it running. A question the form did not save is kept in a file
+when it closes, and before the terminal goes to a sitting. `gc-helm attach`
+opens the same form on the conversations to return to. A --model the
+configured variants do not carry is refused before the form opens.
 --skill <name> takes any skill on the sitting's roster (gc skill list --agent
 <rig>/gc-toolkit.converse-<model>), a bare name resolving to its one full
 match (review-arch to gc-toolkit.review-arch). The new conversation's ask
@@ -2281,6 +2285,10 @@ open_join() {
 # positional text, or --reason without one, is the question it is about, and the
 # conversation's ask. A subject filed whose conversation then is not leaves the
 # subject's id on stderr, and in --json's answer, for a re-run onto it.
+# --if-subject names the subject the caller showed before it asked, as the
+# conversation form does: a reference that names any other bead by the time open
+# resolves it, along a disposition, to a PR's anchor or to a gate's waiter, files
+# nothing and exits 4.
 OPEN_GATE_FROM=""
 _open_new_subject_bead=""
 open_new_subject_report() {
@@ -2293,10 +2301,13 @@ open_new_subject_report() {
 }
 cmd_open() {
     bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""; OPEN_FILED=""
-    open_new_subject=0; open_rig=""
+    open_new_subject=0; open_rig=""; open_if_subject=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --new-subject) open_new_subject=1; shift ;;
+            --if-subject=*) open_if_subject="${1#--if-subject=}"; shift ;;
+            --if-subject) shift; [ $# -gt 0 ] || { echo "$PROG: open: --if-subject requires a value" >&2; exit 2; }
+                        open_if_subject="$1"; shift ;;
             --rig=*)    open_rig="${1#--rig=}"; shift ;;
             --rig)      shift; [ $# -gt 0 ] || { echo "$PROG: open: --rig requires a value" >&2; exit 2; }
                         open_rig="$1"; shift ;;
@@ -2317,6 +2328,10 @@ cmd_open() {
         echo "$PROG: open: --rig applies only with --new-subject; an existing subject's rig is derived from its id." >&2
         exit 2
     fi
+    if [ -n "$open_if_subject" ] && [ "$open_new_subject" = 1 ]; then
+        echo "$PROG: open: --if-subject names an existing subject the reference must still name, and --new-subject files a new one; pass only one." >&2
+        exit 2
+    fi
     if [ "$open_new_subject" = 1 ]; then
         _open_text="${bead:-$open_reason}"
         create_subject open "$open_rig" "$_open_text"
@@ -2328,6 +2343,7 @@ cmd_open() {
 
     # Resolve a PR reference or a settled disposition to the live owning bead
     # BEFORE the rig is derived from the id prefix (a PR number has none).
+    open_ref="$bead"
     resolve_live_subject "$bead"
     bead="$RESOLVED_SUBJECT"
 
@@ -2358,6 +2374,14 @@ cmd_open() {
         bead="$TAKE_BEAD"
         open_pin "$bead"
         verify_subject "$bead" open "No conversation filed." || exit $?
+    fi
+    # --if-subject is the subject the caller showed before it asked: a reference
+    # that names another bead now, through a successor, a PR's anchor or a gate's
+    # waiter, files nothing, so a question never lands where its asker did not see
+    # it going.
+    if [ -n "$open_if_subject" ] && [ "$bead" != "$open_if_subject" ]; then
+        echo "$PROG: open: $open_ref names $bead in rig ${rig:-?} now, not $open_if_subject (--if-subject). No conversation filed." >&2
+        exit 4
     fi
     subject_clean="$VS_PAYLOAD"
 
@@ -3528,6 +3552,14 @@ engage_valid_model() {
     return "$_evm_ok"
 }
 
+# engage_check_model — refuse, exit 2, an $engage_model that is not a configured
+# variant, naming the variants.
+engage_check_model() {
+    engage_valid_model "$engage_model" && return 0
+    echo "$PROG: engage: --model must be one of: $(engage_list_models | tr '\n' ' ' | sed 's/ *$//') (got '$engage_model')" >&2
+    exit 2
+}
+
 # holding_rows <bead> — what holds the bead, one "<held>\t<id>\t<title>" row
 # each, in the order of the reasons `gctk pr-status derive --json` gives: the
 # definition the PR's held: labels and the board's row read, so what engage
@@ -3999,9 +4031,12 @@ cmd_engage() {
     # and engage. A concern on the command line (--reason, --template or
     # --skill), --no-input, and every engage without a terminal take the
     # flag-driven path below. GC_HELM_ASSUME_TTY is a test seam that takes the
-    # form's path when stdin is a pipe, as in a hermetic test.
+    # form's path when stdin is a pipe, as in a hermetic test. A --model the
+    # configured variants do not carry is refused before the form opens, as the
+    # flag-driven path refuses it, since the form's model field holds only those.
     if [ "$engage_no_input" = 0 ] && [ "$engage_reason_set" = 0 ] && [ -z "$engage_template" ] \
         && [ -z "$engage_skill" ] && { [ -t 0 ] || [ -n "${GC_HELM_ASSUME_TTY:-}" ]; }; then
+        [ "$engage_model_set" = 0 ] || engage_check_model
         set --
         if [ "$engage_new_subject" = 1 ]; then
             set -- --new-subject
@@ -4092,10 +4127,7 @@ cmd_engage() {
 
     # The model is the opus default or the flag, validated against the
     # configured variants before the template binds.
-    if ! engage_valid_model "$engage_model"; then
-        echo "$PROG: engage: --model must be one of: $(engage_list_models | tr '\n' ' ' | sed 's/ *$//') (got '$engage_model')" >&2
-        exit 2
-    fi
+    engage_check_model
     template="converse-$engage_model"
 
     # The lens brief becomes the new conversation's ask, ahead of any opener (a

@@ -34,6 +34,10 @@
 #   (UNREAD)   a candidate whose own row does not read files nothing, exit 4
 #   (OPEN-JSON) --json prints {subject, conversation, filed}
 #   (ALLOWDUP) --allow-duplicate files a fresh conversation beside a queued one
+#   (IF-SUBJECT) --if-subject files only while the reference names that subject:
+#              a successor, a PR's anchor or a gate's waiter that is another
+#              bead files nothing, exit 4, and beside --new-subject it is
+#              refused, exit 2
 #   (GATE)     a human gate names the one bead still waiting on it, and the
 #              conversation replies to the gate; several waiting beads, or none,
 #              file nothing and say why
@@ -530,7 +534,24 @@ grep -q 'nothing waits on gate tk-gate1' <<< "$ERR" && grep -q 'tk-done' <<< "$E
   || bad "(GATE-NONE) message (err: $ERR)"
 grep -q 'gc bd gate resolve tk-gate1' <<< "$ERR" \
   && ok "(GATE-NONE) …and how to clear the gate" || bad "(GATE-NONE) names the resolve (err: $ERR)"
+# (IF-SUBJECT-GATE) --if-subject names the bead the caller showed for the gate.
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]'
+run_open found tk-gate1 --if-subject tk-anchor
+eq "$RC" "0" "(IF-SUBJECT-GATE) --if-subject naming the bead the gate is about files, exit 0"
+grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" && grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(IF-SUBJECT-GATE) …on that bead, replying to the gate" || bad "(IF-SUBJECT-GATE) filed on the bead (calls: $CALLS)"
+run_open found tk-gate1 --if-subject tk-shown
+eq "$RC" "4" "(IF-SUBJECT-GATE) a gate about another bead than the one shown exits 4"
+[ -z "$CALLS" ] && ok "(IF-SUBJECT-GATE) …filing nothing" || bad "(IF-SUBJECT-GATE) filed something (calls: $CALLS)"
+grep -q 'tk-gate1 names tk-anchor in rig gc-toolkit now, not tk-shown (--if-subject). No conversation filed.' <<< "$ERR" \
+  && ok "(IF-SUBJECT-GATE) …naming the bead it names now and the one shown" || bad "(IF-SUBJECT-GATE) message (err: $ERR)"
 unset FAKE_WAITERS
+set +e
+OUT="$(sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a new topic" --if-subject tk-a 2>&1)"; RC=$?
+set -e
+eq "$RC" "2" "(IF-SUBJECT-NEW) --if-subject beside --new-subject exits 2"
+grep -q -- '--if-subject names an existing subject' <<< "$OUT" \
+  && ok "(IF-SUBJECT-NEW) …saying the two cannot go together" || bad "(IF-SUBJECT-NEW) message (out: $OUT)"
 
 # --- (SHAPE) a task that did not land as a conversation is closed ---------------
 export FAKE_SHAPE_BROKEN=1
@@ -994,11 +1015,11 @@ export RESRIG="$TMP/resrig"
 # anchor only a query carrying `deferred` sees.
 export FAKE_PR_ROWS='[]'
 
-# run_resolve <arg> -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
+# run_resolve <arg> [args...] -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
 run_resolve() {
     reset_store
     set +e
-    OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" open "$1" 2>"$TMP/err")"; RC=$?
+    OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" open "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
 }
@@ -1015,6 +1036,23 @@ grep -q -- '--deps tracks:tk-pred' <<< "$CALLS" \
 grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
   && ok "(RESOLVE-SUPERSEDE) announces the redirect — never silent" \
   || bad "(RESOLVE-SUPERSEDE) redirect not announced (err: $ERR)"
+
+# (IF-SUBJECT) --if-subject is the subject the caller showed. A reference
+# superseded since names another bead, so open files nothing and says so last,
+# the line the conversation form shows; one that names the subject still files.
+FAKE_PR_ROWS='[]'; run_resolve tk-pred --if-subject tk-pred
+eq "$RC" "4" "(IF-SUBJECT) a reference superseded since the caller showed it exits 4"
+[ -z "$CALLS" ] && ok "(IF-SUBJECT) …filing nothing, on the successor or the predecessor" || bad "(IF-SUBJECT) filed something (calls: $CALLS)"
+eq "$(printf '%s\n' "$ERR" | tail -n1)" "gc-helm: open: tk-pred names tk-succ in rig gc-toolkit now, not tk-pred (--if-subject). No conversation filed." \
+  "(IF-SUBJECT) …its last line naming where the reference leads now and the subject shown"
+FAKE_PR_ROWS='[]'; run_resolve tk-pred --if-subject tk-succ
+eq "$RC" "0" "(IF-SUBJECT) --if-subject naming the successor the reference leads to files"
+grep -q -- '--deps tracks:tk-succ' <<< "$CALLS" \
+  && ok "(IF-SUBJECT) …on the successor" || bad "(IF-SUBJECT) filed on the successor (calls: $CALLS)"
+FAKE_PR_ROWS='[]'; run_resolve tk-live1 --if-subject=tk-live1
+eq "$RC" "0" "(IF-SUBJECT) a live bead that is the subject shown files"
+grep -q -- '--deps tracks:tk-live1' <<< "$CALLS" \
+  && ok "(IF-SUBJECT) …on it" || bad "(IF-SUBJECT) filed on the live bead (calls: $CALLS)"
 
 # (RESOLVE-CHAIN) a multi-hop chain (head -> mid -> succ) resolves to the end.
 FAKE_PR_ROWS='[]'; run_resolve tk-head
@@ -1090,6 +1128,9 @@ grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   || bad "(RESOLVE-PR-NUMBER) filed elsewhere (calls: $CALLS)"
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
   && ok "(RESOLVE-PR-NUMBER) says which bead it matched" || bad "(RESOLVE-PR-NUMBER) match not announced (err: $ERR)"
+run_resolve 615 --if-subject tk-prbead2
+eq "$RC" "4" "(IF-SUBJECT-PR) a PR whose anchor is another bead than the one shown exits 4"
+[ -z "$CALLS" ] && ok "(IF-SUBJECT-PR) …filing nothing" || bad "(IF-SUBJECT-PR) filed something (calls: $CALLS)"
 
 # (RESOLVE-PR-URL) a PR URL resolves the same way, pinning the repo.
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'

@@ -61,14 +61,24 @@ func argv(t *testing.T, argDir string) []string {
 func TestSaveSendsTheQuestionAsOneUnchangedArgument(t *testing.T) {
 	q := "line one\n\n\tindented — ünïcödé\ntrailing space \n"
 	s, dir := stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`+"\n", "", 0)
-	sv, err := s.Save(context.Background(), SaveRequest{Ref: "tk-s", Question: q})
+	sv, err := s.Save(context.Background(), SaveRequest{Ref: "tk-g", Subject: "tk-s", Question: q})
 	if err != nil || sv.Conversation != "tk-c" || !sv.Filed {
 		t.Fatalf("Save = %+v, %v", sv, err)
 	}
 	got := argv(t, dir)
-	want := []string{"open", "tk-s", "--allow-duplicate", "--reason", q, "--json"}
+	want := []string{"open", "tk-g", "--allow-duplicate", "--if-subject", "tk-s", "--reason", q, "--json"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %q, want %q", got, want)
+	}
+}
+
+func TestASaveWithNoSubjectShownRunsNothing(t *testing.T) {
+	s, dir := stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`, "", 0)
+	if _, err := s.Save(context.Background(), SaveRequest{Ref: "tk-s", Question: "q"}); err == nil {
+		t.Fatal("a save with no subject to check it against ran")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "count")); !os.IsNotExist(err) {
+		t.Fatalf("the stand-in ran: %v", err)
 	}
 }
 

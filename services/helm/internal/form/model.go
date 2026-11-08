@@ -105,7 +105,7 @@ type Model struct {
 	ticking  bool // a refresh of the return list is scheduled
 
 	rig   string // the rig a new topic is filed in, chosen by name and only by the operator
-	model int    // index into opt.Models
+	model int    // index into opt.Models; -1 while it is opt.Model, which no variant carries
 
 	choice        string // newChoice, or the conversation the operator chose
 	choiceTouched bool
@@ -123,9 +123,15 @@ type Model struct {
 	pollErr   string
 	leaving   bool // the operator left while a save or a start ran, so the form leaves once it lands
 
-	retCursor int
-	status    string
-	note      string // printed once the form has left the terminal
+	// The return list's selection is a conversation, so a refresh that re-sorts
+	// the list leaves it on the conversation the operator picked.
+	retSel string
+	retAt  int // where retSel was last in the list, for ↑/↓ once it has left the list
+
+	status string
+	note   string // printed once the form has left the terminal
+	kept   string // what the note says of the question kept in a file
+	keptQ  string // the question kept, so a question is kept once
 }
 
 // New builds the form over helm.
@@ -143,12 +149,22 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 		opt.Now = time.Now
 	}
 	if len(opt.Models) == 0 {
+		// No variant was named, as when engage could not list them: a model the
+		// command line named stands unconfirmed, as engage's own check lets it.
 		opt.Models = []string{"opus"}
+		if opt.Model != "" {
+			opt.Models = []string{opt.Model}
+		}
 	}
 	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[string]*lookup{}, rig: opt.Rig}
-	for i, v := range opt.Models {
-		if v == opt.Model {
-			m.model = i
+	if opt.Model != "" {
+		// A model no variant carries is shown as it was named, marked, and
+		// nothing starts on it until the operator picks a variant.
+		m.model = -1
+		for i, v := range opt.Models {
+			if v == opt.Model {
+				m.model = i
+			}
 		}
 	}
 
@@ -433,7 +449,28 @@ func (m *Model) chosen() (Conversation, bool) {
 	return Conversation{}, false
 }
 
-func (m *Model) modelName() string { return m.opt.Models[m.model] }
+// modelName is the model field as it reads: the variant chosen, or the model
+// the command line named while no variant carries it.
+func (m *Model) modelName() string {
+	if m.model < 0 {
+		return m.opt.Model
+	}
+	return m.opt.Models[m.model]
+}
+
+// cycleModel moves the model field to the next or previous variant. From a
+// model no variant carries, → takes the first variant and ← the last.
+func (m *Model) cycleModel(step int) {
+	n := len(m.opt.Models)
+	switch {
+	case m.model < 0 && step > 0:
+		m.model = 0
+	case m.model < 0:
+		m.model = n - 1
+	default:
+		m.model = (m.model + step + n) % n
+	}
+}
 
 // Update handles one message.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -469,6 +506,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		c := msg.city
 		m.city, m.cityErr = &c, ""
+		m.keepSelection()
 		return m, nil
 	case debounceMsg:
 		if msg.seq == m.seq {
@@ -525,8 +563,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case attachedMsg:
+		// The note already says where attach kept a question the form had not
+		// saved.
 		if msg.err != nil {
-			m.note = fmt.Sprintf("The attach did not run: %v", msg.err)
+			m.note = strings.TrimSpace(fmt.Sprintf("The attach did not run: %v\n%s", msg.err, m.note))
 		}
 		return m, tea.Quit
 	case tea.PasteMsg:
@@ -605,9 +645,9 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	case modelField:
 		switch s {
 		case "left":
-			m.model = (m.model - 1 + len(m.opt.Models)) % len(m.opt.Models)
+			m.cycleModel(-1)
 		case "right", "space":
-			m.model = (m.model + 1) % len(m.opt.Models)
+			m.cycleModel(1)
 		}
 		return nil
 	case contextField:
@@ -653,6 +693,14 @@ func (m *Model) choose(rows []contextRow) tea.Cmd {
 // submit files the question, or starts the conversation chosen, once the
 // destination is settled. Nothing is written before then.
 func (m *Model) submit() tea.Cmd {
+	if m.model < 0 {
+		what := "Not saved"
+		if m.choice != newChoice {
+			what = "Not started"
+		}
+		m.status = fmt.Sprintf("%s: %s is not a configured model (%s). Tab to Model and choose one with ←/→.", what, m.opt.Model, strings.Join(m.opt.Models, ", "))
+		return nil
+	}
 	dest, ok := m.destination()
 	if !ok {
 		m.status = "Not saved: " + dest
@@ -688,8 +736,10 @@ func (m *Model) submit() tea.Cmd {
 	if m.newTopic() {
 		req.Rig = m.rig
 	} else {
+		// The save files on the subject the screen shows, and open refuses it
+		// when the reference names another subject by then.
 		a := m.current().about
-		req.Ref = a.Subject.ID
+		req.Ref, req.Subject = a.Subject.ID, a.Subject.ID
 		if a.Gate != "" {
 			req.Ref = a.Gate
 		}
@@ -729,9 +779,10 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 		if msg.err != nil {
 			why = msg.err.Error()
 		}
-		m.status = "Not saved: " + why + ". Your question is still here."
+		m.status = "Not saved: " + strings.TrimSuffix(why, ".") + ". Your question is still here."
 		var cmd tea.Cmd
-		if msg.saved.Subject != "" && m.newTopic() {
+		switch {
+		case msg.saved.Subject != "" && m.newTopic():
 			// The new subject was filed and its conversation was not: the next
 			// save files the question onto that subject, never a second one.
 			m.partial = msg.saved.Subject
@@ -739,6 +790,12 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 			m.seq++
 			m.status += fmt.Sprintf(" Subject %s was filed; saving again files your question onto it.", msg.saved.Subject)
 			cmd = m.lookup(msg.saved.Subject)
+		case !m.newTopic():
+			// What open refused can be the subject as the form read it, such as
+			// one closed onto a successor in another rig since. The subject is
+			// read again, so the next Ctrl+S files where the screen then shows.
+			delete(m.lookups, m.ref())
+			cmd = m.lookup(m.ref())
 		}
 		if m.leaving {
 			return m.quit()
@@ -802,20 +859,54 @@ func (m *Model) returnRows() []Conversation {
 	return rows
 }
 
+// retIndex is where conversation id is in rows, or -1.
+func retIndex(rows []Conversation, id string) int {
+	for i, c := range rows {
+		if c.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// keepSelection holds the return list's selection on its conversation when the
+// list is read again. Nothing selected yet takes the top row. A selected
+// conversation that has left the list leaves nothing selected, so Enter
+// attaches to nothing the operator did not pick, until ↑/↓ picks the row now in
+// its place; one that comes back is selected again.
+func (m *Model) keepSelection() {
+	rows := m.returnRows()
+	if m.retSel == "" {
+		if len(rows) > 0 {
+			m.retSel, m.retAt = rows[0].ID, 0
+		}
+		return
+	}
+	if i := retIndex(rows, m.retSel); i >= 0 {
+		m.retAt = i
+	}
+}
+
 func (m *Model) returnKey(s string) tea.Cmd {
 	rows := m.returnRows()
+	at := retIndex(rows, m.retSel)
 	switch s {
-	case "up":
-		if m.retCursor > 0 {
-			m.retCursor--
+	case "up", "down":
+		if len(rows) == 0 {
+			return nil
 		}
-	case "down":
-		if m.retCursor < len(rows)-1 {
-			m.retCursor++
+		switch {
+		case at < 0:
+			at = min(m.retAt, len(rows)-1)
+		case s == "up" && at > 0:
+			at--
+		case s == "down" && at < len(rows)-1:
+			at++
 		}
+		m.retSel, m.retAt = rows[at].ID, at
 	case "enter":
-		if m.retCursor < len(rows) {
-			return m.attach(rows[m.retCursor].ID)
+		if at >= 0 {
+			return m.attach(m.retSel)
 		}
 	case "r":
 		return m.loadCity()
@@ -827,7 +918,11 @@ func (m *Model) returnKey(s string) tea.Cmd {
 	return nil
 }
 
+// attach hands the terminal to conv's sitting, and the form leaves once it comes
+// back. A question the form has not saved is kept first, so neither the attach
+// nor an end of the form while the sitting holds the terminal loses it.
 func (m *Model) attach(conv string) tea.Cmd {
+	m.note = m.keepUnsaved()
 	return tea.ExecProcess(m.helm.AttachCommand(conv), func(err error) tea.Msg { return attachedMsg{err: err} })
 }
 
@@ -842,17 +937,30 @@ func (m *Model) quit() tea.Cmd {
 		m.leaving = true
 		return nil
 	}
-	switch {
-	case m.saved != nil:
+	if m.saved != nil {
 		m.note = m.savedNote()
-	case strings.TrimSpace(m.question.Value()) != "":
+	} else {
+		m.note = m.keepUnsaved()
+	}
+	return tea.Quit
+}
+
+// keepUnsaved keeps a question the form has not saved in a file, and returns
+// what the note says of it: empty when there is none. A question already kept
+// is not kept again.
+func (m *Model) keepUnsaved() string {
+	q := m.question.Value()
+	if m.saved != nil || strings.TrimSpace(q) == "" {
+		return ""
+	}
+	if m.kept == "" || m.keptQ != q {
 		filed := "Nothing was filed."
 		if m.partial != "" {
 			filed = fmt.Sprintf("Subject %s was filed, and its conversation was not.", m.partial)
 		}
-		m.note = m.keepDraft(filed)
+		m.kept, m.keptQ = m.keepDraft(filed), q
 	}
-	return tea.Quit
+	return m.kept
 }
 
 // leaveNow leaves at once, on a second Ctrl+C while a save or a start runs.
@@ -984,7 +1092,10 @@ func (m *Model) composeView() string {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + l.about.Subject.Rig + hintStyle.Render("   the subject's own") + "\n")
 	}
 	model := m.modelName()
-	if m.model == 0 {
+	switch {
+	case m.model < 0:
+		model = badStyle.Render(model) + hintStyle.Render(" (not a configured model: ←/→ chooses one)")
+	case m.model == 0:
 		model += hintStyle.Render(" (default)")
 	}
 	b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n\n")
@@ -1083,9 +1194,10 @@ func (m *Model) returnView() string {
 	if len(rows) == 0 {
 		b.WriteString("No open conversation.\n")
 	}
+	at := retIndex(rows, m.retSel)
 	for i, c := range rows {
 		cur := "  "
-		if i == m.retCursor {
+		if i == at {
 			cur = "› "
 		}
 		mark := c.Readiness
@@ -1097,6 +1209,9 @@ func (m *Model) returnView() string {
 			topic += hintStyle.Render("  on " + c.Subject + ": " + c.SubjectTitle)
 		}
 		b.WriteString(fmt.Sprintf("%s%-22s %s  %s  %s\n", cur, mark, c.ID, hintStyle.Render(c.Rig), topic))
+	}
+	if at < 0 && m.retSel != "" && len(rows) > 0 {
+		b.WriteString("\n" + waitStyle.Render(m.retSel+" is no longer listed, so nothing is selected: ↑/↓ chooses another.") + "\n")
 	}
 	if len(m.city.Unread) > 0 {
 		b.WriteString("\n" + badStyle.Render("Not listed: the store of "+strings.Join(m.city.Unread, ", ")+" did not answer.") + "\n")

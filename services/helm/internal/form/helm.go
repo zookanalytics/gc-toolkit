@@ -133,9 +133,11 @@ func (r Rig) Hosts() bool { return r.Converse && !r.Suspended }
 
 // SaveRequest is a question to file as a conversation. Ref is the reference
 // the destination was verified for (the subject, or the gate the conversation
-// replies to); a new topic leaves it empty and names its Rig.
+// replies to), and Subject the subject the form showed for it; a new topic
+// leaves both empty and names its Rig.
 type SaveRequest struct {
 	Ref      string
+	Subject  string
 	Rig      string
 	Question string
 }
@@ -265,17 +267,22 @@ func (s Script) City(ctx context.Context) (City, error) {
 }
 
 // Save runs open: `open --new-subject --rig <rig> --reason <question> --json`
-// for a new topic, or `open <ref> --allow-duplicate --reason <question> --json`,
-// since a question the operator brings is a concern of its own. The question
-// rides as one argv element, unchanged. A new subject filed whose conversation
-// was not comes back with the error, so a retry files onto that subject.
+// for a new topic, or `open <ref> --allow-duplicate --if-subject <subject>
+// --reason <question> --json`, since a question the operator brings is a
+// concern of its own, and open refuses a reference that names another subject
+// than the one the form showed. The question rides as one argv element,
+// unchanged. A new subject filed whose conversation was not comes back with the
+// error, so a retry files onto that subject.
 func (s Script) Save(ctx context.Context, req SaveRequest) (Saved, error) {
 	var sv Saved
 	args := []string{"open"}
-	if req.Ref == "" {
+	switch {
+	case req.Ref == "":
 		args = append(args, "--new-subject", "--rig", req.Rig)
-	} else {
-		args = append(args, req.Ref, "--allow-duplicate")
+	case req.Subject == "":
+		return sv, fmt.Errorf("no subject was shown for %s, so the save has nothing to file against", req.Ref)
+	default:
+		args = append(args, req.Ref, "--allow-duplicate", "--if-subject", req.Subject)
 	}
 	args = append(args, "--reason", req.Question, "--json")
 	out, err := s.run(ctx, args...)

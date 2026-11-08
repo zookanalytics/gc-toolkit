@@ -12,7 +12,9 @@
 #
 # Runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a stubbed `gc` on
 # PATH — no live city, Dolt, network, or sessions. Covered:
-#   (MODEL, NOARG) an unknown --model or a missing bead is refused (exit 2)
+#   (MODEL, NOARG, FORM-MODEL-BAD) an unknown --model, on the flag-driven path
+#             or before the conversation form opens, or a missing bead is
+#             refused (exit 2)
 #   (CONVID)  engaging a conversation in the queue spawns converse-opus --alias
 #             <conversation> --no-attach and binds it to the sitting's alias,
 #             guarded on `human`, the holder engage read
@@ -1611,6 +1613,10 @@ reset; run_engage_tty '' tk-subj
 form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj" "(FORM-SUBJECT) a subject fills in the subject field"
 reset; run_engage_tty '' tk-subj --model fable --no-attach
 form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj|--model|fable" "(FORM-MODEL) --model fills in the model"
+reset; run_engage_tty '' tk-subj --model typo
+eq "$RC" 2 "(FORM-MODEL-BAD) a --model no variant carries is refused on a terminal too, exit 2"
+eq "$FORM_ARGV" "" "(FORM-MODEL-BAD) …before the form opens"
+has "$OUT" "--model must be one of: opus codex fable (got 'typo')" "(FORM-MODEL-BAD) …naming the variants, as the flag-driven path does"
 reset; run_engage_tty '' "$(printf 'draft the plan\nwith two lines')" --new-subject --rig gc-toolkit
 form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--new-subject|--question|draft the plan|with two lines|--rig|gc-toolkit" "(FORM-NEWSUBJ) --new-subject opens a new topic, the text its question and --rig its rig"
 hasnt "$CALLED" "--metadata" "(FORM-NEWSUBJ) …and nothing is created before the form saves it"

@@ -22,6 +22,8 @@ topic and readiness. The change adds this surface:
 - `gc-helm.sh open --new-subject --rig <rig>`, which files a new topic's
   subject and its conversation without a sitting, so a save is acknowledged
   before a start.
+- `gc-helm.sh open <ref> --if-subject <id>`, which files only while the
+  reference still names the subject the form showed.
 
 Gas City read at upstream main `2264fa8108` (gastownhall/gascity, fetched
 2026-11-08). bd read as installed, 1.3.4, and its source at v1.3.2 in the Go
@@ -88,3 +90,25 @@ through the subject creator engage uses, so the form saves with open, says
 "saved", and starts with `engage <conversation> --no-attach`. bd's
 `bd create` is the write under both. It exits 0 once the write is durable, which
 is the point the form says "saved".
+
+**Filing only where the screen said.** `open` resolves its reference before it
+files: a closed bead along its supersedes or duplicates edge to its successor,
+which can sit in another rig, a PR to its anchor, and a gate to the one bead
+waiting on it. The form shows the subject that resolution gave when it read
+the reference, and by the time the operator saves, the reference can lead to
+another bead. bd's guarded writes, `--if-assignee` and `--if-status` on
+`bd update` (`cmd/bd/update.go` at beads v1.3.2, the flags at lines 997–998),
+apply a write only while a field of the bead written still holds the value the
+caller read, and write nothing otherwise. They do not cover the need: the
+conversation is a new bead, and `bd create` takes no precondition (its flags at
+v1.3.2 are `cmd/bd/create.go` lines 918–964 and `registerCommonIssueFlags` in
+`cmd/bd/flags.go`). `--deps tracks:<id>` resolves only the id it names
+(`resolveDepSpecTargets`, which refuses an unknown one) and writes the edge
+whatever that bead's state, and nothing in `create.go` follows a supersedes
+edge. Gas City at `2264fa8108` has no verb that resolves a bead
+reference to its live successor or guards a create on one; the only flags of
+that kind in `cmd/gc` guard a purge (`expect-count` and `expect-digest`,
+`cmd/gc/infra_class_purge.go`). So the guard is open's own, named after bd's
+guards: `--if-subject <id>` files only while the reference resolves to that
+subject, and otherwise files nothing and exits 4, open's refusal code. The
+subject's id fixes its rig, since a rig is derived from the id's prefix.

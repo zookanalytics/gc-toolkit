@@ -558,8 +558,8 @@ func TestTheDestinationIsOnScreenBeforeSubmitting(t *testing.T) {
 	typeText(m, "q")
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 1 || f.saves[0].Ref != "tk-g" {
-		t.Fatalf("saves = %+v, want the conversation filed through the gate", f.saves)
+	if len(f.saves) != 1 || f.saves[0].Ref != "tk-g" || f.saves[0].Subject != "tk-a" {
+		t.Fatalf("saves = %+v, want the conversation filed through the gate, bound to tk-a", f.saves)
 	}
 }
 
@@ -778,5 +778,206 @@ func TestTheKeptDraftNamesTheCommandThatFilesItAgain(t *testing.T) {
 	}
 	if shellQuote("it's here") != `'it'\''s here'` || shellQuote("tk-a") != "tk-a" {
 		t.Fatalf("shellQuote")
+	}
+}
+
+func TestAttachingFromTheReturnListKeepsTheUnsavedQuestion(t *testing.T) {
+	for _, attachErr := range []error{nil, errors.New("exit status 1")} {
+		dir := t.TempDir()
+		f := &fakeHelm{
+			about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+			city:  City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}},
+		}
+		m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
+		settle(m)
+		loadCity(m)
+		typeText(m, "a question\n  on two lines ")
+		m.Update(ctrl('r'))
+		_, cmd := m.Update(key(tea.KeyEnter))
+		if cmd == nil || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
+			t.Fatalf("attach = %v", f.attaches)
+		}
+		// The question is in a file before the terminal goes to the sitting.
+		files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
+		if len(files) != 1 {
+			t.Fatalf("draft files while the attach runs: %v", files)
+		}
+		if b, _ := os.ReadFile(files[0]); string(b) != "a question\n  on two lines " {
+			t.Fatalf("kept draft = %q", b)
+		}
+		_, last := m.Update(attachedMsg{err: attachErr})
+		if !isQuit(last) {
+			t.Fatalf("the form did not leave once the attach came back (err %v)", attachErr)
+		}
+		note := m.Note()
+		if !strings.Contains(note, files[0]) || !strings.Contains(note, "Nothing was filed.") || !strings.Contains(note, "gc-helm.sh engage tk-a --reason") {
+			t.Fatalf("note after the attach (err %v) = %q", attachErr, note)
+		}
+		if attachErr != nil && !strings.HasPrefix(note, "The attach did not run: exit status 1") {
+			t.Fatalf("note after a failed attach = %q", note)
+		}
+		if again, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt")); len(again) != 1 {
+			t.Fatalf("the question was kept more than once: %v", again)
+		}
+	}
+	// A question the form saved is not kept as a draft when the terminal goes.
+	dir := t.TempDir()
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
+	settle(m)
+	typeText(m, "q")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	m.Update(key(tea.KeyEnter))
+	m.Update(attachedMsg{})
+	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 || len(f.attaches) != 1 {
+		t.Fatalf("after attaching a saved conversation: drafts %v, attaches %v", files, f.attaches)
+	}
+}
+
+func TestASaveRefusedForASubjectThatMovedShowsWhereItLeadsBeforeTheNextSave(t *testing.T) {
+	f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	typeText(m, "a question")
+	if dest, ok := m.destination(); !ok || !strings.Contains(dest, "on tk-a") || !strings.Contains(dest, "in rig gc-toolkit") {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	// While the operator types, tk-a closes onto a successor in another rig, and
+	// open, told the subject the form showed, refuses to follow it.
+	moved := subjectAbout("gc-b", "gascity")
+	moved.Ref = "tk-a"
+	f.about["tk-a"] = moved
+	f.saveErr = &Refusal{Code: 4, Why: "gc-helm: open: tk-a names gc-b in rig gascity now, not tk-a (--if-subject). No conversation filed."}
+	_, saveCmd := m.Update(ctrl('s'))
+	_, reread := m.Update(saveCmd())
+	if len(f.saves) != 1 || f.saves[0].Ref != "tk-a" || f.saves[0].Subject != "tk-a" {
+		t.Fatalf("saves = %+v, want one bound to tk-a", f.saves)
+	}
+	if m.scr != composeScreen || m.question.Value() != "a question" || len(f.starts) != 0 {
+		t.Fatalf("after the refusal: screen %d, question %q, starts %v", m.scr, m.question.Value(), f.starts)
+	}
+	if !strings.Contains(m.status, "names gc-b in rig gascity now") || strings.Contains(m.status, "..") {
+		t.Fatalf("status = %q", m.status)
+	}
+	// Until the subject reads again, nothing can be saved.
+	if reread == nil {
+		t.Fatalf("the refused save does not read the subject again")
+	}
+	m.Update(ctrl('s'))
+	if len(f.saves) != 1 {
+		t.Fatalf("saved again before the subject read again: %+v", f.saves)
+	}
+	deliver(m, reread)
+	if v := m.composeView(); !strings.Contains(v, "a conversation on gc-b") || !strings.Contains(v, "in rig gascity") {
+		t.Fatalf("the screen does not show where tk-a leads now:\n%s", v)
+	}
+	f.saveErr, f.saveResp = nil, Saved{Subject: "gc-b", Conversation: "gc-c", Filed: true}
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 2 || f.saves[1].Ref != "gc-b" || f.saves[1].Subject != "gc-b" {
+		t.Fatalf("second save = %+v, want one bound to gc-b, the subject now shown", f.saves)
+	}
+}
+
+func TestTheReturnListKeepsItsSelectionAcrossARefresh(t *testing.T) {
+	f := &fakeHelm{city: City{Conversations: []Conversation{
+		{ID: "tk-a", Readiness: Ready, CreatedAt: "2026-11-08T10:00:00Z"},
+		{ID: "tk-b", Readiness: Preparing, CreatedAt: "2026-11-08T11:00:00Z"},
+	}}}
+	m := newForm(t, f, Options{Return: true})
+	loadCity(m)
+	m.Update(key(tea.KeyDown))
+	if m.retSel != "tk-b" {
+		t.Fatalf("selected %q, want tk-b", m.retSel)
+	}
+	// tk-b becomes ready and sorts above tk-a on the next read.
+	f.city.Conversations[1].Readiness = Ready
+	loadCity(m)
+	if rows := m.returnRows(); rows[0].ID != "tk-b" {
+		t.Fatalf("order after the refresh = %v", rows)
+	}
+	if v := m.returnView(); !strings.Contains(v, "› ready") || strings.Index(v, "› ") > strings.Index(v, "tk-b") {
+		t.Fatalf("the cursor is not on tk-b:\n%s", v)
+	}
+	m.Update(key(tea.KeyEnter))
+	if len(f.attaches) != 1 || f.attaches[0] != "tk-b" {
+		t.Fatalf("attach = %v, want tk-b, the conversation selected", f.attaches)
+	}
+
+	// A selected conversation that leaves the list leaves nothing selected.
+	f = &fakeHelm{city: City{Conversations: []Conversation{
+		{ID: "tk-a", Readiness: Ready, CreatedAt: "2026-11-08T10:00:00Z"},
+		{ID: "tk-b", Readiness: Preparing, CreatedAt: "2026-11-08T11:00:00Z"},
+	}}}
+	m = newForm(t, f, Options{Return: true})
+	loadCity(m)
+	m.Update(key(tea.KeyDown))
+	f.city.Conversations = f.city.Conversations[:1]
+	loadCity(m)
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil || len(f.attaches) != 0 {
+		t.Fatalf("Enter attached %v with the selected conversation gone", f.attaches)
+	}
+	if v := m.returnView(); !strings.Contains(v, "tk-b is no longer listed") || strings.Contains(v, "› ") {
+		t.Fatalf("the screen with the selected conversation gone:\n%s", v)
+	}
+	// It comes back, and is selected again.
+	f.city.Conversations = append(f.city.Conversations, Conversation{ID: "tk-b", Readiness: Preparing, CreatedAt: "2026-11-08T11:00:00Z"})
+	loadCity(m)
+	if m.retSel != "tk-b" || retIndex(m.returnRows(), "tk-b") != 1 {
+		t.Fatalf("selection after tk-b came back = %q", m.retSel)
+	}
+	// Gone again, ↑/↓ picks the row now in its place.
+	f.city.Conversations = f.city.Conversations[:1]
+	loadCity(m)
+	m.Update(key(tea.KeyDown))
+	m.Update(key(tea.KeyEnter))
+	if len(f.attaches) != 1 || f.attaches[0] != "tk-a" {
+		t.Fatalf("attach after ↓ = %v, want tk-a", f.attaches)
+	}
+}
+
+func TestAModelNoVariantCarriesIsShownAndStartsNothing(t *testing.T) {
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a", Model: "typo"})
+	settle(m)
+	typeText(m, "q")
+	if v := m.composeView(); !strings.Contains(v, "typo") || !strings.Contains(v, "not a configured model") {
+		t.Fatalf("compose view does not mark the model:\n%s", v)
+	}
+	m.Update(ctrl('s'))
+	if len(f.saves) != 0 || len(f.starts) != 0 || !strings.Contains(m.status, "typo is not a configured model (opus, fable, codex)") {
+		t.Fatalf("saves %v, starts %v, status %q", f.saves, f.starts, m.status)
+	}
+	focusOn(t, m, modelField)
+	m.Update(key(tea.KeyLeft))
+	if m.modelName() != "codex" {
+		t.Fatalf("← from the unknown model = %q, want the last variant", m.modelName())
+	}
+	m.Update(key(tea.KeyRight))
+	if m.modelName() != "opus" {
+		t.Fatalf("→ from codex = %q", m.modelName())
+	}
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+		t.Fatalf("saves %v, starts %v", f.saves, f.starts)
+	}
+	// → from the unknown model takes the first variant.
+	m = newForm(t, &fakeHelm{}, Options{Model: "typo"})
+	m.cycleModel(1)
+	if m.modelName() != "opus" {
+		t.Fatalf("→ from the unknown model = %q, want the first variant", m.modelName())
+	}
+	// With no variants named, the model the command line named stands.
+	m = newForm(t, &fakeHelm{}, Options{Model: "fable", Models: []string{}})
+	if m.model != 0 || m.modelName() != "fable" || strings.Contains(m.composeView(), "not a configured model") {
+		t.Fatalf("model %d %q with no variants named", m.model, m.modelName())
 	}
 }
