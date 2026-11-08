@@ -53,13 +53,15 @@
 #     method's What to check list nor any dimension of it. The correctness
 #     method is method alone: it carries no shell block and reads no record
 #     itself, because the review formula gathers what it reads.
+#   - This repo's own docs/review-triage.md, read the way a review reads it at
+#     its commit, carries the changes that make pm mandatory and the edits that
+#     do not.
 #   - The arch skill approves no commit without a docs/architecture.md, files a
 #     gap in architecture the change does not touch without holding the change,
 #     and passes no change on a gap in architecture it does touch. This repo's
 #     own docs/review-arch.md and docs/review-triage.md, read the way a review
 #     reads them at its commit, carry the divergence lens and the changes that
-#     make arch or pm mandatory, and the pack's arch skill carries none of that
-#     lens.
+#     make arch mandatory, and the pack's arch skill carries none of that lens.
 #   - The demo method lists a message the rig's app sends people among the
 #     surfaces triage adds it for, even when no screen changes, and such a
 #     message settles need. It shows each message a change adds or alters as
