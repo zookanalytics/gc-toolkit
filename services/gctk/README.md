@@ -127,6 +127,7 @@ key-registry.json    every declared key, generated from the declarations
 ```bash
 cd services/gctk && go test ./...          # every package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
+cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd -run TestStoreAcceptance -v   # the city's bd on a scratch store
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge
