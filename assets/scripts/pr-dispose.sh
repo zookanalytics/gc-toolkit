@@ -6,8 +6,8 @@
 #
 # It stamps three metadata keys naming the intended bead-rehome invocation —
 # gc.pr_close_disposition_kind, gc.pr_close_disposition_successor, and an
-# optional gc.pr_close_disposition_successor_store — reads them back, and closes
-# the PR with an explaining comment (unless --no-close-pr, for an operator who
+# optional gc.pr_close_disposition_successor_store — in one update whose exit
+# decides, and closes the PR with an explaining comment (unless --no-close-pr, for an operator who
 # will close it in the UI). It does NOT close the anchor: that terminal close is
 # pr-facts's, the single consummation point, which closes it with the edge that
 # names its successor (the terminal state doctor/check-closed-implies-landed

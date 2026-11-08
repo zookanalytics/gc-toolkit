@@ -599,8 +599,8 @@ lacks "the work skill claims no scope the recipe's push breaks" 'nothing here ch
 have "the prs skill files a supplement in the PR's rig" 'SUP=$(gc bd --rig <rig> create' "$PRS_SKILL"
 have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
 have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
-have "…reads the hold back from the anchor in the same rig" '&& gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json' "$PRS_SKILL"
-have "…and slings only after that read" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
+have "…and slings only once the create names the supplement" '&& [ -n "$SUP" ]' "$PRS_SKILL"
+have "…then slings it" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
 have "…whose target is the PR's base, the integration branch for a stage's PR" "the integration branch for a stage's PR" "$PRS_SKILL"
 have "…one at a time on a branch" 'Send one supplement at a time' "$PRS_SKILL"
 # fenced_block <file> <marker> — the fenced bash block that holds <marker>, with
@@ -1058,9 +1058,8 @@ fi
 # subject's row in $DP/row.json: gc reads and unsets its metadata, the disarm
 # drops its arm, and the writer's --answer logs the arm and route the answer
 # would release the subject to. DP_SHOW_EMPTY answers the read with [],
-# DP_SHOW_RC makes it exit with that status after printing the row,
-# DP_UPDATE_REFUSE refuses the update, and DP_UPDATE_LOST accepts it and
-# writes nothing.
+# DP_SHOW_RC makes it exit with that status after printing the row, and
+# DP_UPDATE_REFUSE refuses the update.
 DP="$TMP/dispatch"
 mkdir -p "$DP/bin" "$DP/pack/assets/scripts"
 cat >"$DP/bin/gc" <<'STUB'
@@ -1072,7 +1071,6 @@ case "$1 ${2:-}" in
         cat "$DP_DIR/row.json"; exit "${DP_SHOW_RC:-0}" ;;
     "bd update")
         [ -z "${DP_UPDATE_REFUSE:-}" ] || exit 1
-        [ -z "${DP_UPDATE_LOST:-}" ] || exit 0
         k=""; p=""
         for a in "$@"; do [ "$p" = "--unset-metadata" ] && k="$a"; p="$a"; done
         [ -z "$k" ] || { jq -c --arg k "$k" '.[0].metadata |= del(.[$k])' "$DP_DIR/row.json" >"$DP_DIR/row.tmp" \
@@ -1142,11 +1140,10 @@ for sh_ in $shells; do
     dp_seed '{"gc.routed_to":"human"}'
     run_dp "$run" "$DP/withdraw" >/dev/null
     eq "$(jq -r '.[0].metadata["gc.routed_to"]' "$DP/row.json")" human "($sh_) dispatch path: a human route stays"
-    # A withdrawal that does not land, or a subject read that is not its own
+    # A withdrawal the store refuses, or a subject read that is not its own
     # row alone, prints no success line and exits non-zero, so the sitting
     # answers nothing. A read that does not answer writes nothing at all.
     for stop in "DP_UPDATE_REFUSE=1|an update the store refuses|" \
-        "DP_UPDATE_LOST=1|an update that writes nothing|tk-x still carries route rig-a/old-pool" \
         "DP_SHOW_EMPTY=1|a subject read that answers no row|" \
         "DP_SHOW_RC=1|a subject read that exits non-zero, whatever it printed,|"; do
         IFS='|' read -r setting what says <<EOF

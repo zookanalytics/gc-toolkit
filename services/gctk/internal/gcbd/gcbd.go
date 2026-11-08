@@ -221,9 +221,7 @@ func (c *Client) ShowDirect(id string) *Bead { return c.showViaExec(id) }
 // The exit status is NOT consulted: the scripts read
 // `gc bd show ... 2>/dev/null | scrub | jq -c '.[0] // empty'` with no
 // pipefail, so a payload printed beside a non-zero exit is a bead there, and a
-// port reads it the same way. Reporting a landed transition as UNVERIFIED
-// (exit 2) because the read-back's `gc` also warned is the divergence from
-// those scripts that this avoids.
+// port reads it the same way.
 //
 // `bd show --json` answers with an ARRAY when any id resolves and an OBJECT
 // when none does, at rc=0 either way, so a non-array payload is a miss and not

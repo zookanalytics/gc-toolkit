@@ -917,8 +917,8 @@ if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
   elif ! "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this gate. Fix that error, then $HANDBACK. To drop the work instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK --key refinery-zero-diff-check-failed --ruling '<why>'."; then
     echo "human-gate.sh filed no gate on $WORK"
   elif [ "$WORK_KIND" = convoy ]; then
-    # human-gate.sh read its gate back from the convoy's side, so the gate
-    # blocks the convoy already, and that holds the park.
+    # human-gate.sh filed its gate on the convoy, in the convoy's store, so the
+    # gate blocks the convoy already, and that holds the park.
     "$LC" transition "$WORK" --to blocked --assignee "" --route human --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its gate names, then hand the convoy back" && WAITS=1
   elif "$SCRIPTS/await-ruling.sh" "$WORK" --key refinery-zero-diff-check-failed --formula mol-polecat-work; then
     WAITS=1

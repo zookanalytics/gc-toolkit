@@ -146,9 +146,8 @@ first-reaction/proactive worker stands down rather than file a second
 conversation; engage files the one conversation itself.
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
-stamps gc.takeaway (+_at/+_by) in one update and reads the stamp back before
-anything follows it, exiting 4 with nothing repaired when the store does not
-hold it; --release also reopens/unassigns/clears the route and ends the run
+stamps gc.takeaway (+_at/+_by) in one update, and exits 4 before anything
+follows it when the store refuses that update; --release also reopens/unassigns/clears the route and ends the run
 beneath the anchor through gascity's run cancel. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
 only the run's end runs; --route <rig>/<agent> releases it TO a pool instead of
@@ -2849,7 +2848,7 @@ accept_vars_said() {
 # and record never interleave with another's, and an acceptance is dispatched
 # once even after the work it sent has finished. On an open gate it records
 # the acceptance's dispatch input on the gate (gc.acceptance: the token, the
-# formula and each --var) and reads it back, resolves the gate with
+# formula and each --var), resolves the gate with
 # `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
 # back that no open human gate blocks the bead, slings the formula titled
 # `<formula> accept:<token>`, and records the dispatch. The first answer to
